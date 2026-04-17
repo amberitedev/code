@@ -1,80 +1,16 @@
-# ===================
-# Rust / Cargo
-# ===================
-**/target/
-**/.sqlx/
-*.pdb
-
-# ===================
-# Node.js / pnpm
-# ===================
+# Dependencies (regenerated, never commit)
+node_modules/
 **/node_modules/
-.pnpm-store/
-.pnpm-debug.log
+**/target/
 
-# ===================
-# Build outputs
-# ===================
+# Build outputs (regenerated)
+dist/
 **/dist/
-**/.nuxt/
-**/.output/
-**/.nitro/
-**/build/
-*.tsbuildinfo
 
-# ===================
-# Cache directories
-# ===================
-.cache/
-.parcel-cache/
-.eslintcache
-
-# ===================
-# Databases
-# ===================
-*.db
-*.sqlite
-*.sqlite3
-
-# ===================
-# Environment files
-# ===================
+# Secrets (never commit)
 .env
 !.env.example
-!**/.env.example
 
-# ===================
-# Logs
-# ===================
-*.log
-logs/
-
-# ===================
-# IDE / Editors
-# ===================
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# ===================
-# OS files
-# ===================
-.DS_Store
-Thumbs.db
-*:Zone.Identifier
-
-# ===================
-# Temporary files
-# ===================
-*.tmp
-*.temp
-*.bak
-*.backup
-*.orig
-
-# ===================
-# Misc
-# ===================
-repos/
+# Local databases
+*.db
+*.sqlite
