@@ -1,0 +1,32 @@
+{
+	"compilerOptions": {
+		"target": "ES2020",
+		"useDefineForClassFields": true,
+		"module": "ESNext",
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		"skipLibCheck": true,
+
+		"moduleResolution": "bundler",
+		"allowJs": true,
+		"allowImportingTsExtensions": true,
+		"isolatedModules": true,
+		"moduleDetection": "force",
+		"noEmit": true,
+		"jsx": "preserve",
+
+		"strict": true,
+
+		"paths": {
+			"@/*": ["./src/*"],
+			"@modrinth/ui": ["./packages/ui/index.ts"],
+			"@modrinth/ui/src/*": ["./packages/ui/src/*"],
+			"@modrinth/assets": ["./packages/assets/index.ts"],
+			"@modrinth/assets/*": ["./packages/assets/*"],
+			"@modrinth/utils": ["./packages/utils/index.ts"],
+			"@modrinth/api-client": ["./packages/api-client/index.ts"],
+			"@modrinth/blog": ["./packages/blog/index.ts"],
+			"@modrinth/tooling-config/*": ["./packages/tooling-config/*"]
+		}
+	},
+	"include": ["src"]
+}
