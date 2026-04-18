@@ -1,6 +1,14 @@
 use tauri_build::{DefaultPermissionRule, InlinedPlugin};
 
 fn main() {
+    // Set Modrinth API environment variables for Theseus
+    unsafe {
+        std::env::set_var("MODRINTH_URL", "https://modrinth.com/");
+        std::env::set_var("MODRINTH_API_URL", "https://api.modrinth.com/v2/");
+        std::env::set_var("MODRINTH_API_URL_V3", "https://api.modrinth.com/v3/");
+        std::env::set_var("MODRINTH_ARCHON_URL", "https://archon.modrinth.com/");
+    }
+    
     // Sadly, there is no better way to do it right now
     // You could try parsing source code here and detecting #[tauri::command]
     // But I think it's not worth it

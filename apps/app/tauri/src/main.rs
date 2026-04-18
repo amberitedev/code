@@ -118,7 +118,7 @@ fn main() {
 
     let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
 
-    tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
+    tracing::info!("Initialized tracing subscriber. Loading Amberite App!");
 
     let mut builder = tauri::Builder::default();
 
@@ -218,6 +218,7 @@ fn main() {
         });
 
     builder = builder
+        // Theseus API modules
         .plugin(api::auth::init())
         .plugin(api::mr_auth::init())
         .plugin(api::import::init())
@@ -237,6 +238,8 @@ fn main() {
         .plugin(api::ads::init())
         .plugin(api::friends::init())
         .plugin(api::worlds::init())
+        // Amberite-specific modules
+        .plugin(api::amberite::init())
         .manage(PendingUpdateData::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,

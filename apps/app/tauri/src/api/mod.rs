@@ -2,6 +2,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use thiserror::Error;
 
+// Theseus API modules (wrappers around theseus library)
 pub mod auth;
 pub mod import;
 pub mod jre;
@@ -22,6 +23,9 @@ pub mod cache;
 pub mod files;
 pub mod friends;
 pub mod worlds;
+
+// Amberite-specific API modules
+pub mod amberite;
 
 mod oauth_utils;
 

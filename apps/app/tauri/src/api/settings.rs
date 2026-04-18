@@ -30,7 +30,7 @@ pub async fn settings_set(settings: Settings) -> Result<()> {
 #[tauri::command]
 pub async fn cancel_directory_change() -> Result<()> {
     let state = State::get().await?;
-    let identifier = &state.app_identifier;
+    let identifier = &state.directories.app_identifier;
 
     settings::cancel_directory_change(identifier).await?;
     Ok(())
