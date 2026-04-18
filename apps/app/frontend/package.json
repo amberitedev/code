@@ -14,11 +14,11 @@
 	},
 	"dependencies": {
 		"@amberite/config": "workspace:*",
-		"@modrinth/ui": "github:modrinth/code#v0.13.1",
-		"@modrinth/api-client": "github:modrinth/code#v0.13.1",
-		"@modrinth/assets": "github:modrinth/code#v0.13.1",
-		"@modrinth/utils": "github:modrinth/code#v0.13.1",
-		"@modrinth/blog": "github:modrinth/code#v0.13.1",
+		"@modrinth/ui": "workspace:*",
+		"@modrinth/api-client": "workspace:*",
+		"@modrinth/assets": "workspace:*",
+		"@modrinth/utils": "workspace:*",
+		"@modrinth/blog": "workspace:*",
 		"@sentry/vue": "^8.27.0",
 		"@sfirew/minecraft-motd-parser": "^1.1.6",
 		"@tanstack/vue-query": "^5.90.7",
@@ -48,7 +48,7 @@
 		"vue-virtual-scroller": "v2.0.0-beta.8"
 	},
 	"devDependencies": {
-		"@modrinth/tooling-config": "github:modrinth/code#v0.13.1",
+		"@modrinth/tooling-config": "workspace:*",
 		"@eslint/compat": "^1.1.1",
 		"@formatjs/cli": "^6.2.12",
 		"@nuxt/eslint-config": "^0.5.6",

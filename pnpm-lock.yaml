@@ -23,20 +23,20 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/config
       '@modrinth/api-client':
-        specifier: github:modrinth/code#v0.13.1
-        version: '@modrinth/monorepo@https://codeload.github.com/modrinth/code/tar.gz/b4a356874e7eacf6b2acc138399fe18e48f8e1a0'
+        specifier: workspace:*
+        version: link:../../web/packages/api-client
       '@modrinth/assets':
-        specifier: github:modrinth/code#v0.13.1
-        version: '@modrinth/monorepo@https://codeload.github.com/modrinth/code/tar.gz/b4a356874e7eacf6b2acc138399fe18e48f8e1a0'
+        specifier: workspace:*
+        version: link:../../web/packages/assets
       '@modrinth/blog':
-        specifier: github:modrinth/code#v0.13.1
-        version: '@modrinth/monorepo@https://codeload.github.com/modrinth/code/tar.gz/b4a356874e7eacf6b2acc138399fe18e48f8e1a0'
+        specifier: workspace:*
+        version: link:../../web/packages/blog
       '@modrinth/ui':
-        specifier: github:modrinth/code#v0.13.1
-        version: '@modrinth/monorepo@https://codeload.github.com/modrinth/code/tar.gz/b4a356874e7eacf6b2acc138399fe18e48f8e1a0'
+        specifier: workspace:*
+        version: link:../../web/packages/ui
       '@modrinth/utils':
-        specifier: github:modrinth/code#v0.13.1
-        version: '@modrinth/monorepo@https://codeload.github.com/modrinth/code/tar.gz/b4a356874e7eacf6b2acc138399fe18e48f8e1a0'
+        specifier: workspace:*
+        version: link:../../web/packages/utils
       '@sentry/vue':
         specifier: ^8.27.0
         version: 8.55.1(pinia@3.0.4(typescript@5.9.3)(vue@3.5.32(typescript@5.9.3)))(vue@3.5.32(typescript@5.9.3))
@@ -126,8 +126,8 @@ importers:
         specifier: ^6.2.12
         version: 6.14.2(@vue/compiler-core@3.5.32)(vue@3.5.32(typescript@5.9.3))
       '@modrinth/tooling-config':
-        specifier: github:modrinth/code#v0.13.1
-        version: '@modrinth/monorepo@https://codeload.github.com/modrinth/code/tar.gz/b4a356874e7eacf6b2acc138399fe18e48f8e1a0'
+        specifier: workspace:*
+        version: link:../../web/packages/tooling-config
       '@nuxt/eslint-config':
         specifier: ^0.5.6
         version: 0.5.7(@typescript-eslint/utils@8.58.2(eslint@9.39.4(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.4(jiti@1.21.7))(typescript@5.9.3)

@@ -29,5 +29,11 @@
     "edit": "allow",
     "read": "allow"
   },
-  "command": {}
+  "command": {
+    "cm": {
+      "template": "Run: git add . && git commit -m \"$ARGUMENTS\" && git push",
+      "description": "Git add, commit with message, and push",
+      "subtask": true
+    }
+  }
 }
