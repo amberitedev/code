@@ -1,15 +1,15 @@
 # Amberite
 
-Amberite is a server management web app that runs via Tauri and manages Amberite Core, which is the actual server manager.
+Amberite is a server management web app that runs via Tauri and manages Amberite Core. The goal is to make playing modded Minecraft with friends seamless by adding client-to-client sync and core-to-client sync to keep all mods synced across server and client.
 
 ## Projects
 
 | Directory | What it is | State |
 |-----------|------------|-------|
-| `apps/app/` | Main app — frontend + custom backend + Tauri | Implemented |
-| `apps/core/` | Amberite Core — actual server management logic | Implemented |
-| `apps/supabase/` | Supabase — auth, friends, groups, registration | Implemented |
-| `apps/web/` | Cloudflare Pages site (amberite.dev) | Partially implemented |
+| `apps/app/` | Main app — Vue 3 frontend + custom Rust backend + Tauri | Stated implemented |
+| `apps/core/` | Amberite Core — Rust/Axum server management | Mostly implemented |
+| `apps/supabase/` | Supabase Edge Functions + setup docs | Setup files only |
+| `apps/web/` | Cloudflare Pages site (amberite.dev/dashboard) — lighter dashboard | Barely implemented |
 
 Each project has its own AGENTS.md. Read the relevant one for your task.
 
@@ -21,10 +21,18 @@ amberite/
 │   ├── app/              # Main app
 │   │   ├── frontend/    # Vue 3 + Tailwind
 │   │   ├── backend/     # Custom Rust/Axum backend (overrides core)
-│   │   └── tauri/       # Tauri desktop shell (read-only)
-│   ├── core/            # Amberite Core — server management
-│   ├── supabase/        # Supabase — auth, friends, groups
+│   │   └── tauri/       # Tauri desktop shell (Rust + Vue 3)
+│   ├── core/            # Amberite Core — Rust/Axum server management
+│   │   ├── src/
+│   │   │   ├── domain/           # Business logic, entities
+│   │   │   ├── application/      # Services, orchestration
+│   │   │   ├── infrastructure/  # SQLite, processes, networking
+│   │   │   └── presentation/    # HTTP handlers, WebSocket
+│   │   └── migrations/
+│   ├── supabase/        # Edge functions + setup docs
+│   │   └── functions/
 │   └── web/             # Cloudflare Pages site
+│       └── src/
 ├── scripts/
 └── AGENTS.md
 ```
@@ -33,7 +41,7 @@ amberite/
 
 Frontend: Vue 3, Tailwind CSS, TypeScript, Vite, Pinia, Vue Router, Vue Query
 Backend: Rust, Axum
-Desktop: Tauri
+Desktop: Tauri (Rust + Vue 3)
 
 Add later once someone knows.
 
