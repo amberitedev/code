@@ -1,0 +1,602 @@
+{
+  "app.auth-servers.unreachable.body": {
+    "message": "Minecraft authentication servers may be down right now. Check your internet connection and try again later."
+  },
+  "app.auth-servers.unreachable.header": {
+    "message": "Cannot reach authentication servers"
+  },
+  "app.browse.add-server-to-instance": {
+    "message": "Add server to instance"
+  },
+  "app.browse.add-servers-to-instance": {
+    "message": "Add servers to your instance"
+  },
+  "app.browse.add-to-instance": {
+    "message": "Add to instance"
+  },
+  "app.browse.add-to-instance-name": {
+    "message": "Add to {instanceName}"
+  },
+  "app.browse.added": {
+    "message": "Added"
+  },
+  "app.browse.already-added": {
+    "message": "Already added"
+  },
+  "app.browse.discover-content": {
+    "message": "Discover content"
+  },
+  "app.browse.discover-servers": {
+    "message": "Discover servers"
+  },
+  "app.browse.hide-added-servers": {
+    "message": "Hide added servers"
+  },
+  "app.browse.hide-installed-content": {
+    "message": "Hide installed content"
+  },
+  "app.browse.install-content-to-instance": {
+    "message": "Install content to instance"
+  },
+  "app.export-modal.description-placeholder": {
+    "message": "Enter modpack description..."
+  },
+  "app.export-modal.export-button": {
+    "message": "Export"
+  },
+  "app.export-modal.header": {
+    "message": "Export modpack"
+  },
+  "app.export-modal.modpack-name-label": {
+    "message": "Modpack Name"
+  },
+  "app.export-modal.modpack-name-placeholder": {
+    "message": "Modpack name"
+  },
+  "app.export-modal.select-files-label": {
+    "message": "Select files and folders to include in pack"
+  },
+  "app.export-modal.version-number-label": {
+    "message": "Version number"
+  },
+  "app.export-modal.version-number-placeholder": {
+    "message": "1.0.0"
+  },
+  "app.instance.confirm-delete.admonition-body": {
+    "message": "All data for your instance will be permanently deleted, including your worlds, configs, and all installed content."
+  },
+  "app.instance.confirm-delete.admonition-header": {
+    "message": "This action cannot be undone"
+  },
+  "app.instance.confirm-delete.delete-button": {
+    "message": "Delete instance"
+  },
+  "app.instance.confirm-delete.header": {
+    "message": "Delete instance"
+  },
+  "app.instance.modpack-already-installed.body": {
+    "message": "This modpack is already installed in the <bold>{instanceName}</bold> instance. Are you sure you want to duplicate it?"
+  },
+  "app.instance.modpack-already-installed.create": {
+    "message": "Create"
+  },
+  "app.instance.modpack-already-installed.header": {
+    "message": "Modpack already installed"
+  },
+  "app.instance.modpack-already-installed.instance": {
+    "message": "Instance"
+  },
+  "app.instance.mods.content-type-project": {
+    "message": "project"
+  },
+  "app.instance.mods.project-was-added": {
+    "message": "\"{name}\" was added"
+  },
+  "app.instance.mods.projects-were-added": {
+    "message": "{count} projects were added"
+  },
+  "app.instance.mods.share-text": {
+    "message": "Check out the projects I'm using in my modpack!"
+  },
+  "app.instance.mods.share-title": {
+    "message": "Sharing modpack content"
+  },
+  "app.instance.mods.successfully-uploaded": {
+    "message": "Successfully uploaded"
+  },
+  "app.instance.worlds.add-server": {
+    "message": "Add server"
+  },
+  "app.instance.worlds.browse-servers": {
+    "message": "Browse servers"
+  },
+  "app.instance.worlds.delete-world-description": {
+    "message": "'{name}' will be **permanently deleted**, and there will be no way to recover it."
+  },
+  "app.instance.worlds.delete-world-title": {
+    "message": "Are you sure you want to permanently delete this world?"
+  },
+  "app.instance.worlds.filter-modded": {
+    "message": "Modded"
+  },
+  "app.instance.worlds.filter-offline": {
+    "message": "Offline"
+  },
+  "app.instance.worlds.filter-online": {
+    "message": "Online"
+  },
+  "app.instance.worlds.filter-vanilla": {
+    "message": "Vanilla"
+  },
+  "app.instance.worlds.no-worlds-description": {
+    "message": "Add a server or browse to get started"
+  },
+  "app.instance.worlds.no-worlds-heading": {
+    "message": "No servers or worlds added"
+  },
+  "app.instance.worlds.remove-server-description": {
+    "message": "'{name}' will be removed from your list, including in-game, and there will be no way to recover it."
+  },
+  "app.instance.worlds.remove-server-description-with-address": {
+    "message": "'{name}' ({address}) will be removed from your list, including in-game, and there will be no way to recover it."
+  },
+  "app.instance.worlds.remove-server-title": {
+    "message": "Are you sure you want to remove {name}?"
+  },
+  "app.instance.worlds.search-worlds-placeholder": {
+    "message": "Search {count} worlds..."
+  },
+  "app.instance.worlds.this-server": {
+    "message": "this server"
+  },
+  "app.modal.install-to-play.content-required": {
+    "message": "Content required"
+  },
+  "app.modal.install-to-play.header": {
+    "message": "Install to play"
+  },
+  "app.modal.install-to-play.install-button": {
+    "message": "Install"
+  },
+  "app.modal.install-to-play.mod-count": {
+    "message": "{count, plural, one {# mod} other {# mods}}"
+  },
+  "app.modal.install-to-play.required-modpack": {
+    "message": "Required modpack"
+  },
+  "app.modal.install-to-play.server-requires-mods": {
+    "message": "This server requires mods to play. Click Install to set up the required files from Modrinth, then launch directly into the server."
+  },
+  "app.modal.install-to-play.shared-instance": {
+    "message": "Shared instance"
+  },
+  "app.modal.install-to-play.shared-server-instance": {
+    "message": "Shared server instance"
+  },
+  "app.modal.install-to-play.view-contents": {
+    "message": "View contents"
+  },
+  "app.modal.update-to-play.header": {
+    "message": "Update to play"
+  },
+  "app.modal.update-to-play.update-required": {
+    "message": "Update required"
+  },
+  "app.modal.update-to-play.update-required-description": {
+    "message": "An update is required to play {name}. Please update to the latest version to launch the game."
+  },
+  "app.settings.developer-mode-enabled": {
+    "message": "Developer mode enabled."
+  },
+  "app.settings.downloading": {
+    "message": "Downloading v{version}"
+  },
+  "app.settings.tabs.appearance": {
+    "message": "Appearance"
+  },
+  "app.settings.tabs.default-instance-options": {
+    "message": "Default instance options"
+  },
+  "app.settings.tabs.java-installations": {
+    "message": "Java installations"
+  },
+  "app.settings.tabs.language": {
+    "message": "Language"
+  },
+  "app.settings.tabs.privacy": {
+    "message": "Privacy"
+  },
+  "app.settings.tabs.resource-management": {
+    "message": "Resource management"
+  },
+  "app.update-popup.body": {
+    "message": "Modrinth App v{version} is ready to install! Reload to update now, or automatically when you close Modrinth App."
+  },
+  "app.update-popup.body.download-complete": {
+    "message": "Modrinth App v{version} has finished downloading. Reload to update now, or automatically when you close Modrinth App."
+  },
+  "app.update-popup.body.linux": {
+    "message": "Modrinth App v{version} is available. Use your package manager to update for the latest features and fixes!"
+  },
+  "app.update-popup.body.metered": {
+    "message": "Modrinth App v{version} is available now! Since you're on a metered network, we didn't automatically download it."
+  },
+  "app.update-popup.changelog": {
+    "message": "Changelog"
+  },
+  "app.update-popup.download": {
+    "message": "Download ({size})"
+  },
+  "app.update-popup.download-complete": {
+    "message": "Download complete"
+  },
+  "app.update-popup.reload": {
+    "message": "Reload"
+  },
+  "app.update-popup.title": {
+    "message": "Update available"
+  },
+  "app.update.complete-toast.text": {
+    "message": "Click here to view the changelog."
+  },
+  "app.update.complete-toast.title": {
+    "message": "Version {version} was successfully installed!"
+  },
+  "app.update.download-update": {
+    "message": "Download update"
+  },
+  "app.update.downloading-update": {
+    "message": "Downloading update ({percent}%)"
+  },
+  "app.update.reload-to-update": {
+    "message": "Reload to install update"
+  },
+  "app.world.server-modal.placeholder-address": {
+    "message": "example.modrinth.gg"
+  },
+  "app.world.server-modal.select-an-option": {
+    "message": "Select an option"
+  },
+  "app.world.world-item.incompatible-version": {
+    "message": "Incompatible version {version}"
+  },
+  "app.world.world-item.not-played-yet": {
+    "message": "Not played yet"
+  },
+  "app.world.world-item.offline": {
+    "message": "Offline"
+  },
+  "app.world.world-item.players-online": {
+    "message": "{count} online"
+  },
+  "friends.action.add-friend": {
+    "message": "Add a friend"
+  },
+  "friends.action.view-friend-requests": {
+    "message": "{count} friend {count, plural, one {request} other {requests}}"
+  },
+  "friends.add-friend.submit": {
+    "message": "Send friend request"
+  },
+  "friends.add-friend.title": {
+    "message": "Adding a friend"
+  },
+  "friends.add-friend.username.description": {
+    "message": "It may be different from their Minecraft username!"
+  },
+  "friends.add-friend.username.placeholder": {
+    "message": "Enter Modrinth username..."
+  },
+  "friends.add-friend.username.title": {
+    "message": "What's your friend's Modrinth username?"
+  },
+  "friends.add-friends-to-share": {
+    "message": "<link>Add friends</link> to see what they're playing!"
+  },
+  "friends.friend.cancel-request": {
+    "message": "Cancel request"
+  },
+  "friends.friend.remove-friend": {
+    "message": "Remove friend"
+  },
+  "friends.friend.request-sent": {
+    "message": "Friend request sent"
+  },
+  "friends.friend.view-profile": {
+    "message": "View profile"
+  },
+  "friends.heading": {
+    "message": "Friends"
+  },
+  "friends.heading.active": {
+    "message": "Active"
+  },
+  "friends.heading.offline": {
+    "message": "Offline"
+  },
+  "friends.heading.online": {
+    "message": "Online"
+  },
+  "friends.heading.pending": {
+    "message": "Pending"
+  },
+  "friends.no-friends-match": {
+    "message": "No friends matching ''{query}''"
+  },
+  "friends.search-friends-placeholder": {
+    "message": "Search friends..."
+  },
+  "friends.section.heading": {
+    "message": "{title} - {count}"
+  },
+  "friends.sign-in-to-add-friends": {
+    "message": "<link>Sign in to a Modrinth account</link> to add friends and see what they're playing!"
+  },
+  "instance.add-server.add-and-play": {
+    "message": "Add and play"
+  },
+  "instance.add-server.add-server": {
+    "message": "Add server"
+  },
+  "instance.add-server.resource-pack.disabled": {
+    "message": "Disabled"
+  },
+  "instance.add-server.resource-pack.enabled": {
+    "message": "Enabled"
+  },
+  "instance.add-server.resource-pack.prompt": {
+    "message": "Prompt"
+  },
+  "instance.add-server.title": {
+    "message": "Add a server"
+  },
+  "instance.edit-server.title": {
+    "message": "Edit server"
+  },
+  "instance.edit-world.hide-from-home": {
+    "message": "Hide from the Home page"
+  },
+  "instance.edit-world.name": {
+    "message": "Name"
+  },
+  "instance.edit-world.placeholder-name": {
+    "message": "Minecraft World"
+  },
+  "instance.edit-world.reset-icon": {
+    "message": "Reset icon"
+  },
+  "instance.edit-world.title": {
+    "message": "Edit world"
+  },
+  "instance.files.adding-files": {
+    "message": "Adding files ({completed}/{total})"
+  },
+  "instance.files.save-as": {
+    "message": "Save as..."
+  },
+  "instance.server-modal.address": {
+    "message": "Address"
+  },
+  "instance.server-modal.name": {
+    "message": "Name"
+  },
+  "instance.server-modal.placeholder-name": {
+    "message": "Minecraft Server"
+  },
+  "instance.server-modal.resource-pack": {
+    "message": "Resource pack"
+  },
+  "instance.settings.tabs.general": {
+    "message": "General"
+  },
+  "instance.settings.tabs.general.delete": {
+    "message": "Delete instance"
+  },
+  "instance.settings.tabs.general.delete.button": {
+    "message": "Delete instance"
+  },
+  "instance.settings.tabs.general.delete.description": {
+    "message": "Permanently deletes an instance from your device, including your worlds, configs, and all installed content. Be careful, as once you delete a instance there is no way to recover it."
+  },
+  "instance.settings.tabs.general.deleting.button": {
+    "message": "Deleting..."
+  },
+  "instance.settings.tabs.general.duplicate-button": {
+    "message": "Duplicate"
+  },
+  "instance.settings.tabs.general.duplicate-button.tooltip.installing": {
+    "message": "Cannot duplicate while installing."
+  },
+  "instance.settings.tabs.general.duplicate-instance": {
+    "message": "Duplicate instance"
+  },
+  "instance.settings.tabs.general.duplicate-instance.description": {
+    "message": "Creates a copy of this instance, including worlds, configs, mods, etc."
+  },
+  "instance.settings.tabs.general.edit-icon": {
+    "message": "Edit icon"
+  },
+  "instance.settings.tabs.general.edit-icon.remove": {
+    "message": "Remove icon"
+  },
+  "instance.settings.tabs.general.edit-icon.replace": {
+    "message": "Replace icon"
+  },
+  "instance.settings.tabs.general.edit-icon.select": {
+    "message": "Select icon"
+  },
+  "instance.settings.tabs.general.library-groups": {
+    "message": "Library groups"
+  },
+  "instance.settings.tabs.general.library-groups.create": {
+    "message": "Create new group"
+  },
+  "instance.settings.tabs.general.library-groups.description": {
+    "message": "Library groups allow you to organize your instances into different sections in your library."
+  },
+  "instance.settings.tabs.general.library-groups.enter-name": {
+    "message": "Enter group name"
+  },
+  "instance.settings.tabs.general.name": {
+    "message": "Name"
+  },
+  "instance.settings.tabs.hooks": {
+    "message": "Launch hooks"
+  },
+  "instance.settings.tabs.hooks.custom-hooks": {
+    "message": "Custom launch hooks"
+  },
+  "instance.settings.tabs.hooks.description": {
+    "message": "Hooks allow advanced users to run certain system commands before and after launching the game."
+  },
+  "instance.settings.tabs.hooks.post-exit": {
+    "message": "Post-exit"
+  },
+  "instance.settings.tabs.hooks.post-exit.description": {
+    "message": "Ran after the game closes."
+  },
+  "instance.settings.tabs.hooks.post-exit.enter": {
+    "message": "Enter post-exit command..."
+  },
+  "instance.settings.tabs.hooks.pre-launch": {
+    "message": "Pre-launch"
+  },
+  "instance.settings.tabs.hooks.pre-launch.description": {
+    "message": "Ran before the instance is launched."
+  },
+  "instance.settings.tabs.hooks.pre-launch.enter": {
+    "message": "Enter pre-launch command..."
+  },
+  "instance.settings.tabs.hooks.title": {
+    "message": "Game launch hooks"
+  },
+  "instance.settings.tabs.hooks.wrapper": {
+    "message": "Wrapper"
+  },
+  "instance.settings.tabs.hooks.wrapper.description": {
+    "message": "Wrapper command for launching Minecraft."
+  },
+  "instance.settings.tabs.hooks.wrapper.enter": {
+    "message": "Enter wrapper command..."
+  },
+  "instance.settings.tabs.installation": {
+    "message": "Installation"
+  },
+  "instance.settings.tabs.installation.loader-version": {
+    "message": "{loader} version"
+  },
+  "instance.settings.tabs.java": {
+    "message": "Java and memory"
+  },
+  "instance.settings.tabs.java.environment-variables": {
+    "message": "Environment variables"
+  },
+  "instance.settings.tabs.java.hooks": {
+    "message": "Hooks"
+  },
+  "instance.settings.tabs.java.java-arguments": {
+    "message": "Java arguments"
+  },
+  "instance.settings.tabs.java.java-installation": {
+    "message": "Java installation"
+  },
+  "instance.settings.tabs.java.java-memory": {
+    "message": "Memory allocated"
+  },
+  "instance.settings.tabs.window": {
+    "message": "Window"
+  },
+  "instance.settings.tabs.window.custom-window-settings": {
+    "message": "Custom window settings"
+  },
+  "instance.settings.tabs.window.fullscreen": {
+    "message": "Fullscreen"
+  },
+  "instance.settings.tabs.window.fullscreen.description": {
+    "message": "Make the game start in full screen when launched (using options.txt)."
+  },
+  "instance.settings.tabs.window.height": {
+    "message": "Height"
+  },
+  "instance.settings.tabs.window.height.description": {
+    "message": "The height of the game window when launched."
+  },
+  "instance.settings.tabs.window.height.enter": {
+    "message": "Enter height..."
+  },
+  "instance.settings.tabs.window.width": {
+    "message": "Width"
+  },
+  "instance.settings.tabs.window.width.description": {
+    "message": "The width of the game window when launched."
+  },
+  "instance.settings.tabs.window.width.enter": {
+    "message": "Enter width..."
+  },
+  "instance.worlds.a_minecraft_server": {
+    "message": "A Minecraft Server"
+  },
+  "instance.worlds.cant_connect": {
+    "message": "Can't connect to server"
+  },
+  "instance.worlds.copy_address": {
+    "message": "Copy address"
+  },
+  "instance.worlds.dont_show_on_home": {
+    "message": "Don't show on Home"
+  },
+  "instance.worlds.game_already_open": {
+    "message": "Instance is already open"
+  },
+  "instance.worlds.hardcore": {
+    "message": "Hardcore mode"
+  },
+  "instance.worlds.incompatible_server": {
+    "message": "Server is incompatible"
+  },
+  "instance.worlds.linked_server": {
+    "message": "Managed by server project"
+  },
+  "instance.worlds.no_contact": {
+    "message": "Server couldn't be contacted"
+  },
+  "instance.worlds.no_server_quick_play": {
+    "message": "You can only jump straight into servers on Minecraft Alpha 1.0.5+"
+  },
+  "instance.worlds.no_singleplayer_quick_play": {
+    "message": "You can only jump straight into singleplayer worlds on Minecraft 1.20+"
+  },
+  "instance.worlds.play_instance": {
+    "message": "Play instance"
+  },
+  "instance.worlds.view_instance": {
+    "message": "View instance"
+  },
+  "instance.worlds.world_in_use": {
+    "message": "World is in use"
+  },
+  "search.filter.locked.instance": {
+    "message": "Provided by the instance"
+  },
+  "search.filter.locked.instance-game-version.title": {
+    "message": "Game version is provided by the instance"
+  },
+  "search.filter.locked.instance-loader.title": {
+    "message": "Loader is provided by the instance"
+  },
+  "search.filter.locked.instance.sync": {
+    "message": "Sync with instance"
+  },
+  "search.filter.locked.server": {
+    "message": "Provided by the server"
+  },
+  "search.filter.locked.server-environment.title": {
+    "message": "Only client-side mods can be added to the server instance"
+  },
+  "search.filter.locked.server-game-version.title": {
+    "message": "Game version is provided by the server"
+  },
+  "search.filter.locked.server-loader.title": {
+    "message": "Loader is provided by the server"
+  }
+}
