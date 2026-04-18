@@ -63,8 +63,8 @@
 </template>
 
 <script setup lang="ts">
-import type { Labrinth } from '@modrinth/api-client'
-import { ClipboardCopyIcon, FolderOpenIcon } from '@modrinth/assets'
+import type { Labrinth } from '@amberite/api-client'
+import { ClipboardCopyIcon, FolderOpenIcon } from '@amberite/assets'
 import {
 	commonMessages,
 	ConfirmModpackUpdateModal,
@@ -84,7 +84,7 @@ import {
 	provideContentManager,
 	useDebugLogger,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'

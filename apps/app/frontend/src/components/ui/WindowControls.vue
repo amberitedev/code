@@ -24,8 +24,8 @@
 </template>
 
 <script setup>
-import { MaximizeIcon, MinimizeIcon, RestoreIcon, XIcon } from '@modrinth/assets'
-import { ButtonStyled } from '@modrinth/ui'
+import { MaximizeIcon, MinimizeIcon, RestoreIcon, XIcon } from '@amberite/assets'
+import { ButtonStyled } from '@amberite/ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { onMounted, onUnmounted, ref } from 'vue'

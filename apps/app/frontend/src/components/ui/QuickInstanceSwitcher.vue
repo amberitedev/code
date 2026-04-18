@@ -1,6 +1,6 @@
 <script setup>
-import { SpinnerIcon } from '@modrinth/assets'
-import { Avatar, injectNotificationManager } from '@modrinth/ui'
+import { SpinnerIcon } from '@amberite/assets'
+import { Avatar, injectNotificationManager } from '@amberite/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import dayjs from 'dayjs'
 import { onUnmounted, ref } from 'vue'

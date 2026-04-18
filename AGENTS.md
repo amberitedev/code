@@ -62,6 +62,7 @@ Backend (in `apps/app/backend/`):
 
 ## Rules
 
+- Never overwrite existing files — always edit them instead
 - Max 200 lines per file (hard rule)
 - One component per file (single responsibility)
 - If you need to exceed 200 lines, ask for permission first

@@ -6,8 +6,8 @@ import {
 	LogInIcon,
 	MessagesSquareIcon,
 	WrenchIcon,
-} from '@modrinth/assets'
-import { Admonition, ButtonStyled, Collapsible, NewModal } from '@modrinth/ui'
+} from '@amberite/assets'
+import { Admonition, ButtonStyled, Collapsible, NewModal } from '@amberite/ui'
 import { computed, ref } from 'vue'
 
 import { hide_ads_window, show_ads_window } from '@/helpers/ads.js'

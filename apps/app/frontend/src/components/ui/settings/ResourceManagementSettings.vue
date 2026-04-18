@@ -1,6 +1,6 @@
 <script setup>
-import { BoxIcon, FolderSearchIcon, TrashIcon } from '@modrinth/assets'
-import { Button, injectNotificationManager, Slider, StyledInput } from '@modrinth/ui'
+import { BoxIcon, FolderSearchIcon, TrashIcon } from '@amberite/assets'
+import { Button, injectNotificationManager, Slider, StyledInput } from '@amberite/ui'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ref, watch } from 'vue'
 

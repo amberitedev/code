@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ServersManageOverviewPage } from '@modrinth/ui'
+import { ServersManageOverviewPage } from '@amberite/ui'
 </script>
 
 <template>

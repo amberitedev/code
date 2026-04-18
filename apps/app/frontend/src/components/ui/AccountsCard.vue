@@ -73,8 +73,8 @@
 </template>
 
 <script setup>
-import { DropdownIcon, LogInIcon, PlusIcon, SpinnerIcon, TrashIcon } from '@modrinth/assets'
-import { Avatar, Button, Card, injectNotificationManager } from '@modrinth/ui'
+import { DropdownIcon, LogInIcon, PlusIcon, SpinnerIcon, TrashIcon } from '@amberite/assets'
+import { Avatar, Button, Card, injectNotificationManager } from '@amberite/ui'
 import { computed, onBeforeUnmount, onMounted, onUnmounted, ref } from 'vue'
 
 import { trackEvent } from '@/helpers/analytics'

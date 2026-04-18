@@ -65,13 +65,13 @@
 </template>
 
 <script setup>
-import { CheckIcon, DownloadIcon, ExternalIcon, MoreVerticalIcon } from '@modrinth/assets'
+import { CheckIcon, DownloadIcon, ExternalIcon, MoreVerticalIcon } from '@amberite/assets'
 import {
 	ButtonStyled,
 	injectNotificationManager,
 	OverflowMenu,
 	ProjectPageVersions,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { ref } from 'vue'
 
 import { SwapIcon } from '@/assets/icons/index.js'

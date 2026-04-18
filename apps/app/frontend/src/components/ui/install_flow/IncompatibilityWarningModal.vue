@@ -44,8 +44,8 @@
 </template>
 
 <script setup>
-import { DownloadIcon, XIcon } from '@modrinth/assets'
-import { Button, Combobox, formatLoader, injectNotificationManager, useVIntl } from '@modrinth/ui'
+import { DownloadIcon, XIcon } from '@amberite/assets'
+import { Button, Combobox, formatLoader, injectNotificationManager, useVIntl } from '@amberite/ui'
 import { computed, ref } from 'vue'
 
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'

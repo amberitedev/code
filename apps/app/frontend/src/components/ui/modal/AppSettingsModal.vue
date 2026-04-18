@@ -9,7 +9,7 @@ import {
 	SettingsIcon,
 	ShieldIcon,
 	ToggleRightIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	commonMessages,
 	commonSettingsMessages,
@@ -18,7 +18,7 @@ import {
 	ProgressBar,
 	TabbedModal,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { getVersion } from '@tauri-apps/api/app'
 import { platform as getOsPlatform, version as getOsVersion } from '@tauri-apps/plugin-os'
 import { ref, watch } from 'vue'

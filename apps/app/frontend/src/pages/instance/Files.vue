@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EditingFile, FileItem, UploadState } from '@modrinth/ui'
+import type { EditingFile, FileItem, UploadState } from '@amberite/ui'
 import {
 	commonMessages,
 	defineMessages,
@@ -8,7 +8,7 @@ import {
 	provideFileManager,
 	useDebugLogger,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { invoke } from '@tauri-apps/api/core'
 import {
 	mkdir,

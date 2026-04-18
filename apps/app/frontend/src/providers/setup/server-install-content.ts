@@ -1,10 +1,10 @@
-import type { Archon, Labrinth } from '@modrinth/api-client'
+import type { Archon, Labrinth } from '@amberite/api-client'
 import {
 	createContext,
 	type CreationFlowContextValue,
 	injectModrinthClient,
 	injectNotificationManager,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { computed, type ComputedRef, nextTick, type Ref, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 

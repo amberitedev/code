@@ -1,21 +1,19 @@
 {
-	"name": "@modrinth/app",
+	"name": "@amberite/tauri",
+	"version": "0.1.0",
+	"private": true,
 	"scripts": {
 		"tauri": "tauri",
 		"build": "tauri build",
 		"dev": "tauri dev",
-		"test": "cargo nextest run --all-targets --no-fail-fast",
+		"test": "cargo test",
 		"lint": "cargo fmt --check && cargo clippy --all-targets && cargo clippy --all-targets --features updater",
-		"lint:ancillary": "prettier --check .",
-		"fix": "cargo clippy --all-targets --fix --allow-dirty && cargo clippy --all-targets --features updater --fix --allow-dirty && cargo fmt",
-		"fix:ancillary": "prettier --write ."
+		"fix": "cargo clippy --all-targets --fix --allow-dirty && cargo clippy --all-targets --features updater --fix --allow-dirty && cargo fmt"
 	},
 	"devDependencies": {
 		"@tauri-apps/cli": "2.5.0"
 	},
 	"dependencies": {
-		"@modrinth/app-frontend": "workspace:*",
-		"@modrinth/app-lib": "workspace:*",
-		"@modrinth/daedalus": "workspace:*"
+		"@amberite/app-frontend": "workspace:*"
 	}
 }

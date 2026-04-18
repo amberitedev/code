@@ -10,7 +10,7 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	provideConsoleManager,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { computed, onUnmounted, ref, shallowRef, triggerRef, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 

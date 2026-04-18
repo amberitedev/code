@@ -1,0 +1,13 @@
+packages:
+  - 'apps/*'
+  - 'apps/*/frontend'
+  - 'apps/*/tauri'
+  - 'packages/*'
+
+catalog:
+  '@modrinth/ui': github:modrinth/code#v0.13.1
+  '@modrinth/api-client': github:modrinth/code#v0.13.1
+  '@modrinth/assets': github:modrinth/code#v0.13.1
+  '@modrinth/utils': github:modrinth/code#v0.13.1
+  '@modrinth/blog': github:modrinth/code#v0.13.1
+  '@modrinth/tooling-config': github:modrinth/code#v0.13.1

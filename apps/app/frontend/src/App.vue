@@ -6,7 +6,7 @@ import {
 	PanelVersionFeature,
 	TauriModrinthClient,
 	VerboseLoggingFeature,
-} from '@modrinth/api-client'
+} from '@amberite/api-client'
 import {
 	ArrowBigUpDashIcon,
 	ChangeSkinIcon,
@@ -28,7 +28,7 @@ import {
 	UserIcon,
 	WorldIcon,
 	XIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	Admonition,
 	Avatar,
@@ -50,8 +50,8 @@ import {
 	providePopupNotificationManager,
 	useDebugLogger,
 	useVIntl,
-} from '@modrinth/ui'
-import { formatBytes, renderString } from '@modrinth/utils'
+} from '@amberite/ui'
+import { formatBytes, renderString } from '@amberite/utils'
 import { useQuery } from '@tanstack/vue-query'
 import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'

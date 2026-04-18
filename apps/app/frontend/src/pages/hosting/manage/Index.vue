@@ -47,8 +47,8 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon, Labrinth } from '@modrinth/api-client'
-import { injectAuth, LoadingIndicator, ServersManageRootLayout } from '@modrinth/ui'
+import type { Archon, Labrinth } from '@amberite/api-client'
+import { injectAuth, LoadingIndicator, ServersManageRootLayout } from '@amberite/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'

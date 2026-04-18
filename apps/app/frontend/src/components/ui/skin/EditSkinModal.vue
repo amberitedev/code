@@ -107,7 +107,7 @@ import {
 	SpinnerIcon,
 	UploadIcon,
 	XIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	Button,
 	ButtonStyled,
@@ -116,7 +116,7 @@ import {
 	injectNotificationManager,
 	RadioButtons,
 	SkinPreviewRenderer,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'

@@ -8,7 +8,7 @@ import {
 	SearchIcon,
 	StopCircleIcon,
 	TrashIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	Accordion,
 	DropdownSelect,
@@ -16,7 +16,7 @@ import {
 	injectNotificationManager,
 	StyledInput,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { useStorage } from '@vueuse/core'
 import dayjs from 'dayjs'
 import { computed, ref } from 'vue'

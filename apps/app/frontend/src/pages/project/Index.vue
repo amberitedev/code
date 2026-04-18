@@ -217,7 +217,7 @@ import {
 	PlusIcon,
 	ReportIcon,
 	StopCircleIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	ButtonStyled,
 	injectNotificationManager,
@@ -231,7 +231,7 @@ import {
 	ProjectSidebarLinks,
 	ProjectSidebarServerInfo,
 	ProjectSidebarTags,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { Labrinth } from '@modrinth/api-client'
-import { injectModrinthClient, ServersManagePageIndex } from '@modrinth/ui'
+import type { Labrinth } from '@amberite/api-client'
+import { injectModrinthClient, ServersManagePageIndex } from '@amberite/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 

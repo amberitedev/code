@@ -1,0 +1,1 @@
+export const MODRINTH_VERSION = "v0.13.1"

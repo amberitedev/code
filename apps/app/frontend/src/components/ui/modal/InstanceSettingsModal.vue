@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Labrinth } from '@modrinth/api-client'
+import type { Labrinth } from '@amberite/api-client'
 import {
 	ChevronRightIcon,
 	CodeIcon,
@@ -7,7 +7,7 @@ import {
 	InfoIcon,
 	MonitorIcon,
 	WrenchIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	Avatar,
 	commonMessages,
@@ -15,7 +15,7 @@ import {
 	TabbedModal,
 	type TabbedModalTab,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, nextTick, ref, watch } from 'vue'

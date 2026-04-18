@@ -1,5 +1,5 @@
 <script setup>
-import { PlusIcon, XIcon } from '@modrinth/assets'
+import { PlusIcon, XIcon } from '@amberite/assets'
 import {
 	Button,
 	Checkbox,
@@ -8,7 +8,7 @@ import {
 	injectNotificationManager,
 	StyledInput,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ref } from 'vue'
 

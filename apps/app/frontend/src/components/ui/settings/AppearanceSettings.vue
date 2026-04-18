@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Combobox, ThemeSelector, Toggle } from '@modrinth/ui'
+import { Combobox, ThemeSelector, Toggle } from '@amberite/ui'
 import { ref, watch } from 'vue'
 
 import { get, set } from '@/helpers/settings.ts'

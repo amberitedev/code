@@ -1,4 +1,4 @@
-import type { ModrinthId } from '@modrinth/utils'
+import type { ModrinthId } from '@amberite/utils'
 
 export type GameInstance = {
 	path: string

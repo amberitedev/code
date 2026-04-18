@@ -84,8 +84,8 @@ import {
 	LeftArrowIcon,
 	RightArrowIcon,
 	XIcon,
-} from '@modrinth/assets'
-import { Button, Card, useFormatDateTime } from '@modrinth/ui'
+} from '@amberite/assets'
+import { Button, Card, useFormatDateTime } from '@amberite/ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { hide_ads_window, show_ads_window } from '@/helpers/ads.js'

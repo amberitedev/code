@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import '@modrinth/ui/src/styles/tailwind-utilities.css';
+@import '@amberite/ui/src/styles/tailwind-utilities.css';
 
 @font-face {
 	font-family: 'bundled-minecraft-font-mrapp';
@@ -187,7 +187,7 @@ input[type='button'] {
 	outline: 2px solid transparent;
 }
 
-@import '@modrinth/assets/omorphia.scss';
+@import '@amberite/assets/omorphia.scss';
 
 input {
 	border-radius: var(--size-rounded-sm);

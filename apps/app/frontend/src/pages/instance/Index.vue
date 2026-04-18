@@ -266,7 +266,7 @@
 	</div>
 </template>
 <script setup lang="ts">
-import type { Labrinth } from '@modrinth/api-client'
+import type { Labrinth } from '@amberite/api-client'
 import {
 	BoxesIcon,
 	CheckCircleIcon,
@@ -290,7 +290,7 @@ import {
 	UpdatedIcon,
 	UserPlusIcon,
 	XIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	Avatar,
 	ButtonStyled,
@@ -303,7 +303,7 @@ import {
 	ServerPing,
 	ServerRecentPlays,
 	ServerRegion,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'

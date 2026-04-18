@@ -71,9 +71,9 @@
 </template>
 
 <script setup lang="ts">
-import type { Labrinth } from '@modrinth/api-client'
-import { DownloadIcon, EyeIcon, XIcon } from '@modrinth/assets'
-import type { ContentItem } from '@modrinth/ui'
+import type { Labrinth } from '@amberite/api-client'
+import { DownloadIcon, EyeIcon, XIcon } from '@amberite/assets'
+import type { ContentItem } from '@amberite/ui'
 import {
 	Admonition,
 	Avatar,
@@ -84,7 +84,7 @@ import {
 	ModpackContentModal,
 	NewModal,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { computed, ref } from 'vue'
 
 import { hide_ads_window, show_ads_window } from '@/helpers/ads'

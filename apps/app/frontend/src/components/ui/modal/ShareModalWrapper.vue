@@ -1,6 +1,6 @@
-<!-- @deprecated Use ShareModal from @modrinth/ui directly. Ads/noblur now handled by injectModalBehavior. -->
+<!-- @deprecated Use ShareModal from @amberite/ui directly. Ads/noblur now handled by injectModalBehavior. -->
 <script setup lang="ts">
-import { ShareModal } from '@modrinth/ui'
+import { ShareModal } from '@amberite/ui'
 import { ref } from 'vue'
 
 defineProps({

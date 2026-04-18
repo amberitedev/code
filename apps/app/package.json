@@ -1,13 +1,14 @@
 {
-  "name": "amberite-app",
+  "name": "@amberite/app",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "pnpm run dev:tauri",
-    "dev:tauri": "cd tauri && pnpm dev",
+    "dev:tauri": "cd tauri && cargo tauri dev",
     "dev:frontend": "cd frontend && pnpm dev",
     "build": "pnpm run build:tauri",
-    "build:tauri": "cd tauri && pnpm build",
+    "build:tauri": "cd tauri && cargo tauri build",
     "build:frontend": "cd frontend && pnpm build",
     "test": "pnpm run test:rust && pnpm run test:frontend",
     "test:rust": "cd backend && cargo test && cd ../tauri && cargo test",
@@ -19,8 +20,5 @@
     "fix:rust": "cd backend && cargo fmt && cargo clippy --fix --allow-dirty && cd ../tauri && cargo fmt && cargo clippy --fix --allow-dirty",
     "fix:frontend": "cd frontend && pnpm fix",
     "cargo:update": "cd tauri && cargo update"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1"
   }
 }

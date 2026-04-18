@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Toggle } from '@modrinth/ui'
+import { Toggle } from '@amberite/ui'
 import { ref, watch } from 'vue'
 
 import { optInAnalytics, optOutAnalytics } from '@/helpers/analytics'

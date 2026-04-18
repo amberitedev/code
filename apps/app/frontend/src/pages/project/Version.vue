@@ -167,9 +167,9 @@
 </template>
 
 <script setup>
-import { CheckIcon, DownloadIcon, ExternalIcon, FileIcon, ReportIcon } from '@modrinth/assets'
-import { Avatar, Badge, Breadcrumbs, Button, Card, CopyCode, useFormatDateTime } from '@modrinth/ui'
-import { formatBytes, renderString } from '@modrinth/utils'
+import { CheckIcon, DownloadIcon, ExternalIcon, FileIcon, ReportIcon } from '@amberite/assets'
+import { Avatar, Badge, Breadcrumbs, Button, Card, CopyCode, useFormatDateTime } from '@amberite/ui'
+import { formatBytes, renderString } from '@amberite/utils'
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PlayIcon, PlusIcon, XIcon } from '@modrinth/assets'
+import { PlayIcon, PlusIcon, XIcon } from '@amberite/assets'
 import {
 	ButtonStyled,
 	commonMessages,
@@ -7,7 +7,7 @@ import {
 	injectNotificationManager,
 	NewModal,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { ref } from 'vue'
 
 import ServerModalBody from '@/components/ui/world/modal/ServerModalBody.vue'

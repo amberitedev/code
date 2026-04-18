@@ -7,8 +7,8 @@ import {
 	SearchIcon,
 	UploadIcon,
 	XIcon,
-} from '@modrinth/assets'
-import { Avatar, Button, Card, injectNotificationManager, StyledInput } from '@modrinth/ui'
+} from '@amberite/assets'
+import { Avatar, Button, Card, injectNotificationManager, StyledInput } from '@amberite/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { computed, ref } from 'vue'

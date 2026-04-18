@@ -1,12 +1,12 @@
 <script setup>
-import { CheckIcon, PlusIcon, SearchIcon } from '@modrinth/assets'
+import { CheckIcon, PlusIcon, SearchIcon } from '@amberite/assets'
 import {
 	Admonition,
 	Avatar,
 	ButtonStyled,
 	injectNotificationManager,
 	StyledInput,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
 

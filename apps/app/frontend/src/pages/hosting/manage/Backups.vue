@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { injectModrinthServerContext, ServersManageBackupsPage } from '@modrinth/ui'
+import { injectModrinthServerContext, ServersManageBackupsPage } from '@amberite/ui'
 
 const { isServerRunning } = injectModrinthServerContext()
 </script>

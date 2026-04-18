@@ -1,0 +1,32 @@
+{
+  "name": "@amberite/monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "config": {
+    "modrinthVersion": "v0.13.1"
+  },
+  "scripts": {
+    "web:dev": "turbo run dev --filter=@amberite/web",
+    "web:build": "turbo run build --filter=@amberite/web",
+    "app:dev": "pnpm run tauri:dev",
+    "app:build": "pnpm run tauri:build",
+    "tauri:dev": "pnpm tauri dev",
+    "tauri:build": "pnpm tauri build",
+    "frontend:dev": "turbo run dev --filter=@amberite/app-frontend",
+    "backend:dev": "cd apps/app/backend && cargo run",
+    "dev": "pnpm run app:dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "fix": "turbo run fix",
+    "typecheck": "turbo run typecheck",
+    "cargo:update": "cd apps/app/tauri && cargo update",
+    "update:modrinth": "node scripts/update-modrinth-deps.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.5.0",
+    "turbo": "^2.9.6"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

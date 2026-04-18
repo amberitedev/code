@@ -3,8 +3,8 @@
  * So, for example, addDefaultInstance creates a blank Profile object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { Labrinth } from '@modrinth/api-client'
-import type { ContentItem, ContentOwner } from '@modrinth/ui'
+import type { Labrinth } from '@amberite/api-client'
+import type { ContentItem, ContentOwner } from '@amberite/ui'
 import { invoke } from '@tauri-apps/api/core'
 
 import { install_to_existing_profile } from '@/helpers/pack'

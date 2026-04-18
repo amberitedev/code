@@ -58,8 +58,8 @@ import {
 	PlayIcon,
 	SearchIcon,
 	XIcon,
-} from '@modrinth/assets'
-import { Button, injectNotificationManager, StyledInput } from '@modrinth/ui'
+} from '@amberite/assets'
+import { Button, injectNotificationManager, StyledInput } from '@amberite/ui'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ref } from 'vue'
 

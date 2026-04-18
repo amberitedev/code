@@ -1,4 +1,4 @@
-import type { AbstractWebNotificationManager } from '@modrinth/ui'
+import type { AbstractWebNotificationManager } from '@amberite/ui'
 
 import { setupCreationModal } from './setup/creation-modal'
 import { setupFilePickerProvider } from './setup/file-picker'

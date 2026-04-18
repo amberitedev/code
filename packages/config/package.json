@@ -1,0 +1,26 @@
+{
+	"name": "@amberite/config",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
+		},
+		"./env": {
+			"types": "./src/env.ts",
+			"default": "./src/env.ts"
+		}
+	},
+	"scripts": {
+		"lint": "eslint . && prettier --check .",
+		"fix": "eslint . --fix && prettier --write ."
+	},
+	"devDependencies": {
+		"@modrinth/tooling-config": "github:modrinth/code#v0.13.1",
+		"typescript": "^5.5.4"
+	}
+}

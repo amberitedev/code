@@ -1,4 +1,4 @@
-import { provideFilePicker } from '@modrinth/ui'
+import { provideFilePicker } from '@amberite/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 

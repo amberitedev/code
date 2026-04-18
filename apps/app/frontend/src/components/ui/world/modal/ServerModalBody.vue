@@ -5,7 +5,7 @@ import {
 	type MessageDescriptor,
 	StyledInput,
 	useVIntl,
-} from '@modrinth/ui'
+} from '@amberite/ui'
 
 import type { ServerPackStatus } from '@/helpers/worlds.ts'
 

@@ -32,9 +32,9 @@ tauri-plugin-os = { version = "2.3.1" }
 tauri-plugin-single-instance = { version = "2.3.4" }
 tauri-plugin-updater = { version = "2.9.0", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-window-state = { version = "2.4.0" }
-theseus = { git = "https://github.com/modrinth/code", rev = "dd51c08a18131a90eb330d0852afd3cfc99cf32b", features = ["tauri"] }
-daedalus = { git = "https://github.com/modrinth/code", rev = "dd51c08a18131a90eb330d0852afd3cfc99cf32b" }
-path-util = { git = "https://github.com/modrinth/code", rev = "dd51c08a18131a90eb330d0852afd3cfc99cf32b" }
+theseus = { git = "https://github.com/modrinth/code", tag = "v0.13.1", features = ["tauri"] }
+daedalus = { git = "https://github.com/modrinth/code", tag = "v0.13.1" }
+path-util = { git = "https://github.com/modrinth/code", tag = "v0.13.1" }
 amberite-backend = { path = "../backend" }
 thiserror = { version = "2.0.17" }
 tokio = { version = "1.47.1", features = ["time"] }

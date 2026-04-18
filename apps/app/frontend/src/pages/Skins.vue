@@ -7,7 +7,7 @@ import {
 	SpinnerIcon,
 	TrashIcon,
 	UpdatedIcon,
-} from '@modrinth/assets'
+} from '@amberite/assets'
 import {
 	Button,
 	ButtonStyled,
@@ -16,8 +16,8 @@ import {
 	SkinButton,
 	SkinLikeTextButton,
 	SkinPreviewRenderer,
-} from '@modrinth/ui'
-import { arrayBufferToBase64 } from '@modrinth/utils'
+} from '@amberite/ui'
+import { arrayBufferToBase64 } from '@amberite/utils'
 import { computedAsync } from '@vueuse/core'
 import type { Ref } from 'vue'
 import { computed, inject, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'

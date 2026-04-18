@@ -1,7 +1,8 @@
 {
-	"name": "@modrinth/app-frontend",
+	"_modrinthVersion": "v0.13.1",
+	"name": "@amberite/app-frontend",
 	"private": true,
-	"version": "1.0.0-local",
+	"version": "0.1.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
@@ -9,14 +10,15 @@
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",
 		"fix": "eslint . --fix && prettier --write .",
-		"intl:extract": "formatjs extract \"src/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}\" --ignore \"**/*.d.ts\" --ignore node_modules --out-file src/locales/en-US/index.json --format crowdin --preserve-whitespace",
 		"test": "vue-tsc --noEmit"
 	},
 	"dependencies": {
-		"@modrinth/api-client": "workspace:^",
-		"@modrinth/assets": "workspace:*",
-		"@modrinth/ui": "workspace:*",
-		"@modrinth/utils": "workspace:*",
+		"@amberite/config": "workspace:*",
+		"@modrinth/ui": "github:modrinth/code#v0.13.1",
+		"@modrinth/api-client": "github:modrinth/code#v0.13.1",
+		"@modrinth/assets": "github:modrinth/code#v0.13.1",
+		"@modrinth/utils": "github:modrinth/code#v0.13.1",
+		"@modrinth/blog": "github:modrinth/code#v0.13.1",
 		"@sentry/vue": "^8.27.0",
 		"@sfirew/minecraft-motd-parser": "^1.1.6",
 		"@tanstack/vue-query": "^5.90.7",
@@ -46,9 +48,9 @@
 		"vue-virtual-scroller": "v2.0.0-beta.8"
 	},
 	"devDependencies": {
+		"@modrinth/tooling-config": "github:modrinth/code#v0.13.1",
 		"@eslint/compat": "^1.1.1",
 		"@formatjs/cli": "^6.2.12",
-		"@modrinth/tooling-config": "workspace:*",
 		"@nuxt/eslint-config": "^0.5.6",
 		"@taijased/vue-render-tracker": "^1.0.7",
 		"@vitejs/plugin-vue": "^6.0.3",
@@ -63,8 +65,7 @@
 		"vite": "^8.0.0",
 		"vue-component-type-helpers": "^3.1.8",
 		"vue-tsc": "^2.1.6",
-		"@vue/devtools": "^1.3.0"
+		"@vue/devtools": "^7.7.9"
 	},
-	"packageManager": "pnpm@9.4.0",
-	"web-types": "../../web-types.json"
+	"packageManager": "pnpm@9.15.0"
 }
