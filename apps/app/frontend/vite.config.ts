@@ -18,25 +18,25 @@ export default defineConfig({
 	resolve: {
 		alias: [
 			{
-				find: '@',
-				replacement: resolve(projectRootDir, 'src'),
+				find: /^@\//,
+				replacement: `${resolve(projectRootDir, 'src')}/`,
 			},
-			// Map @modrinth/* to @amberite/* for compatibility
+			// Map @amberite/* imports to installed @modrinth/* packages
 			{
-				find: /^@modrinth\/ui/,
-				replacement: '@amberite/ui',
-			},
-			{
-				find: /^@modrinth\/api-client/,
-				replacement: '@amberite/api-client',
+				find: /^@amberite\/ui/,
+				replacement: '@modrinth/ui',
 			},
 			{
-				find: /^@modrinth\/assets/,
-				replacement: '@amberite/assets',
+				find: /^@amberite\/api-client/,
+				replacement: '@modrinth/api-client',
 			},
 			{
-				find: /^@modrinth\/utils/,
-				replacement: '@amberite/utils',
+				find: /^@amberite\/assets/,
+				replacement: '@modrinth/assets',
+			},
+			{
+				find: /^@amberite\/utils/,
+				replacement: '@modrinth/utils',
 			},
 		],
 	},

@@ -2,6 +2,7 @@ packages:
   - 'apps/*'
   - 'apps/*/frontend'
   - 'apps/*/tauri'
+  - 'apps/*/packages/*'
   - 'packages/*'
 
 catalog:

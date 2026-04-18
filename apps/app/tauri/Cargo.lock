@@ -119,7 +119,7 @@ dependencies = [
 [[package]]
 name = "ariadne"
 version = "0.1.0"
-source = "git+https://github.com/modrinth/code?rev=dd51c08a18131a90eb330d0852afd3cfc99cf32b#dd51c08a18131a90eb330d0852afd3cfc99cf32b"
+source = "git+https://github.com/modrinth/code?tag=v0.13.1#4d68f3cea4d2b331effb585c4f86a5fdcfe42c0d"
 dependencies = [
  "chrono",
  "either",
@@ -233,7 +233,7 @@ dependencies = [
 [[package]]
 name = "async-minecraft-ping"
 version = "0.8.0"
-source = "git+https://github.com/modrinth/code?rev=dd51c08a18131a90eb330d0852afd3cfc99cf32b#dd51c08a18131a90eb330d0852afd3cfc99cf32b"
+source = "git+https://github.com/modrinth/code?tag=v0.13.1#4d68f3cea4d2b331effb585c4f86a5fdcfe42c0d"
 dependencies = [
  "async-trait",
  "hickory-resolver 0.24.4",
@@ -1032,7 +1032,7 @@ dependencies = [
 [[package]]
 name = "daedalus"
 version = "0.2.3"
-source = "git+https://github.com/modrinth/code?rev=dd51c08a18131a90eb330d0852afd3cfc99cf32b#dd51c08a18131a90eb330d0852afd3cfc99cf32b"
+source = "git+https://github.com/modrinth/code?tag=v0.13.1#4d68f3cea4d2b331effb585c4f86a5fdcfe42c0d"
 dependencies = [
  "chrono",
  "serde",
@@ -1574,16 +1574,6 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
-]
-
-[[package]]
-name = "eyre"
-version = "0.6.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cd915d99f24784cdc19fd37ef22b97e3ff0ae756c7e492e9fbfe897d61e2aec"
-dependencies = [
- "indenter",
- "once_cell",
 ]
 
 [[package]]
@@ -2691,12 +2681,6 @@ dependencies = [
  "icu_normalizer",
  "icu_properties",
 ]
-
-[[package]]
-name = "indenter"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "964de6e86d545b246d84badc0fef527924ace5134f30641c203ef52ba83f58d5"
 
 [[package]]
 name = "indexmap"
@@ -3871,7 +3855,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "path-util"
 version = "0.0.0"
-source = "git+https://github.com/modrinth/code?rev=dd51c08a18131a90eb330d0852afd3cfc99cf32b#dd51c08a18131a90eb330d0852afd3cfc99cf32b"
+source = "git+https://github.com/modrinth/code?tag=v0.13.1#4d68f3cea4d2b331effb585c4f86a5fdcfe42c0d"
 dependencies = [
  "derive_more 2.1.1",
  "itertools",
@@ -6425,7 +6409,7 @@ dependencies = [
 [[package]]
 name = "theseus"
 version = "1.0.0-local"
-source = "git+https://github.com/modrinth/code?rev=dd51c08a18131a90eb330d0852afd3cfc99cf32b#dd51c08a18131a90eb330d0852afd3cfc99cf32b"
+source = "git+https://github.com/modrinth/code?tag=v0.13.1#4d68f3cea4d2b331effb585c4f86a5fdcfe42c0d"
 dependencies = [
  "ariadne",
  "async-compression",
@@ -6451,7 +6435,6 @@ dependencies = [
  "either",
  "encoding_rs",
  "enumset",
- "eyre",
  "flate2",
  "fs4",
  "futures",
