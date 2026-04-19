@@ -70,3 +70,5 @@ Key patterns: Dependency inversion via ports, Actor model for instances, Typesta
 
 - **JWT Secret:** Currently using anon key for validation. For production, replace with service role key for Core's status updates to Supabase.
 - **Service Role Key:** Get from Supabase Dashboard → Settings → API → Service Role Key (click to reveal)
+
+

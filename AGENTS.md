@@ -2,6 +2,14 @@
 
 Amberite is a server management web app that runs via Tauri and manages Amberite Core. The goal is to make playing modded Minecraft with friends seamless by adding client-to-client sync and core-to-client sync to keep all mods synced across server and client.
 
+## Session Start
+
+Read these at the start of every session:
+1. `PROJECT.md` — Full project vision
+2. `.plan/active/features.md` — Planned features
+3. `.plan/active/bugs.md` — Known bugs
+4. `.plan/active/decisions.md` — Architectural decisions
+
 ## Projects
 
 | Directory | What it is | State |
@@ -74,3 +82,7 @@ Backend (in `apps/app/backend/`):
 ## When to Refresh
 
 If you make significant structural changes, tell the user to update relevant AGENTS.md files.
+
+## Memory Tracking
+
+Track all features, plans, decisions, and ideas the user mentions throughout the session. At session end, when finished building/planning, or on request — update `.plan/active/` files using `/feature-memory`. Memory files are the only files you may update in plan mode.

@@ -147,3 +147,4 @@ Frontend receives `{ field_name: "Theseus", message: "..." }`. The `error.js` st
 - Don't import `@modrinth/*` directly in frontend (use aliases)
 - Don't modify `main.rs` unless registering new Amberite plugin
 - Don't skip hidden-window initialization pattern
+
