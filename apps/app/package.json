@@ -1,33 +1,19 @@
 {
-  "name": "@amberite/app",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "tauri": "tauri",
-    "dev": "pnpm run dev:tauri",
-    "dev:tauri": "cd tauri && pnpm tauri dev",
-    "dev:frontend": "cd frontend && pnpm dev",
-    "build": "pnpm run build:tauri",
-    "build:tauri": "cd tauri && cargo tauri build",
-    "build:frontend": "cd frontend && pnpm build",
-    "test": "cargo nextest run --all-targets --no-fail-fast && pnpm run test:frontend",
-    "test:rust": "cd backend && cargo test && cd ../tauri && cargo test",
-    "test:frontend": "cd frontend && pnpm test",
-    "lint": "cargo fmt --check && cargo clippy --all-targets && cargo clippy --all-targets --features updater && pnpm run lint:frontend",
-    "lint:rust": "cd backend && cargo fmt --check && cargo clippy && cd ../tauri && cargo fmt --check && cargo clippy",
-    "lint:frontend": "cd frontend && pnpm lint",
-    "lint:ancillary": "prettier --check .",
-    "fix": "cargo clippy --all-targets --fix --allow-dirty && cargo clippy --all-targets --features updater --fix --allow-dirty && cargo fmt && pnpm run fix:frontend",
-    "fix:rust": "cd backend && cargo fmt && cargo clippy --fix --allow-dirty && cd ../tauri && cargo fmt && cargo clippy --fix --allow-dirty",
-    "fix:frontend": "cd frontend && pnpm fix",
-    "fix:ancillary": "prettier --write .",
-    "cargo:update": "cd tauri && cargo update"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "2.5.0"
-  },
-  "dependencies": {
-    "@amberite/app-frontend": "workspace:*"
-  }
+	"name": "@amberite/app",
+	"scripts": {
+		"tauri": "tauri",
+		"build": "tauri build",
+		"dev": "tauri dev",
+		"test": "cargo nextest run --all-targets --no-fail-fast",
+		"lint": "cargo fmt --check && cargo clippy --all-targets && cargo clippy --all-targets --features updater",
+		"lint:ancillary": "prettier --check .",
+		"fix": "cargo clippy --all-targets --fix --allow-dirty && cargo clippy --all-targets --features updater --fix --allow-dirty && cargo fmt",
+		"fix:ancillary": "prettier --write ."
+	},
+	"devDependencies": {
+		"@tauri-apps/cli": "2.5.0"
+	},
+	"dependencies": {
+		"@amberite/app-frontend": "workspace:*"
+	}
 }
