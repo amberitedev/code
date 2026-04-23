@@ -1,7 +1,7 @@
 //! Router - Assembles Axum web server.
 
 use crate::application::registry::ServiceRegistry;
-use crate::presentation::handlers::{auth_api, diagnostics_api, instance_api, websockets};
+use crate::presentation::handlers::{auth_api, diagnostics_api, instance_api, modpack_api, websockets};
 use axum::routing::{get, post};
 use axum::Router;
 use std::sync::Arc;
@@ -18,6 +18,10 @@ pub fn create_router(registry: ServiceRegistry) -> Router {
         // Auth routes
         .route("/login", post(auth_api::login))
         .route("/setup", post(auth_api::setup))
+        // Modpack routes
+        .route("/instances", post(modpack_api::upload_modpack))
+        .route("/instances/:id/modpack", get(modpack_api::download_modpack))
+        .route("/instances/:id/metadata", get(modpack_api::get_modpack_metadata))
         // Instance routes
         .route("/instances/:id/start", post(instance_api::start_instance))
         .route("/instances/:id/stop", post(instance_api::stop_instance))

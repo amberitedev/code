@@ -5,6 +5,7 @@ mod domain;
 mod application;
 mod infrastructure;
 mod presentation;
+mod theseus;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,9 +48,11 @@ async fn main() -> Result<()> {
     let _ = color_eyre::install();
 
     let args = Args::parse();
-    let lodestone_path = args.lodestone_path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current dir")
-    });
+    let lodestone_path = args.lodestone_path
+        .or_else(|| std::env::var("LODESTONE_PATH").ok().map(PathBuf::from))
+        .unwrap_or_else(|| {
+            std::env::current_dir().expect("Failed to get current dir")
+        });
 
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(EnvFilter::from("lodestone_core=debug"))
@@ -76,6 +79,12 @@ async fn main() -> Result<()> {
             AppError::Database(e.to_string())
         })?;
     info!("Migrations applied");
+
+    // Initialize Theseus state for modpack management
+    let theseus_base_dir = lodestone_path.join(".lodestone");
+    theseus::state::State::init(theseus_base_dir, pool.clone()).await
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    info!("Theseus state initialized");
 
     let paseto_key = load_paseto_key(&pool).await?;
 

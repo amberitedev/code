@@ -155,6 +155,13 @@ portable-pty = "0.8"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 
 # ============================================================
+# THESEUS INTEGRATION - Modpack handling
+# ============================================================
+async_zip = { version = "0.0.17", features = ["tokio", "tokio-fs", "deflate"] }
+sha1 = "0.10"
+bytes = "1.9"
+
+# ============================================================
 # V2 ADDITIONS: Type Safety & Validation
 # ============================================================
 derive_more = "0.99"

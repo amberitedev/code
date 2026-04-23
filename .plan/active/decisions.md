@@ -4,134 +4,112 @@
 
 ---
 
+## Mod Sync Approach (Clarified by User)
+
+**NOT sending binaries.** Manifest-based sync using Modrinth API:
+
+- Modrinth hosts all mods with versions — use their API to download
+- Sync sends manifest (`.mrpack` format) listing what to download
+- Only custom/private mods (not on Modrinth) need physical transfer
+- `.mrpack` format: `modrinth.index.json` + ZIP of custom files
+- Exporter/unexporter exists in Theseus — reuse it
+
+**Reference:** Theseus (apps/app in modrinth/code), mrpack-install
+
+---
+
+## Reference Project Philosophy
+
+Projects are **possible inspiration**, not concrete implementations:
+
+- Look at how they solve a problem
+- Evaluate: Does their approach match Amberite's constraints?
+- If yes → consider adopting pattern
+- If no → learn why, understand tradeoffs
+
+**Don't scour web excessively.** Start with:
+1. Modrinth's own code (you forked it)
+2. Modrinth awesome list (https://github.com/modrinth/awesome)
+3. Theseus documentation (https://docs.modrinth.com/contributing/theseus)
+
+---
+
 ## Testing Approach
-- **Core:** Use `axum-test` crate for endpoint testing (compiles + tests all 9 endpoints)
-- **Frontend:** Tauri invoke test script (separate file, runs outside CI, reports problems for agent review)
-- **CI:** Not implementing now — user will learn GitHub Actions when ready
+- **Core:** `axum-test` for endpoint testing
+- **Frontend:** Tauri invoke test script (runs outside CI)
+- **CI:** User will learn GitHub Actions later
 
 ---
 
 ## Dependency Strategy
-- **Modrinth packages:** User prefers single style (remove catalog, use `workspace:*` only)
-- **Fork strategy:** Stay on latest Modrinth release, periodic merges from modrinth/code
-- **Controlled reference preferred** over local copy modification
+- **Modrinth packages:** Single style (`workspace:*` only, remove catalog)
+- **Fork:** Stay on latest Modrinth release, periodic merges
+- **Reference preferred** over local copy modification
 
 ---
 
 ## Product Boundaries
-- **Core:** Independent backend, runs standalone or launched by desktop app
-  - Windows + Linux support
+- **Core:** Independent backend, standalone or launched by app
+  - Windows + Linux
   - Port-forwarded when app launches local core
-  - Can run on NAS, cloud, or local machine
-- **Web:** Dashboard + marketing + docs (lower priority than desktop app)
-- **CLI:** Late-stage feature, Linux-focused installer/runner/updater
+  - NAS, cloud, or local machine
+- **Web:** Dashboard + marketing + docs (lower priority)
+- **CLI:** Late-stage, Linux-only installer/runner/updater
 
 ---
 
-## Sync Patterns (from Cross-Industry Research)
+## Companion Mod Approach
 
-### Client-to-Client Mod Sync
-- **Binary files (.jar):** Use Syncthing's version vector pattern — track `{DeviceID, Counter}` per file
-- **Config files (JSON/TOML):** Use Automerge/Yjs CRDT pattern — automatic merge, no lost changes
-- **Manifest format:** TOML with `side: both/client/server` metadata (Packwiz pattern)
-- **Resolution:** Hash-based (SHA1) via Modrinth API
+**Likely just use/port Essential Mod:**
+- Essential mod has similar features (social, config sync)
+- Automatically hosted when joining/creating world
+- Port UI, swap backend to use Amberite Core
+- OR just use Essential directly — undecided
 
-### Core-to-Client Config Injection
-- **Transport:** Nacos-style long-polling (blocking queries) for reliable push
-- **Hot reload:** Companion Mod watches local files (Java NIO WatchService)
-- **Validation:** MD5 checksum before applying
-- **Rollout:** Apollo grayscale pattern — test on subset of players first
+**Reference:** Essential Mod (https://github.com/SparkUniverse/Essential-Mod)
 
 ---
 
-## Coordination Patterns
+## Century (Log/Crash AI)
 
-### Server Instance Management
-- **State machine:** `Starting → Running → Stopping → Offline → Crashed`
-- **Graceful stop:** Send `stop` command, wait 30s, then SIGKILL
-- **Crash detection:** Consul-style health check + heartbeat timeout
+**Possible references:**
+- Sentry Seer AI — LLM for root cause analysis
+- Graylog pipelines — rule-based parsing
+- mcla — Minecraft-specific crash patterns
+- Drain3 — template extraction
 
-### P2P Failover
-- **Leader election:** Redis Redlock pattern — quorum-based lock acquisition
-- **Lock-delay:** 15s delay after failover (Consul pattern) — prevents split-brain
-- **Session-based:** Lock tied to health check/TTL, auto-releases on failure
+**Decision pending:** Pattern DB + LLM vs pure ML vs hybrid
 
 ---
 
-## Social System (Friend Groups)
+## Friend Groups
 
-### Database Schema (from Mattermost + Keycloak)
-```sql
--- Friend groups (teams/realms pattern)
-friend_groups (id, owner_id, core_id, name)
+**Possible references:**
+- Mattermost (Teams + Channels) — shows Go backend pattern
+- Spacebar (Discord clone) — shows relationships/permissions schema
+- Keycloak (Realms) — shows tenant isolation
 
--- Members with roles
-group_members (group_id, user_id, role, permissions)
-
--- Invite codes
-group_invites (code, group_id, uses_max, expires_at)
-```
-
-### Permission Model
-- **Simple roles:** Owner, Admin, Member, Guest (GitLab pattern)
-- **Bitfield permissions optional:** 0x1=view, 0x2=start, 0x4=invite, 0x8=console
+**Simpler approach:** Owner/Admin/Member/Guest (GitLab 4-tier)
 
 ---
 
-## Century (Log/Crash AI Explainer)
+## P2P Failover
 
-### Architecture (from Sentry + Graylog)
-1. **Parsing:** Graylog pipeline — regex/grok patterns for Minecraft logs
-2. **Fingerprinting:** Sentry pattern — group similar crashes by error class + message
-3. **Analysis:** Sentry Seer AI — LLM with context aggregation for root cause
-4. **Storage:** Loki pattern — label-based indexing (server, player, mod as labels)
+**Possible references:**
+- Consul sessions — lock tied to health check
+- Redis Redlock — quorum-based election
 
-### Training Data Strategy
-- Collect crash reports from users
-- Manual clustering for known Minecraft errors
-- Build pattern database (mcla-style) for common issues
-- LLM for unknown/unusual crashes
-
----
-
-## Dashboard Architecture (from Uptime Kuma + Grafana)
-
-### Tech Stack
-- **Vue 3 + Vite** (matches Amberite)
-- **Socket.IO** for real-time (Uptime Kuma pattern)
-- **Axum WebSocket** from Core backend
-
-### Panel Components
-1. Server status (live health, player count)
-2. Log viewer (streaming with filtering)
-3. Resource monitor (CPU/memory charts)
-4. Mod grid (sync status, controls)
-5. Activity timeline (events, joins, updates)
-
----
-
-## Desktop App Patterns (from DocKit + RustDesk)
-
-### Architecture
-- **Tauri + Vue 3** — validated stack (DocKit, ServerMint, GlobalProtect)
-- **Rust backend** — same pattern as RustDesk
-- **Background service** — GlobalProtect pattern for persistent Core connection
-
-### Remote Connection
-- HTTP REST to Core (primary)
-- WebSocket for console streaming
-- System tray for background management
+**Hard problems:** World conflict (branch vs disposable), quorum size
 
 ---
 
 ## Supabase Auth
-- **Wait for Supabase MCP:** User will add MCP server, then plan auth fix
-- **Current approach:** Anon key for JWT validation (documented as risky)
-- **Future:** Service role key or proper service-to-service auth
+- Wait for Supabase MCP from user
+- Current: Anon key (risky) — fix later
 
 ---
 
 ## Memory System
-- **feature-memory skill:** Tracks session info, writes at end or on request
+- **feature-memory skill:** Tracks session, writes on request/end
 - **Files:** `.plan/active/` (current), `.plan/archive/` (history), `.plan/completed/` (done)
-- **Agent prompts:** Baked into plan/build agent system prompts
+- **Agent prompts:** Baked into plan/build system prompts
