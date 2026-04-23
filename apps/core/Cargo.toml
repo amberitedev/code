@@ -10,8 +10,7 @@ version = "0.6.0"
 edition = "2021"
 license = "APGL-3.0"
 
-[workspace]
-resolver = "2"
+
 
 [dependencies]
 # ============================================================
@@ -62,8 +61,8 @@ async-trait = "0.1"
 # ============================================================
 # TIER 2 - SERIALIZATION
 # ============================================================
-serde = { version = "=1.0.219", features = ["derive"] }
-serde_json = "=1.0.133"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 serde-aux = "4.5"
 ts-rs = "10.0"
 toml = "0.8"

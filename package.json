@@ -1,32 +1,44 @@
 {
-  "name": "@amberite/monorepo",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "config": {
-    "modrinthVersion": "v0.13.1"
-  },
-  "scripts": {
-    "web:dev": "turbo run dev --filter=@amberite/web",
-    "web:build": "turbo run build --filter=@amberite/web",
-    "app:dev": "pnpm run tauri:dev",
-    "app:build": "pnpm run tauri:build",
-    "tauri:dev": "pnpm tauri dev",
-    "tauri:build": "pnpm tauri build",
-    "frontend:dev": "turbo run dev --filter=@amberite/app-frontend",
-    "backend:dev": "cd apps/app/backend && cargo run",
-    "dev": "pnpm run app:dev",
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
-    "fix": "turbo run fix",
-    "typecheck": "turbo run typecheck",
-    "cargo:update": "cd apps/app/tauri && cargo update",
-    "update:modrinth": "node scripts/update-modrinth-deps.mjs"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "2.5.0",
-    "turbo": "^2.9.6"
-  },
-  "packageManager": "pnpm@9.15.0"
+	"name": "@amberite/monorepo",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"web:dev": "turbo run dev --filter=@amberite/web",
+		"web:build": "turbo run build --filter=@amberite/web",
+		"app:dev": "turbo run dev --filter=@amberite/app",
+		"app:build": "turbo run build --filter=@amberite/app",
+		"docs:dev": "turbo run dev --filter=@amberite/docs",
+		"pages:build": "NITRO_PRESET=cloudflare-pages pnpm --filter frontend run build",
+		"build": "turbo run build --continue",
+		"lint": "turbo run lint lint:ancillary --continue",
+		"lint:ancillary": "prettier --check .github *.*",
+		"test": "turbo run test --continue",
+		"fix": "turbo run fix fix:ancillary --continue",
+		"fix:ancillary": "prettier --write .github *.*",
+		"ci": "turbo run lint test --continue",
+		"prepr": "turbo run prepr --continue",
+		"prepr:frontend": "turbo run prepr --filter=@amberite/ui --filter=@amberite/app-frontend",
+		"prepr:frontend:lib": "turbo run prepr --filter=@amberite/ui --filter=@amberite/moderation --filter=@amberite/assets --filter=@amberite/blog --filter=@amberite/api-client --filter=@amberite/utils --filter=@amberite/tooling-config",
+		"prepr:frontend:web": "turbo run prepr --filter=@amberite/web",
+		"prepr:frontend:app": "turbo run prepr --filter=@amberite/app-frontend",
+		"storybook": "pnpm --filter @amberite/ui storybook",
+		"build-storybook": "pnpm --filter @amberite/ui build-storybook",
+		"icons:add": "pnpm --filter @amberite/assets icons:add",
+		"changelog:collect": "node scripts/run.mjs collect-changelog",
+		"scripts": "node scripts/run.mjs"
+	},
+	"devDependencies": {
+		"@clack/prompts": "^1.0.0",
+		"@types/node": "^20.1.0",
+		"@vue/compiler-dom": "^3.5.26",
+		"@vue/compiler-sfc": "^3.5.26",
+		"chalk": "^5.6.2",
+		"if-ci": "^3.0.0",
+		"keep-a-changelog": "^3.0.2",
+		"prettier": "^3.3.2",
+		"turbo": "^2.5.4",
+		"vue": "^3.5.13",
+		"yaml": "^2.8.2"
+	},
+	"packageManager": "pnpm@9.15.0"
 }
