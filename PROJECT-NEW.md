@@ -10,7 +10,7 @@
 
 Amberite is a free, open-source platform that makes playing modded Minecraft with a friend group completely seamless. The server owner never has to think about server setup. Their friends never have to think about downloading or installing mods. You pick a modpack, push a button, and everyone in the group can join with the right mods already installed. That's the entire vision.
 
-Amberite directly competes with Modrinth's upcoming hosting service, except Amberite is free and self-hosted. The desktop app is a fork of the Modrinth desktop app. The backend engine (the Core) is fully custom Rust, originally inspired by Lodestone but completely rewritten from scratch. The license is **GPL-3**, meaning the entire project must stay open source forever.
+Amberite directly competes with Modrinth's upcoming hosting service, except Amberite is free and self-hosted. The desktop app is a fork of the Modrinth desktop app. The backend engine (the Core) is fully custom Rust, originally inspired by Lodestone but completely rewritten from scratch. The license is **AGPL-3**, meaning the entire project must stay open source forever.
 
 Modrinth's API is used heavily for mod discovery and modpack installation. The app visibly credits Modrinth in the UI and links to Modrinth mod pages — this is intentional and respectful. Modrinth's revenue comes from hosting and donations, not API usage, and the Amberite user base (people who want to self-host) would largely not pay for hosted services anyway.
 
