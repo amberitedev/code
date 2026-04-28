@@ -1,105 +1,58 @@
-# Application Layer
+# application/
 
-## What This Is
-
-Orchestrates domain logic using infrastructure ports. Services, actors, and dependency injection — no HTTP or database code.
+Business logic orchestration. Services call ports and infrastructure; they never touch HTTP or SQL directly.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `mod.rs` | Module exports |
-| `registry.rs` | ServiceRegistry for DI |
-| `auth_service.rs` | Login, registration, token validation |
-| `instance_service.rs` | Manages active instance actors via DashMap |
-| `instance_actor.rs` | Isolated actor per instance |
-| `macro_engine.rs` | JavaScript macro execution |
+| `state.rs` | `AppState` — shared server state injected into all handlers |
+| `instance_service.rs` | Create instance (spawns background install task) |
+| `instance_status_service.rs` | start / stop / kill / restart / send_command |
+| `mod_service.rs` | Mod CRUD — list, add (Modrinth), upload, delete, toggle, update, update-all |
+| `log_service.rs` | Read logs + crash-reports from data dir |
+| `macro_service.rs` | spawn_macro / kill_macro / list_macros / list_macro_files |
+| `modpack_service.rs` | Install mrpack from Modrinth, get, remove |
+| `export_service.rs` | Export instance mods as `.mrpack` zip |
+| `stats_service.rs` | CPU%, RAM bytes, player count (via broadcaster) |
+| `mod.rs` | Re-exports |
 
-## Core Pattern: Actor Model
-
-Each running server has its own `InstanceActor` in a Tokio task:
+## `AppState`
 
 ```rust
-pub enum InstanceCommand {
-    Start, Stop { graceful: bool }, Kill, SendCommand(String)
-}
-
-pub enum InstanceEvent {
-    Started, Stopped { exit_code: i32 }, Error(String), ConsoleLine(String)
-}
-```
-
-**Why:** Zero lock contention. `DashMap<InstanceId, Sender<Command>>` routes requests.
-
-## File Details
-
-### `registry.rs`
-Narrow DI instead of God-object:
-```rust
-pub struct ServiceRegistry {
-    pub auth_service: Arc<AuthService>,
-    pub instance_service: Arc<InstanceService>,
-    pub macro_engine: Arc<MacroEngine>,
+pub struct AppState {
+    pub pool:           SqlitePool,
+    pub http:           reqwest::Client,
+    pub config:         CoreConfig,          // data_dir, bind_addr, jwks_url
+    pub instances:      DashMap<InstanceId, InstanceHandle>,
+    pub broadcaster:    EventBroadcaster,
+    pub macro_executor: MacroExecutor,
+    pub jwks_cache:     Arc<JwksCache>,
+    pub ws_tickets:     DashMap<String, InstanceId>,
+    pub pairing_code:   Arc<Mutex<Option<String>>>,
+    pub instance_store: Arc<dyn InstanceStore + Send + Sync>,
+    pub modpack_store:  Arc<dyn ModpackStore + Send + Sync>,
 }
 ```
 
-### `auth_service.rs`
-| Method | Purpose |
-|--------|---------|
-| `authenticate(username, password)` | Verify with Argon2, return token |
-| `register(username, password)` | Hash password, create user |
-| `validate_token(token)` | Parse and check expiration |
+## Error types per service
 
-**Token format:** `user_id:expires_at:uuid`
+| Service | Error enum |
+|---------|-----------|
+| instance_service | `InstanceError` |
+| instance_status_service | `StatusError` |
+| mod_service | `ModError` |
+| log_service | `LogError` |
+| modpack_service | `ModpackError` |
+| export_service | `ExportError` |
+| stats_service | `StatsError` |
+| macro_service | `MacroError` |
 
-### `instance_service.rs`
-| Method | Purpose |
-|--------|---------|
-| `start_instance(id)` | Spawn actor, send Start |
-| `stop_instance(id, graceful)` | Send Stop to actor |
-| `kill_instance(id)` | Send Kill (force) |
-| `send_command(id, cmd)` | Send console command |
-| `is_running(id)` | Check if active |
+All implement `thiserror::Error`. `ApiError` in `presentation/error.rs` has `From` impls for each.
 
-**Internal:** `DashMap<InstanceId, mpsc::Sender<InstanceCommand>>`
+## Rules
 
-### `instance_actor.rs`
-One actor per server. Runs in Tokio task:
-```rust
-pub async fn run(mut self) {
-    loop {
-        // Handle Start, Stop, Kill, SendCommand
-    }
-}
-```
-
-**State:** `Option<Box<dyn ProcessHandle>>` — the OS process.
-
-**Lifecycle:**
-1. Service creates actor, spawns task
-2. Actor receives Start, calls `OSProcessManager::spawn()`
-3. Process stored, `Started` event broadcast
-4. Stop/Kill drops process, `Stopped` broadcast
-
-### `macro_engine.rs`
-```rust
-pub async fn execute(&self, code: &str) -> Result<(), MacroEngineError>
-```
-Executes JavaScript via Deno (infrastructure provides runtime).
-
-## Error Types
-
-| Error | Location | Variants |
-|-------|----------|----------|
-| `AuthError` | `auth_service.rs` | InvalidCredentials, UserNotFound, TokenGeneration, PasswordHashing |
-| `InstanceServiceError` | `instance_service.rs` | NotFound, AlreadyRunning, NotRunning |
-| `MacroEngineError` | `macro_engine.rs` | Execution |
-
-## Testing
-
-Services depend on ports — use mocks:
-```rust
-let mock_os = Arc::new(MockProcessSpawner::new());
-let service = InstanceService::new(repo, mock_os);
-service.start_instance(id).await.unwrap();
-```
+- Services receive `&Arc<AppState>` — never own state.
+- Background tasks (instance creation, installs) are spawned with `tokio::spawn`.
+- No HTTP handler types (`axum::*`) in this layer.
+- Macro paths resolve to `data_dir/instances/<id>/macros/<name>.ts` or `.js`.

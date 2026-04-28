@@ -27,7 +27,14 @@
       "Remove-Item *": "ask"
     },
     "edit": "allow",
-    "read": "allow"
+    "read": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "codesearch": "allow",
+    "skill": "allow",
+    "external_directory": {
+        "*": "allow"
+    }
   },
   "command": {}
 }

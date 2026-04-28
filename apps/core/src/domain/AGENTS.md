@@ -1,89 +1,45 @@
-# Domain Layer
+# domain/
 
-## What This Is
-
-Pure business logic with typestate pattern and dependency inversion ports — zero external dependencies.
+Pure business logic. **No I/O, no async, no external crates beyond `serde` / `uuid` / `chrono`.**
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `mod.rs` | Module exports |
-| `instances.rs` | GameInstance typestate (Stopped/Running) |
-| `ports.rs` | Dependency inversion traits |
-| `auth.rs` | User, Role, UserPermission entities |
-| `flavours.rs` | Minecraft server variants (Vanilla, Paper, Fabric) |
-| `config.rs` | SettingManifest, ConfigurableValue types |
+| File | Key types |
+|------|-----------|
+| `instance.rs` | `InstanceId(Uuid)`, `InstanceRecord`, `InstanceStatus`, `MemorySettings`, `ModLoader` |
+| `modpack.rs` | `ModpackManifest`, `PackFormat`, `PackFile`, `EnvType` |
+| `event.rs` | `Event` — the broadcast payload enum |
+| `mod.rs` | Re-exports |
 
-## Core Pattern: Typestate
+## Key Types
 
-`GameInstance<State>` encodes state in the type system:
+### `InstanceStatus`
+`offline | starting | running | stopping | crashed | installing`
 
+Serialises/parses via `Display` / `FromStr` (lowercase string in DB and API).
+
+### `ModLoader`
+`vanilla | paper | fabric | quilt | forge | neoforge`
+
+### `MemorySettings`
+`{ min_mb: u32, max_mb: u32 }` — JVM heap flags.
+
+### `Event`
 ```rust
-impl GameInstance<Stopped> {
-    pub async fn start(self, manager: &dyn OSProcessManager) 
-        -> Result<GameInstance<Running>, DomainError>
-}
-
-impl GameInstance<Running> {
-    pub async fn stop(self, graceful: bool) 
-        -> Result<GameInstance<Stopped>, DomainError>
-    pub fn send_command(&self, cmd: &str) -> Result<(), DomainError>
+enum Event {
+    InstanceOutput  { instance_id, line },
+    StatusChanged   { instance_id, status },
+    MacroOutput     { pid, line },
+    CreationProgress{ instance_id, stage, pct },
 }
 ```
+Broadcast via `tokio::sync::broadcast` from `infrastructure::events::EventBroadcaster`.
 
-**Why:** Compiler rejects `stop()` on stopped or `start()` on running.
+### `PackFormat` (mrpack index)
+Top-level JSON of a `.mrpack` file — `game`, `name`, `version_id`, `summary`, `files`, `dependencies`.
 
-## File Details
+## Rules
 
-### `instances.rs`
-| Type | Purpose |
-|------|---------|
-| `InstanceId` | Newtype for `Uuid` |
-| `Stopped` / `Running` | State markers |
-| `ProcessHandle` | OS process trait |
-| `GameInstance<State>` | Typestate entity |
-| `DomainError` | Error enum |
-
-### `ports.rs`
-Traits for dependency inversion. Application uses these; infrastructure implements:
-
-| Trait | Methods |
-|-------|---------|
-| `InstanceRepository` | get, save, list, delete |
-| `UserRepository` | get, get_by_username, create, update, list |
-| `OSProcessManager` | spawn, kill |
-| `ScriptRuntime` | execute |
-| `ConfigManager` | read_properties, write_properties |
-
-### `auth.rs`
-| Type | Purpose |
-|------|---------|
-| `UserId` | Newtype for `Uuid` |
-| `User` | Entity with hashed password |
-| `Role` | Admin or Standard(UserPermission) |
-| `UserPermission` | Per-instance access (HashSet<InstanceId>) |
-
-### `flavours.rs`
-`Flavour` trait for server variants:
-- `Vanilla` — Mojang Piston API
-- `Paper` — PaperMC API v2
-- `Fabric` — Fabric Meta API
-
-### `config.rs`
-| Type | Purpose |
-|------|---------|
-| `ConfigurableValue` | Enum: String, Boolean, Integer, Enum, Number |
-| `SettingManifest` | UI metadata: id, name, description, value, default |
-
-## Error Handling
-
-`DomainError` variants: NotFound, AlreadyRunning, NotRunning, SpawnFailed, Database.
-
-Conversions: `From<ProcessSpawnerError>`, `From<DenoRuntimeError>`.
-
-## Testing
-
-Pure unit tests (no external deps). Use mock ports:
-- `MockProcessSpawner` — fake ProcessHandle
-- `MockDenoRuntime` — no-op script execution
+- No `async` anywhere in this layer.
+- No `sqlx`, `axum`, `reqwest`, or any network/IO crate.
+- `InstanceId` is a newtype over `uuid::Uuid` — always serialise as lowercase hyphenated string.

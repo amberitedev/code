@@ -1,20 +1,16 @@
+# Isolated from root workspace due to deno/theseus dependency conflicts.
+[workspace]
+
 [package]
-name = "lodestone-core"
-description = "The backend for Lodestone Core V2"
-exclude = ["target/*", "InstanceTest/*"]
-rust-version = "1.88.0"
-authors = ["Lodestone Team"]
-homepage = "https://github.com/Lodestone-Team"
-readme = "README.md"
-version = "0.6.0"
+name = "amberite-core"
+description = "Amberite Core — Minecraft server management backend"
+version = "0.1.0"
 edition = "2021"
-license = "APGL-3.0"
-
-
+rust-version = "1.85.0"
 
 [dependencies]
 # ============================================================
-# TIER 1 - DENO STACK (Latest Compatible - HARD-LOCKED)
+# TIER 1 - DENO STACK (HARD-LOCKED)
 # ============================================================
 deno_core = "=0.354.0"
 deno_ops = "=0.226.0"
@@ -29,30 +25,27 @@ node_resolver = "=0.50.0"
 sys_traits = "=0.1.17"
 
 # ============================================================
-# TIER 2 - DATABASE (SQLx)
+# TIER 2 - DATABASE
 # ============================================================
 sqlx = { version = "=0.9.0-alpha.1", features = ["runtime-tokio", "tls-rustls", "sqlite", "json", "uuid", "chrono"] }
 
 # ============================================================
-# TIER 2 - WEB FRAMEWORK (Axum + V2 Upgrades)
+# TIER 2 - WEB FRAMEWORK
 # ============================================================
 axum = { version = "0.7.9", features = ["macros", "ws", "multipart"] }
-axum-auth = "0.7.0"
 axum-server = { version = "0.7.3", features = ["tls-rustls"] }
+# Use ring crypto backend to avoid aws-lc-sys CMake build issues on Windows
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 axum-macros = "0.4.2"
 tower-http = { version = "0.5.2", features = ["fs", "trace", "cors"] }
 tower = "0.4"
 headers = "0.4.0"
 
-# V2 ADDITION: API Documentation (Swagger UI)
-utoipa = { version = "4.2", features = ["axum_extras", "uuid"] }
-utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
-
 # ============================================================
 # TIER 1 - ASYNC RUNTIME
 # ============================================================
 tokio = { version = "1.47", features = ["full"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = "0.7"
 futures = "0.3"
 futures-util = "0.3"
@@ -61,8 +54,8 @@ async-trait = "0.1"
 # ============================================================
 # TIER 2 - SERIALIZATION
 # ============================================================
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde = { version = "=1.0.219", features = ["derive"] }
+serde_json = "=1.0.133"
 serde-aux = "4.5"
 ts-rs = "10.0"
 toml = "0.8"
@@ -97,22 +90,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-error = "0.2"
 color-eyre = "0.6"
 
-# V2 ADDITION: Enhanced Error Diagnostics
-miette = { version = "7.0", features = ["fancy"] }
-
 # ============================================================
 # TIER 1 - CRYPTO & SECURITY
 # ============================================================
-argon2 = "0.5"
 base64 = "0.22"
 rand = "0.8"
-rand_core = "0.6"
 hex = "0.4"
 
-# V2 UPGRADE: PASETO v4 (Replaces jsonwebtoken for auth tokens)
-pasetors = "0.6"
-# Keep jsonwebtoken for compatibility if needed (can be removed later)
-# jsonwebtoken = "9.3"
+# JWT validation (Supabase RS256)
+jsonwebtoken = "9.3"
 
 # ============================================================
 # TIER 2 - DATA & PARSING
@@ -127,25 +113,22 @@ url = "2.5"
 fancy-regex = "0.14"
 lazy_static = "1.5"
 ringbuffer = "0.15"
-rs-snowflake = "0.6"
 rcon = "0.6"
 
 # ============================================================
-# TIER 1 - CONTAINERS & HTTP
+# TIER 1 - HTTP
 # ============================================================
-bollard = "=0.14.0"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
 igd = "0.12"
 
 # ============================================================
 # TIER 2/3 - OTHER
 # ============================================================
-enum_dispatch = "0.3"
-enum-kinds = "0.5"
 thiserror = "1.0"
+derive_more = "0.99"
 
 # ============================================================
-# PTY CONSOLE SUPPORT (for colored output)
+# PTY CONSOLE SUPPORT
 # ============================================================
 portable-pty = "0.8"
 
@@ -155,25 +138,12 @@ portable-pty = "0.8"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 
 # ============================================================
-# THESEUS INTEGRATION - Modpack handling
+# MODPACK HANDLING
 # ============================================================
 async_zip = { version = "0.0.17", features = ["tokio", "tokio-fs", "deflate"] }
 sha1 = "0.10"
+sha2 = "0.10"
 bytes = "1.9"
-
-# ============================================================
-# V2 ADDITIONS: Type Safety & Validation
-# ============================================================
-derive_more = "0.99"
-garde = { version = "0.18", features = ["derive"] }
-bon = "2.0"
-
-# ============================================================
-# GIT DEPENDENCIES (Playit.gg Tunneling)
-# ============================================================
-safe-path = { version = "0.1.0", git = "https://github.com/Lodestone-Team/safe_path_subset" }
-playit-agent-common = { git = "https://github.com/playit-cloud/playit-agent/", branch = "v0.9" }
-playit-agent-core = { package = "playit-agent-core", git = "https://github.com/playit-cloud/playit-agent/", branch = "v0.9" }
 
 # ============================================================
 # FEATURES
@@ -185,3 +155,6 @@ vendored-openssl = ["dep:openssl"]
 version = "0.10"
 features = ["vendored"]
 optional = true
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["full"] }

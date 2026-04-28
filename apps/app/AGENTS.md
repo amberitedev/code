@@ -10,16 +10,17 @@ apps/app/
 │   ├── src/              # Application source
 │   ├── vite.config.ts    # Build config with aliases
 │   └── package.json      # Dependencies, scripts
-├── backend/               # Amberite's Rust library (separate from Theseus)
+├── backend/              # Amberite's Rust library (separate from Theseus)
 │   ├── src/              # lib.rs, error.rs
 │   └── Cargo.toml        # Dependencies: tauri, serde, tokio, tracing
-├── tauri/                 # Tauri shell forked from Modrinth
+├── tauri/                # Tauri shell forked from Modrinth
 │   ├── src/              # main.rs, api/, macos/
-│   ├── capabilities/     # Tauri security capabilities
-│   ├── icons/            # App icons
-│   ├── tauri.conf.json   # Tauri config
-│   └── Cargo.toml        # Dependencies: theseus, amberite-backend, tauri plugins
-└── package.json           # Workspace scripts
+│   ├── Cargo.toml        # Dependencies: theseus, amberite-backend, tauri plugins
+│   └── build.rs          # Tauri build script
+├── tauri.conf.json       # Tauri config (root level, for CLI)
+├── capabilities/         # Tauri security capabilities
+├── icons/                # App icons
+└── package.json          # Workspace scripts
 ```
 
 Each subdirectory has its own AGENTS.md with specifics.

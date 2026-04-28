@@ -1,20 +1,60 @@
 # Architectural Decisions
 
-**Last updated:** 2026-04-19
+**Last updated:** 2026-04-26
 
 ---
 
 ## Testing Approach
 - **Core:** Use `axum-test` crate for endpoint testing (compiles + tests all 9 endpoints)
 - **Frontend:** Tauri invoke test script (separate file, runs outside CI, reports problems for agent review)
-- **CI:** Not implementing now — user will learn GitHub Actions when ready
+- **CI:** GitHub Actions for theseus sync; full CI/CD deferred
 
 ---
 
 ## Dependency Strategy
 - **Modrinth packages:** User prefers single style (remove catalog, use `workspace:*` only)
-- **Fork strategy:** Stay on latest Modrinth release, periodic merges from modrinth/code
+- **Fork strategy:** Vendor `packages/app-lib/` directly into repo; leave `daedalus` and `path-util` as git deps from modrinth/code
+- **Cargo `[patch]`:** Add `[patch."https://github.com/modrinth/code"] theseus = { path = "packages/app-lib" }` to root Cargo.toml — transparent to contributors (zero extra steps)
 - **Controlled reference preferred** over local copy modification
+- **All AMBERITE PATCH lines** marked with `// AMBERITE PATCH` comments for easy reapplication after upstream sync
+
+---
+
+## Vendor Scope (Milestone 1)
+- **Vendor `packages/app-lib/` only** — this is where the namespace patch lives
+- **Leave `daedalus` and `path-util` as git deps** from `modrinth/code` at `v0.13.4` — no Amberite changes needed in those crates
+- **Source:** Copy from `modrinth/code` tag `v0.13.4`
+
+---
+
+## Theseus Namespace Patch (Milestone 1)
+- **Keychain namespace:** Change `"com.modrinth.theseus"` → `"com.amberite.app"` in `packages/app-lib/src/state/legacy_converter.rs` `default_settings_dir()`
+- **User-Agent header:** Change `"modrinth/theseus/"` → `"amberite/app/"` in `packages/app-lib/src/lib.rs` `launcher_user_agent()`
+- **Credential import from Modrinth App:** **Skip for now** — requires cross-app SQLite read from `%APPDATA%\ModrinthApp\app.db`, blocked by macOS sandboxing and file locking concerns. Users sign into Microsoft fresh in Amberite. Future task.
+- **App identifier:** Already `"Amberite"` (separate from Modrinth's `"ModrinthApp"`) — no change needed. Data dirs already separate.
+
+---
+
+## Backend Wiring (Milestone 1)
+
+### Plugin Architecture
+- **Namespace:** `plugin:amberite|` — frontend calls `invoke('plugin:amberite|hello')`
+- **Error type:** Separate `AmberiteCommandError` in `api/amberite.rs` — does NOT touch `TheseusSerializableError` in `api/mod.rs`. This avoids merge conflicts.
+  ```rust
+  #[derive(Error, Debug, Serialize, Clone)]
+  pub enum AmberiteCommandError {
+      #[error("{0}")]
+      Amberite(String),
+  }
+  ```
+- **Command:** `hello()` returns `Result<String, AmberiteCommandError>`, calls `amberite_backend::get_placeholder()?.message`
+- **Registration:** Add `pub mod amberite;` to `api/mod.rs` + `.plugin(api::amberite::init())` to `main.rs`
+- **Test message:** Change `get_placeholder()` return from `"Amberite backend initialized"` to `"hello from Amberite"`. Update test assertion to match.
+
+### Dependency Cleanup
+- **`apps/app/backend/Cargo.toml`:** Convert all deps to `workspace = true` (tauri, serde, serde_json, thiserror, tokio, tracing)
+- **`apps/app/tauri/Cargo.toml`:** Add `amberite-backend = { workspace = true }`
+- **Root `Cargo.toml`:** Add `amberite-backend = { path = "apps/app/backend" }` to `[workspace.dependencies]`
 
 ---
 
@@ -124,6 +164,110 @@ group_invites (code, group_id, uses_max, expires_at)
 
 ---
 
+## Dev Endpoint Switching (Milestone 1)
+- **Dev mode uses Modrinth staging:** `staging-api.modrinth.com` for all API URLs
+- **Files to update:** `apps/app/.env` and `apps/app/.cargo/config.toml`
+- **CSP in tauri.conf.json:** No change needed — `https://*.modrinth.com` wildcard covers staging subdomain
+- **Production:** Revert to `api.modrinth.com` URLs (or use a separate `.env.production` in the future)
+
+---
+
+## Directory Restructure (Milestone 1)
+
+### Target Structure
+```
+apps/app/
+├── frontend/           # Vue 3 UI (was apps/app-frontend/)
+│   ├── src/
+│   ├── vite.config.ts
+│   ├── package.json
+│   └── .env            # Already has staging URLs + VITE_AMBERITE_API_URL
+├── backend/            # Already in place
+│   ├── src/lib.rs, error.rs
+│   └── Cargo.toml
+├── tauri/              # Tauri shell (was at apps/app/ root level)
+│   ├── src/            # main.rs, api/, macos/
+│   ├── capabilities/
+│   ├── icons/
+│   ├── nsis/
+│   ├── Cargo.toml
+│   ├── Cargo.lock
+│   ├── build.rs
+│   ├── tauri.conf.json
+│   ├── tauri-release.conf.json
+│   ├── tauri.linux.conf.json
+│   ├── tauri.macos.conf.json
+│   ├── App.entitlements
+│   ├── Info.plist
+│   ├── COPYING.md
+│   └── LICENSE
+├── .cargo/             # Build config (stays — Cargo walks up to find it)
+├── .env                # Staging URLs
+├── package.json        # @amberite/app workspace scripts
+└── AGENTS.md
+```
+
+### Files that stay at `apps/app/` level
+`.cargo/`, `.env`, `package.json`, `AGENTS.md`, `.gitignore`, `.prettierignore`, `gen/` (build artifact)
+
+---
+
+## Version Synchronization (Milestone 1)
+- **Single source of truth:** `/MODRINTH_VERSION` at repo root
+- **Sync targets:**
+  - `apps/app/MODRINTH_VERSION.ts` (currently stale at `v0.13.3`)
+  - `pnpm-workspace.yaml` catalog entries (currently stale at `v0.13.1`)
+- **GitHub Actions workflow:** `.github/workflows/sync-theseus.yml`
+  - Runs on schedule (weekly) + manual trigger
+  - Checks modrinth/code for new tags
+  - Opens PR with updated vendored copy + re-applied `// AMBERITE PATCH` lines
+  - Uses `// AMBERITE PATCH` markers to detect and warn about conflicts
+
+---
+
+## Desktop Backend Architecture (2026-04-27)
+
+Full detail in `.plan/desktop-backend/decisions.md`. Summary:
+
+### Auth
+- **Microsoft → Supabase via Edge Function:** Theseus Xbox token → `microsoft-auth`
+  Edge Function → Supabase JWT stored in OS keychain. One login, no password.
+- **Web OAuth (Google/Discord/GitHub):** Web dashboard only, not in desktop app.
+
+### Core Connection
+- **Local + Remote supported.** Most users will run Core on localhost.
+- **Pairing via one-time code** printed by Core on first startup. Localhost auto-pairs
+  silently. Remote requires user to paste URL + code.
+- **Owner status is permanent** and stored in Supabase.
+
+### Library Page
+- **Merged client + server library** with filter chips (`All`, `Client`, `Server`).
+  Unified view reinforces Amberite's core proposition (same mods, everywhere).
+- Modrinth community servers stay as a separate tab.
+
+### Tunneling (V2)
+- **Playit.gg** for raw TCP tunneling (Minecraft). **Cloudflare DNS API** to provision
+  `{servername}.amberite.dev` CNAME → Playit.gg address.
+- Cloudflare Tunnels rejected: HTTP-only on free tier. Minecraft needs raw TCP.
+- **V1 ships without tunnel.** Manual port forwarding in V1.
+
+### Mod Sync
+- **Hybrid:** Supabase Realtime events per change + full `.mrpack` snapshot every ~10 changes.
+- Owner clicks "Push to Core" → export `.mrpack` → POST to Core → Core notifies Supabase.
+- Friends receive Realtime event, see "Update available" badge, download pack from Core.
+
+### Core Data Directory
+- Core data (`{AppData}/amberite-core/`) is **separate from app data**.
+  Uninstalling the app NEVER deletes server worlds or configs.
+
+### Onboarding
+- **Linear:** Welcome → Microsoft login → Core setup (local/remote/skip) → Main app.
+
+### Multiaccounts
+- **V1:** Single account. **V2:** Multi-account switcher.
+
+---
+
 ## Supabase Auth
 - **Wait for Supabase MCP:** User will add MCP server, then plan auth fix
 - **Current approach:** Anon key for JWT validation (documented as risky)
@@ -135,3 +279,54 @@ group_invites (code, group_id, uses_max, expires_at)
 - **feature-memory skill:** Tracks session info, writes at end or on request
 - **Files:** `.plan/active/` (current), `.plan/archive/` (history), `.plan/completed/` (done)
 - **Agent prompts:** Baked into plan/build agent system prompts
+
+---
+
+## Core Rewrite (2026-04-26)
+
+### Migration Strategy
+- **Delete `apps/core/src/` entirely** — start clean with heroic file structure
+- **DB migration:** Add `002_full_rewrite.sql` (drop + recreate all tables)
+- **Keep `001_init.sql`** as historical record only
+
+### Auth Model
+- **Supabase JWKS (RS256)** — Core fetches public key from `.well-known/jwks.json`
+- **No secrets in Core config** — fully open-source safe
+- **First-run pairing:** 6-digit code printed to terminal → `POST /setup` with Supabase JWT
+- **WebSocket auth:** Short-lived ticket (`POST /ws-token` → 60s UUID, in-memory, single-use)
+
+### Typestate Removal
+- **Remove `GameInstance<Stopped/Running>`** — conflicts with `DashMap`
+- **Replace with `InstanceStatus` enum:** `Offline|Starting|Running|Stopping|Crashed`
+- **Single `AppState`:** replaces `ServiceRegistry` + `TheseusState`
+
+### Theseus Dissolution
+- **Delete entire `src/theseus/` directory**
+- **Salvage:** `PackFormat` types → `domain/modpack.rs`; `install_mrpack` → `infrastructure/minecraft/mrpack.rs`
+- **Delete:** `Profile`, `ProfileInstallStage`, `DirectoryInfo` (client concepts); `State` + `OnceCell` (replaced by AppState)
+
+### Instance Lifecycle
+- **Creation:** Async (202 + SSE progress events)
+- **Start:** Spawn PtyProcess → wait for "Done" → status=running
+- **Stop:** `stop\n` → 30s timeout → SIGKILL
+- **Auto-restart:** Restore `Running` instances on Core startup
+
+### Macros (Lodestone Pattern)
+- **In scope for rewrite**
+- **`#[op2]` + `deno_core::extension!()`** — not old `#[op]` + `Extension::builder()`
+- **`Arc<AppState>` in op state** — not global singleton
+- **Std::thread::spawn + LocalSet** — JsRuntime is `!Send`
+- **Inject globals:** `__macro_pid`, `__instance_uuid`
+
+### Java Handling
+- **Version registry:** `java_installations` table (version → path)
+- **Detect on startup:** Scan PATH + common install dirs
+- **Auto-install:** TODO (data model ready, logic deferred)
+
+### Cargo.toml
+- **Remove:** `pasetors`, `bollard`, `utoipa`, playit.gg git deps
+- **Add:** `jsonwebtoken`, `base64`
+- **Keep pinned:** all `deno_*` at 0.354/0.220/0.226/0.42
+
+### CORS
+- **Restricted:** `amberite.dev` + `localhost` only

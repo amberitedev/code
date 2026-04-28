@@ -1,13 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-  "apps/app",
+  "apps/app/tauri",
+  "apps/app/backend",
   # "apps/core",  # Excluded due to dependency conflicts with theseus
 ]
 
 [workspace.package]
 edition = "2024"
 rust-version = "1.90.0"
+version = "0.1.0"
 repository = "https://github.com/amberite/code"
 
 [workspace.dependencies]
@@ -52,6 +54,9 @@ tauri-plugin-window-state = "2.4.0"
 # Platform-specific
 webview2-com = "0.38.0"
 windows-core = "0.61.2"
+
+# Amberite backend
+amberite-backend = { path = "apps/app/backend" }
 
 [workspace.lints.clippy]
 bool_to_int_with_if = "warn"

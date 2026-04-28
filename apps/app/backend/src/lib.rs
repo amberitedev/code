@@ -30,7 +30,7 @@ pub struct Placeholder {
 /// Placeholder function - returns a simple message
 pub fn get_placeholder() -> Result<Placeholder> {
     Ok(Placeholder {
-        message: "Amberite backend initialized".to_string(),
+        message: "hello from Amberite".to_string(),
     })
 }
 
@@ -42,6 +42,6 @@ mod tests {
     fn test_placeholder() {
         let result = get_placeholder();
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().message, "Amberite backend initialized");
+        assert_eq!(result.unwrap().message, "hello from Amberite");
     }
 }

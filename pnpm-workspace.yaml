@@ -1,6 +1,6 @@
 packages:
   - 'apps/*'
-  - 'apps/*/frontend'
+  - 'apps/app/frontend'
   - 'apps/*/tauri'
   - 'apps/*/packages/*'
   - 'packages/*'

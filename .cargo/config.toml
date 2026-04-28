@@ -1,0 +1,8 @@
+[env]
+SQLX_OFFLINE = "true"
+MODRINTH_URL = "https://modrinth.com/"
+MODRINTH_API_BASE_URL = "https://api.modrinth.com/"
+MODRINTH_API_URL = "https://api.modrinth.com/v2/"
+MODRINTH_API_URL_V3 = "https://api.modrinth.com/v3/"
+MODRINTH_SOCKET_URL = "wss://api.modrinth.com/"
+MODRINTH_LAUNCHER_META_URL = "https://launcher-meta.modrinth.com/"

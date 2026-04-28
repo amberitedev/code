@@ -1,82 +1,118 @@
-//! Error handling - Maps domain errors to HTTP responses.
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde_json::json;
 
-use axum::response::IntoResponse;
-use axum::Json;
-use serde::Serialize;
-use thiserror::Error;
+use crate::application::{
+    export_service::ExportError,
+    instance_service::InstanceError,
+    log_service::LogError,
+    macro_service::MacroError,
+    mod_service::ModError,
+    modpack_service::ModpackError,
+    stats_service::StatsError,
+};
 
-/// API error type.
-#[derive(Error, Debug)]
+/// Unified API error type that maps to HTTP responses.
+#[derive(Debug)]
 pub enum ApiError {
-    #[error("Not found: {0}")]
-    NotFound(String),
-    #[error("Bad request: {0}")]
-    BadRequest(String),
-    #[error("Unauthorized: {0}")]
     Unauthorized(String),
-    #[error("Forbidden: {0}")]
-    Forbidden(String),
-    #[error("Internal error")]
+    NotFound(String),
+    BadRequest(String),
+    Conflict(String),
     Internal(String),
-    #[error("Validation failed")]
-    Validation { fields: Json<ValidationError> },
+    UnprocessableEntity(String),
 }
 
-/// Validation error details.
-#[derive(Serialize, Debug, Clone)]
-pub struct ValidationError {
-    pub errors: Vec<ValidationErrorDetail>,
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, msg) = match self {
+            Self::Unauthorized(m) => (StatusCode::UNAUTHORIZED, m),
+            Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
+            Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
+            Self::Conflict(m) => (StatusCode::CONFLICT, m),
+            Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
+            Self::UnprocessableEntity(m) => (StatusCode::UNPROCESSABLE_ENTITY, m),
+        };
+        (status, Json(json!({ "error": msg }))).into_response()
+    }
 }
 
-#[derive(Serialize, Debug, Clone)]
-pub struct ValidationErrorDetail {
-    pub field: String,
-    pub message: String,
-}
-
-impl ApiError {
-    pub fn not_found(msg: &str) -> Self {
-        ApiError::NotFound(msg.to_string())
-    }
-
-    pub fn bad_request(msg: &str) -> Self {
-        ApiError::BadRequest(msg.to_string())
-    }
-
-    pub fn unauthorized(msg: &str) -> Self {
-        ApiError::Unauthorized(msg.to_string())
-    }
-
-    pub fn forbidden(msg: &str) -> Self {
-        ApiError::Forbidden(msg.to_string())
-    }
-
-    pub fn internal(msg: &str) -> Self {
-        ApiError::Internal(msg.to_string())
-    }
-
-    pub fn validation(errors: Vec<ValidationErrorDetail>) -> Self {
-        ApiError::Validation {
-            fields: Json(ValidationError { errors }),
+impl From<InstanceError> for ApiError {
+    fn from(e: InstanceError) -> Self {
+        match e {
+            InstanceError::NotFound(id) => Self::NotFound(format!("instance {id} not found")),
+            InstanceError::AlreadyRunning => Self::Conflict("instance already running".into()),
+            InstanceError::NotRunning => Self::Conflict("instance not running".into()),
+            e => Self::Internal(e.to_string()),
         }
     }
 }
 
-impl IntoResponse for ApiError {
-    fn into_response(self) -> axum::response::Response {
-        let (status, body) = match &self {
-            ApiError::NotFound(msg) => (axum::http::StatusCode::NOT_FOUND, msg),
-            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, msg),
-            ApiError::Unauthorized(msg) => (axum::http::StatusCode::UNAUTHORIZED, msg),
-            ApiError::Forbidden(msg) => (axum::http::StatusCode::FORBIDDEN, msg),
-            ApiError::Internal(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg),
-            ApiError::Validation { fields } => {
-                return (axum::http::StatusCode::UNPROCESSABLE_ENTITY, fields.clone())
-                    .into_response()
-            }
-        };
-
-        let body = Json(serde_json::json!({ "error": body.to_string() }));
-        (status, body).into_response()
+impl From<ModpackError> for ApiError {
+    fn from(e: ModpackError) -> Self {
+        match e {
+            ModpackError::InstanceNotFound => Self::NotFound("instance not found".into()),
+            e => Self::Internal(e.to_string()),
+        }
     }
 }
+
+impl From<MacroError> for ApiError {
+    fn from(e: MacroError) -> Self {
+        match e {
+            MacroError::InstanceNotFound(id) => Self::NotFound(format!("instance {id} not found")),
+            MacroError::FileNotFound(name) => Self::NotFound(format!("macro '{name}' not found")),
+            MacroError::MacroNotFound(pid) => Self::NotFound(format!("macro pid {pid} not found")),
+        }
+    }
+}
+
+impl From<ModError> for ApiError {
+    fn from(e: ModError) -> Self {
+        match e {
+            ModError::InstanceNotFound => Self::NotFound("instance not found".into()),
+            ModError::ModNotFound => Self::NotFound("mod not found".into()),
+            ModError::ClientOnly => Self::UnprocessableEntity("this mod is client-only".into()),
+            ModError::NoModrinthId => Self::BadRequest("mod has no modrinth project id".into()),
+            e => Self::Internal(e.to_string()),
+        }
+    }
+}
+
+impl From<LogError> for ApiError {
+    fn from(e: LogError) -> Self {
+        match e {
+            LogError::NotFound => Self::NotFound("not found".into()),
+            LogError::InvalidPath => Self::BadRequest("invalid filename".into()),
+            e => Self::Internal(e.to_string()),
+        }
+    }
+}
+
+impl From<StatsError> for ApiError {
+    fn from(e: StatsError) -> Self {
+        match e {
+            StatsError::NotFound => Self::NotFound("instance not found".into()),
+            e => Self::Internal(e.to_string()),
+        }
+    }
+}
+
+impl From<ExportError> for ApiError {
+    fn from(e: ExportError) -> Self {
+        match e {
+            ExportError::InstanceNotFound => Self::NotFound("instance not found".into()),
+            e => Self::Internal(e.to_string()),
+        }
+    }
+}
+
+impl From<sqlx::Error> for ApiError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Internal(e.to_string())
+    }
+}
+

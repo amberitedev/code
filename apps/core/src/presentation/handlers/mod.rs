@@ -1,7 +1,11 @@
-//! API handlers.
-
-pub mod auth_api;
-pub mod instance_api;
-pub mod diagnostics_api;
-pub mod websockets;
-pub mod modpack_api;
+pub mod console;
+pub mod diagnostics;
+pub mod instance_control;
+pub mod instances;
+pub mod logs;
+pub mod macros;
+pub mod modpack;
+pub mod mods;
+pub mod properties;
+pub mod setup;
+pub mod stats;
