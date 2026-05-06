@@ -243,6 +243,7 @@ const StorybookProvider = defineComponent({
 })
 
 const preview: Preview = {
+	tags: ['autodocs'],
 	parameters: {
 		controls: {
 			matchers: {

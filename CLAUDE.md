@@ -58,7 +58,7 @@ The website and app `prepr` commands
 
 - **Website:** `pnpm web:dev` (copy `.env` template in `apps/frontend/` first)
 - **App:** `pnpm app:dev` (copy `.env` template in `packages/app-lib/` first)
-- **Storybook (packages/ui):** `pnpm storybook`
+- **Storybook (packages/ui):** `pnpm story`
 
 ## Project-Specific Instructions
 

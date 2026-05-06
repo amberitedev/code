@@ -1,3 +1,4 @@
+import { DesignInspectorPlugin } from '../../../packages/design-inspector/index.ts'
 import 'floating-vue/dist/style.css'
 import 'overlayscrollbars/overlayscrollbars.css'
 
@@ -54,4 +55,5 @@ app.use(i18nPlugin)
 app.use(i18nDebugPlugin)
 app.directive('overlay-scrollbars', overlayScrollbarsDirective)
 
+app.use(DesignInspectorPlugin)
 app.mount('#app')
