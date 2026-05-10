@@ -91,119 +91,74 @@
 				</template>
 				<template #actions>
 					<div class="flex gap-2">
-						<ButtonStyled
-							v-if="
-								[
-									'installing',
-									'pack_installing',
-									'pack_installed',
-									'not_installed',
-									'minecraft_installing',
-								].includes(instance.install_stage)
-							"
-							color="brand"
-							size="large"
-						>
-							<button disabled>Installing...</button>
-						</ButtonStyled>
-						<ButtonStyled
-							v-else-if="instance.install_stage !== 'installed'"
-							color="brand"
-							size="large"
-						>
-							<button @click="repairInstance()">
-								<DownloadIcon />
-								Repair
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-else-if="playing === true" color="red" size="large">
-							<button :disabled="stopping" @click="stopInstance('InstancePage')">
-								<StopCircleIcon />
-								{{ stopping ? 'Stopping...' : 'Stop' }}
-							</button>
-						</ButtonStyled>
-						<ButtonStyled
-							v-else-if="playing === false && loading === false && !isServerInstance"
-							color="brand"
-							size="large"
-						>
-							<button @click="startInstance('InstancePage')">
-								<PlayIcon />
-								Play
-							</button>
-						</ButtonStyled>
-						<div
-							v-else-if="playing === false && loading === false && isServerInstance"
-							class="joined-buttons"
-						>
-							<ButtonStyled color="brand" size="large">
-								<button @click="handlePlayServer()">
-									<PlayIcon />
-									Play
-								</button>
-							</ButtonStyled>
-							<ButtonStyled color="brand" size="large">
-								<OverflowMenu
-									:options="[
-										{
-											id: 'join_server',
-											action: () => handlePlayServer(),
-										},
-										{
-											id: 'launch_instance',
-											action: () => startInstance('InstancePage'),
-										},
-									]"
-								>
-									<div class="w-0 text-xl relative top-0.5 right-2.5">
-										<DropdownIcon />
-									</div>
-
-									<template #join_server>
-										<PlayIcon />
-										Join server
-									</template>
-									<template #launch_instance>
-										<PlayIcon />
-										Launch instance
-									</template>
-								</OverflowMenu>
-							</ButtonStyled>
-						</div>
-						<ButtonStyled
-							v-else-if="loading === true && playing === false"
-							color="brand"
-							size="large"
-						>
-							<button disabled>Starting...</button>
-						</ButtonStyled>
+					<ButtonStyled
+						v-if="
+							[
+								'installing',
+								'pack_installing',
+								'pack_installed',
+								'not_installed',
+								'minecraft_installing',
+							].includes(instance.install_stage)
+						"
+						color="brand"
+						size="large"
+					>
+						<button disabled>Installing...</button>
+					</ButtonStyled>
+					<ButtonStyled
+						v-else-if="instance.install_stage !== 'installed'"
+						color="brand"
+						size="large"
+					>
+						<button @click="repairInstance()">
+							<DownloadIcon />
+							Repair
+						</button>
+					</ButtonStyled>
+					<ButtonStyled v-else-if="loading && !playing" color="brand" size="large">
+						<button disabled>Starting...</button>
+					</ButtonStyled>
+					<JoinedButtons
+						v-else
+						:color="playing ? 'red' : 'brand'"
+						size="large"
+						:actions="playActions"
+						:primary-disabled="stopping"
+					/>
 						<ButtonStyled circular size="large">
 							<button v-tooltip="'Instance settings'" @click="settingsModal?.show()">
 								<SettingsIcon />
 							</button>
 						</ButtonStyled>
-						<ButtonStyled type="transparent" circular size="large">
-							<OverflowMenu
-								:options="[
-									{
-										id: 'open-folder',
-										action: () => {
-											if (instance) showProfileInFolder(instance.path)
-										},
+					<ButtonStyled type="transparent" circular size="large">
+						<OverflowMenu
+							:options="[
+								{
+									id: 'open-folder',
+									action: () => {
+										if (instance) showProfileInFolder(instance.path)
 									},
-									{
-										id: 'export-mrpack',
-										action: () => exportModal?.show(),
-									},
-								]"
-							>
-								<MoreVerticalIcon />
-								<template #share-instance> <UserPlusIcon /> Share instance </template>
-								<template #host-a-server> <ServerIcon /> Create a server </template>
-								<template #open-folder> <FolderOpenIcon /> Open folder </template>
-								<template #export-mrpack> <PackageIcon /> Export modpack </template>
-							</OverflowMenu>
-						</ButtonStyled>
+								},
+								{
+									id: 'export-mrpack',
+									action: () => exportModal?.show(),
+								},
+								{
+									id: 'push-to-server',
+									// TODO: AMBERITE - push modpack to Core server
+									action: () => {},
+								},
+							]"
+						>
+							<MoreVerticalIcon />
+							<template #share-instance> <UserPlusIcon /> Share instance </template>
+							<template #host-a-server> <ServerIcon /> Create a server </template>
+							<template #open-folder> <FolderOpenIcon /> Open folder </template>
+							<template #export-mrpack> <PackageIcon /> Export modpack </template>
+							<template #push-to-server> <ServerIcon /> Push to server </template>
+						</OverflowMenu>
+					</ButtonStyled>
 					</div>
 				</template>
 			</ContentPageHeader>
@@ -265,7 +220,6 @@ import {
 	CheckCircleIcon,
 	ClipboardCopyIcon,
 	DownloadIcon,
-	DropdownIcon,
 	EditIcon,
 	ExternalIcon,
 	EyeIcon,
@@ -289,6 +243,7 @@ import {
 	ButtonStyled,
 	ContentPageHeader,
 	injectNotificationManager,
+	JoinedButtons,
 	NavTabs,
 	OverflowMenu,
 	ServerOnlinePlayers,
@@ -347,7 +302,10 @@ const stopping = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
 
-const isServerInstance = ref(false)
+// AMBERITE PATCH: derive from stored kind instead of linkedProjectV3 heuristic
+const isServerInstance = computed(
+	() => instance.value?.kind === 'server' || instance.value?.kind === 'synced',
+)
 const linkedProjectV3 = ref<Labrinth.Projects.v3.Project>()
 const selected = ref<unknown[]>([])
 
@@ -362,13 +320,18 @@ const ping = ref<number | undefined>(undefined)
 const loadingServerPing = ref(false)
 
 async function fetchInstance() {
-	isServerInstance.value = false
 	linkedProjectV3.value = undefined
 	ping.value = undefined
 	playersOnline.value = undefined
 	loadingServerPing.value = false
 
 	instance.value = await get(route.params.id as string).catch(handleError)
+
+	// AMBERITE PATCH: server/synced profiles have their own management page
+	if (instance.value?.kind === 'server' || instance.value?.kind === 'synced') {
+		await router.replace(`/server/${encodeURIComponent(route.params.id as string)}`)
+		return
+	}
 
 	if (!offline.value && instance.value?.linked_data && instance.value.linked_data.project_id) {
 		try {
@@ -378,7 +341,7 @@ async function fetchInstance() {
 			)
 
 			if (linkedProjectV3.value?.minecraft_server != null) {
-				isServerInstance.value = true
+				// legacy Modrinth server project — no action needed, isServerInstance derives from kind
 			}
 		} catch (error) {
 			handleError(error as Error)
@@ -536,6 +499,35 @@ const handlePlayServer = async () => {
 	}
 }
 
+// TODO: AMBERITE - wire serverRunning to Core server state
+const serverRunning = ref(false)
+
+const playActions = computed(() => {
+	if (playing.value) {
+		return [
+			{
+				id: 'stop',
+				label: stopping.value ? 'Stopping...' : 'Stop',
+				icon: StopCircleIcon,
+				action: () => stopInstance('InstancePage'),
+			},
+			serverRunning.value
+				? { id: 'stop_server', label: 'Stop server', icon: ServerIcon, action: () => {} }
+				: { id: 'start_server', label: 'Start server', icon: ServerIcon, action: () => {} },
+		]
+	}
+	if (serverRunning.value) {
+		return [
+			{ id: 'join', label: 'Join', icon: PlayIcon, action: () => handlePlayServer() },
+			{ id: 'stop_server', label: 'Stop server', icon: ServerIcon, action: () => {} },
+		]
+	}
+	return [
+		{ id: 'play', label: 'Play', icon: PlayIcon, action: () => startInstance('InstancePage') },
+		{ id: 'start_server', label: 'Start server', icon: ServerIcon, action: () => {} },
+	]
+})
+
 const repairInstance = async () => {
 	await finish_install(instance.value).catch(handleError)
 }
@@ -620,7 +612,6 @@ const unlistenProfiles = await profile_listener(
 		})
 		if (!instance.value?.linked_data?.project_id) {
 			linkedProjectV3.value = undefined
-			isServerInstance.value = false
 		}
 	},
 )

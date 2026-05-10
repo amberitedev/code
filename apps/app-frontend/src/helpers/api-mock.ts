@@ -1,0 +1,548 @@
+/**
+ * AMBERITE PATCH — Comprehensive dev-only API mock for the desktop app.
+ *
+ * Intercepts ALL fetch calls to:
+ * 1. Archon API (hosting servers, worlds, backups, etc.)
+ * 2. Labrinth billing API (payments, subscriptions)
+ * 3. User auth endpoints
+ *
+ * Returns realistic mock data so the ENTIRE hosting UI works without any backend.
+ * Never hits real servers. Always returns "authenticated" with a fake user.
+ *
+ * Import this file at the TOP of main.ts (before any API calls).
+ */
+
+// ── Mock User ─────────────────────────────────────────────────────────────────
+
+const MOCK_USER = {
+  id: 'mock-user-id',
+  username: 'devuser',
+  name: 'Dev User',
+  email: 'dev@example.com',
+  avatar_url: null,
+  bio: null,
+  created: '2024-01-01T00:00:00Z',
+  role: 'developer',
+  badges: 0,
+  auth_providers: null,
+  email_verified: true,
+  has_password: true,
+  has_totp: false,
+  payout_data: null,
+  stripe_customer_id: 'cus_mock_12345',
+}
+
+// ── Mock IDs ──────────────────────────────────────────────────────────────────
+
+const MOCK_SERVER_ID = '00000000-0000-0000-0000-000000000001'
+const MOCK_WORLD_ID = '00000000-0000-0000-0000-000000000002'
+const MOCK_OWNER_ID = 'mock-user-id'
+const MOCK_SUBSCRIPTION_ID = 'sub_mock_12345'
+
+// ── Mock Server Data ──────────────────────────────────────────────────────────
+
+const MOCK_SERVER_V0 = {
+  server_id: MOCK_SERVER_ID,
+  name: 'Mock Server',
+  owner_id: MOCK_OWNER_ID,
+  net: { ip: '127.0.0.1', port: 25565, domain: 'mock.modrinth.gg' },
+  game: 'Minecraft',
+  backup_quota: 5,
+  used_backup_quota: 0,
+  status: 'available',
+  suspension_reason: null,
+  loader: 'Fabric',
+  loader_version: '0.16.14',
+  mc_version: '1.21.1',
+  upstream: null,
+  sftp_username: 'mock.sftp',
+  sftp_password: 'mock-sftp-password',
+  sftp_host: 'sftp.mock.modrinth.gg',
+  datacenter: 'us-east-1',
+  notices: [],
+  node: null,
+  flows: { intro: false },
+  is_medal: false,
+}
+
+const MOCK_WORLD = {
+  id: MOCK_WORLD_ID,
+  name: 'World 1',
+  created_at: '2025-01-01T00:00:00.000Z',
+  is_active: true,
+  backups: [],
+  content: {
+    modloader: 'fabric',
+    modloader_version: '0.16.14',
+    game_version: '1.21.1',
+    java_version: 21,
+    invocation: 'java -Xms128M -Xmx6144M -jar server.jar --nogui',
+    original_invocation: 'java -Xms128M -Xmx6144M -jar server.jar --nogui',
+  },
+  readiness: { data_synchronized_fetched: true },
+}
+
+const MOCK_SERVER_V1 = {
+  id: MOCK_SERVER_ID,
+  name: 'Mock Server',
+  subdomain: 'mock-server',
+  specs: { cpu: 200, memory_mb: 6144, storage_mb: 51200, swap_mb: 0 },
+  sftp_username: 'mock.sftp',
+  sftp_password: 'mock-sftp-password',
+  tags: [],
+  location: {
+    status: 'assigned',
+    location_metadata: {
+      region: 'us-east',
+      region_should_be_user_displayed: true,
+      hostname: 'mock.modrinth.gg',
+      is_decommissioned_node: false,
+    },
+  },
+  worlds: [MOCK_WORLD],
+}
+
+const MOCK_REGION = {
+  shortcode: 'us-east',
+  country_code: 'US',
+  display_name: 'US East',
+  lat: 40.7128,
+  lon: -74.006,
+  zone: 'modrinth.gg',
+}
+
+const MOCK_STARTUP_CONFIG = {
+  invocation: 'java -Xms128M -Xmx6144M -jar server.jar --nogui',
+  original_invocation: 'java -Xms128M -Xmx6144M -jar server.jar --nogui',
+  jdk_version: 'lts21',
+  jdk_build: 'temurin',
+}
+
+const MOCK_RUNTIME_OPTIONS = {
+  java_version: 21,
+  jre_vendor: 'temurin',
+  original_invocation: 'java -Xms128M -Xmx6144M -jar server.jar --nogui',
+  startup_command: null,
+}
+
+const MOCK_PROPERTIES = {
+  known: {
+    difficulty: 'normal',
+    gamemode: 'survival',
+    max_players: '20',
+    motd: 'A Mock Minecraft Server',
+    view_distance: '10',
+    white_list: 'false',
+  },
+  custom: {},
+}
+
+const MOCK_ADDONS = {
+  modloader: 'fabric',
+  modloader_version: '0.16.14',
+  game_version: '1.21.1',
+  modpack: null,
+  addons: [],
+}
+
+const MOCK_BACKUPS_QUEUE = {
+  active_operations: [],
+  backups: [],
+}
+
+// ── Mock Billing Data ─────────────────────────────────────────────────────────
+
+const MOCK_CUSTOMER = {
+  id: 'cus_mock_12345',
+  user_id: MOCK_USER.id,
+  balance: 0,
+  currency: 'usd',
+  default_payment_method: null,
+}
+
+const MOCK_SUBSCRIPTION = {
+  id: MOCK_SUBSCRIPTION_ID,
+  user_id: MOCK_USER.id,
+  product_id: 'prod_mock_server',
+  status: 'active',
+  current_period_start: '2025-01-01T00:00:00Z',
+  current_period_end: '2025-12-31T23:59:59Z',
+  cancel_at_period_end: false,
+  canceled_at: null,
+  metadata: {},
+}
+
+const MOCK_PRODUCTS = [
+  {
+    id: 'prod_mock_server',
+    name: 'Mock Server Plan',
+    description: 'A mock server for development',
+    prices: {
+      intervals: {
+        monthly: 0,
+        quarterly: 0,
+        yearly: 0,
+      },
+    },
+    metadata: {},
+  },
+]
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function empty(): Response {
+  return new Response(null, { status: 204 })
+}
+
+function notFound(endpoint: string): Response {
+  console.warn(`[api-mock] 404: ${endpoint}`)
+  return json({ error: 'Not found' }, 404)
+}
+
+// ── Archon Router ─────────────────────────────────────────────────────────────
+
+function routeArchon(method: string, pathname: string): Response | null {
+  // GET /modrinth/v0/servers
+  if (method === 'GET' && /^\/modrinth\/v0\/servers$/.test(pathname)) {
+    return json({
+      servers: [MOCK_SERVER_V0],
+      pagination: { current_page: 1, page_size: 100, total_pages: 1, total_items: 1 },
+    })
+  }
+
+  // POST /modrinth/v0/stock
+  if (method === 'POST' && /^\/modrinth\/v0\/stock/.test(pathname)) {
+    return json({ available: 999 })
+  }
+
+  // GET /modrinth/v0/subdomains/:sub/isavailable
+  if (method === 'GET' && /^\/modrinth\/v0\/subdomains\/[^/]+\/isavailable$/.test(pathname)) {
+    return json({ available: true })
+  }
+
+  // GET /modrinth/v0/servers/:id
+  if (method === 'GET' && /^\/modrinth\/v0\/servers\/[^/]+$/.test(pathname)) {
+    return json(MOCK_SERVER_V0)
+  }
+
+  // GET /modrinth/v0/servers/:id/ws
+  if (method === 'GET' && /^\/modrinth\/v0\/servers\/[^/]+\/ws$/.test(pathname)) {
+    return json({ url: 'wss://localhost:9999/mock-ws', token: 'mock-ws-token' })
+  }
+
+  // GET /modrinth/v0/servers/:id/fs
+  if (method === 'GET' && /^\/modrinth\/v0\/servers\/[^/]+\/fs$/.test(pathname)) {
+    return json({ url: 'localhost:9999', token: 'mock-fs-token' })
+  }
+
+  // GET /modrinth/v0/servers/:id/allocations
+  if (method === 'GET' && /^\/modrinth\/v0\/servers\/[^/]+\/allocations$/.test(pathname)) {
+    return json([])
+  }
+
+  // POST /modrinth/v0/servers/:id/allocations
+  if (method === 'POST' && /^\/modrinth\/v0\/servers\/[^/]+\/allocations$/.test(pathname)) {
+    return json({ port: 25566, name: 'mock' })
+  }
+
+  // PUT/DELETE allocations
+  if (
+    (method === 'PUT' || method === 'DELETE') &&
+    /^\/modrinth\/v0\/servers\/[^/]+\/allocations\/\d+$/.test(pathname)
+  ) {
+    return empty()
+  }
+
+  // GET /modrinth/v0/servers/:id/startup
+  if (method === 'GET' && /^\/modrinth\/v0\/servers\/[^/]+\/startup$/.test(pathname)) {
+    return json(MOCK_STARTUP_CONFIG)
+  }
+
+  // POST /modrinth/v0/servers/:id/startup
+  if (method === 'POST' && /^\/modrinth\/v0\/servers\/[^/]+\/startup$/.test(pathname)) {
+    return empty()
+  }
+
+  // POST /modrinth/v0/servers/:id/power
+  if (method === 'POST' && /^\/modrinth\/v0\/servers\/[^/]+\/power$/.test(pathname)) {
+    return empty()
+  }
+
+  // POST /modrinth/v0/servers/:id/reinstall
+  if (method === 'POST' && /^\/modrinth\/v0\/servers\/[^/]+\/reinstall$/.test(pathname)) {
+    return empty()
+  }
+
+  // GET /modrinth/v0/servers/:id/reinstallFromMrpack
+  if (method === 'GET' && /^\/modrinth\/v0\/servers\/[^/]+\/reinstallFromMrpack$/.test(pathname)) {
+    return json({ url: 'localhost:9999', token: 'mock-mrpack-token' })
+  }
+
+  // POST /modrinth/v0/servers/:id/name
+  if (method === 'POST' && /^\/modrinth\/v0\/servers\/[^/]+\/name$/.test(pathname)) {
+    return empty()
+  }
+
+  // POST /modrinth/v0/servers/:id/subdomain
+  if (method === 'POST' && /^\/modrinth\/v0\/servers\/[^/]+\/subdomain$/.test(pathname)) {
+    return empty()
+  }
+
+  // POST /modrinth/v0/servers/:id/notices/:id/dismiss
+  if (
+    method === 'POST' &&
+    /^\/modrinth\/v0\/servers\/[^/]+\/notices\/\d+\/dismiss$/.test(pathname)
+  ) {
+    return empty()
+  }
+
+  // ── Archon v1 ────────────────────────────────────────────────────────────
+
+  // GET /v1/regions
+  if (method === 'GET' && /^\/v1\/regions$/.test(pathname)) {
+    return json([MOCK_REGION])
+  }
+
+  // GET /v1/servers
+  if (method === 'GET' && /^\/v1\/servers$/.test(pathname)) {
+    return json([MOCK_SERVER_V1])
+  }
+
+  // GET /v1/servers/:id
+  if (method === 'GET' && /^\/v1\/servers\/[^/]+$/.test(pathname)) {
+    return json(MOCK_SERVER_V1)
+  }
+
+  // DELETE /v1/servers/:id/flows/intro
+  if (method === 'DELETE' && /^\/v1\/servers\/[^/]+\/flows\/intro$/.test(pathname)) {
+    return empty()
+  }
+
+  // GET /v1/servers/:id/worlds/:wid/properties
+  if (method === 'GET' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/properties$/.test(pathname)) {
+    return json(MOCK_PROPERTIES)
+  }
+
+  // PATCH /v1/servers/:id/worlds/:wid/properties
+  if (method === 'PATCH' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/properties$/.test(pathname)) {
+    return empty()
+  }
+
+  // GET /v1/servers/:id/worlds/:wid/options/startup
+  if (
+    method === 'GET' &&
+    /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/options\/startup$/.test(pathname)
+  ) {
+    return json(MOCK_RUNTIME_OPTIONS)
+  }
+
+  // PATCH /v1/servers/:id/worlds/:wid/options/startup
+  if (
+    method === 'PATCH' &&
+    /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/options\/startup$/.test(pathname)
+  ) {
+    return empty()
+  }
+
+  // GET/POST /v1/servers/:id/worlds/:wid/addons
+  if (method === 'GET' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/addons/.test(pathname)) {
+    return json(MOCK_ADDONS)
+  }
+  if (method === 'POST' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/addons/.test(pathname)) {
+    return empty()
+  }
+
+  // GET/POST /v1/servers/:id/worlds/:wid/backups-queue
+  if (
+    method === 'GET' &&
+    /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/backups-queue/.test(pathname)
+  ) {
+    return json(MOCK_BACKUPS_QUEUE)
+  }
+  if (
+    method === 'POST' &&
+    /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/backups-queue$/.test(pathname)
+  ) {
+    return json({ id: 'mock-backup-' + Date.now() })
+  }
+
+  // DELETE /v1/servers/:id/worlds/:wid/backups-queue/:id
+  if (
+    method === 'DELETE' &&
+    /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/backups-queue\/[^/]+$/.test(pathname)
+  ) {
+    return empty()
+  }
+
+  // POST /v1/servers/:id/worlds/:wid/content
+  if (method === 'POST' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/content/.test(pathname)) {
+    return empty()
+  }
+
+  // GET /v1/servers/:id/worlds/:wid/content/...
+  if (method === 'GET' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/content\//.test(pathname)) {
+    return json(null)
+  }
+
+  // POST /v1/servers/:id/worlds/:wid/onboard
+  if (method === 'POST' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/onboard$/.test(pathname)) {
+    return empty()
+  }
+
+  return null
+}
+
+// ── Billing Router ────────────────────────────────────────────────────────────
+
+function routeBilling(method: string, pathname: string): Response | null {
+  // GET /_internal/billing/customer
+  if (method === 'GET' && pathname === '/_internal/billing/customer') {
+    return json(MOCK_CUSTOMER)
+  }
+
+  // GET /_internal/billing/payment_methods
+  if (method === 'GET' && pathname === '/_internal/billing/payment_methods') {
+    return json([])
+  }
+
+  // POST /_internal/billing/payment_method
+  if (method === 'POST' && pathname === '/_internal/billing/payment_method') {
+    return json({ client_secret: 'mock_secret', status: 'requires_action' })
+  }
+
+  // PATCH/DELETE /_internal/billing/payment_method/:id
+  if (
+    (method === 'PATCH' || method === 'DELETE') &&
+    /^\/_internal\/billing\/payment_method\/[^/]+$/.test(pathname)
+  ) {
+    return empty()
+  }
+
+  // GET /_internal/billing/subscriptions
+  if (method === 'GET' && pathname === '/_internal/billing/subscriptions') {
+    return json([MOCK_SUBSCRIPTION])
+  }
+
+  // GET /_internal/billing/products
+  if (method === 'GET' && pathname === '/_internal/billing/products') {
+    return json(MOCK_PRODUCTS)
+  }
+
+  // PATCH /_internal/billing/subscription/:id
+  if (method === 'PATCH' && /^\/_internal\/billing\/subscription\/[^/]+$/.test(pathname)) {
+    return json({ subscription: MOCK_SUBSCRIPTION, payment_intent: null })
+  }
+
+  // GET /_internal/billing/payments
+  if (method === 'GET' && pathname === '/_internal/billing/payments') {
+    return json([])
+  }
+
+  // POST /_internal/billing/payment
+  if (method === 'POST' && pathname === '/_internal/billing/payment') {
+    return json({
+      subscription: MOCK_SUBSCRIPTION,
+      payment_intent: { id: 'pi_mock', client_secret: 'secret', status: 'succeeded' },
+    })
+  }
+
+  // POST /_internal/billing/charge/:id/refund
+  if (method === 'POST' && /^\/_internal\/billing\/charge\/[^/]+\/refund$/.test(pathname)) {
+    return empty()
+  }
+
+  // POST /_internal/billing/credit
+  if (method === 'POST' && pathname === '/_internal/billing/credit') {
+    return empty()
+  }
+
+  return null
+}
+
+// ── User Router ───────────────────────────────────────────────────────────────
+
+function routeUser(method: string, pathname: string): Response | null {
+  // GET /v2/user
+  if (method === 'GET' && pathname === '/v2/user') {
+    return json(MOCK_USER)
+  }
+
+  return null
+}
+
+// ── Setup Function ────────────────────────────────────────────────────────────
+
+export function setupApiMock() {
+  // Only run in dev mode
+  if (import.meta.env.PROD) {
+    console.log('[api-mock] Disabled in production')
+    return
+  }
+
+  console.log('[api-mock] Initializing comprehensive API mock...')
+
+  // Get base URLs from env or use defaults
+  const archonBase = (import.meta.env.MODRINTH_ARCHON_BASE_URL || 'https://archon.modrinth.com')
+    .replace(/\/$/, '')
+
+  const labrinthBase = (import.meta.env.MODRINTH_API_BASE_URL || 'https://api.modrinth.com')
+    .replace(/\/$/, '')
+
+  console.log(`[api-mock] Archon base: ${archonBase}`)
+  console.log(`[api-mock] Labrinth base: ${labrinthBase}`)
+
+  const originalFetch = globalThis.fetch.bind(globalThis)
+
+  globalThis.fetch = async function mockFetch(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const method = (init?.method ?? 'GET').toUpperCase()
+
+    try {
+      const url = new URL(urlStr)
+      const pathname = url.pathname
+
+      // Archon API
+      if (urlStr.startsWith(archonBase)) {
+        console.log(`[api-mock] Archon: ${method} ${pathname}`)
+        const response = routeArchon(method, pathname)
+        if (response !== null) return response
+        return notFound(`Archon ${pathname}`)
+      }
+
+      // Labrinth billing
+      if (urlStr.startsWith(labrinthBase) && pathname.startsWith('/_internal/billing')) {
+        console.log(`[api-mock] Billing: ${method} ${pathname}`)
+        const response = routeBilling(method, pathname)
+        if (response !== null) return response
+        return notFound(`Billing ${pathname}`)
+      }
+
+      // Labrinth user
+      if (urlStr.startsWith(labrinthBase) && pathname === '/v2/user') {
+        console.log(`[api-mock] User: ${method} ${pathname}`)
+        const response = routeUser(method, pathname)
+        if (response !== null) return response
+      }
+
+      // Pass through to real fetch
+      return originalFetch(input, init)
+    } catch {
+      return originalFetch(input, init)
+    }
+  }
+
+  console.log('[api-mock] Mock active - all hosting & billing APIs return fake data')
+}
+
+// Auto-setup if imported directly
+setupApiMock()

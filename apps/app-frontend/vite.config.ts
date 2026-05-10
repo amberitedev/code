@@ -1,4 +1,5 @@
 import vue from '@vitejs/plugin-vue'
+import VueDevTools from 'vite-plugin-vue-devtools'
 import { designInspectorVitePlugin } from '../../packages/design-inspector/vite-plugin.ts'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
@@ -45,6 +46,7 @@ export default defineConfig({
 		],
 	},
 	plugins: [
+		VueDevTools(),
 		vue(),
 		...designInspectorVitePlugin(),
 		svgLoader({

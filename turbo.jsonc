@@ -17,7 +17,7 @@
 		"build": {
 			"dependsOn": ["^build"],
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
-			"outputs": [".nuxt/**", "dist/**", ".output/**", "$TURBO_ROOT$/target/**"],
+			"outputs": [".nuxt/**", "dist/**", ".output/**"],
 			"env": [
 				"NODE_ENV",
 				"SITE_URL",
@@ -76,8 +76,8 @@
 			"cache": false,
 			"persistent": true,
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
-			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*"],
-			"passThroughEnv": ["DISPLAY", "WEBKIT_DISABLE_DMABUF_RENDERER", "JAVA_HOME"]
+			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*", "PORT", "AMBERITE_*", "SUPABASE_*", "ALLOWED_ORIGIN"],
+			"passThroughEnv": ["DISPLAY", "WEBKIT_DISABLE_DMABUF_RENDERER", "JAVA_HOME", "CARGO_INCREMENTAL"]
 		},
 		"test": {
 			"env": [

@@ -9,7 +9,6 @@ import {
 	VerboseLoggingFeature,
 } from '@modrinth/api-client'
 import {
-	ArrowBigUpDashIcon,
 	ChangeSkinIcon,
 	CompassIcon,
 	DownloadIcon,
@@ -19,7 +18,6 @@ import {
 	LibraryIcon,
 	LogInIcon,
 	LogOutIcon,
-	NewspaperIcon,
 	NotepadTextIcon,
 	PlusIcon,
 	RefreshCwIcon,
@@ -40,7 +38,6 @@ import {
 	defineMessages,
 	I18nDebugPanel,
 	LoadingBar,
-	NewsArticleCard,
 	NotificationPanel,
 	OverflowMenu,
 	PopupNotificationPanel,
@@ -82,7 +79,6 @@ import InstallToPlayModal from '@/components/ui/modal/InstallToPlayModal.vue'
 import ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import UpdateToPlayModal from '@/components/ui/modal/UpdateToPlayModal.vue'
 import NavButton from '@/components/ui/NavButton.vue'
-import PromotionWrapper from '@/components/ui/PromotionWrapper.vue'
 import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
@@ -198,7 +194,6 @@ const {
 	handleModpackDuplicateGoToInstance,
 } = setupProviders(notificationManager, popupNotificationManager)
 
-const news = ref([])
 const availableSurvey = ref(false)
 
 const offline = ref(!navigator.onLine)
@@ -375,22 +370,6 @@ async function setupApp() {
 			console.log(
 				`No critical announcement found at https://api.modrinth.com/appCriticalAnnouncement.json?version=${version}`,
 			)
-		})
-
-	fetch(`https://modrinth.com/news/feed/articles.json`)
-		.then((response) => response.json())
-		.then((res) => {
-			if (res && res.articles) {
-				news.value = res.articles
-					.map((article) => ({
-						...article,
-						path: article.link,
-					}))
-					.slice(0, 4)
-			}
-		})
-		.catch((error) => {
-			console.error('Failed to fetch news articles', error)
 		})
 
 	get_opening_command().then(handleCommand)
@@ -773,6 +752,7 @@ onMounted(() => {
 })
 
 const accounts = ref(null)
+const friendsListRef = ref()
 provide('accountsCard', accounts)
 
 command_listener(handleCommand)
@@ -1459,12 +1439,10 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</div>
 		<div
 			class="app-sidebar mt-px shrink-0 flex flex-col border-0 border-l-[1px] border-[--brand-gradient-border] border-solid"
-			:class="{ 'has-plus': hasPlus }"
 		>
 			<div
 				v-overlay-scrollbars="sidebarOverlayScrollbarsOptions"
 				class="app-sidebar-scrollable flex-grow shrink relative"
-				:class="{ 'pb-12': !hasPlus }"
 				data-overlayscrollbars-initialize
 			>
 				<div id="sidebar-teleport-target" class="sidebar-teleport-content"></div>
@@ -1475,38 +1453,14 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 							<AccountsCard ref="accounts" />
 						</suspense>
 					</div>
-					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
-						<suspense>
-							<FriendsList :credentials="credentials" :sign-in="() => signIn()" />
-						</suspense>
-					</div>
-					<div v-if="news && news.length > 0" class="p-4 flex flex-col items-center">
-						<h3 class="text-base mb-4 text-primary font-medium m-0 text-left w-full">News</h3>
-						<div class="space-y-4 flex flex-col items-center w-full">
-							<NewsArticleCard
-								v-for="(item, index) in news"
-								:key="`news-${index}`"
-								:article="item"
-							/>
-							<ButtonStyled color="brand" size="large">
-								<a href="https://modrinth.com/news" target="_blank" class="my-4">
-									<NewspaperIcon /> View all news
-								</a>
-							</ButtonStyled>
-						</div>
-					</div>
+				<div class="p-4">
+					<suspense>
+						<FriendsList ref="friendsListRef" :credentials="credentials" :sign-in="() => signIn()" />
+					</suspense>
+				</div>
 				</div>
 			</div>
-			<template v-if="showAd">
-				<a
-					href="https://modrinth.plus?app"
-					class="absolute bottom-[250px] w-full flex justify-center items-center gap-1 px-4 py-3 text-purple font-medium hover:underline z-10"
-					target="_blank"
-				>
-					<ArrowBigUpDashIcon class="text-2xl" /> Upgrade to Modrinth+
-				</a>
-				<PromotionWrapper />
-			</template>
+
 		</div>
 	</div>
 	<I18nDebugPanel />

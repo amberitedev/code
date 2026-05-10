@@ -6,7 +6,7 @@ use crate::state::{
     CacheValue, CachedEntry, CachedFile, CachedFileHash, CachedFileUpdate,
     Credentials, DefaultPage, DependencyType, DeviceToken, DeviceTokenKey,
     DeviceTokenPair, FileType, Hooks, LauncherFeatureVersion, LinkedData,
-    MemorySettings, ModrinthCredentials, Profile, ProfileInstallStage,
+    MemorySettings, ModrinthCredentials, Profile, ProfileInstallStage, ProfileKind,
     TeamMember, Theme, VersionFile, WindowSize,
 };
 use crate::util::fetch::{IoSemaphore, read_json};
@@ -368,6 +368,8 @@ where
                             .and_then(|x| x.wrapper.clone()),
                         post_exit: profile.hooks.and_then(|x| x.post_exit),
                     },
+                    kind: ProfileKind::Client,
+                    core_instance_id: None,
                 }
                 .upsert(exec)
                 .await?;

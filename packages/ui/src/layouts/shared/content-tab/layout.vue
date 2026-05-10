@@ -151,6 +151,13 @@ const messages = defineMessages({
 
 const ctx = injectContentManager()
 
+// AMBERITE: client/server side filter
+// null = show all; 'client' = hide server-only; 'server' = hide client-only
+const sideView = ref<'client' | 'server' | null>(null)
+function toggleSideView(side: 'client' | 'server') {
+	sideView.value = sideView.value === side ? null : side
+}
+
 type SortMode = 'alphabetical-asc' | 'alphabetical-desc' | 'date-added-newest' | 'date-added-oldest'
 const sortMode = ref<SortMode>('alphabetical-asc')
 
@@ -254,8 +261,13 @@ async function handleRefresh() {
 }
 
 const filteredItems = computed(() => {
-	const sorted = sortedItems.value
-	const searched = search(sorted)
+	let items = sortedItems.value
+	if (sideView.value === 'client') {
+		items = items.filter((item) => item.environment !== 'server_only')
+	} else if (sideView.value === 'server') {
+		items = items.filter((item) => !isClientOnlyEnvironment(item.environment))
+	}
+	const searched = search(items)
 	return applyFilters(searched)
 })
 const tableItems = computed<ContentCardTableItem[]>(() => {
@@ -590,6 +602,23 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									</button>
 								</ButtonStyled>
 							</div>
+						</div>
+
+						<div class="flex items-center gap-1.5">
+							<button
+								v-for="side in (['client', 'server'] as const)"
+								:key="side"
+								class="cursor-pointer rounded-full border border-solid px-3 py-1.5 text-base font-semibold leading-5 capitalize transition-all duration-100 active:scale-[0.97]"
+								:class="
+									sideView === side
+										? 'border-green bg-brand-highlight text-brand'
+										: 'border-surface-5 bg-surface-4 text-primary hover:bg-surface-5'
+								"
+								:aria-pressed="sideView === side"
+								@click="toggleSideView(side)"
+							>
+								{{ side }}
+							</button>
 						</div>
 
 						<div class="@container flex flex-wrap items-center justify-between gap-2">

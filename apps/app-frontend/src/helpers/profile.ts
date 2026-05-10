@@ -15,6 +15,7 @@ import type {
 	ContentFileProjectType,
 	GameInstance,
 	InstanceLoader,
+	ProfileKind,
 } from './types'
 
 // Add instance
@@ -36,6 +37,8 @@ export async function create(
 	icon: string | null,
 	skipInstall: boolean,
 	linkedData?: { project_id: string; version_id: string; locked: boolean } | null,
+	kind?: ProfileKind | null,
+	port?: number | null,
 ): Promise<string> {
 	// Trim string name to avoid "Unable to find directory"
 	name = name.trim()
@@ -47,6 +50,8 @@ export async function create(
 		icon,
 		skipInstall,
 		linkedData,
+		kind,
+		port,
 	})
 }
 

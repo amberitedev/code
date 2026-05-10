@@ -5,6 +5,7 @@ members = [
   "apps/app-playground",
   "apps/daedalus_client",
   "apps/labrinth",
+  "packages/amberite-lib",
   "packages/app-lib",
   "packages/ariadne",
   "packages/daedalus",
@@ -195,6 +196,7 @@ tauri-plugin-updater = { version = "2.9.0", default-features = false, features =
 ] }
 tauri-plugin-window-state = "2.4.0"
 tempfile = "3.23.0"
+amberite-lib = { path = "packages/amberite-lib" }
 theseus = { path = "packages/app-lib" }
 thiserror = "2.0.17"
 tikv-jemalloc-ctl = "0.6.0"

@@ -1,0 +1,7 @@
+# Force MSVC link.exe instead of rust-lld (default since Rust 1.86).
+# rust-lld panics (ICE) when processing the 238MB rusty_v8.lib archive.
+[target.x86_64-pc-windows-msvc]
+linker = "link.exe"
+
+[env]
+SQLX_OFFLINE = "true"

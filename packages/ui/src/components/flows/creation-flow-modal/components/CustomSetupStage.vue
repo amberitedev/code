@@ -28,6 +28,16 @@
 			/>
 		</div>
 
+		<!-- Instance-specific: Instance type -->
+		<div v-if="ctx.flowType === 'instance'" class="flex flex-col gap-2">
+			<span class="font-semibold text-contrast">{{ formatMessage(messages.instanceTypeLabel) }}</span>
+			<Chips
+				v-model="instanceKind"
+				:items="instanceKindItems"
+				:format-label="formatInstanceKindLabel"
+			/>
+		</div>
+
 		<!-- Loader chips -->
 		<div v-if="!hideLoaderChips" class="flex flex-col gap-2">
 			<span class="font-semibold text-contrast">{{
@@ -161,7 +171,7 @@ import Collapsible from '../../../base/Collapsible.vue'
 import Combobox, { type ComboboxOption } from '../../../base/Combobox.vue'
 import PaperChannelBadge from '../../../base/PaperChannelBadge.vue'
 import StyledInput from '../../../base/StyledInput.vue'
-import type { LoaderVersionEntry, LoaderVersionType } from '../creation-flow-context'
+import type { LoaderVersionEntry, LoaderVersionType, InstanceKind } from '../creation-flow-context'
 import { injectCreationFlowContext } from '../creation-flow-context'
 import { formatLoaderLabel } from '../shared'
 
@@ -176,6 +186,7 @@ const {
 	selectedLoaderVersion,
 	hideLoaderChips,
 	hideLoaderVersion,
+	instanceKind,
 } = ctx
 
 const messages = defineMessages({
@@ -251,6 +262,22 @@ const messages = defineMessages({
 		id: 'creation-flow.modal.custom-setup.loader-version-type.other',
 		defaultMessage: 'Other',
 	},
+	instanceTypeLabel: {
+		id: 'creation-flow.modal.custom-setup.instance-type.label',
+		defaultMessage: 'Instance type',
+	},
+	clientKind: {
+		id: 'creation-flow.modal.custom-setup.instance-type.client',
+		defaultMessage: 'Client',
+	},
+	serverKind: {
+		id: 'creation-flow.modal.custom-setup.instance-type.server',
+		defaultMessage: 'Server',
+	},
+	syncedKind: {
+		id: 'creation-flow.modal.custom-setup.instance-type.synced',
+		defaultMessage: 'Synced',
+	},
 })
 
 function formatLoaderVersionTypeLabel(type: LoaderVersionType): string {
@@ -261,6 +288,19 @@ function formatLoaderVersionTypeLabel(type: LoaderVersionType): string {
 			return formatMessage(messages.latestLoaderVersionType)
 		case 'other':
 			return formatMessage(messages.otherLoaderVersionType)
+	}
+}
+
+const instanceKindItems: InstanceKind[] = ['client', 'server', 'synced']
+
+function formatInstanceKindLabel(kind: InstanceKind): string {
+	switch (kind) {
+		case 'client':
+			return formatMessage(messages.clientKind)
+		case 'server':
+			return formatMessage(messages.serverKind)
+		case 'synced':
+			return formatMessage(messages.syncedKind)
 	}
 }
 

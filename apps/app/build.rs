@@ -309,6 +309,23 @@ fn main() {
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),
+            )
+            .plugin(
+                "amberite",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "ping",
+                        "core_get_instance",
+                        "core_start",
+                        "core_stop",
+                        "core_restart",
+                        "core_send_command",
+                        "core_issue_ws_token",
+                        "core_get_url",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
             ),
     )
     .expect("Failed to run tauri-build");

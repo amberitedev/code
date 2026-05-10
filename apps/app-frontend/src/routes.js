@@ -5,6 +5,7 @@ import * as Hosting from '@/pages/hosting/manage'
 import * as Instance from '@/pages/instance'
 import * as Library from '@/pages/library'
 import * as Project from '@/pages/project'
+import * as Server from '@/pages/server'
 
 /**
  * Configures application routing. Add page to pages/index and then add to route table here.
@@ -69,6 +70,39 @@ export default new createRouter({
 					path: 'backups',
 					name: 'ServerManageBackups',
 					component: Hosting.Backups,
+					meta: {
+						breadcrumb: [{ name: '?Server' }],
+					},
+				},
+			],
+		},
+		{
+			path: '/server/:id',
+			name: 'ServerInstance',
+			component: Server.Index,
+			props: true,
+			children: [
+				{
+					path: '',
+					name: 'ServerInstanceOverview',
+					component: Server.Overview,
+					meta: {
+						breadcrumb: [{ name: '?Server' }],
+					},
+				},
+				{
+					path: 'console',
+					name: 'ServerInstanceConsole',
+					component: Server.Console,
+					meta: {
+						renderMode: 'fixed',
+						breadcrumb: [{ name: '?Server' }],
+					},
+				},
+				{
+					path: 'content',
+					name: 'ServerInstanceContent',
+					component: Server.Content,
 					meta: {
 						breadcrumb: [{ name: '?Server' }],
 					},

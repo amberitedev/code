@@ -1,0 +1,32 @@
+services:
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: amberite-core:latest
+    container_name: amberite-core
+    restart: unless-stopped
+    ports:
+      # HOST:CONTAINER — change host port if 16662 is taken.
+      - "16662:16662"
+    volumes:
+      # Named volume: instance data, SQLite DB, server JARs, logs.
+      - core-data:/data
+    env_file:
+      # Copy .env.example → .env and fill in your values before starting.
+      - .env
+    environment:
+      AMBERITE_DATA_DIR: /data
+      PORT: "16662"
+      # ALLOWED_ORIGIN: https://amberite.dev   # override if self-hosting
+      # AMBERITE_DEV: "false"                  # never set true in prod
+    healthcheck:
+      test: ["CMD", "amberite-core", "check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  core-data:
+    driver: local

@@ -1,3 +1,6 @@
+// AMBERITE: Import API mock first (before any API calls)
+import '@/helpers/api-mock.ts'
+
 import { DesignInspectorPlugin } from '../../../packages/design-inspector/index.ts'
 import 'floating-vue/dist/style.css'
 import 'overlayscrollbars/overlayscrollbars.css'

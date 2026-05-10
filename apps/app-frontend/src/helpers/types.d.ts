@@ -15,6 +15,10 @@ export type GameInstance = {
 
 	linked_data?: LinkedData
 
+	// AMBERITE PATCH
+	kind: ProfileKind
+	core_instance_id?: string
+
 	created: Date
 	modified: Date
 	last_played?: Date
@@ -47,6 +51,9 @@ type LinkedData = {
 }
 
 export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'
+
+// AMBERITE PATCH
+export type ProfileKind = 'client' | 'server' | 'synced'
 
 type ContentFile = {
 	metadata?: {

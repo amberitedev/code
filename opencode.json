@@ -8,6 +8,11 @@
 				"STORYBOOK_URL": "http://localhost:6006/index.json"
 			},
 			"enabled": true
+		},
+		"supabase": {
+			"type": "remote",
+			"url": "https://mcp.supabase.com/mcp?project_ref=zbngxzouadkdbsxtumyf&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching%2Cstorage",
+			"enabled": true
 		}
 	}
 }

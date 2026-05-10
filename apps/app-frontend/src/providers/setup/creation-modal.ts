@@ -17,7 +17,7 @@ import { import_instance } from '@/helpers/import.js'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
 import { create_profile_and_install, create_profile_and_install_from_file } from '@/helpers/pack'
 import { create, list } from '@/helpers/profile.js'
-import type { InstanceLoader } from '@/helpers/types'
+import type { InstanceLoader, ProfileKind } from '@/helpers/types'
 
 export function setupCreationModal(
 	notificationManager: AbstractWebNotificationManager,
@@ -147,6 +147,8 @@ export function setupCreationModal(
 				loaderVersion,
 				iconPath,
 				false,
+				undefined,
+				config.instanceKind.value as ProfileKind,
 			).catch(handleError)
 
 			trackEvent('InstanceCreate', {
