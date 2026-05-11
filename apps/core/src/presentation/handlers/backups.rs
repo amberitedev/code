@@ -70,8 +70,23 @@ pub async fn list_handler(
 	State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
 	validate_id(&id)?;
-	let backups = list_backups(&state, &id).await.map_err(ApiError::from)?;
-	Ok(Json(json!({ "backups": backups })))
+	let rows = list_backups(&state, &id).await.map_err(ApiError::from)?;
+	let backups: Vec<Value> = rows
+		.into_iter()
+		.map(|b| {
+			json!({
+				"id": b.id,
+				"name": b.name,
+				"size_bytes": b.size_bytes,
+				"locked": b.locked,
+				"automated": b.trigger == "automatic",
+				"status": "done",
+				"created_at": b.created_at,
+			})
+		})
+		.collect();
+	let active_operations: Vec<Value> = vec![];
+	Ok(Json(json!({ "backups": backups, "active_operations": active_operations })))
 }
 
 /// POST /instances/:id/backups
@@ -83,7 +98,15 @@ pub async fn create_handler(
 ) -> Result<Json<Value>, ApiError> {
 	validate_id(&id)?;
 	let backup = create_backup(&state, &id, "manual", body.name).await.map_err(ApiError::from)?;
-	Ok(Json(json!(backup)))
+	Ok(Json(json!({
+		"id": backup.id,
+		"name": backup.name,
+		"size_bytes": backup.size_bytes,
+		"locked": backup.locked,
+		"automated": backup.trigger == "automatic",
+		"status": "done",
+		"created_at": backup.created_at,
+	})))
 }
 
 /// DELETE /instances/:id/backups/:bid

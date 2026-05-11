@@ -34,10 +34,10 @@ pub async fn patch_properties_handler(
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
     let data_dir = fetch_data_dir(&state, &id).await?;
-    let updated = patch_properties(&data_dir, &body)
+    let _updated = patch_properties(&data_dir, &body)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(json!({ "updated_keys": updated })))
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// SEC-04: parse UUID and use instance_store — no raw SQL.

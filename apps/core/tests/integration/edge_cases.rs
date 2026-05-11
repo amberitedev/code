@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use serde_json::json;
 
@@ -177,6 +177,13 @@ async fn instance_has_all_expected_fields() {
     assert_eq!(body["loader"], "vanilla");
     assert_eq!(body["port"], 25565);
     assert_eq!(body["status"], "offline");
+
+    // data_dir must contain the instance UUID — proves no path collision between instances.
+    let data_dir = body["data_dir"].as_str().expect("data_dir must be a string");
+    assert!(
+        data_dir.contains(&id),
+        "data_dir must embed the instance UUID; got: {data_dir}"
+    );
 }
 
 /// GET /instances must return `{ "instances": [...] }` shape (not a bare array).
@@ -262,6 +269,11 @@ async fn create_two_instances_concurrently() {
         .collect();
     assert!(ids.contains(&id_a.as_str()), "server-alpha not in list");
     assert!(ids.contains(&id_b.as_str()), "server-beta not in list");
+
+    // Verify the names match — not just that 2 arbitrary items exist.
+    let names: Vec<&str> = instances.iter().map(|v| v["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"server-alpha"), "server-alpha name missing from list");
+    assert!(names.contains(&"server-beta"), "server-beta name missing from list");
 }
 
 // ── Auth (prod mode) ──────────────────────────────────────────────────────────

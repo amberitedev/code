@@ -6,6 +6,7 @@ import * as Instance from '@/pages/instance'
 import * as Library from '@/pages/library'
 import * as Project from '@/pages/project'
 import * as Server from '@/pages/server'
+import * as Synced from '@/pages/synced'
 
 /**
  * Configures application routing. Add page to pages/index and then add to route table here.
@@ -122,6 +123,50 @@ export default new createRouter({
 					meta: {
 						breadcrumb: [{ name: '?Server' }],
 					},
+				},
+			],
+		},
+		{
+			path: '/synced/:id',
+			name: 'SyncedInstance',
+			component: Synced.Index,
+			props: true,
+			children: [
+				{
+					path: '',
+					name: 'SyncedMods',
+					component: Synced.Mods,
+					meta: { breadcrumb: [{ name: '?Instance' }] },
+				},
+				{
+					path: 'files',
+					name: 'SyncedFiles',
+					component: Synced.Files,
+					meta: { breadcrumb: [{ name: '?Instance' }] },
+				},
+				{
+					path: 'worlds',
+					name: 'SyncedWorlds',
+					component: Synced.Worlds,
+					meta: { breadcrumb: [{ name: '?Instance' }] },
+				},
+				{
+					path: 'logs',
+					name: 'SyncedLogs',
+					component: Synced.Logs,
+					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?Instance' }] },
+				},
+				{
+					path: 'console',
+					name: 'SyncedConsole',
+					component: Synced.Console,
+					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?Instance' }] },
+				},
+				{
+					path: 'backups',
+					name: 'SyncedBackups',
+					component: Synced.Backups,
+					meta: { breadcrumb: [{ name: '?Instance' }] },
 				},
 			],
 		},

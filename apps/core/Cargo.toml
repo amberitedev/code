@@ -160,3 +160,11 @@ optional = true
 
 [dev-dependencies]
 tokio = { version = "1.47", features = ["full"] }
+
+[profile.dev]
+incremental = true
+debug = 1
+
+# Deps don't need debug info — cuts compile time significantly for heavy crates like deno/v8
+[profile.dev.package."*"]
+debug = false

@@ -8,7 +8,7 @@ use crate::application::state::AppState;
 pub struct FsEntry {
 	pub name: String,
 	pub path: String,
-	pub is_dir: bool,
+	pub r#type: String,
 	pub size: Option<u64>,
 	pub modified_at: Option<String>,
 }
@@ -62,7 +62,7 @@ fn entry_to_json(data_dir: &Path, path: &Path, is_dir: bool, meta: &std::fs::Met
 	FsEntry {
 		name,
 		path: rel,
-		is_dir,
+		r#type: if is_dir { "directory".to_string() } else { "file".to_string() },
 		size: if is_dir { None } else { Some(meta.len()) },
 		modified_at,
 	}

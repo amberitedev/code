@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use serde_json::Value;
 use tokio::fs;
@@ -46,9 +46,9 @@ async fn list_logs_shows_log_files() {
 
     let logs_dir = data_dir.join("logs");
     fs::create_dir_all(&logs_dir).await.unwrap();
-    fs::write(logs_dir.join("latest.log"), b"server started\n").await.unwrap();
+    let log_content = b"server started\n"; // 15 bytes
+    fs::write(logs_dir.join("latest.log"), log_content).await.unwrap();
     fs::write(logs_dir.join("2024-01-01-1.log.gz"), b"\x1f\x8b").await.unwrap();
-    // .txt should be filtered out
     fs::write(logs_dir.join("debug.txt"), b"ignored").await.unwrap();
 
     let res = app
@@ -60,13 +60,21 @@ async fn list_logs_shows_log_files() {
     assert_eq!(res.status(), 200);
     let body: Value = res.json().await.unwrap();
     let logs = body["logs"].as_array().unwrap();
-    assert_eq!(logs.len(), 2, "expected 2 log entries, got {}", logs.len());
+    assert_eq!(logs.len(), 2, "expected 2 log entries (.log + .log.gz), got {}", logs.len());
+
     let names: Vec<&str> = logs.iter().map(|l| l["filename"].as_str().unwrap()).collect();
-    assert!(names.contains(&"latest.log"));
-    assert!(names.contains(&"2024-01-01-1.log.gz"));
-    // Each entry has size_bytes and modified_at fields.
-    assert!(logs[0]["size_bytes"].is_number());
-    assert!(logs[0]["modified_at"].is_string());
+    assert!(names.contains(&"latest.log"), "latest.log must be in list");
+    assert!(names.contains(&"2024-01-01-1.log.gz"), ".log.gz must be in list");
+    assert!(!names.contains(&"debug.txt"), ".txt must be excluded from log list");
+
+    // size_bytes must match the actual bytes written to disk.
+    let latest = logs.iter().find(|l| l["filename"] == "latest.log").unwrap();
+    assert_eq!(
+        latest["size_bytes"],
+        log_content.len() as u64,
+        "size_bytes must equal actual file size"
+    );
+    assert!(latest["modified_at"].is_string(), "modified_at must be a string");
 }
 
 /// GET /instances/:nonexistent/logs returns 404.

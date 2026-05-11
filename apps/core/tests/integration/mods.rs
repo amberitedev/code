@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use reqwest::multipart;
 
@@ -77,7 +77,6 @@ async fn upload_mod_invalid_uuid() {
 async fn upload_mod_missing_field() {
     let app = common::TestApp::spawn().await;
     let id = common::create_test_instance(&app).await;
-    // Send an empty multipart form (no parts at all).
     let form = multipart::Form::new();
     let res = app
         .client
@@ -89,6 +88,56 @@ async fn upload_mod_missing_field() {
     assert_eq!(res.status(), 400);
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["error"].is_string());
+}
+
+/// Upload response body must include ok=true and echo the filename.
+/// Then GET /mods must list the uploaded file.
+#[tokio::test]
+async fn upload_mod_then_list_shows_file() {
+    let app = common::TestApp::spawn().await;
+    let id = common::create_test_instance(&app).await;
+
+    let form = multipart::Form::new().part(
+        "file",
+        multipart::Part::bytes(b"PK\x03\x04fake-jar-content".to_vec())
+            .file_name("my-mod.jar")
+            .mime_str("application/java-archive")
+            .unwrap(),
+    );
+    let upload = app
+        .client
+        .post(app.url(&format!("/instances/{id}/mods/upload")))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), 200, "upload must succeed");
+    let upload_body: serde_json::Value = upload.json().await.unwrap();
+    assert_eq!(upload_body["ok"], true, "upload response must have ok=true");
+    assert_eq!(
+        upload_body["filename"].as_str().unwrap(),
+        "my-mod.jar",
+        "upload response must echo the original filename"
+    );
+
+    // The uploaded file must now appear in the mod list.
+    let list: serde_json::Value = app
+        .client
+        .get(app.url(&format!("/instances/{id}/mods")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mods = list["mods"].as_array().unwrap();
+    assert_eq!(mods.len(), 1, "uploaded mod must appear in list");
+    let filenames: Vec<&str> = mods.iter().map(|m| m["filename"].as_str().unwrap()).collect();
+    assert!(
+        filenames.contains(&"my-mod.jar"),
+        "my-mod.jar not in mod list: {filenames:?}"
+    );
+    assert_eq!(mods[0]["enabled"], true, "freshly uploaded mod must be enabled");
 }
 
 // ── delete_mod ────────────────────────────────────────────────────────────────

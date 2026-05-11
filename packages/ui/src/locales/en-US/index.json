@@ -1247,20 +1247,11 @@
   "hosting.content.failed-to-bulk-update": {
     "defaultMessage": "Failed to update content"
   },
-  "hosting.content.failed-to-load-modpack-content": {
-    "defaultMessage": "Failed to load modpack content"
-  },
-  "hosting.content.failed-to-load-versions": {
-    "defaultMessage": "Failed to load versions"
-  },
   "hosting.content.failed-to-remove": {
     "defaultMessage": "Failed to remove content"
   },
   "hosting.content.failed-to-toggle": {
     "defaultMessage": "Failed to toggle {name}"
-  },
-  "hosting.content.failed-to-unlink": {
-    "defaultMessage": "Failed to unlink modpack"
   },
   "hosting.content.failed-to-update": {
     "defaultMessage": "Failed to update"

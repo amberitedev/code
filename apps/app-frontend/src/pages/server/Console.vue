@@ -22,13 +22,13 @@
 				ref="logEl"
 				class="flex-1 overflow-y-auto font-mono text-xs bg-[var(--color-raised-bg)] rounded-lg p-3 min-h-0"
 			>
-				<div v-for="(line, i) in lines" :key="i" class="whitespace-pre-wrap break-words leading-5">
-					{{ line }}
+				<div v-for="(line, i) in consoleLines" :key="i" class="whitespace-pre-wrap break-words leading-5">
+					{{ line.text }}
 				</div>
-				<div v-if="lines.length === 0 && connected" class="text-secondary">
+				<div v-if="consoleLines.length === 0 && isConnected" class="text-secondary">
 					Waiting for output...
 				</div>
-				<div v-if="!connected" class="text-secondary">
+				<div v-if="!isConnected" class="text-secondary">
 					Not connected — start your server to see console output.
 				</div>
 			</div>
@@ -37,14 +37,13 @@
 					v-model="inputLine"
 					class="flex-1 bg-[var(--color-raised-bg)] rounded px-3 py-1.5 font-mono text-sm outline-none"
 					placeholder="Enter command..."
-					:disabled="!connected"
+					:disabled="!isConnected"
 					@keydown.enter="sendLine"
 				/>
-				<ButtonStyled :disabled="!connected">
+				<ButtonStyled :disabled="!isConnected">
 					<button @click="sendLine">Send</button>
 				</ButtonStyled>
 			</div>
-			<p v-if="connectError" class="text-red-400 text-sm shrink-0">{{ connectError }}</p>
 		</template>
 
 		<template v-else>
@@ -86,18 +85,15 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreWsConnection } from '@amberite/core-client'
-import { ButtonStyled, injectCoreClient, injectModrinthServerContext } from '@modrinth/ui'
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { ButtonStyled, injectCoreClient, injectModrinthServerContext, useModrinthServersConsole } from '@modrinth/ui'
+import { nextTick, ref, watch } from 'vue'
 
 const { serverId } = injectModrinthServerContext()
 const client = injectCoreClient()
+const console$ = useModrinthServersConsole()
 
 const mode = ref<'live' | 'logs'>('live')
-const lines = ref<string[]>([])
 const inputLine = ref('')
-const connected = ref(false)
-const connectError = ref('')
 const logEl = ref<HTMLElement>()
 const logFiles = ref<string[]>([])
 const crashFiles = ref<string[]>([])
@@ -105,41 +101,18 @@ const selectedFile = ref('')
 const fileContent = ref('')
 const fileLoading = ref(false)
 
-let ws: CoreWsConnection | null = null
-let lastStatus = ''
+const consoleLines = console$.output
+const isConnected = injectModrinthServerContext().isConnected
 
-async function connect() {
-	connectError.value = ''
-	try {
-		const ticket = await client.issueWsTicket()
-		ws = client.openConsole(serverId, ticket)
-		ws.on('open', () => {
-			connected.value = true
-			connectError.value = ''
-		})
-		ws.on('log', async (line) => {
-			lines.value.push(line)
-			await nextTick()
-			logEl.value?.scrollTo(0, logEl.value.scrollHeight)
-		})
-		ws.on('state', (status) => {
-			lastStatus = status
-		})
-		ws.on('close', () => {
-			connected.value = false
-			switchToLogs()
-		})
-		ws.on('error', () => {
-			connectError.value = 'WebSocket error — is the server running?'
-		})
-	} catch (e) {
-		connectError.value = `Failed to connect: ${e}`
-	}
-}
+watch(consoleLines, async () => {
+	if (mode.value !== 'live') return
+	await nextTick()
+	logEl.value?.scrollTo(0, logEl.value.scrollHeight)
+}, { deep: true })
 
 function sendLine() {
-	if (!ws || !inputLine.value.trim() || !connected.value) return
-	ws.send(inputLine.value)
+	if (!inputLine.value.trim() || !isConnected.value) return
+	client.sendCommand(serverId, inputLine.value)
 	inputLine.value = ''
 }
 
@@ -152,10 +125,10 @@ async function switchToLogs() {
 		])
 		logFiles.value = logs
 		crashFiles.value = crashes
-		if (lastStatus === 'crashed' && crashes.length) {
-			await loadFile('crash', crashes[0])
-		} else if (logs.includes('latest.log')) {
+		if (logs.includes('latest.log')) {
 			await loadFile('log', 'latest.log')
+		} else if (crashes.length) {
+			await loadFile('crash', crashes[0])
 		}
 	} catch {
 		// Files unavailable — leave list empty.
@@ -179,7 +152,4 @@ async function loadFile(type: 'log' | 'crash', filename: string) {
 		fileLoading.value = false
 	}
 }
-
-onMounted(connect)
-onUnmounted(() => ws?.close())
 </script>

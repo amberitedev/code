@@ -34,7 +34,7 @@ apps/core/
 | `src/infrastructure/` | `src/infrastructure/AGENTS.md` | SQLite, auth, PTY, Deno macro engine, Minecraft HTTP clients |
 | `src/presentation/` | `src/presentation/AGENTS.md` | Axum router, handlers, JWT extractor, error mapping |
 | `migrations/` | `migrations/AGENTS.md` | Schema history, current effective schema, migration rules |
-| `tests/` | `tests/AGENTS.md` | TestApp fixture, test file breakdown, 112 passing tests |
+| `tests/` | `tests/AGENTS.md` | TestApp fixture, test file breakdown, 94 integration tests |
 | `scripts/` | `scripts/AGENTS.md` | Live diagnostic runner against a running Core |
 
 ## Build facts

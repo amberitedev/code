@@ -1,29 +1,41 @@
 <template>
 	<div class="h-full w-full pt-6">
+		<div
+			v-if="coreError"
+			class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
+		>
+			<ErrorInformationCard
+				title="Core Unavailable"
+				description="Amberite Core is not responding. Make sure Core is running and try again."
+				:icon="IssuesIcon"
+			/>
+		</div>
 		<ServersManageRootLayout
+			v-else
 			:server-id="coreInstanceId"
+			:nav-href-prefix="`/server/${encodeURIComponent(profilePath)}`"
 			:reload-page="() => router.go(0)"
 			:resolve-viewer="resolveViewer"
 			:show-copy-id-action="themeStore.devMode"
 			:auth-user="authUser"
 			:navigate-to-billing="() => {}"
 			:navigate-to-servers="() => router.push('/hosting/manage')"
-		:browse-modpacks="
-			({ serverId: sid, worldId: wid, from }) => {
+			:browse-modpacks="
+				({ serverId: sid, worldId: wid, from }) => {
 				router.push({
 					path: '/browse/modpack',
-					query: { sid, wid: wid ?? undefined, from, back: from ? undefined : `/server/${encodeURIComponent(profilePath)}/content` },
+					query: { sid, wid: wid ?? undefined, from, source: 'core', back: from ? undefined : `/server/${encodeURIComponent(profilePath)}/content` },
 				})
-			}
-		"
-		:browse-content="
-			({ serverId: sid, worldId: wid, type }) => {
+				}
+			"
+			:browse-content="
+				({ serverId: sid, worldId: wid, type }) => {
 				router.push({
 					path: `/browse/${type}`,
-					query: { sid, wid: wid ?? undefined, back: `/server/${encodeURIComponent(profilePath)}/content` },
+					query: { sid, wid: wid ?? undefined, source: 'core', back: `/server/${encodeURIComponent(profilePath)}/content` },
 				})
-			}
-		"
+				}
+			"
 		>
 			<template #default="{ onReinstall, onReinstallFailed }">
 				<RouterView v-slot="{ Component }">
@@ -44,8 +56,9 @@
 
 <script setup lang="ts">
 import { CoreApiClient } from '@amberite/core-client'
-import { injectAuth, provideCoreClient, ServersManageRootLayout } from '@modrinth/ui'
-import { computed } from 'vue'
+import { IssuesIcon } from '@modrinth/assets'
+import { ErrorInformationCard, injectAuth, provideCoreClient, ServersManageRootLayout } from '@modrinth/ui'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { get_user } from '@/helpers/cache'
@@ -61,6 +74,8 @@ const auth = injectAuth()
 const themeStore = useTheming()
 const breadcrumbs = useBreadcrumbs()
 
+const coreError = ref(false)
+
 const profilePath = route.params.id as string
 const profile = await getProfile(profilePath).catch(() => null)
 const coreInstanceId = profile?.core_instance_id ?? profilePath
@@ -70,8 +85,18 @@ if (profile?.name) {
 	breadcrumbs.setContext({ name: profile.name, link: `/server/${encodeURIComponent(profilePath)}/content` })
 }
 
-const baseUrl = await core_get_url()
-provideCoreClient(new CoreApiClient(baseUrl))
+let baseUrl: string
+
+try {
+	baseUrl = await core_get_url()
+} catch {
+	coreError.value = true
+	baseUrl = ''
+}
+
+if (!coreError.value) {
+	provideCoreClient(new CoreApiClient(baseUrl))
+}
 
 const authUser = computed(() => {
 	const user = auth.user.value

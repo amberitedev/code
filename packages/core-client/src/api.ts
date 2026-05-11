@@ -3,7 +3,7 @@
  * Each function accepts a `baseUrl` (no trailing slash) and returns a typed promise.
  * No Tauri-specific code — uses the native fetch API.
  *
- * Key functions: get/list/create/delete instances, start/stop/kill/restart,
+ * Key functions: get/list/create/delete/patch instances, start/stop/kill/restart,
  * issueWsTicket, listMods/addMod/uploadMod/deleteMod/toggleMod/updateMod/updateAllMods,
  * getStats, listLogs/readLog, listCrashReports/readCrashReport,
  * getProperties/patchProperties, listFs/downloadFile/deleteFs/uploadFile,
@@ -15,6 +15,7 @@ import type {
 	CoreInstance,
 	CoreInstanceSummary,
 	CoreCreateInstanceBody,
+	CorePatchInstanceBody,
 	CoreStats,
 	CoreMod,
 	CoreFsListing,
@@ -26,7 +27,13 @@ import type {
 } from './types'
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-	const res = await fetch(url, init)
+	let res: Response
+	try {
+		res = await fetch(url, init)
+	} catch (e) {
+		const reason = e instanceof Error ? e.message : String(e)
+		throw new Error(`Core API network error: ${reason}`)
+	}
 	if (!res.ok) {
 		let msg = res.statusText
 		try {
@@ -37,7 +44,12 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 		}
 		throw new Error(`Core API ${res.status}: ${msg}`)
 	}
-	return res.json() as Promise<T>
+	try {
+		return await res.json()
+	} catch (e) {
+		const reason = e instanceof Error ? e.message : String(e)
+		throw new Error(`Core API: invalid JSON response from ${url} — ${reason}`)
+	}
 }
 
 // ── Instances ─────────────────────────────────────────────────────────────────
@@ -60,6 +72,18 @@ export function createInstance(base: string, body: CoreCreateInstanceBody): Prom
 
 export function deleteInstance(base: string, id: string): Promise<{ ok: boolean }> {
 	return apiFetch(`${base}/instances/${id}`, { method: 'DELETE' })
+}
+
+export function patchInstance(
+	base: string,
+	id: string,
+	body: CorePatchInstanceBody,
+): Promise<CoreInstance> {
+	return apiFetch(`${base}/instances/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
 }
 
 // ── Instance lifecycle ────────────────────────────────────────────────────────

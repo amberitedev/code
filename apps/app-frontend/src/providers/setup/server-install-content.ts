@@ -1,3 +1,4 @@
+import { CoreApiClient } from '@amberite/core-client'
 import type { Archon, Labrinth } from '@modrinth/api-client'
 import {
 	createContext,
@@ -7,6 +8,8 @@ import {
 } from '@modrinth/ui'
 import { computed, type ComputedRef, nextTick, type Ref, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+
+import { core_get_url } from '@/helpers/core'
 
 type ServerFlowFrom = 'onboarding' | 'reset-server'
 type ServerInstallableType = 'modpack' | 'mod' | 'plugin' | 'datapack'
@@ -87,6 +90,7 @@ export function createServerInstallContent(opts: {
 	const isFromWorlds = computed(() => browseFrom.value === 'worlds')
 	const isServerContext = computed(() => !!serverIdQuery.value)
 	const isSetupServerContext = computed(() => !!serverIdQuery.value && !!serverFlowFrom.value)
+	const isCoreContext = computed(() => route.query.source === 'core')
 
 	const serverContextWorldId = ref<string | null>(worldIdQuery.value)
 	const serverContextServerData = ref<Archon.Servers.v0.Server | null>(null)
@@ -101,6 +105,9 @@ export function createServerInstallContent(opts: {
 		}
 		if (serverFlowFrom.value === 'reset-server') {
 			return `/hosting/manage/${sid}?openSettings=installation`
+		}
+		if (isCoreContext.value) {
+			return backOverride.value ?? `/server/${sid}/content`
 		}
 		return backOverride.value ?? `/hosting/manage/${sid}/content`
 	})
@@ -141,9 +148,57 @@ export function createServerInstallContent(opts: {
 		}
 	}
 
+	async function fetchCoreServerData(sid: string) {
+		const baseUrl = await core_get_url()
+		const coreClient = new CoreApiClient(baseUrl)
+		const instance = await coreClient.getInstance(sid)
+		serverContextServerData.value = {
+			server_id: instance.id,
+			name: instance.name,
+			owner_id: '',
+			net: { ip: '127.0.0.1', port: instance.port, domain: '' },
+			game: 'Minecraft',
+			backup_quota: 0,
+			used_backup_quota: 0,
+			status: 'available',
+			suspension_reason: null,
+			loader: instance.loader as Archon.Servers.v0.Loader,
+			loader_version: instance.loader_version ?? '',
+			mc_version: instance.game_version,
+			upstream: null,
+			sftp_username: '',
+			sftp_password: '',
+			sftp_host: '',
+			datacenter: 'local',
+			notices: [],
+			node: null,
+			flows: { intro: false },
+			is_medal: false,
+		} as Archon.Servers.v0.Server
+	}
+
+	async function refreshCoreInstalledContent(sid: string) {
+		const baseUrl = await core_get_url()
+		const coreClient = new CoreApiClient(baseUrl)
+		const mods = await coreClient.listMods(sid)
+		serverContentProjectIds.value = new Set(
+			mods.mods.map((m) => m.modrinth_project_id).filter((id): id is string => !!id),
+		)
+	}
+
 	async function initServerContext() {
 		const sid = serverIdQuery.value
 		if (!sid) return
+
+		if (isCoreContext.value) {
+			try {
+				await fetchCoreServerData(sid)
+				await refreshCoreInstalledContent(sid)
+			} catch (err) {
+				handleError(err as Error)
+			}
+			return
+		}
 
 		try {
 			serverContextServerData.value = await client.archon.servers_v0.get(sid)
@@ -174,6 +229,15 @@ export function createServerInstallContent(opts: {
 
 			if (sid !== prevSid) {
 				serverContentProjectIds.value = new Set()
+				if (isCoreContext.value) {
+					try {
+						await fetchCoreServerData(sid)
+						await refreshCoreInstalledContent(sid)
+					} catch (err) {
+						handleError(err as Error)
+					}
+					return
+				}
 				try {
 					serverContextServerData.value = await client.archon.servers_v0.get(sid)
 				} catch (err) {
@@ -263,6 +327,57 @@ export function createServerInstallContent(opts: {
 		const contentType = getCurrentServerInstallType()
 		const sid = serverIdQuery.value
 		const wid = effectiveServerWorldId.value
+
+		if (isCoreContext.value) {
+			if (!sid) {
+				throw new Error('No server is available for install.')
+			}
+			if (contentType === 'modpack') {
+				throw new Error('Modpack installation is not supported for local Core servers.')
+			}
+
+			const versions = await client.labrinth.versions_v2.getProjectVersions(project.project_id, {
+				include_changelog: false,
+			})
+			const serverLoader = (serverContextServerData.value?.loader ?? '').toLowerCase()
+			const serverGameVersion = (serverContextServerData.value?.mc_version ?? '').trim()
+			const compatibleLoaders = getCompatibleLoaders(serverLoader)
+
+			const hasGameVersionMatch = (version: Labrinth.Versions.v2.Version) =>
+				!serverGameVersion || version.game_versions.includes(serverGameVersion)
+			const hasLoaderMatch = (version: Labrinth.Versions.v2.Version) => {
+				if (contentType === 'datapack') return true
+				if (compatibleLoaders.size === 0) return true
+				return version.loaders.some((loader) => compatibleLoaders.has(normalizeLoader(loader)))
+			}
+
+			let matchingVersion = versions.find(
+				(version) => hasGameVersionMatch(version) && hasLoaderMatch(version),
+			)
+			if (!matchingVersion) {
+				matchingVersion = versions.find((version) => hasLoaderMatch(version))
+			}
+			if (!matchingVersion) {
+				matchingVersion = versions.find((version) => hasGameVersionMatch(version))
+			}
+			if (!matchingVersion) {
+				matchingVersion = versions[0]
+			}
+			if (!matchingVersion) {
+				throw new Error('No installable version was found for this project.')
+			}
+
+			const baseUrl = await core_get_url()
+			const coreClient = new CoreApiClient(baseUrl)
+			await coreClient.addMod(sid, matchingVersion.id)
+
+			serverContentProjectIds.value = new Set([
+				...serverContentProjectIds.value,
+				project.project_id,
+			])
+			return true
+		}
+
 		if (!sid || !wid) {
 			throw new Error('No server world is available for install.')
 		}
@@ -331,8 +446,19 @@ export function createServerInstallContent(opts: {
 
 	async function handleServerModpackFlowCreate(config: CreationFlowContextValue) {
 		const sid = serverIdQuery.value
+		if (!sid || !config.modpackSelection.value) {
+			config.loading.value = false
+			return
+		}
+
+		if (isCoreContext.value) {
+			handleError(new Error('Modpack installation is not supported for local Core servers.'))
+			config.loading.value = false
+			return
+		}
+
 		const wid = effectiveServerWorldId.value
-		if (!sid || !wid || !config.modpackSelection.value) {
+		if (!wid) {
 			config.loading.value = false
 			return
 		}

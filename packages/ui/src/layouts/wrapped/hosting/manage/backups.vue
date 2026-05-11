@@ -136,23 +136,21 @@
 										/>
 										<div class="w-px flex-1 bg-surface-5" />
 									</div>
-									<BackupItem
-										class="my-1.5 min-w-0 flex-1"
-										:backup="backup"
-										:selected="selectedIds.has(backup.id)"
-										:restore-disabled="backupRestoreDisabled"
-										:kyros-url="server.node?.instance"
-										:jwt="server.node?.token"
-										:show-copy-id-action="showCopyIdAction"
-										:show-debug-info="showDebugInfo"
-										@download="() => triggerDownloadAnimation()"
-										@rename="() => renameBackupModal?.show(backup)"
-										@restore="() => restoreBackupModal?.show(backup)"
-										@delete="
-											(skipConfirmation?: boolean) =>
-												skipConfirmation ? deleteBackup(backup) : deleteBackupModal?.show(backup)
-										"
-									/>
+						<BackupItem
+							class="my-1.5 min-w-0 flex-1"
+							:backup="backup"
+							:selected="selectedIds.has(backup.id)"
+							:restore-disabled="backupRestoreDisabled"
+							:show-copy-id-action="showCopyIdAction"
+							:show-debug-info="showDebugInfo"
+							@download="() => triggerDownloadAnimation()"
+							@rename="() => renameBackupModal?.show(backup)"
+							@restore="() => restoreBackupModal?.show(backup)"
+							@delete="
+								(skipConfirmation?: boolean) =>
+									skipConfirmation ? deleteBackup(backup) : deleteBackupModal?.show(backup)
+							"
+						/>
 								</div>
 							</TransitionGroup>
 						</template>
@@ -241,7 +239,7 @@
 <script setup lang="ts">
 import type { CoreBackup } from '@amberite/core-client'
 import { CalendarIcon, DownloadIcon, IssuesIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useMutation } from '@tanstack/vue-query'
 import dayjs from 'dayjs'
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
@@ -333,8 +331,7 @@ const filterPillOptions = computed<FilterPillOption[]>(() => [
 	{ id: 'auto', label: formatMessage(messages.filterAuto) },
 ])
 const coreClient = injectCoreClient()
-const queryClient = useQueryClient()
-const { server, serverId, worldId, busyReasons } = injectModrinthServerContext()
+const { serverId, worldId, busyReasons } = injectModrinthServerContext()
 
 const props = defineProps<{
 	isServerRunning: boolean
@@ -465,18 +462,11 @@ const backupRestoreDisabled = computed(() => {
 })
 
 const backupCreationDisabled = computed(() => {
-	const quota = server.value.backup_quota
-	if (quota !== undefined) {
-		const usedCount = backups.value.length ?? server.value.used_backup_quota ?? 0
-		if (usedCount >= quota) {
-			return `All ${quota} of your backup slots are in use`
-		}
-	}
 	if (busyReasons.value.length > 0) {
 		return formatMessage(busyReasons.value[0].reason)
 	}
 	if (hasActiveCreate.value) {
-		return 'A backup is already queued or in progress'
+		return 'A backup is already in progress'
 	}
 	return undefined
 })

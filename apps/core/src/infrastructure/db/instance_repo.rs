@@ -135,6 +135,37 @@ impl InstanceStore for InstanceRepo {
         Ok(())
     }
 
+    async fn update_name(&self, id: &InstanceId, name: &str) -> Result<(), StoreError> {
+        let result = sqlx::query("UPDATE instances SET name = ?, updated_at = ? WHERE id = ?")
+            .bind(name)
+            .bind(Utc::now().to_rfc3339())
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn update_java_version(
+        &self,
+        id: &InstanceId,
+        java_version: Option<i64>,
+    ) -> Result<(), StoreError> {
+        let result =
+            sqlx::query("UPDATE instances SET java_version = ?, updated_at = ? WHERE id = ?")
+                .bind(java_version)
+                .bind(Utc::now().to_rfc3339())
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
     async fn delete(&self, id: &InstanceId) -> Result<(), StoreError> {
         let result = sqlx::query("DELETE FROM instances WHERE id = ?")
             .bind(id.to_string())

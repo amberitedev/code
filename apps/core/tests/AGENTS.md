@@ -1,13 +1,13 @@
 # tests/
 
-Integration test suite for Amberite Core. **112 passing tests, 0 ignored.**
+Integration test suite for Amberite Core. **94 integration tests, 0 ignored.** (Plus 20 unit tests in `src/`.).
 
 ## Running tests
 
 ```bash
-cargo test --tests                    # all integration + unit tests (Windows — avoids binary lock)
-cargo test --tests -- --nocapture     # with stdout
-cargo test --tests --test setup       # single test file
+cargo test --tests                       # all integration + unit tests (Windows — avoids binary lock)
+cargo test --tests -- --nocapture        # with stdout
+cargo test --tests -- health             # filter by test name prefix
 cargo test --tests -- --test-threads=1  # serial (avoids port conflicts on slow CI)
 ```
 
@@ -15,20 +15,35 @@ cargo test --tests -- --test-threads=1  # serial (avoids port conflicts on slow 
 
 ## Structure
 
+All integration tests compile into **one binary** (`tests/integration.rs`). Previously there were 10 separate files at `tests/*.rs`, each producing its own binary — that caused 10 simultaneous `link.exe` processes against `rusty_v8.lib` (238 MB), exhausting RAM. The fix: a single entry point with `#[path]` attributes pointing into `tests/integration/`.
+
 ```
 tests/
-  common/mod.rs       — TestApp + fixtures (shared by all test files)
-  health.rs           — 3 tests:  GET /health, /version, /java
-  setup.rs            — 5 tests:  pairing flow end-to-end, lockout (SEC-01)
-  instances.rs        — 9 tests:  CRUD, body validation, SEC-04 UUID check
-  logs.rs             — 11 tests: list/read logs + crash-reports, path traversal (SEC-03)
-  security.rs         — 9 tests:  JWT enforcement, lockout, path traversal, UUID injection
-  lifecycle.rs        — 11 tests: start/stop/kill/command via MockSpawner
-  edge_cases.rs       — 11 tests: concurrent creates, double-delete, field presence, auth guard
-  instance_control.rs — 12 tests: invalid UUIDs, nonexistent IDs, offline-state 409s
-  mods.rs             — 10 tests: mod list/upload/delete guards, invalid UUIDs
-  properties_stats.rs — 14 tests: GET/PATCH properties, stats, diagnostics
+  integration.rs            — single binary root; declares all modules via #[path]
+  integration/
+    common/mod.rs           — TestApp + fixtures (shared by all modules)
+    health.rs               — 3 tests:  GET /health, /version (semver parse), /java
+    setup.rs                — 5 tests:  pairing flow end-to-end, lockout (SEC-01)
+    instances.rs            — 10 tests: CRUD, UUID format + roundtrip, body validation, SEC-04 UUID check
+    logs.rs                 — 11 tests: list/read logs + crash-reports, exact size check, path traversal (SEC-03)
+    security.rs             — 9 tests:  JWT enforcement, lockout, path traversal, UUID injection
+    lifecycle.rs            — 11 tests: start/stop/kill/command via MockSpawner
+    edge_cases.rs           — 11 tests: concurrent creates, double-delete, field presence, auth guard
+    instance_control.rs     — 12 tests: invalid UUIDs, nonexistent IDs, offline-state 409s
+    mods.rs                 — 11 tests: mod list/upload→list roundtrip, delete guards, invalid UUIDs
+    properties_stats.rs     — 11 tests: GET/PATCH properties, stats (removed 3 duplicate diagnostics)
 ```
+
+### Why `#[path]` in `integration.rs`?
+
+Rust treats each `.rs` file under `tests/` as a separate crate root (its own binary). A `mod foo;` inside `tests/integration.rs` looks for `tests/foo.rs`, not `tests/integration/foo.rs`. The `#[path]` attribute overrides this lookup:
+
+```rust
+#[path = "integration/health.rs"]
+mod health;
+```
+
+Each module file uses `use crate::common;` (not `mod common;`) because `common` is declared at the crate root in `integration.rs`.
 
 ## `TestApp` (`common/mod.rs`)
 

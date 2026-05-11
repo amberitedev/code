@@ -4,8 +4,8 @@
  * Instantiate once with the Core base URL, then provide it via provideCoreClient().
  * All HTTP methods delegate to api.ts; WebSocket connections are created via openConsole().
  *
- * Key methods: getInstance, listInstances, createInstance, deleteInstance,
- * start/stop/kill/restart, issueWsTicket, openConsole, getStats,
+ * Key methods: getInstance, listInstances, createInstance, deleteInstance, renameInstance,
+ * updateJavaVersion, start/stop/kill/restart, issueWsTicket, openConsole, getStats,
  * listMods/addMod/uploadModFile/deleteMod/toggleMod/updateMod/updateAllMods,
  * listLogs/readLog, listCrashReports/readCrashReport,
  * getProperties/patchProperties, listDirectory/downloadFile/deleteFileOrFolder/uploadFile,
@@ -17,6 +17,7 @@ import type {
 	CoreInstance,
 	CoreInstanceSummary,
 	CoreCreateInstanceBody,
+	CorePatchInstanceBody,
 	CoreStats,
 	CoreMod,
 	CoreFsListing,
@@ -48,6 +49,14 @@ export class CoreApiClient {
 
 	deleteInstance(id: string): Promise<void> {
 		return api.deleteInstance(this.baseUrl, id).then(() => undefined)
+	}
+
+	renameInstance(id: string, name: string): Promise<CoreInstance> {
+		return api.patchInstance(this.baseUrl, id, { name })
+	}
+
+	updateJavaVersion(id: string, javaVersion: number | null): Promise<CoreInstance> {
+		return api.patchInstance(this.baseUrl, id, { java_version: javaVersion })
 	}
 
 	// ── Lifecycle ───────────────────────────────────────────────────────────

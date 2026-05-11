@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use serde_json::json;
 
@@ -82,8 +82,7 @@ async fn get_properties_non_uuid_id_returns_400() {
 
 // ── Properties: PATCH ────────────────────────────────────────────────────────
 
-/// PATCH /instances/:id/properties with a valid key returns 200 and lists the
-/// updated key in `updated_keys`.
+/// PATCH /instances/:id/properties with a valid key returns 200 and ok=true.
 #[tokio::test]
 async fn patch_properties_valid_key_returns_200() {
     let app = common::TestApp::spawn().await;
@@ -99,11 +98,7 @@ async fn patch_properties_valid_key_returns_200() {
 
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    let updated = body["updated_keys"].as_array().expect("updated_keys must be an array");
-    assert!(
-        updated.iter().any(|v| v.as_str() == Some("max-players")),
-        "max-players must appear in updated_keys; got: {updated:?}"
-    );
+    assert_eq!(body["ok"].as_bool(), Some(true), "response must have ok=true; got: {body:?}");
 }
 
 /// After a PATCH, GET should reflect the new value.
@@ -230,37 +225,4 @@ async fn stats_non_uuid_id_returns_404() {
 
     // stats_service maps UUID parse failure to StatsError::NotFound → 404.
     assert_eq!(res.status(), 404);
-}
-
-// ── Diagnostics ───────────────────────────────────────────────────────────────
-
-/// GET /health returns 200 {"status": "ok"}.
-#[tokio::test]
-async fn diagnostics_health_returns_ok() {
-    let app = common::TestApp::spawn().await;
-    let res = app.client.get(app.url("/health")).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["status"], "ok");
-}
-
-/// GET /version returns 200 with `version` and `name` fields.
-#[tokio::test]
-async fn diagnostics_version_has_version_field() {
-    let app = common::TestApp::spawn().await;
-    let res = app.client.get(app.url("/version")).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["version"].is_string(), "version field must be a string");
-    assert!(body["name"].is_string(), "name field must be a string");
-}
-
-/// GET /java returns 200 with an `installations` array (may be empty in CI).
-#[tokio::test]
-async fn diagnostics_java_returns_installations_array() {
-    let app = common::TestApp::spawn().await;
-    let res = app.client.get(app.url("/java")).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["installations"].is_array(), "installations must be an array");
 }

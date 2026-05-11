@@ -94,6 +94,54 @@ pub async fn create_instance(
     Ok((StatusCode::CREATED, Json(record_detail(&record))))
 }
 
+/// PATCH /instances/:id — update mutable instance fields (name, java_version).
+///
+/// All fields are optional. `java_version: null` clears the override.
+#[derive(Deserialize)]
+pub struct PatchBody {
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_option")]
+    pub java_version: Option<Option<i64>>,
+}
+
+/// Deserializes a JSON field that distinguishes between absent (`None`) and
+/// explicit `null` (`Some(None)`). Required because `#[serde(default)]` alone
+/// maps both absent and null to `None`.
+fn deserialize_optional_option<'de, D>(d: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<i64>::deserialize(d)?))
+}
+
+pub async fn patch_instance(
+    _auth: AuthUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchBody>,
+) -> Result<Json<Value>, ApiError> {
+    let iid = id
+        .parse::<InstanceId>()
+        .map_err(|_| ApiError::BadRequest("invalid instance id — must be a UUID".into()))?;
+
+    if let Some(ref name) = body.name {
+        if name.trim().is_empty() {
+            return Err(ApiError::BadRequest("name cannot be empty".into()));
+        }
+        state.instance_store.update_name(&iid, name).await?;
+    }
+
+    if let Some(java_version) = body.java_version {
+        state
+            .instance_store
+            .update_java_version(&iid, java_version)
+            .await?;
+    }
+
+    let record = state.instance_store.get(&iid).await?;
+    Ok(Json(record_detail(&record)))
+}
+
 /// DELETE /instances/:id — delete an instance (must be offline).
 pub async fn delete_instance(
     _auth: AuthUser,

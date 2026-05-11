@@ -126,6 +126,12 @@ export interface CoreCreateInstanceBody {
 	memory?: CoreMemory
 }
 
+/** Request body for PATCH /instances/:id */
+export interface CorePatchInstanceBody {
+	name?: string
+	java_version?: number | null
+}
+
 /** Request body for POST /instances/:id/backups/schedule */
 export interface CoreBackupScheduleBody {
 	enabled: boolean

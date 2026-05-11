@@ -30,6 +30,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances", get(instances::list_instances))
         .route("/instances", post(instances::create_instance))
         .route("/instances/:id", get(instances::get_instance))
+        .route("/instances/:id", patch(instances::patch_instance))
         .route("/instances/:id", delete(instances::delete_instance))
         // Instance lifecycle
         .route("/instances/:id/start", post(instance_control::start))

@@ -327,9 +327,13 @@ async function fetchInstance() {
 
 	instance.value = await get(route.params.id as string).catch(handleError)
 
-	// AMBERITE PATCH: server/synced profiles have their own management page
-	if (instance.value?.kind === 'server' || instance.value?.kind === 'synced') {
+	// AMBERITE PATCH: server/synced profiles have their own management pages
+	if (instance.value?.kind === 'server') {
 		await router.replace(`/server/${encodeURIComponent(route.params.id as string)}`)
+		return
+	}
+	if (instance.value?.kind === 'synced') {
+		await router.replace(`/synced/${encodeURIComponent(route.params.id as string)}`)
 		return
 	}
 

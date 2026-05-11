@@ -237,6 +237,9 @@
 </template>
 
 <script setup lang="ts">
+// ServerListing.vue — server card component for the servers list page.
+// Key functions: navigateToServer (L417), image query + processImageBlob (L523),
+// projectData query (L491), pendingChange/notice display (L441+), status helpers (L430+).
 import type { Archon } from '@modrinth/api-client'
 import {
 	DownloadIcon,
@@ -523,7 +526,7 @@ async function dataURLToBlob(dataURL: string): Promise<Blob> {
 const { data: image } = useQuery({
 	queryKey: ['server-icon', props.server_id] as const,
 	queryFn: async (): Promise<string | null> => {
-		if (!props.server_id || props.status !== 'available') return null
+		if (!props.server_id || props.status !== 'available' || !props.upstream) return null
 
 		try {
 			const fsAuth = await archon.servers_v0.getFilesystemAuth(props.server_id)

@@ -5,9 +5,12 @@
 	"main": "./src/index.ts",
 	"scripts": {
 		"lint": "eslint . && prettier --check .",
-		"fix": "eslint . --fix && prettier --write ."
+		"fix": "eslint . --fix && prettier --write .",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"devDependencies": {
-		"@modrinth/tooling-config": "workspace:*"
+		"@modrinth/tooling-config": "workspace:*",
+		"vitest": "^3.2.0"
 	}
 }

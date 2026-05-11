@@ -30,7 +30,7 @@ import { computed } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
-import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
+import { injectCoreClient, injectModrinthServerContext } from '#ui/providers'
 
 const props = defineProps<{
 	isUpdating: boolean
@@ -41,7 +41,7 @@ const props = defineProps<{
 	serverId: string
 }>()
 
-const client = injectModrinthClient()
+const coreClient = injectCoreClient()
 
 const { powerState } = injectModrinthServerContext()
 
@@ -63,6 +63,10 @@ const saveAndPower = async () => {
 	} catch {
 		return
 	}
-	await client.archon.servers_v0.power(props.serverId, isStopped.value ? 'Start' : 'Restart')
+	if (isStopped.value) {
+		await coreClient.start(props.serverId)
+	} else {
+		await coreClient.restart(props.serverId)
+	}
 }
 </script>

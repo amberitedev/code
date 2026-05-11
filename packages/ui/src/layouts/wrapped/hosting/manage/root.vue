@@ -58,8 +58,8 @@
 		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
 	>
 		<ErrorInformationCard
-			title="An error occured."
-			description="Please contact Modrinth Support."
+			title="An error occurred."
+			description="The server could not be found or you don't have permission to access it."
 			:icon="TransferIcon"
 			icon-color="orange"
 			:error-details="generalErrorDetails"
@@ -67,29 +67,27 @@
 		/>
 	</div>
 	<div
-		v-else-if="serverError || !nodeAccessible"
+		v-else-if="serverError"
 		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
 	>
 		<ErrorInformationCard
-			title="Server Node Unavailable"
+			title="Server Unavailable"
 			:icon="TriangleAlertIcon"
 			icon-color="red"
-			:action="nodeUnavailableAction"
-			:error-details="nodeUnavailableDetails"
+			:action="generalErrorAction"
+			:error-details="generalErrorDetails"
 		>
 			<template #description>
 				<div class="text-md space-y-4">
 					<p class="leading-[170%] text-secondary">
-						Your server's node, where your Modrinth Server is physically hosted, is not accessible
-						at the moment. We are working to resolve the issue as quickly as possible.
+						Your Core server is not responding. Make sure Amberite Core is running and reachable.
 					</p>
 					<p class="leading-[170%] text-secondary">
-						Your data is safe and will not be lost, and your server will be back online as soon as
-						the issue is resolved.
+						If the problem persists, check Core's logs for errors and verify your network
+						connection.
 					</p>
 					<p class="leading-[170%] text-secondary">
-						If reloading does not work initially, please contact Modrinth Support via the chat
-						bubble in the bottom right corner and we'll be happy to help.
+						Try reloading the page or restarting Core if the issue continues.
 					</p>
 				</div>
 			</template>
@@ -211,45 +209,45 @@
 											errorMessage.toLocaleLowerCase() === 'the specified version may be incorrect'
 										"
 									>
-										An invalid loader or Minecraft version was specified and could not be installed.
-										<ul class="m-0 mt-4 p-0 pl-4">
-											<li>
-												If this version of Minecraft was released recently, please check if Modrinth
-												Hosting supports it.
-											</li>
-											<li>
-												If you've installed a modpack, it may have been packaged incorrectly or may
-												not be compatible with the loader.
-											</li>
-											<li>
-												Your server may need to be reinstalled with a valid mod loader and version.
-												You can change the loader by clicking the "Change Loader" button.
-											</li>
-											<li>
-												If you're stuck, please contact Modrinth Support with the information below:
-											</li>
-										</ul>
-										<ButtonStyled>
-											<button class="mt-2" @click="copyServerDebugInfo">
-												<CopyIcon v-if="!copied" />
-												<CheckIcon v-else />
-												Copy Debug Info
-											</button>
-										</ButtonStyled>
-									</div>
-									<div v-if="errorMessage.toLocaleLowerCase() === 'internal error'">
-										An internal error occurred while installing your server. Don't fret — try
-										reinstalling your server, and if the problem persists, please contact Modrinth
-										support with your server's debug information.
-									</div>
-									<div
-										v-if="errorMessage.toLocaleLowerCase() === 'this version is not yet supported'"
-									>
-										An error occurred while installing your server because Modrinth Hosting does not
-										support the version of Minecraft or the loader you specified. Try reinstalling
-										your server with a different version or loader, and if the problem persists,
-										please contact Modrinth Support with your server's debug information.
-									</div>
+											An invalid loader or Minecraft version was specified and could not be installed.
+											<ul class="m-0 mt-4 p-0 pl-4">
+												<li>
+													If this version of Minecraft was released recently, make sure it's supported
+													by your local Core installation.
+												</li>
+												<li>
+													If you've installed a modpack, it may have been packaged incorrectly or may
+													not be compatible with the loader.
+												</li>
+												<li>
+													Your server may need to be reinstalled with a valid mod loader and version.
+													You can change the loader by clicking the "Change Loader" button.
+												</li>
+												<li>
+													If you're stuck, copy the debug info below and check Core's logs.
+												</li>
+											</ul>
+											<ButtonStyled>
+												<button class="mt-2" @click="copyServerDebugInfo">
+													<CopyIcon v-if="!copied" />
+													<CheckIcon v-else />
+													Copy Debug Info
+												</button>
+											</ButtonStyled>
+										</div>
+										<div v-if="errorMessage.toLocaleLowerCase() === 'internal error'">
+											An internal error occurred while installing your server. Try
+											reinstalling your server, and if the problem persists, check Core's logs
+											for more details.
+										</div>
+										<div
+											v-if="errorMessage.toLocaleLowerCase() === 'this version is not yet supported'"
+										>
+											An error occurred while installing your server because the version of Minecraft
+											or the loader you specified is not supported by your local Core. Try reinstalling
+											your server with a different version or loader, and check Core's logs if the
+											problem persists.
+										</div>
 
 									<div
 										v-if="errorTitle === 'Installation error'"
@@ -344,10 +342,8 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreInstance } from '@amberite/core-client'
-import { Intercom, shutdown } from '@intercom/messenger-js-sdk'
+import type { CoreInstance, CoreModLoader } from '@amberite/core-client'
 import type { Archon, Labrinth } from '@modrinth/api-client'
-import { NuxtModrinthClient } from '@modrinth/api-client'
 import {
 	BoxesIcon,
 	CheckIcon,
@@ -367,7 +363,7 @@ import {
 } from '@modrinth/assets'
 import type { Stats } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useStorage, useTimeoutFn } from '@vueuse/core'
+import { useStorage } from '@vueuse/core'
 import DOMPurify from 'dompurify'
 import { Tooltip } from 'floating-vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -402,10 +398,8 @@ import type { ServerSettingsTabId } from '#ui/layouts/shared/server-settings'
 import {
 	injectCoreClient,
 	injectModrinthClient,
-	injectNotificationManager,
 	provideServerSettingsModal,
 } from '#ui/providers'
-import { formatLoaderLabel } from '#ui/utils/loaders'
 
 import ServerOnboardingPanelPage from './[id]/onboarding.vue'
 
@@ -443,6 +437,7 @@ const props = withDefaults(
 			worldId: string | null
 			type: 'mod' | 'plugin' | 'datapack'
 		}) => void | Promise<void>
+		navHrefPrefix?: string
 	}>(),
 	{
 		showCopyIdAction: false,
@@ -459,6 +454,7 @@ const props = withDefaults(
 		navigateToServers: undefined,
 		browseModpacks: undefined,
 		browseContent: undefined,
+		navHrefPrefix: undefined,
 	},
 )
 
@@ -493,40 +489,66 @@ const settingsHintMessages = defineMessages({
 // disabled, keeping the animation logic cos it's really nice and we might want to re-enable in future
 const DISABLE_LOADING_ANIM = true
 
-const { addNotification } = injectNotificationManager()
-const client = injectModrinthClient()
+const _client = injectModrinthClient(null)
 const coreClient = injectCoreClient()
-const isNuxt = computed(() => client instanceof NuxtModrinthClient)
+const isNuxt = computed(() => false)
 const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
 const debug = useDebugLogger('ServerManage')
 
-const mapCoreInstanceToServer = (inst: CoreInstance): Archon.Servers.v0.Server =>
-	({
-		server_id: inst.id,
-		name: inst.name,
-		owner_id: '',
-		net: { ip: '127.0.0.1', port: inst.port, domain: null },
-		game: 'java',
-		backup_quota: 999,
-		used_backup_quota: 0,
-		status: 'available',
-		suspension_reason: null,
-		loader: inst.loader as Archon.Servers.v0.Loader,
-		loader_version: inst.loader_version ?? '',
-		mc_version: inst.game_version,
-		upstream: null,
-		sftp_username: '',
-		sftp_password: '',
-		sftp_host: '',
-		sftp_port: 22,
-		datacenter: 'local',
-		notices: [],
-		node: { token: '', instance: '' },
-		flows: { intro: false },
-		is_medal: false,
-	}) as Archon.Servers.v0.Server
+const mapCoreStatus = (s: CoreInstance['status']): Archon.Servers.v0.Status => {
+	switch (s) {
+		case 'offline':
+		case 'starting':
+		case 'running':
+		case 'stopping':
+			return 'available'
+		case 'crashed':
+			return 'broken'
+	}
+}
+
+const mapCoreLoader = (loader: CoreModLoader): Archon.Servers.v0.Loader => {
+	switch (loader) {
+		case 'vanilla':
+			return 'Vanilla'
+		case 'paper':
+			return 'Paper'
+		case 'fabric':
+			return 'Fabric'
+		case 'forge':
+			return 'Forge'
+		case 'neoforge':
+			return 'NeoForge'
+		case 'quilt':
+			return 'Quilt'
+	}
+}
+
+const mapCoreInstanceToServer = (inst: CoreInstance): Archon.Servers.v0.Server => ({
+	server_id: inst.id,
+	name: inst.name,
+	owner_id: '',
+	net: { ip: '127.0.0.1', port: inst.port, domain: null },
+	game: 'Minecraft',
+	backup_quota: 999,
+	used_backup_quota: 0,
+	status: mapCoreStatus(inst.status),
+	suspension_reason: null,
+	loader: mapCoreLoader(inst.loader),
+	loader_version: inst.loader_version ?? '',
+	mc_version: inst.game_version,
+	upstream: null,
+	sftp_username: '',
+	sftp_password: '',
+	sftp_host: '',
+	datacenter: 'local',
+	notices: [],
+	node: { token: '', instance: '' },
+	flows: { intro: false },
+	is_medal: false,
+})
 
 const isReconnecting = ref(false)
 const isLoading = ref(true)
@@ -572,18 +594,16 @@ function updateServerData(patch: Partial<Archon.Servers.v0.Server>) {
 const serverError = computed(() => {
 	const err = serverQueryError.value
 	if (!err) return null
+	const message = err instanceof Error ? err.message : String(err)
+	const statusMatch = message.match(/Core API (\d+):/)
+	const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : undefined
 	return {
-		message: err instanceof Error ? err.message : String(err),
+		message,
 		name: err instanceof Error ? err.name : 'Error',
-		statusCode: undefined as number | undefined,
+		statusCode,
 		originalError: err,
 		stack: err instanceof Error ? err.stack : undefined,
 	}
-})
-
-const { data: serverFull } = useQuery({
-	queryKey: ['servers', 'v1', 'detail', props.serverId],
-	queryFn: () => client.archon.servers_v1.get(props.serverId),
 })
 
 const worldId = computed(() => props.serverId)
@@ -608,8 +628,6 @@ const {
 	cleanupCoreRuntime,
 	connectSocket,
 	cpuData,
-	fsOps,
-	fsQueuedOps,
 	isConnected,
 	ramData,
 	serverPowerState,
@@ -742,179 +760,52 @@ watch(serverData, (data) => {
 	log('serverData changed', !!data)
 })
 
-const navLinks = computed<Tab[]>(() => [
+const navLinks = computed<Tab[]>(() => {
+	const base = props.navHrefPrefix ?? `/hosting/manage/${props.serverId}`
+	return [
 	{
 		label: 'Overview',
-		href: `/hosting/manage/${props.serverId}`,
+		href: `${base}`,
 		icon: LayoutTemplateIcon,
 		subpages: [],
 	},
 	{
 		label: 'Content',
-		href: `/hosting/manage/${props.serverId}/content`,
+		href: `${base}/content`,
 		icon: BoxesIcon,
 		subpages: ['mods', 'datapacks'],
 	},
 	{
 		label: 'Files',
-		href: `/hosting/manage/${props.serverId}/files`,
+		href: `${base}/files`,
 		icon: FolderOpenIcon,
 		subpages: [],
 	},
 	{
 		label: 'Backups',
-		href: `/hosting/manage/${props.serverId}/backups`,
+		href: `${base}/backups`,
 		icon: DatabaseBackupIcon,
 		subpages: [],
 	},
 	...props.additionalTabs,
-])
+]
+})
 
 const filteredNotices = computed(
 	() => serverData.value?.notices?.filter((n) => n.level !== 'survey') ?? [],
 )
-const surveyNotice = computed(() => serverData.value?.notices?.find((n) => n.level === 'survey'))
 
-async function dismissNotice(_noticeId: number) {
+function dismissNotice(_id: number) {
 	// Core servers have no notices — no-op
 }
 
-async function dismissSurvey() {}
-
-type TallyPopupOptions = {
-	key?: string
-	layout?: 'default' | 'modal'
-	width?: number
-	alignLeft?: boolean
-	hideTitle?: boolean
-	overlay?: boolean
-	emoji?: {
-		text: string
-		animation:
-			| 'none'
-			| 'wave'
-			| 'tada'
-			| 'heart-beat'
-			| 'spin'
-			| 'flash'
-			| 'bounce'
-			| 'rubber-band'
-			| 'head-shake'
-	}
-	autoClose?: number
-	showOnce?: boolean
-	doNotShowAfterSubmit?: boolean
-	customFormUrl?: string
-	hiddenFields?: { [key: string]: unknown }
-	onOpen?: () => void
-	onClose?: () => void
-	onPageView?: (page: number) => void
-	onSubmit?: (payload: unknown) => void
-}
-
-const popupOptions = computed(
-	() =>
-		({
-			layout: 'default',
-			width: 400,
-			autoClose: 2000,
-			hideTitle: true,
-			hiddenFields: {
-				username: props.authUser?.username,
-				user_id: props.authUser?.id,
-				user_email: props.authUser?.email,
-				server_id: serverData.value?.server_id,
-				loader: serverData.value?.loader,
-				game_version: serverData.value?.mc_version,
-				modpack_id: serverProject.value?.id,
-				modpack_name: serverProject.value?.title,
-			},
-			onOpen: () => console.log(`Opened survey notice: ${surveyNotice.value?.id}`),
-			onClose: async () => await dismissSurvey(),
-			onSubmit: (payload: unknown) => {
-				console.log('Form submitted:', payload)
-			},
-		}) satisfies TallyPopupOptions,
-)
-
-function getTally(): { openPopup?: (id: string, opts: TallyPopupOptions) => void } | undefined {
-	return (
-		window as Window & { Tally?: { openPopup?: (id: string, opts: TallyPopupOptions) => void } }
-	).Tally
-}
-
-function showSurvey() {
-	if (!surveyNotice.value) return
-
-	try {
-		const tally = getTally()
-		if (tally?.openPopup) {
-			tally.openPopup(surveyNotice.value.message, popupOptions.value)
-		}
-	} catch (e) {
-		console.error('Error opening Tally popup:', e)
-	}
-}
-
-function loadTallyScript() {
-	if (document.querySelector('script[src*="tally.so"]')) return
-	const script = document.createElement('script')
-	script.src = 'https://tally.so/widgets/embed.js'
-	script.defer = true
-	document.head.appendChild(script)
-}
+const syncProgress = ref(null)
+const contentError = ref(null)
+const suspendedDescription = computed(() => '')
+const suspendedAction = computed(() => ({ label: '', onClick: () => {}, color: 'brand' as const }))
 
 async function handleContentRetry() {
 	// no-op for Core — content sync is not managed via Archon
-}
-
-const handleNewMod = () => {
-	queryClient.invalidateQueries({ queryKey: ['content', 'list'] })
-}
-
-const handleInstallationResult = async (data: Archon.Websocket.v0.WSInstallationResultEvent) => {
-	debug('[root.vue] handleInstallationResult received:', data)
-	switch (data.result) {
-		case 'ok': {
-			debug('[root.vue] handleInstallationResult: ok received')
-			if (!serverData.value) break
-
-			applyOptimisticCompletion()
-			installError.value = null
-			invalidateAfterInstall()
-
-			break
-		}
-		case 'err': {
-			console.log('failed to install')
-			console.log(data)
-			errorTitle.value = 'Installation error'
-			errorMessage.value = data.reason ?? 'Unknown error'
-			installError.value = new Error(data.reason ?? 'Unknown error')
-
-			try {
-				let files = await client.kyros.files_v0.listDirectory('/', 1, 100)
-				if (files && files.total > 1) {
-					for (let i = 2; i <= files.total; i++) {
-						const nextFiles = await client.kyros.files_v0.listDirectory('/', i, 100)
-						if (nextFiles?.items?.length === 0) break
-						if (nextFiles) files = nextFiles
-					}
-				}
-				const fileName = files?.items?.find((file) =>
-					file.name.startsWith('modrinth-installation'),
-				)?.name
-				errorLogFile.value = fileName ?? ''
-				if (fileName) {
-					const content = await client.kyros.files_v0.downloadFile(fileName)
-					errorLog.value = await content.text()
-				}
-			} catch (err) {
-				console.error('Failed to fetch installation log:', err)
-			}
-			break
-		}
-	}
 }
 
 const newLoader = ref<string | null>(null)
@@ -925,11 +816,6 @@ const onReinstall = async (
 	potentialArgs: { loader?: string; lVersion?: string; mVersion?: string } | undefined,
 ) => {
 	debug('[root.vue] onReinstall called with:', potentialArgs)
-
-	if (serverData.value?.flows?.intro) {
-		await client.archon.servers_v1.endIntro(props.serverId)
-		queryClient.invalidateQueries({ queryKey: ['servers', 'detail', props.serverId] })
-	}
 
 	if (!serverData.value) return
 
@@ -965,89 +851,6 @@ const onReinstallFailed = () => {
 	newLoaderVersion.value = null
 	newMCVersion.value = null
 }
-
-function applyOptimisticCompletion() {
-	const patch: Partial<Archon.Servers.v0.Server> = { status: 'available' }
-	if (newLoader.value) patch.loader = formatLoaderLabel(newLoader.value) as Archon.Servers.v0.Loader
-	if (newLoaderVersion.value) patch.loader_version = newLoaderVersion.value
-	if (newMCVersion.value) patch.mc_version = newMCVersion.value
-
-	debug('[root.vue] applyOptimisticCompletion: patch:', patch)
-	updateServerData(patch)
-
-	const addonsQueries = queryClient.getQueriesData<Archon.Content.v1.Addons>({
-		queryKey: ['content', 'list', 'v1', props.serverId],
-	})
-	for (const [key, data] of addonsQueries) {
-		if (!data) continue
-		const addonsPatch: Record<string, string> = {}
-		if (newLoader.value) addonsPatch.modloader = newLoader.value
-		if (newLoaderVersion.value) addonsPatch.modloader_version = newLoaderVersion.value
-		if (newMCVersion.value) addonsPatch.game_version = newMCVersion.value
-		if (Object.keys(addonsPatch).length > 0) {
-			queryClient.setQueryData(key, { ...data, ...addonsPatch })
-		}
-	}
-
-	newLoader.value = null
-	newLoaderVersion.value = null
-	newMCVersion.value = null
-}
-
-async function invalidateAfterInstall() {
-	debug('[root.vue] invalidateAfterInstall: scheduling 2s delayed invalidation')
-	isAwaitingPostInstallRefresh.value = true
-	setTimeout(async () => {
-		try {
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ['servers', 'detail', props.serverId] }),
-				queryClient.invalidateQueries({
-					queryKey: ['servers', 'startup', 'v1', props.serverId],
-				}),
-				queryClient.invalidateQueries({ queryKey: ['content', 'list'] }),
-			])
-		} catch (err: unknown) {
-			console.error('Error refreshing data after installation:', err)
-		} finally {
-			isAwaitingPostInstallRefresh.value = false
-		}
-	}, 2000)
-}
-
-const nodeAccessible = ref(true)
-
-const nodeUnavailableDetails = computed(() => [
-	{
-		label: 'Server ID',
-		value: props.serverId,
-		type: 'inline' as const,
-	},
-	{
-		label: 'Node',
-		value:
-			(serverError.value?.responseData as { hostname?: string } | undefined)?.hostname ??
-			serverData.value?.datacenter ??
-			'Unknown',
-		type: 'inline' as const,
-	},
-	{
-		label: 'Error message',
-		value: nodeAccessible.value
-			? (serverError.value?.message ?? 'Unknown')
-			: 'Unable to reach node. Ping test failed.',
-		type: 'block' as const,
-	},
-])
-
-const suspendedDescription = computed(() => {
-	if (serverData.value?.suspension_reason === 'cancelled') {
-		return 'Your subscription has been cancelled.\nContact Modrinth Support if you believe this is an error.'
-	}
-	if (serverData.value?.suspension_reason) {
-		return `Your server has been suspended: ${serverData.value.suspension_reason}\nContact Modrinth Support if you believe this is an error.`
-	}
-	return 'Your server has been suspended.\nContact Modrinth Support if you believe this is an error.'
-})
 
 const generalErrorDetails = computed(() => [
 	{
@@ -1090,27 +893,14 @@ const generalErrorDetails = computed(() => [
 		: []),
 ])
 
-const suspendedAction = computed(() => ({
-	label: 'Go to billing settings',
-	onClick: () => props.navigateToBilling?.(),
-	color: 'brand' as const,
-}))
-
 const generalErrorAction = computed(() => ({
 	label: 'Go back to all servers',
 	onClick: () => props.navigateToServers?.(),
 	color: 'brand' as const,
 }))
 
-const nodeUnavailableAction = computed(() => ({
-	label: 'Reload',
-	onClick: () => props.reloadPage(),
-	color: 'brand' as const,
-	disabled: false,
-}))
-
 const copyServerDebugInfo = () => {
-	const debugInfo = `Server ID: ${serverData.value?.server_id}\nError: ${errorMessage.value}\nKind: ${serverData.value?.upstream?.kind}\nProject ID: ${serverData.value?.upstream?.project_id}\nVersion ID: ${serverData.value?.upstream?.version_id}\nLog: ${errorLog.value}`
+	const debugInfo = `Server ID: ${serverData.value?.server_id}\nError: ${errorMessage.value}\nLoader: ${serverData.value?.loader}\nVersion: ${serverData.value?.mc_version}\nLog: ${errorLog.value}`
 	navigator.clipboard.writeText(debugInfo)
 	copied.value = true
 	setTimeout(() => {
@@ -1167,77 +957,11 @@ function safeStringify(obj: unknown, indent = ' '): string {
 	)
 }
 
-async function testNodeReachability(): Promise<boolean> {
-	const nodeInstance = serverData.value?.node?.instance
-	if (!nodeInstance) return false
-
-	const wsUrl = `wss://${nodeInstance}/pingtest`
-
-	try {
-		return await new Promise((resolve) => {
-			const socket = new WebSocket(wsUrl)
-			const timeout = setTimeout(() => {
-				socket.close()
-				resolve(false)
-			}, 5000)
-
-			socket.onopen = () => {
-				clearTimeout(timeout)
-				socket.send(performance.now().toString())
-			}
-
-			socket.onmessage = () => {
-				clearTimeout(timeout)
-				socket.close()
-				resolve(true)
-			}
-
-			socket.onerror = () => {
-				clearTimeout(timeout)
-				resolve(false)
-			}
-		})
-	} catch (error) {
-		console.error(`Failed to ping node ${wsUrl}:`, error)
-		return false
-	}
-}
-
 function initializeServer() {
-	if (serverData.value?.status === 'suspended') {
-		isLoading.value = false
-		return
-	}
-
-	if (serverData.value?.node === null) {
-		isLoading.value = false
-		return
-	}
-
-	testNodeReachability()
-		.then((result) => {
-			nodeAccessible.value = result
-			if (!nodeAccessible.value) {
-				isLoading.value = false
-			}
-		})
-		.catch((err) => {
-			console.error('Error testing node reachability:', err)
-			nodeAccessible.value = false
-			isLoading.value = false
-		})
-
 	if (serverError.value) {
 		isLoading.value = false
 	} else {
-		void connectSocket(props.serverId, {
-			extraSubscriptions: (targetServerId) => [
-				client.archon.sockets.on(targetServerId, 'installation-result', handleInstallationResult),
-				client.archon.sockets.on(targetServerId, 'backup-progress', handleBackupProgress),
-				client.archon.sockets.on(targetServerId, 'filesystem-ops', handleFilesystemOps),
-				client.archon.sockets.on(targetServerId, 'new-mod', handleNewMod),
-			],
-		})
+		void connectSocket(props.serverId)
 			.then((connected) => {
 				if (connected && cachedWsState?.consoleLines?.length) {
 					modrinthServersConsole.clear()
@@ -1248,25 +972,12 @@ function initializeServer() {
 				isLoading.value = false
 			})
 	}
-
-	if (serverData.value?.flows?.intro && serverProject.value) {
-		client.archon.servers_v1.endIntro(props.serverId).then(() => {
-			queryClient.invalidateQueries({ queryKey: ['servers', 'detail', props.serverId] })
-		})
-	}
 }
-
-let intercomInitialized = false
 
 const cleanup = () => {
 	isMounted.value = false
 
 	saveWsStateToCache()
-
-	if (intercomInitialized) {
-		shutdown()
-		intercomInitialized = false
-	}
 
 	cleanupCoreRuntime(props.serverId)
 
@@ -1290,53 +1001,6 @@ onMounted(() => {
 		})
 	}
 
-	const tryInitIntercom = () => {
-		if (intercomInitialized) return
-		if (!props.authUser || !props.fetchIntercomToken) {
-			console.debug('[PYROSERVERS][INTERCOM] waiting for auth user and token fetcher', {
-				hasAuthUser: !!props.authUser,
-				hasFetchIntercomToken: !!props.fetchIntercomToken,
-			})
-			return
-		}
-		intercomInitialized = true
-		console.debug('[PYROSERVERS][INTERCOM] initializing secure support chat')
-		props
-			.fetchIntercomToken()
-			.then(({ token }) => {
-				console.debug('[PYROSERVERS][INTERCOM] fetched messenger JWT, booting widget')
-				Intercom({
-					app_id: props.intercomAppId!,
-					intercom_user_jwt: token,
-					session_duration: 1000 * 60 * 60 * 24,
-				})
-				window.setTimeout(() => {
-					const hasWidget = !!document.querySelector(
-						'.intercom-lightweight-app, #intercom-container, #intercom-frame',
-					)
-					if (!hasWidget) {
-						console.warn(
-							'[PYROSERVERS][INTERCOM] boot completed but no Intercom widget was detected',
-						)
-					}
-				}, 2500)
-			})
-			.catch((error) => {
-				intercomInitialized = false
-				console.warn('[PYROSERVERS][INTERCOM] failed to initialize secure support chat', error)
-			})
-	}
-	tryInitIntercom()
-	const stopIntercomWatch = watch(
-		() => props.authUser,
-		(user) => {
-			if (user) {
-				tryInitIntercom()
-				stopIntercomWatch()
-			}
-		},
-	)
-
 	DOMPurify.addHook(
 		'afterSanitizeAttributes',
 		(node: {
@@ -1349,11 +1013,6 @@ onMounted(() => {
 			}
 		},
 	)
-
-	loadTallyScript()
-	if (surveyNotice.value) {
-		showSurvey()
-	}
 
 	if (route.query.openSettings) {
 		const tabId = route.query.openSettings as ServerSettingsTabId
