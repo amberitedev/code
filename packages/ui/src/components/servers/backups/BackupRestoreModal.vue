@@ -36,13 +36,13 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { CoreBackup } from '@amberite/core-client'
 import { RotateCounterClockwiseIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
 import {
-	injectModrinthClient,
+	injectCoreClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '../../../providers'
@@ -52,28 +52,23 @@ import NewModal from '../../modal/NewModal.vue'
 import BackupItem from './BackupItem.vue'
 
 const { addNotification } = injectNotificationManager()
-const client = injectModrinthClient()
+const coreClient = injectCoreClient()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
 const backupsQueryKey = ['backups', 'queue', ctx.serverId]
 
-function safetyBackupName(backupName: string) {
-	const base = `Before restoring "${backupName}"`
-	return base.slice(0, 92)
-}
-
 const restoreMutation = useMutation({
-	mutationFn: ({ backupId, name }: { backupId: string; name: string }) =>
-		client.archon.backups_queue_v1.restore(ctx.serverId, ctx.worldId.value!, backupId, { name }),
+	mutationFn: ({ backupId }: { backupId: string }) =>
+		coreClient.restoreBackup(ctx.serverId, backupId),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()
-const currentBackup = ref<Archon.BackupsQueue.v1.BackupQueueBackup | null>(null)
+const currentBackup = ref<CoreBackup | null>(null)
 const isRestoring = ref(false)
 
-function show(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+function show(backup: CoreBackup) {
 	currentBackup.value = backup
 	modal.value?.show()
 }
@@ -94,7 +89,6 @@ const restoreBackup = () => {
 	restoreMutation.mutate(
 		{
 			backupId: currentBackup.value.id,
-			name: safetyBackupName(currentBackup.value.name),
 		},
 		{
 			onSuccess: () => {

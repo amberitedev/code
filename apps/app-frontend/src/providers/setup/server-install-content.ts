@@ -77,6 +77,7 @@ export function createServerInstallContent(opts: {
 	const serverIdQuery = computed(() => readQueryString(route.query.sid))
 	const worldIdQuery = computed(() => readQueryString(route.query.wid))
 	const browseFrom = computed(() => readQueryString(route.query.from))
+	const backOverride = computed(() => readQueryString(route.query.back))
 	const serverFlowFrom = computed<ServerFlowFrom | null>(() =>
 		browseFrom.value === 'onboarding' || browseFrom.value === 'reset-server'
 			? browseFrom.value
@@ -101,7 +102,7 @@ export function createServerInstallContent(opts: {
 		if (serverFlowFrom.value === 'reset-server') {
 			return `/hosting/manage/${sid}?openSettings=installation`
 		}
-		return `/hosting/manage/${sid}/content`
+		return backOverride.value ?? `/hosting/manage/${sid}/content`
 	})
 	const serverBackLabel = computed(() => {
 		if (serverFlowFrom.value === 'onboarding') return 'Back to setup'

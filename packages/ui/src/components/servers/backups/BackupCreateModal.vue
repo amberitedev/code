@@ -64,13 +64,13 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { CoreBackup } from '@amberite/core-client'
 import { IssuesIcon, PlusIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref } from 'vue'
 
 import {
-	injectModrinthClient,
+	injectCoreClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '../../../providers'
@@ -79,19 +79,18 @@ import StyledInput from '../../base/StyledInput.vue'
 import NewModal from '../../modal/NewModal.vue'
 
 const { addNotification } = injectNotificationManager()
-const client = injectModrinthClient()
+const coreClient = injectCoreClient()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
 const props = defineProps<{
-	backups?: Archon.BackupsQueue.v1.BackupQueueBackup[]
+	backups?: CoreBackup[]
 }>()
 
 const backupsQueryKey = ['backups', 'queue', ctx.serverId]
 
 const createMutation = useMutation({
-	mutationFn: (name: string) =>
-		client.archon.backups_queue_v1.create(ctx.serverId, ctx.worldId.value!, { name }),
+	mutationFn: (name: string) => coreClient.createBackup(ctx.serverId, name),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 

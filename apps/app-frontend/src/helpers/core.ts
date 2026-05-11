@@ -10,9 +10,10 @@ export interface CoreInstanceDetail {
 	game_version: string
 	loader: string
 	loader_version?: string
-	/** "stopped" | "starting" | "running" | "stopping" */
+	/** "offline" | "starting" | "running" | "stopping" | "crashed" */
 	status: string
 	data_dir: string
+	memory?: { min_mb: number; max_mb: number }
 }
 
 export function core_get_instance(id: string): Promise<CoreInstanceDetail> {

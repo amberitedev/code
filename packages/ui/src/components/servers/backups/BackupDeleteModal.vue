@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { CoreBackup } from '@amberite/core-client'
 import { TrashIcon, XIcon } from '@modrinth/assets'
 import { computed, nextTick, ref } from 'vue'
 
@@ -93,8 +93,8 @@ import BackupItem from './BackupItem.vue'
 const { formatMessage } = useVIntl()
 
 const emit = defineEmits<{
-	(e: 'delete', backup: Archon.BackupsQueue.v1.BackupQueueBackup | undefined): void
-	(e: 'bulk-delete', backups: Archon.BackupsQueue.v1.BackupQueueBackup[]): void
+	(e: 'delete', backup: CoreBackup | undefined): void
+	(e: 'bulk-delete', backups: CoreBackup[]): void
 }>()
 
 const messages = defineMessages({
@@ -123,8 +123,8 @@ const messages = defineMessages({
 
 const modal = ref<InstanceType<typeof NewModal>>()
 const backupListRef = ref<HTMLElement | null>(null)
-const singleBackup = ref<Archon.BackupsQueue.v1.BackupQueueBackup>()
-const bulkBackups = ref<Archon.BackupsQueue.v1.BackupQueueBackup[]>([])
+const singleBackup = ref<CoreBackup>()
+const bulkBackups = ref<CoreBackup[]>([])
 const { showTopFade, showBottomFade, checkScrollState, forceCheck } =
 	useScrollIndicator(backupListRef)
 
@@ -134,14 +134,14 @@ const displayBackups = computed(() =>
 	isBulk.value ? bulkBackups.value : singleBackup.value ? [singleBackup.value] : [],
 )
 
-function show(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+function show(backup: CoreBackup) {
 	singleBackup.value = backup
 	bulkBackups.value = []
 	modal.value?.show()
 	nextTick(() => forceCheck())
 }
 
-function showBulk(backups: Archon.BackupsQueue.v1.BackupQueueBackup[]) {
+function showBulk(backups: CoreBackup[]) {
 	singleBackup.value = undefined
 	bulkBackups.value = [...backups]
 	modal.value?.show()

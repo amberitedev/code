@@ -71,6 +71,9 @@ importers:
 
   apps/app-frontend:
     dependencies:
+      '@amberite/core-client':
+        specifier: workspace:*
+        version: link:../../packages/core-client
       '@intercom/messenger-js-sdk':
         specifier: ^0.0.14
         version: 0.0.14
@@ -522,6 +525,12 @@ importers:
         specifier: ^2.4.2
         version: 2.6.1
 
+  packages/core-client:
+    devDependencies:
+      '@modrinth/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+
   packages/daedalus: {}
 
   packages/design-inspector:
@@ -625,6 +634,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@amberite/core-client':
+        specifier: workspace:*
+        version: link:../core-client
       '@codemirror/commands':
         specifier: ^6.3.2
         version: 6.10.1

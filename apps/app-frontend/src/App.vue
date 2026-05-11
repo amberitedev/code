@@ -489,22 +489,26 @@ watch(stateInitialized, (ready) => {
 		queryClient.prefetchQuery({
 			queryKey: ['servers'],
 			queryFn: async () => {
-				const response = await tauriApiClient.archon.servers_v0.list({ limit: 100 })
-				const hasMedalServers = response.servers.some((s) => s.is_medal)
-				if (hasMedalServers) {
-					const subscriptions = await tauriApiClient.labrinth.billing_internal.getSubscriptions()
-					for (const server of response.servers) {
-						if (server.is_medal) {
-							const sub = subscriptions.find((s) => s.metadata?.id === server.server_id)
-							if (sub) {
-								server.medal_expires = new Date(
-									new Date(sub.created).getTime() + 5 * 86400000,
-								).toISOString()
+				try {
+					const response = await tauriApiClient.archon.servers_v0.list({ limit: 100 })
+					const hasMedalServers = response.servers.some((s) => s.is_medal)
+					if (hasMedalServers) {
+						const subscriptions = await tauriApiClient.labrinth.billing_internal.getSubscriptions()
+						for (const server of response.servers) {
+							if (server.is_medal) {
+								const sub = subscriptions.find((s) => s.metadata?.id === server.server_id)
+								if (sub) {
+									server.medal_expires = new Date(
+										new Date(sub.created).getTime() + 5 * 86400000,
+									).toISOString()
+								}
 							}
 						}
 					}
+					return response
+				} catch {
+					return { servers: [] }
 				}
-				return response
 			},
 			staleTime: 30_000,
 		})

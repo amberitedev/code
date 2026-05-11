@@ -7,11 +7,11 @@ use axum::{
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::{
-    application::state::AppState,
-    presentation::handlers::{
-        console, diagnostics, instance_control, instances, logs, macros, modpack, mods,
-        properties, setup, stats,
-    },
+	application::state::AppState,
+	presentation::handlers::{
+		backups, console, diagnostics, fs, instance_control, instances, logs, macros, modpack, mods,
+		properties, setup, stats,
+	},
 };
 
 /// Build the full Axum router with all routes wired to handlers.
@@ -67,6 +67,21 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/properties", patch(properties::patch_properties_handler))
         // Stats
         .route("/instances/:id/stats", get(stats::get_stats_handler))
+        // Filesystem
+        .route("/instances/:id/fs", get(fs::list_handler))
+        .route("/instances/:id/fs", delete(fs::delete_handler))
+        .route("/instances/:id/fs/download", get(fs::download_handler))
+        .route("/instances/:id/fs/upload", post(fs::upload_handler))
+        // Backups — delete-many and schedule registered before /:bid to prevent literal-string capture
+        .route("/instances/:id/backups/delete-many", post(backups::delete_many_handler))
+        .route("/instances/:id/backups/schedule", get(backups::get_schedule_handler))
+        .route("/instances/:id/backups/schedule", put(backups::set_schedule_handler))
+        .route("/instances/:id/backups", get(backups::list_handler))
+        .route("/instances/:id/backups", post(backups::create_handler))
+        .route("/instances/:id/backups/:bid", delete(backups::delete_handler))
+        .route("/instances/:id/backups/:bid", patch(backups::rename_handler))
+        .route("/instances/:id/backups/:bid/lock", patch(backups::lock_handler))
+        .route("/instances/:id/backups/:bid/restore", post(backups::restore_handler))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())

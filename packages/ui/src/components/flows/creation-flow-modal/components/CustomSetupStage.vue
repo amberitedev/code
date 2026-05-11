@@ -171,7 +171,7 @@ import Collapsible from '../../../base/Collapsible.vue'
 import Combobox, { type ComboboxOption } from '../../../base/Combobox.vue'
 import PaperChannelBadge from '../../../base/PaperChannelBadge.vue'
 import StyledInput from '../../../base/StyledInput.vue'
-import type { LoaderVersionEntry, LoaderVersionType, InstanceKind } from '../creation-flow-context'
+import type { InstanceKind,LoaderVersionEntry, LoaderVersionType } from '../creation-flow-context'
 import { injectCreationFlowContext } from '../creation-flow-context'
 import { formatLoaderLabel } from '../shared'
 

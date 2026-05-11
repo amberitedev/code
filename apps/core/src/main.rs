@@ -111,6 +111,7 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
 
     tokio::spawn(application::instance_service::restore_instances(Arc::clone(&state)));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
+    tokio::spawn(application::backup_scheduler::run_backup_scheduler(Arc::clone(&state)));
 
     let router = presentation::router::create_router(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

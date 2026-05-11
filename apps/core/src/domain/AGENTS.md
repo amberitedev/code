@@ -1,88 +1,51 @@
-# domain/
+# src/domain — Core entities and types
 
-Pure business logic. **No I/O, no async, no external crates beyond `serde`, `uuid`, `chrono`.**
+Business entities with no infrastructure dependencies. Everything in here is pure data — derives `Serialize/Deserialize`, no async, no I/O.
 
-## Files
+## File structure
 
-| File | Key types |
-|------|-----------|
-| `instance.rs` | `InstanceId`, `InstanceRecord`, `InstanceStatus`, `ModLoader`, `MemorySettings` |
-| `modpack.rs` | `PackFormat`, `PackFile`, `PackFileHashes`, `PackFileEnv`, `EnvType`, `ModpackManifest`, `LinkedData` |
-| `event.rs` | `Event` — broadcast payload enum |
-| `mod.rs` | Re-exports |
-
-## `InstanceId`
-
-Newtype over `uuid::Uuid`. Implements `Display`, `FromStr`, `Hash`, `Eq`.  
-Always serialized as lowercase hyphenated UUID string.
-
-## `InstanceStatus`
-
-```rust
-enum InstanceStatus { Offline, Starting, Running, Stopping, Crashed }
+```
+domain/
+  mod.rs        — re-exports: instance, modpack, event, java
+  instance.rs   — InstanceId, InstanceStatus, ModLoader, MemorySettings, InstanceRecord
+  event.rs      — Event broadcast enum (InstanceOutput, StatusChanged, MacroOutput, CreationProgress)
+  modpack.rs    — PackFormat, PackFile, PackFileEnv, EnvType, LinkedData, ModpackManifest
+  java.rs       — JavaInstall (version: u32, path: PathBuf)
 ```
 
-Serialises/parses via `Display`/`FromStr` (lowercase). Stored as TEXT in SQLite.
+## instance.rs
 
-## `ModLoader`
+`InstanceId` is a newtype over `Uuid` — it implements `Display`, `FromStr`, and `Hash`. Path params in Axum routes use `.parse::<InstanceId>()` to extract it; if the UUID is malformed the route returns 400 before reaching the handler.
 
-```rust
-enum ModLoader { Vanilla, Paper, Fabric, Forge, NeoForge, Quilt }
+`InstanceStatus` and `ModLoader` serialize to lowercase strings (`#[serde(rename_all = "lowercase")]`). Their `FromStr` impls are case-sensitive — `"Running"` fails, `"running"` succeeds. Both statuses and loaders are stored in SQLite as lowercase text.
+
+`InstanceRecord.data_dir` is a `String`, not a `PathBuf`. Conversion to `PathBuf` happens at every usage site with `PathBuf::from(&record.data_dir)`. This is intentional — SQLx maps SQLite TEXT to String cleanly.
+
+`MemorySettings` defaults to `min_mb: 512, max_mb: 4096`. The default is used whenever a `CreateInstanceRequest` omits memory settings.
+
+`ModLoader` values and their server JAR sources:
+- `Vanilla` / `Paper` / `Fabric` → resolved directly in `infrastructure::minecraft::flavours`
+- `Forge` / `NeoForge` / `Quilt` → downloaded via installer JARs, handled in `infrastructure::minecraft::installer`
+
+## event.rs
+
+`Event` uses `#[serde(tag = "type", rename_all = "snake_case")]`. JSON output looks like:
+```json
+{ "type": "instance_output", "instance_id": "...", "line": "..." }
+{ "type": "status_changed", "instance_id": "...", "status": "running" }
+{ "type": "creation_progress", "instance_id": "...", "progress": 0.5, "message": "..." }
 ```
 
-Serialises/parses via `Display`/`FromStr` (lowercase).
+`CreationProgress.progress` is an `f32` in `0.0..=1.0`. The final event when JAR download completes sends `progress: 1.0`.
 
-## `MemorySettings`
+## modpack.rs
 
-```rust
-struct MemorySettings { min_mb: u32, max_mb: u32 }
-// Default: min 512, max 4096
-```
+`PackFormat` maps directly to `modrinth.index.json` inside a `.mrpack` ZIP archive. Field names use `camelCase` (`#[serde(rename_all = "camelCase")]`).
 
-## `InstanceRecord`
+`EnvType` uses `kebab-case` serialization — `"required"`, `"optional"`, `"unsupported"`. The `server` field on `PackFileEnv` is what the install pipeline checks to decide whether to download a file for the server.
 
-Persisted server record. All fields optional where the DB column is nullable.
+`ModpackManifest` is the persisted DB record — it is NOT the same as `PackFormat`. `PackFormat` is the in-memory representation of the `.mrpack` index; `ModpackManifest` is what gets stored in the `modpack_manifests` table after installation. `ModpackManifest.installed_at` is a `String` (RFC 3339), not a `chrono::DateTime`.
 
-```rust
-struct InstanceRecord {
-    id: InstanceId, name: String, game_version: String,
-    loader: ModLoader, loader_version: Option<String>,
-    port: u16, memory: MemorySettings, java_version: Option<i64>,
-    status: InstanceStatus, data_dir: String,
-    created_at: DateTime<Utc>, updated_at: DateTime<Utc>,
-}
-```
+## java.rs
 
-## `Event`
-
-Broadcast via `tokio::sync::broadcast` from `infrastructure::events::EventBroadcaster`.
-
-```rust
-enum Event {
-    InstanceOutput   { instance_id: InstanceId, line: String },
-    StatusChanged    { instance_id: InstanceId, status: InstanceStatus },
-    MacroOutput      { instance_id: InstanceId, macro_pid: u64, line: String },
-    CreationProgress { instance_id: InstanceId, progress: f32, message: String },
-}
-```
-
-Tagged JSON (`"type": "instance_output"` etc.) via `#[serde(tag = "type", rename_all = "snake_case")]`.
-
-## `PackFormat` (mrpack)
-
-Top-level of a `.mrpack` index file (`modrinth.index.json`).  
-`camelCase` JSON keys. `files: Vec<PackFile>`, `dependencies: HashMap<String, String>`.
-
-## `EnvType`
-
-```rust
-enum EnvType { Required, Optional, Unsupported }
-```
-
-`kebab-case` in JSON. Used to filter server-side-only files during mrpack install.
-
-## Rules
-
-- No `async` anywhere in this layer.
-- No `sqlx`, `axum`, `reqwest`, or any network/IO crate.
-- Unit tests live as `#[cfg(test)] mod tests` inside each file.
+Minimal — just a struct holding `version: u32` (major version, e.g. 17 or 21) and `path: PathBuf`. Detection happens in `infrastructure::minecraft::java`; this struct is the data contract between detection and storage.

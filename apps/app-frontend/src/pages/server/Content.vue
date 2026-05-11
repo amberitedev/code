@@ -1,15 +1,9 @@
-<template>
-	<div class="flex flex-col gap-4">
-		<p class="text-secondary">Mod management for server instances is coming soon.</p>
-	</div>
-</template>
-
 <script setup lang="ts">
-import type { CoreInstanceDetail } from '@/helpers/core'
-import type { GameInstance } from '@/helpers/types'
-
-defineProps<{
-	instance: GameInstance
-	coreInstance: CoreInstanceDetail
-}>()
+import { ServersManageContentPage } from '@modrinth/ui'
+// AMBERITE PATCH: Archon content prefetch removed — no Core equivalent yet.
+// ServersManageContentPage will handle its own data fetching internally.
 </script>
+
+<template>
+	<ServersManageContentPage />
+</template>

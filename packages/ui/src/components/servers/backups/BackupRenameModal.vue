@@ -46,13 +46,13 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { CoreBackup } from '@amberite/core-client'
 import { IssuesIcon, SaveIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref } from 'vue'
 
 import {
-	injectModrinthClient,
+	injectCoreClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '../../../providers'
@@ -61,19 +61,19 @@ import StyledInput from '../../base/StyledInput.vue'
 import NewModal from '../../modal/NewModal.vue'
 
 const { addNotification } = injectNotificationManager()
-const client = injectModrinthClient()
+const coreClient = injectCoreClient()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
 const props = defineProps<{
-	backups?: Archon.BackupsQueue.v1.BackupQueueBackup[]
+	backups?: CoreBackup[]
 }>()
 
 const backupsQueryKey = ['backups', 'queue', ctx.serverId]
 
 const renameMutation = useMutation({
 	mutationFn: ({ backupId, name }: { backupId: string; name: string }) =>
-		client.archon.backups_v1.rename(ctx.serverId, ctx.worldId.value!, backupId, { name }),
+		coreClient.renameBackup(ctx.serverId, backupId, name),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 
@@ -82,7 +82,7 @@ const input = ref<HTMLInputElement>()
 const backupName = ref('')
 const originalName = ref('')
 
-const currentBackup = ref<Archon.BackupsQueue.v1.BackupQueueBackup | null>(null)
+const currentBackup = ref<CoreBackup | null>(null)
 
 const trimmedName = computed(() => backupName.value.trim())
 
@@ -112,7 +112,7 @@ const focusInput = () => {
 	})
 }
 
-function show(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+function show(backup: CoreBackup) {
 	currentBackup.value = backup
 	backupName.value = backup.name
 	originalName.value = backup.name

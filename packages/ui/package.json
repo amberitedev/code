@@ -56,6 +56,7 @@
 		"@codemirror/state": "^6.3.2",
 		"@codemirror/view": "^6.22.1",
 		"@intercom/messenger-js-sdk": "^0.0.14",
+		"@amberite/core-client": "workspace:*",
 		"@modrinth/api-client": "workspace:*",
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/blog": "workspace:*",

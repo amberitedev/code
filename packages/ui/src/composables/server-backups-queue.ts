@@ -1,28 +1,23 @@
-import type { Archon } from '@modrinth/api-client'
+import type { CoreBackup, CoreBackupOperation, CoreBackupsResponse } from '@amberite/core-client'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, reactive, type Ref } from 'vue'
+import { computed, type Ref } from 'vue'
 
-import { type BusyReason, injectModrinthClient } from '#ui/providers'
+import { type BusyReason, injectCoreClient } from '#ui/providers'
 
 import { defineMessage } from './i18n'
 
-type ProgressKey = `${string}:${'create' | 'restore'}`
-
-export function useServerBackupsQueue(serverId: Ref<string>, worldId: Ref<string | null>) {
-	const client = injectModrinthClient()
+export function useServerBackupsQueue(serverId: Ref<string>, _worldId?: Ref<string | null>) {
+	const coreClient = injectCoreClient()
 	const queryClient = useQueryClient()
 
 	const queryKey = computed(() => ['backups', 'queue', serverId.value] as const)
 
-	const progressOverlay = reactive(new Map<ProgressKey, number>())
-	const lastSeenState = new Map<ProgressKey, Archon.Websocket.v0.BackupState>()
-
 	const query = useQuery({
 		queryKey,
-		queryFn: () => client.archon.backups_queue_v1.list(serverId.value, worldId.value!),
-		enabled: computed(() => !!worldId.value),
+		queryFn: (): Promise<CoreBackupsResponse> => coreClient.listBackups(serverId.value),
+		enabled: computed(() => !!serverId.value),
 		refetchInterval: (q) => {
-			const data = q.state.data as Archon.BackupsQueue.v1.BackupsQueueResponse | undefined
+			const data = q.state.data as CoreBackupsResponse | undefined
 			return data?.active_operations?.length ? 3000 : false
 		},
 	})
@@ -36,57 +31,39 @@ export function useServerBackupsQueue(serverId: Ref<string>, worldId: Ref<string
 	)
 
 	const activeOperationByBackupId = computed(() => {
-		const map = new Map<string, Archon.BackupsQueue.v1.ActiveOperation>()
+		const map = new Map<string, CoreBackupOperation>()
 		for (const op of activeOperations.value) map.set(op.backup_id, op)
 		return map
 	})
 	const backupById = computed(() => {
-		const map = new Map<string, Archon.BackupsQueue.v1.BackupQueueBackup>()
-		for (const backup of backups.value) map.set(backup.id, backup)
+		const map = new Map<string, CoreBackup>()
+		for (const b of backups.value) map.set(b.id, b)
 		return map
 	})
 
 	const hasActiveCreate = computed(() =>
-		activeOperations.value.some((o) => o.operation_type === 'create' && !o.has_parent),
+		activeOperations.value.some((o) => o.operation_type === 'create'),
 	)
 	const hasActiveRestore = computed(() =>
 		activeOperations.value.some((o) => o.operation_type === 'restore'),
 	)
 	const hasRunningCreate = computed(() =>
 		activeOperations.value.some(
-			(o) =>
-				o.operation_type === 'create' &&
-				!o.has_parent &&
-				backupById.value.get(o.backup_id)?.status === 'in_progress',
+			(o) => o.operation_type === 'create' && backupById.value.get(o.backup_id)?.status === 'in_progress',
 		),
 	)
 	const hasRunningRestore = computed(() =>
 		activeOperations.value.some(
-			(o) =>
-				o.operation_type === 'restore' &&
-				backupById.value.get(o.backup_id)?.status === 'in_progress',
+			(o) => o.operation_type === 'restore' && backupById.value.get(o.backup_id)?.status === 'in_progress',
 		),
 	)
 
-	function handleWsBackupProgress(evt: Archon.Websocket.v0.WSBackupProgressEvent) {
-		if (evt.task === 'file') return
-		const key = `${evt.id}:${evt.task}` as ProgressKey
+	/** No-op — Core backups don't emit WS progress events. */
+	function handleWsBackupProgress(_evt: unknown) {}
 
-		if (evt.state === 'ongoing') {
-			progressOverlay.set(key, evt.progress)
-		} else {
-			progressOverlay.delete(key)
-		}
-
-		const prev = lastSeenState.get(key)
-		if (prev !== evt.state) {
-			lastSeenState.set(key, evt.state)
-			queryClient.invalidateQueries({ queryKey: queryKey.value })
-		}
-	}
-
-	function progressFor(backupId: string, kind: 'create' | 'restore'): number | undefined {
-		return progressOverlay.get(`${backupId}:${kind}`)
+	/** Always undefined — progress overlay not supported for Core backups. */
+	function progressFor(_backupId: string, _kind: 'create' | 'restore'): number | undefined {
+		return undefined
 	}
 
 	const busyReasons = computed<BusyReason[]>(() => {

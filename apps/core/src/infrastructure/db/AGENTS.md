@@ -1,76 +1,42 @@
-# infrastructure/db/
+# src/infrastructure/db — SQLite repository implementations
 
-SQLite implementations of the store ports using `sqlx`.
+Concrete implementations of the `ports` traits using `sqlx` and SQLite. The connection pool is created by `connect()` in `mod.rs` and stored in `AppState`.
 
-## Files
-
-| File | Implements |
-|------|-----------|
-| `instance_repo.rs` | `InstanceStore` → `InstanceRepo` |
-| `modpack_repo.rs` | `ModpackStore` → `ModpackRepo` |
-| `mod.rs` | Re-exports + `connect(path)` helper |
-
-## `InstanceRepo`
-
-Wraps a `SqlitePool`. Constructed in `AppState::new()` and stored as `Arc<dyn InstanceStore>`.
-
-### Deserialization pattern
-
-Private `InstanceRow` struct derives `sqlx::FromRow`. All columns are primitives (strings, i64).  
-`TryFrom<InstanceRow> for InstanceRecord` parses `loader`, `status`, timestamps, UUID via `FromStr`.
-
-### SQL schema (`instances` table)
+## File structure
 
 ```
-id TEXT PK | name TEXT | game_version TEXT | loader TEXT | loader_version TEXT
-port INTEGER | memory_min INTEGER | memory_max INTEGER | java_version INTEGER
-status TEXT | data_dir TEXT | created_at TEXT | updated_at TEXT
+db/
+  mod.rs           — connect(): opens (or creates) the SQLite pool with WAL + 5s busy timeout
+  instance_repo.rs — InstanceRepo: impl of InstanceStore
+  java_repo.rs     — JavaRepo: impl of JavaStore
+  modpack_repo.rs  — ModpackRepo: impl of ModpackStore
 ```
 
-All timestamps stored as RFC 3339 strings. `id` is lowercase hyphenated UUID. `loader`/`status` are lowercase strings parsed via `FromStr`.
+## mod.rs — connect()
 
-### Methods
+Opens the DB at the given path. Key options:
+- `create_if_missing(true)` — creates the file on first run.
+- `journal_mode(Wal)` — WAL mode reduces write contention.
+- `busy_timeout(5s)` — SQLite returns `BUSY` after 5s instead of spinning; prevents deadlocks under load.
 
-| Method | SQL |
-|--------|-----|
-| `create` | `INSERT INTO instances (...) VALUES (...)` |
-| `get` | `SELECT * FROM instances WHERE id = ?` |
-| `list` | `SELECT * FROM instances ORDER BY created_at` |
-| `list_by_status` | `SELECT * FROM instances WHERE status = ?` |
-| `update_status` | `UPDATE instances SET status = ?, updated_at = ? WHERE id = ?` |
-| `delete` | `DELETE FROM instances WHERE id = ?` |
+## instance_repo.rs
 
-## `ModpackRepo`
+`InstanceRow` is the flat `sqlx::FromRow` struct. `TryFrom<InstanceRow> for InstanceRecord` does the conversion, parsing loader and status from lowercase strings via their `FromStr` impls.
 
-Wraps a `SqlitePool`. Stored as `Arc<dyn ModpackStore>`.
+**BEH-09 timestamp parsing**: `parse_timestamp()` accepts both RFC 3339 (`"2024-01-01T12:00:00Z"`) and SQLite's native `CURRENT_TIMESTAMP` format (`"2024-01-01 12:00:00"`). Old rows inserted directly via SQL use the SQLite format; rows written by `InstanceRepo::create` use RFC 3339 explicitly.
 
-### SQL schema (`modpack_manifests` table)
+`reset_transient_statuses`: single `UPDATE instances SET status = 'offline' WHERE status IN ('starting', 'stopping')`. Called once at startup to clean up after an unclean shutdown.
 
-```
-id TEXT PK | instance_id TEXT | pack_name TEXT | pack_version TEXT
-game_version TEXT | loader TEXT | loader_version TEXT
-modrinth_project_id TEXT | modrinth_version_id TEXT | installed_at TEXT
-```
+## java_repo.rs
 
-Uses `INSERT OR REPLACE` for upsert semantics.
+`sync_all` uses `INSERT OR REPLACE` — upserts by `version` (the major version integer, e.g. `21`). If multiple installs share the same version, only one is stored.
 
-## `connect(path: &Path)` helper (`mod.rs`)
+## modpack_repo.rs
 
-Opens a `SqlitePool` with `create_if_missing(true)`. Used in `main.rs` and `TestApp`.
+`save` upserts the manifest row — only one manifest per instance (`UNIQUE(instance_id)` in the schema). Calling `save` a second time for the same instance replaces the previous manifest.
 
-## Migrations
+## Gotchas
 
-`sqlx::migrate!("./migrations")` is called on startup and in `TestApp`. Files are embedded at **compile time**. After adding a new `.sql` file, run `cargo clean -p amberite-core` to force re-embedding.
-
-Current migrations:
-- `001_init.sql` — initial schema
-- `002_full_rewrite.sql` — complete table redesign
-- `003_alter_instances.sql` — add game_version, loader, port, memory, status, data_dir columns
-- `004_mods.sql` — `mods` + `java_installations` tables
-- `005_fix_instances.sql` — add missing `loader_version`, `java_version`, `updated_at` columns
-
-## Rules
-
-- Use `sqlx::query` / `sqlx::query_as` only — no string concatenation or format! in SQL.
-- No `sqlx::query!` macros (no `.sqlx/` offline cache checked in).
-- `SQLX_OFFLINE=true` is set in `.cargo/config.toml`; this disables compile-time type checking for query macros (which we don't use).
+- **`mod_service` bypasses these repos entirely**: The `mods` table is queried with raw `sqlx::query` directly against `state.pool` — it has no repo class and is not backed by a port trait.
+- **Adding `sqlx::query!` macros requires `cargo sqlx prepare`**: `SQLX_OFFLINE=true` (set in `.cargo/config.toml`) means the compiler uses a cached metadata file. Raw `sqlx::query` (non-macro) is unaffected.
+- **`StoreError::NotFound` holds a `String`**: The string is the UUID text. Callers that need an `InstanceError::NotFound(InstanceId)` convert it manually.

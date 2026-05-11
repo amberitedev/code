@@ -1,78 +1,63 @@
-# infrastructure/process/
+# src/infrastructure/process — Process spawning and per-instance actor
 
-PTY process spawning and the per-instance lifecycle actor.
+PTY-based process spawning, per-instance async actor, and a mock spawner for tests. See `ports/process_spawner.rs` for the trait definitions.
 
-## Files
+## File structure
 
-| File | Purpose |
-|------|---------|
-| `pty_spawner.rs` | `PtySpawner` + `PtyHandle` — production PTY via `portable_pty` |
-| `mock_spawner.rs` | `MockSpawner` + `MockHandle` — in-memory fake for tests |
-| `instance_actor.rs` | `InstanceHandle`, `ActorCmd`, `spawn_actor` — per-instance task |
-| `mod.rs` | Re-exports |
-
-## `PtySpawner` + `PtyHandle`
-
-Implements `ProcessSpawner<Handle = PtyHandle>`.
-
-- Opens a `portable_pty` pair, spawns the child on the slave end.
-- Forwards stdout lines over `mpsc::channel<String>(512)` via a background `std::thread` (PTY I/O is synchronous).
-- `send_stdin(line)` — writes to PTY master with `writeln!`.
-- `take_stdout_rx()` — one-shot; returns `None` on second call.
-- `is_running()` — `child.try_wait()`.
-- `kill()` — `child.kill()`.
-- `pid()` — `child.process_id()`.
-
-## `MockSpawner` + `MockHandle` (tests)
-
-Simulates a running process entirely in memory.
-
-- `spawn()` immediately returns a `MockHandle`.
-- `send_stdin(line)` stores the line in `Vec<String>` (inspectable after test).
-- `take_stdout_rx()` returns a channel the test can write to.
-- `is_running()` — controlled by `MockHandle::set_running(bool)`.
-- `kill()` — sets running = false.
-
-## `spawn_actor` + actor task (`instance_actor.rs`)
-
-```rust
-pub fn spawn_actor<H: ProcessHandle>(
-    instance_id: InstanceId, handle: H, state: Arc<AppState>
-) -> InstanceHandle
+```
+process/
+  mod.rs              — re-exports: pty_spawner, mock_spawner, instance_actor
+  pty_spawner.rs      — PtySpawner + PtyHandle: real PTY-backed process spawning
+  mock_spawner.rs     — MockSpawner + MockHandle: in-memory fake for tests
+  instance_actor.rs   — ActorCmd, InstanceHandle, spawn_actor: per-instance async actor
 ```
 
-Spawns a `tokio::spawn` loop that:
+## pty_spawner.rs
 
-1. Selects on `stdout_rx.recv()` and `cmd_rx.recv()`.
-2. On stdout line: broadcasts `Event::InstanceOutput`; if line contains `"Done ("` → sets status to `Running`.
-3. On `ActorCmd::GracefulStop` → sets `Stopping`, sends `"stop"` to stdin, drains stdout 30s, kills if timeout.
-4. On `ActorCmd::Kill` → calls `handle.kill()`, breaks.
-5. On process exit: determines final status (`Offline` or `Crashed`), broadcasts `StatusChanged`, removes from `AppState.instances`.
+`PtySpawner` opens a PTY pair via `portable_pty::native_pty_system()` and spawns the command on the slave side. The master side gives a writer (for stdin) and a reader (for stdout).
 
-## `InstanceHandle`
+**Stdout reading uses a blocking OS thread** (`std::thread::spawn`): `BufReader::lines()` is a blocking iterator. To bridge this to async, a `std::thread` reads lines and forwards them into an `mpsc::Sender<String>` with `blocking_send`. One OS thread is created per running server instance. These threads self-terminate when the reader closes (process exit or PTY hangup).
 
-Stored in `AppState.instances: DashMap<InstanceId, InstanceHandle>`.
+**PTY size**: hardcoded to 50 rows × 200 columns. Minecraft's output is unaffected, but ANSI escape sequences for terminal width may behave unexpectedly if the server queries terminal dimensions.
 
-```rust
-pub struct InstanceHandle {
-    pub cmd_tx:     mpsc::Sender<ActorCmd>,
-    pub pid:        Option<u32>,
-    pub started_at: Instant,
+`PtyHandle` wraps the writer and child in `Arc<Mutex<>>` for use across async contexts. `pid()` returns the OS PID used by `stats_service`.
+
+## mock_spawner.rs
+
+`MockSpawner` creates an in-memory channel: the `spawn()` method returns a `MockHandle` where `stdin_tx` and the internal `stdout_rx` share the same channel. This means:
+- Anything written via `send_stdin` appears as stdout output in the actor.
+- `feed_output` (called from tests) also writes to the same channel, simulating server output lines.
+
+This design lets test code both observe what commands were sent and inject mock server output.
+
+`kill()` sets `running` to `false` via `AtomicBool` — this causes the actor's `is_running()` check to break the event loop, simulating a process exit.
+
+`MockHandle` does not have a `pid()` — returns `None`. Stats tests cannot use a `MockSpawner`-backed instance.
+
+## instance_actor.rs
+
+`spawn_actor` launches a `tokio::spawn` task that owns the `ProcessHandle`. It returns an `InstanceHandle` immediately.
+
+**Actor loop** (`run_actor`):
+```
+tokio::select! {
+    stdout line → broadcast Event::InstanceOutput; detect "Done (" → set Running status
+    actor command → SendCommand / GracefulStop / Kill
+    else (both channels closed) → break
 }
+if !handle.is_running() → break
 ```
 
-## `ActorCmd`
+**"Done (" detection**: Minecraft prints `Done (Xs)! For help, type "help"` when the server is ready. The actor checks for `"Done ("` substring to transition from `Starting` to `Running`.
 
-```rust
-pub enum ActorCmd {
-    SendCommand(String),
-    GracefulStop,
-    Kill,
-}
-```
+**GracefulStop**: sends `"stop"` to stdin, then calls `drain_until_closed` with a 30-second timeout. If the stdout channel does not close in 30 seconds (server did not exit), falls through to `handle.kill()`.
 
-## Rules
+**Exit handling**: after breaking from the loop, the actor checks `handle.is_running()`. If still running (shouldn't happen after kill), it kills and marks as `Crashed`. If not running, marks as `Offline`. Then calls `state.instances.remove(&instance_id)` — this removal is the signal that the instance is fully stopped.
 
-- `PtySpawner` is the only production spawner — always use `MockSpawner` in tests.
-- The actor must not block the Tokio thread — PTY stdout reading runs in a `std::thread`.
-- Status updates in `set_status()` use raw `sqlx::query` (ARCH-01 open bug; bypasses `InstanceStore`).
+**`set_status` (local)**: the actor has its own private `set_status` function (not the service-layer one) that updates the DB via `instance_store.update_status()` and broadcasts `Event::StatusChanged`. This mirrors `instance_status_service::set_status` but is scoped to the actor.
+
+## Gotchas
+
+- **"Done (" detection is fragile**: any server mod or plugin that prints `"Done ("` before the server is actually ready could cause a premature `Running` status. In practice this is rare.
+- **Graceful stop path**: the 30s timeout is in the actor, not the service. `stop_instance` in `instance_status_service` sends `GracefulStop` and returns immediately — it does NOT await the process exit. The status transition to `Offline` happens asynchronously inside the actor.
+- **Crashed vs Offline**: the actor sets `Crashed` only if `handle.is_running()` is true at exit — but kill was just called, so `is_running()` is false immediately. The `Crashed` branch is nearly unreachable; a server that crashes on its own shows as `Offline`.

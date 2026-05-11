@@ -1,7 +1,5 @@
 // AMBERITE: Import API mock first (before any API calls)
 import '@/helpers/api-mock.ts'
-
-import { DesignInspectorPlugin } from '../../../packages/design-inspector/index.ts'
 import 'floating-vue/dist/style.css'
 import 'overlayscrollbars/overlayscrollbars.css'
 
@@ -17,6 +15,8 @@ import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 import router from '@/routes'
+
+import { DesignInspectorPlugin } from '../../../packages/design-inspector/index.ts'
 
 const vueScan = new VueScanPlugin({
 	enabled: false, // Enable or disable the tracker

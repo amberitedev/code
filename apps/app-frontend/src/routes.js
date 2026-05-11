@@ -107,6 +107,22 @@ export default new createRouter({
 						breadcrumb: [{ name: '?Server' }],
 					},
 				},
+				{
+					path: 'files',
+					name: 'ServerInstanceFiles',
+					component: Server.Files,
+					meta: {
+						breadcrumb: [{ name: '?Server' }],
+					},
+				},
+				{
+					path: 'backups',
+					name: 'ServerInstanceBackups',
+					component: Server.Backups,
+					meta: {
+						breadcrumb: [{ name: '?Server' }],
+					},
+				},
 			],
 		},
 		{

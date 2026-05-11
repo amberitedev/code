@@ -1,76 +1,28 @@
-# infrastructure/auth/
+# src/infrastructure/auth — Supabase RS256 JWT validation
 
-Supabase RS256 JWT validation via cached JWKS.
+JWKS-based JWT validator for Supabase tokens. The only consumer is `presentation/extractors.rs` (`AuthUser`).
 
-## Files
-
-| File | Key types |
-|------|-----------|
-| `jwks.rs` | `JwksCache`, `Claims`, `AuthError` |
-| `mod.rs` | Re-exports |
-
-## `JwksCache`
-
-```rust
-pub struct JwksCache {
-    inner: tokio::sync::RwLock<Option<CacheEntry>>,
-    http:  reqwest::Client,
-}
-```
-
-- `new(http: reqwest::Client) -> Self`
-- `async fn validate(&self, token: &str, jwks_url: &str) -> Result<Claims, AuthError>`
-
-### Cache behaviour
-
-Keys are cached in memory with a 1-hour TTL (`CACHE_TTL = 3600s`).  
-`refresh_if_stale` acquires a read lock first (fast path), upgrades to write lock only when stale.  
-On refresh, fetches `jwks_url`, parses RSA `n`/`e` components via base64url, builds `DecodingKey`.
-
-### Validation logic
-
-1. Decode JWT header to get `kid`.
-2. For each cached `JwkEntry`: if both token and key have a `kid`, they must match; otherwise try all keys.
-3. Decode and validate with `Algorithm::RS256`, `validate_exp = true`.
-
-## `Claims`
-
-```rust
-pub struct Claims {
-    pub sub:  String,           // Supabase user UUID
-    pub role: Option<String>,   // "authenticated" | "service_role" | …
-    pub exp:  u64,
-}
-```
-
-## `AuthError`
-
-```rust
-enum AuthError {
-    InvalidToken,
-    NoKeys,
-    Fetch(String),
-    BadKey,
-    NotPaired,
-}
-```
-
-## JWKS URL
-
-Derived at request time from `core_config.supabase_url` in the DB:
+## File structure
 
 ```
-{supabase_url}/auth/v1/.well-known/jwks.json
+auth/
+  mod.rs    — re-exports: jwks
+  jwks.rs   — JwksCache, Claims, AuthError
 ```
 
-`AppState::jwks_url()` queries this. Returns `None` if not yet paired → `AuthUser` extractor returns 401.
+## jwks.rs
 
-## Dev mode bypass
+### JwksCache
 
-When `config.dev_mode = true`, `AuthUser` extractor returns synthetic `Claims { sub: "dev-owner" }` without touching `JwksCache`. Never enable in prod.
+Holds an `RwLock<Option<CacheEntry>>` with a 1-hour TTL (`CACHE_TTL = 3600s`). The cache is refreshed lazily on the first call after the TTL expires — there is no background refresh task.
 
-## Rules
+`validate(token, jwks_url)`: fetches JWKS if stale, extracts `kid` from the JWT header, and iterates cached keys. If both token and key have `kid` they must match; if either lacks `kid` the key is tried unconditionally. Returns `Claims { sub, role, exp }` on first successful validation.
 
-- `JwksCache` is stored in `AppState` and shared via `Arc`.
-- Do not hardcode any Supabase project URL here.
-- JWT signing algorithm is always RS256 — HS256 tokens are rejected.
+`AuthError::NotPaired` is returned by the extractor before pairing is complete — not by `JwksCache` itself.
+
+## Gotchas
+
+- **1-hour stale window**: A rotated Supabase key will continue to work until the TTL expires. This is intentional (avoids hammering the JWKS endpoint) but means a key rotation takes up to 1 hour to take effect.
+- **`refresh_if_stale` double-lock pattern**: Acquires a read lock to check TTL, drops it, then acquires a write lock to update. There is a TOCTOU window where two concurrent requests could both trigger a refresh. The second write just overwrites with an identical result — harmless.
+- **`jwks_url` is not from `Config`**: The JWKS URL is `{supabase_url}/auth/v1/.well-known/jwks.json` where `supabase_url` comes from the `core_config` DB row written by `POST /setup`. If Core is unpaired, `jwks_url()` returns `None` and all protected routes return 401.
+- **Only RSA keys are parsed**: Non-RSA keys in the JWKS are silently skipped (`if raw.kty != "RSA" { continue }`).

@@ -344,9 +344,10 @@
 </template>
 
 <script setup lang="ts">
+import type { CoreInstance } from '@amberite/core-client'
 import { Intercom, shutdown } from '@intercom/messenger-js-sdk'
 import type { Archon, Labrinth } from '@modrinth/api-client'
-import { ModrinthApiError, NuxtModrinthClient } from '@modrinth/api-client'
+import { NuxtModrinthClient } from '@modrinth/api-client'
 import {
 	BoxesIcon,
 	CheckIcon,
@@ -399,6 +400,7 @@ import { useServerManageCoreRuntime } from '#ui/composables/server-manage-core-r
 import type { LogLine } from '#ui/layouts/shared/console'
 import type { ServerSettingsTabId } from '#ui/layouts/shared/server-settings'
 import {
+	injectCoreClient,
 	injectModrinthClient,
 	injectNotificationManager,
 	provideServerSettingsModal,
@@ -493,11 +495,38 @@ const DISABLE_LOADING_ANIM = true
 
 const { addNotification } = injectNotificationManager()
 const client = injectModrinthClient()
+const coreClient = injectCoreClient()
 const isNuxt = computed(() => client instanceof NuxtModrinthClient)
 const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
 const debug = useDebugLogger('ServerManage')
+
+const mapCoreInstanceToServer = (inst: CoreInstance): Archon.Servers.v0.Server =>
+	({
+		server_id: inst.id,
+		name: inst.name,
+		owner_id: '',
+		net: { ip: '127.0.0.1', port: inst.port, domain: null },
+		game: 'java',
+		backup_quota: 999,
+		used_backup_quota: 0,
+		status: 'available',
+		suspension_reason: null,
+		loader: inst.loader as Archon.Servers.v0.Loader,
+		loader_version: inst.loader_version ?? '',
+		mc_version: inst.game_version,
+		upstream: null,
+		sftp_username: '',
+		sftp_password: '',
+		sftp_host: '',
+		sftp_port: 22,
+		datacenter: 'local',
+		notices: [],
+		node: { token: '', instance: '' },
+		flows: { intro: false },
+		is_medal: false,
+	}) as Archon.Servers.v0.Server
 
 const isReconnecting = ref(false)
 const isLoading = ref(true)
@@ -527,7 +556,7 @@ const {
 	isLoading: serverLoading,
 } = useQuery({
 	queryKey: ['servers', 'detail', props.serverId],
-	queryFn: () => client.archon.servers_v0.get(props.serverId)!,
+	queryFn: () => coreClient.getInstance(props.serverId).then(mapCoreInstanceToServer),
 })
 
 useLoadingBarToken(useReadyState({ isLoading: serverLoading, data: serverData }))
@@ -542,8 +571,14 @@ function updateServerData(patch: Partial<Archon.Servers.v0.Server>) {
 
 const serverError = computed(() => {
 	const err = serverQueryError.value
-	if (err instanceof ModrinthApiError) return err
-	return err ? ModrinthApiError.fromUnknown(err) : null
+	if (!err) return null
+	return {
+		message: err instanceof Error ? err.message : String(err),
+		name: err instanceof Error ? err.name : 'Error',
+		statusCode: undefined as number | undefined,
+		originalError: err,
+		stack: err instanceof Error ? err.stack : undefined,
+	}
 })
 
 const { data: serverFull } = useQuery({
@@ -551,13 +586,9 @@ const { data: serverFull } = useQuery({
 	queryFn: () => client.archon.servers_v1.get(props.serverId),
 })
 
-const worldId = computed(() => {
-	if (!serverFull.value) return null
-	const activeWorld = serverFull.value.worlds.find((w) => w.is_active)
-	return activeWorld?.id ?? serverFull.value.worlds[0]?.id ?? null
-})
+const worldId = computed(() => props.serverId)
 
-const { handleWsBackupProgress, busyReasons: backupsBusy } = useServerBackupsQueue(
+const { busyReasons: backupsBusy } = useServerBackupsQueue(
 	computed(() => props.serverId),
 	worldId,
 )
@@ -568,61 +599,9 @@ const { image: serverImage } = useServerImage(
 )
 const { data: serverProject } = useServerProject(computed(() => serverData.value?.upstream ?? null))
 
-const syncProgress = ref<Archon.Websocket.v0.SyncContentProgress | null>(null)
-const contentError = ref<Archon.Websocket.v0.SyncContentError | null>(null)
-const syncProgressActive = ref(false)
 const isAwaitingPostInstallRefresh = ref(false)
-const { start: startSyncHide, stop: cancelSyncHide } = useTimeoutFn(
-	() => (syncProgressActive.value = false),
-	1000,
-	{ immediate: false },
-)
 
-watch(syncProgress, (progress) => {
-	if (progress != null) {
-		cancelSyncHide()
-		syncProgressActive.value = true
-	} else if (syncProgressActive.value) {
-		startSyncHide()
-	}
-})
-
-const isSyncingContent = computed(
-	() => syncProgressActive.value || isAwaitingPostInstallRefresh.value,
-)
-
-let hasSeenInstallProgress = false
-
-const onStateEvent = (data: Archon.Websocket.v0.WSStateEvent) => {
-	debug('[root.vue] handleState received:', {
-		power_variant: data.power_variant,
-		progress: data.progress,
-		serverStatus: serverData.value?.status,
-	})
-	hasReceivedWsData.value = true
-	syncProgress.value = data.progress
-	contentError.value = data.content_error
-
-	if (serverData.value) {
-		if (data.progress != null && serverData.value.status !== 'installing') {
-			debug('[root.vue] handleState: progress != null, setting status to installing')
-			hasSeenInstallProgress = true
-			updateServerData({ status: 'installing' })
-		} else if (data.progress != null) {
-			hasSeenInstallProgress = true
-		} else if (
-			data.progress == null &&
-			data.content_error == null &&
-			serverData.value.status === 'installing' &&
-			hasSeenInstallProgress
-		) {
-			debug('[root.vue] handleState: progress null + was installing, applying optimistic update')
-			hasSeenInstallProgress = false
-			applyOptimisticCompletion()
-			invalidateAfterInstall()
-		}
-	}
-}
+const isSyncingContent = computed(() => isAwaitingPostInstallRefresh.value)
 
 const {
 	cancelUpload,
@@ -643,11 +622,8 @@ const {
 	server: serverData,
 	isSyncingContent,
 	extraBusyReasons: backupsBusy,
-	setDisconnectedOnAuthIncorrect: false,
-	syncUptimeFromState: true,
 	incrementUptimeLocally: true,
 	eventGuard: () => isMounted.value,
-	onStateEvent,
 })
 
 const isUploading = computed(() => uploadState.value.isUploading)
@@ -799,22 +775,11 @@ const filteredNotices = computed(
 )
 const surveyNotice = computed(() => serverData.value?.notices?.find((n) => n.level === 'survey'))
 
-async function dismissNotice(noticeId: number) {
-	await client.archon.servers_v0.dismissNotice(props.serverId, noticeId).catch((err) => {
-		addNotification({
-			title: 'Error dismissing notice',
-			text: err,
-			type: 'error',
-		})
-	})
-	await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', props.serverId] })
+async function dismissNotice(_noticeId: number) {
+	// Core servers have no notices — no-op
 }
 
-async function dismissSurvey() {
-	const noticeId = surveyNotice.value?.id
-	if (noticeId === undefined) return
-	await dismissNotice(noticeId)
-}
+async function dismissSurvey() {}
 
 type TallyPopupOptions = {
 	key?: string
@@ -900,40 +865,7 @@ function loadTallyScript() {
 }
 
 async function handleContentRetry() {
-	if (!worldId.value) return
-	try {
-		await client.archon.content_v1.repair(props.serverId, worldId.value)
-	} catch (err) {
-		addNotification({
-			type: 'error',
-			text: err instanceof Error ? err.message : 'Failed to retry installation',
-		})
-	}
-}
-
-const handleBackupProgress = (data: Archon.Websocket.v0.WSBackupProgressEvent) => {
-	handleWsBackupProgress(data)
-}
-
-const handleFilesystemOps = (data: Archon.Websocket.v0.WSFilesystemOpsEvent) => {
-	const allOps = data.all
-
-	if (JSON.stringify(fsOps.value) !== JSON.stringify(allOps)) {
-		fsOps.value = allOps
-	}
-
-	fsQueuedOps.value = fsQueuedOps.value.filter(
-		(queuedOp) => !allOps.some((x) => x.src === queuedOp.src),
-	)
-
-	const cancelled = allOps.filter((x) => x.state === 'cancelled')
-	Promise.all(
-		cancelled.map((x) =>
-			client.kyros.files_v0.modifyOperation(x.id, 'dismiss').catch((error) => {
-				console.error('Failed to dismiss cancelled operation:', error)
-			}),
-		),
-	)
+	// no-op for Core — content sync is not managed via Archon
 }
 
 const handleNewMod = () => {

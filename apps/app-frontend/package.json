@@ -14,6 +14,7 @@
 	},
 	"dependencies": {
 		"@intercom/messenger-js-sdk": "^0.0.14",
+		"@amberite/core-client": "workspace:*",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/ui": "workspace:*",

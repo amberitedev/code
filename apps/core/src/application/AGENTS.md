@@ -1,80 +1,82 @@
-# application/
+# src/application — Services and shared state
 
-Business logic orchestration. Services receive `&Arc<AppState>` and call ports or infrastructure. No HTTP types (`axum::*`) anywhere in this layer.
+Orchestration layer: coordinates domain types with port interfaces. No direct I/O — delegates to `ports` and `infrastructure`. All services receive `&Arc<AppState>`.
 
-## Files
+## File structure
 
-| File | Purpose |
-|------|---------|
-| `state.rs` | `AppState` — central shared state, created once in `main.rs` |
-| `instance_service.rs` | `create_instance`, `restore_instances`, `get_data_dir`, `update_port` |
-| `instance_status_service.rs` | `start_instance`, `stop_instance`, `kill_instance`, `restart_instance`, `send_command` |
-| `mod_service.rs` | Mod CRUD: list, add (Modrinth), upload, delete, toggle, update, update-all |
-| `log_service.rs` | Read logs and crash-reports from `data_dir/instances/<id>/` |
-| `macro_service.rs` | `spawn_macro`, `kill_macro`, `list_macros`, `list_macro_files` |
-| `modpack_service.rs` | Install `.mrpack` from Modrinth; get, remove modpack manifest |
-| `export_service.rs` | Export instance mods as a `.mrpack` zip |
-| `stats_service.rs` | CPU%, RAM bytes for a running instance |
-| `mod.rs` | Re-exports |
-
-## `AppState` (state.rs)
-
-```rust
-pub struct AppState {
-    pub pool:                   SqlitePool,          // kept for legacy direct queries
-    pub http:                   reqwest::Client,
-    pub config:                 Config,
-    pub instances:              DashMap<InstanceId, InstanceHandle>,
-    pub broadcaster:            EventBroadcaster,
-    pub macro_executor:         MacroExecutor,
-    pub jwks_cache:             JwksCache,
-    pub ws_tickets:             DashMap<String, WsTicket>,
-    pub pairing_code:           tokio::sync::Mutex<Option<String>>,
-    pub wrong_pairing_attempts: AtomicU32,           // SEC-01 lockout counter
-    pub instance_store:         Arc<dyn InstanceStore>,
-    pub modpack_store:          Arc<dyn ModpackStore>,
-}
+```
+application/
+  mod.rs                    — re-exports all service submodules
+  state.rs                  — AppState definition and constructors
+  instance_service.rs       — create instance, restore on startup, get data_dir
+  instance_status_service.rs — start, stop, kill, restart, send command, set_status
+  mod_service.rs            — full mod CRUD (list, add from Modrinth, upload, delete, toggle, update)
+  modpack_service.rs        — install .mrpack, get/remove manifest
+  log_service.rs            — list + read log files and crash reports from data_dir
+  macro_service.rs          — spawn/kill/list Deno macros
+  stats_service.rs          — CPU%, RAM, player count, uptime for a running instance
+  export_service.rs         — export instance mod list as a .mrpack archive
 ```
 
-`AppState::new()` generates the 6-digit pairing code if not already paired (reads `core_config`).
+## state.rs — AppState
 
-## `create_instance` flow
+`AppState` is always behind `Arc<AppState>` — it is never passed by value. The `Arc` is constructed inside `AppState::new()` and returned.
 
-1. Allocate `InstanceId::new()`, create `data_dir/instances/<id>/`.
-2. Write `server.properties` via `write_initial_properties`.
-3. Insert `InstanceRecord` (status = `offline`) via `instance_store.create()`.
-4. `tokio::spawn` background JAR download — sends `CreationProgress` events. Failures are logged but do not affect the HTTP response.
-5. Return `InstanceId` (HTTP 200).
+Key fields:
 
-**BEH-04 open bug**: returns 200, should return 201 Created.
+| Field | Type | Purpose |
+|-------|------|---------|
+| `pool` | `SqlitePool` | Raw SQLite pool — kept for direct queries that bypass the port traits (e.g., `mods` table, `core_config`) |
+| `http` | `reqwest::Client` | Shared HTTP client (user-agent `amberite-core/0.1`) used by all outbound requests |
+| `config` | `Config` | Runtime configuration loaded from env vars |
+| `instances` | `DashMap<InstanceId, InstanceHandle>` | Live running instances — present only while the actor task is alive |
+| `broadcaster` | `EventBroadcaster` | Broadcast channel for instance output + status events |
+| `macro_executor` | `MacroExecutor` | Tracks and kills running Deno macro threads |
+| `jwks_cache` | `JwksCache` | Cached JWKS keys for Supabase RS256 validation |
+| `ws_tickets` | `DashMap<String, WsTicket>` | Short-lived UUID tokens for WebSocket auth |
+| `pairing_code` | `Mutex<Option<String>>` | Set at startup if unpaired; cleared after successful pairing |
+| `wrong_pairing_attempts` | `AtomicU32` | Pairing lockout counter (max 5) |
+| `instance_store` | `Arc<dyn InstanceStore>` | SQLite-backed in production |
+| `java_store` | `Arc<dyn JavaStore>` | SQLite-backed in production |
+| `modpack_store` | `Arc<dyn ModpackStore>` | SQLite-backed in production |
+| `spawner` | `Arc<dyn AnySpawner>` | `PtySpawner` in production, `MockSpawner` in tests |
 
-## `restore_instances` (startup)
+`AppState::new()` calls `AppState::new_with_spawner()` with `PtySpawner`. Tests use `new_with_spawner(MockSpawner)` to avoid spawning real JVMs.
 
-Called from `main.rs` via `tokio::spawn`. Resets `starting`/`stopping` → `offline`, then re-starts any `running` instances.
+`jwks_url()` is an async method that queries `core_config` in the DB — it is NOT derived from `Config.supabase_url`. The supabase URL is stored in the DB row written by `POST /setup`, not in the env var.
 
-## Service error types
+## instance_service.rs
 
-| Service | Error enum |
-|---------|------------|
-| `instance_service` | `InstanceError` |
-| `instance_status_service` | `InstanceError` (reused) |
-| `mod_service` | `ModError` |
-| `log_service` | `LogError` |
-| `modpack_service` | `ModpackError` |
-| `export_service` | `ExportError` |
-| `stats_service` | `StatsError` |
-| `macro_service` | `MacroError` |
+`create_instance`: writes `data_dir/{uuid}/`, creates initial `server.properties`, inserts the DB record, then spawns a background tokio task for the JAR download. The function returns the new `InstanceId` immediately — the download happens asynchronously. Use `GET /instances/:id/progress` (SSE) to track it. If the download fails, the DB record still exists and the instance will be in `Offline` status with no JAR.
 
-All implement `thiserror::Error`. `ApiError` in `presentation/error.rs` has `From` impls for each.
+`restore_instances`: runs at startup as a separate `tokio::spawn` task. Detects Java installations and syncs to DB, resets any instances stuck in `starting` or `stopping` to `offline` (unclean-shutdown recovery), then re-starts all instances that had `Running` status.
 
-## Log path guard (`log_service.rs`)
+## instance_status_service.rs
 
-`resolve_log` and `resolve_crash` reject filenames containing `..`, `/`, or `\` (SEC-03).  
-Extension whitelist: logs → `.log`, `.log.gz`; crash-reports → `.txt`.
+`start_instance`: reads `launch.json` from the instance `data_dir` to determine launch style. If `launch.json` is absent (legacy instances), it falls back to `server.jar` in the data dir.
 
-## Rules
+Launch styles from `launch.json`:
+- `Jar { jar }` — `java -Xms... -Xmx... -jar {jar} --nogui` (Vanilla, Paper, Fabric, Quilt post-install)
+- `ArgsFile { args }` — `java -Xms... -Xmx... @{args}` (Forge 1.17+ uses an args file from libraries/)
 
-- Services receive `&Arc<AppState>` — never own state.
-- Background tasks use `tokio::spawn`.
-- No `axum` types here.
-- `update_port` in `instance_service.rs` still uses raw `sqlx::query` (ARCH-01 open).
+`restart_instance`: sends `GracefulStop`, then polls `state.instances.contains_key(id)` until the actor removes itself (clean stop signal). 30-second timeout.
+
+`set_status` is `pub(crate)` — called by both this service and `instance_actor`. It updates the DB and broadcasts a `StatusChanged` event.
+
+## mod_service.rs
+
+`list_mods` scans the `mods/` subdirectory of the instance data_dir and cross-references against the `mods` DB table. The `tracked` flag on `ModInfo` means the file has a DB row; untacked JARs dropped directly into the folder still appear in the list.
+
+`sanitize_filename` rejects filenames containing `..`, `/`, or `\`. Called before any filesystem operation on a mod filename (SEC-05 path traversal guard).
+
+## Other services
+
+`stats_service::get_stats`: gets CPU/RAM from `sysinfo` filtered by PID (from `InstanceHandle.pid`), and player count by sending the `"list"` command and listening to the event stream for the response line. Uptime is derived from `InstanceHandle.started_at`.
+
+`export_service::export_modpack`: builds a `.mrpack` ZIP with `modrinth.index.json` listing Modrinth-linked mods and override JARs for untracked files, plus the contents of the instance's `config/` directory as overrides.
+
+## Gotchas
+
+- **`AppState.instances` presence ≠ `Running` status**: An instance can be in `Starting` or `Stopping` and still have a handle in the map. Absence from the map means the actor task has fully exited.
+- **Background JAR download failures are silent in the HTTP response**: `create_instance` returns 201 before the download starts. Errors log via `tracing::error!` but don't surface to the caller.
+- **`mod_service` bypasses the port abstraction**: several functions use `state.pool` directly (raw `sqlx::query`) rather than going through `instance_store`. This is intentional — the mods table is not part of the `InstanceStore` port.

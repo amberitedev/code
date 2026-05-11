@@ -13,6 +13,7 @@ use crate::{
 pub struct StatsResponse {
     pub cpu_percent: Option<f32>,
     pub memory_mb: Option<u64>,
+    pub ram_total_mb: Option<u64>,
     pub player_count: Option<u32>,
     pub uptime_seconds: Option<u64>,
 }
@@ -41,6 +42,7 @@ pub async fn get_stats(
             return Ok(StatsResponse {
                 cpu_percent: None,
                 memory_mb: None,
+                ram_total_mb: None,
                 player_count: None,
                 uptime_seconds: None,
             });
@@ -52,22 +54,22 @@ pub async fn get_stats(
     let cmd_tx = handle.cmd_tx.clone();
     drop(handle); // release DashMap guard before any await
 
-    let (cpu_percent, memory_mb) = if let Some(pid_val) = pid {
+    let (cpu_percent, memory_mb, ram_total_mb) = if let Some(pid_val) = pid {
         tokio::task::spawn_blocking(move || {
             let p = Pid::from(pid_val as usize);
             let mut sys = System::new_all();
             std::thread::sleep(Duration::from_millis(200));
             sys.refresh_all();
             if let Some(proc) = sys.process(p) {
-                (Some(proc.cpu_usage()), Some(proc.memory() / 1_048_576))
+                (Some(proc.cpu_usage()), Some(proc.memory() / 1_048_576), Some(sys.total_memory() / 1_048_576))
             } else {
-                (None, None)
+                (None, None, None)
             }
         })
         .await
-        .unwrap_or((None, None))
+        .unwrap_or((None, None, None))
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     let player_count = get_player_count(state, &iid, cmd_tx).await;
@@ -75,6 +77,7 @@ pub async fn get_stats(
     Ok(StatsResponse {
         cpu_percent,
         memory_mb,
+        ram_total_mb,
         player_count,
         uptime_seconds,
     })

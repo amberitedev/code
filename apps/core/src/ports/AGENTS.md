@@ -1,87 +1,42 @@
-# ports/
+# src/ports — Async trait interfaces
 
-Port trait definitions for dependency inversion. Infrastructure implements these; application calls them. No implementation code lives here.
+Dependency inversion boundary: application services call these traits; infrastructure provides the implementations. Keeping this layer thin ensures services are testable without real I/O.
 
-## Files
+## File structure
 
-| File | Trait(s) | Error type |
-|------|----------|------------|
-| `instance_store.rs` | `InstanceStore` | `StoreError` |
-| `modpack_store.rs` | `ModpackStore` | `StoreError` (shared type) |
-| `process_spawner.rs` | `ProcessSpawner`, `ProcessHandle` | `SpawnError` |
-| `mod.rs` | Re-exports |
-
-## `InstanceStore`
-
-```rust
-#[async_trait]
-trait InstanceStore: Send + Sync + 'static {
-    async fn create(&self, record: &InstanceRecord) -> Result<(), StoreError>;
-    async fn get(&self, id: &InstanceId) -> Result<InstanceRecord, StoreError>;
-    async fn list(&self) -> Result<Vec<InstanceRecord>, StoreError>;
-    async fn list_by_status(&self, status: InstanceStatus) -> Result<Vec<InstanceRecord>, StoreError>;
-    async fn update_status(&self, id: &InstanceId, status: InstanceStatus) -> Result<(), StoreError>;
-    async fn delete(&self, id: &InstanceId) -> Result<(), StoreError>;
-}
+```
+ports/
+  mod.rs              — re-exports: instance_store, java_store, modpack_store, process_spawner
+  instance_store.rs   — InstanceStore trait + StoreError
+  java_store.rs       — JavaStore trait
+  modpack_store.rs    — ModpackStore trait
+  process_spawner.rs  — ProcessHandle, ProcessSpawner, AnySpawner, SpawnError
 ```
 
-Concrete impl: `infrastructure::db::instance_repo::InstanceRepo`.
+## instance_store.rs
 
-## `ModpackStore`
+Eight-method trait. The notable one is `reset_transient_statuses` — called once at startup to reset any `starting` or `stopping` instances to `offline` after an unclean shutdown. It returns the count of rows updated.
 
-```rust
-#[async_trait]
-trait ModpackStore: Send + Sync + 'static {
-    async fn save(&self, manifest: &ModpackManifest) -> Result<(), StoreError>;
-    async fn get_for_instance(&self, instance_id: &str) -> Result<Option<ModpackManifest>, StoreError>;
-    async fn delete_for_instance(&self, instance_id: &str) -> Result<(), StoreError>;
-}
-```
+`StoreError::NotFound` holds a `String`, not an `InstanceId`. The string is the UUID text. Callers that need to convert it back to an `InstanceError::NotFound(InstanceId)` do so manually in the service layer.
 
-Concrete impl: `infrastructure::db::modpack_repo::ModpackRepo`.
+## process_spawner.rs — The two-trait pattern
 
-## `ProcessHandle` + `ProcessSpawner`
+There are two spawner traits, and both live here. This is the most complex port.
 
-```rust
-trait ProcessHandle: Send + 'static {
-    fn send_stdin(&self, line: &str) -> Result<(), SpawnError>;
-    fn take_stdout_rx(&mut self) -> Option<mpsc::Receiver<String>>;
-    fn is_running(&self) -> bool;
-    fn kill(&mut self) -> Result<(), SpawnError>;
-    fn pid(&self) -> Option<u32> { None }   // default impl
-}
+`ProcessSpawner` has an associated type `Handle: ProcessHandle`. This makes it non-object-safe — you cannot put it behind `dyn ProcessSpawner`. This is fine for generic code but cannot be stored in `AppState`.
 
-#[async_trait]
-trait ProcessSpawner: Send + Sync + 'static {
-    type Handle: ProcessHandle;
-    async fn spawn(&self, command: &str, args: &[&str], cwd: &Path, env: &[(&str, &str)])
-        -> Result<Self::Handle, SpawnError>;
-}
-```
+`AnySpawner` is the object-safe version: `spawn_any` returns `Box<dyn ProcessHandle>`. This IS storable as `Arc<dyn AnySpawner>` in `AppState`.
 
-Concrete impls: `PtySpawner` (production) and `MockSpawner` (tests).
+The bridge: a blanket impl at line 75 automatically makes any `ProcessSpawner` satisfy `AnySpawner`. So `PtySpawner` and `MockSpawner` only need to implement `ProcessSpawner`; they get `AnySpawner` for free.
 
-## `StoreError`
+`ProcessHandle` has a second blanket impl (line 30): `Box<dyn ProcessHandle>` itself implements `ProcessHandle`. This lets `spawn_actor` in `instance_actor.rs` be generic over `H: ProcessHandle`, accepting both a concrete handle from `PtySpawner` and a `Box<dyn ProcessHandle>` from `AnySpawner`.
 
-```rust
-enum StoreError {
-    NotFound(String),
-    Database(sqlx::Error),
-    Parse(String),
-}
-```
+`take_stdout_rx` can only succeed once per handle instance — it moves the `mpsc::Receiver` out. Calling it a second time returns `None`. The actor calls it on startup and panics/logs an error if it gets `None`.
 
-## `SpawnError`
+## java_store.rs
 
-```rust
-enum SpawnError {
-    Io(std::io::Error),
-    Failed(String),
-}
-```
+Three methods: `sync_all` (upsert batch), `find_by_version` (returns the first matching Java binary path for a given major version), `list_all`. Called only by `restore_instances` and `start_instance`.
 
-## Rules
+## modpack_store.rs
 
-- Traits only — no implementation or SQL here.
-- `Send + Sync + 'static` bounds are required for storage in `Arc<AppState>`.
-- `StoreError` is shared across both store traits (defined once in `instance_store.rs`).
+Three methods: `save`, `get_for_instance`, `delete_for_instance`. One manifest per instance — `save` overwrites any existing row. `get_for_instance` returns `Option<ModpackManifest>`.

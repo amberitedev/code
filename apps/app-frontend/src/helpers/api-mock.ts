@@ -41,7 +41,7 @@ const MOCK_SUBSCRIPTION_ID = 'sub_mock_12345'
 
 // ── Mock Server Data ──────────────────────────────────────────────────────────
 
-const MOCK_SERVER_V0 = {
+export const MOCK_SERVER_V0 = {
   server_id: MOCK_SERVER_ID,
   name: 'Mock Server',
   owner_id: MOCK_OWNER_ID,
@@ -60,7 +60,7 @@ const MOCK_SERVER_V0 = {
   sftp_host: 'sftp.mock.modrinth.gg',
   datacenter: 'us-east-1',
   notices: [],
-  node: null,
+  node: { token: 'mock-node-token', instance: 'mock-node.modrinth.gg' },
   flows: { intro: false },
   is_medal: false,
 }
@@ -162,29 +162,30 @@ const MOCK_CUSTOMER = {
 
 const MOCK_SUBSCRIPTION = {
   id: MOCK_SUBSCRIPTION_ID,
-  user_id: MOCK_USER.id,
-  product_id: 'prod_mock_server',
-  status: 'active',
-  current_period_start: '2025-01-01T00:00:00Z',
-  current_period_end: '2025-12-31T23:59:59Z',
-  cancel_at_period_end: false,
-  canceled_at: null,
-  metadata: {},
+  user_id: MOCK_OWNER_ID,
+  price_id: 'price_mock_6gb_monthly',
+  interval: 'monthly',
+  status: 'provisioned',
+  created: '2025-01-01T00:00:00Z',
+  metadata: { type: 'pyro', id: MOCK_SERVER_ID },
 }
 
 const MOCK_PRODUCTS = [
   {
-    id: 'prod_mock_server',
-    name: 'Mock Server Plan',
-    description: 'A mock server for development',
-    prices: {
-      intervals: {
-        monthly: 0,
-        quarterly: 0,
-        yearly: 0,
+    id: 'prod_mock_6gb',
+    metadata: { type: 'pyro', cpu: 200, ram: 6144, swap: 0, storage: 51200 },
+    prices: [
+      {
+        id: 'price_mock_6gb_monthly',
+        product_id: 'prod_mock_6gb',
+        prices: {
+          type: 'recurring',
+          intervals: { monthly: 600, quarterly: 1500, 'five-days': 150, yearly: 5400 },
+        },
+        currency_code: 'USD',
       },
-    },
-    metadata: {},
+    ],
+    unitary: true,
   },
 ]
 
@@ -381,6 +382,11 @@ function routeArchon(method: string, pathname: string): Response | null {
     return empty()
   }
 
+  // GET /v1/servers/:id/worlds/:wid/backups (legacy)
+  if (method === 'GET' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/backups$/.test(pathname)) {
+    return json([])
+  }
+
   // POST /v1/servers/:id/worlds/:wid/content
   if (method === 'POST' && /^\/v1\/servers\/[^/]+\/worlds\/[^/]+\/content/.test(pathname)) {
     return empty()
@@ -477,6 +483,99 @@ function routeUser(method: string, pathname: string): Response | null {
   return null
 }
 
+// ── Mock WebSocket ────────────────────────────────────────────────────────────
+// Intercepts new WebSocket(...) so testNodeReachability() and connectSocket()
+// both succeed without a real backend.
+//
+// - URLs containing "/pingtest": fires onopen immediately (node reachability test)
+// - All other URLs: fires onopen, then replies to auth with auth-ok + state + stats
+class MockWebSocket extends EventTarget {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSING = 2
+  static CLOSED = 3
+
+  readonly url: string
+  readyState = 0
+  protocol = ''
+  extensions = ''
+  bufferedAmount = 0
+  binaryType: BinaryType = 'blob'
+  onopen: ((e: Event) => void) | null = null
+  onclose: ((e: CloseEvent) => void) | null = null
+  onerror: ((e: Event) => void) | null = null
+  onmessage: ((e: MessageEvent) => void) | null = null
+
+  private _statsTimer: ReturnType<typeof setTimeout> | null = null
+
+  constructor(url: string, _protocols?: string | string[]) {
+    super()
+    this.url = url
+    setTimeout(() => {
+      this.readyState = 1
+      const e = new Event('open')
+      this.onopen?.(e)
+      this.dispatchEvent(e)
+    }, 30)
+  }
+
+  send(data: string) {
+    if (this.url.includes('/pingtest')) return
+    try {
+      const msg = JSON.parse(data)
+      if (msg.event === 'auth') setTimeout(() => this._afterAuth(), 30)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private _afterAuth() {
+    this._emit({ event: 'auth-ok' })
+    this._emit({
+      event: 'state',
+      debug: 'mock',
+      power_variant: 'idle',
+      target: null,
+      exit_code: null,
+      was_oom: false,
+      uptime: 0,
+      progress: null,
+      content_error: null,
+    })
+    this._scheduleStats()
+  }
+
+  private _scheduleStats() {
+    if (this.readyState !== 1) return
+    this._emit({
+      event: 'stats',
+      cpu_percent: 5,
+      ram_usage_bytes: 536870912,
+      ram_total_bytes: 6442450944,
+      storage_usage_bytes: 5368709120,
+      storage_total_bytes: 53687091200,
+      net_tx_bytes: 0,
+      net_rx_bytes: 0,
+    })
+    this._statsTimer = setTimeout(() => this._scheduleStats(), 5000)
+  }
+
+  private _emit(data: object) {
+    if (this.readyState !== 1) return
+    const e = new MessageEvent('message', { data: JSON.stringify(data) })
+    this.onmessage?.(e)
+    this.dispatchEvent(e)
+  }
+
+  close(_code?: number, _reason?: string) {
+    if (this._statsTimer) clearTimeout(this._statsTimer)
+    this.readyState = 3
+    const e = new CloseEvent('close', { wasClean: true, code: 1000 })
+    this.onclose?.(e)
+    this.dispatchEvent(e)
+  }
+}
+
 // ── Setup Function ────────────────────────────────────────────────────────────
 
 export function setupApiMock() {
@@ -487,6 +586,9 @@ export function setupApiMock() {
   }
 
   console.log('[api-mock] Initializing comprehensive API mock...')
+
+  // Override WebSocket so node reachability checks and console connections succeed
+  globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
 
   // Get base URLs from env or use defaults
   const archonBase = (import.meta.env.MODRINTH_ARCHON_BASE_URL || 'https://archon.modrinth.com')

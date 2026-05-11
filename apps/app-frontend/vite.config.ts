@@ -1,11 +1,11 @@
 import vue from '@vitejs/plugin-vue'
-import VueDevTools from 'vite-plugin-vue-devtools'
-import { designInspectorVitePlugin } from '../../packages/design-inspector/vite-plugin.ts'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import { defineConfig } from 'vite'
+import VueDevTools from 'vite-plugin-vue-devtools'
 import svgLoader from 'vite-svg-loader'
 
+import { designInspectorVitePlugin } from '../../packages/design-inspector/vite-plugin.ts'
 import tauriConf from '../app/tauri.conf.json'
 
 const projectRootDir = resolve(__dirname)

@@ -530,6 +530,18 @@
   "creation-flow.modal.custom-setup.icon.select": {
     "defaultMessage": "Select icon"
   },
+  "creation-flow.modal.custom-setup.instance-type.client": {
+    "defaultMessage": "Client"
+  },
+  "creation-flow.modal.custom-setup.instance-type.label": {
+    "defaultMessage": "Instance type"
+  },
+  "creation-flow.modal.custom-setup.instance-type.server": {
+    "defaultMessage": "Server"
+  },
+  "creation-flow.modal.custom-setup.instance-type.synced": {
+    "defaultMessage": "Synced"
+  },
   "creation-flow.modal.custom-setup.loader-version-type.latest": {
     "defaultMessage": "Latest"
   },

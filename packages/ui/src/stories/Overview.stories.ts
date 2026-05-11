@@ -67,14 +67,12 @@ import Timeline from '../components/base/Timeline.vue'
 import Toggle from '../components/base/Toggle.vue'
 // @ts-ignore
 import UnsavedChangesPopup from '../components/base/UnsavedChangesPopup.vue'
-
 // ── Modal ─────────────────────────────────────────────────────────────────────
 import ConfirmLeaveModal from '../components/modal/ConfirmLeaveModal.vue'
 import NewModal from '../components/modal/NewModal.vue'
 import ShareModal from '../components/modal/ShareModal.vue'
 import TabbedModal from '../components/modal/TabbedModal.vue'
 import UploadProgressModal from '../components/modal/UploadProgressModal.vue'
-
 // ── Project ───────────────────────────────────────────────────────────────────
 import ProjectCard from '../components/project/card/ProjectCard.vue'
 import ProjectCombobox from '../components/project/ProjectCombobox.vue'
@@ -84,12 +82,10 @@ import ProjectSidebarDetails from '../components/project/ProjectSidebarDetails.v
 import ProjectSidebarLinks from '../components/project/ProjectSidebarLinks.vue'
 import ProjectSidebarServerInfo from '../components/project/ProjectSidebarServerInfo.vue'
 import ProjectSidebarTags from '../components/project/ProjectSidebarTags.vue'
-
 // ── Servers ───────────────────────────────────────────────────────────────────
 import InstallingBanner from '../components/servers/InstallingBanner.vue'
 import SaveBanner from '../components/servers/SaveBanner.vue'
 import ServerListing from '../components/servers/ServerListing.vue'
-
 // ── Instances ─────────────────────────────────────────────────────────────────
 import ContentModpackCard from '../layouts/shared/content-tab/components/ContentModpackCard.vue'
 

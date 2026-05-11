@@ -7,3 +7,6 @@ pub mod mod_service;
 pub mod log_service;
 pub mod stats_service;
 pub mod export_service;
+pub mod fs_service;
+pub mod backup_service;
+pub mod backup_scheduler;

@@ -1,40 +1,30 @@
-# infrastructure/
+# src/infrastructure — Port implementations
 
-Concrete implementations of ports and shared infrastructure utilities.
+Concrete adapters: SQLite repos, Supabase JWT auth, PTY process spawning, Deno macro engine, Minecraft-specific HTTP clients.
 
-## Subdirectories
+## File structure
 
-| Dir | What it contains |
-|-----|-----------------|
-| `auth/` | Supabase RS256 JWT validation via JWKS endpoint |
-| `db/` | SQLite implementations of `InstanceStore` + `ModpackStore` |
-| `macro_engine/` | Deno Core JS/TS runtime for user macros |
-| `minecraft/` | Server JAR downloads, loader installers, mrpack, Modrinth API, Java detection |
-| `process/` | PTY process spawning + per-instance lifecycle actor |
-
-## `events.rs` — `EventBroadcaster`
-
-Thin wrapper around `tokio::sync::broadcast::Sender<Event>` (capacity 512).
-
-```rust
-impl EventBroadcaster {
-    pub fn new() -> Self;
-    pub fn send(&self, event: Event);
-    pub fn subscribe(&self) -> broadcast::Receiver<Event>;
-}
+```
+infrastructure/
+  mod.rs          — re-exports: db, events, auth, process, minecraft, macro_engine
+  events.rs       — EventBroadcaster: tokio broadcast channel wrapper for instance events
+  auth/           — Supabase RS256 JWT validation
+  db/             — SQLite repositories (InstanceRepo, JavaRepo, ModpackRepo)
+  macro_engine/   — embedded Deno V8 runtime for JS/TS macros
+  minecraft/      — jar download, installer, Java detection, Modrinth API, mrpack, server.properties
+  process/        — PTY process spawning, per-instance actor, mock spawner
 ```
 
-Used by `instance_actor` to emit stdout lines, status changes, and creation progress.  
-Used by `presentation/handlers/console.rs` (SSE + WebSocket) to subscribe.
+## Redirections
 
-## `mod.rs`
+| Folder | AGENTS.md | Summary |
+|--------|-----------|---------|
+| `auth/` | `auth/AGENTS.md` | JWKS fetch + RS256 JWT validation for Supabase tokens |
+| `db/` | `db/AGENTS.md` | SQLite implementations of InstanceStore, JavaStore, ModpackStore |
+| `macro_engine/` | `macro_engine/AGENTS.md` | Embedded Deno V8 runtime: executor, TypeScript loader, op extensions |
+| `minecraft/` | `minecraft/AGENTS.md` | Minecraft-specific infra: jar downloads, Java detection, Modrinth API, mrpack, server.properties |
+| `process/` | `process/AGENTS.md` | PTY spawner, per-instance actor, mock spawner for tests |
 
-Re-exports `events`, `auth`, `db`, `minecraft`, `process`, `macro_engine`.
+## Gotchas
 
-## Rules
-
-- Implementations must satisfy the port traits in `ports/`.
-- `minecraft/` may make outbound HTTP calls (Modrinth, Mojang, Fabric Meta, etc.).
-- `macro_engine/` requires a dedicated `std::thread` + `tokio::task::LocalSet` per isolate.
-- Never import `axum` or `presentation` types here.
-- Never import `application/` services here (avoid circular deps).
+- **`EventBroadcaster`** wraps `tokio::sync::broadcast`. Receivers are created via `subscribe()`. The channel is lossy — lagged receivers drop messages silently by design.
