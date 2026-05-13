@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"dev:no-hmr": "vite --mode no-hmr",
 		"build": "vue-tsc --noEmit && vite build",
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",
@@ -14,7 +15,8 @@
 	},
 	"dependencies": {
 		"@intercom/messenger-js-sdk": "^0.0.14",
-		"@amberite/core-client": "workspace:*",
+		"@amberite/api-lib": "workspace:*",
+		"@supabase/supabase-js": "^2.49.0",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/ui": "workspace:*",

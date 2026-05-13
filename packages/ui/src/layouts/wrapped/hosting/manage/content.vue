@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreMod } from '@amberite/core-client'
+import type { CoreMod } from '@amberite/api-lib'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -83,6 +83,8 @@ const modsQuery = useQuery({
 	queryFn: () => coreClient.listMods(serverId),
 	enabled: computed(() => !!serverId),
 	staleTime: 0,
+	retry: false,
+	refetchOnWindowFocus: false,
 })
 
 const contentReadyPending = useReadyState(modsQuery)
@@ -238,6 +240,7 @@ async function handleBulkDisable(items: ContentItem[]) {
 const modpackUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 const modpackContentModal = ref<InstanceType<typeof ModpackContentModal>>()
 const contentUpdaterModal = ref<InstanceType<typeof ContentUpdaterModal>>()
+const modpackUpdateModal = ref<InstanceType<typeof ConfirmModpackUpdateModal>>()
 
 const updatingProject = ref<ContentItem | null>(null)
 const updatingModpack = ref(false)

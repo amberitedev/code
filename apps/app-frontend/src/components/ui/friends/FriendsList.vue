@@ -16,11 +16,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
 import { friend_listener } from '@/helpers/events'
-import {
-	add_friend,
-	type FriendWithUserData,
-	remove_friend,
-} from '@/helpers/friends.ts'
+import { add_friend, type FriendWithUserData, remove_friend } from '@/helpers/friends.ts'
 import type { ModrinthCredentials } from '@/helpers/mr_auth'
 
 const { formatMessage } = useVIntl()
@@ -167,13 +163,13 @@ watch(
 	{ immediate: true },
 )
 
+defineExpose({
+	showAddFriendModal: () => addFriendModal.value?.show(),
+})
+
 const unlisten = await friend_listener(() => loadFriends())
 onUnmounted(() => {
 	unlisten()
-})
-
-defineExpose({
-	showAddFriendModal: () => addFriendModal.value?.show(),
 })
 
 const messages = defineMessages({
@@ -414,16 +410,14 @@ const messages = defineMessages({
 				:heading="formatMessage(messages.pending)"
 				:remove-friend="removeFriend"
 			/>
-		<p v-if="filteredFriends.length === 0 && search" class="text-sm text-secondary my-1 mx-4">
-			{{ formatMessage(messages.noFriendsMatch, { query: search }) }}
-		</p>
-	</template>
-</div>
-<div v-if="userCredentials?.user_id" class="mt-4 flex justify-center">
-	<ButtonStyled color="brand" size="large">
-		<button @click="addFriendModal.show">
-			<UserPlusIcon /> Add friend
-		</button>
-	</ButtonStyled>
-</div>
+			<p v-if="filteredFriends.length === 0 && search" class="text-sm text-secondary my-1 mx-4">
+				{{ formatMessage(messages.noFriendsMatch, { query: search }) }}
+			</p>
+		</template>
+	</div>
+	<div v-if="userCredentials?.user_id" class="mt-4 flex justify-center">
+		<ButtonStyled color="brand" size="large">
+			<button @click="addFriendModal.show"><UserPlusIcon /> Add friend</button>
+		</ButtonStyled>
+	</div>
 </template>

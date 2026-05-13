@@ -101,6 +101,33 @@ pub async fn start_core() -> Result<CoreProcess> {
     Ok(CoreProcess { core_url: DEFAULT_CORE_URL.to_string(), child })
 }
 
+/// Check whether the local Core process is responding on its HTTP port.
+pub async fn is_core_running(core_url: Option<&str>) -> bool {
+    let url = core_url.unwrap_or(DEFAULT_CORE_URL);
+    match Client::new().get(format!("{}/health", url.trim_end_matches('/'))).send().await {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// Read the local Core token from the well-known file path.
+pub async fn get_local_core_token() -> Result<String> {
+    let token_file = dirs::data_dir()
+        .ok_or_else(|| AmberiteError::Core("Cannot find data directory".into()))?
+        .join("amberite-core")
+        .join("data")
+        .join(".local_token");
+
+    if !token_file.exists() {
+        return Err(AmberiteError::Core("Local Core token file not found".into()));
+    }
+
+    tokio::fs::read_to_string(&token_file)
+        .await
+        .map(|s| s.trim().to_string())
+        .map_err(|e| AmberiteError::Core(format!("Failed to read local Core token: {e}")))
+}
+
 /// Kill a running Core child process.
 pub async fn stop_core(process: &mut CoreProcess) -> Result<()> {
     process.child.kill().await.map_err(|e| AmberiteError::Core(e.to_string()))

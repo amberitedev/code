@@ -86,7 +86,7 @@ Uses `async_zip` for async ZIP reading (tokio-compatible). The `ZipFileReader` m
 
 Reads and writes `{data_dir}/server.properties` as key-value pairs. `patch_properties` reads the file, updates the specified keys in-place (preserving comments and ordering), and writes it back atomically.
 
-`write_initial_properties`: writes a minimal default `server.properties` with port, eula=false, online-mode=false. Called by `create_instance` before the server JAR is downloaded.
+`write_initial_properties`: writes a minimal `server.properties` (port, online-mode=false) and `eula.txt` (`eula=true`). Called by `create_instance` before the server JAR is downloaded. Note: Minecraft reads EULA from `eula.txt`, not `server.properties`.
 
 ## Gotchas
 

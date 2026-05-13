@@ -22,25 +22,36 @@
 			:navigate-to-servers="() => router.push('/hosting/manage')"
 			:browse-modpacks="
 				({ serverId: sid, worldId: wid, from }) => {
-				router.push({
-					path: '/browse/modpack',
-					query: { sid, wid: wid ?? undefined, from, source: 'core', back: from ? undefined : `/server/${encodeURIComponent(profilePath)}/content` },
-				})
+					router.push({
+						path: '/browse/modpack',
+						query: {
+							sid,
+							wid: wid ?? undefined,
+							from,
+							source: 'core',
+							back: from ? undefined : `/server/${encodeURIComponent(profilePath)}/content`,
+						},
+					})
 				}
 			"
 			:browse-content="
 				({ serverId: sid, worldId: wid, type }) => {
-				router.push({
-					path: `/browse/${type}`,
-					query: { sid, wid: wid ?? undefined, source: 'core', back: `/server/${encodeURIComponent(profilePath)}/content` },
-				})
+					router.push({
+						path: `/browse/${type}`,
+						query: {
+							sid,
+							wid: wid ?? undefined,
+							source: 'core',
+							back: `/server/${encodeURIComponent(profilePath)}/content`,
+						},
+					})
 				}
 			"
 		>
 			<template #default="{ onReinstall, onReinstallFailed }">
 				<RouterView v-slot="{ Component }">
 					<template v-if="Component">
-						<Suspense>
+						<Suspense :key="route.path">
 							<component
 								:is="Component"
 								@reinstall="onReinstall"
@@ -55,14 +66,19 @@
 </template>
 
 <script setup lang="ts">
-import { CoreApiClient } from '@amberite/core-client'
+import { CoreApiClient } from '@amberite/api-lib'
 import { IssuesIcon } from '@modrinth/assets'
-import { ErrorInformationCard, injectAuth, provideCoreClient, ServersManageRootLayout } from '@modrinth/ui'
+import {
+	ErrorInformationCard,
+	injectAuth,
+	provideCoreClient,
+	ServersManageRootLayout,
+} from '@modrinth/ui'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { getDesktopAdapter } from '@/adapters/desktop'
 import { get_user } from '@/helpers/cache'
-import { core_get_url } from '@/helpers/core'
 import { get as getCreds } from '@/helpers/mr_auth'
 import { get as getProfile } from '@/helpers/profile'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
@@ -78,24 +94,27 @@ const coreError = ref(false)
 
 const profilePath = route.params.id as string
 const profile = await getProfile(profilePath).catch(() => null)
-const coreInstanceId = profile?.core_instance_id ?? profilePath
+const coreInstanceId = profile?.core_instance_id ?? ''
+
+if (!coreInstanceId) {
+	coreError.value = true
+}
 
 if (profile?.name) {
 	breadcrumbs.setName('Server', profile.name)
-	breadcrumbs.setContext({ name: profile.name, link: `/server/${encodeURIComponent(profilePath)}/content` })
-}
-
-let baseUrl: string
-
-try {
-	baseUrl = await core_get_url()
-} catch {
-	coreError.value = true
-	baseUrl = ''
+	breadcrumbs.setContext({
+		name: profile.name,
+		link: `/server/${encodeURIComponent(profilePath)}/content`,
+	})
 }
 
 if (!coreError.value) {
-	provideCoreClient(new CoreApiClient(baseUrl))
+	try {
+		const adapter = await getDesktopAdapter()
+		provideCoreClient(new CoreApiClient(adapter))
+	} catch {
+		coreError.value = true
+	}
 }
 
 const authUser = computed(() => {
@@ -108,6 +127,9 @@ async function resolveViewer(): Promise<{ userId: string | null; userRole: strin
 	const credentials = await getCreds().catch(() => null)
 	if (!credentials?.user_id) return { userId: null, userRole: null }
 	const user = await get_user(credentials.user_id, 'bypass').catch(() => null)
-	return { userId: credentials.user_id, userRole: (user as { role?: string | null } | null)?.role ?? null }
+	return {
+		userId: credentials.user_id,
+		userRole: (user as { role?: string | null } | null)?.role ?? null,
+	}
 }
 </script>

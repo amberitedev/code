@@ -3,14 +3,18 @@
 		<div class="flex gap-2 shrink-0">
 			<button
 				class="px-3 py-1 rounded text-sm font-medium transition-colors"
-				:class="mode === 'live' ? 'bg-brand text-white' : 'bg-[var(--color-raised-bg)] text-secondary'"
+				:class="
+					mode === 'live' ? 'bg-brand text-white' : 'bg-[var(--color-raised-bg)] text-secondary'
+				"
 				@click="switchToLive"
 			>
 				Live
 			</button>
 			<button
 				class="px-3 py-1 rounded text-sm font-medium transition-colors"
-				:class="mode === 'logs' ? 'bg-brand text-white' : 'bg-[var(--color-raised-bg)] text-secondary'"
+				:class="
+					mode === 'logs' ? 'bg-brand text-white' : 'bg-[var(--color-raised-bg)] text-secondary'
+				"
 				@click="switchToLogs"
 			>
 				Logs
@@ -22,7 +26,11 @@
 				ref="logEl"
 				class="flex-1 overflow-y-auto font-mono text-xs bg-[var(--color-raised-bg)] rounded-lg p-3 min-h-0"
 			>
-				<div v-for="(line, i) in consoleLines" :key="i" class="whitespace-pre-wrap break-words leading-5">
+				<div
+					v-for="(line, i) in consoleLines"
+					:key="i"
+					class="whitespace-pre-wrap break-words leading-5"
+				>
 					{{ line.text }}
 				</div>
 				<div v-if="consoleLines.length === 0 && isConnected" class="text-secondary">
@@ -59,7 +67,10 @@
 					>
 						{{ f }}
 					</button>
-					<p v-if="crashFiles.length" class="text-xs text-secondary font-medium uppercase mt-2 mb-1">
+					<p
+						v-if="crashFiles.length"
+						class="text-xs text-secondary font-medium uppercase mt-2 mb-1"
+					>
 						Crash Reports
 					</p>
 					<button
@@ -85,7 +96,12 @@
 </template>
 
 <script setup lang="ts">
-import { ButtonStyled, injectCoreClient, injectModrinthServerContext, useModrinthServersConsole } from '@modrinth/ui'
+import {
+	ButtonStyled,
+	injectCoreClient,
+	injectModrinthServerContext,
+	useModrinthServersConsole,
+} from '@modrinth/ui'
 import { nextTick, ref, watch } from 'vue'
 
 const { serverId } = injectModrinthServerContext()
@@ -104,11 +120,15 @@ const fileLoading = ref(false)
 const consoleLines = console$.output
 const isConnected = injectModrinthServerContext().isConnected
 
-watch(consoleLines, async () => {
-	if (mode.value !== 'live') return
-	await nextTick()
-	logEl.value?.scrollTo(0, logEl.value.scrollHeight)
-}, { deep: true })
+watch(
+	consoleLines,
+	async () => {
+		if (mode.value !== 'live') return
+		await nextTick()
+		logEl.value?.scrollTo(0, logEl.value.scrollHeight)
+	},
+	{ deep: true },
+)
 
 function sendLine() {
 	if (!inputLine.value.trim() || !isConnected.value) return

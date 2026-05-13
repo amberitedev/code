@@ -1,22 +1,15 @@
 //! Amberite Backend - Core logic for Amberite-specific features
 //!
-//! Provides Amberite-specific functionality: Supabase auth, friends,
-//! mod sync, core process management, and more.
+//! Provides Amberite-specific functionality: Supabase auth, OS keychain
+//! access, core process management, pairing, and more.
 
 pub mod auth;
 pub mod console_stream;
-pub mod core_client;
-pub mod core_instances;
 pub mod core_launcher;
-pub mod core_modpacks;
 pub mod error;
-pub mod friends;
-pub mod groups;
-pub mod mod_sync;
 pub mod pairing;
 pub mod progress_stream;
 pub mod settings;
-pub mod supabase_client;
 pub mod tunnel;
 
 pub use error::{AmberiteError, Result};

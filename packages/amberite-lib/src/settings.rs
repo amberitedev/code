@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub core_url: Option<String>,
     /// Supabase JWT for the logged-in user (V1: stored in settings)
     pub supabase_token: Option<String>,
+    /// Supabase URL
+    pub supabase_url: Option<String>,
     /// Supabase user ID
     pub supabase_user_id: Option<String>,
     /// Display name of the logged-in user
@@ -25,6 +27,7 @@ impl Default for AppSettings {
         Self {
             core_url: None,
             supabase_token: None,
+            supabase_url: None,
             supabase_user_id: None,
             display_name: None,
             auto_launch_core: false,

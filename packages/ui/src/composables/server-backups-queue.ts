@@ -1,4 +1,4 @@
-import type { CoreBackup, CoreBackupOperation, CoreBackupsResponse } from '@amberite/core-client'
+import type { CoreBackup, CoreBackupOperation, CoreBackupsResponse } from '@amberite/api-lib'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref } from 'vue'
 

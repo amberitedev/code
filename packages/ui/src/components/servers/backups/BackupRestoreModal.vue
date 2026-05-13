@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/core-client'
+import type { CoreBackup } from '@amberite/api-lib'
 import { RotateCounterClockwiseIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'

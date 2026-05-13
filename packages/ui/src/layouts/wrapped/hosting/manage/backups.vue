@@ -237,7 +237,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/core-client'
+import type { CoreBackup } from '@amberite/api-lib'
 import { CalendarIcon, DownloadIcon, IssuesIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
 import { useMutation } from '@tanstack/vue-query'
 import dayjs from 'dayjs'

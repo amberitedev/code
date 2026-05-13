@@ -1,4 +1,4 @@
-import { CoreApiClient } from '@amberite/core-client'
+import { CoreApiClient } from '@amberite/api-lib'
 import type { Archon, Labrinth } from '@modrinth/api-client'
 import {
 	createContext,
@@ -9,7 +9,7 @@ import {
 import { computed, type ComputedRef, nextTick, type Ref, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { core_get_url } from '@/helpers/core'
+import { getDesktopAdapter } from '@/adapters/desktop'
 
 type ServerFlowFrom = 'onboarding' | 'reset-server'
 type ServerInstallableType = 'modpack' | 'mod' | 'plugin' | 'datapack'
@@ -149,8 +149,8 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function fetchCoreServerData(sid: string) {
-		const baseUrl = await core_get_url()
-		const coreClient = new CoreApiClient(baseUrl)
+		const adapter = await getDesktopAdapter()
+		const coreClient = new CoreApiClient(adapter)
 		const instance = await coreClient.getInstance(sid)
 		serverContextServerData.value = {
 			server_id: instance.id,
@@ -178,11 +178,11 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function refreshCoreInstalledContent(sid: string) {
-		const baseUrl = await core_get_url()
-		const coreClient = new CoreApiClient(baseUrl)
+		const adapter = await getDesktopAdapter()
+		const coreClient = new CoreApiClient(adapter)
 		const mods = await coreClient.listMods(sid)
 		serverContentProjectIds.value = new Set(
-			mods.mods.map((m) => m.modrinth_project_id).filter((id): id is string => !!id),
+			mods.map((m) => m.modrinth_project_id).filter((id): id is string => !!id),
 		)
 	}
 
@@ -367,8 +367,8 @@ export function createServerInstallContent(opts: {
 				throw new Error('No installable version was found for this project.')
 			}
 
-			const baseUrl = await core_get_url()
-			const coreClient = new CoreApiClient(baseUrl)
+			const adapter = await getDesktopAdapter()
+			const coreClient = new CoreApiClient(adapter)
 			await coreClient.addMod(sid, matchingVersion.id)
 
 			serverContentProjectIds.value = new Set([

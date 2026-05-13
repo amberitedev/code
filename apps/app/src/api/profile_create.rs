@@ -1,5 +1,5 @@
 use crate::api::Result;
-use amberite_lib::core_instances::{CreateInstanceRequest, create_instance};
+use amberite_lib::error::AmberiteError;
 use amberite_lib::settings::AppSettings;
 use reqwest::Client;
 use theseus::prelude::*;
@@ -37,26 +37,37 @@ pub async fn profile_create(
         _ => Some(ProfileKind::Client),
     };
 
-    // For server/synced: provision a Core instance first to get its ID
+    // For server/synced: provision a Core instance directly via HTTP
     let core_instance_id = if matches!(profile_kind, Some(ProfileKind::Server) | Some(ProfileKind::Synced)) {
         let settings = AppSettings::load().await.ok();
         let core_url = settings
             .and_then(|s| s.core_url)
             .unwrap_or_else(|| DEV_CORE_URL.to_string());
-        let core_url_opt = Some(core_url);
 
         let client = Client::new();
-        let req = CreateInstanceRequest {
-            name: name.clone(),
-            game_version: game_version.clone(),
-            loader: modloader.as_str().to_string(),
-            loader_version: loader_version.clone(),
-            port: port.unwrap_or(25565),
-            memory: None,
-        };
-        let detail = create_instance(&client, &core_url_opt, req).await
-            .map_err(TheseusSerializableError::Amberite)?;
-        Some(detail.id)
+        let req_body = serde_json::json!({
+            "name": &name,
+            "game_version": &game_version,
+            "loader": modloader.as_str(),
+            "loader_version": loader_version,
+            "port": port.unwrap_or(25565),
+        });
+
+        let resp = client
+            .post(format!("{}/api/v1/instances", core_url.trim_end_matches('/')))
+            .json(&req_body)
+            .send()
+            .await
+            .map_err(|e| TheseusSerializableError::Amberite(AmberiteError::Http(e.to_string())))?
+            .error_for_status()
+            .map_err(|e| TheseusSerializableError::Amberite(AmberiteError::Http(e.to_string())))?;
+
+        let detail: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| TheseusSerializableError::Amberite(AmberiteError::Http(e.to_string())))?;
+
+        detail["id"].as_str().map(|s| s.to_string())
     } else {
         None
     };

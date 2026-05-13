@@ -315,12 +315,8 @@ fn main() {
                 InlinedPlugin::new()
                     .commands(&[
                         "ping",
-                        "core_get_instance",
-                        "core_start",
-                        "core_stop",
-                        "core_restart",
-                        "core_send_command",
-                        "core_issue_ws_token",
+                        "get_local_core_token",
+                        "is_core_running",
                         "core_get_url",
                     ])
                     .default_permission(

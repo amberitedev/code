@@ -79,6 +79,13 @@
 			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*", "PORT", "AMBERITE_*", "SUPABASE_*", "ALLOWED_ORIGIN"],
 			"passThroughEnv": ["DISPLAY", "WEBKIT_DISABLE_DMABUF_RENDERER", "JAVA_HOME", "CARGO_INCREMENTAL", "SCCACHE_*", "RUSTC_WRAPPER"]
 		},
+		"dev:no-hmr": {
+			"cache": false,
+			"persistent": true,
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*", "PORT", "AMBERITE_*", "SUPABASE_*", "ALLOWED_ORIGIN"],
+			"passThroughEnv": ["DISPLAY", "WEBKIT_DISABLE_DMABUF_RENDERER", "JAVA_HOME", "CARGO_INCREMENTAL", "SCCACHE_*", "RUSTC_WRAPPER"]
+		},
 		"test": {
 			"env": [
 				"SQLX_OFFLINE",

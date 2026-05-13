@@ -28,7 +28,7 @@
 			<template #default="{ onReinstall, onReinstallFailed }">
 				<RouterView v-slot="{ Component }">
 					<template v-if="Component">
-						<Suspense>
+						<Suspense :key="route.path">
 							<component
 								:is="Component"
 								@reinstall="onReinstall"

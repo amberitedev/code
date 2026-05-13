@@ -45,10 +45,16 @@
 				{
 					"url": "http://*.taila228c5.ts.net/*"
 				},
-				{
-					"url": "https://*.taila228c5.ts.net/*"
-				}
-			]
+			{
+				"url": "https://*.taila228c5.ts.net/*"
+			},
+			{
+				"url": "http://localhost:7000/*"
+			},
+			{
+				"url": "http://localhost:16662/*"
+			}
+		]
 		},
 		"dialog:allow-save",
 		"fs:allow-read-dir",

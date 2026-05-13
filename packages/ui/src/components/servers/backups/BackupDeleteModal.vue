@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/core-client'
+import type { CoreBackup } from '@amberite/api-lib'
 import { TrashIcon, XIcon } from '@modrinth/assets'
 import { computed, nextTick, ref } from 'vue'
 

@@ -1,4 +1,4 @@
-import type { CoreInstanceStatus, CoreStats, CoreWsConnection } from '@amberite/core-client'
+import type { CoreInstanceStatus, CoreStats, CoreWsConnection } from '@amberite/api-lib'
 import type { Archon, UploadState } from '@modrinth/api-client'
 import type { Stats } from '@modrinth/utils'
 import type { ComputedRef, Ref } from 'vue'
@@ -78,6 +78,11 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 	let uptimerId: ReturnType<typeof setInterval> | null = null
 	let staleTimeout: ReturnType<typeof setTimeout> | null = null
 	let staleInterval: ReturnType<typeof setInterval> | null = null
+	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+	let shouldReconnect = false
+	let reconnectTargetId: string | null = null
+
+	const RECONNECT_DELAY_MS = 3000
 
 	const busyReasons = computed<BusyReason[]>(() => {
 		const r: BusyReason[] = []
@@ -129,6 +134,9 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 	}
 
 	const disconnectSocket = (targetServerId?: string) => {
+		shouldReconnect = false
+		reconnectTargetId = null
+		if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
 		if (wsConn) { wsConn.close(); wsConn = null }
 		if (targetServerId) connectedServerId = null
 		stopUptime(); clearStale()
@@ -139,16 +147,29 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		uptimeSeconds.value = 0
 	}
 
-	const connectSocket = async (targetServerId: string, opts: { force?: boolean } = {}): Promise<boolean> => {
+	const scheduleReconnect = () => {
+		if (!shouldReconnect || !reconnectTargetId) return
+		if (reconnectTimer) clearTimeout(reconnectTimer)
+		reconnectTimer = setTimeout(() => {
+			reconnectTimer = null
+			if (shouldReconnect && reconnectTargetId) {
+				connectSocket(reconnectTargetId, { force: true, isReconnect: true })
+			}
+		}, RECONNECT_DELAY_MS)
+	}
+
+	const connectSocket = async (targetServerId: string, opts: { force?: boolean, isReconnect?: boolean } = {}): Promise<boolean> => {
 		if (connectedServerId === targetServerId && isConnected.value && !opts.force) return true
 		disconnectSocket(connectedServerId ?? undefined)
+		shouldReconnect = true
+		reconnectTargetId = targetServerId
 		try {
 			const ticket = await coreClient.issueWsTicket()
-			console$.clear()
-			const conn = coreClient.openConsole(targetServerId, ticket)
+			if (!opts.isReconnect) console$.clear()
+			const conn = await coreClient.openConsole(targetServerId, ticket)
 			wsConn = conn; connectedServerId = targetServerId
 			conn.on('open', () => { isConnected.value = true })
-			conn.on('close', () => { isConnected.value = false; clearStale() })
+			conn.on('close', () => { isConnected.value = false; clearStale(); scheduleReconnect() })
 			conn.on('log', onLog)
 			conn.on('stats', onStats)
 			conn.on('state', onState)
@@ -156,6 +177,7 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		} catch (err) {
 			console.error('[hosting/manage] Failed to connect server socket:', err)
 			isConnected.value = false
+			scheduleReconnect()
 			return false
 		}
 	}

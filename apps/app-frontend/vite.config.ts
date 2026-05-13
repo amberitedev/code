@@ -28,7 +28,7 @@ if (existsSync(envFilePath)) {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
 	css: {
 		preprocessorOptions: {
 			scss: {
@@ -72,6 +72,7 @@ export default defineConfig({
 	server: {
 		port: 1420,
 		strictPort: true,
+		hmr: mode !== 'no-hmr',
 		headers: {
 			'content-security-policy': Object.entries(tauriConf.app.security.csp)
 				.map(([directive, sources]) => {
@@ -105,4 +106,4 @@ export default defineConfig({
 		// produce sourcemaps for debug builds
 		sourcemap: !!process.env.TAURI_ENV_DEBUG, // eslint-disable-line turbo/no-undeclared-env-vars
 	},
-})
+}))

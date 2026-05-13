@@ -91,74 +91,74 @@
 				</template>
 				<template #actions>
 					<div class="flex gap-2">
-					<ButtonStyled
-						v-if="
-							[
-								'installing',
-								'pack_installing',
-								'pack_installed',
-								'not_installed',
-								'minecraft_installing',
-							].includes(instance.install_stage)
-						"
-						color="brand"
-						size="large"
-					>
-						<button disabled>Installing...</button>
-					</ButtonStyled>
-					<ButtonStyled
-						v-else-if="instance.install_stage !== 'installed'"
-						color="brand"
-						size="large"
-					>
-						<button @click="repairInstance()">
-							<DownloadIcon />
-							Repair
-						</button>
-					</ButtonStyled>
-					<ButtonStyled v-else-if="loading && !playing" color="brand" size="large">
-						<button disabled>Starting...</button>
-					</ButtonStyled>
-					<JoinedButtons
-						v-else
-						:color="playing ? 'red' : 'brand'"
-						size="large"
-						:actions="playActions"
-						:primary-disabled="stopping"
-					/>
+						<ButtonStyled
+							v-if="
+								[
+									'installing',
+									'pack_installing',
+									'pack_installed',
+									'not_installed',
+									'minecraft_installing',
+								].includes(instance.install_stage)
+							"
+							color="brand"
+							size="large"
+						>
+							<button disabled>Installing...</button>
+						</ButtonStyled>
+						<ButtonStyled
+							v-else-if="instance.install_stage !== 'installed'"
+							color="brand"
+							size="large"
+						>
+							<button @click="repairInstance()">
+								<DownloadIcon />
+								Repair
+							</button>
+						</ButtonStyled>
+						<ButtonStyled v-else-if="loading && !playing" color="brand" size="large">
+							<button disabled>Starting...</button>
+						</ButtonStyled>
+						<JoinedButtons
+							v-else
+							:color="playing ? 'red' : 'brand'"
+							size="large"
+							:actions="playActions"
+							:primary-disabled="stopping"
+						/>
 						<ButtonStyled circular size="large">
 							<button v-tooltip="'Instance settings'" @click="settingsModal?.show()">
 								<SettingsIcon />
 							</button>
 						</ButtonStyled>
-					<ButtonStyled type="transparent" circular size="large">
-						<OverflowMenu
-							:options="[
-								{
-									id: 'open-folder',
-									action: () => {
-										if (instance) showProfileInFolder(instance.path)
+						<ButtonStyled type="transparent" circular size="large">
+							<OverflowMenu
+								:options="[
+									{
+										id: 'open-folder',
+										action: () => {
+											if (instance) showProfileInFolder(instance.path)
+										},
 									},
-								},
-								{
-									id: 'export-mrpack',
-									action: () => exportModal?.show(),
-								},
-								{
-									id: 'push-to-server',
-									// TODO: AMBERITE - push modpack to Core server
-									action: () => {},
-								},
-							]"
-						>
-							<MoreVerticalIcon />
-							<template #share-instance> <UserPlusIcon /> Share instance </template>
-							<template #host-a-server> <ServerIcon /> Create a server </template>
-							<template #open-folder> <FolderOpenIcon /> Open folder </template>
-							<template #export-mrpack> <PackageIcon /> Export modpack </template>
-							<template #push-to-server> <ServerIcon /> Push to server </template>
-						</OverflowMenu>
-					</ButtonStyled>
+									{
+										id: 'export-mrpack',
+										action: () => exportModal?.show(),
+									},
+									{
+										id: 'push-to-server',
+										// TODO: AMBERITE - push modpack to Core server
+										action: () => {},
+									},
+								]"
+							>
+								<MoreVerticalIcon />
+								<template #share-instance> <UserPlusIcon /> Share instance </template>
+								<template #host-a-server> <ServerIcon /> Create a server </template>
+								<template #open-folder> <FolderOpenIcon /> Open folder </template>
+								<template #export-mrpack> <PackageIcon /> Export modpack </template>
+								<template #push-to-server> <ServerIcon /> Push to server </template>
+							</OverflowMenu>
+						</ButtonStyled>
 					</div>
 				</template>
 			</ContentPageHeader>

@@ -24,6 +24,7 @@ export function setupAuthProvider(
 ) {
 	// AMBERITE PATCH: In dev mode, always inject a mock user so hosting pages
 	// never show the sign-in / subscription paywall.
+	// eslint-disable-next-line turbo/no-undeclared-env-vars
 	if (import.meta.env.DEV) {
 		const sessionToken = ref<string | null>('mock-session-token')
 		const user = ref<Labrinth.Users.v2.User | null>(MOCK_USER)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/core-client'
+import type { CoreBackup } from '@amberite/api-lib'
 import {
 	ClipboardCopyIcon,
 	DownloadIcon,

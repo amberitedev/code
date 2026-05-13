@@ -1,4 +1,4 @@
-use std::{sync::{atomic::AtomicU32, Arc}, time::Instant};
+use std::{path::PathBuf, sync::{atomic::AtomicU32, Arc}, time::Instant};
 
 use dashmap::DashMap;
 use sqlx::SqlitePool;
@@ -23,7 +23,14 @@ use crate::{
 
 /// Short-lived ticket for WebSocket auth.
 pub struct WsTicket {
-    pub expires_at: Instant,
+	pub expires_at: Instant,
+}
+
+/// Short-lived token for one-time file downloads (issued by GET /instances/:id/fs/url).
+pub struct FsDownloadToken {
+	pub instance_id: String,
+	pub path: PathBuf,
+	pub expires_at: Instant,
 }
 
 /// Central shared state — passed as `Arc<AppState>` through all layers.
@@ -42,8 +49,10 @@ pub struct AppState {
     pub macro_executor: MacroExecutor,
     /// JWKS cache for Supabase JWT validation.
     pub jwks_cache: JwksCache,
-    /// In-memory short-lived WebSocket tickets.
-    pub ws_tickets: DashMap<String, WsTicket>,
+	/// In-memory short-lived WebSocket tickets.
+	pub ws_tickets: DashMap<String, WsTicket>,
+	/// In-memory short-lived file download tokens (issued by GET /instances/:id/fs/url).
+	pub fs_download_tokens: DashMap<String, FsDownloadToken>,
     /// First-run pairing code (cleared after pairing).
     pub pairing_code: tokio::sync::Mutex<Option<String>>,
     /// SEC-01: counts wrong pairing-code attempts; locked out after MAX_PAIRING_ATTEMPTS.
@@ -106,7 +115,8 @@ impl AppState {
             broadcaster,
             macro_executor: MacroExecutor::new(),
             jwks_cache,
-            ws_tickets: DashMap::new(),
+			ws_tickets: DashMap::new(),
+			fs_download_tokens: DashMap::new(),
             pairing_code: tokio::sync::Mutex::new(pairing_code),
             wrong_pairing_attempts: AtomicU32::new(0),
             instance_store,

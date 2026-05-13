@@ -1,0 +1,283 @@
+# @amberite/api-lib — Implementation Plan v2
+
+## What we're building and why
+
+`@amberite/api-lib` is the single package that handles every bit of external communication
+in Amberite: talking to Core, authenticating users, and messaging through Supabase for
+both relay transport and push notifications.
+
+The reason this needs to be one package is that the same communication logic must work
+on both the desktop app (Tauri) and amberite.dev (a web dashboard). Without a shared
+library, the same auth flow, Core API calls, and relay logic would need to be written
+twice. That's the problem this package solves.
+
+This package replaces `@amberite/core-client` (rename + major expansion) and replaces
+seven Rust modules currently in `packages/amberite-lib` that are only there because
+the original design had no shared TypeScript layer.
+
+---
+
+## The PlatformAdapter — how one library runs on two platforms
+
+The desktop app and the web browser differ in two meaningful ways:
+
+1. The desktop WebView can't make HTTP requests to localhost due to CORS. On the web,
+   native fetch works fine. On desktop, `@tauri-apps/plugin-http` provides a `tauriFetch`
+   function that routes through Rust and bypasses the restriction. This is the correct
+   approach — registering individual Tauri invokes for each endpoint is not. The only
+   Tauri invokes that should exist are for things that genuinely require OS-level Rust.
+
+2. Sensitive data (auth tokens) is stored differently. On desktop, the OS keychain
+   (Windows Credential Manager, macOS Keychain, Linux libsecret) is used. On the web,
+   the Supabase SDK manages an HTTP-only cookie that JavaScript cannot read.
+
+These are the ONLY things that differ between platforms. Everything else — auth logic,
+Core endpoints, relay transport — is identical.
+
+The PlatformAdapter is an interface the caller provides when creating any api-lib client.
+The desktop app passes a Tauri-backed adapter; the web app passes a browser-backed adapter.
+The library itself has no knowledge of Tauri. It just calls the adapter.
+
+The adapter exposes: a fetch function, a pre-built Supabase client, a way to get the
+local Core token (desktop only), a way to get the Core URL, a way to get the current
+user's Supabase JWT, and a way to open an external auth window.
+
+All external communication (Core API, Supabase, relay) uses HTTPS. HTTP is only
+permitted for loopback traffic to a locally-running Core on the same machine, where
+traffic never leaves the OS.
+
+---
+
+## Auth — Microsoft login
+
+Amberite requires a Microsoft account. Users need Minecraft features, and Microsoft is
+the Xbox/Mojang identity provider. There is no separate Amberite account.
+
+The login flow lives entirely in api-lib so it's shared across both platforms:
+
+1. The library constructs a Microsoft OAuth URL and tells the adapter to open it.
+   On desktop the adapter opens a system browser via Tauri's shell plugin. On the web
+   it redirects the page.
+2. The user authenticates with Microsoft and the callback returns a Microsoft token.
+3. The library sends that token to the `microsoft-auth` Supabase Edge Function. This
+   function validates the Microsoft token, fetches the user's Xbox/Minecraft profile,
+   and creates or looks up a Supabase user. It returns a Supabase session.
+4. The library calls `supabase.auth.setSession()` so the SDK is authenticated.
+5. Session persistence is the adapter's job. The desktop adapter stores the JWT in the
+   OS keychain via a Tauri command. The web adapter does nothing — the Supabase SDK
+   already wrote it to an HTTP-only cookie.
+
+The `microsoft-auth` Edge Function does not exist yet and needs to be written.
+
+---
+
+## Core communication — why only 3 Tauri invokes are needed
+
+The original design had Rust act as a proxy for every Core API call (38 Tauri commands
+for 38 endpoints). That's what `core_client.rs`, `core_instances.rs`, and
+`core_modpacks.rs` in amberite-lib are. We are deleting all of that.
+
+The replacement: `@tauri-apps/plugin-http` gives TypeScript a `tauriFetch` function
+that routes all HTTP through Rust, bypassing the WebView CORS restriction in one shot.
+The library calls `ctx.fetchFn(url)` and on desktop that function is `tauriFetch`.
+The library doesn't know or care — it just calls fetch.
+
+The only Tauri invokes the desktop adapter needs are three OS-level calls that genuinely
+require Rust: reading the local Core token, getting the Core URL, and reading the
+Supabase JWT from the OS keychain.
+
+The `CoreApiClient` class takes the adapter, resolves the token and URL through it, and
+makes typed calls to all 38 endpoints.
+
+---
+
+## Transport — direct HTTP and relay as one system
+
+Both Core and the desktop app maintain a persistent Supabase Realtime subscription at
+all times, regardless of whether direct HTTP is available. The subscription is not a
+fallback — it is always active.
+
+When a client makes a request:
+- If direct HTTP to Core is reachable, it is used. It's faster and skips the middleman.
+- If direct HTTP fails, the message is published to the Supabase relay. Core is already
+  subscribed and picks it up immediately.
+
+From the calling code's perspective there is no difference. `CoreApiClient.request()`
+either returns a result or throws. The transport decision is made below that interface.
+
+The same mechanism runs in both directions:
+- **Client → Core**: API calls (install mod, fetch modpack list, change settings, etc.)
+- **Core → Client**: push notifications (modpack added, mod updated, member joined,
+  server started or stopped, etc.)
+
+This means the relay subscription code — subscribe to Realtime, handle incoming message,
+write acknowledgment, write result — is the same on both sides. Core and the desktop app
+are symmetric participants in the same message system. There is no special "relay mode."
+
+---
+
+## Message acknowledgment — two phases
+
+Every message goes through two writes on the receiver's side:
+
+1. **Receipt** (`received_at`): written immediately when the message is picked up,
+   before any validation or processing. This confirms the receiver is alive and saw it.
+2. **Result** (`completed_at` + result payload or typed error): written when processing
+   finishes.
+
+This gives three distinct debuggable states:
+
+| State | Meaning |
+|---|---|
+| No `received_at` after timeout | Receiver is offline |
+| `received_at` set, no result after timeout | Receiver got it but crashed or bad data |
+| Both set | Success or known typed error |
+
+Receipt is always written before validation. If the message contains bad data, the result
+field carries a typed error. This makes "offline" and "bad request" distinguishable in logs.
+
+---
+
+## Relay timeout and TTL
+
+Every message has an explicit **30-second timeout** from send to `received_at`. If
+`received_at` is not written within 30 seconds, the sender surfaces a typed
+`CoreOfflineError` to the caller. Messages have a **5-minute TTL** — Core ignores
+stale messages on reconnect.
+
+There is no circuit breaker. Messages in this system are critical delivery, not calls
+to a public rate-limited API. The relay always attempts delivery.
+
+---
+
+## Connection state and offline detection
+
+`CoreConnectionMonitor` tracks four states:
+
+| State | Meaning |
+|---|---|
+| `connecting` | Initial connection attempt in progress |
+| `online-direct` | Direct HTTP is reachable; relay subscription also active |
+| `online-relay` | Direct HTTP failed; relay is active; Core is responding |
+| `offline` | Relay messages unacknowledged past timeout; Core is genuinely down |
+
+"Fail to fetch" on direct HTTP does not mean offline. It means direct is unavailable
+and the relay path should be used. Core is only considered offline when relay messages
+also go unacknowledged past the timeout.
+
+The `last_seen` heartbeat timestamp in `core_registrations` is a UX hint only — it tells
+the UI how long ago Core was last seen ("last online 3 hours ago"). It does not drive
+routing decisions.
+
+---
+
+## Security — Core machine accounts, no service role key
+
+Core must never hold a Supabase service role key. A service role key bypasses all RLS
+policies. Since Core is open source software running on user machines, any user could
+modify their Core binary to use that key to read or write any other user's data across
+all instances.
+
+Instead, during the pairing flow, each Core instance is provisioned a dedicated Supabase
+machine account:
+
+1. The owner runs the pairing flow on the desktop app.
+2. A Supabase Edge Function (server-side, holding the service role internally) creates
+   a new Supabase auth user scoped to this Core instance.
+3. The Edge Function returns the credentials to Core over the secure pairing channel.
+4. Core stores them in a local config file on the server machine.
+
+RLS policies are written so this machine account can only read and write rows belonging
+to its own Core ID. If someone modifies their Core binary, the worst they can do is
+affect their own instance. They cannot touch any other user's data.
+
+The service role key exists only inside Supabase Edge Functions, which are server-side
+and never distributed. Core and the desktop app both use scoped accounts with RLS.
+
+---
+
+## Supabase schema
+
+Three tables. All old tables are dropped and rewritten.
+
+**`core_registrations`** — one row per Core instance. Stores the owner's user ID, the
+Core machine account's user ID, the direct HTTPS URL if reachable (null if relay-only),
+and `last_seen` timestamp updated by Core's heartbeat.
+
+**`core_messages`** — the shared message table for both relay and push notifications.
+Columns: `id`, `core_id`, `sender_id`, `direction` (`client-to-core` | `core-to-client`),
+`payload` (JSON), `received_at`, `completed_at`, `result` (JSON), `created_at`, `ttl`.
+Rows are written by either side and read by the other's Realtime subscription.
+
+**`core_group_members`** — who has access to a given Core and at what role (viewer,
+member, mod, admin). The owner is stored separately in `core_registrations`. In V1,
+a user can either own one Core or be a member of one Core, not both.
+
+RLS policies:
+- Users can insert messages only to Cores they are members of.
+- Users can only read messages addressed to them or sent by them.
+- Core's machine account can read and write only rows for its own `core_id`.
+- No service role key is used outside Edge Functions.
+
+---
+
+## `packages/ui` dependency — TBD
+
+Whether `packages/ui` should depend on `@amberite/api-lib` directly (so shared
+components can make API calls) or whether that dependency should live only in the app
+layers (`apps/app-frontend`, `apps/web`) is an open question. Resolve this by checking
+how Modrinth handles the same boundary in their monorepo before implementing step 13.
+
+---
+
+## What gets deleted from amberite-lib
+
+Seven Rust modules exist only because there was no TypeScript layer to handle external
+communication. With api-lib in place, they are redundant:
+
+`core_client.rs`, `core_instances.rs`, `core_modpacks.rs`, `friends.rs`, `groups.rs`,
+`supabase_client.rs`, `mod_sync.rs`. Their Tauri command registrations in `lib.rs`
+are removed too.
+
+What stays in Rust is only what genuinely requires OS-level access or Tauri's event
+system: `core_launcher.rs` (process management), `auth.rs` (keychain read/write),
+`console_stream.rs` and `progress_stream.rs` (Tauri event bus), `settings.rs` (OS
+paths), `tunnel.rs` (TCP tunneling), and `pairing.rs`.
+
+---
+
+## Implementation order
+
+1. Rename `packages/core-client` to `packages/api-lib`, update package name to `@amberite/api-lib`.
+2. Define the `PlatformAdapter` interface and `CoreCallContext` types.
+3. Define the structured error hierarchy: `NetworkError`, `AuthError`, `CoreOfflineError`,
+   `RelayTimeoutError`, `CoreApiError` (typed error from Core), `AmberiteApiError` (base).
+4. Migrate the 38 Core API endpoints from bare `fetch()` to the ctx pattern.
+5. Rewrite `CoreApiClient` to accept a `PlatformAdapter`, attempt direct HTTP first,
+   fall through to relay on failure, expose the same interface for both paths.
+6. Write the shared transport layer: Supabase Realtime subscription, message publish,
+   two-phase acknowledgment (`received_at` on pickup, `completed_at` + result on finish).
+   This code is used identically by both client and Core.
+7. Add `CoreConnectionMonitor` with four states driven by direct HTTP result and relay
+   acknowledgment timing, not by `last_seen`.
+8. Write the auth module: Microsoft OAuth URL builder, `microsoft-auth` Edge Function
+   call, session setup.
+9. Write the `microsoft-auth` Supabase Edge Function.
+10. Create the Supabase schema with RLS as described above.
+11. Write the pairing-time machine account provisioning Edge Function. Update `pairing.rs`
+    to call it and persist the returned credentials to the server config.
+12. Write the heartbeat module: Core updates `core_registrations.last_seen` on a
+    regular interval while running.
+13. Resolve the `packages/ui` dependency question, then update `packages/ui` import paths.
+14. Wire the desktop adapter in `apps/app-frontend` with `tauriFetch` and the three
+    Tauri invokes.
+15. Add `get_local_core_token()` and `is_core_running()` Tauri commands to amberite-lib.
+16. Delete the seven Rust modules and remove their command registrations from `lib.rs`.
+
+---
+
+## Out of scope for this session
+
+Social features (friends/groups beyond group membership), additional OAuth providers
+(Google, Discord), the Core-side Rust relay subscriber implementation, and the
+amberite.dev web app itself.

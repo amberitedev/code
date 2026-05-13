@@ -1,4 +1,4 @@
-import { CoreApiClient } from '@amberite/core-client'
+import { CoreApiClient } from '@amberite/api-lib'
 import type {
 	AbstractPopupNotificationManager,
 	AbstractWebNotificationManager,
@@ -10,11 +10,11 @@ import { provide, ref, useTemplateRef } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 import { useRouter } from 'vue-router'
 
+import { getDesktopAdapter } from '@/adapters/desktop'
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_search_results } from '@/helpers/cache.js'
-import { core_get_url } from '@/helpers/core'
 import { import_instance } from '@/helpers/import.js'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
 import { create_profile_and_install, create_profile_and_install_from_file } from '@/helpers/pack'
@@ -132,47 +132,47 @@ export function setupCreationModal(
 				return
 			}
 
-		// Custom/vanilla setup
-		const loader = config.hideLoaderChips.value
-			? 'vanilla'
-			: (config.selectedLoader.value ?? 'vanilla')
-		const loaderVersion = config.hideLoaderVersion.value
-			? null
-			: (config.selectedLoaderVersion.value ?? config.loaderVersionType.value)
-		const iconPath = config.instanceIconPath.value ?? null
-		const name = config.instanceName.value.trim() || config.autoInstanceName.value
-		const kind = config.instanceKind.value as ProfileKind
+			// Custom/vanilla setup
+			const loader = config.hideLoaderChips.value
+				? 'vanilla'
+				: (config.selectedLoader.value ?? 'vanilla')
+			const loaderVersion = config.hideLoaderVersion.value
+				? null
+				: (config.selectedLoaderVersion.value ?? config.loaderVersionType.value)
+			const iconPath = config.instanceIconPath.value ?? null
+			const name = config.instanceName.value.trim() || config.autoInstanceName.value
+			const kind = config.instanceKind.value as ProfileKind
 
-		// Server instances skip local Minecraft installation; synced instances install locally.
-		const skipInstall = kind === 'server'
+			// Server instances skip local Minecraft installation; synced instances install locally.
+			const skipInstall = kind === 'server'
 
-		const profilePath = await create(
-			name,
-			config.selectedGameVersion.value!,
-			loader as InstanceLoader,
-			loaderVersion,
-			iconPath,
-			skipInstall,
-			undefined,
-			kind,
-		).catch(handleError)
+			const profilePath = await create(
+				name,
+				config.selectedGameVersion.value!,
+				loader as InstanceLoader,
+				loaderVersion,
+				iconPath,
+				skipInstall,
+				undefined,
+				kind,
+			).catch(handleError)
 
-		if (profilePath && (kind === 'server' || kind === 'synced')) {
-			try {
-				const baseUrl = await core_get_url()
-				const coreClient = new CoreApiClient(baseUrl)
-				const coreInstance = await coreClient.createInstance({
-					name,
-					game_version: config.selectedGameVersion.value!,
-					loader: loader as 'vanilla' | 'paper' | 'fabric' | 'forge' | 'neoforge' | 'quilt',
-					loader_version: loaderVersion ?? undefined,
-					port: 25565,
-				})
-				await editProfile(profilePath, { core_instance_id: coreInstance.id })
-			} catch (err) {
-				handleError(err as Error)
+			if (profilePath && (kind === 'server' || kind === 'synced')) {
+				try {
+					const adapter = await getDesktopAdapter()
+					const coreClient = new CoreApiClient(adapter)
+					const coreInstance = await coreClient.createInstance({
+						name,
+						game_version: config.selectedGameVersion.value!,
+						loader: loader as 'vanilla' | 'paper' | 'fabric' | 'forge' | 'neoforge' | 'quilt',
+						loader_version: loaderVersion ?? undefined,
+						port: 25565,
+					})
+					await editProfile(profilePath, { core_instance_id: coreInstance.id })
+				} catch (err) {
+					handleError(err as Error)
+				}
 			}
-		}
 
 			trackEvent('InstanceCreate', {
 				source: 'CreationModal',

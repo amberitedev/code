@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import type { CoreInstanceSummary } from '@amberite/core-client'
-import { CoreApiClient } from '@amberite/core-client'
+import type { CoreInstanceSummary } from '@amberite/api-lib'
+import { CoreApiClient } from '@amberite/api-lib'
 import type { Archon } from '@modrinth/api-client'
 import { ServersManagePageIndex } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { core_get_url } from '@/helpers/core'
+import { getDesktopAdapter } from '@/adapters/desktop'
 
 import { config } from '../config'
 
@@ -64,8 +64,8 @@ useQuery({
 	queryKey: ['servers'],
 	staleTime: Infinity,
 	queryFn: async () => {
-		const baseUrl = await core_get_url()
-		const coreClient = new CoreApiClient(baseUrl)
+		const adapter = await getDesktopAdapter()
+		const coreClient = new CoreApiClient(adapter)
 		const instances = await coreClient.listInstances()
 		return {
 			servers: instances.map(mapCoreInstanceToServer),

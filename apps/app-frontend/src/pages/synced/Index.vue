@@ -1,5 +1,15 @@
 <template>
-	<div v-if="instance" :class="{ 'flex h-full flex-col': isFixedRender }">
+	<div
+		v-if="coreError"
+		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
+	>
+		<ErrorInformationCard
+			title="Core Unavailable"
+			description="Amberite Core is not responding. Make sure Core is running and try again."
+			:icon="IssuesIcon"
+		/>
+	</div>
+	<div v-else-if="instance" :class="{ 'flex h-full flex-col': isFixedRender }">
 		<div :class="['p-6 pr-2 pb-4', { 'shrink-0': isFixedRender }]">
 			<ExportModal ref="exportModal" :instance="instance" />
 			<InstanceSettingsModal
@@ -37,7 +47,15 @@
 				<template #actions>
 					<div class="flex gap-2">
 						<ButtonStyled
-							v-if="['installing', 'pack_installing', 'pack_installed', 'not_installed', 'minecraft_installing'].includes(instance.install_stage)"
+							v-if="
+								[
+									'installing',
+									'pack_installing',
+									'pack_installed',
+									'not_installed',
+									'minecraft_installing',
+								].includes(instance.install_stage)
+							"
 							color="brand"
 							size="large"
 						>
@@ -71,7 +89,12 @@
 						<ButtonStyled type="transparent" circular size="large">
 							<OverflowMenu
 								:options="[
-									{ id: 'open-folder', action: () => { if (instance) showProfileInFolder(instance.path) } },
+									{
+										id: 'open-folder',
+										action: () => {
+											if (instance) showProfileInFolder(instance.path)
+										},
+									},
 									{ id: 'export-mrpack', action: () => exportModal?.show() },
 								]"
 							>
@@ -92,10 +115,10 @@
 				<RouterView
 					v-if="route.path.startsWith('/synced')"
 					v-slot="{ Component }"
-					:key="instance.path"
+					:key="route.path"
 				>
 					<template v-if="Component">
-						<Suspense :key="instance.path">
+						<Suspense :key="route.path">
 							<component
 								:is="Component"
 								:instance="instance"
@@ -120,16 +143,24 @@
 			<template #copy_path><ClipboardCopyIcon /> Copy path</template>
 		</ContextMenu>
 	</div>
+	<div v-else class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast">
+		<ErrorInformationCard
+			title="Instance Unavailable"
+			description="This instance could not be loaded. It may have been deleted or is temporarily unavailable."
+			:icon="IssuesIcon"
+		/>
+	</div>
 </template>
 
 <script setup lang="ts">
-import { CoreApiClient } from '@amberite/core-client'
+import { CoreApiClient } from '@amberite/api-lib'
 import {
 	BoxesIcon,
 	ClipboardCopyIcon,
 	DownloadIcon,
 	FolderOpenIcon,
 	GlobeIcon,
+	IssuesIcon,
 	MoreVerticalIcon,
 	PackageIcon,
 	PlayIcon,
@@ -143,6 +174,7 @@ import {
 	Avatar,
 	ButtonStyled,
 	ContentPageHeader,
+	ErrorInformationCard,
 	injectNotificationManager,
 	JoinedButtons,
 	NavTabs,
@@ -156,12 +188,12 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { getDesktopAdapter } from '@/adapters/desktop'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
 import UpdateToPlayModal from '@/components/ui/modal/UpdateToPlayModal.vue'
 import { trackEvent } from '@/helpers/analytics'
-import { core_get_url } from '@/helpers/core'
 import { process_listener, profile_listener } from '@/helpers/events'
 import { get_by_profile_path } from '@/helpers/process'
 import { finish_install, get, get_full_path, kill, run } from '@/helpers/profile'
@@ -181,10 +213,15 @@ const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
 
 const offline = ref(!navigator.onLine)
-window.addEventListener('offline', () => { offline.value = true })
-window.addEventListener('online', () => { offline.value = false })
+window.addEventListener('offline', () => {
+	offline.value = true
+})
+window.addEventListener('online', () => {
+	offline.value = false
+})
 
 const instance = ref<GameInstance>()
+const coreError = ref(false)
 const playing = ref(false)
 const loading = ref(false)
 const stopping = ref(false)
@@ -198,7 +235,9 @@ async function fetchInstance() {
 	if (instance.value) {
 		breadcrumbs.setName(
 			'SyncedInstance',
-			instance.value.name.length > 40 ? instance.value.name.substring(0, 40) + '...' : instance.value.name,
+			instance.value.name.length > 40
+				? instance.value.name.substring(0, 40) + '...'
+				: instance.value.name,
 		)
 		breadcrumbs.setContext({ name: instance.value.name, link: route.path, query: route.query })
 	}
@@ -208,8 +247,12 @@ async function fetchInstance() {
 await fetchInstance()
 
 const coreInstanceId = instance.value?.core_instance_id ?? (route.params.id as string)
-const baseUrl = await core_get_url()
-provideCoreClient(new CoreApiClient(baseUrl))
+try {
+	const adapter = await getDesktopAdapter()
+	provideCoreClient(new CoreApiClient(adapter))
+} catch {
+	coreError.value = true
+}
 
 watch(
 	() => route.params.id,
@@ -256,7 +299,11 @@ const startInstance = async (context: string) => {
 		handleSevereError(err, { profilePath: route.params.id as string })
 	}
 	loading.value = false
-	trackEvent('InstanceStart', { loader: instance.value.loader, game_version: instance.value.game_version, source: context })
+	trackEvent('InstanceStart', {
+		loader: instance.value.loader,
+		game_version: instance.value.game_version,
+		source: context,
+	})
 }
 
 const stopInstance = async (context: string) => {
@@ -265,12 +312,23 @@ const stopInstance = async (context: string) => {
 	stopping.value = false
 	playing.value = false
 	if (!instance.value) return
-	trackEvent('InstanceStop', { loader: instance.value.loader, game_version: instance.value.game_version, source: context })
+	trackEvent('InstanceStop', {
+		loader: instance.value.loader,
+		game_version: instance.value.game_version,
+		source: context,
+	})
 }
 
 const playActions = computed(() => {
 	if (playing.value) {
-		return [{ id: 'stop', label: stopping.value ? 'Stopping...' : 'Stop', icon: StopCircleIcon, action: () => stopInstance('SyncedPage') }]
+		return [
+			{
+				id: 'stop',
+				label: stopping.value ? 'Stopping...' : 'Stop',
+				icon: StopCircleIcon,
+				action: () => stopInstance('SyncedPage'),
+			},
+		]
 	}
 	return [{ id: 'play', label: 'Play', icon: PlayIcon, action: () => startInstance('SyncedPage') }]
 })
@@ -305,7 +363,10 @@ const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 			await stopInstance('SyncedPageContextMenu')
 			break
 		case 'add_content':
-			await router.push({ path: `/browse/${instance.value?.loader === 'vanilla' ? 'datapack' : 'mod'}`, query: { i: route.params.id } })
+			await router.push({
+				path: `/browse/${instance.value?.loader === 'vanilla' ? 'datapack' : 'mod'}`,
+				query: { i: route.params.id },
+			})
 			break
 		case 'open_folder':
 			if (instance.value) await showProfileInFolder(instance.value.path)
@@ -320,6 +381,9 @@ const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 	}
 }
 
+let _unmounted = false
+onUnmounted(() => { _unmounted = true })
+
 const unlistenProfiles = await profile_listener(
 	async (event: { profile_path_id: string; event: string }) => {
 		if (event.profile_path_id !== route.params.id) return
@@ -328,22 +392,32 @@ const unlistenProfiles = await profile_listener(
 			return
 		}
 		instance.value = await get(route.params.id as string).catch((err) => {
-			if (String(err).includes('not managed')) { router.push({ path: '/' }); return undefined }
+			if (String(err).includes('not managed')) {
+				router.push({ path: '/' })
+				return undefined
+			}
 			return handleError(err)
 		})
 	},
 )
 
-const unlistenProcesses = await process_listener(
-	(e: { event: string; profile_path_id: string }) => {
-		if (e.event === 'finished' && e.profile_path_id === route.params.id) {
-			playing.value = false
-		}
-	},
-)
-
-onUnmounted(() => {
+if (_unmounted) {
 	unlistenProfiles()
-	unlistenProcesses()
-})
+} else {
+	const unlistenProcesses = await process_listener(
+		(e: { event: string; profile_path_id: string }) => {
+			if (e.event === 'finished' && e.profile_path_id === route.params.id) {
+				playing.value = false
+			}
+		},
+	)
+
+	const cleanup = () => {
+		unlistenProfiles()
+		unlistenProcesses()
+	}
+
+	if (_unmounted) cleanup()
+	else onUnmounted(cleanup)
+}
 </script>

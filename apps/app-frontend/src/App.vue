@@ -60,7 +60,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { type } from '@tauri-apps/plugin-os'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { $fetch } from 'ofetch'
-import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, onErrorCaptured, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
 import ModrinthAppLogo from '@/assets/modrinth_app.svg?component'
@@ -463,6 +463,7 @@ function onSuspensePending() {
 }
 
 function onSuspenseResolve() {
+	suspensePending = false
 	if (suspenseToken) {
 		loading.end(suspenseToken)
 		suspenseToken = null
@@ -472,6 +473,21 @@ function onSuspenseResolve() {
 		routerToken = null
 	}
 }
+
+// When an async component setup throws inside the <Suspense>, Vue never emits
+// @resolve — leaving suspensePending=true and tokens permanently live. Capture
+// the error here to release those tokens so subsequent navigations can proceed.
+onErrorCaptured(() => {
+	if (suspenseToken) {
+		loading.end(suspenseToken)
+		suspenseToken = null
+	}
+	if (routerToken) {
+		loading.end(routerToken)
+		routerToken = null
+	}
+	suspensePending = false
+})
 
 const queryClient = useQueryClient()
 
@@ -1435,7 +1451,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</Admonition>
 			<RouterView v-slot="{ Component }">
 				<template v-if="Component">
-					<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
+					<Suspense :key="route.path" @pending="onSuspensePending" @resolve="onSuspenseResolve">
 						<component :is="Component"></component>
 					</Suspense>
 				</template>
@@ -1457,14 +1473,17 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 							<AccountsCard ref="accounts" />
 						</suspense>
 					</div>
-				<div class="p-4">
-					<suspense>
-						<FriendsList ref="friendsListRef" :credentials="credentials" :sign-in="() => signIn()" />
-					</suspense>
-				</div>
+					<div class="p-4">
+						<suspense>
+							<FriendsList
+								ref="friendsListRef"
+								:credentials="credentials"
+								:sign-in="() => signIn()"
+							/>
+						</suspense>
+					</div>
 				</div>
 			</div>
-
 		</div>
 	</div>
 	<I18nDebugPanel />

@@ -4,10 +4,10 @@
 
 There are **two separate route trees** for server management. Both reuse the same `@modrinth/ui` components.
 
-| Route | File | Target | Status |
-|---|---|---|---|
+| Route                 | File                             | Target                             | Status          |
+| --------------------- | -------------------------------- | ---------------------------------- | --------------- |
 | `/hosting/manage/:id` | `pages/hosting/manage/Index.vue` | Modrinth cloud (Archon/Kyros APIs) | Works for cloud |
-| `/server/:id` | `pages/server/Index.vue` | Local Core server | **Broken** |
+| `/server/:id`         | `pages/server/Index.vue`         | Local Core server                  | **Broken**      |
 
 The user lands on `/server/:id`. This is the one we're fixing.
 
@@ -27,6 +27,7 @@ The user lands on `/server/:id`. This is the one we're fixing.
 8. Passes `serverId = profile.core_instance_id` to `ServersManageRootLayout`
 
 The proxy maps:
+
 - `archon.servers_v0` → `buildServersV0(baseUrl)` — calls `core_get_instance()` via Tauri, maps to `Archon.Servers.v0.Server`
 - `archon.servers_v1` → `buildServersV1()` — same, maps to `Archon.Servers.v1.ServerFull`
 - `archon.content_v1` → `buildContentV1(baseUrl)` — calls Core's `/instances/{id}/mods` REST endpoints
@@ -42,33 +43,36 @@ The `ServersManageRootLayout` (from `packages/ui`) never knows the difference �
 
 All child pages get this context via `injectModrinthServerContext()`:
 
-| Field | Type | Source |
-|---|---|---|
-| `serverId` | `string` | Passed prop — Core instance UUID |
-| `worldId` | `Ref<string \| null>` | From `servers_v1.worlds[0].id` — currently = `inst.id` (same UUID) |
-| `server` | `Ref<Archon.Servers.v0.Server>` | TanStack query via `servers_v0.get(serverId)` |
-| `powerState` | `Ref<PowerState>` | Polled from Core every 2s via `CoreWebSocketClient.statePolls` |
-| `isServerRunning` | `ComputedRef<boolean>` | `powerState === 'running'` |
-| `stats` | `Ref<Stats>` | Polled from Core `/instances/{id}/stats` every 3s |
-| `uptimeSeconds` | `Ref<number>` | From WS state event `uptime` field |
-| `isConnected` | `Ref<boolean>` | True when Core WS console opens |
-| `busyReasons` | `ComputedRef<BusyReason[]>` | Populated during content sync operations |
-| `fsAuth` | `Ref<{url, token} \| null>` | From `getFilesystemAuth()` — currently returns `{ url: '', token: '' }` |
-| `uploadState` | `Ref<UploadState>` | Managed by Files/Content pages |
+| Field             | Type                            | Source                                                                  |
+| ----------------- | ------------------------------- | ----------------------------------------------------------------------- |
+| `serverId`        | `string`                        | Passed prop — Core instance UUID                                        |
+| `worldId`         | `Ref<string \| null>`           | From `servers_v1.worlds[0].id` — currently = `inst.id` (same UUID)      |
+| `server`          | `Ref<Archon.Servers.v0.Server>` | TanStack query via `servers_v0.get(serverId)`                           |
+| `powerState`      | `Ref<PowerState>`               | Polled from Core every 2s via `CoreWebSocketClient.statePolls`          |
+| `isServerRunning` | `ComputedRef<boolean>`          | `powerState === 'running'`                                              |
+| `stats`           | `Ref<Stats>`                    | Polled from Core `/instances/{id}/stats` every 3s                       |
+| `uptimeSeconds`   | `Ref<number>`                   | From WS state event `uptime` field                                      |
+| `isConnected`     | `Ref<boolean>`                  | True when Core WS console opens                                         |
+| `busyReasons`     | `ComputedRef<BusyReason[]>`     | Populated during content sync operations                                |
+| `fsAuth`          | `Ref<{url, token} \| null>`     | From `getFilesystemAuth()` — currently returns `{ url: '', token: '' }` |
+| `uploadState`     | `Ref<UploadState>`              | Managed by Files/Content pages                                          |
 
 ---
 
 ## Confirmed Bugs — Crash-Level
 
 ### Bug 1: Content page — `mods.map is not a function`
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:84-88`
 
 Core `GET /instances/{id}/mods` returns:
+
 ```json
 { "mods": [ { "filename": "...", "display_name": "...", ... } ] }
 ```
 
 The proxy does:
+
 ```ts
 const mods: Mod[] = res.ok ? await res.json() : []
 // mods = { mods: [...] }  ← an object, NOT an array
@@ -79,14 +83,17 @@ return { ..., addons: mods.map(toAddon) }
 **Fix:** Change to `const data = await res.json(); const mods = data.mods ?? []`
 
 ### Bug 2: Toggle mod enable/disable sends wrong field name
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:93-94`
 
 The proxy sends:
+
 ```json
-{ "disabled": true }   // or { "disabled": false }
+{ "disabled": true } // or { "disabled": false }
 ```
 
 Core `PATCH /instances/:id/mods/:filename` expects:
+
 ```json
 { "enabled": boolean }
 ```
@@ -96,19 +103,23 @@ The field name is inverted and flipped. Core silently ignores the unknown `disab
 **Fix:** Send `{ "enabled": !disabled }` instead.
 
 ### Bug 3: Status "offline" and "crashed" not handled
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:8-10` and `core-ws-client.ts:28-33`
 
 Core's `InstanceStatus` serializes as:
+
 - `Offline` → `"offline"` (NOT `"stopped"`)
 - `Crashed` → `"crashed"`
 
 The TypeScript type annotation in `core.ts` incorrectly documents `"stopped"` instead of `"offline"`.
 
 Effect on `STATUS_TO_POWER` (used every 2s state poll):
+
 - `"offline"` → `STATUS_TO_POWER['offline']` → `undefined` → falls back to `?? 'idle'` (accidentally correct)
 - `"crashed"` → `STATUS_TO_POWER['crashed']` → `undefined` → falls back to `?? 'idle'` → **server crash shows as "stopped"** instead of "crashed"
 
 Effect on `STATUS_TO_V0` (used by `coreToV0`):
+
 - `"offline"` → `undefined` → `?? 'available'` (fine)
 - `"crashed"` → `undefined` → `?? 'available'` (fine, v0 status doesn't matter much)
 
@@ -119,6 +130,7 @@ Effect on `STATUS_TO_V0` (used by `coreToV0`):
 ## Confirmed Bugs — Functional (Non-Crash)
 
 ### Bug 4: Files page — wrong response shape
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:114-116`
 
 ```ts
@@ -130,6 +142,7 @@ The UI reads `.items` (Kyros `DirectoryItem[]`) — gets `undefined`. The Files 
 No Core file manager API exists. This is a **gap** as much as a bug.
 
 ### Bug 5: RAM total hardcoded to 4GB
+
 **File:** `apps/app-frontend/src/helpers/core-ws-client.ts:149`
 
 ```ts
@@ -139,6 +152,7 @@ ram_total_bytes: 4 * 1024 * 1024 * 1024,  // always 4GB
 Core `/instances/{id}/stats` does not return memory total. Core `GET /instances/{id}` returns `memory: { min_mb, max_mb }`. The stats poll would need to also fetch instance details (or cache them from the initial load) to get the real `max_mb`.
 
 ### Bug 6: Crash log analysis — empty download
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:115`
 
 ```ts
@@ -150,17 +164,19 @@ buildKyrosFiles().downloadFile = async () => ''
 Core has `GET /instances/{id}/logs/latest.log` that returns the raw log file. This needs to be plumbed through `downloadFile`.
 
 ### Bug 7: `addAddon` sends wrong request body
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:89-91`
 
 ```ts
 addAddon: async (id, _w, req: Archon.Content.v1.AddAddonRequest) => {
-    await fetch(base(id), { method: 'POST', headers, body: JSON.stringify(req) })
+	await fetch(base(id), { method: 'POST', headers, body: JSON.stringify(req) })
 }
 ```
 
 `Archon.Content.v1.AddAddonRequest` shape (from Archon API) likely contains `{ project_id, version_id, ... }`. Core `POST /instances/{id}/mods` expects only `{ "version_id": "string" }`. The extra fields cause no hard error (serde ignores unknown fields) but the intent is `version_id` — should only send that.
 
 ### Bug 8: `player_count` and `uptime_seconds` from Core stats ignored
+
 **File:** `apps/app-frontend/src/helpers/core-ws-client.ts:143-155`
 
 Core returns `{ cpu_percent?, memory_mb?, player_count?, uptime_seconds? }`.
@@ -168,6 +184,7 @@ Core returns `{ cpu_percent?, memory_mb?, player_count?, uptime_seconds? }`.
 `player_count` and `uptime_seconds` are never forwarded to the WS stats event — they're silently dropped. The UI could display player count on the Overview panel.
 
 ### Bug 9: Modpack install is a noop
+
 **File:** `apps/app-frontend/src/helpers/core-client.ts:100`
 
 ```ts
@@ -180,20 +197,20 @@ The "Install from modpack" flow in the Content tab calls `installContent(...)`. 
 
 ## Complete Gap Map (Missing Features)
 
-| Feature | Core API exists? | Current state |
-|---|---|---|
-| **Files tab** | ❌ No file manager API | Stub returns wrong shape; page is empty/broken |
-| **Backups tab** | ❌ No backup API | Stub returns empty list; page appears "no backups" |
-| **Logs tab** | ✅ `GET /instances/{id}/logs` + filenames | Route doesn't exist in `/server/:id` at all |
-| **Crash log analysis** | ✅ `GET /instances/{id}/logs/latest.log` | `downloadFile` stub returns `''` |
-| **Modpack install** | ✅ `POST /instances/{id}/modpack` (multipart) | `installContent` is noop |
-| **Modpack info** | ✅ `GET /instances/{id}/modpack` | `getModpackUpdate/getAddonUpdate` return null stubs |
-| **Modpack export** | ✅ `GET /instances/{id}/modpack/export` | Not wired |
-| **Server properties** | ✅ `GET/PATCH /instances/{id}/properties` | No UI page; not wired anywhere |
-| **Macros (scripts)** | ✅ `GET/POST/DELETE /instances/{id}/macros` | Not wired; no UI |
-| **RAM total in stats** | ✅ From `GET /instances/{id}` → `memory.max_mb` | Hardcoded 4GB |
-| **Player count** | ✅ From `GET /instances/{id}/stats` → `player_count` | Not forwarded to UI |
-| **Crash status display** | ✅ Core sends `"crashed"` status | Maps to `'idle'`/stopped; crash overlay never shows |
+| Feature                  | Core API exists?                                     | Current state                                       |
+| ------------------------ | ---------------------------------------------------- | --------------------------------------------------- |
+| **Files tab**            | ❌ No file manager API                               | Stub returns wrong shape; page is empty/broken      |
+| **Backups tab**          | ❌ No backup API                                     | Stub returns empty list; page appears "no backups"  |
+| **Logs tab**             | ✅ `GET /instances/{id}/logs` + filenames            | Route doesn't exist in `/server/:id` at all         |
+| **Crash log analysis**   | ✅ `GET /instances/{id}/logs/latest.log`             | `downloadFile` stub returns `''`                    |
+| **Modpack install**      | ✅ `POST /instances/{id}/modpack` (multipart)        | `installContent` is noop                            |
+| **Modpack info**         | ✅ `GET /instances/{id}/modpack`                     | `getModpackUpdate/getAddonUpdate` return null stubs |
+| **Modpack export**       | ✅ `GET /instances/{id}/modpack/export`              | Not wired                                           |
+| **Server properties**    | ✅ `GET/PATCH /instances/{id}/properties`            | No UI page; not wired anywhere                      |
+| **Macros (scripts)**     | ✅ `GET/POST/DELETE /instances/{id}/macros`          | Not wired; no UI                                    |
+| **RAM total in stats**   | ✅ From `GET /instances/{id}` → `memory.max_mb`      | Hardcoded 4GB                                       |
+| **Player count**         | ✅ From `GET /instances/{id}/stats` → `player_count` | Not forwarded to UI                                 |
+| **Crash status display** | ✅ Core sends `"crashed"` status                     | Maps to `'idle'`/stopped; crash overlay never shows |
 
 ---
 
@@ -201,51 +218,55 @@ The "Install from modpack" flow in the Content tab calls `installContent(...)`. 
 
 All routes require `Authorization: Bearer <token>` (or bypass in dev mode).
 
-| Method | Path | Body | Response |
-|---|---|---|---|
-| GET | `/instances` | — | `{ instances: Instance[] }` |
-| POST | `/instances` | `{ name, game_version, loader, loader_version?, port, memory? }` | `201 Instance` |
-| GET | `/instances/:id` | — | `Instance` (with `data_dir`, `java_version`) |
-| DELETE | `/instances/:id` | — | `{ ok: true }` |
-| POST | `/instances/:id/start` | — | `{ ok: true }` |
-| POST | `/instances/:id/stop` | — | `{ ok: true }` |
-| POST | `/instances/:id/kill` | — | `{ ok: true }` |
-| POST | `/instances/:id/restart` | — | `{ ok: true }` |
-| POST | `/instances/:id/command` | `{ command: string }` | `{ ok: true }` |
-| GET | `/instances/:id/console` | WS (ticket in query) | Stream of text lines |
-| GET | `/instances/:id/progress` | SSE | `{ type: "creation_progress", progress: 0–1, message }` |
-| GET | `/instances/:id/stats` | — | `{ cpu_percent?, memory_mb?, player_count?, uptime_seconds? }` |
-| GET | `/instances/:id/mods` | — | `{ mods: ModInfo[] }` |
-| POST | `/instances/:id/mods` | `{ version_id: string }` | `ModInfo` |
-| POST | `/instances/:id/mods/upload` | multipart `file` field | `{ ok: true, filename }` |
-| DELETE | `/instances/:id/mods/:filename` | — | `{ ok: true, restart_required: bool }` |
-| PATCH | `/instances/:id/mods/:filename` | `{ enabled: bool }` | `{ ok: true }` |
-| PUT | `/instances/:id/mods/:filename/update` | — | `{ updated: ... }` |
-| POST | `/instances/:id/mods/update-all` | — | `{ updated[], already_latest[], failed[] }` |
-| POST | `/instances/:id/modpack` | multipart `mrpack` field | `ModpackManifest` |
-| GET | `/instances/:id/modpack` | — | `ModpackManifest` or 404 |
-| DELETE | `/instances/:id/modpack` | — | `{ ok: true }` |
-| GET | `/instances/:id/modpack/export` | — | Binary `.mrpack` download |
-| GET | `/instances/:id/logs` | — | `{ logs: LogEntry[] }` |
-| GET | `/instances/:id/logs/:filename` | — | Raw text (gzip if `.gz`) |
-| GET | `/instances/:id/crash-reports` | — | `{ crash_reports: LogEntry[] }` |
-| GET | `/instances/:id/crash-reports/:filename` | — | Raw text |
-| GET | `/instances/:id/properties` | — | `{ properties: { [key]: string } }` |
-| PATCH | `/instances/:id/properties` | `{ [key]: string }` | `{ updated_keys: string[] }` |
-| GET | `/instances/:id/macros` | — | macro list |
-| POST | `/instances/:id/macros` | macro spawn body | macro info |
-| DELETE | `/instances/:id/macros/:pid` | — | `{ ok: true }` |
+| Method | Path                                     | Body                                                             | Response                                                       |
+| ------ | ---------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| GET    | `/instances`                             | —                                                                | `{ instances: Instance[] }`                                    |
+| POST   | `/instances`                             | `{ name, game_version, loader, loader_version?, port, memory? }` | `201 Instance`                                                 |
+| GET    | `/instances/:id`                         | —                                                                | `Instance` (with `data_dir`, `java_version`)                   |
+| DELETE | `/instances/:id`                         | —                                                                | `{ ok: true }`                                                 |
+| POST   | `/instances/:id/start`                   | —                                                                | `{ ok: true }`                                                 |
+| POST   | `/instances/:id/stop`                    | —                                                                | `{ ok: true }`                                                 |
+| POST   | `/instances/:id/kill`                    | —                                                                | `{ ok: true }`                                                 |
+| POST   | `/instances/:id/restart`                 | —                                                                | `{ ok: true }`                                                 |
+| POST   | `/instances/:id/command`                 | `{ command: string }`                                            | `{ ok: true }`                                                 |
+| GET    | `/instances/:id/console`                 | WS (ticket in query)                                             | Stream of text lines                                           |
+| GET    | `/instances/:id/progress`                | SSE                                                              | `{ type: "creation_progress", progress: 0–1, message }`        |
+| GET    | `/instances/:id/stats`                   | —                                                                | `{ cpu_percent?, memory_mb?, player_count?, uptime_seconds? }` |
+| GET    | `/instances/:id/mods`                    | —                                                                | `{ mods: ModInfo[] }`                                          |
+| POST   | `/instances/:id/mods`                    | `{ version_id: string }`                                         | `ModInfo`                                                      |
+| POST   | `/instances/:id/mods/upload`             | multipart `file` field                                           | `{ ok: true, filename }`                                       |
+| DELETE | `/instances/:id/mods/:filename`          | —                                                                | `{ ok: true, restart_required: bool }`                         |
+| PATCH  | `/instances/:id/mods/:filename`          | `{ enabled: bool }`                                              | `{ ok: true }`                                                 |
+| PUT    | `/instances/:id/mods/:filename/update`   | —                                                                | `{ updated: ... }`                                             |
+| POST   | `/instances/:id/mods/update-all`         | —                                                                | `{ updated[], already_latest[], failed[] }`                    |
+| POST   | `/instances/:id/modpack`                 | multipart `mrpack` field                                         | `ModpackManifest`                                              |
+| GET    | `/instances/:id/modpack`                 | —                                                                | `ModpackManifest` or 404                                       |
+| DELETE | `/instances/:id/modpack`                 | —                                                                | `{ ok: true }`                                                 |
+| GET    | `/instances/:id/modpack/export`          | —                                                                | Binary `.mrpack` download                                      |
+| GET    | `/instances/:id/logs`                    | —                                                                | `{ logs: LogEntry[] }`                                         |
+| GET    | `/instances/:id/logs/:filename`          | —                                                                | Raw text (gzip if `.gz`)                                       |
+| GET    | `/instances/:id/crash-reports`           | —                                                                | `{ crash_reports: LogEntry[] }`                                |
+| GET    | `/instances/:id/crash-reports/:filename` | —                                                                | Raw text                                                       |
+| GET    | `/instances/:id/properties`              | —                                                                | `{ properties: { [key]: string } }`                            |
+| PATCH  | `/instances/:id/properties`              | `{ [key]: string }`                                              | `{ updated_keys: string[] }`                                   |
+| GET    | `/instances/:id/macros`                  | —                                                                | macro list                                                     |
+| POST   | `/instances/:id/macros`                  | macro spawn body                                                 | macro info                                                     |
+| DELETE | `/instances/:id/macros/:pid`             | —                                                                | `{ ok: true }`                                                 |
 
 ### Response shapes
 
 **`Instance` (summary from `GET /instances`):**
+
 ```ts
 { id, name, game_version, loader, loader_version, port, memory: { min_mb, max_mb }, status }
 ```
 
 **`Instance` (detail from `GET /instances/:id`):**
+
 ```ts
-{ id, name, game_version, loader, loader_version, port, memory, java_version, status, data_dir, created_at, updated_at }
+{
+	;(id, name, game_version, loader, loader_version, port, memory, java_version, status, data_dir, created_at, updated_at)
+}
 ```
 
 **`InstanceStatus` values:** `"offline"` | `"starting"` | `"running"` | `"stopping"` | `"crashed"`
@@ -253,17 +274,20 @@ All routes require `Authorization: Bearer <token>` (or bypass in dev mode).
 **`ModLoader` values:** `"vanilla"` | `"paper"` | `"fabric"` | `"forge"` | `"neoforge"` | `"quilt"`
 
 **`ModInfo`:**
+
 ```ts
 { id: string|null, filename, display_name, version_number, enabled: bool, tracked: bool,
   client_side, server_side, modrinth_project_id, update_available: null }
 ```
 
 **`LogEntry`:**
+
 ```ts
 { filename, size_bytes: number, modified_at: string }  // modified_at = RFC 3339 or ""
 ```
 
 **Stats:**
+
 ```ts
 { cpu_percent?: number, memory_mb?: number, player_count?: number, uptime_seconds?: number }
 ```
@@ -272,15 +296,15 @@ All routes require `Authorization: Bearer <token>` (or bypass in dev mode).
 
 ## What Needs to Change — Files That Must Be Modified
 
-| File | Changes needed |
-|---|---|
-| `helpers/core-client.ts` | Fix `getAddons` (unwrap `{ mods: [...] }`), fix `disableAddon`/`enableAddon` (flip field), fix `addAddon` body, wire `installContent`, wire `downloadFile` to Core logs |
-| `helpers/core-ws-client.ts` | Fix `STATUS_TO_POWER` (add `offline`/`crashed`), fix `ram_total_bytes` (fetch from instance), forward `player_count`/`uptime_seconds` |
-| `helpers/core.ts` | Fix `CoreInstanceDetail.status` type annotation (`"offline" \| "starting" \| "running" \| "stopping" \| "crashed"`) |
-| `pages/server/Index.vue` | Pass `memory.max_mb` to WS client for accurate RAM display |
-| `pages/server/Files.vue` | Either: (a) connect to Core file API, (b) hide tab, or (c) Tauri FS |
-| `pages/server/Backups.vue` | Either: (a) connect to Core backup API, (b) hide tab |
-| `routes.js` | Add `/server/:id/logs` route if we add a Logs page |
+| File                        | Changes needed                                                                                                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `helpers/core-client.ts`    | Fix `getAddons` (unwrap `{ mods: [...] }`), fix `disableAddon`/`enableAddon` (flip field), fix `addAddon` body, wire `installContent`, wire `downloadFile` to Core logs |
+| `helpers/core-ws-client.ts` | Fix `STATUS_TO_POWER` (add `offline`/`crashed`), fix `ram_total_bytes` (fetch from instance), forward `player_count`/`uptime_seconds`                                   |
+| `helpers/core.ts`           | Fix `CoreInstanceDetail.status` type annotation (`"offline" \| "starting" \| "running" \| "stopping" \| "crashed"`)                                                     |
+| `pages/server/Index.vue`    | Pass `memory.max_mb` to WS client for accurate RAM display                                                                                                              |
+| `pages/server/Files.vue`    | Either: (a) connect to Core file API, (b) hide tab, or (c) Tauri FS                                                                                                     |
+| `pages/server/Backups.vue`  | Either: (a) connect to Core backup API, (b) hide tab                                                                                                                    |
+| `routes.js`                 | Add `/server/:id/logs` route if we add a Logs page                                                                                                                      |
 
 ---
 
@@ -297,15 +321,18 @@ Execution order follows the declared priority: Core first (missing APIs), then p
 All changes in `apps/app-frontend/src/helpers/`. No Core changes needed.
 
 #### 1.1 `helpers/core.ts`
+
 - Add `memory?: { min_mb: number; max_mb: number }` to `CoreInstanceDetail`.
 - Fix `status` type annotation: `"offline" | "starting" | "running" | "stopping" | "crashed"`.
 
 #### 1.2 `helpers/core-ws-client.ts`
+
 - **STATUS_TO_POWER**: add `offline → 'idle'` and `crashed → 'crashed'`.
 - **`CoreInstanceDetail` cache**: in the state poller, cache `inst.memory?.max_mb` in a per-server `Map<string, number>`. Use it as `ram_total_bytes` in the stats event.
 - **Forward `player_count` / `uptime_seconds`**: parse the stats response fully; include `player_count` and `uptime_seconds` fields in the emitted `WSStatsEvent` (even if the stock event type ignores extras, forwarding them keeps the door open for later).
 
 #### 1.3 `helpers/core-client.ts`
+
 - **Bug 1 — `getAddons`**: unwrap `data.mods ?? []` instead of treating the whole object as an array.
 - **Bug 2 — `disableAddon` / `enableAddon`**: send `{ enabled: false }` / `{ enabled: true }` (not `disabled`).
 - **Bug 3 — `STATUS_TO_V0`**: add `offline → 'available'` and `crashed → 'available'` (v0 status doesn't render a crash overlay; only `power_variant` matters).
@@ -314,6 +341,7 @@ All changes in `apps/app-frontend/src/helpers/`. No Core changes needed.
 - **Bug 9 — `installContent`**: call `POST ${baseUrl}/instances/${id}/modpack` with a FormData containing the `.mrpack` file from the request.
 
 #### 1.4 `pages/server/Index.vue`
+
 - **Bug 5 — RAM total**: after resolving `coreInstanceId`, call `core_get_instance(coreInstanceId)` once and pass `instance.memory?.max_mb` to `CoreWebSocketClient` via a new `setRamTotal(mb: number)` method. The WS client stores it and uses it in every stats emission.
 
 ---
@@ -335,15 +363,15 @@ All changes in `apps/app-frontend/src/helpers/`. No Core changes needed.
 
 #### 2.1 Route table
 
-| Method | Path | Query | Body | Response |
-|---|---|---|---|---|
-| GET | `/instances/:id/fs/list` | `path`, `page` (def 1), `page_size` (def 100) | — | `DirectoryResponse` |
-| GET | `/instances/:id/fs/download` | `path` | — | file bytes + Content-Type |
-| POST | `/instances/:id/fs/create` | `path`, `type` (`file`\|`directory`) | multipart `file` field (file only, optional) | `{}` |
-| PUT | `/instances/:id/fs/update` | `path` | raw bytes (`application/octet-stream`) | `{}` |
-| POST | `/instances/:id/fs/move` | — | `{ "source": string, "destination": string }` | `{}` |
-| DELETE | `/instances/:id/fs/delete` | `path`, `recursive` (bool, def false) | — | `{}` |
-| POST | `/instances/:id/fs/extract` | `src`, `trg` (def `/`), `override` (bool), `dry` (bool) | — | `ExtractResult` |
+| Method | Path                         | Query                                                   | Body                                          | Response                  |
+| ------ | ---------------------------- | ------------------------------------------------------- | --------------------------------------------- | ------------------------- |
+| GET    | `/instances/:id/fs/list`     | `path`, `page` (def 1), `page_size` (def 100)           | —                                             | `DirectoryResponse`       |
+| GET    | `/instances/:id/fs/download` | `path`                                                  | —                                             | file bytes + Content-Type |
+| POST   | `/instances/:id/fs/create`   | `path`, `type` (`file`\|`directory`)                    | multipart `file` field (file only, optional)  | `{}`                      |
+| PUT    | `/instances/:id/fs/update`   | `path`                                                  | raw bytes (`application/octet-stream`)        | `{}`                      |
+| POST   | `/instances/:id/fs/move`     | —                                                       | `{ "source": string, "destination": string }` | `{}`                      |
+| DELETE | `/instances/:id/fs/delete`   | `path`, `recursive` (bool, def false)                   | —                                             | `{}`                      |
+| POST   | `/instances/:id/fs/extract`  | `src`, `trg` (def `/`), `override` (bool), `dry` (bool) | —                                             | `ExtractResult`           |
 
 All require `AuthUser`.
 
@@ -459,6 +487,7 @@ Sort order: directories first, then files, both groups sorted alphabetically by 
 #### 2.6 `extract_archive` — ZIP extraction
 
 Use the `zip` crate already in Cargo.toml:
+
 1. Open the archive at the resolved `src` path.
 2. If `dry_run = true`: list all entries, check which exist at their target path under `trg`; return `conflicting_files` list without writing anything.
 3. If `dry_run = false`: for each entry, resolve target path (path traversal guard applies to each entry), optionally overwrite if `override_existing`, write file.
@@ -486,33 +515,36 @@ Use the `zip` crate already in Cargo.toml:
 
 ```sql
 CREATE TABLE IF NOT EXISTS backups (
-    id           TEXT    PRIMARY KEY,
-    instance_id  TEXT    NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
-    name         TEXT    NOT NULL,
-    created_at   TEXT    NOT NULL,
-    status       TEXT    NOT NULL DEFAULT 'pending',
-    locked       INTEGER NOT NULL DEFAULT 0,
-    automated    INTEGER NOT NULL DEFAULT 0,
-    size_bytes   INTEGER,
-    archive_path TEXT    NOT NULL DEFAULT ''
+	id TEXT PRIMARY KEY,
+	instance_id TEXT NOT NULL REFERENCES instances (id)
+		ON DELETE CASCADE,
+	name TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	locked INTEGER NOT NULL DEFAULT 0,
+	automated INTEGER NOT NULL DEFAULT 0,
+	size_bytes INTEGER,
+	archive_path TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS backup_operations (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    backup_id      TEXT    NOT NULL REFERENCES backups(id) ON DELETE CASCADE,
-    operation_type TEXT    NOT NULL,   -- 'create' | 'restore'
-    state          TEXT    NOT NULL DEFAULT 'pending',
-    scheduled_for  TEXT    NOT NULL,
-    completed_at   TEXT,
-    has_parent     INTEGER NOT NULL DEFAULT 0,
-    error          TEXT
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	backup_id TEXT NOT NULL REFERENCES backups (id)
+		ON DELETE CASCADE,
+	operation_type TEXT NOT NULL, -- 'create' | 'restore'
+	state TEXT NOT NULL DEFAULT 'pending',
+	scheduled_for TEXT NOT NULL,
+	completed_at TEXT,
+	has_parent INTEGER NOT NULL DEFAULT 0,
+	error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS backup_schedules (
-    instance_id   TEXT    PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
-    cron          TEXT    NOT NULL,
-    retain_count  INTEGER NOT NULL DEFAULT 5,
-    enabled       INTEGER NOT NULL DEFAULT 1
+	instance_id TEXT PRIMARY KEY REFERENCES instances (id)
+		ON DELETE CASCADE,
+	cron TEXT NOT NULL,
+	retain_count INTEGER NOT NULL DEFAULT 5,
+	enabled INTEGER NOT NULL DEFAULT 1
 );
 ```
 
@@ -555,17 +587,17 @@ pub struct BackupSchedule {
 
 #### 3.3 Route table
 
-| Method | Path | Body | Response |
-|---|---|---|---|
-| GET | `/instances/:id/backups` | — | `BackupsQueueResponse` |
-| POST | `/instances/:id/backups` | `{ "name": string }` | `{ "id": string }` |
-| DELETE | `/instances/:id/backups/:bid` | — | `{ "ok": true }` |
-| POST | `/instances/:id/backups/:bid/restore` | `{ "name": string }` | `{ "ok": true }` |
-| POST | `/instances/:id/backups/delete-many` | `{ "backup_ids": string[] }` | `{ "ok": true }` |
-| POST | `/instances/:id/backups/:bid/ack` | `{ "operation_id": number, "operation_type": string }` | `{ "ok": true }` |
-| GET | `/instances/:id/backups/schedule` | — | `BackupScheduleResponse` |
-| PUT | `/instances/:id/backups/schedule` | `{ "cron": string, "retain_count": number }` | `BackupScheduleResponse` |
-| DELETE | `/instances/:id/backups/schedule` | — | `{ "ok": true }` |
+| Method | Path                                  | Body                                                   | Response                 |
+| ------ | ------------------------------------- | ------------------------------------------------------ | ------------------------ |
+| GET    | `/instances/:id/backups`              | —                                                      | `BackupsQueueResponse`   |
+| POST   | `/instances/:id/backups`              | `{ "name": string }`                                   | `{ "id": string }`       |
+| DELETE | `/instances/:id/backups/:bid`         | —                                                      | `{ "ok": true }`         |
+| POST   | `/instances/:id/backups/:bid/restore` | `{ "name": string }`                                   | `{ "ok": true }`         |
+| POST   | `/instances/:id/backups/delete-many`  | `{ "backup_ids": string[] }`                           | `{ "ok": true }`         |
+| POST   | `/instances/:id/backups/:bid/ack`     | `{ "operation_id": number, "operation_type": string }` | `{ "ok": true }`         |
+| GET    | `/instances/:id/backups/schedule`     | —                                                      | `BackupScheduleResponse` |
+| PUT    | `/instances/:id/backups/schedule`     | `{ "cron": string, "retain_count": number }`           | `BackupScheduleResponse` |
+| DELETE | `/instances/:id/backups/schedule`     | —                                                      | `{ "ok": true }`         |
 
 `BackupScheduleResponse`: `{ "enabled": bool, "cron": string | null, "retain_count": number }`
 
@@ -712,38 +744,46 @@ All methods call `${baseUrl}/instances/${instanceId}/fs/*` directly. Auth header
 
 ```ts
 function buildUploadHandle(url: string, formData: FormData): UploadHandle<void> {
-    const callbacks: Array<(p: UploadProgress) => void> = []
-    let xhr: XMLHttpRequest
-    const promise = new Promise<void>((resolve, reject) => {
-        xhr = new XMLHttpRequest()
-        xhr.open('POST', url)
-        xhr.upload.onprogress = (e) => {
-            if (!e.lengthComputable) return
-            const p: UploadProgress = {
-                loaded: e.loaded, total: e.total, progress: e.loaded / e.total,
-            }
-            callbacks.forEach((cb) => cb(p))
-        }
-        xhr.onload = () => (xhr.status < 400 ? resolve() : reject(new Error(String(xhr.status))))
-        xhr.onerror = () => reject(new Error('XHR error'))
-        xhr.send(formData)
-    })
-    const handle: UploadHandle<void> = {
-        promise,
-        onProgress: (cb) => { callbacks.push(cb); return handle },
-        cancel: () => xhr?.abort(),
-    }
-    return handle
+	const callbacks: Array<(p: UploadProgress) => void> = []
+	let xhr: XMLHttpRequest
+	const promise = new Promise<void>((resolve, reject) => {
+		xhr = new XMLHttpRequest()
+		xhr.open('POST', url)
+		xhr.upload.onprogress = (e) => {
+			if (!e.lengthComputable) return
+			const p: UploadProgress = {
+				loaded: e.loaded,
+				total: e.total,
+				progress: e.loaded / e.total,
+			}
+			callbacks.forEach((cb) => cb(p))
+		}
+		xhr.onload = () => (xhr.status < 400 ? resolve() : reject(new Error(String(xhr.status))))
+		xhr.onerror = () => reject(new Error('XHR error'))
+		xhr.send(formData)
+	})
+	const handle: UploadHandle<void> = {
+		promise,
+		onProgress: (cb) => {
+			callbacks.push(cb)
+			return handle
+		},
+		cancel: () => xhr?.abort(),
+	}
+	return handle
 }
 ```
 
 #### 4.2 `getFilesystemAuth` fix
 
 In `buildServersV0`, change:
+
 ```ts
 getFilesystemAuth: async () => ({ url: '', token: '' })
 ```
+
 to:
+
 ```ts
 getFilesystemAuth: async () => ({ url: baseUrl, token: '' })
 ```
@@ -758,36 +798,35 @@ This gives `WithAuth` callers (server icon components) a usable base URL. Token 
 
 ```ts
 function buildBackupsQueueV1(baseUrl: string) {
-    const base = (id: string) => `${baseUrl}/instances/${id}/backups`
-    const headers = { 'Content-Type': 'application/json' }
-    return {
-        list: async (id: string, _worldId: string) => {
-            const res = await fetch(base(id))
-            return res.ok ? res.json() : { active_operations: [], backups: [] }
-        },
-        create: async (id: string, _w: string, req: { name: string }) => {
-            const res = await fetch(base(id), { method: 'POST', headers, body: JSON.stringify(req) })
-            return res.ok ? res.json() : { id: '' }
-        },
-        delete: async (id: string, _w: string, backupId: string) => {
-            await fetch(`${base(id)}/${backupId}`, { method: 'DELETE' })
-        },
-        deleteMany: async (id: string, _w: string, backupIds: string[]) => {
-            await fetch(`${base(id)}/delete-many`, { method: 'POST', headers,
-                body: JSON.stringify({ backup_ids: backupIds }) })
-        },
-        restore: async (id: string, _w: string, backupId: string, req: { name: string }) => {
-            await fetch(`${base(id)}/${backupId}/restore`, { method: 'POST', headers,
-                body: JSON.stringify(req) })
-        },
-        ackCreate: async () => {},   // Core never sets should_prompt=true
-        ackRestore: async () => {},
-        retry: async () => {},
-    }
+	const base = (id: string) => `${baseUrl}/instances/${id}/backups`
+	const headers = { 'Content-Type': 'application/json' }
+	return {
+		list: async (id: string, _worldId: string) => {
+			const res = await fetch(base(id))
+			return res.ok ? res.json() : { active_operations: [], backups: [] }
+		},
+		create: async (id: string, _w: string, req: { name: string }) => {
+			const res = await fetch(base(id), { method: 'POST', headers, body: JSON.stringify(req) })
+			return res.ok ? res.json() : { id: '' }
+		},
+		delete: async (id: string, _w: string, backupId: string) => {
+			await fetch(`${base(id)}/${backupId}`, { method: 'DELETE' })
+		},
+		deleteMany: async (id: string, _w: string, backupIds: string[]) => {
+			await fetch(`${base(id)}/delete-many`, { method: 'POST', headers, body: JSON.stringify({ backup_ids: backupIds }) })
+		},
+		restore: async (id: string, _w: string, backupId: string, req: { name: string }) => {
+			await fetch(`${base(id)}/${backupId}/restore`, { method: 'POST', headers, body: JSON.stringify(req) })
+		},
+		ackCreate: async () => {}, // Core never sets should_prompt=true
+		ackRestore: async () => {},
+		retry: async () => {},
+	}
 }
 ```
 
 Also add a `backups_v1` stub to `buildServersV0` (the UI calls `client.archon.backups_v1.delete(...)` for non-done backups):
+
 ```ts
 buildServersV0 additions:
     backups_v1: {
@@ -797,6 +836,7 @@ buildServersV0 additions:
 ```
 
 Wait — `backups_v1` is on `archon`, not `servers_v0`. It needs its own namespace in the proxy. Add `backups_v1` to the archon proxy in `createCoreClient`:
+
 ```ts
 if (prop === 'backups_v1') return buildBackupsV1LegacyStub(baseUrl)
 ```
@@ -839,15 +879,15 @@ const loadingLog = ref(false)
 
 ```ts
 async function loadLogFile(filename: string, kind: 'log' | 'crash') {
-    loadingLog.value = true
-    selectedLogFilename.value = filename
-    const endpoint = kind === 'log' ? 'logs' : 'crash-reports'
-    try {
-        const res = await fetch(`${baseUrl}/instances/${serverId}/${endpoint}/${filename}`)
-        selectedLogContent.value = res.ok ? await res.text() : `Error loading ${filename}`
-    } finally {
-        loadingLog.value = false
-    }
+	loadingLog.value = true
+	selectedLogFilename.value = filename
+	const endpoint = kind === 'log' ? 'logs' : 'crash-reports'
+	try {
+		const res = await fetch(`${baseUrl}/instances/${serverId}/${endpoint}/${filename}`)
+		selectedLogContent.value = res.ok ? await res.text() : `Error loading ${filename}`
+	} finally {
+		loadingLog.value = false
+	}
 }
 ```
 
@@ -855,10 +895,13 @@ async function loadLogFile(filename: string, kind: 'log' | 'crash') {
 
 ```ts
 ws.onclose = async () => {
-    connected.value = false
-    if (logFiles.value.length === 0) await fetchLogList()
-    const latest = logFiles.value.find((f) => f.filename === 'latest.log') ?? logFiles.value[0]
-    if (latest) { mode.value = 'logs'; await loadLogFile(latest.filename, latest.kind) }
+	connected.value = false
+	if (logFiles.value.length === 0) await fetchLogList()
+	const latest = logFiles.value.find((f) => f.filename === 'latest.log') ?? logFiles.value[0]
+	if (latest) {
+		mode.value = 'logs'
+		await loadLogFile(latest.filename, latest.kind)
+	}
 }
 ```
 
@@ -870,13 +913,13 @@ The current Console.vue is 83 lines. The enhanced version with the logs tab will
 
 ### Execution Summary
 
-| Phase | Files changed (Core) | Files changed (Frontend) |
-|---|---|---|
-| 1 — Bug fixes | — | `core.ts`, `core-ws-client.ts`, `core-client.ts`, `server/Index.vue` |
-| 2 — File manager API | `fs_service.rs` (new), `handlers/fs.rs` (new), `router.rs`, `handlers/mod.rs`, `application/mod.rs` | — |
-| 3 — Backup API | `domain/backup.rs` (new), `domain/mod.rs`, `backup_service.rs` (new), `application/mod.rs`, `handlers/backups.rs` (new), `handlers/mod.rs`, `router.rs`, `error.rs`, `007_backups.sql` (new) | — |
-| 4 — Wire file manager | — | `core-client.ts` (`buildKyrosFiles`) |
-| 5 — Wire backups | — | `core-client.ts` (`buildBackupsQueueV1`, `backups_v1` stub) |
-| 6 — Console logs | — | `server/Console.vue` |
+| Phase                 | Files changed (Core)                                                                                                                                                                         | Files changed (Frontend)                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 1 — Bug fixes         | —                                                                                                                                                                                            | `core.ts`, `core-ws-client.ts`, `core-client.ts`, `server/Index.vue` |
+| 2 — File manager API  | `fs_service.rs` (new), `handlers/fs.rs` (new), `router.rs`, `handlers/mod.rs`, `application/mod.rs`                                                                                          | —                                                                    |
+| 3 — Backup API        | `domain/backup.rs` (new), `domain/mod.rs`, `backup_service.rs` (new), `application/mod.rs`, `handlers/backups.rs` (new), `handlers/mod.rs`, `router.rs`, `error.rs`, `007_backups.sql` (new) | —                                                                    |
+| 4 — Wire file manager | —                                                                                                                                                                                            | `core-client.ts` (`buildKyrosFiles`)                                 |
+| 5 — Wire backups      | —                                                                                                                                                                                            | `core-client.ts` (`buildBackupsQueueV1`, `backups_v1` stub)          |
+| 6 — Console logs      | —                                                                                                                                                                                            | `server/Console.vue`                                                 |
 
 Total new Core files: 5. Total modified Core files: 5. Total modified frontend files: 5.

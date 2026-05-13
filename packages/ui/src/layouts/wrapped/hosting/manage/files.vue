@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreFsEntry } from '@amberite/core-client'
+import type { CoreFsEntry } from '@amberite/api-lib'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -200,38 +200,53 @@ const deleteMutation = useMutation({
 	},
 })
 
-// Unsupported operations — Core does not yet expose rename, move, create, or extract endpoints.
-function unsupported(name: string) {
-	addNotification({
-		title: 'Not supported',
-		text: `${name} is not yet supported by Amberite Core.`,
-		type: 'error',
-	})
-}
-
 const renameMutation = useMutation({
-	mutationFn: (_args: { path: string; newName: string }) => {
-		unsupported('Renaming')
-		return Promise.resolve()
+	mutationFn: ({ path, newName }: { path: string; newName: string }) => {
+		const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
+		const newPath = dir ? `${dir}/${newName}` : newName
+		return coreClient.moveEntry(serverId, path, newPath)
+	},
+	onError: (err: Error) => {
+		addNotification({ title: 'Rename failed', text: err.message, type: 'error' })
+	},
+	onSettled: () => {
+		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
 	},
 })
 
 const moveMutation = useMutation({
-	mutationFn: (_args: { source: string; destination: string }) => {
-		unsupported('Moving')
-		return Promise.resolve()
+	mutationFn: ({ source, destination }: { source: string; destination: string }) =>
+		coreClient.moveEntry(serverId, source, destination),
+	onError: (err: Error) => {
+		addNotification({ title: 'Move failed', text: err.message, type: 'error' })
+	},
+	onSettled: () => {
+		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
 	},
 })
 
 const createMutation = useMutation({
-	mutationFn: (_args: { path: string; type: 'file' | 'directory' }) => {
-		unsupported(`Creating ${_args.type}s`)
-		return Promise.resolve()
+	mutationFn: ({ path, type }: { path: string; type: 'file' | 'directory' }) =>
+		type === 'directory' ? coreClient.createDir(serverId, path) : coreClient.createFile(serverId, path),
+	onError: (err: Error) => {
+		addNotification({ title: 'Create failed', text: err.message, type: 'error' })
+	},
+	onSettled: () => {
+		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
 	},
 })
 
-async function extractFile(_path: string, _override: boolean, _dry: boolean) {
-	unsupported('Archive extraction')
+async function extractFile(path: string, _override: boolean, _dry: boolean) {
+	try {
+		await coreClient.unzipFile(serverId, path, 'normal')
+		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
+	} catch (err) {
+		addNotification({
+			title: 'Extract failed',
+			text: err instanceof Error ? err.message : 'Unknown error',
+			type: 'error',
+		})
+	}
 }
 
 // File I/O
@@ -239,8 +254,8 @@ async function readFile(path: string): Promise<string> {
 	const normalizedPath = path.startsWith('/') ? path : `/${path}`
 	const cachedContent = queryClient.getQueryData<string>(['file-content', serverId, normalizedPath])
 	if (cachedContent) return cachedContent
-	const blob = await coreClient.downloadFile(serverId, normalizedPath)
-	return await blob.text()
+	const buf = await coreClient.readFile(serverId, normalizedPath)
+	return new TextDecoder().decode(buf)
 }
 
 async function readFileAsBlob(path: string): Promise<Blob> {
@@ -248,8 +263,9 @@ async function readFileAsBlob(path: string): Promise<Blob> {
 	return await coreClient.downloadFile(serverId, normalizedPath)
 }
 
-async function writeFile(_path: string, _content: string): Promise<void> {
-	unsupported('Editing files')
+async function writeFile(path: string, content: string): Promise<void> {
+	await coreClient.writeFile(serverId, path, content)
+	queryClient.invalidateQueries({ queryKey: ['file-content', serverId, path] })
 }
 
 async function downloadFile(path: string, fileName: string): Promise<void> {

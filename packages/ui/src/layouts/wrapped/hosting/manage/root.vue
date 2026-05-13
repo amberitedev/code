@@ -342,7 +342,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreInstance, CoreModLoader } from '@amberite/core-client'
+import type { CoreInstance, CoreModLoader } from '@amberite/api-lib'
 import type { Archon, Labrinth } from '@modrinth/api-client'
 import {
 	BoxesIcon,
@@ -490,7 +490,7 @@ const settingsHintMessages = defineMessages({
 const DISABLE_LOADING_ANIM = true
 
 const _client = injectModrinthClient(null)
-const coreClient = injectCoreClient()
+const coreClient = injectCoreClient(null)
 const isNuxt = computed(() => false)
 const queryClient = useQueryClient()
 const route = useRoute()
@@ -578,7 +578,9 @@ const {
 	isLoading: serverLoading,
 } = useQuery({
 	queryKey: ['servers', 'detail', props.serverId],
-	queryFn: () => coreClient.getInstance(props.serverId).then(mapCoreInstanceToServer),
+	queryFn: () => coreClient ? coreClient.getInstance(props.serverId).then(mapCoreInstanceToServer) : Promise.reject(new Error('No core client')),
+	enabled: computed(() => !!props.serverId && !!coreClient),
+	retry: false,
 })
 
 useLoadingBarToken(useReadyState({ isLoading: serverLoading, data: serverData }))
@@ -668,7 +670,8 @@ if (typeof window !== 'undefined') {
 
 	onBeforeRouteLeave(async () => {
 		if (isUploading.value) {
-			const shouldLeave = (await confirmLeaveModal.value?.prompt()) ?? false
+			if (!confirmLeaveModal.value) return true
+			const shouldLeave = await confirmLeaveModal.value.prompt()
 			if (shouldLeave) cancelUpload.value?.()
 			return shouldLeave
 		}
@@ -820,7 +823,6 @@ const onReinstall = async (
 	if (!serverData.value) return
 
 	debug('[root.vue] onReinstall: setting serverData.status to installing')
-	hasSeenInstallProgress = false
 	updateServerData({ status: 'installing' })
 
 	if (potentialArgs?.loader) {

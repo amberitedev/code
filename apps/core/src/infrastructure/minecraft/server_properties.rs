@@ -38,13 +38,14 @@ pub async fn write_properties(
     Ok(())
 }
 
-/// Write the minimal `server.properties` for a new instance.
+/// Write the minimal `server.properties` and `eula.txt` for a new instance.
 pub async fn write_initial_properties(dir: &Path, port: u16) -> Result<(), PropertiesError> {
     let mut props = HashMap::new();
     props.insert("server-port".to_string(), port.to_string());
-    props.insert("eula".to_string(), "true".to_string());
     props.insert("online-mode".to_string(), "false".to_string());
-    write_properties(dir, &props).await
+    write_properties(dir, &props).await?;
+    tokio::fs::write(dir.join("eula.txt"), "eula=true\n").await?;
+    Ok(())
 }
 
 /// Update specific keys in `server.properties` in-place, preserving comment lines.
