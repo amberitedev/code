@@ -307,6 +307,7 @@ import {
 	injectModrinthClient,
 	NavTabs,
 	OverflowMenu,
+	PROJECT_DEP_MARKER_QUERY,
 	ProjectCard,
 	ProjectCardList,
 	useCompactNumber,
@@ -489,7 +490,10 @@ function getServerModpackContent(project: ProjectV3) {
 			onclick:
 				project_id !== project.id
 					? () => {
-							navigateTo(`/project/${project_id}`)
+							navigateTo({
+								path: `/project/${project_id}`,
+								query: { ...PROJECT_DEP_MARKER_QUERY },
+							})
 						}
 					: undefined,
 			showCustomModpackTooltip: project_id === project.id,
@@ -532,9 +536,9 @@ provideOrganizationContext(organizationContext)
 const canAccessSettings = computed(() => !!currentMember.value?.accepted)
 
 watch(
-	[routeHasSettings, currentMember],
+	[routeHasSettings, acceptedMembers, currentMember],
 	() => {
-		if (routeHasSettings.value && !canAccessSettings.value) {
+		if (routeHasSettings.value && acceptedMembers.value.length > 0 && !canAccessSettings.value) {
 			showError({
 				fatal: true,
 				statusCode: 401,
@@ -551,6 +555,7 @@ watch(
 		if (org) {
 			const title = `${org.name} - Organization`
 			const description = `${org.description} - View the organization ${org.name} on Modrinth`
+			const canonicalUrl = org ? `https://modrinth.com/organization/${org.id}` : undefined
 
 			useSeoMeta({
 				title,
@@ -558,6 +563,15 @@ watch(
 				ogTitle: title,
 				ogDescription: org.description,
 				ogImage: org.icon_url ?? 'https://cdn.modrinth.com/placeholder.png',
+				ogUrl: canonicalUrl,
+			})
+			useHead({
+				link: [
+					{
+						rel: 'canonical',
+						href: canonicalUrl,
+					},
+				],
 			})
 		}
 	},

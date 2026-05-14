@@ -2,7 +2,7 @@ import { computed, type Ref } from 'vue'
 
 import { useVIntl } from '#ui/composables/i18n'
 import {
-	injectCoreClient,
+	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '#ui/providers'
@@ -11,11 +11,21 @@ export type PowerAction = 'Start' | 'Stop' | 'Restart' | 'Kill'
 
 export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 	const { formatMessage } = useVIntl()
-	const coreClient = injectCoreClient()
-	const { serverId, server, powerState, busyReasons } = injectModrinthServerContext()
+	const client = injectModrinthClient()
+	const { serverId, server, powerState, isSyncingContent, busyReasons } =
+		injectModrinthServerContext()
 	const { addNotification } = injectNotificationManager()
 
-	const isInstalling = computed(() => server.value.status === 'installing')
+	const isInstalling = computed(
+		() =>
+			server.value.status === 'installing' ||
+			isSyncingContent.value ||
+			busyReasons.value.some(
+				(r) =>
+					r.reason.id === 'servers.busy.installing' ||
+					r.reason.id === 'servers.busy.syncing-content',
+			),
+	)
 	const isRunning = computed(() => powerState.value === 'running')
 	const isStopping = computed(() => powerState.value === 'stopping')
 	const isStarting = computed(() => powerState.value === 'starting')
@@ -54,20 +64,7 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 
 	async function sendPowerAction(action: PowerAction) {
 		try {
-			switch (action) {
-				case 'Start':
-					await coreClient.start(serverId)
-					break
-				case 'Stop':
-					await coreClient.stop(serverId)
-					break
-				case 'Restart':
-					await coreClient.restart(serverId)
-					break
-				case 'Kill':
-					await coreClient.kill(serverId)
-					break
-			}
+			await client.archon.servers_v0.power(serverId, action)
 		} catch (error) {
 			console.error(`Error performing ${action} on server:`, error)
 			addNotification({
