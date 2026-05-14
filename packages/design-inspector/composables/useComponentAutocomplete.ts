@@ -24,12 +24,15 @@ let componentCache: ComponentOption[] | null = null
 let fileCache: ComponentOption[] | null = null
 let componentFetchDone = false
 let fileFetchDone = false
+let serverUnavailableUntil = 0
 
 async function fetchList(endpoint: string): Promise<ComponentOption[] | null> {
+	if (Date.now() < serverUnavailableUntil) return null
 	try {
 		const res = await fetch(`${RELAY}/${endpoint}/autocomplete`)
-		return res.ok ? (await res.json() as ComponentOption[]) : null
-	} catch { return null }
+		if (!res.ok) { serverUnavailableUntil = Date.now() + 30_000; return null }
+		return await res.json() as ComponentOption[]
+	} catch { serverUnavailableUntil = Date.now() + 30_000; return null }
 }
 
 /** Pre-warm both caches. Safe to call multiple times. */

@@ -14,7 +14,7 @@ let cachedAdapter: PlatformAdapter | null = null
  * - getCurrentJwt reads from the active Supabase session (V1).
  * - getCoreToken and getCoreUrl read from Rust via Tauri invoke.
  */
-export async function createDesktopAdapter(): Promise<PlatformAdapter> {
+export function createDesktopAdapter(): PlatformAdapter {
 	const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 	const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 	if (!supabaseUrl || !supabaseAnonKey) {
@@ -68,9 +68,9 @@ export async function createDesktopAdapter(): Promise<PlatformAdapter> {
 /**
  * Return a singleton desktop adapter, creating it on first call.
  */
-export async function getDesktopAdapter(): Promise<PlatformAdapter> {
+export function getDesktopAdapter(): PlatformAdapter {
 	if (!cachedAdapter) {
-		cachedAdapter = await createDesktopAdapter()
+		cachedAdapter = createDesktopAdapter()
 	}
 	return cachedAdapter
 }

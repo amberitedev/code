@@ -19,7 +19,7 @@
 				:offline="offline"
 				@unlinked="fetchInstance"
 			/>
-			<UpdateToPlayModal ref="updateToPlayModal" :instance="instance" />
+			<UpdateToPlayModal ref="updateToPlayModal" />
 			<ContentPageHeader>
 				<template #icon>
 					<Avatar
@@ -248,7 +248,7 @@ await fetchInstance()
 
 const coreInstanceId = instance.value?.core_instance_id ?? (route.params.id as string)
 try {
-	const adapter = await getDesktopAdapter()
+	const adapter = getDesktopAdapter()
 	provideCoreClient(new CoreApiClient(adapter))
 } catch {
 	coreError.value = true

@@ -119,7 +119,16 @@ defineExpose({
 
 const currentEvent = ref(null)
 
-const unlisten = await process_listener((e) => {
+let unlisten
+
+onMounted(() => checkProcess())
+onUnmounted(() => {
+	const fn = unlisten
+	unlisten = undefined
+	fn?.()
+})
+
+unlisten = await process_listener((e) => {
 	if (e.profile_path_id === props.instance.path) {
 		currentEvent.value = e.event
 		if (e.event === 'finished') {
@@ -127,9 +136,6 @@ const unlisten = await process_listener((e) => {
 		}
 	}
 })
-
-onMounted(() => checkProcess())
-onUnmounted(() => unlisten())
 </script>
 
 <template>

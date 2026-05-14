@@ -159,7 +159,7 @@ export function setupCreationModal(
 
 			if (profilePath && (kind === 'server' || kind === 'synced')) {
 				try {
-					const adapter = await getDesktopAdapter()
+					const adapter = getDesktopAdapter()
 					const coreClient = new CoreApiClient(adapter)
 					const coreInstance = await coreClient.createInstance({
 						name,

@@ -318,6 +318,12 @@
 		</template>
 	</div>
 	<div
+		v-else
+		class="flex min-h-[calc(100vh-4rem)] items-center justify-center"
+	>
+		<LoaderCircleIcon class="h-8 w-8 animate-spin text-secondary" />
+	</div>
+	<div
 		v-if="showAdvancedDebugInfo"
 		class="relative mx-auto mt-6 box-border w-full min-w-0 max-w-[1280px] px-6"
 	>
@@ -342,6 +348,13 @@
 </template>
 
 <script setup lang="ts">
+// Server management root layout for Core-managed servers.
+// mapCoreInstanceToServer (529) — maps CoreInstance to Archon server shape used by shared components
+// useQuery serverData (576) — main Core API query; enabled when serverId + coreClient are present
+// serverError computed (596) — parses query errors and extracts HTTP status codes
+// initializeServer (962) — connects Core WebSocket after serverData resolves
+// cleanup (979) — saves WebSocket state to query cache and tears down Core runtime on unmount
+// onMounted (992) — watches for serverData then calls initializeServer; handles openSettings param
 import type { CoreInstance, CoreModLoader } from '@amberite/api-lib'
 import type { Archon, Labrinth } from '@modrinth/api-client'
 import {

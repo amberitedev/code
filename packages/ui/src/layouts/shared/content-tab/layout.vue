@@ -21,6 +21,7 @@ import {
 import { computed, ref, watch } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
+import TabGroup from '#ui/components/base/TabGroup.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
 import OverflowMenu from '#ui/components/base/OverflowMenu.vue'
 import StyledInput from '#ui/components/base/StyledInput.vue'
@@ -151,12 +152,8 @@ const messages = defineMessages({
 
 const ctx = injectContentManager()
 
-// AMBERITE: client/server side filter
-// null = show all; 'client' = hide server-only; 'server' = hide client-only
-const sideView = ref<'client' | 'server' | null>(null)
-function toggleSideView(side: 'client' | 'server') {
-	sideView.value = sideView.value === side ? null : side
-}
+// AMBERITE: client/server tab — always one selected, defaults to 'client'
+const sideView = ref<string>('client')
 
 type SortMode = 'alphabetical-asc' | 'alphabetical-desc' | 'date-added-newest' | 'date-added-oldest'
 const sortMode = ref<SortMode>('alphabetical-asc')
@@ -554,72 +551,60 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							{{ formatMessage(messages.additionalContent) }}
 						</span>
 
-						<div class="flex flex-wrap items-center gap-2">
-							<StyledInput
-								v-model="searchQuery"
-								:icon="SearchIcon"
-								type="text"
-								autocomplete="off"
-								:spellcheck="false"
-								input-class="!h-10"
-								wrapper-class="flex-1 min-w-0"
-								clearable
-								:placeholder="
-									formatMessage(messages.searchPlaceholder, {
-										count: tableItems.length,
-										contentType: `${ctx.contentTypeLabel.value}${tableItems.length === 1 ? '' : 's'}`,
-									})
-								"
-							/>
+			<!-- AMBERITE: Client / Server tabs encasing modding UI -->
+			<TabGroup
+				v-model="sideView"
+				:tabs="[{ id: 'client', label: 'Client' }, { id: 'server', label: 'Server' }]"
+			>
+				<div class="flex flex-wrap items-center gap-2">
+						<StyledInput
+							v-model="searchQuery"
+							:icon="SearchIcon"
+							type="text"
+							autocomplete="off"
+							:spellcheck="false"
+							input-class="!h-10"
+							wrapper-class="flex-1 min-w-0"
+							clearable
+							:placeholder="
+								formatMessage(messages.searchPlaceholder, {
+									count: tableItems.length,
+									contentType: `${ctx.contentTypeLabel.value}${tableItems.length === 1 ? '' : 's'}`,
+								})
+							"
+						/>
 
-							<div class="flex gap-2">
-								<ButtonStyled color="brand">
-									<button
-										v-tooltip="
-											ctx.busyMessage?.value ??
-											(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
-										"
-										:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
-										class="!h-10 flex items-center gap-2"
-										@click="ctx.browse"
-									>
-										<CompassIcon class="size-5" />
-										<span>{{ formatMessage(messages.browseContent) }}</span>
-									</button>
-								</ButtonStyled>
-								<ButtonStyled type="outlined">
-									<button
-										v-tooltip="
-											ctx.busyMessage?.value ??
-											(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
-										"
-										:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
-										class="!h-10"
-										@click="ctx.uploadFiles"
-									>
-										<FolderOpenIcon class="size-5" />
-										{{ formatMessage(messages.uploadFiles) }}
-									</button>
-								</ButtonStyled>
-							</div>
+						<div class="flex gap-2">
+							<ButtonStyled color="brand">
+								<button
+									v-tooltip="
+										ctx.busyMessage?.value ??
+										(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
+									"
+									:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
+									class="!h-10 flex items-center gap-2"
+									@click="ctx.browse"
+								>
+									<CompassIcon class="size-5" />
+									<span>{{ formatMessage(messages.browseContent) }}</span>
+								</button>
+							</ButtonStyled>
+							<ButtonStyled type="outlined">
+								<button
+									v-tooltip="
+										ctx.busyMessage?.value ??
+										(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
+									"
+									:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
+									class="!h-10"
+									@click="ctx.uploadFiles"
+								>
+									<FolderOpenIcon class="size-5" />
+									{{ formatMessage(messages.uploadFiles) }}
+								</button>
+							</ButtonStyled>
 						</div>
-
-						<div class="flex items-center gap-1.5">
-							<button
-								v-for="side in (['client', 'server'] as const)"
-								:key="side"
-								class="cursor-pointer rounded-full border border-solid px-3 py-1.5 text-base font-semibold leading-5 capitalize transition-all duration-100 active:scale-[0.97]"
-								:class="
-									sideView === side
-										? 'border-green bg-brand-highlight text-brand'
-										: 'border-surface-5 bg-surface-4 text-primary hover:bg-surface-5'
-								"
-								:aria-pressed="sideView === side"
-								@click="toggleSideView(side)"
-							>
-								{{ side }}
-							</button>
-						</div>
+					</div>
 
 						<div class="@container flex flex-wrap items-center justify-between gap-2">
 							<div class="flex flex-wrap items-center gap-1.5">
@@ -722,9 +707,10 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							<template #empty>
 								<span>{{ formatMessage(messages.noContentFound) }}</span>
 							</template>
-						</ContentCardTable>
-					</div>
-				</template>
+					</ContentCardTable>
+			</TabGroup>
+				</div>
+			</template>
 
 				<EmptyState v-else type="empty-inbox">
 					<template #heading>

@@ -156,8 +156,17 @@ const { installingItems } = injectContentInstall()
 const router = useRouter()
 const debug = useDebugLogger('Mods:ContentUpdate')
 
+defineEmits<{
+	(event: 'play'): void
+	(event: 'stop'): void
+}>()
+
 const props = defineProps<{
 	instance: GameInstance
+	options?: unknown
+	offline?: boolean
+	playing?: boolean
+	installed?: boolean
 	isServerInstance?: boolean
 	openSettings?: () => void
 }>()
@@ -860,7 +869,20 @@ const removeBeforeEach = router.beforeEach(() => {
 	savedModalState = state ?? null
 })
 
-const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+let unlisten: (() => void) | undefined
+let unlistenProfiles: (() => void) | undefined
+
+onUnmounted(() => {
+	removeBeforeEach()
+	const a = unlisten
+	const b = unlistenProfiles
+	unlisten = undefined
+	unlistenProfiles = undefined
+	a?.()
+	b?.()
+})
+
+unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
 	if (event.payload.type !== 'drop' || !props.instance) return
 
 	for (const file of event.payload.paths) {
@@ -870,7 +892,7 @@ const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
 	await initProjects()
 })
 
-const unlistenProfiles = await profile_listener(
+unlistenProfiles = await profile_listener(
 	async (event: { event: string; profile_path_id: string }) => {
 		if (
 			props.instance &&
@@ -903,10 +925,4 @@ watch(
 		}
 	},
 )
-
-onUnmounted(() => {
-	removeBeforeEach()
-	unlisten()
-	unlistenProfiles()
-})
 </script>

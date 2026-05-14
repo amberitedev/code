@@ -92,6 +92,13 @@ const breadcrumbs = useBreadcrumbs()
 
 const coreError = ref(false)
 
+// provide() must be called before any await (Vue 3 clears currentInstance after each await boundary)
+try {
+	provideCoreClient(new CoreApiClient(getDesktopAdapter()))
+} catch {
+	coreError.value = true
+}
+
 const profilePath = route.params.id as string
 const profile = await getProfile(profilePath).catch(() => null)
 const coreInstanceId = profile?.core_instance_id ?? ''
@@ -106,15 +113,6 @@ if (profile?.name) {
 		name: profile.name,
 		link: `/server/${encodeURIComponent(profilePath)}/content`,
 	})
-}
-
-if (!coreError.value) {
-	try {
-		const adapter = await getDesktopAdapter()
-		provideCoreClient(new CoreApiClient(adapter))
-	} catch {
-		coreError.value = true
-	}
 }
 
 const authUser = computed(() => {

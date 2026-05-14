@@ -2,7 +2,6 @@ import 'floating-vue/dist/style.css'
 import 'overlayscrollbars/overlayscrollbars.css'
 
 import * as Sentry from '@sentry/vue'
-import { VueScanPlugin } from '@taijased/vue-render-tracker'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import FloatingVue from 'floating-vue'
 import { createPinia } from 'pinia'
@@ -16,13 +15,6 @@ import router from '@/routes'
 
 import { DesignInspectorPlugin } from '../../../packages/design-inspector/index.ts'
 
-const vueScan = new VueScanPlugin({
-	enabled: false, // Enable or disable the tracker
-	showOverlay: true, // Show overlay to visualize renders
-	log: false, // Log render events to the console
-	playSound: false, // Play sound on each render
-})
-
 const pinia = createPinia()
 
 let app = createApp(App)
@@ -35,7 +27,6 @@ Sentry.init({
 })
 
 app.use(VueQueryPlugin)
-app.use(vueScan)
 app.use(router)
 app.use(pinia)
 app.use(FloatingVue, {

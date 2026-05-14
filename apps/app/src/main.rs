@@ -169,6 +169,36 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
+            let mut builder = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("Amberite")
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(1100.0, 700.0)
+            .visible(false)
+            .resizable(true)
+            .decorations(false)
+            .zoom_hotkeys_enabled(false)
+            .fullscreen(false);
+
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
+
+            #[cfg(debug_assertions)]
+            {
+                builder = builder.additional_browser_args(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222",
+                );
+            }
+
+            builder.build()?;
+
             #[cfg(target_os = "macos")]
             {
                 let payload = macos::deep_link::get_or_init_payload(app);

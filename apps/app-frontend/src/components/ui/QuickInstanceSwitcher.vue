@@ -37,14 +37,17 @@ const getInstances = async () => {
 
 await getInstances()
 
-const unlistenProfile = await profile_listener(async (event) => {
+let unlistenProfile
+onUnmounted(() => {
+	const fn = unlistenProfile
+	unlistenProfile = undefined
+	fn?.()
+})
+
+unlistenProfile = await profile_listener(async (event) => {
 	if (event.event !== 'synced') {
 		await getInstances()
 	}
-})
-
-onUnmounted(() => {
-	unlistenProfile()
 })
 </script>
 
@@ -66,7 +69,7 @@ onUnmounted(() => {
 		</NavButton>
 	</div>
 	<div
-		v-if="instances && recentInstances.length > 0"
+		v-if="recentInstances.length > 0"
 		class="h-px w-6 mx-auto my-2 bg-divider"
 	></div>
 </template>

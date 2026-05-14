@@ -64,7 +64,7 @@ useQuery({
 	queryKey: ['servers'],
 	staleTime: Infinity,
 	queryFn: async () => {
-		const adapter = await getDesktopAdapter()
+		const adapter = getDesktopAdapter()
 		const coreClient = new CoreApiClient(adapter)
 		const instances = await coreClient.listInstances()
 		return {

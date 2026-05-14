@@ -12,7 +12,7 @@
 				:offline="offline"
 				@unlinked="fetchInstance"
 			/>
-			<UpdateToPlayModal ref="updateToPlayModal" :instance="instance" />
+			<UpdateToPlayModal ref="updateToPlayModal" />
 			<ContentPageHeader>
 				<template #icon>
 					<Avatar
@@ -214,6 +214,11 @@
 	</div>
 </template>
 <script setup lang="ts">
+// Instance page for local Modrinth-style instances (non-server, non-synced kinds).
+// fetchInstance (322) — loads instance by path; redirects kind=server→/server/:id, synced→/synced/:id
+// top-level await fetchInstance (394) — runs in script setup; listener registration is guarded below
+// onUnmounted (604) — cleans up Tauri profile/process listeners and console
+// profile_listener + process_listener (618, 640) — only registered when not redirected (non-server/synced)
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	BoxesIcon,
@@ -598,35 +603,54 @@ const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 	}
 }
 
-const unlistenProfiles = await profile_listener(
-	async (event: { profile_path_id: string; event: string }) => {
-		if (event.profile_path_id !== route.params.id) return
-		if (event.event === 'removed' || route.path === '/') {
-			if (route.path !== '/') {
-				await router.push({ path: '/' })
-			}
-			return
-		}
-		instance.value = await get(route.params.id as string).catch((err) => {
-			if (String(err).includes('not managed')) {
-				router.push({ path: '/' })
-				return undefined
-			}
-			return handleError(err)
-		})
-		if (!instance.value?.linked_data?.project_id) {
-			linkedProjectV3.value = undefined
-		}
-	},
-)
+let unlistenProfiles: (() => void) | undefined
+let unlistenProcesses: (() => void) | undefined
 
-const unlistenProcesses = await process_listener(
-	(e: { event: string; profile_path_id: string }) => {
-		if (e.event === 'finished' && e.profile_path_id === route.params.id) {
-			playing.value = false
-		}
-	},
-)
+onUnmounted(() => {
+	const p = unlistenProfiles
+	const q = unlistenProcesses
+	unlistenProfiles = undefined
+	unlistenProcesses = undefined
+	p?.()
+	q?.()
+	const profilePath = route.params.id
+	if (profilePath) {
+		const { destroy } = useInstanceConsole(profilePath)
+		destroy()
+	}
+})
+
+if (instance.value?.kind !== 'server' && instance.value?.kind !== 'synced') {
+	unlistenProfiles = await profile_listener(
+		async (event: { profile_path_id: string; event: string }) => {
+			if (event.profile_path_id !== route.params.id) return
+			if (event.event === 'removed' || route.path === '/') {
+				if (route.path !== '/') {
+					await router.push({ path: '/' })
+				}
+				return
+			}
+			instance.value = await get(route.params.id as string).catch((err) => {
+				if (String(err).includes('not managed')) {
+					router.push({ path: '/' })
+					return undefined
+				}
+				return handleError(err)
+			})
+			if (!instance.value?.linked_data?.project_id) {
+				linkedProjectV3.value = undefined
+			}
+		},
+	)
+
+	unlistenProcesses = await process_listener(
+		(e: { event: string; profile_path_id: string }) => {
+			if (e.event === 'finished' && e.profile_path_id === route.params.id) {
+				playing.value = false
+			}
+		},
+	)
+}
 
 const icon = computed(() =>
 	instance.value?.icon_path ? convertFileSrc(instance.value.icon_path) : null,
@@ -654,16 +678,6 @@ const timePlayedHumanized = computed(() => {
 
 	const seconds = Math.floor(duration.asSeconds())
 	return seconds + ' second' + (seconds > 1 ? 's' : '')
-})
-
-onUnmounted(() => {
-	unlistenProcesses()
-	unlistenProfiles()
-	const profilePath = route.params.id
-	if (profilePath) {
-		const { destroy } = useInstanceConsole(profilePath)
-		destroy()
-	}
 })
 </script>
 

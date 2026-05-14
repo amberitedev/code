@@ -149,7 +149,7 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function fetchCoreServerData(sid: string) {
-		const adapter = await getDesktopAdapter()
+		const adapter = getDesktopAdapter()
 		const coreClient = new CoreApiClient(adapter)
 		const instance = await coreClient.getInstance(sid)
 		serverContextServerData.value = {
@@ -178,7 +178,7 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function refreshCoreInstalledContent(sid: string) {
-		const adapter = await getDesktopAdapter()
+		const adapter = getDesktopAdapter()
 		const coreClient = new CoreApiClient(adapter)
 		const mods = await coreClient.listMods(sid)
 		serverContentProjectIds.value = new Set(
@@ -367,7 +367,7 @@ export function createServerInstallContent(opts: {
 				throw new Error('No installable version was found for this project.')
 			}
 
-			const adapter = await getDesktopAdapter()
+			const adapter = getDesktopAdapter()
 			const coreClient = new CoreApiClient(adapter)
 			await coreClient.addMod(sid, matchingVersion.id)
 
