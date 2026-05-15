@@ -4,7 +4,7 @@ import { useComponentAutocomplete } from '../composables/useComponentAutocomplet
 import { useCommentSubmit } from '../composables/useCommentSubmit'
 import { copyPayloadToClipboard } from '../composables/useClipboardMode'
 import { usePosition } from '../composables/usePosition'
-import { useInlinePickMode, extractRefs } from '../composables/useInlinePickMode'
+import { useInlinePickMode } from '../composables/useInlinePickMode'
 import type { PickDetail } from './DesignInspectorRoot.vue'
 
 const props = withDefaults(defineProps<{
@@ -27,24 +27,59 @@ const ac = useComponentAutocomplete(inputRef, () => {
 
 let mo: MutationObserver | null = null
 
+/** Walk the contenteditable DOM and build comment text with inline reference objects. */
+function buildCommentWithInlineRefs(el: HTMLElement | null): string {
+	if (!el) return ''
+	const parts: string[] = []
+	function walk(node: Node) {
+		if (node.nodeType === Node.TEXT_NODE) {
+			parts.push(node.textContent ?? '')
+		} else if (node instanceof HTMLElement) {
+			if (node.classList.contains('di-hash-token')) {
+				const name = (node.textContent ?? '').replace(/^[#@]/, '')
+				const sourceFile = node.dataset.componentFile
+				const sourceLines = node.dataset.componentLines
+					? (JSON.parse(node.dataset.componentLines) as [number, number])
+					: undefined
+				const props = node.dataset.componentProps
+					? (JSON.parse(node.dataset.componentProps) as Record<string, unknown>)
+					: undefined
+				const sourceFileStr = sourceFile
+					? sourceLines
+						? `${sourceFile}:${sourceLines[0]}-${sourceLines[1]}`
+						: sourceFile
+					: undefined
+				if (props) {
+					// click reference: [component: Name, source file: path:L-L, component properties: {...}]
+					const refParts: string[] = [`component: ${name}`]
+					if (sourceFileStr) refParts.push(`source file: ${sourceFileStr}`)
+					refParts.push(`component properties: ${JSON.stringify(props)}`)
+					parts.push(`[${refParts.join(', ')}]`)
+				} else {
+					// mention reference: [name: Name, source file: path:L-L]
+					const refParts: string[] = [`name: ${name}`]
+					if (sourceFileStr) refParts.push(`source file: ${sourceFileStr}`)
+					parts.push(`[${refParts.join(', ')}]`)
+				}
+			} else {
+				for (const child of node.childNodes) walk(child)
+			}
+		}
+	}
+	for (const child of el.childNodes) walk(child)
+	return parts.join('').trim()
+}
+
 async function onSubmit() {
-	const text = commentText.value.trim()
+	const text = buildCommentWithInlineRefs(inputRef.value)
 	if (!text) return
+	const { file, sourceLines } = props.detail
+	const sourceFileStr = sourceLines ? `${file}:${sourceLines[0]}-${sourceLines[1]}` : file
 	const payload = {
 		id: crypto.randomUUID(),
-		component: props.detail.component,
-		source_file: props.detail.file,
-		source_lines: props.detail.sourceLines,
-		html: props.detail.html,
-		css_classes: props.detail.cssClasses,
-		computed_styles: props.detail.computedStyles,
-		component_props: props.detail.componentProps,
-		parent: props.detail.parent
-			? { component: props.detail.parent.name, file: props.detail.parent.file }
-			: undefined,
+		component: file,
+		'source file': sourceFileStr,
 		comment: text,
-		references: extractRefs(inputRef.value),
-		timestamp: new Date().toISOString(),
 	}
 	copyPayloadToClipboard(payload)
 	const ok = await submit(payload)

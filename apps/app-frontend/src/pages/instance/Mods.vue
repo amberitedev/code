@@ -1,6 +1,6 @@
 <template>
 	<ReadyTransition :pending="loading">
-		<ContentPageLayout>
+		<ContentPageLayout :enable-side-filter="props.isServerInstance">
 			<template #modals>
 				<ShareModalWrapper
 					ref="shareModal"
@@ -157,8 +157,7 @@ const router = useRouter()
 const debug = useDebugLogger('Mods:ContentUpdate')
 
 defineEmits<{
-	(event: 'play'): void
-	(event: 'stop'): void
+	(event: 'play' | 'stop'): void
 }>()
 
 const props = defineProps<{

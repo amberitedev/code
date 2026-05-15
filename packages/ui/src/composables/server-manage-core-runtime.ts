@@ -1,16 +1,26 @@
-import type { CoreInstanceStatus, CoreStats, CoreWsConnection } from '@amberite/api-lib'
-import type { Archon, UploadState } from '@modrinth/api-client'
+import {
+	type Archon,
+	clearNodeAuthState,
+	setNodeAuthState,
+	type UploadState,
+} from '@modrinth/api-client'
 import type { Stats } from '@modrinth/utils'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
 import type { FileOperation } from '../layouts/shared/files-tab/types'
-import { injectCoreClient, provideModrinthServerContext } from '../providers'
+import { injectModrinthClient, provideModrinthServerContext } from '../providers'
 import type { BusyReason } from '../providers/server-context'
 import { defineMessage } from './i18n'
 import { useModrinthServersConsole } from './server-console'
 
 type ReadableRef<T> = Ref<T> | ComputedRef<T>
+type SocketUnsubscriber = () => void
+
+type ConnectSocketOptions = {
+	force?: boolean
+	extraSubscriptions?: (targetServerId: string) => SocketUnsubscriber[]
+}
 
 type UseServerManageCoreRuntimeOptions = {
 	serverId: ReadableRef<string>
@@ -18,128 +28,274 @@ type UseServerManageCoreRuntimeOptions = {
 	server: ReadableRef<Archon.Servers.v0.Server | null | undefined>
 	isSyncingContent: ReadableRef<boolean>
 	extraBusyReasons?: ComputedRef<BusyReason[]>
+	setDisconnectedOnAuthIncorrect?: boolean
+	syncUptimeFromState?: boolean
 	incrementUptimeLocally?: boolean
 	eventGuard?: () => boolean
+	onStateEvent?: (data: Archon.Websocket.v0.WSStateEvent) => void
 }
 
-const STALE_MS = 5000
-const STALE_INTERVAL_MS = 1000
-
-const mapPowerState = (s: CoreInstanceStatus): Archon.Websocket.v0.PowerState =>
-	({ offline: 'stopped', starting: 'starting', running: 'running', stopping: 'stopping', crashed: 'crashed' } as const)[s]
-
-const mapCoreStats = (s: CoreStats): Stats['current'] => ({
-	cpu_percent: s.cpu_percent ?? 0,
-	ram_usage_bytes: (s.memory_mb ?? 0) * 1024 * 1024,
-	ram_total_bytes: (s.ram_total_mb ?? 1) * 1024 * 1024,
-	storage_usage_bytes: 0,
-	storage_total_bytes: 0,
+const createInitialStats = (): Stats => ({
+	current: {
+		cpu_percent: 0,
+		ram_usage_bytes: 0,
+		ram_total_bytes: 1,
+		storage_usage_bytes: 0,
+		storage_total_bytes: 0,
+	},
+	past: {
+		cpu_percent: 0,
+		ram_usage_bytes: 0,
+		ram_total_bytes: 1,
+		storage_usage_bytes: 0,
+		storage_total_bytes: 0,
+	},
+	graph: {
+		cpu: [],
+		ram: [],
+	},
 })
 
-const emptyStats = (): Stats => ({
-	current: { cpu_percent: 0, ram_usage_bytes: 0, ram_total_bytes: 1, storage_usage_bytes: 0, storage_total_bytes: 0 },
-	past: { cpu_percent: 0, ram_usage_bytes: 0, ram_total_bytes: 1, storage_usage_bytes: 0, storage_total_bytes: 0 },
-	graph: { cpu: [], ram: [] },
-})
+const appendGraphData = (dataArray: number[], newValue: number): number[] => {
+	const updated = [...dataArray, newValue]
+	if (updated.length > 10) updated.shift()
+	return updated
+}
 
-const appendGraph = (arr: number[], v: number): number[] => {
-	const next = [...arr, v]
-	if (next.length > 10) next.shift()
-	return next
+const STALE_STATS_THRESHOLD_MS = 5000
+const STALE_STATS_PUSH_INTERVAL_MS = 1000
+
+const mapPowerStateFromStateEvent = (
+	data: Archon.Websocket.v0.WSStateEvent,
+): Archon.Websocket.v0.PowerState => {
+	const powerMap: Record<Archon.Websocket.v0.FlattenedPowerState, Archon.Websocket.v0.PowerState> =
+		{
+			not_ready: 'stopped',
+			starting: 'starting',
+			running: 'running',
+			stopping: 'stopping',
+			idle:
+				data.was_oom || (data.exit_code != null && data.exit_code !== 0) ? 'crashed' : 'stopped',
+		}
+	return powerMap[data.power_variant]
 }
 
 export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOptions) {
-	const coreClient = injectCoreClient()
-	const console$ = useModrinthServersConsole()
-	const guard = () => (options.eventGuard ? options.eventGuard() : true)
+	const client = injectModrinthClient()
+	const modrinthServersConsole = useModrinthServersConsole()
+
+	const shouldProcessEvent = () => (options.eventGuard ? options.eventGuard() : true)
 
 	const isConnected = ref(false)
 	const isWsAuthIncorrect = ref(false)
 	const serverPowerState = ref<Archon.Websocket.v0.PowerState>('stopped')
 	const powerStateDetails = ref<{ oom_killed?: boolean; exit_code?: number }>()
 	const isServerRunning = computed(() => serverPowerState.value === 'running')
-	const stats = ref<Stats>(emptyStats())
+	const stats = ref<Stats>(createInitialStats())
 	const uptimeSeconds = ref(0)
-	const cpuData = ref<number[]>([])
-	const ramData = ref<number[]>([])
-
 	const fsAuth = ref<{ url: string; token: string } | null>(null)
 	const fsOps = ref<Archon.Websocket.v0.FilesystemOperation[]>([])
 	const fsQueuedOps = ref<Archon.Websocket.v0.QueuedFilesystemOp[]>([])
-	const activeOperations = computed<FileOperation[]>(() => [])
-	const uploadState = ref<UploadState>({
-		isUploading: false, currentFileName: null, currentFileProgress: 0,
-		uploadedBytes: 0, totalBytes: 0, completedFiles: 0, totalFiles: 0,
-	})
-	const cancelUpload = ref<(() => void) | null>(null)
+	const connectedSocketServerId = ref<string | null>(null)
+	const socketUnsubscribers = ref<SocketUnsubscriber[]>([])
+	const cpuData = ref<number[]>([])
+	const ramData = ref<number[]>([])
 
-	let wsConn: CoreWsConnection | null = null
-	let connectedServerId: string | null = null
-	let uptimerId: ReturnType<typeof setInterval> | null = null
-	let staleTimeout: ReturnType<typeof setTimeout> | null = null
-	let staleInterval: ReturnType<typeof setInterval> | null = null
-	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-	let shouldReconnect = false
-	let reconnectTargetId: string | null = null
-
-	const RECONNECT_DELAY_MS = 3000
+	let uptimeIntervalId: ReturnType<typeof setInterval> | null = null
+	let staleStatsTimeoutId: ReturnType<typeof setTimeout> | null = null
+	let staleStatsIntervalId: ReturnType<typeof setInterval> | null = null
 
 	const busyReasons = computed<BusyReason[]>(() => {
-		const r: BusyReason[] = []
-		if (options.server.value?.status === 'installing')
-			r.push({ reason: defineMessage({ id: 'servers.busy.installing', defaultMessage: 'Server is installing' }) })
-		if (options.isSyncingContent.value)
-			r.push({ reason: defineMessage({ id: 'servers.busy.syncing-content', defaultMessage: 'Content sync in progress' }) })
-		if (options.extraBusyReasons) r.push(...options.extraBusyReasons.value)
-		return r
+		const reasons: BusyReason[] = []
+		if (options.server.value?.status === 'installing') {
+			reasons.push({
+				reason: defineMessage({
+					id: 'servers.busy.installing',
+					defaultMessage: 'Server is installing',
+				}),
+			})
+		}
+		if (options.isSyncingContent.value) {
+			reasons.push({
+				reason: defineMessage({
+					id: 'servers.busy.syncing-content',
+					defaultMessage: 'Content sync in progress',
+				}),
+			})
+		}
+		if (options.extraBusyReasons) reasons.push(...options.extraBusyReasons.value)
+		return reasons
 	})
 
-	const stopUptime = () => { if (uptimerId) { clearInterval(uptimerId); uptimerId = null } }
-	const startUptime = () => {
-		if (!options.incrementUptimeLocally || uptimerId) return
-		uptimerId = setInterval(() => { uptimeSeconds.value += 1 }, 1000)
-	}
-	const clearStale = () => {
-		if (staleTimeout) { clearTimeout(staleTimeout); staleTimeout = null }
-		if (staleInterval) { clearInterval(staleInterval); staleInterval = null }
-	}
-	const pushZero = () => {
-		if (!guard()) return
-		cpuData.value = appendGraph(cpuData.value, 0)
-		ramData.value = appendGraph(ramData.value, 0)
-		stats.value = { current: { ...stats.value.current, cpu_percent: 0, ram_usage_bytes: 0 }, past: { ...stats.value.current }, graph: { cpu: cpuData.value, ram: ramData.value } }
-	}
-	const armStale = () => {
-		clearStale()
-		staleTimeout = setTimeout(() => { pushZero(); staleInterval = setInterval(pushZero, STALE_INTERVAL_MS) }, STALE_MS)
+	const stopUptimeTicker = () => {
+		if (uptimeIntervalId) {
+			clearInterval(uptimeIntervalId)
+			uptimeIntervalId = null
+		}
 	}
 
-	const onLog = (msg: string) => { if (guard()) console$.addLegacyLog(msg) }
-	const onStats = (s: CoreStats) => {
-		if (!guard()) return
-		armStale()
-		const current = mapCoreStats(s)
-		cpuData.value = appendGraph(cpuData.value, current.cpu_percent)
-		ramData.value = appendGraph(ramData.value, Math.floor((current.ram_usage_bytes / current.ram_total_bytes) * 100))
-		stats.value = { current, past: { ...stats.value.current }, graph: { cpu: cpuData.value, ram: ramData.value } }
-		if (!isConnected.value) isConnected.value = true
-		if (s.uptime_seconds != null) { stopUptime(); uptimeSeconds.value = s.uptime_seconds; if (serverPowerState.value === 'running') startUptime() }
+	const startUptimeTicker = () => {
+		if (!options.incrementUptimeLocally || uptimeIntervalId) return
+		uptimeIntervalId = setInterval(() => {
+			uptimeSeconds.value += 1
+		}, 1000)
 	}
-	const onState = (status: CoreInstanceStatus) => {
-		if (!guard()) return
-		const ps = mapPowerState(status)
-		serverPowerState.value = ps
-		if (ps === 'stopped' || ps === 'crashed') { stopUptime(); uptimeSeconds.value = 0; powerStateDetails.value = undefined }
+
+	const updateStats = (currentStats: Stats['current']) => {
+		if (!shouldProcessEvent()) return
 		if (!isConnected.value) isConnected.value = true
+		cpuData.value = appendGraphData(cpuData.value, currentStats.cpu_percent)
+		ramData.value = appendGraphData(
+			ramData.value,
+			Math.floor((currentStats.ram_usage_bytes / currentStats.ram_total_bytes) * 100),
+		)
+		stats.value = {
+			current: currentStats,
+			past: { ...stats.value.current },
+			graph: {
+				cpu: cpuData.value,
+				ram: ramData.value,
+			},
+		}
+	}
+
+	const clearStaleStatsTimers = () => {
+		if (staleStatsTimeoutId) {
+			clearTimeout(staleStatsTimeoutId)
+			staleStatsTimeoutId = null
+		}
+		if (staleStatsIntervalId) {
+			clearInterval(staleStatsIntervalId)
+			staleStatsIntervalId = null
+		}
+	}
+
+	const pushZeroStats = () => {
+		if (!shouldProcessEvent()) return
+		cpuData.value = appendGraphData(cpuData.value, 0)
+		ramData.value = appendGraphData(ramData.value, 0)
+		stats.value = {
+			current: {
+				...stats.value.current,
+				cpu_percent: 0,
+				ram_usage_bytes: 0,
+			},
+			past: { ...stats.value.current },
+			graph: {
+				cpu: cpuData.value,
+				ram: ramData.value,
+			},
+		}
+	}
+
+	const armStaleStatsWatchdog = () => {
+		clearStaleStatsTimers()
+		staleStatsTimeoutId = setTimeout(() => {
+			pushZeroStats()
+			staleStatsIntervalId = setInterval(pushZeroStats, STALE_STATS_PUSH_INTERVAL_MS)
+		}, STALE_STATS_THRESHOLD_MS)
+	}
+
+	const updatePowerState = (
+		state: Archon.Websocket.v0.PowerState,
+		details?: { oom_killed?: boolean; exit_code?: number },
+	) => {
+		if (!shouldProcessEvent()) return
+		serverPowerState.value = state
+		powerStateDetails.value = state === 'crashed' ? details : undefined
+		if (state === 'stopped' || state === 'crashed') {
+			stopUptimeTicker()
+			uptimeSeconds.value = 0
+		}
+	}
+
+	const handleLog = (data: Archon.Websocket.v0.WSLogEvent) => {
+		if (!shouldProcessEvent()) return
+		modrinthServersConsole.recordWsEvent({ event: 'log', ...data })
+		modrinthServersConsole.addLegacyLog(data.message)
+	}
+
+	const handleLog4j = (data: Archon.Websocket.v0.WSLog4jEvent) => {
+		if (!shouldProcessEvent()) return
+		modrinthServersConsole.recordWsEvent({ event: 'log4j', ...data })
+		modrinthServersConsole.addLog4jEvent(data)
+	}
+
+	const handleStats = (data: Archon.Websocket.v0.WSStatsEvent) => {
+		armStaleStatsWatchdog()
+		updateStats({
+			cpu_percent: data.cpu_percent,
+			ram_usage_bytes: data.ram_usage_bytes,
+			ram_total_bytes: data.ram_total_bytes,
+			storage_usage_bytes: data.storage_usage_bytes,
+			storage_total_bytes: data.storage_total_bytes,
+		})
+	}
+
+	const handlePowerState = (data: Archon.Websocket.v0.WSPowerStateEvent) => {
+		if (data.state === 'crashed') {
+			updatePowerState(data.state, {
+				oom_killed: data.oom_killed,
+				exit_code: data.exit_code,
+			})
+		} else {
+			updatePowerState(data.state)
+		}
+	}
+
+	const handleState = (data: Archon.Websocket.v0.WSStateEvent) => {
+		if (!shouldProcessEvent()) return
+		options.onStateEvent?.(data)
+		updatePowerState(mapPowerStateFromStateEvent(data), {
+			exit_code: data.exit_code ?? undefined,
+			oom_killed: data.was_oom,
+		})
+
+		if (options.syncUptimeFromState && data.uptime > 0) {
+			stopUptimeTicker()
+			uptimeSeconds.value = data.uptime
+			startUptimeTicker()
+		}
+	}
+
+	const handleUptime = (data: Archon.Websocket.v0.WSUptimeEvent) => {
+		if (!shouldProcessEvent()) return
+		stopUptimeTicker()
+		uptimeSeconds.value = data.uptime
+		startUptimeTicker()
+	}
+
+	const handleAuthIncorrect = () => {
+		if (!shouldProcessEvent()) return
+		isWsAuthIncorrect.value = true
+		if (options.setDisconnectedOnAuthIncorrect) {
+			isConnected.value = false
+		}
+	}
+
+	const handleAuthOk = () => {
+		if (!shouldProcessEvent()) return
+		isWsAuthIncorrect.value = false
+		isConnected.value = true
+	}
+
+	const clearSocketListeners = () => {
+		for (const unsub of socketUnsubscribers.value) unsub()
+		socketUnsubscribers.value = []
 	}
 
 	const disconnectSocket = (targetServerId?: string) => {
-		shouldReconnect = false
-		reconnectTargetId = null
-		if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-		if (wsConn) { wsConn.close(); wsConn = null }
-		if (targetServerId) connectedServerId = null
-		stopUptime(); clearStale()
+		if (!targetServerId && !connectedSocketServerId.value) return
+
+		clearSocketListeners()
+
+		if (targetServerId) {
+			client.archon.sockets.disconnect(targetServerId)
+		}
+
+		stopUptimeTicker()
+		clearStaleStatsTimers()
+		connectedSocketServerId.value = null
 		isConnected.value = false
 		isWsAuthIncorrect.value = false
 		serverPowerState.value = 'stopped'
@@ -147,62 +303,142 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		uptimeSeconds.value = 0
 	}
 
-	const scheduleReconnect = () => {
-		if (!shouldReconnect || !reconnectTargetId) return
-		if (reconnectTimer) clearTimeout(reconnectTimer)
-		reconnectTimer = setTimeout(() => {
-			reconnectTimer = null
-			if (shouldReconnect && reconnectTargetId) {
-				connectSocket(reconnectTargetId, { force: true, isReconnect: true })
-			}
-		}, RECONNECT_DELAY_MS)
-	}
-
-	const connectSocket = async (targetServerId: string, opts: { force?: boolean, isReconnect?: boolean } = {}): Promise<boolean> => {
-		if (connectedServerId === targetServerId && isConnected.value && !opts.force) return true
-		disconnectSocket(connectedServerId ?? undefined)
-		shouldReconnect = true
-		reconnectTargetId = targetServerId
-		try {
-			const ticket = await coreClient.issueWsTicket()
-			if (!opts.isReconnect) console$.clear()
-			const conn = await coreClient.openConsole(targetServerId, ticket)
-			wsConn = conn; connectedServerId = targetServerId
-			conn.on('open', () => { isConnected.value = true })
-			conn.on('close', () => { isConnected.value = false; clearStale(); scheduleReconnect() })
-			conn.on('log', onLog)
-			conn.on('stats', onStats)
-			conn.on('state', onState)
+	const connectSocket = async (
+		targetServerId: string,
+		connectOptions: ConnectSocketOptions = {},
+	): Promise<boolean> => {
+		if (
+			connectedSocketServerId.value === targetServerId &&
+			(isConnected.value || isWsAuthIncorrect.value)
+		) {
 			return true
-		} catch (err) {
-			console.error('[hosting/manage] Failed to connect server socket:', err)
+		}
+
+		disconnectSocket(connectedSocketServerId.value ?? undefined)
+
+		try {
+			const safeConnectOptions = connectOptions.force ? { force: true } : undefined
+			await client.archon.sockets.safeConnect(targetServerId, safeConnectOptions)
+			connectedSocketServerId.value = targetServerId
+			isConnected.value = true
+			isWsAuthIncorrect.value = false
+
+			modrinthServersConsole.clear()
+			modrinthServersConsole.beginInitialLogHydration()
+
+			const baseSubscriptions: SocketUnsubscriber[] = [
+				client.archon.sockets.on(targetServerId, 'log', handleLog),
+				client.archon.sockets.on(targetServerId, 'log4j', handleLog4j),
+				client.archon.sockets.on(targetServerId, 'stats', handleStats),
+				client.archon.sockets.on(targetServerId, 'state', handleState),
+				client.archon.sockets.on(targetServerId, 'power-state', handlePowerState),
+				client.archon.sockets.on(targetServerId, 'uptime', handleUptime),
+				client.archon.sockets.on(targetServerId, 'auth-incorrect', handleAuthIncorrect),
+				client.archon.sockets.on(targetServerId, 'auth-ok', handleAuthOk),
+			]
+			const extraSubscriptions = connectOptions.extraSubscriptions?.(targetServerId) ?? []
+			socketUnsubscribers.value = [...baseSubscriptions, ...extraSubscriptions]
+			return true
+		} catch (error) {
+			console.error('[hosting/manage] Failed to connect server socket:', error)
 			isConnected.value = false
-			scheduleReconnect()
 			return false
 		}
 	}
 
-	const dismissOperation = async (_opId: string, _action: 'dismiss' | 'cancel') => {}
-	const refreshFsAuth = async () => {}
+	const uploadState = ref<UploadState>({
+		isUploading: false,
+		currentFileName: null,
+		currentFileProgress: 0,
+		uploadedBytes: 0,
+		totalBytes: 0,
+		completedFiles: 0,
+		totalFiles: 0,
+	})
+	const cancelUpload = ref<(() => void) | null>(null)
+
+	type QueuedOpWithState = Archon.Websocket.v0.QueuedFilesystemOp & { state: 'queued' }
+	const dismissedOpIds = ref<Set<string>>(new Set())
+
+	const activeOperations = computed<FileOperation[]>(() => [
+		...fsQueuedOps.value.map((x) => ({ ...x, state: 'queued' }) satisfies QueuedOpWithState),
+		...(fsOps.value.filter((op) => !op.id || !dismissedOpIds.value.has(op.id)) as FileOperation[]),
+	])
+
+	async function dismissOperation(opId: string, action: 'dismiss' | 'cancel') {
+		if (action === 'dismiss') {
+			dismissedOpIds.value = new Set([...dismissedOpIds.value, opId])
+		}
+		try {
+			await client.kyros.files_v0.modifyOperation(opId, action)
+		} catch (error) {
+			if (action === 'dismiss') return
+			console.error(`Failed to ${action} operation:`, error)
+		}
+	}
+
+	const refreshFsAuth = async () => {
+		if (!options.serverId.value) {
+			fsAuth.value = null
+			return
+		}
+		fsAuth.value = await client.archon.servers_v0.getFilesystemAuth(options.serverId.value)
+	}
 
 	provideModrinthServerContext({
-		get serverId() { return options.serverId.value },
+		get serverId() {
+			return options.serverId.value
+		},
 		worldId: options.worldId as Ref<string | null>,
 		server: options.server as Ref<Archon.Servers.v0.Server>,
-		isConnected, isWsAuthIncorrect, powerState: serverPowerState, powerStateDetails,
-		isServerRunning, stats, uptimeSeconds,
+		isConnected,
+		isWsAuthIncorrect,
+		powerState: serverPowerState,
+		powerStateDetails,
+		isServerRunning,
+		stats,
+		uptimeSeconds,
 		isSyncingContent: options.isSyncingContent as Ref<boolean>,
-		busyReasons, fsAuth, fsOps, fsQueuedOps, refreshFsAuth,
-		uploadState, cancelUpload, activeOperations, dismissOperation,
+		busyReasons,
+		fsAuth,
+		fsOps,
+		fsQueuedOps,
+		refreshFsAuth,
+		uploadState,
+		cancelUpload,
+		activeOperations,
+		dismissOperation,
 	})
 
-	const cleanupCoreRuntime = (targetServerId?: string) =>
-		disconnectSocket(targetServerId ?? connectedServerId ?? undefined)
+	setNodeAuthState(() => fsAuth.value, refreshFsAuth)
+
+	const cleanupCoreRuntime = (targetServerId?: string) => {
+		disconnectSocket(targetServerId ?? connectedSocketServerId.value ?? undefined)
+		clearNodeAuthState()
+	}
 
 	return {
-		activeOperations, busyReasons, cancelUpload, cleanupCoreRuntime, connectSocket,
-		cpuData, disconnectSocket, dismissOperation, fsAuth, fsOps, fsQueuedOps,
-		isConnected, isServerRunning, isWsAuthIncorrect, powerStateDetails, ramData,
-		refreshFsAuth, serverPowerState, stats, uptimeSeconds, uploadState,
+		activeOperations,
+		busyReasons,
+		cancelUpload,
+		cleanupCoreRuntime,
+		connectSocket,
+		connectedSocketServerId,
+		cpuData,
+		disconnectSocket,
+		dismissOperation,
+		fsAuth,
+		fsOps,
+		fsQueuedOps,
+		isConnected,
+		isServerRunning,
+		isWsAuthIncorrect,
+		powerStateDetails,
+		ramData,
+		refreshFsAuth,
+		serverPowerState,
+		stats,
+		uptimeSeconds,
+		uploadState,
 	}
 }

@@ -10,7 +10,7 @@
 				:icon="IssuesIcon"
 			/>
 		</div>
-		<ServersManageRootLayout
+		<CoreServerManageRootLayout
 			v-else
 			:server-id="coreInstanceId"
 			:nav-href-prefix="`/server/${encodeURIComponent(profilePath)}`"
@@ -61,7 +61,7 @@
 					</template>
 				</RouterView>
 			</template>
-		</ServersManageRootLayout>
+		</CoreServerManageRootLayout>
 	</div>
 </template>
 
@@ -69,18 +69,19 @@
 import { CoreApiClient } from '@amberite/api-lib'
 import { IssuesIcon } from '@modrinth/assets'
 import {
+	CoreServerManageRootLayout,
 	ErrorInformationCard,
 	injectAuth,
 	provideCoreClient,
-	ServersManageRootLayout,
 } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getDesktopAdapter } from '@/adapters/desktop'
 import { get_user } from '@/helpers/cache'
 import { get as getCreds } from '@/helpers/mr_auth'
 import { get as getProfile } from '@/helpers/profile'
+import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useTheming } from '@/store/theme'
 
@@ -99,21 +100,35 @@ try {
 	coreError.value = true
 }
 
-const profilePath = route.params.id as string
-const profile = await getProfile(profilePath).catch(() => null)
-const coreInstanceId = profile?.core_instance_id ?? ''
+const profilePath = computed(() => {
+	const id = route.params.id
+	return Array.isArray(id) ? id[0] : (id ?? '')
+})
+const profile = ref<GameInstance | null>(null)
+const coreInstanceId = computed(() => profile.value?.core_instance_id ?? '')
 
-if (!coreInstanceId) {
-	coreError.value = true
+async function loadProfile(path = profilePath.value) {
+	coreError.value = false
+	const nextProfile = await getProfile(path).catch(() => null)
+	if (path !== profilePath.value) return
+
+	profile.value = nextProfile
+	if (!nextProfile?.core_instance_id) {
+		coreError.value = true
+		return
+	}
+
+	if (nextProfile.name) {
+		breadcrumbs.setName('Server', nextProfile.name)
+		breadcrumbs.setContext({
+			name: nextProfile.name,
+			link: `/server/${encodeURIComponent(path)}/content`,
+		})
+	}
 }
 
-if (profile?.name) {
-	breadcrumbs.setName('Server', profile.name)
-	breadcrumbs.setContext({
-		name: profile.name,
-		link: `/server/${encodeURIComponent(profilePath)}/content`,
-	})
-}
+await loadProfile()
+watch(profilePath, (path) => void loadProfile(path))
 
 const authUser = computed(() => {
 	const user = auth.user.value

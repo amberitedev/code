@@ -1343,6 +1343,9 @@
   "hosting.content.failed-to-toggle": {
     "defaultMessage": "Failed to toggle {name}"
   },
+  "hosting.content.failed-to-unlink": {
+    "defaultMessage": "Failed to unlink modpack"
+  },
   "hosting.content.failed-to-update": {
     "defaultMessage": "Failed to update"
   },

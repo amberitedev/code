@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreFsEntry } from '@amberite/api-lib'
+import type { Kyros } from '@modrinth/api-client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -8,7 +8,7 @@ import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
 import { useReadyState } from '#ui/composables'
 import { useVIntl } from '#ui/composables/i18n'
 import {
-	injectCoreClient,
+	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '#ui/providers'
@@ -23,9 +23,9 @@ const props = defineProps<{
 	showRefreshButton?: boolean
 }>()
 
-const coreClient = injectCoreClient()
+const client = injectModrinthClient()
 const serverContext = injectModrinthServerContext()
-const { serverId, busyReasons, uploadState, cancelUpload: cancelUploadRef } = serverContext
+const { serverId, fsOps, busyReasons, uploadState, cancelUpload: cancelUploadRef } = serverContext
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 
@@ -100,17 +100,6 @@ function initializeFileEdit() {
 	}
 }
 
-function mapCoreEntryToFileItem(entry: CoreFsEntry): FileItem {
-	return {
-		name: entry.name,
-		path: entry.path,
-		type: entry.type === 'directory' ? 'directory' : 'file',
-		modified: entry.modified_at ? new Date(entry.modified_at).getTime() / 1000 : 0,
-		created: entry.modified_at ? new Date(entry.modified_at).getTime() / 1000 : 0,
-		size: entry.size ?? undefined,
-	}
-}
-
 // Directory listing query
 const {
 	data: directoryData,
@@ -119,12 +108,12 @@ const {
 } = useQuery({
 	queryKey: computed(() => ['files', serverId, currentPath.value]),
 	queryFn: async () => {
-		return coreClient.listDirectory(serverId, currentPath.value, 0, 2000)
+		return client.kyros.files_v0.listDirectory(currentPath.value, 1, 2000)
 	},
 	staleTime: 30_000,
 })
 
-const items = computed<FileItem[]>(() => directoryData.value?.items.map(mapCoreEntryToFileItem) ?? [])
+const items = computed<FileItem[]>(() => directoryData.value?.items ?? [])
 
 const filesReadyPending = useReadyState({ isLoading, data: directoryData })
 
@@ -134,9 +123,9 @@ function prefetchDirectory(path: string) {
 		queryKey: ['files', serverId, path],
 		queryFn: async () => {
 			try {
-				return await coreClient.listDirectory(serverId, path, 0, 2000)
+				return await client.kyros.files_v0.listDirectory(path, 1, 2000)
 			} catch {
-				return { items: [], total: 0, current: 0 }
+				return { items: [], total: 0, current: 1 }
 			}
 		},
 		staleTime: 30_000,
@@ -148,7 +137,7 @@ function prefetchFile(path: string) {
 		queryKey: ['file-content', serverId, path],
 		queryFn: async () => {
 			try {
-				const blob = await coreClient.downloadFile(serverId, path)
+				const blob = await client.kyros.files_v0.downloadFile(path)
 				return await blob.text()
 			} catch {
 				return null
@@ -169,12 +158,12 @@ function refreshList() {
 // Mutations
 const deleteMutation = useMutation({
 	mutationFn: ({ path, recursive }: { path: string; recursive: boolean }) =>
-		coreClient.deleteFileOrFolder(serverId, path, recursive),
+		client.kyros.files_v0.deleteFileOrFolder(path, recursive),
 	onMutate: async ({ path }) => {
 		const queryKey = getQueryKey()
 		await queryClient.cancelQueries({ queryKey })
 		const previous = queryClient.getQueryData(queryKey)
-		queryClient.setQueryData(queryKey, (old: { items: CoreFsEntry[] } | undefined) => {
+		queryClient.setQueryData(queryKey, (old: Kyros.Files.v0.DirectoryResponse | undefined) => {
 			if (!old) return old
 			return { ...old, items: old.items.filter((item) => item.path !== path) }
 		})
@@ -201,13 +190,39 @@ const deleteMutation = useMutation({
 })
 
 const renameMutation = useMutation({
-	mutationFn: ({ path, newName }: { path: string; newName: string }) => {
-		const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
-		const newPath = dir ? `${dir}/${newName}` : newName
-		return coreClient.moveEntry(serverId, path, newPath)
+	mutationFn: ({ path, newName }: { path: string; newName: string }) =>
+		client.kyros.files_v0.renameFileOrFolder(path, newName),
+	onMutate: async ({ path, newName }) => {
+		const queryKey = getQueryKey()
+		await queryClient.cancelQueries({ queryKey })
+		const previous = queryClient.getQueryData(queryKey)
+		queryClient.setQueryData(queryKey, (old: Kyros.Files.v0.DirectoryResponse | undefined) => {
+			if (!old) return old
+			return {
+				...old,
+				items: old.items.map((item) =>
+					item.path === path
+						? {
+								...item,
+								name: newName,
+								path: item.path.replace(/[^/]+$/, newName),
+							}
+						: item,
+				),
+			}
+		})
+		return { previous }
 	},
-	onError: (err: Error) => {
-		addNotification({ title: 'Rename failed', text: err.message, type: 'error' })
+	onError: (err: Error, _vars, context) => {
+		queryClient.setQueryData(getQueryKey(), context?.previous)
+		addNotification({
+			title: formatMessage(commonMessages.renameFailedLabel),
+			text: err.message,
+			type: 'error',
+		})
+	},
+	onSuccess: (_, { newName }) => {
+		addNotification({ title: 'Renamed', text: `Renamed to ${newName}`, type: 'success' })
 	},
 	onSettled: () => {
 		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
@@ -216,9 +231,27 @@ const renameMutation = useMutation({
 
 const moveMutation = useMutation({
 	mutationFn: ({ source, destination }: { source: string; destination: string }) =>
-		coreClient.moveEntry(serverId, source, destination),
-	onError: (err: Error) => {
-		addNotification({ title: 'Move failed', text: err.message, type: 'error' })
+		client.kyros.files_v0.moveFileOrFolder(source, destination),
+	onMutate: async ({ source }) => {
+		const queryKey = getQueryKey()
+		await queryClient.cancelQueries({ queryKey })
+		const previous = queryClient.getQueryData(queryKey)
+		queryClient.setQueryData(queryKey, (old: Kyros.Files.v0.DirectoryResponse | undefined) => {
+			if (!old) return old
+			return { ...old, items: old.items.filter((item) => item.path !== source) }
+		})
+		return { previous }
+	},
+	onError: (err: Error, _vars, context) => {
+		queryClient.setQueryData(getQueryKey(), context?.previous)
+		addNotification({
+			title: formatMessage(commonMessages.moveFailedLabel),
+			text: err.message,
+			type: 'error',
+		})
+	},
+	onSuccess: (_, { destination }) => {
+		addNotification({ title: 'Moved', text: `Moved to ${destination}`, type: 'success' })
 	},
 	onSettled: () => {
 		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
@@ -227,26 +260,54 @@ const moveMutation = useMutation({
 
 const createMutation = useMutation({
 	mutationFn: ({ path, type }: { path: string; type: 'file' | 'directory' }) =>
-		type === 'directory' ? coreClient.createDir(serverId, path) : coreClient.createFile(serverId, path),
-	onError: (err: Error) => {
-		addNotification({ title: 'Create failed', text: err.message, type: 'error' })
+		client.kyros.files_v0.createFileOrFolder(path, type),
+	onMutate: async ({ path, type }) => {
+		const queryKey = getQueryKey()
+		await queryClient.cancelQueries({ queryKey })
+		const previous = queryClient.getQueryData(queryKey)
+		const name = path.split('/').pop()!
+		const now = Math.floor(Date.now() / 1000)
+		const newItem: Kyros.Files.v0.DirectoryItem = {
+			name,
+			path,
+			type,
+			modified: now,
+			created: now,
+			...(type === 'directory' ? { count: 0 } : { size: 0 }),
+		}
+		queryClient.setQueryData(queryKey, (old: Kyros.Files.v0.DirectoryResponse | undefined) => {
+			if (!old) return old
+			return { ...old, items: [newItem, ...old.items] }
+		})
+		return { previous }
+	},
+	onError: (err: Error, _vars, context) => {
+		queryClient.setQueryData(getQueryKey(), context?.previous)
+		addNotification({
+			title: formatMessage(commonMessages.createFailedLabel),
+			text: err.message,
+			type: 'error',
+		})
+	},
+	onSuccess: (_, { path, type }) => {
+		const name = path.split('/').pop()
+		addNotification({
+			title: `${type === 'directory' ? 'Folder' : 'File'} created`,
+			text: `Created ${name}`,
+			type: 'success',
+		})
 	},
 	onSettled: () => {
 		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
 	},
 })
 
-async function extractFile(path: string, _override: boolean, _dry: boolean) {
-	try {
-		await coreClient.unzipFile(serverId, path, 'normal')
-		queryClient.invalidateQueries({ queryKey: ['files', serverId] })
-	} catch (err) {
-		addNotification({
-			title: 'Extract failed',
-			text: err instanceof Error ? err.message : 'Unknown error',
-			type: 'error',
-		})
+// Extraction
+async function extractFile(path: string, override: boolean, dry: boolean) {
+	if (dry) {
+		return await client.kyros.files_v0.extractFile(path, override, true)
 	}
+	await client.kyros.files_v0.extractFile(path, override, false)
 }
 
 // File I/O
@@ -254,28 +315,31 @@ async function readFile(path: string): Promise<string> {
 	const normalizedPath = path.startsWith('/') ? path : `/${path}`
 	const cachedContent = queryClient.getQueryData<string>(['file-content', serverId, normalizedPath])
 	if (cachedContent) return cachedContent
-	const buf = await coreClient.readFile(serverId, normalizedPath)
-	return new TextDecoder().decode(buf)
+	const blob = await client.kyros.files_v0.downloadFile(normalizedPath)
+	return await blob.text()
 }
 
 async function readFileAsBlob(path: string): Promise<Blob> {
 	const normalizedPath = path.startsWith('/') ? path : `/${path}`
-	return await coreClient.downloadFile(serverId, normalizedPath)
+	return await client.kyros.files_v0.downloadFile(normalizedPath)
 }
 
 async function writeFile(path: string, content: string): Promise<void> {
-	await coreClient.writeFile(serverId, path, content)
-	queryClient.invalidateQueries({ queryKey: ['file-content', serverId, path] })
+	await client.kyros.files_v0.updateFile(path, content)
+	queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
 }
 
 async function downloadFile(path: string, fileName: string): Promise<void> {
 	try {
-		const blob = await coreClient.downloadFile(serverId, path)
-		const link = document.createElement('a')
-		link.href = window.URL.createObjectURL(blob)
-		link.download = fileName
-		link.click()
-		window.URL.revokeObjectURL(link.href)
+		const fileData = await client.kyros.files_v0.downloadFile(path)
+		if (fileData) {
+			const blob = new Blob([fileData], { type: 'application/octet-stream' })
+			const link = document.createElement('a')
+			link.href = window.URL.createObjectURL(blob)
+			link.download = fileName
+			link.click()
+			window.URL.revokeObjectURL(link.href)
+		}
 	} catch {
 		addNotification({
 			title: formatMessage(commonMessages.downloadFailedLabel),
@@ -286,7 +350,7 @@ async function downloadFile(path: string, fileName: string): Promise<void> {
 }
 
 watch(
-	() => serverContext.fsOps.value,
+	() => fsOps.value,
 	() => {
 		refreshList()
 	},
@@ -298,7 +362,7 @@ onMounted(async () => {
 
 // Restart
 async function restartServer() {
-	await coreClient.restart(serverId)
+	await client.archon.servers_v0.power(serverId, 'Restart')
 }
 
 let activeUploadCancel: (() => void) | null = null
@@ -322,20 +386,21 @@ async function uploadFiles(files: File[]) {
 
 	for (let i = 0; i < files.length; i++) {
 		const file = files[i]
-		const targetDir = currentPath.value
+		const filePath = `${currentPath.value}/${file.name}`.replace('//', '/')
 
 		uploadState.value.currentFileName = file.name
 		uploadState.value.currentFileProgress = 0
 
 		try {
-			const handle = coreClient.uploadFile(serverId, targetDir, file)
-			handle.onProgress((pct) => {
-				uploadState.value.currentFileProgress = pct / 100
-				uploadState.value.uploadedBytes = completedBytes + Math.round(file.size * (pct / 100))
+			const uploader = client.kyros.files_v0.uploadFile(filePath, file, {
+				onProgress: ({ progress }) => {
+					uploadState.value.currentFileProgress = progress
+					uploadState.value.uploadedBytes = completedBytes + Math.round(file.size * progress)
+				},
 			})
-			activeUploadCancel = () => handle.abort()
+			activeUploadCancel = () => uploader.cancel()
 
-			await handle.done
+			await uploader.promise
 			completedBytes += file.size
 			uploadState.value.completedFiles = i + 1
 			uploadState.value.uploadedBytes = completedBytes
@@ -404,7 +469,7 @@ provideFileManager({
 	extractFile,
 	prefetchDirectory,
 	prefetchFile,
-	showInstallFromUrl: false,
+	showInstallFromUrl: true,
 	canRestart: true,
 	restartServer,
 	canShareToMclogs: true,

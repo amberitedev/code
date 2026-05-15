@@ -1,0 +1,6 @@
+export { default as CoreServerManageBackupsPage } from './server-manage/backups.vue'
+export { default as CoreServerManageContentPage } from './server-manage/content.vue'
+export { default as CoreServerManageFilesPage } from './server-manage/files.vue'
+export { default as CoreServerManageOverviewPage } from './server-manage/overview.vue'
+export { default as CoreServerManageRootLayout } from './server-manage/root.vue'
+export { useCoreServerManageRuntime } from './server-manage/runtime'

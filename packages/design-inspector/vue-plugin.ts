@@ -9,6 +9,8 @@ import DesignInspectorRoot from './components/DesignInspectorRoot.vue'
 export const DesignInspectorPlugin: Plugin = {
 	install(_app: App) {
 		if (typeof window === 'undefined') return
+		if (!import.meta.env.DEV || import.meta.env.VITE_ENABLE_DESIGN_INSPECTOR !== 'true') return
+		if (document.getElementById('design-inspector-ui')) return
 
 		const container = document.createElement('div')
 		container.id = 'design-inspector-ui'

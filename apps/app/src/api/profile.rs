@@ -368,6 +368,14 @@ pub async fn profile_kill(path: &str) -> Result<()> {
 pub struct EditProfile {
     pub name: Option<String>,
 
+    pub kind: Option<ProfileKind>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    pub core_instance_id: Option<Option<String>>,
+
     pub game_version: Option<String>,
     pub loader: Option<ModLoader>,
     #[serde(
@@ -433,6 +441,12 @@ pub async fn profile_edit(path: &str, edit_profile: EditProfile) -> Result<()> {
     profile::edit(path, |prof| {
         if let Some(name) = edit_profile.name.clone() {
             prof.name = name;
+        }
+        if let Some(kind) = edit_profile.kind {
+            prof.kind = kind;
+        }
+        if let Some(core_instance_id) = edit_profile.core_instance_id.clone() {
+            prof.core_instance_id = core_instance_id;
         }
         if let Some(game_version) = edit_profile.game_version.clone() {
             if game_version != prof.game_version {

@@ -63,6 +63,10 @@ generated
 # app testing dir
 app-playground-data/*
 
+# Minecraft runtime/download cache artifacts
+libraries/
+versions/*/server-*.jar
+
 .astro
 .claude/*
 !.claude/skills/

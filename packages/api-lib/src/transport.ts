@@ -38,6 +38,7 @@ export interface PublishOptions {
 
 const DEFAULT_TTL_SECONDS = 300
 const RELAY_TIMEOUT_MS = 30_000
+const PUBLISH_TIMEOUT_MS = 5_000
 
 /**
  * Publish a message to the core_messages relay table.
@@ -47,17 +48,30 @@ export async function publishMessage(
 	opts: PublishOptions,
 ): Promise<RelayMessage> {
 	const ttl = new Date(Date.now() + (opts.ttlSeconds ?? DEFAULT_TTL_SECONDS) * 1000).toISOString()
-	const { data, error } = await supabase
-		.from('core_messages')
-		.insert({
-			core_id: opts.coreId,
-			sender_id: opts.senderId,
-			direction: opts.direction,
-			payload: opts.payload,
-			ttl,
-		})
-		.select()
-		.single()
+	let timeoutId: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<never>(
+		(_, reject) =>
+			(timeoutId = setTimeout(
+				() => reject(new NetworkError('Relay publish timed out')),
+				PUBLISH_TIMEOUT_MS,
+			)),
+	)
+	const { data, error } = await Promise.race([
+		supabase
+			.from('core_messages')
+			.insert({
+				core_id: opts.coreId,
+				sender_id: opts.senderId,
+				direction: opts.direction,
+				payload: opts.payload,
+				ttl,
+			})
+			.select()
+			.single(),
+		timeout,
+	]).finally(() => {
+		if (timeoutId) clearTimeout(timeoutId)
+	})
 
 	if (error) throw new NetworkError(`Failed to publish relay message: ${error.message}`)
 	return data as RelayMessage
@@ -99,9 +113,11 @@ export async function waitForReceipt(
 	supabase: SupabaseClient,
 	messageId: string,
 	timeoutMs = RELAY_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<void> {
 	const start = Date.now()
 	while (Date.now() - start < timeoutMs) {
+		if (signal?.aborted) throw new CoreOfflineError()
 		const { data, error } = await supabase
 			.from('core_messages')
 			.select('received_at')
@@ -126,9 +142,11 @@ export async function waitForResult(
 	supabase: SupabaseClient,
 	messageId: string,
 	timeoutMs = RELAY_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<unknown> {
 	const start = Date.now()
 	while (Date.now() - start < timeoutMs) {
+		if (signal?.aborted) throw new CoreOfflineError()
 		const { data, error } = await supabase
 			.from('core_messages')
 			.select('completed_at, result')

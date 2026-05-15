@@ -18,7 +18,7 @@ import { get_project_versions, get_search_results } from '@/helpers/cache.js'
 import { import_instance } from '@/helpers/import.js'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
 import { create_profile_and_install, create_profile_and_install_from_file } from '@/helpers/pack'
-import { create, edit as editProfile, list } from '@/helpers/profile.js'
+import { create, list } from '@/helpers/profile.js'
 import type { InstanceLoader, ProfileKind } from '@/helpers/types'
 
 export function setupCreationModal(
@@ -146,32 +146,36 @@ export function setupCreationModal(
 			// Server instances skip local Minecraft installation; synced instances install locally.
 			const skipInstall = kind === 'server'
 
-			const profilePath = await create(
-				name,
-				config.selectedGameVersion.value!,
-				loader as InstanceLoader,
-				loaderVersion,
-				iconPath,
-				skipInstall,
-				undefined,
-				kind,
-			).catch(handleError)
-
-			if (profilePath && (kind === 'server' || kind === 'synced')) {
-				try {
-					const adapter = getDesktopAdapter()
-					const coreClient = new CoreApiClient(adapter)
-					const coreInstance = await coreClient.createInstance({
+			const coreClient =
+				kind === 'server' || kind === 'synced' ? new CoreApiClient(getDesktopAdapter()) : null
+			const coreInstance = coreClient
+				? await coreClient.createInstance({
 						name,
 						game_version: config.selectedGameVersion.value!,
 						loader: loader as 'vanilla' | 'paper' | 'fabric' | 'forge' | 'neoforge' | 'quilt',
 						loader_version: loaderVersion ?? undefined,
 						port: 25565,
 					})
-					await editProfile(profilePath, { core_instance_id: coreInstance.id })
-				} catch (err) {
-					handleError(err as Error)
+				: null
+
+			try {
+				await create(
+					name,
+					config.selectedGameVersion.value!,
+					loader as InstanceLoader,
+					loaderVersion,
+					iconPath,
+					skipInstall,
+					undefined,
+					kind,
+					25565,
+					coreInstance?.id ?? null,
+				)
+			} catch (err) {
+				if (coreClient && coreInstance) {
+					await coreClient.deleteInstance(coreInstance.id).catch(() => {})
 				}
+				throw err
 			}
 
 			trackEvent('InstanceCreate', {

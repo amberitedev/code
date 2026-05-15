@@ -62,7 +62,6 @@ export function useServerImage(
 		queryKey,
 		queryFn: async (): Promise<string | null> => {
 			if (!serverId) return null
-			if (!upstream.value) return null
 
 			try {
 				const fsAuth = await client.archon.servers_v0.getFilesystemAuth(serverId)

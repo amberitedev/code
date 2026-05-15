@@ -1,4 +1,8 @@
-use std::{path::PathBuf, sync::{atomic::AtomicU32, Arc}, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::{atomic::AtomicU32, Arc},
+    time::Instant,
+};
 
 use dashmap::DashMap;
 use sqlx::SqlitePool;
@@ -8,29 +12,30 @@ use crate::{
     domain::instance::InstanceId,
     infrastructure::{
         auth::jwks::JwksCache,
-        db::{instance_repo::InstanceRepo, java_repo::JavaRepo, modpack_repo::ModpackRepo},
+        db::{
+            instance_repo::InstanceRepo, java_repo::JavaRepo,
+            modpack_repo::ModpackRepo,
+        },
         events::EventBroadcaster,
         macro_engine::executor::MacroExecutor,
         process::{instance_actor::InstanceHandle, pty_spawner::PtySpawner},
     },
     ports::{
-        instance_store::InstanceStore,
-        java_store::JavaStore,
-        modpack_store::ModpackStore,
-        process_spawner::AnySpawner,
+        instance_store::InstanceStore, java_store::JavaStore,
+        modpack_store::ModpackStore, process_spawner::AnySpawner,
     },
 };
 
 /// Short-lived ticket for WebSocket auth.
 pub struct WsTicket {
-	pub expires_at: Instant,
+    pub expires_at: Instant,
 }
 
 /// Short-lived token for one-time file downloads (issued by GET /instances/:id/fs/url).
 pub struct FsDownloadToken {
-	pub instance_id: String,
-	pub path: PathBuf,
-	pub expires_at: Instant,
+    pub instance_id: String,
+    pub path: PathBuf,
+    pub expires_at: Instant,
 }
 
 /// Central shared state — passed as `Arc<AppState>` through all layers.
@@ -49,10 +54,10 @@ pub struct AppState {
     pub macro_executor: MacroExecutor,
     /// JWKS cache for Supabase JWT validation.
     pub jwks_cache: JwksCache,
-	/// In-memory short-lived WebSocket tickets.
-	pub ws_tickets: DashMap<String, WsTicket>,
-	/// In-memory short-lived file download tokens (issued by GET /instances/:id/fs/url).
-	pub fs_download_tokens: DashMap<String, FsDownloadToken>,
+    /// In-memory short-lived WebSocket tickets.
+    pub ws_tickets: DashMap<String, WsTicket>,
+    /// In-memory short-lived file download tokens (issued by GET /instances/:id/fs/url).
+    pub fs_download_tokens: DashMap<String, FsDownloadToken>,
     /// First-run pairing code (cleared after pairing).
     pub pairing_code: tokio::sync::Mutex<Option<String>>,
     /// SEC-01: counts wrong pairing-code attempts; locked out after MAX_PAIRING_ATTEMPTS.
@@ -69,7 +74,10 @@ pub struct AppState {
 
 impl AppState {
     /// Create a new `AppState` with production defaults (uses `PtySpawner`).
-    pub async fn new(config: Config, pool: SqlitePool) -> color_eyre::eyre::Result<Arc<Self>> {
+    pub async fn new(
+        config: Config,
+        pool: SqlitePool,
+    ) -> color_eyre::eyre::Result<Arc<Self>> {
         Self::new_with_spawner(config, pool, Arc::new(PtySpawner)).await
     }
 
@@ -90,10 +98,12 @@ impl AppState {
         let modpack_store = Arc::new(ModpackRepo::new(pool.clone()));
 
         // Generate first-run pairing code if not yet paired.
-        let is_paired = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM core_config")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0) > 0;
+        let is_paired =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM core_config")
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0)
+                > 0;
 
         // In dev mode, skip pairing entirely — no code, no banner.
         let pairing_code = if is_paired || config.dev_mode {
@@ -115,8 +125,8 @@ impl AppState {
             broadcaster,
             macro_executor: MacroExecutor::new(),
             jwks_cache,
-			ws_tickets: DashMap::new(),
-			fs_download_tokens: DashMap::new(),
+            ws_tickets: DashMap::new(),
+            fs_download_tokens: DashMap::new(),
             pairing_code: tokio::sync::Mutex::new(pairing_code),
             wrong_pairing_attempts: AtomicU32::new(0),
             instance_store,
@@ -128,14 +138,22 @@ impl AppState {
 
     /// JWKS URL derived from the stored supabase_url.
     pub async fn jwks_url(&self) -> Option<String> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT supabase_url FROM core_config WHERE id = 1"
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten();
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT supabase_url FROM core_config WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
         row.map(|(url,)| format!("{url}/auth/v1/.well-known/jwks.json"))
+    }
+
+    /// Owner user id written during setup. Only this user may administer Core.
+    pub async fn owner_user_id(&self) -> Option<String> {
+        sqlx::query_scalar("SELECT owner_user_id FROM core_config WHERE id = 1")
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
     }
 }
 

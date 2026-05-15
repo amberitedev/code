@@ -419,7 +419,7 @@ initialize_state()
 	})
 
 const handleClose = async () => {
-	await saveWindowState(StateFlags.ALL)
+	await saveWindowState(StateFlags.POSITION | StateFlags.SIZE | StateFlags.MAXIMIZED)
 	await getCurrentWindow().close()
 }
 
@@ -724,7 +724,11 @@ async function bootIntercom() {
 
 function shutdownHostingIntercom() {
 	if (!intercomBooted && !intercomBooting) return
-	shutdownIntercom()
+	try {
+		shutdownIntercom()
+	} catch {
+		// Intercom not fully initialized in this environment
+	}
 	intercomBooting = false
 	intercomBooted = false
 }
@@ -1591,7 +1595,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 
 .app-grid-statusbar {
 	grid-area: status;
-	padding-right: var(--window-controls-width, 0px);
 	position: relative;
 	z-index: 2;
 }

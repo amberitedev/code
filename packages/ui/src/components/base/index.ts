@@ -77,8 +77,6 @@ export type { StackedAdmonitionItem, StackedAdmonitionType } from './StackedAdmo
 export { default as StackedAdmonitions } from './StackedAdmonitions.vue'
 export { default as StatItem } from './StatItem.vue'
 export { default as StyledInput } from './StyledInput.vue'
-export type { TabItem } from './TabGroup.vue'
-export { default as TabGroup } from './TabGroup.vue'
 export type { TableColumn } from './Table.vue'
 export { default as Table } from './Table.vue'
 export type { TabsTab, TabsValue } from './Tabs.vue'

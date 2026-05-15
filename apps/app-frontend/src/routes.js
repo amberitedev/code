@@ -136,37 +136,37 @@ export default new createRouter({
 					path: '',
 					name: 'SyncedMods',
 					component: Synced.Mods,
-					meta: { breadcrumb: [{ name: '?Instance' }] },
+					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
 				},
 				{
 					path: 'files',
 					name: 'SyncedFiles',
 					component: Synced.Files,
-					meta: { breadcrumb: [{ name: '?Instance' }] },
+					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
 				},
 				{
 					path: 'worlds',
 					name: 'SyncedWorlds',
 					component: Synced.Worlds,
-					meta: { breadcrumb: [{ name: '?Instance' }] },
+					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
 				},
 				{
 					path: 'logs',
 					name: 'SyncedLogs',
 					component: Synced.Logs,
-					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?Instance' }] },
+					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?SyncedInstance' }] },
 				},
 				{
 					path: 'console',
 					name: 'SyncedConsole',
 					component: Synced.Console,
-					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?Instance' }] },
+					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?SyncedInstance' }] },
 				},
 				{
 					path: 'backups',
 					name: 'SyncedBackups',
 					component: Synced.Backups,
-					meta: { breadcrumb: [{ name: '?Instance' }] },
+					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
 				},
 			],
 		},
@@ -348,6 +348,8 @@ export default new createRouter({
 		if (to.path === from.path) return
 		// Sometimes Vue's scroll behavior is not working as expected, so we need to manually scroll to top (especially on Linux)
 		document.querySelector('.app-viewport')?.scrollTo(0, 0)
+		const el = document.querySelector('.app-viewport')
+		if (!el) return { top: 0 }
 		return {
 			el: '.app-viewport',
 			top: 0,

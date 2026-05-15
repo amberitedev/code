@@ -1,11 +1,7 @@
 use crate::api::Result;
-use amberite_lib::error::AmberiteError;
-use amberite_lib::settings::AppSettings;
-use reqwest::Client;
-use theseus::prelude::*;
 use crate::api::TheseusSerializableError;
-
-const DEV_CORE_URL: &str = "http://localhost:16662";
+use amberite_lib::error::AmberiteError;
+use theseus::prelude::*;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("profile-create")
@@ -16,7 +12,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
-/// Creates a profile and, for server/synced kinds, provisions a Core instance.
+/// Creates a profile. Core instance provisioning is owned by the frontend Core API client.
 // invoke('plugin:profile-create|profile_create', profile)
 #[tauri::command]
 pub async fn profile_create(
@@ -30,47 +26,25 @@ pub async fn profile_create(
     // "client" | "server" | "synced" — defaults to "client"
     kind: Option<String>,
     port: Option<u16>,
+    core_instance_id: Option<String>,
 ) -> Result<String> {
+    let _ = port;
+
     let profile_kind = match kind.as_deref() {
         Some("server") => Some(ProfileKind::Server),
         Some("synced") => Some(ProfileKind::Synced),
         _ => Some(ProfileKind::Client),
     };
 
-    // For server/synced: provision a Core instance directly via HTTP
-    let core_instance_id = if matches!(profile_kind, Some(ProfileKind::Server) | Some(ProfileKind::Synced)) {
-        let settings = AppSettings::load().await.ok();
-        let core_url = settings
-            .and_then(|s| s.core_url)
-            .unwrap_or_else(|| DEV_CORE_URL.to_string());
-
-        let client = Client::new();
-        let req_body = serde_json::json!({
-            "name": &name,
-            "game_version": &game_version,
-            "loader": modloader.as_str(),
-            "loader_version": loader_version,
-            "port": port.unwrap_or(25565),
-        });
-
-        let resp = client
-            .post(format!("{}/api/v1/instances", core_url.trim_end_matches('/')))
-            .json(&req_body)
-            .send()
-            .await
-            .map_err(|e| TheseusSerializableError::Amberite(AmberiteError::Http(e.to_string())))?
-            .error_for_status()
-            .map_err(|e| TheseusSerializableError::Amberite(AmberiteError::Http(e.to_string())))?;
-
-        let detail: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| TheseusSerializableError::Amberite(AmberiteError::Http(e.to_string())))?;
-
-        detail["id"].as_str().map(|s| s.to_string())
-    } else {
-        None
-    };
+    let requires_core_id = matches!(
+        profile_kind,
+        Some(ProfileKind::Server) | Some(ProfileKind::Synced)
+    );
+    if requires_core_id && core_instance_id.is_none() {
+        return Err(TheseusSerializableError::Amberite(AmberiteError::Other(
+            "Server profiles require a Core instance ID".into(),
+        )));
+    }
 
     let res = profile::create::profile_create(
         name,

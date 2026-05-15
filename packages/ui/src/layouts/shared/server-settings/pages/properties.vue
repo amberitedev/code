@@ -265,11 +265,7 @@
 </template>
 
 <script setup lang="ts">
-// properties.vue — server.properties editor via Core API.
-// Key: useQuery(['servers','properties','core',serverId]) → coreClient.getProperties; flat Record<string,string>.
-// buildPatch: returns only changed keys. useMutation → coreClient.patchProperties.
-// isPropertyVisible(key), hasVisibleProperties, hasVisibleAdvancedProperties for search/accordion.
-// combinedGamemode, selectedDifficulty, whitelistEnabled, spawnProtectionEnabled: derived two-way computeds.
+import type { Archon } from '@modrinth/api-client'
 import { SearchIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Fuse from 'fuse.js'
@@ -279,14 +275,14 @@ import { Accordion, Admonition, AutoLink, Chips, StyledInput, Toggle } from '#ui
 import SaveBanner from '#ui/components/servers/SaveBanner.vue'
 import { injectServerSettings } from '#ui/layouts/shared/server-settings'
 import {
-	injectCoreClient,
+	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '#ui/providers'
 
 const { addNotification } = injectNotificationManager()
-const coreClient = injectCoreClient()
-const { serverId, powerState, busyReasons } = injectModrinthServerContext()
+const client = injectModrinthClient()
+const { serverId, worldId, powerState, busyReasons } = injectModrinthServerContext()
 const queryClient = useQueryClient()
 const filesTabLink = computed(
 	() => `/hosting/manage/${encodeURIComponent(serverId)}/files?path=/&editing=server.properties`,
@@ -359,12 +355,28 @@ function capitalize(str: string): string {
 	return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
-const queryKey = computed(() => ['servers', 'properties', 'core', serverId])
+const queryKey = computed(() => ['servers', 'properties', 'v1', serverId, worldId.value])
 
 const { data: propsData } = useQuery({
 	queryKey,
-	queryFn: () => coreClient.getProperties(serverId),
+	queryFn: () => client.archon.properties_v1.getProperties(serverId, worldId.value!),
+	enabled: computed(() => worldId.value !== null),
 })
+
+function flattenProperties(data: Archon.Content.v1.PropertiesFields): Record<string, string> {
+	const result: Record<string, string> = {}
+	if (data.known) {
+		for (const [key, value] of Object.entries(data.known)) {
+			if (value != null) result[key] = value
+		}
+	}
+	if (data.custom) {
+		for (const [key, value] of Object.entries(data.custom)) {
+			if (value != null) result[key] = value
+		}
+	}
+	return result
+}
 
 const liveProperties = ref<Record<string, string>>({})
 const originalProperties = ref<Record<string, string>>({})
@@ -372,9 +384,10 @@ let previousSpawnProtection = '16'
 
 function syncFormFromData() {
 	if (!propsData.value) return
-	liveProperties.value = { ...propsData.value }
-	originalProperties.value = { ...propsData.value }
-	const sp = propsData.value.spawn_protection
+	const flat = flattenProperties(propsData.value)
+	liveProperties.value = { ...flat }
+	originalProperties.value = { ...flat }
+	const sp = flat.spawn_protection
 	if (sp && sp !== '0') {
 		previousSpawnProtection = sp
 	}
@@ -450,18 +463,32 @@ const spawnProtectionEnabled = computed({
 	},
 })
 
-function buildPatch(): Record<string, string> {
-	const patch: Record<string, string> = {}
+function buildPatch(): Archon.Content.v1.PatchPropertiesFields {
+	const known: Record<string, string> = {}
+	const custom: Record<string, string> = {}
+
 	for (const key of Object.keys(liveProperties.value)) {
-		if (liveProperties.value[key] !== originalProperties.value[key]) {
-			patch[key] = liveProperties.value[key]
+		if (liveProperties.value[key] === originalProperties.value[key]) continue
+		if (key in KNOWN_PROPERTIES) {
+			known[key] = liveProperties.value[key]
+		} else {
+			custom[key] = liveProperties.value[key]
 		}
+	}
+
+	const patch: Archon.Content.v1.PatchPropertiesFields = {}
+	if (Object.keys(known).length > 0) {
+		patch.known = known as Archon.Content.v1.KnownPropertiesFields
+	}
+	if (Object.keys(custom).length > 0) {
+		patch.custom = custom
 	}
 	return patch
 }
 
 const { mutateAsync: saveProperties, isPending: isUpdating } = useMutation({
-	mutationFn: () => coreClient.patchProperties(serverId, buildPatch()),
+	mutationFn: () =>
+		client.archon.properties_v1.patchProperties(serverId, worldId.value!, buildPatch()),
 	onSuccess: async () => {
 		await queryClient.invalidateQueries({ queryKey: queryKey.value })
 		syncFormFromData()

@@ -1,23 +1,15 @@
 import { ref } from 'vue'
 
 // All requests go through the Vite dev server relay at /__design-relay.
-// The relay proxy (vite-plugin.ts) reads the OpenCurser lock file on every
-// request, so any OpenCurser restart is handled transparently — no stale URLs.
+// The relay proxies to the T3 Code dev server on the fixed port (3773).
+// No lock file or URL discovery — T3 Code always runs on port 3773.
 const RELAY = '/__design-relay'
 
 export interface CommentPayload {
 	id: string
 	component: string
-	source_file: string
-	source_lines?: [number, number]
-	html: string
-	css_classes: string[]
-	computed_styles?: Record<string, string>
-	component_props?: Record<string, unknown>
-	parent?: { component: string; file: string }
+	'source file': string
 	comment: string
-	references?: Array<{ name: string; source_file: string; source_lines?: [number, number] }>
-	timestamp: string
 }
 
 const diLog = import.meta.env.DEV

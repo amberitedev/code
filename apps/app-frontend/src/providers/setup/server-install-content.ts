@@ -383,20 +383,20 @@ export function createServerInstallContent(opts: {
 				return
 			}
 
-		if (sid !== prevSid) {
-			serverContentProjectIds.value = new Set()
-			serverContentInstallKeys.value = new Set()
-			queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
-			if (isCoreContext.value) {
-				try {
-					await fetchCoreServerData(sid)
-					await refreshCoreInstalledContent(sid)
-				} catch (err) {
-					handleError(err as Error)
+			if (sid !== prevSid) {
+				serverContentProjectIds.value = new Set()
+				serverContentInstallKeys.value = new Set()
+				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
+				if (isCoreContext.value) {
+					try {
+						await fetchCoreServerData(sid)
+						await refreshCoreInstalledContent(sid)
+					} catch (err) {
+						handleError(err as Error)
+					}
+					return
 				}
-				return
-			}
-			try {
+				try {
 					serverContextServerData.value = await client.archon.servers_v0.get(sid)
 				} catch (err) {
 					handleError(err as Error)

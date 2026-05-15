@@ -191,22 +191,37 @@ fn main() {
             .min_inner_size(1100.0, 700.0)
             .visible(false)
             .resizable(true)
-            .decorations(false)
             .zoom_hotkeys_enabled(false)
             .fullscreen(false);
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                builder = builder.decorations(false);
+            }
 
             #[cfg(target_os = "macos")]
             {
                 builder = builder
+                    .decorations(true)
                     .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true);
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(15.0, 22.0));
             }
 
             #[cfg(debug_assertions)]
             {
-                builder = builder.additional_browser_args(
-                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222",
-                );
+                const BASE_BROWSER_ARGS: &str =
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+                let enable_cdp = std::env::var("AMBERITE_ENABLE_CDP")
+                    .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                let browser_args = if enable_cdp {
+                    format!("{BASE_BROWSER_ARGS} --remote-debugging-port=9222")
+                } else {
+                    BASE_BROWSER_ARGS.to_string()
+                };
+
+                builder = builder.additional_browser_args(&browser_args);
             }
 
             builder.build()?;

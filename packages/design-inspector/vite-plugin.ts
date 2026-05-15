@@ -1,44 +1,7 @@
-import { readFileSync } from 'node:fs'
 import http from 'node:http'
-import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { parse as vueParse } from '@vue/compiler-dom'
 import type { Plugin, ViteDevServer } from 'vite'
-
-// ---------------------------------------------------------------------------
-// Lock file helpers
-// ---------------------------------------------------------------------------
-
-function readLockFile(): { url: string; auth: string } | null {
-	try {
-		const raw = readFileSync(join(tmpdir(), 'opencurser-server.json'), 'utf8')
-		const parsed = JSON.parse(raw)
-		if (typeof parsed.url === 'string') return parsed
-	} catch {}
-	return null
-}
-
-function fetchActiveSessionId(target: string, auth: string): Promise<string | null> {
-	return new Promise((resolve) => {
-		const url = new URL('/design-session/active', target)
-		const reqHeaders: Record<string, string> = { accept: 'application/json' }
-		if (auth) reqHeaders['authorization'] = auth
-
-		const req = http.request(url, { method: 'GET', headers: reqHeaders }, (res) => {
-			let body = ''
-			res.on('data', (chunk: Buffer) => { body += chunk.toString() })
-			res.on('end', () => {
-				try {
-					const data = JSON.parse(body) as { sessionID?: string } | null
-					resolve(data?.sessionID ?? null)
-				} catch { resolve(null) }
-			})
-		})
-		req.setTimeout(500, () => { req.destroy(); resolve(null) })
-		req.on('error', () => resolve(null))
-		req.end()
-	})
-}
 
 // ---------------------------------------------------------------------------
 // data-v-inspector injection
@@ -123,30 +86,37 @@ function dataVInspectorTransformPlugin(): Plugin {
 }
 
 // ---------------------------------------------------------------------------
-// Vite plugin: relay
+// Vite plugin: T3 Code relay
+//
+// All design-inspector traffic goes through this proxy at /__design-relay.
+// Targets the T3 Code dev server — port from T3CODE_PORT env var (default 3773).
+// In dev:desktop mode T3 Code runs on 13773; set T3CODE_PORT=13773 accordingly.
+// Path rewrite: /design-comments -> /api/design-comments
+//
+// The port is read lazily (per-request) so that env vars loaded after this
+// module is imported (e.g. from packages/app-lib/.env in vite.config.ts) are
+// picked up correctly.
 // ---------------------------------------------------------------------------
 
 function relayPlugin(): Plugin {
 	return {
-		name: 'amberite-opencurser-relay',
+		name: 'amberite-t3code-relay',
 		configureServer(server: ViteDevServer) {
-			server.middlewares.use('/__design-relay', async (req, res) => {
-				const lock = readLockFile()
-				const target = lock?.url ?? 'http://localhost:4096'
-				const auth = lock?.auth ?? ''
+			server.middlewares.use('/__design-relay', (req, res) => {
+				const port = process.env['T3CODE_PORT'] ?? '3773'
+				const target = `http://localhost:${port}`
+				const rawPath = req.url || '/'
+				const needsApiPrefix = rawPath.startsWith('/design-comments')
+				|| rawPath.startsWith('/components/autocomplete')
+				|| rawPath.startsWith('/files/autocomplete')
+			const destPath = needsApiPrefix ? '/api' + rawPath : rawPath
+				const destUrl = new URL(destPath, target)
 
-				const destUrl = new URL(req.url || '/', target)
 				const headers: Record<string, string | string[]> = {
 					...(req.headers as Record<string, string | string[]>),
 					host: destUrl.host,
 				}
 				delete headers['connection']
-				if (auth) headers['authorization'] = auth
-
-				if (req.url === '/design-comments' && req.method === 'POST') {
-					const sessionID = await fetchActiveSessionId(target, auth)
-					if (sessionID) headers['x-opencode-session-id'] = sessionID
-				}
 
 				const proxyReq = http.request(destUrl, { method: req.method, headers }, (proxyRes) => {
 					const resHeaders = { ...proxyRes.headers }
@@ -158,12 +128,12 @@ function relayPlugin(): Plugin {
 				proxyReq.setTimeout(5000, () => {
 					proxyReq.destroy()
 					if (!res.headersSent) res.writeHead(504, { 'content-type': 'text/plain' })
-					res.end('OpenCurser timeout')
+					res.end('T3 Code timeout')
 				})
 
 				proxyReq.on('error', () => {
 					if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' })
-					res.end('OpenCurser unreachable')
+					res.end('T3 Code unreachable')
 				})
 
 				req.pipe(proxyReq, { end: true })
@@ -177,6 +147,8 @@ function relayPlugin(): Plugin {
 // ---------------------------------------------------------------------------
 
 export function designInspectorVitePlugin(): Plugin[] {
+	if (process.env.VITE_ENABLE_DESIGN_INSPECTOR !== 'true') return []
+
 	return [
 		relayPlugin(),
 		dataVInspectorTransformPlugin(),

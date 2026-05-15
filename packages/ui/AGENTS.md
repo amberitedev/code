@@ -28,14 +28,14 @@ The most active area for app-frontend work. Two categories:
 
 **`shared/`** — Self-contained layout modules. Each subfolder is its own unit with `layout.vue`, `components/`, `composables/`, `providers/`, and `types.ts`:
 
-| Module | What it is |
-|---|---|
-| `browse-tab/` | Browse/discover content tab |
-| `console/` | Terminal console layout |
-| `content-tab/` | Content/mods tab |
-| `files-tab/` | File manager tab |
-| `installation-settings/` | Instance install settings |
-| `server-settings/` | Server settings panel |
+| Module                   | What it is                  |
+| ------------------------ | --------------------------- |
+| `browse-tab/`            | Browse/discover content tab |
+| `console/`               | Terminal console layout     |
+| `content-tab/`           | Content/mods tab            |
+| `files-tab/`             | File manager tab            |
+| `installation-settings/` | Instance install settings   |
+| `server-settings/`       | Server settings panel       |
 
 **`wrapped/`** — Full page implementations consumed by both frontends. `hosting/manage/` contains `ServersManageRootLayout` and all server management sub-pages (`overview.vue`, `content.vue`, `files.vue`, `backups.vue`, `root.vue`). This is what `apps/app-frontend/src/pages/server/Index.vue` renders.
 
@@ -49,12 +49,12 @@ All contexts use `createContext` from `providers/create-context.ts` — returns 
 
 Key providers consumed by `apps/app-frontend`:
 
-| Provider | File | What it provides |
-|---|---|---|
-| `provideCoreClient` / `injectCoreClient` | `core-client.ts` | `CoreApiClient` instance |
-| `provideAuth` / `injectAuth` | `auth.ts` | Logged-in user state |
-| `provideModrinthClient` / `injectModrinthClient` | `api-client.ts` | Modrinth API client |
-| `provideNotificationManager` / `injectNotificationManager` | `web-notifications.ts` | Toast notifications |
+| Provider                                                   | File                   | What it provides         |
+| ---------------------------------------------------------- | ---------------------- | ------------------------ |
+| `provideCoreClient` / `injectCoreClient`                   | `core-client.ts`       | `CoreApiClient` instance |
+| `provideAuth` / `injectAuth`                               | `auth.ts`              | Logged-in user state     |
+| `provideModrinthClient` / `injectModrinthClient`           | `api-client.ts`        | Modrinth API client      |
+| `provideNotificationManager` / `injectNotificationManager` | `web-notifications.ts` | Toast notifications      |
 
 ---
 
@@ -64,13 +64,13 @@ Tailwind preset: `packages/tooling-config/tailwind/tailwind-preset.ts`. CSS cust
 
 **Backgrounds — always `surface-*`, never aliased `bg-*` color variables:**
 
-| Token | Usage |
-|---|---|
-| `bg-surface-1` | Deepest background |
-| `bg-surface-2` | Secondary panels, even rows |
+| Token          | Usage                          |
+| -------------- | ------------------------------ |
+| `bg-surface-1` | Deepest background             |
+| `bg-surface-2` | Secondary panels, even rows    |
 | `bg-surface-3` | Headers, floating bars, inputs |
-| `bg-surface-4` | Cards, elevated surfaces |
-| `bg-surface-5` | Borders, dividers |
+| `bg-surface-4` | Cards, elevated surfaces       |
+| `bg-surface-5` | Borders, dividers              |
 
 **Text:** `text-contrast` (headings) · `text-primary` (body) · `text-secondary` (reduced emphasis)
 
@@ -83,8 +83,10 @@ Tailwind preset: `packages/tooling-config/tailwind/tailwind-preset.ts`. CSS cust
 - **Adding a component:** must add/update a matching story in `src/stories/`.
 - **`@click` multi-statement:** semicolons on one line only — newline-separated statements cause a Vue template parse error:
   ```vue
-  <!-- BAD -->  @click="foo = true $emit('bar')"
-  <!-- GOOD --> @click="foo = true; $emit('bar')"
+  <!-- BAD -->
+  @click="foo = true $emit('bar')"
+  <!-- GOOD -->
+  @click="foo = true; $emit('bar')"
   ```
 - **Platform-agnostic:** no Tauri imports, no `apps/app-lib` imports anywhere in this package. Platform-specific behavior goes through DI.
 - **`flows/`** in `components/` is distinct from `layouts/shared/` — flows are modal/step-through sequences, not page layouts.
