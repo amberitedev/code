@@ -26,7 +26,7 @@ src/
 
 ## Key Relationships
 
-- **`adapters/desktop.ts`** — singleton `PlatformAdapter` from `@amberite/api-lib`. Bridges Supabase auth, Tauri HTTP fetch (bypasses WebView CORS), and `invoke()` calls to Core. Every page that talks to Core creates a `CoreApiClient` with this adapter.
+- **`adapters/desktop.ts`** — singleton `PlatformAdapter` from `@amberite/api-lib`. Bridges OS keychain session storage, the app-launched Core setup secret, Convex URL, Tauri HTTP fetch (bypasses WebView CORS), and `invoke()` calls to Core. Every page that talks to Core creates a `CoreApiClient` with this adapter.
 - **`@amberite/api-lib`** — provides `CoreApiClient` and `PlatformAdapter` types. Used by pages that need Core API access.
 - **`@modrinth/ui`** — shared component library. Server management UI (`ServersManageRootLayout`) lives here, not in this package. See `packages/ui/AGENTS.md`.
 - **`packages/app-lib/`** — provides Tauri commands. `.env` for this app is read from `packages/app-lib/.env` (loaded manually in `vite.config.ts`), not from this directory.
@@ -41,7 +41,7 @@ src/
 | Core-managed server pages  | `pages/server/`               |
 | Core-synced instance pages | `pages/synced/`               |
 | Hosted server management   | `pages/hosting/manage/`       |
-| Tauri/Supabase/Core bridge | `adapters/desktop.ts`         |
+| Tauri/Convex/Core bridge   | `adapters/desktop.ts`         |
 | Server install providers   | `providers/server-install.ts` |
 
 Everything else (`Browse`, `Library`, `Project`, `Instance`, `Skins`, `Worlds`) is inherited from Modrinth.
@@ -53,6 +53,7 @@ Everything else (`Browse`, `Library`, `Project`, `Instance`, `Skins`, `Worlds`) 
 - Dev server must run on port **1420** — Tauri requires a fixed port (`vite.config.ts:73`).
 - Env vars are loaded from `packages/app-lib/.env`, not from this directory. If env vars are missing at runtime, check there.
 - Env prefix: `VITE_`, `TAURI_`, `MODRINTH_` (see `vite.config.ts:94`).
+- Desktop JWT storage is not `localStorage`; use `PlatformAdapter.getCurrentJwt()` / `setCurrentJwt()` so the Tauri OS keychain bridge is used.
 - `synced/` pages mostly re-export views from `instance/` and `server/` — see `pages/synced/index.js`.
 
 ---

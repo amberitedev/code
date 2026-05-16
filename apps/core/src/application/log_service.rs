@@ -13,17 +13,25 @@ pub struct LogEntry {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LogError {
-    #[error("io: {0}")] Io(#[from] std::io::Error),
-    #[error("db: {0}")] Db(#[from] sqlx::Error),
-    #[error("not found")] NotFound,
-    #[error("invalid path")] InvalidPath,
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("db: {0}")]
+    Db(#[from] sqlx::Error),
+    #[error("not found")]
+    NotFound,
+    #[error("invalid path")]
+    InvalidPath,
 }
 
-async fn instance_data_dir(state: &Arc<AppState>, instance_id: &str) -> Result<PathBuf, LogError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT data_dir FROM instances WHERE id = ?")
-        .bind(instance_id)
-        .fetch_optional(&state.pool)
-        .await?;
+async fn instance_data_dir(
+    state: &Arc<AppState>,
+    instance_id: &str,
+) -> Result<PathBuf, LogError> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT data_dir FROM instances WHERE id = ?")
+            .bind(instance_id)
+            .fetch_optional(&state.pool)
+            .await?;
     let (dir,) = row.ok_or(LogError::NotFound)?;
     Ok(PathBuf::from(dir))
 }
@@ -55,7 +63,10 @@ async fn scan_dir(dir: PathBuf, extensions: &[&str]) -> Vec<LogEntry> {
     entries
 }
 
-pub async fn list_logs(state: &Arc<AppState>, instance_id: &str) -> Result<Vec<LogEntry>, LogError> {
+pub async fn list_logs(
+    state: &Arc<AppState>,
+    instance_id: &str,
+) -> Result<Vec<LogEntry>, LogError> {
     let dir = instance_data_dir(state, instance_id).await?;
     Ok(scan_dir(dir.join("logs"), &[".log", ".log.gz"]).await)
 }
@@ -66,7 +77,10 @@ pub async fn resolve_log(
     instance_id: &str,
     filename: &str,
 ) -> Result<(PathBuf, bool), LogError> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+    if filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
         return Err(LogError::InvalidPath);
     }
     if !filename.ends_with(".log") && !filename.ends_with(".log.gz") {
@@ -93,7 +107,10 @@ pub async fn resolve_crash(
     instance_id: &str,
     filename: &str,
 ) -> Result<PathBuf, LogError> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+    if filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
         return Err(LogError::InvalidPath);
     }
     if !filename.ends_with(".txt") {

@@ -119,7 +119,10 @@ pub struct MemorySettings {
 
 impl Default for MemorySettings {
     fn default() -> Self {
-        Self { min_mb: 512, max_mb: 4096 }
+        Self {
+            min_mb: 512,
+            max_mb: 4096,
+        }
     }
 }
 

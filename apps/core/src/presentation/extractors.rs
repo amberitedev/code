@@ -35,7 +35,7 @@ fn dev_claims() -> Claims {
     }
 }
 
-/// Axum extractor that validates a Supabase JWT and yields its claims.
+/// Axum extractor that validates an owner JWT and yields its claims.
 pub struct AuthUser(pub Claims);
 
 #[async_trait]
@@ -56,7 +56,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         })?;
 
         let jwks_url = state.jwks_url().await.ok_or_else(|| {
-            ApiError::Unauthorized("Core not paired with Supabase".into())
+            ApiError::Unauthorized("Core is not paired".into())
         })?;
 
         let claims = state
@@ -66,7 +66,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .map_err(|e| ApiError::Unauthorized(e.to_string()))?;
 
         let owner_user_id = state.owner_user_id().await.ok_or_else(|| {
-            ApiError::Unauthorized("Core not paired with Supabase".into())
+            ApiError::Unauthorized("Core is not paired".into())
         })?;
         if claims.sub != owner_user_id {
             return Err(ApiError::Forbidden(

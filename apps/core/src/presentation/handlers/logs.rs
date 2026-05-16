@@ -11,7 +11,9 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        log_service::{list_crash_reports, list_logs, resolve_crash, resolve_log},
+        log_service::{
+            list_crash_reports, list_logs, resolve_crash, resolve_log,
+        },
         state::AppState,
     },
     presentation::{error::ApiError, extractors::AuthUser},
@@ -42,14 +44,19 @@ pub async fn read_log_handler(
     if is_gzipped {
         builder = builder
             .header(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"))
-            .header(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+            .header(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/plain"),
+            );
     } else {
         builder = builder.header(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/plain; charset=utf-8"),
         );
     }
-    builder.body(Body::from(data)).map_err(|e| ApiError::Internal(e.to_string()))
+    builder
+        .body(Body::from(data))
+        .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
 /// GET /instances/:id/crash-reports

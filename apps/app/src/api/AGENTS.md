@@ -27,7 +27,7 @@ Frontend does **not** use these commands to talk to `apps/core`. Core communicat
 | `minecraft_skins` | `plugin:minecraft-skins\|*` | Skin management |
 | `ads` | `plugin:ads\|*` | Ad integration (`ads-init.js` bundled here) |
 | `utils` | `plugin:utils\|*` | Deep link / URL command handler |
-| `amberite/` | `plugin:amberite\|*` | Core bridge — only 4 commands (see below) |
+| `amberite/` | `plugin:amberite\|*` | Core bridge — session, setup-secret, health, and URL helpers (see below) |
 | `oauth_utils/` | *(pub crate only)* | OAuth auth-code reply server, used by `auth` and `mr_auth` |
 
 ## Module-Specific Gotchas
@@ -42,6 +42,6 @@ Frontend does **not** use these commands to talk to `apps/core`. Core communicat
 
 **`process`** — `profile_run` returns `ProcessMetadata`, not a handle. Monitor the running process via `listen("process")` and `listen("log")` Tauri events, not the return value.
 
-**`amberite/`** — Only 4 commands: `ping`, `get_local_core_token`, `is_core_running`, `core_get_url`. All actual Core API calls bypass this and go via `tauriFetch` directly. Do not add per-endpoint proxies here.
+**`amberite/`** — Commands: `ping`, `get_current_jwt`, `set_current_jwt`, `clear_current_jwt`, `get_local_setup_secret`, `is_core_running`, `core_get_url`. All actual Core API calls bypass this and go via `tauriFetch` directly. Do not add per-endpoint proxies here.
 
 **`oauth_utils/`** — `pub(crate)` only. Do not expose further.

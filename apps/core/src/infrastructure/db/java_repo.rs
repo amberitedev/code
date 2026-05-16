@@ -31,13 +31,14 @@ impl JavaStore for JavaRepo {
     }
 
     async fn find_by_version(&self, version: u32) -> Option<PathBuf> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT path FROM java_installations WHERE version = ?")
-                .bind(version as i64)
-                .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten();
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT path FROM java_installations WHERE version = ?",
+        )
+        .bind(version as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten();
         row.map(|(p,)| PathBuf::from(p))
     }
 
@@ -48,7 +49,10 @@ impl JavaStore for JavaRepo {
                 .await
                 .unwrap_or_default();
         rows.into_iter()
-            .map(|(v, p)| JavaInstall { version: v as u32, path: PathBuf::from(p) })
+            .map(|(v, p)| JavaInstall {
+                version: v as u32,
+                path: PathBuf::from(p),
+            })
             .collect()
     }
 }

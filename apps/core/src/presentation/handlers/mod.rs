@@ -1,7 +1,7 @@
+pub mod backups;
 pub mod console;
 pub mod diagnostics;
 pub mod fs;
-pub mod backups;
 pub mod instance_control;
 pub mod instances;
 pub mod logs;
@@ -9,5 +9,6 @@ pub mod macros;
 pub mod modpack;
 pub mod mods;
 pub mod properties;
+pub mod relay;
 pub mod setup;
 pub mod stats;

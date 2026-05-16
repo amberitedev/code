@@ -1,4 +1,7 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use clap::{Parser, Subcommand};
 use tracing::info;
@@ -29,7 +32,7 @@ enum Command {
     Migrate,
     /// Print the version string and exit.
     Version,
-    /// Remove pairing data so Core can be re-paired with a new Supabase project.
+    /// Remove pairing data so Core can be re-paired.
     /// The next `run` will generate a fresh pairing code.
     ResetPairing,
 }
@@ -60,15 +63,19 @@ async fn main() -> color_eyre::eyre::Result<()> {
             let db_path = config.data_dir.join("data.db");
             let pool = infrastructure::db::connect(&db_path).await?;
             sqlx::migrate!("./migrations").run(&pool).await?;
-            let paired: bool =
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM core_config")
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap_or(0)
-                    > 0;
+            let paired: bool = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM core_config",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0)
+                > 0;
             println!("Config  : OK (data_dir = {})", config.data_dir.display());
             println!("Database: OK ({})", db_path.display());
-            println!("Paired  : {}", if paired { "yes" } else { "no — run to pair" });
+            println!(
+                "Paired  : {}",
+                if paired { "yes" } else { "no — run to pair" }
+            );
         }
         Command::ResetPairing => {
             init_tracing();
@@ -78,7 +85,9 @@ async fn main() -> color_eyre::eyre::Result<()> {
             sqlx::query("DELETE FROM core_config WHERE id = 1")
                 .execute(&pool)
                 .await?;
-            println!("Pairing reset. Restart Core to generate a new pairing code.");
+            println!(
+                "Pairing reset. Restart Core to generate a new pairing code."
+            );
         }
         Command::Run => {
             init_tracing();
@@ -92,7 +101,10 @@ async fn main() -> color_eyre::eyre::Result<()> {
 fn init_tracing() {
     tracing_subscriber::registry()
         .with(fmt::layer())
-        .with(EnvFilter::from_default_env().add_directive("amberite_core=info".parse().unwrap()))
+        .with(
+            EnvFilter::from_default_env()
+                .add_directive("amberite_core=info".parse().unwrap()),
+        )
         .init();
 }
 
@@ -107,14 +119,23 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     let port = config.port;
+    let bind_host = config.bind_host.clone();
     let state = application::state::AppState::new(config, pool).await?;
 
-    tokio::spawn(application::instance_service::restore_instances(Arc::clone(&state)));
+    tokio::spawn(application::instance_service::restore_instances(
+        Arc::clone(&state),
+    ));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
-    tokio::spawn(application::backup_scheduler::run_backup_scheduler(Arc::clone(&state)));
+    tokio::spawn(application::backup_scheduler::run_backup_scheduler(
+        Arc::clone(&state),
+    ));
+    tokio::spawn(application::pairing_service::register_pairing_core(
+        Arc::clone(&state),
+    ));
 
     let router = presentation::router::create_router(state);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let host: IpAddr = bind_host.parse()?;
+    let addr = SocketAddr::new(host, port);
 
     info!("Amberite Core listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -128,6 +149,8 @@ async fn gc_ws_tickets(state: Arc<application::state::AppState>) {
     use std::time::Instant;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
-        state.ws_tickets.retain(|_, t| t.expires_at > Instant::now());
+        state
+            .ws_tickets
+            .retain(|_, t| t.expires_at > Instant::now());
     }
 }

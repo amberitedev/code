@@ -25,7 +25,10 @@ async fn list_instances_shows_created() {
     let instances = body["instances"].as_array().unwrap();
     assert_eq!(instances.len(), 3);
     // Verify the actual IDs are present — not just any 3 items.
-    let returned_ids: Vec<&str> = instances.iter().map(|v| v["id"].as_str().unwrap()).collect();
+    let returned_ids: Vec<&str> = instances
+        .iter()
+        .map(|v| v["id"].as_str().unwrap())
+        .collect();
     for id in &created_ids {
         assert!(
             returned_ids.contains(&id.as_str()),
@@ -52,7 +55,11 @@ async fn create_instance_returns_id() {
 
     // Validate UUID format: 8-4-4-4-12 hex groups.
     let parts: Vec<&str> = id.split('-').collect();
-    assert_eq!(parts.len(), 5, "id must be UUID (5 hyphen-separated groups): {id}");
+    assert_eq!(
+        parts.len(),
+        5,
+        "id must be UUID (5 hyphen-separated groups): {id}"
+    );
     assert_eq!(parts[0].len(), 8, "UUID group 0 must be 8 chars: {id}");
     assert_eq!(parts[1].len(), 4, "UUID group 1 must be 4 chars: {id}");
     assert_eq!(parts[2].len(), 4, "UUID group 2 must be 4 chars: {id}");
@@ -69,7 +76,11 @@ async fn create_instance_returns_id() {
         .json()
         .await
         .unwrap();
-    assert_eq!(fetched["id"].as_str().unwrap(), id, "GET must return same ID as create");
+    assert_eq!(
+        fetched["id"].as_str().unwrap(),
+        id,
+        "GET must return same ID as create"
+    );
 }
 
 #[tokio::test]
@@ -126,7 +137,9 @@ async fn get_instance_returns_record() {
     assert_eq!(body["memory"]["max_mb"], 1024);
 
     // data_dir must embed the instance UUID (proves correct path segregation).
-    let data_dir = body["data_dir"].as_str().expect("data_dir must be a string");
+    let data_dir = body["data_dir"]
+        .as_str()
+        .expect("data_dir must be a string");
     assert!(
         data_dir.contains(&id),
         "data_dir must contain the instance UUID; got: {data_dir}"
@@ -187,7 +200,11 @@ async fn delete_running_instance_returns_409() {
         .send()
         .await
         .unwrap();
-    assert_eq!(del.status(), 409, "deleting a running instance must return 409 Conflict");
+    assert_eq!(
+        del.status(),
+        409,
+        "deleting a running instance must return 409 Conflict"
+    );
     let body: serde_json::Value = del.json().await.unwrap();
     assert!(
         body["error"].as_str().unwrap().contains("stop"),
@@ -206,7 +223,11 @@ async fn delete_instance_invalid_uuid_returns_400() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 400, "SEC-04 fixed: non-UUID path must return 400");
+    assert_eq!(
+        res.status(),
+        400,
+        "SEC-04 fixed: non-UUID path must return 400"
+    );
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["error"].is_string());
 }

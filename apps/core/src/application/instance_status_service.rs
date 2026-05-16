@@ -4,10 +4,7 @@ use tokio::time::{sleep, Duration};
 use tracing::warn;
 
 use crate::{
-    application::{
-        instance_service::InstanceError,
-        state::AppState,
-    },
+    application::{instance_service::InstanceError, state::AppState},
     domain::instance::{InstanceId, InstanceStatus},
     infrastructure::{
         minecraft::{
@@ -32,14 +29,14 @@ pub async fn start_instance(
     // TODO(networking/upnp): Request UPnP port mapping on router at instance start
     // Use the igd2 crate
 
-    let record = state.instance_store.get(id).await
-        .map_err(|e| match e {
-            StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-            other => InstanceError::Store(other),
-        })?;
+    let record = state.instance_store.get(id).await.map_err(|e| match e {
+        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+        other => InstanceError::Store(other),
+    })?;
 
     let req_java = required_java_version(&record.game_version);
-    let java = find_java_path(state, req_java).await
+    let java = find_java_path(state, req_java)
+        .await
         .unwrap_or_else(|| PathBuf::from("java"));
 
     let data_dir = PathBuf::from(&record.data_dir);
@@ -55,19 +52,37 @@ pub async fn start_instance(
         }
         Some(LaunchStyle::Jar { jar }) => {
             let jar_path = data_dir.join(&jar);
-            vec![mem_min, mem_max, "-jar".to_string(), jar_path.display().to_string(), "--nogui".to_string()]
+            vec![
+                mem_min,
+                mem_max,
+                "-jar".to_string(),
+                jar_path.display().to_string(),
+                "--nogui".to_string(),
+            ]
         }
         None => {
             // Fallback: look for server.jar (legacy instances without launch.json)
             let jar = data_dir.join("server.jar");
-            vec![mem_min, mem_max, "-jar".to_string(), jar.display().to_string(), "--nogui".to_string()]
+            vec![
+                mem_min,
+                mem_max,
+                "-jar".to_string(),
+                jar.display().to_string(),
+                "--nogui".to_string(),
+            ]
         }
     };
 
     let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let handle = state.spawner
-        .spawn_any(java.to_str().unwrap_or("java"), &args_refs, &data_dir, &[("SERVER_PORT", &record.port.to_string())])
+    let handle = state
+        .spawner
+        .spawn_any(
+            java.to_str().unwrap_or("java"),
+            &args_refs,
+            &data_dir,
+            &[("SERVER_PORT", &record.port.to_string())],
+        )
         .await
         .map_err(|e| InstanceError::Spawn(e.to_string()))?;
 
@@ -78,14 +93,16 @@ pub async fn start_instance(
 }
 
 /// Request graceful stop of a running instance.
-pub async fn stop_instance(state: &Arc<AppState>, id: &InstanceId) -> Result<(), InstanceError> {
+pub async fn stop_instance(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+) -> Result<(), InstanceError> {
     if !state.instances.contains_key(id) {
         // BEH-06: check DB to distinguish "not found" from "offline"
-        state.instance_store.get(id).await
-            .map_err(|e| match e {
-                StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-                other => InstanceError::Store(other),
-            })?;
+        state.instance_store.get(id).await.map_err(|e| match e {
+            StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+            other => InstanceError::Store(other),
+        })?;
         return Err(InstanceError::NotRunning);
     }
     let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
@@ -94,18 +111,23 @@ pub async fn stop_instance(state: &Arc<AppState>, id: &InstanceId) -> Result<(),
 }
 
 /// Force-kill a running instance.
-pub async fn kill_instance(state: &Arc<AppState>, id: &InstanceId) -> Result<(), InstanceError> {
+pub async fn kill_instance(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+) -> Result<(), InstanceError> {
     if !state.instances.contains_key(id) {
         // BEH-06: check DB to distinguish "not found" from "offline"
-        state.instance_store.get(id).await
-            .map_err(|e| match e {
-                StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-                other => InstanceError::Store(other),
-            })?;
+        state.instance_store.get(id).await.map_err(|e| match e {
+            StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+            other => InstanceError::Store(other),
+        })?;
         return Err(InstanceError::NotRunning);
     }
     let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
-    let _ = handle.cmd_tx.send(crate::infrastructure::process::instance_actor::ActorCmd::Kill).await;
+    let _ = handle
+        .cmd_tx
+        .send(crate::infrastructure::process::instance_actor::ActorCmd::Kill)
+        .await;
     Ok(())
 }
 
@@ -117,11 +139,10 @@ pub async fn send_command(
 ) -> Result<(), InstanceError> {
     if !state.instances.contains_key(id) {
         // BEH-06: check DB to distinguish "not found" from "offline"
-        state.instance_store.get(id).await
-            .map_err(|e| match e {
-                StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-                other => InstanceError::Store(other),
-            })?;
+        state.instance_store.get(id).await.map_err(|e| match e {
+            StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+            other => InstanceError::Store(other),
+        })?;
         return Err(InstanceError::NotRunning);
     }
     let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
@@ -154,15 +175,23 @@ pub async fn restart_instance(
     start_instance(state, id).await
 }
 
-pub(crate) async fn set_status(state: &Arc<AppState>, id: &InstanceId, status: InstanceStatus) {
+pub(crate) async fn set_status(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+    status: InstanceStatus,
+) {
     let _ = state.instance_store.update_status(id, status.clone()).await;
-    state.broadcaster.send(crate::domain::event::Event::StatusChanged {
-        instance_id: id.clone(),
-        status,
-    });
+    state
+        .broadcaster
+        .send(crate::domain::event::Event::StatusChanged {
+            instance_id: id.clone(),
+            status,
+        });
 }
 
-async fn find_java_path(state: &Arc<AppState>, version: u32) -> Option<PathBuf> {
+async fn find_java_path(
+    state: &Arc<AppState>,
+    version: u32,
+) -> Option<PathBuf> {
     state.java_store.find_by_version(version).await
 }
-

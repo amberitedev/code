@@ -1,6 +1,6 @@
 # src/application — Services and shared state
 
-Orchestration layer: coordinates domain types with port interfaces. No direct I/O — delegates to `ports` and `infrastructure`. All services receive `&Arc<AppState>`.
+Orchestration layer: coordinates domain types with port interfaces. Most direct I/O is delegated to `ports` and `infrastructure`; `pairing_service` is the current exception because it performs one startup Convex registration through the shared HTTP client. All services receive `&Arc<AppState>`.
 
 ## File structure
 
@@ -13,7 +13,8 @@ application/
   mod_service.rs            — full mod CRUD (list, add from Modrinth, upload, delete, toggle, update)
   modpack_service.rs        — install .mrpack, get/remove manifest
   log_service.rs            — list + read log files and crash reports from data_dir
-  macro_service.rs          — spawn/kill/list Deno macros
+  macro_service.rs          — disabled macro route backing service
+  pairing_service.rs        — register unpaired remote Cores with Convex
   stats_service.rs          — CPU%, RAM, player count, uptime for a running instance
   export_service.rs         — export instance mod list as a .mrpack archive
 ```
@@ -29,12 +30,13 @@ Key fields:
 | `pool` | `SqlitePool` | Raw SQLite pool — kept for direct queries that bypass the port traits (e.g., `mods` table, `core_config`) |
 | `http` | `reqwest::Client` | Shared HTTP client (user-agent `amberite-core/0.1`) used by all outbound requests |
 | `config` | `Config` | Runtime configuration loaded from env vars |
+| `core_id` | `String` | Stable Core UUID loaded from `core_identity`, generated once on first startup |
 | `instances` | `DashMap<InstanceId, InstanceHandle>` | Live running instances — present only while the actor task is alive |
 | `broadcaster` | `EventBroadcaster` | Broadcast channel for instance output + status events |
-| `macro_executor` | `MacroExecutor` | Tracks and kills running Deno macro threads |
-| `jwks_cache` | `JwksCache` | Cached JWKS keys for Supabase RS256 validation |
+| `jwks_cache` | `JwksCache` | Cached JWKS keys for RS256 JWT validation |
 | `ws_tickets` | `DashMap<String, WsTicket>` | Short-lived UUID tokens for WebSocket auth |
 | `pairing_code` | `Mutex<Option<String>>` | Set at startup if unpaired; cleared after successful pairing |
+| `local_setup_secret` | `Mutex<Option<String>>` | One-time secret written to `.setup_secret` for app-launched local pairing |
 | `wrong_pairing_attempts` | `AtomicU32` | Pairing lockout counter (max 5) |
 | `instance_store` | `Arc<dyn InstanceStore>` | SQLite-backed in production |
 | `java_store` | `Arc<dyn JavaStore>` | SQLite-backed in production |
@@ -43,7 +45,9 @@ Key fields:
 
 `AppState::new()` calls `AppState::new_with_spawner()` with `PtySpawner`. Tests use `new_with_spawner(MockSpawner)` to avoid spawning real JVMs.
 
-`jwks_url()` is an async method that queries `core_config` in the DB — it is NOT derived from `Config.supabase_url`. The supabase URL is stored in the DB row written by `POST /setup`, not in the env var.
+`jwks_url()` is an async method that queries `auth_jwks_url` from `core_config` in the DB — it is NOT derived from `Config.convex_url`.
+
+`pairing_service::register_pairing_core` runs once at startup for unpaired Cores when `CONVEX_URL` is set. It registers the current 6-digit code, stable `core_id`, optional `AMBERITE_PUBLIC_URL`, and bind metadata with Convex.
 
 ## instance_service.rs
 
@@ -74,6 +78,8 @@ Launch styles from `launch.json`:
 `stats_service::get_stats`: gets CPU/RAM from `sysinfo` filtered by PID (from `InstanceHandle.pid`), and player count by sending the `"list"` command and listening to the event stream for the response line. Uptime is derived from `InstanceHandle.started_at`.
 
 `export_service::export_modpack`: builds a `.mrpack` ZIP with `modrinth.index.json` listing Modrinth-linked mods and override JARs for untracked files, plus the contents of the instance's `config/` directory as overrides.
+
+`macro_service`: macro execution is intentionally disabled. Routes return a service-unavailable error until the future out-of-process plugin system exists; do not re-add embedded Deno here.
 
 ## Gotchas
 

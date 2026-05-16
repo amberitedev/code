@@ -117,7 +117,11 @@ async fn delete_instance_twice() {
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 404, "second delete of a gone instance must return 404");
+    assert_eq!(
+        second.status(),
+        404,
+        "second delete of a gone instance must return 404"
+    );
 }
 
 /// After deletion, GET /instances/:id must return 404.
@@ -162,11 +166,20 @@ async fn instance_has_all_expected_fields() {
     // Verify all required fields are present and non-null
     assert!(body["id"].is_string(), "missing field: id");
     assert!(body["name"].is_string(), "missing field: name");
-    assert!(body["game_version"].is_string(), "missing field: game_version");
+    assert!(
+        body["game_version"].is_string(),
+        "missing field: game_version"
+    );
     assert!(body["loader"].is_string(), "missing field: loader");
     assert!(body["port"].is_number(), "missing field: port");
-    assert!(body["memory"]["min_mb"].is_number(), "missing field: memory.min_mb");
-    assert!(body["memory"]["max_mb"].is_number(), "missing field: memory.max_mb");
+    assert!(
+        body["memory"]["min_mb"].is_number(),
+        "missing field: memory.min_mb"
+    );
+    assert!(
+        body["memory"]["max_mb"].is_number(),
+        "missing field: memory.max_mb"
+    );
     assert!(body["status"].is_string(), "missing field: status");
     assert!(body["created_at"].is_string(), "missing field: created_at");
 
@@ -179,7 +192,9 @@ async fn instance_has_all_expected_fields() {
     assert_eq!(body["status"], "offline");
 
     // data_dir must contain the instance UUID — proves no path collision between instances.
-    let data_dir = body["data_dir"].as_str().expect("data_dir must be a string");
+    let data_dir = body["data_dir"]
+        .as_str()
+        .expect("data_dir must be a string");
     assert!(
         data_dir.contains(&id),
         "data_dir must embed the instance UUID; got: {data_dir}"
@@ -212,7 +227,10 @@ async fn list_instances_returns_array() {
     assert!(item["id"].is_string(), "list item missing: id");
     assert!(item["name"].is_string(), "list item missing: name");
     assert!(item["status"].is_string(), "list item missing: status");
-    assert!(item["game_version"].is_string(), "list item missing: game_version");
+    assert!(
+        item["game_version"].is_string(),
+        "list item missing: game_version"
+    );
     assert!(item["loader"].is_string(), "list item missing: loader");
     assert!(item["port"].is_number(), "list item missing: port");
 }
@@ -232,20 +250,22 @@ async fn create_two_instances_concurrently() {
     body_b["name"] = json!("server-beta");
 
     let (res_a, res_b) = tokio::join!(
-        app.client
-            .post(app.url("/instances"))
-            .json(&body_a)
-            .send(),
-        app.client
-            .post(app.url("/instances"))
-            .json(&body_b)
-            .send(),
+        app.client.post(app.url("/instances")).json(&body_a).send(),
+        app.client.post(app.url("/instances")).json(&body_b).send(),
     );
 
     let res_a = res_a.unwrap();
     let res_b = res_b.unwrap();
-    assert!(res_a.status().is_success(), "concurrent create A failed: {}", res_a.status());
-    assert!(res_b.status().is_success(), "concurrent create B failed: {}", res_b.status());
+    assert!(
+        res_a.status().is_success(),
+        "concurrent create A failed: {}",
+        res_a.status()
+    );
+    assert!(
+        res_b.status().is_success(),
+        "concurrent create B failed: {}",
+        res_b.status()
+    );
 
     let id_a = res_a.json::<serde_json::Value>().await.unwrap()["id"]
         .as_str()
@@ -261,7 +281,11 @@ async fn create_two_instances_concurrently() {
     let list_res = app.client.get(app.url("/instances")).send().await.unwrap();
     let list: serde_json::Value = list_res.json().await.unwrap();
     let instances = list["instances"].as_array().unwrap();
-    assert_eq!(instances.len(), 2, "both concurrent instances must appear in list");
+    assert_eq!(
+        instances.len(),
+        2,
+        "both concurrent instances must appear in list"
+    );
 
     let ids: Vec<&str> = instances
         .iter()
@@ -271,9 +295,18 @@ async fn create_two_instances_concurrently() {
     assert!(ids.contains(&id_b.as_str()), "server-beta not in list");
 
     // Verify the names match — not just that 2 arbitrary items exist.
-    let names: Vec<&str> = instances.iter().map(|v| v["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"server-alpha"), "server-alpha name missing from list");
-    assert!(names.contains(&"server-beta"), "server-beta name missing from list");
+    let names: Vec<&str> = instances
+        .iter()
+        .map(|v| v["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"server-alpha"),
+        "server-alpha name missing from list"
+    );
+    assert!(
+        names.contains(&"server-beta"),
+        "server-beta name missing from list"
+    );
 }
 
 // ── Auth (prod mode) ──────────────────────────────────────────────────────────

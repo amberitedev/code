@@ -81,7 +81,11 @@ async fn start_instance_twice_returns_409() {
         .send()
         .await
         .unwrap();
-    assert_eq!(r2.status(), 409, "second start must return 409 Already Running");
+    assert_eq!(
+        r2.status(),
+        409,
+        "second start must return 409 Already Running"
+    );
 }
 
 // ── Kill ──────────────────────────────────────────────────────────────────────

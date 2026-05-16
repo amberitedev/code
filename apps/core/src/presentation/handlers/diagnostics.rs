@@ -19,7 +19,9 @@ pub async fn version() -> Json<Value> {
 }
 
 /// GET /java — list detected Java installations (ARCH-08: via JavaStore port).
-pub async fn java_installations(State(state): State<Arc<AppState>>) -> Json<Value> {
+pub async fn java_installations(
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
     let installs = state.java_store.list_all().await;
     let installations: Vec<Value> = installs
         .into_iter()

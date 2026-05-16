@@ -8,8 +8,7 @@
 use std::sync::Arc;
 
 use amberite_core::{
-    application::state::AppState,
-    config::Config,
+    application::state::AppState, config::Config,
     infrastructure::process::mock_spawner::MockSpawner,
     presentation::router::create_router,
 };
@@ -47,9 +46,10 @@ impl TestApp {
     pub async fn spawn_with_mock() -> Self {
         let (pool, data_dir) = Self::db_and_dir().await;
         let config = Self::dev_config(data_dir.path().to_path_buf());
-        let state = AppState::new_with_spawner(config, pool, Arc::new(MockSpawner))
-            .await
-            .unwrap();
+        let state =
+            AppState::new_with_spawner(config, pool, Arc::new(MockSpawner))
+                .await
+                .unwrap();
         Self::start(state, data_dir, None).await
     }
 
@@ -72,10 +72,12 @@ impl TestApp {
     pub async fn spawn_paired() -> Self {
         let (pool, data_dir) = Self::db_and_dir().await;
         sqlx::query(
-            "INSERT INTO core_config (id, supabase_url, owner_user_id, paired_at) \
-             VALUES (1, ?, ?, ?)",
-        )
-        .bind("https://test.supabase.co")
+			"INSERT INTO core_config (id, supabase_url, convex_url, auth_jwks_url, owner_user_id, paired_at) \
+			 VALUES (1, ?, ?, ?, ?, ?)",
+		)
+		.bind("https://test.convex.cloud")
+		.bind("https://test.convex.cloud")
+		.bind("https://auth.test/.well-known/jwks.json")
         .bind("test-owner")
         .bind(chrono::Utc::now().to_rfc3339())
         .execute(&pool)
@@ -83,7 +85,7 @@ impl TestApp {
         .unwrap();
 
         let config = Config {
-            supabase_url: Some("https://test.supabase.co".to_string()),
+            convex_url: Some("https://test.convex.cloud".to_string()),
             ..Self::dev_config(data_dir.path().to_path_buf())
         };
         let state = AppState::new(config, pool).await.unwrap();
@@ -119,14 +121,20 @@ impl TestApp {
     fn dev_config(data_dir: std::path::PathBuf) -> Config {
         Config {
             data_dir,
-            supabase_url: None,
+            convex_url: None,
+            public_url: None,
             port: 0,
+            bind_host: "127.0.0.1".to_string(),
             allowed_origin: "*".to_string(),
             dev_mode: true,
         }
     }
 
-    async fn start(state: Arc<AppState>, data_dir: tempfile::TempDir, pairing_code: Option<String>) -> Self {
+    async fn start(
+        state: Arc<AppState>,
+        data_dir: tempfile::TempDir,
+        pairing_code: Option<String>,
+    ) -> Self {
         let router = create_router(Arc::clone(&state));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -168,10 +176,12 @@ pub async fn create_test_instance(app: &TestApp) -> String {
         .send()
         .await
         .unwrap();
-    assert!(res.status().is_success(), "create_test_instance failed: {}", res.status());
-    res.json::<serde_json::Value>()
-        .await
-        .unwrap()["id"]
+    assert!(
+        res.status().is_success(),
+        "create_test_instance failed: {}",
+        res.status()
+    );
+    res.json::<serde_json::Value>().await.unwrap()["id"]
         .as_str()
         .unwrap()
         .to_string()

@@ -17,6 +17,8 @@ SQLx migration files. Applied automatically on startup via `sqlx::migrate!("./mi
 | `005_fix_instances.sql` | Adds `loader_version TEXT`, `java_version INTEGER`, `updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00'` — columns missed in migration 003 |
 | `006_fix_nulls.sql` | Back-fills NULL sentinels in `instances` for rows that pre-date migration 003 (MIGS-01): sets `game_version='unknown'`, `loader='vanilla'`, `port=25565`, `memory_min=1024`, `memory_max=4096`, `data_dir=''` |
 | `007_backups.sql` | Adds `backups` table (per-instance backup records with lock + trigger fields) and `backup_schedules` table (one row per instance, cron + retain_count) |
+| `008_convex_messaging.sql` | Adds Convex/auth config columns and `core_relay_messages` for Mode 2 Core-as-relay delivery |
+| `009_core_identity.sql` | Adds permanent `core_identity` table and nullable `core_config.core_id` back-reference |
 
 ## Current effective schema
 
@@ -41,8 +43,41 @@ updated_at TEXT NOT NULL
 ```sql
 id INTEGER PRIMARY KEY
 supabase_url TEXT NOT NULL
+convex_url TEXT
+auth_jwks_url TEXT
+auth_audience TEXT NOT NULL DEFAULT 'authenticated'
 owner_user_id TEXT NOT NULL
 paired_at TEXT NOT NULL
+core_id TEXT
+```
+
+`supabase_url` remains for legacy migrated databases; new setup writes `convex_url` and `auth_jwks_url`.
+
+### `core_identity`
+```sql
+id INTEGER PRIMARY KEY CHECK (id = 1)
+core_id TEXT NOT NULL UNIQUE
+created_at TEXT NOT NULL
+```
+
+`core_identity.core_id` is generated once on first startup and survives `reset-pairing`; it is copied into `core_config.core_id` when pairing completes.
+
+### `core_relay_messages`
+```sql
+id TEXT PRIMARY KEY
+type TEXT NOT NULL
+version INTEGER NOT NULL
+sender_id TEXT NOT NULL
+recipient_id TEXT NOT NULL
+payload TEXT NOT NULL
+ack TEXT NOT NULL
+status TEXT NOT NULL DEFAULT 'pending'
+created_at TEXT NOT NULL
+expires_at TEXT NOT NULL
+received_at TEXT
+processed_at TEXT
+result TEXT
+error TEXT
 ```
 
 ### `modpack_manifests`

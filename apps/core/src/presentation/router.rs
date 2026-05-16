@@ -17,7 +17,7 @@ use crate::{
     application::state::AppState,
     presentation::handlers::{
         backups, console, diagnostics, fs, instance_control, instances, logs,
-        macros, modpack, mods, properties, setup, stats,
+        macros, modpack, mods, properties, relay, setup, stats,
     },
 };
 
@@ -33,6 +33,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // First-run pairing
         .route("/setup", post(setup::complete_setup))
         .route("/setup/status", get(setup::setup_status))
+        // Core-local relay (Mode 2)
+        .route("/relay/messages", post(relay::publish))
+        .route("/relay/messages/:recipient_id", get(relay::pending))
+        .route("/relay/messages/:id/ack", post(relay::ack))
+        .route("/relay/messages/:id/complete", post(relay::complete))
         // WebSocket ticket
         .route("/ws-token", post(console::issue_ws_token))
         // Instances CRUD

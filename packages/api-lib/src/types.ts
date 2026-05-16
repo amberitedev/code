@@ -10,6 +10,25 @@ export interface CoreMemory {
 	max_mb: number
 }
 
+export interface CoreSetupStatus {
+	paired: boolean
+	core_id: string
+	dev_mode?: boolean
+}
+
+export interface CoreSetupRequest {
+	code?: string
+	local_setup_secret?: string
+	convex_url: string
+	auth_jwks_url: string
+	owner_user_id: string
+}
+
+export interface CoreSetupResponse {
+	ok: boolean
+	core_id: string
+}
+
 /** Full detail response from GET /instances/:id */
 export interface CoreInstance {
 	id: string

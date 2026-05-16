@@ -31,10 +31,15 @@ pub async fn resolve_jar(
     match loader {
         ModLoader::Vanilla => resolve_vanilla(http, game_version).await,
         ModLoader::Paper => resolve_paper(http, game_version).await,
-        ModLoader::Fabric => resolve_fabric(http, game_version, loader_version).await,
+        ModLoader::Fabric => {
+            resolve_fabric(http, game_version, loader_version).await
+        }
         ModLoader::Quilt | ModLoader::Forge | ModLoader::NeoForge => {
             // These loaders use the installer path in server_jar.rs.
-            Err(FlavourError::Unsupported(loader.to_string(), game_version.to_string()))
+            Err(FlavourError::Unsupported(
+                loader.to_string(),
+                game_version.to_string(),
+            ))
         }
     }
 }
@@ -68,13 +73,23 @@ struct DownloadInfo {
     sha1: String,
 }
 
-async fn resolve_vanilla(http: &reqwest::Client, game_version: &str) -> Result<JarInfo, FlavourError> {
+async fn resolve_vanilla(
+    http: &reqwest::Client,
+    game_version: &str,
+) -> Result<JarInfo, FlavourError> {
     let manifest: VersionManifest = http
         .get("https://launchermeta.mojang.com/mc/game/version_manifest.json")
-        .send().await?.json().await?;
-    let entry = manifest.versions.iter()
+        .send()
+        .await?
+        .json()
+        .await?;
+    let entry = manifest
+        .versions
+        .iter()
         .find(|v| v.id == game_version)
-        .ok_or_else(|| FlavourError::Unsupported("vanilla".into(), game_version.into()))?;
+        .ok_or_else(|| {
+            FlavourError::Unsupported("vanilla".into(), game_version.into())
+        })?;
     let meta: VersionMeta = http.get(&entry.url).send().await?.json().await?;
     Ok(JarInfo {
         url: meta.downloads.server.url,
@@ -107,22 +122,39 @@ struct PaperDownload {
     name: String,
 }
 
-async fn resolve_paper(http: &reqwest::Client, game_version: &str) -> Result<JarInfo, FlavourError> {
+async fn resolve_paper(
+    http: &reqwest::Client,
+    game_version: &str,
+) -> Result<JarInfo, FlavourError> {
     let builds_url = format!(
         "https://api.papermc.io/v2/projects/paper/versions/{game_version}/builds"
     );
-    let resp: PaperBuildsResponse = http.get(&builds_url).send().await?.error_for_status()?.json().await?;
+    let resp: PaperBuildsResponse = http
+        .get(&builds_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
     // Pick last build with channel = "default" (stable releases only)
-    let entry = resp.builds.iter()
+    let entry = resp
+        .builds
+        .iter()
         .filter(|b| b.channel == "default")
         .last()
-        .ok_or_else(|| FlavourError::Unsupported("paper".into(), game_version.into()))?;
+        .ok_or_else(|| {
+            FlavourError::Unsupported("paper".into(), game_version.into())
+        })?;
     let build = entry.build;
     let filename = entry.downloads.application.name.clone();
     let url = format!(
         "https://api.papermc.io/v2/projects/paper/versions/{game_version}/builds/{build}/downloads/{filename}"
     );
-    Ok(JarInfo { url, filename, sha1: None })
+    Ok(JarInfo {
+        url,
+        filename,
+        sha1: None,
+    })
 }
 
 // ---- Fabric ----
@@ -142,10 +174,17 @@ async fn resolve_fabric(
     } else {
         let versions: Vec<FabricLoaderVersion> = http
             .get("https://meta.fabricmc.net/v2/versions/loader")
-            .send().await?.json().await?;
-        versions.first()
-            .ok_or_else(|| FlavourError::Unsupported("fabric".into(), game_version.into()))?
-            .version.clone()
+            .send()
+            .await?
+            .json()
+            .await?;
+        versions
+            .first()
+            .ok_or_else(|| {
+                FlavourError::Unsupported("fabric".into(), game_version.into())
+            })?
+            .version
+            .clone()
     };
     // Fabric provides a pre-built server-launch JAR
     let url = format!(

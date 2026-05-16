@@ -21,7 +21,10 @@ async fn get_properties_existing_instance_returns_200() {
 
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["properties"].is_object(), "response must have a 'properties' object");
+    assert!(
+        body["properties"].is_object(),
+        "response must have a 'properties' object"
+    );
 }
 
 /// The initial properties file must include the `server-port` key.
@@ -39,7 +42,9 @@ async fn get_properties_contains_server_port() {
 
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    let props = body["properties"].as_object().expect("properties must be an object");
+    let props = body["properties"]
+        .as_object()
+        .expect("properties must be an object");
     assert!(
         props.contains_key("server-port"),
         "server-port must be present in initial properties; got keys: {:?}",
@@ -53,12 +58,14 @@ async fn get_properties_contains_server_port() {
 async fn get_properties_nonexistent_instance_returns_404() {
     let app = common::TestApp::spawn().await;
 
-    let res = app
-        .client
-        .get(app.url("/instances/00000000-0000-0000-0000-000000000000/properties"))
-        .send()
-        .await
-        .unwrap();
+    let res =
+        app.client
+            .get(app.url(
+                "/instances/00000000-0000-0000-0000-000000000000/properties",
+            ))
+            .send()
+            .await
+            .unwrap();
 
     assert_eq!(res.status(), 404);
 }
@@ -98,7 +105,11 @@ async fn patch_properties_valid_key_returns_200() {
 
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["ok"].as_bool(), Some(true), "response must have ok=true; got: {body:?}");
+    assert_eq!(
+        body["ok"].as_bool(),
+        Some(true),
+        "response must have ok=true; got: {body:?}"
+    );
 }
 
 /// After a PATCH, GET should reflect the new value.
@@ -136,13 +147,15 @@ async fn patch_properties_value_is_persisted() {
 async fn patch_properties_nonexistent_instance_returns_404() {
     let app = common::TestApp::spawn().await;
 
-    let res = app
-        .client
-        .patch(app.url("/instances/00000000-0000-0000-0000-000000000000/properties"))
-        .json(&json!({ "max-players": "10" }))
-        .send()
-        .await
-        .unwrap();
+    let res =
+        app.client
+            .patch(app.url(
+                "/instances/00000000-0000-0000-0000-000000000000/properties",
+            ))
+            .json(&json!({ "max-players": "10" }))
+            .send()
+            .await
+            .unwrap();
 
     assert_eq!(res.status(), 404);
 }
@@ -185,10 +198,22 @@ async fn stats_offline_instance_returns_200_with_nulls() {
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
     // All fields are null for an offline instance.
-    assert!(body["cpu_percent"].is_null(), "cpu_percent must be null for offline instance");
-    assert!(body["memory_mb"].is_null(), "memory_mb must be null for offline instance");
-    assert!(body["player_count"].is_null(), "player_count must be null for offline instance");
-    assert!(body["uptime_seconds"].is_null(), "uptime_seconds must be null for offline instance");
+    assert!(
+        body["cpu_percent"].is_null(),
+        "cpu_percent must be null for offline instance"
+    );
+    assert!(
+        body["memory_mb"].is_null(),
+        "memory_mb must be null for offline instance"
+    );
+    assert!(
+        body["player_count"].is_null(),
+        "player_count must be null for offline instance"
+    );
+    assert!(
+        body["uptime_seconds"].is_null(),
+        "uptime_seconds must be null for offline instance"
+    );
 }
 
 /// Stats for a nonexistent instance (valid UUID, no DB row) returns 404.

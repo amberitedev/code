@@ -1,0 +1,13 @@
+{
+	"name": "@amberite/convex",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"dev": "npx convex dev"
+	},
+	"dependencies": {
+		"@auth/core": "0.37.0",
+		"@convex-dev/auth": "^0.0.91",
+		"convex": "^1.21.0"
+	}
+}

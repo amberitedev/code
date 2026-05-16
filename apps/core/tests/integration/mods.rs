@@ -132,12 +132,18 @@ async fn upload_mod_then_list_shows_file() {
         .unwrap();
     let mods = list["mods"].as_array().unwrap();
     assert_eq!(mods.len(), 1, "uploaded mod must appear in list");
-    let filenames: Vec<&str> = mods.iter().map(|m| m["filename"].as_str().unwrap()).collect();
+    let filenames: Vec<&str> = mods
+        .iter()
+        .map(|m| m["filename"].as_str().unwrap())
+        .collect();
     assert!(
         filenames.contains(&"my-mod.jar"),
         "my-mod.jar not in mod list: {filenames:?}"
     );
-    assert_eq!(mods[0]["enabled"], true, "freshly uploaded mod must be enabled");
+    assert_eq!(
+        mods[0]["enabled"], true,
+        "freshly uploaded mod must be enabled"
+    );
 }
 
 // ── delete_mod ────────────────────────────────────────────────────────────────

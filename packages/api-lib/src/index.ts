@@ -17,11 +17,14 @@ export type {
 	CoreBackupScheduleBody,
 	UploadHandle,
 	CoreWsFrame,
+	CoreSetupStatus,
+	CoreSetupRequest,
+	CoreSetupResponse,
 } from './types'
 
 export { CoreApiClient } from './client'
 export { CoreWsConnection } from './ws'
-export type { PlatformAdapter } from './adapter'
+export type { PlatformAdapter, PersistentQueueStore, QueuedMessage } from './adapter'
 export type { CoreCallContext } from './context'
 export {
 	AmberiteApiError,
@@ -34,14 +37,20 @@ export {
 export { CoreConnectionMonitor, type ConnectionState } from './monitor'
 export {
 	publishMessage,
+	pendingMessages,
 	writeReceipt,
 	writeResult,
 	waitForReceipt,
 	waitForResult,
-	subscribeToMessages,
-	type RelayMessage,
-	type MessageDirection,
+	heartbeatCore,
+	corePresence,
+	messageDefinitions,
+	type MessageEnvelope,
+	type MessageDefinition,
+	type MessageMode,
+	type AckPolicy,
 	type PublishOptions,
 } from './transport'
+export { pendingCoreRelayMessages, writeCoreRelayReceipt, writeCoreRelayResult } from './core-relay'
 export { startMicrosoftLogin, completeMicrosoftLogin, type AuthSession } from './auth'
 export { CoreHeartbeat } from './heartbeat'

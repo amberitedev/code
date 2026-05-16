@@ -1,7 +1,7 @@
 {
 	"name": "@amberite/api-lib",
 	"version": "0.2.0",
-	"description": "Shared communication layer for Amberite: Core API, auth, and Supabase relay transport. Works on desktop (Tauri) and web.",
+	"description": "Shared communication layer for Amberite: Core API, auth, and explicit message transports. Works on desktop (Tauri) and web.",
 	"main": "./src/index.ts",
 	"scripts": {
 		"lint": "eslint . && prettier --check .",
@@ -9,9 +9,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},
-	"dependencies": {
-		"@supabase/supabase-js": "^2.49.0"
-	},
+	"dependencies": {},
 	"devDependencies": {
 		"@modrinth/tooling-config": "workspace:*",
 		"vitest": "^3.2.0"

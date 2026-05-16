@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        instance_service::{create_instance as svc_create_instance, CreateInstanceRequest},
+        instance_service::{
+            create_instance as svc_create_instance, CreateInstanceRequest,
+        },
         state::AppState,
     },
     domain::instance::{InstanceId, InstanceRecord, MemorySettings, ModLoader},
@@ -62,9 +64,9 @@ pub async fn get_instance(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = id
-        .parse::<InstanceId>()
-        .map_err(|_| ApiError::BadRequest("invalid instance id — must be a UUID".into()))?;
+    let iid = id.parse::<InstanceId>().map_err(|_| {
+        ApiError::BadRequest("invalid instance id — must be a UUID".into())
+    })?;
     let record = state.instance_store.get(&iid).await?;
     Ok(Json(record_detail(&record)))
 }
@@ -107,7 +109,9 @@ pub struct PatchBody {
 /// Deserializes a JSON field that distinguishes between absent (`None`) and
 /// explicit `null` (`Some(None)`). Required because `#[serde(default)]` alone
 /// maps both absent and null to `None`.
-fn deserialize_optional_option<'de, D>(d: D) -> Result<Option<Option<i64>>, D::Error>
+fn deserialize_optional_option<'de, D>(
+    d: D,
+) -> Result<Option<Option<i64>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -120,9 +124,9 @@ pub async fn patch_instance(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = id
-        .parse::<InstanceId>()
-        .map_err(|_| ApiError::BadRequest("invalid instance id — must be a UUID".into()))?;
+    let iid = id.parse::<InstanceId>().map_err(|_| {
+        ApiError::BadRequest("invalid instance id — must be a UUID".into())
+    })?;
 
     if let Some(ref name) = body.name {
         if name.trim().is_empty() {
@@ -149,9 +153,9 @@ pub async fn delete_instance(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     // SEC-04: reject non-UUID paths before touching the database.
-    let iid = id
-        .parse::<InstanceId>()
-        .map_err(|_| ApiError::BadRequest("invalid instance id — must be a UUID".into()))?;
+    let iid = id.parse::<InstanceId>().map_err(|_| {
+        ApiError::BadRequest("invalid instance id — must be a UUID".into())
+    })?;
 
     if state.instances.contains_key(&iid) {
         return Err(ApiError::Conflict(

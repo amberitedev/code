@@ -27,12 +27,12 @@ Frontend talks to Core via `tauriFetch` (HTTP), not Tauri IPC. Core communicatio
 | Crate | Source | Role |
 |-------|--------|------|
 | `theseus` | `packages/app-lib` | Full Minecraft launcher engine — profiles, auth, process mgmt |
-| `amberite-lib` | `packages/amberite-lib` | Core process control, `AppSettings`, token/health commands |
+| `amberite-lib` | `packages/amberite-lib` | Core process control, `AppSettings`, OS keychain session storage, health/setup commands |
 | `daedalus` | `packages/daedalus` | Minecraft metadata types (`VersionManifest`, loaders) |
 
 **`theseus::State`** — singleton holding `DirectoryInfo`, `SqlitePool`, `ProcessManager: DashMap<Uuid, Process>`, semaphores, `DiscordGuard`, `FriendsSocket`. `State::get()` busy-waits if called before `State::init()` — logs "this should never happen!" but doesn't crash or return an error.
 
-**`amberite-lib::AppSettings`** — stores `core_url` + Supabase token plaintext in `settings.json`. `is_core_running()` creates a new `reqwest::Client` per call — do not call in a polling loop.
+**`amberite-lib::AppSettings`** — stores non-secret local preferences only: `core_url`, `display_name`, and `auto_launch_core`. Amberite session JWTs live in the OS keychain via `amberite-lib::session`; app-launched Core pairing uses the one-time `.setup_secret`, not `.local_token`. `is_core_running()` creates a new `reqwest::Client` per call — do not call in a polling loop.
 
 **`daedalus`** — use `native_arch()` not `native()` for ARM architecture detection.
 

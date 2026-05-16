@@ -30,20 +30,26 @@ pub async fn install(
         .map_err(|_| ModpackError::InstanceNotFound)?;
     let iid = crate::domain::instance::InstanceId(instance_uuid);
 
-    let instance = state.instance_store.get(&iid).await
-        .map_err(|e| match e {
+    let instance =
+        state.instance_store.get(&iid).await.map_err(|e| match e {
             StoreError::NotFound(_) => ModpackError::InstanceNotFound,
             other => ModpackError::Store(other),
         })?;
 
-    let pack_format = install_mrpack(&state.http, mrpack_path, Path::new(&instance.data_dir)).await?;
+    let pack_format =
+        install_mrpack(&state.http, mrpack_path, Path::new(&instance.data_dir))
+            .await?;
 
     let manifest = ModpackManifest {
         id: Uuid::new_v4().to_string(),
         instance_id: instance_id.to_string(),
         pack_name: pack_format.name.clone(),
         pack_version: pack_format.version_id.clone(),
-        game_version: pack_format.dependencies.get("minecraft").cloned().unwrap_or_default(),
+        game_version: pack_format
+            .dependencies
+            .get("minecraft")
+            .cloned()
+            .unwrap_or_default(),
         loader: detect_loader(&pack_format.dependencies),
         loader_version: detect_loader_version(&pack_format.dependencies),
         modrinth_project_id: None,
@@ -73,14 +79,22 @@ pub async fn remove(
 }
 
 fn detect_loader(deps: &std::collections::HashMap<String, String>) -> String {
-    if deps.contains_key("fabric-loader") { "fabric".into() }
-    else if deps.contains_key("quilt-loader") { "quilt".into() }
-    else if deps.contains_key("forge") { "forge".into() }
-    else if deps.contains_key("neoforge") { "neoforge".into() }
-    else { "vanilla".into() }
+    if deps.contains_key("fabric-loader") {
+        "fabric".into()
+    } else if deps.contains_key("quilt-loader") {
+        "quilt".into()
+    } else if deps.contains_key("forge") {
+        "forge".into()
+    } else if deps.contains_key("neoforge") {
+        "neoforge".into()
+    } else {
+        "vanilla".into()
+    }
 }
 
-fn detect_loader_version(deps: &std::collections::HashMap<String, String>) -> Option<String> {
+fn detect_loader_version(
+    deps: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     deps.get("fabric-loader")
         .or_else(|| deps.get("quilt-loader"))
         .or_else(|| deps.get("forge"))

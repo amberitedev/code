@@ -8,7 +8,9 @@ pub enum PropertiesError {
 }
 
 /// Read `server.properties` from `dir` into a key-value map.
-pub async fn read_properties(dir: &Path) -> Result<HashMap<String, String>, PropertiesError> {
+pub async fn read_properties(
+    dir: &Path,
+) -> Result<HashMap<String, String>, PropertiesError> {
     let path = dir.join("server.properties");
     let content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
     let mut map = HashMap::new();
@@ -39,7 +41,10 @@ pub async fn write_properties(
 }
 
 /// Write the minimal `server.properties` and `eula.txt` for a new instance.
-pub async fn write_initial_properties(dir: &Path, port: u16) -> Result<(), PropertiesError> {
+pub async fn write_initial_properties(
+    dir: &Path,
+    port: u16,
+) -> Result<(), PropertiesError> {
     let mut props = HashMap::new();
     props.insert("server-port".to_string(), port.to_string());
     props.insert("online-mode".to_string(), "false".to_string());

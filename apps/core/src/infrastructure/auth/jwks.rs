@@ -7,7 +7,7 @@ use tracing::debug;
 
 const CACHE_TTL: Duration = Duration::from_secs(3600);
 
-/// Cached JWKS data for Supabase RS256 validation.
+/// Cached JWKS data for RS256 JWT validation.
 pub struct JwksCache {
     inner: tokio::sync::RwLock<Option<CacheEntry>>,
     http: reqwest::Client,
@@ -36,7 +36,7 @@ struct JwkRaw {
     e: Option<String>,
 }
 
-/// Claims extracted from a valid Supabase JWT.
+/// Claims extracted from a valid owner JWT.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
@@ -143,6 +143,6 @@ pub enum AuthError {
     Fetch(String),
     #[error("bad key encoding")]
     BadKey,
-    #[error("core not paired with Supabase")]
+    #[error("core is not paired")]
     NotPaired,
 }

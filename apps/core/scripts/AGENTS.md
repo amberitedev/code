@@ -18,11 +18,11 @@ Start Core first: `cargo run` (or `docker-compose up -d`) from `apps/core/`.
 .\scripts\run_diag.ps1
 
 # Full run — all endpoints
-.\scripts\run_diag.ps1 -Token <supabase_jwt>
+.\scripts\run_diag.ps1 -Token <auth_jwt>
 
 # Include first-run pairing
 .\scripts\run_diag.ps1 -Token <jwt> -PairingCode <6-digit-code> `
-    -SupabaseUrl https://xyz.supabase.co -OwnerId <uid>
+    -ConvexUrl https://deployment.convex.cloud -AuthJwksUrl https://issuer/.well-known/jwks.json -OwnerId <uid>
 ```
 
 ## What gets tested

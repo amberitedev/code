@@ -37,7 +37,11 @@ pub fn spawn_actor<H: ProcessHandle>(
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
     let pid = handle.pid();
     tokio::spawn(run_actor(instance_id, handle, cmd_rx, state));
-    InstanceHandle { cmd_tx, pid, started_at: Instant::now() }
+    InstanceHandle {
+        cmd_tx,
+        pid,
+        started_at: Instant::now(),
+    }
 }
 
 async fn run_actor<H: ProcessHandle>(
@@ -115,7 +119,11 @@ async fn run_actor<H: ProcessHandle>(
     info!("Actor exited for instance {instance_id}");
 }
 
-async fn set_status(state: &Arc<AppState>, id: &InstanceId, status: InstanceStatus) {
+async fn set_status(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+    status: InstanceStatus,
+) {
     let _ = state.instance_store.update_status(id, status.clone()).await;
     state.broadcaster.send(Event::StatusChanged {
         instance_id: id.clone(),

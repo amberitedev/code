@@ -14,7 +14,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CoreApiClient } from '../client'
 
 const BASE = 'http://localhost:16662'
-const client = new CoreApiClient(BASE)
+const client = new CoreApiClient({
+	fetchFn: fetch,
+	convexUrl: 'https://test.convex.cloud',
+	getCoreUrl: async () => BASE,
+	getCurrentJwt: async () => null,
+	openExternalAuth: () => {},
+})
 
 let instanceId: string
 

@@ -1,14 +1,13 @@
 //! Amberite Backend - Core logic for Amberite-specific features
 //!
-//! Provides Amberite-specific functionality: Supabase auth, OS keychain
-//! access, core process management, pairing, and more.
+//! Provides Amberite-specific functionality: OS keychain session storage,
+//! core process management, progress streaming, and more.
 
-pub mod auth;
 pub mod console_stream;
 pub mod core_launcher;
 pub mod error;
-pub mod pairing;
 pub mod progress_stream;
+pub mod session;
 pub mod settings;
 pub mod tunnel;
 

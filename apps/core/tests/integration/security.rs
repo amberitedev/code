@@ -11,7 +11,10 @@ async fn auth_no_header_returns_401_in_prod_mode() {
     let res = app.client.get(app.url("/instances")).send().await.unwrap();
     assert_eq!(res.status(), 401);
     let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["error"].as_str().unwrap().contains("missing"), "expected 'missing' in error");
+    assert!(
+        body["error"].as_str().unwrap().contains("missing"),
+        "expected 'missing' in error"
+    );
 }
 
 /// In prod mode with a fake Bearer token, unpaired Core returns 401 "not paired".
@@ -40,7 +43,12 @@ async fn public_routes_accessible_without_auth_in_prod_mode() {
     let app = common::TestApp::spawn_prod_unpaired().await;
     let health = app.client.get(app.url("/health")).send().await.unwrap();
     assert_eq!(health.status(), 200);
-    let status = app.client.get(app.url("/setup/status")).send().await.unwrap();
+    let status = app
+        .client
+        .get(app.url("/setup/status"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(status.status(), 200);
 }
 
@@ -59,13 +67,18 @@ async fn pairing_brute_force_locked_out_after_five_failures() {
             .post(app.url("/setup"))
             .json(&json!({
                 "code": wrong_code,
-                "supabase_url": "https://test.supabase.co",
+                "convex_url": "https://test.convex.cloud",
+                "auth_jwks_url": "https://auth.test/.well-known/jwks.json",
                 "owner_user_id": "attacker"
             }))
             .send()
             .await
             .unwrap();
-        assert_eq!(res.status(), 401, "attempt {i}: expected 401 before lockout");
+        assert_eq!(
+            res.status(),
+            401,
+            "attempt {i}: expected 401 before lockout"
+        );
     }
     // 6th attempt: locked out — must return 429.
     let res = app
@@ -73,15 +86,23 @@ async fn pairing_brute_force_locked_out_after_five_failures() {
         .post(app.url("/setup"))
         .json(&json!({
             "code": "999999",
-            "supabase_url": "https://test.supabase.co",
+            "convex_url": "https://test.convex.cloud",
+            "auth_jwks_url": "https://auth.test/.well-known/jwks.json",
             "owner_user_id": "attacker"
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 429, "SEC-01: 6th attempt must return 429 Too Many Requests");
+    assert_eq!(
+        res.status(),
+        429,
+        "SEC-01: 6th attempt must return 429 Too Many Requests"
+    );
     let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["error"].as_str().unwrap().contains("too many"), "error message should mention 'too many'");
+    assert!(
+        body["error"].as_str().unwrap().contains("too many"),
+        "error message should mention 'too many'"
+    );
 }
 
 /// Pairing code of all zeros is rejected when the real code differs.
@@ -94,7 +115,8 @@ async fn pairing_empty_string_code_rejected() {
         .post(app.url("/setup"))
         .json(&json!({
             "code": "",
-            "supabase_url": "https://test.supabase.co",
+            "convex_url": "https://test.convex.cloud",
+            "auth_jwks_url": "https://auth.test/.well-known/jwks.json",
             "owner_user_id": "attacker"
         }))
         .send()
@@ -152,7 +174,11 @@ async fn delete_dotdot_segment_normalized_to_404() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 404, "path traversal via .. must not match any route");
+    assert_eq!(
+        res.status(),
+        404,
+        "path traversal via .. must not match any route"
+    );
 }
 
 // ── SQL injection safety ──────────────────────────────────────────────────────
@@ -173,7 +199,11 @@ async fn sql_injection_in_name_is_safe() {
         .send()
         .await
         .unwrap();
-    assert_eq!(create.status(), 201, "create should succeed despite injection name");
+    assert_eq!(
+        create.status(),
+        201,
+        "create should succeed despite injection name"
+    );
 
     let id = create.json::<serde_json::Value>().await.unwrap()["id"]
         .as_str()

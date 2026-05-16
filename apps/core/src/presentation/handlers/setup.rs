@@ -12,10 +12,14 @@ const MAX_PAIRING_ATTEMPTS: u32 = 5;
 #[derive(Deserialize)]
 pub struct SetupRequest {
     /// Six-digit pairing code shown on Core's terminal.
-    pub code: String,
-    /// Supabase project URL (e.g. https://xyz.supabase.co).
-    pub supabase_url: String,
-    /// Supabase user ID of the owner (from their JWT sub).
+    pub code: Option<String>,
+    /// One-time secret written locally for app-launched Core auto-pairing.
+    pub local_setup_secret: Option<String>,
+    /// Convex deployment URL used for relay and presence.
+    pub convex_url: String,
+    /// JWKS URL for the current auth provider.
+    pub auth_jwks_url: String,
+    /// Auth user ID of the owner (from their JWT sub).
     pub owner_user_id: String,
 }
 
@@ -36,40 +40,62 @@ pub async fn complete_setup(
         )));
     }
 
-    let mut guard = state.pairing_code.lock().await;
+    let mut pairing_code = state.pairing_code.lock().await;
+    let mut local_setup_secret = state.local_setup_secret.lock().await;
 
-    let expected = guard
-        .as_deref()
-        .ok_or_else(|| ApiError::BadRequest("Core is already paired".into()))?;
+    if pairing_code.is_none() && local_setup_secret.is_none() {
+        return Err(ApiError::BadRequest("Core is already paired".into()));
+    }
 
-    if body.code != expected {
+    let pairing_code_valid = body.code.as_deref().is_some_and(|code| {
+        pairing_code
+            .as_deref()
+            .is_some_and(|expected| code == expected)
+    });
+    let local_secret_valid =
+        body.local_setup_secret.as_deref().is_some_and(|secret| {
+            local_setup_secret
+                .as_deref()
+                .is_some_and(|expected| secret == expected)
+        });
+
+    if !pairing_code_valid && !local_secret_valid {
         state.wrong_pairing_attempts.fetch_add(1, Ordering::Relaxed);
         return Err(ApiError::Unauthorized("invalid pairing code".into()));
     }
 
     sqlx::query(
-        "INSERT OR REPLACE INTO core_config \
-         (id, supabase_url, owner_user_id, paired_at) VALUES (1, ?, ?, ?)",
-    )
-    .bind(&body.supabase_url)
-    .bind(&body.owner_user_id)
+		"INSERT OR REPLACE INTO core_config \
+		 (id, supabase_url, convex_url, auth_jwks_url, owner_user_id, paired_at, core_id) VALUES (1, ?, ?, ?, ?, ?, ?)",
+	)
+	.bind(&body.convex_url)
+	.bind(&body.convex_url)
+	.bind(&body.auth_jwks_url)
+	.bind(&body.owner_user_id)
     .bind(chrono::Utc::now().to_rfc3339())
+    .bind(&state.core_id)
     .execute(&state.pool)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Reset attempt counter and clear the pairing code.
     state.wrong_pairing_attempts.store(0, Ordering::Relaxed);
-    *guard = None;
-    Ok(Json(json!({ "ok": true })))
+    *pairing_code = None;
+    *local_setup_secret = None;
+    tokio::fs::remove_file(state.config.data_dir.join(".setup_secret"))
+        .await
+        .ok();
+    Ok(Json(json!({ "ok": true, "core_id": state.core_id })))
 }
 
 /// GET /setup/status — check whether Core is paired.
 /// In dev mode, always reports paired so the App skips the pairing screen.
 pub async fn setup_status(State(state): State<Arc<AppState>>) -> Json<Value> {
     if state.config.dev_mode {
-        return Json(json!({ "paired": true, "dev_mode": true }));
+        return Json(
+            json!({ "paired": true, "dev_mode": true, "core_id": state.core_id }),
+        );
     }
     let paired = state.jwks_url().await.is_some();
-    Json(json!({ "paired": paired }))
+    Json(json!({ "paired": paired, "core_id": state.core_id }))
 }

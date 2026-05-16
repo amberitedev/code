@@ -29,6 +29,9 @@ import type {
 	UnzipOption,
 	FsZipRequest,
 	FsCopyRequest,
+	CoreSetupStatus,
+	CoreSetupRequest,
+	CoreSetupResponse,
 } from './types'
 import { NetworkError, CoreApiError } from './errors'
 
@@ -84,6 +87,21 @@ async function apiFetch<T>(ctx: CoreCallContext, url: string, init?: RequestInit
 
 async function rawFetch(ctx: CoreCallContext, url: string, init?: RequestInit): Promise<Response> {
 	return request(ctx, url, init)
+}
+
+export function getSetupStatus(ctx: CoreCallContext): Promise<CoreSetupStatus> {
+	return apiFetch(ctx, `${ctx.baseUrl}/setup/status`)
+}
+
+export function completeSetup(
+	ctx: CoreCallContext,
+	body: CoreSetupRequest,
+): Promise<CoreSetupResponse> {
+	return apiFetch(ctx, `${ctx.baseUrl}/setup`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
 }
 
 // ── Instances ─────────────────────────────────────────────────────────────────

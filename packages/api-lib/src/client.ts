@@ -1,9 +1,8 @@
 /**
  * CoreApiClient — primary entry point for all Amberite Core API calls.
  *
- * Accepts a PlatformAdapter, attempts direct HTTP first, and falls through to
- * the Supabase relay when direct HTTP is unreachable. From the caller's
- * perspective every method works the same regardless of transport.
+ * Accepts a PlatformAdapter and talks directly to Core. Relay behavior is not
+ * implicit; asynchronous delivery uses explicitly declared message transports.
  *
  * Key methods: getInstance, listInstances, createInstance, deleteInstance, renameInstance,
  * updateJavaVersion, start/stop/kill/restart, issueWsTicket, openConsole, getStats,
@@ -33,28 +32,14 @@ import type {
 	UnzipOption,
 	FsZipRequest,
 	FsCopyRequest,
+	CoreSetupStatus,
+	CoreSetupRequest,
+	CoreSetupResponse,
 } from './types'
 import * as api from './api'
 import { CoreWsConnection } from './ws'
-import { publishMessage, waitForReceipt, waitForResult } from './transport'
-import { NetworkError, CoreOfflineError } from './errors'
+import { CoreOfflineError } from './errors'
 import type { CoreConnectionMonitor } from './monitor'
-
-interface RelayApiPayload {
-	method: string
-	path: string
-	body?: unknown
-}
-
-function isLoopback(url: string | null): boolean {
-	if (!url) return false
-	try {
-		const { hostname } = new URL(url)
-		return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
-	} catch {
-		return false
-	}
-}
 
 export class CoreApiClient {
 	public monitor: CoreConnectionMonitor | null = null
@@ -78,7 +63,7 @@ export class CoreApiClient {
 
 	private async direct<T>(fn: (ctx: CoreCallContext) => Promise<T>): Promise<T> {
 		const coreUrl = await this.getCoreUrlCached()
-		const token = await this.adapter.getLocalCoreToken()
+		const token = await this.adapter.getCurrentJwt()
 		if (!coreUrl) throw new CoreOfflineError()
 		const ctx: CoreCallContext = {
 			baseUrl: coreUrl,
@@ -89,47 +74,31 @@ export class CoreApiClient {
 		return fn(ctx)
 	}
 
-	private async relay<T>(payload: RelayApiPayload): Promise<T> {
-		const coreUrl = await this.getCoreUrlCached()
-		if (!coreUrl) throw new CoreOfflineError()
-
-		const coreId = new URL(coreUrl).hostname // simplistic core-id derivation; caller may override
-		const senderId = (await this.adapter.getCurrentJwt()) ?? 'anonymous'
-
-		let msg: Awaited<ReturnType<typeof publishMessage>>
-		try {
-			msg = await publishMessage(this.adapter.supabase, {
-				coreId,
-				senderId,
-				direction: 'client-to-core',
-				payload,
-			})
-		} catch {
-			throw new NetworkError('Core server is offline and the relay is unavailable.')
-		}
-
-		await waitForReceipt(this.adapter.supabase, msg.id, undefined)
-		const result = await waitForResult(this.adapter.supabase, msg.id, undefined)
-
-		if (result && typeof result === 'object' && 'error' in result) {
-			throw new NetworkError(String((result as any).error))
-		}
-		return result as T
-	}
-
 	private async request<T>(
 		directFn: (ctx: CoreCallContext) => Promise<T>,
-		relayPayload: RelayApiPayload,
+		_relayPayload: unknown,
 	): Promise<T> {
-		try {
-			return await this.direct(directFn)
-		} catch (e) {
-			if (!(e instanceof NetworkError) && !(e instanceof CoreOfflineError)) throw e
-			// Relay makes no sense for loopback addresses — skip it and fail fast.
-			const coreUrl = await this.getCoreUrlCached()
-			if (isLoopback(coreUrl)) throw e
-			return this.relay<T>(relayPayload)
-		}
+		return await this.direct(directFn)
+	}
+
+	getSetupStatus(): Promise<CoreSetupStatus> {
+		return this.direct(api.getSetupStatus)
+	}
+
+	completeSetup(body: CoreSetupRequest): Promise<CoreSetupResponse> {
+		return this.direct((ctx) => api.completeSetup(ctx, body))
+	}
+
+	async completeLocalSetup(ownerUserId: string, authJwksUrl: string): Promise<CoreSetupResponse> {
+		const localSetupSecret = await this.adapter.getLocalSetupSecret?.()
+		if (!localSetupSecret) throw new Error('Local Core setup secret is not available')
+
+		return this.completeSetup({
+			local_setup_secret: localSetupSecret,
+			convex_url: this.adapter.convexUrl,
+			auth_jwks_url: authJwksUrl,
+			owner_user_id: ownerUserId,
+		})
 	}
 
 	// ── Instances ───────────────────────────────────────────────────────────
@@ -267,7 +236,7 @@ export class CoreApiClient {
 		let aborted = false
 		const done = (async () => {
 			const coreUrl = await this.getCoreUrlCached()
-			const token = await this.adapter.getLocalCoreToken()
+			const token = await this.adapter.getCurrentJwt()
 			if (!coreUrl) throw new CoreOfflineError()
 			if (aborted) return
 			const ctx: CoreCallContext = {
@@ -402,7 +371,7 @@ export class CoreApiClient {
 		let aborted = false
 		const done = (async () => {
 			const coreUrl = await this.getCoreUrlCached()
-			const token = await this.adapter.getLocalCoreToken()
+			const token = await this.adapter.getCurrentJwt()
 			if (!coreUrl) throw new CoreOfflineError()
 			if (aborted) return
 			const ctx: CoreCallContext = {

@@ -7,6 +7,7 @@
     "web:dev": "turbo run dev --filter=@modrinth/frontend",
     "web:build": "turbo run build --filter=@modrinth/frontend",
 		"app:dev": "turbo run dev --filter=@modrinth/app",
+		"convex:dev": "turbo run dev --filter=@amberite/convex",
 		"app:dev:no-hmr": "pnpm --filter @modrinth/app dev:no-hmr",
     "app:build": "turbo run build --filter=@modrinth/app",
     "docs:dev": "turbo run dev --filter=@modrinth/docs",

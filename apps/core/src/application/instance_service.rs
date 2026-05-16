@@ -4,7 +4,9 @@ use tracing::{error, info};
 
 use crate::{
     application::state::AppState,
-    domain::instance::{InstanceId, InstanceRecord, InstanceStatus, MemorySettings, ModLoader},
+    domain::instance::{
+        InstanceId, InstanceRecord, InstanceStatus, MemorySettings, ModLoader,
+    },
     infrastructure::minecraft::{
         java::{detect_java_installations, required_java_version},
         server_jar::download_server_jar,
@@ -52,7 +54,8 @@ pub async fn create_instance(
     tokio::fs::create_dir_all(&data_dir).await?;
 
     // B4: Write initial server.properties so the server can start on first launch.
-    write_initial_properties(&data_dir, req.port).await
+    write_initial_properties(&data_dir, req.port)
+        .await
         .map_err(|e| InstanceError::Io(std::io::Error::other(e.to_string())))?;
     // TODO(backups): Implement world backup — create a timestamped zip of {data_dir}/world/
     // See .plan/active/features.md for full backup scope and .plan/core_rewrite/README.md
@@ -87,17 +90,23 @@ pub async fn create_instance(
         let req_java = required_java_version(&game_version);
         let java_path = state_clone.java_store.find_by_version(req_java).await;
         let jar_result = download_server_jar(
-            &state_clone.http, &loader,
-            &game_version, loader_version.as_deref(),
+            &state_clone.http,
+            &loader,
+            &game_version,
+            loader_version.as_deref(),
             &data_dir,
             java_path.as_deref(),
-        ).await;
+        )
+        .await;
         match jar_result {
             Ok(_) => {
-                state_clone.broadcaster.send(crate::domain::event::Event::CreationProgress {
-                    instance_id: id_clone, progress: 1.0,
-                    message: "Server JAR downloaded".to_string(),
-                });
+                state_clone.broadcaster.send(
+                    crate::domain::event::Event::CreationProgress {
+                        instance_id: id_clone,
+                        progress: 1.0,
+                        message: "Server JAR downloaded".to_string(),
+                    },
+                );
             }
             Err(e) => error!("JAR download failed for {id_clone}: {e}"),
         }
@@ -126,14 +135,20 @@ pub async fn restore_instances(state: Arc<AppState>) {
     let _ = state.instance_store.reset_transient_statuses().await;
 
     // Restore instances that were running before Core stopped.
-    let running = state.instance_store
+    let running = state
+        .instance_store
         .list_by_status(InstanceStatus::Running)
         .await
         .unwrap_or_default();
 
     for record in running {
         info!("Restoring instance {}", record.id);
-        if let Err(e) = crate::application::instance_status_service::start_instance(&state, &record.id).await {
+        if let Err(e) =
+            crate::application::instance_status_service::start_instance(
+                &state, &record.id,
+            )
+            .await
+        {
             error!("Failed to restore instance {}: {e}", record.id);
         }
     }
@@ -144,10 +159,9 @@ pub async fn get_data_dir(
     state: &Arc<AppState>,
     id: &InstanceId,
 ) -> Result<PathBuf, InstanceError> {
-    let record = state.instance_store.get(id).await
-        .map_err(|e| match e {
-            StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-            other => InstanceError::Store(other),
-        })?;
+    let record = state.instance_store.get(id).await.map_err(|e| match e {
+        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+        other => InstanceError::Store(other),
+    })?;
     Ok(PathBuf::from(&record.data_dir))
 }

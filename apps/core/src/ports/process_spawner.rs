@@ -22,7 +22,9 @@ pub trait ProcessHandle: Send + 'static {
     /// Send SIGKILL (or TerminateProcess on Windows).
     fn kill(&mut self) -> Result<(), SpawnError>;
     /// Return the OS process ID if known.
-    fn pid(&self) -> Option<u32> { None }
+    fn pid(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// Blanket impl so `Box<dyn ProcessHandle>` itself satisfies `ProcessHandle`.

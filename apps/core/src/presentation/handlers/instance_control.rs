@@ -9,7 +9,10 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        instance_status_service::{kill_instance, restart_instance, send_command, start_instance, stop_instance},
+        instance_status_service::{
+            kill_instance, restart_instance, send_command, start_instance,
+            stop_instance,
+        },
         state::AppState,
     },
     domain::instance::InstanceId,
@@ -61,14 +64,13 @@ pub async fn restart(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let iid = parse_id(&id)?;
-    restart_instance(&state, &iid).await
-        .map_err(|e| {
-            if e.to_string().contains("timed out") {
-                ApiError::Internal("Shutdown timed out".into())
-            } else {
-                ApiError::from(e)
-            }
-        })?;
+    restart_instance(&state, &iid).await.map_err(|e| {
+        if e.to_string().contains("timed out") {
+            ApiError::Internal("Shutdown timed out".into())
+        } else {
+            ApiError::from(e)
+        }
+    })?;
     Ok(Json(json!({ "ok": true })))
 }
 

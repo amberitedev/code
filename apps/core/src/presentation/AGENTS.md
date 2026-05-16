@@ -9,7 +9,7 @@ presentation/
   mod.rs          — re-exports: error, extractors, handlers, router
   router.rs       — create_router(): assembles all routes with CORS and tracing middleware
   error.rs        — ApiError enum with From impls for every service error type
-  extractors.rs   — AuthUser Axum extractor (validates Supabase Bearer JWT or dev bypass)
+  extractors.rs   — AuthUser Axum extractor (validates Bearer JWT or dev bypass)
   handlers/
     mod.rs              — re-exports all handlers
     console.rs          — WS console (stdout stream + stdin), SSE creation progress, WS ticket issue
@@ -18,7 +18,7 @@ presentation/
     instances.rs        — CRUD: list, get, create, delete
     instance_control.rs — start, stop, kill, restart, send command
     logs.rs             — list/read log files and crash reports
-    macros.rs           — list, spawn, kill Deno macros
+    macros.rs           — macro routes; execution currently disabled by application service
     modpack.rs          — install (multipart), get manifest, remove, export .mrpack
     mods.rs             — list, add from Modrinth, upload JAR, delete, toggle, update, update-all
     properties.rs       — GET/PATCH server.properties
@@ -31,7 +31,7 @@ All routes are in `router.rs`. Grouped by auth requirement:
 
 **No auth** — `AuthUser` extractor not used:
 - `GET /health`, `GET /version`, `GET /java`
-- `POST /setup`, `GET /setup/status`
+- `POST /setup`, `GET /setup/status` (`POST` accepts either a 6-digit `code` or local `local_setup_secret`)
 - `GET /instances/:id/console?ticket=<uuid>` — ticket IS the credential (validated inside handler)
 
 **Requires `AuthUser`** (Bearer JWT or dev bypass):
@@ -39,11 +39,11 @@ All routes are in `router.rs`. Grouped by auth requirement:
 
 ## extractors.rs — AuthUser
 
-`AuthUser` is an Axum extractor that validates a Supabase Bearer JWT using the `JwksCache`. If `config.dev_mode` is true, it skips JWT validation entirely and returns synthetic `Claims { sub: "dev-owner" }`. This means every route using `AuthUser` is open in dev mode — no token header needed.
+`AuthUser` is an Axum extractor that validates a Bearer JWT using the `JwksCache`. If `config.dev_mode` is true, it skips JWT validation entirely and returns synthetic `Claims { sub: "dev-owner" }`. This means every route using `AuthUser` is open in dev mode — no token header needed.
 
 `bearer_token()` does an exact case-sensitive prefix match on `"Bearer "` (capital B, trailing space). A lowercase `"bearer "` header returns `None`, which becomes a 401.
 
-The JWKS URL comes from `state.jwks_url().await` — a DB query against `core_config`. If Core is not paired (no row), `jwks_url()` returns `None` and the extractor returns 401 "Core not paired with Supabase". Auth is structurally impossible before pairing.
+The JWKS URL comes from `state.jwks_url().await` — a DB query against `core_config.auth_jwks_url`. If Core is not paired (no row), `jwks_url()` returns `None` and the extractor returns 401. Auth is structurally impossible before pairing.
 
 ## console.rs — WebSocket flow
 
@@ -71,6 +71,7 @@ Service-to-HTTP status mappings worth knowing:
 
 ## Gotchas
 
-- **CORS is `CorsLayer::permissive()`** — not restricted to `amberite.dev` or localhost despite what documentation says. The `ALLOWED_ORIGIN` env var is loaded into `Config` but never referenced in `router.rs`. This is a known discrepancy.
+- **CORS is restricted outside dev mode** — `router.rs` uses `ALLOWED_ORIGIN` in production and permissive CORS only in dev mode or when `ALLOWED_ORIGIN=*`.
 - **WebSocket endpoint bypasses `AuthUser`** — the ticket in the query string IS the auth. Don't add `AuthUser` to `ws_console` — it would require a JWT header on a WebSocket upgrade, which browsers can't provide.
 - **`setup.rs` uses raw `sqlx::query`** — the pairing handler writes directly to `state.pool` rather than going through a store port. This is intentional — `core_config` is not an entity with a port.
+- **Macro routes are disabled stubs** — they remain registered for API compatibility but return service unavailable until the future out-of-process plugin system is implemented.

@@ -20,10 +20,15 @@ async fn version_returns_semver() {
     let version = body["version"].as_str().expect("version must be a string");
     let parts: Vec<&str> = version.split('.').collect();
     assert!(
-        parts.len() >= 2 && parts[0].parse::<u32>().is_ok() && parts[1].parse::<u32>().is_ok(),
+        parts.len() >= 2
+            && parts[0].parse::<u32>().is_ok()
+            && parts[1].parse::<u32>().is_ok(),
         "version must be semver (e.g. 0.1.0), got: {version}"
     );
-    assert!(body["name"].as_str().is_some_and(|n| !n.is_empty()), "name must be a non-empty string");
+    assert!(
+        body["name"].as_str().is_some_and(|n| !n.is_empty()),
+        "name must be a non-empty string"
+    );
 }
 
 /// GET /java returns 200 with an installations array (may be empty in CI).

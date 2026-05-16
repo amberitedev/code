@@ -1,4 +1,4 @@
-# Isolated from root workspace due to deno/theseus dependency conflicts.
+# Isolated from root workspace to keep Core dependencies independent.
 [workspace]
 
 [package]
@@ -9,21 +9,6 @@ edition = "2021"
 rust-version = "1.85.0"
 
 [dependencies]
-# ============================================================
-# TIER 1 - DENO STACK (HARD-LOCKED)
-# ============================================================
-deno_core = "=0.354.0"
-deno_ops = "=0.226.0"
-deno_runtime = "=0.220.0"
-deno_node = "=0.150.0"
-deno_permissions = "=0.71.0"
-deno_ast = "=0.42.1"
-deno_graph = "=0.82.0"
-import_map = "=0.19.0"
-deno_error = "=0.7.0"
-node_resolver = "=0.50.0"
-sys_traits = "=0.1.17"
-
 # ============================================================
 # TIER 2 - DATABASE
 # ============================================================
@@ -99,7 +84,7 @@ base64 = "0.22"
 rand = "0.8"
 hex = "0.4"
 
-# JWT validation (Supabase RS256)
+# JWT validation (RS256 JWKS)
 jsonwebtoken = "9.3"
 
 # ============================================================

@@ -5,7 +5,10 @@ use tracing::info;
 
 use super::{
     flavours::{resolve_jar, FlavourError},
-    installer::{install_with_installer, write_launch_config, InstallerError, LaunchConfig, LaunchStyle},
+    installer::{
+        install_with_installer, write_launch_config, InstallerError,
+        LaunchConfig, LaunchStyle,
+    },
 };
 use crate::domain::instance::ModLoader;
 
@@ -39,27 +42,48 @@ pub async fn download_server_jar(
     match loader {
         ModLoader::Quilt | ModLoader::Forge | ModLoader::NeoForge => {
             // Installer-based: let the installer download and configure everything.
-            install_with_installer(http, loader, game_version, loader_version, instance_dir, java)
-                .await?;
+            install_with_installer(
+                http,
+                loader,
+                game_version,
+                loader_version,
+                instance_dir,
+                java,
+            )
+            .await?;
             Ok(instance_dir.join("server.jar")) // path is nominal; actual jar set in launch.json
         }
         _ => {
-            let info = resolve_jar(http, loader, game_version, loader_version).await?;
+            let info =
+                resolve_jar(http, loader, game_version, loader_version).await?;
             let dest = instance_dir.join(&info.filename);
             info!("Downloading server JAR from {}", info.url);
-            let bytes = http.get(&info.url).send().await?.error_for_status()?.bytes().await?;
+            let bytes = http
+                .get(&info.url)
+                .send()
+                .await?
+                .error_for_status()?
+                .bytes()
+                .await?;
             if let Some(expected) = info.sha1 {
                 let actual = hex::encode(sha1::Sha1::digest(&bytes));
                 if actual != expected {
-                    return Err(ServerJarError::HashMismatch { expected, actual });
+                    return Err(ServerJarError::HashMismatch {
+                        expected,
+                        actual,
+                    });
                 }
             }
             tokio::fs::write(&dest, &bytes).await?;
             info!("Server JAR written to {}", dest.display());
             // Write launch.json so instance_status_service knows how to start this jar.
-            write_launch_config(instance_dir, &LaunchConfig {
-                style: LaunchStyle::Jar { jar: info.filename },
-            }).await?;
+            write_launch_config(
+                instance_dir,
+                &LaunchConfig {
+                    style: LaunchStyle::Jar { jar: info.filename },
+                },
+            )
+            .await?;
             Ok(dest)
         }
     }

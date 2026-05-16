@@ -94,6 +94,9 @@ impl From<MacroError> for ApiError {
             MacroError::InvalidName => {
                 Self::BadRequest("invalid macro name".into())
             }
+            MacroError::Disabled => {
+                Self::ServiceUnavailable("macro runtime is disabled".into())
+            }
         }
     }
 }

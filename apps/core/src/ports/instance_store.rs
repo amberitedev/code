@@ -22,8 +22,16 @@ pub trait InstanceStore: Send + Sync + 'static {
         id: &InstanceId,
         status: InstanceStatus,
     ) -> Result<(), StoreError>;
-    async fn update_port(&self, id: &InstanceId, port: u16) -> Result<(), StoreError>;
-    async fn update_name(&self, id: &InstanceId, name: &str) -> Result<(), StoreError>;
+    async fn update_port(
+        &self,
+        id: &InstanceId,
+        port: u16,
+    ) -> Result<(), StoreError>;
+    async fn update_name(
+        &self,
+        id: &InstanceId,
+        name: &str,
+    ) -> Result<(), StoreError>;
     async fn update_java_version(
         &self,
         id: &InstanceId,

@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use crate::{
-    application::state::AppState,
-    domain::instance::InstanceId,
-    infrastructure::macro_engine::executor::MacroPid,
-};
+use crate::{application::state::AppState, domain::instance::InstanceId};
+
+pub type MacroPid = u64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MacroError {
@@ -16,6 +14,8 @@ pub enum MacroError {
     MacroNotFound(MacroPid),
     #[error("invalid macro name")]
     InvalidName,
+    #[error("macro runtime is disabled")]
+    Disabled,
 }
 
 /// SEC-06: Spawn a macro for an instance by name. Returns the macro PID.
@@ -24,7 +24,11 @@ pub fn spawn_macro(
     instance_id: InstanceId,
     macro_name: String,
 ) -> Result<MacroPid, MacroError> {
-    if macro_name.is_empty() || macro_name.contains("..") || macro_name.contains('/') || macro_name.contains('\\') {
+    if macro_name.is_empty()
+        || macro_name.contains("..")
+        || macro_name.contains('/')
+        || macro_name.contains('\\')
+    {
         return Err(MacroError::InvalidName);
     }
     if !state.instances.contains_key(&instance_id) {
@@ -48,29 +52,21 @@ pub fn spawn_macro(
         return Err(MacroError::FileNotFound(macro_name));
     };
 
-    let rx = state.broadcaster.subscribe();
-    let pid = state.macro_executor.spawn_macro(
-        instance_id,
-        path,
-        Arc::clone(state),
-        rx,
-    );
-    Ok(pid)
+    let _path = path;
+    Err(MacroError::Disabled)
 }
 
 /// Kill a macro by PID.
-pub fn kill_macro(state: &Arc<AppState>, pid: MacroPid) -> Result<(), MacroError> {
-    if state.macro_executor.kill_macro(pid) {
-        Ok(())
-    } else {
-        Err(MacroError::MacroNotFound(pid))
-    }
+pub fn kill_macro(
+    _state: &Arc<AppState>,
+    pid: MacroPid,
+) -> Result<(), MacroError> {
+    Err(MacroError::MacroNotFound(pid))
 }
 
 /// List all running macro PIDs for a given instance.
-/// (All running PIDs are returned; per-instance filtering deferred to TODO.)
-pub fn list_macros(state: &Arc<AppState>) -> Vec<MacroPid> {
-    state.macro_executor.list_pids()
+pub fn list_macros(_state: &Arc<AppState>) -> Vec<MacroPid> {
+    Vec::new()
 }
 
 /// List available macro files for an instance.

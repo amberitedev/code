@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use crate::domain::modpack::ModpackManifest;
 use super::instance_store::StoreError;
+use crate::domain::modpack::ModpackManifest;
 
 #[async_trait]
 pub trait ModpackStore: Send + Sync + 'static {
@@ -10,5 +10,8 @@ pub trait ModpackStore: Send + Sync + 'static {
         &self,
         instance_id: &str,
     ) -> Result<Option<ModpackManifest>, StoreError>;
-    async fn delete_for_instance(&self, instance_id: &str) -> Result<(), StoreError>;
+    async fn delete_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<(), StoreError>;
 }

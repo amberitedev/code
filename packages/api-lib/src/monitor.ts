@@ -1,15 +1,5 @@
-/**
- * CoreConnectionMonitor tracks the four states of connectivity to Core:
- * connecting, online-direct, online-relay, offline.
- *
- * State is driven by direct HTTP reachability and relay acknowledgment timing,
- * not by the last_seen heartbeat timestamp (which is UX-only).
- */
-
 import type { PlatformAdapter } from './adapter'
-import type { CoreCallContext } from './context'
-import { publishMessage, waitForReceipt, subscribeToMessages } from './transport'
-import { CoreOfflineError } from './errors'
+import { corePresence } from './transport'
 
 export type ConnectionState = 'connecting' | 'online-direct' | 'online-relay' | 'offline'
 
@@ -23,13 +13,11 @@ export class CoreConnectionMonitor {
 	private state: ConnectionState = 'connecting'
 	private listeners: Array<StateChangeListener> = []
 	private timer: ReturnType<typeof setInterval> | null = null
-	private unsub: { unsubscribe: () => void } | null = null
-	private lastRelayAck = 0
 
 	constructor(
 		private adapter: PlatformAdapter,
 		private coreId: string,
-		private senderId: string,
+		private _senderId: string,
 	) {}
 
 	get currentState(): ConnectionState {
@@ -46,17 +34,6 @@ export class CoreConnectionMonitor {
 
 	async start(): Promise<void> {
 		this.setState('connecting')
-		this.unsub = subscribeToMessages(
-			this.adapter.supabase,
-			this.coreId,
-			'core-to-client',
-			async (msg) => {
-				this.lastRelayAck = Date.now()
-				if (this.state === 'offline') {
-					this.setState('online-relay')
-				}
-			},
-		)
 		this.timer = setInterval(() => this.tick(), PING_INTERVAL_MS)
 		await this.tick()
 	}
@@ -66,47 +43,38 @@ export class CoreConnectionMonitor {
 			clearInterval(this.timer)
 			this.timer = null
 		}
-		if (this.unsub) {
-			this.unsub.unsubscribe()
-			this.unsub = null
-		}
 	}
 
 	private async tick(): Promise<void> {
-		const coreUrl = await this.adapter.getCoreUrl()
-		const token = await this.adapter.getLocalCoreToken()
-
-		let directOk = false
-		if (coreUrl) {
-			try {
-				const ctx: CoreCallContext = {
-					baseUrl: coreUrl,
-					token,
-					fetchFn: this.adapter.fetchFn,
-				}
-				const res = await this.adapter.fetchFn(`${ctx.baseUrl}${HEALTH_PATH}`, {
-					headers: token ? { Authorization: `Bearer ${token}` } : {},
-				})
-				directOk = res.ok
-			} catch {
-				directOk = false
-			}
-		}
-
+		const directOk = await this.directHealthOk()
 		if (directOk) {
 			this.setState('online-direct')
 			return
 		}
 
-		const relayAlive = Date.now() - this.lastRelayAck < OFFLINE_THRESHOLD_MS
-		if (this.state === 'online-direct' || this.state === 'connecting') {
-			if (relayAlive) {
+		try {
+			const presence = (await corePresence(this.adapter, this.coreId)) as {
+				lastSeenAt?: number
+			} | null
+			if (presence?.lastSeenAt && Date.now() - presence.lastSeenAt < OFFLINE_THRESHOLD_MS) {
 				this.setState('online-relay')
-			} else {
-				this.setState('offline')
+				return
 			}
-		} else if (this.state === 'online-relay' && !relayAlive) {
-			this.setState('offline')
+		} catch {
+			// Convex presence is best-effort for monitoring.
+		}
+
+		this.setState('offline')
+	}
+
+	private async directHealthOk(): Promise<boolean> {
+		const coreUrl = await this.adapter.getCoreUrl()
+		if (!coreUrl) return false
+		try {
+			const res = await this.adapter.fetchFn(`${coreUrl}${HEALTH_PATH}`)
+			return res.ok
+		} catch {
+			return false
 		}
 	}
 

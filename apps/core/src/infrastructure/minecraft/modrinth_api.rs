@@ -57,11 +57,17 @@ impl ModrinthClient {
         Self { http }
     }
 
-    pub async fn get_project(&self, id_or_slug: &str) -> Result<ModrinthProject, ModrinthError> {
+    pub async fn get_project(
+        &self,
+        id_or_slug: &str,
+    ) -> Result<ModrinthProject, ModrinthError> {
         self.get(&format!("/project/{id_or_slug}")).await
     }
 
-    pub async fn get_version(&self, version_id: &str) -> Result<ModrinthVersion, ModrinthError> {
+    pub async fn get_version(
+        &self,
+        version_id: &str,
+    ) -> Result<ModrinthVersion, ModrinthError> {
         self.get(&format!("/version/{version_id}")).await
     }
 
@@ -82,25 +88,41 @@ impl ModrinthClient {
         if !params.is_empty() {
             url.push('?');
             url.push_str(
-                &params.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&"),
+                &params
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("&"),
             );
         }
         let resp = self.http.get(&url).send().await?.error_for_status()?;
         Ok(resp.json().await?)
     }
 
-    pub async fn get_version_from_hash(&self, hash: &str) -> Result<ModrinthVersion, ModrinthError> {
-        let resp = self.http
+    pub async fn get_version_from_hash(
+        &self,
+        hash: &str,
+    ) -> Result<ModrinthVersion, ModrinthError> {
+        let resp = self
+            .http
             .get(format!("{MODRINTH_API}/version_file/{hash}"))
-            .send().await?;
+            .send()
+            .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(ModrinthError::NotFound);
         }
         Ok(resp.error_for_status()?.json().await?)
     }
 
-    async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ModrinthError> {
-        let resp = self.http.get(format!("{MODRINTH_API}{path}")).send().await?;
+    async fn get<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, ModrinthError> {
+        let resp = self
+            .http
+            .get(format!("{MODRINTH_API}{path}"))
+            .send()
+            .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(ModrinthError::NotFound);
         }

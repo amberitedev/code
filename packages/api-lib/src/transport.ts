@@ -1,205 +1,194 @@
-/**
- * Shared transport layer for relay and push notifications via Supabase Realtime.
- *
- * Both Core and the desktop app maintain a persistent Realtime subscription.
- * When direct HTTP fails, messages are published to the relay table and picked
- * up by the other's subscription.
- *
- * Every message has two-phase acknowledgment:
- * 1. received_at — written immediately on pickup (confirms receiver is alive).
- * 2. completed_at + result — written when processing finishes.
- */
+import type { PlatformAdapter } from './adapter'
+import { convexMutation, convexQuery } from './convex-relay'
+import { publishCoreRelay } from './core-relay'
+import { NetworkError, RelayTimeoutError } from './errors'
 
-import type { SupabaseClient } from '@supabase/supabase-js'
-import { NetworkError, RelayTimeoutError, CoreOfflineError } from './errors'
+export type MessageMode = 'direct-queued' | 'direct-fire-and-forget' | 'core-relay' | 'convex-relay'
+export type AckPolicy = 'none' | 'received' | 'processed'
 
-export type MessageDirection = 'client-to-core' | 'core-to-client'
+export interface MessageDefinition<TPayload = unknown> {
+	type: string
+	version: number
+	mode: MessageMode
+	ack: AckPolicy
+	ttlMs?: number
+	payload?: TPayload
+}
 
-export interface RelayMessage {
+export interface MessageEnvelope<TPayload = unknown> {
 	id: string
-	core_id: string
-	sender_id: string
-	direction: MessageDirection
-	payload: unknown
-	received_at: string | null
-	completed_at: string | null
-	result: unknown | null
-	created_at: string
-	ttl: string
-}
-
-export interface PublishOptions {
-	coreId: string
+	type: string
+	version: number
+	mode: MessageMode
+	ack: AckPolicy
 	senderId: string
-	direction: MessageDirection
-	payload: unknown
-	ttlSeconds?: number
+	recipientId: string
+	payload: TPayload
+	createdAt: number
+	ttlMs: number
 }
 
-const DEFAULT_TTL_SECONDS = 300
+export interface PublishOptions<TPayload = unknown> {
+	definition: MessageDefinition<TPayload>
+	senderId: string
+	recipientId: string
+	payload: TPayload
+}
+
+const DEFAULT_TTL_MS = 5 * 60 * 1000
 const RELAY_TIMEOUT_MS = 30_000
-const PUBLISH_TIMEOUT_MS = 5_000
 
-/**
- * Publish a message to the core_messages relay table.
- */
-export async function publishMessage(
-	supabase: SupabaseClient,
-	opts: PublishOptions,
-): Promise<RelayMessage> {
-	const ttl = new Date(Date.now() + (opts.ttlSeconds ?? DEFAULT_TTL_SECONDS) * 1000).toISOString()
-	let timeoutId: ReturnType<typeof setTimeout> | undefined
-	const timeout = new Promise<never>(
-		(_, reject) =>
-			(timeoutId = setTimeout(
-				() => reject(new NetworkError('Relay publish timed out')),
-				PUBLISH_TIMEOUT_MS,
-			)),
-	)
-	const { data, error } = await Promise.race([
-		supabase
-			.from('core_messages')
-			.insert({
-				core_id: opts.coreId,
-				sender_id: opts.senderId,
-				direction: opts.direction,
-				payload: opts.payload,
-				ttl,
+export const messageDefinitions = {
+	coreHealthProbe: {
+		type: 'core.health.probe',
+		version: 1,
+		mode: 'direct-fire-and-forget',
+		ack: 'none',
+	},
+	coreConfigChanged: {
+		type: 'core.config.changed',
+		version: 1,
+		mode: 'direct-queued',
+		ack: 'received',
+	},
+	profileSync: {
+		type: 'core.instance.profile-sync',
+		version: 1,
+		mode: 'core-relay',
+		ack: 'processed',
+	},
+	coreHeartbeat: {
+		type: 'core.registration.heartbeat',
+		version: 1,
+		mode: 'convex-relay',
+		ack: 'received',
+	},
+	pairingCompleted: {
+		type: 'core.pairing.completed',
+		version: 1,
+		mode: 'convex-relay',
+		ack: 'processed',
+	},
+} satisfies Record<string, MessageDefinition>
+
+export async function publishMessage<TPayload>(
+	adapter: PlatformAdapter,
+	options: PublishOptions<TPayload>,
+): Promise<MessageEnvelope<TPayload>> {
+	const envelope = createEnvelope(options)
+	switch (envelope.mode) {
+		case 'direct-queued':
+			await adapter.queueStore?.push('direct', {
+				id: envelope.id,
+				createdAt: envelope.createdAt,
+				payload: envelope,
 			})
-			.select()
-			.single(),
-		timeout,
-	]).finally(() => {
-		if (timeoutId) clearTimeout(timeoutId)
-	})
-
-	if (error) throw new NetworkError(`Failed to publish relay message: ${error.message}`)
-	return data as RelayMessage
+			return envelope
+		case 'direct-fire-and-forget':
+			return envelope
+		case 'core-relay':
+			await publishCoreRelay(adapter, envelope)
+			return envelope
+		case 'convex-relay':
+			await convexMutation(adapter, 'messaging:publishMessage', {
+				messageId: envelope.id,
+				type: envelope.type,
+				version: envelope.version,
+				senderId: envelope.senderId,
+				recipientId: envelope.recipientId,
+				payload: envelope.payload,
+				ack: envelope.ack,
+				ttlMs: envelope.ttlMs,
+			})
+			return envelope
+	}
 }
 
-/**
- * Write received_at on a message to acknowledge receipt.
- */
-export async function writeReceipt(supabase: SupabaseClient, messageId: string): Promise<void> {
-	const { error } = await supabase
-		.from('core_messages')
-		.update({ received_at: new Date().toISOString() })
-		.eq('id', messageId)
-
-	if (error) throw new NetworkError(`Failed to write receipt: ${error.message}`)
+export async function pendingMessages(
+	adapter: PlatformAdapter,
+	recipientId: string,
+): Promise<unknown[]> {
+	return await convexQuery(adapter, 'messaging:pendingMessages', { recipientId })
 }
 
-/**
- * Write completed_at and result on a message when processing finishes.
- */
-export async function writeResult(
-	supabase: SupabaseClient,
+export async function writeReceipt(
+	adapter: PlatformAdapter,
 	messageId: string,
+	recipientId: string,
+): Promise<void> {
+	await convexMutation(adapter, 'messaging:ackMessage', { messageId, recipientId })
+}
+
+export async function writeResult(
+	adapter: PlatformAdapter,
+	messageId: string,
+	recipientId: string,
 	result: unknown,
 ): Promise<void> {
-	const { error } = await supabase
-		.from('core_messages')
-		.update({ completed_at: new Date().toISOString(), result })
-		.eq('id', messageId)
-
-	if (error) throw new NetworkError(`Failed to write result: ${error.message}`)
+	await convexMutation(adapter, 'messaging:completeMessage', { messageId, recipientId, result })
 }
 
-/**
- * Wait for a message's received_at to be set by the receiver.
- * Throws RelayTimeoutError if not received within 30 seconds.
- */
 export async function waitForReceipt(
-	supabase: SupabaseClient,
+	adapter: PlatformAdapter,
 	messageId: string,
 	timeoutMs = RELAY_TIMEOUT_MS,
-	signal?: AbortSignal,
 ): Promise<void> {
-	const start = Date.now()
-	while (Date.now() - start < timeoutMs) {
-		if (signal?.aborted) throw new CoreOfflineError()
-		const { data, error } = await supabase
-			.from('core_messages')
-			.select('received_at')
-			.eq('id', messageId)
-			.single()
-
-		if (error) {
-			await sleep(500)
-			continue
-		}
-
-		if (data?.received_at) return
-		await sleep(500)
-	}
-	throw new RelayTimeoutError()
+	await waitForStatus(adapter, messageId, timeoutMs, ['received', 'processed'])
 }
 
-/**
- * Wait for a message's completed_at to be set by the receiver.
- */
 export async function waitForResult(
-	supabase: SupabaseClient,
+	adapter: PlatformAdapter,
 	messageId: string,
 	timeoutMs = RELAY_TIMEOUT_MS,
-	signal?: AbortSignal,
 ): Promise<unknown> {
+	const status = await waitForStatus(adapter, messageId, timeoutMs, ['processed'])
+	if (status?.error) throw new NetworkError(status.error)
+	return status?.result
+}
+
+export async function heartbeatCore(
+	adapter: PlatformAdapter,
+	coreId: string,
+	status?: string,
+	metadata?: unknown,
+): Promise<void> {
+	await convexMutation(adapter, 'presence:heartbeatCore', { coreId, status, metadata })
+}
+
+export async function corePresence(adapter: PlatformAdapter, coreId: string): Promise<unknown> {
+	return await convexQuery(adapter, 'presence:corePresence', { coreId })
+}
+
+function createEnvelope<TPayload>(options: PublishOptions<TPayload>): MessageEnvelope<TPayload> {
+	return {
+		id: crypto.randomUUID(),
+		type: options.definition.type,
+		version: options.definition.version,
+		mode: options.definition.mode,
+		ack: options.definition.ack,
+		senderId: options.senderId,
+		recipientId: options.recipientId,
+		payload: options.payload,
+		createdAt: Date.now(),
+		ttlMs: options.definition.ttlMs ?? DEFAULT_TTL_MS,
+	}
+}
+
+async function waitForStatus(
+	adapter: PlatformAdapter,
+	messageId: string,
+	timeoutMs: number,
+	statuses: string[],
+) {
 	const start = Date.now()
 	while (Date.now() - start < timeoutMs) {
-		if (signal?.aborted) throw new CoreOfflineError()
-		const { data, error } = await supabase
-			.from('core_messages')
-			.select('completed_at, result')
-			.eq('id', messageId)
-			.single()
-
-		if (error) {
-			await sleep(500)
-			continue
-		}
-
-		if (data?.completed_at) return data.result
+		const state = await convexQuery<any>(adapter, 'messaging:messageStatus', { messageId })
+		if (state && statuses.includes(state.status)) return state
 		await sleep(500)
 	}
 	throw new RelayTimeoutError()
-}
-
-/**
- * Subscribe to incoming messages for a given core_id and direction.
- * Calls onMessage for every new row. The caller is responsible for writing
- * receipt and result via writeReceipt / writeResult.
- */
-export function subscribeToMessages(
-	supabase: SupabaseClient,
-	coreId: string,
-	direction: MessageDirection,
-	onMessage: (msg: RelayMessage) => void | Promise<void>,
-): { unsubscribe: () => void } {
-	const channel = supabase
-		.channel(`core_messages:${coreId}:${direction}`)
-		.on(
-			'postgres_changes',
-			{
-				event: 'INSERT',
-				schema: 'public',
-				table: 'core_messages',
-				filter: `core_id=eq.${coreId}`,
-			},
-			async (payload) => {
-				const msg = payload.new as RelayMessage
-				if (msg.direction !== direction) return
-				await onMessage(msg)
-			},
-		)
-		.subscribe()
-
-	return {
-		unsubscribe: () => {
-			supabase.removeChannel(channel)
-		},
-	}
 }
 
 function sleep(ms: number): Promise<void> {
-	return new Promise((res) => setTimeout(res, ms))
+	return new Promise((resolve) => setTimeout(resolve, ms))
 }

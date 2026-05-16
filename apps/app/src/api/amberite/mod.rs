@@ -1,15 +1,16 @@
 //! Amberite plugin — `plugin:amberite|*` namespace.
 //!
-//! Reduced to three OS-level invokes: token read, Core health, URL resolve.
+//! Reduced to OS-level invokes: session token keychain access, Core health, URL resolve.
 //! All API calls are routed through `@tauri-apps/plugin-http` (tauriFetch)
 //! in TypeScript; no per-endpoint Rust proxies remain.
 //!
 //! Debug: `invoke('plugin:amberite|ping')` → "amberite-lib: pong"
 
 use amberite_lib::core_launcher::{
-	get_local_core_token as read_local_core_token,
+	get_local_setup_secret as read_local_setup_secret,
 	is_core_running as check_core_running,
 };
+use amberite_lib::session;
 use amberite_lib::settings::AppSettings;
 use tauri::plugin::TauriPlugin;
 use tauri::Runtime;
@@ -31,7 +32,10 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 	tauri::plugin::Builder::<R>::new("amberite")
 		.invoke_handler(tauri::generate_handler![
 			ping,
-			get_local_core_token,
+			get_current_jwt,
+			set_current_jwt,
+			clear_current_jwt,
+			get_local_setup_secret,
 			is_core_running,
 			core_get_url,
 		])
@@ -45,10 +49,28 @@ async fn ping() -> String {
 	"amberite-lib: pong".to_string()
 }
 
-/// Read the local Core token from the well-known file on disk.
+/// Read the current Amberite session JWT from the OS keychain.
 #[tauri::command]
-async fn get_local_core_token() -> Result<String> {
-	read_local_core_token()
+async fn get_current_jwt() -> Result<Option<String>> {
+	session::get_current_jwt().map_err(TheseusSerializableError::Amberite)
+}
+
+/// Persist the current Amberite session JWT in the OS keychain.
+#[tauri::command]
+async fn set_current_jwt(jwt: String) -> Result<()> {
+	session::set_current_jwt(jwt).map_err(TheseusSerializableError::Amberite)
+}
+
+/// Clear the current Amberite session JWT from the OS keychain.
+#[tauri::command]
+async fn clear_current_jwt() -> Result<()> {
+	session::clear_current_jwt().map_err(TheseusSerializableError::Amberite)
+}
+
+/// Read the local one-time setup secret for an app-launched Core.
+#[tauri::command]
+async fn get_local_setup_secret() -> Result<Option<String>> {
+	read_local_setup_secret()
 		.await
 		.map_err(TheseusSerializableError::Amberite)
 }

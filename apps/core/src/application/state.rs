@@ -6,6 +6,7 @@ use std::{
 
 use dashmap::DashMap;
 use sqlx::SqlitePool;
+use uuid::Uuid;
 
 use crate::{
     config::Config,
@@ -17,7 +18,6 @@ use crate::{
             modpack_repo::ModpackRepo,
         },
         events::EventBroadcaster,
-        macro_engine::executor::MacroExecutor,
         process::{instance_actor::InstanceHandle, pty_spawner::PtySpawner},
     },
     ports::{
@@ -46,13 +46,13 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// Runtime config.
     pub config: Config,
+    /// Stable Core identity generated once and persisted locally.
+    pub core_id: String,
     /// Running instance handles, keyed by instance ID.
     pub instances: DashMap<InstanceId, InstanceHandle>,
     /// Broadcast channel for all instance events.
     pub broadcaster: EventBroadcaster,
-    /// Deno macro executor.
-    pub macro_executor: MacroExecutor,
-    /// JWKS cache for Supabase JWT validation.
+    /// JWKS cache for auth JWT validation.
     pub jwks_cache: JwksCache,
     /// In-memory short-lived WebSocket tickets.
     pub ws_tickets: DashMap<String, WsTicket>,
@@ -60,6 +60,8 @@ pub struct AppState {
     pub fs_download_tokens: DashMap<String, FsDownloadToken>,
     /// First-run pairing code (cleared after pairing).
     pub pairing_code: tokio::sync::Mutex<Option<String>>,
+    /// Local one-time setup secret for app-launched Cores.
+    pub local_setup_secret: tokio::sync::Mutex<Option<String>>,
     /// SEC-01: counts wrong pairing-code attempts; locked out after MAX_PAIRING_ATTEMPTS.
     pub wrong_pairing_attempts: AtomicU32,
     /// Instance data store.
@@ -96,6 +98,7 @@ impl AppState {
         let instance_store = Arc::new(InstanceRepo::new(pool.clone()));
         let java_store = Arc::new(JavaRepo::new(pool.clone()));
         let modpack_store = Arc::new(ModpackRepo::new(pool.clone()));
+        let core_id = load_or_create_core_id(&pool).await?;
 
         // Generate first-run pairing code if not yet paired.
         let is_paired =
@@ -105,29 +108,42 @@ impl AppState {
                 .unwrap_or(0)
                 > 0;
 
-        // In dev mode, skip pairing entirely — no code, no banner.
-        let pairing_code = if is_paired || config.dev_mode {
-            None
+        if is_paired {
+            sqlx::query(
+                "UPDATE core_config SET core_id = ? WHERE id = 1 AND core_id IS NULL",
+            )
+            .bind(&core_id)
+            .execute(&pool)
+            .await
+            .ok();
+        }
+
+        let (pairing_code, local_setup_secret) = if is_paired || config.dev_mode
+        {
+            (None, None)
         } else {
             let code = generate_pairing_code();
+            let secret = generate_setup_secret();
+            write_local_setup_secret(&config.data_dir, &secret).await?;
             println!("\n╔══════════════════════════════╗");
             println!("║  Amberite Core — Pairing Code  ║");
             println!("║          {code}          ║");
             println!("╚══════════════════════════════╝\n");
-            Some(code)
+            (Some(code), Some(secret))
         };
 
         Ok(Arc::new(Self {
             pool,
             http,
             config,
+            core_id,
             instances: DashMap::new(),
             broadcaster,
-            macro_executor: MacroExecutor::new(),
             jwks_cache,
             ws_tickets: DashMap::new(),
             fs_download_tokens: DashMap::new(),
             pairing_code: tokio::sync::Mutex::new(pairing_code),
+            local_setup_secret: tokio::sync::Mutex::new(local_setup_secret),
             wrong_pairing_attempts: AtomicU32::new(0),
             instance_store,
             java_store,
@@ -136,15 +152,16 @@ impl AppState {
         }))
     }
 
-    /// JWKS URL derived from the stored supabase_url.
+    /// JWKS URL written during setup for the active auth provider.
     pub async fn jwks_url(&self) -> Option<String> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT supabase_url FROM core_config WHERE id = 1")
-                .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten();
-        row.map(|(url,)| format!("{url}/auth/v1/.well-known/jwks.json"))
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT auth_jwks_url FROM core_config WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten();
+        row.map(|(url,)| url)
     }
 
     /// Owner user id written during setup. Only this user may administer Core.
@@ -157,8 +174,58 @@ impl AppState {
     }
 }
 
+async fn load_or_create_core_id(
+    pool: &SqlitePool,
+) -> color_eyre::eyre::Result<String> {
+    if let Some(core_id) = sqlx::query_scalar::<_, String>(
+        "SELECT core_id FROM core_identity WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await?
+    {
+        return Ok(core_id);
+    }
+
+    let core_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT OR IGNORE INTO core_identity (id, core_id, created_at) VALUES (1, ?, ?)",
+    )
+    .bind(&core_id)
+    .bind(chrono::Utc::now().to_rfc3339())
+    .execute(pool)
+    .await?;
+
+    Ok(sqlx::query_scalar::<_, String>(
+        "SELECT core_id FROM core_identity WHERE id = 1",
+    )
+    .fetch_one(pool)
+    .await?)
+}
+
+async fn write_local_setup_secret(
+    data_dir: &std::path::Path,
+    secret: &str,
+) -> color_eyre::eyre::Result<()> {
+    let path = data_dir.join(".setup_secret");
+    tokio::fs::write(&path, secret).await?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = tokio::fs::metadata(&path).await?.permissions();
+        permissions.set_mode(0o600);
+        tokio::fs::set_permissions(&path, permissions).await?;
+    }
+
+    Ok(())
+}
+
 fn generate_pairing_code() -> String {
     use rand::Rng;
     let n: u32 = rand::thread_rng().gen_range(100_000..=999_999);
     n.to_string()
+}
+
+fn generate_setup_secret() -> String {
+    Uuid::new_v4().to_string()
 }

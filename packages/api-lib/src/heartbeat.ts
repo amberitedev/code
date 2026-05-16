@@ -1,11 +1,5 @@
-/**
- * Heartbeat module — Core updates core_registrations.last_seen on a regular
- * interval while running. This timestamp is a UX hint only; it does not drive
- * routing decisions.
- */
-
-import type { SupabaseClient } from '@supabase/supabase-js'
-import { NetworkError } from './errors'
+import type { PlatformAdapter } from './adapter'
+import { heartbeatCore } from './transport'
 
 const HEARTBEAT_INTERVAL_MS = 30_000
 
@@ -13,7 +7,7 @@ export class CoreHeartbeat {
 	private timer: ReturnType<typeof setInterval> | null = null
 
 	constructor(
-		private supabase: SupabaseClient,
+		private adapter: PlatformAdapter,
 		private coreId: string,
 	) {}
 
@@ -31,14 +25,10 @@ export class CoreHeartbeat {
 	}
 
 	private async beat(): Promise<void> {
-		const { error } = await this.supabase
-			.from('core_registrations')
-			.update({ last_seen: new Date().toISOString() })
-			.eq('id', this.coreId)
-
-		if (error) {
-			// Heartbeat failures are non-fatal; just log.
-			console.warn('Core heartbeat failed:', error.message)
+		try {
+			await heartbeatCore(this.adapter, this.coreId, 'online')
+		} catch (error) {
+			console.warn('Core heartbeat failed:', error)
 		}
 	}
 }

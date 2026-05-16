@@ -43,12 +43,12 @@ pub async fn install_modpack(
         }
     }
 
-    let data =
-        mrpack_bytes.ok_or_else(|| ApiError::BadRequest("missing 'mrpack' field".into()))?;
+    let data = mrpack_bytes
+        .ok_or_else(|| ApiError::BadRequest("missing 'mrpack' field".into()))?;
 
     // Write to a temp file for the installer to read
-    let tmp =
-        tempfile::NamedTempFile::new().map_err(|e| ApiError::Internal(e.to_string()))?;
+    let tmp = tempfile::NamedTempFile::new()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     tokio::fs::write(tmp.path(), &data)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -63,9 +63,9 @@ pub async fn get_modpack(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let manifest = get_manifest(&state, &id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("no modpack installed for this instance".into()))?;
+    let manifest = get_manifest(&state, &id).await?.ok_or_else(|| {
+        ApiError::NotFound("no modpack installed for this instance".into())
+    })?;
     Ok(Json(manifest_to_value(&manifest)))
 }
 

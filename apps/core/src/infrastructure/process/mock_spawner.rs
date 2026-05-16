@@ -5,7 +5,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::ports::process_spawner::{ProcessHandle, ProcessSpawner, SpawnError};
+use crate::ports::process_spawner::{
+    ProcessHandle, ProcessSpawner, SpawnError,
+};
 
 /// Fake spawner used in tests — no real process is created.
 pub struct MockSpawner;

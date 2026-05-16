@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tokio::sync::mpsc;
 
-use crate::ports::process_spawner::{ProcessHandle, ProcessSpawner, SpawnError};
+use crate::ports::process_spawner::{
+    ProcessHandle, ProcessSpawner, SpawnError,
+};
 
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn IoWrite + Send>>>,
@@ -16,9 +18,11 @@ pub struct PtyHandle {
 
 impl ProcessHandle for PtyHandle {
     fn send_stdin(&self, line: &str) -> Result<(), SpawnError> {
-        let mut w = self.writer.lock().map_err(|e| SpawnError::Failed(e.to_string()))?;
-        writeln!(w, "{}", line.trim_end_matches('\n'))
-            .map_err(SpawnError::Io)
+        let mut w = self
+            .writer
+            .lock()
+            .map_err(|e| SpawnError::Failed(e.to_string()))?;
+        writeln!(w, "{}", line.trim_end_matches('\n')).map_err(SpawnError::Io)
     }
 
     fn take_stdout_rx(&mut self) -> Option<mpsc::Receiver<String>> {
@@ -26,12 +30,17 @@ impl ProcessHandle for PtyHandle {
     }
 
     fn is_running(&self) -> bool {
-        let Ok(mut child) = self.child.lock() else { return false };
+        let Ok(mut child) = self.child.lock() else {
+            return false;
+        };
         matches!(child.try_wait(), Ok(None))
     }
 
     fn kill(&mut self) -> Result<(), SpawnError> {
-        let mut child = self.child.lock().map_err(|e| SpawnError::Failed(e.to_string()))?;
+        let mut child = self
+            .child
+            .lock()
+            .map_err(|e| SpawnError::Failed(e.to_string()))?;
         child.kill().map_err(SpawnError::Io)
     }
 
@@ -55,7 +64,12 @@ impl ProcessSpawner for PtySpawner {
     ) -> Result<Self::Handle, SpawnError> {
         let pty_system = native_pty_system();
         let pair = pty_system
-            .openpty(PtySize { rows: 50, cols: 200, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: 50,
+                cols: 200,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| SpawnError::Failed(e.to_string()))?;
 
         let mut cmd = CommandBuilder::new(command);
@@ -67,15 +81,18 @@ impl ProcessSpawner for PtySpawner {
             cmd.env(k, v);
         }
 
-        let child = pair.slave
+        let child = pair
+            .slave
             .spawn_command(cmd)
             .map_err(|e| SpawnError::Failed(e.to_string()))?;
 
-        let writer = pair.master
+        let writer = pair
+            .master
             .take_writer()
             .map_err(|e| SpawnError::Failed(e.to_string()))?;
 
-        let reader = pair.master
+        let reader = pair
+            .master
             .try_clone_reader()
             .map_err(|e| SpawnError::Failed(e.to_string()))?;
 

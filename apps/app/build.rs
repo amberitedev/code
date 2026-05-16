@@ -315,7 +315,10 @@ fn main() {
                 InlinedPlugin::new()
                     .commands(&[
                         "ping",
-                        "get_local_core_token",
+                        "get_current_jwt",
+                        "set_current_jwt",
+                        "clear_current_jwt",
+                        "get_local_setup_secret",
                         "is_core_running",
                         "core_get_url",
                     ])

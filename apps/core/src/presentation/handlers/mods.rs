@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 use crate::{
     application::{
         mod_service::{
-            add_mod, delete_mod, list_mods, toggle_mod, update_all_mods, update_mod, upload_mod,
+            add_mod, delete_mod, list_mods, toggle_mod, update_all_mods,
+            update_mod, upload_mod,
         },
         state::AppState,
     },
@@ -30,9 +31,9 @@ pub struct ToggleBody {
 
 /// SEC-04: Reject non-UUID instance IDs before touching the database.
 fn validate_instance_id(id: &str) -> Result<(), ApiError> {
-    id.parse::<InstanceId>()
-        .map(|_| ())
-        .map_err(|_| ApiError::BadRequest("invalid instance id — must be a UUID".into()))
+    id.parse::<InstanceId>().map(|_| ()).map_err(|_| {
+        ApiError::BadRequest("invalid instance id — must be a UUID".into())
+    })
 }
 
 /// GET /instances/:id/mods
@@ -71,10 +72,7 @@ pub async fn upload_mod_handler(
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?
     {
-        let filename = field
-            .file_name()
-            .unwrap_or("mod.jar")
-            .to_string();
+        let filename = field.file_name().unwrap_or("mod.jar").to_string();
         let data = field
             .bytes()
             .await

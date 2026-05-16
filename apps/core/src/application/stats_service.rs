@@ -20,8 +20,10 @@ pub struct StatsResponse {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StatsError {
-    #[error("db: {0}")] Db(#[from] sqlx::Error),
-    #[error("instance not found")] NotFound,
+    #[error("db: {0}")]
+    Db(#[from] sqlx::Error),
+    #[error("instance not found")]
+    NotFound,
 }
 
 pub async fn get_stats(
@@ -37,7 +39,10 @@ pub async fn get_stats(
         Some(h) => h,
         None => {
             // BEH-05: distinguish "not in DB" (→ 404) from "offline" (→ 200 with nulls)
-            state.instance_store.get(&iid).await
+            state
+                .instance_store
+                .get(&iid)
+                .await
                 .map_err(|_| StatsError::NotFound)?;
             return Ok(StatsResponse {
                 cpu_percent: None,
@@ -61,7 +66,11 @@ pub async fn get_stats(
             std::thread::sleep(Duration::from_millis(200));
             sys.refresh_all();
             if let Some(proc) = sys.process(p) {
-                (Some(proc.cpu_usage()), Some(proc.memory() / 1_048_576), Some(sys.total_memory() / 1_048_576))
+                (
+                    Some(proc.cpu_usage()),
+                    Some(proc.memory() / 1_048_576),
+                    Some(sys.total_memory() / 1_048_576),
+                )
             } else {
                 (None, None, None)
             }
@@ -89,18 +98,20 @@ async fn get_player_count(
     cmd_tx: tokio::sync::mpsc::Sender<ActorCmd>,
 ) -> Option<u32> {
     let mut rx = state.broadcaster.subscribe();
-    let _ = cmd_tx
-        .send(ActorCmd::SendCommand("list".into()))
-        .await;
+    let _ = cmd_tx.send(ActorCmd::SendCommand("list".into())).await;
     let iid = instance_id.clone();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let remaining =
+            deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             break;
         }
         match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Ok(Event::InstanceOutput { instance_id: evid, line })) if evid == iid => {
+            Ok(Ok(Event::InstanceOutput {
+                instance_id: evid,
+                line,
+            })) if evid == iid => {
                 if let Some(n) = parse_player_count(&line) {
                     return Some(n);
                 }
@@ -126,7 +137,9 @@ mod tests {
     #[test]
     fn parse_normal_count() {
         assert_eq!(
-            parse_player_count("There are 3 of a max of 20 players online: foo, bar, baz"),
+            parse_player_count(
+                "There are 3 of a max of 20 players online: foo, bar, baz"
+            ),
             Some(3)
         );
     }
@@ -152,6 +165,9 @@ mod tests {
 
     #[test]
     fn parse_unrelated_line() {
-        assert_eq!(parse_player_count("[Server] Done (2.5s)! For help, type help"), None);
+        assert_eq!(
+            parse_player_count("[Server] Done (2.5s)! For help, type help"),
+            None
+        );
     }
 }

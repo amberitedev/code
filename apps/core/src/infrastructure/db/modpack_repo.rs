@@ -68,9 +68,12 @@ impl ModpackStore for ModpackRepo {
         Ok(())
     }
 
-    async fn get_for_instance(&self, instance_id: &str) -> Result<Option<ModpackManifest>, StoreError> {
+    async fn get_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<Option<ModpackManifest>, StoreError> {
         let row = sqlx::query_as::<_, ManifestRow>(
-            "SELECT * FROM modpack_manifests WHERE instance_id = ?"
+            "SELECT * FROM modpack_manifests WHERE instance_id = ?",
         )
         .bind(instance_id)
         .fetch_optional(&self.pool)
@@ -78,7 +81,10 @@ impl ModpackStore for ModpackRepo {
         Ok(row.map(Into::into))
     }
 
-    async fn delete_for_instance(&self, instance_id: &str) -> Result<(), StoreError> {
+    async fn delete_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<(), StoreError> {
         sqlx::query("DELETE FROM modpack_manifests WHERE instance_id = ?")
             .bind(instance_id)
             .execute(&self.pool)

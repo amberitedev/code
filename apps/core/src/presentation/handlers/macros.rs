@@ -9,11 +9,12 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        macro_service::{kill_macro, list_macro_files, list_macros, spawn_macro},
+        macro_service::{
+            kill_macro, list_macro_files, list_macros, spawn_macro, MacroPid,
+        },
         state::AppState,
     },
     domain::instance::InstanceId,
-    infrastructure::macro_engine::executor::MacroPid,
     presentation::{error::ApiError, extractors::AuthUser},
 };
 
