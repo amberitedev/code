@@ -42,7 +42,7 @@ import { computed, ref, watch } from 'vue'
 
 import { useModrinthServersConsole } from '#ui/composables'
 import { ConsolePageLayout, provideConsoleManager } from '#ui/layouts/shared/console'
-import { injectCoreClient, injectModrinthServerContext } from '#ui/providers'
+import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
 
 import ServerManageStats from './components/ServerManageStats.vue'
 
@@ -55,13 +55,15 @@ const props = withDefaults(
 	},
 )
 
-const coreClient = injectCoreClient()
+const client = injectModrinthClient()
 const {
+	server: _serverData,
 	serverId,
 	isConnected,
 	isWsAuthIncorrect,
 	stats,
 	powerState: serverPowerState,
+	powerStateDetails: _powerStateDetails,
 } = injectModrinthServerContext()
 const modrinthServersConsole = useModrinthServersConsole()
 
@@ -83,16 +85,11 @@ const inspectError = async () => {
 	if (isDismissed()) return
 
 	try {
-		const log = await coreClient.readLog(serverId, 'latest.log')
+		const blob = await client.kyros.files_v0.downloadFile('/logs/latest.log')
+		const log = await blob.text()
 		if (!log) return
 
-		const res = await fetch('https://api.mclo.gs/1/analyse', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-			body: new URLSearchParams({ content: log }),
-		})
-		if (!res.ok) throw new Error(`mclogs ${res.status}`)
-		const data = (await res.json()) as Mclogs.Insights.v1.InsightsResponse
+		const data = await client.mclogs.insights_v1.analyse(log)
 		if (data.analysis?.problems?.length) {
 			crashAnalysis.value = data
 		} else {
@@ -112,9 +109,11 @@ const dismissCrash = () => {
 provideConsoleManager({
 	logLines: modrinthServersConsole.output,
 	sendCommand: (cmd: string) => {
-		coreClient.sendCommand(serverId, cmd).catch((error) => {
+		try {
+			client.archon.sockets.send(serverId, { event: 'command', cmd })
+		} catch (error) {
 			console.error('Error sending command:', error)
-		})
+		}
 	},
 	showCommandInput: true,
 	disableCommandInput: computed(() => serverPowerState.value !== 'running'),
@@ -126,13 +125,17 @@ provideConsoleManager({
 	),
 	onClear: async () => {
 		modrinthServersConsole.clear()
+		try {
+			await client.kyros.logs_v1.clear()
+		} catch (error) {
+			console.error('Failed to clear server logs:', error)
+		}
 	},
 	shareDisabled: computed(() => !isConnected.value),
 	emptyStateType: 'server',
 	crashAnalysis,
 	onDismissCrash: dismissCrash,
 })
-
 
 watch(
 	() => serverPowerState.value,

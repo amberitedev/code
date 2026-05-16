@@ -13,7 +13,7 @@ export default plugin({
 			"  tari_page_info      — URL, title, readyState",
 			"  tari_vue_warnings   — [Vue warn] messages grouped+deduped",
 			"  tari_clear          — clear all captured data",
-			"CDP auto-enabled in dev builds (pnpm app:dev) — no manual env var needed. CDP on localhost:9222",
+			"CDP is opt-in: start the app with AMBERITE_ENABLE_CDP=true to expose localhost:9222",
 		].join("\n");
 	},
 });

@@ -26,6 +26,13 @@ Remember to update an AGENTS.md when:
 
 Do not update for routine work. Keep the cache clean.
 
+### Plans (`.plan/`)
+
+Plans in `.plan/` are off-limits unless the user explicitly names a specific
+plan to read or asks you to implement that plan. Read only the requested plan,
+not the rest of the directory. Treat plans as planning notes, not source of
+truth; they are usually at least partially wrong.
+
 ---
 
 ## Architecture

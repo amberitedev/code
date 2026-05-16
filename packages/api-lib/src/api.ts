@@ -32,22 +32,32 @@ import type {
 } from './types'
 import { NetworkError, CoreApiError } from './errors'
 
+const DEFAULT_TIMEOUT_MS = 15_000
+
 function authHeaders(ctx: CoreCallContext): Record<string, string> {
 	const h: Record<string, string> = {}
 	if (ctx.token) h['Authorization'] = `Bearer ${ctx.token}`
 	return h
 }
 
-async function apiFetch<T>(ctx: CoreCallContext, url: string, init?: RequestInit): Promise<T> {
+async function request(ctx: CoreCallContext, url: string, init?: RequestInit): Promise<Response> {
 	let res: Response
+	const controller = new AbortController()
+	const timeout = setTimeout(() => controller.abort(), ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+	const abortFromCaller = () => controller.abort()
+	ctx.signal?.addEventListener('abort', abortFromCaller, { once: true })
 	try {
 		res = await ctx.fetchFn(url, {
 			...init,
 			headers: { ...authHeaders(ctx), ...(init?.headers || {}) },
+			signal: controller.signal,
 		})
 	} catch (e) {
 		const reason = e instanceof Error ? e.message : String(e)
 		throw new NetworkError(reason)
+	} finally {
+		clearTimeout(timeout)
+		ctx.signal?.removeEventListener('abort', abortFromCaller)
 	}
 	if (!res.ok) {
 		let msg = res.statusText
@@ -59,12 +69,21 @@ async function apiFetch<T>(ctx: CoreCallContext, url: string, init?: RequestInit
 		}
 		throw new CoreApiError(res.status, msg)
 	}
+	return res
+}
+
+async function apiFetch<T>(ctx: CoreCallContext, url: string, init?: RequestInit): Promise<T> {
+	const res = await request(ctx, url, init)
 	try {
 		return await res.json()
 	} catch (e) {
 		const reason = e instanceof Error ? e.message : String(e)
 		throw new NetworkError(`Invalid JSON response from ${url} — ${reason}`)
 	}
+}
+
+async function rawFetch(ctx: CoreCallContext, url: string, init?: RequestInit): Promise<Response> {
+	return request(ctx, url, init)
 }
 
 // ── Instances ─────────────────────────────────────────────────────────────────
@@ -215,14 +234,9 @@ export function listLogs(ctx: CoreCallContext, id: string): Promise<{ logs: stri
 }
 
 export function readLog(ctx: CoreCallContext, id: string, filename: string): Promise<string> {
-	return ctx
-		.fetchFn(`${ctx.baseUrl}/instances/${id}/logs/${encodeURIComponent(filename)}`, {
-			headers: authHeaders(ctx),
-		})
-		.then((r) => {
-			if (!r.ok) throw new CoreApiError(r.status, r.statusText)
-			return r.text()
-		})
+	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/logs/${encodeURIComponent(filename)}`).then(
+		(r) => r.text(),
+	)
 }
 
 export function listCrashReports(
@@ -237,14 +251,10 @@ export function readCrashReport(
 	id: string,
 	filename: string,
 ): Promise<string> {
-	return ctx
-		.fetchFn(`${ctx.baseUrl}/instances/${id}/crash-reports/${encodeURIComponent(filename)}`, {
-			headers: authHeaders(ctx),
-		})
-		.then((r) => {
-			if (!r.ok) throw new CoreApiError(r.status, r.statusText)
-			return r.text()
-		})
+	return rawFetch(
+		ctx,
+		`${ctx.baseUrl}/instances/${id}/crash-reports/${encodeURIComponent(filename)}`,
+	).then((r) => r.text())
 }
 
 // ── Server properties ─────────────────────────────────────────────────────────
@@ -287,14 +297,7 @@ export function listDirectory(
 
 export function downloadFile(ctx: CoreCallContext, id: string, path: string): Promise<Blob> {
 	const q = new URLSearchParams({ path })
-	return ctx
-		.fetchFn(`${ctx.baseUrl}/instances/${id}/fs/download?${q}`, {
-			headers: authHeaders(ctx),
-		})
-		.then((r) => {
-			if (!r.ok) throw new CoreApiError(r.status, r.statusText)
-			return r.blob()
-		})
+	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/download?${q}`).then((r) => r.blob())
 }
 
 export function deleteFileOrFolder(
@@ -322,12 +325,7 @@ export function uploadFile(
 
 export function readFile(ctx: CoreCallContext, id: string, path: string): Promise<ArrayBuffer> {
 	const q = new URLSearchParams({ path })
-	return ctx
-		.fetchFn(`${ctx.baseUrl}/instances/${id}/fs/read?${q}`, { headers: authHeaders(ctx) })
-		.then((r) => {
-			if (!r.ok) throw new CoreApiError(r.status, r.statusText)
-			return r.arrayBuffer()
-		})
+	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/read?${q}`).then((r) => r.arrayBuffer())
 }
 
 export function writeFile(
@@ -541,6 +539,9 @@ function xhrUpload(ctx: CoreCallContext, url: string, file: File): UploadHandle 
 		else reject(new CoreApiError(xhr.status, 'upload failed'))
 	}
 	xhr.onerror = () => reject(new NetworkError('Network error during upload'))
+	xhr.onabort = () => reject(new NetworkError('Upload aborted'))
+	xhr.timeout = ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS
+	xhr.ontimeout = () => reject(new NetworkError('Upload timed out'))
 
 	const form = new FormData()
 	form.append('file', file, file.name)

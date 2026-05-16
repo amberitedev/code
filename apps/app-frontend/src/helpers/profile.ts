@@ -39,6 +39,7 @@ export async function create(
 	linkedData?: { project_id: string; version_id: string; locked: boolean } | null,
 	kind?: ProfileKind | null,
 	port?: number | null,
+	coreInstanceId?: string | null,
 ): Promise<string> {
 	// Trim string name to avoid "Unable to find directory"
 	name = name.trim()
@@ -52,6 +53,7 @@ export async function create(
 		linkedData,
 		kind,
 		port,
+		coreInstanceId,
 	})
 }
 
@@ -189,7 +191,7 @@ export async function update_project(path: string, projectPath: string): Promise
 
 // Add a project to a profile from a version
 // Returns a path to the new project file
-export type DownloadReason = 'standalone' | 'dependency' | 'modpack'
+export type DownloadReason = 'standalone' | 'dependency' | 'modpack' | 'update'
 
 export async function add_project_from_version(
 	path: string,
@@ -287,7 +289,11 @@ export async function kill(path: string): Promise<void> {
 }
 
 // Edits a profile
-export async function edit(path: string, editProfile: Partial<GameInstance>): Promise<void> {
+export type EditGameInstance = Partial<Omit<GameInstance, 'core_instance_id'>> & {
+	core_instance_id?: string | null
+}
+
+export async function edit(path: string, editProfile: EditGameInstance): Promise<void> {
 	return await invoke('plugin:profile|profile_edit', { path, editProfile })
 }
 

@@ -1,21 +1,30 @@
 use std::sync::Arc;
 
 use axum::{
+    http::{
+        header::{AUTHORIZATION, CONTENT_TYPE},
+        HeaderValue, Method,
+    },
     routing::{delete, get, patch, post, put},
     Router,
 };
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
 
 use crate::{
-	application::state::AppState,
-	presentation::handlers::{
-		backups, console, diagnostics, fs, instance_control, instances, logs, macros, modpack, mods,
-		properties, setup, stats,
-	},
+    application::state::AppState,
+    presentation::handlers::{
+        backups, console, diagnostics, fs, instance_control, instances, logs,
+        macros, modpack, mods, properties, setup, stats,
+    },
 };
 
 /// Build the full Axum router with all routes wired to handlers.
 pub fn create_router(state: Arc<AppState>) -> Router {
+    let cors = cors_layer(&state);
+
     Router::new()
         // System
         .route("/health", get(diagnostics::health))
@@ -37,7 +46,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/stop", post(instance_control::stop))
         .route("/instances/:id/kill", post(instance_control::kill))
         .route("/instances/:id/restart", post(instance_control::restart))
-        .route("/instances/:id/command", post(instance_control::send_command_handler))
+        .route(
+            "/instances/:id/command",
+            post(instance_control::send_command_handler),
+        )
         // Console (WS) + creation progress (SSE)
         .route("/instances/:id/console", get(console::ws_console))
         .route("/instances/:id/progress", get(console::sse_progress))
@@ -45,27 +57,57 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/modpack", post(modpack::install_modpack))
         .route("/instances/:id/modpack", get(modpack::get_modpack))
         .route("/instances/:id/modpack", delete(modpack::remove_modpack))
-        .route("/instances/:id/modpack/export", get(modpack::export_modpack_handler))
+        .route(
+            "/instances/:id/modpack/export",
+            get(modpack::export_modpack_handler),
+        )
         // Macros
         .route("/instances/:id/macros", get(macros::list_macros_handler))
         .route("/instances/:id/macros", post(macros::spawn_macro_handler))
-        .route("/instances/:id/macros/:pid", delete(macros::kill_macro_handler))
+        .route(
+            "/instances/:id/macros/:pid",
+            delete(macros::kill_macro_handler),
+        )
         // Mods
         .route("/instances/:id/mods", get(mods::list_mods_handler))
         .route("/instances/:id/mods", post(mods::add_mod_handler))
         .route("/instances/:id/mods/upload", post(mods::upload_mod_handler))
-        .route("/instances/:id/mods/update-all", post(mods::update_all_handler))
-        .route("/instances/:id/mods/:filename", delete(mods::delete_mod_handler))
-        .route("/instances/:id/mods/:filename", patch(mods::toggle_mod_handler))
-        .route("/instances/:id/mods/:filename/update", put(mods::update_mod_handler))
+        .route(
+            "/instances/:id/mods/update-all",
+            post(mods::update_all_handler),
+        )
+        .route(
+            "/instances/:id/mods/:filename",
+            delete(mods::delete_mod_handler),
+        )
+        .route(
+            "/instances/:id/mods/:filename",
+            patch(mods::toggle_mod_handler),
+        )
+        .route(
+            "/instances/:id/mods/:filename/update",
+            put(mods::update_mod_handler),
+        )
         // Logs
         .route("/instances/:id/logs", get(logs::list_logs_handler))
         .route("/instances/:id/logs/:filename", get(logs::read_log_handler))
-        .route("/instances/:id/crash-reports", get(logs::list_crash_reports_handler))
-        .route("/instances/:id/crash-reports/:filename", get(logs::read_crash_report_handler))
+        .route(
+            "/instances/:id/crash-reports",
+            get(logs::list_crash_reports_handler),
+        )
+        .route(
+            "/instances/:id/crash-reports/:filename",
+            get(logs::read_crash_report_handler),
+        )
         // Server properties
-        .route("/instances/:id/properties", get(properties::get_properties_handler))
-        .route("/instances/:id/properties", patch(properties::patch_properties_handler))
+        .route(
+            "/instances/:id/properties",
+            get(properties::get_properties_handler),
+        )
+        .route(
+            "/instances/:id/properties",
+            patch(properties::patch_properties_handler),
+        )
         // Stats
         .route("/instances/:id/stats", get(stats::get_stats_handler))
         // Filesystem
@@ -85,16 +127,62 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/fs/search", get(fs::search_handler))
         .route("/fs/file/:key", get(fs::download_by_key_handler))
         // Backups — delete-many and schedule registered before /:bid to prevent literal-string capture
-        .route("/instances/:id/backups/delete-many", post(backups::delete_many_handler))
-        .route("/instances/:id/backups/schedule", get(backups::get_schedule_handler))
-        .route("/instances/:id/backups/schedule", put(backups::set_schedule_handler))
+        .route(
+            "/instances/:id/backups/delete-many",
+            post(backups::delete_many_handler),
+        )
+        .route(
+            "/instances/:id/backups/schedule",
+            get(backups::get_schedule_handler),
+        )
+        .route(
+            "/instances/:id/backups/schedule",
+            put(backups::set_schedule_handler),
+        )
         .route("/instances/:id/backups", get(backups::list_handler))
         .route("/instances/:id/backups", post(backups::create_handler))
-        .route("/instances/:id/backups/:bid", delete(backups::delete_handler))
-        .route("/instances/:id/backups/:bid", patch(backups::rename_handler))
-        .route("/instances/:id/backups/:bid/lock", patch(backups::lock_handler))
-        .route("/instances/:id/backups/:bid/restore", post(backups::restore_handler))
+        .route(
+            "/instances/:id/backups/:bid",
+            delete(backups::delete_handler),
+        )
+        .route(
+            "/instances/:id/backups/:bid",
+            patch(backups::rename_handler),
+        )
+        .route(
+            "/instances/:id/backups/:bid/lock",
+            patch(backups::lock_handler),
+        )
+        .route(
+            "/instances/:id/backups/:bid/restore",
+            post(backups::restore_handler),
+        )
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
+}
+
+fn cors_layer(state: &AppState) -> CorsLayer {
+    if state.config.dev_mode || state.config.allowed_origin == "*" {
+        return CorsLayer::permissive();
+    }
+
+    let origin = state
+        .config
+        .allowed_origin
+        .parse::<HeaderValue>()
+        .unwrap_or_else(|_| HeaderValue::from_static("https://amberite.dev"));
+
+    CorsLayer::new()
+        .allow_origin(origin)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+        .allow_credentials(true)
+        .expose_headers(Any)
 }

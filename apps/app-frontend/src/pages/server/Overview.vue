@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ServersManageOverviewPage } from '@modrinth/ui'
+import { CoreServerManageOverviewPage } from '@modrinth/ui'
 </script>
 
 <template>
-	<ServersManageOverviewPage />
+	<CoreServerManageOverviewPage />
 </template>

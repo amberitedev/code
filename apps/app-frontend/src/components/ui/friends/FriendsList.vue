@@ -10,13 +10,18 @@ import {
 	useRelativeTime,
 	useVIntl,
 } from '@modrinth/ui'
-import dayjs from 'dayjs'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
 import { friend_listener } from '@/helpers/events'
-import { add_friend, type FriendWithUserData, remove_friend } from '@/helpers/friends.ts'
+import {
+	add_friend,
+	friends,
+	type FriendWithUserData,
+	remove_friend,
+	transformFriends,
+} from '@/helpers/friends.ts'
 import type { ModrinthCredentials } from '@/helpers/mr_auth'
 
 const { formatMessage } = useVIntl()
@@ -104,47 +109,19 @@ const incomingRequests = computed(() =>
 )
 
 const loading = ref(true)
+async function loadFriends(timeout = false) {
+	loading.value = timeout
 
-// MOCK: temporary fake friends for design preview
-const MOCK_FRIENDS: FriendWithUserData[] = [
-	{
-		id: 'mock-1',
-		friend_id: null,
-		status: 'Minecraft - Survival',
-		last_updated: dayjs().subtract(5, 'minute'),
-		created: dayjs().subtract(30, 'day'),
-		username: 'alice_plays',
-		accepted: true,
-		online: true,
-		avatar: '',
-	},
-	{
-		id: 'mock-2',
-		friend_id: null,
-		status: null,
-		last_updated: dayjs().subtract(2, 'hour'),
-		created: dayjs().subtract(60, 'day'),
-		username: 'CraftingBob',
-		accepted: true,
-		online: true,
-		avatar: '',
-	},
-	{
-		id: 'mock-3',
-		friend_id: null,
-		status: null,
-		last_updated: null,
-		created: dayjs().subtract(90, 'day'),
-		username: 'RedstoneCharlie',
-		accepted: true,
-		online: false,
-		avatar: '',
-	},
-]
-
-async function loadFriends(_timeout = false) {
-	loading.value = false
-	userFriends.value = userCredentials.value ? MOCK_FRIENDS : []
+	try {
+		const friendsList = await friends()
+		userFriends.value = await transformFriends(friendsList, userCredentials.value)
+		loading.value = false
+	} catch (e) {
+		console.error('Error loading friends', e)
+		if (timeout) {
+			setTimeout(() => loadFriends(), 15 * 1000)
+		}
+	}
 }
 
 watch(
@@ -162,10 +139,6 @@ watch(
 	},
 	{ immediate: true },
 )
-
-defineExpose({
-	showAddFriendModal: () => addFriendModal.value?.show(),
-})
 
 const unlisten = await friend_listener(() => loadFriends())
 onUnmounted(() => {
@@ -317,6 +290,15 @@ const messages = defineMessages({
 	</ModalWrapper>
 	<div v-if="userCredentials && !loading" class="flex gap-1 items-center mb-3 -ml-1">
 		<template v-if="sortedFriends.length > 0">
+			<ButtonStyled circular type="transparent">
+				<button
+					v-tooltip="formatMessage(messages.addFriend)"
+					:aria-label="formatMessage(messages.addFriend)"
+					@click="addFriendModal.show"
+				>
+					<UserPlusIcon />
+				</button>
+			</ButtonStyled>
 			<StyledInput
 				v-model="search"
 				type="text"
@@ -373,7 +355,13 @@ const messages = defineMessages({
 					</IntlFormatted>
 				</div>
 				<div v-else>
-					<p class="text-sm text-secondary m-0">No friends yet. Use the button below to add one!</p>
+					<IntlFormatted :message-id="messages.addFriendsToShare">
+						<template #link="{ children }">
+							<span class="font-semibold text-brand cursor-pointer" @click="addFriendModal.show">
+								<component :is="() => children" />
+							</span>
+						</template>
+					</IntlFormatted>
 				</div>
 			</div>
 		</template>
@@ -414,10 +402,5 @@ const messages = defineMessages({
 				{{ formatMessage(messages.noFriendsMatch, { query: search }) }}
 			</p>
 		</template>
-	</div>
-	<div v-if="userCredentials?.user_id" class="mt-4 flex justify-center">
-		<ButtonStyled color="brand" size="large">
-			<button @click="addFriendModal.show"><UserPlusIcon /> Add friend</button>
-		</ButtonStyled>
 	</div>
 </template>

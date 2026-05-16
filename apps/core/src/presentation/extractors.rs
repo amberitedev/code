@@ -21,8 +21,7 @@ use axum::{
 };
 
 use crate::{
-    application::state::AppState,
-    infrastructure::auth::jwks::Claims,
+    application::state::AppState, infrastructure::auth::jwks::Claims,
     presentation::error::ApiError,
 };
 
@@ -30,6 +29,7 @@ use crate::{
 fn dev_claims() -> Claims {
     Claims {
         sub: "dev-owner".to_string(),
+        aud: "authenticated".to_string(),
         role: Some("authenticated".to_string()),
         exp: u64::MAX,
     }
@@ -51,19 +51,28 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             return Ok(Self(dev_claims()));
         }
 
-        let token = bearer_token(&parts.headers)
-            .ok_or_else(|| ApiError::Unauthorized("missing Authorization header".into()))?;
+        let token = bearer_token(&parts.headers).ok_or_else(|| {
+            ApiError::Unauthorized("missing Authorization header".into())
+        })?;
 
-        let jwks_url = state
-            .jwks_url()
-            .await
-            .ok_or_else(|| ApiError::Unauthorized("Core not paired with Supabase".into()))?;
+        let jwks_url = state.jwks_url().await.ok_or_else(|| {
+            ApiError::Unauthorized("Core not paired with Supabase".into())
+        })?;
 
         let claims = state
             .jwks_cache
             .validate(token, &jwks_url)
             .await
             .map_err(|e| ApiError::Unauthorized(e.to_string()))?;
+
+        let owner_user_id = state.owner_user_id().await.ok_or_else(|| {
+            ApiError::Unauthorized("Core not paired with Supabase".into())
+        })?;
+        if claims.sub != owner_user_id {
+            return Err(ApiError::Forbidden(
+                "token does not belong to this Core owner".into(),
+            ));
+        }
 
         Ok(Self(claims))
     }

@@ -23,14 +23,13 @@
 		"lint": "eslint . && prettier --check .",
 		"fix": "eslint . --fix && prettier --write .",
 		"intl:extract": "formatjs extract \"src/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}\" --ignore \"src/**/*.d.ts\" --out-file src/locales/en-US/index.json --preserve-whitespace",
-		"story": "storybook dev -p 6006",
-		"build-story": "storybook build"
+		"storybook": "storybook dev -p 6006",
+		"build-storybook": "storybook build"
 	},
 	"devDependencies": {
 		"@formatjs/cli": "^6.2.12",
 		"@modrinth/tooling-config": "workspace:*",
 		"@storybook/addon-a11y": "^10.1.10",
-		"@storybook/addon-docs": "^10.2.4",
 		"@storybook/addon-themes": "^10.1.10",
 		"@storybook/builder-vite": "^10.1.10",
 		"@storybook/vue3-vite": "^10.1.10",
@@ -61,7 +60,7 @@
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/blog": "workspace:*",
 		"@modrinth/utils": "workspace:*",
-		"@tanstack/vue-query": "^5.90.7",
+		"@tanstack/vue-query": "5.90.7",
 		"@tresjs/cientos": "^4.3.0",
 		"@tresjs/core": "^4.3.4",
 		"@tresjs/post-processing": "^2.4.0",
@@ -78,6 +77,7 @@
 		"dayjs": "^1.11.10",
 		"dompurify": "^3.1.7",
 		"es-toolkit": "^1.44.0",
+		"flatpickr": "^4.6.13",
 		"floating-vue": "^5.2.2",
 		"fuse.js": "^6.6.2",
 		"highlight.js": "^11.9.0",

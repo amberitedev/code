@@ -136,21 +136,23 @@
 										/>
 										<div class="w-px flex-1 bg-surface-5" />
 									</div>
-						<BackupItem
-							class="my-1.5 min-w-0 flex-1"
-							:backup="backup"
-							:selected="selectedIds.has(backup.id)"
-							:restore-disabled="backupRestoreDisabled"
-							:show-copy-id-action="showCopyIdAction"
-							:show-debug-info="showDebugInfo"
-							@download="() => triggerDownloadAnimation()"
-							@rename="() => renameBackupModal?.show(backup)"
-							@restore="() => restoreBackupModal?.show(backup)"
-							@delete="
-								(skipConfirmation?: boolean) =>
-									skipConfirmation ? deleteBackup(backup) : deleteBackupModal?.show(backup)
-							"
-						/>
+									<BackupItem
+										class="my-1.5 min-w-0 flex-1"
+										:backup="backup"
+										:selected="selectedIds.has(backup.id)"
+										:restore-disabled="backupRestoreDisabled"
+										:kyros-url="server.node?.instance"
+										:jwt="server.node?.token"
+										:show-copy-id-action="showCopyIdAction"
+										:show-debug-info="showDebugInfo"
+										@download="() => triggerDownloadAnimation()"
+										@rename="() => renameBackupModal?.show(backup)"
+										@restore="() => restoreBackupModal?.show(backup)"
+										@delete="
+											(skipConfirmation?: boolean) =>
+												skipConfirmation ? deleteBackup(backup) : deleteBackupModal?.show(backup)
+										"
+									/>
 								</div>
 							</TransitionGroup>
 						</template>
@@ -237,12 +239,13 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/api-lib'
+import type { Archon } from '@modrinth/api-client'
 import { CalendarIcon, DownloadIcon, IssuesIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
-import { useMutation } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import dayjs from 'dayjs'
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import Checkbox from '#ui/components/base/Checkbox.vue'
@@ -259,7 +262,7 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import { useBulkOperation } from '#ui/layouts/shared/content-tab/composables/bulk-operations'
 import {
-	injectCoreClient,
+	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '#ui/providers'
@@ -330,14 +333,18 @@ const filterPillOptions = computed<FilterPillOption[]>(() => [
 	{ id: 'manual', label: formatMessage(messages.filterManual) },
 	{ id: 'auto', label: formatMessage(messages.filterAuto) },
 ])
-const coreClient = injectCoreClient()
-const { serverId, worldId, busyReasons } = injectModrinthServerContext()
+const client = injectModrinthClient()
+const queryClient = useQueryClient()
+const { server, worldId, busyReasons } = injectModrinthServerContext()
 
 const props = defineProps<{
 	isServerRunning: boolean
 	showCopyIdAction?: boolean
 	showDebugInfo?: boolean
 }>()
+
+const route = useRoute()
+const serverId = route.params.id as string
 
 defineEmits(['onDownload'])
 
@@ -370,24 +377,40 @@ const filteredBackups = computed(() => {
 	return completedBackups.value.filter((b) => b.automated === wantAuto)
 })
 
-const deleteMutation = useMutation({
-	mutationFn: (backupId: string) => coreClient.deleteBackup(serverId, backupId),
+/** Completed backups with a snapshot: queue API schedules deletion. */
+const deleteQueueMutation = useMutation({
+	mutationFn: (backupId: string) =>
+		client.archon.backups_queue_v1.delete(serverId, worldId.value!, backupId),
 	onSuccess: async () => {
 		await invalidate()
+		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
 	},
 })
 
-const deleteManyMutation = useMutation({
-	mutationFn: (backupIds: string[]) => coreClient.deleteManyBackups(serverId, backupIds),
+/** In-progress / incomplete backups: legacy cancel + delete path. */
+const deleteLegacyMutation = useMutation({
+	mutationFn: (backupId: string) =>
+		client.archon.backups_v1.delete(serverId, worldId.value!, backupId),
 	onSuccess: async () => {
 		await invalidate()
+		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
+	},
+})
+
+/** Bulk delete via queue API — handles both completed and in-progress backups (cancels the latter). */
+const deleteManyMutation = useMutation({
+	mutationFn: (backupIds: string[]) =>
+		client.archon.backups_queue_v1.deleteMany(serverId, worldId.value!, backupIds),
+	onSuccess: async () => {
+		await invalidate()
+		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
 	},
 })
 
 type BackupGroup = {
 	label: string
 	icon: Component | null
-	backups: CoreBackup[]
+	backups: Archon.BackupsQueue.v1.BackupQueueBackup[]
 }
 
 const groupedBackups = computed((): BackupGroup[] => {
@@ -396,7 +419,11 @@ const groupedBackups = computed((): BackupGroup[] => {
 	const now = dayjs()
 	const groups: BackupGroup[] = []
 
-	const addToGroup = (label: string, icon: Component | null, backup: CoreBackup) => {
+	const addToGroup = (
+		label: string,
+		icon: Component | null,
+		backup: Archon.BackupsQueue.v1.BackupQueueBackup,
+	) => {
 		let group = groups.find((g) => g.label === label)
 		if (!group) {
 			group = { label, icon, backups: [] }
@@ -462,11 +489,18 @@ const backupRestoreDisabled = computed(() => {
 })
 
 const backupCreationDisabled = computed(() => {
+	const quota = server.value.backup_quota
+	if (quota !== undefined) {
+		const usedCount = backups.value.length ?? server.value.used_backup_quota ?? 0
+		if (usedCount >= quota) {
+			return `All ${quota} of your backup slots are in use`
+		}
+	}
 	if (busyReasons.value.length > 0) {
 		return formatMessage(busyReasons.value[0].reason)
 	}
 	if (hasActiveCreate.value) {
-		return 'A backup is already in progress'
+		return 'A backup is already queued or in progress'
 	}
 	return undefined
 })
@@ -484,7 +518,7 @@ function confirmBulkDelete() {
 	deleteBackupModal.value?.showBulk(selectedBackups.value)
 }
 
-async function bulkDelete(toRemove: CoreBackup[]) {
+async function bulkDelete(toRemove: Archon.BackupsQueue.v1.BackupQueueBackup[]) {
 	if (!toRemove.length) return
 
 	isBulkOperating.value = true
@@ -510,7 +544,11 @@ function triggerDownloadAnimation() {
 	setTimeout(() => (overTheTopDownloadAnimation.value = false), 500)
 }
 
-function deleteBackup(backup?: CoreBackup) {
+function useQueueDeleteFor(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+	return backup.status === 'done'
+}
+
+function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
 	if (!backup) {
 		addNotification({
 			type: 'error',
@@ -520,7 +558,9 @@ function deleteBackup(backup?: CoreBackup) {
 		return
 	}
 
-	deleteMutation.mutate(backup.id, {
+	const mutation = useQueueDeleteFor(backup) ? deleteQueueMutation : deleteLegacyMutation
+
+	mutation.mutate(backup.id, {
 		onError: (err) => {
 			const message = err instanceof Error ? err.message : String(err)
 			addNotification({

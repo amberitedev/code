@@ -26,8 +26,8 @@ Provides AI-friendly Chrome DevTools Protocol (CDP) tools for debugging the Taur
 | `tari_vue_warnings` | `[Vue warn]` messages, grouped+deduped |
 
 ## Prerequisites
-CDP is auto-enabled in debug builds — just run `pnpm app:dev`. No `WEBVIEW_DEVTOOLS=1` needed.
-CDP listens on `http://localhost:9222`.
+CDP is opt-in for debug builds. Start the app with `AMBERITE_ENABLE_CDP=true pnpm app:dev`.
+When enabled, CDP listens on `http://localhost:9222`.
 
 ## Gotchas
 - Console history requires the JS interceptor (`window.__mcp_logs`). CDP Runtime.consoleAPICalled only fires for new messages after connection.

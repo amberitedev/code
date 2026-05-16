@@ -46,11 +46,24 @@ interface RelayApiPayload {
 	body?: unknown
 }
 
+function isLoopback(url: string | null): boolean {
+	if (!url) return false
+	try {
+		const { hostname } = new URL(url)
+		return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+	} catch {
+		return false
+	}
+}
+
 export class CoreApiClient {
 	public monitor: CoreConnectionMonitor | null = null
 	private coreUrlPromise: Promise<string | null> | null = null
 
-	constructor(public readonly adapter: PlatformAdapter) {}
+	constructor(
+		public readonly adapter: PlatformAdapter,
+		private readonly options: { timeoutMs?: number } = {},
+	) {}
 
 	private getCoreUrlCached(): Promise<string | null> {
 		if (!this.coreUrlPromise) {
@@ -71,6 +84,7 @@ export class CoreApiClient {
 			baseUrl: coreUrl,
 			token,
 			fetchFn: this.adapter.fetchFn,
+			timeoutMs: this.options.timeoutMs,
 		}
 		return fn(ctx)
 	}
@@ -94,8 +108,8 @@ export class CoreApiClient {
 			throw new NetworkError('Core server is offline and the relay is unavailable.')
 		}
 
-		await waitForReceipt(this.adapter.supabase, msg.id)
-		const result = await waitForResult(this.adapter.supabase, msg.id)
+		await waitForReceipt(this.adapter.supabase, msg.id, undefined)
+		const result = await waitForResult(this.adapter.supabase, msg.id, undefined)
 
 		if (result && typeof result === 'object' && 'error' in result) {
 			throw new NetworkError(String((result as any).error))
@@ -110,10 +124,11 @@ export class CoreApiClient {
 		try {
 			return await this.direct(directFn)
 		} catch (e) {
-			if (e instanceof NetworkError || e instanceof CoreOfflineError) {
-				return this.relay<T>(relayPayload)
-			}
-			throw e
+			if (!(e instanceof NetworkError) && !(e instanceof CoreOfflineError)) throw e
+			// Relay makes no sense for loopback addresses — skip it and fail fast.
+			const coreUrl = await this.getCoreUrlCached()
+			if (isLoopback(coreUrl)) throw e
+			return this.relay<T>(relayPayload)
 		}
 	}
 
@@ -255,7 +270,12 @@ export class CoreApiClient {
 			const token = await this.adapter.getLocalCoreToken()
 			if (!coreUrl) throw new CoreOfflineError()
 			if (aborted) return
-			const ctx: CoreCallContext = { baseUrl: coreUrl, token, fetchFn: this.adapter.fetchFn }
+			const ctx: CoreCallContext = {
+				baseUrl: coreUrl,
+				token,
+				fetchFn: this.adapter.fetchFn,
+				timeoutMs: this.options.timeoutMs,
+			}
 			const handle = api.uploadModFile(ctx, id, file)
 			innerAbort = handle.abort
 			if (aborted) {
@@ -385,7 +405,12 @@ export class CoreApiClient {
 			const token = await this.adapter.getLocalCoreToken()
 			if (!coreUrl) throw new CoreOfflineError()
 			if (aborted) return
-			const ctx: CoreCallContext = { baseUrl: coreUrl, token, fetchFn: this.adapter.fetchFn }
+			const ctx: CoreCallContext = {
+				baseUrl: coreUrl,
+				token,
+				fetchFn: this.adapter.fetchFn,
+				timeoutMs: this.options.timeoutMs,
+			}
 			const handle = api.uploadFile(ctx, id, targetDir, file)
 			innerAbort = handle.abort
 			if (aborted) {

@@ -12,7 +12,7 @@
 				:offline="offline"
 				@unlinked="fetchInstance"
 			/>
-			<UpdateToPlayModal ref="updateToPlayModal" />
+			<UpdateToPlayModal ref="updateToPlayModal" :instance="instance" />
 			<ContentPageHeader>
 				<template #icon>
 					<Avatar
@@ -116,16 +116,67 @@
 								Repair
 							</button>
 						</ButtonStyled>
-						<ButtonStyled v-else-if="loading && !playing" color="brand" size="large">
+						<ButtonStyled v-else-if="playing === true" color="red" size="large">
+							<button :disabled="stopping" @click="stopInstance('InstancePage')">
+								<StopCircleIcon />
+								{{ stopping ? 'Stopping...' : 'Stop' }}
+							</button>
+						</ButtonStyled>
+						<ButtonStyled
+							v-else-if="playing === false && loading === false && !isServerInstance"
+							color="brand"
+							size="large"
+						>
+							<button @click="startInstance('InstancePage')">
+								<PlayIcon />
+								Play
+							</button>
+						</ButtonStyled>
+						<div
+							v-else-if="playing === false && loading === false && isServerInstance"
+							class="joined-buttons"
+						>
+							<ButtonStyled color="brand" size="large">
+								<button @click="handlePlayServer()">
+									<PlayIcon />
+									Play
+								</button>
+							</ButtonStyled>
+							<ButtonStyled color="brand" size="large">
+								<OverflowMenu
+									:options="[
+										{
+											id: 'join_server',
+											action: () => handlePlayServer(),
+										},
+										{
+											id: 'launch_instance',
+											action: () => startInstance('InstancePage'),
+										},
+									]"
+								>
+									<div class="w-0 text-xl relative top-0.5 right-2.5">
+										<DropdownIcon />
+									</div>
+
+									<template #join_server>
+										<PlayIcon />
+										Join server
+									</template>
+									<template #launch_instance>
+										<PlayIcon />
+										Launch instance
+									</template>
+								</OverflowMenu>
+							</ButtonStyled>
+						</div>
+						<ButtonStyled
+							v-else-if="loading === true && playing === false"
+							color="brand"
+							size="large"
+						>
 							<button disabled>Starting...</button>
 						</ButtonStyled>
-						<JoinedButtons
-							v-else
-							:color="playing ? 'red' : 'brand'"
-							size="large"
-							:actions="playActions"
-							:primary-disabled="stopping"
-						/>
 						<ButtonStyled circular size="large">
 							<button v-tooltip="'Instance settings'" @click="settingsModal?.show()">
 								<SettingsIcon />
@@ -144,11 +195,6 @@
 										id: 'export-mrpack',
 										action: () => exportModal?.show(),
 									},
-									{
-										id: 'push-to-server',
-										// TODO: AMBERITE - push modpack to Core server
-										action: () => {},
-									},
 								]"
 							>
 								<MoreVerticalIcon />
@@ -156,7 +202,6 @@
 								<template #host-a-server> <ServerIcon /> Create a server </template>
 								<template #open-folder> <FolderOpenIcon /> Open folder </template>
 								<template #export-mrpack> <PackageIcon /> Export modpack </template>
-								<template #push-to-server> <ServerIcon /> Push to server </template>
 							</OverflowMenu>
 						</ButtonStyled>
 					</div>
@@ -214,17 +259,13 @@
 	</div>
 </template>
 <script setup lang="ts">
-// Instance page for local Modrinth-style instances (non-server, non-synced kinds).
-// fetchInstance (322) — loads instance by path; redirects kind=server→/server/:id, synced→/synced/:id
-// top-level await fetchInstance (394) — runs in script setup; listener registration is guarded below
-// onUnmounted (604) — cleans up Tauri profile/process listeners and console
-// profile_listener + process_listener (618, 640) — only registered when not redirected (non-server/synced)
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	BoxesIcon,
 	CheckCircleIcon,
 	ClipboardCopyIcon,
 	DownloadIcon,
+	DropdownIcon,
 	EditIcon,
 	ExternalIcon,
 	EyeIcon,
@@ -248,7 +289,6 @@ import {
 	ButtonStyled,
 	ContentPageHeader,
 	injectNotificationManager,
-	JoinedButtons,
 	NavTabs,
 	OverflowMenu,
 	ServerOnlinePlayers,
@@ -307,10 +347,7 @@ const stopping = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
 
-// AMBERITE PATCH: derive from stored kind instead of linkedProjectV3 heuristic
-const isServerInstance = computed(
-	() => instance.value?.kind === 'server' || instance.value?.kind === 'synced',
-)
+const isServerInstance = ref(false)
 const linkedProjectV3 = ref<Labrinth.Projects.v3.Project>()
 const selected = ref<unknown[]>([])
 
@@ -325,22 +362,13 @@ const ping = ref<number | undefined>(undefined)
 const loadingServerPing = ref(false)
 
 async function fetchInstance() {
+	isServerInstance.value = false
 	linkedProjectV3.value = undefined
 	ping.value = undefined
 	playersOnline.value = undefined
 	loadingServerPing.value = false
 
 	instance.value = await get(route.params.id as string).catch(handleError)
-
-	// AMBERITE PATCH: server/synced profiles have their own management pages
-	if (instance.value?.kind === 'server') {
-		await router.replace(`/server/${encodeURIComponent(route.params.id as string)}`)
-		return
-	}
-	if (instance.value?.kind === 'synced') {
-		await router.replace(`/synced/${encodeURIComponent(route.params.id as string)}`)
-		return
-	}
 
 	if (!offline.value && instance.value?.linked_data && instance.value.linked_data.project_id) {
 		try {
@@ -350,7 +378,7 @@ async function fetchInstance() {
 			)
 
 			if (linkedProjectV3.value?.minecraft_server != null) {
-				// legacy Modrinth server project — no action needed, isServerInstance derives from kind
+				isServerInstance.value = true
 			}
 		} catch (error) {
 			handleError(error as Error)
@@ -395,6 +423,19 @@ async function updatePlayState() {
 
 	playing.value = Array.isArray(runningProcesses) && runningProcesses.length > 0
 }
+
+const unlistenProfiles = ref<(() => void) | undefined>()
+const unlistenProcesses = ref<(() => void) | undefined>()
+
+onUnmounted(() => {
+	unlistenProcesses.value?.()
+	unlistenProfiles.value?.()
+	const profilePath = route.params.id
+	if (profilePath) {
+		const { destroy } = useInstanceConsole(profilePath)
+		destroy()
+	}
+})
 
 await fetchInstance()
 watch(
@@ -508,35 +549,6 @@ const handlePlayServer = async () => {
 	}
 }
 
-// TODO: AMBERITE - wire serverRunning to Core server state
-const serverRunning = ref(false)
-
-const playActions = computed(() => {
-	if (playing.value) {
-		return [
-			{
-				id: 'stop',
-				label: stopping.value ? 'Stopping...' : 'Stop',
-				icon: StopCircleIcon,
-				action: () => stopInstance('InstancePage'),
-			},
-			serverRunning.value
-				? { id: 'stop_server', label: 'Stop server', icon: ServerIcon, action: () => {} }
-				: { id: 'start_server', label: 'Start server', icon: ServerIcon, action: () => {} },
-		]
-	}
-	if (serverRunning.value) {
-		return [
-			{ id: 'join', label: 'Join', icon: PlayIcon, action: () => handlePlayServer() },
-			{ id: 'stop_server', label: 'Stop server', icon: ServerIcon, action: () => {} },
-		]
-	}
-	return [
-		{ id: 'play', label: 'Play', icon: PlayIcon, action: () => startInstance('InstancePage') },
-		{ id: 'start_server', label: 'Start server', icon: ServerIcon, action: () => {} },
-	]
-})
-
 const repairInstance = async () => {
 	await finish_install(instance.value).catch(handleError)
 }
@@ -603,54 +615,36 @@ const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 	}
 }
 
-let unlistenProfiles: (() => void) | undefined
-let unlistenProcesses: (() => void) | undefined
-
-onUnmounted(() => {
-	const p = unlistenProfiles
-	const q = unlistenProcesses
-	unlistenProfiles = undefined
-	unlistenProcesses = undefined
-	p?.()
-	q?.()
-	const profilePath = route.params.id
-	if (profilePath) {
-		const { destroy } = useInstanceConsole(profilePath)
-		destroy()
-	}
-})
-
-if (instance.value?.kind !== 'server' && instance.value?.kind !== 'synced') {
-	unlistenProfiles = await profile_listener(
-		async (event: { profile_path_id: string; event: string }) => {
-			if (event.profile_path_id !== route.params.id) return
-			if (event.event === 'removed' || route.path === '/') {
-				if (route.path !== '/') {
-					await router.push({ path: '/' })
-				}
-				return
+unlistenProfiles.value = await profile_listener(
+	async (event: { profile_path_id: string; event: string }) => {
+		if (event.profile_path_id !== route.params.id) return
+		if (event.event === 'removed' || route.path === '/') {
+			if (route.path !== '/') {
+				await router.push({ path: '/' })
 			}
-			instance.value = await get(route.params.id as string).catch((err) => {
-				if (String(err).includes('not managed')) {
-					router.push({ path: '/' })
-					return undefined
-				}
-				return handleError(err)
-			})
-			if (!instance.value?.linked_data?.project_id) {
-				linkedProjectV3.value = undefined
+			return
+		}
+		instance.value = await get(route.params.id as string).catch((err) => {
+			if (String(err).includes('not managed')) {
+				router.push({ path: '/' })
+				return undefined
 			}
-		},
-	)
+			return handleError(err)
+		})
+		if (!instance.value?.linked_data?.project_id) {
+			linkedProjectV3.value = undefined
+			isServerInstance.value = false
+		}
+	},
+)
 
-	unlistenProcesses = await process_listener(
-		(e: { event: string; profile_path_id: string }) => {
-			if (e.event === 'finished' && e.profile_path_id === route.params.id) {
-				playing.value = false
-			}
-		},
-	)
-}
+unlistenProcesses.value = await process_listener(
+	(e: { event: string; profile_path_id: string }) => {
+		if (e.event === 'finished' && e.profile_path_id === route.params.id) {
+			playing.value = false
+		}
+	},
+)
 
 const icon = computed(() =>
 	instance.value?.icon_path ? convertFileSrc(instance.value.icon_path) : null,

@@ -21,7 +21,6 @@ import {
 import { computed, ref, watch } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
-import TabGroup from '#ui/components/base/TabGroup.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
 import OverflowMenu from '#ui/components/base/OverflowMenu.vue'
 import StyledInput from '#ui/components/base/StyledInput.vue'
@@ -152,9 +151,6 @@ const messages = defineMessages({
 
 const ctx = injectContentManager()
 
-// AMBERITE: client/server tab — always one selected, defaults to 'client'
-const sideView = ref<string>('client')
-
 type SortMode = 'alphabetical-asc' | 'alphabetical-desc' | 'date-added-newest' | 'date-added-oldest'
 const sortMode = ref<SortMode>('alphabetical-asc')
 
@@ -258,13 +254,8 @@ async function handleRefresh() {
 }
 
 const filteredItems = computed(() => {
-	let items = sortedItems.value
-	if (sideView.value === 'client') {
-		items = items.filter((item) => item.environment !== 'server_only')
-	} else if (sideView.value === 'server') {
-		items = items.filter((item) => !isClientOnlyEnvironment(item.environment))
-	}
-	const searched = search(items)
+	const sorted = sortedItems.value
+	const searched = search(sorted)
 	return applyFilters(searched)
 })
 const tableItems = computed<ContentCardTableItem[]>(() => {
@@ -551,60 +542,55 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							{{ formatMessage(messages.additionalContent) }}
 						</span>
 
-			<!-- AMBERITE: Client / Server tabs encasing modding UI -->
-			<TabGroup
-				v-model="sideView"
-				:tabs="[{ id: 'client', label: 'Client' }, { id: 'server', label: 'Server' }]"
-			>
-				<div class="flex flex-wrap items-center gap-2">
-						<StyledInput
-							v-model="searchQuery"
-							:icon="SearchIcon"
-							type="text"
-							autocomplete="off"
-							:spellcheck="false"
-							input-class="!h-10"
-							wrapper-class="flex-1 min-w-0"
-							clearable
-							:placeholder="
-								formatMessage(messages.searchPlaceholder, {
-									count: tableItems.length,
-									contentType: `${ctx.contentTypeLabel.value}${tableItems.length === 1 ? '' : 's'}`,
-								})
-							"
-						/>
+						<div class="flex flex-wrap items-center gap-2">
+							<StyledInput
+								v-model="searchQuery"
+								:icon="SearchIcon"
+								type="text"
+								autocomplete="off"
+								:spellcheck="false"
+								input-class="!h-10"
+								wrapper-class="flex-1 min-w-0"
+								clearable
+								:placeholder="
+									formatMessage(messages.searchPlaceholder, {
+										count: tableItems.length,
+										contentType: `${ctx.contentTypeLabel.value}${tableItems.length === 1 ? '' : 's'}`,
+									})
+								"
+							/>
 
-						<div class="flex gap-2">
-							<ButtonStyled color="brand">
-								<button
-									v-tooltip="
-										ctx.busyMessage?.value ??
-										(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
-									"
-									:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
-									class="!h-10 flex items-center gap-2"
-									@click="ctx.browse"
-								>
-									<CompassIcon class="size-5" />
-									<span>{{ formatMessage(messages.browseContent) }}</span>
-								</button>
-							</ButtonStyled>
-							<ButtonStyled type="outlined">
-								<button
-									v-tooltip="
-										ctx.busyMessage?.value ??
-										(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
-									"
-									:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
-									class="!h-10"
-									@click="ctx.uploadFiles"
-								>
-									<FolderOpenIcon class="size-5" />
-									{{ formatMessage(messages.uploadFiles) }}
-								</button>
-							</ButtonStyled>
+							<div class="flex gap-2">
+								<ButtonStyled color="brand">
+									<button
+										v-tooltip="
+											ctx.busyMessage?.value ??
+											(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
+										"
+										:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
+										class="!h-10 flex items-center gap-2"
+										@click="ctx.browse"
+									>
+										<CompassIcon class="size-5" />
+										<span>{{ formatMessage(messages.browseContent) }}</span>
+									</button>
+								</ButtonStyled>
+								<ButtonStyled type="outlined">
+									<button
+										v-tooltip="
+											ctx.busyMessage?.value ??
+											(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
+										"
+										:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
+										class="!h-10"
+										@click="ctx.uploadFiles"
+									>
+										<FolderOpenIcon class="size-5" />
+										{{ formatMessage(messages.uploadFiles) }}
+									</button>
+								</ButtonStyled>
+							</div>
 						</div>
-					</div>
 
 						<div class="@container flex flex-wrap items-center justify-between gap-2">
 							<div class="flex flex-wrap items-center gap-1.5">
@@ -707,10 +693,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							<template #empty>
 								<span>{{ formatMessage(messages.noContentFound) }}</span>
 							</template>
-					</ContentCardTable>
-			</TabGroup>
-				</div>
-			</template>
+						</ContentCardTable>
+					</div>
+				</template>
 
 				<EmptyState v-else type="empty-inbox">
 					<template #heading>

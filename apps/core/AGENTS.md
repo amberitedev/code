@@ -41,12 +41,11 @@ apps/core/
 
 - **Isolated workspace** — `Cargo.toml` opens with `[workspace]`; Deno's deps conflict with the monorepo. All `cargo` commands must run from `apps/core/`.
 - **Dual targets** — `main.rs` + `lib.rs` declare the same module tree. The library target lets `tests/` use `use amberite_core::...`.
-- **Deno version pins** — all `deno_*` crates use `=` exact versions; they ship as a coordinated bundle. Never bump one individually.
+- **Deno version pins** — all `deno_*` crates use `=` exact versions; they ship as a coordinated bundle. Never bump one individually. Deno is legacy architecture for now; do not re-add vendored patch trees without a deliberate follow-up plan.
 - **SQLite bundled** — `libsqlite3-sys = { features = ["bundled"] }`; do not remove.
 - **rustls ring** — `features = ["ring", "std", "tls12"]`; `aws-lc-sys` requires CMake and fails on Windows.
 - **`.cargo/config.toml`** — forces `link.exe` linker on Windows (rust-lld ICEs on 238MB rusty_v8.lib); sets `SQLX_OFFLINE=true` globally.
 - **`rust-toolchain.toml`** — pinned to `1.90.0`; Deno internals break on other channels.
-- **`patches/swc_common-0.37.5/`** — cargo path patch for Deno compatibility; do not update without verifying the full build.
 
 ## Runtime configuration
 

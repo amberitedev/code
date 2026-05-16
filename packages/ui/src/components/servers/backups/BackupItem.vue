@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/api-lib'
+import type { Archon } from '@modrinth/api-client'
 import {
 	ClipboardCopyIcon,
 	DownloadIcon,
@@ -31,7 +31,7 @@ const emit = defineEmits<{
 
 const props = withDefaults(
 	defineProps<{
-		backup: CoreBackup
+		backup: Archon.BackupsQueue.v1.BackupQueueBackup
 		preview?: boolean
 		kyrosUrl?: string
 		jwt?: string

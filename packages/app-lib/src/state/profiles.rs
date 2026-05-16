@@ -461,6 +461,25 @@ struct InitialScanFile {
     cache_key: String,
 }
 
+fn is_scannable_project_file(
+    project_type: ProjectType,
+    file_name: &str,
+) -> bool {
+    let Some(extension) = Path::new(file_name.trim_end_matches(".disabled"))
+        .extension()
+        .and_then(|ext| ext.to_str())
+    else {
+        return false;
+    };
+
+    match project_type {
+        ProjectType::Mod => extension.eq_ignore_ascii_case("jar"),
+        ProjectType::DataPack
+        | ProjectType::ResourcePack
+        | ProjectType::ShaderPack => extension.eq_ignore_ascii_case("zip"),
+    }
+}
+
 impl Profile {
     pub async fn get(
         path: &str,
@@ -702,8 +721,10 @@ impl Profile {
                             && let Some(file_name) = subdirectory
                                 .file_name()
                                 .and_then(|x| x.to_str())
-                            && !(project_type == ProjectType::ShaderPack
-                                && file_name.ends_with(".txt"))
+                            && is_scannable_project_file(
+                                project_type,
+                                file_name,
+                            )
                         {
                             let file_size = subdirectory
                                 .metadata()
@@ -1005,15 +1026,13 @@ impl Profile {
             InitialScanFile,
         > = keys.into_iter().map(|k| (k.path.clone(), k)).collect();
 
-        let mut file_info_by_hash: std::collections::HashMap<
-            String,
-            CachedFile,
-        > = file_info.into_iter().map(|f| (f.hash.clone(), f)).collect();
+        let file_info_by_hash: std::collections::HashMap<String, CachedFile> =
+            file_info.into_iter().map(|f| (f.hash.clone(), f)).collect();
 
         let files = DashMap::new();
 
         for hash in file_hashes {
-            let file = file_info_by_hash.remove(&hash.hash);
+            let file = file_info_by_hash.get(&hash.hash).cloned();
             let trimmed = hash.path.trim_end_matches(".disabled");
 
             if let Some(initial_file) = keys_by_path.remove(trimmed) {
@@ -1108,8 +1127,7 @@ impl Profile {
                     if subdirectory.is_file()
                         && let Some(file_name) =
                             subdirectory.file_name().and_then(|x| x.to_str())
-                        && !(project_type == ProjectType::ShaderPack
-                            && file_name.ends_with(".txt"))
+                        && is_scannable_project_file(project_type, file_name)
                     {
                         let file_size = subdirectory
                             .metadata()

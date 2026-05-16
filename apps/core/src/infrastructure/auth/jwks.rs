@@ -40,24 +40,33 @@ struct JwkRaw {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
+    pub aud: String,
     pub role: Option<String>,
     pub exp: u64,
 }
 
 impl JwksCache {
     pub fn new(http: reqwest::Client) -> Self {
-        Self { inner: tokio::sync::RwLock::new(None), http }
+        Self {
+            inner: tokio::sync::RwLock::new(None),
+            http,
+        }
     }
 
     /// Validate a JWT against the JWKS from `jwks_url`.
-    pub async fn validate(&self, token: &str, jwks_url: &str) -> Result<Claims, AuthError> {
+    pub async fn validate(
+        &self,
+        token: &str,
+        jwks_url: &str,
+    ) -> Result<Claims, AuthError> {
         self.refresh_if_stale(jwks_url).await?;
         let guard = self.inner.read().await;
         let Some(ref entry) = *guard else {
             return Err(AuthError::NoKeys);
         };
 
-        let header = decode_header(token).map_err(|_| AuthError::InvalidToken)?;
+        let header =
+            decode_header(token).map_err(|_| AuthError::InvalidToken)?;
         let token_kid = header.kid.as_deref();
 
         for jwk in &entry.keys {
@@ -71,6 +80,7 @@ impl JwksCache {
             }
             let mut validation = Validation::new(Algorithm::RS256);
             validation.validate_exp = true;
+            validation.set_audience(&["authenticated"]);
             if let Ok(data) = decode::<Claims>(token, &jwk.key, &validation) {
                 return Ok(data.claims);
             }
@@ -88,22 +98,37 @@ impl JwksCache {
             }
         }
         debug!("Refreshing JWKS from {jwks_url}");
-        let doc: JwksDoc = self.http.get(jwks_url).send().await
+        let doc: JwksDoc = self
+            .http
+            .get(jwks_url)
+            .send()
+            .await
             .map_err(|e| AuthError::Fetch(e.to_string()))?
-            .json().await
+            .json()
+            .await
             .map_err(|e| AuthError::Fetch(e.to_string()))?;
 
         let mut keys = Vec::new();
         for raw in doc.keys {
-            if raw.kty != "RSA" { continue; }
+            if raw.kty != "RSA" {
+                continue;
+            }
             if let (Some(n), Some(e)) = (raw.n, raw.e) {
-                let n_bytes = URL_SAFE_NO_PAD.decode(&n).map_err(|_| AuthError::BadKey)?;
-                let e_bytes = URL_SAFE_NO_PAD.decode(&e).map_err(|_| AuthError::BadKey)?;
-                let key = DecodingKey::from_rsa_raw_components(&n_bytes, &e_bytes);
+                let n_bytes = URL_SAFE_NO_PAD
+                    .decode(&n)
+                    .map_err(|_| AuthError::BadKey)?;
+                let e_bytes = URL_SAFE_NO_PAD
+                    .decode(&e)
+                    .map_err(|_| AuthError::BadKey)?;
+                let key =
+                    DecodingKey::from_rsa_raw_components(&n_bytes, &e_bytes);
                 keys.push(JwkEntry { kid: raw.kid, key });
             }
         }
-        *self.inner.write().await = Some(CacheEntry { keys, fetched_at: Instant::now() });
+        *self.inner.write().await = Some(CacheEntry {
+            keys,
+            fetched_at: Instant::now(),
+        });
         Ok(())
     }
 }

@@ -13,7 +13,8 @@ import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 import router from '@/routes'
 
-import { DesignInspectorPlugin } from '../../../packages/design-inspector/index.ts'
+const enableDesignInspector =
+	import.meta.env.MODE === 'development' && import.meta.env.VITE_ENABLE_DESIGN_INSPECTOR === 'true' // eslint-disable-line turbo/no-undeclared-env-vars
 
 const pinia = createPinia()
 
@@ -47,5 +48,12 @@ app.use(i18nPlugin)
 app.use(i18nDebugPlugin)
 app.directive('overlay-scrollbars', overlayScrollbarsDirective)
 
-app.use(DesignInspectorPlugin)
-app.mount('#app')
+if (enableDesignInspector) {
+	import('../../../packages/design-inspector/index.ts')
+		.then(({ DesignInspectorPlugin }) => {
+			app.use(DesignInspectorPlugin)
+		})
+		.finally(() => app.mount('#app'))
+} else {
+	app.mount('#app')
+}

@@ -1,6 +1,6 @@
 <template>
 	<ReadyTransition :pending="loading">
-		<ContentPageLayout>
+		<ContentPageLayout :enable-side-filter="props.isServerInstance">
 			<template #modals>
 				<ShareModalWrapper
 					ref="shareModal"
@@ -157,8 +157,7 @@ const router = useRouter()
 const debug = useDebugLogger('Mods:ContentUpdate')
 
 defineEmits<{
-	(event: 'play'): void
-	(event: 'stop'): void
+	(event: 'play' | 'stop'): void
 }>()
 
 const props = defineProps<{
@@ -320,7 +319,7 @@ async function updateProject(mod: ContentItem) {
 				const profile = await get(props.instance.path).catch(handleError)
 
 				if (profile) {
-					await installVersionDependencies(profile, versionData).catch(handleError)
+					await installVersionDependencies(profile, versionData, 'update').catch(handleError)
 				}
 			}
 		}
@@ -356,7 +355,7 @@ async function switchProjectVersion(mod: ContentItem, version: Labrinth.Versions
 
 		const profile = await get(props.instance.path).catch(handleError)
 		if (profile) {
-			await installVersionDependencies(profile, version).catch(handleError)
+			await installVersionDependencies(profile, version, 'update').catch(handleError)
 		}
 
 		mod.file_path = newPath

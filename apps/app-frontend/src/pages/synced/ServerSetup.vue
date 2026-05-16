@@ -4,9 +4,9 @@
 
 <script setup lang="ts">
 import type { Archon } from '@modrinth/api-client'
-import { useServerManageCoreRuntime } from '@modrinth/ui'
+import { useCoreServerManageRuntime } from '@modrinth/ui'
 import type { Ref } from 'vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps<{
 	coreInstanceId: string
@@ -15,7 +15,7 @@ const props = defineProps<{
 const isMounted = ref(true)
 const isSyncingContent = ref(false)
 
-const { isServerRunning, cleanupCoreRuntime, connectSocket } = useServerManageCoreRuntime({
+const { isServerRunning, cleanupCoreRuntime, connectSocket } = useCoreServerManageRuntime({
 	serverId: computed(() => props.coreInstanceId),
 	worldId: ref(null),
 	server: ref(null) as Ref<Archon.Servers.v0.Server | null>,
@@ -24,10 +24,18 @@ const { isServerRunning, cleanupCoreRuntime, connectSocket } = useServerManageCo
 	eventGuard: () => isMounted.value,
 })
 
-onMounted(() => connectSocket(props.coreInstanceId))
+watch(
+	() => props.coreInstanceId,
+	(nextId, previousId) => {
+		if (previousId && previousId !== nextId) cleanupCoreRuntime()
+		if (nextId) void connectSocket(nextId)
+	},
+	{ immediate: true },
+)
+
 onUnmounted(() => {
 	isMounted.value = false
-	cleanupCoreRuntime(props.coreInstanceId)
+	cleanupCoreRuntime()
 })
 
 defineExpose({ isServerRunning })

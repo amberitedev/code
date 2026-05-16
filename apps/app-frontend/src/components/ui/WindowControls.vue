@@ -22,7 +22,7 @@
 			hover-color-fill="background"
 			circular
 		>
-			<button class="relative expanded-button" @click="handleClose">
+			<button class="relative expanded-button close-button" @click="handleClose">
 				<XIcon />
 			</button>
 		</ButtonStyled>
@@ -41,7 +41,6 @@ import { getOS } from '@/helpers/utils.js'
 import { useTheming } from '@/store/state'
 
 const themeStore = useTheming()
-
 const nativeDecorations = ref(true)
 const isMaximized = ref(false)
 const os = ref('')
@@ -49,10 +48,10 @@ const os = ref('')
 const alwaysShowAppControls = computed(() => themeStore.getFeatureFlag('always_show_app_controls'))
 
 const showControls = computed(
-	() =>
-		alwaysShowAppControls.value ||
-		(!nativeDecorations.value && (os.value === 'Windows' || os.value === 'Linux')),
+	() => alwaysShowAppControls.value || (!nativeDecorations.value && os.value !== 'MacOS'),
 )
+
+let unlistenResize
 
 onMounted(async () => {
 	os.value = await getOS()
@@ -66,24 +65,29 @@ onMounted(async () => {
 
 	isMaximized.value = await getCurrentWindow().isMaximized()
 
-	const unlisten = await getCurrentWindow().onResized(async () => {
+	unlistenResize = await getCurrentWindow().onResized(async () => {
 		isMaximized.value = await getCurrentWindow().isMaximized()
-	})
-
-	onUnmounted(() => {
-		unlisten()
 	})
 })
 
+onUnmounted(() => {
+	unlistenResize?.()
+})
+
 const handleClose = async () => {
-	await saveWindowState(StateFlags.ALL)
+	await saveWindowState(StateFlags.POSITION | StateFlags.SIZE | StateFlags.MAXIMIZED)
 	await getCurrentWindow().close()
 }
 </script>
+
 <style scoped>
 .expanded-button::before {
-	inset: -6px;
 	content: '';
 	position: absolute;
+	inset: -9px -6px;
+}
+
+.expanded-button.close-button::before {
+	inset: -9px -9px -9px -6px;
 }
 </style>
