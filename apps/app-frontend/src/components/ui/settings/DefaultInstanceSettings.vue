@@ -1,26 +1,45 @@
 <script setup lang="ts">
 import { injectNotificationManager, Slider, StyledInput, Toggle } from '@modrinth/ui'
-import { ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 
 import useMemorySlider from '@/composables/useMemorySlider'
+import type { AppSettings } from '@/helpers/settings.ts'
 import { get, set } from '@/helpers/settings.ts'
 
 const { handleError } = injectNotificationManager()
 
-const fetchSettings = await get()
-fetchSettings.launchArgs = fetchSettings.extra_launch_args.join(' ')
-fetchSettings.envVars = fetchSettings.custom_env_vars.map((x) => x.join('=')).join(' ')
-
-const settings = ref(fetchSettings)
-
-const { maxMemory, snapPoints } = (await useMemorySlider().catch(handleError)) as unknown as {
-	maxMemory: number
-	snapPoints: number[]
+type EditableAppSettings = AppSettings & {
+	launchArgs: string
+	envVars: string
 }
+
+const settings = ref<EditableAppSettings | null>(null)
+const maxMemory = ref(0)
+const snapPoints = ref<number[]>([])
+
+onMounted(async () => {
+	const [fetchSettings, memorySlider] = await Promise.all([
+		get(),
+		useMemorySlider().catch(handleError) as Promise<unknown>,
+	])
+	const editableSettings = fetchSettings as EditableAppSettings
+	editableSettings.launchArgs = editableSettings.extra_launch_args.join(' ')
+	editableSettings.envVars = editableSettings.custom_env_vars.map((x) => x.join('=')).join(' ')
+
+	settings.value = editableSettings
+
+	if (memorySlider) {
+		const memory = memorySlider as { maxMemory: number; snapPoints: number[] }
+		maxMemory.value = memory.maxMemory
+		snapPoints.value = memory.snapPoints
+	}
+})
 
 watch(
 	settings,
-	async () => {
+	async (_, previousSettings) => {
+		if (!settings.value || !previousSettings) return
+
 		const setSettings = JSON.parse(JSON.stringify(settings.value))
 
 		setSettings.extra_launch_args = setSettings.launchArgs.trim().split(/\s+/).filter(Boolean)
@@ -51,7 +70,7 @@ watch(
 </script>
 
 <template>
-	<div>
+	<div v-if="settings">
 		<div class="flex flex-col gap-6">
 			<div class="flex items-center justify-between gap-4">
 				<div class="flex flex-col gap-1">

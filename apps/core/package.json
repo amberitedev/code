@@ -1,10 +1,15 @@
 {
-  "name": "@modrinth/core",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "cargo run",
-    "build": "cargo build --release",
-    "check": "cargo check"
-  }
+	"name": "@modrinth/core",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "cargo run",
+		"build": "cargo build --release",
+		"check": "cargo check",
+		"test": "cargo test --lib",
+		"test:integration": "cargo test --tests",
+		"lint": "cargo fmt --check && cargo clippy --all-targets",
+		"exercise": "node scripts/core_exercise.ts"
+	}
 }

@@ -1,9 +1,4 @@
 # Amberite — Full Project Documentation
-
-> Plain English. No code. Everything explained as if you've never seen the repo.
-> **This is the single source of truth.** Feed it to any AI at the start of every session.
-> Update this file when features are added, removed, or changed.
-
 ---
 
 ## What This Project Is
@@ -23,12 +18,6 @@ Modrinth's API is used heavily for mod discovery and modpack installation. The a
 A fully custom Rust backend. Manages Minecraft server instances — starting, stopping, installing mods, watching the process, and keeping it running. Communicates with the App over the network using JWT tokens, and connects to Supabase to register itself as online so friends can find it.
 
 Every friend group has exactly one Core. **Core runs on Windows and Linux. Mac is not supported and is not planned.**
-
-Layered architecture:
-- `domain/` — business logic and entities (instances, mods, users)
-- `application/` — services and orchestration (install pipeline, friend sync)
-- `infrastructure/` — SQLite, process management, networking, file I/O
-- `presentation/` — HTTP handlers and WebSocket (Axum)
 
 **Authentication:** JWKS RS256 — Core fetches Supabase public key from `.well-known/jwks.json`. No secrets stored in Core config. **First-time setup:** Core prints a 6-digit pairing code on first start. The App uses this code to claim ownership via `POST /setup`.
 
@@ -63,118 +52,6 @@ Lower priority than the desktop app. Build after the desktop app is stable.
 A small Minecraft mod (Java, Gradle) that runs inside the game client. Applies personal user preferences — keybinds, settings, configs — dynamically when joining a server, and saves changes back on exit. Config files cannot simply be overwritten at the filesystem level without breaking things; they must be applied at runtime via mod hooks.
 
 **Not started. Built last, after all other systems are complete and stable.**
-
----
-
-## Repo Structure
-
-The project lives in the **`amberitedev`** GitHub organization at **`amberitedev/code`**. It is a full GitHub fork of **`modrinth/code`**. All Amberite-specific code lives on top of the Modrinth codebase.
-
-```
-amberitedev/code/
-│
-├── apps/
-│   ├── app/                        — desktop client (Modrinth fork + Amberite customizations)
-│   │   ├── frontend/               — Vue 3 + Tailwind UI
-│   │   │   └── src/
-│   │   │       ├── components/
-│   │   │       ├── pages/
-│   │   │       ├── stores/
-│   │   │       ├── composables/
-│   │   │       └── assets/
-│   │   ├── backend/                — will move to packages/amberite-lib/ (currently here)
-│   │   │   └── src/
-│   │   ├── tauri/                  — Tauri desktop shell (READ-ONLY in agent sessions)
-│   │   │   ├── src/
-│   │   │   └── tauri.conf.json
-│   │   └── packages/               — Modrinth sub-packages from upstream
-│   │
-│   ├── core/                       — fully custom Rust backend (zero Modrinth code)
-│   │   ├── src/
-│   │   │   ├── domain/             — business logic, entities
-│   │   │   ├── application/        — services, orchestration
-│   │   │   ├── infrastructure/     — SQLite, processes, networking
-│   │   │   └── presentation/       — HTTP handlers, WebSocket (Axum)
-│   │   ├── migrations/
-│   │   ├── Cargo.toml
-│   │   └── Cargo.lock
-│   │
-│   ├── supabase/                   — Edge Functions + setup
-│   │   └── functions/
-│   │       ├── microsoft-auth/     — Microsoft token → Supabase session
-│   │       ├── create-invite-link/ — generate group invite token
-│   │       └── join-group/         — validate invite, add to group_members
-│   │
-│   ├── web/                        — Cloudflare Pages (amberite.dev)
-│   │   └── src/
-│   │       ├── pages/
-│   │       │   ├── index/          — marketing + download
-│   │       │   └── dashboard/      — remote dashboard (amberite.dev/dashboard)
-│   │       └── components/
-│   │
-│   └── mod/                        — companion Minecraft mod (NOT STARTED — built last)
-│       ├── src/
-│       ├── build.gradle
-│       └── settings.gradle
-│
-├── packages/
-│   ├── amberite-lib/               — PLANNED: Amberite backend library (currently apps/app/backend/)
-│   │                                 Handles: Core client, auth, mod sync, friends, groups
-│   ├── app-lib/                    — Modrinth theseus library (from upstream, game launcher logic)
-│   ├── ui/                         — shared Vue 3 + Tailwind components (Modrinth + Amberite)
-│   ├── utils/                      — shared utilities (from upstream)
-│   ├── config/                     — shared Tailwind, ESLint, tsconfig base (from upstream)
-│   ├── api-client/                 — Modrinth API client (from upstream)
-│   ├── assets/                     — shared assets (from upstream)
-│   ├── blog/                       — Modrinth blog articles (from upstream)
-│   ├── design-inspector/           — design tooling (from upstream)
-│   └── tooling-config/             — build tooling config (from upstream)
-│
-└── scripts/                        — build and utility scripts
-```
-
-**Rules for contributors and AI agents:**
-- Never overwrite existing files — always edit them.
-- Max 200 lines per file (hard rule). Ask before exceeding.
-- One component per file (single responsibility).
-- All `.env` files are gitignored. Use `.env.example` as template.
-- Tauri APIs are mocked in dev — do not import real `@tauri-apps/*` without mocking.
-- Use `@` alias for `src/` in imports.
-- `apps/app/tauri/` is read-only — do not modify Tauri shell code.
-- `packages/amberite-lib/` never modifies theseus/Modrinth internals. Patch in local copies marked `// AMBERITE PATCH`.
-- `apps/mod/` does not exist yet — do not create it.
-
----
-
-## Development Environment
-
-**WSL (Linux)** — Core development. WSL simulates the Ubuntu/Oracle Cloud server environment. All Rust compilation and server testing happens here. The repo must be cloned inside WSL's own filesystem (not `/mnt/c/`) — Rust compilation through the translation layer is noticeably slow.
-
-**Windows** — App development. The Tauri app and Vue frontend are developed on Windows. The App connects over the network to the Core running in WSL, exactly as it would to a real remote Core.
-
-Dev commands:
-
-| Task | Command | Directory |
-|---|---|---|
-| Frontend dev server | `pnpm dev` | `apps/app/` |
-| Frontend build | `pnpm build` | `apps/app/` |
-| Core (Rust) | `cargo run` | `apps/core/` |
-| Core tests | `cargo test` | `apps/core/` |
-
----
-
-## Shipping and CI
-
-Users download and install one single executable containing the App, the compiled Core binary, and everything needed. An auto-updater keeps everything in sync.
-
-GitHub Actions build pipeline on each release:
-1. Check out the repo.
-2. Compile the Rust Core from source (cached).
-3. Build the Vue App with Tauri.
-4. Bundle into a single installer.
-5. Publish to GitHub Releases.
-
----
 
 ## How Mod Syncing Works
 

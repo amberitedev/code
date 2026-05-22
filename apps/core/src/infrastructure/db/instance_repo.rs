@@ -4,7 +4,8 @@ use sqlx::SqlitePool;
 
 use crate::{
     domain::instance::{
-        InstanceId, InstanceRecord, InstanceStatus, MemorySettings, ModLoader,
+        InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
+        MemorySettings, ModLoader,
     },
     ports::instance_store::{InstanceStore, StoreError},
 };
@@ -31,6 +32,7 @@ struct InstanceRow {
     memory_min: i64,
     memory_max: i64,
     java_version: Option<i64>,
+    install_status: String,
     status: String,
     data_dir: String,
     created_at: String,
@@ -56,6 +58,10 @@ impl TryFrom<InstanceRow> for InstanceRecord {
                 max_mb: r.memory_max as u32,
             },
             java_version: r.java_version,
+            install_status: r
+                .install_status
+                .parse::<InstanceInstallStatus>()
+                .map_err(StoreError::Parse)?,
             status: r
                 .status
                 .parse::<InstanceStatus>()
@@ -83,7 +89,7 @@ fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, StoreError> {
 impl InstanceStore for InstanceRepo {
     async fn create(&self, r: &InstanceRecord) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,status,data_dir,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,install_status,status,data_dir,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         .bind(r.id.to_string())
         .bind(&r.name)
@@ -94,6 +100,7 @@ impl InstanceStore for InstanceRepo {
         .bind(r.memory.min_mb as i64)
         .bind(r.memory.max_mb as i64)
         .bind(r.java_version)
+        .bind(r.install_status.to_string())
         .bind(r.status.to_string())
         .bind(&r.data_dir)
         .bind(r.created_at.to_rfc3339())
@@ -192,6 +199,25 @@ impl InstanceStore for InstanceRepo {
                 .bind(id.to_string())
                 .execute(&self.pool)
                 .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn update_install_status(
+        &self,
+        id: &InstanceId,
+        install_status: InstanceInstallStatus,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            "UPDATE instances SET install_status = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(install_status.to_string())
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
         if result.rows_affected() == 0 {
             return Err(StoreError::NotFound(id.to_string()));
         }

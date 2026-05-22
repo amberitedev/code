@@ -1,0 +1,12 @@
+{
+	"identifier": "theme-editor",
+	"description": "Permissions for the theme editor dev tool window",
+	"local": true,
+	"windows": ["theme-editor"],
+	"permissions": [
+		"core:default",
+		"core:event:default",
+		"core:window:default",
+		"core:window:allow-close"
+	]
+}

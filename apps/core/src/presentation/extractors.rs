@@ -59,9 +59,11 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             ApiError::Unauthorized("Core is not paired".into())
         })?;
 
+        let audience = state.auth_audience().await;
+
         let claims = state
             .jwks_cache
-            .validate(token, &jwks_url)
+            .validate(token, &jwks_url, &audience)
             .await
             .map_err(|e| ApiError::Unauthorized(e.to_string()))?;
 

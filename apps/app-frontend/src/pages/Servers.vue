@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import type { CoreInstanceSummary } from '@amberite/api-lib'
-import { CoreApiClient } from '@amberite/api-lib'
+import type { CoreInstanceSummary } from '@amberite/amberite-api'
 import type { Archon } from '@modrinth/api-client'
-import { ServersManagePageIndex } from '@modrinth/ui'
+import { injectCoreInstanceState, ServersManagePageIndex } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-
-import { getDesktopAdapter } from '@/adapters/desktop'
 
 import { config } from '../config'
 
 const stripePublishableKey = (config.stripePublishableKey as string) || ''
+const coreInstances = injectCoreInstanceState()
 
 function mapCoreInstanceToServer(inst: CoreInstanceSummary): Archon.Servers.v0.Server {
 	return {
@@ -64,9 +62,7 @@ useQuery({
 	queryKey: ['servers'],
 	staleTime: Infinity,
 	queryFn: async () => {
-		const adapter = getDesktopAdapter()
-		const coreClient = new CoreApiClient(adapter)
-		const instances = await coreClient.listInstances()
+		const instances = await coreInstances.refresh()
 		return {
 			servers: instances.map(mapCoreInstanceToServer),
 			pagination: {

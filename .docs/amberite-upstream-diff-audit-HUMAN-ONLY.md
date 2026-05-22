@@ -7,7 +7,7 @@ Do not treat this as machine-consumable project truth. It is a human review snap
 ## What changed at a high level
 
 - New Amberite Core service under `apps/core`, with Axum APIs for instances, console, files, backups, mods, properties, stats, auth, migrations, Docker, tests, and a large vendored `swc_common` patch tree.
-- Desktop app now tries to bridge to Core through Rust (`apps/app/src/api/amberite`, profile creation changes, manual Tauri window builder), frontend adapters, and a new `@amberite/api-lib` package.
+- Desktop app now tries to bridge to Core through Rust (`apps/app/src/api/amberite`, profile creation changes, manual Tauri window builder), frontend adapters, and a new `@amberite/amberite-api` package.
 - App frontend adds `/server/:id` and `/synced/:id`, Core-backed server management pages, synced instance reuse, creation-flow instance type, Core install/browse flows, and several dev/mock changes.
 - Shared `packages/ui` server-management code was rewritten in-place from Modrinth Archon/Kyros assumptions toward Core assumptions.
 - New design inspector and Tari DevTools packages were added, plus devtools/Vite/Storybook changes.
@@ -35,7 +35,7 @@ Do not treat this as machine-consumable project truth. It is a human review snap
 - `packages/ui/src/composables/server-manage-core-runtime.ts`: stubs filesystem auth/operations and reports socket connect success before real heartbeat/state. File UI and console can appear connected but remain stale/disconnected.
 - `packages/ui/src/layouts/wrapped/hosting/manage/files.vue`: `extractFile` ignores dry-run/override and always unzips in normal mode; root rename can drop the leading slash.
 - `packages/ui/src/components/servers/backups/BackupItem.vue`: still has Kyros download behavior, while Core wrapper no longer passes Kyros URL/JWT, so backup downloads are disabled/broken.
-- `packages/api-lib/src/api.ts` and `src/client.ts`: direct fetch has no timeout; several fetch paths bypass error wrapping; relay fallback can wait 60s and cannot handle binary file payloads.
+- `packages/amberite-api/src/api.ts` and `src/client.ts`: direct fetch has no timeout; several fetch paths bypass error wrapping; relay fallback can wait 60s and cannot handle binary file payloads.
 
 ## Highest-risk security/data issues
 
@@ -70,7 +70,7 @@ Do not treat this as machine-consumable project truth. It is a human review snap
 - Align console WS flow. Core uses `POST /ws-token` returning `{ ticket }` and `/instances/:id/console?ticket=...`; `amberite-lib` uses stale `/instances/:id/ws-token` and `?token=`.
 - Align properties keys. Core currently expects exact Minecraft keys like `server-port`; UI/shared settings may send normalized snake_case/camel keys.
 - Align Supabase relay IDs. Database expects UUIDs, api-lib sends hostnames/JWT strings; relay cannot work as written.
-- Add request timeouts and cancellation to `@amberite/api-lib` before routing pages depend on it.
+- Add request timeouts and cancellation to `@amberite/amberite-api` before routing pages depend on it.
 
 ## Keepable changes
 
@@ -91,4 +91,4 @@ Do not treat this as machine-consumable project truth. It is a human review snap
 4. Revert unrelated behavior changes: mock friends, download prop removals, Storybook script renames without aliases, planning/vendor artifacts.
 5. Split Core-specific UI from shared Modrinth UI to reduce accidental regressions and make upstream merges easier.
 6. Harden Core: JWT ownership checks, CORS, file path canonicalization, ZIP extraction, backup restore, port validation, process readiness.
-7. Simplify `@amberite/api-lib`: direct Core client first; defer Supabase relay/auth/monitoring until schema and identity model are correct.
+7. Simplify `@amberite/amberite-api`: direct Core client first; defer Supabase relay/auth/monitoring until schema and identity model are correct.

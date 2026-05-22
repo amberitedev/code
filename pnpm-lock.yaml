@@ -74,9 +74,9 @@ importers:
 
   apps/app-frontend:
     dependencies:
-      '@amberite/api-lib':
+      '@amberite/amberite-api':
         specifier: workspace:*
-        version: link:../../packages/api-lib
+        version: link:../../packages/amberite-api
       '@intercom/messenger-js-sdk':
         specifier: ^0.0.14
         version: 0.0.14
@@ -471,7 +471,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/api-lib:
+  packages/amberite-api:
     devDependencies:
       '@modrinth/tooling-config':
         specifier: workspace:*
@@ -677,9 +677,9 @@ importers:
 
   packages/ui:
     dependencies:
-      '@amberite/api-lib':
+      '@amberite/amberite-api':
         specifier: workspace:*
-        version: link:../api-lib
+        version: link:../amberite-api
       '@codemirror/commands':
         specifier: ^6.3.2
         version: 6.10.1

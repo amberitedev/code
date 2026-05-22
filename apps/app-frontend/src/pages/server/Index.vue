@@ -13,7 +13,7 @@
 		<CoreServerManageRootLayout
 			v-else
 			:server-id="coreInstanceId"
-			:nav-href-prefix="`/server/${encodeURIComponent(profilePath)}`"
+			:nav-href-prefix="`/instance/${encodeURIComponent(profilePath)}`"
 			:reload-page="() => router.go(0)"
 			:resolve-viewer="resolveViewer"
 			:show-copy-id-action="themeStore.devMode"
@@ -29,7 +29,7 @@
 							wid: wid ?? undefined,
 							from,
 							source: 'core',
-							back: from ? undefined : `/server/${encodeURIComponent(profilePath)}/content`,
+							back: from ? undefined : `/instance/${encodeURIComponent(profilePath)}/content`,
 						},
 					})
 				}
@@ -42,7 +42,7 @@
 							sid,
 							wid: wid ?? undefined,
 							source: 'core',
-							back: `/server/${encodeURIComponent(profilePath)}/content`,
+							back: `/instance/${encodeURIComponent(profilePath)}/content`,
 						},
 					})
 				}
@@ -66,18 +66,16 @@
 </template>
 
 <script setup lang="ts">
-import { CoreApiClient } from '@amberite/api-lib'
 import { IssuesIcon } from '@modrinth/assets'
 import {
 	CoreServerManageRootLayout,
 	ErrorInformationCard,
 	injectAuth,
-	provideCoreClient,
+	injectCoreInstanceState,
 } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getDesktopAdapter } from '@/adapters/desktop'
 import { get_user } from '@/helpers/cache'
 import { get as getCreds } from '@/helpers/mr_auth'
 import { get as getProfile } from '@/helpers/profile'
@@ -88,17 +86,11 @@ import { useTheming } from '@/store/theme'
 const route = useRoute()
 const router = useRouter()
 const auth = injectAuth()
+const coreInstances = injectCoreInstanceState()
 const themeStore = useTheming()
 const breadcrumbs = useBreadcrumbs()
 
 const coreError = ref(false)
-
-// provide() must be called before any await (Vue 3 clears currentInstance after each await boundary)
-try {
-	provideCoreClient(new CoreApiClient(getDesktopAdapter()))
-} catch {
-	coreError.value = true
-}
 
 const profilePath = computed(() => {
 	const id = route.params.id
@@ -118,11 +110,15 @@ async function loadProfile(path = profilePath.value) {
 		return
 	}
 
+	void coreInstances.refresh().catch(() => {
+		coreError.value = true
+	})
+
 	if (nextProfile.name) {
 		breadcrumbs.setName('Server', nextProfile.name)
 		breadcrumbs.setContext({
 			name: nextProfile.name,
-			link: `/server/${encodeURIComponent(path)}/content`,
+			link: `/instance/${encodeURIComponent(path)}/content`,
 		})
 	}
 }

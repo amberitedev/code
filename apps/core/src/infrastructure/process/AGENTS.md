@@ -1,16 +1,23 @@
 # src/infrastructure/process — Process spawning and per-instance actor
 
-PTY-based process spawning, per-instance async actor, and a mock spawner for tests. See `ports/process_spawner.rs` for the trait definitions.
+Process spawning, per-instance async actor, and a mock spawner for tests. See `ports/process_spawner.rs` for the trait definitions.
 
 ## File structure
 
 ```
-process/
-  mod.rs              — re-exports: pty_spawner, mock_spawner, instance_actor
-  pty_spawner.rs      — PtySpawner + PtyHandle: real PTY-backed process spawning
+  process/
+    mod.rs              — re-exports: pty_spawner, mock_spawner, instance_actor
+  std_spawner.rs      — StdSpawner + StdHandle: production stdin/stdout pipe spawning
+  pty_spawner.rs      — PtySpawner + PtyHandle: PTY-backed process spawning, currently not used by production
   mock_spawner.rs     — MockSpawner + MockHandle: in-memory fake for tests
   instance_actor.rs   — ActorCmd, InstanceHandle, spawn_actor: per-instance async actor
 ```
+
+## std_spawner.rs
+
+`StdSpawner` uses `tokio::process::Command` with piped stdin, stdout, and stderr. Production uses this spawner because Windows ConPTY/`portable-pty` can launch Java/Minecraft without reliably surfacing output and may leave Core unable to detect readiness.
+
+Two async tasks forward stdout and stderr lines into the actor's single output channel. `send_stdin` writes a trimmed command plus newline to the child stdin. `pid()` returns the OS PID used by `stats_service`.
 
 ## pty_spawner.rs
 

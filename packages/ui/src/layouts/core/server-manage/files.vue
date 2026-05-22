@@ -1,69 +1,280 @@
 <template>
-	<div class="flex flex-col gap-4">
-		<div class="flex items-center justify-between gap-3">
-			<h2 class="text-2xl font-semibold text-contrast">Files</h2>
-			<button
-				class="rounded-full bg-surface-4 px-4 py-2 font-semibold text-contrast"
-				@click="loadDirectory"
-			>
-				Refresh
-			</button>
-		</div>
-		<div v-if="error" class="rounded-xl bg-red-highlight p-4 text-red">{{ error }}</div>
-		<div class="overflow-hidden rounded-2xl bg-surface-2">
-			<button
-				v-if="path !== '/'"
-				class="w-full border-b border-surface-5 px-4 py-3 text-left text-primary hover:bg-surface-3"
-				@click="openParent"
-			>
-				../
-			</button>
-			<button
-				v-for="entry in entries"
-				:key="entry.path"
-				class="flex w-full items-center justify-between border-b border-surface-5 px-4 py-3 text-left text-primary last:border-b-0 hover:bg-surface-3"
-				@click="entry.type === 'directory' ? openDirectory(entry.path) : undefined"
-			>
-				<span>{{ entry.type === 'directory' ? '[dir]' : '[file]' }} {{ entry.name }}</span>
-				<span class="text-sm text-secondary">{{ entry.type }}</span>
-			</button>
-		</div>
-	</div>
+	<ReadyTransition :pending="firstPaintPending">
+		<FilePageLayout />
+	</ReadyTransition>
 </template>
 
 <script setup lang="ts">
-import type { CoreFsEntry } from '@amberite/api-lib'
-import { onMounted, ref, watch } from 'vue'
+import type { CoreFsEntry, UploadHandle } from '@amberite/amberite-api'
+import type { UploadState } from '@modrinth/api-client'
+import { computed, ref } from 'vue'
 
-import { injectCoreClient, injectModrinthServerContext } from '#ui/providers'
+import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
+import { useVIntl } from '#ui/composables/i18n'
+import {
+	type EditingFile,
+	type FileItem,
+	FilePageLayout,
+	provideFileManager,
+} from '#ui/layouts/shared/files-tab'
+import {
+	injectCoreClient,
+	injectModrinthServerContext,
+	injectNotificationManager,
+} from '#ui/providers'
+import { commonMessages } from '#ui/utils/common-messages'
 
 const coreClient = injectCoreClient()
-const { serverId } = injectModrinthServerContext()
-const path = ref('/')
-const entries = ref<CoreFsEntry[]>([])
-const error = ref<string | null>(null)
+const { addNotification } = injectNotificationManager()
+const { formatMessage } = useVIntl()
+const ctx = injectModrinthServerContext()
 
-async function loadDirectory() {
-	error.value = null
-	try {
-		const listing = await coreClient.listDirectory(serverId, path.value)
-		entries.value = listing.items
-	} catch (loadError) {
-		console.error('[core/server-manage] Failed to load files:', loadError)
-		error.value = 'Could not load this directory.'
+const items = ref<FileItem[]>([])
+const firstPaintPending = ref(true)
+const loading = ref(true)
+const error = ref<Error | null>(null)
+const currentPath = ref('/')
+const editingFile = ref<EditingFile | null>(null)
+const uploadState = ref<UploadState>({
+	isUploading: false,
+	currentFileName: null,
+	currentFileProgress: 0,
+	uploadedBytes: 0,
+	totalBytes: 0,
+	completedFiles: 0,
+	totalFiles: 0,
+})
+const cancelUpload = ref<(() => void) | null>(null)
+
+const isBusy = computed(() => ctx.busyReasons.value.length > 0 || ctx.isSyncingContent.value)
+const busyTooltip = computed(() => (isBusy.value ? 'Your server is busy.' : undefined))
+
+function normalizePath(path: string) {
+	if (!path || path === '/') return '/'
+	return path.startsWith('/') ? path : `/${path}`
+}
+
+function childPath(name: string) {
+	return currentPath.value === '/' ? name : `${currentPath.value.replace(/^\//, '')}/${name}`
+}
+
+function toTimestamp(value: string | null) {
+	return value ? Math.floor(new Date(value).getTime() / 1000) : 0
+}
+
+function mapEntry(entry: CoreFsEntry): FileItem {
+	return {
+		name: entry.name,
+		type: entry.type,
+		path: entry.path.startsWith('/') ? entry.path.slice(1) : entry.path,
+		modified: toTimestamp(entry.modified_at),
+		created: toTimestamp(entry.modified_at),
+		size: entry.size ?? undefined,
 	}
 }
 
-function openDirectory(nextPath: string) {
-	path.value = nextPath
+async function refresh() {
+	loading.value = true
+	error.value = null
+	try {
+		const listing = await coreClient.listDirectory(ctx.serverId, currentPath.value, 0, 500)
+		items.value = listing.items.map(mapEntry)
+	} catch (err) {
+		error.value = err instanceof Error ? err : new Error(String(err))
+		items.value = []
+	} finally {
+		loading.value = false
+		firstPaintPending.value = false
+	}
 }
 
-function openParent() {
-	const parts = path.value.split('/').filter(Boolean)
-	parts.pop()
-	path.value = parts.length ? `/${parts.join('/')}` : '/'
+function navigateTo(path: string) {
+	currentPath.value = normalizePath(path)
+	void refresh()
 }
 
-watch(path, () => void loadDirectory())
-onMounted(() => void loadDirectory())
+function startEditing(file: EditingFile) {
+	editingFile.value = file
+}
+
+function stopEditing() {
+	editingFile.value = null
+}
+
+async function createItem(name: string, type: 'file' | 'directory') {
+	const path = childPath(name)
+	try {
+		if (type === 'directory') await coreClient.createDir(ctx.serverId, path)
+		else await coreClient.createFile(ctx.serverId, path)
+		await refresh()
+	} catch (err) {
+		addNotification({
+			type: 'error',
+			title: formatMessage(commonMessages.createFailedLabel),
+			text: err instanceof Error ? err.message : String(err),
+		})
+	}
+}
+
+async function renameItem(path: string, newName: string) {
+	const normalized = path.replace(/^\//, '')
+	const parent = normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : ''
+	const destination = parent ? `${parent}/${newName}` : newName
+	try {
+		await coreClient.moveEntry(ctx.serverId, normalized, destination)
+		await refresh()
+	} catch (err) {
+		addNotification({
+			type: 'error',
+			title: formatMessage(commonMessages.renameFailedLabel),
+			text: err instanceof Error ? err.message : String(err),
+		})
+	}
+}
+
+async function moveItem(source: string, destination: string) {
+	try {
+		await coreClient.moveEntry(
+			ctx.serverId,
+			source.replace(/^\//, ''),
+			destination.replace(/^\//, ''),
+		)
+		await refresh()
+	} catch (err) {
+		addNotification({
+			type: 'error',
+			title: formatMessage(commonMessages.moveFailedLabel),
+			text: err instanceof Error ? err.message : String(err),
+		})
+	}
+}
+
+async function deleteItem(path: string, recursive: boolean) {
+	try {
+		await coreClient.deleteFileOrFolder(ctx.serverId, path.replace(/^\//, ''), recursive)
+		await refresh()
+	} catch (err) {
+		addNotification({
+			type: 'error',
+			title: formatMessage(commonMessages.deleteFailedLabel),
+			text: err instanceof Error ? err.message : String(err),
+		})
+	}
+}
+
+async function readFile(path: string) {
+	const data = await coreClient.readFile(ctx.serverId, path.replace(/^\//, ''))
+	return new TextDecoder().decode(data)
+}
+
+async function readFileAsBlob(path: string) {
+	return new Blob([await coreClient.readFile(ctx.serverId, path.replace(/^\//, ''))])
+}
+
+async function writeFile(path: string, content: string) {
+	await coreClient.writeFile(ctx.serverId, path.replace(/^\//, ''), content)
+}
+
+async function downloadFile(path: string, fileName: string) {
+	const blob = await coreClient.downloadFile(ctx.serverId, path.replace(/^\//, ''))
+	const url = URL.createObjectURL(blob)
+	const link = document.createElement('a')
+	link.href = url
+	link.download = fileName
+	document.body.appendChild(link)
+	link.click()
+	document.body.removeChild(link)
+	URL.revokeObjectURL(url)
+}
+
+function setUploadProgress(
+	handle: UploadHandle,
+	file: File,
+	completed: number,
+	totalFiles: number,
+) {
+	handle.onProgress((progress) => {
+		uploadState.value = {
+			...uploadState.value,
+			currentFileName: file.name,
+			currentFileProgress: progress,
+			uploadedBytes: uploadState.value.uploadedBytes,
+			completedFiles: completed,
+			totalFiles,
+		}
+	})
+}
+
+function uploadFiles(files: File[]) {
+	void (async () => {
+		uploadState.value = {
+			isUploading: true,
+			currentFileName: null,
+			currentFileProgress: 0,
+			uploadedBytes: 0,
+			totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+			completedFiles: 0,
+			totalFiles: files.length,
+		}
+
+		try {
+			for (const [index, file] of files.entries()) {
+				const handle = coreClient.uploadFile(ctx.serverId, currentPath.value, file)
+				cancelUpload.value = () => handle.abort()
+				setUploadProgress(handle, file, index, files.length)
+				await handle.done
+				uploadState.value.uploadedBytes += file.size
+				uploadState.value.completedFiles = index + 1
+			}
+			await refresh()
+		} catch (err) {
+			addNotification({
+				type: 'error',
+				title: 'Failed to upload files',
+				text: err instanceof Error ? err.message : String(err),
+			})
+		} finally {
+			cancelUpload.value = null
+			uploadState.value.isUploading = false
+		}
+	})()
+}
+
+async function extractFile(path: string, _override: boolean, dry: boolean) {
+	if (dry) return { modpack_name: null, conflicting_files: [] }
+	await coreClient.unzipFile(ctx.serverId, path.replace(/^\//, ''))
+	await refresh()
+}
+
+provideFileManager({
+	items,
+	loading,
+	error,
+	currentPath,
+	navigateTo,
+	editingFile,
+	startEditing,
+	stopEditing,
+	createItem,
+	renameItem,
+	moveItem,
+	deleteItem,
+	readFile,
+	readFileAsBlob,
+	writeFile,
+	downloadFile,
+	uploadFiles,
+	cancelUpload: () => cancelUpload.value?.(),
+	uploadState,
+	refresh: () => void refresh(),
+	isBusy,
+	busyTooltip,
+	extractFile,
+	prefetchDirectory: () => {},
+	prefetchFile: () => {},
+	canRestart: true,
+	restartServer: () => coreClient.restart(ctx.serverId),
+})
+
+await refresh()
 </script>

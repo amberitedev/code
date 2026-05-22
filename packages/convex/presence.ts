@@ -1,7 +1,15 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
-import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { v } from 'convex/values'
+import { mutation, query } from './_generated/server'
+import type { MutationCtx, QueryCtx } from './_generated/server'
+import {
+	coreById,
+	ensureFriendGroupCore,
+	getOrCreateDefaultFriendGroup,
+	requireFriendGroupRole,
+	requireSingleGroupMembership,
+	requireSingleOwnedCore,
+	requireUserId,
+} from './_socialRules'
 
 export const registerCore = mutation({
 	args: {
@@ -14,54 +22,58 @@ export const registerCore = mutation({
 	},
 	returns: v.object({ coreId: v.string() }),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx);
-		if (args.ownerUserId !== userId) throw new Error("cannot register a Core for another user");
-		if (args.friendGroupId) await requireFriendGroupRole(ctx, userId, args.friendGroupId, ["owner", "admin"]);
-
-		const now = Date.now();
-		const existing = await ctx.db
-			.query("cores")
-			.withIndex("by_core_id", (q) => q.eq("coreId", args.coreId))
-			.unique();
+		const userId = await requireUserId(ctx)
+		if (args.ownerUserId !== userId) throw new Error('cannot register a Core for another user')
+		const now = Date.now()
+		const existing = await coreById(ctx, args.coreId)
+		let friendGroupId = args.friendGroupId
+		if (friendGroupId) {
+			await requireFriendGroupRole(ctx, userId, friendGroupId, ['owner'])
+			await requireSingleGroupMembership(ctx, userId, friendGroupId)
+			await requireSingleOwnedCore(ctx, userId, args.coreId)
+			await ensureFriendGroupCore(ctx, friendGroupId, args.coreId, now)
+		} else {
+			friendGroupId = await getOrCreateDefaultFriendGroup(ctx, userId, args.coreId, now)
+		}
 
 		if (existing) {
-			await requireCoreRole(ctx, userId, args.coreId, ["owner", "admin"]);
+			await requireCoreRole(ctx, userId, args.coreId, ['owner', 'admin'])
+			if (existing.ownerUserId !== userId) throw new Error('Core already belongs to another user')
+			if (existing.friendGroupId && existing.friendGroupId !== friendGroupId)
+				throw new Error('Core already belongs to another friend group')
 			await ctx.db.patch(existing._id, {
-				ownerUserId: args.ownerUserId,
-				friendGroupId: args.friendGroupId,
+				ownerUserId: userId,
+				friendGroupId,
 				connectionUrl: args.connectionUrl,
 				status: args.status,
 				metadata: args.metadata,
 				lastSeenAt: now,
-			});
+			})
 		} else {
-			await ctx.db.insert("cores", { ...args, lastSeenAt: now });
+			await ctx.db.insert('cores', { ...args, ownerUserId: userId, friendGroupId, lastSeenAt: now })
 		}
 
-		return { coreId: args.coreId };
+		return { coreId: args.coreId }
 	},
-});
+})
 
 export const heartbeatCore = mutation({
 	args: { coreId: v.string(), status: v.optional(v.string()), metadata: v.optional(v.any()) },
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx);
-		await requireCoreRole(ctx, userId, args.coreId, ["owner", "admin"]);
+		const userId = await requireUserId(ctx)
+		await requireCoreRole(ctx, userId, args.coreId, ['owner', 'admin'])
 
-		const existing = await ctx.db
-			.query("cores")
-			.withIndex("by_core_id", (q) => q.eq("coreId", args.coreId))
-			.unique();
-		if (!existing) return null;
+		const existing = await coreById(ctx, args.coreId)
+		if (!existing) return null
 		await ctx.db.patch(existing._id, {
 			lastSeenAt: Date.now(),
 			status: args.status,
 			metadata: args.metadata,
-		});
-		return null;
+		})
+		return null
 	},
-});
+})
 
 export const corePresence = query({
 	args: { coreId: v.string() },
@@ -78,16 +90,16 @@ export const corePresence = query({
 		}),
 	),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx);
+		const userId = await requireUserId(ctx)
 		const core = await ctx.db
-			.query("cores")
-			.withIndex("by_core_id", (q) => q.eq("coreId", args.coreId))
-			.unique();
-		if (!core) return null;
-		await requireCoreAccess(ctx, userId, core);
-		return core;
+			.query('cores')
+			.withIndex('by_core_id', (q) => q.eq('coreId', args.coreId))
+			.unique()
+		if (!core) return null
+		await requireCoreAccess(ctx, userId, core)
+		return core
 	},
-});
+})
 
 export const registerPairingCore = mutation({
 	args: {
@@ -99,26 +111,26 @@ export const registerPairingCore = mutation({
 	},
 	returns: v.object({ coreId: v.string(), code: v.string() }),
 	handler: async (ctx, args) => {
-		const now = Date.now();
+		const now = Date.now()
 		const existing = await ctx.db
-			.query("pairingCores")
-			.withIndex("by_core_id", (q) => q.eq("coreId", args.coreId))
-			.unique();
+			.query('pairingCores')
+			.withIndex('by_core_id', (q) => q.eq('coreId', args.coreId))
+			.unique()
 		const value = {
 			code: args.code,
 			coreId: args.coreId,
 			connectionUrl: args.connectionUrl,
-			status: "waiting" as const,
+			status: 'waiting' as const,
 			metadata: args.metadata,
 			createdAt: now,
 			expiresAt: now + (args.ttlMs ?? 10 * 60 * 1000),
-		};
+		}
 
-		if (existing) await ctx.db.patch(existing._id, value);
-		else await ctx.db.insert("pairingCores", value);
-		return { coreId: args.coreId, code: args.code };
+		if (existing) await ctx.db.patch(existing._id, value)
+		else await ctx.db.insert('pairingCores', value)
+		return { coreId: args.coreId, code: args.code }
 	},
-});
+})
 
 export const claimPairingCore = mutation({
 	args: { code: v.string() },
@@ -127,104 +139,60 @@ export const claimPairingCore = mutation({
 		v.object({ coreId: v.string(), connectionUrl: v.optional(v.string()) }),
 	),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx);
-		const now = Date.now();
+		const userId = await requireUserId(ctx)
+		const now = Date.now()
 		const pairing = await ctx.db
-			.query("pairingCores")
-			.withIndex("by_code", (q) => q.eq("code", args.code))
-			.unique();
-		if (!pairing || pairing.status !== "waiting" || pairing.expiresAt <= now) return null;
+			.query('pairingCores')
+			.withIndex('by_code', (q) => q.eq('code', args.code))
+			.unique()
+		if (!pairing || pairing.status !== 'waiting' || pairing.expiresAt <= now) return null
 
-		const friendGroup = await getOrCreateDefaultFriendGroup(ctx, userId, pairing.coreId);
-		const existingCore = await ctx.db
-			.query("cores")
-			.withIndex("by_core_id", (q) => q.eq("coreId", pairing.coreId))
-			.unique();
+		const existingCore = await coreById(ctx, pairing.coreId)
+		if (existingCore && existingCore.ownerUserId !== userId)
+			throw new Error('Core already belongs to another user')
+		const friendGroup = await getOrCreateDefaultFriendGroup(ctx, userId, pairing.coreId, now)
+		if (existingCore?.friendGroupId && existingCore.friendGroupId !== friendGroup)
+			throw new Error('Core already belongs to another friend group')
 		const coreValue = {
 			coreId: pairing.coreId,
 			ownerUserId: userId,
 			friendGroupId: friendGroup,
 			connectionUrl: pairing.connectionUrl,
 			lastSeenAt: now,
-			status: "paired",
+			status: 'paired',
 			metadata: pairing.metadata,
-		};
+		}
 
-		if (existingCore) await ctx.db.patch(existingCore._id, coreValue);
-		else await ctx.db.insert("cores", coreValue);
+		if (existingCore) await ctx.db.patch(existingCore._id, coreValue)
+		else await ctx.db.insert('cores', coreValue)
 
 		await ctx.db.patch(pairing._id, {
-			status: "claimed",
+			status: 'claimed',
 			ownerUserId: userId,
 			claimedAt: now,
-		});
-		return { coreId: pairing.coreId, connectionUrl: pairing.connectionUrl };
+		})
+		return { coreId: pairing.coreId, connectionUrl: pairing.connectionUrl }
 	},
-});
-
-async function requireUserId(ctx: QueryCtx | MutationCtx): Promise<string> {
-	const userId = await getAuthUserId(ctx);
-	if (userId === null) throw new Error("not authenticated");
-	return userId;
-}
+})
 
 async function requireCoreRole(
 	ctx: QueryCtx | MutationCtx,
 	userId: string,
 	coreId: string,
-	allowedRoles: Array<"owner" | "admin" | "member">,
+	allowedRoles: Array<'owner' | 'admin' | 'member'>,
 ): Promise<void> {
-	const core = await ctx.db
-		.query("cores")
-		.withIndex("by_core_id", (q) => q.eq("coreId", coreId))
-		.unique();
-	if (!core) throw new Error("Core not found");
-	await requireCoreAccess(ctx, userId, core, allowedRoles);
+	const core = await coreById(ctx, coreId)
+	if (!core) throw new Error('Core not found')
+	await requireCoreAccess(ctx, userId, core, allowedRoles)
 }
 
 async function requireCoreAccess(
 	ctx: QueryCtx | MutationCtx,
 	userId: string,
 	core: { ownerUserId: string; friendGroupId?: string },
-	allowedRoles: Array<"owner" | "admin" | "member"> = ["owner", "admin", "member"],
+	allowedRoles: Array<'owner' | 'admin' | 'member'> = ['owner', 'admin', 'member'],
 ): Promise<void> {
-	if (core.ownerUserId === userId && allowedRoles.includes("owner")) return;
-	if (!core.friendGroupId) throw new Error("not authorized for Core");
-	await requireFriendGroupRole(ctx, userId, core.friendGroupId, allowedRoles);
-}
-
-async function requireFriendGroupRole(
-	ctx: QueryCtx | MutationCtx,
-	userId: string,
-	friendGroupId: string,
-	allowedRoles: Array<"owner" | "admin" | "member">,
-): Promise<void> {
-	const membership = await ctx.db
-		.query("friendGroupMembers")
-		.withIndex("by_group_user", (q) => q.eq("friendGroupId", friendGroupId).eq("userId", userId))
-		.unique();
-	if (!membership || !allowedRoles.includes(membership.role)) throw new Error("not authorized for friend group");
-}
-
-async function getOrCreateDefaultFriendGroup(ctx: MutationCtx, userId: string, coreId: string): Promise<string> {
-	const existing = await ctx.db
-		.query("friendGroups")
-		.withIndex("by_core_id", (q) => q.eq("coreId", coreId))
-		.unique();
-	if (existing) return existing._id.toString();
-
-	const now = Date.now();
-	const friendGroupId = await ctx.db.insert("friendGroups", {
-		ownerUserId: userId,
-		coreId,
-		createdAt: now,
-	});
-	const friendGroupIdString = friendGroupId.toString();
-	await ctx.db.insert("friendGroupMembers", {
-		friendGroupId: friendGroupIdString,
-		userId,
-		role: "owner",
-		createdAt: now,
-	});
-	return friendGroupIdString;
+	if (core.ownerUserId === userId && allowedRoles.includes('owner')) return
+	if (!core.friendGroupId) throw new Error('not authorized for Core')
+	await requireFriendGroupRole(ctx, userId, core.friendGroupId, allowedRoles)
 }

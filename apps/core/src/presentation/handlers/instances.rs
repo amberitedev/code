@@ -15,7 +15,10 @@ use crate::{
         },
         state::AppState,
     },
-    domain::instance::{InstanceId, InstanceRecord, MemorySettings, ModLoader},
+    domain::{
+        event::Event,
+        instance::{InstanceId, InstanceRecord, MemorySettings, ModLoader},
+    },
     presentation::{error::ApiError, extractors::AuthUser},
 };
 
@@ -29,12 +32,13 @@ pub struct CreateBody {
     pub memory: Option<MemorySettings>,
 }
 
-fn record_summary(r: &InstanceRecord) -> Value {
+pub(crate) fn record_list_item(r: &InstanceRecord) -> Value {
     json!({
         "id": r.id.to_string(), "name": r.name, "game_version": r.game_version,
         "loader": r.loader.to_string(), "loader_version": r.loader_version,
         "port": r.port, "memory": { "min_mb": r.memory.min_mb, "max_mb": r.memory.max_mb },
-        "status": r.status.to_string(),
+        "status": r.status.to_string(), "install_status": r.install_status.to_string(),
+        "created_at": r.created_at, "updated_at": r.updated_at,
     })
 }
 
@@ -43,7 +47,8 @@ fn record_detail(r: &InstanceRecord) -> Value {
         "id": r.id.to_string(), "name": r.name, "game_version": r.game_version,
         "loader": r.loader.to_string(), "loader_version": r.loader_version,
         "port": r.port, "memory": { "min_mb": r.memory.min_mb, "max_mb": r.memory.max_mb },
-        "java_version": r.java_version, "status": r.status.to_string(),
+        "java_version": r.java_version, "install_status": r.install_status.to_string(),
+        "status": r.status.to_string(),
         "data_dir": r.data_dir, "created_at": r.created_at, "updated_at": r.updated_at,
     })
 }
@@ -54,7 +59,7 @@ pub async fn list_instances(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let records = state.instance_store.list().await?;
-    let instances: Vec<Value> = records.iter().map(record_summary).collect();
+    let instances: Vec<Value> = records.iter().map(record_list_item).collect();
     Ok(Json(json!({ "instances": instances })))
 }
 
@@ -143,6 +148,9 @@ pub async fn patch_instance(
     }
 
     let record = state.instance_store.get(&iid).await?;
+    state.broadcaster.send(Event::InstanceUpdated {
+        instance: record.clone(),
+    });
     Ok(Json(record_detail(&record)))
 }
 
@@ -164,5 +172,8 @@ pub async fn delete_instance(
     }
 
     state.instance_store.delete(&iid).await?;
+    state
+        .broadcaster
+        .send(Event::InstanceDeleted { instance_id: iid });
     Ok(Json(json!({ "ok": true })))
 }

@@ -2,9 +2,7 @@
 	"identifier": "plugins",
 	"description": "",
 	"local": true,
-	"windows": [
-		"main"
-	],
+	"windows": ["main"],
 	"permissions": [
 		"dialog:allow-open",
 		"dialog:allow-confirm",
@@ -43,18 +41,24 @@
 					"url": "https://api.purpurmc.org/*"
 				},
 				{
+					"url": "https://*.convex.cloud/*"
+				},
+				{
+					"url": "https://*.convex.site/*"
+				},
+				{
 					"url": "http://*.taila228c5.ts.net/*"
 				},
-			{
-				"url": "https://*.taila228c5.ts.net/*"
-			},
-			{
-				"url": "http://localhost:7000/*"
-			},
-			{
-				"url": "http://localhost:16662/*"
-			}
-		]
+				{
+					"url": "https://*.taila228c5.ts.net/*"
+				},
+				{
+					"url": "http://localhost:*/*"
+				},
+				{
+					"url": "http://127.0.0.1:*/*"
+				}
+			]
 		},
 		"dialog:allow-save",
 		"fs:allow-read-dir",
@@ -111,6 +115,16 @@
 		"ads:default",
 		"friends:default",
 		"worlds:default",
-		"amberite:default"
+		"amberite:default",
+		"amberite:allow-core-get-settings",
+		"amberite:allow-core-set-settings",
+		"amberite:allow-core-list-permission-presets",
+		"amberite:allow-core-is-installed",
+		"amberite:allow-core-install",
+		"amberite:allow-core-start",
+		"amberite:allow-core-stop",
+		"amberite:allow-convex-login",
+		"amberite:allow-convex-refresh-session",
+		"amberite:allow-convex-logout"
 	]
 }

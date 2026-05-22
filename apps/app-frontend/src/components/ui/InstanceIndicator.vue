@@ -23,7 +23,7 @@ const props = withDefaults(
 
 const instanceLink = computed(() => {
 	const base = `/instance/${encodeURIComponent(props.instance.path)}`
-	return props.backTab ? `${base}/${props.backTab}` : base
+	return props.backTab ? `${base}/${props.backTab}` : `${base}/content`
 })
 </script>
 

@@ -1,39 +1,19 @@
 # Amberite — Monorepo
 
-Free, self-hosted platform for playing modded Minecraft with friends. One person
-runs the Core (server manager); everyone else installs the App and gets synced
-automatically. The App is a full fork of the Modrinth desktop app. Core is custom
-Rust with zero Modrinth code. License: AGPL-3.
-
-GitHub: `amberitedev/code` (forked from `modrinth/code`)
-
+An open-source project that lets users self-host a Rust-based Core server manager and control it through a desktop app forked from Modrinth.
 ---
 
 ## Context Loading — READ THIS FIRST
 
 **DO NOT scan, explore, or glob the codebase to build a project overview.** Context is pre-built per subproject.
 
-| Subproject     | AGENTS.md                     | What it covers                              |
-| -------------- | ----------------------------- | ------------------------------------------- |
-| `app-frontend` | `apps/app-frontend/AGENTS.md` | Desktop app frontend (Vue 3, Modrinth fork) |
-| `app`          | `apps/app/AGENTS.md`          | Desktop app shell (Tauri)                   |
-| `core`         | `apps/core/AGENTS.md`         | Amberite Core - server manager (Rust)       |
-
-Remember to update an AGENTS.md when:
-- You added, removed, or restructured something
-- You discovered a gotcha that isn't documented
-- You had to figure something out that should have been cached and wasn't
-
-Do not update for routine work. Keep the cache clean.
-
-### Plans (`.plan/`)
-
-Plans in `.plan/` are off-limits unless the user explicitly names a specific
-plan to read or asks you to implement that plan. Read only the requested plan,
-not the rest of the directory. Treat plans as planning notes, not source of
-truth; they are usually at least partially wrong.
-
----
+| Subproject        | AGENTS.md                          | Description                                                        |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------------ |
+| `frontend`        | `apps/frontend/AGENTS.md`          | Modrinth website (Nuxt 3, upstream not yet modifyed)               |
+| `app-frontend`    | `apps/app-frontend/AGENTS.md`      | Desktop app frontend (Vue 3, Modrinth fork)                        |
+| `app`             | `apps/app/AGENTS.md`               | Desktop app shell (Tauri)                                          |
+| `core`            | `apps/core/AGENTS.md`              | Amberite Core server manager (Rust)                                |
+| `amberite-api`    | `packages/amberite-api/AGENTS.md`  | Shared communication library for app, core, and Convex integration |
 
 ## Architecture
 
@@ -43,41 +23,44 @@ truth; they are usually at least partially wrong.
 - **Core:** Rust/Axum
 - **Indentation:** Tabs everywhere, never spaces
 
-### Packages (`packages/`)
-
-| Package          | Description                                                |
-| ---------------- | ---------------------------------------------------------- |
-| `ui`             | Shared Vue component library (`@modrinth/ui`)             |
-| `assets`         | Styling and auto-generated icons                           |
-| `api-client`     | API client (Nuxt, Tauri, Node/browser)                    |
-| `app-lib`        | Shared app library — **do not modify unless explicitly asked** |
-| `tooling-config` | ESLint, Prettier, TypeScript configs                      |
-
----
-#### Dev Commands
-
-| Task               | Command         | Directory    |
-| ------------------ | --------------- | ------------ |
-| App frontend dev   | `pnpm app:dev`  | root         |
-| App frontend build | `pnpm build`    | `apps/app/`  |
-| Storybook          | `pnpm story`    | root         |
-| Core dev           | `cargo run`     | `apps/core/` |
-| Core tests         | `cargo test`    | `apps/core/` |
-
 `.env` files are gitignored. Copy `.env.example` as template before running.
 `packages/app-lib/` needs its own `.env` — copy template before running the app.
 
 ---
 
-## Pre-PR Commands
+## Dev commands
 
-Run from root. Only run when opening a PR — do not run after every prompt.
+Run from the repo root unless noted. dont run build or dev commands.
 
-| Target        | Command                   |
-| ------------- | ------------------------- |
-| App frontend  | `pnpm prepr:frontend:app` |
-| Frontend libs | `pnpm prepr:frontend:lib` |
-| All frontend  | `pnpm prepr`              |
+### Main dev servers
+
+| Command | What it starts |
+| ------- | -------------- |
+| `pnpm app:dev` | Desktop app (Tauri + Vite on port **1420**) |
+| `pnpm app:dev:no-hmr` | Same, without HMR (`tauri.no-hmr.conf.json`) |
+| `pnpm core:dev` | Amberite Core (`cargo run` in `apps/core/`, default port **16662**) |
+| `pnpm convex:dev` | Convex backend watcher (`packages/convex/`) |
+| `pnpm web:dev` | Modrinth website (`apps/frontend/`) |
+| `pnpm docs:dev` | Docs site (`apps/docs/`) |
+
+### Lint, test, build
+
+| Command | Scope |
+| ------- | ----- |
+| `pnpm prepr` | Format/lint across the monorepo |
+| `pnpm prepr:frontend` | Frontend + app-frontend only |
+| `pnpm prepr:frontend:app` | App frontend only |
+| `pnpm lint` / `pnpm fix` | Turbo lint/fix |
+| `pnpm test` | Turbo test |
+| `pnpm ci` | Lint + test |
+| `pnpm build` | Turbo build (all packages) |
+| `pnpm storybook` | `@modrinth/ui` Storybook |
+
+Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`, `cargo test`, `cargo run -- check`.
+
+`@amberite/amberite-api` tests: `pnpm --filter @amberite/amberite-api test`.
+
+---
 
 ## Code Guidelines
 
@@ -98,15 +81,15 @@ Run from root. Only run when opening a PR — do not run after every prompt.
 ### General
 - Do not create new non-source code files (e.g. Bash scripts, SQL scripts) unless explicitly prompted to
 - For Frontend, when doing lint checks, only use the `prepr` commands, do not use `typecheck` or `tsc` etc.
-- Types in `@modrinth/utils` are considered highly outdated, if a component needs them, check if you can switch said component to use types from `packages/api-client`
+- Types in `@modrinth/utils` are considered highly outdated; if a component needs them, check if you can switch said component to use types from `packages/api-client`
 - When provided problems, do not say "I didn't introduce these problems" (shifting the blame/effort) — just fix them.
 
-## General Rules
+## General rules
 
 - Max 200 lines per file. Ask before exceeding.
 - One component per file.
 - Use `@` alias for `src/` in imports.
 - Named exports over default exports.
 - Do not modify `packages/app-lib` unless explicitly asked.
-- never read PROJECT-HUMAN-ONLY.md unless user speficly asks.
-
+- Never read `PROJECT-HUMAN-ONLY.md` unless the user specifically asks.
+- Do not read plans in `.plan/` for orientation; only read a specific plan if the user explicitly asks.

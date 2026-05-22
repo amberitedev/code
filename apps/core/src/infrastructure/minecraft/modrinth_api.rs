@@ -30,6 +30,16 @@ pub struct ModrinthVersion {
     pub game_versions: Vec<String>,
     pub loaders: Vec<String>,
     pub files: Vec<ModrinthFile>,
+    #[serde(default)]
+    pub dependencies: Vec<ModrinthDependency>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModrinthDependency {
+    pub version_id: Option<String>,
+    pub project_id: Option<String>,
+    pub file_name: Option<String>,
+    pub dependency_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

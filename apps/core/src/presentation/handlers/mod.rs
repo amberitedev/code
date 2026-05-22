@@ -1,6 +1,7 @@
 pub mod backups;
 pub mod console;
 pub mod diagnostics;
+pub mod events;
 pub mod fs;
 pub mod instance_control;
 pub mod instances;
@@ -11,4 +12,6 @@ pub mod mods;
 pub mod properties;
 pub mod relay;
 pub mod setup;
+pub mod social;
 pub mod stats;
+pub mod sync;

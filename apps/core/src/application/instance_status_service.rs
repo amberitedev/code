@@ -5,7 +5,7 @@ use tracing::warn;
 
 use crate::{
     application::{instance_service::InstanceError, state::AppState},
-    domain::instance::{InstanceId, InstanceStatus},
+    domain::instance::{InstanceId, InstanceInstallStatus, InstanceStatus},
     infrastructure::{
         minecraft::{
             installer::{read_launch_config, LaunchStyle},
@@ -33,6 +33,10 @@ pub async fn start_instance(
         StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
         other => InstanceError::Store(other),
     })?;
+
+    if record.install_status != InstanceInstallStatus::Ready {
+        return Err(InstanceError::NotReady(record.install_status.to_string()));
+    }
 
     let req_java = required_java_version(&record.game_version);
     let java = find_java_path(state, req_java)

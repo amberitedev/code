@@ -16,8 +16,9 @@ use tower_http::{
 use crate::{
     application::state::AppState,
     presentation::handlers::{
-        backups, console, diagnostics, fs, instance_control, instances, logs,
-        macros, modpack, mods, properties, relay, setup, stats,
+        backups, console, diagnostics, events, fs, instance_control, instances,
+        logs, macros, modpack, mods, properties, relay, setup, social, stats,
+        sync,
     },
 };
 
@@ -38,8 +39,47 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/relay/messages/:recipient_id", get(relay::pending))
         .route("/relay/messages/:id/ack", post(relay::ack))
         .route("/relay/messages/:id/complete", post(relay::complete))
+        // Core social, permissions, and sync scaffolding
+        .route("/core", get(social::get_core))
+        .route("/core", patch(social::update_core))
+        .route("/core/members", get(social::list_members))
+        .route("/core/members", post(social::upsert_member))
+        .route("/core/members/:user_id", delete(social::remove_member))
+        .route("/core/bans", get(social::list_bans))
+        .route("/core/bans", post(social::ban_member))
+        .route("/sync/profiles", get(sync::list_sync_profiles))
+        .route("/sync/profiles", post(sync::register_sync_profile))
+        .route(
+            "/sync/profiles/from-mrpack",
+            post(sync::create_sync_profile_from_mrpack),
+        )
+        .route(
+            "/sync/profiles/:profile_id",
+            delete(sync::remove_sync_profile),
+        )
+        .route(
+            "/sync/profiles/:profile_id/check-version",
+            get(sync::check_sync_version),
+        )
+        .route(
+            "/sync/profiles/:profile_id/snapshots",
+            get(sync::list_snapshots),
+        )
+        .route(
+            "/sync/profiles/:profile_id/snapshots",
+            post(sync::publish_snapshot),
+        )
+        .route(
+            "/sync/profiles/:profile_id/snapshots/:snapshot_id/download",
+            get(sync::download_snapshot),
+        )
+        .route(
+            "/sync/profiles/:profile_id/events",
+            get(sync::list_sync_events),
+        )
         // WebSocket ticket
         .route("/ws-token", post(console::issue_ws_token))
+        .route("/events", get(events::stream_events))
         // Instances CRUD
         .route("/instances", get(instances::list_instances))
         .route("/instances", post(instances::create_instance))
@@ -60,6 +100,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/progress", get(console::sse_progress))
         // Modpack install / get / remove / export
         .route("/instances/:id/modpack", post(modpack::install_modpack))
+        .route(
+            "/instances/:id/modpack/modrinth",
+            post(modpack::install_modpack_modrinth),
+        )
         .route("/instances/:id/modpack", get(modpack::get_modpack))
         .route("/instances/:id/modpack", delete(modpack::remove_modpack))
         .route(

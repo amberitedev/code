@@ -10,13 +10,15 @@ Route-mapped views. Each subfolder maps to a route group in `routes.js`. Each fo
 | ---------------------- | ----------------- | ----------------------------------------------------- |
 | `/`                    | `Index.vue`       | Home                                                  |
 | `/worlds`              | `Worlds.vue`      |                                                       |
+| `/core`                | `Core.vue`        | **Amberite** — Core/friend-group settings dashboard   |
+| `/core/setup`          | `CoreSetup.vue`   | **Amberite** — local/remote Core pairing setup        |
 | `/skins`               | `Skins.vue`       |                                                       |
 | `/browse/:projectType` | `Browse.vue`      |                                                       |
 | `/library`             | `library/`        | Tabs: Overview, Downloaded, Modpacks, Servers, Custom |
 | `/project/:id`         | `project/`        | Description, Versions, Version, Gallery, Changelog    |
-| `/instance/:id`        | `instance/`       | Modrinth-style local instance                         |
-| `/server/:id`          | `server/`         | **Amberite** — Core-managed server (dedicated server) |
-| `/synced/:id`          | `synced/`         | **Amberite** — Core-synced game instance              |
+| `/instance/:id`        | `instance/`       | Flat client/server/synced instance shell              |
+| `/server/:id`          | `server/`         | **Amberite** — legacy/dev Core server shell           |
+| `/synced/:id`          | `synced/`         | **Amberite** — legacy/dev synced shell                |
 | `/hosting/manage/:id`  | `hosting/manage/` | **Amberite** — hosted (cloud) server management       |
 | `/hosting/manage/`     | `Servers.vue`     | Server list                                           |
 
@@ -24,9 +26,13 @@ Route-mapped views. Each subfolder maps to a route group in `routes.js`. Each fo
 
 ## Amberite-Specific Pages
 
-**`server/`** — dedicated server managed by Amberite Core. `Index.vue` delegates almost everything to `ServersManageRootLayout` from `@modrinth/ui`, injecting navigation callbacks and a `CoreApiClient`. Sub-pages: Overview, Console, Content, Files, Backups.
+**`instance/`** — product instance route for local clients, dedicated Core servers, and synced instances. `Index.vue` owns the flat shell and child pages branch on `GameInstance.kind`. Sub-pages: Overview, Content, Files, Worlds, Logs, Backups, Settings.
 
-**`synced/`** — game instance synced by Core. `Index.vue` handles play/stop, Tauri event listeners, and breadcrumbs. Sub-pages are **re-exported from other folders** (see gotchas). `ServerSetup.vue` wraps content that requires Core to be running.
+**`Core.vue` / `CoreSetup.vue`** — Core and friend-group management outside the active instance shell. These pages intentionally do not touch `/instance/:id`; they expose setup, member permission, invite, and sync scaffolding that the instance page can connect to later.
+
+**`server/`** — legacy/dev dedicated server shell managed by Amberite Core. Product routes should use `/instance/:id` with `kind === 'server'`.
+
+**`synced/`** — legacy/dev synced instance shell. Product routes should use `/instance/:id` with `kind === 'synced'`.
 
 **`hosting/manage/`** — cloud-hosted server. Sub-pages: Overview, Content, Files, Backups.
 
@@ -43,7 +49,7 @@ Route-mapped views. Each subfolder maps to a route group in `routes.js`. Each fo
 
 ## Gotchas
 
-- `synced/index.js` has no own sub-page views — it re-exports from `instance/` (Mods, Files, Worlds, Logs) and `server/` (Console, Backups). Editing a synced sub-page means editing the instance or server view.
-- Old `/instance/:id` Overview route is commented out in `routes.js` — the default child (`''`) renders `Mods` instead.
+- Flat `/instance/:id` is the product shell for local client, Core server, and synced instances. Branch inside the instance pages with `GameInstance.kind`; do not add `/instance/:id/server` or `/instance/:id/synced` route namespaces.
+- `/instance/:id` renders Overview. Content lives at `/instance/:id/content`.
 - URL redirect at `/:projectType(mod|plugin|...)/:id` normalizes old Modrinth URLs to `/project/:id`.
 - Scroll behavior targets `.app-viewport` element, not `window` — Linux workaround (`routes.js:349`).

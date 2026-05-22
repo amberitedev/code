@@ -7,17 +7,26 @@ use axum::{
     response::Response,
     Json,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
     application::{
         export_service::export_modpack,
-        modpack_service::{get_manifest, install, remove},
+        modpack_service::{
+            get_manifest, install, install_modrinth_version, remove,
+        },
         state::AppState,
     },
     domain::modpack::ModpackManifest,
     presentation::{error::ApiError, extractors::AuthUser},
 };
+
+#[derive(Deserialize)]
+pub struct InstallModpackVersionBody {
+    pub project_id: String,
+    pub version_id: String,
+}
 
 /// POST /instances/:id/modpack — upload and install a `.mrpack` file.
 pub async fn install_modpack(
@@ -54,6 +63,23 @@ pub async fn install_modpack(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     let manifest = install(&state, &id, tmp.path()).await?;
+    Ok(Json(manifest_to_value(&manifest)))
+}
+
+/// POST /instances/:id/modpack/modrinth — download and install a Modrinth `.mrpack` version.
+pub async fn install_modpack_modrinth(
+    _auth: AuthUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<InstallModpackVersionBody>,
+) -> Result<Json<Value>, ApiError> {
+    let manifest = install_modrinth_version(
+        &state,
+        &id,
+        &body.project_id,
+        &body.version_id,
+    )
+    .await?;
     Ok(Json(manifest_to_value(&manifest)))
 }
 

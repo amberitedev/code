@@ -18,7 +18,7 @@ use crate::{
             modpack_repo::ModpackRepo,
         },
         events::EventBroadcaster,
-        process::{instance_actor::InstanceHandle, pty_spawner::PtySpawner},
+        process::{instance_actor::InstanceHandle, std_spawner::StdSpawner},
     },
     ports::{
         instance_store::InstanceStore, java_store::JavaStore,
@@ -33,7 +33,6 @@ pub struct WsTicket {
 
 /// Short-lived token for one-time file downloads (issued by GET /instances/:id/fs/url).
 pub struct FsDownloadToken {
-    pub instance_id: String,
     pub path: PathBuf,
     pub expires_at: Instant,
 }
@@ -70,17 +69,17 @@ pub struct AppState {
     pub java_store: Arc<dyn JavaStore>,
     /// Modpack manifest store.
     pub modpack_store: Arc<dyn ModpackStore>,
-    /// Process spawner — `PtySpawner` in production, `MockSpawner` in tests.
+    /// Process spawner — `StdSpawner` in production, `MockSpawner` in tests.
     pub spawner: Arc<dyn AnySpawner>,
 }
 
 impl AppState {
-    /// Create a new `AppState` with production defaults (uses `PtySpawner`).
+    /// Create a new `AppState` with production defaults (uses `StdSpawner`).
     pub async fn new(
         config: Config,
         pool: SqlitePool,
     ) -> color_eyre::eyre::Result<Arc<Self>> {
-        Self::new_with_spawner(config, pool, Arc::new(PtySpawner)).await
+        Self::new_with_spawner(config, pool, Arc::new(StdSpawner)).await
     }
 
     /// Create a new `AppState` with a custom spawner (used in tests with `MockSpawner`).
@@ -164,6 +163,18 @@ impl AppState {
         row.map(|(url,)| url)
     }
 
+    /// Expected JWT audience for the active auth provider (defaults to "authenticated").
+    pub async fn auth_audience(&self) -> String {
+        sqlx::query_scalar::<_, String>(
+            "SELECT auth_audience FROM core_config WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "authenticated".to_string())
+    }
+
     /// Owner user id written during setup. Only this user may administer Core.
     pub async fn owner_user_id(&self) -> Option<String> {
         sqlx::query_scalar("SELECT owner_user_id FROM core_config WHERE id = 1")
@@ -206,6 +217,7 @@ async fn write_local_setup_secret(
     data_dir: &std::path::Path,
     secret: &str,
 ) -> color_eyre::eyre::Result<()> {
+    tokio::fs::create_dir_all(data_dir).await?;
     let path = data_dir.join(".setup_secret");
     tokio::fs::write(&path, secret).await?;
 

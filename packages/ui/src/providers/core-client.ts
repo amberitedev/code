@@ -1,4 +1,4 @@
-import type { CoreApiClient } from '@amberite/api-lib'
+import type { CoreApiClient } from '@amberite/amberite-api'
 
 import { createContext } from './create-context'
 

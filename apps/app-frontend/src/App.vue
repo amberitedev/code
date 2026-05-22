@@ -1,3 +1,4 @@
+<!-- Summary: App shell bootstraps providers/listeners (~306), global navigation/sidebar (~1273), router viewport (~1509), and modal stack (~1551). -->
 <script setup>
 import { Intercom, shutdown as shutdownIntercom } from '@intercom/messenger-js-sdk'
 import {
@@ -24,6 +25,7 @@ import {
 	RefreshCwIcon,
 	RightArrowIcon,
 	ServerStackIcon,
+	Settings2Icon,
 	SettingsIcon,
 	UserIcon,
 	WorldIcon,
@@ -56,6 +58,7 @@ import { renderString } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -70,6 +73,7 @@ import AccountsCard from '@/components/ui/AccountsCard.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
+import FriendGroupCard from '@/components/ui/friends/FriendGroupCard.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
 import IncompatibilityWarningModal from '@/components/ui/install_flow/IncompatibilityWarningModal.vue'
@@ -86,9 +90,10 @@ import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useIntercomPositioning } from '@/composables/intercom-positioning'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
+import { listenForThemeChanges } from '@/composables/useThemeEditorComms'
 import { config } from '@/config'
 import { hide_ads_window, init_ads_window, show_ads_window } from '@/helpers/ads.js'
-import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
+import { initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { command_listener, warning_listener } from '@/helpers/events.js'
@@ -116,6 +121,7 @@ import {
 import { createServerInstall, provideServerInstall } from '@/providers/server-install'
 import { setupProviders } from '@/providers/setup'
 import { setupAuthProvider } from '@/providers/setup/auth'
+import { setupCoreInstanceState } from '@/providers/setup/core-instance-state'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
@@ -124,6 +130,7 @@ import { generateSkinPreviews } from './helpers/rendering/batch-skin-renderer'
 import { get_available_capes, get_available_skins } from './helpers/skins'
 import { AppNotificationManager } from './providers/app-notifications'
 import { AppPopupNotificationManager } from './providers/app-popup-notifications'
+import { setupCoreMonitor } from './providers/setup/core-monitor'
 
 const themeStore = useTheming()
 const router = useRouter()
@@ -185,6 +192,8 @@ provideModalBehavior({
 	onHide: () => show_ads_window(),
 })
 
+const coreInstanceState = setupCoreInstanceState()
+
 const {
 	installationModal,
 	unknownPackWarningModal,
@@ -197,17 +206,54 @@ const {
 	setModpackAlreadyInstalledModal,
 	handleModpackDuplicateCreateAnyway,
 	handleModpackDuplicateGoToInstance,
-} = setupProviders(notificationManager, popupNotificationManager)
+} = setupProviders(notificationManager, popupNotificationManager, coreInstanceState)
 
 const availableSurvey = ref(false)
 
 const offline = ref(!navigator.onLine)
-window.addEventListener('offline', () => {
+const handleOffline = () => {
 	offline.value = true
-})
-window.addEventListener('online', () => {
+}
+const handleOnline = () => {
 	offline.value = false
-})
+}
+window.addEventListener('offline', handleOffline)
+window.addEventListener('online', handleOnline)
+
+let unlistenThemeChanges = undefined
+listenForThemeChanges()
+	.then((cleanup) => {
+		unlistenThemeChanges = cleanup
+	})
+	.catch(console.warn)
+
+function openThemeEditor() {
+	const url =
+		window.location.protocol === 'http:' || window.location.protocol === 'https:'
+			? `${window.location.origin}/theme-editor.html`
+			: '/theme-editor.html'
+	WebviewWindow.getByLabel('theme-editor')
+		.then((existing) => {
+			if (existing) {
+				existing.setFocus().catch(console.warn)
+			} else {
+				new WebviewWindow('theme-editor', {
+					url,
+					title: 'Theme Editor',
+					width: 420,
+					height: 700,
+					resizable: true,
+				})
+			}
+		})
+		.catch(console.warn)
+}
+
+function handleThemeEditorShortcut(e) {
+	if (e.ctrlKey && e.shiftKey && e.code === 'KeyT') openThemeEditor()
+}
+
+window.addEventListener('keydown', handleThemeEditorShortcut)
 
 const showOnboarding = ref(false)
 const nativeDecorations = ref(false)
@@ -258,6 +304,11 @@ onUnmounted(async () => {
 	clearIntercomBubbleStyles()
 
 	await unlistenUpdateDownload?.()
+	coreInstanceState.stop()
+	window.removeEventListener('offline', handleOffline)
+	window.removeEventListener('online', handleOnline)
+	unlistenThemeChanges?.()
+	window.removeEventListener('keydown', handleThemeEditorShortcut)
 })
 
 const { formatMessage } = useVIntl()
@@ -343,9 +394,8 @@ async function setupApp() {
 		isMaximized.value = await getCurrentWindow().isMaximized()
 	})
 
-	if (telemetry) {
+	if (telemetry && !dev) {
 		initAnalytics()
-		if (dev) debugAnalytics()
 		trackEvent('Launched', { version, dev, onboarded })
 	}
 
@@ -401,6 +451,10 @@ async function setupApp() {
 	} else {
 		console.info('Skipping user surveys on non-Windows platforms')
 	}
+
+	setupCoreMonitor().catch((err) => {
+		console.warn('[core-monitor] failed to start', err)
+	})
 }
 
 const stateFailed = ref(false)
@@ -551,6 +605,7 @@ watch(stateInitialized, (ready) => {
 const error = useError()
 const errorModal = ref()
 const minecraftAuthErrorModal = ref()
+const settingsModal = ref()
 
 const contentInstall = createContentInstall({ router, handleError })
 provideContentInstall(contentInstall)
@@ -1249,6 +1304,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		<CreationFlowModal
 			ref="installationModal"
 			type="instance"
+			:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper']"
 			show-snapshot-toggle
 			:fetch-existing-instance-names="fetchExistingInstanceNames"
 			:search-modpacks="searchModpacks"
@@ -1290,6 +1346,14 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				"
 			>
 				<LibraryIcon />
+			</NavButton>
+			<NavButton
+				v-tooltip.right="'Core'"
+				to="/core"
+				:is-primary="(r) => r.path === '/core'"
+				:is-subpage="(r) => r.path.startsWith('/core/')"
+			>
+				<Settings2Icon />
 			</NavButton>
 			<NavButton
 				v-tooltip.right="'Modrinth Hosting'"
@@ -1340,7 +1404,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</Transition>
 			<NavButton
 				v-tooltip.right="formatMessage(commonMessages.settingsLabel)"
-				:to="() => $refs.settingsModal.show()"
+				:to="() => settingsModal?.show()"
 			>
 				<SettingsIcon />
 			</NavButton>
@@ -1382,15 +1446,21 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		<div data-tauri-drag-region class="app-grid-statusbar bg-bg-raised h-[--top-bar-height] flex">
 			<div data-tauri-drag-region class="flex min-w-0 flex-1 overflow-hidden p-3">
 				<ModrinthAppLogo class="h-full w-auto shrink-0 text-contrast pointer-events-none" />
-				<div data-tauri-drag-region class="flex shrink-0 items-center gap-1 ml-3">
+				<div
+					data-tauri-drag-region-exclude
+					class="flex shrink-0 items-center gap-1 ml-3"
+					@mousedown.stop
+				>
 					<button
 						class="cursor-pointer p-0 m-0 text-contrast border-none outline-none bg-button-bg rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
+						@mousedown.stop
 						@click="router.back()"
 					>
 						<LeftArrowIcon />
 					</button>
 					<button
 						class="cursor-pointer p-0 m-0 text-contrast border-none outline-none bg-button-bg rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
+						@mousedown.stop
 						@click="router.forward()"
 					>
 						<RightArrowIcon />
@@ -1398,21 +1468,27 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				</div>
 				<Breadcrumbs class="pt-[2px]" />
 			</div>
-			<section data-tauri-drag-region class="flex shrink-0 ml-auto items-center">
+			<section
+				data-tauri-drag-region-exclude
+				class="flex shrink-0 ml-auto items-center"
+				@mousedown.stop
+			>
 				<ButtonStyled
 					v-if="!forceSidebar && themeStore.toggleSidebar"
 					:type="sidebarToggled ? 'standard' : 'transparent'"
 					circular
 				>
 					<button
+						data-tauri-drag-region-exclude
 						class="mr-3 transition-transform"
 						:class="{ 'rotate-180': !sidebarToggled }"
+						@mousedown.stop
 						@click="sidebarToggled = !sidebarToggled"
 					>
 						<RightArrowIcon />
 					</button>
 				</ButtonStyled>
-				<div class="flex mr-3">
+				<div data-tauri-drag-region-exclude class="flex mr-3" @mousedown.stop>
 					<Suspense>
 						<AppActionBar />
 					</Suspense>
@@ -1516,6 +1592,11 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 						<h3 class="text-base text-primary font-medium m-0">Playing as</h3>
 						<suspense>
 							<AccountsCard ref="accounts" />
+						</suspense>
+					</div>
+					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
+						<suspense>
+							<FriendGroupCard />
 						</suspense>
 					</div>
 					<div class="p-4">

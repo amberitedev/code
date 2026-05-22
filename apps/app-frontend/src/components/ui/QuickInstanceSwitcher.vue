@@ -12,6 +12,9 @@ import { list } from '@/helpers/profile'
 const { handleError } = injectNotificationManager()
 
 const recentInstances = ref([])
+const isInstallInProgress = (stage) =>
+	stage === 'minecraft_installing' || stage === 'pack_installing'
+
 const getInstances = async () => {
 	const profiles = await list().catch(handleError)
 
@@ -53,15 +56,15 @@ unlistenProfile = await profile_listener(async (event) => {
 
 <template>
 	<div v-for="instance in recentInstances" :key="instance.id" v-tooltip.right="instance.name">
-		<NavButton :to="`/instance/${encodeURIComponent(instance.path)}`" class="relative">
+		<NavButton :to="`/instance/${encodeURIComponent(instance.path)}/content`" class="relative">
 			<Avatar
 				:src="instance.icon_path ? convertFileSrc(instance.icon_path) : null"
 				size="28px"
 				:tint-by="instance.path"
-				:class="`transition-all ${instance.install_stage !== 'installed' ? `brightness-[0.25] scale-[0.85]` : `group-hover:brightness-75`}`"
+				:class="`transition-all ${isInstallInProgress(instance.install_stage) ? `brightness-[0.25] scale-[0.85]` : `group-hover:brightness-75`}`"
 			/>
 			<div
-				v-if="instance.install_stage !== 'installed'"
+				v-if="isInstallInProgress(instance.install_stage)"
 				class="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
 			>
 				<SpinnerIcon class="animate-spin w-4 h-4" />

@@ -6,6 +6,17 @@
 
 		<!-- Instance flow options -->
 		<template v-if="ctx.flowType === 'instance'">
+			<div class="flex flex-col gap-2">
+				<span class="font-semibold text-contrast">{{
+					formatMessage(messages.instanceTypeLabel)
+				}}</span>
+				<Chips
+					v-model="instanceKind"
+					:items="instanceKindItems"
+					:format-label="formatInstanceKindLabel"
+				/>
+			</div>
+
 			<div class="flex flex-col gap-3">
 				<BigOptionButton
 					:icon="BoxesIcon"
@@ -65,11 +76,13 @@ import { computed } from 'vue'
 import { useDebugLogger } from '#ui/composables/debug-logger'
 
 import BigOptionButton from '../../../base/BigOptionButton.vue'
+import Chips from '../../../base/Chips.vue'
+import type { InstanceKind } from '../creation-flow-context'
 import { injectCreationFlowContext } from '../creation-flow-context'
 
 const debug = useDebugLogger('SetupTypeStage')
 const ctx = injectCreationFlowContext()
-const { setSetupType: _setSetupType } = ctx
+const { instanceKind, setSetupType: _setSetupType } = ctx
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
@@ -121,7 +134,36 @@ const messages = defineMessages({
 		id: 'creation-flow.modal.setup-type.option.vanilla-minecraft.description',
 		defaultMessage: 'Classic Minecraft with no mods or plugins.',
 	},
+	instanceTypeLabel: {
+		id: 'creation-flow.modal.custom-setup.instance-type.label',
+		defaultMessage: 'Instance type',
+	},
+	clientKind: {
+		id: 'creation-flow.modal.custom-setup.instance-type.client',
+		defaultMessage: 'Client',
+	},
+	serverKind: {
+		id: 'creation-flow.modal.custom-setup.instance-type.server',
+		defaultMessage: 'Server',
+	},
+	syncedKind: {
+		id: 'creation-flow.modal.custom-setup.instance-type.synced',
+		defaultMessage: 'Synced',
+	},
 })
+
+const instanceKindItems: InstanceKind[] = ['client', 'server', 'synced']
+
+function formatInstanceKindLabel(kind: InstanceKind): string {
+	switch (kind) {
+		case 'client':
+			return formatMessage(messages.clientKind)
+		case 'server':
+			return formatMessage(messages.serverKind)
+		case 'synced':
+			return formatMessage(messages.syncedKind)
+	}
+}
 
 const setupTypeTitle = computed(() => {
 	if (ctx.flowType === 'instance') {

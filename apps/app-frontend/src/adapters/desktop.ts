@@ -1,7 +1,9 @@
-import type { PlatformAdapter } from '@amberite/api-lib'
+import type { PlatformAdapter } from '@amberite/amberite-api'
 import { invoke } from '@tauri-apps/api/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
+
+import { createLocalQueueStore } from './local-queue-store'
 
 let cachedAdapter: PlatformAdapter | null = null
 
@@ -15,14 +17,18 @@ let cachedAdapter: PlatformAdapter | null = null
  * - getCoreUrl reads from Rust via Tauri invoke.
  */
 export function createDesktopAdapter(): PlatformAdapter {
-	const convexUrl = import.meta.env.VITE_CONVEX_URL as string
+	const convexUrl = (import.meta.env.VITE_CONVEX_URL as string) || ''
 	if (!convexUrl) {
-		throw new Error('Convex URL not configured')
+		console.warn(
+			'[desktop] VITE_CONVEX_URL is not set in packages/app-lib/.env — ' +
+				'Convex features will be unavailable. The app will still open.',
+		)
 	}
 
 	return {
 		fetchFn: tauriFetch as unknown as typeof fetch,
 		convexUrl,
+		queueStore: createLocalQueueStore(),
 
 		openExternalAuth: async (url: string) => {
 			await openUrl(url)

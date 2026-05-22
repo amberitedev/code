@@ -328,7 +328,7 @@ const messages = defineMessages({
 						•
 						<router-link
 							class="flex items-center gap-1 truncate hover:underline text-secondary smart-clickable:allow-pointer-events"
-							:to="`/instance/${instancePath}`"
+							:to="`/instance/${encodeURIComponent(instancePath)}/content`"
 						>
 							<Avatar
 								:src="instanceIcon ? convertFileSrc(instanceIcon) : undefined"
@@ -427,7 +427,7 @@ const messages = defineMessages({
 							{
 								id: 'open-instance',
 								shown: !!instancePath,
-								action: () => router.push(encodeURI(`/instance/${instancePath}`)),
+								action: () => router.push(`/instance/${encodeURIComponent(instancePath!)}/content`),
 							},
 							{
 								id: 'refresh',

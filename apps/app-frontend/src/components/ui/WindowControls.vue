@@ -3,14 +3,15 @@
 		v-if="showControls"
 		class="flex items-center gap-2 mr-1.5"
 		data-tauri-drag-region-exclude
+		@mousedown.stop
 	>
 		<ButtonStyled type="transparent" circular>
-			<button class="relative expanded-button" @click="() => getCurrentWindow().minimize()">
+			<button class="relative expanded-button" @mousedown.stop @click="handleMinimize">
 				<MinimizeIcon />
 			</button>
 		</ButtonStyled>
 		<ButtonStyled type="transparent" circular>
-			<button class="relative expanded-button" @click="() => getCurrentWindow().toggleMaximize()">
+			<button class="relative expanded-button" @mousedown.stop @click="handleToggleMaximize">
 				<RestoreIcon v-if="isMaximized" />
 				<MaximizeIcon v-else />
 			</button>
@@ -22,7 +23,7 @@
 			hover-color-fill="background"
 			circular
 		>
-			<button class="relative expanded-button close-button" @click="handleClose">
+			<button class="relative expanded-button close-button" @mousedown.stop @click="handleClose">
 				<XIcon />
 			</button>
 		</ButtonStyled>
@@ -75,8 +76,29 @@ onUnmounted(() => {
 })
 
 const handleClose = async () => {
-	await saveWindowState(StateFlags.POSITION | StateFlags.SIZE | StateFlags.MAXIMIZED)
-	await getCurrentWindow().close()
+	try {
+		await saveWindowState(StateFlags.POSITION | StateFlags.SIZE | StateFlags.MAXIMIZED)
+		await getCurrentWindow().close()
+	} catch (error) {
+		console.error('[window-controls] Failed to close window:', error)
+	}
+}
+
+const handleMinimize = async () => {
+	try {
+		await getCurrentWindow().minimize()
+	} catch (error) {
+		console.error('[window-controls] Failed to minimize window:', error)
+	}
+}
+
+const handleToggleMaximize = async () => {
+	try {
+		await getCurrentWindow().toggleMaximize()
+		isMaximized.value = await getCurrentWindow().isMaximized()
+	} catch (error) {
+		console.error('[window-controls] Failed to toggle maximize:', error)
+	}
 }
 </script>
 

@@ -1,262 +1,295 @@
+<!--
+	Flat instance shell for client, Core server, and synced profiles.
+	Key areas: template shell/actions (lines 16-286), profile/Core loading (lines 405-453), route tabs/runtime mode (lines 503-590), play/stop/context actions (lines 629-773).
+-->
 <template>
-	<div v-if="instance" :class="{ 'flex h-full flex-col': isFixedRender }">
-		<div
-			:class="['p-6 pr-2 pb-4', { 'shrink-0': isFixedRender }]"
-			@contextmenu.prevent.stop="(event) => handleRightClick(event)"
-		>
-			<ExportModal ref="exportModal" :instance="instance" />
-			<InstanceSettingsModal
-				:key="instance.path"
-				ref="settingsModal"
-				:instance="instance"
-				:offline="offline"
-				@unlinked="fetchInstance"
-			/>
-			<UpdateToPlayModal ref="updateToPlayModal" :instance="instance" />
-			<ContentPageHeader>
-				<template #icon>
-					<Avatar
-						:src="icon ? icon : undefined"
-						:alt="instance.name"
-						size="64px"
-						:tint-by="instance.path"
-					/>
-				</template>
-				<template #title>
-					{{ instance.name }}
-				</template>
-				<template #stats>
-					<div class="flex items-center flex-wrap gap-2">
-						<template v-if="!isServerInstance">
-							<div class="flex items-center gap-2 capitalize font-medium">
-								{{ instance.loader }} {{ instance.game_version }}
-							</div>
-
-							<div class="w-1.5 h-1.5 rounded-full bg-surface-5"></div>
-
-							<div class="flex items-center gap-2 font-medium">
-								<template v-if="timePlayed > 0">
-									{{ timePlayedHumanized }}
+	<div
+		v-if="coreError"
+		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
+	>
+		<ErrorInformationCard
+			title="Core Unavailable"
+			description="Amberite Core is not responding. Make sure Core is running and try again."
+			:icon="IssuesIcon"
+		/>
+	</div>
+	<CoreServerRuntimeProvider
+		v-else-if="instance"
+		:enabled="usesCoreRuntime"
+		:core-instance-id="coreInstanceId"
+		:core-instance="coreInstance"
+	>
+		<div :class="{ 'flex h-full flex-col': isFixedRender }">
+			<div
+				:class="['p-6 pr-2 pb-4', { 'shrink-0': isFixedRender }]"
+				@contextmenu.prevent.stop="(event) => handleRightClick(event)"
+			>
+				<ExportModal ref="exportModal" :instance="instance" />
+				<UpdateToPlayModal ref="updateToPlayModal" :instance="instance" />
+				<ContentPageHeader>
+					<template #icon>
+						<Avatar
+							:src="icon ? icon : undefined"
+							:alt="instance.name"
+							size="64px"
+							:tint-by="instance.path"
+						/>
+					</template>
+					<template #title>
+						{{ instance.name }}
+					</template>
+					<template #stats>
+						<div class="flex items-center flex-wrap gap-2">
+							<template v-if="instance.kind === 'server'">
+								<div class="flex items-center gap-2 capitalize font-medium">
+									{{ coreInstance?.loader ?? instance.loader }}
+									{{ coreInstance?.game_version ?? instance.game_version }}
+								</div>
+								<div class="w-1.5 h-1.5 rounded-full bg-surface-5"></div>
+								<div class="flex items-center gap-2 font-medium capitalize">
+									{{ coreInstance?.status ?? 'offline' }}
+								</div>
+								<div class="w-1.5 h-1.5 rounded-full bg-surface-5"></div>
+								<div class="flex items-center gap-2 font-medium">
+									Port {{ coreInstance?.port ?? 25565 }}
+								</div>
+							</template>
+							<template v-else-if="!isServerInstance">
+								<div class="flex items-center gap-2 capitalize font-medium">
+									{{ instance.loader }} {{ instance.game_version }}
+								</div>
+								<div class="w-1.5 h-1.5 rounded-full bg-surface-5"></div>
+								<div class="flex items-center gap-2 font-medium">
+									<template v-if="timePlayed > 0">
+										{{ timePlayedHumanized }}
+									</template>
+									<template v-else> Never played </template>
+								</div>
+							</template>
+							<template v-else>
+								<template v-if="loadingServerPing">
+									<ServerOnlinePlayers
+										v-if="playersOnline !== undefined"
+										:online="playersOnline"
+										:status-online="statusOnline"
+										hide-label
+									/>
+									<ServerRecentPlays :recent-plays="recentPlays ?? 0" hide-label />
+									<div
+										v-if="
+											(playersOnline !== undefined || recentPlays !== undefined) &&
+											(minecraftServer?.region || ping)
+										"
+										class="w-1.5 h-1.5 rounded-full bg-surface-5"
+									></div>
+									<ServerPing v-if="ping" :ping="ping" />
 								</template>
-								<template v-else> Never played </template>
-							</div>
-						</template>
-
-						<template v-else>
-							<template v-if="loadingServerPing">
-								<ServerOnlinePlayers
-									v-if="playersOnline !== undefined"
-									:online="playersOnline"
-									:status-online="statusOnline"
-									hide-label
-								/>
-								<ServerRecentPlays :recent-plays="recentPlays ?? 0" hide-label />
+								<ServerRegion v-if="minecraftServer?.region" :region="minecraftServer?.region" />
 								<div
-									v-if="
-										(playersOnline !== undefined || recentPlays !== undefined) &&
-										(minecraftServer?.region || ping)
-									"
+									v-if="minecraftServer?.region || ping"
 									class="w-1.5 h-1.5 rounded-full bg-surface-5"
 								></div>
-								<ServerPing v-if="ping" :ping="ping" />
-							</template>
-
-							<ServerRegion v-if="minecraftServer?.region" :region="minecraftServer?.region" />
-
-							<div
-								v-if="minecraftServer?.region || ping"
-								class="w-1.5 h-1.5 rounded-full bg-surface-5"
-							></div>
-
-							<div
-								v-if="linkedProjectV3"
-								class="flex gap-1.5 items-center font-medium text-primary"
-							>
-								Linked to
-								<Avatar
-									:src="linkedProjectV3.icon_url"
-									:alt="linkedProjectV3.name"
-									:tint-by="instance.path"
-									size="24px"
-								/>
-								<router-link
-									:to="`/project/${linkedProjectV3.slug ?? linkedProjectV3.id}`"
-									class="hover:underline text-primary truncate"
+								<div
+									v-if="linkedProjectV3"
+									class="flex gap-1.5 items-center font-medium text-primary"
 								>
-									{{ linkedProjectV3.name }}
-								</router-link>
-							</div>
-						</template>
-					</div>
-				</template>
-				<template #actions>
-					<div class="flex gap-2">
-						<ButtonStyled
-							v-if="
-								[
-									'installing',
-									'pack_installing',
-									'pack_installed',
-									'not_installed',
-									'minecraft_installing',
-								].includes(instance.install_stage)
-							"
-							color="brand"
-							size="large"
-						>
-							<button disabled>Installing...</button>
-						</ButtonStyled>
-						<ButtonStyled
-							v-else-if="instance.install_stage !== 'installed'"
-							color="brand"
-							size="large"
-						>
-							<button @click="repairInstance()">
-								<DownloadIcon />
-								Repair
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-else-if="playing === true" color="red" size="large">
-							<button :disabled="stopping" @click="stopInstance('InstancePage')">
-								<StopCircleIcon />
-								{{ stopping ? 'Stopping...' : 'Stop' }}
-							</button>
-						</ButtonStyled>
-						<ButtonStyled
-							v-else-if="playing === false && loading === false && !isServerInstance"
-							color="brand"
-							size="large"
-						>
-							<button @click="startInstance('InstancePage')">
-								<PlayIcon />
-								Play
-							</button>
-						</ButtonStyled>
-						<div
-							v-else-if="playing === false && loading === false && isServerInstance"
-							class="joined-buttons"
-						>
-							<ButtonStyled color="brand" size="large">
-								<button @click="handlePlayServer()">
-									<PlayIcon />
-									Play
+									Linked to
+									<Avatar
+										:src="linkedProjectV3.icon_url"
+										:alt="linkedProjectV3.name"
+										:tint-by="instance.path"
+										size="24px"
+									/>
+									<router-link
+										:to="`/project/${linkedProjectV3.slug ?? linkedProjectV3.id}`"
+										class="hover:underline text-primary truncate"
+									>
+										{{ linkedProjectV3.name }}
+									</router-link>
+								</div>
+							</template>
+						</div>
+					</template>
+					<template #actions>
+						<div class="flex gap-2">
+							<template v-if="instance.kind === 'server'">
+								<ButtonStyled
+									:color="coreInstance?.status === 'running' ? 'red' : 'brand'"
+									size="large"
+								>
+									<button :disabled="!canUseCorePrimaryAction" @click="handleCorePrimaryAction">
+										<LoaderCircleIcon
+											v-if="coreActionPending || isCoreTransitioning"
+											class="animate-spin"
+										/>
+										<StopCircleIcon v-else-if="coreInstance?.status === 'running'" />
+										<PlayIcon v-else />
+										{{ corePrimaryActionLabel }}
+									</button>
+								</ButtonStyled>
+							</template>
+							<template v-else>
+								<ButtonStyled
+									v-if="
+										[
+											'installing',
+											'pack_installing',
+											'pack_installed',
+											'not_installed',
+											'minecraft_installing',
+										].includes(instance.install_stage)
+									"
+									color="brand"
+									size="large"
+								>
+									<button disabled>Installing...</button>
+								</ButtonStyled>
+								<ButtonStyled
+									v-else-if="instance.install_stage !== 'installed'"
+									color="brand"
+									size="large"
+								>
+									<button @click="repairInstance()">
+										<DownloadIcon />
+										Repair
+									</button>
+								</ButtonStyled>
+								<ButtonStyled v-else-if="playing === true" color="red" size="large">
+									<button :disabled="stopping" @click="stopInstance('InstancePage')">
+										<StopCircleIcon />
+										{{ stopping ? 'Stopping...' : 'Stop' }}
+									</button>
+								</ButtonStyled>
+								<ButtonStyled
+									v-else-if="playing === false && loading === false && !isServerInstance"
+									color="brand"
+									size="large"
+								>
+									<button @click="startInstance('InstancePage')">
+										<PlayIcon />
+										Play
+									</button>
+								</ButtonStyled>
+								<div
+									v-else-if="playing === false && loading === false && isServerInstance"
+									class="joined-buttons"
+								>
+									<ButtonStyled color="brand" size="large">
+										<button @click="handlePlayServer()">
+											<PlayIcon />
+											Play
+										</button>
+									</ButtonStyled>
+									<ButtonStyled color="brand" size="large">
+										<OverflowMenu
+											:options="[
+												{
+													id: 'join_server',
+													action: () => handlePlayServer(),
+												},
+												{
+													id: 'launch_instance',
+													action: () => startInstance('InstancePage'),
+												},
+											]"
+										>
+											<div class="w-0 text-xl relative top-0.5 right-2.5">
+												<DropdownIcon />
+											</div>
+
+											<template #join_server>
+												<PlayIcon />
+												Join server
+											</template>
+											<template #launch_instance>
+												<PlayIcon />
+												Launch instance
+											</template>
+										</OverflowMenu>
+									</ButtonStyled>
+								</div>
+								<ButtonStyled
+									v-else-if="loading === true && playing === false"
+									color="brand"
+									size="large"
+								>
+									<button disabled>Starting...</button>
+								</ButtonStyled>
+							</template>
+							<ButtonStyled circular size="large">
+								<button v-tooltip="'Instance settings'" @click="openSettingsPage">
+									<SettingsIcon />
 								</button>
 							</ButtonStyled>
-							<ButtonStyled color="brand" size="large">
-								<OverflowMenu
-									:options="[
-										{
-											id: 'join_server',
-											action: () => handlePlayServer(),
-										},
-										{
-											id: 'launch_instance',
-											action: () => startInstance('InstancePage'),
-										},
-									]"
-								>
-									<div class="w-0 text-xl relative top-0.5 right-2.5">
-										<DropdownIcon />
-									</div>
-
-									<template #join_server>
-										<PlayIcon />
-										Join server
-									</template>
-									<template #launch_instance>
-										<PlayIcon />
-										Launch instance
-									</template>
+							<ButtonStyled
+								v-if="headerOverflowOptions.length > 0"
+								type="transparent"
+								circular
+								size="large"
+							>
+								<OverflowMenu :options="headerOverflowOptions">
+									<MoreVerticalIcon />
+									<template #share-instance> <UserPlusIcon /> Share instance </template>
+									<template #host-a-server> <ServerIcon /> Create a server </template>
+									<template #open-folder> <FolderOpenIcon /> Open folder </template>
+									<template #export-mrpack> <PackageIcon /> Export modpack </template>
 								</OverflowMenu>
 							</ButtonStyled>
 						</div>
-						<ButtonStyled
-							v-else-if="loading === true && playing === false"
-							color="brand"
-							size="large"
-						>
-							<button disabled>Starting...</button>
-						</ButtonStyled>
-						<ButtonStyled circular size="large">
-							<button v-tooltip="'Instance settings'" @click="settingsModal?.show()">
-								<SettingsIcon />
-							</button>
-						</ButtonStyled>
-						<ButtonStyled type="transparent" circular size="large">
-							<OverflowMenu
-								:options="[
-									{
-										id: 'open-folder',
-										action: () => {
-											if (instance) showProfileInFolder(instance.path)
-										},
-									},
-									{
-										id: 'export-mrpack',
-										action: () => exportModal?.show(),
-									},
-								]"
-							>
-								<MoreVerticalIcon />
-								<template #share-instance> <UserPlusIcon /> Share instance </template>
-								<template #host-a-server> <ServerIcon /> Create a server </template>
-								<template #open-folder> <FolderOpenIcon /> Open folder </template>
-								<template #export-mrpack> <PackageIcon /> Export modpack </template>
-							</OverflowMenu>
-						</ButtonStyled>
-					</div>
-				</template>
-			</ContentPageHeader>
+					</template>
+				</ContentPageHeader>
+			</div>
+			<div :class="['px-6', { 'shrink-0': isFixedRender }]">
+				<NavTabs :links="tabs" />
+			</div>
+			<div :class="['p-6 pt-4', { 'min-h-0 flex-1 overflow-y-auto': isFixedRender }]">
+				<RouterView
+					v-if="route.path.startsWith('/instance')"
+					v-slot="{ Component }"
+					:key="`${instance.path}:${route.path}`"
+				>
+					<template v-if="Component">
+						<Suspense :key="instance.path">
+							<component
+								:is="Component"
+								:instance="instance"
+								:options="options"
+								:offline="offline"
+								:playing="playing"
+								:installed="instance.install_stage === 'installed'"
+								:is-server-instance="isServerInstance"
+								:open-settings="openSettingsPage"
+								@play="updatePlayState"
+								@refresh="fetchInstance"
+								@stop="() => stopInstance('InstanceSubpage')"
+							></component>
+						</Suspense>
+					</template>
+				</RouterView>
+			</div>
+			<ContextMenu ref="options" @option-clicked="handleOptionsClick">
+				<template #play> <PlayIcon /> Play </template>
+				<template #stop> <StopCircleIcon /> Stop </template>
+				<template #add_content> <PlusIcon /> Add content </template>
+				<template #edit> <EditIcon /> Edit </template>
+				<template #copy_path> <ClipboardCopyIcon /> Copy path </template>
+				<template #open_folder> <FolderOpenIcon /> Open folder </template>
+				<template #copy_link> <ClipboardCopyIcon /> Copy link </template>
+				<template #open_link> <GlobeIcon /> Open in Modrinth <ExternalIcon /> </template>
+				<template #copy_names><EditIcon />Copy names</template>
+				<template #copy_slugs><HashIcon />Copy slugs</template>
+				<template #copy_links><GlobeIcon />Copy links</template>
+				<template #toggle><EditIcon />Toggle selected</template>
+				<template #disable><XIcon />Disable selected</template>
+				<template #enable><CheckCircleIcon />Enable selected</template>
+				<template #hide_show><EyeIcon />Show/Hide unselected</template>
+				<template #update_all
+					><UpdatedIcon />Update {{ selected.length > 0 ? 'selected' : 'all' }}</template
+				>
+				<template #filter_update><UpdatedIcon />Select Updatable</template>
+			</ContextMenu>
 		</div>
-		<div :class="['px-6', { 'shrink-0': isFixedRender }]">
-			<NavTabs :links="tabs" />
-		</div>
-		<div :class="['p-6 pt-4', { 'min-h-0 flex-1 overflow-y-auto': isFixedRender }]">
-			<RouterView
-				v-if="route.path.startsWith('/instance')"
-				v-slot="{ Component }"
-				:key="instance.path"
-			>
-				<template v-if="Component">
-					<Suspense :key="instance.path">
-						<component
-							:is="Component"
-							:instance="instance"
-							:options="options"
-							:offline="offline"
-							:playing="playing"
-							:installed="instance.install_stage !== 'installed'"
-							:is-server-instance="isServerInstance"
-							:open-settings="() => settingsModal?.show(1)"
-							@play="updatePlayState"
-							@stop="() => stopInstance('InstanceSubpage')"
-						></component>
-					</Suspense>
-				</template>
-			</RouterView>
-		</div>
-		<ContextMenu ref="options" @option-clicked="handleOptionsClick">
-			<template #play> <PlayIcon /> Play </template>
-			<template #stop> <StopCircleIcon /> Stop </template>
-			<template #add_content> <PlusIcon /> Add content </template>
-			<template #edit> <EditIcon /> Edit </template>
-			<template #copy_path> <ClipboardCopyIcon /> Copy path </template>
-			<template #open_folder> <FolderOpenIcon /> Open folder </template>
-			<template #copy_link> <ClipboardCopyIcon /> Copy link </template>
-			<template #open_link> <GlobeIcon /> Open in Modrinth <ExternalIcon /> </template>
-			<template #copy_names><EditIcon />Copy names</template>
-			<template #copy_slugs><HashIcon />Copy slugs</template>
-			<template #copy_links><GlobeIcon />Copy links</template>
-			<template #toggle><EditIcon />Toggle selected</template>
-			<template #disable><XIcon />Disable selected</template>
-			<template #enable><CheckCircleIcon />Enable selected</template>
-			<template #hide_show><EyeIcon />Show/Hide unselected</template>
-			<template #update_all
-				><UpdatedIcon />Update {{ selected.length > 0 ? 'selected' : 'all' }}</template
-			>
-			<template #filter_update><UpdatedIcon />Select Updatable</template>
-		</ContextMenu>
-	</div>
+	</CoreServerRuntimeProvider>
 </template>
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
@@ -272,6 +305,8 @@ import {
 	FolderOpenIcon,
 	GlobeIcon,
 	HashIcon,
+	IssuesIcon,
+	LoaderCircleIcon,
 	MoreVerticalIcon,
 	PackageIcon,
 	PlayIcon,
@@ -288,6 +323,8 @@ import {
 	Avatar,
 	ButtonStyled,
 	ContentPageHeader,
+	ErrorInformationCard,
+	injectCoreInstanceState,
 	injectNotificationManager,
 	NavTabs,
 	OverflowMenu,
@@ -306,7 +343,6 @@ import { useRoute, useRouter } from 'vue-router'
 
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
-import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
 import UpdateToPlayModal from '@/components/ui/modal/UpdateToPlayModal.vue'
 import { useInstanceConsole } from '@/composables/useInstanceConsole'
 import { trackEvent } from '@/helpers/analytics'
@@ -317,6 +353,7 @@ import { finish_install, get, get_full_path, kill, run } from '@/helpers/profile
 import type { GameInstance } from '@/helpers/types'
 import { showProfileInFolder } from '@/helpers/utils.js'
 import { get_server_status, refreshWorlds } from '@/helpers/worlds'
+import CoreServerRuntimeProvider from '@/pages/instance/CoreServerRuntimeProvider.vue'
 import { injectServerInstall } from '@/providers/server-install'
 import { handleSevereError } from '@/store/error.js'
 import { useBreadcrumbs } from '@/store/state'
@@ -326,6 +363,7 @@ dayjs.extend(relativeTime)
 
 const { handleError } = injectNotificationManager()
 const { playServerProject } = injectServerInstall()
+const coreInstances = injectCoreInstanceState()
 const queryClient = useQueryClient()
 const route = useRoute()
 
@@ -341,9 +379,15 @@ window.addEventListener('online', () => {
 })
 
 const instance = ref<GameInstance>()
+const coreError = ref(false)
+const coreSnapshot = ref(coreInstances.snapshot)
+const unlistenCoreInstances = coreInstances.subscribe((snapshot) => {
+	coreSnapshot.value = snapshot
+})
 const playing = ref(false)
 const loading = ref(false)
 const stopping = ref(false)
+const coreActionPending = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
 
@@ -362,6 +406,7 @@ const ping = ref<number | undefined>(undefined)
 const loadingServerPing = ref(false)
 
 async function fetchInstance() {
+	coreError.value = false
 	isServerInstance.value = false
 	linkedProjectV3.value = undefined
 	ping.value = undefined
@@ -369,6 +414,20 @@ async function fetchInstance() {
 	loadingServerPing.value = false
 
 	instance.value = await get(route.params.id as string).catch(handleError)
+
+	if (instance.value?.kind === 'server' || instance.value?.kind === 'synced') {
+		if (!instance.value.core_instance_id) {
+			coreError.value = true
+			return
+		}
+		void coreInstances.refresh().catch(() => {
+			coreError.value = true
+		})
+	}
+
+	if (instance.value?.kind === 'server') {
+		return
+	}
 
 	if (!offline.value && instance.value?.linked_data && instance.value.linked_data.project_id) {
 		try {
@@ -430,6 +489,7 @@ const unlistenProcesses = ref<(() => void) | undefined>()
 onUnmounted(() => {
 	unlistenProcesses.value?.()
 	unlistenProfiles.value?.()
+	unlistenCoreInstances()
 	const profilePath = route.params.id
 	if (profilePath) {
 		const { destroy } = useInstanceConsole(profilePath)
@@ -448,6 +508,34 @@ watch(
 )
 
 const basePath = computed(() => `/instance/${encodeURIComponent(route.params.id as string)}`)
+const coreInstanceId = computed(() => instance.value?.core_instance_id ?? '')
+const coreInstance = computed(
+	() => coreSnapshot.value.instances.find((item) => item.id === coreInstanceId.value) ?? null,
+)
+const usesCoreRuntime = computed(
+	() =>
+		!!coreInstanceId.value &&
+		(instance.value?.kind === 'server' || instance.value?.kind === 'synced'),
+)
+const isCoreTransitioning = computed(
+	() => coreInstance.value?.status === 'starting' || coreInstance.value?.status === 'stopping',
+)
+const canUseCorePrimaryAction = computed(
+	() =>
+		!!coreInstanceId.value &&
+		!coreActionPending.value &&
+		!isCoreTransitioning.value &&
+		coreInstance.value?.install_status !== 'installing' &&
+		coreInstance.value?.install_status !== 'failed',
+)
+const corePrimaryActionLabel = computed(() => {
+	if (coreActionPending.value) return 'Working...'
+	if (coreInstance.value?.install_status === 'installing') return 'Installing...'
+	if (coreInstance.value?.install_status === 'failed') return 'Install failed'
+	if (coreInstance.value?.status === 'starting') return 'Starting...'
+	if (coreInstance.value?.status === 'stopping') return 'Stopping...'
+	return coreInstance.value?.status === 'running' ? 'Stop server' : 'Start server'
+})
 
 /**
  * Per-route layout mode.
@@ -462,28 +550,44 @@ const renderMode = computed<'scroll' | 'fixed'>(() =>
 )
 const isFixedRender = computed(() => renderMode.value === 'fixed')
 
-const tabs = computed(() => [
-	{
-		label: 'Content',
-		href: `${basePath.value}`,
-		icon: BoxesIcon,
-	},
-	{
-		label: 'Files',
-		href: `${basePath.value}/files`,
-		icon: FolderOpenIcon,
-	},
-	{
-		label: 'Worlds',
-		href: `${basePath.value}/worlds`,
-		icon: GlobeIcon,
-	},
-	{
-		label: 'Logs',
-		href: `${basePath.value}/logs`,
-		icon: TerminalSquareIcon,
-	},
-])
+const tabs = computed(() => {
+	const commonTabs = [
+		{ label: 'Overview', href: `${basePath.value}`, icon: ServerIcon },
+		{ label: 'Content', href: `${basePath.value}/content`, icon: BoxesIcon },
+		{ label: 'Files', href: `${basePath.value}/files`, icon: FolderOpenIcon },
+		{ label: 'Worlds', href: `${basePath.value}/worlds`, icon: GlobeIcon },
+		{ label: 'Logs', href: `${basePath.value}/logs`, icon: TerminalSquareIcon },
+	]
+
+	if (instance.value?.kind === 'server' || instance.value?.kind === 'synced') {
+		return [
+			...commonTabs,
+			{ label: 'Backups', href: `${basePath.value}/backups`, icon: PackageIcon },
+			{ label: 'Settings', href: `${basePath.value}/settings`, icon: SettingsIcon },
+		]
+	}
+
+	return [
+		...commonTabs,
+		{ label: 'Settings', href: `${basePath.value}/settings`, icon: SettingsIcon },
+	]
+})
+
+const headerOverflowOptions = computed(() => {
+	if (instance.value?.kind === 'server') return []
+	return [
+		{
+			id: 'open-folder',
+			action: () => {
+				if (instance.value) showProfileInFolder(instance.value.path)
+			},
+		},
+		{
+			id: 'export-mrpack',
+			action: () => exportModal.value?.show(),
+		},
+	]
+})
 
 if (instance.value) {
 	breadcrumbs.setName(
@@ -553,14 +657,59 @@ const repairInstance = async () => {
 	await finish_install(instance.value).catch(handleError)
 }
 
+const openSettingsPage = async () => {
+	await router.push(`${basePath.value}/settings`)
+}
+
+const startCoreServer = async () => {
+	if (!coreInstanceId.value) return
+	coreActionPending.value = true
+	try {
+		await coreInstances.startInstance(coreInstanceId.value)
+	} catch (error) {
+		handleError(error as Error)
+	} finally {
+		coreActionPending.value = false
+	}
+}
+
+const stopCoreServer = async () => {
+	if (!coreInstanceId.value) return
+	coreActionPending.value = true
+	try {
+		await coreInstances.stopInstance(coreInstanceId.value)
+	} catch (error) {
+		handleError(error as Error)
+	} finally {
+		coreActionPending.value = false
+	}
+}
+
+const handleCorePrimaryAction = async () => {
+	if (!canUseCorePrimaryAction.value) return
+	if (coreInstance.value?.status === 'running') await stopCoreServer()
+	else await startCoreServer()
+}
+
 const handleRightClick = (event: MouseEvent) => {
 	const baseOptions = [
-		{ name: 'add_content' },
+		...(instance.value?.kind === 'server' ? [] : [{ name: 'add_content' }]),
 		{ type: 'divider' },
 		{ name: 'edit' },
-		{ name: 'open_folder' },
-		{ name: 'copy_path' },
+		...(instance.value?.kind === 'server' ? [] : [{ name: 'open_folder' }]),
+		...(instance.value?.kind === 'server' ? [] : [{ name: 'copy_path' }]),
 	]
+
+	if (instance.value?.kind === 'server') {
+		options.value?.showMenu(event, instance.value, [
+			{
+				name: coreInstance.value?.status === 'running' ? 'stop' : 'play',
+				color: coreInstance.value?.status === 'running' ? 'danger' : 'primary',
+			},
+			...baseOptions,
+		])
+		return
+	}
 
 	options.value?.showMenu(
 		event,
@@ -586,9 +735,17 @@ const handleRightClick = (event: MouseEvent) => {
 const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 	switch (args.option) {
 		case 'play':
+			if (instance.value?.kind === 'server') {
+				await startCoreServer()
+				break
+			}
 			await startInstance('InstancePageContextMenu')
 			break
 		case 'stop':
+			if (instance.value?.kind === 'server') {
+				await stopCoreServer()
+				break
+			}
 			await stopInstance('InstancePageContextMenu')
 			break
 		case 'add_content':
@@ -599,7 +756,7 @@ const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 			break
 		case 'edit':
 			await router.push({
-				path: `/instance/${encodeURIComponent(route.params.id as string)}/options`,
+				path: `${basePath.value}/settings`,
 			})
 			break
 		case 'open_folder':
@@ -649,8 +806,6 @@ unlistenProcesses.value = await process_listener(
 const icon = computed(() =>
 	instance.value?.icon_path ? convertFileSrc(instance.value.icon_path) : null,
 )
-
-const settingsModal = ref<InstanceType<typeof InstanceSettingsModal>>()
 
 const timePlayed = computed(() => {
 	return instance.value

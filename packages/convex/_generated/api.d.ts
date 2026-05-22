@@ -8,10 +8,15 @@
  * @module
  */
 
+import type * as _socialRules from "../_socialRules.js";
 import type * as auth from "../auth.js";
+import type * as friendGroups from "../friendGroups.js";
+import type * as friends from "../friends.js";
+import type * as groupInvites from "../groupInvites.js";
 import type * as http from "../http.js";
 import type * as messaging from "../messaging.js";
 import type * as presence from "../presence.js";
+import type * as sync from "../sync.js";
 
 import type {
   ApiFromModules,
@@ -20,10 +25,15 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  _socialRules: typeof _socialRules;
   auth: typeof auth;
+  friendGroups: typeof friendGroups;
+  friends: typeof friends;
+  groupInvites: typeof groupInvites;
   http: typeof http;
   messaging: typeof messaging;
   presence: typeof presence;
+  sync: typeof sync;
 }>;
 
 /**

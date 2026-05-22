@@ -58,6 +58,7 @@ All from env vars (`.env.example` is the template):
 | `AMBERITE_BIND_HOST` | `127.0.0.1` | Bind host/IP; set `0.0.0.0` only for LAN/public exposure |
 | `AMBERITE_PUBLIC_URL` | unset | Public URL stored with remote pairing registrations |
 | `AMBERITE_DEV` | `true` in debug builds | Bypasses JWT auth; never enable in production |
+| `AMBERITE_SYNC_RETAIN_COUNT` | `10` | Max `.mrpack` sync archives retained per profile |
 | `ALLOWED_ORIGIN` | `https://amberite.dev` | CORS allowed origin |
 | `CONVEX_URL` | unset | Convex deployment URL; when unpaired, Core uses it to register a remote pairing code |
 | `RUST_LOG` | — | e.g. `amberite_core=debug` for verbose logging |
@@ -90,4 +91,8 @@ The binary accepts subcommands via `clap`. Default (no subcommand) is `run`:
 
 - **`AMBERITE_DEV` defaults on in debug builds** — if you run `cargo run` and auth seems to be bypassed, that's expected. Set `AMBERITE_DEV=false` in `.env` to test real JWT validation locally.
 - **Pairing lockout**: After 5 wrong pairing-code attempts, `POST /setup` returns 429 permanently until Core is restarted. The counter resets on successful pairing.
+- **`list_directory` does not canonicalize before reading entries.** A symlink inside an instance directory can list filenames outside the instance.
+- **Modrinth API filenames are trusted during install/update.** `file.filename` is joined directly into `mods/` without the same sanitization used for uploads.
+- **FS download tokens have no GC loop.** They expire after 5 minutes but remain in memory until used; only WS tickets are garbage-collected.
+- **`.mrpack` install can panic on empty `downloads`.** It indexes `downloads[0]` without checking length, and `downloads[]` URLs are fetched server-side with no host allowlist.
 - **WS ticket GC**: The `gc_ws_tickets` loop runs every 5 minutes — expired tickets are not evicted on use. The single-use enforcement happens at the handler level; GC just prevents unbounded map growth.

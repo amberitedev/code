@@ -56,6 +56,7 @@ async fn run_actor<H: ProcessHandle>(
     };
 
     info!("Actor started for instance {instance_id}");
+    let mut expected_shutdown = false;
 
     loop {
         tokio::select! {
@@ -80,6 +81,7 @@ async fn run_actor<H: ProcessHandle>(
                         }
                     }
                     ActorCmd::GracefulStop => {
+                        expected_shutdown = true;
                         set_status(&state, &instance_id, InstanceStatus::Stopping).await;
                         let _ = handle.send_stdin("stop");
                         let did_exit = timeout(
@@ -93,11 +95,13 @@ async fn run_actor<H: ProcessHandle>(
                         break;
                     }
                     ActorCmd::Kill => {
+                        expected_shutdown = true;
                         let _ = handle.kill();
                         break;
                     }
                 }
             }
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
             else => break,
         }
 
@@ -107,7 +111,9 @@ async fn run_actor<H: ProcessHandle>(
     }
 
     // Determine final status.
-    let final_status = if handle.is_running() {
+    let final_status = if expected_shutdown {
+        InstanceStatus::Offline
+    } else if handle.is_running() {
         let _ = handle.kill();
         InstanceStatus::Crashed
     } else {

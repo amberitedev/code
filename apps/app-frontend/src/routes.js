@@ -23,6 +23,22 @@ export default new createRouter({
 			},
 		},
 		{
+			path: '/core',
+			name: 'Core',
+			component: Pages.Core,
+			meta: {
+				breadcrumb: [{ name: 'Core' }],
+			},
+		},
+		{
+			path: '/core/setup',
+			name: 'CoreSetup',
+			component: Pages.CoreSetup,
+			meta: {
+				breadcrumb: [{ name: 'Core', link: '/core' }, { name: 'Setup' }],
+			},
+		},
+		{
 			path: '/worlds',
 			name: 'Worlds',
 			component: Pages.Worlds,
@@ -284,28 +300,28 @@ export default new createRouter({
 			component: Instance.Index,
 			props: true,
 			children: [
-				// {
-				//   path: '',
-				//   name: 'Overview',
-				//   component: Instance.Overview,
-				//   meta: {
-				//     useRootContext: true,
-				//     breadcrumb: [{ name: '?Instance' }],
-				//   },
-				// },
+				{
+					path: '',
+					name: 'InstanceOverview',
+					component: Instance.Overview,
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance' }],
+					},
+				},
 				{
 					path: 'worlds',
 					name: 'InstanceWorlds',
-					component: Instance.Worlds,
+					component: Instance.WorldsPage,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Worlds' }],
 					},
 				},
 				{
-					path: '',
-					name: 'Mods',
-					component: Instance.Mods,
+					path: 'content',
+					name: 'InstanceContent',
+					component: Instance.Content,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Content' }],
@@ -313,17 +329,26 @@ export default new createRouter({
 				},
 				{
 					path: 'projects/:type',
-					name: 'ModsFilter',
-					component: Instance.Mods,
+					name: 'InstanceContentFilter',
+					component: Instance.Content,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Content' }],
 					},
 				},
 				{
+					path: 'backups',
+					name: 'InstanceBackups',
+					component: Instance.Backups,
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Backups' }],
+					},
+				},
+				{
 					path: 'files',
-					name: 'Files',
-					component: Instance.Files,
+					name: 'InstanceFiles',
+					component: Instance.FilesPage,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Files' }],
@@ -331,12 +356,21 @@ export default new createRouter({
 				},
 				{
 					path: 'logs',
-					name: 'Logs',
-					component: Instance.Logs,
+					name: 'InstanceLogs',
+					component: Instance.LogsPage,
 					meta: {
 						useRootContext: true,
-						// renderMode: 'fixed',
+						renderMode: 'fixed',
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Logs' }],
+					},
+				},
+				{
+					path: 'settings',
+					name: 'InstanceSettings',
+					component: Instance.Settings,
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Settings' }],
 					},
 				},
 			],

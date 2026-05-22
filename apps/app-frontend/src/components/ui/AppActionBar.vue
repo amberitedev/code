@@ -22,7 +22,7 @@
 				<div class="text-contrast flex items-center gap-2">
 					<router-link
 						v-tooltip="formatMessage(messages.viewInstance)"
-						:to="`/instance/${encodeURIComponent(selectedProcess.profile.path)}`"
+						:to="`/instance/${encodeURIComponent(selectedProcess.profile.path)}/content`"
 						class="hover:underline"
 					>
 						{{ selectedProcess.profile.name }}

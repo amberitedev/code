@@ -1,79 +1,68 @@
-# apps/app — Tauri App Shell (Rust)
+# Aamberite app
 
-Tauri shell wrapping `apps/app-frontend/` as a WebView. Registers command plugins, manages the window lifecycle, and bridges the frontend to `theseus` (Minecraft engine) and `amberite-lib` (Core integration).
+This is the main product of Amberite. This directory contains the Tauri shell, which embeds `apps/app-frontend/` in a WebView, registers command plugins, manages the window lifecycle, and bridges the frontend to `theseus` (Minecraft engine) and `amberite-lib` (Core integration).
 
-## Runtime Processes
+## Context
+	Refer to the appropriate AGENTS.md file for the specific project you are working on.
+| Subproject        | AGENTS.md                                | Description                                                        |
+| ----------------- | ---------------------------------------- | ------------------------------------------------------------------ |
+| `app-lib`         | `packages/app-lib/AGENTS.md`             | Main app backend (Rust), Minecraft launcher engine                 |
+| `app-frontend`    | `apps/app-frontend/AGENTS.md`            | Desktop app frontend                                               |
+| `ui`              | `packages/ui/AGENTS.md`                  | Shared UI components and layout system                             |
+| `amberite-api`    | `packages/amberite-api/AGENTS.md`        | Shared API client for app, core, and integrations                  |
+| `amberite-lib`    | `packages/amberite-lib/AGENTS.md`        | Core process, settings, and session storage logic                  |
 
-Three separate processes form the full runtime:
+## File Tree
 
-| Process | What |
-|---------|------|
-| `apps/app` | Tauri Rust shell + WebView (this package) |
-| `apps/app-frontend` | Vue 3 SPA running inside the WebView (same OS process as above) |
-| `apps/core` | Optional Axum HTTP server on `localhost:16662` — separate process |
-
-Frontend talks to Core via `tauriFetch` (HTTP), not Tauri IPC. Core communication path: `CoreApiClient` → `PlatformAdapter.fetchFn` = `tauriFetch` → `apps/core` REST/WS.
-
-## Initialization Sequence (order is critical)
-
-1. `start_logger()` — must be first
-2. `EventState::init(app_handle)` — **before** `State::init`; events emitted during migrations are silently dropped if this is missing
-3. `State::init("amberite")` — opens `app.db`, runs SQLite migrations
-4. Vue mounts → calls `invoke('initialize_state')` → triggers steps 2–3
-5. Vue `onMounted()` calls `show_window` — window starts `visible: false` to avoid white flash
-
-## Key Rust Dependencies
-
-| Crate | Source | Role |
-|-------|--------|------|
-| `theseus` | `packages/app-lib` | Full Minecraft launcher engine — profiles, auth, process mgmt |
-| `amberite-lib` | `packages/amberite-lib` | Core process control, `AppSettings`, OS keychain session storage, health/setup commands |
-| `daedalus` | `packages/daedalus` | Minecraft metadata types (`VersionManifest`, loaders) |
-
-**`theseus::State`** — singleton holding `DirectoryInfo`, `SqlitePool`, `ProcessManager: DashMap<Uuid, Process>`, semaphores, `DiscordGuard`, `FriendsSocket`. `State::get()` busy-waits if called before `State::init()` — logs "this should never happen!" but doesn't crash or return an error.
-
-**`amberite-lib::AppSettings`** — stores non-secret local preferences only: `core_url`, `display_name`, and `auto_launch_core`. Amberite session JWTs live in the OS keychain via `amberite-lib::session`; app-launched Core pairing uses the one-time `.setup_secret`, not `.local_token`. `is_core_running()` creates a new `reqwest::Client` per call — do not call in a polling loop.
-
-**`daedalus`** — use `native_arch()` not `native()` for ARM architecture detection.
-
-## Key JS/TS Dependencies (consumed by `apps/app-frontend`)
-
-| Package | Role |
-|---------|------|
-| `@amberite/api-lib` | `CoreApiClient` (typed HTTP to Core) + `PlatformAdapter` (tauriFetch abstraction) |
-| `@modrinth/api-client` | Modrinth REST client — projects, versions, users, Archon servers |
-| `@modrinth/ui` | All Vue components, layouts, DI providers |
-
-`@amberite/api-lib` vs `@modrinth/api-client` are entirely separate — Core API calls use the former, Modrinth API calls use the latter. `CoreConnectionMonitor` pings `/health` every 10s; `CoreWsConnection` handles console/stats WebSocket.
-
-Pinia stores: `themeStore` (theme + 9 feature flags), `breadcrumbsStore`, `errorsStore`.
-
-DI providers: `provideCoreClient`, `provideModrinthClient`, `provideAuth` — injected at the app root.
-
-## File Map
-
-| Path | What |
-|------|------|
-| `src/main.rs` | Tauri builder, plugin registration, window lifecycle |
-| `src/api/` | All Tauri command plugins — see `src/api/AGENTS.md` |
-| `src/error.rs` | Tracing span-aware error display utility |
-| `src/macos/` | macOS deep link handling — mutex-latched payload for pre-init events |
-| `src/updater_impl.rs` | Update download/install (feature-gated) |
-| `src/updater_impl_noop.rs` | Stub when `updater` Cargo feature is off |
-| `capabilities/` | Tauri security capability groups: `ads`, `core`, `plugins`, `updater` |
-| `tauri.conf.json` | Product name `Amberite`, identifier `amberite`, `visible: false` |
-| `tauri.{macos,linux,no-hmr}.conf.json` | Platform overrides merged on top |
-
-## Gotchas
-
-- **Window visibility:** `plugin-window-state` saves `POSITION | SIZE | MAXIMIZED` only. Adding `VISIBLE` to the flags breaks the white-flash fix.
-- **`updater` feature flag:** compile-time Cargo feature, not a runtime toggle. Linux excludes it entirely. `MODRINTH_EXTERNAL_UPDATE_PROVIDER` env var also disables the built-in updater at runtime.
-- **Profile path = profile ID.** `path` is both the DB identifier and the filesystem directory name. `profile_edit` only patches the DB — it does not move the directory on disk.
-- **`EventState` before `State`:** inverting init order causes silent event loss during DB migrations with no error surfaced.
-
-## Build
-
-| Task | Command | From |
-|------|---------|------|
-| Dev | `pnpm app:dev` | repo root |
-| Build | `pnpm build` | `apps/app/` |
+```
+apps/app/
+  src/
+    main.rs                          — Tauri builder, plugin registration, window lifecycle
+    error.rs                         — Tracing span-aware error display utility
+    macos/
+      mod.rs                         — macOS module gate
+      deep_link.rs                   — Deep link handling; mutex-latched payload for pre-init events
+    api/
+      mod.rs                         — Plugin error type, serialization macro, `Result<T>`
+      auth.rs                        — MSA/Xbox auth plugin
+      mr_auth.rs                     — Modrinth OAuth plugin
+      cache.rs                       — Asset/icon cache plugin (macro-generated commands)
+      pack.rs                        — Modpack install/export plugin
+      process.rs                     — Minecraft process launch/kill/status plugin
+      profile.rs                     — Mod profile CRUD plugin
+      profile_create.rs              — Profile creation wizard plugin
+      settings.rs                    — App settings read/write plugin
+      tags.rs                        — Modrinth tag data plugin
+      metadata.rs                    — Game version/loader metadata plugin
+      jre.rs                         — Java runtime detection/management plugin
+      logs.rs                        — Game log access plugin
+      import.rs                      — Import from other launchers plugin
+      files.rs                       — Filesystem operations plugin
+      friends.rs                     — Modrinth friends/social plugin
+      worlds.rs                      — Minecraft world management plugin
+      minecraft_skins.rs             — Skin management plugin
+      ads.rs                         — Ad integration plugin
+      ads-init.js                    — Ad init script bundled with ads plugin
+      utils.rs                       — Deep link / URL command handler plugin
+      amberite/
+        mod.rs                       — Core bridge plugin (session, setup secret, health, URL helpers)
+      oauth_utils/
+        mod.rs                       — OAuth auth-code reply server module gate
+        auth_code_reply.rs           — Loopback HTTP server for OAuth redirects
+        auth_code_reply/
+          (impl files)
+    updater_impl.rs                  — Update download/install (feature-gated)
+    updater_impl_noop.rs             — Stub when `updater` Cargo feature is off
+  capabilities/
+    ads.json                         — Tauri capability group: ads permissions
+    core.json                        — Tauri capability group: Core/HTTP permissions
+    plugins.json                     — Tauri capability group: plugin command permissions
+    updater.json                     — Tauri capability group: updater permissions
+  build.rs                           — Build script (advertises permissions)
+  Cargo.toml                         — Rust crate manifest
+  tauri.conf.json                    — Product name `Amberite`, identifier `amberite`, `visible: false`
+  tauri.macos.conf.json              — macOS platform overrides
+  tauri.linux.conf.json              — Linux platform overrides
+  tauri.no-hmr.conf.json             — HMR-disabled platform overrides
+  tauri-release.conf.json            — Release build overrides
+```

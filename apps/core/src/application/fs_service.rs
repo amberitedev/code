@@ -1,5 +1,3 @@
-// list_directory, download_file, delete_entry, upload_file, read_file, write_file,
-// create_file, create_dir, move_entry, unzip_file, zip_files, copy_files, search_files
 use std::{
     io::Write,
     path::{Component, Path, PathBuf},
@@ -172,6 +170,28 @@ fn entry_to_json(
     }
 }
 
+fn validate_filename(filename: &str) -> Result<(), FsError> {
+    if filename.is_empty()
+        || filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
+        return Err(FsError::PathTraversal);
+    }
+    Ok(())
+}
+
+fn ensure_no_destination_symlink(path: &Path) -> Result<(), FsError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err(FsError::PathTraversal)
+        }
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(FsError::Io(err)),
+    }
+}
+
 pub async fn list_directory(
     state: &Arc<AppState>,
     instance_id: &str,
@@ -181,14 +201,21 @@ pub async fn list_directory(
 ) -> Result<FsListing, FsError> {
     let data_dir = instance_data_dir(state, instance_id).await?;
     let dir = guard_path(&data_dir, client_path)?;
+    let dir = guard_canonical(&data_dir, &dir)?;
 
     let mut rd = tokio::fs::read_dir(&dir).await?;
     let mut dirs: Vec<FsEntry> = vec![];
     let mut files: Vec<FsEntry> = vec![];
 
     while let Some(e) = rd.next_entry().await? {
+        let file_type = e.file_type().await?;
+        if file_type.is_symlink() {
+            continue;
+        }
         let meta = e.metadata().await?;
-        let entry = entry_to_json(&data_dir, &e.path(), meta.is_dir(), &meta);
+        let path = e.path();
+        guard_canonical(&data_dir, &path)?;
+        let entry = entry_to_json(&data_dir, &path, meta.is_dir(), &meta);
         if meta.is_dir() {
             dirs.push(entry);
         } else {
@@ -220,7 +247,7 @@ pub async fn download_file(
     state: &Arc<AppState>,
     instance_id: &str,
     client_path: &str,
-) -> Result<(Vec<u8>, String), FsError> {
+) -> Result<(tokio::fs::File, String), FsError> {
     let data_dir = instance_data_dir(state, instance_id).await?;
     let path = guard_path(&data_dir, client_path)?;
     let canonical = guard_canonical(&data_dir, &path)?;
@@ -230,8 +257,10 @@ pub async fn download_file(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let bytes = tokio::fs::read(&canonical).await?;
-    Ok((bytes, filename))
+    if tokio::fs::metadata(&canonical).await?.is_dir() {
+        return Err(FsError::NotAFile);
+    }
+    Ok((tokio::fs::File::open(&canonical).await?, filename))
 }
 
 pub async fn delete_entry(
@@ -264,17 +293,13 @@ pub async fn upload_file(
     filename: &str,
     data: bytes::Bytes,
 ) -> Result<(), FsError> {
-    if filename.contains("..")
-        || filename.contains('/')
-        || filename.contains('\\')
-    {
-        return Err(FsError::PathTraversal);
-    }
+    validate_filename(filename)?;
     let data_dir = instance_data_dir(state, instance_id).await?;
     let dir = guard_path(&data_dir, target_dir)?;
     tokio::fs::create_dir_all(&dir).await?;
     guard_canonical(&data_dir, &dir)?;
     let dest = dir.join(filename);
+    ensure_no_destination_symlink(&dest)?;
     tokio::fs::write(&dest, &data).await?;
     emit(state, instance_id, FsOperationKind::Upload, &dest);
     Ok(())
@@ -284,15 +309,14 @@ pub async fn read_file(
     state: &Arc<AppState>,
     instance_id: &str,
     client_path: &str,
-) -> Result<Vec<u8>, FsError> {
+) -> Result<tokio::fs::File, FsError> {
     let data_dir = instance_data_dir(state, instance_id).await?;
     let path = guard_path(&data_dir, client_path)?;
     let canonical = guard_canonical(&data_dir, &path)?;
     if canonical.is_dir() {
         return Err(FsError::NotAFile);
     }
-    let bytes = tokio::fs::read(&canonical).await?;
-    Ok(bytes)
+    Ok(tokio::fs::File::open(&canonical).await?)
 }
 
 pub async fn write_file(
@@ -304,6 +328,7 @@ pub async fn write_file(
     let data_dir = instance_data_dir(state, instance_id).await?;
     let path = guard_path(&data_dir, client_path)?;
     guard_parent_canonical(&data_dir, &path)?;
+    ensure_no_destination_symlink(&path)?;
     tokio::fs::write(&path, &data).await?;
     emit(state, instance_id, FsOperationKind::Write, &path);
     Ok(())
@@ -317,6 +342,7 @@ pub async fn create_file(
     let data_dir = instance_data_dir(state, instance_id).await?;
     let path = guard_path(&data_dir, client_path)?;
     guard_parent_canonical(&data_dir, &path)?;
+    ensure_no_destination_symlink(&path)?;
     tokio::fs::File::create(&path).await?;
     emit(state, instance_id, FsOperationKind::Create, &path);
     Ok(())
@@ -347,6 +373,7 @@ pub async fn move_entry(
 
     let canonical_from = guard_canonical(&data_dir, &from)?;
     guard_parent_canonical(&data_dir, &to)?;
+    ensure_no_destination_symlink(&to)?;
     tokio::fs::rename(&canonical_from, &to).await?;
     emit(
         state,
@@ -395,10 +422,14 @@ pub async fn unzip_file(
             }
             let entry_path =
                 guarded_archive_path(&effective_dest, entry.name())?;
+            if !entry_path.starts_with(&effective_dest) {
+                return Err(FsError::PathTraversal);
+            }
             if entry.is_dir() {
                 std::fs::create_dir_all(&entry_path)?;
             } else {
                 guard_parent_canonical(&effective_dest, &entry_path)?;
+                ensure_no_destination_symlink(&entry_path)?;
                 let mut out = std::fs::File::create(&entry_path)?;
                 std::io::copy(&mut entry, &mut out)?;
             }
@@ -422,6 +453,7 @@ pub async fn zip_files(
     let data_dir = instance_data_dir(state, instance_id).await?;
     let dest = guard_path(&data_dir, dest_path)?;
     guard_parent_canonical(&data_dir, &dest)?;
+    ensure_no_destination_symlink(&dest)?;
 
     let mut canonical_sources = Vec::new();
     for src in &sources {
@@ -434,6 +466,7 @@ pub async fn zip_files(
         if let Some(p) = dest_clone.parent() {
             std::fs::create_dir_all(p)?;
         }
+        ensure_no_destination_symlink(&dest_clone)?;
         let out_file = std::fs::File::create(&dest_clone)?;
         let mut zip = zip::ZipWriter::new(out_file);
         let options: FileOptions<'_, ()> = FileOptions::default()
@@ -491,13 +524,14 @@ pub async fn copy_files(
     let data_dir = instance_data_dir(state, instance_id).await?;
     let dest_dir = guard_path(&data_dir, dest_dir_path)?;
     tokio::fs::create_dir_all(&dest_dir).await?;
-    guard_canonical(&data_dir, &dest_dir)?;
+    let dest_dir = guard_canonical(&data_dir, &dest_dir)?;
 
     for src_str in &sources {
         let src = guard_path(&data_dir, src_str)?;
         let canonical = guard_canonical(&data_dir, &src)?;
         let name = canonical.file_name().unwrap_or_default();
         let dest = dest_dir.join(name);
+        ensure_no_destination_symlink(&dest)?;
         if canonical.is_dir() {
             fs_extra::dir::copy(
                 &canonical,
@@ -528,7 +562,6 @@ pub async fn get_download_url(
     state.fs_download_tokens.insert(
         key.clone(),
         FsDownloadToken {
-            instance_id: instance_id.to_string(),
             path: canonical,
             expires_at: Instant::now() + Duration::from_secs(expires_in),
         },

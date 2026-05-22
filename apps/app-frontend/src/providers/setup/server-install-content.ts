@@ -1,4 +1,4 @@
-import { CoreApiClient } from '@amberite/api-lib'
+import { CoreApiClient } from '@amberite/amberite-api'
 import type { AbstractModrinthClient, Archon, Labrinth } from '@modrinth/api-client'
 import {
 	addPendingServerContentInstalls,
@@ -31,6 +31,7 @@ type InstallableSearchResult = Labrinth.Search.v3.ResultSearchProject & {
 	installed?: boolean
 }
 type PendingServerContentInstallInput = Omit<PendingServerContentInstall, 'createdAt'>
+const coreInstallQueueWorldId = 'core'
 
 export interface ServerModpackSelectionRequest {
 	projectId: string
@@ -47,6 +48,7 @@ interface ServerSetupModalHandle {
 
 export interface ServerInstallContentContext {
 	serverIdQuery: ComputedRef<string | null>
+	coreInstanceIdQuery: ComputedRef<string | null>
 	worldIdQuery: ComputedRef<string | null>
 	browseFrom: ComputedRef<string | null>
 	serverFlowFrom: ComputedRef<ServerFlowFrom | null>
@@ -213,6 +215,8 @@ export function createServerInstallContent(opts: {
 	const { handleError } = injectNotificationManager()
 
 	const serverIdQuery = computed(() => readQueryString(route.query.sid))
+	const coreInstanceIdQuery = computed(() => readQueryString(route.query.cid))
+	const installTargetServerId = computed(() => coreInstanceIdQuery.value ?? serverIdQuery.value)
 	const worldIdQuery = computed(() => readQueryString(route.query.wid))
 	const browseFrom = computed(() => readQueryString(route.query.from))
 	const backOverride = computed(() => readQueryString(route.query.back))
@@ -223,8 +227,10 @@ export function createServerInstallContent(opts: {
 	)
 
 	const isFromWorlds = computed(() => browseFrom.value === 'worlds')
-	const isServerContext = computed(() => !!serverIdQuery.value)
-	const isSetupServerContext = computed(() => !!serverIdQuery.value && !!serverFlowFrom.value)
+	const isServerContext = computed(() => !!installTargetServerId.value)
+	const isSetupServerContext = computed(
+		() => !!installTargetServerId.value && !!serverFlowFrom.value,
+	)
 	const isCoreContext = computed(() => route.query.source === 'core')
 
 	const serverContextWorldId = ref<string | null>(worldIdQuery.value)
@@ -245,9 +251,19 @@ export function createServerInstallContent(opts: {
 	)
 	const isInstallingQueuedServerInstalls = ref(false)
 	const queuedInstallProgress = ref({ completed: 0, total: 0 })
-	const effectiveServerWorldId = computed(() => worldIdQuery.value ?? serverContextWorldId.value)
+	const effectiveServerWorldId = computed(() =>
+		isCoreContext.value
+			? coreInstallQueueWorldId
+			: (worldIdQuery.value ?? serverContextWorldId.value),
+	)
+	const storedInstallWorldId = computed(() =>
+		isCoreContext.value ? coreInstallQueueWorldId : effectiveServerWorldId.value,
+	)
+	const visibleServerWorldId = computed(() =>
+		isCoreContext.value ? null : effectiveServerWorldId.value,
+	)
 	const serverBackUrl = computed(() => {
-		const sid = serverIdQuery.value
+		const sid = installTargetServerId.value
 		if (!sid) return '/hosting/manage'
 		if (serverFlowFrom.value === 'onboarding') {
 			return `/hosting/manage/${sid}?resumeModal=setup-type`
@@ -256,7 +272,7 @@ export function createServerInstallContent(opts: {
 			return `/hosting/manage/${sid}?openSettings=installation`
 		}
 		if (isCoreContext.value) {
-			return backOverride.value ?? `/server/${sid}/content`
+			return backOverride.value ?? `/instance/${encodeURIComponent(sid)}/content`
 		}
 		return backOverride.value ?? `/hosting/manage/${sid}/content`
 	})
@@ -337,16 +353,20 @@ export function createServerInstallContent(opts: {
 		serverContentProjectIds.value = new Set(
 			mods.map((m) => m.modrinth_project_id).filter((id): id is string => !!id),
 		)
+		serverContentInstallKeys.value = new Set(
+			mods.map((m) => m.modrinth_project_id ?? m.filename).filter(Boolean),
+		)
 	}
 
 	async function initServerContext() {
-		const sid = serverIdQuery.value
+		const sid = installTargetServerId.value
 		if (!sid) return
 
 		if (isCoreContext.value) {
 			try {
 				await fetchCoreServerData(sid)
 				await refreshCoreInstalledContent(sid)
+				queuedServerInstalls.value = readStoredServerInstallQueue(sid, coreInstallQueueWorldId)
 			} catch (err) {
 				handleError(err as Error)
 			}
@@ -374,7 +394,7 @@ export function createServerInstallContent(opts: {
 	}
 
 	function watchServerContextChanges() {
-		watch([serverIdQuery, effectiveServerWorldId], async ([sid, wid], [prevSid, prevWid]) => {
+		watch([installTargetServerId, storedInstallWorldId], async ([sid, wid], [prevSid, prevWid]) => {
 			if (!sid) {
 				serverContextServerData.value = null
 				serverContentProjectIds.value = new Set()
@@ -407,7 +427,7 @@ export function createServerInstallContent(opts: {
 				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
 			}
 
-			if (wid && (sid !== prevSid || wid !== prevWid)) {
+			if (!isCoreContext.value && wid && (sid !== prevSid || wid !== prevWid)) {
 				await refreshServerInstalledContent(sid, wid)
 			}
 		})
@@ -435,9 +455,24 @@ export function createServerInstallContent(opts: {
 		return versions.map((version) => ({ id: version.id }))
 	}
 
+	async function installCoreModpack(sid: string, request: ServerModpackSelectionRequest) {
+		const coreClient = new CoreApiClient(getDesktopAdapter())
+		await coreClient.installModpackVersion(sid, request.projectId, request.versionId)
+		serverContentProjectIds.value = new Set([...serverContentProjectIds.value, request.projectId])
+		serverContentInstallKeys.value = new Set([...serverContentInstallKeys.value, request.projectId])
+		await refreshCoreInstalledContent(sid)
+	}
+
 	async function openServerModpackInstallFlow(request: ServerModpackSelectionRequest) {
-		if (!serverIdQuery.value || !effectiveServerWorldId.value) {
+		const sid = installTargetServerId.value
+		if (!sid || (!isCoreContext.value && !effectiveServerWorldId.value)) {
 			throw new Error('Missing server context')
+		}
+
+		if (isCoreContext.value) {
+			await installCoreModpack(sid, request)
+			await router.push(serverBackUrl.value)
+			return
 		}
 
 		const modalInstance = serverSetupModalRef.value
@@ -471,18 +506,18 @@ export function createServerInstallContent(opts: {
 
 	function setStoredServerInstallPlans(
 		serverId: string,
-		worldId: string,
+		worldId: string | null,
 		plans: Map<string, BrowseInstallPlan<InstallableSearchResult>>,
 	) {
-		if (serverId === serverIdQuery.value && worldId === effectiveServerWorldId.value) {
+		if (serverId === installTargetServerId.value && worldId === storedInstallWorldId.value) {
 			queuedServerInstalls.value = plans
 		}
 		writeStoredServerInstallQueue(serverId, worldId, plans)
 	}
 
 	async function flushQueuedServerInstalls(
-		serverId: string | null = serverIdQuery.value,
-		worldId: string | null = effectiveServerWorldId.value,
+		serverId: string | null = installTargetServerId.value,
+		worldId: string | null = storedInstallWorldId.value,
 	) {
 		if (isInstallingQueuedServerInstalls.value) return false
 
@@ -504,15 +539,22 @@ export function createServerInstallContent(opts: {
 			const result = await flushStoredServerAddonInstallQueue({
 				serverId,
 				worldId,
-				install: (plans) =>
-					client.archon.content_v1.addAddons(
+				install: async (plans) => {
+					if (isCoreContext.value) {
+						const adapter = getDesktopAdapter()
+						const coreClient = new CoreApiClient(adapter)
+						await Promise.all(plans.map((plan) => coreClient.addMod(serverId, plan.versionId)))
+						return
+					}
+					await client.archon.content_v1.addAddons(
 						serverId,
 						worldId,
 						plans.map((plan) => ({
 							project_id: plan.projectId,
 							version_id: plan.versionId,
 						})),
-					),
+					)
+				},
 				onQueueChange: (plans) => setStoredServerInstallPlans(serverId, worldId, plans),
 			})
 
@@ -522,6 +564,10 @@ export function createServerInstallContent(opts: {
 				}
 				handleError(result.error as Error)
 				return false
+			}
+
+			if (isCoreContext.value) {
+				await refreshCoreInstalledContent(serverId)
 			}
 
 			queuedInstallProgress.value = {
@@ -550,10 +596,16 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function installQueuedServerInstallsAndBack() {
-		const sid = serverIdQuery.value
-		const wid = effectiveServerWorldId.value
+		const sid = installTargetServerId.value
+		const wid = storedInstallWorldId.value
 		const backUrl = serverBackUrl.value
 		const plans = new Map(queuedServerInstalls.value)
+
+		if (isCoreContext.value) {
+			const installed = await flushQueuedServerInstalls(sid, wid)
+			if (installed) await router.push(backUrl)
+			return installed
+		}
 
 		if (sid && wid) {
 			writePendingServerContentInstallBaseline(sid, wid, serverContentInstallKeys.value)
@@ -585,7 +637,7 @@ export function createServerInstallContent(opts: {
 		plans: Map<string, BrowseInstallPlan<InstallableSearchResult>>,
 	) {
 		queuedServerInstalls.value = plans
-		writeStoredServerInstallQueue(serverIdQuery.value, effectiveServerWorldId.value, plans)
+		writeStoredServerInstallQueue(installTargetServerId.value, storedInstallWorldId.value, plans)
 	}
 
 	function onServerFlowBack() {
@@ -593,7 +645,7 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function handleServerModpackFlowCreate(config: CreationFlowContextValue) {
-		const sid = serverIdQuery.value
+		const sid = installTargetServerId.value
 		if (!sid || !config.modpackSelection.value) {
 			config.loading.value = false
 			return
@@ -643,13 +695,14 @@ export function createServerInstallContent(opts: {
 
 	return {
 		serverIdQuery,
+		coreInstanceIdQuery,
 		worldIdQuery,
 		browseFrom,
 		serverFlowFrom,
 		isFromWorlds,
 		isServerContext,
 		isSetupServerContext,
-		effectiveServerWorldId,
+		effectiveServerWorldId: visibleServerWorldId,
 		serverContextServerData,
 		serverContentProjectIds,
 		queuedServerInstallProjectIds,

@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 
-use crate::domain::instance::{InstanceId, InstanceRecord, InstanceStatus};
+use crate::domain::instance::{
+    InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -36,6 +38,11 @@ pub trait InstanceStore: Send + Sync + 'static {
         &self,
         id: &InstanceId,
         java_version: Option<i64>,
+    ) -> Result<(), StoreError>;
+    async fn update_install_status(
+        &self,
+        id: &InstanceId,
+        install_status: InstanceInstallStatus,
     ) -> Result<(), StoreError>;
     async fn delete(&self, id: &InstanceId) -> Result<(), StoreError>;
     async fn list_by_status(

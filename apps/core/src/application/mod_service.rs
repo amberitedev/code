@@ -21,6 +21,7 @@ pub struct ModInfo {
     pub client_side: Option<String>,
     pub server_side: Option<String>,
     pub modrinth_project_id: Option<String>,
+    pub modrinth_version_id: Option<String>,
     pub update_available: Option<bool>,
 }
 
@@ -51,6 +52,12 @@ pub enum ModError {
     NoModrinthId,
     #[error("invalid filename")]
     InvalidFilename,
+    #[error("hash mismatch for {filename}: expected {expected}, got {actual}")]
+    HashMismatch {
+        filename: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// SEC-05: Reject filenames that could escape the mods directory.
@@ -65,7 +72,25 @@ fn sanitize_filename(name: &str) -> Result<(), ModError> {
     Ok(())
 }
 
-async fn instance_info(
+pub(crate) fn verify_sha512(
+    filename: &str,
+    bytes: &[u8],
+    expected: Option<&str>,
+) -> Result<String, ModError> {
+    let actual = hex::encode(sha2::Sha512::digest(bytes));
+    if let Some(expected) = expected {
+        if actual != expected {
+            return Err(ModError::HashMismatch {
+                filename: filename.to_string(),
+                expected: expected.to_string(),
+                actual,
+            });
+        }
+    }
+    Ok(actual)
+}
+
+pub(crate) async fn instance_info(
     state: &Arc<AppState>,
     id: &str,
 ) -> Result<(PathBuf, String, String), ModError> {
@@ -84,7 +109,7 @@ pub async fn list_mods(
     instance_id: &str,
 ) -> Result<Vec<ModInfo>, ModError> {
     let (data_dir, _, _) = instance_info(state, instance_id).await?;
-    let rows = sqlx::query("SELECT id, filename, display_name, modrinth_project_id, version_number, enabled, client_side, server_side FROM mods WHERE instance_id = ?")
+    let rows = sqlx::query("SELECT id, filename, display_name, modrinth_project_id, modrinth_version_id, version_number, enabled, client_side, server_side FROM mods WHERE instance_id = ?")
         .bind(instance_id).fetch_all(&state.pool).await?;
     let mut tracked: HashSet<String> = HashSet::new();
     let mut infos: Vec<ModInfo> = rows
@@ -102,6 +127,7 @@ pub async fn list_mods(
                 client_side: r.get("client_side"),
                 server_side: r.get("server_side"),
                 modrinth_project_id: r.get("modrinth_project_id"),
+                modrinth_version_id: r.get("modrinth_version_id"),
                 update_available: None,
             }
         })
@@ -122,6 +148,7 @@ pub async fn list_mods(
                     client_side: None,
                     server_side: None,
                     modrinth_project_id: None,
+                    modrinth_version_id: None,
                     update_available: None,
                 });
             }
@@ -135,53 +162,15 @@ pub async fn add_mod(
     instance_id: &str,
     version_id: &str,
 ) -> Result<ModInfo, ModError> {
-    let (data_dir, _, _) = instance_info(state, instance_id).await?;
-    let modrinth = ModrinthClient::new(state.http.clone());
-    let ver = modrinth.get_version(version_id).await?;
-    let proj = modrinth.get_project(&ver.project_id).await?;
-    if proj.server_side.as_deref() == Some("unsupported") {
-        return Err(ModError::ClientOnly);
-    }
-    let file = ver
-        .files
-        .iter()
-        .find(|f| f.primary)
-        .or_else(|| ver.files.first())
-        .ok_or(ModError::ModNotFound)?;
-    let bytes = state
-        .http
-        .get(&file.url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    let mods_dir = data_dir.join("mods");
-    tokio::fs::create_dir_all(&mods_dir).await?;
-    tokio::fs::write(mods_dir.join(&file.filename), &bytes).await?;
-    let sha512 = file
-        .hashes
-        .sha512
-        .clone()
-        .unwrap_or_else(|| hex::encode(sha2::Sha512::digest(&bytes)));
-    let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO mods (id,instance_id,filename,display_name,modrinth_project_id,modrinth_version_id,version_number,client_side,server_side,sha512,enabled,installed_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)")
-        .bind(&id).bind(instance_id).bind(&file.filename).bind(&proj.title)
-        .bind(&ver.project_id).bind(version_id).bind(&ver.version_number)
-        .bind(proj.client_side.as_deref()).bind(proj.server_side.as_deref())
-        .bind(&sha512).bind(chrono::Utc::now().to_rfc3339()).execute(&state.pool).await?;
-    Ok(ModInfo {
-        id: Some(id),
-        filename: file.filename.clone(),
-        display_name: Some(proj.title),
-        version_number: Some(ver.version_number),
-        enabled: true,
-        tracked: true,
-        client_side: proj.client_side,
-        server_side: proj.server_side,
-        modrinth_project_id: Some(ver.project_id),
-        update_available: Some(false),
-    })
+    super::mod_installer::add_mod_version(state, instance_id, version_id).await
+}
+
+pub async fn add_mod_project(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    project_id: &str,
+) -> Result<ModInfo, ModError> {
+    super::mod_installer::add_mod_project(state, instance_id, project_id).await
 }
 
 pub async fn upload_mod(
@@ -189,7 +178,7 @@ pub async fn upload_mod(
     instance_id: &str,
     filename: &str,
     data: bytes::Bytes,
-) -> Result<(), ModError> {
+) -> Result<String, ModError> {
     sanitize_filename(filename)?;
     let (data_dir, _, _) = instance_info(state, instance_id).await?;
     let mods_dir = data_dir.join("mods");
@@ -199,7 +188,7 @@ pub async fn upload_mod(
     sqlx::query("INSERT OR REPLACE INTO mods (id,instance_id,filename,sha512,enabled,installed_at) VALUES (?,?,?,?,1,?)")
         .bind(Uuid::new_v4().to_string()).bind(instance_id).bind(filename)
         .bind(sha512).bind(chrono::Utc::now().to_rfc3339()).execute(&state.pool).await?;
-    Ok(())
+    Ok(filename.to_string())
 }
 
 pub async fn delete_mod(
@@ -302,6 +291,7 @@ pub async fn update_mod(
         .find(|f| f.primary)
         .or_else(|| latest.files.first())
         .ok_or(ModError::ModNotFound)?;
+    sanitize_filename(&file.filename)?;
     let bytes = state
         .http
         .get(&file.url)
@@ -310,6 +300,8 @@ pub async fn update_mod(
         .error_for_status()?
         .bytes()
         .await?;
+    let sha512 =
+        verify_sha512(&file.filename, &bytes, file.hashes.sha512.as_deref())?;
     let mods_dir = data_dir.join("mods");
     let tmp = mods_dir.join(format!("{}.tmp", file.filename));
     tokio::fs::write(&tmp, &bytes).await?;
@@ -318,11 +310,6 @@ pub async fn update_mod(
         tokio::fs::remove_file(mods_dir.join(format!("{filename}.disabled")))
             .await;
     tokio::fs::rename(&tmp, mods_dir.join(&file.filename)).await?;
-    let sha512 = file
-        .hashes
-        .sha512
-        .clone()
-        .unwrap_or_else(|| hex::encode(sha2::Sha512::digest(&bytes)));
     sqlx::query("UPDATE mods SET filename=?,modrinth_version_id=?,version_number=?,sha512=? WHERE instance_id=? AND filename=?")
         .bind(&file.filename).bind(&latest.id).bind(&latest.version_number)
         .bind(&sha512).bind(instance_id).bind(filename).execute(&state.pool).await?;

@@ -1,2 +1,4 @@
 
 .env.local
+_generated/
+.convex/

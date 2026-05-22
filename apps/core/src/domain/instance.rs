@@ -42,6 +42,38 @@ pub enum InstanceStatus {
     Crashed,
 }
 
+/// Installation/readiness state of the server files for an instance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InstanceInstallStatus {
+    Installing,
+    Ready,
+    Failed,
+}
+
+impl std::fmt::Display for InstanceInstallStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Installing => "installing",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl std::str::FromStr for InstanceInstallStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "installing" => Ok(Self::Installing),
+            "ready" => Ok(Self::Ready),
+            "failed" => Ok(Self::Failed),
+            _ => Err(format!("unknown install status: {s}")),
+        }
+    }
+}
+
 impl std::fmt::Display for InstanceStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -146,6 +178,19 @@ mod tests {
     }
 
     #[test]
+    fn instance_install_status_roundtrip() {
+        let cases = [
+            (InstanceInstallStatus::Installing, "installing"),
+            (InstanceInstallStatus::Ready, "ready"),
+            (InstanceInstallStatus::Failed, "failed"),
+        ];
+        for (status, s) in cases {
+            assert_eq!(status.to_string(), s);
+            assert_eq!(s.parse::<InstanceInstallStatus>().unwrap(), status);
+        }
+    }
+
+    #[test]
     fn instance_status_invalid_parse() {
         assert!("garbage".parse::<InstanceStatus>().is_err());
         // Status strings are lowercase — uppercase must fail
@@ -209,6 +254,7 @@ pub struct InstanceRecord {
     pub port: u16,
     pub memory: MemorySettings,
     pub java_version: Option<i64>,
+    pub install_status: InstanceInstallStatus,
     pub status: InstanceStatus,
     pub data_dir: String,
     pub created_at: DateTime<Utc>,

@@ -316,7 +316,10 @@ import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
 import { getServerLatency } from '@/helpers/worlds'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
-import { createServerInstallContent } from '@/providers/setup/server-install-content'
+import {
+	createServerInstallContent,
+	provideServerInstallContent,
+} from '@/providers/setup/server-install-content'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { getServerAddress } from '@/store/install.js'
 import { useTheming } from '@/store/state.js'
@@ -371,6 +374,7 @@ const serverInstancePath = ref(null)
 const serverPlaying = ref(false)
 const serverSetupModalRef = ref(null)
 const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
+provideServerInstallContent(serverInstallContent)
 
 serverInstallContent.watchServerContextChanges()
 await serverInstallContent.initServerContext()
@@ -426,7 +430,8 @@ const projectInstallContext = computed(() => {
 			name: serverData.name,
 			loader: serverData.loader ?? '',
 			gameVersion: serverData.mc_version ?? '',
-			serverId: serverInstallContent.serverIdQuery.value,
+			serverId:
+				serverInstallContent.coreInstanceIdQuery.value ?? serverInstallContent.serverIdQuery.value,
 			upstream: serverData.upstream,
 			iconSrc: null,
 			isMedal: serverData.is_medal,
@@ -734,7 +739,7 @@ async function install(version) {
 			}
 		},
 		(profile) => {
-			router.push(`/instance/${profile}`)
+			router.push(`/instance/${encodeURIComponent(profile)}/content`)
 		},
 	).catch(handleError)
 }

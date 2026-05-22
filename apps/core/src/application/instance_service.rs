@@ -4,8 +4,12 @@ use tracing::{error, info};
 
 use crate::{
     application::state::AppState,
-    domain::instance::{
-        InstanceId, InstanceRecord, InstanceStatus, MemorySettings, ModLoader,
+    domain::{
+        event::Event,
+        instance::{
+            InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
+            MemorySettings, ModLoader,
+        },
     },
     infrastructure::minecraft::{
         java::{detect_java_installations, required_java_version},
@@ -40,6 +44,8 @@ pub enum InstanceError {
     Io(#[from] std::io::Error),
     #[error("jar download: {0}")]
     JarDownload(String),
+    #[error("instance is not ready: {0}")]
+    NotReady(String),
     #[error("actor channel closed — instance may have crashed")]
     ActorDead,
 }
@@ -71,6 +77,7 @@ pub async fn create_instance(
         port: req.port,
         memory: req.memory,
         java_version: None,
+        install_status: InstanceInstallStatus::Installing,
         status: InstanceStatus::Offline,
         data_dir: data_dir.display().to_string(),
         created_at: now,
@@ -78,6 +85,9 @@ pub async fn create_instance(
     };
 
     state.instance_store.create(&record).await?;
+    state.broadcaster.send(Event::InstanceCreated {
+        instance: record.clone(),
+    });
 
     // Download JAR in background (caller can track via SSE events).
     let state_clone = Arc::clone(state);
@@ -100,15 +110,40 @@ pub async fn create_instance(
         .await;
         match jar_result {
             Ok(_) => {
-                state_clone.broadcaster.send(
-                    crate::domain::event::Event::CreationProgress {
-                        instance_id: id_clone,
-                        progress: 1.0,
-                        message: "Server JAR downloaded".to_string(),
-                    },
-                );
+                let _ = state_clone
+                    .instance_store
+                    .update_install_status(
+                        &id_clone,
+                        InstanceInstallStatus::Ready,
+                    )
+                    .await;
+                state_clone.broadcaster.send(Event::CreationProgress {
+                    instance_id: id_clone.clone(),
+                    progress: 1.0,
+                    message: "Server JAR downloaded".to_string(),
+                });
+                state_clone.broadcaster.send(Event::InstallStatusChanged {
+                    instance_id: id_clone,
+                    install_status: InstanceInstallStatus::Ready,
+                    message: Some("Server JAR downloaded".to_string()),
+                });
             }
-            Err(e) => error!("JAR download failed for {id_clone}: {e}"),
+            Err(e) => {
+                let message = e.to_string();
+                let _ = state_clone
+                    .instance_store
+                    .update_install_status(
+                        &id_clone,
+                        InstanceInstallStatus::Failed,
+                    )
+                    .await;
+                state_clone.broadcaster.send(Event::InstallStatusChanged {
+                    instance_id: id_clone.clone(),
+                    install_status: InstanceInstallStatus::Failed,
+                    message: Some(message.clone()),
+                });
+                error!("JAR download failed for {id_clone}: {message}");
+            }
         }
     });
 

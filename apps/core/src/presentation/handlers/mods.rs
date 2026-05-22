@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 use crate::{
     application::{
         mod_service::{
-            add_mod, delete_mod, list_mods, toggle_mod, update_all_mods,
-            update_mod, upload_mod,
+            add_mod, add_mod_project, delete_mod, list_mods, toggle_mod,
+            update_all_mods, update_mod, upload_mod,
         },
         state::AppState,
     },
@@ -21,7 +21,8 @@ use crate::{
 
 #[derive(Deserialize)]
 pub struct AddModBody {
-    pub version_id: String,
+    pub version_id: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -55,7 +56,15 @@ pub async fn add_mod_handler(
     Json(body): Json<AddModBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_instance_id(&id)?;
-    let info = add_mod(&state, &id, &body.version_id).await?;
+    let info = if let Some(version_id) = body.version_id {
+        add_mod(&state, &id, &version_id).await?
+    } else if let Some(project_id) = body.project_id {
+        add_mod_project(&state, &id, &project_id).await?
+    } else {
+        return Err(ApiError::BadRequest(
+            "version_id or project_id is required".into(),
+        ));
+    };
     Ok(Json(json!(info)))
 }
 
@@ -77,7 +86,7 @@ pub async fn upload_mod_handler(
             .bytes()
             .await
             .map_err(|e| ApiError::BadRequest(e.to_string()))?;
-        upload_mod(&state, &id, &filename, data).await?;
+        let filename = upload_mod(&state, &id, &filename, data).await?;
         return Ok(Json(json!({ "ok": true, "filename": filename })));
     }
     Err(ApiError::BadRequest("no file provided".into()))

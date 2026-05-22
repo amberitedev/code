@@ -1,4 +1,4 @@
-import type { CoreInstanceStatus, CoreStats, CoreWsConnection } from '@amberite/api-lib'
+import type { CoreInstanceStatus, CoreStats, CoreWsConnection } from '@amberite/amberite-api'
 import type { Archon, UploadState } from '@modrinth/api-client'
 import type { Stats } from '@modrinth/utils'
 import type { ComputedRef, Ref } from 'vue'
@@ -64,6 +64,7 @@ export function useCoreServerManageRuntime(options: Options) {
 	const guard = () => options.eventGuard?.() ?? true
 
 	const isConnected = ref(false)
+	const isReconnecting = ref(false)
 	const isWsAuthIncorrect = ref(false)
 	const powerState = ref<Archon.Websocket.v0.PowerState>('stopped')
 	const powerStateDetails = ref<{ oom_killed?: boolean; exit_code?: number }>()
@@ -114,6 +115,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		wsConn = null
 		connectedServerId = null
 		isConnected.value = false
+		isReconnecting.value = false
 		isWsAuthIncorrect.value = false
 		powerState.value = 'stopped'
 		powerStateDetails.value = undefined
@@ -131,11 +133,16 @@ export function useCoreServerManageRuntime(options: Options) {
 			consoleState.clear()
 			wsConn = await coreClient.openConsole(targetServerId, ticket)
 			connectedServerId = targetServerId
-			wsConn.on('open', () => (isConnected.value = true))
+			wsConn.on('open', () => {
+				isConnected.value = true
+				isReconnecting.value = false
+			})
 			wsConn.on('close', () => {
 				isConnected.value = false
-				if (shouldReconnect)
+				if (shouldReconnect) {
+					isReconnecting.value = true
 					reconnectTimer = setTimeout(() => void connectSocket(targetServerId), 3000)
+				}
 			})
 			wsConn.on('log', (message) => {
 				if (guard()) consoleState.addLegacyLog(message)
@@ -165,6 +172,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		} catch (error) {
 			console.error('[core/server-manage] Failed to connect socket:', error)
 			isConnected.value = false
+			isReconnecting.value = shouldReconnect
 			return false
 		}
 	}
@@ -199,6 +207,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		connectSocket,
 		isServerRunning,
 		isConnected,
+		isReconnecting,
 		powerState,
 		stats,
 		uptimeSeconds,

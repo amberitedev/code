@@ -26,8 +26,8 @@ src/
 
 ## Key Relationships
 
-- **`adapters/desktop.ts`** — singleton `PlatformAdapter` from `@amberite/api-lib`. Bridges OS keychain session storage, the app-launched Core setup secret, Convex URL, Tauri HTTP fetch (bypasses WebView CORS), and `invoke()` calls to Core. Every page that talks to Core creates a `CoreApiClient` with this adapter.
-- **`@amberite/api-lib`** — provides `CoreApiClient` and `PlatformAdapter` types. Used by pages that need Core API access.
+- **`adapters/desktop.ts`** — singleton `PlatformAdapter` from `@amberite/amberite-api`. Bridges OS keychain session storage, the app-launched Core setup secret, Convex URL, Tauri HTTP fetch (bypasses WebView CORS), and `invoke()` calls to Core. Every page that talks to Core creates a `CoreApiClient` with this adapter. Convex Auth login/refresh is owned by `helpers/amberite-auth.ts`, not the adapter itself.
+- **`@amberite/amberite-api`** — provides `CoreApiClient` and `PlatformAdapter` types. Used by pages that need Core API access.
 - **`@modrinth/ui`** — shared component library. Server management UI (`ServersManageRootLayout`) lives here, not in this package. See `packages/ui/AGENTS.md`.
 - **`packages/app-lib/`** — provides Tauri commands. `.env` for this app is read from `packages/app-lib/.env` (loaded manually in `vite.config.ts`), not from this directory.
 - **`helpers/`** — all Tauri `invoke()` wrappers and API logic. Pages import from here, not from `@modrinth/ui` data utilities.
@@ -48,16 +48,6 @@ Everything else (`Browse`, `Library`, `Project`, `Instance`, `Skins`, `Worlds`) 
 
 ---
 
-## Gotchas
-
-- Dev server must run on port **1420** — Tauri requires a fixed port (`vite.config.ts:73`).
-- Env vars are loaded from `packages/app-lib/.env`, not from this directory. If env vars are missing at runtime, check there.
-- Env prefix: `VITE_`, `TAURI_`, `MODRINTH_` (see `vite.config.ts:94`).
-- Desktop JWT storage is not `localStorage`; use `PlatformAdapter.getCurrentJwt()` / `setCurrentJwt()` so the Tauri OS keychain bridge is used.
-- `synced/` pages mostly re-export views from `instance/` and `server/` — see `pages/synced/index.js`.
-
----
-
 ## Navigation
 
 | Need                                        | Go to                          |
@@ -69,3 +59,23 @@ Everything else (`Browse`, `Library`, `Project`, `Instance`, `Skins`, `Worlds`) 
 | App-level state                             | `src/store/`                   |
 | App-specific components                     | `src/components/ui/`           |
 | Shared UI library (components, layouts, DI) | `packages/ui/` → `AGENTS.md`   |
+
+---
+
+## Dev Tools
+
+### Theme Editor (Ctrl+Shift+T)
+
+A standalone Tauri dev window for live-editing CSS custom property theme values. Changes propagate to the main window in real time via Tauri events and persist across restarts via `localStorage`.
+
+| File                                                  | Purpose                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `theme-editor.html`                                   | Standalone Vite entry point (separate from main `index.html`)                                                             |
+| `src/theme-editor-main.ts`                            | Minimal Vue app mount (no Pinia/i18n)                                                                                     |
+| `src/composables/useThemeEditorComms.ts`              | Module-level reactive singleton; loads saved overrides on import; emits `tw:var-change` / `tw:var-reset-all` Tauri events |
+| `src/components/theme-editor/ThemeEditorApp.vue`      | Shell: tab bar, dark/light toggle, Copy CSS, Reset All                                                                    |
+| `src/components/theme-editor/ThemeEditorSurfaces.vue` | Surface and text color pickers                                                                                            |
+| `src/components/theme-editor/ThemeEditorPalette.vue`  | Full color scale palette (red/orange/green/blue/purple/gray × 11 shades)                                                  |
+| `src/components/theme-editor/ThemeEditorTokens.vue`   | Gap/radius sliders, platform color pickers                                                                                |
+
+Tauri capability: `apps/app/capabilities/theme-editor.json` (window label `theme-editor`).

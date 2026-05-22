@@ -21,7 +21,9 @@ presentation/
     macros.rs           — macro routes; execution currently disabled by application service
     modpack.rs          — install (multipart), get manifest, remove, export .mrpack
     mods.rs             — list, add from Modrinth, upload JAR, delete, toggle, update, update-all
+    fs.rs               — instance filesystem operations plus one-time download-token streaming
     properties.rs       — GET/PATCH server.properties
+    social.rs           — Core metadata, members, bans, and sync-profile scaffolding
     stats.rs            — GET resource stats (CPU, RAM, player count, uptime)
 ```
 
@@ -36,6 +38,7 @@ All routes are in `router.rs`. Grouped by auth requirement:
 
 **Requires `AuthUser`** (Bearer JWT or dev bypass):
 - Everything else, including `POST /ws-token`
+- `GET/PATCH /core`, `/core/members`, `/core/bans`, and `/sync/profiles*` are owner-authenticated scaffolding for social/friend-group management; fine-grained member authorization is not enforced yet.
 
 ## extractors.rs — AuthUser
 
@@ -73,5 +76,6 @@ Service-to-HTTP status mappings worth knowing:
 
 - **CORS is restricted outside dev mode** — `router.rs` uses `ALLOWED_ORIGIN` in production and permissive CORS only in dev mode or when `ALLOWED_ORIGIN=*`.
 - **WebSocket endpoint bypasses `AuthUser`** — the ticket in the query string IS the auth. Don't add `AuthUser` to `ws_console` — it would require a JWT header on a WebSocket upgrade, which browsers can't provide.
+- **`GET /fs/file/:key` bypasses `AuthUser`** — the one-time download key IS the credential. Tokens are removed on use and expired tokens are drained by the background GC task.
 - **`setup.rs` uses raw `sqlx::query`** — the pairing handler writes directly to `state.pool` rather than going through a store port. This is intentional — `core_config` is not an entity with a port.
 - **Macro routes are disabled stubs** — they remain registered for API compatibility but return service unavailable until the future out-of-process plugin system is implemented.

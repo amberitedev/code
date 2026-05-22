@@ -8,8 +8,9 @@ import {
 	LOCALES,
 	useVIntl,
 } from '@modrinth/ui'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
+import type { AppSettings } from '@/helpers/settings.ts'
 import { get, set } from '@/helpers/settings.ts'
 import i18n from '@/i18n.config'
 
@@ -17,11 +18,17 @@ const { formatMessage } = useVIntl()
 
 const platform = computed(() => formatMessage(languageSelectorMessages.platformApp))
 
-const settings = ref(await get())
+const settings = ref<AppSettings | null>(null)
+
+onMounted(async () => {
+	settings.value = await get()
+})
 
 watch(
 	settings,
-	async () => {
+	async (_, previousSettings) => {
+		if (!settings.value || !previousSettings) return
+
 		await set(settings.value)
 	},
 	{ deep: true },
@@ -30,6 +37,7 @@ watch(
 const $isChanging = ref(false)
 
 async function onLocaleChange(newLocale: string) {
+	if (!settings.value) return
 	if (settings.value.locale === newLocale) return
 
 	$isChanging.value = true
@@ -63,6 +71,7 @@ async function onLocaleChange(newLocale: string) {
 	</p>
 
 	<LanguageSelector
+		v-if="settings"
 		:current-locale="settings.locale"
 		:locales="LOCALES"
 		:on-locale-change="onLocaleChange"

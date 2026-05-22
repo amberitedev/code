@@ -1,4 +1,4 @@
-import { CoreApiClient } from '@amberite/api-lib'
+import type { CoreInstanceStateManager, CoreInstanceSummary } from '@amberite/amberite-api'
 import type {
 	AbstractPopupNotificationManager,
 	AbstractWebNotificationManager,
@@ -10,7 +10,6 @@ import { provide, ref, useTemplateRef } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 import { useRouter } from 'vue-router'
 
-import { getDesktopAdapter } from '@/adapters/desktop'
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import { trackEvent } from '@/helpers/analytics'
@@ -21,9 +20,13 @@ import { create_profile_and_install, create_profile_and_install_from_file } from
 import { create, list } from '@/helpers/profile.js'
 import type { InstanceLoader, ProfileKind } from '@/helpers/types'
 
+const coreLoaderOptions = ['vanilla', 'paper', 'fabric', 'forge', 'neoforge', 'quilt'] as const
+type CoreCreationLoader = (typeof coreLoaderOptions)[number]
+
 export function setupCreationModal(
 	notificationManager: AbstractWebNotificationManager,
 	popupNotificationManager: AbstractPopupNotificationManager,
+	coreInstances: CoreInstanceStateManager,
 ) {
 	const { handleError } = notificationManager
 	const { formatMessage } = useVIntl()
@@ -37,6 +40,14 @@ export function setupCreationModal(
 		installingModpackDescription: {
 			id: 'app.creation-modal.installing-modpack.description',
 			defaultMessage: '{fileName}',
+		},
+		importedModpackServerUnsupported: {
+			id: 'app.creation-modal.imported-modpack-server-unsupported',
+			defaultMessage: 'Imported modpack files can only create client instances for now.',
+		},
+		importServerUnsupported: {
+			id: 'app.creation-modal.import-server-unsupported',
+			defaultMessage: 'Importing as a server or synced instance is not supported yet.',
 		},
 	})
 
@@ -66,14 +77,86 @@ export function setupCreationModal(
 		versionId: string,
 		name: string,
 		iconUrl?: string,
+		kind: ProfileKind = 'client',
 	) {
-		await create_profile_and_install(projectId, versionId, name, iconUrl).catch(handleError)
+		const versions = await get_project_versions(projectId)
+		const version = versions?.find((candidate) => candidate.id === versionId)
+		const gameVersion = version?.game_versions?.[0]
+		const versionLoaders = [...(version?.mrpack_loaders ?? []), ...(version?.loaders ?? [])]
+		if (!gameVersion) throw new Error('Modpack version is missing a Minecraft version')
+
+		const serverLoader = getServerLoader(versionLoaders)
+		const profileLoader = getProfileLoader(serverLoader)
+
+		let coreInstance: CoreInstanceSummary | null = null
+		if (kind !== 'client') {
+			coreInstance = await coreInstances.create({
+				name,
+				game_version: gameVersion,
+				loader: serverLoader,
+				loader_version: undefined,
+				port: 25565,
+			})
+		}
+
+		let profilePath = ''
+		try {
+			if (coreInstance) {
+				await coreInstances.client.installModpackVersion(coreInstance.id, projectId, versionId)
+			}
+
+			if (kind === 'client') {
+				await create_profile_and_install(
+					projectId,
+					versionId,
+					name,
+					iconUrl,
+					(profile) => {
+						profilePath = profile
+					},
+					{
+						kind,
+						coreInstanceId: null,
+						port: 25565,
+						installLocalPack: true,
+					},
+				)
+			} else {
+				profilePath = await create(
+					name,
+					gameVersion,
+					profileLoader,
+					null,
+					iconUrl ?? null,
+					true,
+					{ project_id: projectId, version_id: versionId, locked: true },
+					kind,
+					25565,
+					coreInstance?.id ?? null,
+				)
+			}
+		} catch (err) {
+			if (coreInstance) await coreInstances.delete(coreInstance.id).catch(() => {})
+			throw err
+		}
+		if (profilePath) await router.push(`/instance/${encodeURIComponent(profilePath)}/content`)
 		trackEvent('InstanceCreate', { source: 'CreationModalModpack' })
+	}
+
+	function getServerLoader(loaders: string[]): CoreCreationLoader {
+		return coreLoaderOptions.find((loader) => loaders.includes(loader)) ?? 'fabric'
+	}
+
+	function getProfileLoader(loader: string): InstanceLoader {
+		if (loader === 'paper' || loader === 'purpur') return 'vanilla'
+		return loader as InstanceLoader
 	}
 
 	async function handleCreate(config: CreationFlowContextValue) {
 		try {
-			if (config.modpackSelection.value) {
+			const kind = config.instanceKind.value as ProfileKind
+
+			if (config.modpackSelection.value && kind === 'client') {
 				const { projectId, versionId, name, iconUrl } = config.modpackSelection.value
 
 				const instances = await list().catch(handleError)
@@ -90,6 +173,9 @@ export function setupCreationModal(
 			installationModal.value?.hide()
 
 			if (config.isImportMode.value) {
+				if (kind !== 'client') {
+					throw new Error(formatMessage(messages.importServerUnsupported))
+				}
 				for (const [launcherName, instanceSet] of Object.entries(
 					config.importSelectedInstances.value,
 				)) {
@@ -105,11 +191,15 @@ export function setupCreationModal(
 
 			if (config.modpackSelection.value) {
 				const { projectId, versionId, name, iconUrl } = config.modpackSelection.value
-				await proceedWithModpackCreation(projectId, versionId, name, iconUrl)
+				await proceedWithModpackCreation(projectId, versionId, name, iconUrl, kind)
 				return
 			}
 
 			if (config.modpackFilePath.value) {
+				if (kind !== 'client') {
+					throw new Error(formatMessage(messages.importedModpackServerUnsupported))
+				}
+
 				const waitingNotification = popupNotificationManager.addPopupNotification({
 					title: formatMessage(messages.installingModpackTitle),
 					text: formatMessage(messages.installingModpackDescription, {
@@ -126,6 +216,11 @@ export function setupCreationModal(
 						popupNotificationManager.removeNotification(waitingNotification.id)
 						unknownPackWarningModal.value?.show(createProfile, fileName)
 					},
+					{
+						kind,
+						coreInstanceId: null,
+						port: 25565,
+					},
 				).catch(handleError)
 				popupNotificationManager.removeNotification(waitingNotification.id)
 				trackEvent('InstanceCreate', { source: 'CreationModalModpackFile' })
@@ -136,33 +231,31 @@ export function setupCreationModal(
 			const loader = config.hideLoaderChips.value
 				? 'vanilla'
 				: (config.selectedLoader.value ?? 'vanilla')
+			const profileLoader = getProfileLoader(loader)
 			const loaderVersion = config.hideLoaderVersion.value
 				? null
 				: (config.selectedLoaderVersion.value ?? config.loaderVersionType.value)
 			const iconPath = config.instanceIconPath.value ?? null
 			const name = config.instanceName.value.trim() || config.autoInstanceName.value
-			const kind = config.instanceKind.value as ProfileKind
+			const skipInstall = false
 
-			// Server instances skip local Minecraft installation; synced instances install locally.
-			const skipInstall = kind === 'server'
+			const coreInstance =
+				kind === 'server' || kind === 'synced'
+					? await coreInstances.create({
+							name,
+							game_version: config.selectedGameVersion.value!,
+							loader: loader as CoreCreationLoader,
+							loader_version: loaderVersion ?? undefined,
+							port: 25565,
+						})
+					: null
 
-			const coreClient =
-				kind === 'server' || kind === 'synced' ? new CoreApiClient(getDesktopAdapter()) : null
-			const coreInstance = coreClient
-				? await coreClient.createInstance({
-						name,
-						game_version: config.selectedGameVersion.value!,
-						loader: loader as 'vanilla' | 'paper' | 'fabric' | 'forge' | 'neoforge' | 'quilt',
-						loader_version: loaderVersion ?? undefined,
-						port: 25565,
-					})
-				: null
-
+			let profilePath = ''
 			try {
-				await create(
+				profilePath = await create(
 					name,
 					config.selectedGameVersion.value!,
-					loader as InstanceLoader,
+					profileLoader,
 					loaderVersion,
 					iconPath,
 					skipInstall,
@@ -172,11 +265,13 @@ export function setupCreationModal(
 					coreInstance?.id ?? null,
 				)
 			} catch (err) {
-				if (coreClient && coreInstance) {
-					await coreClient.deleteInstance(coreInstance.id).catch(() => {})
+				if (coreInstance) {
+					await coreInstances.delete(coreInstance.id).catch(() => {})
 				}
 				throw err
 			}
+
+			await router.push(`/instance/${encodeURIComponent(profilePath)}/content`)
 
 			trackEvent('InstanceCreate', {
 				source: 'CreationModal',
@@ -197,12 +292,12 @@ export function setupCreationModal(
 		if (!pendingModpackCreation.value) return
 		const { projectId, versionId, name, iconUrl } = pendingModpackCreation.value
 		pendingModpackCreation.value = null
-		await proceedWithModpackCreation(projectId, versionId, name, iconUrl)
+		await proceedWithModpackCreation(projectId, versionId, name, iconUrl, 'client')
 	}
 
 	function handleModpackDuplicateGoToInstance(instancePath: string) {
 		pendingModpackCreation.value = null
-		router.push(`/instance/${encodeURIComponent(instancePath)}/`)
+		router.push(`/instance/${encodeURIComponent(instancePath)}/content`)
 	}
 
 	function handleBrowseModpacks() {

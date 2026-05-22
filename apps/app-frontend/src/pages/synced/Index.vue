@@ -225,7 +225,6 @@
 	</div>
 </template>
 <script setup lang="ts">
-import { CoreApiClient } from '@amberite/api-lib'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	BoxesIcon,
@@ -255,11 +254,11 @@ import {
 	ButtonStyled,
 	ContentPageHeader,
 	ErrorInformationCard,
+	injectCoreInstanceState,
 	injectNotificationManager,
 	JoinedButtons,
 	NavTabs,
 	OverflowMenu,
-	provideCoreClient,
 	ServerOnlinePlayers,
 	ServerPing,
 	ServerRecentPlays,
@@ -273,7 +272,6 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getDesktopAdapter } from '@/adapters/desktop'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
@@ -303,18 +301,21 @@ const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
 
 const offline = ref(!navigator.onLine)
-window.addEventListener('offline', () => {
+const handleOffline = () => {
 	offline.value = true
-})
-window.addEventListener('online', () => {
+}
+const handleOnline = () => {
 	offline.value = false
-})
+}
+window.addEventListener('offline', handleOffline)
+window.addEventListener('online', handleOnline)
 
 const instance = ref<GameInstance>()
 const coreError = ref(false)
 const playing = ref(false)
 const loading = ref(false)
 const stopping = ref(false)
+const serverActionPending = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
 
@@ -333,6 +334,11 @@ const recentPlays = computed(
 const playersOnline = ref<number | undefined>(undefined)
 const ping = ref<number | undefined>(undefined)
 const loadingServerPing = ref(false)
+const coreInstances = injectCoreInstanceState()
+const coreSnapshot = ref(coreInstances.snapshot)
+const unlistenCoreInstances = coreInstances.subscribe((snapshot) => {
+	coreSnapshot.value = snapshot
+})
 
 async function fetchInstance() {
 	coreError.value = false
@@ -344,7 +350,7 @@ async function fetchInstance() {
 	instance.value = await get(route.params.id as string).catch(handleError)
 
 	if (instance.value?.kind === 'server') {
-		await router.replace(`/server/${encodeURIComponent(route.params.id as string)}`)
+		await router.replace(`/instance/${encodeURIComponent(route.params.id as string)}/content`)
 		return
 	}
 
@@ -416,26 +422,24 @@ async function updatePlayState() {
 	playing.value = Array.isArray(runningProcesses) && runningProcesses.length > 0
 }
 
-let _unmounted = false
 const unlistenProfiles = ref<(() => void) | undefined>()
 const unlistenProcesses = ref<(() => void) | undefined>()
 
-try {
-	const adapter = getDesktopAdapter()
-	provideCoreClient(new CoreApiClient(adapter))
-} catch {
-	coreError.value = true
-}
-
 onUnmounted(() => {
-	_unmounted = true
 	unlistenProfiles.value?.()
 	unlistenProcesses.value?.()
+	unlistenCoreInstances()
+	window.removeEventListener('offline', handleOffline)
+	window.removeEventListener('online', handleOnline)
 })
 
 await fetchInstance()
 
 const coreInstanceId = computed(() => instance.value?.core_instance_id ?? '')
+const coreInstance = computed(
+	() => coreSnapshot.value.instances.find((item) => item.id === coreInstanceId.value) ?? null,
+)
+const serverRunning = computed(() => coreInstance.value?.status === 'running')
 
 watch(
 	() => route.params.id,
@@ -513,8 +517,45 @@ const handlePlayServer = async () => {
 	}
 }
 
-// TODO: AMBERITE - wire serverRunning to Core server state
-const serverRunning = ref(false)
+const startServer = async () => {
+	if (!coreInstanceId.value || serverActionPending.value) return
+	serverActionPending.value = true
+	try {
+		await coreInstances.startInstance(coreInstanceId.value)
+	} catch (err) {
+		handleError(err as Error)
+	} finally {
+		serverActionPending.value = false
+	}
+}
+
+const stopServer = async () => {
+	if (!coreInstanceId.value || serverActionPending.value) return
+	serverActionPending.value = true
+	try {
+		await coreInstances.stopInstance(coreInstanceId.value)
+	} catch (err) {
+		handleError(err as Error)
+	} finally {
+		serverActionPending.value = false
+	}
+}
+
+const serverStartStopAction = computed(() =>
+	serverRunning.value
+		? {
+				id: 'stop_server',
+				label: serverActionPending.value ? 'Stopping server...' : 'Stop server',
+				icon: ServerIcon,
+				action: () => stopServer(),
+			}
+		: {
+				id: 'start_server',
+				label: serverActionPending.value ? 'Starting server...' : 'Start server',
+				icon: ServerIcon,
+				action: () => startServer(),
+			},
+)
 
 const playActions = computed(() => {
 	if (playing.value) {
@@ -525,20 +566,18 @@ const playActions = computed(() => {
 				icon: StopCircleIcon,
 				action: () => stopInstance('SyncedPage'),
 			},
-			serverRunning.value
-				? { id: 'stop_server', label: 'Stop server', icon: ServerIcon, action: () => {} }
-				: { id: 'start_server', label: 'Start server', icon: ServerIcon, action: () => {} },
+			serverStartStopAction.value,
 		]
 	}
 	if (serverRunning.value) {
 		return [
 			{ id: 'join', label: 'Join', icon: PlayIcon, action: () => handlePlayServer() },
-			{ id: 'stop_server', label: 'Stop server', icon: ServerIcon, action: () => {} },
+			serverStartStopAction.value,
 		]
 	}
 	return [
 		{ id: 'play', label: 'Play', icon: PlayIcon, action: () => startInstance('SyncedPage') },
-		{ id: 'start_server', label: 'Start server', icon: ServerIcon, action: () => {} },
+		serverStartStopAction.value,
 	]
 })
 

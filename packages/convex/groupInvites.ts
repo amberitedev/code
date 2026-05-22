@@ -1,0 +1,140 @@
+import { v } from 'convex/values'
+import { mutation, query } from './_generated/server'
+import type { MutationCtx, QueryCtx } from './_generated/server'
+import {
+	membershipByGroupUser,
+	requireFriendGroupRole,
+	requireSingleGroupMembership,
+	requireSingleOwnedCore,
+	requireUserId,
+} from './_socialRules'
+
+const role = v.union(v.literal('owner'), v.literal('admin'), v.literal('member'))
+
+export const createFriendGroupInvite = mutation({
+	args: {
+		friendGroupId: v.string(),
+		inviteeUserId: v.optional(v.string()),
+		role: v.optional(role),
+		ttlMs: v.optional(v.number()),
+	},
+	handler: async (ctx, args) => {
+		const userId = await requireUserId(ctx)
+		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin'])
+		const now = Date.now()
+		const code = args.inviteeUserId ? undefined : await createInviteCode(ctx)
+		const inviteId = await ctx.db.insert('friendGroupInvites', {
+			friendGroupId: args.friendGroupId,
+			inviterUserId: userId,
+			inviteeUserId: args.inviteeUserId,
+			code,
+			role: args.role ?? 'member',
+			status: 'pending',
+			createdAt: now,
+			expiresAt: now + (args.ttlMs ?? 7 * 24 * 60 * 60 * 1000),
+		})
+		return { inviteId, code }
+	},
+})
+
+export const listMyGroupInvites = query({
+	args: {},
+	handler: async (ctx) => {
+		const userId = await requireUserId(ctx)
+		const invites = await invitesByUser(ctx, userId)
+		return await Promise.all(
+			invites.map(async (invite) => ({
+				invite,
+				group: await ctx.db.get(invite.friendGroupId as any),
+			})),
+		)
+	},
+})
+
+export const getInviteByCode = query({
+	args: { code: v.string() },
+	handler: async (ctx, args) => {
+		const invite = await inviteByCode(ctx, args.code)
+		if (!invite || invite.status !== 'pending' || invite.expiresAt <= Date.now()) return null
+		return { invite, group: await ctx.db.get(invite.friendGroupId as any) }
+	},
+})
+
+export const acceptFriendGroupInvite = mutation({
+	args: { inviteId: v.optional(v.id('friendGroupInvites')), code: v.optional(v.string()) },
+	handler: async (ctx, args) => {
+		const userId = await requireUserId(ctx)
+		const invite = await resolveInvite(ctx, args)
+		if (!invite || invite.status !== 'pending' || invite.expiresAt <= Date.now())
+			throw new Error('invite not found')
+		if (invite.inviteeUserId && invite.inviteeUserId !== userId)
+			throw new Error('invite belongs to another user')
+		await requireSingleGroupMembership(ctx, userId, invite.friendGroupId)
+		const existing = await membershipByGroupUser(ctx, invite.friendGroupId, userId)
+		const now = Date.now()
+		if (!existing) {
+			await requireSingleOwnedCore(ctx, userId)
+			await ctx.db.insert('friendGroupMembers', {
+				friendGroupId: invite.friendGroupId,
+				userId,
+				role: invite.role,
+				permissionPreset: invite.role,
+				createdAt: now,
+				updatedAt: now,
+			})
+		}
+		await ctx.db.patch(invite._id, { status: 'accepted', respondedAt: now })
+		return { friendGroupId: invite.friendGroupId }
+	},
+})
+
+export const declineFriendGroupInvite = mutation({
+	args: { inviteId: v.id('friendGroupInvites') },
+	handler: async (ctx, args) => {
+		const userId = await requireUserId(ctx)
+		const invite = await ctx.db.get(args.inviteId)
+		if (!invite || invite.inviteeUserId !== userId) throw new Error('invite not found')
+		await ctx.db.patch(args.inviteId, { status: 'declined', respondedAt: Date.now() })
+		return null
+	},
+})
+
+export const revokeFriendGroupInvite = mutation({
+	args: { inviteId: v.id('friendGroupInvites') },
+	handler: async (ctx, args) => {
+		const userId = await requireUserId(ctx)
+		const invite = await ctx.db.get(args.inviteId)
+		if (!invite) return null
+		await requireFriendGroupRole(ctx, userId, invite.friendGroupId, ['owner', 'admin'])
+		await ctx.db.patch(args.inviteId, { status: 'revoked', respondedAt: Date.now() })
+		return null
+	},
+})
+
+async function resolveInvite(ctx: QueryCtx, args: { inviteId?: string; code?: string }) {
+	if (args.inviteId) return await ctx.db.get(args.inviteId as any)
+	if (args.code) return await inviteByCode(ctx, args.code)
+	return null
+}
+
+async function createInviteCode(ctx: MutationCtx): Promise<string> {
+	for (let i = 0; i < 10; i++) {
+		const code = Math.random().toString(36).slice(2, 10).toUpperCase()
+		const existing = await inviteByCode(ctx, code)
+		if (!existing) return code
+	}
+	throw new Error('could not allocate invite code')
+}
+
+function invitesByUser(ctx: QueryCtx, userId: string) {
+	return ctx.db
+		.query('friendGroupInvites')
+		.withIndex('by_invitee_status', (q) => q.eq('inviteeUserId', userId).eq('status', 'pending'))
+		.collect()
+}
+function inviteByCode(ctx: QueryCtx | MutationCtx, code: string) {
+	return ctx.db
+		.query('friendGroupInvites')
+		.withIndex('by_code', (q) => q.eq('code', code.trim().toUpperCase()))
+		.unique()
+}

@@ -1,0 +1,104 @@
+warning: variant `JarDownload` is never constructed
+  --> src\application\instance_service.rs:46:5
+   |
+32 | pub enum InstanceError {
+   |          ------------- variant in this enum
+...
+46 |     JarDownload(String),
+   |     ^^^^^^^^^^^
+   |
+   = note: `InstanceError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: function `get_data_dir` is never used
+   --> src\application\instance_service.rs:193:14
+    |
+193 | pub async fn get_data_dir(
+    |              ^^^^^^^^^^^^
+
+warning: struct `LinkedData` is never constructed
+  --> src\domain\modpack.rs:49:12
+   |
+49 | pub struct LinkedData {
+   |            ^^^^^^^^^^
+
+warning: variant `NotPaired` is never constructed
+   --> src\infrastructure\auth\jwks.rs:148:5
+    |
+138 | pub enum AuthError {
+    |          --------- variant in this enum
+...
+148 |     NotPaired,
+    |     ^^^^^^^^^
+    |
+    = note: `AuthError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: variant `Sha1Mismatch` is never constructed
+  --> src\infrastructure\minecraft\flavours.rs:12:5
+   |
+ 6 | pub enum FlavourError {
+   |          ------------ variant in this enum
+...
+12 |     Sha1Mismatch { expected: String, actual: String },
+   |     ^^^^^^^^^^^^
+   |
+   = note: `FlavourError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `get_version_from_hash` is never used
+   --> src\infrastructure\minecraft\modrinth_api.rs:112:18
+    |
+ 65 | impl ModrinthClient {
+    | ------------------- method in this implementation
+...
+112 |     pub async fn get_version_from_hash(
+    |                  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `MockSpawner` is never constructed
+  --> src\infrastructure\process\mock_spawner.rs:13:12
+   |
+13 | pub struct MockSpawner;
+   |            ^^^^^^^^^^^
+
+warning: struct `MockHandle` is never constructed
+  --> src\infrastructure\process\mock_spawner.rs:15:12
+   |
+15 | pub struct MockHandle {
+   |            ^^^^^^^^^^
+
+warning: method `feed_output` is never used
+  --> src\infrastructure\process\mock_spawner.rs:23:12
+   |
+21 | impl MockHandle {
+   | --------------- method in this implementation
+22 |     /// Feed a line of "output" to the handle's stdout channel from tests.
+23 |     pub fn feed_output(&self, line: &str) {
+   |            ^^^^^^^^^^^
+
+warning: struct `PtyHandle` is never constructed
+  --> src\infrastructure\process\pty_spawner.rs:13:12
+   |
+13 | pub struct PtyHandle {
+   |            ^^^^^^^^^
+
+warning: struct `PtySpawner` is never constructed
+  --> src\infrastructure\process\pty_spawner.rs:52:12
+   |
+52 | pub struct PtySpawner;
+   |            ^^^^^^^^^^
+
+warning: `amberite-core` (bin "amberite-core") generated 11 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.99s
+     Running `target\debug\amberite-core.exe`
+
+╔══════════════════════════════╗
+║  Amberite Core — Pairing Code  ║
+║          641145          ║
+╚══════════════════════════════╝
+
+[31mThe application panicked (crashed).[0m
+Message:  [36mInvalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Expose-Headers: *`[0m
+Location: [35mC:\Users\ilai\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tower-http-0.5.2\src\cors\mod.rs[0m:[35m730[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+error: process didn't exit successfully: `target\debug\amberite-core.exe` (exit code: 101)

@@ -126,6 +126,7 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
         Arc::clone(&state),
     ));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
+    tokio::spawn(gc_fs_download_tokens(Arc::clone(&state)));
     tokio::spawn(application::backup_scheduler::run_backup_scheduler(
         Arc::clone(&state),
     ));
@@ -151,6 +152,16 @@ async fn gc_ws_tickets(state: Arc<application::state::AppState>) {
         tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
         state
             .ws_tickets
+            .retain(|_, t| t.expires_at > Instant::now());
+    }
+}
+
+async fn gc_fs_download_tokens(state: Arc<application::state::AppState>) {
+    use std::time::Instant;
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        state
+            .fs_download_tokens
             .retain(|_, t| t.expires_at > Instant::now());
     }
 }

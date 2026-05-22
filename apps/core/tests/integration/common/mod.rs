@@ -8,7 +8,9 @@
 use std::sync::Arc;
 
 use amberite_core::{
-    application::state::AppState, config::Config,
+    application::state::AppState,
+    config::Config,
+    domain::instance::{InstanceId, InstanceInstallStatus},
     infrastructure::process::mock_spawner::MockSpawner,
     presentation::router::create_router,
 };
@@ -23,6 +25,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 pub struct TestApp {
     pub base_url: String,
     pub client: reqwest::Client,
+    pub state: Arc<AppState>,
     /// The first-run pairing code, if this app was spawned in prod (unpaired) mode.
     /// `None` for dev-mode spawns (pairing is skipped) and already-paired spawns.
     pub pairing_code: Option<String>,
@@ -146,6 +149,7 @@ impl TestApp {
         Self {
             base_url: format!("http://127.0.0.1:{port}"),
             client: reqwest::Client::new(),
+            state,
             pairing_code,
             _data_dir: data_dir,
         }
@@ -181,8 +185,15 @@ pub async fn create_test_instance(app: &TestApp) -> String {
         "create_test_instance failed: {}",
         res.status()
     );
-    res.json::<serde_json::Value>().await.unwrap()["id"]
+    let id = res.json::<serde_json::Value>().await.unwrap()["id"]
         .as_str()
         .unwrap()
-        .to_string()
+        .to_string();
+    let parsed = id.parse::<InstanceId>().unwrap();
+    app.state
+        .instance_store
+        .update_install_status(&parsed, InstanceInstallStatus::Ready)
+        .await
+        .unwrap();
+    id
 }

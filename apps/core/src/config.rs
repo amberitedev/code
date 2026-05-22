@@ -17,6 +17,8 @@ pub struct Config {
     pub allowed_origin: String,
     /// When true, all auth checks are bypassed (dev mode only).
     pub dev_mode: bool,
+    /// Number of sync snapshot archives retained per profile.
+    pub sync_retain_count: usize,
 }
 
 impl Config {
@@ -38,7 +40,11 @@ impl Config {
                 .unwrap_or_else(|_| "https://amberite.dev".to_string()),
             dev_mode: std::env::var("AMBERITE_DEV")
                 .map(|v| v == "true" || v == "1")
-                .unwrap_or(cfg!(debug_assertions)),
+                .unwrap_or(false),
+            sync_retain_count: std::env::var("AMBERITE_SYNC_RETAIN_COUNT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
         }
     }
 }

@@ -58,6 +58,7 @@ impl JwksCache {
         &self,
         token: &str,
         jwks_url: &str,
+        audience: &str,
     ) -> Result<Claims, AuthError> {
         self.refresh_if_stale(jwks_url).await?;
         let guard = self.inner.read().await;
@@ -80,7 +81,7 @@ impl JwksCache {
             }
             let mut validation = Validation::new(Algorithm::RS256);
             validation.validate_exp = true;
-            validation.set_audience(&["authenticated"]);
+            validation.set_audience(&[audience]);
             if let Ok(data) = decode::<Claims>(token, &jwk.key, &validation) {
                 return Ok(data.claims);
             }

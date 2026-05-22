@@ -19,11 +19,13 @@
 			<template v-for="breadcrumb in breadcrumbs" :key="breadcrumb.name">
 				<router-link
 					v-if="breadcrumb.link"
+					data-tauri-drag-region-exclude
 					:to="{
 						path: breadcrumb.link.replace('{id}', encodeURIComponent($route.params.id as string)),
 						query: breadcrumb.query,
 					}"
 					class="shrink-0 whitespace-nowrap text-primary"
+					@mousedown.stop
 				>
 					{{ resolveLabel(breadcrumb.name) }}
 				</router-link>

@@ -143,6 +143,12 @@
   "app.browse.server.installing": {
     "message": "Installing"
   },
+  "app.creation-modal.import-server-unsupported": {
+    "message": "Importing as a server or synced instance is not supported yet."
+  },
+  "app.creation-modal.imported-modpack-server-unsupported": {
+    "message": "Imported modpack files can only create client instances for now."
+  },
   "app.creation-modal.installing-modpack.description": {
     "message": "{fileName}"
   },
@@ -316,6 +322,9 @@
   },
   "app.settings.tabs.appearance": {
     "message": "Appearance"
+  },
+  "app.settings.tabs.core": {
+    "message": "Core"
   },
   "app.settings.tabs.default-instance-options": {
     "message": "Default instance options"

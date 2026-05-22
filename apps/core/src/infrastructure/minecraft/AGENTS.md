@@ -78,7 +78,7 @@ Uses `async_zip` for async ZIP reading (tokio-compatible). The `ZipFileReader` m
 4. Extracts `overrides/` entries to `instance_dir/`.
 5. Extracts `server-overrides/` entries to `instance_dir/`.
 
-**SHA1 verification**: only verified if `file.hashes.sha1` is `Some`. Files with no SHA1 hash are downloaded without verification.
+**SHA1 verification**: only verified if `file.hashes.sha1` is `Some`. Files with no SHA1 hash are downloaded without verification. Empty `downloads[]` is rejected, and `.mrpack` download URLs are restricted to HTTPS Modrinth/GitHub/GitHubusercontent hosts to avoid arbitrary Core-side fetches.
 
 **`is_client_only`**: checks `env.server == EnvType::Unsupported`. Mods with `env: None` (no env field) are downloaded. Mods with `server: Optional` or `server: Required` are downloaded.
 

@@ -41,16 +41,16 @@ pub async fn start_console_stream<R: tauri::Runtime>(
         .json()
         .await
         .map_err(|e| AmberiteError::Core(e.to_string()))?;
-    let token = json["token"]
-        .as_str()
-        .map(String::from)
-        .ok_or_else(|| AmberiteError::Core("No token in ws-token response".into()))?;
+    let token = json["token"].as_str().map(String::from).ok_or_else(|| {
+        AmberiteError::Core("No token in ws-token response".into())
+    })?;
 
     let ws_base = core_url
         .trim_end_matches('/')
         .replace("http://", "ws://")
         .replace("https://", "wss://");
-    let ws_url = format!("{ws_base}/instances/{instance_id}/console?token={token}");
+    let ws_url =
+        format!("{ws_base}/instances/{instance_id}/console?token={token}");
 
     let id = instance_id.clone();
     let handle = tokio::spawn(async move {

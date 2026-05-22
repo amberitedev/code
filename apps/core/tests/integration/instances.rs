@@ -24,6 +24,10 @@ async fn list_instances_shows_created() {
     let body: serde_json::Value = res.json().await.unwrap();
     let instances = body["instances"].as_array().unwrap();
     assert_eq!(instances.len(), 3);
+    assert_eq!(instances[0]["install_status"], "ready");
+    assert!(instances[0]["created_at"].is_string());
+    assert!(instances[0]["updated_at"].is_string());
+    assert!(instances[0]["data_dir"].is_null());
     // Verify the actual IDs are present — not just any 3 items.
     let returned_ids: Vec<&str> = instances
         .iter()
@@ -130,6 +134,7 @@ async fn get_instance_returns_record() {
     assert_eq!(body["id"].as_str().unwrap(), id);
     assert_eq!(body["name"], "test-server");
     assert_eq!(body["status"], "offline");
+    assert_eq!(body["install_status"], "ready");
     assert_eq!(body["game_version"], "1.21.1");
     assert_eq!(body["loader"], "vanilla");
     assert_eq!(body["port"], 25565);

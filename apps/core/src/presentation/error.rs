@@ -10,7 +10,7 @@ use crate::{
         export_service::ExportError, instance_service::InstanceError,
         log_service::LogError, macro_service::MacroError,
         mod_service::ModError, modpack_service::ModpackError,
-        stats_service::StatsError,
+        social_models::SocialError, stats_service::StatsError,
     },
     ports::instance_store::StoreError,
 };
@@ -63,6 +63,9 @@ impl From<InstanceError> for ApiError {
             InstanceError::ActorDead => Self::ServiceUnavailable(
                 "instance actor is not responding".into(),
             ),
+            InstanceError::NotReady(message) => {
+                Self::Conflict(format!("instance is not ready: {message}"))
+            }
             e => Self::Internal(e.to_string()),
         }
     }
@@ -73,6 +76,9 @@ impl From<ModpackError> for ApiError {
         match e {
             ModpackError::InstanceNotFound => {
                 Self::NotFound("instance not found".into())
+            }
+            ModpackError::MissingFile => {
+                Self::BadRequest("version has no downloadable file".into())
             }
             e => Self::Internal(e.to_string()),
         }
@@ -117,6 +123,7 @@ impl From<ModError> for ApiError {
             ModError::InvalidFilename => {
                 Self::BadRequest("invalid filename".into())
             }
+            ModError::HashMismatch { .. } => Self::BadRequest(e.to_string()),
             e => Self::Internal(e.to_string()),
         }
     }
@@ -150,6 +157,18 @@ impl From<ExportError> for ApiError {
                 Self::NotFound("instance not found".into())
             }
             e => Self::Internal(e.to_string()),
+        }
+    }
+}
+
+impl From<SocialError> for ApiError {
+    fn from(e: SocialError) -> Self {
+        match e {
+            SocialError::NotFound => Self::NotFound("not found".into()),
+            SocialError::Invalid(message) => Self::BadRequest(message),
+            SocialError::Database(e) => Self::Internal(e.to_string()),
+            SocialError::Io(e) => Self::Internal(e.to_string()),
+            SocialError::Mrpack(e) => Self::BadRequest(e.to_string()),
         }
     }
 }

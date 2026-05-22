@@ -89,7 +89,10 @@ export default defineConfig(async ({ mode }) => {
 			strictPort: true,
 			hmr: mode !== 'no-hmr',
 			headers: {
-				'content-security-policy': Object.entries(tauriConf.app.security.csp)
+				'content-security-policy': Object.entries({
+					...tauriConf.app.security.csp,
+					'worker-src': "'self' blob:",
+				})
 					.map(([directive, sources]) => {
 						// An additional websocket connect-src is required for Vite dev tools to work
 						if (directive === 'connect-src') {
@@ -109,6 +112,10 @@ export default defineConfig(async ({ mode }) => {
 		envPrefix: ['VITE_', 'TAURI_', 'MODRINTH_'],
 		build: {
 			rolldownOptions: {
+				input: {
+					main: resolve(projectRootDir, 'index.html'),
+					themeEditor: resolve(projectRootDir, 'theme-editor.html'),
+				},
 				onwarn(warning, defaultHandler) {
 					if (warning.code === 'INEFFECTIVE_DYNAMIC_IMPORT') return
 					defaultHandler(warning)

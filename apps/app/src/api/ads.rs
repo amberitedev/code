@@ -59,10 +59,10 @@ fn ads_user_agent_override_params() -> String {
 fn configure_ads_cookie_settings(
     core_webview2: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2,
 ) {
-    use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_NONE, ICoreWebView2,
-        ICoreWebView2_13, ICoreWebView2Profile3,
-    };
+	use webview2_com::Microsoft::Web::WebView2::Win32::{
+		COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_NONE, ICoreWebView2_13,
+		ICoreWebView2Profile3,
+	};
     use windows_core::Interface;
 
     match core_webview2
@@ -229,12 +229,18 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             init_ads_window,
             hide_ads_window,
+            scroll_ads_window,
             show_ads_window,
             record_ads_click,
             open_link,
             get_ads_personalization,
         ])
         .build()
+}
+
+#[tauri::command]
+pub async fn scroll_ads_window() -> crate::api::Result<()> {
+    Ok(())
 }
 
 fn get_webview_position<R: Runtime>(

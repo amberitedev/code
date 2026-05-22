@@ -330,7 +330,7 @@ export interface FlushInstallQueueOptions<TProject extends BrowseInstallProject>
 
 export interface FlushStoredServerAddonInstallQueueOptions<TProject extends BrowseInstallProject> {
 	serverId: string
-	worldId: string
+	worldId: string | null
 	install: (plans: BrowseInstallPlan<TProject>[]) => void | Promise<void>
 	onQueueChange?: (plans: Map<string, BrowseInstallPlan<TProject>>) => void
 }
@@ -616,7 +616,7 @@ export async function flushInstallQueue<TProject extends BrowseInstallProject>({
 
 export function getStoredServerAddonInstallQueue<
 	TProject extends BrowseInstallProject = BrowseInstallProject,
->(serverId: string, worldId: string) {
+>(serverId: string, worldId: string | null) {
 	const storedPlans = readStoredServerInstallQueue<TProject>(serverId, worldId)
 	const addonPlans = new Map(
 		Array.from(storedPlans).filter(([, plan]) => plan.contentType !== 'modpack'),

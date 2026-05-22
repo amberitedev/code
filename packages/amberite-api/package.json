@@ -1,0 +1,18 @@
+{
+	"name": "@amberite/amberite-api",
+	"version": "0.2.0",
+	"description": "Shared communication layer for Amberite: Core API, auth, and explicit message transports. Works on desktop (Tauri) and web.",
+	"main": "./src/index.ts",
+	"scripts": {
+		"lint": "eslint . && prettier --check .",
+		"fix": "eslint . --fix && prettier --write .",
+		"test": "vitest run",
+		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"test:watch": "vitest"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@modrinth/tooling-config": "workspace:*",
+		"vitest": "^3.2.0"
+	}
+}

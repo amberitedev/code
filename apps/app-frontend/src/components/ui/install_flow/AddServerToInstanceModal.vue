@@ -97,7 +97,7 @@ async function addServer(profile) {
 				>
 					<router-link
 						class="btn btn-transparent p-2 text-left"
-						:to="`/instance/${encodeURIComponent(profile.path)}`"
+						:to="`/instance/${encodeURIComponent(profile.path)}/content`"
 						@click="modal.hide()"
 					>
 						<Avatar

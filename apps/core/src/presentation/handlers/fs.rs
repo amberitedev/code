@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Instant};
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::{header, StatusCode},
-    response::{IntoResponse, Response},
+    response::Response,
     Json,
 };
 use serde::Deserialize;
@@ -133,19 +133,18 @@ pub async fn download_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
     validate_id(&id)?;
-    let (bytes, filename) = download_file(&state, &id, &q.path)
+    let (file, filename) = download_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
+    let stream = tokio_util::io::ReaderStream::new(file);
+    let body = axum::body::Body::from_stream(stream);
     let disposition = format!("attachment; filename=\"{filename}\"");
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/octet-stream"),
-            (header::CONTENT_DISPOSITION, disposition.as_str()),
-        ],
-        bytes,
-    )
-        .into_response())
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(body)
+        .map_err(|e| ApiError::Internal(e.to_string()))?)
 }
 
 /// DELETE /instances/:id/fs — delete a file or directory.
@@ -199,15 +198,15 @@ pub async fn read_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
     validate_id(&id)?;
-    let bytes = read_file(&state, &id, &q.path)
+    let file = read_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        bytes,
-    )
-        .into_response())
+    let stream = tokio_util::io::ReaderStream::new(file);
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(axum::body::Body::from_stream(stream))
+        .map_err(|e| ApiError::Internal(e.to_string()))?)
 }
 
 /// PUT /instances/:id/fs/write — write raw bytes to a file (creates or overwrites).
@@ -368,17 +367,15 @@ pub async fn download_by_key_handler(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let bytes = tokio::fs::read(&path)
+    let file = tokio::fs::File::open(&path)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let stream = tokio_util::io::ReaderStream::new(file);
     let disposition = format!("attachment; filename=\"{filename}\"");
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/octet-stream"),
-            (header::CONTENT_DISPOSITION, disposition.as_str()),
-        ],
-        bytes,
-    )
-        .into_response())
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(axum::body::Body::from_stream(stream))
+        .map_err(|e| ApiError::Internal(e.to_string()))?)
 }

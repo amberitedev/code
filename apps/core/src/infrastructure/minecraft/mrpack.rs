@@ -26,6 +26,12 @@ pub enum MrpackError {
     },
     #[error("path traversal rejected")]
     PathTraversal,
+    #[error("file has no downloads: {0}")]
+    MissingDownload(String),
+    #[error("download URL is not allowed: {0}")]
+    DisallowedDownloadUrl(String),
+    #[error("destination symlink rejected")]
+    DestinationSymlink,
 }
 
 /// Extract the `modrinth.index.json` from a `.mrpack` file.
@@ -77,9 +83,13 @@ pub async fn install_mrpack(
             tokio::fs::create_dir_all(parent).await?;
         }
         info!("Downloading {}", file.path);
+        let download_url = file
+            .downloads
+            .first()
+            .ok_or_else(|| MrpackError::MissingDownload(file.path.clone()))?;
         download_with_sha1(
             http,
-            &file.downloads[0],
+            download_url,
             &dest,
             file.hashes.sha1.as_deref(),
         )
@@ -106,6 +116,7 @@ async fn download_with_sha1(
     dest: &Path,
     expected_sha1: Option<&str>,
 ) -> Result<(), MrpackError> {
+    validate_download_url(url)?;
     let bytes = http
         .get(url)
         .send()
@@ -123,8 +134,29 @@ async fn download_with_sha1(
             });
         }
     }
+    ensure_no_destination_symlink(dest)?;
     let mut f = tokio::fs::File::create(dest).await?;
     f.write_all(&bytes).await?;
+    Ok(())
+}
+
+fn validate_download_url(url: &str) -> Result<(), MrpackError> {
+    let parsed = url::Url::parse(url)
+        .map_err(|_| MrpackError::DisallowedDownloadUrl(url.to_string()))?;
+    if parsed.scheme() != "https" {
+        return Err(MrpackError::DisallowedDownloadUrl(url.to_string()));
+    }
+    let Some(host) = parsed.host_str() else {
+        return Err(MrpackError::DisallowedDownloadUrl(url.to_string()));
+    };
+    let allowed = host == "cdn.modrinth.com"
+        || host.ends_with(".modrinth.com")
+        || host == "github.com"
+        || host.ends_with(".github.com")
+        || host.ends_with(".githubusercontent.com");
+    if !allowed {
+        return Err(MrpackError::DisallowedDownloadUrl(url.to_string()));
+    }
     Ok(())
 }
 
@@ -158,10 +190,22 @@ async fn extract_overrides(
             .reader_with_entry(i)
             .await
             .map_err(|e| MrpackError::Zip(e.to_string()))?;
+        ensure_no_destination_symlink(&out_path)?;
         let mut f = tokio::fs::File::create(&out_path).await?;
         tokio::io::copy(&mut entry_reader.compat(), &mut f).await?;
     }
     Ok(())
+}
+
+fn ensure_no_destination_symlink(path: &Path) -> Result<(), MrpackError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err(MrpackError::DestinationSymlink)
+        }
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(MrpackError::Io(err)),
+    }
 }
 
 fn guarded_child_path(

@@ -7,6 +7,7 @@ Developer tooling for Amberite Core. These scripts exercise the live API — the
 | File | Purpose |
 |------|---------|
 | `diagnostic.py` | Hits every REST endpoint; reports pass / fail / skip |
+| `core_exercise.ts` | Live workflow runner for scripted Core smoke tests against real instances |
 | `run_diag.ps1` | PowerShell wrapper — auto-installs `requests`, forwards all args |
 
 ## Running
@@ -24,6 +25,15 @@ Start Core first: `cargo run` (or `docker-compose up -d`) from `apps/core/`.
 .\scripts\run_diag.ps1 -Token <jwt> -PairingCode <6-digit-code> `
     -ConvexUrl https://deployment.convex.cloud -AuthJwksUrl https://issuer/.well-known/jwks.json -OwnerId <uid>
 ```
+
+Live vanilla workflow runner:
+
+```powershell
+pnpm exercise vanilla --version 1.21.1 --port 25565
+pnpm exercise add-mod --instance <uuid> --project lithium --gameVersion 1.21.1 --loader fabric
+```
+
+`core_exercise.ts` uses the HTTP API plus generated instance files (`server.jar`, `launch.json`) to avoid starting before async install finishes.
 
 ## What gets tested
 

@@ -6,6 +6,7 @@
 pub mod console_stream;
 pub mod core_launcher;
 pub mod error;
+pub mod permissions;
 pub mod progress_stream;
 pub mod session;
 pub mod settings;

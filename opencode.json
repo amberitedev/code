@@ -1,23 +1,4 @@
 {
 	"$schema": "https://opencode.ai/config.json",
-	"mcp": {
-		"storybook": {
-			"type": "local",
-			"command": ["npx", "-y", "storybook-mcp@latest"],
-			"environment": {
-				"STORYBOOK_URL": "http://localhost:6006/index.json"
-			},
-			"enabled": true
-		},
-		"supabase": {
-			"type": "remote",
-			"url": "https://mcp.supabase.com/mcp?project_ref=zbngxzouadkdbsxtumyf&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching%2Cstorage",
-			"enabled": true
-		},
-		"tari-devtools": {
-			"type": "local",
-			"command": ["bun", "run", "packages/tari-devtools/src/index.ts"],
-			"enabled": true
-		}
-	}
+	"mcp": {}
 }

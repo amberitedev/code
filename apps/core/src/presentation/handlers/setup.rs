@@ -21,6 +21,8 @@ pub struct SetupRequest {
     pub auth_jwks_url: String,
     /// Auth user ID of the owner (from their JWT sub).
     pub owner_user_id: String,
+    /// JWT audience claim to validate. Defaults to "authenticated" if omitted.
+    pub auth_audience: Option<String>,
 }
 
 /// POST /setup — complete first-run pairing.
@@ -64,19 +66,55 @@ pub async fn complete_setup(
         return Err(ApiError::Unauthorized("invalid pairing code".into()));
     }
 
+    if body.owner_user_id.trim().is_empty() {
+        return Err(ApiError::BadRequest(
+            "owner_user_id cannot be empty".into(),
+        ));
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+
     sqlx::query(
 		"INSERT OR REPLACE INTO core_config \
-		 (id, supabase_url, convex_url, auth_jwks_url, owner_user_id, paired_at, core_id) VALUES (1, ?, ?, ?, ?, ?, ?)",
+		 (id, supabase_url, convex_url, auth_jwks_url, auth_audience, owner_user_id, paired_at, core_id) VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
 	)
 	.bind(&body.convex_url)
 	.bind(&body.convex_url)
 	.bind(&body.auth_jwks_url)
+	.bind(body.auth_audience.as_deref().unwrap_or("authenticated"))
 	.bind(&body.owner_user_id)
-    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(&now)
     .bind(&state.core_id)
     .execute(&state.pool)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let setup_mode = if local_secret_valid {
+        "local"
+    } else {
+        "remote"
+    };
+    sqlx::query(
+		"INSERT INTO core_metadata (id, name, setup_mode, updated_at) VALUES (1, 'Amberite Core', ?, ?) \
+		 ON CONFLICT(id) DO UPDATE SET setup_mode = excluded.setup_mode, updated_at = excluded.updated_at",
+	)
+	.bind(setup_mode)
+	.bind(&now)
+	.execute(&state.pool)
+	.await
+	.map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    sqlx::query(
+		"INSERT INTO core_members (user_id, role, permission_preset, status, joined_at, updated_at) \
+		 VALUES (?, 'owner', 'owner', 'active', ?, ?) \
+		 ON CONFLICT(user_id) DO UPDATE SET role = 'owner', permission_preset = 'owner', status = 'active', updated_at = excluded.updated_at",
+	)
+	.bind(&body.owner_user_id)
+	.bind(&now)
+	.bind(&now)
+	.execute(&state.pool)
+	.await
+	.map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Reset attempt counter and clear the pairing code.
     state.wrong_pairing_attempts.store(0, Ordering::Relaxed);

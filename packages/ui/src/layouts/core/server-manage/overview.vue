@@ -1,46 +1,29 @@
 <template>
-	<div class="flex flex-col gap-6">
-		<section class="grid gap-4 md:grid-cols-3">
-			<div class="rounded-2xl bg-surface-3 p-5">
-				<p class="text-sm font-semibold text-secondary">CPU</p>
-				<p class="text-3xl font-bold text-contrast">{{ cpuPercent }}</p>
-			</div>
-			<div class="rounded-2xl bg-surface-3 p-5">
-				<p class="text-sm font-semibold text-secondary">Memory</p>
-				<p class="text-3xl font-bold text-contrast">{{ memoryUsage }}</p>
-			</div>
-			<div class="rounded-2xl bg-surface-3 p-5">
-				<p class="text-sm font-semibold text-secondary">Connection</p>
-				<p class="text-3xl font-bold text-contrast">{{ isConnected ? 'Online' : 'Offline' }}</p>
-			</div>
-		</section>
+	<div class="relative flex select-none flex-col gap-6" data-pyro-server-manager-root>
+		<div class="flex flex-col gap-4">
+			<ServerManageStats :data="stats" :loading="false" />
 
-		<section class="flex min-h-[620px] flex-col gap-3">
-			<h2 class="text-2xl font-semibold text-contrast">Console</h2>
-			<ConsolePageLayout />
-		</section>
+			<div class="flex min-h-[700px] flex-col gap-2">
+				<span class="text-2xl font-semibold text-contrast">Console</span>
+				<ConsolePageLayout />
+			</div>
+		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { useFormatBytes } from '#ui/composables/format-bytes'
 import { useModrinthServersConsole } from '#ui/composables/server-console'
 import { ConsolePageLayout, provideConsoleManager } from '#ui/layouts/shared/console'
 import { injectCoreClient, injectModrinthServerContext } from '#ui/providers'
 
+import ServerManageStats from '../../wrapped/hosting/manage/components/ServerManageStats.vue'
+
 const coreClient = injectCoreClient()
 const consoleState = useModrinthServersConsole()
-const formatBytes = useFormatBytes()
 const { serverId, isConnected, stats, powerState } = injectModrinthServerContext()
 const crashAnalysis = ref(null)
-
-const cpuPercent = computed(() => `${(stats.value.current.cpu_percent ?? 0).toFixed(2)}%`)
-const memoryUsage = computed(() => {
-	const current = stats.value.current
-	return `${formatBytes(current.ram_usage_bytes ?? 0, 1)} / ${formatBytes(current.ram_total_bytes ?? 0, 1)}`
-})
 
 provideConsoleManager({
 	logLines: consoleState.output,
