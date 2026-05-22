@@ -13,6 +13,7 @@ import { BoxesIcon, ServerIcon } from '@modrinth/assets'
 import { CoreServerManageContentPage, Tabs, type TabsTab, type TabsValue } from '@modrinth/ui'
 import { ref } from 'vue'
 
+import type { InstanceContentData } from '@/helpers/instance-content'
 import type { GameInstance } from '@/helpers/types'
 
 import Mods from './Mods.vue'
@@ -27,6 +28,7 @@ const props = defineProps<{
 	installed?: boolean
 	isServerInstance?: boolean
 	openSettings?: () => void
+	preloadedContent?: InstanceContentData | null
 }>()
 
 const emit = defineEmits<{

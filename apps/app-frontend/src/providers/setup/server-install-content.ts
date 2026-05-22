@@ -18,6 +18,7 @@ import {
 	writePendingServerContentInstallBaseline,
 	writeStoredServerInstallQueue,
 } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type ComputedRef, nextTick, type Ref, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -213,6 +214,7 @@ export function createServerInstallContent(opts: {
 	const router = useRouter()
 	const client = injectModrinthClient()
 	const { handleError } = injectNotificationManager()
+	const queryClient = useQueryClient()
 
 	const serverIdQuery = computed(() => readQueryString(route.query.sid))
 	const coreInstanceIdQuery = computed(() => readQueryString(route.query.cid))
@@ -582,6 +584,9 @@ export function createServerInstallContent(opts: {
 				...serverContentInstallKeys.value,
 				...result.flushedPlans.map((plan) => plan.projectId),
 			])
+			if (result.flushedPlans.length > 0) {
+				await queryClient.invalidateQueries({ queryKey: ['content', 'list', 'v1', serverId] })
+			}
 
 			return true
 		} finally {
@@ -608,6 +613,7 @@ export function createServerInstallContent(opts: {
 		}
 
 		if (sid && wid) {
+			writeStoredServerInstallQueue(sid, wid, plans)
 			writePendingServerContentInstallBaseline(sid, wid, serverContentInstallKeys.value)
 			addPendingServerContentInstalls(sid, wid, getQueuedInstallPlaceholderFallbacks(plans))
 			void getQueuedInstallPlaceholders(client, plans)

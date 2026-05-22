@@ -37,10 +37,14 @@ const mods = ref<CoreMod[]>([])
 const isBusy = computed(() => isSyncingContent.value || busyReasons.value.length > 0)
 const busyMessage = computed(() => (busyReasons.value[0] ? 'Your server is busy.' : null))
 const items = computed<ContentItem[]>(() => mods.value.map(mapCoreModToContentItem))
+const modrinthProjectIds = computed(
+	() => new Set(mods.value.map((mod) => mod.modrinth_project_id).filter(Boolean)),
+)
+const modrinthVersionIds = computed(
+	() => new Set(mods.value.map((mod) => mod.modrinth_version_id).filter(Boolean)),
+)
 
 function mapCoreModToContentItem(mod: CoreMod): ContentItem {
-	const projectId = mod.modrinth_project_id ?? mod.id ?? mod.filename
-	const versionId = mod.modrinth_version_id ?? mod.id ?? mod.filename
 	const title = mod.display_name ?? mod.filename.replace(/\.disabled$/, '')
 	return {
 		id: mod.filename,
@@ -54,13 +58,13 @@ function mapCoreModToContentItem(mod: CoreMod): ContentItem {
 			mod.client_side === 'required' && mod.server_side !== 'required' ? 'client' : 'server',
 		enabled: mod.enabled,
 		project: {
-			id: projectId,
+			id: mod.modrinth_project_id ?? mod.id ?? mod.filename,
 			slug: mod.modrinth_project_id ?? undefined,
 			title,
 			icon_url: null,
 		},
 		version: {
-			id: versionId,
+			id: mod.modrinth_version_id ?? mod.id ?? mod.filename,
 			version_number: mod.version_number ?? formatMessage(commonMessages.unknownLabel),
 			file_name: mod.filename,
 		},
@@ -148,8 +152,16 @@ async function bulkUpdateItems(targetItems: ContentItem[]) {
 	await refresh()
 }
 
+function isTrackedProject(item: ContentItem) {
+	return !!item.project?.id && modrinthProjectIds.value.has(item.project.id)
+}
+
+function isTrackedVersion(item: ContentItem) {
+	return !!item.version?.id && modrinthVersionIds.value.has(item.version.id)
+}
+
 async function switchVersion(item: ContentItem) {
-	if (!item.project?.id || !item.version?.id || item.version.id === item.file_name) return
+	if (!isTrackedProject(item) || !isTrackedVersion(item)) return
 	await router.push(`/project/${item.project.id}/version/${item.version.id}`)
 }
 
@@ -172,6 +184,7 @@ provideContentManager({
 	refresh,
 	browse,
 	uploadFiles,
+	getItemId: (item) => item.file_name,
 	hasUpdateSupport: true,
 	updateItem: (id) => void updateItem(id),
 	bulkUpdateItem: (item) => coreClient.updateMod(serverId, item.file_name).then(() => {}),
@@ -194,15 +207,15 @@ provideContentManager({
 			title: item.file_name,
 			icon_url: null,
 		},
-		projectLink: item.project?.id ? { path: `/project/${item.project.id}` } : undefined,
+		projectLink: isTrackedProject(item) ? { path: `/project/${item.project!.id}` } : undefined,
 		version: item.version ?? {
 			id: item.file_name,
 			version_number: formatMessage(commonMessages.unknownLabel),
 			file_name: item.file_name,
 		},
 		versionLink:
-			item.project?.id && item.version?.id && item.version.id !== item.file_name
-				? { path: `/project/${item.project.id}/version/${item.version.id}` }
+			isTrackedProject(item) && isTrackedVersion(item)
+				? { path: `/project/${item.project!.id}/version/${item.version!.id}` }
 				: undefined,
 		owner: item.owner,
 		enabled: item.enabled,

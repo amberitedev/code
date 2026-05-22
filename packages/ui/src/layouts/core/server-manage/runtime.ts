@@ -7,7 +7,7 @@ import { computed, ref } from 'vue'
 import { useModrinthServersConsole } from '#ui/composables/server-console'
 import type { FileOperation } from '#ui/layouts/shared/files-tab/types'
 import { injectCoreClient, provideModrinthServerContext } from '#ui/providers'
-import type { BusyReason } from '#ui/providers/server-context'
+import type { BusyReason, CancelUploadHandler } from '#ui/providers/server-context'
 
 type ReadableRef<T> = Ref<T> | ComputedRef<T>
 
@@ -89,7 +89,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		completedFiles: 0,
 		totalFiles: 0,
 	})
-	const cancelUpload = ref<(() => void) | null>(null)
+	const cancelUpload = ref<CancelUploadHandler | null>(null)
 
 	let wsConn: CoreWsConnection | null = null
 	let connectedServerId: string | null = null

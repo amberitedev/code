@@ -14,7 +14,6 @@
 		"test": "vue-tsc --noEmit"
 	},
 	"dependencies": {
-		"@intercom/messenger-js-sdk": "^0.0.14",
 		"@amberite/amberite-api": "workspace:*",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",

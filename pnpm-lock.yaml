@@ -77,9 +77,6 @@ importers:
       '@amberite/amberite-api':
         specifier: workspace:*
         version: link:../../packages/amberite-api
-      '@intercom/messenger-js-sdk':
-        specifier: ^0.0.14
-        version: 0.0.14
       '@modrinth/api-client':
         specifier: workspace:^
         version: link:../../packages/api-client
@@ -268,9 +265,6 @@ importers:
       '@formatjs/intl-localematcher':
         specifier: ^0.5.4
         version: 0.5.10
-      '@intercom/messenger-js-sdk':
-        specifier: ^0.0.14
-        version: 0.0.14
       '@ltd/j-toml':
         specifier: ^1.38.0
         version: 1.38.0
