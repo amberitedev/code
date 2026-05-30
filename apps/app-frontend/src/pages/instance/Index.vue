@@ -249,7 +249,11 @@
 					:key="`${instance.path}:${route.path}`"
 				>
 					<template v-if="Component">
-						<Suspense :key="instance.path">
+						<Suspense
+							:key="instance.path"
+							@pending="subpagePending = true"
+							@resolve="subpagePending = false"
+						>
 							<component
 								:is="Component"
 								:instance="instance"
@@ -332,6 +336,7 @@ import {
 	ServerPing,
 	ServerRecentPlays,
 	ServerRegion,
+	useLoadingBarToken,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -369,7 +374,6 @@ const route = useRoute()
 
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
-
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
 	offline.value = true
@@ -386,10 +390,13 @@ const unlistenCoreInstances = coreInstances.subscribe((snapshot) => {
 })
 const playing = ref(false)
 const loading = ref(false)
+const subpagePending = ref(false)
 const stopping = ref(false)
 const coreActionPending = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
+
+useLoadingBarToken(subpagePending)
 
 const isServerInstance = ref(false)
 const linkedProjectV3 = ref<Labrinth.Projects.v3.Project>()
@@ -413,43 +420,48 @@ async function fetchInstance() {
 	playersOnline.value = undefined
 	loadingServerPing.value = false
 
-	instance.value = await get(route.params.id as string).catch(handleError)
+	const nextInstance = await get(route.params.id as string).catch(handleError)
+	let nextLinkedProjectV3: Labrinth.Projects.v3.Project | undefined
+	let nextIsServerInstance = false
 
-	if (instance.value?.kind === 'server' || instance.value?.kind === 'synced') {
-		if (!instance.value.core_instance_id) {
+	if (nextInstance?.kind === 'server' || nextInstance?.kind === 'synced') {
+		if (!nextInstance.core_instance_id) {
 			coreError.value = true
 			return
 		}
-		void coreInstances.refresh().catch(() => {
-			coreError.value = true
-		})
-	}
-
-	if (instance.value?.kind === 'server') {
-		return
-	}
-
-	if (!offline.value && instance.value?.linked_data && instance.value.linked_data.project_id) {
 		try {
-			linkedProjectV3.value = await get_project_v3(
-				instance.value.linked_data.project_id,
+			await coreInstances.refresh()
+		} catch {
+			coreError.value = true
+			return
+		}
+	}
+
+	if (!offline.value && nextInstance?.linked_data && nextInstance.linked_data.project_id) {
+		try {
+			nextLinkedProjectV3 = await get_project_v3(
+				nextInstance.linked_data.project_id,
 				'must_revalidate',
 			)
 
-			if (linkedProjectV3.value?.minecraft_server != null) {
-				isServerInstance.value = true
+			if (nextLinkedProjectV3?.minecraft_server != null) {
+				nextIsServerInstance = true
 			}
 		} catch (error) {
 			handleError(error as Error)
 		}
 	}
 
+	instance.value = nextInstance ?? undefined
+	linkedProjectV3.value = nextLinkedProjectV3
+	isServerInstance.value = nextIsServerInstance
+
 	fetchDeferredData()
 
-	if (instance.value) {
+	if (nextInstance) {
 		queryClient.prefetchQuery({
-			queryKey: ['worlds', instance.value.path],
-			queryFn: () => refreshWorlds(instance.value!.path),
+			queryKey: ['worlds', nextInstance.path],
+			queryFn: () => refreshWorlds(nextInstance.path),
 			staleTime: 30_000,
 		})
 	}

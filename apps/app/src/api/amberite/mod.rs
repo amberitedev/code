@@ -158,12 +158,14 @@ async fn convex_sign_in_action(
 async fn store_convex_tokens(tokens: ConvexTokens) -> Result<String> {
     let token = tokens.token;
     session::set_current_tokens(token.clone(), tokens.refresh_token)
+        .await
         .map_err(TheseusSerializableError::Amberite)?;
     Ok(token)
 }
 
 async fn refresh_convex_session(convex_url: &str) -> Result<Option<String>> {
     let Some(refresh_token) = session::get_refresh_token()
+        .await
         .map_err(TheseusSerializableError::Amberite)?
     else {
         return Ok(None);
@@ -178,6 +180,7 @@ async fn refresh_convex_session(convex_url: &str) -> Result<Option<String>> {
         Some(tokens) => store_convex_tokens(tokens).await.map(Some),
         None => {
             session::clear_current_session()
+                .await
                 .map_err(TheseusSerializableError::Amberite)?;
             Ok(None)
         }
@@ -224,36 +227,61 @@ async fn ping() -> String {
 /// Read the current Amberite session JWT from the OS keychain.
 #[tauri::command]
 async fn get_current_jwt() -> Result<Option<String>> {
-    session::get_current_jwt().map_err(TheseusSerializableError::Amberite)
+    session::get_current_jwt()
+        .await
+        .map_err(TheseusSerializableError::Amberite)
 }
 
 /// Persist the current Amberite session JWT in the OS keychain.
 #[tauri::command]
 async fn set_current_jwt(jwt: String) -> Result<()> {
-    session::set_current_jwt(jwt).map_err(TheseusSerializableError::Amberite)
+    session::set_current_jwt(jwt)
+        .await
+        .map_err(TheseusSerializableError::Amberite)
 }
 
 /// Clear the current Amberite session JWT from the OS keychain.
 #[tauri::command]
 async fn clear_current_jwt() -> Result<()> {
-    session::clear_current_session().map_err(TheseusSerializableError::Amberite)
+    session::clear_current_session()
+        .await
+        .map_err(TheseusSerializableError::Amberite)
 }
 
 #[tauri::command]
 async fn convex_refresh_session(convex_url: String) -> Result<Option<String>> {
     if let Some(jwt) = session::get_current_jwt()
+        .await
         .map_err(TheseusSerializableError::Amberite)?
     {
         if !jwt_expired(&jwt) {
             return Ok(Some(jwt));
         }
     }
+    // Fast-fail: skip refresh if the Convex backend is not reachable within 2s.
+    let host_port = convex_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    let reachable = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::TcpStream::connect(host_port),
+    )
+    .await
+    .map_or(false, |r| r.is_ok());
+    if !reachable {
+        return Ok(None);
+    }
     refresh_convex_session(&convex_url).await
 }
 
 #[tauri::command]
 async fn convex_logout() -> Result<()> {
-    session::clear_current_session().map_err(TheseusSerializableError::Amberite)
+    session::clear_current_session()
+        .await
+        .map_err(TheseusSerializableError::Amberite)
 }
 
 #[tauri::command]

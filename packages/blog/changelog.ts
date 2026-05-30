@@ -11,6 +11,104 @@ export type VersionEntry = {
 
 const VERSIONS: VersionEntry[] = [
 	{
+		date: `2026-05-21T22:13:35+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed project embeds not loading in correctly.`,
+	},
+	{
+		date: `2026-05-21T22:13:35+00:00`,
+		product: 'app',
+		version: '0.13.21',
+		body: `## Fixed
+- Fixed issue with content items visually duplicating over other content items in the Content tab table.`,
+	},
+	{
+		date: `2026-05-21T22:13:35+00:00`,
+		product: 'hosting',
+		body: `## Fixed
+- Fixed issue with content items visually duplicating over other content items in the Content tab table.
+- Fixed issue when cancelling a multi-file upload to the Files tab or Content tab, any files fully uploaded before cancelling are not removed on cancel.`,
+	},
+	{
+		date: `2026-05-20T19:48:04+00:00`,
+		product: 'web',
+		body: `## Changed
+- Improved date selection across the website.
+
+## Fixed
+- Fixed server project types sometimes appearing as modpacks in page titles and embeds.`,
+	},
+	{
+		date: `2026-05-20T19:48:04+00:00`,
+		product: 'hosting',
+		body: `## Fixed
+- Fixed the support portal bubble appearing in the wrong position in the bottom-right corner of the server panel.
+- Fixed modpack updates in the Content tab not appearing when a newer Modrinth version was available.`,
+	},
+	{
+		date: `2026-05-20T19:48:04+00:00`,
+		product: 'app',
+		version: '0.13.20',
+		body: `## Changed
+- Updated linked modpack version switching to show every available version and ask for confirmation before risky changes:
+	- Versions for a different game version.
+	- Downgrades.
+
+## Fixed
+- Fixed instance pages sometimes opening with an empty Content tab.
+- Fixed Content tab performance problems.
+- Fixed linked modpack content appearing as user-added after switching a bundled project to another version.
+- Fixed linked modpack content staying stale after updating, removing, enabling, disabling, or switching bundled content.
+- Fixed content installation problems from the Browse content page.`,
+	},
+	{
+		date: `2026-05-20T16:01:04.111Z`,
+		product: 'web',
+		body: `## Fixed
+- Fixed "Permissions" page showing in Modpack settings.`,
+	},
+	{
+		date: `2026-05-19T19:51:55+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed 404 error when changing project URL.`,
+	},
+	{
+		date: `2026-05-19T18:50:27+00:00`,
+		product: 'web',
+		body: `## Changed
+- Updated translations.
+
+## Fixed
+- Fixed pages randomly erroring with 404 when coming from another page such as a user, org, or collection.
+- Fixed bug with table headers being misaligned if using the website in a non-english language.
+- Fixed a problem with Brazil PIX withdrawals being unable to click the withdraw button.`,
+	},
+	{
+		date: `2026-05-19T18:50:27+00:00`,
+		product: 'app',
+		version: '0.13.19',
+		body: `## Changed
+- Updated translations.
+
+## Fixed
+- Fixed bug with table headers being misaligned if using the app in a non-english language.`,
+	},
+	{
+		date: `2026-05-19T18:50:27+00:00`,
+		product: 'hosting',
+		body: `## Changed
+- Updated translations.`,
+	},
+	{
+		date: `2026-05-17T20:46:06+00:00`,
+		product: 'app',
+		version: '0.13.18',
+		body: `## Fixed
+- Fixed how the app handles ad webview visibility`,
+	},
+	{
 		date: `2026-05-13T05:24:14+00:00`,
 		product: 'web',
 		body: `## Changed

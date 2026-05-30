@@ -212,26 +212,28 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 }
 
 fn cors_layer(state: &AppState) -> CorsLayer {
-    if state.config.dev_mode || state.config.allowed_origin == "*" {
-        return CorsLayer::permissive();
-    }
+	if state.config.dev_mode || state.config.allowed_origin == "*" {
+		return CorsLayer::new()
+			.allow_origin(Any)
+			.allow_methods(Any)
+			.allow_headers(Any);
+	}
 
-    let origin = state
-        .config
-        .allowed_origin
-        .parse::<HeaderValue>()
-        .unwrap_or_else(|_| HeaderValue::from_static("https://amberite.dev"));
+	let origin = state
+		.config
+		.allowed_origin
+		.parse::<HeaderValue>()
+		.unwrap_or_else(|_| HeaderValue::from_static("https://amberite.dev"));
 
-    CorsLayer::new()
-        .allow_origin(origin)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::PATCH,
-            Method::DELETE,
-        ])
-        .allow_headers([AUTHORIZATION, CONTENT_TYPE])
-        .allow_credentials(true)
-        .expose_headers(Any)
+	CorsLayer::new()
+		.allow_origin(origin)
+		.allow_methods([
+			Method::GET,
+			Method::POST,
+			Method::PUT,
+			Method::PATCH,
+			Method::DELETE,
+		])
+		.allow_headers([AUTHORIZATION, CONTENT_TYPE])
+		.allow_credentials(true)
 }

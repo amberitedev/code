@@ -39,9 +39,10 @@ Run from the repo root unless noted. dont run build or dev commands.
 | `pnpm app:dev` | Desktop app (Tauri + Vite on port **1420**) |
 | `pnpm app:dev:no-hmr` | Same, without HMR (`tauri.no-hmr.conf.json`) |
 | `pnpm core:dev` | Amberite Core (`cargo run` in `apps/core/`, default port **16662**) |
-| `pnpm convex:dev` | Convex backend watcher (`packages/convex/`) |
 | `pnpm web:dev` | Modrinth website (`apps/frontend/`) |
 | `pnpm docs:dev` | Docs site (`apps/docs/`) |
+
+Convex is standalone in `convex/` — run directly: `pnpm dlx convex dev`
 
 ### Lint, test, build
 

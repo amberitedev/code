@@ -63,7 +63,7 @@
 			</div>
 
 			<div
-				v-if="!isConnected && !isReconnecting"
+				v-if="!isConnected && !isConnecting && !isReconnecting"
 				data-pyro-server-ws-error
 				class="mb-4 flex w-full flex-row items-center gap-4 rounded-2xl bg-bg-red p-4 text-contrast"
 			>
@@ -114,9 +114,10 @@ const props = withDefaults(
 		serverId: string
 		navHrefPrefix: string
 		reloadPage?: () => void
+		openSettings?: () => void
 		showCopyIdAction?: boolean
 	}>(),
-	{ reloadPage: undefined, showCopyIdAction: false },
+	{ reloadPage: undefined, openSettings: undefined, showCopyIdAction: false },
 )
 
 const coreInstances = injectCoreInstanceState()
@@ -157,13 +158,19 @@ const server = computed(() => {
 	} as Archon.Servers.v0.Server
 })
 
-const { cleanupCoreRuntime, connectSocket, isConnected, isReconnecting, uptimeSeconds } =
-	useCoreServerManageRuntime({
-		serverId: computed(() => props.serverId),
-		server,
-		isSyncingContent,
-		incrementUptimeLocally: true,
-	})
+const {
+	cleanupCoreRuntime,
+	connectSocket,
+	isConnected,
+	isConnecting,
+	isReconnecting,
+	uptimeSeconds,
+} = useCoreServerManageRuntime({
+	serverId: computed(() => props.serverId),
+	server,
+	isSyncingContent,
+	incrementUptimeLocally: true,
+})
 
 const navLinks = computed(() => [
 	{
@@ -178,7 +185,7 @@ const navLinks = computed(() => [
 ])
 
 const noop = () => {}
-const openSettings = () => {}
+const openSettings = () => props.openSettings?.()
 
 async function refreshInstance() {
 	if (!props.serverId) return

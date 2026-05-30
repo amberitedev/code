@@ -59,6 +59,7 @@ apps/frontend/src/generated
 target
 generated
 .env
+.env.local
 
 # app testing dir
 app-playground-data/*
@@ -90,3 +91,7 @@ apps/frontend/src/public/robots.txt
 /test_result.md
 
 packages/tooling-config/script-utils/import-sort.js
+
+# Convex generated/local state
+convex/_generated/
+.convex/

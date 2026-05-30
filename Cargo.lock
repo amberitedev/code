@@ -10598,6 +10598,8 @@ dependencies = [
  "async_zip",
  "base64 0.22.1",
  "chrono",
+ "core-foundation 0.10.1",
+ "core-graphics",
  "daedalus",
  "dashmap",
  "either",
@@ -10605,6 +10607,7 @@ dependencies = [
  "hyper 1.7.0",
  "hyper-util",
  "native-dialog",
+ "objc2-app-kit",
  "paste",
  "path-util",
  "reqwest 0.12.24",
@@ -10631,6 +10634,7 @@ dependencies = [
  "urlencoding",
  "uuid 1.18.1",
  "webview2-com",
+ "windows",
  "windows-core 0.61.2",
 ]
 

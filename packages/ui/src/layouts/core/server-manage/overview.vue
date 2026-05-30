@@ -14,11 +14,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
+import ServerManageStats from '#ui/components/servers/ServerManageStats.vue'
 import { useModrinthServersConsole } from '#ui/composables/server-console'
 import { ConsolePageLayout, provideConsoleManager } from '#ui/layouts/shared/console'
 import { injectCoreClient, injectModrinthServerContext } from '#ui/providers'
-
-import ServerManageStats from '../../wrapped/hosting/manage/components/ServerManageStats.vue'
 
 const coreClient = injectCoreClient()
 const consoleState = useModrinthServersConsole()
