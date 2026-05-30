@@ -15,6 +15,7 @@
 			:server-id="coreInstanceId"
 			:nav-href-prefix="`/instance/${encodeURIComponent(profilePath)}`"
 			:reload-page="() => router.go(0)"
+			:open-settings="() => router.push(`/instance/${encodeURIComponent(profilePath)}/settings`)"
 			:resolve-viewer="resolveViewer"
 			:show-copy-id-action="themeStore.devMode"
 			:auth-user="authUser"

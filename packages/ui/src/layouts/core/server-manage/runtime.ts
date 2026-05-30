@@ -64,6 +64,7 @@ export function useCoreServerManageRuntime(options: Options) {
 	const guard = () => options.eventGuard?.() ?? true
 
 	const isConnected = ref(false)
+	const isConnecting = ref(false)
 	const isReconnecting = ref(false)
 	const isWsAuthIncorrect = ref(false)
 	const powerState = ref<Archon.Websocket.v0.PowerState>('stopped')
@@ -115,6 +116,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		wsConn = null
 		connectedServerId = null
 		isConnected.value = false
+		isConnecting.value = false
 		isReconnecting.value = false
 		isWsAuthIncorrect.value = false
 		powerState.value = 'stopped'
@@ -129,16 +131,19 @@ export function useCoreServerManageRuntime(options: Options) {
 		shouldReconnect = true
 
 		try {
+			isConnecting.value = true
 			const ticket = await coreClient.issueWsTicket()
 			consoleState.clear()
 			wsConn = await coreClient.openConsole(targetServerId, ticket)
 			connectedServerId = targetServerId
 			wsConn.on('open', () => {
 				isConnected.value = true
+				isConnecting.value = false
 				isReconnecting.value = false
 			})
 			wsConn.on('close', () => {
 				isConnected.value = false
+				isConnecting.value = false
 				if (shouldReconnect) {
 					isReconnecting.value = true
 					reconnectTimer = setTimeout(() => void connectSocket(targetServerId), 3000)
@@ -172,6 +177,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		} catch (error) {
 			console.error('[core/server-manage] Failed to connect socket:', error)
 			isConnected.value = false
+			isConnecting.value = false
 			isReconnecting.value = shouldReconnect
 			return false
 		}
@@ -207,6 +213,7 @@ export function useCoreServerManageRuntime(options: Options) {
 		connectSocket,
 		isServerRunning,
 		isConnected,
+		isConnecting,
 		isReconnecting,
 		powerState,
 		stats,

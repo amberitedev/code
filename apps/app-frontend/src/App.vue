@@ -73,7 +73,6 @@ import AccountsCard from '@/components/ui/AccountsCard.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
-import FriendGroupCard from '@/components/ui/friends/FriendGroupCard.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
 import IncompatibilityWarningModal from '@/components/ui/install_flow/IncompatibilityWarningModal.vue'
@@ -1545,11 +1544,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 						<h3 class="text-base text-primary font-medium m-0">Playing as</h3>
 						<suspense>
 							<AccountsCard ref="accounts" />
-						</suspense>
-					</div>
-					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
-						<suspense>
-							<FriendGroupCard />
 						</suspense>
 					</div>
 					<div class="p-4">

@@ -263,7 +263,6 @@
 								:installed="instance.install_stage === 'installed'"
 								:is-server-instance="isServerInstance"
 								:open-settings="openSettingsPage"
-								v-bind="contentSubpageProps"
 								@play="updatePlayState"
 								@refresh="fetchInstance"
 								@stop="() => stopInstance('InstanceSubpage')"
@@ -354,7 +353,6 @@ import { useInstanceConsole } from '@/composables/useInstanceConsole'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_v3 } from '@/helpers/cache.js'
 import { process_listener, profile_listener } from '@/helpers/events'
-import { type InstanceContentData, loadInstanceContentData } from '@/helpers/instance-content'
 import { get_by_profile_path } from '@/helpers/process'
 import { finish_install, get, get_full_path, kill, run } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
@@ -376,8 +374,6 @@ const route = useRoute()
 
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
-const contentSubpageRouteNames = new Set(['InstanceContent', 'InstanceContentFilter'])
-
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
 	offline.value = true
@@ -392,7 +388,6 @@ const coreSnapshot = ref(coreInstances.snapshot)
 const unlistenCoreInstances = coreInstances.subscribe((snapshot) => {
 	coreSnapshot.value = snapshot
 })
-const preloadedContent = ref<InstanceContentData | null>(null)
 const playing = ref(false)
 const loading = ref(false)
 const subpagePending = ref(false)
@@ -417,15 +412,10 @@ const playersOnline = ref<number | undefined>(undefined)
 const ping = ref<number | undefined>(undefined)
 const loadingServerPing = ref(false)
 
-function isContentSubpageRoute(routeName = route.name) {
-	return typeof routeName === 'string' && contentSubpageRouteNames.has(routeName)
-}
-
 async function fetchInstance() {
 	coreError.value = false
 	isServerInstance.value = false
 	linkedProjectV3.value = undefined
-	preloadedContent.value = null
 	ping.value = undefined
 	playersOnline.value = undefined
 	loadingServerPing.value = false
@@ -447,11 +437,6 @@ async function fetchInstance() {
 		}
 	}
 
-	const contentPreloadPromise =
-		nextInstance && isContentSubpageRoute()
-			? loadInstanceContentData(nextInstance.path, undefined, handleError)
-			: Promise.resolve(null)
-
 	if (!offline.value && nextInstance?.linked_data && nextInstance.linked_data.project_id) {
 		try {
 			nextLinkedProjectV3 = await get_project_v3(
@@ -467,12 +452,9 @@ async function fetchInstance() {
 		}
 	}
 
-	const nextPreloadedContent = await contentPreloadPromise
-
 	instance.value = nextInstance ?? undefined
 	linkedProjectV3.value = nextLinkedProjectV3
 	isServerInstance.value = nextIsServerInstance
-	preloadedContent.value = nextPreloadedContent
 
 	fetchDeferredData()
 
@@ -579,9 +561,6 @@ const renderMode = computed<'scroll' | 'fixed'>(() =>
 	route.meta.renderMode === 'fixed' ? 'fixed' : 'scroll',
 )
 const isFixedRender = computed(() => renderMode.value === 'fixed')
-const contentSubpageProps = computed(() =>
-	isContentSubpageRoute() ? { preloadedContent: preloadedContent.value } : {},
-)
 
 const tabs = computed(() => {
 	const commonTabs = [
