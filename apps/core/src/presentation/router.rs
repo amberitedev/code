@@ -36,6 +36,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/setup/status", get(setup::setup_status))
         // Core-local relay (Mode 2)
         .route("/relay/messages", post(relay::publish))
+        .route("/relay/messages/status/:id", get(relay::status))
         .route("/relay/messages/:recipient_id", get(relay::pending))
         .route("/relay/messages/:id/ack", post(relay::ack))
         .route("/relay/messages/:id/complete", post(relay::complete))

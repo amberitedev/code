@@ -2,6 +2,8 @@ import type { PlatformAdapter } from './adapter'
 import { CoreOfflineError, NetworkError } from './errors'
 import type { MessageEnvelope } from './transport'
 
+const CORE_RELAY_POLL_INTERVAL_MS = 500
+
 export async function publishCoreRelay<TPayload>(
 	adapter: PlatformAdapter,
 	envelope: MessageEnvelope<TPayload>,
@@ -9,6 +11,7 @@ export async function publishCoreRelay<TPayload>(
 	await coreRelayCall(adapter, '/relay/messages', {
 		method: 'POST',
 		body: JSON.stringify({
+			id: envelope.id,
 			type: envelope.type,
 			version: envelope.version,
 			sender_id: envelope.senderId,
@@ -32,6 +35,38 @@ export async function pendingCoreRelayMessages(
 		},
 	)
 	return body.messages
+}
+
+export async function coreRelayMessageStatus(
+	adapter: PlatformAdapter,
+	messageId: string,
+): Promise<unknown | null> {
+	const body = await coreRelayCall<{ message: unknown | null }>(
+		adapter,
+		`/relay/messages/status/${encodeURIComponent(messageId)}`,
+		{
+			method: 'GET',
+		},
+	)
+	return body.message
+}
+
+export async function waitForCoreRelayReceipt(
+	adapter: PlatformAdapter,
+	messageId: string,
+	timeoutMs: number,
+): Promise<void> {
+	await waitForCoreRelayStatus(adapter, messageId, timeoutMs, ['received', 'processed'])
+}
+
+export async function waitForCoreRelayResult(
+	adapter: PlatformAdapter,
+	messageId: string,
+	timeoutMs: number,
+): Promise<unknown> {
+	const status = await waitForCoreRelayStatus(adapter, messageId, timeoutMs, ['processed'])
+	if (status?.error) throw new NetworkError(String(status.error))
+	return status?.result
 }
 
 export async function writeCoreRelayReceipt(
@@ -87,4 +122,23 @@ async function coreRelayCall<T = unknown>(
 	const body = await res.json().catch(() => null)
 	if (!res.ok) throw new NetworkError(body?.error ?? `Core relay failed: ${res.status}`)
 	return body as T
+}
+
+async function waitForCoreRelayStatus(
+	adapter: PlatformAdapter,
+	messageId: string,
+	timeoutMs: number,
+	statuses: string[],
+): Promise<any> {
+	const start = Date.now()
+	while (Date.now() - start < timeoutMs) {
+		const state = (await coreRelayMessageStatus(adapter, messageId)) as any
+		if (state && statuses.includes(state.status)) return state
+		await sleep(CORE_RELAY_POLL_INTERVAL_MS)
+	}
+	throw new NetworkError(`Core relay timed out waiting for ${statuses.join(' or ')}`)
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms))
 }

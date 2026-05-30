@@ -53,15 +53,34 @@ import * as api from './api'
 import { CoreWsConnection } from './ws'
 import { CoreOfflineError } from './errors'
 import type { CoreConnectionMonitor } from './monitor'
+import { CommunicationPipeline, type CommunicationPipelineOptions } from './pipeline'
+import { resolveCoreEndpointKey } from './endpoint-policies'
+import type { CommunicationPolicyOverride } from './pipeline-types'
 
 export class CoreApiClient {
 	public monitor: CoreConnectionMonitor | null = null
+	public readonly pipeline: CommunicationPipeline
 	private coreUrlPromise: Promise<string | null> | null = null
 
 	constructor(
 		public readonly adapter: PlatformAdapter,
-		private readonly options: { timeoutMs?: number } = {},
-	) {}
+		private readonly options: { timeoutMs?: number; pipeline?: CommunicationPipelineOptions } = {},
+	) {
+		this.pipeline = new CommunicationPipeline(adapter, options.pipeline)
+	}
+
+	withPolicy(policy: CommunicationPolicyOverride): CoreApiClient {
+		return new CoreApiClient(this.adapter, {
+			...this.options,
+			pipeline: {
+				...this.options.pipeline,
+				defaultPolicy: {
+					...this.options.pipeline?.defaultPolicy,
+					...policy,
+				},
+			},
+		})
+	}
 
 	private getCoreUrlCached(): Promise<string | null> {
 		if (!this.coreUrlPromise) {
@@ -74,32 +93,57 @@ export class CoreApiClient {
 		return this.coreUrlPromise
 	}
 
-	private async direct<T>(fn: (ctx: CoreCallContext) => Promise<T>): Promise<T> {
-		const coreUrl = await this.getCoreUrlCached()
-		if (!coreUrl) throw new CoreOfflineError()
-		const token = await this.adapter.getCurrentJwt()
-		const ctx: CoreCallContext = {
-			baseUrl: coreUrl,
-			token,
-			fetchFn: this.adapter.fetchFn,
-			timeoutMs: this.options.timeoutMs,
-		}
-		return fn(ctx)
+	private async direct<T>(
+		keyOrFn: string | ((ctx: CoreCallContext) => Promise<T>),
+		maybeFn?: (ctx: CoreCallContext) => Promise<T>,
+		policy?: CommunicationPolicyOverride,
+	): Promise<T> {
+		const key = typeof keyOrFn === 'string' ? keyOrFn : 'core.default'
+		const fn = typeof keyOrFn === 'string' ? maybeFn : keyOrFn
+		if (!fn) throw new Error(`Missing Core API function for ${key}`)
+
+		return this.pipeline.callValue({
+			key,
+			surface: 'core',
+			policy,
+			execute: async (signal, resolvedPolicy) => {
+				const coreUrl = await this.getCoreUrlCached()
+				if (!coreUrl) throw new CoreOfflineError()
+				const token = await this.adapter.getCurrentJwt()
+				const ctx: CoreCallContext = {
+					baseUrl: coreUrl,
+					token,
+					fetchFn: this.adapter.fetchFn,
+					timeoutMs: this.options.timeoutMs ?? resolvedPolicy.timeoutMs,
+					signal,
+				}
+				return fn(ctx)
+			},
+		})
 	}
 
 	private async request<T>(
 		directFn: (ctx: CoreCallContext) => Promise<T>,
-		_relayPayload: unknown,
+		relayPayload: {
+			method?: string
+			path?: string
+			policy?: CommunicationPolicyOverride
+			[key: string]: unknown
+		},
 	): Promise<T> {
-		return await this.direct(directFn)
+		const key =
+			relayPayload.method && relayPayload.path
+				? resolveCoreEndpointKey(relayPayload.method, relayPayload.path)
+				: 'core.default'
+		return await this.direct(key, directFn, relayPayload.policy)
 	}
 
 	getSetupStatus(): Promise<CoreSetupStatus> {
-		return this.direct(api.getSetupStatus)
+		return this.direct('core.setup.status', api.getSetupStatus)
 	}
 
 	completeSetup(body: CoreSetupRequest): Promise<CoreSetupResponse> {
-		return this.direct((ctx) => api.completeSetup(ctx, body))
+		return this.direct('core.setup.complete', (ctx) => api.completeSetup(ctx, body))
 	}
 
 	async completeLocalSetup(ownerUserId: string, authJwksUrl: string): Promise<CoreSetupResponse> {
@@ -209,19 +253,25 @@ export class CoreApiClient {
 	}
 
 	openEvents(): Promise<CoreEventStream> {
-		return this.direct(async (ctx) => {
+		return this.direct('core.events.open', async (ctx) => {
 			const response = await api.openEventStream(ctx)
 			return new CoreEventStream(response)
 		})
 	}
 
 	async openConsole(instanceId: string, ticket: string): Promise<CoreWsConnection> {
-		const coreUrl = await this.getCoreUrlCached()
-		if (!coreUrl) throw new CoreOfflineError()
-		const wsUrl =
-			coreUrl.replace(/^http/, 'ws') +
-			`/instances/${encodeURIComponent(instanceId)}/console?ticket=${encodeURIComponent(ticket)}`
-		return new CoreWsConnection(wsUrl)
+		return this.pipeline.callValue({
+			key: 'core.console.open',
+			surface: 'core',
+			execute: async () => {
+				const coreUrl = await this.getCoreUrlCached()
+				if (!coreUrl) throw new CoreOfflineError()
+				const wsUrl =
+					coreUrl.replace(/^http/, 'ws') +
+					`/instances/${encodeURIComponent(instanceId)}/console?ticket=${encodeURIComponent(ticket)}`
+				return new CoreWsConnection(wsUrl)
+			},
+		})
 	}
 
 	// ── Stats ───────────────────────────────────────────────────────────────
@@ -263,6 +313,7 @@ export class CoreApiClient {
 	}
 
 	uploadModFile(id: string, file: File): UploadHandle {
+		const policy = this.pipeline.resolvePolicy('core.mods.upload')
 		const progressCallbacks: Array<(percent: number) => void> = []
 		let innerAbort = () => {}
 		let aborted = false
@@ -275,7 +326,7 @@ export class CoreApiClient {
 				baseUrl: coreUrl,
 				token,
 				fetchFn: this.adapter.fetchFn,
-				timeoutMs: this.options.timeoutMs,
+				timeoutMs: this.options.timeoutMs ?? policy.timeoutMs,
 			}
 			const handle = api.uploadModFile(ctx, id, file)
 			innerAbort = handle.abort
@@ -398,6 +449,7 @@ export class CoreApiClient {
 	}
 
 	uploadFile(id: string, targetDir: string, file: File): UploadHandle {
+		const policy = this.pipeline.resolvePolicy('core.fs.upload')
 		const progressCallbacks: Array<(percent: number) => void> = []
 		let innerAbort = () => {}
 		let aborted = false
@@ -410,7 +462,7 @@ export class CoreApiClient {
 				baseUrl: coreUrl,
 				token,
 				fetchFn: this.adapter.fetchFn,
-				timeoutMs: this.options.timeoutMs,
+				timeoutMs: this.options.timeoutMs ?? policy.timeoutMs,
 			}
 			const handle = api.uploadFile(ctx, id, targetDir, file)
 			innerAbort = handle.abort
@@ -583,44 +635,54 @@ export class CoreApiClient {
 	// ── Social / Core Identity ───────────────────────────────────────────────
 
 	getCoreMetadata(): Promise<CoreMetadata> {
-		return this.direct(api.getCoreMetadata)
+		return this.direct('core.metadata.get', api.getCoreMetadata)
 	}
 
 	updateCoreMetadata(body: Partial<CoreMetadata>): Promise<CoreMetadata> {
-		return this.direct((ctx) => api.updateCoreMetadata(ctx, body))
+		return this.direct('core.metadata.update', (ctx) => api.updateCoreMetadata(ctx, body))
 	}
 
 	listCoreMembers(): Promise<CoreMember[]> {
-		return this.direct((ctx) => api.listCoreMembers(ctx).then((r) => r.members))
+		return this.direct('core.members.list', (ctx) =>
+			api.listCoreMembers(ctx).then((r) => r.members),
+		)
 	}
 
 	upsertCoreMember(body: Partial<CoreMember> & { user_id: string }): Promise<CoreMember> {
-		return this.direct((ctx) => api.upsertCoreMember(ctx, body))
+		return this.direct('core.members.upsert', (ctx) => api.upsertCoreMember(ctx, body))
 	}
 
 	removeCoreMember(userId: string): Promise<void> {
-		return this.direct((ctx) => api.removeCoreMember(ctx, userId).then(() => undefined))
+		return this.direct('core.members.remove', (ctx) =>
+			api.removeCoreMember(ctx, userId).then(() => undefined),
+		)
 	}
 
 	// ── Sync Profiles ────────────────────────────────────────────────────────
 
 	listSyncProfiles(): Promise<CoreSyncProfile[]> {
-		return this.direct((ctx) => api.listSyncProfiles(ctx).then((r) => r.profiles))
+		return this.direct('core.sync_profiles.list', (ctx) =>
+			api.listSyncProfiles(ctx).then((r) => r.profiles),
+		)
 	}
 
 	registerSyncProfile(body: Partial<CoreSyncProfile> & { name: string }): Promise<CoreSyncProfile> {
-		return this.direct((ctx) => api.registerSyncProfile(ctx, body))
+		return this.direct('core.sync_profiles.register', (ctx) => api.registerSyncProfile(ctx, body))
 	}
 
 	removeSyncProfile(profileId: string): Promise<void> {
-		return this.direct((ctx) => api.removeSyncProfile(ctx, profileId).then(() => undefined))
+		return this.direct('core.sync_profiles.remove', (ctx) =>
+			api.removeSyncProfile(ctx, profileId).then(() => undefined),
+		)
 	}
 
 	createSyncProfileFromMrpack(
 		file: File,
 		metadata?: CoreCreateSyncProfileFromMrpackMetadata,
 	): Promise<CoreSyncSnapshotPublishResult> {
-		return this.direct((ctx) => api.createSyncProfileFromMrpack(ctx, file, metadata))
+		return this.direct('core.sync_profiles.create_from_mrpack', (ctx) =>
+			api.createSyncProfileFromMrpack(ctx, file, metadata),
+		)
 	}
 
 	publishSyncSnapshot(
@@ -628,41 +690,51 @@ export class CoreApiClient {
 		file: File,
 		notes?: string,
 	): Promise<CoreSyncSnapshotPublishResult> {
-		return this.direct((ctx) => api.publishSyncSnapshot(ctx, profileId, file, notes))
+		return this.direct('core.sync_snapshots.publish', (ctx) =>
+			api.publishSyncSnapshot(ctx, profileId, file, notes),
+		)
 	}
 
 	listSyncSnapshots(profileId: string): Promise<CoreSyncSnapshot[]> {
-		return this.direct((ctx) => api.listSyncSnapshots(ctx, profileId).then((r) => r.snapshots))
+		return this.direct('core.sync_snapshots.list', (ctx) =>
+			api.listSyncSnapshots(ctx, profileId).then((r) => r.snapshots),
+		)
 	}
 
 	listSyncEvents(profileId: string): Promise<CoreSyncEvent[]> {
-		return this.direct((ctx) => api.listSyncEvents(ctx, profileId).then((r) => r.events))
+		return this.direct('core.sync_events.list', (ctx) =>
+			api.listSyncEvents(ctx, profileId).then((r) => r.events),
+		)
 	}
 
 	checkSyncVersion(profileId: string): Promise<CoreSyncVersionStatus> {
-		return this.direct((ctx) => api.checkSyncVersion(ctx, profileId))
+		return this.direct('core.sync_version.check', (ctx) => api.checkSyncVersion(ctx, profileId))
 	}
 
 	downloadSyncSnapshot(profileId: string, snapshotId: string): Promise<Blob> {
-		return this.direct((ctx) => api.downloadSyncSnapshot(ctx, profileId, snapshotId))
+		return this.direct('core.sync_snapshots.download', (ctx) =>
+			api.downloadSyncSnapshot(ctx, profileId, snapshotId),
+		)
 	}
 
 	// ── Modpack (additional) ─────────────────────────────────────────────────
 
 	getModpack(id: string): Promise<CoreModpackManifest | null> {
-		return this.direct((ctx) => api.getModpack(ctx, id))
+		return this.direct('core.modpack.get', (ctx) => api.getModpack(ctx, id))
 	}
 
 	removeModpack(id: string): Promise<void> {
-		return this.direct((ctx) => api.removeModpack(ctx, id).then(() => undefined))
+		return this.direct('core.modpack.remove', (ctx) =>
+			api.removeModpack(ctx, id).then(() => undefined),
+		)
 	}
 
 	exportModpack(id: string): Promise<Blob> {
-		return this.direct((ctx) => api.exportModpack(ctx, id))
+		return this.direct('core.modpack.export', (ctx) => api.exportModpack(ctx, id))
 	}
 
 	installModpackFile(id: string, file: File): Promise<CoreModpackManifest> {
-		return this.direct((ctx) => api.installModpackFile(ctx, id, file))
+		return this.direct('core.modpack.install_file', (ctx) => api.installModpackFile(ctx, id, file))
 	}
 }
 

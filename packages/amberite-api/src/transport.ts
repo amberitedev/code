@@ -33,6 +33,7 @@ export interface PublishOptions<TPayload = unknown> {
 	senderId: string
 	recipientId: string
 	payload: TPayload
+	queueName?: string
 }
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000
@@ -78,7 +79,7 @@ export async function publishMessage<TPayload>(
 	const envelope = createEnvelope(options)
 	switch (envelope.mode) {
 		case 'direct-queued':
-			await adapter.queueStore?.push('direct', {
+			await adapter.queueStore?.push(options.queueName ?? 'direct', {
 				id: envelope.id,
 				createdAt: envelope.createdAt,
 				payload: envelope,
@@ -159,7 +160,9 @@ export async function corePresence(adapter: PlatformAdapter, coreId: string): Pr
 	return await convexQuery(adapter, 'presence:corePresence', { coreId })
 }
 
-function createEnvelope<TPayload>(options: PublishOptions<TPayload>): MessageEnvelope<TPayload> {
+export function createEnvelope<TPayload>(
+	options: PublishOptions<TPayload>,
+): MessageEnvelope<TPayload> {
 	return {
 		id: crypto.randomUUID(),
 		type: options.definition.type,

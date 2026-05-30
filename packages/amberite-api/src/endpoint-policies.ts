@@ -1,0 +1,161 @@
+import type { CommunicationPolicy, CommunicationPolicyOverride } from './pipeline-types'
+
+export const defaultCommunicationPolicy: CommunicationPolicy = {
+	key: 'default',
+	surface: 'core',
+	methods: ['core-direct'],
+	timeoutMs: 15_000,
+	retries: 0,
+	retryDelayMs: 500,
+	ttlMs: 5 * 60 * 1000,
+	ack: 'received',
+	waitForAck: false,
+	waitForResult: false,
+	reliability: 'interactive',
+	auth: 'optional',
+	queueName: 'direct',
+	throwOnError: true,
+	allowConvexRelay: false,
+}
+
+const read: CommunicationPolicyOverride = {
+	timeoutMs: 10_000,
+	retries: 1,
+	reliability: 'interactive',
+}
+const stream: CommunicationPolicyOverride = { timeoutMs: 0, retries: 0, reliability: 'volatile' }
+const mutate: CommunicationPolicyOverride = {
+	timeoutMs: 20_000,
+	retries: 0,
+	reliability: 'interactive',
+}
+const long: CommunicationPolicyOverride = { timeoutMs: 120_000, retries: 0, reliability: 'durable' }
+const destructive: CommunicationPolicyOverride = {
+	timeoutMs: 20_000,
+	retries: 0,
+	reliability: 'critical',
+}
+const upload: CommunicationPolicyOverride = {
+	timeoutMs: 300_000,
+	retries: 0,
+	reliability: 'durable',
+}
+
+export const coreEndpointPolicies = Object.freeze({
+	'core.setup.status': read,
+	'core.setup.complete': mutate,
+	'core.instances.list': read,
+	'core.instances.get': read,
+	'core.instances.create': long,
+	'core.instances.delete': destructive,
+	'core.instances.patch': mutate,
+	'core.lifecycle.start': long,
+	'core.lifecycle.stop': long,
+	'core.lifecycle.kill': destructive,
+	'core.lifecycle.restart': long,
+	'core.lifecycle.command': mutate,
+	'core.ws.ticket': mutate,
+	'core.events.open': stream,
+	'core.console.open': stream,
+	'core.stats.get': read,
+	'core.mods.list': read,
+	'core.mods.add': long,
+	'core.mods.install_modpack_version': long,
+	'core.mods.upload': upload,
+	'core.mods.delete': destructive,
+	'core.mods.toggle': mutate,
+	'core.mods.update': long,
+	'core.mods.update_all': long,
+	'core.logs.list': read,
+	'core.logs.read': read,
+	'core.crash_reports.list': read,
+	'core.crash_reports.read': read,
+	'core.properties.get': read,
+	'core.properties.patch': mutate,
+	'core.fs.list': read,
+	'core.fs.download': long,
+	'core.fs.delete': destructive,
+	'core.fs.upload': upload,
+	'core.fs.read': read,
+	'core.fs.write': mutate,
+	'core.fs.create_file': mutate,
+	'core.fs.create_dir': mutate,
+	'core.fs.move': mutate,
+	'core.fs.unzip': long,
+	'core.fs.zip': long,
+	'core.fs.copy': long,
+	'core.fs.download_url': read,
+	'core.fs.search': read,
+	'core.backups.list': read,
+	'core.backups.create': long,
+	'core.backups.rename': mutate,
+	'core.backups.delete': destructive,
+	'core.backups.delete_many': destructive,
+	'core.backups.lock': mutate,
+	'core.backups.restore': long,
+	'core.backups.schedule_get': read,
+	'core.backups.schedule_set': mutate,
+	'core.metadata.get': read,
+	'core.metadata.update': mutate,
+	'core.members.list': read,
+	'core.members.upsert': mutate,
+	'core.members.remove': destructive,
+	'core.sync_profiles.list': read,
+	'core.sync_profiles.register': mutate,
+	'core.sync_profiles.remove': destructive,
+	'core.sync_profiles.create_from_mrpack': upload,
+	'core.sync_snapshots.publish': upload,
+	'core.sync_snapshots.list': read,
+	'core.sync_events.list': read,
+	'core.sync_version.check': read,
+	'core.sync_snapshots.download': long,
+	'core.modpack.get': read,
+	'core.modpack.remove': destructive,
+	'core.modpack.export': long,
+	'core.modpack.install_file': upload,
+} satisfies Record<string, CommunicationPolicyOverride>)
+
+const routePolicies: Array<[RegExp, string]> = [
+	[/^GET \/setup\/status$/, 'core.setup.status'],
+	[/^POST \/setup$/, 'core.setup.complete'],
+	[/^GET \/instances$/, 'core.instances.list'],
+	[/^POST \/instances$/, 'core.instances.create'],
+	[/^GET \/instances\/[^/]+$/, 'core.instances.get'],
+	[/^PATCH \/instances\/[^/]+$/, 'core.instances.patch'],
+	[/^DELETE \/instances\/[^/]+$/, 'core.instances.delete'],
+	[/^POST \/instances\/[^/]+\/start$/, 'core.lifecycle.start'],
+	[/^POST \/instances\/[^/]+\/stop$/, 'core.lifecycle.stop'],
+	[/^POST \/instances\/[^/]+\/kill$/, 'core.lifecycle.kill'],
+	[/^POST \/instances\/[^/]+\/restart$/, 'core.lifecycle.restart'],
+	[/^POST \/instances\/[^/]+\/command$/, 'core.lifecycle.command'],
+	[/^POST \/ws-token$/, 'core.ws.ticket'],
+	[/^GET \/instances\/[^/]+\/stats$/, 'core.stats.get'],
+	[/^GET \/instances\/[^/]+\/mods$/, 'core.mods.list'],
+	[/^POST \/instances\/[^/]+\/mods$/, 'core.mods.add'],
+	[/^POST \/instances\/[^/]+\/modpack\/modrinth$/, 'core.mods.install_modpack_version'],
+	[/^DELETE \/instances\/[^/]+\/mods\//, 'core.mods.delete'],
+	[/^PATCH \/instances\/[^/]+\/mods\//, 'core.mods.toggle'],
+	[/^PUT \/instances\/[^/]+\/mods\/.*\/update$/, 'core.mods.update'],
+	[/^POST \/instances\/[^/]+\/mods\/update-all$/, 'core.mods.update_all'],
+	[/^GET \/instances\/[^/]+\/logs$/, 'core.logs.list'],
+	[/^GET \/instances\/[^/]+\/crash-reports$/, 'core.crash_reports.list'],
+	[/^GET \/instances\/[^/]+\/properties$/, 'core.properties.get'],
+	[/^PATCH \/instances\/[^/]+\/properties$/, 'core.properties.patch'],
+	[/^GET \/instances\/[^/]+\/fs($|\?)/, 'core.fs.list'],
+	[/^DELETE \/instances\/[^/]+\/fs$/, 'core.fs.delete'],
+	[/^POST \/instances\/[^/]+\/backups$/, 'core.backups.create'],
+	[/^GET \/instances\/[^/]+\/backups$/, 'core.backups.list'],
+]
+
+export function resolveCoreEndpointKey(method: string, path: string): string {
+	const key = `${method.toUpperCase()} ${path.split('?')[0]}`
+	return routePolicies.find(([pattern]) => pattern.test(key))?.[1] ?? 'core.default'
+}
+
+export function mergePolicy(
+	key: string,
+	base: CommunicationPolicy = defaultCommunicationPolicy,
+	override: CommunicationPolicyOverride = {},
+): CommunicationPolicy {
+	return { ...base, ...(coreEndpointPolicies[key] ?? {}), ...override, key: override.key ?? key }
+}

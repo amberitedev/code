@@ -12,8 +12,24 @@ use crate::{
     presentation::{error::ApiError, extractors::AuthUser},
 };
 
+type RelayStatusRow = (
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
 #[derive(Deserialize)]
 pub struct PublishRelayMessage {
+    pub id: Option<String>,
     pub r#type: String,
     pub version: i64,
     pub sender_id: String,
@@ -52,7 +68,7 @@ pub async fn publish(
     let now = chrono::Utc::now();
     let ttl_ms = body.ttl_ms.unwrap_or(5 * 60 * 1000).max(1000);
     let expires_at = now + chrono::Duration::milliseconds(ttl_ms);
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = body.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     sqlx::query(
         "INSERT INTO core_relay_messages \
@@ -110,6 +126,40 @@ pub async fn pending(
         .collect();
 
     Ok(Json(json!({ "messages": messages })))
+}
+
+pub async fn status(
+    _user: AuthUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let row: Option<RelayStatusRow> = sqlx::query_as(
+        "SELECT id, type, version, sender_id, recipient_id, payload, ack, status, created_at, expires_at, result, error \
+         FROM core_relay_messages WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let message = row.map(|row| {
+        json!({
+            "id": row.0,
+            "type": row.1,
+            "version": row.2,
+            "sender_id": row.3,
+            "recipient_id": row.4,
+            "payload": serde_json::from_str::<Value>(&row.5).unwrap_or(Value::Null),
+            "ack": row.6,
+            "status": row.7,
+            "created_at": row.8,
+            "expires_at": row.9,
+            "result": row.10.and_then(|v| serde_json::from_str::<Value>(&v).ok()),
+            "error": row.11,
+        })
+    });
+
+    Ok(Json(json!({ "message": message })))
 }
 
 pub async fn ack(

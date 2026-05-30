@@ -83,6 +83,9 @@ importers:
 
   apps/app-frontend:
     dependencies:
+      '@amberite/amberite-api':
+        specifier: workspace:*
+        version: link:../../packages/amberite-api
       '@modrinth/api-client':
         specifier: workspace:^
         version: link:../../packages/api-client

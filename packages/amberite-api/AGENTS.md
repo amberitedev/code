@@ -12,6 +12,10 @@ src/
   context.ts        CoreCallContext — resolved baseUrl + token passed to api.ts
   api.ts            Raw typed HTTP functions for every Core endpoint
   client.ts         CoreApiClient class + CoreEventStream (SSE) class
+  pipeline.ts       CommunicationPipeline — timeout/retry/queue/relay policy runner
+  endpoint-policies.ts Defaults for every Core endpoint key
+  pipeline-types.ts Communication surfaces, methods, policies, nodes, results
+  queue.ts          MemoryQueueStore + CompositeQueueStore implementations
   ws.ts             CoreWsConnection — typed WebSocket for instance consoles
   transport.ts      Explicit message bus — 4 modes, ack policies, message registry
   convex-relay.ts   Raw Convex HTTP query/mutation calls
@@ -33,9 +37,17 @@ src/
 Everything flows through `PlatformAdapter`. It is the only interface that differs between desktop (Tauri) and web. The library itself has no platform code.
 
 **Call path for a normal API call:**
-`CoreApiClient.method()` → `this.direct()` → builds `CoreCallContext` from adapter → calls raw function in `api.ts` → returns typed result.
+`CoreApiClient.method()` → endpoint key policy → `CommunicationPipeline.callValue()` → builds `CoreCallContext` from adapter → calls raw function in `api.ts` → returns typed result.
 
-`CoreApiClient.request()` accepts a `_relayPayload` second arg that is currently **completely unused** — it's a reserved stub for future relay fallback routing. Don't treat it as active logic.
+`CoreApiClient.request()` resolves method/path metadata into an endpoint key using `resolveCoreEndpointKey()`. `CoreApiClient.withPolicy()` creates a lightweight client wrapper with per-call defaults (timeout, retries, methods, queue, auth mode, relay flags).
+
+**Pipeline rules:**
+
+- Every Core endpoint has a default policy in `endpoint-policies.ts`.
+- Direct calls use `core-direct`; async messages use `CommunicationPipeline.publish()`.
+- Convex relay is opt-in through `allowConvexRelay`; default policies avoid expensive Convex traffic.
+- Queue fallback requires `adapter.queueStore` and a payload. Desktop currently supplies a localStorage-backed queue.
+- `throwOnError` defaults true inside the library. App composables catch errors and expose refs so failures do not escape into Tauri uncaught.
 
 **Event flow:**
 Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableStream`, splits on `\n\n`, strips `data:` prefixes, and emits typed `CoreInstanceEvent` objects. `CoreInstanceStateManager` subscribes to these and patches its internal `Map<id, CoreInstanceSummary>`.
@@ -54,18 +66,21 @@ Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableSt
 | `core-relay`             | POSTed directly to Core's `/relay/messages`                                                  |
 | `convex-relay`           | POSTed to Convex `messaging:publishMessage`; `waitForResult` polls `messaging:messageStatus` |
 
+`CommunicationPipeline.publish()` adds higher-level methods over these modes: `core-relay`, `convex-relay`, `memory-queue`, `persistent-queue`, and `fire-and-forget`. It can wait for received or processed acknowledgements through Core relay or Convex relay based on policy.
+
 `drainQueue()` is **not auto-called** — the consumer must call it when `CoreConnectionMonitor` transitions to `online-direct`.
 
 ---
 
 ## Where It Gets Loaded
 
-| Consumer                                                       | What it does                                                             |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `apps/app-frontend/src/adapters/desktop.ts`                    | Implements `PlatformAdapter` using Tauri invoke, tauriFetch, OS keychain |
-| `apps/app-frontend/src/providers/setup/core-instance-state.ts` | Bootstraps `CoreInstanceStateManager`                                    |
-| `packages/ui/src/providers/core-client.ts`                     | Provides `CoreApiClient` via Vue DI                                      |
-| `packages/ui/src/providers/core-instance-state.ts`             | Provides `CoreInstanceStateManager` via Vue DI                           |
+| Consumer                                                | What it does                                                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `apps/app-frontend/src/adapters/desktop.ts`             | Implements `PlatformAdapter` using native `window.fetch`, env URLs, no-auth dev mode, and local queue storage |
+| `apps/app-frontend/src/composables/useCoreClient.ts`    | Provides the singleton `CoreApiClient`                                                                        |
+| `apps/app-frontend/src/composables/useCoreCall.ts`      | Vue-safe call wrapper; catches errors and exposes reactive refs                                               |
+| `apps/app-frontend/src/composables/useCoreMessage.ts`   | Vue-safe message publish wrapper over `CommunicationPipeline.publish()`                                       |
+| `apps/app-frontend/src/composables/useCoreInstances.ts` | Instances list + SSE state                                                                                    |
 
 ---
 

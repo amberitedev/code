@@ -74,7 +74,36 @@ export {
 	type AckPolicy,
 	type PublishOptions,
 } from './transport'
-export { pendingCoreRelayMessages, writeCoreRelayReceipt, writeCoreRelayResult } from './core-relay'
+export {
+	pendingCoreRelayMessages,
+	writeCoreRelayReceipt,
+	writeCoreRelayResult,
+	coreRelayMessageStatus,
+	waitForCoreRelayReceipt,
+	waitForCoreRelayResult,
+} from './core-relay'
+export { CommunicationPipeline, type CommunicationPipelineOptions } from './pipeline'
+export {
+	defaultCommunicationPolicy,
+	coreEndpointPolicies,
+	resolveCoreEndpointKey,
+	mergePolicy,
+} from './endpoint-policies'
+export { MemoryQueueStore, CompositeQueueStore } from './queue'
+export type {
+	CommunicationSurface,
+	CommunicationMethod,
+	CommunicationReliability,
+	CommunicationAuthMode,
+	CommunicationNode,
+	CommunicationPolicy,
+	CommunicationPipelineOptions,
+	CommunicationPolicyOverride,
+	CommunicationCall,
+	CommunicationPublish,
+	CommunicationResult,
+	EndpointPolicyMap,
+} from './pipeline-types'
 export { startMicrosoftLogin, completeMicrosoftLogin, type AuthSession } from './auth'
 export { CoreHeartbeat } from './heartbeat'
 export { drainQueue } from './drain'
