@@ -1,4 +1,3 @@
-<!-- Summary: App shell bootstraps providers/listeners (~306), global navigation/sidebar (~1273), router viewport (~1509), and modal stack (~1551). -->
 <script setup>
 import {
 	AuthFeature,
@@ -10,6 +9,7 @@ import {
 	VerboseLoggingFeature,
 } from '@modrinth/api-client'
 import {
+	ArrowBigUpDashIcon,
 	ChangeSkinIcon,
 	CompassIcon,
 	DownloadIcon,
@@ -19,12 +19,12 @@ import {
 	LibraryIcon,
 	LogInIcon,
 	LogOutIcon,
+	NewspaperIcon,
 	NotepadTextIcon,
 	PlusIcon,
 	RefreshCwIcon,
 	RightArrowIcon,
 	ServerStackIcon,
-	Settings2Icon,
 	SettingsIcon,
 	UserIcon,
 	WorldIcon,
@@ -40,6 +40,7 @@ import {
 	defineMessages,
 	I18nDebugPanel,
 	LoadingBar,
+	NewsArticleCard,
 	NotificationPanel,
 	OverflowMenu,
 	PopupNotificationPanel,
@@ -58,14 +59,13 @@ import { renderString } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { type } from '@tauri-apps/plugin-os'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { $fetch } from 'ofetch'
-import { computed, onErrorCaptured, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
 import ModrinthAppLogo from '@/assets/modrinth_app.svg?component'
@@ -84,14 +84,14 @@ import InstallToPlayModal from '@/components/ui/modal/InstallToPlayModal.vue'
 import ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import UpdateToPlayModal from '@/components/ui/modal/UpdateToPlayModal.vue'
 import NavButton from '@/components/ui/NavButton.vue'
+import PromotionWrapper from '@/components/ui/PromotionWrapper.vue'
 import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
-import { listenForThemeChanges } from '@/composables/useThemeEditorComms'
 import { config } from '@/config'
 import { hide_ads_window, init_ads_window, show_ads_window } from '@/helpers/ads.js'
-import { initAnalytics, trackEvent } from '@/helpers/analytics'
+import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { command_listener, warning_listener } from '@/helpers/events.js'
@@ -119,7 +119,6 @@ import {
 import { createServerInstall, provideServerInstall } from '@/providers/server-install'
 import { setupProviders } from '@/providers/setup'
 import { setupAuthProvider } from '@/providers/setup/auth'
-import { setupCoreInstanceState } from '@/providers/setup/core-instance-state'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
@@ -128,7 +127,6 @@ import { generateSkinPreviews } from './helpers/rendering/batch-skin-renderer'
 import { get_available_capes, get_available_skins } from './helpers/skins'
 import { AppNotificationManager } from './providers/app-notifications'
 import { AppPopupNotificationManager } from './providers/app-popup-notifications'
-import { setupCoreMonitor } from './providers/setup/core-monitor'
 
 const themeStore = useTheming()
 const router = useRouter()
@@ -215,8 +213,6 @@ provideModalBehavior({
 	onHide: () => show_ads_window(),
 })
 
-const coreInstanceState = setupCoreInstanceState()
-
 const {
 	installationModal,
 	unknownPackWarningModal,
@@ -229,54 +225,18 @@ const {
 	setModpackAlreadyInstalledModal,
 	handleModpackDuplicateCreateAnyway,
 	handleModpackDuplicateGoToInstance,
-} = setupProviders(notificationManager, popupNotificationManager, coreInstanceState)
+} = setupProviders(notificationManager, popupNotificationManager)
 
+const news = ref([])
 const availableSurvey = ref(false)
 
 const offline = ref(!navigator.onLine)
-const handleOffline = () => {
+window.addEventListener('offline', () => {
 	offline.value = true
-}
-const handleOnline = () => {
+})
+window.addEventListener('online', () => {
 	offline.value = false
-}
-window.addEventListener('offline', handleOffline)
-window.addEventListener('online', handleOnline)
-
-let unlistenThemeChanges = undefined
-listenForThemeChanges()
-	.then((cleanup) => {
-		unlistenThemeChanges = cleanup
-	})
-	.catch(console.warn)
-
-function openThemeEditor() {
-	const url =
-		window.location.protocol === 'http:' || window.location.protocol === 'https:'
-			? `${window.location.origin}/theme-editor.html`
-			: '/theme-editor.html'
-	WebviewWindow.getByLabel('theme-editor')
-		.then((existing) => {
-			if (existing) {
-				existing.setFocus().catch(console.warn)
-			} else {
-				new WebviewWindow('theme-editor', {
-					url,
-					title: 'Theme Editor',
-					width: 420,
-					height: 700,
-					resizable: true,
-				})
-			}
-		})
-		.catch(console.warn)
-}
-
-function handleThemeEditorShortcut(e) {
-	if (e.ctrlKey && e.shiftKey && e.code === 'KeyT') openThemeEditor()
-}
-
-window.addEventListener('keydown', handleThemeEditorShortcut)
+})
 
 const showOnboarding = ref(false)
 const nativeDecorations = ref(false)
@@ -326,11 +286,6 @@ onUnmounted(async () => {
 	unsubscribeSidebarToggle()
 
 	await unlistenUpdateDownload?.()
-	coreInstanceState.stop()
-	window.removeEventListener('offline', handleOffline)
-	window.removeEventListener('online', handleOnline)
-	unlistenThemeChanges?.()
-	window.removeEventListener('keydown', handleThemeEditorShortcut)
 })
 
 const { formatMessage } = useVIntl()
@@ -375,6 +330,7 @@ async function setupApp() {
 		locale,
 		telemetry,
 		collapsed_navigation,
+		hide_nametag_skins_page,
 		advanced_rendering,
 		onboarded,
 		default_page,
@@ -405,8 +361,8 @@ async function setupApp() {
 	themeStore.setThemeState(theme)
 	themeStore.collapsedNavigation = collapsed_navigation
 	themeStore.advancedRendering = advanced_rendering
+	themeStore.hideNametagSkinsPage = hide_nametag_skins_page
 	themeStore.toggleSidebar = toggle_sidebar
-	sidebarToggled.value = !themeStore.toggleSidebar
 	themeStore.devMode = developer_mode
 	themeStore.featureFlags = feature_flags
 	stateInitialized.value = true
@@ -417,8 +373,9 @@ async function setupApp() {
 		isMaximized.value = await getCurrentWindow().isMaximized()
 	})
 
-	if (telemetry && !dev) {
+	if (telemetry) {
 		initAnalytics()
+		if (dev) debugAnalytics()
 		trackEvent('Launched', { version, dev, onboarded })
 	}
 
@@ -452,6 +409,22 @@ async function setupApp() {
 			)
 		})
 
+	fetch(`https://modrinth.com/news/feed/articles.json`)
+		.then((response) => response.json())
+		.then((res) => {
+			if (res && res.articles) {
+				news.value = res.articles
+					.map((article) => ({
+						...article,
+						path: article.link,
+					}))
+					.slice(0, 4)
+			}
+		})
+		.catch((error) => {
+			console.error('Failed to fetch news articles', error)
+		})
+
 	get_opening_command().then(handleCommand)
 	fetchCredentials()
 
@@ -474,10 +447,6 @@ async function setupApp() {
 	} else {
 		console.info('Skipping user surveys on non-Windows platforms')
 	}
-
-	setupCoreMonitor().catch((err) => {
-		console.warn('[core-monitor] failed to start', err)
-	})
 }
 
 const stateFailed = ref(false)
@@ -496,7 +465,7 @@ initialize_state()
 	})
 
 const handleClose = async () => {
-	await saveWindowState(StateFlags.POSITION | StateFlags.SIZE | StateFlags.MAXIMIZED)
+	await saveWindowState(StateFlags.ALL)
 	await getCurrentWindow().close()
 }
 
@@ -547,7 +516,6 @@ function onSuspensePending() {
 }
 
 function onSuspenseResolve() {
-	suspensePending = false
 	if (suspenseToken) {
 		loading.end(suspenseToken)
 		suspenseToken = null
@@ -557,21 +525,6 @@ function onSuspenseResolve() {
 		routerToken = null
 	}
 }
-
-// When an async component setup throws inside the <Suspense>, Vue never emits
-// @resolve — leaving suspensePending=true and tokens permanently live. Capture
-// the error here to release those tokens so subsequent navigations can proceed.
-onErrorCaptured(() => {
-	if (suspenseToken) {
-		loading.end(suspenseToken)
-		suspenseToken = null
-	}
-	if (routerToken) {
-		loading.end(routerToken)
-		routerToken = null
-	}
-	suspensePending = false
-})
 
 const queryClient = useQueryClient()
 
@@ -589,26 +542,22 @@ watch(stateInitialized, (ready) => {
 		queryClient.prefetchQuery({
 			queryKey: ['servers'],
 			queryFn: async () => {
-				try {
-					const response = await tauriApiClient.archon.servers_v0.list({ limit: 100 })
-					const hasMedalServers = response.servers.some((s) => s.is_medal)
-					if (hasMedalServers) {
-						const subscriptions = await tauriApiClient.labrinth.billing_internal.getSubscriptions()
-						for (const server of response.servers) {
-							if (server.is_medal) {
-								const sub = subscriptions.find((s) => s.metadata?.id === server.server_id)
-								if (sub) {
-									server.medal_expires = new Date(
-										new Date(sub.created).getTime() + 5 * 86400000,
-									).toISOString()
-								}
+				const response = await tauriApiClient.archon.servers_v0.list({ limit: 100 })
+				const hasMedalServers = response.servers.some((s) => s.is_medal)
+				if (hasMedalServers) {
+					const subscriptions = await tauriApiClient.labrinth.billing_internal.getSubscriptions()
+					for (const server of response.servers) {
+						if (server.is_medal) {
+							const sub = subscriptions.find((s) => s.metadata?.id === server.server_id)
+							if (sub) {
+								server.medal_expires = new Date(
+									new Date(sub.created).getTime() + 5 * 86400000,
+								).toISOString()
 							}
 						}
 					}
-					return response
-				} catch {
-					return { servers: [] }
 				}
+				return response
 			},
 			staleTime: 30_000,
 		})
@@ -628,7 +577,6 @@ watch(stateInitialized, (ready) => {
 const error = useError()
 const errorModal = ref()
 const minecraftAuthErrorModal = ref()
-const settingsModal = ref()
 
 const contentInstall = createContentInstall({ router, handleError })
 provideContentInstall(contentInstall)
@@ -790,7 +738,6 @@ onMounted(() => {
 })
 
 const accounts = ref(null)
-const friendsListRef = ref()
 provide('accountsCard', accounts)
 
 command_listener(handleCommand)
@@ -1256,7 +1203,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		<CreationFlowModal
 			ref="installationModal"
 			type="instance"
-			:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper']"
 			show-snapshot-toggle
 			:fetch-existing-instance-names="fetchExistingInstanceNames"
 			:search-modpacks="searchModpacks"
@@ -1283,7 +1229,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				<CompassIcon />
 			</NavButton>
-			<NavButton v-tooltip.right="'Skins (Beta)'" to="/skins">
+			<NavButton v-tooltip.right="'Skin selector'" to="/skins">
 				<ChangeSkinIcon />
 			</NavButton>
 			<NavButton
@@ -1298,14 +1244,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				"
 			>
 				<LibraryIcon />
-			</NavButton>
-			<NavButton
-				v-tooltip.right="'Core'"
-				to="/core"
-				:is-primary="(r) => r.path === '/core'"
-				:is-subpage="(r) => r.path.startsWith('/core/')"
-			>
-				<Settings2Icon />
 			</NavButton>
 			<NavButton
 				v-tooltip.right="'Modrinth Hosting'"
@@ -1356,7 +1294,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</Transition>
 			<NavButton
 				v-tooltip.right="formatMessage(commonMessages.settingsLabel)"
-				:to="() => settingsModal?.show()"
+				:to="() => $refs.settingsModal.show()"
 			>
 				<SettingsIcon />
 			</NavButton>
@@ -1398,21 +1336,15 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		<div data-tauri-drag-region class="app-grid-statusbar bg-bg-raised h-[--top-bar-height] flex">
 			<div data-tauri-drag-region class="flex min-w-0 flex-1 overflow-hidden p-3">
 				<ModrinthAppLogo class="h-full w-auto shrink-0 text-contrast pointer-events-none" />
-				<div
-					data-tauri-drag-region-exclude
-					class="flex shrink-0 items-center gap-1 ml-3"
-					@mousedown.stop
-				>
+				<div data-tauri-drag-region class="flex shrink-0 items-center gap-1 ml-3">
 					<button
 						class="cursor-pointer p-0 m-0 text-contrast border-none outline-none bg-button-bg rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
-						@mousedown.stop
 						@click="router.back()"
 					>
 						<LeftArrowIcon />
 					</button>
 					<button
 						class="cursor-pointer p-0 m-0 text-contrast border-none outline-none bg-button-bg rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
-						@mousedown.stop
 						@click="router.forward()"
 					>
 						<RightArrowIcon />
@@ -1420,27 +1352,21 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				</div>
 				<Breadcrumbs class="pt-[2px]" />
 			</div>
-			<section
-				data-tauri-drag-region-exclude
-				class="flex shrink-0 ml-auto items-center"
-				@mousedown.stop
-			>
+			<section data-tauri-drag-region class="flex shrink-0 ml-auto items-center">
 				<ButtonStyled
 					v-if="!forceSidebar && themeStore.toggleSidebar"
 					:type="sidebarToggled ? 'standard' : 'transparent'"
 					circular
 				>
 					<button
-						data-tauri-drag-region-exclude
 						class="mr-3 transition-transform"
 						:class="{ 'rotate-180': !sidebarToggled }"
-						@mousedown.stop
 						@click="sidebarToggled = !sidebarToggled"
 					>
 						<RightArrowIcon />
 					</button>
 				</ButtonStyled>
-				<div data-tauri-drag-region-exclude class="flex mr-3" @mousedown.stop>
+				<div class="flex mr-3">
 					<Suspense>
 						<AppActionBar />
 					</Suspense>
@@ -1524,7 +1450,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</Admonition>
 			<RouterView v-slot="{ Component }">
 				<template v-if="Component">
-					<Suspense :key="route.path" @pending="onSuspensePending" @resolve="onSuspenseResolve">
+					<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
 						<component :is="Component"></component>
 					</Suspense>
 				</template>
@@ -1532,10 +1458,12 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</div>
 		<div
 			class="app-sidebar mt-px shrink-0 flex flex-col border-0 border-l-[1px] border-[--brand-gradient-border] border-solid"
+			:class="{ 'has-plus': hasPlus }"
 		>
 			<div
 				v-overlay-scrollbars="sidebarOverlayScrollbarsOptions"
 				class="app-sidebar-scrollable flex-grow shrink relative"
+				:class="{ 'pb-12': !hasPlus }"
 				data-overlayscrollbars-initialize
 			>
 				<div id="sidebar-teleport-target" class="sidebar-teleport-content"></div>
@@ -1546,17 +1474,38 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 							<AccountsCard ref="accounts" />
 						</suspense>
 					</div>
-					<div class="p-4">
+					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
 						<suspense>
-							<FriendsList
-								ref="friendsListRef"
-								:credentials="credentials"
-								:sign-in="() => signIn()"
-							/>
+							<FriendsList :credentials="credentials" :sign-in="() => signIn()" />
 						</suspense>
+					</div>
+					<div v-if="news && news.length > 0" class="p-4 flex flex-col items-center">
+						<h3 class="text-base mb-4 text-primary font-medium m-0 text-left w-full">News</h3>
+						<div class="space-y-4 flex flex-col items-center w-full">
+							<NewsArticleCard
+								v-for="(item, index) in news"
+								:key="`news-${index}`"
+								:article="item"
+							/>
+							<ButtonStyled color="brand" size="large">
+								<a href="https://modrinth.com/news" target="_blank" class="my-4">
+									<NewspaperIcon /> View all news
+								</a>
+							</ButtonStyled>
+						</div>
 					</div>
 				</div>
 			</div>
+			<template v-if="showAd">
+				<a
+					href="https://modrinth.plus?app"
+					class="absolute bottom-[250px] w-full flex justify-center items-center gap-1 px-4 py-3 text-purple font-medium hover:underline z-10"
+					target="_blank"
+				>
+					<ArrowBigUpDashIcon class="text-2xl" /> Upgrade to Modrinth+
+				</a>
+				<PromotionWrapper />
+			</template>
 		</div>
 	</div>
 	<I18nDebugPanel />
@@ -1623,6 +1572,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 
 .app-grid-statusbar {
 	grid-area: status;
+	padding-right: var(--window-controls-width, 0px);
 	position: relative;
 	z-index: 2;
 }

@@ -114,10 +114,12 @@ fn main() {
                         "get_available_capes",
                         "get_available_skins",
                         "add_and_equip_custom_skin",
-                        "set_default_cape",
                         "equip_skin",
                         "remove_custom_skin",
+                        "save_custom_skin",
                         "unequip_skin",
+                        "flush_pending_skin_change",
+                        "flush_pending_skin_change_for_profile",
                         "normalize_skin_texture",
                         "get_dragged_skin_data",
                     ])
@@ -305,32 +307,6 @@ fn main() {
                         "get_server_status",
                         "start_join_singleplayer_world",
                         "start_join_server",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "amberite",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "ping",
-                        "core_get_settings",
-                        "core_set_settings",
-                        "core_list_permission_presets",
-                        "core_is_installed",
-                        "core_install",
-                        "core_start",
-                        "core_stop",
-                        "get_current_jwt",
-                        "set_current_jwt",
-                        "clear_current_jwt",
-                        "convex_login",
-                        "convex_refresh_session",
-                        "convex_logout",
-                        "get_local_setup_secret",
-                        "is_core_running",
-                        "core_get_url",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

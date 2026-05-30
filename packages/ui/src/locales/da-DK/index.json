@@ -185,12 +185,6 @@
   "content.confirm-deletion.admonition-header": {
     "defaultMessage": "Advarsel ved sletning"
   },
-  "content.confirm-deletion.delete-button": {
-    "defaultMessage": "Slet {count} {itemType}{count, plural, one {} other {er}}"
-  },
-  "content.confirm-deletion.header": {
-    "defaultMessage": "Slet {itemType}{count, plural, one {} other {er}}"
-  },
   "content.page-layout.please-wait": {
     "defaultMessage": "Vent venligst"
   },
@@ -1154,9 +1148,6 @@
   "servers.region.custom.prompt": {
     "defaultMessage": "Hvor meget RAM vil du have din server har?"
   },
-  "servers.region.north-america": {
-    "defaultMessage": "Nordamerika"
-  },
   "servers.region.prompt": {
     "defaultMessage": "Hvor vil du gerne have din server er lokaliseret?"
   },
@@ -1323,4 +1314,3 @@
     "defaultMessage": "Vanilla Shader"
   }
 }
-

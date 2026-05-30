@@ -84,7 +84,7 @@
     "message": "Decorazioni native"
   },
   "app.appearance-settings.select-option": {
-    "message": "Scegli una pagina"
+    "message": "Seleziona"
   },
   "app.appearance-settings.toggle-sidebar.description": {
     "message": "Scegli se mostrare o nascondere la barra laterale."
@@ -224,9 +224,6 @@
   "app.instance.worlds.browse-servers": {
     "message": "Esplora i server"
   },
-  "app.instance.worlds.delete-world-description": {
-    "message": "\"{name}\" verrà **eliminato permanentemente** e non ci sarà modo di recuperarlo."
-  },
   "app.instance.worlds.delete-world-title": {
     "message": "Vuoi davvero eliminare questo mondo per sempre?"
   },
@@ -248,12 +245,6 @@
   "app.instance.worlds.no-worlds-heading": {
     "message": "Nessun server o mondo aggiunto"
   },
-  "app.instance.worlds.remove-server-description": {
-    "message": "\"{name}\" sarà rimosso dalla tua lista, inclusa quella nel gioco, e non ci sarà modo di recuperarlo."
-  },
-  "app.instance.worlds.remove-server-description-with-address": {
-    "message": "\"{name}\" ({address}) sarà rimosso dalla tua lista, inclusa quella nel gioco, e non ci sarà modo di recuperarlo."
-  },
   "app.instance.worlds.remove-server-title": {
     "message": "Vuoi davvero rimuovere {name}?"
   },
@@ -271,9 +262,6 @@
   },
   "app.modal.install-to-play.install-button": {
     "message": "Installa"
-  },
-  "app.modal.install-to-play.mod-count": {
-    "message": "{count} mod"
   },
   "app.modal.install-to-play.required-modpack": {
     "message": "Pacchetto di mod richiesto"
@@ -611,6 +599,24 @@
   "instance.settings.tabs.java": {
     "message": "Java e memoria"
   },
+  "instance.settings.tabs.java.custom-environment-variables": {
+    "message": "Variabili d'ambiente"
+  },
+  "instance.settings.tabs.java.custom-java-arguments": {
+    "message": "Argomenti JVM"
+  },
+  "instance.settings.tabs.java.custom-java-installation": {
+    "message": "Eseguibile di Java"
+  },
+  "instance.settings.tabs.java.custom-memory-allocation": {
+    "message": "Memoria allocata"
+  },
+  "instance.settings.tabs.java.enter-environment-variables": {
+    "message": "Inserisci le variabili d'ambiente..."
+  },
+  "instance.settings.tabs.java.enter-java-arguments": {
+    "message": "Inserisci gli argomenti JVM..."
+  },
   "instance.settings.tabs.java.environment-variables": {
     "message": "Variabili d'ambiente"
   },
@@ -625,6 +631,9 @@
   },
   "instance.settings.tabs.java.java-memory": {
     "message": "Memoria allocata"
+  },
+  "instance.settings.tabs.java.java-path-placeholder": {
+    "message": "/percorso/di/java"
   },
   "instance.settings.tabs.window": {
     "message": "Finestra"

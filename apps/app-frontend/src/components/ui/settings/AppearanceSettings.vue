@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { Combobox, defineMessages, ThemeSelector, Toggle, useVIntl } from '@modrinth/ui'
-import { onMounted, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 
-import type { AppSettings } from '@/helpers/settings.ts'
 import { get, set } from '@/helpers/settings.ts'
 import { getOS } from '@/helpers/utils'
 import { useTheming } from '@/store/state'
@@ -103,178 +102,177 @@ const messages = defineMessages({
 	},
 })
 
-const os = ref('')
-const settings = ref<AppSettings | null>(null)
-
-onMounted(async () => {
-	const [nextOs, nextSettings] = await Promise.all([getOS(), get()])
-	os.value = nextOs
-	settings.value = nextSettings
-})
+const os = ref(await getOS())
+const settings = ref(await get())
 
 watch(
 	settings,
-	async (_, previousSettings) => {
-		if (!settings.value || !previousSettings) return
-
+	async () => {
 		await set(settings.value)
 	},
 	{ deep: true },
 )
 </script>
 <template>
-	<template v-if="settings">
-		<h2 class="m-0 text-lg font-semibold text-contrast">
-			{{ formatMessage(messages.colorThemeTitle) }}
-		</h2>
-		<p class="m-0 mt-1">{{ formatMessage(messages.colorThemeDescription) }}</p>
+	<h2 class="m-0 text-lg font-semibold text-contrast">
+		{{ formatMessage(messages.colorThemeTitle) }}
+	</h2>
+	<p class="m-0 mt-1">{{ formatMessage(messages.colorThemeDescription) }}</p>
 
-		<ThemeSelector
-			:update-color-theme="
-				(theme: ColorTheme) => {
-					themeStore.setThemeState(theme)
-					settings.theme = theme
+	<ThemeSelector
+		:update-color-theme="
+			(theme: ColorTheme) => {
+				themeStore.setThemeState(theme)
+				settings.theme = theme
+			}
+		"
+		:current-theme="settings.theme"
+		:theme-options="themeStore.getThemeOptions()"
+		system-theme-color="system"
+	/>
+
+	<div class="mt-6 flex items-center justify-between">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.advancedRenderingTitle) }}
+			</h2>
+			<p class="m-0 mt-1">
+				{{ formatMessage(messages.advancedRenderingDescription) }}
+			</p>
+		</div>
+
+		<Toggle
+			id="advanced-rendering"
+			:model-value="themeStore.advancedRendering"
+			@update:model-value="
+				(e) => {
+					themeStore.advancedRendering = !!e
+					settings.advanced_rendering = themeStore.advancedRendering
 				}
 			"
-			:current-theme="settings.theme"
-			:theme-options="themeStore.getThemeOptions()"
-			system-theme-color="system"
 		/>
+	</div>
 
-		<div class="mt-6 flex items-center justify-between">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.advancedRenderingTitle) }}
-				</h2>
-				<p class="m-0 mt-1">
-					{{ formatMessage(messages.advancedRenderingDescription) }}
-				</p>
-			</div>
-
-			<Toggle
-				id="advanced-rendering"
-				:model-value="themeStore.advancedRendering"
-				@update:model-value="
-					(e) => {
-						themeStore.advancedRendering = !!e
-						settings.advanced_rendering = themeStore.advancedRendering
-					}
-				"
-			/>
+	<div class="mt-6 flex items-center justify-between">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.hideNametagTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.hideNametagDescription) }}</p>
 		</div>
+		<Toggle
+			id="hide-nametag-skins-page"
+			:model-value="themeStore.hideNametagSkinsPage"
+			@update:model-value="
+				(e) => {
+					themeStore.hideNametagSkinsPage = !!e
+					settings.hide_nametag_skins_page = themeStore.hideNametagSkinsPage
+				}
+			"
+		/>
+	</div>
 
-		<div class="mt-6 flex items-center justify-between">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.hideNametagTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.hideNametagDescription) }}</p>
-			</div>
-			<Toggle id="hide-nametag-skins-page" v-model="settings.hide_nametag_skins_page" />
+	<div v-if="os !== 'MacOS'" class="mt-6 flex items-center justify-between gap-4">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.nativeDecorationsTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.nativeDecorationsDescription) }}</p>
 		</div>
+		<Toggle id="native-decorations" v-model="settings.native_decorations" />
+	</div>
 
-		<div v-if="os !== 'MacOS'" class="mt-6 flex items-center justify-between gap-4">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.nativeDecorationsTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.nativeDecorationsDescription) }}</p>
-			</div>
-			<Toggle id="native-decorations" v-model="settings.native_decorations" />
+	<div class="mt-6 flex items-center justify-between">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.minimizeLauncherTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.minimizeLauncherDescription) }}</p>
 		</div>
+		<Toggle id="minimize-launcher" v-model="settings.hide_on_process_start" />
+	</div>
 
-		<div class="mt-6 flex items-center justify-between">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.minimizeLauncherTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.minimizeLauncherDescription) }}</p>
-			</div>
-			<Toggle id="minimize-launcher" v-model="settings.hide_on_process_start" />
+	<div class="mt-6 flex items-center justify-between">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.defaultLandingPageTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.defaultLandingPageDescription) }}</p>
 		</div>
+		<Combobox
+			id="opening-page"
+			v-model="settings.default_page"
+			name="Opening page dropdown"
+			class="max-w-40"
+			:options="[
+				{
+					value: 'Home',
+					label: formatMessage(messages.defaultLandingPageHome),
+				},
+				{
+					value: 'Library',
+					label: formatMessage(messages.defaultLandingPageLibrary),
+				},
+			]"
+			:display-value="settings.default_page ?? 'Select an option'"
+		/>
+	</div>
 
-		<div class="mt-6 flex items-center justify-between">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.defaultLandingPageTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.defaultLandingPageDescription) }}</p>
-			</div>
-			<Combobox
-				id="opening-page"
-				v-model="settings.default_page"
-				name="Opening page dropdown"
-				class="max-w-40"
-				:options="[
-					{
-						value: 'Home',
-						label: formatMessage(messages.defaultLandingPageHome),
-					},
-					{
-						value: 'Library',
-						label: formatMessage(messages.defaultLandingPageLibrary),
-					},
-				]"
-				:display-value="settings.default_page ?? 'Select an option'"
-			/>
+	<div class="mt-6 flex items-center justify-between">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.jumpBackIntoWorldsTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.jumpBackIntoWorldsDescription) }}</p>
 		</div>
+		<Toggle
+			:model-value="themeStore.getFeatureFlag(worldsInHomeFeatureFlag)"
+			@update:model-value="
+				() => {
+					const newValue = !themeStore.getFeatureFlag(worldsInHomeFeatureFlag)
+					themeStore.featureFlags[worldsInHomeFeatureFlag] = newValue
+					settings.feature_flags[worldsInHomeFeatureFlag] = newValue
+				}
+			"
+		/>
+	</div>
 
-		<div class="mt-6 flex items-center justify-between">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.jumpBackIntoWorldsTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.jumpBackIntoWorldsDescription) }}</p>
-			</div>
-			<Toggle
-				:model-value="themeStore.getFeatureFlag(worldsInHomeFeatureFlag)"
-				@update:model-value="
-					() => {
-						const newValue = !themeStore.getFeatureFlag(worldsInHomeFeatureFlag)
-						themeStore.featureFlags[worldsInHomeFeatureFlag] = newValue
-						settings.feature_flags[worldsInHomeFeatureFlag] = newValue
-					}
-				"
-			/>
+	<div class="mt-6 flex items-center justify-between gap-4">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.unknownPackWarningTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.unknownPackWarningDescription) }}</p>
 		</div>
+		<Toggle
+			:model-value="!themeStore.getFeatureFlag(skipUnknownPackWarningFeatureFlag)"
+			@update:model-value="
+				(e) => {
+					const warnBeforeUnknownPackInstall = !!e
+					const skipUnknownPackWarning = !warnBeforeUnknownPackInstall
+					themeStore.featureFlags[skipUnknownPackWarningFeatureFlag] = skipUnknownPackWarning
+					settings.feature_flags[skipUnknownPackWarningFeatureFlag] = skipUnknownPackWarning
+				}
+			"
+		/>
+	</div>
 
-		<div class="mt-6 flex items-center justify-between gap-4">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.unknownPackWarningTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.unknownPackWarningDescription) }}</p>
-			</div>
-			<Toggle
-				:model-value="!themeStore.getFeatureFlag(skipUnknownPackWarningFeatureFlag)"
-				@update:model-value="
-					(e) => {
-						const warnBeforeUnknownPackInstall = !!e
-						const skipUnknownPackWarning = !warnBeforeUnknownPackInstall
-						themeStore.featureFlags[skipUnknownPackWarningFeatureFlag] = skipUnknownPackWarning
-						settings.feature_flags[skipUnknownPackWarningFeatureFlag] = skipUnknownPackWarning
-					}
-				"
-			/>
+	<div class="mt-6 flex items-center justify-between">
+		<div>
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.toggleSidebarTitle) }}
+			</h2>
+			<p class="m-0 mt-1">{{ formatMessage(messages.toggleSidebarDescription) }}</p>
 		</div>
-
-		<div class="mt-6 flex items-center justify-between">
-			<div>
-				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(messages.toggleSidebarTitle) }}
-				</h2>
-				<p class="m-0 mt-1">{{ formatMessage(messages.toggleSidebarDescription) }}</p>
-			</div>
-			<Toggle
-				id="toggle-sidebar"
-				:model-value="settings.toggle_sidebar"
-				@update:model-value="
-					(e) => {
-						settings.toggle_sidebar = !!e
-						themeStore.toggleSidebar = settings.toggle_sidebar
-					}
-				"
-			/>
-		</div>
-	</template>
+		<Toggle
+			id="toggle-sidebar"
+			:model-value="settings.toggle_sidebar"
+			@update:model-value="
+				(e) => {
+					settings.toggle_sidebar = !!e
+					themeStore.toggleSidebar = settings.toggle_sidebar
+				}
+			"
+		/>
+	</div>
 </template>

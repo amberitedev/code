@@ -2,24 +2,18 @@
 import { BoxIcon, FolderSearchIcon, TrashIcon } from '@modrinth/assets'
 import { ButtonStyled, injectNotificationManager, Slider, StyledInput } from '@modrinth/ui'
 import { open } from '@tauri-apps/plugin-dialog'
-import { onMounted, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 
 import ConfirmModalWrapper from '@/components/ui/modal/ConfirmModalWrapper.vue'
 import { purge_cache_types } from '@/helpers/cache.js'
 import { get, set } from '@/helpers/settings.ts'
 
 const { handleError } = injectNotificationManager()
-const settings = ref(null)
-
-onMounted(async () => {
-	settings.value = await get()
-})
+const settings = ref(await get())
 
 watch(
 	settings,
-	async (_, previousSettings) => {
-		if (!settings.value || !previousSettings) return
-
+	async () => {
 		const setSettings = JSON.parse(JSON.stringify(settings.value))
 
 		if (!setSettings.custom_dir) {
@@ -68,7 +62,7 @@ async function findLauncherDir() {
 </script>
 
 <template>
-	<div v-if="settings" class="flex flex-col gap-6">
+	<div class="flex flex-col gap-6">
 		<div class="flex flex-col gap-2.5">
 			<h2 class="m-0 text-lg font-semibold text-contrast">App directory</h2>
 			<StyledInput

@@ -706,7 +706,7 @@ if (typeof window !== 'undefined') {
 	onBeforeRouteLeave(async () => {
 		if (isUploading.value) {
 			const shouldLeave = (await confirmLeaveModal.value?.prompt()) ?? false
-			if (shouldLeave) await cancelUpload.value?.()
+			if (shouldLeave) cancelUpload.value?.()
 			return shouldLeave
 		}
 		return true

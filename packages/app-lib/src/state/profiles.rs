@@ -21,37 +21,6 @@ use tokio::fs::DirEntry;
 use tokio::io::{AsyncBufReadExt, AsyncRead};
 use tokio::task::JoinSet;
 
-/// Whether this profile is a local client, a server frontend, or both (synced).
-// AMBERITE PATCH
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProfileKind {
-    /// Standard local Minecraft client (default).
-    Client,
-    /// Frontend for a Core-managed server — no local MC install.
-    Server,
-    /// Local client + Core server, mod lists synced bidirectionally.
-    Synced,
-}
-
-impl ProfileKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Client => "client",
-            Self::Server => "server",
-            Self::Synced => "synced",
-        }
-    }
-
-    pub fn from_str(val: &str) -> Self {
-        match val {
-            "server" => Self::Server,
-            "synced" => Self::Synced,
-            _ => Self::Client,
-        }
-    }
-}
-
 // Represent a Minecraft instance.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Profile {
@@ -86,10 +55,6 @@ pub struct Profile {
     pub force_fullscreen: Option<bool>,
     pub game_resolution: Option<WindowSize>,
     pub hooks: Hooks,
-
-    // AMBERITE PATCH - instance kind and optional Core linkage
-    pub kind: ProfileKind,
-    pub core_instance_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
@@ -347,9 +312,6 @@ struct ProfileQueryResult {
     override_hook_post_exit: Option<String>,
     protocol_version: Option<i64>,
     launcher_feature_version: String,
-    // AMBERITE PATCH
-    kind: Option<String>,
-    core_instance_id: Option<String>,
 }
 
 impl TryFrom<ProfileQueryResult> for Profile {
@@ -419,11 +381,6 @@ impl TryFrom<ProfileQueryResult> for Profile {
                 wrapper: x.override_hook_wrapper,
                 post_exit: x.override_hook_post_exit,
             },
-            // AMBERITE PATCH
-            kind: ProfileKind::from_str(
-                x.kind.as_deref().unwrap_or("client"),
-            ),
-            core_instance_id: x.core_instance_id,
         })
     }
 }
@@ -443,8 +400,7 @@ macro_rules! select_profiles_with_predicate {
                 override_java_path,
                 json(override_extra_launch_args) as "override_extra_launch_args!: serde_json::Value", json(override_custom_env_vars) as "override_custom_env_vars!: serde_json::Value",
                 override_mc_memory_max, override_mc_force_fullscreen, override_mc_game_resolution_x, override_mc_game_resolution_y,
-                override_hook_pre_launch, override_hook_wrapper, override_hook_post_exit,
-                kind, core_instance_id
+                override_hook_pre_launch, override_hook_wrapper, override_hook_post_exit
             FROM profiles
             "#
                 + $predicate,
@@ -552,9 +508,6 @@ impl Profile {
         let extra_launch_args = serde_json::to_string(&self.extra_launch_args)?;
         let custom_env_vars = serde_json::to_string(&self.custom_env_vars)?;
 
-        // AMBERITE PATCH
-        let kind = self.kind.as_str();
-
         sqlx::query!(
             "
             INSERT INTO profiles (
@@ -567,8 +520,7 @@ impl Profile {
                 override_java_path, override_extra_launch_args, override_custom_env_vars,
                 override_mc_memory_max, override_mc_force_fullscreen, override_mc_game_resolution_x, override_mc_game_resolution_y,
                 override_hook_pre_launch, override_hook_wrapper, override_hook_post_exit,
-                protocol_version, launcher_feature_version,
-                kind, core_instance_id
+                protocol_version, launcher_feature_version
             )
             VALUES (
                 $1, $2, $3, $4,
@@ -580,8 +532,7 @@ impl Profile {
                 $17, jsonb($18), jsonb($19),
                 $20, $21, $22, $23,
                 $24, $25, $26,
-                $27, $28,
-                $29, $30
+                $27, $28
             )
             ON CONFLICT (path) DO UPDATE SET
                 install_stage = $2,
@@ -618,10 +569,7 @@ impl Profile {
                 override_hook_post_exit = $26,
 
                 protocol_version = $27,
-                launcher_feature_version = $28,
-
-                kind = $29,
-                core_instance_id = $30
+                launcher_feature_version = $28
             ",
             self.path,
             install_stage,
@@ -650,9 +598,7 @@ impl Profile {
             self.hooks.wrapper,
             self.hooks.post_exit,
             self.protocol_version,
-            launcher_feature_version,
-            kind,
-            self.core_instance_id
+            launcher_feature_version
         )
             .execute(exec)
             .await?;

@@ -244,7 +244,7 @@ const messages = defineMessages({
 					</TagItem>
 					<div
 						v-if="world.type === 'singleplayer'"
-						class="text-sm text-secondary flex items-center gap-1 font-semibold"
+						class="text-sm text-secondary flex items-center gap-1 font-semibold flex-nowrap whitespace-nowrap"
 					>
 						<UserIcon
 							aria-hidden="true"
@@ -328,7 +328,7 @@ const messages = defineMessages({
 						•
 						<router-link
 							class="flex items-center gap-1 truncate hover:underline text-secondary smart-clickable:allow-pointer-events"
-							:to="`/instance/${encodeURIComponent(instancePath)}/content`"
+							:to="`/instance/${instancePath}`"
 						>
 							<Avatar
 								:src="instanceIcon ? convertFileSrc(instanceIcon) : undefined"
@@ -427,7 +427,7 @@ const messages = defineMessages({
 							{
 								id: 'open-instance',
 								shown: !!instancePath,
-								action: () => router.push(`/instance/${encodeURIComponent(instancePath!)}/content`),
+								action: () => router.push(encodeURI(`/instance/${instancePath}`)),
 							},
 							{
 								id: 'refresh',

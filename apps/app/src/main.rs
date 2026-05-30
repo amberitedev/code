@@ -181,51 +181,6 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
-            let mut builder = tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .title("Amberite")
-            .inner_size(1280.0, 800.0)
-            .min_inner_size(1100.0, 700.0)
-            .visible(false)
-            .resizable(true)
-            .zoom_hotkeys_enabled(false)
-            .fullscreen(false);
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                builder = builder.decorations(false);
-            }
-
-            #[cfg(target_os = "macos")]
-            {
-                builder = builder
-                    .decorations(true)
-                    .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true)
-                    .traffic_light_position(tauri::LogicalPosition::new(15.0, 22.0));
-            }
-
-            #[cfg(debug_assertions)]
-            {
-                const BASE_BROWSER_ARGS: &str =
-                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
-                let enable_cdp = std::env::var("AMBERITE_ENABLE_CDP")
-                    .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-                    .unwrap_or(false);
-                let browser_args = if enable_cdp {
-                    format!("{BASE_BROWSER_ARGS} --remote-debugging-port=9222")
-                } else {
-                    BASE_BROWSER_ARGS.to_string()
-                };
-
-                builder = builder.additional_browser_args(&browser_args);
-            }
-
-            builder.build()?;
-
             #[cfg(target_os = "macos")]
             {
                 let payload = macos::deep_link::get_or_init_payload(app);
@@ -294,7 +249,6 @@ fn main() {
         .plugin(api::ads::init())
         .plugin(api::friends::init())
         .plugin(api::worlds::init())
-        .plugin(api::amberite::init())
         .manage(PendingUpdateData::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,
@@ -316,10 +270,20 @@ fn main() {
         Ok(app) => {
             app.run(|app, event| {
                 #[cfg(not(any(feature = "updater", target_os = "macos")))]
-                drop((app, event));
+                let _ = app;
+
+                if matches!(&event, tauri::RunEvent::ExitRequested { .. })
+                    && let Err(error) = tauri::async_runtime::block_on(
+                        theseus::minecraft_skins::flush_pending_skin_change(),
+                    )
+                {
+                    tracing::warn!(
+                        "Failed to flush pending Minecraft skin change before exit: {error}"
+                    );
+                }
 
                 #[cfg(feature = "updater")]
-                if matches!(event, tauri::RunEvent::Exit) {
+                if matches!(&event, tauri::RunEvent::Exit) {
                     let update_data = app.state::<PendingUpdateData>().inner();
                     let should_restart = State::get_if_initialized()
                         .map(|s| {

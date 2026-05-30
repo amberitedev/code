@@ -168,7 +168,7 @@ export function createServerInstall(opts: {
 					: []),
 				{
 					label: 'Instance',
-					action: () => opts.router.push(`/instance/${encodeURIComponent(project.path)}/content`),
+					action: () => opts.router.push(`/instance/${encodeURIComponent(project.path)}`),
 				},
 			],
 			autoCloseMs: null,
@@ -203,7 +203,7 @@ export function createServerInstall(opts: {
 					: []),
 				{
 					label: 'Instance',
-					action: () => opts.router.push(`/instance/${encodeURIComponent(instance.path)}/content`),
+					action: () => opts.router.push(`/instance/${encodeURIComponent(instance.path)}`),
 				},
 			],
 			autoCloseMs: null,

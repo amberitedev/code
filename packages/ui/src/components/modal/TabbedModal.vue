@@ -129,13 +129,6 @@ defineExpose({ show, hide, selectedTab, setTab })
 							:is="visibleTabs[selectedTab]?.content"
 							v-if="visibleTabs[selectedTab]?.content"
 						/>
-						<template #fallback>
-							<div class="flex h-32 items-center justify-center">
-								<div
-									class="h-6 w-6 animate-spin rounded-full border-2 border-brand border-t-transparent"
-								/>
-							</div>
-						</template>
 					</Suspense>
 				</div>
 

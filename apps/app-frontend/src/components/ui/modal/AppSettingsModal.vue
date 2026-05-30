@@ -6,7 +6,6 @@ import {
 	LanguagesIcon,
 	ModrinthIcon,
 	PaintbrushIcon,
-	ServerStackIcon,
 	SettingsIcon,
 	ShieldIcon,
 	ToggleRightIcon,
@@ -25,7 +24,6 @@ import { platform as getOsPlatform, version as getOsVersion } from '@tauri-apps/
 import { ref, watch } from 'vue'
 
 import AppearanceSettings from '@/components/ui/settings/AppearanceSettings.vue'
-import CoreSettings from '@/components/ui/settings/CoreSettings.vue'
 import DefaultInstanceSettings from '@/components/ui/settings/DefaultInstanceSettings.vue'
 import FeatureFlagSettings from '@/components/ui/settings/FeatureFlagSettings.vue'
 import JavaSettings from '@/components/ui/settings/JavaSettings.vue'
@@ -37,22 +35,17 @@ import { injectAppUpdateDownloadProgress } from '@/providers/download-progress.t
 import { useTheming } from '@/store/state'
 
 const themeStore = useTheming()
+
 const { formatMessage } = useVIntl()
+
 const devModeCounter = ref(0)
 
 const developerModeEnabled = defineMessage({
 	id: 'app.settings.developer-mode-enabled',
 	defaultMessage: 'Developer mode enabled.',
 })
+
 const tabs = [
-	{
-		name: defineMessage({
-			id: 'app.settings.tabs.core',
-			defaultMessage: 'Core',
-		}),
-		icon: ServerStackIcon,
-		content: CoreSettings,
-	},
 	{
 		name: defineMessage({
 			id: 'app.settings.tabs.appearance',
@@ -109,6 +102,7 @@ const tabs = [
 		developerOnly: true,
 	},
 ]
+
 const modal = ref<InstanceType<typeof TabbedModal> | null>(null)
 
 function show() {
@@ -116,7 +110,9 @@ function show() {
 }
 
 defineExpose({ show })
+
 const { progress, version: downloadingVersion } = injectAppUpdateDownloadProgress()
+
 const version = await getVersion()
 const osPlatform = getOsPlatform()
 const osVersion = getOsVersion()

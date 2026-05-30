@@ -54,7 +54,7 @@ const installed = computed(() => props.instance.install_stage === 'installed')
 const router = useRouter()
 
 const seeInstance = async () => {
-	await router.push(`/instance/${encodeURIComponent(props.instance.path)}/content`)
+	await router.push(`/instance/${encodeURIComponent(props.instance.path)}`)
 }
 
 const checkProcess = async () => {
@@ -119,16 +119,7 @@ defineExpose({
 
 const currentEvent = ref(null)
 
-let unlisten
-
-onMounted(() => checkProcess())
-onUnmounted(() => {
-	const fn = unlisten
-	unlisten = undefined
-	fn?.()
-})
-
-unlisten = await process_listener((e) => {
+const unlisten = await process_listener((e) => {
 	if (e.profile_path_id === props.instance.path) {
 		currentEvent.value = e.event
 		if (e.event === 'finished') {
@@ -136,6 +127,9 @@ unlisten = await process_listener((e) => {
 		}
 	}
 })
+
+onMounted(() => checkProcess())
+onUnmounted(() => unlisten())
 </script>
 
 <template>

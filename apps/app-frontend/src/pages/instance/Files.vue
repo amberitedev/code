@@ -36,12 +36,6 @@ const props = defineProps<{
 	playing: boolean
 	installed: boolean
 	isServerInstance: boolean
-	openSettings?: () => void
-}>()
-
-defineEmits<{
-	play: []
-	stop: []
 }>()
 
 const { formatMessage } = useVIntl()
@@ -69,12 +63,6 @@ const currentPath = ref('')
 const editingFile = ref<EditingFile | null>(null)
 
 debug('setup: start, instance.path =', props.instance.path)
-
-const unlistenProfiles = ref<(() => void) | undefined>()
-
-onUnmounted(() => {
-	unlistenProfiles.value?.()
-})
 
 instanceRoot.value = await get_full_path(props.instance.path)
 debug('setup: instanceRoot =', instanceRoot.value)
@@ -302,7 +290,7 @@ async function handleExtractFile(path: string, override: boolean, dry: boolean) 
 }
 
 debug('setup: registering profile_listener')
-unlistenProfiles.value = await profile_listener(
+const unlistenProfiles = await profile_listener(
 	async (event: { event: string; profile_path_id: string }) => {
 		debug('profile_listener: event =', event.event, 'path =', event.profile_path_id)
 		if (event.profile_path_id === props.instance.path && event.event === 'synced') {
@@ -312,6 +300,10 @@ unlistenProfiles.value = await profile_listener(
 	},
 )
 debug('setup: profile_listener registered')
+
+onUnmounted(() => {
+	unlistenProfiles()
+})
 
 watch(
 	() => props.instance.path,

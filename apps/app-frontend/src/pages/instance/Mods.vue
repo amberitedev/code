@@ -1,6 +1,6 @@
 <template>
 	<ReadyTransition :pending="loading">
-		<ContentPageLayout :enable-side-filter="props.isServerInstance">
+		<ContentPageLayout>
 			<template #modals>
 				<ShareModalWrapper
 					ref="shareModal"
@@ -155,16 +155,8 @@ const { installingItems } = injectContentInstall()
 const router = useRouter()
 const debug = useDebugLogger('Mods:ContentUpdate')
 
-defineEmits<{
-	(event: 'play' | 'stop'): void
-}>()
-
 const props = defineProps<{
 	instance: GameInstance
-	options?: unknown
-	offline?: boolean
-	playing?: boolean
-	installed?: boolean
 	isServerInstance?: boolean
 	openSettings?: () => void
 	preloadedContent?: InstanceContentData | null

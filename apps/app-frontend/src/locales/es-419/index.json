@@ -224,9 +224,6 @@
   "app.instance.worlds.browse-servers": {
     "message": "Explorar servidores"
   },
-  "app.instance.worlds.delete-world-description": {
-    "message": "\"{name}\" se **eliminará permanentemente** y no habrá forma de recuperarlo."
-  },
   "app.instance.worlds.delete-world-title": {
     "message": "¿Estás seguro de que quieres eliminar este mundo de forma permanente?"
   },
@@ -247,12 +244,6 @@
   },
   "app.instance.worlds.no-worlds-heading": {
     "message": "No hay servidores ni mundos añadidos"
-  },
-  "app.instance.worlds.remove-server-description": {
-    "message": "\"{name}\" se eliminará de tu lista, también dentro del juego, y no podrás recuperarlo."
-  },
-  "app.instance.worlds.remove-server-description-with-address": {
-    "message": "\"{name}\" ({address}) se eliminará de tu lista, también dentro del juego, y no podrás recuperarlo."
   },
   "app.instance.worlds.remove-server-title": {
     "message": "¿Estás seguro de que quieres eliminar {name}?"
@@ -611,6 +602,24 @@
   "instance.settings.tabs.java": {
     "message": "Java y memoria"
   },
+  "instance.settings.tabs.java.custom-environment-variables": {
+    "message": "Variables de entorno personalizadas"
+  },
+  "instance.settings.tabs.java.custom-java-arguments": {
+    "message": "Argumentos personalizados de Java"
+  },
+  "instance.settings.tabs.java.custom-java-installation": {
+    "message": "Instalación personalizada de Java"
+  },
+  "instance.settings.tabs.java.custom-memory-allocation": {
+    "message": "Asignación de memoria personalizada"
+  },
+  "instance.settings.tabs.java.enter-environment-variables": {
+    "message": "Introduce las variables de entorno..."
+  },
+  "instance.settings.tabs.java.enter-java-arguments": {
+    "message": "Introduce los argumentos de Java..."
+  },
   "instance.settings.tabs.java.environment-variables": {
     "message": "Variables de entorno"
   },
@@ -625,6 +634,9 @@
   },
   "instance.settings.tabs.java.java-memory": {
     "message": "Memoria asignada"
+  },
+  "instance.settings.tabs.java.java-path-placeholder": {
+    "message": "/ruta/a/java"
   },
   "instance.settings.tabs.window": {
     "message": "Ventana"

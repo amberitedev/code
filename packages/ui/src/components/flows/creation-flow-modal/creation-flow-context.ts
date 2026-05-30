@@ -23,7 +23,6 @@ export type SetupType = 'modpack' | 'custom' | 'vanilla'
 export type Gamemode = 'survival' | 'creative' | 'hardcore'
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard'
 export type LoaderVersionType = 'stable' | 'latest' | 'other'
-export type InstanceKind = 'client' | 'server' | 'synced'
 export type GeneratorSettingsMode = 'default' | 'flat' | 'custom'
 export type LoaderManifestResolver = (loader: string) => Promise<LauncherMeta.Manifest.v0.Manifest>
 export interface LoaderVersionEntry {
@@ -152,7 +151,6 @@ export interface CreationFlowContextValue {
 	instanceIcon: Ref<File | null>
 	instanceIconUrl: Ref<string | null>
 	instanceIconPath: Ref<string | null>
-	instanceKind: Ref<InstanceKind>
 
 	// Loader/version state (custom setup)
 	selectedLoader: Ref<string | null>
@@ -278,7 +276,6 @@ export function createCreationFlowContext(
 	const instanceIcon = ref<File | null>(null)
 	const instanceIconUrl = ref<string | null>(null)
 	const instanceIconPath = ref<string | null>(null)
-	const instanceKind = ref<InstanceKind>('client')
 
 	// Revoke old object URL when icon is cleared to avoid memory leaks
 	watch(instanceIconUrl, (_newUrl, oldUrl) => {
@@ -443,7 +440,6 @@ export function createCreationFlowContext(
 		instanceIconUrl.value = null
 		instanceIcon.value = null
 		instanceIconPath.value = null
-		instanceKind.value = 'client'
 
 		selectedLoader.value = null
 		selectedGameVersion.value = null
@@ -566,7 +562,6 @@ export function createCreationFlowContext(
 		instanceIcon,
 		instanceIconUrl,
 		instanceIconPath,
-		instanceKind,
 		selectedLoader,
 		selectedGameVersion,
 		loaderVersionType,

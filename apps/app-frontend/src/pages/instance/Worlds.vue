@@ -314,7 +314,6 @@ const props = defineProps<{
 	offline: boolean
 	playing: boolean
 	installed: boolean
-	openSettings?: () => void
 }>()
 
 const instance = computed(() => props.instance)

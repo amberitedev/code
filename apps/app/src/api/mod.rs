@@ -18,7 +18,6 @@ pub mod tags;
 pub mod utils;
 
 pub mod ads;
-pub mod amberite;
 #[cfg(target_os = "macos")]
 mod ads_occlusion_macos;
 #[cfg(windows)]
@@ -59,9 +58,6 @@ pub enum TheseusSerializableError {
     #[cfg(feature = "updater")]
     #[error("HTTP error: {0}")]
     Http(#[from] tauri_plugin_http::reqwest::Error),
-
-    #[error("Amberite error: {0}")]
-    Amberite(#[from] amberite_lib::error::AmberiteError),
 }
 
 // Generic implementation of From<T> for ErrorTypeA
@@ -113,7 +109,6 @@ macro_rules! impl_serialize {
 impl_serialize! {
     IO,
     Tauri,
-    Amberite,
 }
 
 #[cfg(feature = "updater")]
@@ -122,5 +117,4 @@ impl_serialize! {
     Tauri,
     Updater,
     Http,
-    Amberite,
 }

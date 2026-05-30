@@ -1,4 +1,3 @@
-<!-- Summary: Browse page wires tag/context loading (~112), install card actions (~676), search execution (~845), and the browse manager/sidebar render (~984). -->
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
 import {
@@ -30,7 +29,7 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { Ref } from 'vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { LocationQuery } from 'vue-router'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
@@ -72,7 +71,6 @@ const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
 provideServerInstallContent(serverInstallContent)
 const {
 	serverIdQuery,
-	coreInstanceIdQuery,
 	serverFlowFrom,
 	isFromWorlds,
 	isServerContext,
@@ -107,20 +105,17 @@ const {
 } = serverInstallContent
 
 debugLog('fetching tags (categories, loaders, gameVersions)')
-const categories = ref<Labrinth.Tags.v2.Category[]>([])
-const loaders = ref<Labrinth.Tags.v2.Loader[]>([])
-const availableGameVersions = ref<Labrinth.Tags.v2.GameVersion[]>([])
-
-async function initTags() {
-	const [nextCategories, nextLoaders, nextGameVersions] = await Promise.all([
-		get_categories().catch(handleError),
-		get_loaders().catch(handleError),
-		get_game_versions().catch(handleError),
-	])
-	categories.value = nextCategories ?? []
-	loaders.value = nextLoaders ?? []
-	availableGameVersions.value = nextGameVersions ?? []
-}
+const [categories, loaders, availableGameVersions] = await Promise.all([
+	get_categories()
+		.catch(handleError)
+		.then(ref<Labrinth.Tags.v2.Category[]>),
+	get_loaders()
+		.catch(handleError)
+		.then(ref<Labrinth.Tags.v2.Loader[]>),
+	get_game_versions()
+		.catch(handleError)
+		.then(ref<Labrinth.Tags.v2.GameVersion[]>),
+])
 
 const tags: Ref<Tags> = computed(() => ({
 	gameVersions: availableGameVersions.value ?? [],
@@ -183,6 +178,8 @@ watch(
 )
 
 watchServerContextChanges()
+
+await initInstanceContext()
 
 async function initInstanceContext() {
 	debugLog('initInstanceContext', {
@@ -443,22 +440,16 @@ const breadcrumbs = useBreadcrumbs()
 const browseTitle = computed(() =>
 	formatMessage(isFromWorlds.value ? messages.discoverServers : messages.discoverContent),
 )
-
-function syncBreadcrumbs() {
-	breadcrumbs.setName('BrowseTitle', browseTitle.value)
-	if (!instance.value) {
-		breadcrumbs.setContext(null)
-		return
-	}
-
+breadcrumbs.setName('BrowseTitle', browseTitle.value)
+if (instance.value) {
 	const instanceLink = `/instance/${encodeURIComponent(instance.value.path)}`
 	breadcrumbs.setContext({
 		name: instance.value.name,
-		link: isFromWorlds.value ? `${instanceLink}/worlds` : `${instanceLink}/content`,
+		link: isFromWorlds.value ? `${instanceLink}/worlds` : instanceLink,
 	})
+} else {
+	breadcrumbs.setContext(null)
 }
-
-syncBreadcrumbs()
 
 onBeforeRouteLeave(() => {
 	breadcrumbs.setContext({
@@ -526,11 +517,7 @@ const selectableProjectTypes = computed(() => {
 	if (route.query.ai) params.ai = route.query.ai
 	if (route.query.from) params.from = route.query.from
 	if (route.query.sid) params.sid = route.query.sid
-	if (route.query.cid) params.cid = route.query.cid
-	if (route.query.source) params.source = route.query.source
-	if (effectiveServerWorldId.value && !coreInstanceIdQuery.value) {
-		params.wid = effectiveServerWorldId.value
-	}
+	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
 
 	const queryString = new URLSearchParams(params as Record<string, string>).toString()
 	const suffix = queryString ? `?${queryString}` : ''
@@ -561,7 +548,7 @@ const installContext = computed(() => {
 			name: serverContextServerData.value.name,
 			loader: serverContextServerData.value.loader ?? '',
 			gameVersion: serverContextServerData.value.mc_version ?? '',
-			serverId: coreInstanceIdQuery.value ?? serverIdQuery.value,
+			serverId: serverIdQuery.value,
 			upstream: serverContextServerData.value.upstream,
 			iconSrc: null as string | null,
 			isMedal: serverContextServerData.value.is_medal,
@@ -585,7 +572,7 @@ const installContext = computed(() => {
 			loader: instance.value.loader,
 			gameVersion: instance.value.game_version,
 			iconSrc: instance.value.icon_path ? convertFileSrc(instance.value.icon_path) : null,
-			backUrl: `/instance/${encodeURIComponent(instance.value.path)}${isFromWorlds.value ? '/worlds' : '/content'}`,
+			backUrl: `/instance/${encodeURIComponent(instance.value.path)}${isFromWorlds.value ? '/worlds' : ''}`,
 			backLabel: formatMessage(messages.backToInstance),
 			heading: formatMessage(
 				isFromWorlds.value ? messages.addServersToInstance : commonMessages.installingContentLabel,
@@ -825,7 +812,7 @@ function getCardActions(
 							}
 						},
 						(profile) => {
-							router.push(`/instance/${encodeURIComponent(profile)}/content`)
+							router.push(`/instance/${profile}`)
 						},
 						{
 							preferredLoader: instance.value?.loader ?? selectedPreferences.loaders?.[0],
@@ -935,12 +922,10 @@ const searchState = useBrowseSearch({
 	tags,
 	providedFilters: combinedProvidedFilters,
 	search,
-	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'cid', 'source', 'wid', 'from'],
+	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
-		cid: coreInstanceIdQuery.value || undefined,
-		source: coreInstanceIdQuery.value ? 'core' : undefined,
-		wid: !coreInstanceIdQuery.value ? effectiveServerWorldId.value || undefined : undefined,
+		wid: effectiveServerWorldId.value || undefined,
 		ai: instanceHideInstalled.value ? 'true' : undefined,
 		shi: serverHideInstalled.value ? 'true' : undefined,
 	}),
@@ -969,9 +954,7 @@ watch(queuedServerInstallCount, (count) => {
 	}
 })
 
-function applyInstanceServerGameVersionFilter() {
-	if (!instance.value?.game_version) return
-
+if (instance.value?.game_version) {
 	const gv = instance.value.game_version
 	const alreadyHasGv = searchState.serverCurrentFilters.value.some(
 		(f) => f.type === 'server_game_version' && f.option === gv,
@@ -981,12 +964,7 @@ function applyInstanceServerGameVersionFilter() {
 	}
 }
 
-onMounted(async () => {
-	await Promise.all([initTags().catch(handleError), initInstanceContext().catch(handleError)])
-	syncBreadcrumbs()
-	applyInstanceServerGameVersionFilter()
-	await searchState.refreshSearch()
-})
+await searchState.refreshSearch()
 
 function getProjectBrowseQuery() {
 	if (!installContext.value) return undefined

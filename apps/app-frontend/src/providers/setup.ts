@@ -1,4 +1,3 @@
-import type { CoreInstanceStateManager } from '@amberite/amberite-api'
 import type { AbstractPopupNotificationManager, AbstractWebNotificationManager } from '@modrinth/ui'
 
 import { setupCreationModal } from './setup/creation-modal'
@@ -9,13 +8,12 @@ import { setupTagsProvider } from './setup/tags'
 export function setupProviders(
 	notificationManager: AbstractWebNotificationManager,
 	popupNotificationManager: AbstractPopupNotificationManager,
-	coreInstances: CoreInstanceStateManager,
 ) {
 	setupTagsProvider(notificationManager)
 	setupFilePickerProvider()
 	setupInstanceImportProvider(notificationManager)
 
 	return {
-		...setupCreationModal(notificationManager, popupNotificationManager, coreInstances),
+		...setupCreationModal(notificationManager, popupNotificationManager),
 	}
 }

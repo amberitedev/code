@@ -1,4 +1,3 @@
-export * from './core'
 export * from './shared/browse-tab'
 export * from './shared/console'
 export * from './shared/content-tab'

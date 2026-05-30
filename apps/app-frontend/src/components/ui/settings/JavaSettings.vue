@@ -1,18 +1,13 @@
 <script setup>
 import { injectNotificationManager } from '@modrinth/ui'
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 
 import JavaSelector from '@/components/ui/JavaSelector.vue'
 import { get_java_versions, set_java_version } from '@/helpers/jre'
 
 const { handleError } = injectNotificationManager()
 
-const javaVersions = ref(null)
-
-onMounted(async () => {
-	javaVersions.value = await get_java_versions().catch(handleError)
-})
-
+const javaVersions = ref(await get_java_versions().catch(handleError))
 async function updateJavaVersion(version) {
 	if (version?.path === '') {
 		version.path = undefined
@@ -26,7 +21,7 @@ async function updateJavaVersion(version) {
 }
 </script>
 <template>
-	<div v-if="javaVersions" class="flex flex-col gap-6">
+	<div class="flex flex-col gap-6">
 		<div
 			v-for="(javaVersion, index) in [25, 21, 17, 8]"
 			:key="`java-${javaVersion}`"

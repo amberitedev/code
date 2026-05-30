@@ -18,8 +18,8 @@ use std::{
 
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use theseus::prelude::tcp_listen_any_loopback;
 use theseus::ErrorKind;
+use theseus::prelude::tcp_listen_any_loopback;
 use tokio::sync::{broadcast, oneshot};
 
 static SERVER_SHUTDOWN: LazyLock<broadcast::Sender<()>> =
@@ -62,14 +62,14 @@ pub async fn listen(
     let mut shutdown_notification = SERVER_SHUTDOWN.subscribe();
 
     while auth_code.get_mut().unwrap().is_none() {
-        let (client_socket, peer_addr) = tokio::select! {
+        let client_socket = tokio::select! {
             biased;
             _ = shutdown_notification.recv() => {
                 break;
             }
             conn_accept_result = listener.accept() => {
                 match conn_accept_result {
-                    Ok((socket, peer_addr)) => (socket, peer_addr),
+                    Ok((socket, _)) => socket,
                     Err(e) => {
                         tracing::warn!("Failed to accept auth code reply: {e}");
                         continue;
@@ -85,9 +85,7 @@ pub async fn listen(
             .auto_date_header(false)
             .serve_connection(
                 TokioIo::new(client_socket),
-                hyper::service::service_fn(|req| {
-                    handle_reply(req, &auth_code, peer_addr)
-                }),
+                hyper::service::service_fn(|req| handle_reply(req, &auth_code)),
             )
             .await
         {
@@ -106,14 +104,7 @@ pub fn stop_listeners() {
 async fn handle_reply(
     req: hyper::Request<Incoming>,
     auth_code_out: &Mutex<Option<String>>,
-    peer_addr: SocketAddr,
 ) -> Result<hyper::Response<String>, hyper::http::Error> {
-    if !peer_addr.ip().is_loopback() {
-        return hyper::Response::builder()
-            .status(hyper::StatusCode::FORBIDDEN)
-            .body("".into());
-    }
-
     if req.method() != hyper::Method::GET {
         return hyper::Response::builder()
             .status(hyper::StatusCode::METHOD_NOT_ALLOWED)

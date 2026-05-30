@@ -15,7 +15,6 @@ import type {
 	ContentFileProjectType,
 	GameInstance,
 	InstanceLoader,
-	ProfileKind,
 } from './types'
 
 // Add instance
@@ -37,9 +36,6 @@ export async function create(
 	icon: string | null,
 	skipInstall: boolean,
 	linkedData?: { project_id: string; version_id: string; locked: boolean } | null,
-	kind?: ProfileKind | null,
-	port?: number | null,
-	coreInstanceId?: string | null,
 ): Promise<string> {
 	// Trim string name to avoid "Unable to find directory"
 	name = name.trim()
@@ -51,9 +47,6 @@ export async function create(
 		icon,
 		skipInstall,
 		linkedData,
-		kind,
-		port,
-		coreInstanceId,
 	})
 }
 
@@ -154,9 +147,16 @@ export async function get_mod_full_path(path: string, projectPath: string): Prom
 	return await invoke('plugin:profile|profile_get_mod_full_path', { path, projectPath })
 }
 
+export interface JavaVersion {
+	parsed_version: number
+	version: string
+	architecture: string
+	path: string
+}
+
 // Get optimal java version from profile
 // Returns a java version
-export async function get_optimal_jre_key(path: string): Promise<string | null> {
+export async function get_optimal_jre_key(path: string): Promise<JavaVersion | null> {
 	return await invoke('plugin:profile|profile_get_optimal_jre_key', { path })
 }
 
@@ -289,11 +289,7 @@ export async function kill(path: string): Promise<void> {
 }
 
 // Edits a profile
-export type EditGameInstance = Partial<Omit<GameInstance, 'core_instance_id'>> & {
-	core_instance_id?: string | null
-}
-
-export async function edit(path: string, editProfile: EditGameInstance): Promise<void> {
+export async function edit(path: string, editProfile: Partial<GameInstance>): Promise<void> {
 	return await invoke('plugin:profile|profile_edit', { path, editProfile })
 }
 

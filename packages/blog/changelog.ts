@@ -11,6 +11,111 @@ export type VersionEntry = {
 
 const VERSIONS: VersionEntry[] = [
 	{
+		date: `2026-05-29T23:08:28+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed revenue not showing in 'All time' queries`,
+	},
+	{
+		date: `2026-05-29T22:06:30+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed lack of error notification when analytics errors.
+- Fixed failing to fetch analytics for an obscene amount of projects.`,
+	},
+	{
+		date: `2026-05-29T20:01:16+00:00`,
+		product: 'web',
+		body: `## Changed
+- Completely overhauled project analytics. See our [blog post](https://modrinth.com/news/article/analytics-overhaul/) to learn about it!
+
+## Fixed
+- Fixed i18n bug in the resubmit project modal.`,
+	},
+	{
+		date: `2026-05-29T01:44:44+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Account sign in buttons were showing in mobile navbar on iOs when hidden`,
+	},
+	{
+		date: `2026-05-27T22:30:20+00:00`,
+		product: 'app',
+		version: '0.14.0',
+		body: `## Added
+- Skin selections can now be previewed in the Skin selector before applying or resetting them.
+- The Tiny Takeover default skin pack in the Skin selector.
+- The skin preview in the Skin selections page now feels pain.
+
+## Changed
+- Renamed the Skins page to Skin selector and removed its beta label.
+- Redesigned the Skin selector with a sticky preview, larger skin cards, and collapsible skin pack sections.
+- Moved PNG skin uploads from a separate modal to the Add skin card in Saved skins.
+- Changed cape selection so each saved skin controls its own cape instead of using a separate default cape.
+- Moved cape selection into the Edit skin modal, with a \`None\` option for saving skins without capes.
+- Updated skin previews for more consistent framing across the Skin selector, skin editor, and skin cards.
+- Skin and cape changes made outside Modrinth App are now reflected when the Skin selector refreshes or on app launch safely.
+- Images from \`user-images.githubusercontent.com\` are no longer proxied.
+
+## Fixed
+- Fixed duplicate saved skin cards appearing when the same texture was saved with different arm or cape settings.
+- Fixed skins equipped outside Modrinth App disappearing from the Skin selector after switching to another skin.
+- Fixed skin selection hanging when a skin texture download stopped responding.
+- Fixed the hide nametag setting not updating the Skin selector preview until the page refreshed.`,
+	},
+	{
+		date: `2026-05-27T22:30:20+00:00`,
+		product: 'web',
+		body: `## Changed
+- Images from \`user-images.githubusercontent.com\` are no longer proxied.`,
+	},
+	{
+		date: `2026-05-24T17:46:23+00:00`,
+		product: 'web',
+		body: `## Changed
+- Updated translations.
+
+## Fixed
+- Fixed occasional error when loading version pages.`,
+	},
+	{
+		date: `2026-05-24T17:46:23+00:00`,
+		product: 'app',
+		version: '0.13.24',
+		body: `## Changed
+- Updated translations.`,
+	},
+	{
+		date: `2026-05-24T16:26:23+00:00`,
+		product: 'app',
+		version: '0.13.23',
+		body: `## Fixed
+- Fixed the discover page not working when the spanish language is selected.`,
+	},
+	{
+		date: `2026-05-24T16:26:23+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed the discover page not working when the spanish language is selected.`,
+	},
+	{
+		date: `2026-05-24T05:00:37+00:00`,
+		product: 'app',
+		version: '0.13.22',
+		body: `## Added
+- Added log spam detection and line compacting logic to prevent Modrinth App from crashing when viewing large log files.
+
+## Changed
+- Increased the default memory for instances from 2GB to 4GB (depending on your system memory).
+- Improved "Java installation" settings page design. Thanks [@creeperkatze](https://github.com/creeperkatze)`,
+	},
+	{
+		date: `2026-05-24T05:00:37+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed an issue where the page fails to load sometimes, requiring you to delete your cookies.`,
+	},
+	{
 		date: `2026-05-21T22:13:35+00:00`,
 		product: 'web',
 		body: `## Fixed

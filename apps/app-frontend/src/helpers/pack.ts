@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import { create } from './profile'
-import type { InstanceLoader, ProfileKind } from './types'
+import type { InstanceLoader } from './types'
 
 interface PackProfileCreator {
 	name: string
@@ -24,20 +24,12 @@ interface PackLocationFile {
 	path: string
 }
 
-interface PackCreateOptions {
-	kind?: ProfileKind | null
-	coreInstanceId?: string | null
-	port?: number | null
-	installLocalPack?: boolean
-}
-
 export async function create_profile_and_install(
 	projectId: string,
 	versionId: string,
 	packTitle: string,
 	iconUrl?: string,
 	createInstanceCallback: (profile: string) => void = () => {},
-	options: PackCreateOptions = {},
 ): Promise<void> {
 	const location: PackLocationVersionId = {
 		type: 'fromVersionId',
@@ -57,14 +49,8 @@ export async function create_profile_and_install(
 		profile_creator.loaderVersion,
 		null,
 		true,
-		undefined,
-		options.kind,
-		options.port,
-		options.coreInstanceId,
 	)
 	createInstanceCallback(profile)
-
-	if (options.installLocalPack === false) return
 
 	return await invoke('plugin:pack|pack_install', { location, profile })
 }
@@ -87,7 +73,6 @@ export async function install_to_existing_profile(
 export async function create_profile_and_install_from_file(
 	path: string,
 	showUnknownPackWarningModal?: (createProfile: () => Promise<void>, fileName: string) => void,
-	options: PackCreateOptions = {},
 ): Promise<void> {
 	const location: PackLocationFile = {
 		type: 'fromFile',
@@ -106,14 +91,8 @@ export async function create_profile_and_install_from_file(
 			profile_creator.loaderVersion,
 			null,
 			true,
-			undefined,
-			options.kind,
-			options.port,
-			options.coreInstanceId,
 		)
-		if (options.installLocalPack !== false) {
-			await invoke('plugin:pack|pack_install', { location, profile })
-		}
+		await invoke('plugin:pack|pack_install', { location, profile })
 	}
 
 	if (profile_creator.unknownFile && showUnknownPackWarningModal) {

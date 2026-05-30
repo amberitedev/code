@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PlusIcon } from '@modrinth/assets'
 import { ButtonStyled, injectNotificationManager, NavTabs } from '@modrinth/ui'
-import { inject, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { inject, onUnmounted, ref, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { NewInstanceImage } from '@/assets/icons'
@@ -14,7 +14,9 @@ const showCreationModal = inject('showCreationModal')
 const route = useRoute()
 const breadcrumbs = useBreadcrumbs()
 
-const instances = shallowRef([])
+breadcrumbs.setRootContext({ name: 'Library', link: route.path })
+
+const instances = shallowRef(await list().catch(handleError))
 
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
@@ -24,20 +26,11 @@ window.addEventListener('online', () => {
 	offline.value = false
 })
 
-let unlistenProfile
-
-async function refreshInstances() {
-	instances.value = (await list().catch(handleError)) ?? []
-}
-
-onMounted(async () => {
-	breadcrumbs.setRootContext({ name: 'Library', link: route.path })
-	await refreshInstances()
-	unlistenProfile = await profile_listener(refreshInstances)
+const unlistenProfile = await profile_listener(async () => {
+	instances.value = await list().catch(handleError)
 })
-
 onUnmounted(() => {
-	unlistenProfile?.()
+	unlistenProfile()
 })
 </script>
 

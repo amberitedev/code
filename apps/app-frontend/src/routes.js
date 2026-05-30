@@ -5,8 +5,6 @@ import * as Hosting from '@/pages/hosting/manage'
 import * as Instance from '@/pages/instance'
 import * as Library from '@/pages/library'
 import * as Project from '@/pages/project'
-import * as Server from '@/pages/server'
-import * as Synced from '@/pages/synced'
 
 /**
  * Configures application routing. Add page to pages/index and then add to route table here.
@@ -20,22 +18,6 @@ export default new createRouter({
 			component: Pages.Index,
 			meta: {
 				breadcrumb: [{ name: 'Home' }],
-			},
-		},
-		{
-			path: '/core',
-			name: 'Core',
-			component: Pages.Core,
-			meta: {
-				breadcrumb: [{ name: 'Core' }],
-			},
-		},
-		{
-			path: '/core/setup',
-			name: 'CoreSetup',
-			component: Pages.CoreSetup,
-			meta: {
-				breadcrumb: [{ name: 'Core', link: '/core' }, { name: 'Setup' }],
 			},
 		},
 		{
@@ -94,99 +76,6 @@ export default new createRouter({
 			],
 		},
 		{
-			path: '/server/:id',
-			name: 'ServerInstance',
-			component: Server.Index,
-			props: true,
-			children: [
-				{
-					path: '',
-					name: 'ServerInstanceOverview',
-					component: Server.Overview,
-					meta: {
-						breadcrumb: [{ name: '?Server' }],
-					},
-				},
-				{
-					path: 'console',
-					name: 'ServerInstanceConsole',
-					component: Server.Console,
-					meta: {
-						renderMode: 'fixed',
-						breadcrumb: [{ name: '?Server' }],
-					},
-				},
-				{
-					path: 'content',
-					name: 'ServerInstanceContent',
-					component: Server.Content,
-					meta: {
-						breadcrumb: [{ name: '?Server' }],
-					},
-				},
-				{
-					path: 'files',
-					name: 'ServerInstanceFiles',
-					component: Server.Files,
-					meta: {
-						breadcrumb: [{ name: '?Server' }],
-					},
-				},
-				{
-					path: 'backups',
-					name: 'ServerInstanceBackups',
-					component: Server.Backups,
-					meta: {
-						breadcrumb: [{ name: '?Server' }],
-					},
-				},
-			],
-		},
-		{
-			path: '/synced/:id',
-			name: 'SyncedInstance',
-			component: Synced.Index,
-			props: true,
-			children: [
-				{
-					path: '',
-					name: 'SyncedMods',
-					component: Synced.Mods,
-					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
-				},
-				{
-					path: 'files',
-					name: 'SyncedFiles',
-					component: Synced.Files,
-					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
-				},
-				{
-					path: 'worlds',
-					name: 'SyncedWorlds',
-					component: Synced.Worlds,
-					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
-				},
-				{
-					path: 'logs',
-					name: 'SyncedLogs',
-					component: Synced.Logs,
-					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?SyncedInstance' }] },
-				},
-				{
-					path: 'console',
-					name: 'SyncedConsole',
-					component: Synced.Console,
-					meta: { renderMode: 'fixed', breadcrumb: [{ name: '?SyncedInstance' }] },
-				},
-				{
-					path: 'backups',
-					name: 'SyncedBackups',
-					component: Synced.Backups,
-					meta: { breadcrumb: [{ name: '?SyncedInstance' }] },
-				},
-			],
-		},
-		{
 			path: '/browse/:projectType',
 			name: 'Discover content',
 			component: Pages.Browse,
@@ -197,10 +86,10 @@ export default new createRouter({
 		},
 		{
 			path: '/skins',
-			name: 'Skins',
+			name: 'Skin selector',
 			component: Pages.Skins,
 			meta: {
-				breadcrumb: [{ name: 'Skins' }],
+				breadcrumb: [{ name: 'Skin selector' }],
 			},
 		},
 		{
@@ -300,28 +189,28 @@ export default new createRouter({
 			component: Instance.Index,
 			props: true,
 			children: [
-				{
-					path: '',
-					name: 'InstanceOverview',
-					component: Instance.Overview,
-					meta: {
-						useRootContext: true,
-						breadcrumb: [{ name: '?Instance' }],
-					},
-				},
+				// {
+				//   path: '',
+				//   name: 'Overview',
+				//   component: Instance.Overview,
+				//   meta: {
+				//     useRootContext: true,
+				//     breadcrumb: [{ name: '?Instance' }],
+				//   },
+				// },
 				{
 					path: 'worlds',
 					name: 'InstanceWorlds',
-					component: Instance.WorldsPage,
+					component: Instance.Worlds,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Worlds' }],
 					},
 				},
 				{
-					path: 'content',
-					name: 'InstanceContent',
-					component: Instance.Content,
+					path: '',
+					name: 'Mods',
+					component: Instance.Mods,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Content' }],
@@ -329,26 +218,17 @@ export default new createRouter({
 				},
 				{
 					path: 'projects/:type',
-					name: 'InstanceContentFilter',
-					component: Instance.Content,
+					name: 'ModsFilter',
+					component: Instance.Mods,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Content' }],
 					},
 				},
 				{
-					path: 'backups',
-					name: 'InstanceBackups',
-					component: Instance.Backups,
-					meta: {
-						useRootContext: true,
-						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Backups' }],
-					},
-				},
-				{
 					path: 'files',
-					name: 'InstanceFiles',
-					component: Instance.FilesPage,
+					name: 'Files',
+					component: Instance.Files,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Files' }],
@@ -356,21 +236,12 @@ export default new createRouter({
 				},
 				{
 					path: 'logs',
-					name: 'InstanceLogs',
-					component: Instance.LogsPage,
+					name: 'Logs',
+					component: Instance.Logs,
 					meta: {
 						useRootContext: true,
-						renderMode: 'fixed',
+						// renderMode: 'fixed',
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Logs' }],
-					},
-				},
-				{
-					path: 'settings',
-					name: 'InstanceSettings',
-					component: Instance.Settings,
-					meta: {
-						useRootContext: true,
-						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Settings' }],
 					},
 				},
 			],
@@ -382,8 +253,6 @@ export default new createRouter({
 		if (to.path === from.path) return
 		// Sometimes Vue's scroll behavior is not working as expected, so we need to manually scroll to top (especially on Linux)
 		document.querySelector('.app-viewport')?.scrollTo(0, 0)
-		const el = document.querySelector('.app-viewport')
-		if (!el) return { top: 0 }
 		return {
 			el: '.app-viewport',
 			top: 0,

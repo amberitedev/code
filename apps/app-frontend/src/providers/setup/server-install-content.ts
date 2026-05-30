@@ -1,4 +1,3 @@
-import { CoreApiClient } from '@amberite/amberite-api'
 import type { AbstractModrinthClient, Archon, Labrinth } from '@modrinth/api-client'
 import {
 	addPendingServerContentInstalls,
@@ -22,8 +21,6 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type ComputedRef, nextTick, type Ref, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getDesktopAdapter } from '@/adapters/desktop'
-
 type ServerFlowFrom = 'onboarding' | 'reset-server'
 
 type InstallableSearchResult = Labrinth.Search.v3.ResultSearchProject & {
@@ -32,7 +29,6 @@ type InstallableSearchResult = Labrinth.Search.v3.ResultSearchProject & {
 	installed?: boolean
 }
 type PendingServerContentInstallInput = Omit<PendingServerContentInstall, 'createdAt'>
-const coreInstallQueueWorldId = 'core'
 
 export interface ServerModpackSelectionRequest {
 	projectId: string
@@ -49,7 +45,6 @@ interface ServerSetupModalHandle {
 
 export interface ServerInstallContentContext {
 	serverIdQuery: ComputedRef<string | null>
-	coreInstanceIdQuery: ComputedRef<string | null>
 	worldIdQuery: ComputedRef<string | null>
 	browseFrom: ComputedRef<string | null>
 	serverFlowFrom: ComputedRef<ServerFlowFrom | null>
@@ -217,11 +212,8 @@ export function createServerInstallContent(opts: {
 	const queryClient = useQueryClient()
 
 	const serverIdQuery = computed(() => readQueryString(route.query.sid))
-	const coreInstanceIdQuery = computed(() => readQueryString(route.query.cid))
-	const installTargetServerId = computed(() => coreInstanceIdQuery.value ?? serverIdQuery.value)
 	const worldIdQuery = computed(() => readQueryString(route.query.wid))
 	const browseFrom = computed(() => readQueryString(route.query.from))
-	const backOverride = computed(() => readQueryString(route.query.back))
 	const serverFlowFrom = computed<ServerFlowFrom | null>(() =>
 		browseFrom.value === 'onboarding' || browseFrom.value === 'reset-server'
 			? browseFrom.value
@@ -229,11 +221,8 @@ export function createServerInstallContent(opts: {
 	)
 
 	const isFromWorlds = computed(() => browseFrom.value === 'worlds')
-	const isServerContext = computed(() => !!installTargetServerId.value)
-	const isSetupServerContext = computed(
-		() => !!installTargetServerId.value && !!serverFlowFrom.value,
-	)
-	const isCoreContext = computed(() => route.query.source === 'core')
+	const isServerContext = computed(() => !!serverIdQuery.value)
+	const isSetupServerContext = computed(() => !!serverIdQuery.value && !!serverFlowFrom.value)
 
 	const serverContextWorldId = ref<string | null>(worldIdQuery.value)
 	const serverContextServerData = ref<Archon.Servers.v0.Server | null>(null)
@@ -253,19 +242,9 @@ export function createServerInstallContent(opts: {
 	)
 	const isInstallingQueuedServerInstalls = ref(false)
 	const queuedInstallProgress = ref({ completed: 0, total: 0 })
-	const effectiveServerWorldId = computed(() =>
-		isCoreContext.value
-			? coreInstallQueueWorldId
-			: (worldIdQuery.value ?? serverContextWorldId.value),
-	)
-	const storedInstallWorldId = computed(() =>
-		isCoreContext.value ? coreInstallQueueWorldId : effectiveServerWorldId.value,
-	)
-	const visibleServerWorldId = computed(() =>
-		isCoreContext.value ? null : effectiveServerWorldId.value,
-	)
+	const effectiveServerWorldId = computed(() => worldIdQuery.value ?? serverContextWorldId.value)
 	const serverBackUrl = computed(() => {
-		const sid = installTargetServerId.value
+		const sid = serverIdQuery.value
 		if (!sid) return '/hosting/manage'
 		if (serverFlowFrom.value === 'onboarding') {
 			return `/hosting/manage/${sid}?resumeModal=setup-type`
@@ -273,10 +252,7 @@ export function createServerInstallContent(opts: {
 		if (serverFlowFrom.value === 'reset-server') {
 			return `/hosting/manage/${sid}?openSettings=installation`
 		}
-		if (isCoreContext.value) {
-			return backOverride.value ?? `/instance/${encodeURIComponent(sid)}/content`
-		}
-		return backOverride.value ?? `/hosting/manage/${sid}/content`
+		return `/hosting/manage/${sid}/content`
 	})
 	const serverBackLabel = computed(() => {
 		if (serverFlowFrom.value === 'onboarding') return 'Back to setup'
@@ -319,61 +295,9 @@ export function createServerInstallContent(opts: {
 		}
 	}
 
-	async function fetchCoreServerData(sid: string) {
-		const adapter = getDesktopAdapter()
-		const coreClient = new CoreApiClient(adapter)
-		const instance = await coreClient.getInstance(sid)
-		serverContextServerData.value = {
-			server_id: instance.id,
-			name: instance.name,
-			owner_id: '',
-			net: { ip: '127.0.0.1', port: instance.port, domain: '' },
-			game: 'Minecraft',
-			backup_quota: 0,
-			used_backup_quota: 0,
-			status: 'available',
-			suspension_reason: null,
-			loader: instance.loader as Archon.Servers.v0.Loader,
-			loader_version: instance.loader_version ?? '',
-			mc_version: instance.game_version,
-			upstream: null,
-			sftp_username: '',
-			sftp_password: '',
-			sftp_host: '',
-			datacenter: 'local',
-			notices: [],
-			node: null,
-			flows: { intro: false },
-			is_medal: false,
-		} as Archon.Servers.v0.Server
-	}
-
-	async function refreshCoreInstalledContent(sid: string) {
-		const adapter = getDesktopAdapter()
-		const coreClient = new CoreApiClient(adapter)
-		const mods = await coreClient.listMods(sid)
-		serverContentProjectIds.value = new Set(
-			mods.map((m) => m.modrinth_project_id).filter((id): id is string => !!id),
-		)
-		serverContentInstallKeys.value = new Set(
-			mods.map((m) => m.modrinth_project_id ?? m.filename).filter(Boolean),
-		)
-	}
-
 	async function initServerContext() {
-		const sid = installTargetServerId.value
+		const sid = serverIdQuery.value
 		if (!sid) return
-
-		if (isCoreContext.value) {
-			try {
-				await fetchCoreServerData(sid)
-				await refreshCoreInstalledContent(sid)
-				queuedServerInstalls.value = readStoredServerInstallQueue(sid, coreInstallQueueWorldId)
-			} catch (err) {
-				handleError(err as Error)
-			}
-			return
-		}
 
 		try {
 			serverContextServerData.value = await client.archon.servers_v0.get(sid)
@@ -396,7 +320,7 @@ export function createServerInstallContent(opts: {
 	}
 
 	function watchServerContextChanges() {
-		watch([installTargetServerId, storedInstallWorldId], async ([sid, wid], [prevSid, prevWid]) => {
+		watch([serverIdQuery, effectiveServerWorldId], async ([sid, wid], [prevSid, prevWid]) => {
 			if (!sid) {
 				serverContextServerData.value = null
 				serverContentProjectIds.value = new Set()
@@ -409,15 +333,6 @@ export function createServerInstallContent(opts: {
 				serverContentProjectIds.value = new Set()
 				serverContentInstallKeys.value = new Set()
 				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
-				if (isCoreContext.value) {
-					try {
-						await fetchCoreServerData(sid)
-						await refreshCoreInstalledContent(sid)
-					} catch (err) {
-						handleError(err as Error)
-					}
-					return
-				}
 				try {
 					serverContextServerData.value = await client.archon.servers_v0.get(sid)
 				} catch (err) {
@@ -429,7 +344,7 @@ export function createServerInstallContent(opts: {
 				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
 			}
 
-			if (!isCoreContext.value && wid && (sid !== prevSid || wid !== prevWid)) {
+			if (wid && (sid !== prevSid || wid !== prevWid)) {
 				await refreshServerInstalledContent(sid, wid)
 			}
 		})
@@ -457,24 +372,9 @@ export function createServerInstallContent(opts: {
 		return versions.map((version) => ({ id: version.id }))
 	}
 
-	async function installCoreModpack(sid: string, request: ServerModpackSelectionRequest) {
-		const coreClient = new CoreApiClient(getDesktopAdapter())
-		await coreClient.installModpackVersion(sid, request.projectId, request.versionId)
-		serverContentProjectIds.value = new Set([...serverContentProjectIds.value, request.projectId])
-		serverContentInstallKeys.value = new Set([...serverContentInstallKeys.value, request.projectId])
-		await refreshCoreInstalledContent(sid)
-	}
-
 	async function openServerModpackInstallFlow(request: ServerModpackSelectionRequest) {
-		const sid = installTargetServerId.value
-		if (!sid || (!isCoreContext.value && !effectiveServerWorldId.value)) {
+		if (!serverIdQuery.value || !effectiveServerWorldId.value) {
 			throw new Error('Missing server context')
-		}
-
-		if (isCoreContext.value) {
-			await installCoreModpack(sid, request)
-			await router.push(serverBackUrl.value)
-			return
 		}
 
 		const modalInstance = serverSetupModalRef.value
@@ -508,18 +408,18 @@ export function createServerInstallContent(opts: {
 
 	function setStoredServerInstallPlans(
 		serverId: string,
-		worldId: string | null,
+		worldId: string,
 		plans: Map<string, BrowseInstallPlan<InstallableSearchResult>>,
 	) {
-		if (serverId === installTargetServerId.value && worldId === storedInstallWorldId.value) {
+		if (serverId === serverIdQuery.value && worldId === effectiveServerWorldId.value) {
 			queuedServerInstalls.value = plans
 		}
 		writeStoredServerInstallQueue(serverId, worldId, plans)
 	}
 
 	async function flushQueuedServerInstalls(
-		serverId: string | null = installTargetServerId.value,
-		worldId: string | null = storedInstallWorldId.value,
+		serverId: string | null = serverIdQuery.value,
+		worldId: string | null = effectiveServerWorldId.value,
 	) {
 		if (isInstallingQueuedServerInstalls.value) return false
 
@@ -541,22 +441,15 @@ export function createServerInstallContent(opts: {
 			const result = await flushStoredServerAddonInstallQueue({
 				serverId,
 				worldId,
-				install: async (plans) => {
-					if (isCoreContext.value) {
-						const adapter = getDesktopAdapter()
-						const coreClient = new CoreApiClient(adapter)
-						await Promise.all(plans.map((plan) => coreClient.addMod(serverId, plan.versionId)))
-						return
-					}
-					await client.archon.content_v1.addAddons(
+				install: (plans) =>
+					client.archon.content_v1.addAddons(
 						serverId,
 						worldId,
 						plans.map((plan) => ({
 							project_id: plan.projectId,
 							version_id: plan.versionId,
 						})),
-					)
-				},
+					),
 				onQueueChange: (plans) => setStoredServerInstallPlans(serverId, worldId, plans),
 			})
 
@@ -566,10 +459,6 @@ export function createServerInstallContent(opts: {
 				}
 				handleError(result.error as Error)
 				return false
-			}
-
-			if (isCoreContext.value) {
-				await refreshCoreInstalledContent(serverId)
 			}
 
 			queuedInstallProgress.value = {
@@ -601,16 +490,10 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function installQueuedServerInstallsAndBack() {
-		const sid = installTargetServerId.value
-		const wid = storedInstallWorldId.value
+		const sid = serverIdQuery.value
+		const wid = effectiveServerWorldId.value
 		const backUrl = serverBackUrl.value
 		const plans = new Map(queuedServerInstalls.value)
-
-		if (isCoreContext.value) {
-			const installed = await flushQueuedServerInstalls(sid, wid)
-			if (installed) await router.push(backUrl)
-			return installed
-		}
 
 		if (sid && wid) {
 			writeStoredServerInstallQueue(sid, wid, plans)
@@ -643,7 +526,7 @@ export function createServerInstallContent(opts: {
 		plans: Map<string, BrowseInstallPlan<InstallableSearchResult>>,
 	) {
 		queuedServerInstalls.value = plans
-		writeStoredServerInstallQueue(installTargetServerId.value, storedInstallWorldId.value, plans)
+		writeStoredServerInstallQueue(serverIdQuery.value, effectiveServerWorldId.value, plans)
 	}
 
 	function onServerFlowBack() {
@@ -651,20 +534,9 @@ export function createServerInstallContent(opts: {
 	}
 
 	async function handleServerModpackFlowCreate(config: CreationFlowContextValue) {
-		const sid = installTargetServerId.value
-		if (!sid || !config.modpackSelection.value) {
-			config.loading.value = false
-			return
-		}
-
-		if (isCoreContext.value) {
-			handleError(new Error('Modpack installation is not supported for local Core servers.'))
-			config.loading.value = false
-			return
-		}
-
+		const sid = serverIdQuery.value
 		const wid = effectiveServerWorldId.value
-		if (!wid) {
+		if (!sid || !wid || !config.modpackSelection.value) {
 			config.loading.value = false
 			return
 		}
@@ -701,14 +573,13 @@ export function createServerInstallContent(opts: {
 
 	return {
 		serverIdQuery,
-		coreInstanceIdQuery,
 		worldIdQuery,
 		browseFrom,
 		serverFlowFrom,
 		isFromWorlds,
 		isServerContext,
 		isSetupServerContext,
-		effectiveServerWorldId: visibleServerWorldId,
+		effectiveServerWorldId,
 		serverContextServerData,
 		serverContentProjectIds,
 		queuedServerInstallProjectIds,

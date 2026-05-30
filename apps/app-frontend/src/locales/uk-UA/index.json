@@ -168,7 +168,7 @@
     "message": "Назва збірки"
   },
   "app.export-modal.select-files-label": {
-    "message": "Змінити які файли додані до експорту"
+    "message": "Змініть файли, які додані до експорту"
   },
   "app.export-modal.version-number-label": {
     "message": "Номер версії"
@@ -222,10 +222,7 @@
     "message": "Додати сервер"
   },
   "app.instance.worlds.browse-servers": {
-    "message": "Переглянути сервера"
-  },
-  "app.instance.worlds.delete-world-description": {
-    "message": "«{name}» буде **назавжди видалено** й у вас не буде можливости відновлення."
+    "message": "Переглянути сервери"
   },
   "app.instance.worlds.delete-world-title": {
     "message": "Ви впевнені, що хочете назавжди видалити цей світ?"
@@ -248,12 +245,6 @@
   "app.instance.worlds.no-worlds-heading": {
     "message": "Сервера або світи не додано"
   },
-  "app.instance.worlds.remove-server-description": {
-    "message": "«{name}» буде видалено з вашого списку, включно в грі, і без можливости відновлення."
-  },
-  "app.instance.worlds.remove-server-description-with-address": {
-    "message": "«{name}» ({address}) буде видалено з вашого списку, включно в грі, і без можливости відновлення."
-  },
   "app.instance.worlds.remove-server-title": {
     "message": "Ви впевнені, що хочете видалити «{name}»?"
   },
@@ -271,9 +262,6 @@
   },
   "app.modal.install-to-play.install-button": {
     "message": "Установити"
-  },
-  "app.modal.install-to-play.mod-count": {
-    "message": "{count, plural, one {# мод} few {# мода} other {# модів}}"
   },
   "app.modal.install-to-play.required-modpack": {
     "message": "Потрібна збірка"
@@ -394,9 +382,6 @@
   },
   "friends.action.add-friend": {
     "message": "Додати друга"
-  },
-  "friends.action.view-friend-requests": {
-    "message": "{count} запит{count, plural, one { у} few {и в} many {ів у} other {у в}} друзі"
   },
   "friends.add-friend.submit": {
     "message": "Надіслати запит у друзі"
@@ -611,6 +596,24 @@
   "instance.settings.tabs.java": {
     "message": "Java та пам’ять"
   },
+  "instance.settings.tabs.java.custom-environment-variables": {
+    "message": "Власні змінні середовища"
+  },
+  "instance.settings.tabs.java.custom-java-arguments": {
+    "message": "Власні аргументи Java"
+  },
+  "instance.settings.tabs.java.custom-java-installation": {
+    "message": "Власна інсталяція Java"
+  },
+  "instance.settings.tabs.java.custom-memory-allocation": {
+    "message": "Власний розподіл пам'яті"
+  },
+  "instance.settings.tabs.java.enter-environment-variables": {
+    "message": "Уведіть змінні середовища…"
+  },
+  "instance.settings.tabs.java.enter-java-arguments": {
+    "message": "Уведіть аргументи Java…"
+  },
   "instance.settings.tabs.java.environment-variables": {
     "message": "Змінні середовища"
   },
@@ -625,6 +628,9 @@
   },
   "instance.settings.tabs.java.java-memory": {
     "message": "Виділена пам’ять"
+  },
+  "instance.settings.tabs.java.java-path-placeholder": {
+    "message": "/шлях/до/java"
   },
   "instance.settings.tabs.window": {
     "message": "Вікно"

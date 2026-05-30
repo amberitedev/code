@@ -130,7 +130,7 @@ onUnmounted(() => {
 		<template #clickable>
 			<router-link
 				class="no-click-animation"
-				:to="`/instance/${encodeURIComponent(instance.path)}/content`"
+				:to="`/instance/${encodeURIComponent(instance.path)}`"
 			/>
 		</template>
 		<div
@@ -207,7 +207,7 @@ onUnmounted(() => {
 							{
 								id: 'open-instance',
 								shown: !!instance.path,
-								action: () => router.push(`/instance/${encodeURIComponent(instance.path)}/content`),
+								action: () => router.push(encodeURI(`/instance/${instance.path}`)),
 							},
 							{
 								id: 'open-folder',

@@ -331,18 +331,12 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             init_ads_window,
             hide_ads_window,
-            scroll_ads_window,
             show_ads_window,
             record_ads_click,
             open_link,
             get_ads_personalization,
         ])
         .build()
-}
-
-#[tauri::command]
-pub async fn scroll_ads_window() -> crate::api::Result<()> {
-    Ok(())
 }
 
 fn get_webview_position<R: Runtime>(

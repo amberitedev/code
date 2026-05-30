@@ -3,15 +3,14 @@
 		v-if="showControls"
 		class="flex items-center gap-2 mr-1.5"
 		data-tauri-drag-region-exclude
-		@mousedown.stop
 	>
 		<ButtonStyled type="transparent" circular>
-			<button class="relative expanded-button" @mousedown.stop @click="handleMinimize">
+			<button class="relative expanded-button" @click="() => getCurrentWindow().minimize()">
 				<MinimizeIcon />
 			</button>
 		</ButtonStyled>
 		<ButtonStyled type="transparent" circular>
-			<button class="relative expanded-button" @mousedown.stop @click="handleToggleMaximize">
+			<button class="relative expanded-button" @click="() => getCurrentWindow().toggleMaximize()">
 				<RestoreIcon v-if="isMaximized" />
 				<MaximizeIcon v-else />
 			</button>
@@ -23,7 +22,7 @@
 			hover-color-fill="background"
 			circular
 		>
-			<button class="relative expanded-button close-button" @mousedown.stop @click="handleClose">
+			<button class="relative expanded-button close-button" @click="handleClose">
 				<XIcon />
 			</button>
 		</ButtonStyled>
@@ -42,6 +41,7 @@ import { getOS } from '@/helpers/utils.js'
 import { useTheming } from '@/store/state'
 
 const themeStore = useTheming()
+
 const nativeDecorations = ref(true)
 const isMaximized = ref(false)
 const os = ref('')
@@ -49,10 +49,10 @@ const os = ref('')
 const alwaysShowAppControls = computed(() => themeStore.getFeatureFlag('always_show_app_controls'))
 
 const showControls = computed(
-	() => alwaysShowAppControls.value || (!nativeDecorations.value && os.value !== 'MacOS'),
+	() =>
+		alwaysShowAppControls.value ||
+		(!nativeDecorations.value && (os.value === 'Windows' || os.value === 'Linux')),
 )
-
-let unlistenResize
 
 onMounted(async () => {
 	os.value = await getOS()
@@ -66,47 +66,25 @@ onMounted(async () => {
 
 	isMaximized.value = await getCurrentWindow().isMaximized()
 
-	unlistenResize = await getCurrentWindow().onResized(async () => {
+	const unlisten = await getCurrentWindow().onResized(async () => {
 		isMaximized.value = await getCurrentWindow().isMaximized()
+	})
+
+	onUnmounted(() => {
+		unlisten()
 	})
 })
 
-onUnmounted(() => {
-	unlistenResize?.()
-})
-
 const handleClose = async () => {
-	try {
-		await saveWindowState(StateFlags.POSITION | StateFlags.SIZE | StateFlags.MAXIMIZED)
-		await getCurrentWindow().close()
-	} catch (error) {
-		console.error('[window-controls] Failed to close window:', error)
-	}
-}
-
-const handleMinimize = async () => {
-	try {
-		await getCurrentWindow().minimize()
-	} catch (error) {
-		console.error('[window-controls] Failed to minimize window:', error)
-	}
-}
-
-const handleToggleMaximize = async () => {
-	try {
-		await getCurrentWindow().toggleMaximize()
-		isMaximized.value = await getCurrentWindow().isMaximized()
-	} catch (error) {
-		console.error('[window-controls] Failed to toggle maximize:', error)
-	}
+	await saveWindowState(StateFlags.ALL)
+	await getCurrentWindow().close()
 }
 </script>
-
 <style scoped>
 .expanded-button::before {
+	inset: -9px -6px;
 	content: '';
 	position: absolute;
-	inset: -9px -6px;
 }
 
 .expanded-button.close-button::before {

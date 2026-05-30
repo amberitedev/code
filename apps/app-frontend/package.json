@@ -5,16 +5,15 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"dev:no-hmr": "vite --mode no-hmr",
 		"build": "vue-tsc --noEmit && vite build",
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",
 		"fix": "eslint . --fix && prettier --write .",
 		"intl:extract": "formatjs extract \"src/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}\" --ignore \"**/*.d.ts\" --ignore node_modules --out-file src/locales/en-US/index.json --format crowdin --preserve-whitespace",
+		"intl:prune-local": "pnpm -w scripts i18n-icu-contract prune-local --scope apps/app-frontend",
 		"test": "vue-tsc --noEmit"
 	},
 	"dependencies": {
-		"@amberite/amberite-api": "workspace:*",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/ui": "workspace:*",
@@ -63,7 +62,6 @@
 		"tailwindcss": "^3.4.4",
 		"typescript": "^5.5.4",
 		"vite": "^8.0.0",
-		"vite-plugin-vue-devtools": "^8.1.2",
 		"vue-component-type-helpers": "^3.1.8",
 		"vue-tsc": "^2.1.6"
 	},
