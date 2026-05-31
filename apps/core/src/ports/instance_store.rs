@@ -39,6 +39,20 @@ pub trait InstanceStore: Send + Sync + 'static {
         id: &InstanceId,
         java_version: Option<i64>,
     ) -> Result<(), StoreError>;
+    /// Update JVM heap settings (megabytes). Applied on the next start.
+    async fn update_memory(
+        &self,
+        id: &InstanceId,
+        min_mb: u32,
+        max_mb: u32,
+    ) -> Result<(), StoreError>;
+    /// Update custom launch tuning. `None` clears the override; applied on next start.
+    async fn update_startup(
+        &self,
+        id: &InstanceId,
+        jvm_args: Option<&str>,
+        server_args: Option<&str>,
+    ) -> Result<(), StoreError>;
     /// Update the game version, loader, and loader version of an instance.
     /// Used by `change_version` when migrating an instance to a different build.
     async fn update_version(

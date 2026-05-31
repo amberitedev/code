@@ -32,6 +32,8 @@ struct InstanceRow {
     memory_min: i64,
     memory_max: i64,
     java_version: Option<i64>,
+    jvm_args: Option<String>,
+    server_args: Option<String>,
     install_status: String,
     status: String,
     data_dir: String,
@@ -58,6 +60,8 @@ impl TryFrom<InstanceRow> for InstanceRecord {
                 max_mb: r.memory_max as u32,
             },
             java_version: r.java_version,
+            jvm_args: r.jvm_args,
+            server_args: r.server_args,
             install_status: r
                 .install_status
                 .parse::<InstanceInstallStatus>()
@@ -89,7 +93,7 @@ fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, StoreError> {
 impl InstanceStore for InstanceRepo {
     async fn create(&self, r: &InstanceRecord) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,install_status,status,data_dir,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,jvm_args,server_args,install_status,status,data_dir,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         .bind(r.id.to_string())
         .bind(&r.name)
@@ -100,6 +104,8 @@ impl InstanceStore for InstanceRepo {
         .bind(r.memory.min_mb as i64)
         .bind(r.memory.max_mb as i64)
         .bind(r.java_version)
+        .bind(&r.jvm_args)
+        .bind(&r.server_args)
         .bind(r.install_status.to_string())
         .bind(r.status.to_string())
         .bind(&r.data_dir)
@@ -199,6 +205,48 @@ impl InstanceStore for InstanceRepo {
                 .bind(id.to_string())
                 .execute(&self.pool)
                 .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn update_memory(
+        &self,
+        id: &InstanceId,
+        min_mb: u32,
+        max_mb: u32,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            "UPDATE instances SET memory_min = ?, memory_max = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(min_mb as i64)
+        .bind(max_mb as i64)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn update_startup(
+        &self,
+        id: &InstanceId,
+        jvm_args: Option<&str>,
+        server_args: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            "UPDATE instances SET jvm_args = ?, server_args = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(jvm_args)
+        .bind(server_args)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
         if result.rows_affected() == 0 {
             return Err(StoreError::NotFound(id.to_string()));
         }

@@ -254,6 +254,12 @@ pub struct InstanceRecord {
     pub port: u16,
     pub memory: MemorySettings,
     pub java_version: Option<i64>,
+    /// Extra JVM flags inserted after the memory flags and before `-jar`/`@args`
+    /// (e.g. Aikar's GC flags). Whitespace-separated, quotes respected.
+    pub jvm_args: Option<String>,
+    /// Extra program arguments appended after the server launch args
+    /// (e.g. `--world myworld`). Whitespace-separated, quotes respected.
+    pub server_args: Option<String>,
     pub install_status: InstanceInstallStatus,
     pub status: InstanceStatus,
     pub data_dir: String,

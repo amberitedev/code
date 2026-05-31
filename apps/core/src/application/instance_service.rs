@@ -77,6 +77,8 @@ pub async fn create_instance(
         port: req.port,
         memory: req.memory,
         java_version: None,
+        jvm_args: None,
+        server_args: None,
         install_status: InstanceInstallStatus::Installing,
         status: InstanceStatus::Offline,
         data_dir: data_dir.display().to_string(),
