@@ -220,6 +220,24 @@ export interface CoreCreateInstanceBody {
 export interface CorePatchInstanceBody {
 	name?: string
 	java_version?: number | null
+	/** RAM bounds applied on next start. */
+	memory?: CoreMemory
+	/** Extra JVM args inserted after the memory flags. `null` clears the override. */
+	jvm_args?: string | null
+	/** Extra server args appended to the launch command. `null` clears the override. */
+	server_args?: string | null
+}
+
+/** GET /instances/:id/startup — current startup configuration + rendered commands. */
+export interface CoreStartupSettings {
+	memory: CoreMemory
+	java_version: number | null
+	jvm_args: string | null
+	server_args: string | null
+	/** Launch command Core would build with no user overrides. */
+	default_command: string
+	/** Launch command Core would build with the current overrides applied. */
+	effective_command: string
 }
 
 /**

@@ -24,6 +24,7 @@ import type {
 	CoreCreateInstanceBody,
 	CorePatchInstanceBody,
 	CoreChangeVersionBody,
+	CoreStartupSettings,
 	CoreStats,
 	CoreMod,
 	CoreFsListing,
@@ -208,6 +209,39 @@ export class CoreApiClient {
 			method: 'PATCH',
 			path: `/instances/${id}`,
 			body: { java_version: javaVersion },
+		})
+	}
+
+	/** Set RAM bounds (MB). Applied on next start. */
+	updateMemory(id: string, minMb: number, maxMb: number): Promise<CoreInstance> {
+		const memory = { min_mb: minMb, max_mb: maxMb }
+		return this.request((ctx) => api.patchInstance(ctx, id, { memory }), {
+			method: 'PATCH',
+			path: `/instances/${id}`,
+			body: { memory },
+		})
+	}
+
+	/**
+	 * Update the startup overrides. Pass `null` for a field to clear that override
+	 * and fall back to Core's defaults; omit a field to leave it unchanged.
+	 */
+	updateStartup(
+		id: string,
+		overrides: { jvm_args?: string | null; server_args?: string | null },
+	): Promise<CoreInstance> {
+		return this.request((ctx) => api.patchInstance(ctx, id, overrides), {
+			method: 'PATCH',
+			path: `/instances/${id}`,
+			body: overrides,
+		})
+	}
+
+	/** Current startup configuration plus rendered default/effective launch commands. */
+	getStartup(id: string): Promise<CoreStartupSettings> {
+		return this.request((ctx) => api.getStartup(ctx, id), {
+			method: 'GET',
+			path: `/instances/${id}/startup`,
 		})
 	}
 

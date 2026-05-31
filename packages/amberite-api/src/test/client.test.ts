@@ -121,6 +121,53 @@ describe('getStats', () => {
 	})
 })
 
+// ── getStartup / updateStartup / updateMemory ─────────────────────────────────
+
+describe('getStartup', () => {
+	it('returns startup settings with rendered command strings', async () => {
+		const startup = await client.getStartup(instanceId)
+		expect(typeof startup.memory.min_mb).toBe('number')
+		expect(typeof startup.memory.max_mb).toBe('number')
+		expect(typeof startup.default_command).toBe('string')
+		expect(startup.default_command.length).toBeGreaterThan(0)
+		expect(typeof startup.effective_command).toBe('string')
+	})
+
+	it('throws Core API 404 for a non-existent UUID', async () => {
+		await expect(client.getStartup('00000000-0000-0000-0000-000000000000')).rejects.toThrow(
+			'Core API 404',
+		)
+	})
+})
+
+describe('updateMemory', () => {
+	it('persists new RAM bounds, reflected in getStartup', async () => {
+		await client.updateMemory(instanceId, 1024, 4096)
+		const startup = await client.getStartup(instanceId)
+		expect(startup.memory.min_mb).toBe(1024)
+		expect(startup.memory.max_mb).toBe(4096)
+	})
+})
+
+describe('updateStartup', () => {
+	it('sets and clears jvm_args / server_args', async () => {
+		const set = await client.updateStartup(instanceId, {
+			jvm_args: '-XX:+UseG1GC',
+			server_args: '--nogui',
+		})
+		expect(set.id).toBe(instanceId)
+		const withArgs = await client.getStartup(instanceId)
+		expect(withArgs.jvm_args).toBe('-XX:+UseG1GC')
+		expect(withArgs.server_args).toBe('--nogui')
+		expect(withArgs.effective_command).toContain('-XX:+UseG1GC')
+
+		await client.updateStartup(instanceId, { jvm_args: null, server_args: null })
+		const cleared = await client.getStartup(instanceId)
+		expect(cleared.jvm_args).toBeNull()
+		expect(cleared.server_args).toBeNull()
+	})
+})
+
 // ── listMods ──────────────────────────────────────────────────────────────────
 
 describe('listMods', () => {

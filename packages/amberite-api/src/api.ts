@@ -20,6 +20,7 @@ import type {
 	CoreCreateInstanceBody,
 	CorePatchInstanceBody,
 	CoreChangeVersionBody,
+	CoreStartupSettings,
 	CoreStats,
 	CoreMod,
 	CoreFsListing,
@@ -165,6 +166,10 @@ export function patchInstance(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
 	})
+}
+
+export function getStartup(ctx: CoreCallContext, id: string): Promise<CoreStartupSettings> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/startup`)
 }
 
 // ── Instance lifecycle ────────────────────────────────────────────────────────
