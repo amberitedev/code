@@ -96,6 +96,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/stop", post(instance_control::stop))
         .route("/instances/:id/kill", post(instance_control::kill))
         .route("/instances/:id/restart", post(instance_control::restart))
+        .route("/instances/:id/repair", post(instance_control::repair))
+        .route(
+            "/instances/:id/change-version",
+            post(instance_control::change_version_handler),
+        )
         .route(
             "/instances/:id/command",
             post(instance_control::send_command_handler),

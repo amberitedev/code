@@ -1,5 +1,6 @@
 import type {
 	CoreBackup,
+	CoreChangeVersionBody,
 	CoreFsEntry,
 	CoreInstance,
 	CoreInstanceStatus,
@@ -27,6 +28,8 @@ export type CoreServerContext = {
 	stopServer: () => Promise<void>
 	restartServer: () => Promise<void>
 	killServer: () => Promise<void>
+	repairServer: () => Promise<void>
+	changeVersion: (body: CoreChangeVersionBody) => Promise<void>
 }
 
 export const coreServerContextKey = Symbol('core-server-context')
@@ -44,7 +47,7 @@ export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 		game: 'Minecraft',
 		backup_quota: 0,
 		used_backup_quota: 0,
-		status: instance.install_status === 'failed' ? 'broken' : 'available',
+		status: toHostingStatus(instance.install_status),
 		suspension_reason: null,
 		loader: toHostingLoader(instance.loader),
 		loader_version: instance.loader_version,
@@ -61,6 +64,17 @@ export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 	}
 }
 
+function toHostingStatus(installStatus: CoreInstance['install_status']): Archon.Servers.v0.Status {
+	switch (installStatus) {
+		case 'failed':
+			return 'broken'
+		case 'installing':
+			return 'installing'
+		default:
+			return 'available'
+	}
+}
+
 export function toHostingPowerState(status: CoreInstanceStatus): Archon.Websocket.v0.PowerState {
 	if (status === 'offline') return 'stopped'
 	return status
@@ -69,21 +83,19 @@ export function toHostingPowerState(status: CoreInstanceStatus): Archon.Websocke
 export function toStats(stats: CoreStats | null | undefined): Stats {
 	const ramUsageBytes = (stats?.memory_mb ?? 0) * 1024 * 1024
 	const ramTotalBytes = (stats?.ram_total_mb ?? 1) * 1024 * 1024
+	const storageUsageBytes = stats?.storage_bytes ?? 0
+	const current = {
+		cpu_percent: stats?.cpu_percent ?? 0,
+		ram_usage_bytes: ramUsageBytes,
+		ram_total_bytes: Math.max(ramTotalBytes, 1),
+		storage_usage_bytes: storageUsageBytes,
+		storage_total_bytes: 0,
+	}
 	return {
-		current: {
-			cpu_percent: stats?.cpu_percent ?? 0,
-			ram_usage_bytes: ramUsageBytes,
-			ram_total_bytes: Math.max(ramTotalBytes, 1),
-			storage_usage_bytes: 0,
-			storage_total_bytes: 0,
-		},
-		past: {
-			cpu_percent: 0,
-			ram_usage_bytes: 0,
-			ram_total_bytes: Math.max(ramTotalBytes, 1),
-			storage_usage_bytes: 0,
-			storage_total_bytes: 0,
-		},
+		current,
+		// Core does not retain historical samples, so `past` mirrors `current`
+		// to produce zero-delta trends rather than fabricated movement.
+		past: { ...current },
 		graph: {
 			cpu: [stats?.cpu_percent ?? 0],
 			ram: [Math.round((ramUsageBytes / Math.max(ramTotalBytes, 1)) * 100)],

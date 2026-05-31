@@ -9,13 +9,14 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
+        instance_service::{change_version, repair_instance},
         instance_status_service::{
             kill_instance, restart_instance, send_command, start_instance,
             stop_instance,
         },
         state::AppState,
     },
-    domain::instance::InstanceId,
+    domain::instance::{InstanceId, ModLoader},
     presentation::{error::ApiError, extractors::AuthUser},
 };
 
@@ -88,5 +89,55 @@ pub async fn send_command_handler(
 ) -> Result<Json<Value>, ApiError> {
     let iid = parse_id(&id)?;
     send_command(&state, &iid, body.command).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// POST /instances/:id/repair — re-download/reinstall the server JAR.
+/// Refuses while the instance is running. Returns immediately; track via SSE.
+pub async fn repair(
+    _auth: AuthUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    let iid = parse_id(&id)?;
+    repair_instance(&state, &iid).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct ChangeVersionBody {
+    pub game_version: Option<String>,
+    pub loader: Option<ModLoader>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub loader_version: Option<Option<String>>,
+}
+
+/// Distinguishes absent (`None`) from explicit `null` (`Some(None)`) for loader_version.
+fn deserialize_optional_string<'de, D>(
+    d: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(d)?))
+}
+
+/// POST /instances/:id/change-version — change game version/loader, then reinstall.
+/// Refuses while the instance is running. Returns immediately; track via SSE.
+pub async fn change_version_handler(
+    _auth: AuthUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ChangeVersionBody>,
+) -> Result<Json<Value>, ApiError> {
+    let iid = parse_id(&id)?;
+    change_version(
+        &state,
+        &iid,
+        body.game_version,
+        body.loader,
+        body.loader_version,
+    )
+    .await?;
     Ok(Json(json!({ "ok": true })))
 }

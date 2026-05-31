@@ -16,6 +16,9 @@ pub struct StatsResponse {
     pub ram_total_mb: Option<u64>,
     pub player_count: Option<u32>,
     pub uptime_seconds: Option<u64>,
+    /// Total on-disk size of the instance's data directory, in bytes.
+    /// Computed for both running and offline instances.
+    pub storage_bytes: Option<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -35,21 +38,26 @@ pub async fn get_stats(
         .map_err(|_| StatsError::NotFound)?;
     let iid = InstanceId(uid);
 
+    // Storage is computed for both running and offline instances, so always
+    // resolve the record's data_dir first (also doubles as the 404 check).
+    let record = state
+        .instance_store
+        .get(&iid)
+        .await
+        .map_err(|_| StatsError::NotFound)?;
+    let storage_bytes = compute_dir_size(&record.data_dir).await;
+
     let handle = match state.instances.get(&iid) {
         Some(h) => h,
         None => {
             // BEH-05: distinguish "not in DB" (→ 404) from "offline" (→ 200 with nulls)
-            state
-                .instance_store
-                .get(&iid)
-                .await
-                .map_err(|_| StatsError::NotFound)?;
             return Ok(StatsResponse {
                 cpu_percent: None,
                 memory_mb: None,
                 ram_total_mb: None,
                 player_count: None,
                 uptime_seconds: None,
+                storage_bytes,
             });
         }
     };
@@ -89,7 +97,39 @@ pub async fn get_stats(
         ram_total_mb,
         player_count,
         uptime_seconds,
+        storage_bytes,
     })
+}
+
+/// Recursively sum the byte size of all files under `dir`. Returns `None` on error
+/// (e.g. the directory does not exist yet). Runs on a blocking thread.
+async fn compute_dir_size(dir: &str) -> Option<u64> {
+    let dir = dir.to_string();
+    tokio::task::spawn_blocking(move || {
+        fn walk(path: &std::path::Path) -> u64 {
+            let mut total = 0;
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let Ok(meta) = entry.metadata() else { continue };
+                    if meta.is_dir() {
+                        total += walk(&entry.path());
+                    } else {
+                        total += meta.len();
+                    }
+                }
+            }
+            total
+        }
+        let p = std::path::Path::new(&dir);
+        if p.exists() {
+            Some(walk(p))
+        } else {
+            None
+        }
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 async fn get_player_count(

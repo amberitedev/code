@@ -1,4 +1,4 @@
-import type { CoreInstance, CoreStats } from '@amberite/amberite-api'
+import type { CoreChangeVersionBody, CoreInstance, CoreStats } from '@amberite/amberite-api'
 import type { Archon, UploadState } from '@modrinth/api-client'
 import type { LogLine } from '@modrinth/ui'
 import { provideModrinthServerContext, provideServerSettingsModal } from '@modrinth/ui'
@@ -28,6 +28,8 @@ type CoreServerProviderState = {
 	stopServer: () => Promise<void>
 	restartServer: () => Promise<void>
 	killServer: () => Promise<void>
+	repairServer: () => Promise<void>
+	changeVersion: (body: CoreChangeVersionBody) => Promise<void>
 }
 
 export function provideCoreServerRuntime(state: CoreServerProviderState) {
@@ -104,6 +106,8 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		stopServer: state.stopServer,
 		restartServer: state.restartServer,
 		killServer: state.killServer,
+		repairServer: state.repairServer,
+		changeVersion: state.changeVersion,
 	})
 }
 

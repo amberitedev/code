@@ -205,6 +205,29 @@ impl InstanceStore for InstanceRepo {
         Ok(())
     }
 
+    async fn update_version(
+        &self,
+        id: &InstanceId,
+        game_version: &str,
+        loader: &ModLoader,
+        loader_version: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            "UPDATE instances SET game_version = ?, loader = ?, loader_version = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(game_version)
+        .bind(loader.to_string())
+        .bind(loader_version)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
     async fn update_install_status(
         &self,
         id: &InstanceId,

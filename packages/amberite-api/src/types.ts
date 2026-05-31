@@ -118,6 +118,8 @@ export interface CoreStats {
 	ram_total_mb: number | null
 	player_count: number | null
 	uptime_seconds: number | null
+	/** Total on-disk size of the instance data directory, in bytes. */
+	storage_bytes: number | null
 }
 
 /** Item in GET /instances/:id/mods */
@@ -218,6 +220,16 @@ export interface CoreCreateInstanceBody {
 export interface CorePatchInstanceBody {
 	name?: string
 	java_version?: number | null
+}
+
+/**
+ * Request body for POST /instances/:id/change-version.
+ * Omitted fields are left unchanged; `loader_version: null` explicitly clears it.
+ */
+export interface CoreChangeVersionBody {
+	game_version?: string
+	loader?: string
+	loader_version?: string | null
 }
 
 /** Request body for POST /instances/:id/backups/schedule */

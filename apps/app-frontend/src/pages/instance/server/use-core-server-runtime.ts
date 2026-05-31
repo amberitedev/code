@@ -1,4 +1,5 @@
 import type {
+	CoreChangeVersionBody,
 	CoreInstance,
 	CoreInstanceStatus,
 	CoreStats,
@@ -135,6 +136,38 @@ export function useCoreServerRuntime() {
 		await refreshServer()
 	}
 
+	async function repairServer() {
+		console.log('[server-instance] Repairing (reinstalling) instance', instanceId.value)
+		try {
+			await core.repair(instanceId.value)
+			addNotification({
+				title: 'Repair started',
+				text: 'The server is reinstalling. This may take a few minutes.',
+				type: 'success',
+			})
+			await refreshServer()
+		} catch (error) {
+			console.error('[server-instance] Repair failed:', error)
+			handleError(error as Error)
+		}
+	}
+
+	async function changeVersion(body: CoreChangeVersionBody) {
+		console.log('[server-instance] Changing version for', instanceId.value, body)
+		try {
+			await core.changeVersion(instanceId.value, body)
+			addNotification({
+				title: 'Version change started',
+				text: 'The server is reinstalling with the new version.',
+				type: 'success',
+			})
+			await refreshServer()
+		} catch (error) {
+			console.error('[server-instance] Change version failed:', error)
+			handleError(error as Error)
+		}
+	}
+
 	async function copyId() {
 		await navigator.clipboard.writeText(instanceId.value)
 		addNotification({
@@ -162,6 +195,8 @@ export function useCoreServerRuntime() {
 		stopServer,
 		restartServer,
 		killServer,
+		repairServer,
+		changeVersion,
 	})
 
 	onMounted(async () => {
@@ -186,6 +221,8 @@ export function useCoreServerRuntime() {
 		stopServer,
 		restartServer,
 		killServer,
+		repairServer,
+		changeVersion,
 		copyId,
 	}
 }

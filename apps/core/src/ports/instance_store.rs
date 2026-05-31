@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::domain::instance::{
-    InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
+    InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus, ModLoader,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +38,15 @@ pub trait InstanceStore: Send + Sync + 'static {
         &self,
         id: &InstanceId,
         java_version: Option<i64>,
+    ) -> Result<(), StoreError>;
+    /// Update the game version, loader, and loader version of an instance.
+    /// Used by `change_version` when migrating an instance to a different build.
+    async fn update_version(
+        &self,
+        id: &InstanceId,
+        game_version: &str,
+        loader: &ModLoader,
+        loader_version: Option<&str>,
     ) -> Result<(), StoreError>;
     async fn update_install_status(
         &self,

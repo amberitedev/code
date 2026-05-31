@@ -89,18 +89,40 @@ pub async fn create_instance(
         instance: record.clone(),
     });
 
-    // Download JAR in background (caller can track via SSE events).
-    let state_clone = Arc::clone(state);
-    let id_clone = id.clone();
-    let game_version = req.game_version.clone();
-    let loader = req.loader.clone();
-    let loader_version = req.loader_version.clone();
+    spawn_jar_install(
+        Arc::clone(state),
+        id.clone(),
+        req.game_version.clone(),
+        req.loader.clone(),
+        req.loader_version.clone(),
+        data_dir,
+        "Server JAR downloaded",
+    );
+
+    Ok(id)
+}
+
+/// Spawn a background task that (re)downloads the server JAR for an instance and
+/// updates `install_status` + broadcasts progress/status events.
+///
+/// Shared by `create_instance`, `repair_instance`, and `change_version`. The caller
+/// is responsible for having already set `install_status` to `Installing` in the DB
+/// (and broadcasting it) so the UI shows the installing state immediately.
+fn spawn_jar_install(
+    state: Arc<AppState>,
+    id: InstanceId,
+    game_version: String,
+    loader: ModLoader,
+    loader_version: Option<String>,
+    data_dir: PathBuf,
+    success_message: &'static str,
+) {
     tokio::spawn(async move {
         // Find Java path for installer-based loaders (Quilt/Forge/NeoForge)
         let req_java = required_java_version(&game_version);
-        let java_path = state_clone.java_store.find_by_version(req_java).await;
+        let java_path = state.java_store.find_by_version(req_java).await;
         let jar_result = download_server_jar(
-            &state_clone.http,
+            &state.http,
             &loader,
             &game_version,
             loader_version.as_deref(),
@@ -110,44 +132,140 @@ pub async fn create_instance(
         .await;
         match jar_result {
             Ok(_) => {
-                let _ = state_clone
+                let _ = state
                     .instance_store
-                    .update_install_status(
-                        &id_clone,
-                        InstanceInstallStatus::Ready,
-                    )
+                    .update_install_status(&id, InstanceInstallStatus::Ready)
                     .await;
-                state_clone.broadcaster.send(Event::CreationProgress {
-                    instance_id: id_clone.clone(),
+                state.broadcaster.send(Event::CreationProgress {
+                    instance_id: id.clone(),
                     progress: 1.0,
-                    message: "Server JAR downloaded".to_string(),
+                    message: success_message.to_string(),
                 });
-                state_clone.broadcaster.send(Event::InstallStatusChanged {
-                    instance_id: id_clone,
+                state.broadcaster.send(Event::InstallStatusChanged {
+                    instance_id: id.clone(),
                     install_status: InstanceInstallStatus::Ready,
-                    message: Some("Server JAR downloaded".to_string()),
+                    message: Some(success_message.to_string()),
                 });
+                info!("JAR install complete for {id}: {success_message}");
             }
             Err(e) => {
                 let message = e.to_string();
-                let _ = state_clone
+                let _ = state
                     .instance_store
-                    .update_install_status(
-                        &id_clone,
-                        InstanceInstallStatus::Failed,
-                    )
+                    .update_install_status(&id, InstanceInstallStatus::Failed)
                     .await;
-                state_clone.broadcaster.send(Event::InstallStatusChanged {
-                    instance_id: id_clone.clone(),
+                state.broadcaster.send(Event::InstallStatusChanged {
+                    instance_id: id.clone(),
                     install_status: InstanceInstallStatus::Failed,
                     message: Some(message.clone()),
                 });
-                error!("JAR download failed for {id_clone}: {message}");
+                error!("JAR download failed for {id}: {message}");
             }
         }
     });
+}
 
-    Ok(id)
+/// Re-download/reinstall the server JAR for an existing instance ("repair").
+///
+/// Refuses while the instance is running. Sets `install_status` to `Installing`,
+/// broadcasts it, then spawns the shared install task. Track progress via SSE.
+pub async fn repair_instance(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+) -> Result<(), InstanceError> {
+    if state.instances.contains_key(id) {
+        return Err(InstanceError::AlreadyRunning);
+    }
+    let record = state.instance_store.get(id).await.map_err(|e| match e {
+        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+        other => InstanceError::Store(other),
+    })?;
+
+    state
+        .instance_store
+        .update_install_status(id, InstanceInstallStatus::Installing)
+        .await?;
+    state.broadcaster.send(Event::InstallStatusChanged {
+        instance_id: id.clone(),
+        install_status: InstanceInstallStatus::Installing,
+        message: Some("Repairing server installation".to_string()),
+    });
+
+    spawn_jar_install(
+        Arc::clone(state),
+        id.clone(),
+        record.game_version,
+        record.loader,
+        record.loader_version,
+        PathBuf::from(&record.data_dir),
+        "Server repaired",
+    );
+    Ok(())
+}
+
+/// Change the game version and/or loader of an existing instance, then reinstall.
+///
+/// Refuses while the instance is running. Persists the new version fields, sets
+/// `install_status` to `Installing`, broadcasts updates, then reinstalls the JAR.
+pub async fn change_version(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+    game_version: Option<String>,
+    loader: Option<ModLoader>,
+    loader_version: Option<Option<String>>,
+) -> Result<(), InstanceError> {
+    if state.instances.contains_key(id) {
+        return Err(InstanceError::AlreadyRunning);
+    }
+    let mut record = state.instance_store.get(id).await.map_err(|e| match e {
+        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+        other => InstanceError::Store(other),
+    })?;
+
+    if let Some(gv) = game_version {
+        record.game_version = gv;
+    }
+    if let Some(l) = loader {
+        record.loader = l;
+    }
+    if let Some(lv) = loader_version {
+        record.loader_version = lv;
+    }
+
+    state
+        .instance_store
+        .update_version(
+            id,
+            &record.game_version,
+            &record.loader,
+            record.loader_version.as_deref(),
+        )
+        .await?;
+    state
+        .instance_store
+        .update_install_status(id, InstanceInstallStatus::Installing)
+        .await?;
+
+    let updated = state.instance_store.get(id).await?;
+    state.broadcaster.send(Event::InstanceUpdated {
+        instance: updated.clone(),
+    });
+    state.broadcaster.send(Event::InstallStatusChanged {
+        instance_id: id.clone(),
+        install_status: InstanceInstallStatus::Installing,
+        message: Some("Changing version".to_string()),
+    });
+
+    spawn_jar_install(
+        Arc::clone(state),
+        id.clone(),
+        record.game_version,
+        record.loader,
+        record.loader_version,
+        PathBuf::from(&record.data_dir),
+        "Version changed",
+    );
+    Ok(())
 }
 
 /// Update the port for an instance (used when server-port is changed in properties).

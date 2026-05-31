@@ -23,6 +23,7 @@ import type {
 	CoreInstanceSummary,
 	CoreCreateInstanceBody,
 	CorePatchInstanceBody,
+	CoreChangeVersionBody,
 	CoreStats,
 	CoreMod,
 	CoreFsListing,
@@ -237,6 +238,21 @@ export class CoreApiClient {
 		return this.request((ctx) => api.restartInstance(ctx, id).then(() => undefined), {
 			method: 'POST',
 			path: `/instances/${id}/restart`,
+		})
+	}
+
+	repair(id: string): Promise<void> {
+		return this.request((ctx) => api.repairInstance(ctx, id).then(() => undefined), {
+			method: 'POST',
+			path: `/instances/${id}/repair`,
+		})
+	}
+
+	changeVersion(id: string, body: CoreChangeVersionBody): Promise<void> {
+		return this.request((ctx) => api.changeInstanceVersion(ctx, id, body).then(() => undefined), {
+			method: 'POST',
+			path: `/instances/${id}/change-version`,
+			body,
 		})
 	}
 

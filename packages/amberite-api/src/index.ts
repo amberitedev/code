@@ -16,6 +16,7 @@ export type {
 	CoreBackupSchedule,
 	CoreCreateInstanceBody,
 	CorePatchInstanceBody,
+	CoreChangeVersionBody,
 	CoreBackupScheduleBody,
 	UploadHandle,
 	CoreWsFrame,

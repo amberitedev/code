@@ -19,6 +19,7 @@ import type {
 	CoreInstanceSummary,
 	CoreCreateInstanceBody,
 	CorePatchInstanceBody,
+	CoreChangeVersionBody,
 	CoreStats,
 	CoreMod,
 	CoreFsListing,
@@ -182,6 +183,22 @@ export function killInstance(ctx: CoreCallContext, id: string): Promise<{ ok: bo
 
 export function restartInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
 	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/restart`, { method: 'POST' })
+}
+
+export function repairInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/repair`, { method: 'POST' })
+}
+
+export function changeInstanceVersion(
+	ctx: CoreCallContext,
+	id: string,
+	body: CoreChangeVersionBody,
+): Promise<{ ok: boolean }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/change-version`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
 }
 
 export function sendCommand(
