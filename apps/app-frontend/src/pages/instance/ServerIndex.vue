@@ -100,16 +100,11 @@ import {
 	TriangleAlertIcon,
 	UpdatedIcon,
 } from '@modrinth/assets'
-import {
-	ButtonStyled,
-	ErrorInformationCard,
-	NavTabs,
-	OverflowMenu,
-	ServerManageHeader,
-} from '@modrinth/ui'
+import { ButtonStyled, ErrorInformationCard, NavTabs, OverflowMenu } from '@modrinth/ui'
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import ServerManageHeader from './server/ServerManageHeader.vue'
 import ServerSettingsModal from './server/settings/ServerSettingsModal.vue'
 import { useCoreServerRuntime } from './server/use-core-server-runtime'
 import ServerBackups from './ServerBackups.vue'
