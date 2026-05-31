@@ -1,93 +1,71 @@
 import type { PlatformAdapter } from './adapter'
-import { corePresence } from './transport'
+import { verifyCoreConnection, type ConnectionState, type ConnectionStatus } from './connection'
 
-export type ConnectionState = 'connecting' | 'online-direct' | 'online-relay' | 'offline'
+type StateChangeListener = (state: ConnectionState, status: ConnectionStatus) => void
+type StatusListener = (status: ConnectionStatus) => void
 
-type StateChangeListener = (state: ConnectionState) => void
-
-const HEALTH_PATH = '/health'
-const PING_INTERVAL_MS = 10_000
-const OFFLINE_THRESHOLD_MS = 30_000
-const HEALTH_TIMEOUT_MS = 5_000
+const CHECK_INTERVAL_MS = 10_000
 
 export class CoreConnectionMonitor {
-	private state: ConnectionState = 'connecting'
-	private listeners: Array<StateChangeListener> = []
+	private state: ConnectionState = 'unknown'
+	private status: ConnectionStatus | null = null
+	private stateListeners: Array<StateChangeListener> = []
+	private statusListeners: Array<StatusListener> = []
 	private timer: ReturnType<typeof setInterval> | null = null
 
 	constructor(
 		private adapter: PlatformAdapter,
-		private coreId: string,
-		private _senderId: string,
+		private knownCoreId?: string | null,
+		_senderId?: string,
 	) {}
 
 	get currentState(): ConnectionState {
 		return this.state
 	}
 
+	get currentStatus(): ConnectionStatus | null {
+		return this.status
+	}
+
 	onStateChange(cb: StateChangeListener): () => void {
-		this.listeners.push(cb)
-		return () => {
-			const idx = this.listeners.indexOf(cb)
-			if (idx !== -1) this.listeners.splice(idx, 1)
-		}
+		this.stateListeners.push(cb)
+		return () => removeListener(this.stateListeners, cb)
+	}
+
+	onStatus(cb: StatusListener): () => void {
+		this.statusListeners.push(cb)
+		return () => removeListener(this.statusListeners, cb)
 	}
 
 	async start(): Promise<void> {
 		this.setState('connecting')
-		this.timer = setInterval(() => this.tick(), PING_INTERVAL_MS)
-		await this.tick()
+		this.timer = setInterval(() => this.checkNow().catch(() => {}), CHECK_INTERVAL_MS)
+		await this.checkNow()
 	}
 
 	stop(): void {
-		if (this.timer) {
-			clearInterval(this.timer)
-			this.timer = null
-		}
+		if (this.timer) clearInterval(this.timer)
+		this.timer = null
 	}
 
-	private async tick(): Promise<void> {
-		const directOk = await this.directHealthOk()
-		if (directOk) {
-			this.setState('online-direct')
-			return
-		}
-
-		try {
-			const presence = (await corePresence(this.adapter, this.coreId)) as {
-				lastSeenAt?: number
-			} | null
-			if (presence?.lastSeenAt && Date.now() - presence.lastSeenAt < OFFLINE_THRESHOLD_MS) {
-				this.setState('online-relay')
-				return
-			}
-		} catch {
-			// Convex presence is best-effort for monitoring.
-		}
-
-		this.setState('offline')
+	async checkNow(): Promise<ConnectionStatus> {
+		const next = await verifyCoreConnection(this.adapter, { knownCoreId: this.knownCoreId })
+		this.status = next
+		this.setState(next.state, next)
+		for (const cb of this.statusListeners) cb(next)
+		return next
 	}
 
-	private async directHealthOk(): Promise<boolean> {
-		const coreUrl = await this.adapter.getCoreUrl()
-		if (!coreUrl) return false
-		const controller = new AbortController()
-		const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS)
-		try {
-			const res = await this.adapter.fetchFn(`${coreUrl}${HEALTH_PATH}`, {
-				signal: controller.signal,
-			})
-			return res.ok
-		} catch {
-			return false
-		} finally {
-			clearTimeout(timeout)
-		}
-	}
-
-	private setState(next: ConnectionState): void {
+	private setState(next: ConnectionState, status = this.status): void {
 		if (this.state === next) return
 		this.state = next
-		for (const cb of this.listeners) cb(next)
+		if (status) for (const cb of this.stateListeners) cb(next, status)
 	}
 }
+
+function removeListener<T>(listeners: T[], listener: T): void {
+	const idx = listeners.indexOf(listener)
+	if (idx !== -1) listeners.splice(idx, 1)
+}
+
+export type { ConnectionState, ConnectionStatus }

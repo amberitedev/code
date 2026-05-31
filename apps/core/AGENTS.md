@@ -15,6 +15,7 @@ apps/core/
     ports/            — async trait interfaces (stores + process spawner)
     infrastructure/   — concrete impls (SQLite repos, PTY spawner, auth, Minecraft HTTP)
     presentation/     — Axum router, handlers, extractors, error mapping
+    api/              — typed message layer (kinds, routing policy, envelope, relay store, distributor)
   migrations/         — SQLx migration SQL files (compile-time embedded via proc macro)
   tests/              — integration test suite (reqwest against a real in-process server)
   scripts/            — developer diagnostic tooling (Python + PowerShell)
@@ -33,6 +34,7 @@ apps/core/
 | `src/ports/` | `src/ports/AGENTS.md` | Async trait interfaces bridging application ↔ infrastructure |
 | `src/infrastructure/` | `src/infrastructure/AGENTS.md` | SQLite, auth, PTY, Minecraft HTTP clients |
 | `src/presentation/` | `src/presentation/AGENTS.md` | Axum router, handlers, JWT extractor, error mapping |
+| `src/api/` | `src/api/AGENTS.md` | Typed message layer: kinds, routing policy, envelope, relay store, distributor |
 | `migrations/` | `migrations/AGENTS.md` | Schema history, current effective schema, migration rules |
 | `tests/` | `tests/AGENTS.md` | TestApp fixture, test file breakdown, 94 integration tests |
 | `scripts/` | `scripts/AGENTS.md` | Live diagnostic runner against a running Core |

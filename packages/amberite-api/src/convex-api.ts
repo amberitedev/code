@@ -7,12 +7,10 @@
  * ensureSocialProfile:40, searchUsers:44, friendsList:48, sendFriendRequest:57,
  * respondFriendRequest:65, removeFriend:69, blockUser:73, unblockUser:77,
  * listMyFriendGroups:82, getFriendGroup:86, listFriendGroupMembers:91,
- * ensureCoreFriendGroup:95, updateFriendGroup:106, updateMemberRole:113,
- * removeMember:122, friendGroupCores:126, createFriendGroupInvite:130,
- * listMyGroupInvites:138, getInviteByCode:142, acceptFriendGroupInvite:146,
- * declineFriendGroupInvite:152, revokeFriendGroupInvite:156,
- * registerCore:161, heartbeatCore:170, corePresence:174,
- * registerPairingCore:178, claimPairingCore:187.
+ * ensureCoreFriendGroup, updateFriendGroup, updateMemberRole, removeMember,
+ * friendGroupCores, createFriendGroupInvite, listMyGroupInvites, getInviteByCode,
+ * acceptFriendGroupInvite, declineFriendGroupInvite, revokeFriendGroupInvite,
+ * registerCore, corePresence, registerPairingCore, claimPairingCore.
  */
 import type { PlatformAdapter } from './adapter'
 import { convexQuery, convexMutation } from './convex-relay'
@@ -197,10 +195,6 @@ export class ConvexApiClient {
 		metadata?: unknown
 	}): Promise<{ coreId: string }> {
 		return convexMutation(this.adapter, 'presence:registerCore', args)
-	}
-
-	heartbeatCore(coreId: string, status?: string, metadata?: unknown): Promise<null> {
-		return convexMutation(this.adapter, 'presence:heartbeatCore', { coreId, status, metadata })
 	}
 
 	corePresence(coreId: string): Promise<CorePresence | null> {

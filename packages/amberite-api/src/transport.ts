@@ -58,12 +58,6 @@ export const messageDefinitions = {
 		mode: 'core-relay',
 		ack: 'processed',
 	},
-	coreHeartbeat: {
-		type: 'core.registration.heartbeat',
-		version: 1,
-		mode: 'convex-relay',
-		ack: 'received',
-	},
 	pairingCompleted: {
 		type: 'core.pairing.completed',
 		version: 1,
@@ -145,19 +139,6 @@ export async function waitForResult(
 	const status = await waitForStatus(adapter, messageId, timeoutMs, ['processed'])
 	if (status?.error) throw new NetworkError(status.error)
 	return status?.result
-}
-
-export async function heartbeatCore(
-	adapter: PlatformAdapter,
-	coreId: string,
-	status?: string,
-	metadata?: unknown,
-): Promise<void> {
-	await convexMutation(adapter, 'presence:heartbeatCore', { coreId, status, metadata })
-}
-
-export async function corePresence(adapter: PlatformAdapter, coreId: string): Promise<unknown> {
-	return await convexQuery(adapter, 'presence:corePresence', { coreId })
 }
 
 export function createEnvelope<TPayload>(

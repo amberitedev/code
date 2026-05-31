@@ -52,7 +52,7 @@ import type {
 import * as api from './api'
 import { CoreWsConnection } from './ws'
 import { CoreOfflineError } from './errors'
-import type { CoreConnectionMonitor } from './monitor'
+import { CoreConnectionMonitor, type ConnectionStatus } from './monitor'
 import { CommunicationPipeline, type CommunicationPipelineOptions } from './pipeline'
 import { resolveCoreEndpointKey } from './endpoint-policies'
 import type { CommunicationPolicyOverride } from './pipeline-types'
@@ -67,6 +67,7 @@ export class CoreApiClient {
 		private readonly options: { timeoutMs?: number; pipeline?: CommunicationPipelineOptions } = {},
 	) {
 		this.pipeline = new CommunicationPipeline(adapter, options.pipeline)
+		this.monitor = new CoreConnectionMonitor(adapter)
 	}
 
 	withPolicy(policy: CommunicationPolicyOverride): CoreApiClient {
@@ -144,6 +145,10 @@ export class CoreApiClient {
 
 	completeSetup(body: CoreSetupRequest): Promise<CoreSetupResponse> {
 		return this.direct('core.setup.complete', (ctx) => api.completeSetup(ctx, body))
+	}
+
+	connect(): Promise<ConnectionStatus> {
+		return this.monitor?.checkNow() ?? new CoreConnectionMonitor(this.adapter).checkNow()
 	}
 
 	async completeLocalSetup(ownerUserId: string, authJwksUrl: string): Promise<CoreSetupResponse> {

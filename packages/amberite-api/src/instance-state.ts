@@ -25,7 +25,7 @@ export class CoreInstanceStateManager {
 	private monitor: CoreConnectionMonitor | null = null
 	private events: CoreEventStream | null = null
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null
-	private connectionState: ConnectionState = 'connecting'
+	private connectionState: ConnectionState = 'unknown'
 	private isRefreshing = false
 	private error: unknown | null = null
 
@@ -54,7 +54,7 @@ export class CoreInstanceStateManager {
 			this.monitor.onStateChange((state) => {
 				this.connectionState = state
 				this.emit()
-				if (state === 'online-direct') {
+				if (state === 'connected') {
 					void this.refresh().catch(() => {})
 					void this.connectEvents().catch(() => {})
 				} else {
@@ -128,7 +128,7 @@ export class CoreInstanceStateManager {
 	}
 
 	private async connectEvents(): Promise<void> {
-		if (this.events || this.connectionState !== 'online-direct') return
+		if (this.events || this.connectionState !== 'connected') return
 		try {
 			this.events = await this.client.openEvents()
 			this.events.onEvent((event) => this.applyEvent(event))
@@ -138,7 +138,7 @@ export class CoreInstanceStateManager {
 			})
 			this.events.onClose(() => {
 				this.events = null
-				if (this.connectionState === 'online-direct') this.scheduleEventReconnect()
+				if (this.connectionState === 'connected') this.scheduleEventReconnect()
 			})
 		} catch (error) {
 			this.error = error

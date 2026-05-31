@@ -22,6 +22,9 @@ export type {
 	CoreSetupStatus,
 	CoreSetupRequest,
 	CoreSetupResponse,
+	CoreConnectionHandshakeRequest,
+	CoreConnectionHandshakeResponse,
+	CoreConnectionRejectReason,
 	CoreModpackManifest,
 	FsDownloadUrlResponse,
 	UnzipOption,
@@ -56,7 +59,12 @@ export {
 	RelayTimeoutError,
 	CoreApiError,
 } from './errors'
-export { CoreConnectionMonitor, type ConnectionState } from './monitor'
+export { CoreConnectionMonitor, type ConnectionState, type ConnectionStatus } from './monitor'
+export {
+	CONNECTION_PROTOCOL,
+	verifyCoreConnection,
+	type ConnectionFailureReason,
+} from './connection'
 export { CoreInstanceStateManager, type CoreInstanceStateSnapshot } from './instance-state'
 export {
 	publishMessage,
@@ -65,8 +73,6 @@ export {
 	writeResult,
 	waitForReceipt,
 	waitForResult,
-	heartbeatCore,
-	corePresence,
 	messageDefinitions,
 	type MessageEnvelope,
 	type MessageDefinition,
@@ -105,5 +111,4 @@ export type {
 	EndpointPolicyMap,
 } from './pipeline-types'
 export { startMicrosoftLogin, completeMicrosoftLogin, type AuthSession } from './auth'
-export { CoreHeartbeat } from './heartbeat'
 export { drainQueue } from './drain'

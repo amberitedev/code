@@ -29,6 +29,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         // System
         .route("/health", get(diagnostics::health))
+        .route(
+            "/connection/handshake",
+            post(diagnostics::connection_handshake),
+        )
         .route("/version", get(diagnostics::version))
         .route("/java", get(diagnostics::java_installations))
         // First-run pairing

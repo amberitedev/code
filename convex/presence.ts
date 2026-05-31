@@ -57,24 +57,6 @@ export const registerCore = mutation({
 	},
 })
 
-export const heartbeatCore = mutation({
-	args: { coreId: v.string(), status: v.optional(v.string()), metadata: v.optional(v.any()) },
-	returns: v.null(),
-	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
-		await requireCoreRole(ctx, userId, args.coreId, ['owner', 'admin'])
-
-		const existing = await coreById(ctx, args.coreId)
-		if (!existing) return null
-		await ctx.db.patch(existing._id, {
-			lastSeenAt: Date.now(),
-			status: args.status,
-			metadata: args.metadata,
-		})
-		return null
-	},
-})
-
 export const corePresence = query({
 	args: { coreId: v.string() },
 	returns: v.union(

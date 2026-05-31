@@ -4,7 +4,7 @@ import type { MessageEnvelope } from './transport'
 
 /**
  * Drain the local direct-queued message queue, delivering each stored envelope
- * to Core via the relay endpoint. Call this when Core transitions to online-direct.
+ * to Core via the relay endpoint. Call this when Core transitions to connected.
  *
  * Each message is removed from the queue only after successful delivery.
  * Failed deliveries remain in the queue for the next drain cycle.

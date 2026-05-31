@@ -35,6 +35,23 @@ export interface CoreSetupResponse {
 	core_id: string
 }
 
+export type CoreConnectionRejectReason = 'protocol-mismatch' | 'wrong-core'
+
+export interface CoreConnectionHandshakeRequest {
+	nonce: string
+	protocol: number
+	known_core_id?: string | null
+}
+
+export interface CoreConnectionHandshakeResponse {
+	nonce: string
+	ok: boolean
+	core_id: string
+	protocol: number
+	version: string
+	reason: CoreConnectionRejectReason | null
+}
+
 /** Full detail response from GET /instances/:id */
 export interface CoreInstance {
 	id: string

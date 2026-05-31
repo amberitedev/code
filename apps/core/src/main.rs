@@ -7,6 +7,8 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+#[allow(dead_code)]
+mod api;
 mod application;
 mod config;
 mod domain;

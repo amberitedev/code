@@ -20,9 +20,9 @@ src/
   transport.ts      Explicit message bus — 4 modes, ack policies, message registry
   convex-relay.ts   Raw Convex HTTP query/mutation calls
   core-relay.ts     Direct calls to Core's /relay/messages endpoint
-  monitor.ts        CoreConnectionMonitor — pings /health + Convex presence
+  connection.ts     verifyCoreConnection — nonce handshake against Core
+  monitor.ts        CoreConnectionMonitor — periodically runs the Core handshake
   instance-state.ts CoreInstanceStateManager — reactive state combining all of the above
-  heartbeat.ts      CoreHeartbeat — fires heartbeatCore to Convex every 30s
   drain.ts          drainQueue — flushes direct-queued messages to Core when online
   auth.ts           Microsoft OAuth — startMicrosoftLogin / completeMicrosoftLogin
   errors.ts         Error hierarchy: AmberiteApiError → NetworkError, AuthError,
@@ -68,7 +68,7 @@ Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableSt
 
 `CommunicationPipeline.publish()` adds higher-level methods over these modes: `core-relay`, `convex-relay`, `memory-queue`, `persistent-queue`, and `fire-and-forget`. It can wait for received or processed acknowledgements through Core relay or Convex relay based on policy.
 
-`drainQueue()` is **not auto-called** — the consumer must call it when `CoreConnectionMonitor` transitions to `online-direct`.
+`drainQueue()` is **not auto-called** — the consumer must call it when `CoreConnectionMonitor` transitions to `connected`.
 
 ---
 
@@ -88,5 +88,5 @@ Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableSt
 
 - `CoreApiClient` caches the Core URL promise but **only when non-null** — so if Core is offline, the next call retries discovery instead of caching the miss.
 - `types.ts` has no validation — it is purely structural. Drift from Core's Rust structs is silent at runtime.
-- `CoreConnectionMonitor` checks Convex `presence:corePresence` as fallback when direct `/health` fails. It treats presence as stale after 30s.
+- `CoreConnectionMonitor` verifies Core with a nonce handshake at `/connection/handshake`. It does not heartbeat and does not use Convex as a Core liveness bus.
 - `auth.ts` reads env vars with a dual path: `import.meta.env.VITE_*` for Vite builds, `process.env.*` for Node (tests/scripts). Both paths need the corresponding var set.

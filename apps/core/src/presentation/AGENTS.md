@@ -13,7 +13,7 @@ presentation/
   handlers/
     mod.rs              — re-exports all handlers
     console.rs          — WS console (stdout stream + stdin), SSE creation progress, WS ticket issue
-    diagnostics.rs      — GET /health, /version, /java (no auth)
+    diagnostics.rs      — GET /health, POST /connection/handshake, GET /version, GET /java (no auth)
     setup.rs            — POST /setup (pairing), GET /setup/status (no auth)
     instances.rs        — CRUD: list, get, create, delete
     instance_control.rs — start, stop, kill, restart, send command
@@ -32,7 +32,7 @@ presentation/
 All routes are in `router.rs`. Grouped by auth requirement:
 
 **No auth** — `AuthUser` extractor not used:
-- `GET /health`, `GET /version`, `GET /java`
+- `GET /health`, `POST /connection/handshake`, `GET /version`, `GET /java`
 - `POST /setup`, `GET /setup/status` (`POST` accepts either a 6-digit `code` or local `local_setup_secret`)
 - `GET /instances/:id/console?ticket=<uuid>` — ticket IS the credential (validated inside handler)
 

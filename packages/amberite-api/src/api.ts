@@ -36,6 +36,8 @@ import type {
 	CoreSetupStatus,
 	CoreSetupRequest,
 	CoreSetupResponse,
+	CoreConnectionHandshakeRequest,
+	CoreConnectionHandshakeResponse,
 	CoreMetadata,
 	CoreMember,
 	CoreSyncProfile,
@@ -110,6 +112,17 @@ export function completeSetup(
 	body: CoreSetupRequest,
 ): Promise<CoreSetupResponse> {
 	return apiFetch(ctx, `${ctx.baseUrl}/setup`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function connectionHandshake(
+	ctx: CoreCallContext,
+	body: CoreConnectionHandshakeRequest,
+): Promise<CoreConnectionHandshakeResponse> {
+	return apiFetch(ctx, `${ctx.baseUrl}/connection/handshake`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),

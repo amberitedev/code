@@ -3,11 +3,44 @@ use std::sync::Arc;
 use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
-use crate::application::state::AppState;
+use crate::{
+    api::{
+        ConnectionHandshakeRequest, ConnectionHandshakeResponse,
+        ConnectionRejectReason, HANDSHAKE_PROTOCOL,
+    },
+    application::state::AppState,
+};
 
 /// GET /health — liveness probe.
 pub async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+/// POST /connection/handshake — app ↔ Core nonce handshake.
+pub async fn connection_handshake(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ConnectionHandshakeRequest>,
+) -> Json<ConnectionHandshakeResponse> {
+    let reason = if body.protocol != HANDSHAKE_PROTOCOL {
+        Some(ConnectionRejectReason::ProtocolMismatch)
+    } else if body
+        .known_core_id
+        .as_deref()
+        .is_some_and(|id| id != state.core_id)
+    {
+        Some(ConnectionRejectReason::WrongCore)
+    } else {
+        None
+    };
+
+    Json(ConnectionHandshakeResponse {
+        nonce: body.nonce,
+        ok: reason.is_none(),
+        core_id: state.core_id.clone(),
+        protocol: HANDSHAKE_PROTOCOL,
+        version: env!("CARGO_PKG_VERSION"),
+        reason,
+    })
 }
 
 /// GET /version — package version info.
