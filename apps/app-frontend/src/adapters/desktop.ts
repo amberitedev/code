@@ -9,7 +9,7 @@
  * JWT: returns null — Core dev mode bypasses auth. TODO: wire up real auth here.
  */
 import type { PersistentQueueStore, PlatformAdapter, QueuedMessage } from '@amberite/amberite-api'
-import { open } from '@tauri-apps/plugin-opener'
+import { openUrl } from '@tauri-apps/plugin-opener'
 
 class LocalStorageQueueStore implements PersistentQueueStore {
 	async list(queueName: string): Promise<QueuedMessage[]> {
@@ -71,7 +71,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 
 		// Opens external URLs (OAuth, docs, etc.) in the system browser.
 		openExternalAuth(url: string): void {
-			open(url).catch((e) => console.error('[DesktopAdapter] openExternalAuth failed:', e))
+			openUrl(url).catch((e) => console.error('[DesktopAdapter] openExternalAuth failed:', e))
 		},
 	}
 }

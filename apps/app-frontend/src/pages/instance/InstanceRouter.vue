@@ -4,14 +4,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { get } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
 
 import ClientIndex from './Index.vue'
-import ServerIndex from './ServerIndex.vue'
+
+const ServerIndex = defineAsyncComponent(() => import('./ServerIndex.vue'))
 
 const route = useRoute()
 const router = useRouter()
