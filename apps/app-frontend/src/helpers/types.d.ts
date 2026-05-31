@@ -3,6 +3,7 @@ import type { ModrinthId } from '@modrinth/utils'
 export type GameInstance = {
 	path: string
 	install_stage: InstallStage
+	profile_type: ProfileType
 
 	name: string
 	icon_path?: string
@@ -38,6 +39,8 @@ type InstallStage =
 	| 'pack_installed'
 	| 'pack_installing'
 	| 'not_installed'
+
+export type ProfileType = 'client' | 'server' | 'synced'
 
 type LinkedData = {
 	project_id: ModrinthId

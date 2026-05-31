@@ -186,7 +186,7 @@ export default new createRouter({
 		{
 			path: '/instance/:id',
 			name: 'Instance',
-			component: Instance.Index,
+			component: () => import('@/pages/instance/InstanceRouter.vue'),
 			props: true,
 			children: [
 				// {

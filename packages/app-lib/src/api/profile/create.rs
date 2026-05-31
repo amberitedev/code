@@ -1,7 +1,9 @@
 //! Theseus profile management interface
 use crate::launcher::get_loader_version_from_profile;
 use crate::settings::Hooks;
-use crate::state::{LauncherFeatureVersion, LinkedData, ProfileInstallStage};
+use crate::state::{
+    LauncherFeatureVersion, LinkedData, ProfileInstallStage, ProfileType,
+};
 use crate::util::io::{self, canonicalize};
 use crate::{ErrorKind, pack, profile};
 pub use crate::{State, state::Profile};
@@ -25,6 +27,7 @@ pub async fn profile_create(
     icon_path: Option<String>,      // the icon for the profile
     linked_data: Option<LinkedData>, // the linked project ID (mainly for modpacks)- used for updating
     skip_install_profile: Option<bool>,
+    profile_type: Option<ProfileType>,
 ) -> crate::Result<String> {
     trace!("Creating new profile. {}", name);
     let state = State::get().await?;
@@ -75,6 +78,7 @@ pub async fn profile_create(
         path: path.clone(),
         install_stage: ProfileInstallStage::NotInstalled,
         launcher_feature_version: LauncherFeatureVersion::MOST_RECENT,
+        profile_type: profile_type.unwrap_or_default(),
         name,
         icon_path: None,
         game_version,
@@ -177,6 +181,7 @@ pub async fn profile_create_from_duplicate(
         profile.icon_path.clone(),
         profile.linked_data.clone(),
         Some(true),
+        Some(profile.profile_type),
     )
     .await?;
 

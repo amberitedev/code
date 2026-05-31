@@ -367,6 +367,7 @@ pub async fn profile_kill(path: &str) -> Result<()> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EditProfile {
     pub name: Option<String>,
+    pub profile_type: Option<ProfileType>,
 
     pub game_version: Option<String>,
     pub loader: Option<ModLoader>,
@@ -433,6 +434,9 @@ pub async fn profile_edit(path: &str, edit_profile: EditProfile) -> Result<()> {
     profile::edit(path, |prof| {
         if let Some(name) = edit_profile.name.clone() {
             prof.name = name;
+        }
+        if let Some(profile_type) = edit_profile.profile_type {
+            prof.profile_type = profile_type;
         }
         if let Some(game_version) = edit_profile.game_version.clone() {
             if game_version != prof.game_version {

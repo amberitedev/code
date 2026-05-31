@@ -7,6 +7,7 @@ use crate::state::{
     Credentials, DefaultPage, DependencyType, DeviceToken, DeviceTokenKey,
     DeviceTokenPair, FileType, Hooks, LauncherFeatureVersion, LinkedData,
     MemorySettings, ModrinthCredentials, Profile, ProfileInstallStage,
+    ProfileType,
     TeamMember, Theme, VersionFile, WindowSize,
 };
 use crate::util::fetch::{IoSemaphore, read_json};
@@ -309,6 +310,7 @@ where
                         }
                     },
                     launcher_feature_version: LauncherFeatureVersion::None,
+                    profile_type: ProfileType::Client,
                     name: profile.metadata.name,
                     icon_path: profile.metadata.icon,
                     game_version: profile.metadata.game_version,

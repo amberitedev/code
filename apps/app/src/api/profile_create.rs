@@ -21,6 +21,7 @@ pub async fn profile_create(
     icon: Option<String>,           // the icon for the profile
     skip_install: Option<bool>,
     linked_data: Option<LinkedData>,
+    profile_type: Option<ProfileType>,
 ) -> Result<String> {
     let res = profile::create::profile_create(
         name,
@@ -30,6 +31,7 @@ pub async fn profile_create(
         icon,
         linked_data,
         skip_install,
+        profile_type,
     )
     .await?;
     Ok(res)

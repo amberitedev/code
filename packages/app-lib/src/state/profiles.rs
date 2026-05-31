@@ -1,3 +1,10 @@
+//! Profile state, persistence, and content scanning.
+//!
+//! Key sections: profile and type definitions (lines 33-321), SQL row mapping
+//! and selection (lines 324-450), profile CRUD/upsert and launcher migrations
+//! (lines 479-894), project/content scanning (lines 980-1268), and project
+//! mutation helpers (lines 1271-1455).
+
 use super::settings::{Hooks, MemorySettings, WindowSize};
 use crate::profile::get_full_path;
 use crate::state::server_join_log::JoinLogEntry;
@@ -27,6 +34,8 @@ pub struct Profile {
     pub path: String,
     pub install_stage: ProfileInstallStage,
     pub launcher_feature_version: LauncherFeatureVersion,
+    #[serde(default)]
+    pub profile_type: ProfileType,
 
     pub name: String,
     pub icon_path: Option<String>,
@@ -92,6 +101,34 @@ impl ProfileInstallStage {
             "pack_installing" => Self::PackInstalling,
             "not_installed" => Self::NotInstalled,
             _ => Self::NotInstalled,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ProfileType {
+    #[default]
+    Client,
+    Server,
+    Synced,
+}
+
+impl ProfileType {
+    pub fn as_str(&self) -> &'static str {
+        match *self {
+            Self::Client => "client",
+            Self::Server => "server",
+            Self::Synced => "synced",
+        }
+    }
+
+    pub fn from_str(val: &str) -> Self {
+        match val {
+            "client" => Self::Client,
+            "server" => Self::Server,
+            "synced" => Self::Synced,
+            _ => Self::Client,
         }
     }
 }
@@ -283,9 +320,11 @@ impl ProjectType {
     }
 }
 
+#[derive(sqlx::FromRow)]
 struct ProfileQueryResult {
     path: String,
     install_stage: String,
+    profile_type: String,
     name: String,
     icon_path: Option<String>,
     game_version: String,
@@ -324,6 +363,7 @@ impl TryFrom<ProfileQueryResult> for Profile {
             launcher_feature_version: LauncherFeatureVersion::from_str(
                 &x.launcher_feature_version,
             ),
+            profile_type: ProfileType::from_str(&x.profile_type),
             name: x.name,
             icon_path: x.icon_path,
             game_version: x.game_version,
@@ -387,25 +427,25 @@ impl TryFrom<ProfileQueryResult> for Profile {
 
 macro_rules! select_profiles_with_predicate {
     ($predicate:tt, $param:ident) => {
-        sqlx::query_as!(
-            ProfileQueryResult,
-            r#"
+        sqlx::query_as::<_, ProfileQueryResult>(
+            &(r#"
             SELECT
-                path, install_stage, launcher_feature_version, name, icon_path,
+                path, install_stage, launcher_feature_version, profile_type, name, icon_path,
                 game_version, protocol_version, mod_loader, mod_loader_version,
-                json(groups) as "groups!: serde_json::Value",
+                json(groups) as groups,
                 linked_project_id, linked_version_id, locked,
                 created, modified, last_played,
                 submitted_time_played, recent_time_played,
                 override_java_path,
-                json(override_extra_launch_args) as "override_extra_launch_args!: serde_json::Value", json(override_custom_env_vars) as "override_custom_env_vars!: serde_json::Value",
+                json(override_extra_launch_args) as override_extra_launch_args, json(override_custom_env_vars) as override_custom_env_vars,
                 override_mc_memory_max, override_mc_force_fullscreen, override_mc_game_resolution_x, override_mc_game_resolution_y,
                 override_hook_pre_launch, override_hook_wrapper, override_hook_post_exit
             FROM profiles
             "#
-                + $predicate,
-            $param
+                .to_string()
+                + $predicate),
         )
+        .bind($param)
     };
 }
 
@@ -482,6 +522,7 @@ impl Profile {
     ) -> crate::Result<()> {
         let install_stage = self.install_stage.as_str();
         let launcher_feature_version = self.launcher_feature_version.as_str();
+        let profile_type = self.profile_type.as_str();
 
         let mod_loader = self.loader.as_str();
 
@@ -508,7 +549,7 @@ impl Profile {
         let extra_launch_args = serde_json::to_string(&self.extra_launch_args)?;
         let custom_env_vars = serde_json::to_string(&self.custom_env_vars)?;
 
-        sqlx::query!(
+        sqlx::query(
             "
             INSERT INTO profiles (
                 path, install_stage, name, icon_path,
@@ -520,7 +561,7 @@ impl Profile {
                 override_java_path, override_extra_launch_args, override_custom_env_vars,
                 override_mc_memory_max, override_mc_force_fullscreen, override_mc_game_resolution_x, override_mc_game_resolution_y,
                 override_hook_pre_launch, override_hook_wrapper, override_hook_post_exit,
-                protocol_version, launcher_feature_version
+                protocol_version, launcher_feature_version, profile_type
             )
             VALUES (
                 $1, $2, $3, $4,
@@ -532,7 +573,7 @@ impl Profile {
                 $17, jsonb($18), jsonb($19),
                 $20, $21, $22, $23,
                 $24, $25, $26,
-                $27, $28
+                $27, $28, $29
             )
             ON CONFLICT (path) DO UPDATE SET
                 install_stage = $2,
@@ -569,37 +610,39 @@ impl Profile {
                 override_hook_post_exit = $26,
 
                 protocol_version = $27,
-                launcher_feature_version = $28
+                launcher_feature_version = $28,
+                profile_type = $29
             ",
-            self.path,
-            install_stage,
-            self.name,
-            self.icon_path,
-            self.game_version,
-            mod_loader,
-            self.loader_version,
-            groups,
-            linked_data_project_id,
-            linked_data_version_id,
-            linked_data_locked,
-            created,
-            modified,
-            last_played,
-            submitted_time_played,
-            recent_time_played,
-            self.java_path,
-            extra_launch_args,
-            custom_env_vars,
-            memory_max,
-            self.force_fullscreen,
-            game_resolution_x,
-            game_resolution_y,
-            self.hooks.pre_launch,
-            self.hooks.wrapper,
-            self.hooks.post_exit,
-            self.protocol_version,
-            launcher_feature_version
         )
+            .bind(&self.path)
+            .bind(install_stage)
+            .bind(&self.name)
+            .bind(&self.icon_path)
+            .bind(&self.game_version)
+            .bind(mod_loader)
+            .bind(&self.loader_version)
+            .bind(groups)
+            .bind(linked_data_project_id)
+            .bind(linked_data_version_id)
+            .bind(linked_data_locked)
+            .bind(created)
+            .bind(modified)
+            .bind(last_played)
+            .bind(submitted_time_played)
+            .bind(recent_time_played)
+            .bind(&self.java_path)
+            .bind(extra_launch_args)
+            .bind(custom_env_vars)
+            .bind(memory_max)
+            .bind(self.force_fullscreen)
+            .bind(game_resolution_x)
+            .bind(game_resolution_y)
+            .bind(&self.hooks.pre_launch)
+            .bind(&self.hooks.wrapper)
+            .bind(&self.hooks.post_exit)
+            .bind(self.protocol_version)
+            .bind(launcher_feature_version)
+            .bind(profile_type)
             .execute(exec)
             .await?;
 

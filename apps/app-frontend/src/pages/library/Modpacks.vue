@@ -13,7 +13,9 @@ const props = defineProps({
 
 const serverProjectIds = ref(new Set())
 
-const linkedInstances = computed(() => props.instances.filter((i) => i.linked_data))
+const linkedInstances = computed(() =>
+	props.instances.filter((i) => i.profile_type !== 'server' && i.linked_data),
+)
 
 watchEffect(async () => {
 	const projectIds = [

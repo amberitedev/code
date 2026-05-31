@@ -387,7 +387,7 @@ async function fetchInstance() {
 
 	const nextInstance = await get(route.params.id as string).catch(handleError)
 	let nextLinkedProjectV3: Labrinth.Projects.v3.Project | undefined
-	let nextIsServerInstance = false
+	let nextIsServerInstance = nextInstance?.profile_type === 'server'
 
 	const contentPreloadPromise =
 		nextInstance && isContentSubpageRoute()

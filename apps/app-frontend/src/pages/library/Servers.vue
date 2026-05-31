@@ -13,7 +13,12 @@ const props = defineProps({
 
 const serverProjectIds = ref(new Set())
 
-const linkedInstances = computed(() => props.instances.filter((i) => i.linked_data))
+const typedServerInstances = computed(() =>
+	props.instances.filter((i) => i.profile_type === 'server'),
+)
+const linkedInstances = computed(() =>
+	props.instances.filter((i) => i.profile_type !== 'server' && i.linked_data),
+)
 
 watchEffect(async () => {
 	const projectIds = [
@@ -34,9 +39,10 @@ watchEffect(async () => {
 	}
 })
 
-const filteredInstances = computed(() =>
-	linkedInstances.value.filter((i) => serverProjectIds.value.has(i.linked_data?.project_id)),
-)
+const filteredInstances = computed(() => [
+	...typedServerInstances.value,
+	...linkedInstances.value.filter((i) => serverProjectIds.value.has(i.linked_data?.project_id)),
+])
 </script>
 <template>
 	<GridDisplay
