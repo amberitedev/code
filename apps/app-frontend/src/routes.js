@@ -226,12 +226,30 @@ export default new createRouter({
 					},
 				},
 				{
+					path: 'content',
+					name: 'ServerInstanceContent',
+					component: () => import('@/pages/instance/ServerContent.vue'),
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Content' }],
+					},
+				},
+				{
 					path: 'files',
 					name: 'Files',
 					component: Instance.Files,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Files' }],
+					},
+				},
+				{
+					path: 'backups',
+					name: 'ServerInstanceBackups',
+					component: () => import('@/pages/instance/ServerBackups.vue'),
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Backups' }],
 					},
 				},
 				{

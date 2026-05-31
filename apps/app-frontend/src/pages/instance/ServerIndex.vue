@@ -33,20 +33,18 @@
 							</button>
 						</ButtonStyled>
 						<ButtonStyled circular type="transparent" size="large">
-							<button type="button">
-								<OverflowMenu
-									:options="[
-										{ id: 'allServers', action: () => router.push('/library/servers') },
-										{ id: 'copy-id', action: copyId },
-										{ id: 'kill', action: killServer, color: 'red' },
-									]"
-								>
-									<MoreVerticalIcon />
-									<template #allServers><ServerStackIcon /> All servers</template>
-									<template #copy-id><ClipboardCopyIcon /> Copy ID</template>
-									<template #kill><SlashIcon /> Kill server</template>
-								</OverflowMenu>
-							</button>
+							<OverflowMenu
+								:options="[
+									{ id: 'allServers', action: () => router.push('/library/servers') },
+									{ id: 'copy-id', action: copyId },
+									{ id: 'kill', action: killServer, color: 'red' },
+								]"
+							>
+								<MoreVerticalIcon />
+								<template #allServers><ServerStackIcon /> All servers</template>
+								<template #copy-id><ClipboardCopyIcon /> Copy ID</template>
+								<template #kill><SlashIcon /> Kill server</template>
+							</OverflowMenu>
 						</ButtonStyled>
 					</div>
 				</template>
