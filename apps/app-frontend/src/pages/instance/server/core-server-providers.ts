@@ -9,6 +9,11 @@ import { useRouter } from 'vue-router'
 
 import type { CoreServerContext, CoreServerViewData } from './core-server-instance'
 import { coreServerContextKey, toHostingServer } from './core-server-instance'
+import {
+	createServerSettingsController,
+	serverSettingsControllerKey,
+} from './settings/server-settings-controller'
+import type { ServerSettingsTabId } from './settings/tabs'
 
 type CoreServerProviderState = {
 	instanceId: ComputedRef<string>
@@ -56,6 +61,9 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		() => state.server.value ?? toHostingServer(createFallbackInstance(state.instanceId.value)),
 	)
 
+	const settingsController = createServerSettingsController()
+	provide(serverSettingsControllerKey, settingsController)
+
 	provideModrinthServerContext({
 		get serverId() {
 			return state.instanceId.value
@@ -84,7 +92,14 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 	})
 
 	provideServerSettingsModal({
-		openServerSettings: () => {},
+		openServerSettings: (options) => {
+			const tab = options?.tabId
+			settingsController.open(
+				tab === 'billing' || tab === 'admin-billing'
+					? undefined
+					: (tab as ServerSettingsTabId | undefined),
+			)
+		},
 		browseServerContent: () => {
 			void router.push(
 				`/browse/${state.rawInstance.value?.loader === 'vanilla' ? 'datapack' : 'mod'}`,
@@ -109,6 +124,8 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		repairServer: state.repairServer,
 		changeVersion: state.changeVersion,
 	})
+
+	return { settingsController }
 }
 
 function createFallbackInstance(id: string): CoreInstance {

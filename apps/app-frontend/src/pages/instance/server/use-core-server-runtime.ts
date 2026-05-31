@@ -22,6 +22,7 @@ import {
 	toStats,
 } from './core-server-instance'
 import { provideCoreServerRuntime } from './core-server-providers'
+import type { ServerSettingsTabId } from './settings/tabs'
 
 export function useCoreServerRuntime() {
 	const route = useRoute()
@@ -177,7 +178,7 @@ export function useCoreServerRuntime() {
 		})
 	}
 
-	provideCoreServerRuntime({
+	const { settingsController } = provideCoreServerRuntime({
 		instanceId,
 		rawInstance,
 		server,
@@ -224,5 +225,6 @@ export function useCoreServerRuntime() {
 		repairServer,
 		changeVersion,
 		copyId,
+		openSettings: (tabId?: ServerSettingsTabId) => settingsController.open(tabId),
 	}
 }

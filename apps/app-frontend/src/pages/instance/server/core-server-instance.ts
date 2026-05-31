@@ -11,7 +11,8 @@ import type {
 import type { Archon } from '@modrinth/api-client'
 import type { ContentItem, FileItem, LogLine } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
-import type { ComputedRef, Ref } from 'vue'
+import type { ComputedRef, InjectionKey, Ref } from 'vue'
+import { inject } from 'vue'
 
 export type CoreServerViewData = Archon.Servers.v0.Server
 export type CoreServerContext = {
@@ -32,7 +33,15 @@ export type CoreServerContext = {
 	changeVersion: (body: CoreChangeVersionBody) => Promise<void>
 }
 
-export const coreServerContextKey = Symbol('core-server-context')
+export const coreServerContextKey = Symbol('core-server-context') as InjectionKey<CoreServerContext>
+
+export function injectCoreServerContext(): CoreServerContext {
+	const context = inject(coreServerContextKey)
+	if (!context) {
+		throw new Error('CoreServerContext not provided — call provideCoreServerRuntime first')
+	}
+	return context
+}
 
 export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 	return {

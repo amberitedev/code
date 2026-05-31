@@ -33,6 +33,11 @@
 							</button>
 						</ButtonStyled>
 						<ButtonStyled circular type="transparent" size="large">
+							<button v-tooltip="'Server settings'" @click="openSettings()">
+								<SettingsIcon />
+							</button>
+						</ButtonStyled>
+						<ButtonStyled circular type="transparent" size="large">
 							<OverflowMenu
 								:options="[
 									{ id: 'allServers', action: () => router.push('/library/servers') },
@@ -63,6 +68,7 @@
 				</Suspense>
 			</div>
 		</div>
+		<ServerSettingsModal />
 	</div>
 	<div v-else-if="loadError" class="flex min-h-full items-center justify-center p-6 text-contrast">
 		<ErrorInformationCard
@@ -86,6 +92,7 @@ import {
 	MoreVerticalIcon,
 	PlayIcon,
 	ServerStackIcon,
+	SettingsIcon,
 	SlashIcon,
 	SpinnerIcon,
 	StopCircleIcon,
@@ -103,6 +110,7 @@ import {
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import ServerSettingsModal from './server/settings/ServerSettingsModal.vue'
 import { useCoreServerRuntime } from './server/use-core-server-runtime'
 import ServerBackups from './ServerBackups.vue'
 import ServerContent from './ServerContent.vue'
@@ -122,6 +130,7 @@ const {
 	restartServer,
 	killServer,
 	copyId,
+	openSettings,
 } = useCoreServerRuntime()
 
 const navLinks = computed(() => {
