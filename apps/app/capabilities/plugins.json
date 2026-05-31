@@ -25,6 +25,12 @@
 			"identifier": "http:default",
 			"allow": [
 				{
+					"url": "http://localhost:16662/*"
+				},
+				{
+					"url": "ws://localhost:16662/*"
+				},
+				{
 					"url": "https://modrinth.com/*"
 				},
 				{

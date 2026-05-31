@@ -1,3 +1,4 @@
+import type { CoreModLoader } from '@amberite/amberite-api'
 import type {
 	AbstractPopupNotificationManager,
 	AbstractWebNotificationManager,
@@ -11,12 +12,13 @@ import { useRouter } from 'vue-router'
 
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
+import { useCoreClient } from '@/composables/useCoreClient'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_search_results } from '@/helpers/cache.js'
 import { import_instance } from '@/helpers/import.js'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
 import { create_profile_and_install, create_profile_and_install_from_file } from '@/helpers/pack'
-import { create, list } from '@/helpers/profile.js'
+import { create, edit, list } from '@/helpers/profile.js'
 import type { InstanceLoader } from '@/helpers/types'
 
 export function setupCreationModal(
@@ -140,14 +142,46 @@ export function setupCreationModal(
 			const iconPath = config.instanceIconPath.value ?? null
 			const name = config.instanceName.value.trim() || config.autoInstanceName.value
 
-			await create(
-				name,
-				config.selectedGameVersion.value!,
-				loader as InstanceLoader,
-				loaderVersion,
-				iconPath,
-				false,
-			).catch(handleError)
+			if (config.instanceType.value === 'server') {
+				const core = useCoreClient()
+				const existingServers = await core.listInstances()
+				const port = getNextServerPort(existingServers.map((instance) => instance.port))
+				const coreInstance = await core.createInstance({
+					name,
+					game_version: config.selectedGameVersion.value!,
+					loader: toCoreLoader(loader),
+					loader_version: loaderVersion,
+					port,
+					memory: { min_mb: 1024, max_mb: 4096 },
+				})
+				await create(
+					coreInstance.id,
+					config.selectedGameVersion.value!,
+					toProfileLoader(loader),
+					loaderVersion,
+					iconPath,
+					true,
+					null,
+					'server',
+				)
+				await edit(coreInstance.id, {
+					name,
+					profile_type: 'server',
+					install_stage: 'installed',
+				})
+				await router.push(`/instance/${encodeURIComponent(coreInstance.id)}`)
+			} else {
+				await create(
+					name,
+					config.selectedGameVersion.value!,
+					toProfileLoader(loader),
+					loaderVersion,
+					iconPath,
+					false,
+					null,
+					'client',
+				).catch(handleError)
+			}
 
 			trackEvent('InstanceCreate', {
 				source: 'CreationModal',
@@ -155,6 +189,26 @@ export function setupCreationModal(
 		} catch (err) {
 			handleError(err as Error)
 		}
+	}
+
+	function toProfileLoader(loader: string): InstanceLoader {
+		if (loader === 'paper' || loader === 'purpur') return 'vanilla'
+		return loader as InstanceLoader
+	}
+
+	function toCoreLoader(loader: string): CoreModLoader {
+		if (loader === 'purpur') return 'paper'
+		if (['vanilla', 'paper', 'fabric', 'forge', 'neoforge', 'quilt'].includes(loader)) {
+			return loader as CoreModLoader
+		}
+		return 'vanilla'
+	}
+
+	function getNextServerPort(ports: number[]): number {
+		const usedPorts = new Set(ports)
+		let port = 25565
+		while (usedPorts.has(port)) port += 1
+		return port
 	}
 
 	const pendingModpackCreation = ref<{

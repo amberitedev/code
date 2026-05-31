@@ -74,6 +74,9 @@
 			icon-color="red"
 		/>
 	</div>
+	<div v-else class="flex min-h-full items-center justify-center">
+		<SpinnerIcon class="animate-spin w-8 h-8 text-contrast" />
+	</div>
 </template>
 
 <script setup lang="ts">
@@ -86,6 +89,7 @@ import {
 	PlayIcon,
 	ServerStackIcon,
 	SlashIcon,
+	SpinnerIcon,
 	StopCircleIcon,
 	TerminalSquareIcon,
 	TriangleAlertIcon,

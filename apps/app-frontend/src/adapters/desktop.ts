@@ -1,14 +1,15 @@
 /**
  * DesktopAdapter — PlatformAdapter implementation for the Amberite desktop app (Tauri).
  *
- * Uses native window.fetch instead of the Tauri HTTP plugin; Core's dev-mode CORS allows
- * any origin. For production deployments ALLOWED_ORIGIN in Core must be set to the Tauri
- * webview origin (tauri://localhost or similar).
+ * Uses @tauri-apps/plugin-http fetch (routes through Rust) instead of window.fetch,
+ * so requests to Core bypass browser CSP entirely. The http plugin allowlist in
+ * capabilities/plugins.json must include http://localhost:16662/*.
  *
  * Core URL: reads VITE_CORE_URL env var, falls back to http://localhost:16662.
  * JWT: returns null — Core dev mode bypasses auth. TODO: wire up real auth here.
  */
 import type { PersistentQueueStore, PlatformAdapter, QueuedMessage } from '@amberite/amberite-api'
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 class LocalStorageQueueStore implements PersistentQueueStore {
@@ -51,8 +52,8 @@ const queueStore = new LocalStorageQueueStore()
 
 export function createDesktopAdapter(): PlatformAdapter {
 	return {
-		// Native browser fetch — no Tauri HTTP plugin needed.
-		fetchFn: window.fetch.bind(window),
+		// Tauri HTTP plugin fetch — routes through Rust, bypasses browser CSP.
+		fetchFn: tauriFetch as typeof fetch,
 
 		// Convex relay URL. Empty string disables Convex-relay transport silently.
 		convexUrl: (import.meta.env.VITE_CONVEX_URL as string | undefined) ?? '',

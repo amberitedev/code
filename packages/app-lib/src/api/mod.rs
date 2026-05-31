@@ -22,7 +22,7 @@ pub mod data {
         ContentItemProject, ContentItemVersion, Credentials, Dependency,
         DirectoryInfo, Hooks, JavaVersion, LinkedData, LinkedModpackInfo,
         MemorySettings, ModLoader, ModrinthCredentials, Organization,
-        OwnerType, ProcessMetadata, ProfileFile, ProfileType, Project, ProjectType,
+        OwnerType, ProcessMetadata, ProfileFile, ProfileInstallStage, ProfileType, Project, ProjectType,
         ProjectV3, SearchResult, SearchResults, SearchResultsV3, Settings,
         TeamMember, Theme, User, UserFriend, Version, WindowSize,
     };

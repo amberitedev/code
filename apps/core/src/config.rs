@@ -40,7 +40,7 @@ impl Config {
                 .unwrap_or_else(|_| "https://amberite.dev".to_string()),
             dev_mode: std::env::var("AMBERITE_DEV")
                 .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
+                .unwrap_or(cfg!(debug_assertions)),
             sync_retain_count: std::env::var("AMBERITE_SYNC_RETAIN_COUNT")
                 .ok()
                 .and_then(|v| v.parse().ok())

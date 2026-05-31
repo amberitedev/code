@@ -1,3 +1,9 @@
+// Creation flow shared state for world, server, and instance setup modals.
+// Key sections: public flow/context types (lines 22-237), context factory and
+// reactive state (lines 239-346), loader metadata helpers (lines 348-424),
+// modal reset/navigation methods (lines 426-523), and returned context value
+// (lines 549-616).
+
 import type { Archon, LauncherMeta } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type ComputedRef, type Ref, ref, type ShallowRef, watch } from 'vue'
@@ -20,6 +26,7 @@ import { stageConfigs } from './stages'
 
 export type FlowType = 'world' | 'server-onboarding' | 'reset-server' | 'instance'
 export type SetupType = 'modpack' | 'custom' | 'vanilla'
+export type InstanceType = 'client' | 'server'
 export type Gamemode = 'survival' | 'creative' | 'hardcore'
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard'
 export type LoaderVersionType = 'stable' | 'latest' | 'other'
@@ -146,6 +153,7 @@ export interface CreationFlowContextValue {
 	generatorSettingsCustom: Ref<string>
 
 	// Instance-specific state
+	instanceType: Ref<InstanceType>
 	instanceName: Ref<string>
 	autoInstanceName: ComputedRef<string>
 	instanceIcon: Ref<File | null>
@@ -270,6 +278,7 @@ export function createCreationFlowContext(
 	const generatorSettingsCustom = ref('')
 
 	// Instance-specific state
+	const instanceType = ref<InstanceType>('client')
 	const instanceName = ref('')
 	const existingInstanceNames = ref<string[]>([])
 	const fetchExistingInstanceNames = options.fetchExistingInstanceNames ?? null
@@ -436,6 +445,7 @@ export function createCreationFlowContext(
 		generatorSettingsCustom.value = ''
 
 		// Instance-specific
+		instanceType.value = 'client'
 		instanceName.value = ''
 		instanceIconUrl.value = null
 		instanceIcon.value = null
@@ -557,6 +567,7 @@ export function createCreationFlowContext(
 		generateStructures,
 		generatorSettingsMode,
 		generatorSettingsCustom,
+		instanceType,
 		instanceName,
 		autoInstanceName,
 		instanceIcon,

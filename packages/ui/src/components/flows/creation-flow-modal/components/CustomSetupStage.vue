@@ -1,3 +1,11 @@
+<!--
+Custom setup stage for creation flows. Key sections: instance fields and type
+selector (lines 3-39), loader/game/loader-version controls (lines 41-149),
+messages and label formatting (lines 187-298), option computation and file
+picker helpers (lines 300-357), version filtering/loading (lines 359-578), and
+loader version option mapping (lines 580-629).
+-->
+
 <template>
 	<div class="space-y-6">
 		<!-- Instance-specific: Icon upload -->
@@ -25,6 +33,18 @@
 			<StyledInput
 				v-model="ctx.instanceName.value"
 				:placeholder="ctx.autoInstanceName.value || formatMessage(messages.instanceNamePlaceholder)"
+			/>
+		</div>
+
+		<!-- Instance-specific: Type selector -->
+		<div v-if="ctx.flowType === 'instance'" class="flex flex-col gap-2">
+			<span class="font-semibold text-contrast">{{
+				formatMessage(messages.instanceTypeLabel)
+			}}</span>
+			<Chips
+				v-model="ctx.instanceType.value"
+				:items="instanceTypeItems"
+				:format-label="formatInstanceTypeLabel"
 			/>
 		</div>
 
@@ -163,7 +183,7 @@ import Collapsible from '../../../base/Collapsible.vue'
 import Combobox, { type ComboboxOption } from '../../../base/Combobox.vue'
 import PaperChannelBadge from '../../../base/PaperChannelBadge.vue'
 import StyledInput from '../../../base/StyledInput.vue'
-import type { LoaderVersionEntry, LoaderVersionType } from '../creation-flow-context'
+import type { InstanceType, LoaderVersionEntry, LoaderVersionType } from '../creation-flow-context'
 import { injectCreationFlowContext } from '../creation-flow-context'
 import { formatLoaderLabel } from '../shared'
 
@@ -196,6 +216,18 @@ const messages = defineMessages({
 	instanceNamePlaceholder: {
 		id: 'creation-flow.modal.custom-setup.name.placeholder',
 		defaultMessage: 'Enter instance name',
+	},
+	instanceTypeLabel: {
+		id: 'creation-flow.modal.custom-setup.instance-type.label',
+		defaultMessage: 'Instance type',
+	},
+	clientInstanceType: {
+		id: 'creation-flow.modal.custom-setup.instance-type.client',
+		defaultMessage: 'Client',
+	},
+	serverInstanceType: {
+		id: 'creation-flow.modal.custom-setup.instance-type.server',
+		defaultMessage: 'Server',
 	},
 	loaderLabel: {
 		id: 'creation-flow.modal.custom-setup.loader.label',
@@ -254,6 +286,14 @@ const messages = defineMessages({
 		defaultMessage: 'Other',
 	},
 })
+
+const instanceTypeItems: InstanceType[] = ['client', 'server']
+
+function formatInstanceTypeLabel(type: InstanceType): string {
+	return type === 'server'
+		? formatMessage(messages.serverInstanceType)
+		: formatMessage(messages.clientInstanceType)
+}
 
 function formatLoaderVersionTypeLabel(type: LoaderVersionType): string {
 	switch (type) {

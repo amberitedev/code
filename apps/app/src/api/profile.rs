@@ -425,6 +425,7 @@ pub struct EditProfile {
     )]
     pub game_resolution: Option<Option<WindowSize>>,
     pub hooks: Option<Hooks>,
+    pub install_stage: Option<ProfileInstallStage>,
 }
 
 // Edits a profile
@@ -470,6 +471,9 @@ pub async fn profile_edit(path: &str, edit_profile: EditProfile) -> Result<()> {
         }
         if let Some(hooks) = edit_profile.hooks.clone() {
             prof.hooks = hooks;
+        }
+        if let Some(install_stage) = edit_profile.install_stage {
+            prof.install_stage = install_stage;
         }
 
         prof.modified = chrono::Utc::now();
