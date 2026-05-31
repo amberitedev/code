@@ -130,6 +130,7 @@ impl TestApp {
             bind_host: "127.0.0.1".to_string(),
             allowed_origin: "*".to_string(),
             dev_mode: true,
+            sync_retain_count: 10,
         }
     }
 
