@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "未知のMODパックをインストールする前に警告してください"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraftの認証サーバーは現在停止している可能性があります。インターネット接続を確認し、しばらくしてからもう一度お試しください。"
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "認証サーバーにアクセスできません"
-  },
   "app.browse.add-to-instance": {
     "message": "インスタンスに追加"
   },
@@ -301,48 +295,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "リソース管理"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} のインストール準備が整いました！今すぐ更新するには再読み込みするか、Modrinth Appを閉じる際に自動更新されます。"
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} のダウンロードが完了しました。今すぐ更新するには再読み込みするか、Modrinth Appを閉じる際に自動更新されます。"
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} が利用可能です。最新の機能と修正プログラムを入手するには、パッケージマネージャーを使用して更新してください！"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} が利用可能になりました！お使いのネットワークが従量制のため、自動ダウンロードは行っておりません。"
-  },
-  "app.update-popup.changelog": {
-    "message": "更新履歴"
-  },
-  "app.update-popup.download": {
-    "message": "ダウンロード ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "ダウンロード完了"
-  },
-  "app.update-popup.reload": {
-    "message": "再読み込み"
-  },
-  "app.update-popup.title": {
-    "message": "アップデートが利用可能です"
-  },
-  "app.update.complete-toast.text": {
-    "message": "クリックすると更新履歴を表示できます。"
-  },
-  "app.update.complete-toast.title": {
-    "message": "バージョン {version} が正常にインストールされました！"
-  },
-  "app.update.download-update": {
-    "message": "アップデートをダウンロード"
-  },
-  "app.update.downloading-update": {
-    "message": "アップデートをダウンロード中 ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "再起動して今すぐ更新"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

@@ -132,6 +132,9 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::backup_scheduler::run_backup_scheduler(
         Arc::clone(&state),
     ));
+    tokio::spawn(application::task_scheduler::run_task_scheduler(
+        Arc::clone(&state),
+    ));
     tokio::spawn(application::pairing_service::register_pairing_core(
         Arc::clone(&state),
     ));

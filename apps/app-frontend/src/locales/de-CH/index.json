@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Warne mich, bevor unbekannte Modpacks installiert werden"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Die Authentifizierungsserver von Minecraft sind eventuell momentan nicht erreichbar. Überprüfe deine Internetverbindung und versuche es später erneut."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Authentifizierungsserver sind nicht erreichbar"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "Server zu Instanz hinzufügen"
   },
@@ -322,48 +316,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Ressourcenmanagement"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} ist bereit zur Installation! Lade die App neu um jetzt zu aktualisieren, oder automatisch nach dem schliessen der Modrinth App."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} wurde heruntergeladen. Lade die App neu um jetzt zu aktualisieren, oder automatisch nach dem schliessen der Modrinth App."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} ist verfügbar. Benutze deinen Paketmanager zum aktualisieren, um die neusten Features und Bugfixes zu erhalten!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} ist jetzt verfügbar! Da du in einem begrenzten Netzwerk bist, haben wir es nicht automatisch heruntergeladen."
-  },
-  "app.update-popup.changelog": {
-    "message": "Änderungen"
-  },
-  "app.update-popup.download": {
-    "message": "Herunterladen ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Download abgeschlossen"
-  },
-  "app.update-popup.reload": {
-    "message": "Neu Laden"
-  },
-  "app.update-popup.title": {
-    "message": "Aktualisierung verfügbar"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Klicke Hier um die Änderungen zu sehen."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Version {version} wurde erfolgreich installiert!"
-  },
-  "app.update.download-update": {
-    "message": "Aktualisierung herunterladen"
-  },
-  "app.update.downloading-update": {
-    "message": "Lade Aktualisierung herunter ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Lade neu um Aktualisierung zu installieren"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

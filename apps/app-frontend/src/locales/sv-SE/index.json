@@ -56,12 +56,6 @@
   "app.appearance-settings.hide-nametag.title": {
     "message": "Dölj namnskylt"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecrafts autentiseringsservrar kan vara nere just nu. Kontrollera din internetanslutning och försök igen senare."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Kan ej nå autentiseringsservrarna"
-  },
   "app.browse.add-to-instance": {
     "message": "Lägg till i instans"
   },
@@ -253,48 +247,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Resurshantering"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} är redo att laddas ner! Ladda om för att uppdatera nu, eller automatiskt när du stänger Modrinth App."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} har laddats ner. Ladda om för att uppdatera nu, eller automatiskt när du stänger Modrinth App."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} är tillgänglig. Använd din pakethanterare för att uppdatera och få tillgång till de senaste funktionerna och buggfixarna!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} är nu tillgänglig! Eftersom du använder ett nätverk med datatrafikbegränsningar har vi inte laddat ner det automatiskt."
-  },
-  "app.update-popup.changelog": {
-    "message": "Ändringslogg"
-  },
-  "app.update-popup.download": {
-    "message": "Ladda ner ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Nedladdning slutförd"
-  },
-  "app.update-popup.reload": {
-    "message": "Ladda om"
-  },
-  "app.update-popup.title": {
-    "message": "Uppdatering tillgänglig"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Tryck här för att visa ändringsloggen."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Version {version} har installerats!"
-  },
-  "app.update.download-update": {
-    "message": "Ladda ner uppdatering"
-  },
-  "app.update.downloading-update": {
-    "message": "Laddar ner uppdatering ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Ladda om för att installera uppdatering"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

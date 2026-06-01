@@ -229,6 +229,10 @@ const messages = defineMessages({
 		id: 'creation-flow.modal.custom-setup.instance-type.server',
 		defaultMessage: 'Server',
 	},
+	syncedInstanceType: {
+		id: 'creation-flow.modal.custom-setup.instance-type.synced',
+		defaultMessage: 'Synced',
+	},
 	loaderLabel: {
 		id: 'creation-flow.modal.custom-setup.loader.label',
 		defaultMessage: 'Loader',
@@ -287,12 +291,12 @@ const messages = defineMessages({
 	},
 })
 
-const instanceTypeItems: InstanceType[] = ['client', 'server']
+const instanceTypeItems: InstanceType[] = ['client', 'server', 'synced']
 
 function formatInstanceTypeLabel(type: InstanceType): string {
-	return type === 'server'
-		? formatMessage(messages.serverInstanceType)
-		: formatMessage(messages.clientInstanceType)
+	if (type === 'server') return formatMessage(messages.serverInstanceType)
+	if (type === 'synced') return formatMessage(messages.syncedInstanceType)
+	return formatMessage(messages.clientInstanceType)
 }
 
 function formatLoaderVersionTypeLabel(type: LoaderVersionType): string {

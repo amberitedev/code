@@ -1,6 +1,8 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import {
+	banByGroupUser,
+	bansByGroup,
 	coreById,
 	coresByGroup,
 	groupByCoreId,
@@ -11,15 +13,17 @@ import {
 	requireFriendGroupRole,
 	requireSingleGroupMembership,
 	requireSingleOwnedCore,
-	requireUserId,
+	resolveActor,
+	roleRank,
 	upsertCoreForFriendGroup,
 } from './_socialRules'
 const role = v.union(v.literal('owner'), v.literal('admin'), v.literal('member'))
+const devActAs = { __actAs: v.optional(v.string()) }
 
 export const listMyFriendGroups = query({
-	args: {},
-	handler: async (ctx) => {
-		const userId = await requireUserId(ctx)
+	args: { ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs)
 		const memberships = await membershipsByUser(ctx, userId)
 		return await Promise.all(
 			memberships.map(async (membership) => {
@@ -39,9 +43,9 @@ export const listMyFriendGroups = query({
 })
 
 export const getFriendGroup = query({
-	args: { friendGroupId: v.string() },
+	args: { friendGroupId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin', 'member'])
 		const group = await ctx.db.get(args.friendGroupId as any)
 		return group
@@ -54,9 +58,9 @@ export const getFriendGroup = query({
 })
 
 export const listFriendGroupMembers = query({
-	args: { friendGroupId: v.string() },
+	args: { friendGroupId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin', 'member'])
 		const members = await membersByGroup(ctx, args.friendGroupId)
 		return await Promise.all(
@@ -77,9 +81,10 @@ export const ensureCoreFriendGroup = mutation({
 		banner: v.optional(v.string()),
 		subdomain: v.optional(v.string()),
 		setupMode: v.optional(v.union(v.literal('remote'), v.literal('local'))),
+		...devActAs,
 	},
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		const now = Date.now()
 		const existingGroup = await groupByCoreId(ctx, args.coreId)
 		if (existingGroup) {
@@ -135,9 +140,10 @@ export const updateFriendGroup = mutation({
 		description: v.optional(v.string()),
 		banner: v.optional(v.string()),
 		subdomain: v.optional(v.string()),
+		...devActAs,
 	},
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin'])
 		await ctx.db.patch(args.friendGroupId as any, {
 			...(args.name !== undefined ? { name: args.name.trim() } : {}),
@@ -157,19 +163,25 @@ export const updateMemberRole = mutation({
 		role,
 		permissionPreset: v.optional(v.string()),
 		customPermissions: v.optional(v.any()),
+		...devActAs,
 	},
 	handler: async (ctx, args) => {
-		const actorId = await requireUserId(ctx)
+		const actorId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, actorId, args.friendGroupId, ['owner', 'admin'])
+		const actor = await membershipByGroupUser(ctx, args.friendGroupId, actorId)
 		const member = await membershipByGroupUser(ctx, args.friendGroupId, args.userId)
 		if (!member) throw new Error('member not found')
 		if (member.role === 'owner' && args.role !== 'owner')
 			throw new Error('owner role cannot be changed')
 		if (member.role !== 'owner' && args.role === 'owner')
 			throw new Error('owner role cannot be assigned')
+		if (actor && actorId !== args.userId && roleRank(member.role) >= roleRank(actor.role))
+			throw new Error('cannot manage a member of equal or higher rank')
+		if (actor && args.role !== 'member' && roleRank(args.role) >= roleRank(actor.role))
+			throw new Error('cannot promote a member to your own rank or higher')
 		await ctx.db.patch(member._id, {
 			role: args.role,
-			permissionPreset: args.permissionPreset,
+			permissionPreset: args.permissionPreset ?? member.permissionPreset ?? args.role,
 			customPermissions: args.customPermissions,
 			updatedAt: Date.now(),
 		})
@@ -178,22 +190,124 @@ export const updateMemberRole = mutation({
 })
 
 export const removeMember = mutation({
-	args: { friendGroupId: v.string(), userId: v.string() },
+	args: { friendGroupId: v.string(), userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const actorId = await requireUserId(ctx)
+		const actorId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, actorId, args.friendGroupId, ['owner', 'admin'])
+		const actor = await membershipByGroupUser(ctx, args.friendGroupId, actorId)
 		const member = await membershipByGroupUser(ctx, args.friendGroupId, args.userId)
 		if (!member) return null
 		if (member.role === 'owner') throw new Error('owner cannot be removed from their Core group')
+		if (actor && actorId !== args.userId && roleRank(member.role) >= roleRank(actor.role))
+			throw new Error('cannot remove a member of equal or higher rank')
 		await ctx.db.delete(member._id)
 		return null
 	},
 })
 
-export const friendGroupCores = query({
-	args: { friendGroupId: v.string() },
+/**
+ * Transfer ownership of the friend group (and its Core) to another member.
+ * Only the current owner may do this. The previous owner is demoted to admin.
+ */
+export const transferOwnership = mutation({
+	args: { friendGroupId: v.string(), userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const actorId = await resolveActor(ctx, args.__actAs)
+		await requireFriendGroupRole(ctx, actorId, args.friendGroupId, ['owner'])
+		if (actorId === args.userId) throw new Error('already the owner')
+		const target = await membershipByGroupUser(ctx, args.friendGroupId, args.userId)
+		if (!target) throw new Error('member not found')
+		const current = await membershipByGroupUser(ctx, args.friendGroupId, actorId)
+		const now = Date.now()
+		if (current)
+			await ctx.db.patch(current._id, { role: 'admin', permissionPreset: 'admin', updatedAt: now })
+		await ctx.db.patch(target._id, { role: 'owner', permissionPreset: 'owner', updatedAt: now })
+		await ctx.db.patch(args.friendGroupId as any, { ownerUserId: args.userId, updatedAt: now })
+		const group = await ctx.db.get(args.friendGroupId as any)
+		if (group?.coreId) {
+			const core = await coreById(ctx, group.coreId)
+			if (core) await ctx.db.patch(core._id, { ownerUserId: args.userId })
+		}
+		return null
+	},
+})
+
+/**
+ * Leave the friend group. The owner cannot leave while they still own the Core —
+ * they must transfer ownership first (mirrors the "owner is permanent" invariant).
+ */
+export const leaveGroup = mutation({
+	args: { friendGroupId: v.string(), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs)
+		const member = await membershipByGroupUser(ctx, args.friendGroupId, userId)
+		if (!member) return null
+		if (member.role === 'owner')
+			throw new Error('transfer ownership before leaving your Core group')
+		await ctx.db.delete(member._id)
+		return null
+	},
+})
+
+/**
+ * Ban a user from the friend group: removes their membership and records a ban
+ * so they cannot rejoin via invite until unbanned. Owner/admin only.
+ */
+export const banMember = mutation({
+	args: { friendGroupId: v.string(), userId: v.string(), reason: v.optional(v.string()), ...devActAs },
+	handler: async (ctx, args) => {
+		const actorId = await resolveActor(ctx, args.__actAs)
+		await requireFriendGroupRole(ctx, actorId, args.friendGroupId, ['owner', 'admin'])
+		if (actorId === args.userId) throw new Error('cannot ban yourself')
+		const actor = await membershipByGroupUser(ctx, args.friendGroupId, actorId)
+		const member = await membershipByGroupUser(ctx, args.friendGroupId, args.userId)
+		if (member?.role === 'owner') throw new Error('owner cannot be banned')
+		if (actor && member && roleRank(member.role) >= roleRank(actor.role))
+			throw new Error('cannot ban a member of equal or higher rank')
+		if (member) await ctx.db.delete(member._id)
+		const existing = await banByGroupUser(ctx, args.friendGroupId, args.userId)
+		if (!existing)
+			await ctx.db.insert('friendGroupBans', {
+				friendGroupId: args.friendGroupId,
+				userId: args.userId,
+				bannedByUserId: actorId,
+				reason: args.reason,
+				createdAt: Date.now(),
+			})
+		return null
+	},
+})
+
+export const unbanMember = mutation({
+	args: { friendGroupId: v.string(), userId: v.string(), ...devActAs },
+	handler: async (ctx, args) => {
+		const actorId = await resolveActor(ctx, args.__actAs)
+		await requireFriendGroupRole(ctx, actorId, args.friendGroupId, ['owner', 'admin'])
+		const ban = await banByGroupUser(ctx, args.friendGroupId, args.userId)
+		if (ban) await ctx.db.delete(ban._id)
+		return null
+	},
+})
+
+export const listFriendGroupBans = query({
+	args: { friendGroupId: v.string(), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs)
+		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin'])
+		const bans = await bansByGroup(ctx, args.friendGroupId)
+		return await Promise.all(
+			bans.map(async (ban) => {
+				const user = await ctx.db.get(ban.userId as any)
+				return { ...ban, user: user ? publicUser(user) : null }
+			}),
+		)
+	},
+})
+
+export const friendGroupCores = query({
+	args: { friendGroupId: v.string(), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin', 'member'])
 		return await coresByGroup(ctx, args.friendGroupId)
 	},

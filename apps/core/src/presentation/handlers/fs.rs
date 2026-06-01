@@ -136,12 +136,18 @@ pub async fn download_handler(
     let (file, filename) = download_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
+    let len = file
+        .metadata()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .len();
     let stream = tokio_util::io::ReaderStream::new(file);
     let body = axum::body::Body::from_stream(stream);
     let disposition = format!("attachment; filename=\"{filename}\"");
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, len)
         .header(header::CONTENT_DISPOSITION, disposition)
         .body(body)
         .map_err(|e| ApiError::Internal(e.to_string()))?)
@@ -201,10 +207,16 @@ pub async fn read_handler(
     let file = read_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
+    let len = file
+        .metadata()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .len();
     let stream = tokio_util::io::ReaderStream::new(file);
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, len)
         .body(axum::body::Body::from_stream(stream))
         .map_err(|e| ApiError::Internal(e.to_string()))?)
 }
@@ -370,11 +382,17 @@ pub async fn download_by_key_handler(
     let file = tokio::fs::File::open(&path)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let len = file
+        .metadata()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .len();
     let stream = tokio_util::io::ReaderStream::new(file);
     let disposition = format!("attachment; filename=\"{filename}\"");
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, len)
         .header(header::CONTENT_DISPOSITION, disposition)
         .body(axum::body::Body::from_stream(stream))
         .map_err(|e| ApiError::Internal(e.to_string()))?)

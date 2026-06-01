@@ -10,7 +10,9 @@ use crate::{
         export_service::ExportError, instance_service::InstanceError,
         log_service::LogError, macro_service::MacroError,
         mod_service::ModError, modpack_service::ModpackError,
-        social_models::SocialError, stats_service::StatsError,
+        query_service::QueryServiceError,
+        rcon_service::RconServiceError, social_models::SocialError,
+        stats_service::StatsError, task_service::TaskError,
     },
     ports::instance_store::StoreError,
 };
@@ -169,6 +171,63 @@ impl From<SocialError> for ApiError {
             SocialError::Database(e) => Self::Internal(e.to_string()),
             SocialError::Io(e) => Self::Internal(e.to_string()),
             SocialError::Mrpack(e) => Self::BadRequest(e.to_string()),
+        }
+    }
+}
+
+impl From<RconServiceError> for ApiError {
+    fn from(e: RconServiceError) -> Self {
+        match e {
+            RconServiceError::NotFound => {
+                Self::NotFound("instance not found".into())
+            }
+            RconServiceError::NotEnabled => {
+                Self::Conflict("rcon is not enabled for this instance".into())
+            }
+            RconServiceError::NotRunning => {
+                Self::Conflict("instance is not running".into())
+            }
+            RconServiceError::Rcon(inner) => match inner {
+                crate::infrastructure::minecraft::rcon::RconError::AuthFailed => {
+                    Self::BadRequest(inner.to_string())
+                }
+                crate::infrastructure::minecraft::rcon::RconError::Timeout => {
+                    Self::ServiceUnavailable(
+                        "rcon connection timed out".into(),
+                    )
+                }
+                _ => Self::ServiceUnavailable(inner.to_string()),
+            },
+            RconServiceError::Properties(inner) => {
+                Self::Internal(inner.to_string())
+            }
+        }
+    }
+}
+
+impl From<QueryServiceError> for ApiError {
+    fn from(e: QueryServiceError) -> Self {
+        match e {
+            QueryServiceError::NotFound => {
+                Self::NotFound("instance not found".into())
+            }
+            QueryServiceError::NotRunning => {
+                Self::Conflict("instance is not running".into())
+            }
+            QueryServiceError::Ping(inner) => {
+                Self::ServiceUnavailable(inner.to_string())
+            }
+        }
+    }
+}
+
+impl From<TaskError> for ApiError {
+    fn from(e: TaskError) -> Self {
+        match e {
+            TaskError::NotFound => Self::NotFound("task not found".into()),
+            TaskError::InvalidType => Self::BadRequest("invalid task type".into()),
+            TaskError::InvalidCron => Self::BadRequest("invalid cron expression".into()),
+            e => Self::Internal(e.to_string()),
         }
     }
 }

@@ -7,18 +7,38 @@ Downloads, installs, and validates Minecraft server JARs; detects Java; queries 
 ```
 minecraft/
   mod.rs              — re-exports all submodules
-  flavours.rs         — resolve_jar(): URL-based loaders (Vanilla, Paper, Fabric)
-  installer.rs        — install_with_installer(): installer-based loaders (Quilt, Forge, NeoForge)
+  flavours.rs         — resolve_jar(): URL-based loaders (Paper; Vanilla/Fabric kept but unused)
+  installer.rs        — install_with_installer(): installer-based loaders (Forge, NeoForge) + LaunchStyle
   java.rs             — detect_java_installations(), required_java_version()
   modrinth_api.rs     — ModrinthClient: project/version lookup, hash-based version lookup
   mrpack.rs           — extract_metadata(), install_mrpack(): parse and install .mrpack archives
-  server_jar.rs       — download_server_jar(): orchestrates flavours/installer dispatch + SHA1 verify
+  server_jar.rs       — download_server_jar(): routes loader → shared store / installer / flavours
   server_properties.rs — read/write/patch server.properties
+  shared/             — global content-addressed shared store (daedalus port) for Vanilla/Fabric/Quilt
 ```
+
+## shared/ — global shared store (daedalus port)
+
+Server-side port of app-lib's (Theseus) shared client storage. Instead of an opaque per-instance blob, libraries and the vanilla server jar are downloaded ONCE into `{data_dir}/meta/` and reused (deduped) across every installation; builds launch with absolute classpaths into that single tree.
+
+| File | Responsibility |
+|------|----------------|
+| `mod.rs` | `install_shared()` orchestrator (meta→version_info→libraries→server jar→processors→launch tokens); `is_shared_loader()`; server-jar download from `downloads[Server]` |
+| `dirs.rs` | `SharedDirs` rooted at `{data_dir}/meta`: `libraries/`, `versions/{id}/{id}.json`, `versions/{id}/server.jar` |
+| `meta.rs` | Modrinth launcher-meta client (`launcher-meta.modrinth.com`); resolves game + loader versions |
+| `version_info.rs` | Download + `merge_partial_version` of vanilla + loader JSON; on-disk cached |
+| `rules.rs` | Server-flavored OS/feature rule evaluation (feature rules → false) |
+| `libraries.rs` | Concurrent dedup library download (skips natives); absolute canonicalized classpath builder |
+| `processors.rs` | Forge/NeoForge SIDE=server processor loop (defensive; shared loaders declare none) |
+| `launch.rs` | `build_launch_tokens()`: Vanilla `-jar server.jar --nogui`; Fabric/Quilt `-cp <classpath> KnotServer --nogui` |
+
+**Only Vanilla/Fabric/Quilt** use the shared store. Returned tokens are persisted as `LaunchStyle::Modular` in the installation's `launch.json` and replayed verbatim at launch (paths are absolute, so the process cwd stays the per-instance data dir).
+
+`daedalus` is a local path crate (`packages/daedalus`). Core relaxed its `serde`/`serde_json` pins to `1.0.228`/`1.0.145` so it shares one serde version with daedalus (which inherits from the root workspace).
 
 ## flavours.rs
 
-Handles the three URL-based loaders. **Quilt, Forge, and NeoForge are explicitly rejected here** — they call `installer.rs`.
+Handles URL-based loaders. **Only Paper is routed here now** (Vanilla/Fabric moved to the shared store). `resolve_jar` still supports Vanilla/Fabric and rejects Quilt/Forge/NeoForge.
 
 | Loader | Endpoint | Notes |
 |--------|----------|-------|
@@ -28,15 +48,18 @@ Handles the three URL-based loaders. **Quilt, Forge, and NeoForge are explicitly
 
 ## installer.rs
 
-Handles Quilt, Forge, and NeoForge by downloading their installer JARs and running them with `java -jar installer.jar --installServer {data_dir}`.
+Handles Forge and NeoForge by downloading their installer JARs and running them with `java -jar installer.jar --installServer {data_dir}`. (Quilt moved to the shared store.)
 
 Installer JARs are downloaded to `tempfile::NamedTempFile` — cleaned up automatically on drop.
+
+`LaunchStyle` variants: `Jar { jar }` (Paper, legacy), `ArgsFile { args }` (Forge 1.17+), `Modular { args }` (absolute tokens from the shared store, Vanilla/Fabric/Quilt).
 
 `detect_launch_style`: after a Forge/NeoForge install, reads `run.sh` or `run.bat` to check for `@libraries` args-file references (Forge 1.17+ pattern). Falls back to `LaunchStyle::Jar { jar: "forge-server.jar" }` for older Forge.
 
 **NeoForge**: requires MC 1.20.1+. Returns `InstallerError::UnsupportedVersion` for older versions.
 
-**`launch.json`**: after every installer-based install, `write_launch_config` writes `{data_dir}/launch.json`. This JSON file tells `instance_status_service::start_instance` how to launch the server. Read by `read_launch_config` at startup.
+**`launch.json`**: after every install, `write_launch_config` writes `{installation_dir}/launch.json`. This JSON file tells `instance_status_service::start_instance` how to launch the server. Read by `read_launch_config` at startup.
+
 
 ## java.rs
 

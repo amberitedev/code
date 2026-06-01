@@ -3,17 +3,23 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::{error, info};
 
 use crate::{
-    application::state::AppState,
+    application::{
+        installation_service::{
+            ensure_installation, reconcile_instance, repair_installation,
+            restore_installations,
+        },
+        state::AppState,
+    },
     domain::{
         event::Event,
         instance::{
             InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
             MemorySettings, ModLoader,
         },
+        server_installation::InstallationId,
     },
     infrastructure::minecraft::{
-        java::{detect_java_installations, required_java_version},
-        server_jar::download_server_jar,
+        java::detect_java_installations,
         server_properties::write_initial_properties,
     },
     ports::instance_store::StoreError,
@@ -50,7 +56,12 @@ pub enum InstanceError {
     ActorDead,
 }
 
-/// Create a new instance record, write server.properties, and start JAR download.
+/// Create a new instance: write its per-instance data dir + server.properties,
+/// bind it to a shared installation for the requested build (installing the
+/// shared server files in the background if needed), and persist the record.
+///
+/// Returns immediately. If the shared installation is already `Ready` the
+/// instance is `Ready` at once; otherwise track progress via the SSE endpoints.
 pub async fn create_instance(
     state: &Arc<AppState>,
     req: CreateInstanceRequest,
@@ -63,17 +74,22 @@ pub async fn create_instance(
     write_initial_properties(&data_dir, req.port)
         .await
         .map_err(|e| InstanceError::Io(std::io::Error::other(e.to_string())))?;
-    // TODO(backups): Implement world backup — create a timestamped zip of {data_dir}/world/
-    // See .plan/active/features.md for full backup scope and .plan/core_rewrite/README.md
-    // TODO(import): accept existing server dir to populate data_dir instead of empty creation
+
+    let (installation_id, _status) = ensure_installation(
+        state,
+        &req.game_version,
+        &req.loader,
+        req.loader_version.as_deref(),
+    )
+    .await?;
 
     let now = chrono::Utc::now();
     let record = InstanceRecord {
         id: id.clone(),
         name: req.name,
-        game_version: req.game_version.clone(),
-        loader: req.loader.clone(),
-        loader_version: req.loader_version.clone(),
+        game_version: req.game_version,
+        loader: req.loader,
+        loader_version: req.loader_version,
         port: req.port,
         memory: req.memory,
         java_version: None,
@@ -82,6 +98,8 @@ pub async fn create_instance(
         install_status: InstanceInstallStatus::Installing,
         status: InstanceStatus::Offline,
         data_dir: data_dir.display().to_string(),
+        installation_id: Some(installation_id.to_string()),
+        total_uptime_seconds: 0,
         created_at: now,
         updated_at: now,
     };
@@ -91,86 +109,18 @@ pub async fn create_instance(
         instance: record.clone(),
     });
 
-    spawn_jar_install(
-        Arc::clone(state),
-        id.clone(),
-        req.game_version.clone(),
-        req.loader.clone(),
-        req.loader_version.clone(),
-        data_dir,
-        "Server JAR downloaded",
-    );
+    // Reconcile after insert: an already-ready installation marks this instance
+    // ready immediately; otherwise the running install task will propagate.
+    reconcile_instance(state, &id, &installation_id).await;
 
     Ok(id)
 }
 
-/// Spawn a background task that (re)downloads the server JAR for an instance and
-/// updates `install_status` + broadcasts progress/status events.
+/// Re-download/reinstall the shared server files backing an instance ("repair").
 ///
-/// Shared by `create_instance`, `repair_instance`, and `change_version`. The caller
-/// is responsible for having already set `install_status` to `Installing` in the DB
-/// (and broadcasting it) so the UI shows the installing state immediately.
-fn spawn_jar_install(
-    state: Arc<AppState>,
-    id: InstanceId,
-    game_version: String,
-    loader: ModLoader,
-    loader_version: Option<String>,
-    data_dir: PathBuf,
-    success_message: &'static str,
-) {
-    tokio::spawn(async move {
-        // Find Java path for installer-based loaders (Quilt/Forge/NeoForge)
-        let req_java = required_java_version(&game_version);
-        let java_path = state.java_store.find_by_version(req_java).await;
-        let jar_result = download_server_jar(
-            &state.http,
-            &loader,
-            &game_version,
-            loader_version.as_deref(),
-            &data_dir,
-            java_path.as_deref(),
-        )
-        .await;
-        match jar_result {
-            Ok(_) => {
-                let _ = state
-                    .instance_store
-                    .update_install_status(&id, InstanceInstallStatus::Ready)
-                    .await;
-                state.broadcaster.send(Event::CreationProgress {
-                    instance_id: id.clone(),
-                    progress: 1.0,
-                    message: success_message.to_string(),
-                });
-                state.broadcaster.send(Event::InstallStatusChanged {
-                    instance_id: id.clone(),
-                    install_status: InstanceInstallStatus::Ready,
-                    message: Some(success_message.to_string()),
-                });
-                info!("JAR install complete for {id}: {success_message}");
-            }
-            Err(e) => {
-                let message = e.to_string();
-                let _ = state
-                    .instance_store
-                    .update_install_status(&id, InstanceInstallStatus::Failed)
-                    .await;
-                state.broadcaster.send(Event::InstallStatusChanged {
-                    instance_id: id.clone(),
-                    install_status: InstanceInstallStatus::Failed,
-                    message: Some(message.clone()),
-                });
-                error!("JAR download failed for {id}: {message}");
-            }
-        }
-    });
-}
-
-/// Re-download/reinstall the server JAR for an existing instance ("repair").
-///
-/// Refuses while the instance is running. Sets `install_status` to `Installing`,
-/// broadcasts it, then spawns the shared install task. Track progress via SSE.
+/// Refuses while the instance is running. Binds the instance to an installation
+/// for its build (migrating legacy instances), then forces a fresh install of
+/// the shared files — which repairs every instance that shares this build.
 pub async fn repair_instance(
     state: &Arc<AppState>,
     id: &InstanceId,
@@ -178,37 +128,24 @@ pub async fn repair_instance(
     if state.instances.contains_key(id) {
         return Err(InstanceError::AlreadyRunning);
     }
-    let record = state.instance_store.get(id).await.map_err(|e| match e {
-        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-        other => InstanceError::Store(other),
-    })?;
+    let record = load_record(state, id).await?;
 
-    state
-        .instance_store
-        .update_install_status(id, InstanceInstallStatus::Installing)
-        .await?;
-    state.broadcaster.send(Event::InstallStatusChanged {
-        instance_id: id.clone(),
-        install_status: InstanceInstallStatus::Installing,
-        message: Some("Repairing server installation".to_string()),
-    });
-
-    spawn_jar_install(
-        Arc::clone(state),
-        id.clone(),
-        record.game_version,
-        record.loader,
-        record.loader_version,
-        PathBuf::from(&record.data_dir),
-        "Server repaired",
-    );
+    let (installation_id, _) = ensure_installation(
+        state,
+        &record.game_version,
+        &record.loader,
+        record.loader_version.as_deref(),
+    )
+    .await?;
+    bind_instance(state, id, &installation_id).await?;
+    repair_installation(state, &installation_id).await?;
     Ok(())
 }
 
-/// Change the game version and/or loader of an existing instance, then reinstall.
+/// Change the game version and/or loader of an existing instance, then rebind it
+/// to the appropriate shared installation (installing it if new).
 ///
-/// Refuses while the instance is running. Persists the new version fields, sets
-/// `install_status` to `Installing`, broadcasts updates, then reinstalls the JAR.
+/// Refuses while the instance is running.
 pub async fn change_version(
     state: &Arc<AppState>,
     id: &InstanceId,
@@ -219,10 +156,7 @@ pub async fn change_version(
     if state.instances.contains_key(id) {
         return Err(InstanceError::AlreadyRunning);
     }
-    let mut record = state.instance_store.get(id).await.map_err(|e| match e {
-        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-        other => InstanceError::Store(other),
-    })?;
+    let mut record = load_record(state, id).await?;
 
     if let Some(gv) = game_version {
         record.game_version = gv;
@@ -243,31 +177,47 @@ pub async fn change_version(
             record.loader_version.as_deref(),
         )
         .await?;
-    state
-        .instance_store
-        .update_install_status(id, InstanceInstallStatus::Installing)
-        .await?;
+
+    let (installation_id, _) = ensure_installation(
+        state,
+        &record.game_version,
+        &record.loader,
+        record.loader_version.as_deref(),
+    )
+    .await?;
+    bind_instance(state, id, &installation_id).await?;
 
     let updated = state.instance_store.get(id).await?;
     state.broadcaster.send(Event::InstanceUpdated {
-        instance: updated.clone(),
-    });
-    state.broadcaster.send(Event::InstallStatusChanged {
-        instance_id: id.clone(),
-        install_status: InstanceInstallStatus::Installing,
-        message: Some("Changing version".to_string()),
+        instance: updated,
     });
 
-    spawn_jar_install(
-        Arc::clone(state),
-        id.clone(),
-        record.game_version,
-        record.loader,
-        record.loader_version,
-        PathBuf::from(&record.data_dir),
-        "Version changed",
-    );
+    reconcile_instance(state, id, &installation_id).await;
     Ok(())
+}
+
+/// Bind an instance to a shared installation.
+async fn bind_instance(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+    installation_id: &InstallationId,
+) -> Result<(), InstanceError> {
+    state
+        .instance_store
+        .update_installation_id(id, Some(&installation_id.to_string()))
+        .await?;
+    Ok(())
+}
+
+/// Fetch an instance record, mapping a missing row to `InstanceError::NotFound`.
+async fn load_record(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+) -> Result<InstanceRecord, InstanceError> {
+    state.instance_store.get(id).await.map_err(|e| match e {
+        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
+        other => InstanceError::Store(other),
+    })
 }
 
 /// Update the port for an instance (used when server-port is changed in properties).
@@ -280,11 +230,15 @@ pub async fn update_port(
     Ok(())
 }
 
-/// On startup, detect Java and restore any instances that were Running before shutdown.
+/// On startup, detect Java, resume interrupted shared installations, and restore
+/// any instances that were Running before shutdown.
 pub async fn restore_instances(state: Arc<AppState>) {
     // Sync Java installations to DB
     let installs = detect_java_installations();
     state.java_store.sync_all(&installs).await;
+
+    // Resume any shared installations interrupted by an unclean shutdown.
+    restore_installations(Arc::clone(&state)).await;
 
     // Reset any instances stuck in transient states
     let _ = state.instance_store.reset_transient_statuses().await;
@@ -314,9 +268,6 @@ pub async fn get_data_dir(
     state: &Arc<AppState>,
     id: &InstanceId,
 ) -> Result<PathBuf, InstanceError> {
-    let record = state.instance_store.get(id).await.map_err(|e| match e {
-        StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
-        other => InstanceError::Store(other),
-    })?;
+    let record = load_record(state, id).await?;
     Ok(PathBuf::from(&record.data_dir))
 }

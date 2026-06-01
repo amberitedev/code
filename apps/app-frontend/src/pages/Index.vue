@@ -1,28 +1,32 @@
 <script setup lang="ts">
-import { injectNotificationManager } from '@modrinth/ui'
-import type { SearchResult } from '@modrinth/utils'
+import { injectNotificationManager, useLoadingBarToken } from '@modrinth/ui'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import dayjs from 'dayjs'
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import RowDisplay from '@/components/RowDisplay.vue'
+import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import RecentWorldsList from '@/components/ui/world/RecentWorldsList.vue'
 import { get_search_results } from '@/helpers/cache.js'
 import { profile_listener } from '@/helpers/events'
 import { list } from '@/helpers/profile.js'
-import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
+defineOptions({
+	name: 'HomePage',
+})
+
 const { handleError } = injectNotificationManager()
+const queryClient = useQueryClient()
 const route = useRoute()
 const breadcrumbs = useBreadcrumbs()
 
 breadcrumbs.setRootContext({ name: 'Home', link: route.path })
 
-const instances = ref<GameInstance[]>([])
-
-const featuredModpacks = ref<SearchResult[]>([])
-const featuredMods = ref<SearchResult[]>([])
+const instances = computed(() => instancesQuery.data.value ?? [])
+const featuredModpacks = computed(() => featuredQuery.data.value?.modpacks ?? [])
+const featuredMods = computed(() => featuredQuery.data.value?.mods ?? [])
 const installedModpacksFilter = ref('')
 
 const recentInstances = computed(() =>
@@ -45,15 +49,16 @@ window.addEventListener('online', () => {
 })
 
 async function fetchInstances() {
-	instances.value = await list().catch(handleError)
+	const loadedInstances = (await list().catch(handleError)) ?? []
 
 	const filters = []
-	for (const instance of instances.value) {
+	for (const instance of loadedInstances) {
 		if (instance.linked_data && instance.linked_data.project_id) {
 			filters.push(`NOT"project_id"="${instance.linked_data.project_id}"`)
 		}
 	}
 	installedModpacksFilter.value = filters.join(' AND ')
+	return loadedInstances
 }
 
 async function fetchFeaturedModpacks() {
@@ -62,46 +67,70 @@ async function fetchFeaturedModpacks() {
 	)
 
 	if (response) {
-		featuredModpacks.value = response.result.hits
-	} else {
-		featuredModpacks.value = []
+		return response.result.hits
 	}
+	return []
 }
 
 async function fetchFeaturedMods() {
 	const response = await get_search_results('?facets=[["project_type:mod"]]&limit=10&index=follows')
 
 	if (response) {
-		featuredMods.value = response.result.hits
-	} else {
-		featuredModpacks.value = []
+		return response.result.hits
 	}
+	return []
 }
 
 async function refreshFeaturedProjects() {
-	await Promise.all([fetchFeaturedModpacks(), fetchFeaturedMods()])
+	const [modpacks, mods] = await Promise.all([fetchFeaturedModpacks(), fetchFeaturedMods()])
+	return { modpacks, mods }
 }
 
-await fetchInstances()
-await refreshFeaturedProjects()
+const instancesQuery = useQuery({
+	queryKey: ['app-home', 'instances'],
+	queryFn: fetchInstances,
+	staleTime: 30_000,
+	gcTime: 10 * 60_000,
+})
 
-const unlistenProfile = await profile_listener(
-	async (e: { event: string; profile_path_id: string }) => {
-		await fetchInstances()
+const featuredQuery = useQuery({
+	queryKey: computed(() => ['app-home', 'featured', installedModpacksFilter.value]),
+	queryFn: refreshFeaturedProjects,
+	enabled: computed(() => !instancesQuery.isPending.value),
+	staleTime: 5 * 60_000,
+	gcTime: 15 * 60_000,
+})
 
-		if (e.event === 'added' || e.event === 'created' || e.event === 'removed') {
-			await refreshFeaturedProjects()
-		}
-	},
+const initialPending = computed(
+	() =>
+		(instancesQuery.isPending.value && instances.value.length === 0) ||
+		(featuredQuery.isPending.value && !hasFeaturedProjects.value),
 )
+useLoadingBarToken(initialPending)
+
+let unlistenProfile: (() => void) | undefined
+
+onMounted(async () => {
+	unlistenProfile = await profile_listener(
+		async (e: { event: string; profile_path_id: string }) => {
+			await queryClient.invalidateQueries({ queryKey: ['app-home', 'instances'] })
+
+			if (e.event === 'added' || e.event === 'created' || e.event === 'removed') {
+				await instancesQuery.refetch()
+				await queryClient.invalidateQueries({ queryKey: ['app-home', 'featured'] })
+			}
+		},
+	)
+})
 
 onUnmounted(() => {
-	unlistenProfile()
+	unlistenProfile?.()
 })
 </script>
 
 <template>
-	<div class="p-6 flex flex-col gap-2">
+	<AppPageSkeleton v-if="initialPending" />
+	<div v-else class="p-6 flex flex-col gap-2">
 		<h1 v-if="recentInstances?.length > 0" class="m-0 text-2xl font-extrabold">Welcome back!</h1>
 		<h1 v-else class="m-0 text-2xl font-extrabold">Welcome to Modrinth App!</h1>
 		<RecentWorldsList :recent-instances="recentInstances" />

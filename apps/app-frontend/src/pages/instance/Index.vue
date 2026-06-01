@@ -1,4 +1,5 @@
 <template>
+	<AppPageSkeleton v-if="!instance" variant="detail" />
 	<div v-if="instance" :class="{ 'flex h-full flex-col': isFixedRender }">
 		<div
 			:class="['p-6 pr-2 pb-4', { 'shrink-0': isFixedRender }]"
@@ -195,6 +196,14 @@
 										id: 'export-mrpack',
 										action: () => exportModal?.show(),
 									},
+									...(instance && canConvertToSynced(instance)
+										? [
+												{
+													id: 'sync-to-server',
+													action: () => syncToServer(),
+												},
+											]
+										: []),
 								]"
 							>
 								<MoreVerticalIcon />
@@ -202,6 +211,7 @@
 								<template #host-a-server> <ServerIcon /> Create a server </template>
 								<template #open-folder> <FolderOpenIcon /> Open folder </template>
 								<template #export-mrpack> <PackageIcon /> Export modpack </template>
+								<template #sync-to-server> <LinkIcon /> Sync to server </template>
 							</OverflowMenu>
 						</ButtonStyled>
 					</div>
@@ -277,6 +287,7 @@ import {
 	FolderOpenIcon,
 	GlobeIcon,
 	HashIcon,
+	LinkIcon,
 	MoreVerticalIcon,
 	PackageIcon,
 	PlayIcon,
@@ -310,6 +321,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
@@ -324,6 +336,7 @@ import { finish_install, get, get_full_path, kill, run } from '@/helpers/profile
 import type { GameInstance } from '@/helpers/types'
 import { showProfileInFolder } from '@/helpers/utils.js'
 import { get_server_status, refreshWorlds } from '@/helpers/worlds'
+import { canConvertToSynced, convertToSynced } from '@/pages/instance/synced/synced-conversion'
 import { injectServerInstall } from '@/providers/server-install'
 import { handleSevereError } from '@/store/error.js'
 import { useBreadcrumbs } from '@/store/state'
@@ -349,6 +362,7 @@ window.addEventListener('online', () => {
 })
 
 const instance = ref<GameInstance>()
+const instancePending = computed(() => !instance.value)
 const preloadedContent = ref<InstanceContentData | null>(null)
 const playing = ref(false)
 const loading = ref(false)
@@ -358,6 +372,16 @@ const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
 
 useLoadingBarToken(subpagePending)
+useLoadingBarToken(instancePending)
+
+async function syncToServer() {
+	if (!instance.value) return
+	try {
+		await convertToSynced(instance.value.path)
+	} catch (error) {
+		handleError(error as Error)
+	}
+}
 
 const isServerInstance = ref(false)
 const linkedProjectV3 = ref<Labrinth.Projects.v3.Project>()

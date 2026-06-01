@@ -5,7 +5,8 @@
 <script setup lang="ts">
 import type { UploadState } from '@modrinth/api-client'
 import { FilePageLayout, injectNotificationManager, provideFileManager } from '@modrinth/ui'
-import { computed, inject, ref, watch } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
+import { computed, inject, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'
@@ -19,9 +20,6 @@ const { handleError } = injectNotificationManager()
 const ctx = inject(coreServerContextKey)
 if (!ctx) throw new Error('Missing Core server context')
 
-const items = ref([])
-const loading = ref(false)
-const error = ref<Error | null>(null)
 const editingFile = ref(null)
 const currentPath = computed(() => (typeof route.query.path === 'string' ? route.query.path : '/'))
 const uploadState = ref<UploadState>({
@@ -34,23 +32,26 @@ const uploadState = ref<UploadState>({
 	totalFiles: 0,
 })
 
+const filesQuery = useQuery({
+	queryKey: computed(() => ['core-files', ctx.instanceId.value, currentPath.value]),
+	queryFn: () =>
+		core
+			.listDirectory(ctx.instanceId.value, currentPath.value, 0, 2000)
+			.then((listing) => listing.items.map(toFileItem)),
+	staleTime: 15_000,
+})
+
+const items = computed(() => filesQuery.data.value ?? [])
+const loading = computed(() => filesQuery.isLoading.value)
+const error = computed(() => (filesQuery.error.value as Error | null) ?? null)
+
 function navigateTo(path: string) {
 	const { editing: _, ...query } = route.query
 	void router.push({ query: { ...query, path } })
 }
 
 async function refresh() {
-	loading.value = true
-	error.value = null
-	try {
-		const listing = await core.listDirectory(ctx.instanceId.value, currentPath.value, 0, 2000)
-		items.value = listing.items.map(toFileItem)
-	} catch (err) {
-		error.value = err as Error
-		handleError(err as Error)
-	} finally {
-		loading.value = false
-	}
+	await filesQuery.refetch()
 }
 
 function childPath(name: string) {
@@ -108,8 +109,6 @@ async function uploadFiles(files: File[]) {
 		}
 	}
 }
-
-watch(currentPath, () => void refresh(), { immediate: true })
 
 provideFileManager({
 	items,

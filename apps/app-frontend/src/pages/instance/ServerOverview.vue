@@ -7,6 +7,11 @@
 				:storage-link="filesLink"
 			/>
 
+			<ServerQueryCard
+				:instance-id="ctx.instanceId.value"
+				:enabled="ctx.powerState.value === 'running'"
+			/>
+
 			<div class="flex min-h-[700px] flex-col gap-2">
 				<span class="text-2xl font-semibold text-contrast">Console</span>
 				<ConsolePageLayout />
@@ -20,6 +25,7 @@ import { ConsolePageLayout, provideConsoleManager } from '@modrinth/ui'
 import { computed, inject, ref } from 'vue'
 
 import { coreServerContextKey } from './server/core-server-instance'
+import ServerQueryCard from './server/ServerQueryCard.vue'
 import ServerStats from './server/ServerStats.vue'
 
 const ctx = inject(coreServerContextKey)

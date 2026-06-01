@@ -1,10 +1,4 @@
 {
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraft serveri za autentifikaciju su možda trenutno nedostupni. Molimo vas da proverite vašu internet vezu i pokušajte ponovo kasnije."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Serveri za autentifikaciju su nedostupni"
-  },
   "app.browse.add-to-instance": {
     "message": "Dodaj na instancu"
   },

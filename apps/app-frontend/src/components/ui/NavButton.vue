@@ -10,6 +10,8 @@
 			disabled: disabled,
 		}"
 		class="w-12 h-12 text-primary rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bg hover:text-contrast"
+		@mouseenter="preloadRoute"
+		@focus="preloadRoute"
 	>
 		<slot />
 	</RouterLink>
@@ -26,13 +28,14 @@
 
 <script setup lang="ts">
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
 
 type RouteFunction = (route: RouteLocationNormalizedLoaded) => boolean
 
-withDefaults(
+const props = withDefaults(
 	defineProps<{
 		to: (() => void) | string
 		isPrimary?: RouteFunction
@@ -42,8 +45,28 @@ withDefaults(
 	}>(),
 	{
 		disabled: false,
+		isPrimary: undefined,
+		isSubpage: undefined,
+		highlightOverride: false,
 	},
 )
+
+let preloaded = false
+
+async function preloadRoute() {
+	if (preloaded || props.disabled || typeof props.to !== 'string') return
+	preloaded = true
+	const resolved = router.resolve(props.to)
+	await Promise.all(
+		resolved.matched.flatMap((record) =>
+			Object.values(record.components ?? {}).map((component) =>
+				typeof component === 'function' ? component() : Promise.resolve(),
+			),
+		),
+	).catch(() => {
+		preloaded = false
+	})
+}
 
 defineOptions({
 	inheritAttrs: false,

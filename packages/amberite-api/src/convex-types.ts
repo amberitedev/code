@@ -67,6 +67,16 @@ export interface FriendGroupInvite {
 	respondedAt?: number
 }
 
+export interface FriendGroupBan {
+	_id: string
+	friendGroupId: string
+	userId: string
+	bannedByUserId: string
+	reason?: string
+	createdAt: number
+	user?: AmberiteUser | null
+}
+
 export interface ConvexSyncedProfile {
 	_id: string
 	friendGroupId: string
@@ -80,4 +90,54 @@ export interface ConvexSyncedProfile {
 	status: 'active' | 'paused' | 'archived'
 	createdAt: number
 	updatedAt: number
+}
+
+export interface ConvexProfileSnapshot {
+	_id: string
+	profileId: string
+	authorUserId: string
+	manifest: unknown
+	clientOnlyManifest?: unknown
+	serverManifest?: unknown
+	notes?: string
+	createdAt: number
+}
+
+export interface ConvexModSyncEvent {
+	_id: string
+	profileId: string
+	snapshotId?: string
+	authorUserId: string
+	status: string
+	message?: string
+	createdAt: number
+}
+
+export type FriendGroupRoleName = 'owner' | 'admin' | 'member'
+export type ProfileVisibility = 'everyone' | 'roles' | 'custom'
+export type WhitelistScope = 'viewers' | 'roles' | 'custom'
+
+export interface SyncedProfileSettings {
+	name?: string
+	syncEnabled?: boolean
+	status?: 'active' | 'paused' | 'archived'
+	visibility?: ProfileVisibility
+	visibilityRoles?: FriendGroupRoleName[]
+	visibilityUserIds?: string[]
+	autoWhitelist?: boolean
+	whitelistScope?: WhitelistScope
+	whitelistRoles?: FriendGroupRoleName[]
+	whitelistUserIds?: string[]
+}
+
+export interface ProfileWhitelistEntry {
+	userId: string
+	role: FriendGroupRoleName
+	displayName?: string | null
+	accounts: { gamertag: string | null; minecraftUuid: string | null }[]
+}
+
+export interface ProfileWhitelistResult {
+	autoWhitelist: boolean
+	entries: ProfileWhitelistEntry[]
 }

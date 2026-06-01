@@ -5,11 +5,12 @@ import type {
 	CoreStats,
 	CoreWsConnection,
 } from '@amberite/amberite-api'
+import { CoreOfflineError } from '@amberite/amberite-api'
 import type { Archon } from '@modrinth/api-client'
 import { injectNotificationManager } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import { useQueryClient } from '@tanstack/vue-query'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'
@@ -24,13 +25,13 @@ import {
 import { provideCoreServerRuntime } from './core-server-providers'
 import type { ServerSettingsTabId } from './settings/tabs'
 
-export function useCoreServerRuntime() {
+export function useCoreServerRuntime(instanceIdOverride?: string) {
 	const route = useRoute()
 	const core = useCoreClient()
 	const queryClient = useQueryClient()
 	const { addNotification, handleError } = injectNotificationManager()
 
-	const instanceId = computed(() => route.params.id as string)
+	const instanceId = computed(() => instanceIdOverride ?? (route.params.id as string))
 	const rawInstance = ref<CoreInstance | null>(null)
 	const server = computed(() => (rawInstance.value ? toHostingServer(rawInstance.value) : null))
 	const loadError = ref<Error | null>(null)
@@ -41,9 +42,19 @@ export function useCoreServerRuntime() {
 	const isWsAuthIncorrect = ref(false)
 	const isSyncingContent = ref(false)
 	const logLines = ref<ReturnType<typeof toLogLine>[]>([])
+	const MAX_LOG_LINES = 5000
+	const cpuHistory = ref<number[]>([])
+	const ramHistory = ref<number[]>([])
 	let socket: CoreWsConnection | null = null
 	let socketListeners: Array<() => void> = []
 	let statsTimer: ReturnType<typeof setInterval> | null = null
+	let serverTimer: ReturnType<typeof setInterval> | null = null
+
+	const cachedInstance = queryClient.getQueryData<CoreInstance>(['core-server', instanceId.value])
+	if (cachedInstance) {
+		rawInstance.value = cachedInstance
+		powerState.value = toHostingPowerState(cachedInstance.status)
+	}
 
 	async function refreshServer() {
 		try {
@@ -52,17 +63,32 @@ export function useCoreServerRuntime() {
 			powerState.value = toHostingPowerState(rawInstance.value.status)
 			queryClient.setQueryData(['core-server', instanceId.value], rawInstance.value)
 		} catch (error) {
-			loadError.value = error as Error
-			handleError(error as Error)
+			const isOffline =
+				error instanceof CoreOfflineError ||
+				(error instanceof Error && /offline|network|fetch|connection/i.test(error.message))
+			if (isOffline) {
+				loadError.value = new Error('Core is currently offline. Start Core to manage this server.')
+			} else {
+				loadError.value = error as Error
+				handleError(error as Error)
+			}
 		}
 	}
 
 	async function refreshStats() {
 		try {
 			statsData.value = await core.getStats(instanceId.value)
-			stats.value = toStats(statsData.value)
 		} catch {
-			statsData.value = null
+			// Keep previous statsData so loading state doesn't flash; only
+			// overwrite on success.
+		}
+		const next = statsData.value
+		if (next) {
+			const cpu = next.cpu_percent ?? 0
+			const ramPct = Math.round(((next.memory_mb ?? 0) / Math.max(next.ram_total_mb ?? 1, 1)) * 100)
+			cpuHistory.value = [...cpuHistory.value.slice(-9), cpu]
+			ramHistory.value = [...ramHistory.value.slice(-9), ramPct]
+			stats.value = toStats(next, cpuHistory.value, ramHistory.value, stats.value.current)
 		}
 	}
 
@@ -72,10 +98,20 @@ export function useCoreServerRuntime() {
 			const ticket = await core.issueWsTicket()
 			socket = await core.openConsole(instanceId.value, ticket)
 			appendSocketListeners(socket, socketListeners, {
-				onLog: (line) => logLines.value.push(toLogLine(line)),
+				onLog: (line) => {
+					const next = [...logLines.value, toLogLine(line)]
+					logLines.value =
+						next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next
+				},
 				onStats: (nextStats) => {
 					statsData.value = nextStats
-					stats.value = toStats(nextStats)
+					const cpu = nextStats.cpu_percent ?? 0
+					const ramPct = Math.round(
+						((nextStats.memory_mb ?? 0) / Math.max(nextStats.ram_total_mb ?? 1, 1)) * 100,
+					)
+					cpuHistory.value = [...cpuHistory.value.slice(-9), cpu]
+					ramHistory.value = [...ramHistory.value.slice(-9), ramPct]
+					stats.value = toStats(nextStats, cpuHistory.value, ramHistory.value, stats.value.current)
 				},
 				onState: (status: CoreInstanceStatus) => {
 					powerState.value = toHostingPowerState(status)
@@ -169,6 +205,23 @@ export function useCoreServerRuntime() {
 		}
 	}
 
+	async function refreshFsAuth() {
+		try {
+			const url = await core.adapter.getCoreUrl()
+			const token = await core.adapter.getCurrentJwt()
+			if (url) {
+				fsAuth.value = {
+					url: `${url}/instances/${encodeURIComponent(instanceId.value)}/fs`,
+					token: token ?? '',
+				}
+			} else {
+				fsAuth.value = null
+			}
+		} catch {
+			fsAuth.value = null
+		}
+	}
+
 	async function copyId() {
 		await navigator.clipboard.writeText(instanceId.value)
 		addNotification({
@@ -178,7 +231,7 @@ export function useCoreServerRuntime() {
 		})
 	}
 
-	const { settingsController } = provideCoreServerRuntime({
+	const { settingsController, fsAuth } = provideCoreServerRuntime({
 		instanceId,
 		rawInstance,
 		server,
@@ -198,18 +251,34 @@ export function useCoreServerRuntime() {
 		killServer,
 		repairServer,
 		changeVersion,
+		refreshFsAuth,
 	})
 
 	onMounted(async () => {
 		await refreshServer()
 		await refreshStats()
+		void queryClient.prefetchQuery({
+			queryKey: ['core-mods', instanceId.value],
+			queryFn: () => core.listMods(instanceId.value),
+			staleTime: 30_000,
+		})
 		await connectConsole()
 		statsTimer = setInterval(refreshStats, 5000)
+		serverTimer = setInterval(refreshServer, 10_000)
+		await refreshFsAuth()
+	})
+
+	watch(powerState, (next, prev) => {
+		if (next === prev) return
+		if ((next === 'starting' || next === 'running') && !isConnected.value) {
+			void connectConsole()
+		}
 	})
 
 	onUnmounted(() => {
 		disconnectConsole()
 		if (statsTimer) clearInterval(statsTimer)
+		if (serverTimer) clearInterval(serverTimer)
 	})
 
 	return {

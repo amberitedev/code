@@ -14,12 +14,6 @@
   "app.appearance-settings.default-landing-page.library": {
     "message": "مكتبة"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "قد تكون خوادم مصادقة ماينكرافت معطلة حاليًا. تحقق من اتصالك بالإنترنت وحاول مرة أخرى لاحقًا."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "تعذر الوصول إلى خوادم المصادقة"
-  },
   "app.browse.add-to-instance": {
     "message": "أضف للنموذج"
   },
@@ -208,48 +202,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "إدارة الموارد"
-  },
-  "app.update-popup.body": {
-    "message": "تطبيق Modrinth v{version} جاهز للتثبيت! أعد التحميل للتحديث الآن، أو تلقائيًا عند إغلاق تطبيق Modrinth."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "انتهى تنزيل تطبيق Modrinth v{version}. أعد التحميل للتحديث الآن، أو تلقائيًا عند إغلاق تطبيق Modrinth."
-  },
-  "app.update-popup.body.linux": {
-    "message": "تطبيق Modrinth v {version} متاح. استخدم مدير الحزم الخاص بك للتحديث للحصول على أحدث الميزات والإصلاحات!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "تطبيق Modrinth v{version} متاح الآن! وبما أنك متصل بشبكة مقيّدة، لم نقم بتنزيله تلقائيًا."
-  },
-  "app.update-popup.changelog": {
-    "message": "سجل التغيير"
-  },
-  "app.update-popup.download": {
-    "message": "تنزيل ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "اكتمل التنزيل"
-  },
-  "app.update-popup.reload": {
-    "message": "إعادة تحميل"
-  },
-  "app.update-popup.title": {
-    "message": "تحديث متاح"
-  },
-  "app.update.complete-toast.text": {
-    "message": "انقر هنا لعرض سجلّ التغييرات."
-  },
-  "app.update.complete-toast.title": {
-    "message": "تم تثبيت الإصدار {version} بنجاح!"
-  },
-  "app.update.download-update": {
-    "message": "تنزيل التحديث"
-  },
-  "app.update.downloading-update": {
-    "message": "جار تنزيل التحديث ({percent}٪)"
-  },
-  "app.update.reload-to-update": {
-    "message": "أعد التحميل لتثبيت التحديث"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "مثال.مودرنث.جج"

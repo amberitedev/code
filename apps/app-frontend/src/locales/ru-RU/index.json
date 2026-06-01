@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Предупреждение о сторонних сборках"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Серверы аутентификации Minecraft сейчас могут быть недоступны. Проверьте подключение к интернету и повторите попытку позже."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Нет связи с серверами аутентификации"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "Добавление серверов в сборку"
   },
@@ -313,48 +307,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Управление ресурсами"
-  },
-  "app.update-popup.body": {
-    "message": "Версия Modrinth App {version} готова к установке! Перезапустите приложение, чтобы обновить его, или оно обновится автоматически после закрытия."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Скачивание версии Modrinth App {version} завершено. Перезапустите приложение, чтобы обновить его, или оно обновится автоматически после закрытия."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Доступна версия Modrinth App {version}. Обновите приложение через менеджер пакетов, чтобы получить последние улучшения и исправления!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Версия Modrinth App {version} доступна для скачивания! Используется сеть с лимитным тарифным планом, поэтому скачивание не началось автоматически."
-  },
-  "app.update-popup.changelog": {
-    "message": "Список изменений"
-  },
-  "app.update-popup.download": {
-    "message": "Скачать ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Скачивание завершено"
-  },
-  "app.update-popup.reload": {
-    "message": "Перезапустить"
-  },
-  "app.update-popup.title": {
-    "message": "Доступно обновление"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Нажмите, чтобы посмотреть список изменений."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Версия {version} успешно установлена!"
-  },
-  "app.update.download-update": {
-    "message": "Скачать обновление"
-  },
-  "app.update.downloading-update": {
-    "message": "Скачивание обновления ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Перезапустить и обновить"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

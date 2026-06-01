@@ -1,10 +1,4 @@
 {
-  "app.auth-servers.unreachable.body": {
-    "message": "Serverele de autentificare Minecraft pot fi indisponibile în acest moment. Verificați conexiunea la internet și încercați din nou mai târziu."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Nu se pot accesa serverele de autentificare"
-  },
   "app.modal.install-to-play.content-required": {
     "message": "Conținut necesar"
   },
@@ -64,48 +58,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Administrare resurse"
-  },
-  "app.update-popup.body": {
-    "message": "Aplicația Modrinth v{version} este gata de instalat! Reîncărcați pentru a actualiza acum sau automat când închideți aplicația Modrinth."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Aplicația Modrinth v{version} a terminat descărcarea. Reîncărcați pentru a actualiza acum sau automat când închideți aplicația Modrinth."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Aplicația Modrinth v{version} este disponibil. Utilizați managerul de pachete pentru a actualiza pentru cele mai recente funcții și remedieri!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Aplicația Modrinth v{version} este disponibil acum! Deoarece sunteți într-o rețea cu contorizare, nu am descărcat-o automat."
-  },
-  "app.update-popup.changelog": {
-    "message": "Jurnalul modificărilor"
-  },
-  "app.update-popup.download": {
-    "message": "Descărcați ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Descărcare finalizată"
-  },
-  "app.update-popup.reload": {
-    "message": "Reîncărcați"
-  },
-  "app.update-popup.title": {
-    "message": "Actualizare disponibilă"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Apasă aici pentru a vedea istoricul de modificări."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Versiunea {version} a fost instalată cu succes!"
-  },
-  "app.update.download-update": {
-    "message": "Descarcă actualizarea"
-  },
-  "app.update.downloading-update": {
-    "message": "Se descarcă actualizarea ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Reîncarcă pentru a instala actualizarea"
   },
   "app.world.server-modal.select-an-option": {
     "message": "Selectează o opțiune"

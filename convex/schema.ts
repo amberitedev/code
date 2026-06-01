@@ -9,6 +9,8 @@ const groupInviteStatus = v.union(v.literal("pending"), v.literal("accepted"), v
 const messageStatus = v.union(v.literal("pending"), v.literal("received"), v.literal("processed"), v.literal("expired"));
 const pairingStatus = v.union(v.literal("waiting"), v.literal("claimed"), v.literal("expired"));
 const syncStatus = v.union(v.literal("active"), v.literal("paused"), v.literal("archived"));
+const profileVisibility = v.union(v.literal("everyone"), v.literal("roles"), v.literal("custom"));
+const whitelistScope = v.union(v.literal("viewers"), v.literal("roles"), v.literal("custom"));
 
 export default defineSchema({
 	...authTables,
@@ -59,6 +61,12 @@ export default defineSchema({
 	blockedUsers: defineTable({ blockerUserId: v.string(), blockedUserId: v.string(), createdAt: v.number() })
 		.index("by_blocker_blocked", ["blockerUserId", "blockedUserId"])
 		.index("by_blocker", ["blockerUserId"]),
+	friendGroupBans: defineTable({
+		friendGroupId: v.string(), userId: v.string(), bannedByUserId: v.string(),
+		reason: v.optional(v.string()), createdAt: v.number(),
+	})
+		.index("by_group_user", ["friendGroupId", "userId"])
+		.index("by_group", ["friendGroupId"]),
 	friendGroupInvites: defineTable({
 		friendGroupId: v.string(), inviterUserId: v.string(), inviteeUserId: v.optional(v.string()),
 		code: v.optional(v.string()), role: friendGroupRole, status: groupInviteStatus,
@@ -101,6 +109,13 @@ export default defineSchema({
 		loader: v.optional(v.string()),
 		syncEnabled: v.boolean(),
 		status: syncStatus,
+		visibility: v.optional(profileVisibility),
+		visibilityRoles: v.optional(v.array(friendGroupRole)),
+		visibilityUserIds: v.optional(v.array(v.string())),
+		autoWhitelist: v.optional(v.boolean()),
+		whitelistScope: v.optional(whitelistScope),
+		whitelistRoles: v.optional(v.array(friendGroupRole)),
+		whitelistUserIds: v.optional(v.array(v.string())),
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	})

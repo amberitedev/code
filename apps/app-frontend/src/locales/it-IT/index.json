@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Avvisami se installo pacchetti sconosciuti"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "I server di autenticazione di Minecraft stanno riscontrando problemi. Controlla la tua connessione a Internet e riprova più tardi."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Impossibile raggiungere i server di autenticazione"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "Aggiungendo il server all'istanza"
   },
@@ -319,48 +313,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Gestione delle risorse"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} è pronta per essere installata! Ricarica per aggiornare ora, o avverrà in automatico alla chiusura dell'app."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} è stata scaricata. Ricarica per aggiornare ora, o avverrà in automatico alla chiusura dell'app."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} è disponibile. Usa il tuo gestore di pacchetti per aggiornare e ricevere le novità più recenti!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} è ora disponibile! Poiché sei su una rete a consumo, non l'abbiamo scaricata automaticamente."
-  },
-  "app.update-popup.changelog": {
-    "message": "Novità"
-  },
-  "app.update-popup.download": {
-    "message": "Scarica ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Download completato"
-  },
-  "app.update-popup.reload": {
-    "message": "Ricarica"
-  },
-  "app.update-popup.title": {
-    "message": "Aggiornamento disponibile"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Consulta qui le ultime novità in inglese."
-  },
-  "app.update.complete-toast.title": {
-    "message": "La versione {version} è stata installata con successo!"
-  },
-  "app.update.download-update": {
-    "message": "Scarica aggiornamento"
-  },
-  "app.update.downloading-update": {
-    "message": "Scaricando l'aggiornamento ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Ricarica per installare l'aggiornamento"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

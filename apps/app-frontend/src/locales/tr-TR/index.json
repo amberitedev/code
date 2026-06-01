@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Bilinmeyen mod paketlerini indirmeden önce beni uyar"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraft doğrulama sunucuları kapalı olabilir. İnternet bağlantını kontrol et ve daha sonra tekrar dene."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Doğrulama sunucularına erişilemedi"
-  },
   "app.browse.add-to-instance": {
     "message": "Kuruluma ekle"
   },
@@ -304,48 +298,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Kaynak yönetimi"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} güncellemesi indirilmeye hazır! Hemen güncellemek için yeniden başlatın veya Modrinth App’i kapattığınızda otomatik olarak güncellenecek."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} indirildi. Güncellemek için yeniden başlatın veya Modrinth App’i kapattığınızda otomatik olarak güncellenecek."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} yayımlandı. En yeni özellikler ve hata düzeltmeleri için paket yöneticin üzerinden güncelle!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} mevcut! Kısıtlı bağlantıda olduğunuzdan otomatik olarak indirmedik."
-  },
-  "app.update-popup.changelog": {
-    "message": "Yama Notları"
-  },
-  "app.update-popup.download": {
-    "message": "İndir ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "İndirme tamamlandı"
-  },
-  "app.update-popup.reload": {
-    "message": "Yeniden başlat"
-  },
-  "app.update-popup.title": {
-    "message": "Güncelleme mevcut"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Değişiklikleri görüntülemek için buraya tıklayın."
-  },
-  "app.update.complete-toast.title": {
-    "message": "{version} sürümü başarıyla kuruldu!"
-  },
-  "app.update.download-update": {
-    "message": "Güncellemeyi indir"
-  },
-  "app.update.downloading-update": {
-    "message": "Güncelleme indiriliyor (%{percent})"
-  },
-  "app.update.reload-to-update": {
-    "message": "Güncellemeyi kurmak için yeniden başlatın"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

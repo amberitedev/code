@@ -50,7 +50,7 @@ export function filterSavedSkins(list: Skin[]) {
 export async function determineModelType(texture: string): Promise<'SLIM' | 'CLASSIC'> {
 	return new Promise((resolve, reject) => {
 		const canvas = document.createElement('canvas')
-		const context = canvas.getContext('2d')
+		const context = canvas.getContext('2d', { willReadFrequently: true })
 
 		if (!context) {
 			return reject(new Error('Failed to create canvas rendering context.'))

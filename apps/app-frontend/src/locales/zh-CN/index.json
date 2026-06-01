@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "安装未知整合包前提醒我"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraft 身份验证服务器现在可能无法使用。请检查你的网络连接，并稍后再试。"
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "无法连接到身份验证服务器"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "将服务器添加到实例"
   },
@@ -319,48 +313,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "资源管理"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} 更新已就绪！立即重启更新，或退出时自动安装。"
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} 更新已下载完成！立即重启更新，或退出时自动安装。"
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} 现已发布。请使用你的软件包管理器进行更新，获取最新功能与修复！"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} 现已发布！由于你正在使用按流量计费的网络，该更新未自动下载。"
-  },
-  "app.update-popup.changelog": {
-    "message": "更新日志"
-  },
-  "app.update-popup.download": {
-    "message": "下载（{size}）"
-  },
-  "app.update-popup.download-complete": {
-    "message": "下载完成"
-  },
-  "app.update-popup.reload": {
-    "message": "重新启动"
-  },
-  "app.update-popup.title": {
-    "message": "有可用的更新"
-  },
-  "app.update.complete-toast.text": {
-    "message": "点击此处查看更新日志。"
-  },
-  "app.update.complete-toast.title": {
-    "message": "版本 {version} 已成功安装！"
-  },
-  "app.update.download-update": {
-    "message": "下载更新"
-  },
-  "app.update.downloading-update": {
-    "message": "下载更新中（{percent}%）"
-  },
-  "app.update.reload-to-update": {
-    "message": "重启以安装更新"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

@@ -16,9 +16,9 @@ use tower_http::{
 use crate::{
     application::state::AppState,
     presentation::handlers::{
-        backups, console, diagnostics, events, fs, instance_control, instances,
-        logs, macros, modpack, mods, properties, relay, setup, social, stats,
-        sync,
+        backups, console, diagnostics, events, fs, installations,
+        instance_control, instances, logs, macros, modpack, mods, players,
+        properties, rcon, relay, setup, social, stats, sync, tasks,
     },
 };
 
@@ -92,6 +92,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id", patch(instances::patch_instance))
         .route("/instances/:id", delete(instances::delete_instance))
         .route("/instances/:id/startup", get(instances::get_startup))
+        .route("/installations", get(installations::list_installations))
+        .route("/installations/:id", get(installations::get_installation))
+        .route("/installations/:id", delete(installations::delete_installation))
         // Instance lifecycle
         .route("/instances/:id/start", post(instance_control::start))
         .route("/instances/:id/stop", post(instance_control::stop))
@@ -170,6 +173,45 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         // Stats
         .route("/instances/:id/stats", get(stats::get_stats_handler))
+        // RCON
+        .route("/instances/:id/rcon", post(rcon::execute_rcon_handler))
+        .route(
+            "/instances/:id/rcon/enable",
+            post(rcon::enable_rcon_handler),
+        )
+        // Players (whitelist / ops / bans / kick — RCON-backed mutations)
+        .route("/instances/:id/players", get(players::list_players_handler))
+        .route(
+            "/instances/:id/players/kick",
+            post(players::kick_handler),
+        )
+        .route("/instances/:id/players/op", post(players::op_handler))
+        .route("/instances/:id/players/deop", post(players::deop_handler))
+        .route(
+            "/instances/:id/players/whitelist",
+            post(players::whitelist_add_handler),
+        )
+        .route(
+            "/instances/:id/players/whitelist/toggle",
+            post(players::whitelist_toggle_handler),
+        )
+        .route(
+            "/instances/:id/players/whitelist/:name",
+            delete(players::whitelist_remove_handler),
+        )
+        .route("/instances/:id/players/ban", post(players::ban_handler))
+        .route(
+            "/instances/:id/players/pardon",
+            post(players::pardon_handler),
+        )
+        .route(
+            "/instances/:id/players/ban-ip",
+            post(players::ban_ip_handler),
+        )
+        .route(
+            "/instances/:id/players/pardon-ip",
+            post(players::pardon_ip_handler),
+        )
         // Filesystem
         .route("/instances/:id/fs", get(fs::list_handler))
         .route("/instances/:id/fs", delete(fs::delete_handler))
@@ -217,6 +259,12 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/instances/:id/backups/:bid/restore",
             post(backups::restore_handler),
         )
+        // Scheduled tasks
+        .route("/instances/:id/tasks", get(tasks::list_handler))
+        .route("/instances/:id/tasks", post(tasks::create_handler))
+        .route("/instances/:id/tasks/:task_id", get(tasks::get_handler))
+        .route("/instances/:id/tasks/:task_id", patch(tasks::update_handler))
+        .route("/instances/:id/tasks/:task_id", delete(tasks::delete_handler))
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http())

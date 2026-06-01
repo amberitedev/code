@@ -209,8 +209,14 @@ providePageContext({
 })
 provideModalBehavior({
 	noblur: computed(() => !themeStore.advancedRendering),
-	onShow: () => hide_ads_window(),
-	onHide: () => show_ads_window(),
+	onShow: () => {
+		hide_ads_window()
+		document.body.classList.add('amberite-console-fullscreen')
+	},
+	onHide: () => {
+		show_ads_window()
+		document.body.classList.remove('amberite-console-fullscreen')
+	},
 })
 
 const {
@@ -1798,5 +1804,17 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	.profile-card {
 		right: 8rem;
 	}
+}
+
+/* When the console is expanded to fullscreen, remove the .app-contents stacking
+   context so the fixed z-[15] console sits in the root stacking context and
+   covers the nav/status bars (which are at z-2 in the root). */
+body.amberite-console-fullscreen .app-contents {
+	z-index: auto !important;
+}
+body.amberite-console-fullscreen .app-grid-navbar,
+body.amberite-console-fullscreen .app-grid-statusbar,
+body.amberite-console-fullscreen .app-sidebar {
+	visibility: hidden;
 }
 </style>

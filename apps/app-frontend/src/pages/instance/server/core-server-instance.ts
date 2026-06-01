@@ -17,6 +17,7 @@ import { inject } from 'vue'
 export type CoreServerViewData = Archon.Servers.v0.Server
 export type CoreServerContext = {
 	instanceId: ComputedRef<string>
+	rawInstance: Ref<CoreInstance | null>
 	server: ComputedRef<CoreServerViewData | null>
 	statsData: Ref<CoreStats | null>
 	stats: Ref<Stats>
@@ -68,7 +69,7 @@ export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 		datacenter: 'Local Core',
 		notices: [],
 		node: null,
-		flows: { intro: false },
+		flows: { intro: instance.install_status === 'installing' },
 		is_medal: false,
 	}
 }
@@ -89,12 +90,21 @@ export function toHostingPowerState(status: CoreInstanceStatus): Archon.Websocke
 	return status
 }
 
-export function toStats(stats: CoreStats | null | undefined): Stats {
+export function toStats(
+	stats: CoreStats | null | undefined,
+	cpuHistory?: number[],
+	ramHistory?: number[],
+	previousCurrent?: Stats['current'],
+): Stats {
 	const ramUsageBytes = (stats?.memory_mb ?? 0) * 1024 * 1024
 	const ramTotalBytes = (stats?.ram_total_mb ?? 1) * 1024 * 1024
-	const storageUsageBytes = stats?.storage_bytes ?? 0
+	// WS stats don't include storage_bytes; preserve previous value to avoid flashing to 0.
+	const storageUsageBytes =
+		stats?.storage_bytes != null ? stats.storage_bytes : (previousCurrent?.storage_usage_bytes ?? 0)
+	const cpuPct = stats?.cpu_percent ?? 0
+	const ramPct = Math.round((ramUsageBytes / Math.max(ramTotalBytes, 1)) * 100)
 	const current = {
-		cpu_percent: stats?.cpu_percent ?? 0,
+		cpu_percent: cpuPct,
 		ram_usage_bytes: ramUsageBytes,
 		ram_total_bytes: Math.max(ramTotalBytes, 1),
 		storage_usage_bytes: storageUsageBytes,
@@ -102,12 +112,10 @@ export function toStats(stats: CoreStats | null | undefined): Stats {
 	}
 	return {
 		current,
-		// Core does not retain historical samples, so `past` mirrors `current`
-		// to produce zero-delta trends rather than fabricated movement.
-		past: { ...current },
+		past: previousCurrent ? { ...previousCurrent } : { ...current },
 		graph: {
-			cpu: [stats?.cpu_percent ?? 0],
-			ram: [Math.round((ramUsageBytes / Math.max(ramTotalBytes, 1)) * 100)],
+			cpu: cpuHistory?.length ? cpuHistory : [cpuPct],
+			ram: ramHistory?.length ? ramHistory : [ramPct],
 		},
 	}
 }
@@ -177,6 +185,7 @@ export function toBackupItem(backup: CoreBackup): Archon.BackupsQueue.v1.BackupQ
 		status: backup.status === 'done' ? 'done' : 'in_progress',
 		locked: backup.locked,
 		automated: backup.automated,
+		size: backup.size_bytes,
 		history: [],
 	}
 }

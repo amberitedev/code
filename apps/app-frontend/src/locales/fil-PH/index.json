@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Pakipaalala bago ko ma-install ang mga di-kilalang modpack"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Maaaring hindi maaabot ang mga authentication server ng Minecraft sa ngayon. Tingnan mo ang iyong internet connection at muling subukan mamaya."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Hindi maabot ang mga authentication server"
-  },
   "app.browse.add-to-instance": {
     "message": "Idagdag sa instansiya"
   },
@@ -310,48 +304,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Pamamahala ng paglalaan"
-  },
-  "app.update-popup.body": {
-    "message": "Ang Modrinth App v{version} ay handa nang ma-install. Mag-reload upang ma-update ngayon, o awtomatiko sa pagsara ng Modrinth App."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Tapos nang ma-download ang Modrinth App v{version}. Mag-reload upang ma-update ngayon, o awtomatiko sa pagsara ng Modrinth App."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Magagamit na ngayon ang Modrinth App v{version}. Gamitin ang iyong package manager upang i-update sa pinabagong tampok at pag-aayos!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Magagamit na ngayon ang Modrinth App v{version}! Hindi namin dinanload kaagad dahil naka-metro ang inyong network."
-  },
-  "app.update-popup.changelog": {
-    "message": "Changelog"
-  },
-  "app.update-popup.download": {
-    "message": "I-download ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Nakumpleto ang pagdownload"
-  },
-  "app.update-popup.reload": {
-    "message": "Mag-reload"
-  },
-  "app.update-popup.title": {
-    "message": "May bagong update"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Dito pumindot upang matingnan ang changelog."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Tagumpay na na-install ang bersiyong {version}!"
-  },
-  "app.update.download-update": {
-    "message": "I-download ang update"
-  },
-  "app.update.downloading-update": {
-    "message": "Nagdadownload ng update ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Handang ma-install ang update"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

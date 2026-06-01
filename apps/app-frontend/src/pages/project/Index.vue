@@ -1,4 +1,5 @@
 <template>
+	<AppPageSkeleton v-if="!data" variant="detail" />
 	<div v-if="data">
 		<Teleport to="#sidebar-teleport-target">
 			<ProjectSidebarCompatibility
@@ -284,6 +285,7 @@ import {
 	ProjectSidebarTags,
 	requestInstall,
 	SelectedProjectsFloatingBar,
+	useLoadingBarToken,
 	useVIntl,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -293,6 +295,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import InstanceIndicator from '@/components/ui/InstanceIndicator.vue'
 import {
@@ -350,6 +353,7 @@ const { installingServerProjects, playServerProject, showAddServerToInstanceModa
 	injectServerInstall()
 const installing = ref(false)
 const data = shallowRef(null)
+const projectPending = computed(() => !data.value)
 const versions = shallowRef([])
 const members = shallowRef([])
 const categories = shallowRef([])
@@ -371,6 +375,7 @@ const serverInstancePath = ref(null)
 const serverPlaying = ref(false)
 const serverSetupModalRef = ref(null)
 const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
+useLoadingBarToken(projectPending)
 
 serverInstallContent.watchServerContextChanges()
 await serverInstallContent.initServerContext()
@@ -539,6 +544,21 @@ function handleAddServerToInstance() {
 }
 
 async function fetchProjectData() {
+	data.value = null
+	versions.value = []
+	members.value = []
+	categories.value = []
+	organization.value = null
+	instance.value = null
+	instanceProjects.value = null
+	installed.value = false
+	installedVersion.value = null
+	serverRequiredContent.value = null
+	serverRecommendedVersion.value = null
+	serverSupportedVersions.value = []
+	serverModpackLoaders.value = []
+	serverPing.value = undefined
+	serverStatusOnline.value = false
 	const [project, projectV3Result] = await Promise.all([
 		get_project(route.params.id, 'must_revalidate').catch(handleError),
 		get_project_v3(route.params.id, 'must_revalidate').catch(handleError),

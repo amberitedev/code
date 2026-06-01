@@ -20,6 +20,7 @@ import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
 import { create_profile_and_install, create_profile_and_install_from_file } from '@/helpers/pack'
 import { create, edit, list } from '@/helpers/profile.js'
 import type { InstanceLoader } from '@/helpers/types'
+import { registerSyncedProfileBackend } from '@/pages/instance/synced/synced-registration'
 
 export function setupCreationModal(
 	notificationManager: AbstractWebNotificationManager,
@@ -168,6 +169,42 @@ export function setupCreationModal(
 					name,
 					profile_type: 'server',
 					install_stage: 'installed',
+				})
+				await router.push(`/instance/${encodeURIComponent(coreInstance.id)}`)
+			} else if (config.instanceType.value === 'synced') {
+				const core = useCoreClient()
+				const existingServers = await core.listInstances()
+				const port = getNextServerPort(existingServers.map((instance) => instance.port))
+				const coreInstance = await core.createInstance({
+					name,
+					game_version: config.selectedGameVersion.value!,
+					loader: toCoreLoader(loader),
+					loader_version: loaderVersion,
+					port,
+					memory: { min_mb: 1024, max_mb: 4096 },
+				})
+				await create(
+					coreInstance.id,
+					config.selectedGameVersion.value!,
+					toProfileLoader(loader),
+					loaderVersion,
+					iconPath,
+					false,
+					null,
+					'synced',
+				)
+				await edit(coreInstance.id, {
+					name,
+					profile_type: 'synced',
+				})
+				await registerSyncedProfileBackend({
+					profilePath: coreInstance.id,
+					serverInstanceId: coreInstance.id,
+					instance: {
+						name,
+						game_version: config.selectedGameVersion.value!,
+						loader: toProfileLoader(loader),
+					},
 				})
 				await router.push(`/instance/${encodeURIComponent(coreInstance.id)}`)
 			} else {

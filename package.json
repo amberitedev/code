@@ -6,13 +6,13 @@
     "core:dev": "turbo run dev --filter=@modrinth/core",
     "web:dev": "turbo run dev --filter=@modrinth/frontend",
     "web:build": "turbo run build --filter=@modrinth/frontend",
-		"app:dev": "turbo run dev --filter=@modrinth/app",
-		"app:debug": "node scripts/app-debug.mjs",
-		"devtool:app": "node scripts/app-debug.mjs app",
-		"devtool:core": "node scripts/app-debug.mjs core",
-		"devtool": "node scripts/app-debug.mjs",
-		"app:check": "node scripts/pre-dev.mjs && pnpm --filter @amberite/amberite-api test",
-		"app:build": "turbo run build --filter=@modrinth/app",
+    "app:dev": "turbo run dev --filter=@modrinth/app",
+    "app:debug": "node scripts/app-debug.mjs",
+    "devtool:app": "node scripts/app-debug.mjs app",
+    "devtool:core": "node scripts/app-debug.mjs core",
+    "devtool": "node scripts/app-debug.mjs",
+    "app:check": "node scripts/pre-dev.mjs && pnpm --filter @amberite/amberite-api test",
+    "app:build": "turbo run build --filter=@modrinth/app",
     "docs:dev": "turbo run dev --filter=@modrinth/docs",
     "pages:build": "NITRO_PRESET=cloudflare-pages pnpm --filter frontend run build",
     "build": "turbo run build --continue",
@@ -27,18 +27,17 @@
     "prepr:frontend:lib": "turbo run prepr --filter=@modrinth/ui --filter=@modrinth/moderation --filter=@modrinth/assets --filter=@modrinth/blog --filter=@modrinth/api-client --filter=@modrinth/utils --filter=@modrinth/tooling-config",
     "prepr:frontend:web": "turbo run prepr --filter=@modrinth/frontend",
     "prepr:frontend:app": "turbo run prepr --filter=@modrinth/app-frontend",
-		"storybook": "pnpm --filter @modrinth/ui storybook",
-		"build-storybook": "pnpm --filter @modrinth/ui build-storybook",
+    "storybook": "pnpm --filter @modrinth/ui storybook",
+    "build-storybook": "pnpm --filter @modrinth/ui build-storybook",
     "icons:add": "pnpm --filter @modrinth/assets icons:add",
     "changelog:collect": "node scripts/run.mjs collect-changelog",
     "changelog:combine-for-app": "node scripts/run.mjs build-theseus-release-notes",
     "scripts": "node scripts/run.mjs"
   },
   "devDependencies": {
-		"@clack/prompts": "^1.0.0",
-		"@crowdin/crowdin-api-client": "^1.55.2",
-		"@formatjs/icu-messageformat-parser": "^2.11.4",
-		"convex": "^1.21.0",
+    "@clack/prompts": "^1.0.0",
+    "@crowdin/crowdin-api-client": "^1.55.2",
+    "@formatjs/icu-messageformat-parser": "^2.11.4",
     "@modrinth/tooling-config": "workspace:*",
     "@tailwindcss/container-queries": "^0.1.1",
     "@types/node": "^24",
@@ -46,6 +45,7 @@
     "@vue/compiler-sfc": "^3.5.26",
     "@vue/tsconfig": "^0.7.0",
     "chalk": "^5.6.2",
+    "convex": "^1.21.0",
     "if-ci": "^3.0.0",
     "keep-a-changelog": "^3.0.2",
     "prettier": "^3.3.2",
@@ -79,5 +79,9 @@
       "workerd"
     ]
   },
-  "prettier": "@modrinth/tooling-config/prettier.config.cjs"
+  "prettier": "@modrinth/tooling-config/prettier.config.cjs",
+  "dependencies": {
+    "@auth/core": "0.37.0",
+    "@convex-dev/auth": "^0.0.92"
+  }
 }

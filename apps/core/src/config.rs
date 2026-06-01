@@ -27,7 +27,7 @@ impl Config {
         Self {
             data_dir: std::env::var("AMBERITE_DATA_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| home_dir().join(".amberite")),
+                .unwrap_or_else(|_| home_dir().join(".copal")),
             convex_url: std::env::var("CONVEX_URL").ok(),
             public_url: std::env::var("AMBERITE_PUBLIC_URL").ok(),
             port: std::env::var("PORT")

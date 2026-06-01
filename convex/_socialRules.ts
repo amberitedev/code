@@ -1,10 +1,62 @@
 import { getAuthUserId } from '@convex-dev/auth/server'
+import type { Id } from './_generated/dataModel'
 import type { MutationCtx, QueryCtx } from './_generated/server'
 export type FriendGroupRole = 'owner' | 'admin' | 'member'
-export async function requireUserId(ctx: QueryCtx | MutationCtx) {
+export async function requireUserId(ctx: QueryCtx | MutationCtx): Promise<Id<'users'>> {
 	const userId = await getAuthUserId(ctx)
 	if (userId === null) throw new Error('not authenticated')
 	return userId
+}
+
+/**
+ * Resolve the acting user. In production this is always the authenticated user.
+ *
+ * When `AMBERITE_DEV_MODE` is enabled on the deployment, an explicit `devActAs`
+ * user id is honoured so the desktop app and tests can act as any seeded user
+ * before real Microsoft auth is wired. The flag is unset in production, so the
+ * override is structurally impossible there — no auth bypass ships.
+ */
+export async function resolveActor(
+	ctx: QueryCtx | MutationCtx,
+	devActAs?: string,
+): Promise<Id<'users'>> {
+	if (devActAs && process.env.AMBERITE_DEV_MODE === 'true') {
+		return devActAs as Id<'users'>
+	}
+	return await requireUserId(ctx)
+}
+
+/** True when the deployment is running with the dev identity override enabled. */
+export function isDevMode(): boolean {
+	return process.env.AMBERITE_DEV_MODE === 'true'
+}
+
+export function bansByGroup(ctx: QueryCtx | MutationCtx, friendGroupId: string) {
+	return ctx.db
+		.query('friendGroupBans')
+		.withIndex('by_group', (q) => q.eq('friendGroupId', friendGroupId))
+		.collect()
+}
+
+export function banByGroupUser(
+	ctx: QueryCtx | MutationCtx,
+	friendGroupId: string,
+	userId: string,
+) {
+	return ctx.db
+		.query('friendGroupBans')
+		.withIndex('by_group_user', (q) =>
+			q.eq('friendGroupId', friendGroupId).eq('userId', userId),
+		)
+		.unique()
+}
+
+/**
+ * Rank roles so an actor can only act on members strictly below them. Owner
+ * outranks admin outranks member. Used to gate kick/ban/role changes.
+ */
+export function roleRank(role: FriendGroupRole): number {
+	return role === 'owner' ? 3 : role === 'admin' ? 2 : 1
 }
 
 export async function requireFriendGroupRole(

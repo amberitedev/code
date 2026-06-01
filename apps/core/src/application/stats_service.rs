@@ -16,6 +16,8 @@ pub struct StatsResponse {
     pub ram_total_mb: Option<u64>,
     pub player_count: Option<u32>,
     pub uptime_seconds: Option<u64>,
+    /// Accumulated total uptime across all sessions, in seconds.
+    pub total_uptime_seconds: Option<u64>,
     /// Total on-disk size of the instance's data directory, in bytes.
     /// Computed for both running and offline instances.
     pub storage_bytes: Option<u64>,
@@ -57,12 +59,16 @@ pub async fn get_stats(
                 ram_total_mb: None,
                 player_count: None,
                 uptime_seconds: None,
+                total_uptime_seconds: Some(record.total_uptime_seconds),
                 storage_bytes,
             });
         }
     };
 
     let uptime_seconds = Some(handle.started_at.elapsed().as_secs());
+    let total_uptime_seconds = Some(
+        record.total_uptime_seconds + uptime_seconds.unwrap_or(0),
+    );
     let pid = handle.pid;
     let cmd_tx = handle.cmd_tx.clone();
     drop(handle); // release DashMap guard before any await
@@ -74,8 +80,9 @@ pub async fn get_stats(
             std::thread::sleep(Duration::from_millis(200));
             sys.refresh_all();
             if let Some(proc) = sys.process(p) {
+                let core_count = sys.cpus().len().max(1) as f32;
                 (
-                    Some(proc.cpu_usage()),
+                    Some(proc.cpu_usage() / core_count),
                     Some(proc.memory() / 1_048_576),
                     Some(sys.total_memory() / 1_048_576),
                 )
@@ -97,6 +104,7 @@ pub async fn get_stats(
         ram_total_mb,
         player_count,
         uptime_seconds,
+        total_uptime_seconds,
         storage_bytes,
     })
 }

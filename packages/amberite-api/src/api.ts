@@ -3,7 +3,7 @@
  * Each function accepts a `CoreCallContext` and returns a typed promise.
  *
  * Key functions: get/list/create/delete/patch instances, start/stop/kill/restart,
- * issueWsTicket, listMods/addMod/uploadMod/deleteMod/toggleMod/updateMod/updateAllMods,
+ * issueWsTicket, listMods/addMod/addModProject/uploadMod/deleteMod/toggleMod/updateMod/updateAllMods,
  * getStats, listLogs/readLog, listCrashReports/readCrashReport,
  * getProperties/patchProperties, listFs/downloadFile/deleteFs/uploadFile,
  * listBackups/createBackup/deleteBackup/deleteManyBackups/lockBackup/restoreBackup,
@@ -22,6 +22,12 @@ import type {
 	CoreChangeVersionBody,
 	CoreStartupSettings,
 	CoreStats,
+	CorePlayers,
+	CoreRconEnableResult,
+	CoreServerQuery,
+	CoreScheduledTask,
+	CoreCreateTaskBody,
+	CoreUpdateTaskBody,
 	CoreMod,
 	CoreFsListing,
 	CoreBackup,
@@ -248,6 +254,18 @@ export function addMod(ctx: CoreCallContext, id: string, versionId: string): Pro
 	})
 }
 
+export function addModProject(
+	ctx: CoreCallContext,
+	id: string,
+	projectId: string,
+): Promise<CoreMod> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ project_id: projectId }),
+	})
+}
+
 export function uploadModFile(ctx: CoreCallContext, id: string, file: File): UploadHandle {
 	return xhrUpload(ctx, `${ctx.baseUrl}/instances/${id}/mods/upload`, file)
 }
@@ -360,8 +378,191 @@ export function patchProperties(
 	})
 }
 
-// ── Filesystem ────────────────────────────────────────────────────────────────
+// ── RCON ──────────────────────────────────────────────────────────────────────
 
+export function executeRcon(
+	ctx: CoreCallContext,
+	id: string,
+	command: string,
+): Promise<{ response: string }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/rcon`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ command }),
+	})
+}
+
+export function enableRcon(ctx: CoreCallContext, id: string): Promise<CoreRconEnableResult> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/rcon/enable`, {
+		method: 'POST',
+	})
+}
+
+// ── Server Query ──────────────────────────────────────────────────────────────
+
+export function queryInstance(ctx: CoreCallContext, id: string): Promise<CoreServerQuery> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/query`)
+}
+
+// ── Scheduled Tasks ───────────────────────────────────────────────────────────
+
+export function listTasks(
+	ctx: CoreCallContext,
+	id: string,
+): Promise<{ tasks: CoreScheduledTask[] }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks`)
+}
+
+export function createTask(
+	ctx: CoreCallContext,
+	id: string,
+	body: CoreCreateTaskBody,
+): Promise<CoreScheduledTask> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function getTask(
+	ctx: CoreCallContext,
+	id: string,
+	taskId: string,
+): Promise<CoreScheduledTask> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks/${encodeURIComponent(taskId)}`)
+}
+
+export function updateTask(
+	ctx: CoreCallContext,
+	id: string,
+	taskId: string,
+	body: CoreUpdateTaskBody,
+): Promise<CoreScheduledTask> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks/${encodeURIComponent(taskId)}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function deleteTask(
+	ctx: CoreCallContext,
+	id: string,
+	taskId: string,
+): Promise<{ ok: boolean }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks/${encodeURIComponent(taskId)}`, {
+		method: 'DELETE',
+	})
+}
+
+// ── Players ───────────────────────────────────────────────────────────────────
+
+export function listPlayers(ctx: CoreCallContext, id: string): Promise<CorePlayers> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/players`)
+}
+
+function playerAction(
+	ctx: CoreCallContext,
+	id: string,
+	action: string,
+	body: Record<string, unknown>,
+): Promise<{ response: string }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/players/${action}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function kickPlayer(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+	reason?: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'kick', { name, reason })
+}
+
+export function opPlayer(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'op', { name })
+}
+
+export function deopPlayer(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'deop', { name })
+}
+
+export function banPlayer(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+	reason?: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'ban', { name, reason })
+}
+
+export function pardonPlayer(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'pardon', { name })
+}
+
+export function banIp(
+	ctx: CoreCallContext,
+	id: string,
+	ip: string,
+	reason?: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'ban-ip', { ip, reason })
+}
+
+export function pardonIp(
+	ctx: CoreCallContext,
+	id: string,
+	ip: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'pardon-ip', { ip })
+}
+
+export function addToWhitelist(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'whitelist', { name })
+}
+
+export function setWhitelistEnabled(
+	ctx: CoreCallContext,
+	id: string,
+	enabled: boolean,
+): Promise<{ response: string }> {
+	return playerAction(ctx, id, 'whitelist/toggle', { enabled })
+}
+
+export function removeFromWhitelist(
+	ctx: CoreCallContext,
+	id: string,
+	name: string,
+): Promise<{ response: string }> {
+	return apiFetch(
+		ctx,
+		`${ctx.baseUrl}/instances/${id}/players/whitelist/${encodeURIComponent(name)}`,
+		{ method: 'DELETE' },
+	)
+}
+
+// ── Filesystem ────────────────────────────────────────────────────────────────
 export function listDirectory(
 	ctx: CoreCallContext,
 	id: string,
@@ -726,8 +927,16 @@ export function downloadSyncSnapshot(
 
 // ── Modpack (additional) ──────────────────────────────────────────────────────
 
-export function getModpack(ctx: CoreCallContext, id: string): Promise<CoreModpackManifest | null> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/modpack`)
+export async function getModpack(
+	ctx: CoreCallContext,
+	id: string,
+): Promise<CoreModpackManifest | null> {
+	try {
+		return await apiFetch<CoreModpackManifest>(ctx, `${ctx.baseUrl}/instances/${id}/modpack`)
+	} catch (e) {
+		if (e instanceof CoreApiError && e.status === 404) return null
+		throw e
+	}
 }
 
 export function removeModpack(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {

@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Figyelmeztess, mielőtt ismeretlen modcsomagokat telepítenék"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "A Minecraft hitelesítő szerverek lehet, hogy nem üzemelnek. Bizonyosodj meg róla, hogy van internetkapcsolatod és próbáld meg újra."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Nem lehet elérni a hitelesítési kiszolgálókat"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "Szerver hozzáadása a profilhoz"
   },
@@ -328,48 +322,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Erőforráskezelés"
-  },
-  "app.update-popup.body": {
-    "message": "A Modrinth App v{version} telepítésre kész! Frissítéshez válaszd ki a Frissítés opciót, vagy az alkalmazás a bezárásakor automatikusan frissül."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "A Modrinth App v{version} letöltése befejeződött. Frissítéshez válaszd ki a Frissítés opciót, vagy az alkalmazás a bezárásakor automatikusan frissül."
-  },
-  "app.update-popup.body.linux": {
-    "message": "A Modrinth App v{version} elérhető. Használd a csomagkezelőt a legújabb funkciók és javítások frissítéséhez!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "A Modrinth App v{version} már elérhető! Mivel mérhető hálózaton vagy, nem töltöttük le automatikusan."
-  },
-  "app.update-popup.changelog": {
-    "message": "Változásnapló"
-  },
-  "app.update-popup.download": {
-    "message": "Letöltés ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Sikeres letöltés"
-  },
-  "app.update-popup.reload": {
-    "message": "Frissítés"
-  },
-  "app.update-popup.title": {
-    "message": "Frissítés elérhető"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Kattints ide a változások megtekintéséhez."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Verzió {version} sikeresen telepítve!"
-  },
-  "app.update.download-update": {
-    "message": "Frissítés letöltése"
-  },
-  "app.update.downloading-update": {
-    "message": "Frissítés letöltése ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "A telepítéshez újraindítás szükséges"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "pelda.modrinth.gg"

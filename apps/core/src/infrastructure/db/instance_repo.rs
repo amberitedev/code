@@ -37,6 +37,8 @@ struct InstanceRow {
     install_status: String,
     status: String,
     data_dir: String,
+    installation_id: Option<String>,
+    total_uptime_seconds: i64,
     created_at: String,
     updated_at: String,
 }
@@ -71,6 +73,8 @@ impl TryFrom<InstanceRow> for InstanceRecord {
                 .parse::<InstanceStatus>()
                 .map_err(StoreError::Parse)?,
             data_dir: r.data_dir,
+            installation_id: r.installation_id,
+            total_uptime_seconds: r.total_uptime_seconds as u64,
             created_at: parse_timestamp(&r.created_at)?,
             updated_at: parse_timestamp(&r.updated_at)?,
         })
@@ -80,7 +84,7 @@ impl TryFrom<InstanceRow> for InstanceRecord {
 /// BEH-09: Parse a timestamp that may be RFC 3339 ("2024-01-01T12:00:00Z") or SQLite's
 /// CURRENT_TIMESTAMP format ("2024-01-01 12:00:00"). Rows written by `InstanceRepo::create`
 /// use RFC 3339 explicitly; older rows inserted directly by SQL may use the SQLite format.
-fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, StoreError> {
+pub(crate) fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, StoreError> {
     if let Ok(dt) = s.parse::<DateTime<Utc>>() {
         return Ok(dt);
     }
@@ -93,7 +97,7 @@ fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, StoreError> {
 impl InstanceStore for InstanceRepo {
     async fn create(&self, r: &InstanceRecord) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,jvm_args,server_args,install_status,status,data_dir,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,jvm_args,server_args,install_status,status,data_dir,installation_id,total_uptime_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         .bind(r.id.to_string())
         .bind(&r.name)
@@ -109,6 +113,8 @@ impl InstanceStore for InstanceRepo {
         .bind(r.install_status.to_string())
         .bind(r.status.to_string())
         .bind(&r.data_dir)
+        .bind(&r.installation_id)
+        .bind(r.total_uptime_seconds as i64)
         .bind(r.created_at.to_rfc3339())
         .bind(r.updated_at.to_rfc3339())
         .execute(&self.pool)
@@ -295,6 +301,25 @@ impl InstanceStore for InstanceRepo {
         Ok(())
     }
 
+    async fn update_installation_id(
+        &self,
+        id: &InstanceId,
+        installation_id: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            "UPDATE instances SET installation_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(installation_id)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
     async fn delete(&self, id: &InstanceId) -> Result<(), StoreError> {
         let result = sqlx::query("DELETE FROM instances WHERE id = ?")
             .bind(id.to_string())
@@ -319,6 +344,19 @@ impl InstanceStore for InstanceRepo {
         rows.into_iter().map(|r| r.try_into()).collect()
     }
 
+    async fn list_by_installation(
+        &self,
+        installation_id: &str,
+    ) -> Result<Vec<InstanceRecord>, StoreError> {
+        let rows = sqlx::query_as::<_, InstanceRow>(
+            "SELECT * FROM instances WHERE installation_id = ?",
+        )
+        .bind(installation_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
     async fn reset_transient_statuses(&self) -> Result<u64, StoreError> {
         let result = sqlx::query(
             "UPDATE instances SET status = 'offline' WHERE status IN ('starting', 'stopping')",
@@ -326,5 +364,18 @@ impl InstanceStore for InstanceRepo {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    async fn add_uptime(&self, id: &InstanceId, seconds: u64) -> Result<(), StoreError> {
+        let secs = seconds as i64;
+        let id_str = id.to_string();
+        sqlx::query(
+            "UPDATE instances SET total_uptime_seconds = total_uptime_seconds + ?1 WHERE id = ?2",
+        )
+        .bind(secs)
+        .bind(id_str)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }

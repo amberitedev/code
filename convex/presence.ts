@@ -8,8 +8,11 @@ import {
 	requireFriendGroupRole,
 	requireSingleGroupMembership,
 	requireSingleOwnedCore,
-	requireUserId,
+	resolveActor,
 } from './_socialRules'
+
+/** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
+const devActAs = { __actAs: v.optional(v.string()) }
 
 export const registerCore = mutation({
 	args: {
@@ -19,10 +22,11 @@ export const registerCore = mutation({
 		connectionUrl: v.optional(v.string()),
 		status: v.optional(v.string()),
 		metadata: v.optional(v.any()),
+		...devActAs,
 	},
 	returns: v.object({ coreId: v.string() }),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		if (args.ownerUserId !== userId) throw new Error('cannot register a Core for another user')
 		const now = Date.now()
 		const existing = await coreById(ctx, args.coreId)
@@ -58,7 +62,7 @@ export const registerCore = mutation({
 })
 
 export const corePresence = query({
-	args: { coreId: v.string() },
+	args: { coreId: v.string(), ...devActAs },
 	returns: v.union(
 		v.null(),
 		v.object({
@@ -72,7 +76,7 @@ export const corePresence = query({
 		}),
 	),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		const core = await ctx.db
 			.query('cores')
 			.withIndex('by_core_id', (q) => q.eq('coreId', args.coreId))
@@ -115,13 +119,13 @@ export const registerPairingCore = mutation({
 })
 
 export const claimPairingCore = mutation({
-	args: { code: v.string() },
+	args: { code: v.string(), ...devActAs },
 	returns: v.union(
 		v.null(),
 		v.object({ coreId: v.string(), connectionUrl: v.optional(v.string()) }),
 	),
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		const now = Date.now()
 		const pairing = await ctx.db
 			.query('pairingCores')

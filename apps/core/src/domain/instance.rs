@@ -263,6 +263,10 @@ pub struct InstanceRecord {
     pub install_status: InstanceInstallStatus,
     pub status: InstanceStatus,
     pub data_dir: String,
+    /// Shared installation this instance launches from. `None` for legacy
+    /// instances whose server files live directly in `data_dir`.
+    pub installation_id: Option<String>,
+    pub total_uptime_seconds: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

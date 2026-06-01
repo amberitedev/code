@@ -1,71 +1,126 @@
-<template>
-	<NewModal
-		ref="modal"
-		:header="undefined"
-		hide-header
-		max-width="60rem"
-		@hide="controller.close()"
-	>
-		<div class="flex min-h-[32rem] w-full">
-			<nav
-				class="flex w-48 shrink-0 flex-col gap-1 border-0 border-r border-solid border-divider p-3"
-			>
-				<h2 class="m-0 mb-2 px-2 text-lg font-extrabold text-contrast">Server settings</h2>
-				<button
-					v-for="tab in visibleTabs"
-					:key="tab.id"
-					type="button"
-					class="flex items-center gap-2 rounded-xl border-none bg-transparent px-3 py-2 text-left text-sm font-bold text-secondary transition-colors hover:bg-button-bg hover:text-contrast"
-					:class="{ 'bg-button-bg !text-contrast': tab.id === controller.activeTab.value }"
-					@click="controller.activeTab.value = tab.id"
-				>
-					<component :is="tab.icon" class="h-4 w-4" />
-					{{ tab.label }}
-				</button>
-			</nav>
-			<div class="min-w-0 flex-1 overflow-y-auto p-5">
-				<Suspense>
-					<component :is="activeComponent" :key="controller.activeTab.value" />
-					<template #fallback>
-						<div class="flex h-full items-center justify-center">
-							<SpinnerIcon class="h-6 w-6 animate-spin text-secondary" />
-						</div>
-					</template>
-				</Suspense>
-			</div>
-		</div>
-	</NewModal>
-</template>
-
 <script setup lang="ts">
-import { SpinnerIcon } from '@modrinth/assets'
-import { NewModal } from '@modrinth/ui'
-import { computed, ref, watch } from 'vue'
+import { ChevronRightIcon } from '@modrinth/assets'
+import {
+	commonMessages,
+	defineMessage,
+	TabbedModal,
+	type TabbedModalTab,
+	useVIntl,
+} from '@modrinth/ui'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { injectCoreServerContext } from '../core-server-instance'
+import advanced from './pages/advanced.vue'
+import general from './pages/general.vue'
+import installation from './pages/installation.vue'
+import network from './pages/network.vue'
+import properties from './pages/properties.vue'
+import { provideServerSettings } from './server-settings'
 import { injectServerSettingsController } from './server-settings-controller'
-import { serverSettingsTabs } from './tabs'
+import { serverSettingsTabDefinitions, type ServerSettingsTabId } from './tabs'
 
-const controller = injectServerSettingsController()
+const { formatMessage } = useVIntl()
+const router = useRouter()
 const { server } = injectCoreServerContext()
 
-const modal = ref<{ show: () => void; hide: () => void } | null>(null)
+const controller = injectServerSettingsController()
 
-const visibleTabs = computed(() =>
-	serverSettingsTabs.filter((tab) => !tab.shown || tab.shown(server.value?.status ?? 'available')),
+const modal = ref<InstanceType<typeof TabbedModal> | null>(null)
+
+const currentUserId = ref<string | null>('local')
+const currentUserRole = ref<string | null>(null)
+const isApp = ref(true)
+
+const serverSettingsTabComponentMap = {
+	general,
+	installation,
+	network,
+	properties,
+	advanced,
+} as const
+
+provideServerSettings({
+	isApp,
+	currentUserId,
+	currentUserRole,
+	browseModpacks: () => {
+		controller.close()
+		void router.push('/browse/modpack')
+	},
+	closeModal: () => controller.close(),
+})
+
+const ownerId = computed(() => server.value?.owner_id ?? 'local')
+const isOwner = computed(() => currentUserId.value != null && currentUserId.value === ownerId.value)
+const isAdmin = computed(() => currentUserRole.value === 'admin')
+
+const tabs = computed<TabbedModalTab[]>(() =>
+	serverSettingsTabDefinitions.map((tab) => {
+		const ctx = {
+			serverId: server.value?.server_id ?? '',
+			ownerId: ownerId.value,
+			serverStatus: server.value?.status,
+			isOwner: isOwner.value,
+			isAdmin: isAdmin.value,
+		}
+		return {
+			name: defineMessage({
+				id: `server.settings.tabs.${tab.id}`,
+				defaultMessage: tab.label,
+			}),
+			icon: tab.icon,
+			content: serverSettingsTabComponentMap[tab.id],
+			shown: tab.shown ? tab.shown(ctx) : true,
+		}
+	}),
 )
 
-const activeComponent = computed(
-	() =>
-		visibleTabs.value.find((tab) => tab.id === controller.activeTab.value)?.component ??
-		visibleTabs.value[0]?.component,
-)
+function syncTab(tabId: ServerSettingsTabId) {
+	const fullIndex = serverSettingsTabDefinitions.findIndex((d) => d.id === tabId)
+	if (fullIndex < 0 || tabs.value[fullIndex]?.shown === false) return
+	let visibleIndex = 0
+	for (let i = 0; i < fullIndex; i++) {
+		if (tabs.value[i]?.shown !== false) visibleIndex++
+	}
+	nextTick(() => modal.value?.setTab(visibleIndex))
+}
 
 watch(
 	() => controller.isOpen.value,
 	(open) => {
-		if (open) modal.value?.show()
-		else modal.value?.hide()
+		if (open) {
+			modal.value?.show()
+			syncTab(controller.activeTab.value)
+		} else {
+			modal.value?.hide()
+		}
+	},
+)
+
+watch(
+	() => controller.activeTab.value,
+	(tabId) => {
+		if (controller.isOpen.value) syncTab(tabId)
 	},
 )
 </script>
+
+<template>
+	<TabbedModal
+		ref="modal"
+		:tabs="tabs"
+		:max-width="'min(980px, calc(95vw - 2rem))'"
+		:width="'min(980px, calc(95vw - 2rem))'"
+		:on-hide="() => controller.close()"
+	>
+		<template #title>
+			<span class="flex items-center gap-2 text-lg font-semibold text-primary">
+				{{ server?.name || 'Server' }} <ChevronRightIcon />
+				<span class="font-extrabold text-contrast">{{
+					formatMessage(commonMessages.settingsLabel)
+				}}</span>
+			</span>
+		</template>
+	</TabbedModal>
+</template>

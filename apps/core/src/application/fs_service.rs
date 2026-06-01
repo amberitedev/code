@@ -83,13 +83,36 @@ fn guard_path(data_dir: &Path, client_path: &str) -> Result<PathBuf, FsError> {
 }
 
 /// Canonicalize and assert still inside data_dir (catches symlink escapes).
+/// Falls back to a simple absolute-path check when canonicalize fails on Windows.
 fn guard_canonical(data_dir: &Path, path: &Path) -> Result<PathBuf, FsError> {
-    let canonical = path.canonicalize()?;
-    let canonical_base = data_dir.canonicalize()?;
-    if !canonical.starts_with(&canonical_base) {
-        return Err(FsError::PathTraversal);
+    match path.canonicalize() {
+        Ok(canonical) => {
+            let canonical_base = data_dir.canonicalize()?;
+            if !canonical.starts_with(&canonical_base) {
+                return Err(FsError::PathTraversal);
+            }
+            Ok(canonical)
+        }
+        Err(_) => {
+            // Fallback for platforms where canonicalize is unreliable (e.g. Windows
+            // UNC paths). Verify the path exists, then compare absolute prefixes.
+            let _ = std::fs::metadata(path)?;
+            let absolute = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(path)
+            };
+            let base_absolute = if data_dir.is_absolute() {
+                data_dir.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(data_dir)
+            };
+            if !absolute.starts_with(&base_absolute) {
+                return Err(FsError::PathTraversal);
+            }
+            Ok(absolute)
+        }
     }
-    Ok(canonical)
 }
 
 fn guard_parent_canonical(data_dir: &Path, path: &Path) -> Result<(), FsError> {

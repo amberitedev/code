@@ -24,15 +24,17 @@ import {
 	requestInstall,
 	useBrowseSearch,
 	useDebugLogger,
+	useLoadingBarToken,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { Ref } from 'vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { LocationQuery } from 'vue-router'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
+import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
 import {
@@ -55,6 +57,10 @@ import {
 	provideServerInstallContent,
 } from '@/providers/setup/server-install-content'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
+
+defineOptions({
+	name: 'BrowsePage',
+})
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
@@ -105,17 +111,10 @@ const {
 } = serverInstallContent
 
 debugLog('fetching tags (categories, loaders, gameVersions)')
-const [categories, loaders, availableGameVersions] = await Promise.all([
-	get_categories()
-		.catch(handleError)
-		.then(ref<Labrinth.Tags.v2.Category[]>),
-	get_loaders()
-		.catch(handleError)
-		.then(ref<Labrinth.Tags.v2.Loader[]>),
-	get_game_versions()
-		.catch(handleError)
-		.then(ref<Labrinth.Tags.v2.GameVersion[]>),
-])
+const categories = ref<Labrinth.Tags.v2.Category[]>([])
+const loaders = ref<Labrinth.Tags.v2.Loader[]>([])
+const availableGameVersions = ref<Labrinth.Tags.v2.GameVersion[]>([])
+const tagsLoaded = ref(false)
 
 const tags: Ref<Tags> = computed(() => ({
 	gameVersions: availableGameVersions.value ?? [],
@@ -179,7 +178,7 @@ watch(
 
 watchServerContextChanges()
 
-await initInstanceContext()
+const contextLoaded = ref(false)
 
 async function initInstanceContext() {
 	debugLog('initInstanceContext', {
@@ -964,7 +963,50 @@ if (instance.value?.game_version) {
 	}
 }
 
-await searchState.refreshSearch()
+const browseInitialPending = computed(
+	() =>
+		!tagsLoaded.value ||
+		!contextLoaded.value ||
+		(searchState.loading.value &&
+			(searchState.isServerType.value
+				? searchState.serverHits.value.length === 0
+				: searchState.projectHits.value.length === 0)),
+)
+useLoadingBarToken(browseInitialPending)
+
+onMounted(async () => {
+	contextLoaded.value = false
+	const [nextCategories, nextLoaders, nextGameVersions] = await Promise.all([
+		queryClient
+			.fetchQuery({
+				queryKey: ['tags', 'categories'],
+				queryFn: get_categories,
+				staleTime: 10 * 60_000,
+			})
+			.catch(handleError),
+		queryClient
+			.fetchQuery({
+				queryKey: ['tags', 'loaders'],
+				queryFn: get_loaders,
+				staleTime: 10 * 60_000,
+			})
+			.catch(handleError),
+		queryClient
+			.fetchQuery({
+				queryKey: ['tags', 'game-versions'],
+				queryFn: get_game_versions,
+				staleTime: 10 * 60_000,
+			})
+			.catch(handleError),
+	])
+	categories.value = nextCategories ?? []
+	loaders.value = nextLoaders ?? []
+	availableGameVersions.value = nextGameVersions ?? []
+	tagsLoaded.value = true
+	await initInstanceContext()
+	contextLoaded.value = true
+	await searchState.refreshSearch()
+})
 
 function getProjectBrowseQuery() {
 	if (!installContext.value) return undefined
@@ -1031,7 +1073,8 @@ provideBrowseManager({
 
 <template>
 	<div class="flex flex-col gap-3 p-6">
-		<BrowsePageLayout>
+		<AppPageSkeleton v-if="browseInitialPending" variant="list" class="!p-0" />
+		<BrowsePageLayout v-else>
 			<template #after>
 				<ContextMenu ref="contextMenuRef" @option-clicked="handleOptionsClick">
 					<template #open_link>

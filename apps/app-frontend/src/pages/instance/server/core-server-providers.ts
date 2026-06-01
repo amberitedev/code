@@ -35,6 +35,7 @@ type CoreServerProviderState = {
 	killServer: () => Promise<void>
 	repairServer: () => Promise<void>
 	changeVersion: (body: CoreChangeVersionBody) => Promise<void>
+	refreshFsAuth?: () => Promise<void>
 }
 
 export function provideCoreServerRuntime(state: CoreServerProviderState) {
@@ -83,7 +84,11 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		fsOps,
 		fsQueuedOps,
 		refreshFsAuth: async () => {
-			fsAuth.value = null
+			if (state.refreshFsAuth) {
+				await state.refreshFsAuth()
+			} else {
+				fsAuth.value = null
+			}
 		},
 		uploadState,
 		cancelUpload,
@@ -109,6 +114,7 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 
 	provide<CoreServerContext>(coreServerContextKey, {
 		instanceId: state.instanceId,
+		rawInstance: state.rawInstance,
 		server: state.server,
 		statsData: state.statsData,
 		stats: state.stats,
@@ -125,7 +131,7 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		changeVersion: state.changeVersion,
 	})
 
-	return { settingsController }
+	return { settingsController, fsAuth }
 }
 
 function createFallbackInstance(id: string): CoreInstance {

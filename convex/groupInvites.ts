@@ -2,14 +2,16 @@ import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
 import {
+	banByGroupUser,
 	membershipByGroupUser,
 	requireFriendGroupRole,
 	requireSingleGroupMembership,
 	requireSingleOwnedCore,
-	requireUserId,
+	resolveActor,
 } from './_socialRules'
 
 const role = v.union(v.literal('owner'), v.literal('admin'), v.literal('member'))
+const devActAs = { __actAs: v.optional(v.string()) }
 
 export const createFriendGroupInvite = mutation({
 	args: {
@@ -17,10 +19,15 @@ export const createFriendGroupInvite = mutation({
 		inviteeUserId: v.optional(v.string()),
 		role: v.optional(role),
 		ttlMs: v.optional(v.number()),
+		...devActAs,
 	},
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin'])
+		if (args.inviteeUserId) {
+			const ban = await banByGroupUser(ctx, args.friendGroupId, args.inviteeUserId)
+			if (ban) throw new Error('user is banned from this friend group')
+		}
 		const now = Date.now()
 		const code = args.inviteeUserId ? undefined : await createInviteCode(ctx)
 		const inviteId = await ctx.db.insert('friendGroupInvites', {
@@ -38,9 +45,9 @@ export const createFriendGroupInvite = mutation({
 })
 
 export const listMyGroupInvites = query({
-	args: {},
-	handler: async (ctx) => {
-		const userId = await requireUserId(ctx)
+	args: { ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs)
 		const invites = await invitesByUser(ctx, userId)
 		return await Promise.all(
 			invites.map(async (invite) => ({
@@ -61,14 +68,16 @@ export const getInviteByCode = query({
 })
 
 export const acceptFriendGroupInvite = mutation({
-	args: { inviteId: v.optional(v.id('friendGroupInvites')), code: v.optional(v.string()) },
+	args: { inviteId: v.optional(v.id('friendGroupInvites')), code: v.optional(v.string()), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		const invite = await resolveInvite(ctx, args)
 		if (!invite || invite.status !== 'pending' || invite.expiresAt <= Date.now())
 			throw new Error('invite not found')
 		if (invite.inviteeUserId && invite.inviteeUserId !== userId)
 			throw new Error('invite belongs to another user')
+		const ban = await banByGroupUser(ctx, invite.friendGroupId, userId)
+		if (ban) throw new Error('you are banned from this friend group')
 		await requireSingleGroupMembership(ctx, userId, invite.friendGroupId)
 		const existing = await membershipByGroupUser(ctx, invite.friendGroupId, userId)
 		const now = Date.now()
@@ -89,9 +98,9 @@ export const acceptFriendGroupInvite = mutation({
 })
 
 export const declineFriendGroupInvite = mutation({
-	args: { inviteId: v.id('friendGroupInvites') },
+	args: { inviteId: v.id('friendGroupInvites'), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		const invite = await ctx.db.get(args.inviteId)
 		if (!invite || invite.inviteeUserId !== userId) throw new Error('invite not found')
 		await ctx.db.patch(args.inviteId, { status: 'declined', respondedAt: Date.now() })
@@ -100,9 +109,9 @@ export const declineFriendGroupInvite = mutation({
 })
 
 export const revokeFriendGroupInvite = mutation({
-	args: { inviteId: v.id('friendGroupInvites') },
+	args: { inviteId: v.id('friendGroupInvites'), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx)
+		const userId = await resolveActor(ctx, args.__actAs)
 		const invite = await ctx.db.get(args.inviteId)
 		if (!invite) return null
 		await requireFriendGroupRole(ctx, userId, invite.friendGroupId, ['owner', 'admin'])

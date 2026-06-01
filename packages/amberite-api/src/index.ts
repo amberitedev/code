@@ -7,6 +7,17 @@ export type {
 	CoreModLoader,
 	CoreMemory,
 	CoreStats,
+	CorePlayers,
+	CoreWhitelistEntry,
+	CoreOpEntry,
+	CoreBanEntry,
+	CoreIpBanEntry,
+	CoreRconEnableResult,
+	CoreServerQuery,
+	CoreScheduledTask,
+	CoreCreateTaskBody,
+	CoreUpdateTaskBody,
+	CoreTaskType,
 	CoreMod,
 	CoreFsEntry,
 	CoreFsListing,
@@ -45,11 +56,26 @@ export type {
 	FriendGroupSummary,
 	FriendGroupMember,
 	FriendGroupInvite,
+	FriendGroupBan,
 	ConvexSyncedProfile,
+	ConvexProfileSnapshot,
+	ConvexModSyncEvent,
+	ProfileVisibility,
+	WhitelistScope,
+	FriendGroupRoleName,
+	SyncedProfileSettings,
+	ProfileWhitelistEntry,
+	ProfileWhitelistResult,
 } from './convex-types'
 
 export { CoreApiClient, CoreEventStream } from './client'
 export { ConvexApiClient } from './convex-api'
+export type {
+	AmberiteSocialClient,
+	FriendsListResult,
+	FriendRequestEntry,
+	GroupInviteWithGroup,
+} from './convex-api'
 export { CoreWsConnection } from './ws'
 export type { PlatformAdapter, PersistentQueueStore, QueuedMessage } from './adapter'
 export type { CoreCallContext } from './context'

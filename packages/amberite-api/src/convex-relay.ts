@@ -3,6 +3,11 @@ import { NetworkError } from './errors'
 
 const CONVEX_REQUEST_TIMEOUT_MS = 15_000
 
+/** Convex args are always a plain JSON object; only then can we add `__actAs`. */
+function isPlainArgs(args: unknown): args is Record<string, unknown> {
+	return typeof args === 'object' && args !== null && !Array.isArray(args)
+}
+
 export async function convexQuery<T = unknown>(
 	adapter: PlatformAdapter,
 	path: string,
@@ -26,6 +31,9 @@ async function convexCall<T>(
 	args: unknown,
 ): Promise<T> {
 	const token = await adapter.getCurrentJwt()
+	const devActingUserId = adapter.getDevActingUserId?.()
+	const finalArgs =
+		devActingUserId && isPlainArgs(args) ? { ...(args as object), __actAs: devActingUserId } : args
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), CONVEX_REQUEST_TIMEOUT_MS)
 	let res: Response
@@ -37,7 +45,7 @@ async function convexCall<T>(
 				'Content-Type': 'application/json',
 				...(token ? { Authorization: `Bearer ${token}` } : {}),
 			},
-			body: JSON.stringify({ path, args, format: 'json' }),
+			body: JSON.stringify({ path, args: finalArgs, format: 'json' }),
 		})
 	} catch (err) {
 		if (err instanceof Error && err.name === 'AbortError') {

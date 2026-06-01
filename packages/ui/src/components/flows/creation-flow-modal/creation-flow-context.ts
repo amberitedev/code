@@ -26,7 +26,7 @@ import { stageConfigs } from './stages'
 
 export type FlowType = 'world' | 'server-onboarding' | 'reset-server' | 'instance'
 export type SetupType = 'modpack' | 'custom' | 'vanilla'
-export type InstanceType = 'client' | 'server'
+export type InstanceType = 'client' | 'server' | 'synced'
 export type Gamemode = 'survival' | 'creative' | 'hardcore'
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard'
 export type LoaderVersionType = 'stable' | 'latest' | 'other'

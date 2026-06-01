@@ -1,12 +1,15 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { resolveActor } from "./_socialRules";
+
+/** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
+const devActAs = { __actAs: v.optional(v.string()) };
 
 export const ensureSocialProfile = mutation({
-	args: {},
-	handler: async (ctx) => {
-		const userId = await requireUserId(ctx);
+	args: { ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
 		const user = await ctx.db.get(userId);
 		if (!user) throw new Error("user not found");
 		const patch: Record<string, unknown> = {};
@@ -18,9 +21,9 @@ export const ensureSocialProfile = mutation({
 });
 
 export const searchUsers = query({
-	args: { query: v.string() },
+	args: { query: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const viewerId = await requireUserId(ctx);
+		const viewerId = await resolveActor(ctx, args.__actAs);
 		const term = args.query.trim();
 		if (term.length < 3) return [];
 		const byCode = await userByFriendCode(ctx, term);
@@ -32,9 +35,9 @@ export const searchUsers = query({
 });
 
 export const friendsList = query({
-	args: {},
-	handler: async (ctx) => {
-		const userId = await requireUserId(ctx);
+	args: { ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
 		const [left, right, incoming, outgoing, blocks] = await Promise.all([
 			friendshipsByUserA(ctx, userId),
 			friendshipsByUserB(ctx, userId),
@@ -48,14 +51,22 @@ export const friendsList = query({
 			const user = await ctx.db.get(otherId as any);
 			return { friendshipId: friendship._id, user: user ? publicUser(user) : null, createdAt: friendship.createdAt };
 		}));
-		return { friends: friends.filter((friend) => friend.user), incoming, outgoing, blocks };
+		const incomingWithUser = await Promise.all(incoming.map(async (request) => {
+			const user = await ctx.db.get(request.fromUserId as any);
+			return { request, user: user ? publicUser(user) : null };
+		}));
+		const outgoingWithUser = await Promise.all(outgoing.map(async (request) => {
+			const user = await ctx.db.get(request.toUserId as any);
+			return { request, user: user ? publicUser(user) : null };
+		}));
+		return { friends: friends.filter((friend) => friend.user), incoming: incomingWithUser, outgoing: outgoingWithUser, blocks };
 	},
 });
 
 export const sendFriendRequest = mutation({
-	args: { targetUserId: v.optional(v.id("users")), friendCode: v.optional(v.string()), username: v.optional(v.string()), message: v.optional(v.string()) },
+	args: { targetUserId: v.optional(v.id("users")), friendCode: v.optional(v.string()), username: v.optional(v.string()), message: v.optional(v.string()), ...devActAs },
 	handler: async (ctx, args) => {
-		const fromUserId = await requireUserId(ctx);
+		const fromUserId = await resolveActor(ctx, args.__actAs);
 		const target = await resolveTargetUser(ctx, args);
 		if (!target || target._id === fromUserId) throw new Error("friend target not found");
 		await assertNotBlocked(ctx, fromUserId, target._id);
@@ -71,9 +82,9 @@ export const sendFriendRequest = mutation({
 });
 
 export const respondFriendRequest = mutation({
-	args: { requestId: v.id("friendRequests"), accept: v.boolean() },
+	args: { requestId: v.id("friendRequests"), accept: v.boolean(), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx);
+		const userId = await resolveActor(ctx, args.__actAs);
 		const request = await ctx.db.get(args.requestId);
 		if (!request || request.toUserId !== userId || request.status !== "pending") throw new Error("friend request not found");
 		const now = Date.now();
@@ -88,9 +99,9 @@ export const respondFriendRequest = mutation({
 });
 
 export const removeFriend = mutation({
-	args: { userId: v.string() },
+	args: { userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const userId = await requireUserId(ctx);
+		const userId = await resolveActor(ctx, args.__actAs);
 		const [userAId, userBId] = canonicalPair(userId, args.userId);
 		const friendship = await friendshipByPair(ctx, userAId, userBId);
 		if (friendship) await ctx.db.delete(friendship._id);
@@ -99,9 +110,9 @@ export const removeFriend = mutation({
 });
 
 export const blockUser = mutation({
-	args: { userId: v.string() },
+	args: { userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const blockerUserId = await requireUserId(ctx);
+		const blockerUserId = await resolveActor(ctx, args.__actAs);
 		if (blockerUserId === args.userId) throw new Error("cannot block yourself");
 		await removeFriendship(ctx, blockerUserId, args.userId);
 		const existing = await blockByPair(ctx, blockerUserId, args.userId);
@@ -111,20 +122,14 @@ export const blockUser = mutation({
 });
 
 export const unblockUser = mutation({
-	args: { userId: v.string() },
+	args: { userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
-		const blockerUserId = await requireUserId(ctx);
+		const blockerUserId = await resolveActor(ctx, args.__actAs);
 		const block = await blockByPair(ctx, blockerUserId, args.userId);
 		if (block) await ctx.db.delete(block._id);
 		return null;
 	},
 });
-
-async function requireUserId(ctx: QueryCtx | MutationCtx) {
-	const userId = await getAuthUserId(ctx);
-	if (userId === null) throw new Error("not authenticated");
-	return userId;
-}
 
 async function createFriendCode(ctx: MutationCtx): Promise<string> {
 	for (let i = 0; i < 10; i++) {

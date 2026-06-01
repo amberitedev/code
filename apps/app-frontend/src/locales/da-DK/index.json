@@ -83,12 +83,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Advar mig før jeg installere en ukendt modpacks"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraft authentication servere kan måske være nede lige nu. Tjek din internet forbindelse og prøv igen senere."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Kan ikke nå autentificeringsservere"
-  },
   "app.browse.add-to-instance-name": {
     "message": "Tilføjet til {instanceName}"
   },
@@ -226,48 +220,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Ressourcestyring"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} er klar til at blive installeret! Genindlæs for at opdatere nu, eller automatisk når du lukker Modrinth App."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} er færdig med at download. Genindlæs for at opdatere nu, eller automatisk når du lukker Modrinth App."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} er nu tilgængelig. Brug din pakke-manager til at opdatere for de nyeste features og fejlrettelser!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} er nu tilgængelig! Siden du er på et begrænset netværk, vi downloadede den ikke automatisk."
-  },
-  "app.update-popup.changelog": {
-    "message": "Ændringslog"
-  },
-  "app.update-popup.download": {
-    "message": "Download ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Download færdiggjort"
-  },
-  "app.update-popup.reload": {
-    "message": "Geninlæs"
-  },
-  "app.update-popup.title": {
-    "message": "Opdatering tilgængelig"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Klik her for at vise ændringslog."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Version {version} var installeret med succes!"
-  },
-  "app.update.download-update": {
-    "message": "Download opdatering"
-  },
-  "app.update.downloading-update": {
-    "message": "Downloader opdatering ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Genindlæs for at installere opdatering"
   },
   "friends.action.add-friend": {
     "message": "Tilføj en ven"

@@ -1,39 +1,49 @@
+import type { Archon } from '@modrinth/api-client'
 import { ListIcon, SettingsIcon, TextQuoteIcon, VersionIcon, WrenchIcon } from '@modrinth/assets'
 import type { Component } from 'vue'
 
-import type { CoreServerViewData } from '../core-server-instance'
-import ServerSettingsAdvanced from './pages/ServerSettingsAdvanced.vue'
-import ServerSettingsGeneral from './pages/ServerSettingsGeneral.vue'
-import ServerSettingsInstallation from './pages/ServerSettingsInstallation.vue'
-import ServerSettingsNetwork from './pages/ServerSettingsNetwork.vue'
-import ServerSettingsProperties from './pages/ServerSettingsProperties.vue'
-
 export type ServerSettingsTabId = 'general' | 'installation' | 'network' | 'properties' | 'advanced'
 
-export interface ServerSettingsTab {
+export interface ServerSettingsTabContext {
+	serverId: string
+	ownerId: string
+	serverStatus?: Archon.Servers.v0.Status | null
+	isOwner: boolean
+	isAdmin: boolean
+}
+
+export interface ServerSettingsTabDefinition {
 	id: ServerSettingsTabId
 	label: string
 	icon: Component
-	component: Component
-	/** Hide the tab while the instance is still installing. */
-	shown?: (status: CoreServerViewData['status']) => boolean
+	shown?: (ctx: ServerSettingsTabContext) => boolean
 }
 
-export const serverSettingsTabs: ServerSettingsTab[] = [
-	{ id: 'general', label: 'General', icon: SettingsIcon, component: ServerSettingsGeneral },
+export const serverSettingsTabDefinitions: ServerSettingsTabDefinition[] = [
+	{
+		id: 'general',
+		label: 'General',
+		icon: SettingsIcon,
+	},
 	{
 		id: 'installation',
 		label: 'Installation',
 		icon: WrenchIcon,
-		component: ServerSettingsInstallation,
 	},
-	{ id: 'network', label: 'Network', icon: VersionIcon, component: ServerSettingsNetwork },
+	{
+		id: 'network',
+		label: 'Network',
+		icon: VersionIcon,
+	},
 	{
 		id: 'properties',
 		label: 'Properties',
 		icon: ListIcon,
-		component: ServerSettingsProperties,
-		shown: (status) => status !== 'installing',
+		shown: ({ serverStatus }) => serverStatus !== 'installing',
 	},
-	{ id: 'advanced', label: 'Advanced', icon: TextQuoteIcon, component: ServerSettingsAdvanced },
+	{
+		id: 'advanced',
+		label: 'Advanced',
+		icon: TextQuoteIcon,
+	},
 ]

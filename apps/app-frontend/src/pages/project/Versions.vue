@@ -1,5 +1,5 @@
 <template>
-	<div>
+	<div v-if="loaders && gameVersions">
 		<ProjectPageVersions
 			:loaders="loaders"
 			:game-versions="gameVersions"
@@ -62,6 +62,7 @@
 			</template>
 		</ProjectPageVersions>
 	</div>
+	<AppPageSkeleton v-else variant="list" class="!p-0" />
 </template>
 
 <script setup>
@@ -71,11 +72,15 @@ import {
 	injectNotificationManager,
 	OverflowMenu,
 	ProjectPageVersions,
+	useLoadingBarToken,
 } from '@modrinth/ui'
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { SwapIcon } from '@/assets/icons/index.js'
+import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import { get_game_versions, get_loaders } from '@/helpers/tags.js'
+
+const { handleError } = injectNotificationManager()
 
 defineProps({
 	project: {
@@ -108,12 +113,17 @@ defineProps({
 	},
 })
 
-const { handleError } = injectNotificationManager()
+const loaders = ref(null)
+const gameVersions = ref(null)
+const tagsPending = computed(() => !loaders.value || !gameVersions.value)
+useLoadingBarToken(tagsPending)
 
-const [loaders, gameVersions] = await Promise.all([
-	get_loaders().catch(handleError).then(ref),
-	get_game_versions().catch(handleError).then(ref),
-])
+onMounted(async () => {
+	;[loaders.value, gameVersions.value] = await Promise.all([
+		get_loaders().catch(handleError),
+		get_game_versions().catch(handleError),
+	])
+})
 </script>
 
 <style scoped lang="scss">

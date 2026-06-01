@@ -6,7 +6,7 @@
  *
  * Key methods: getInstance, listInstances, createInstance, deleteInstance, renameInstance,
  * updateJavaVersion, start/stop/kill/restart, issueWsTicket, openConsole, getStats,
- * listMods/addMod/uploadModFile/deleteMod/toggleMod/updateMod/updateAllMods,
+ * listMods/addMod/addModProject/uploadModFile/deleteMod/toggleMod/updateMod/updateAllMods,
  * listLogs/readLog, listCrashReports/readCrashReport,
  * getProperties/patchProperties, listDirectory/downloadFile/deleteFileOrFolder/uploadFile,
  * listBackups/createBackup/renameBackup/deleteBackup/deleteManyBackups/lockBackup/restoreBackup,
@@ -26,6 +26,12 @@ import type {
 	CoreChangeVersionBody,
 	CoreStartupSettings,
 	CoreStats,
+	CorePlayers,
+	CoreRconEnableResult,
+	CoreServerQuery,
+	CoreScheduledTask,
+	CoreCreateTaskBody,
+	CoreUpdateTaskBody,
 	CoreMod,
 	CoreFsListing,
 	CoreBackupsResponse,
@@ -338,8 +344,162 @@ export class CoreApiClient {
 		})
 	}
 
-	// ── Mods ────────────────────────────────────────────────────────────────
+	// ── RCON ────────────────────────────────────────────────────────────────
 
+	/** Execute a raw RCON command against a running instance. */
+	executeRcon(id: string, command: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.executeRcon(ctx, id, command), {
+			method: 'POST',
+			path: `/instances/${id}/rcon`,
+			body: { command },
+		})
+	}
+
+	/** Enable RCON on an instance (patches server.properties, may need restart). */
+	enableRcon(id: string): Promise<CoreRconEnableResult> {
+		return this.request((ctx) => api.enableRcon(ctx, id), {
+			method: 'POST',
+			path: `/instances/${id}/rcon/enable`,
+		})
+	}
+
+	/** Query a running instance via Server List Ping (MOTD, version, players, latency). */
+	queryInstance(id: string): Promise<CoreServerQuery> {
+		return this.request((ctx) => api.queryInstance(ctx, id), {
+			method: 'GET',
+			path: `/instances/${id}/query`,
+		})
+	}
+
+	// ── Scheduled Tasks ─────────────────────────────────────────────────────
+
+	listTasks(id: string): Promise<CoreScheduledTask[]> {
+		return this.request((ctx) => api.listTasks(ctx, id).then((r) => r.tasks), {
+			method: 'GET',
+			path: `/instances/${id}/tasks`,
+		})
+	}
+
+	createTask(id: string, body: CoreCreateTaskBody): Promise<CoreScheduledTask> {
+		return this.request((ctx) => api.createTask(ctx, id, body), {
+			method: 'POST',
+			path: `/instances/${id}/tasks`,
+			body,
+		})
+	}
+
+	getTask(id: string, taskId: string): Promise<CoreScheduledTask> {
+		return this.request((ctx) => api.getTask(ctx, id, taskId), {
+			method: 'GET',
+			path: `/instances/${id}/tasks/${encodeURIComponent(taskId)}`,
+		})
+	}
+
+	updateTask(id: string, taskId: string, body: CoreUpdateTaskBody): Promise<CoreScheduledTask> {
+		return this.request((ctx) => api.updateTask(ctx, id, taskId, body), {
+			method: 'PATCH',
+			path: `/instances/${id}/tasks/${encodeURIComponent(taskId)}`,
+			body,
+		})
+	}
+
+	deleteTask(id: string, taskId: string): Promise<void> {
+		return this.request((ctx) => api.deleteTask(ctx, id, taskId).then(() => undefined), {
+			method: 'DELETE',
+			path: `/instances/${id}/tasks/${encodeURIComponent(taskId)}`,
+		})
+	}
+
+	// ── Players ─────────────────────────────────────────────────────────────
+
+	/** Full player-management snapshot (online list + whitelist/ops/bans). */
+	listPlayers(id: string): Promise<CorePlayers> {
+		return this.request((ctx) => api.listPlayers(ctx, id), {
+			method: 'GET',
+			path: `/instances/${id}/players`,
+		})
+	}
+
+	kickPlayer(id: string, name: string, reason?: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.kickPlayer(ctx, id, name, reason), {
+			method: 'POST',
+			path: `/instances/${id}/players/kick`,
+			body: { name, reason },
+		})
+	}
+
+	opPlayer(id: string, name: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.opPlayer(ctx, id, name), {
+			method: 'POST',
+			path: `/instances/${id}/players/op`,
+			body: { name },
+		})
+	}
+
+	deopPlayer(id: string, name: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.deopPlayer(ctx, id, name), {
+			method: 'POST',
+			path: `/instances/${id}/players/deop`,
+			body: { name },
+		})
+	}
+
+	banPlayer(id: string, name: string, reason?: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.banPlayer(ctx, id, name, reason), {
+			method: 'POST',
+			path: `/instances/${id}/players/ban`,
+			body: { name, reason },
+		})
+	}
+
+	pardonPlayer(id: string, name: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.pardonPlayer(ctx, id, name), {
+			method: 'POST',
+			path: `/instances/${id}/players/pardon`,
+			body: { name },
+		})
+	}
+
+	banIp(id: string, ip: string, reason?: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.banIp(ctx, id, ip, reason), {
+			method: 'POST',
+			path: `/instances/${id}/players/ban-ip`,
+			body: { ip, reason },
+		})
+	}
+
+	pardonIp(id: string, ip: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.pardonIp(ctx, id, ip), {
+			method: 'POST',
+			path: `/instances/${id}/players/pardon-ip`,
+			body: { ip },
+		})
+	}
+
+	addToWhitelist(id: string, name: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.addToWhitelist(ctx, id, name), {
+			method: 'POST',
+			path: `/instances/${id}/players/whitelist`,
+			body: { name },
+		})
+	}
+
+	removeFromWhitelist(id: string, name: string): Promise<{ response: string }> {
+		return this.request((ctx) => api.removeFromWhitelist(ctx, id, name), {
+			method: 'DELETE',
+			path: `/instances/${id}/players/whitelist/${encodeURIComponent(name)}`,
+		})
+	}
+
+	setWhitelistEnabled(id: string, enabled: boolean): Promise<{ response: string }> {
+		return this.request((ctx) => api.setWhitelistEnabled(ctx, id, enabled), {
+			method: 'POST',
+			path: `/instances/${id}/players/whitelist/toggle`,
+			body: { enabled },
+		})
+	}
+
+	// ── Mods ────────────────────────────────────────────────────────────────
 	listMods(id: string): Promise<CoreMod[]> {
 		return this.request((ctx) => api.listMods(ctx, id).then((r) => r.mods), {
 			method: 'GET',
@@ -352,6 +512,14 @@ export class CoreApiClient {
 			method: 'POST',
 			path: `/instances/${id}/mods`,
 			body: { version_id: versionId },
+		})
+	}
+
+	addModProject(id: string, projectId: string): Promise<CoreMod> {
+		return this.request((ctx) => api.addModProject(ctx, id, projectId), {
+			method: 'POST',
+			path: `/instances/${id}/mods`,
+			body: { project_id: projectId },
 		})
 	}
 

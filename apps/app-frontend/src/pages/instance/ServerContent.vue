@@ -3,9 +3,9 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreMod, CoreModpackManifest } from '@amberite/amberite-api'
 import type { ContentItem, ContentModpackData } from '@modrinth/ui'
 import { ContentPageLayout, injectNotificationManager, provideContentManager } from '@modrinth/ui'
+import { useQuery } from '@tanstack/vue-query'
 import { computed, inject, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -14,16 +14,73 @@ import { useCoreClient } from '@/composables/useCoreClient'
 import { coreServerContextKey, toContentItem } from './server/core-server-instance'
 
 const core = useCoreClient()
-const router = useRouter()
 const { addNotification, handleError } = injectNotificationManager()
 const ctx = inject(coreServerContextKey)
 if (!ctx) throw new Error('Missing Core server context')
 
-const mods = ref<CoreMod[]>([])
-const rawModpack = ref<CoreModpackManifest | null>(null)
-const loading = ref(false)
-const error = ref<Error | null>(null)
-const items = computed(() => mods.value.map(toContentItem))
+const router = useRouter()
+
+const modsQuery = useQuery({
+	queryKey: computed(() => ['core-mods', ctx.instanceId.value]),
+	queryFn: () => core.listMods(ctx.instanceId.value),
+	staleTime: 30_000,
+})
+
+const modpackQuery = useQuery({
+	queryKey: computed(() => ['core-modpack', ctx.instanceId.value]),
+	queryFn: async () => {
+		try {
+			return await core.getModpack(ctx.instanceId.value)
+		} catch (modpackErr) {
+			console.warn('[server-instance] Modpack lookup failed (non-fatal):', modpackErr)
+			return null
+		}
+	},
+	staleTime: 30_000,
+	retry: false,
+})
+
+const mods = computed(() => modsQuery.data.value ?? [])
+const rawModpack = computed(() => modpackQuery.data.value ?? null)
+const loading = computed(() => modsQuery.isLoading.value)
+const error = computed(() => (modsQuery.error.value as Error | null) ?? null)
+
+const installedProjectIds = computed(() =>
+	mods.value
+		.map((mod) => mod.modrinth_project_id)
+		.filter((id): id is string => typeof id === 'string' && id.length > 0),
+)
+
+const iconsQuery = useQuery({
+	queryKey: computed(() => ['modrinth-project-icons', installedProjectIds.value]),
+	queryFn: async () => {
+		const ids = installedProjectIds.value
+		if (!ids.length) return {} as Record<string, string>
+		const res = await fetch(
+			`https://api.modrinth.com/v2/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`,
+		)
+		if (!res.ok) return {} as Record<string, string>
+		const projects = (await res.json()) as Array<{ id: string; icon_url: string | null }>
+		const map: Record<string, string> = {}
+		for (const p of projects) {
+			if (p.icon_url) map[p.id] = p.icon_url
+		}
+		return map
+	},
+	staleTime: 5 * 60_000,
+	enabled: computed(() => installedProjectIds.value.length > 0),
+})
+
+const iconMap = computed(() => iconsQuery.data.value ?? {})
+const items = computed(() =>
+	mods.value.map((mod) => {
+		const item = toContentItem(mod)
+		if (item.project && mod.modrinth_project_id && iconMap.value[mod.modrinth_project_id]) {
+			item.project = { ...item.project, icon_url: iconMap.value[mod.modrinth_project_id] }
+		}
+		return item
+	}),
+)
 const isBusy = computed(
 	() => ctx.powerState.value === 'starting' || ctx.powerState.value === 'stopping',
 )
@@ -51,17 +108,7 @@ const modpack = computed<ContentModpackData | null>(() => {
 })
 
 async function refresh() {
-	loading.value = true
-	error.value = null
-	try {
-		mods.value = await core.listMods(ctx.instanceId.value)
-		rawModpack.value = await core.getModpack(ctx.instanceId.value)
-	} catch (err) {
-		error.value = err as Error
-		handleError(err as Error)
-	} finally {
-		loading.value = false
-	}
+	await Promise.all([modsQuery.refetch(), modpackQuery.refetch()])
 }
 
 function getFilename(item: ContentItem) {
@@ -125,8 +172,6 @@ async function unlinkModpack() {
 	}
 }
 
-await refresh()
-
 provideContentManager({
 	items,
 	loading,
@@ -144,7 +189,7 @@ provideContentManager({
 		Promise.all(selected.filter((item) => item.enabled).map(toggleEnabled)).then(() => {}),
 	refresh,
 	browse: () => {
-		void router.push({ path: '/browse/mod', query: { i: ctx.instanceId.value } })
+		void router.push(`/instance/${encodeURIComponent(ctx.instanceId.value)}/browse`)
 	},
 	uploadFiles,
 	unlinkModpack,

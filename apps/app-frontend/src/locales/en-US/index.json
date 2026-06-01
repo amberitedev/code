@@ -524,6 +524,18 @@
   "app.world.world-item.players-online": {
     "message": "{count} online"
   },
+  "core-server.browse.added": {
+    "message": "{title} was added to the server."
+  },
+  "core-server.browse.back": {
+    "message": "Back to content"
+  },
+  "core-server.browse.heading": {
+    "message": "Add content"
+  },
+  "core-server.browse.installing": {
+    "message": "Installing..."
+  },
   "friends.action.add-friend": {
     "message": "Add a friend"
   },
@@ -892,6 +904,9 @@
   },
   "search.filter.locked.server-loader.title": {
     "message": "Loader is provided by the server"
+  },
+  "server.settings.tabs.installation.loader-version": {
+    "message": "{loader} version"
   },
   "unknown-pack-warning-modal.body": {
     "message": "A file is only reviewed if it’s uploaded to Modrinth, regardless of its file format (including .mrpack)."

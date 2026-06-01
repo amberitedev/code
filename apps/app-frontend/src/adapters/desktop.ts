@@ -50,6 +50,9 @@ class LocalStorageQueueStore implements PersistentQueueStore {
 
 const queueStore = new LocalStorageQueueStore()
 
+/** localStorage key holding the dev "act as" Convex user id (see useSocial dev API). */
+export const DEV_ACTING_USER_KEY = 'amberite:dev:actingUserId'
+
 export function createDesktopAdapter(): PlatformAdapter {
 	return {
 		// Tauri HTTP plugin fetch — routes through Rust, bypasses browser CSP.
@@ -68,6 +71,20 @@ export function createDesktopAdapter(): PlatformAdapter {
 		// TODO: return real JWT when auth is implemented.
 		async getCurrentJwt(): Promise<string | null> {
 			return null
+		},
+
+		/**
+		 * Dev-only acting-user override. Returns the Convex user id stored by the
+		 * `window.__amberite` dev API so the app can act as any seeded user before
+		 * real Microsoft auth is wired. The Convex deployment ignores this unless
+		 * AMBERITE_DEV_MODE is set, so it is inert in production.
+		 */
+		getDevActingUserId(): string | null {
+			try {
+				return window.localStorage.getItem(DEV_ACTING_USER_KEY)
+			} catch {
+				return null
+			}
 		},
 
 		// Opens external URLs (OAuth, docs, etc.) in the system browser.

@@ -80,6 +80,10 @@ const playing = ref(false)
 
 const play = async (event: MouseEvent) => {
 	event?.stopPropagation()
+	if (props.instance.profile_type === 'server') {
+		await router.push(`/instance/${encodeURIComponent(props.instance.path)}`)
+		return
+	}
 	loading.value = true
 	await run(props.instance.path)
 		.catch((err) => handleSevereError(err, { profilePath: props.instance.path }))
@@ -112,6 +116,7 @@ const unlistenProcesses = await process_listener(async () => {
 })
 
 const checkProcess = async () => {
+	if (props.instance.profile_type === 'server') return
 	const runningProcesses = await get_by_profile_path(props.instance.path).catch(handleError)
 
 	playing.value = runningProcesses.length > 0

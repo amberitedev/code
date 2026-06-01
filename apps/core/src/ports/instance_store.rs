@@ -67,12 +67,25 @@ pub trait InstanceStore: Send + Sync + 'static {
         id: &InstanceId,
         install_status: InstanceInstallStatus,
     ) -> Result<(), StoreError>;
+    /// Bind (or unbind, with `None`) an instance to a shared installation.
+    async fn update_installation_id(
+        &self,
+        id: &InstanceId,
+        installation_id: Option<&str>,
+    ) -> Result<(), StoreError>;
     async fn delete(&self, id: &InstanceId) -> Result<(), StoreError>;
     async fn list_by_status(
         &self,
         status: InstanceStatus,
     ) -> Result<Vec<InstanceRecord>, StoreError>;
+    /// List all instances bound to a given shared installation.
+    async fn list_by_installation(
+        &self,
+        installation_id: &str,
+    ) -> Result<Vec<InstanceRecord>, StoreError>;
     /// Reset any instances stuck in transient states (`starting`/`stopping`) to `offline`.
     /// Called once on startup to recover from unclean shutdown.
     async fn reset_transient_statuses(&self) -> Result<u64, StoreError>;
+    /// Add `seconds` to the accumulated `total_uptime_seconds` for the given instance.
+    async fn add_uptime(&self, id: &InstanceId, seconds: u64) -> Result<(), StoreError>;
 }

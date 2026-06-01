@@ -1,10 +1,4 @@
 {
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraft-autentiseringsservere kan være nede for øyeblikket. Kontroller internettforbindelsen din og prøv igjen senere."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Kan ikke nå autentiseringsservere"
-  },
   "app.modal.install-to-play.header": {
     "message": "Installer for å spille"
   },
@@ -52,21 +46,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Ressursforvaltning"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Klikk her for å se endringsloggen."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Versjon {version} ble installert!"
-  },
-  "app.update.download-update": {
-    "message": "Last ned oppdatering"
-  },
-  "app.update.downloading-update": {
-    "message": "Laster ned oppdatering ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Last inn på nytt for å installere oppdateringen"
   },
   "friends.action.add-friend": {
     "message": "Legg til en venn"

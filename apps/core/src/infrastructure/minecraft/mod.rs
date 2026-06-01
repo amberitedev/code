@@ -3,5 +3,8 @@ pub mod installer;
 pub mod java;
 pub mod modrinth_api;
 pub mod mrpack;
+pub mod rcon;
 pub mod server_jar;
+pub mod server_ping;
+pub mod shared;
 pub mod server_properties;

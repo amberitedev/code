@@ -56,7 +56,7 @@ All from env vars (`.env.example` is the template):
 | Var | Default | Notes |
 |-----|---------|-------|
 | `PORT` | `16662` | HTTP listen port |
-| `AMBERITE_DATA_DIR` | `~/.amberite` | Root for all instance data and SQLite DB |
+| `AMBERITE_DATA_DIR` | `~/.copal` | Root for all instance data and SQLite DB |
 | `AMBERITE_BIND_HOST` | `127.0.0.1` | Bind host/IP; set `0.0.0.0` only for LAN/public exposure |
 | `AMBERITE_PUBLIC_URL` | unset | Public URL stored with remote pairing registrations |
 | `AMBERITE_DEV` | `true` in debug builds | Bypasses JWT auth; never enable in production |

@@ -1,3 +1,4 @@
+pub mod installation_repo;
 pub mod instance_repo;
 pub mod java_repo;
 pub mod modpack_repo;

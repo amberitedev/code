@@ -56,6 +56,7 @@ async fn run_actor<H: ProcessHandle>(
     };
 
     info!("Actor started for instance {instance_id}");
+    let started_at = Instant::now();
     let mut expected_shutdown = false;
 
     loop {
@@ -121,6 +122,14 @@ async fn run_actor<H: ProcessHandle>(
     };
 
     set_status(&state, &instance_id, final_status).await;
+
+    let session_secs = started_at.elapsed().as_secs();
+    if session_secs > 0 {
+        if let Err(e) = state.instance_store.add_uptime(&instance_id, session_secs).await {
+            warn!("Failed to persist uptime for {instance_id}: {e}");
+        }
+    }
+
     state.instances.remove(&instance_id);
     info!("Actor exited for instance {instance_id}");
 }

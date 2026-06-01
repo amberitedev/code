@@ -2,6 +2,7 @@ import MicrosoftEntraID from "@auth/core/providers/microsoft-entra-id";
 import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { resolveActor } from "./_socialRules";
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 	providers: [
@@ -15,9 +16,12 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 });
 
 export const currentUser = query({
-	args: {},
-	handler: async (ctx) => {
-		const userId = await getAuthUserId(ctx);
+	args: { __actAs: v.optional(v.string()) },
+	handler: async (ctx, args) => {
+		const userId =
+			args.__actAs && process.env.AMBERITE_DEV_MODE === "true"
+				? (args.__actAs as any)
+				: await getAuthUserId(ctx);
 		if (userId === null) return null;
 		const user = await ctx.db.get(userId);
 		return user ? { ...user, userId } : null;
@@ -28,10 +32,10 @@ export const setUsername = mutation({
 	args: {
 		username: v.string(),
 		displayName: v.optional(v.string()),
+		__actAs: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
-		const userId = await getAuthUserId(ctx);
-		if (userId === null) throw new Error("not authenticated");
+		const userId = await resolveActor(ctx, args.__actAs);
 
 		const username = args.username.trim();
 		if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {

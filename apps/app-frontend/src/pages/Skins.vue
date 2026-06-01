@@ -269,8 +269,8 @@ async function loadSkins() {
 		selectedSkin.value = skins.value.find((s) => s.is_equipped) ?? null
 		originalSelectedSkin.value = selectedSkin.value
 	} catch (error) {
-		if (currentUser.value && error instanceof Error) {
-			handleError(error)
+		if (currentUser.value) {
+			handleError(error as Error)
 		}
 	}
 }
@@ -714,8 +714,8 @@ async function checkUserChanges() {
 			await loadSkins()
 		}
 	} catch (error) {
-		if (currentUser.value && error instanceof Error) {
-			handleError(error)
+		if (currentUser.value) {
+			handleError(error as Error)
 		}
 	}
 }

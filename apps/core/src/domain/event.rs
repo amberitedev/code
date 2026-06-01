@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::instance::{
     InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
 };
+use super::server_installation::InstallationStatus;
 
 /// Broadcast events emitted by instances and the macro engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,11 @@ pub enum Event {
     InstallStatusChanged {
         instance_id: InstanceId,
         install_status: InstanceInstallStatus,
+        message: Option<String>,
+    },
+    InstallationStatusChanged {
+        installation_id: String,
+        status: InstallationStatus,
         message: Option<String>,
     },
     FsChanged {

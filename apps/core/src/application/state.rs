@@ -15,14 +15,15 @@ use crate::{
         auth::jwks::JwksCache,
         db::{
             instance_repo::InstanceRepo, java_repo::JavaRepo,
-            modpack_repo::ModpackRepo,
+            installation_repo::InstallationRepo, modpack_repo::ModpackRepo,
         },
         events::EventBroadcaster,
         process::{instance_actor::InstanceHandle, std_spawner::StdSpawner},
     },
     ports::{
-        instance_store::InstanceStore, java_store::JavaStore,
-        modpack_store::ModpackStore, process_spawner::AnySpawner,
+        installation_store::InstallationStore, instance_store::InstanceStore,
+        java_store::JavaStore, modpack_store::ModpackStore,
+        process_spawner::AnySpawner,
     },
 };
 
@@ -65,6 +66,8 @@ pub struct AppState {
     pub wrong_pairing_attempts: AtomicU32,
     /// Instance data store.
     pub instance_store: Arc<dyn InstanceStore>,
+    /// Shared server installation store.
+    pub installation_store: Arc<dyn InstallationStore>,
     /// Java installation store.
     pub java_store: Arc<dyn JavaStore>,
     /// Modpack manifest store.
@@ -95,6 +98,7 @@ impl AppState {
         let jwks_cache = JwksCache::new(http.clone());
 
         let instance_store = Arc::new(InstanceRepo::new(pool.clone()));
+        let installation_store = Arc::new(InstallationRepo::new(pool.clone()));
         let java_store = Arc::new(JavaRepo::new(pool.clone()));
         let modpack_store = Arc::new(ModpackRepo::new(pool.clone()));
         let core_id = load_or_create_core_id(&pool).await?;
@@ -145,6 +149,7 @@ impl AppState {
             local_setup_secret: tokio::sync::Mutex::new(local_setup_secret),
             wrong_pairing_attempts: AtomicU32::new(0),
             instance_store,
+            installation_store,
             java_store,
             modpack_store,
             spawner,

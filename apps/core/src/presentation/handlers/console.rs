@@ -63,10 +63,11 @@ pub async fn ws_console(
         .parse::<InstanceId>()
         .map_err(|_| ApiError::BadRequest("invalid instance id".into()))?;
 
-    if !state.instances.contains_key(&iid) {
-        return Err(ApiError::NotFound(format!(
-            "instance {id} is not running"
-        )));
+    // Allow connecting to any existing instance, even while stopped — the
+    // socket then streams logs/state/stats once the instance starts. This
+    // mirrors the upstream hosting console, which is always connectable.
+    if state.instance_store.get(&iid).await.is_err() {
+        return Err(ApiError::NotFound(format!("instance {id} not found")));
     }
 
     let rx = state.broadcaster.subscribe();
@@ -133,9 +134,15 @@ async fn collect_stats_for_ws(
     let (uptime_seconds, pid) = match state.instances.get(iid) {
         Some(h) => (Some(h.started_at.elapsed().as_secs()), h.pid),
         None => {
-            return json!({ "cpu_percent": null, "memory_mb": null, "ram_total_mb": null, "player_count": null, "uptime_seconds": null })
+            return json!({ "cpu_percent": null, "memory_mb": null, "ram_total_mb": null, "player_count": null, "uptime_seconds": null, "total_uptime_seconds": null })
         }
     };
+
+    // Fetch accumulated total from DB (non-blocking; ignore errors)
+    let db_total = state.instance_store.get(iid).await
+        .map(|r| r.total_uptime_seconds)
+        .unwrap_or(0);
+    let total_uptime_seconds = db_total + uptime_seconds.unwrap_or(0);
 
     let (cpu_percent, memory_mb, ram_total_mb) = if let Some(pid_val) = pid {
         tokio::task::spawn_blocking(move || {
@@ -145,8 +152,9 @@ async fn collect_stats_for_ws(
             sys.refresh_all();
             sys.process(p)
                 .map(|proc| {
+                    let core_count = sys.cpus().len().max(1) as f32;
                     (
-                        Some(proc.cpu_usage()),
+                        Some(proc.cpu_usage() / core_count),
                         Some(proc.memory() / 1_048_576),
                         Some(sys.total_memory() / 1_048_576),
                     )
@@ -165,6 +173,7 @@ async fn collect_stats_for_ws(
         "ram_total_mb": ram_total_mb,
         "player_count": null,
         "uptime_seconds": uptime_seconds,
+        "total_uptime_seconds": total_uptime_seconds,
     })
 }
 

@@ -27,14 +27,22 @@
 			<p class="m-0">Create a backup before changing server files or content.</p>
 		</div>
 
-		<div v-else class="flex flex-col gap-3">
+		<div v-else-if="backupItems.length" class="flex flex-col gap-3">
 			<BackupItem
-				v-for="backup in backups"
-				:key="backup.id"
-				:backup="toBackupItem(backup)"
-				@delete="() => deleteBackup(backup.id)"
-				@restore="() => restoreBackup(backup.id)"
+				v-for="item in backupItems"
+				:key="item.id"
+				:backup="item"
+				@delete="() => deleteBackup(item.id)"
+				@restore="() => restoreBackup(item.id)"
 			/>
+		</div>
+		<div
+			v-else
+			class="mt-6 flex flex-col items-center justify-center gap-2 rounded-[20px] bg-surface-3 p-12 text-center text-secondary"
+		>
+			<DatabaseBackupIcon class="size-16" />
+			<h3 class="m-0 text-2xl font-bold text-contrast">No backups yet</h3>
+			<p class="m-0">Create a backup before changing server files or content.</p>
 		</div>
 	</div>
 </template>
@@ -43,7 +51,8 @@
 import type { CoreBackup } from '@amberite/amberite-api'
 import { DatabaseBackupIcon, PlusIcon } from '@modrinth/assets'
 import { BackupItem, ButtonStyled, injectNotificationManager } from '@modrinth/ui'
-import { inject, ref } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
+import { computed, inject, ref } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 
@@ -54,22 +63,21 @@ const { handleError } = injectNotificationManager()
 const ctx = inject(coreServerContextKey)
 if (!ctx) throw new Error('Missing Core server context')
 
-const backups = ref<CoreBackup[]>([])
-const loading = ref(false)
 const creating = ref(false)
-const error = ref<Error | null>(null)
+
+const backupsQuery = useQuery({
+	queryKey: computed(() => ['core-backups', ctx.instanceId.value]),
+	queryFn: () => core.listBackups(ctx.instanceId.value).then((res) => res.backups),
+	staleTime: 30_000,
+})
+
+const backups = computed<CoreBackup[]>(() => backupsQuery.data.value ?? [])
+const loading = computed(() => backupsQuery.isLoading.value)
+const error = computed(() => (backupsQuery.error.value as Error | null) ?? null)
+const backupItems = computed(() => backups.value.map((b) => toBackupItem(b)))
 
 async function refresh() {
-	loading.value = true
-	error.value = null
-	try {
-		backups.value = (await core.listBackups(ctx.instanceId.value)).backups
-	} catch (err) {
-		error.value = err as Error
-		handleError(err as Error)
-	} finally {
-		loading.value = false
-	}
+	await backupsQuery.refetch()
 }
 
 async function createBackup() {
@@ -93,6 +101,4 @@ async function restoreBackup(id: string) {
 	await core.restoreBackup(ctx.instanceId.value, id).catch(handleError)
 	await refresh()
 }
-
-await refresh()
 </script>

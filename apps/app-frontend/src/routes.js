@@ -1,15 +1,55 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import * as Pages from '@/pages'
-import * as Hosting from '@/pages/hosting/manage'
-import * as Instance from '@/pages/instance'
-import * as Library from '@/pages/library'
-import * as Project from '@/pages/project'
+const Pages = {
+	Index: () => import('@/pages/Index.vue'),
+	Worlds: () => import('@/pages/Worlds.vue'),
+	Servers: () => import('@/pages/Servers.vue'),
+	Browse: () => import('@/pages/Browse.vue'),
+	Skins: () => import('@/pages/Skins.vue'),
+}
 
-/**
- * Configures application routing. Add page to pages/index and then add to route table here.
- */
-export default new createRouter({
+const Hosting = {
+	Index: () => import('@/pages/hosting/manage/Index.vue'),
+	Overview: () => import('@/pages/hosting/manage/Overview.vue'),
+	Content: () => import('@/pages/hosting/manage/Content.vue'),
+	Files: () => import('@/pages/hosting/manage/Files.vue'),
+	Backups: () => import('@/pages/hosting/manage/Backups.vue'),
+}
+
+const Instance = {
+	Worlds: () => import('@/pages/instance/Worlds.vue'),
+	Mods: () => import('@/pages/instance/Mods.vue'),
+	Files: () => import('@/pages/instance/Files.vue'),
+	Logs: () => import('@/pages/instance/Logs.vue'),
+}
+
+const Library = {
+	Index: () => import('@/pages/library/Index.vue'),
+	Overview: () => import('@/pages/library/Overview.vue'),
+	Downloaded: () => import('@/pages/library/Downloaded.vue'),
+	Modpacks: () => import('@/pages/library/Modpacks.vue'),
+	Servers: () => import('@/pages/library/Servers.vue'),
+	Custom: () => import('@/pages/library/Custom.vue'),
+}
+
+const Core = {
+	Index: () => import('@/pages/core/Index.vue'),
+	Overview: () => import('@/pages/core/Overview.vue'),
+	Members: () => import('@/pages/core/Members.vue'),
+	Servers: () => import('@/pages/core/Servers.vue'),
+	Settings: () => import('@/pages/core/Settings.vue'),
+	Setup: () => import('@/pages/core/Setup.vue'),
+}
+
+const Project = {
+	Index: () => import('@/pages/project/Index.vue'),
+	Description: () => import('@/pages/project/Description.vue'),
+	Versions: () => import('@/pages/project/Versions.vue'),
+	Version: () => import('@/pages/project/Version.vue'),
+	Gallery: () => import('@/pages/project/Gallery.vue'),
+}
+
+const router = createRouter({
 	history: createWebHistory(),
 	routes: [
 		{
@@ -91,6 +131,42 @@ export default new createRouter({
 			meta: {
 				breadcrumb: [{ name: 'Skin selector' }],
 			},
+		},
+		{
+			path: '/core',
+			name: 'Core',
+			component: Core.Index,
+			meta: {
+				breadcrumb: [{ name: 'Core' }],
+			},
+			children: [
+				{
+					path: '',
+					name: 'CoreOverview',
+					component: Core.Overview,
+				},
+				{
+					path: 'members',
+					name: 'CoreMembers',
+					component: Core.Members,
+				},
+
+				{
+					path: 'servers',
+					name: 'CoreServers',
+					component: Core.Servers,
+				},
+				{
+					path: 'settings',
+					name: 'CoreSettings',
+					component: Core.Settings,
+				},
+				{
+					path: 'setup',
+					name: 'CoreSetup',
+					component: Core.Setup,
+				},
+			],
 		},
 		{
 			path: '/library',
@@ -189,15 +265,6 @@ export default new createRouter({
 			component: () => import('@/pages/instance/InstanceRouter.vue'),
 			props: true,
 			children: [
-				// {
-				//   path: '',
-				//   name: 'Overview',
-				//   component: Instance.Overview,
-				//   meta: {
-				//     useRootContext: true,
-				//     breadcrumb: [{ name: '?Instance' }],
-				//   },
-				// },
 				{
 					path: 'worlds',
 					name: 'InstanceWorlds',
@@ -235,12 +302,30 @@ export default new createRouter({
 					},
 				},
 				{
+					path: 'browse',
+					name: 'ServerInstanceBrowse',
+					component: () => import('@/pages/instance/ServerBrowsePage.vue'),
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/content' }, { name: 'Add content' }],
+					},
+				},
+				{
 					path: 'files',
 					name: 'Files',
 					component: Instance.Files,
 					meta: {
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Files' }],
+					},
+				},
+				{
+					path: 'players',
+					name: 'ServerInstancePlayers',
+					component: () => import('@/pages/instance/ServerPlayers.vue'),
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Players' }],
 					},
 				},
 				{
@@ -253,12 +338,20 @@ export default new createRouter({
 					},
 				},
 				{
+					path: 'tasks',
+					name: 'ServerInstanceTasks',
+					component: () => import('@/pages/instance/ServerTasks.vue'),
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Tasks' }],
+					},
+				},
+				{
 					path: 'logs',
 					name: 'Logs',
 					component: Instance.Logs,
 					meta: {
 						useRootContext: true,
-						// renderMode: 'fixed',
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Logs' }],
 					},
 				},
@@ -269,11 +362,8 @@ export default new createRouter({
 	linkExactActiveClass: 'router-link-exact-active',
 	scrollBehavior(to, from) {
 		if (to.path === from.path) return
-		// Sometimes Vue's scroll behavior is not working as expected, so we need to manually scroll to top (especially on Linux)
-		document.querySelector('.app-viewport')?.scrollTo(0, 0)
-		return {
-			el: '.app-viewport',
-			top: 0,
-		}
+		document.querySelector('.app-viewport')?.scrollTo({ top: 0, left: 0, behavior: 'instant' })
 	},
 })
+
+export default router

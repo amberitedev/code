@@ -69,6 +69,16 @@ pub async fn stream_events(
                     "install_status": install_status.to_string(),
                     "message": message,
                 }),
+                Event::InstallationStatusChanged {
+                    installation_id,
+                    status,
+                    message,
+                } => json!({
+                    "type": "installation_status_changed",
+                    "installation_id": installation_id,
+                    "status": status.to_string(),
+                    "message": message,
+                }),
                 Event::FsChanged {
                     instance_id,
                     operation,

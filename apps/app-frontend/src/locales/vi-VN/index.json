@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Cảnh báo tôi trước khi cài đặt các modpacks không rõ nguồn gốc"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Máy chủ xác thực của Minecraft có thể đang bị sập. Hãy kiểm tra kết nối Internet của bạn và thử lại sau."
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "Không thể kết nối đến máy chủ xác thực"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "Thêm máy chủ vào phiên bản"
   },
@@ -331,48 +325,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Quản lý tài nguyên"
-  },
-  "app.update-popup.body": {
-    "message": "Phiên bản v{version} của Modrinth đã được chuẩn bị để cài đặt! Khởi động lại ứng dụng để cập nhật ngay bây giờ, hoặc cập nhật tự động khi bạn đóng Modrinth."
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Phiên bản v{version} của Modrinth đã sẵn sàng để có thể cài đặt. Khởi động lại ứng dụng để cập nhật ngay bây giờ, hoặc tự động cập nhật sau khi bạn tắt Modrinth."
-  },
-  "app.update-popup.body.linux": {
-    "message": "Phiên bản v{version} của Modrinth hiện đang khả dụng. Hãy sử dụng trình quản lý gói của bạn để cập nhật các tính năng và bản vá lỗi mới nhất!"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Phiên bản v{version} của Modrinth hiện đang khả dụng ngay bây giờ! Vì bạn đang sử dụng mạng có tính phí theo dung lượng nên chúng tôi không tự động tải xuống."
-  },
-  "app.update-popup.changelog": {
-    "message": "Nhật ký thay đổi"
-  },
-  "app.update-popup.download": {
-    "message": "Tải xuống ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "Cài đặt thành công"
-  },
-  "app.update-popup.reload": {
-    "message": "Khởi động lại"
-  },
-  "app.update-popup.title": {
-    "message": "Cập nhật mới hiện đang khả dụng"
-  },
-  "app.update.complete-toast.text": {
-    "message": "Nhấn vào đây để xem nhật kí thay đổi."
-  },
-  "app.update.complete-toast.title": {
-    "message": "Phiên bản {version} đã được cài đặt thành công!"
-  },
-  "app.update.download-update": {
-    "message": "Tải về bản cập nhật"
-  },
-  "app.update.downloading-update": {
-    "message": "Đang tải xuống bản cập nhật ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "Hãy khởi động lại để cài đặt bản cập nhật"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

@@ -602,6 +602,9 @@
   "creation-flow.modal.custom-setup.instance-type.server": {
     "defaultMessage": "Server"
   },
+  "creation-flow.modal.custom-setup.instance-type.synced": {
+    "defaultMessage": "Synced"
+  },
   "creation-flow.modal.custom-setup.loader-version-type.latest": {
     "defaultMessage": "Latest"
   },

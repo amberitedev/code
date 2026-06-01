@@ -98,12 +98,6 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "在安裝未知模組包前發出警告"
   },
-  "app.auth-servers.unreachable.body": {
-    "message": "Minecraft 驗證伺服器現在可能無法使用。請檢查網際網路連線，然後再試一次。"
-  },
-  "app.auth-servers.unreachable.header": {
-    "message": "無法連線到驗證伺服器"
-  },
   "app.browse.add-servers-to-instance": {
     "message": "將伺服器新增至實例"
   },
@@ -319,48 +313,6 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "資源管理"
-  },
-  "app.update-popup.body": {
-    "message": "Modrinth App v{version} 已準備好安裝！立即重新載入以更新，或在關閉 Modrinth App 時自動更新。"
-  },
-  "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} 已完成下載！立即重新載入以更新，或在關閉 Modrinth App 時自動更新。"
-  },
-  "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} 現已推出。請使用軟體包管理員進行更新，以取得最新的功能與修正！"
-  },
-  "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} 現已推出！由於你目前使用的是計量付費網路，我們並未自動下載更新。"
-  },
-  "app.update-popup.changelog": {
-    "message": "更新日誌"
-  },
-  "app.update-popup.download": {
-    "message": "下載 ({size})"
-  },
-  "app.update-popup.download-complete": {
-    "message": "下載完成"
-  },
-  "app.update-popup.reload": {
-    "message": "重新載入"
-  },
-  "app.update-popup.title": {
-    "message": "有可用的更新"
-  },
-  "app.update.complete-toast.text": {
-    "message": "按這裡查看更新日誌。"
-  },
-  "app.update.complete-toast.title": {
-    "message": "版本 {version} 已成功安裝！"
-  },
-  "app.update.download-update": {
-    "message": "下載更新"
-  },
-  "app.update.downloading-update": {
-    "message": "正在下載更新 ({percent}%)"
-  },
-  "app.update.reload-to-update": {
-    "message": "重新載入即可安裝更新"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"

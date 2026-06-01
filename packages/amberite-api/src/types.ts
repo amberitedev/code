@@ -64,6 +64,7 @@ export interface CoreInstance {
 	java_version: number | null
 	install_status: CoreInstanceInstallStatus
 	status: CoreInstanceStatus
+	installation_id: string | null
 	data_dir: string
 	created_at: string
 	updated_at: string
@@ -80,6 +81,21 @@ export interface CoreInstanceSummary {
 	memory: CoreMemory
 	install_status: CoreInstanceInstallStatus
 	status: CoreInstanceStatus
+	installation_id: string | null
+	created_at: string
+	updated_at: string
+}
+
+export type CoreServerInstallationStatus = 'installing' | 'ready' | 'failed'
+
+/** A shared server installation referenced by one or more instances. */
+export interface CoreServerInstallation {
+	id: string
+	game_version: string
+	loader: CoreModLoader
+	loader_version: string | null
+	status: CoreServerInstallationStatus
+	error: string | null
 	created_at: string
 	updated_at: string
 }
@@ -96,6 +112,12 @@ export type CoreInstanceEvent =
 			message?: string | null
 	  }
 	| { type: 'creation_progress'; instance_id: string; progress: number; message: string }
+	| {
+			type: 'installation_status_changed'
+			installation_id: string
+			status: CoreServerInstallationStatus
+			message?: string | null
+	  }
 	| { type: 'fs_changed'; instance_id: string; operation: CoreFsOperationKind; path: string }
 	| {
 			type: 'sync_profile_updated'
@@ -118,8 +140,105 @@ export interface CoreStats {
 	ram_total_mb: number | null
 	player_count: number | null
 	uptime_seconds: number | null
+	/** Accumulated uptime across all sessions, in seconds. */
+	total_uptime_seconds: number | null
 	/** Total on-disk size of the instance data directory, in bytes. */
 	storage_bytes: number | null
+}
+
+/** Entry in `whitelist.json`. */
+export interface CoreWhitelistEntry {
+	uuid: string
+	name: string
+}
+
+/** Entry in `ops.json`. */
+export interface CoreOpEntry {
+	uuid: string
+	name: string
+	level: number
+	bypassesPlayerLimit: boolean
+}
+
+/** Entry in `banned-players.json`. */
+export interface CoreBanEntry {
+	uuid: string
+	name: string
+	created: string
+	source: string
+	expires: string
+	reason: string
+}
+
+/** Entry in `banned-ips.json`. */
+export interface CoreIpBanEntry {
+	ip: string
+	created: string
+	source: string
+	expires: string
+	reason: string
+}
+
+/** GET /instances/:id/players — full player-management snapshot. */
+export interface CorePlayers {
+	/** Names currently online (empty when the server is offline). */
+	online: string[]
+	whitelist: CoreWhitelistEntry[]
+	ops: CoreOpEntry[]
+	banned_players: CoreBanEntry[]
+	banned_ips: CoreIpBanEntry[]
+	whitelist_enabled: boolean
+	running: boolean
+}
+
+/** Response from enabling RCON on an instance. */
+export interface CoreRconEnableResult {
+	port: number
+	password: string
+	restart_required: boolean
+}
+
+/** GET /instances/:id/query — live Server List Ping result. */
+export interface CoreServerQuery {
+	online: boolean
+	version_name: string
+	protocol: number
+	players_online: number
+	players_max: number
+	sample: string[]
+	motd: string
+	favicon: string | null
+	latency_ms: number
+}
+
+/** Scheduled task types. */
+export type CoreTaskType = 'backup' | 'restart' | 'command' | 'announce'
+
+/** Single scheduled task from GET /instances/:id/tasks */
+export interface CoreScheduledTask {
+	id: string
+	instance_id: string
+	task_type: CoreTaskType
+	cron: string
+	enabled: boolean
+	payload: Record<string, unknown> | null
+	created_at: string
+	updated_at: string
+	last_run_at: string | null
+}
+
+/** Request body for POST /instances/:id/tasks */
+export interface CoreCreateTaskBody {
+	task_type: CoreTaskType
+	cron: string
+	payload?: Record<string, unknown> | null
+}
+
+/** Request body for PATCH /instances/:id/tasks/:task_id */
+export interface CoreUpdateTaskBody {
+	cron?: string
+	enabled?: boolean
+	payload?: Record<string, unknown> | null
 }
 
 /** Item in GET /instances/:id/mods */

@@ -39,6 +39,7 @@ pub(crate) fn record_list_item(r: &InstanceRecord) -> Value {
         "loader": r.loader.to_string(), "loader_version": r.loader_version,
         "port": r.port, "memory": { "min_mb": r.memory.min_mb, "max_mb": r.memory.max_mb },
         "status": r.status.to_string(), "install_status": r.install_status.to_string(),
+        "installation_id": r.installation_id,
         "created_at": r.created_at, "updated_at": r.updated_at,
     })
 }
@@ -51,6 +52,7 @@ fn record_detail(r: &InstanceRecord) -> Value {
         "java_version": r.java_version, "jvm_args": r.jvm_args, "server_args": r.server_args,
         "install_status": r.install_status.to_string(),
         "status": r.status.to_string(),
+        "installation_id": r.installation_id,
         "data_dir": r.data_dir, "created_at": r.created_at, "updated_at": r.updated_at,
     })
 }

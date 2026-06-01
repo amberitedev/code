@@ -41,8 +41,8 @@ async-trait = "0.1"
 # ============================================================
 # TIER 2 - SERIALIZATION
 # ============================================================
-serde = { version = "=1.0.219", features = ["derive"] }
-serde_json = "=1.0.133"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 serde-aux = "4.5"
 ts-rs = "10.0"
 toml = "0.8"
@@ -131,6 +131,15 @@ async_zip = { version = "0.0.17", features = ["tokio", "tokio-fs", "deflate"] }
 sha1 = "0.10"
 sha2 = "0.10"
 bytes = "1.9"
+
+# ============================================================
+# MINECRAFT METADATA (shared content-addressed library store)
+# ============================================================
+# Local path crate (Modrinth's daedalus) — parses Mojang/loader version metadata
+# and provides merge_partial_version + get_path_from_artifact (maven pathing).
+daedalus = { path = "../../packages/daedalus" }
+# dunce::canonicalize avoids Windows \\?\ UNC prefixes that break the JVM -cp.
+dunce = "1.0"
 
 # ============================================================
 # FEATURES

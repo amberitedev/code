@@ -28,6 +28,10 @@ pub enum LaunchStyle {
     Jar { jar: String },
     /// Forge/NeoForge args-file (`@libraries/...args.txt`).
     ArgsFile { args: String },
+    /// Absolute, instance-independent launch tokens produced by the shared
+    /// store (Vanilla/Fabric/Quilt). Every path points into `{data_dir}/meta`,
+    /// so the tokens are replayed verbatim regardless of working directory.
+    Modular { args: Vec<String> },
 }
 
 /// Persisted to `{data_dir}/launch.json` after installation.
