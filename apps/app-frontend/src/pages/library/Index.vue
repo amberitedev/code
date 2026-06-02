@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import type { CoreInstanceSummary } from '@amberite/amberite-api'
 import { PlusIcon } from '@modrinth/assets'
 import { ButtonStyled, injectNotificationManager, NavTabs, useLoadingBarToken } from '@modrinth/ui'
-import type { CoreInstanceSummary } from '@amberite/amberite-api'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'

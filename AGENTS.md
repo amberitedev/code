@@ -94,3 +94,5 @@ Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`
 - Do not modify `packages/app-lib` unless explicitly asked.
 - Never read `PROJECT-HUMAN-ONLY.md` unless the user specifically asks.
 - Do not read plans in `.plan/` for orientation; only read a specific plan if the user explicitly asks.
+- Always use existing: components from the `packages/ui`, text sizes, fonts, laouts, padding, and more
+- Never write new ui unless seificly asked. the compenent library and ui in the desktop app has litlrly everything you need.

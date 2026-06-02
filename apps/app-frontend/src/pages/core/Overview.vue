@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { PlusIcon, UsersIcon } from '@modrinth/assets'
+import { LinkIcon, PlusIcon, ServerStackIcon, UsersIcon } from '@modrinth/assets'
 import { Avatar, ButtonStyled } from '@modrinth/ui'
-import { computed } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 
+import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
 import { useSocial } from '@/composables/useSocial'
 
 defineOptions({ name: 'CoreOverviewPage' })
 
 const router = useRouter()
 const { group, members, invites, friends, currentUser, acceptInvite, declineInvite } = useSocial()
+const setupModal = useTemplateRef<InstanceType<typeof CoreOnboardingModal>>('setupModal')
+const connectModal = useTemplateRef<InstanceType<typeof CoreOnboardingModal>>('connectModal')
 
 const core = computed(() => group.value?.core ?? null)
 const coreOnline = computed(() => {
@@ -20,7 +23,7 @@ const incomingFriendRequests = computed(() => friends.value?.incoming ?? [])
 </script>
 
 <template>
-	<div class="flex flex-col gap-4 w-full">
+	<div class="flex flex-col gap-6 w-full">
 		<div v-if="currentUser" class="flex items-center gap-3">
 			<Avatar :src="currentUser.image" :alt="currentUser.username" size="48px" circle />
 			<div class="flex flex-col">
@@ -55,38 +58,97 @@ const incomingFriendRequests = computed(() => friends.value?.incoming ?? [])
 			</div>
 		</div>
 
-		<div v-else class="rounded-2xl bg-bg-raised p-6 flex flex-col items-center gap-3 text-center">
-			<UsersIcon class="w-16 h-16 text-secondary" />
-			<h3 class="m-0">You're not in a Core group yet</h3>
-			<p class="m-0 text-secondary">Pair a Core server or accept an invite to get started.</p>
-			<ButtonStyled color="brand">
-				<button @click="router.push('/core/setup')"><PlusIcon /> Set up a Core</button>
-			</ButtonStyled>
-		</div>
+		<div v-else class="flex flex-col gap-4">
+			<div class="text-center max-w-xl mx-auto py-4">
+				<h2 class="m-0 mb-2 text-2xl">Get started with Amberite Core</h2>
+				<p class="m-0 text-secondary">
+					Pair a Core server you've already set up, or create a brand-new one.
+				</p>
+			</div>
 
-		<div v-if="invites.length > 0" class="rounded-2xl bg-bg-raised p-4 flex flex-col gap-3">
-			<span class="font-bold">Group invites</span>
-			<div
-				v-for="entry in invites"
-				:key="entry.invite._id"
-				class="flex items-center justify-between gap-2"
-			>
-				<span
-					>{{ (entry.group as any)?.name ?? 'A Core group' }} · role: {{ entry.invite.role }}</span
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl w-full mx-auto">
+				<button
+					type="button"
+					class="text-left rounded-2xl bg-bg-raised p-6 flex flex-col gap-3 transition-all border-2 border-transparent hover:border-brand cursor-pointer"
+					@click="connectModal?.show()"
 				>
-				<div class="flex gap-2">
-					<ButtonStyled color="brand">
-						<button @click="acceptInvite({ inviteId: entry.invite._id })">Accept</button>
-					</ButtonStyled>
-					<ButtonStyled>
-						<button @click="declineInvite(entry.invite._id)">Decline</button>
-					</ButtonStyled>
+					<div class="flex items-center gap-3">
+						<span
+							class="w-10 h-10 rounded-xl bg-brand/20 text-brand flex items-center justify-center"
+						>
+							<LinkIcon class="w-5 h-5" />
+						</span>
+						<div class="flex flex-col">
+							<span class="font-bold text-lg">Connect to a Core</span>
+							<span class="text-secondary text-xs">Join an existing friend group</span>
+						</div>
+					</div>
+					<p class="m-0 text-secondary text-sm">
+						Already have a Core running? Enter its pairing code to join its friend group and start
+						syncing servers.
+					</p>
+					<div class="flex items-center gap-1 text-brand font-semibold text-sm mt-auto">
+						Connect <span aria-hidden>→</span>
+					</div>
+				</button>
+
+				<button
+					type="button"
+					class="text-left rounded-2xl bg-bg-raised p-6 flex flex-col gap-3 transition-all border-2 border-transparent hover:border-brand cursor-pointer"
+					@click="setupModal?.show()"
+				>
+					<div class="flex items-center gap-3">
+						<span
+							class="w-10 h-10 rounded-xl bg-brand/20 text-brand flex items-center justify-center"
+						>
+							<PlusIcon class="w-5 h-5" />
+						</span>
+						<div class="flex flex-col">
+							<span class="font-bold text-lg">Set up a new Core</span>
+							<span class="text-secondary text-xs">Create a fresh friend group</span>
+						</div>
+					</div>
+					<p class="m-0 text-secondary text-sm">
+						Start from scratch — pair a new Core server, name your group, and invite your first
+						members.
+					</p>
+					<div class="flex items-center gap-1 text-brand font-semibold text-sm mt-auto">
+						Set up <span aria-hidden>→</span>
+					</div>
+				</button>
+			</div>
+
+			<div
+				v-if="invites.length > 0"
+				class="rounded-2xl bg-bg-raised p-4 flex flex-col gap-3 max-w-3xl w-full mx-auto"
+			>
+				<div class="flex items-center gap-2">
+					<ServerStackIcon class="w-5 h-5 text-brand" />
+					<span class="font-bold">Group invites</span>
+				</div>
+				<div
+					v-for="entry in invites"
+					:key="entry.invite._id"
+					class="flex items-center justify-between gap-2 border-b border-surface-5 last:border-0 pb-2 last:pb-0"
+				>
+					<span class="text-sm"
+						>{{ (entry.group as any)?.name ?? 'A Core group' }} · role:
+						{{ entry.invite.role }}</span
+					>
+					<div class="flex gap-2">
+						<ButtonStyled color="brand">
+							<button @click="acceptInvite({ inviteId: entry.invite._id })">Accept</button>
+						</ButtonStyled>
+						<ButtonStyled>
+							<button @click="declineInvite(entry.invite._id)">Decline</button>
+						</ButtonStyled>
+					</div>
 				</div>
 			</div>
 		</div>
 
 		<div
-			v-if="incomingFriendRequests.length > 0"
+			v-if="incomingFriendRequests.length > 0 && group"
 			class="rounded-2xl bg-bg-raised p-4 flex flex-col gap-2"
 		>
 			<span class="font-bold">Friend requests</span>
@@ -94,5 +156,8 @@ const incomingFriendRequests = computed(() => friends.value?.incoming ?? [])
 				>{{ incomingFriendRequests.length }} pending — manage them in Members.</span
 			>
 		</div>
+
+		<CoreOnboardingModal ref="connectModal" mode="connect" />
+		<CoreOnboardingModal ref="setupModal" mode="setup" />
 	</div>
 </template>

@@ -13,7 +13,6 @@ import {
 	ChangeSkinIcon,
 	CompassIcon,
 	DownloadIcon,
-	ExternalIcon,
 	HomeIcon,
 	LeftArrowIcon,
 	LibraryIcon,
@@ -79,7 +78,6 @@ import IncompatibilityWarningModal from '@/components/ui/install_flow/Incompatib
 import UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import MinecraftAuthErrorModal from '@/components/ui/minecraft-auth-error-modal/MinecraftAuthErrorModal.vue'
 import AppSettingsModal from '@/components/ui/modal/AppSettingsModal.vue'
-import AuthGrantFlowWaitModal from '@/components/ui/modal/AuthGrantFlowWaitModal.vue'
 import InstallToPlayModal from '@/components/ui/modal/InstallToPlayModal.vue'
 import ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import UpdateToPlayModal from '@/components/ui/modal/UpdateToPlayModal.vue'
@@ -89,13 +87,14 @@ import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
+import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
 import { config } from '@/config'
 import { hide_ads_window, init_ads_window, show_ads_window } from '@/helpers/ads.js'
 import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { command_listener, warning_listener } from '@/helpers/events.js'
-import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
+import { get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
 import { create_profile_and_install_from_file } from '@/helpers/pack'
 import { list } from '@/helpers/profile.js'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
@@ -134,6 +133,7 @@ const route = useRoute()
 const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
+const amberiteAuth = useAmberiteAuth()
 const credentials = ref()
 const sidebarToggled = ref(true)
 const unsubscribeSidebarToggle = themeStore.$subscribe(() => {
@@ -147,11 +147,11 @@ const hostingRouteActive = computed(() => route.path.startsWith('/hosting'))
 const hostingIntercomIdentityKey = computed(() => {
 	const rawServerId = route.params.id
 	const serverId = Array.isArray(rawServerId) ? rawServerId[0] : rawServerId
-	const userId = credentials.value?.user_id ?? credentials.value?.user?.id ?? 'anonymous'
+	const userId = amberiteAuth.user.value?.id ?? 'anonymous'
 	return `${userId}:${serverId ?? 'hosting'}`
 })
 const hostingIntercom = useHostingIntercom({
-	enabled: computed(() => hostingRouteActive.value && !!credentials.value?.session),
+	enabled: computed(() => hostingRouteActive.value && amberiteAuth.isLoggedIn.value),
 	appId: 'ykeritl9',
 	fetchToken: fetchIntercomToken,
 	identityKey: hostingIntercomIdentityKey,
@@ -185,7 +185,7 @@ const tauriApiClient = new TauriModrinthClient({
 			},
 		}),
 		new AuthFeature({
-			token: async () => (await getCreds())?.session,
+			token: async () => (amberiteAuth.isLoggedIn.value ? 'amberite-session' : null),
 		}),
 		new PanelVersionFeature(),
 		new VerboseLoggingFeature(),
@@ -624,41 +624,24 @@ const incompatibilityWarningModal = ref()
 const installToPlayModal = ref()
 const updateToPlayModal = ref()
 
-const modrinthLoginFlowWaitModal = ref()
-
-setupAuthProvider(credentials, async (_redirectPath) => {
+setupAuthProvider(amberiteAuth.user, async (_redirectPath) => {
 	await signIn()
 })
-
-async function validateSession(sessionToken) {
-	try {
-		const response = await tauriFetch(`${config.labrinthBaseUrl}/v2/user`, {
-			method: 'GET',
-			headers: { Authorization: sessionToken },
-		})
-		if (response.status === 401) return false
-		return true
-	} catch {
-		return true
-	}
-}
 
 async function fetchCredentials() {
 	const creds = await getCreds().catch(handleError)
 	if (creds && creds.user_id) {
-		if (creds.session && !(await validateSession(creds.session))) {
-			await logout().catch(handleError)
-			credentials.value = null
-			return
-		}
 		creds.user = await get_user(creds.user_id, 'bypass').catch(handleError)
 	}
 	credentials.value = creds ?? null
 }
 
 async function signIn() {
-	modrinthLoginFlowWaitModal.value.show()
+	await amberiteAuth.signIn().catch(handleError)
+	await fetchCredentials()
+}
 
+async function modrinthSignIn() {
 	try {
 		await login()
 		await fetchCredentials()
@@ -672,31 +655,21 @@ async function signIn() {
 		} else {
 			handleError(error)
 		}
-	} finally {
-		modrinthLoginFlowWaitModal.value.hide()
 	}
 }
 
 async function logOut() {
 	await logout().catch(handleError)
+	await amberiteAuth.logOut().catch(handleError)
 	await fetchCredentials()
 }
 
-const MIDAS_BITFLAG = 1 << 0
-const hasPlus = computed(
-	() =>
-		credentials.value &&
-		credentials.value.user &&
-		(credentials.value.user.badges & MIDAS_BITFLAG) === MIDAS_BITFLAG,
-)
+const hasPlus = computed(() => false)
 
-const showAd = computed(
-	() => sidebarVisible.value && !hasPlus.value && credentials.value !== undefined,
-)
+const showAd = computed(() => false)
 
 async function fetchIntercomToken() {
-	const creds = await getCreds()
-	if (!creds?.session) {
+	if (!amberiteAuth.isLoggedIn.value) {
 		throw new Error('Not authenticated')
 	}
 
@@ -710,9 +683,6 @@ async function fetchIntercomToken() {
 
 	const response = await tauriFetch(`${config.siteUrl}/api/intercom/messenger-jwt${query}`, {
 		method: 'GET',
-		headers: {
-			Authorization: `Bearer ${creds.session}`,
-		},
 	})
 	if (!response.ok) {
 		throw new Error(`Failed to fetch Intercom token: ${response.status}`)
@@ -1086,8 +1056,7 @@ async function openSurvey() {
 		return
 	}
 
-	const creds = await getCreds().catch(handleError)
-	const userId = creds?.user_id
+	const userId = amberiteAuth.user.value?.id
 
 	const formId = availableSurvey.value.tally_id
 
@@ -1140,8 +1109,7 @@ async function processPendingSurveys() {
 
 	cleanupOldSurveyDisplayData()
 
-	const creds = await getCreds().catch(handleError)
-	const userId = creds?.user_id
+	const userId = amberiteAuth.user.value?.id
 
 	const instances = await list().catch(handleError)
 	const isActivePlayer =
@@ -1203,9 +1171,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		<Suspense>
 			<AppSettingsModal ref="settingsModal" />
 		</Suspense>
-		<Suspense>
-			<AuthGrantFlowWaitModal ref="modrinthLoginFlowWaitModal" @flow-cancel="cancelLogin" />
-		</Suspense>
+
 		<CreationFlowModal
 			ref="installationModal"
 			type="instance"
@@ -1251,12 +1217,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				<LibraryIcon />
 			</NavButton>
-			<NavButton
-				v-tooltip.right="'Modrinth Hosting'"
-				to="/hosting/manage"
-				:is-primary="(r) => r.path === '/hosting/manage' || r.path === '/hosting/manage/'"
-				:is-subpage="(r) => r.path.startsWith('/hosting/manage/') && r.path !== '/hosting/manage/'"
-			>
+			<NavButton v-tooltip.right="'Core'" to="/core">
 				<ServerStackIcon />
 			</NavButton>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
@@ -1305,14 +1266,10 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				<SettingsIcon />
 			</NavButton>
 			<OverflowMenu
-				v-if="credentials?.user"
-				v-tooltip.right="`Modrinth account`"
+				v-if="amberiteAuth.user"
+				v-tooltip.right="`Amberite account`"
 				class="w-12 h-12 text-primary rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bg hover:text-contrast border-0 cursor-pointer"
 				:options="[
-					{
-						id: 'view-profile',
-						action: () => openUrl('https://modrinth.com/user/' + credentials.user.username),
-					},
 					{
 						id: 'sign-out',
 						action: () => logOut(),
@@ -1321,21 +1278,20 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				]"
 				placement="right-end"
 			>
-				<Avatar :src="credentials?.user?.avatar_url" alt="" size="32px" circle />
-				<template #view-profile>
+				<Avatar :src="amberiteAuth.user?.avatar_url" alt="" size="32px" circle />
+				<template #sign-out>
 					<UserIcon />
 					<span class="inline-flex items-center gap-1">
 						Signed in as
 						<span class="inline-flex items-center gap-1 text-contrast font-semibold">
-							<Avatar :src="credentials?.user?.avatar_url" alt="" size="20px" circle />
-							{{ credentials?.user?.username }}
+							<Avatar :src="amberiteAuth.user?.avatar_url" alt="" size="20px" circle />
+							{{ amberiteAuth.user?.username }}
 						</span>
 					</span>
-					<ExternalIcon />
+					<LogOutIcon />
 				</template>
-				<template #sign-out> <LogOutIcon /> Sign out </template>
 			</OverflowMenu>
-			<NavButton v-else v-tooltip.right="'Sign in to a Modrinth account'" :to="() => signIn()">
+			<NavButton v-else v-tooltip.right="'Sign in to Amberite'" :to="() => signIn()">
 				<LogInIcon class="text-brand" />
 			</NavButton>
 		</div>
@@ -1482,7 +1438,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					</div>
 					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
 						<suspense>
-							<FriendsList :credentials="credentials" :sign-in="() => signIn()" />
+							<FriendsList :credentials="credentials" :sign-in="() => modrinthSignIn()" />
 						</suspense>
 					</div>
 					<div v-if="news && news.length > 0" class="p-4 flex flex-col items-center">

@@ -39,6 +39,7 @@ const Core = {
 	Servers: () => import('@/pages/core/Servers.vue'),
 	Settings: () => import('@/pages/core/Settings.vue'),
 	Setup: () => import('@/pages/core/Setup.vue'),
+	Connect: () => import('@/pages/core/Connect.vue'),
 }
 
 const Project = {
@@ -163,8 +164,11 @@ const router = createRouter({
 				},
 				{
 					path: 'setup',
-					name: 'CoreSetup',
-					component: Core.Setup,
+					redirect: '/core',
+				},
+				{
+					path: 'connect',
+					redirect: '/core',
 				},
 			],
 		},
@@ -307,7 +311,10 @@ const router = createRouter({
 					component: () => import('@/pages/instance/ServerBrowsePage.vue'),
 					meta: {
 						useRootContext: true,
-						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/content' }, { name: 'Add content' }],
+						breadcrumb: [
+							{ name: '?Instance', link: '/instance/{id}/content' },
+							{ name: 'Add content' },
+						],
 					},
 				},
 				{

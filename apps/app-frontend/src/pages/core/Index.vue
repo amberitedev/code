@@ -25,7 +25,6 @@ const hasGroup = computed(() => group.value !== null)
 					{ label: 'Members', href: `/core/members`, shown: hasGroup },
 					{ label: 'Servers', href: `/core/servers`, shown: hasGroup },
 					{ label: 'Core Settings', href: `/core/settings`, shown: hasGroup },
-					{ label: 'Setup', href: `/core/setup` },
 				]"
 			/>
 			<RouterView v-if="route.path.startsWith('/core')" class="flex-1 min-h-0" />
