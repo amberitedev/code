@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { LinkIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
-import { Avatar, ButtonStyled } from '@modrinth/ui'
-import { computed } from 'vue'
+import { Avatar, Badge, ButtonStyled, StyledInput } from '@modrinth/ui'
+import { computed, ref } from 'vue'
 
 import { useSocial } from '@/composables/useSocial'
 
@@ -9,106 +9,86 @@ import { useOnboarding } from '../core-onboarding-context'
 
 const ctx = useOnboarding()
 const { friends } = useSocial()
-
+const inviteRole = ref<'admin' | 'moderator' | 'member'>('member')
 const friendList = computed(() => friends.value?.friends ?? [])
-const filteredFriends = computed(() => {
+const results = computed(() => {
 	const q = ctx.inviteQuery.value.trim().toLowerCase()
 	if (!q) return friendList.value
-	return friendList.value.filter((f) => (f.user?.username ?? '').toLowerCase().includes(q))
+	return friendList.value.filter((x) => (x.user?.username ?? '').toLowerCase().includes(q))
 })
+
+function invite(userId?: string) {
+	if (!userId) return
+	void ctx.inviteUser(userId, inviteRole.value === 'moderator' ? 'member' : inviteRole.value)
+}
+
+function inviteBackendRole() {
+	return inviteRole.value === 'moderator' ? 'member' : inviteRole.value
+}
 </script>
 
 <template>
-	<div class="flex flex-col gap-4">
-		<div class="flex flex-col gap-2">
-			<span class="font-semibold">Invite members</span>
-			<p class="text-secondary text-sm m-0">
-				Search users or paste a friend code to invite people to your group.
-			</p>
-		</div>
-
-		<div class="flex gap-2">
-			<input
-				v-model="ctx.inviteQuery.value"
-				class="flex-1 rounded-lg bg-bg-input px-3 py-2"
-				placeholder="Search by username..."
-				@keyup.enter="ctx.searchUsers"
-			/>
-			<ButtonStyled circular @click="ctx.searchUsers">
-				<SearchIcon />
-			</ButtonStyled>
-		</div>
-
-		<div v-if="ctx.inviteSearchLoading.value" class="text-secondary text-sm">Searching...</div>
-		<div
-			v-else-if="ctx.inviteSearchResults.value.length"
-			class="flex flex-col gap-2 max-h-40 overflow-y-auto"
-		>
-			<div
-				v-for="user in ctx.inviteSearchResults.value"
-				:key="user.userId"
-				class="flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-button-bg transition-colors"
-			>
-				<div class="flex items-center gap-2">
-					<Avatar :src="user.image" :alt="user.username" size="32px" circle />
-					<span class="text-sm">{{ user.displayName ?? user.username }}</span>
+	<div class="flex flex-col gap-5">
+		<div class="rounded-2xl bg-surface-3 p-5">
+			<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<h2 class="m-0 text-xl font-bold text-contrast">Send member invites</h2>
+					<p class="m-0 text-sm text-secondary">Pick friends or search the user database.</p>
 				</div>
-				<ButtonStyled size="small" color="brand" @click="ctx.inviteUser(user.userId, 'member')">
-					<UserPlusIcon />
-				</ButtonStyled>
+				<select v-model="inviteRole" class="rounded-xl border-0 bg-surface-4 px-3 py-2 font-bold">
+					<option value="admin">Admin</option>
+					<option value="moderator">Moderator</option>
+					<option value="member">Member</option>
+				</select>
 			</div>
-		</div>
-
-		<div v-if="filteredFriends.length" class="flex flex-col gap-2">
-			<span class="text-xs font-semibold text-secondary">Quick invite — friends</span>
-			<div
-				v-for="f in filteredFriends"
-				:key="f.friendshipId"
-				class="flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-button-bg transition-colors"
-			>
-				<div class="flex items-center gap-2">
-					<Avatar :src="f.user?.image" :alt="f.user?.username" size="32px" circle />
-					<span class="text-sm">{{ f.user?.displayName ?? f.user?.username }}</span>
-				</div>
-				<ButtonStyled size="small" color="brand" @click="ctx.inviteUser(f.user?.userId, 'member')">
-					<UserPlusIcon />
-				</ButtonStyled>
-			</div>
-		</div>
-
-		<div class="border-t border-surface-5 pt-3 flex flex-col gap-2">
-			<span class="font-semibold text-sm">Or generate an invite link</span>
 			<div class="flex gap-2">
-				<ButtonStyled type="outlined" @click="ctx.generateInviteLink('member')">
-					<LinkIcon /> Generate link
-				</ButtonStyled>
-			</div>
-			<div v-if="ctx.generatedInviteCode.value" class="flex items-center gap-2">
-				<code class="rounded-lg bg-bg-input px-3 py-2 font-mono text-sm flex-1">{{
-					ctx.generatedInviteCode.value
-				}}</code>
-				<ButtonStyled
-					size="small"
-					@click="
-						() => {
-							navigator.clipboard.writeText(ctx.generatedInviteCode.value!)
-						}
-					"
-				>
-					Copy
+				<StyledInput
+					v-model="ctx.inviteQuery.value"
+					:icon="SearchIcon"
+					placeholder="Search username or friend code"
+					wrapper-class="flex-1"
+					@keyup.enter="ctx.searchUsers"
+				/>
+				<ButtonStyled circular>
+					<button @click="ctx.searchUsers"><SearchIcon /></button>
 				</ButtonStyled>
 			</div>
 		</div>
 
-		<div v-if="ctx.invitedUsers.value.length" class="flex flex-col gap-2">
-			<span class="text-xs font-semibold text-secondary">Invited</span>
-			<div
-				v-for="u in ctx.invitedUsers.value"
-				:key="u.userId"
-				class="flex items-center gap-2 p-2 rounded-lg bg-bg-input"
-			>
-				<Avatar :src="u.image" :alt="u.username" size="24px" circle />
-				<span class="text-sm">{{ u.username }}</span>
+		<div class="grid gap-4 md:grid-cols-2">
+			<div class="rounded-2xl bg-surface-3 p-4">
+				<h3 class="m-0 mb-3 text-base font-bold text-contrast">Friends</h3>
+				<p v-if="!results.length" class="m-0 text-sm text-secondary">No matching friends.</p>
+				<div v-for="friend in results" :key="friend.friendshipId" class="flex items-center justify-between gap-3 rounded-xl p-2 hover:bg-button-bg">
+					<div class="flex items-center gap-3">
+						<Avatar :src="friend.user?.image" :alt="friend.user?.username" size="36px" circle />
+						<span class="font-semibold">{{ friend.user?.displayName ?? friend.user?.username }}</span>
+					</div>
+					<ButtonStyled size="small" color="brand"><button @click="invite(friend.user?.userId)"><UserPlusIcon /> Invite</button></ButtonStyled>
+				</div>
+			</div>
+			<div class="rounded-2xl bg-surface-3 p-4">
+				<h3 class="m-0 mb-3 text-base font-bold text-contrast">Search results</h3>
+				<p v-if="ctx.inviteSearchLoading.value" class="m-0 text-sm text-secondary">Searching...</p>
+				<p v-else-if="!ctx.inviteSearchResults.value.length" class="m-0 text-sm text-secondary">Search to find users outside your friend list.</p>
+				<div v-for="user in ctx.inviteSearchResults.value" :key="user.userId" class="flex items-center justify-between gap-3 rounded-xl p-2 hover:bg-button-bg">
+					<div class="flex items-center gap-3">
+						<Avatar :src="user.image" :alt="user.username" size="36px" circle />
+						<span class="font-semibold">{{ user.displayName ?? user.username }}</span>
+					</div>
+					<ButtonStyled size="small" color="brand"><button @click="invite(user.userId)"><UserPlusIcon /> Invite</button></ButtonStyled>
+				</div>
+			</div>
+		</div>
+
+		<div class="rounded-2xl bg-surface-3 p-4">
+			<div class="mb-3 flex items-center justify-between gap-3">
+				<h3 class="m-0 text-base font-bold text-contrast">Invite code</h3>
+				<ButtonStyled type="outlined"><button @click="ctx.generateInviteLink(inviteBackendRole())"><LinkIcon /> Generate</button></ButtonStyled>
+			</div>
+			<code v-if="ctx.generatedInviteCode.value" class="block rounded-xl bg-surface-4 p-3 font-mono">{{ ctx.generatedInviteCode.value }}</code>
+			<div v-if="ctx.invitedUsers.value.length" class="mt-3 flex flex-wrap gap-2">
+				<Badge v-for="user in ctx.invitedUsers.value" :key="user.userId">{{ user.username }}</Badge>
 			</div>
 		</div>
 	</div>

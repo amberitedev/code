@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { Avatar, ButtonStyled } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { BanIcon, MoreVerticalIcon, SearchIcon, UserPlusIcon, UsersIcon } from '@modrinth/assets'
+import { Avatar, Badge, ButtonStyled, NewModal, OverflowMenu, StyledInput } from '@modrinth/ui'
+import { computed, ref, useTemplateRef } from 'vue'
 
+import { useCorePreview } from '@/components/core/use-core-preview'
 import { useSocial } from '@/composables/useSocial'
+import { useSocialClient } from '@/composables/useSocialClient'
 import {
 	SYNCED_PERMISSION_PRESET_LABELS,
 	type SyncedPermissionPreset,
@@ -13,9 +16,7 @@ defineOptions({ name: 'CoreMembersPage' })
 type Role = 'owner' | 'admin' | 'member'
 type Member = (typeof members)['value'][number]
 
-/** Presets an owner/admin may assign. Ownership is changed via transfer, not here. */
-const ASSIGNABLE_PRESETS: SyncedPermissionPreset[] = ['admin', 'member', 'client-only', 'viewer']
-
+const presets: SyncedPermissionPreset[] = ['admin', 'member', 'client-only', 'viewer']
 const {
 	group,
 	members,
@@ -32,158 +33,145 @@ const {
 	leaveGroup,
 	inviteToGroup,
 } = useSocial()
+const { isPreviewConnected } = useCorePreview()
+const modal = useTemplateRef<InstanceType<typeof NewModal>>('modal')
+const query = ref('')
+const inviteRole = ref<'admin' | 'moderator' | 'member'>('member')
+const searching = ref(false)
+const results = ref<Awaited<ReturnType<ReturnType<typeof useSocialClient>['searchUsers']>>>([])
+const displayGroup = computed(() => group.value ?? (isPreviewConnected.value ? { group: { name: 'Amberite Core' } } : null))
+const displayMembers = computed(() =>
+	members.value.length
+		? members.value
+		: [
+				{ _id: '1', userId: currentUser.value?.userId ?? '1', role: 'owner' as Role, status: 'active', user: currentUser.value ?? { username: 'ilai', displayName: 'Ilai', image: null } },
+				{ _id: '2', userId: '2', role: 'admin' as Role, status: 'active', permissionPreset: 'admin', user: { username: 'maya', displayName: 'Maya', image: null } },
+				{ _id: '3', userId: '3', role: 'member' as Role, status: 'active', permissionPreset: 'client-only', user: { username: 'noam', displayName: 'Noam', image: null } },
+			],
+)
+const displayBans = computed(() => bans.value)
+const displayCanManage = computed(() => canManage.value || isPreviewConnected.value)
+const rank = (role: Role) => (role === 'owner' ? 3 : role === 'admin' ? 2 : 1)
+const myRank = computed(() => (myRole.value ? rank(myRole.value) : isPreviewConnected.value ? 3 : 0))
 
-const inviteInput = ref('')
-const inviteRole = ref<Role>('member')
-const inviteSending = ref(false)
-
-const rank = (r: Role) => (r === 'owner' ? 3 : r === 'admin' ? 2 : 1)
-const myRank = computed(() => (myRole.value ? rank(myRole.value) : 0))
-
-function canActOn(role: Role, userId: string): boolean {
-	if (!canManage.value) return false
-	if (userId === currentUser.value?.userId) return false
-	return rank(role) < myRank.value
-}
-
-/** Effective synced permission preset for a member (stored preset or role default). */
-function presetOf(member: Member): SyncedPermissionPreset {
-	const stored = member.permissionPreset
-	if (stored && (ASSIGNABLE_PRESETS as string[]).includes(stored)) {
-		return stored as SyncedPermissionPreset
+function presetOf(member: Member | (typeof displayMembers)['value'][number]): SyncedPermissionPreset {
+	if (member.permissionPreset && (presets as string[]).includes(member.permissionPreset)) {
+		return member.permissionPreset as SyncedPermissionPreset
 	}
-	if (member.role === 'owner') return 'owner'
-	if (member.role === 'admin') return 'admin'
-	return 'member'
+	return member.role === 'owner' ? 'owner' : member.role === 'admin' ? 'admin' : 'member'
 }
 
 function roleForPreset(preset: SyncedPermissionPreset): Role {
-	if (preset === 'owner') return 'owner'
-	if (preset === 'admin') return 'admin'
-	return 'member'
+	return preset === 'admin' ? 'admin' : 'member'
 }
 
-async function setPreset(member: Member, preset: SyncedPermissionPreset) {
-	await setMemberRole(member.userId, roleForPreset(preset), preset)
+function canAct(member: Member | (typeof displayMembers)['value'][number]) {
+	return displayCanManage.value && member.userId !== currentUser.value?.userId && rank(member.role) < myRank.value
 }
 
-async function invite() {
-	const value = inviteInput.value.trim()
-	if (!value) return
-	inviteSending.value = true
-	// Try to find user by code/username first, then invite by userId
+async function search() {
+	if (!query.value.trim()) return
+	searching.value = true
 	try {
-		const client = (await import('@/composables/useSocialClient')).useSocialClient()
-		const results = await client.searchUsers(value)
-		const match = results[0]
-		if (match?.userId) {
-			await inviteToGroup({ inviteeUserId: match.userId, role: inviteRole.value })
-		} else {
-			// Fallback: treat as direct userId
-			await inviteToGroup({ inviteeUserId: value, role: inviteRole.value })
-		}
-	} catch {
-		// Fallback: treat as direct userId
-		await inviteToGroup({ inviteeUserId: value, role: inviteRole.value })
+		results.value = await useSocialClient().searchUsers(query.value.trim())
+	} finally {
+		searching.value = false
 	}
-	inviteSending.value = false
-	inviteInput.value = ''
+}
+
+async function invite(userId: string) {
+	if (isPreviewConnected.value && !group.value) {
+		modal.value?.hide()
+		return
+	}
+	await inviteToGroup({
+		inviteeUserId: userId,
+		role: inviteRole.value === 'moderator' ? 'member' : inviteRole.value,
+	})
+	modal.value?.hide()
+	query.value = ''
+	results.value = []
 }
 </script>
 
 <template>
-	<div v-if="group" class="flex flex-col gap-4 w-full">
-		<div class="rounded-2xl bg-bg-raised p-6 flex flex-col gap-4">
-			<span class="font-bold text-lg">Members ({{ members.length }})</span>
-			<div
-				v-for="member in members"
-				:key="member._id"
-				class="flex items-center justify-between gap-2 border-b border-surface-5 last:border-0 pb-3 last:pb-0"
-			>
-				<div class="flex items-center gap-3">
-					<Avatar :src="member.user?.image" :alt="member.user?.username" size="40px" circle />
-					<div class="flex flex-col">
-						<span class="font-semibold">
-							{{ member.user?.displayName ?? member.user?.username ?? member.userId }}
-							<span v-if="member.userId === currentUser?.userId" class="text-secondary">(you)</span>
-						</span>
-						<span class="text-secondary text-xs">
-							{{ SYNCED_PERMISSION_PRESET_LABELS[presetOf(member)] }}
-						</span>
-					</div>
-				</div>
-				<div v-if="canActOn(member.role, member.userId)" class="flex gap-1 flex-wrap justify-end">
-					<select
-						:value="presetOf(member)"
-						class="rounded-lg bg-bg-input px-2 py-1 text-sm"
-						@change="
-							setPreset(
-								member,
-								($event.target as HTMLSelectElement).value as SyncedPermissionPreset,
-							)
-						"
-					>
-						<option v-for="preset in ASSIGNABLE_PRESETS" :key="preset" :value="preset">
-							{{ SYNCED_PERMISSION_PRESET_LABELS[preset] }}
-						</option>
-					</select>
-					<ButtonStyled v-if="myRole === 'owner'" size="small">
-						<button @click="transferOwnership(member.userId)">Make owner</button>
-					</ButtonStyled>
-					<ButtonStyled size="small">
-						<button @click="kickMember(member.userId)">Kick</button>
-					</ButtonStyled>
-					<ButtonStyled size="small" color="red">
-						<button @click="banMember(member.userId)">Ban</button>
-					</ButtonStyled>
-				</div>
+	<div v-if="displayGroup" class="flex w-full flex-col gap-5">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div>
+				<h1 class="m-0 text-3xl font-black text-contrast">Members</h1>
+				<p class="m-0 text-secondary">Manage invites, roles, bans, and access tiers.</p>
 			</div>
-		</div>
-
-		<div v-if="canManage" class="rounded-2xl bg-bg-raised p-6 flex flex-col gap-3">
-			<span class="font-bold text-lg">Add Member to Friend Group</span>
-			<p class="text-secondary text-sm m-0">
-				Enter a friend code (AMB-XXXXXX) or a username to invite them.
-			</p>
-			<div class="flex gap-2">
-				<input
-					v-model="inviteInput"
-					class="flex-1 rounded-lg bg-bg-input px-3 py-2"
-					placeholder="AMB-ABC123 or username"
-					@keyup.enter="invite"
-				/>
-				<select v-model="inviteRole" class="rounded-lg bg-bg-input px-3 py-2">
-					<option value="member">member</option>
-					<option value="admin">admin</option>
-				</select>
-				<ButtonStyled color="brand" :disabled="inviteSending" @click="invite">
-					{{ inviteSending ? 'Inviting…' : 'Invite' }}
-				</ButtonStyled>
-			</div>
-		</div>
-
-		<div
-			v-if="canManage && bans.length > 0"
-			class="rounded-2xl bg-bg-raised p-6 flex flex-col gap-3"
-		>
-			<span class="font-bold text-lg">Banned ({{ bans.length }})</span>
-			<div v-for="ban in bans" :key="ban._id" class="flex items-center justify-between gap-2">
-				<div class="flex items-center gap-2">
-					<Avatar :src="ban.user?.image" :alt="ban.user?.username" size="32px" circle />
-					<span>{{ ban.user?.displayName ?? ban.user?.username ?? ban.userId }}</span>
-				</div>
-				<ButtonStyled size="small">
-					<button @click="unbanMember(ban.userId)">Unban</button>
-				</ButtonStyled>
-			</div>
-		</div>
-
-		<div class="flex">
-			<ButtonStyled v-if="myRole !== 'owner'" color="red">
-				<button @click="leaveGroup">Leave group</button>
+			<ButtonStyled v-if="displayCanManage" color="brand">
+				<button @click="modal?.show()"><UserPlusIcon /> Invite member</button>
 			</ButtonStyled>
 		</div>
 
-		<p v-if="error" class="text-red text-sm m-0">{{ error.message }}</p>
+		<section class="rounded-2xl bg-surface-3 p-5">
+			<div class="mb-4 flex items-center gap-2">
+				<UsersIcon class="text-brand" />
+				<h2 class="m-0 text-xl font-bold text-contrast">Group roster</h2>
+				<Badge>{{ displayMembers.length }}</Badge>
+			</div>
+			<div v-for="member in displayMembers" :key="member._id" class="flex flex-wrap items-center justify-between gap-3 rounded-xl p-3 hover:bg-button-bg">
+				<div class="flex items-center gap-3">
+					<Avatar :src="member.user?.image" :alt="member.user?.username" size="42px" circle />
+					<div>
+						<div class="font-bold text-contrast">
+							{{ member.user?.displayName ?? member.user?.username ?? member.userId }}
+							<span v-if="member.userId === currentUser?.userId" class="text-secondary">(you)</span>
+						</div>
+						<div class="text-sm text-secondary">{{ SYNCED_PERMISSION_PRESET_LABELS[presetOf(member)] }}</div>
+					</div>
+				</div>
+				<div v-if="canAct(member)" class="flex items-center gap-2">
+					<select class="rounded-xl border-0 bg-surface-4 px-3 py-2" :value="presetOf(member)" @change="setMemberRole(member.userId, roleForPreset(($event.target as HTMLSelectElement).value as SyncedPermissionPreset), ($event.target as HTMLSelectElement).value)">
+						<option v-for="preset in presets" :key="preset" :value="preset">{{ SYNCED_PERMISSION_PRESET_LABELS[preset] }}</option>
+					</select>
+					<OverflowMenu :options="[
+						{ id: 'owner', shown: myRole === 'owner', action: () => transferOwnership(member.userId) },
+						{ id: 'kick', action: () => kickMember(member.userId) },
+						{ id: 'ban', color: 'red', action: () => banMember(member.userId) },
+					]">
+						<MoreVerticalIcon />
+						<template #owner>Make owner</template>
+						<template #kick>Kick</template>
+						<template #ban>Ban</template>
+					</OverflowMenu>
+				</div>
+			</div>
+		</section>
+
+		<section v-if="displayCanManage" class="rounded-2xl bg-surface-3 p-5">
+			<div class="mb-3 flex items-center gap-2"><BanIcon class="text-red" /><h2 class="m-0 text-xl font-bold text-contrast">Banned users</h2></div>
+			<p v-if="!displayBans.length" class="m-0 text-secondary">No bans.</p>
+			<div v-for="ban in displayBans" :key="ban._id" class="flex items-center justify-between rounded-xl p-2">
+				<span>{{ ban.user?.displayName ?? ban.user?.username ?? ban.userId }}</span>
+				<ButtonStyled size="small"><button @click="unbanMember(ban.userId)">Unban</button></ButtonStyled>
+			</div>
+		</section>
+
+		<ButtonStyled v-if="myRole !== 'owner'" color="red"><button @click="leaveGroup">Leave group</button></ButtonStyled>
+		<p v-if="error" class="m-0 text-sm text-red">{{ error.message }}</p>
+
+		<NewModal ref="modal" header="Invite member" max-width="560px">
+			<div class="flex flex-col gap-4">
+				<div class="flex gap-2">
+					<StyledInput v-model="query" :icon="SearchIcon" wrapper-class="flex-1" placeholder="Username or friend code" @keyup.enter="search" />
+					<ButtonStyled circular><button :disabled="searching" @click="search"><SearchIcon /></button></ButtonStyled>
+				</div>
+				<select v-model="inviteRole" class="rounded-xl border-0 bg-surface-4 px-3 py-2">
+					<option value="admin">Admin</option>
+					<option value="moderator">Moderator</option>
+					<option value="member">Member</option>
+				</select>
+				<div v-for="user in results" :key="user.userId" class="flex items-center justify-between rounded-xl p-2 hover:bg-button-bg">
+					<div class="flex items-center gap-3">
+						<Avatar :src="user.image" :alt="user.username" size="36px" circle />
+						<span class="font-bold">{{ user.displayName ?? user.username }}</span>
+					</div>
+					<ButtonStyled size="small" color="brand"><button @click="invite(user.userId)">Send invite</button></ButtonStyled>
+				</div>
+			</div>
+		</NewModal>
 	</div>
 </template>

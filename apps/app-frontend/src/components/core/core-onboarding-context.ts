@@ -19,22 +19,29 @@ export interface OnboardingContext {
 	coreId: Ref<string | null>
 	groupName: Ref<string>
 	description: Ref<string>
+	iconUrl: Ref<string>
 	bannerUrl: Ref<string>
 	subdomain: Ref<string>
 	runOnStartup: Ref<boolean>
 	runInBackground: Ref<boolean>
+	installPath: Ref<string>
+	backupRetention: Ref<number>
+	shareTelemetry: Ref<boolean>
 	inviteQuery: Ref<string>
 	inviteSearchResults: Ref<AmberiteUser[]>
 	inviteSearchLoading: Ref<boolean>
 	invitedUsers: Ref<InvitedUser[]>
 	generatedInviteCode: Ref<string | null>
 	runMode: Ref<'manual' | 'app_open' | 'startup'>
+	progress: Ref<number>
+	progressLabel: Ref<string>
 	pair: () => Promise<void>
-	join: () => Promise<void>
+	saveGeneral: () => Promise<void>
 	searchUsers: () => Promise<void>
 	inviteUser: (userId: string, role: string) => Promise<void>
 	generateInviteLink: (role: string) => Promise<void>
 	saveAdvanced: () => Promise<void>
+	runFinish: () => Promise<void>
 	finish: () => void
 }
 

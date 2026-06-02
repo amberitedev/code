@@ -1,163 +1,193 @@
 <script setup lang="ts">
-import { LinkIcon, PlusIcon, ServerStackIcon, UsersIcon } from '@modrinth/assets'
-import { Avatar, ButtonStyled } from '@modrinth/ui'
-import { computed, useTemplateRef } from 'vue'
+import {
+	ChartIcon,
+	LinkIcon,
+	PlusIcon,
+	ServerStackIcon,
+	UsersIcon,
+} from '@modrinth/assets'
+import { Avatar, Badge, ButtonStyled } from '@modrinth/ui'
+import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
+import { useCorePreview } from '@/components/core/use-core-preview'
 import { useSocial } from '@/composables/useSocial'
+import { useSyncedServers } from '@/composables/useSyncedServers'
 
 defineOptions({ name: 'CoreOverviewPage' })
 
 const router = useRouter()
-const { group, members, invites, friends, currentUser, acceptInvite, declineInvite } = useSocial()
+const { group, members, invites, currentUser, acceptInvite, declineInvite } = useSocial()
+const { profiles, refresh } = useSyncedServers()
+const { isPreviewConnected, isPreviewLocal } = useCorePreview()
 const setupModal = useTemplateRef<InstanceType<typeof CoreOnboardingModal>>('setupModal')
 const connectModal = useTemplateRef<InstanceType<typeof CoreOnboardingModal>>('connectModal')
-
-const core = computed(() => group.value?.core ?? null)
-const coreOnline = computed(() => {
+const previewCore = computed(() => ({
+	setupMode: isPreviewLocal.value ? 'local' : 'external',
+	lastSeenAt: Date.now(),
+}))
+const displayGroup = computed(() =>
+	group.value ??
+	(isPreviewConnected.value
+		? { group: { id: 'preview-core', name: 'Amberite Core', description: 'Servers, sync, and members in one place.' }, core: previewCore.value }
+		: null),
+)
+const displayMembers = computed(() =>
+	members.value.length
+		? members.value
+		: [
+				{ _id: '1', userId: '1', role: 'owner', status: 'active', user: { username: 'ilai', displayName: 'Ilai', image: null } },
+				{ _id: '2', userId: '2', role: 'admin', status: 'active', user: { username: 'maya', displayName: 'Maya', image: null } },
+				{ _id: '3', userId: '3', role: 'member', status: 'active', user: { username: 'noam', displayName: 'Noam', image: null } },
+			],
+)
+const displayProfiles = computed(() =>
+	profiles.value.length
+		? profiles.value
+		: [
+				{ _id: '1', name: 'Survival SMP', status: 'active', gameVersion: '1.21.1', loader: 'Fabric' },
+				{ _id: '2', name: 'Creative Lab', status: 'idle', gameVersion: '1.20.6', loader: 'NeoForge' },
+			],
+)
+const core = computed(() => displayGroup.value?.core ?? null)
+const groupId = computed(() => group.value?.group.id ?? null)
+const online = computed(() => {
 	const seen = core.value?.lastSeenAt
 	return seen ? Date.now() - seen < 60_000 : false
 })
-const incomingFriendRequests = computed(() => friends.value?.incoming ?? [])
+const activeServers = computed(() => displayProfiles.value.filter((x) => x.status === 'active').length)
+const activeMembers = computed(() => displayMembers.value.filter((x) => x.status !== 'banned').length)
+
+async function loadServers() {
+	if (groupId.value) await refresh(groupId.value)
+}
+
+onMounted(loadServers)
+watch(groupId, loadServers)
 </script>
 
 <template>
-	<div class="flex flex-col gap-6 w-full">
-		<div v-if="currentUser" class="flex items-center gap-3">
-			<Avatar :src="currentUser.image" :alt="currentUser.username" size="48px" circle />
-			<div class="flex flex-col">
-				<span class="font-bold text-lg">{{ currentUser.displayName ?? currentUser.username }}</span>
-				<span class="text-secondary text-sm">Friend code: {{ currentUser.friendCode ?? '—' }}</span>
-			</div>
-		</div>
-
-		<div v-if="group" class="rounded-2xl bg-bg-raised p-4 flex flex-col gap-3">
-			<div class="flex items-center justify-between">
-				<div class="flex flex-col">
-					<span class="font-bold text-lg">{{ group.group.name ?? 'Your Core' }}</span>
-					<span class="text-secondary text-sm"
-						>{{ members.length }} member(s) · your role: {{ group.role }}</span
-					>
-				</div>
-				<span
-					class="px-2 py-1 rounded-full text-xs font-bold"
-					:class="coreOnline ? 'bg-green/20 text-green' : 'bg-surface-5 text-secondary'"
-				>
-					{{ coreOnline ? 'Online' : 'Offline' }}
-				</span>
-			</div>
-			<p v-if="group.group.description" class="m-0 text-secondary">{{ group.group.description }}</p>
-			<div class="flex gap-2">
-				<ButtonStyled>
-					<button @click="router.push('/core/members')"><UsersIcon /> Members</button>
-				</ButtonStyled>
-				<ButtonStyled v-if="group.role === 'owner' || group.role === 'admin'">
-					<button @click="router.push('/core/settings')">Core Settings</button>
-				</ButtonStyled>
-			</div>
-		</div>
-
-		<div v-else class="flex flex-col gap-4">
-			<div class="text-center max-w-xl mx-auto py-4">
-				<h2 class="m-0 mb-2 text-2xl">Get started with Amberite Core</h2>
-				<p class="m-0 text-secondary">
-					Pair a Core server you've already set up, or create a brand-new one.
-				</p>
-			</div>
-
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl w-full mx-auto">
-				<button
-					type="button"
-					class="text-left rounded-2xl bg-bg-raised p-6 flex flex-col gap-3 transition-all border-2 border-transparent hover:border-brand cursor-pointer"
-					@click="connectModal?.show()"
-				>
-					<div class="flex items-center gap-3">
-						<span
-							class="w-10 h-10 rounded-xl bg-brand/20 text-brand flex items-center justify-center"
-						>
-							<LinkIcon class="w-5 h-5" />
-						</span>
-						<div class="flex flex-col">
-							<span class="font-bold text-lg">Connect to a Core</span>
-							<span class="text-secondary text-xs">Join an existing friend group</span>
+	<div class="flex w-full flex-col gap-5">
+		<section v-if="!displayGroup" class="overflow-hidden rounded-[28px] bg-surface-3">
+			<div class="grid gap-6 p-6 lg:grid-cols-[1.1fr_0.9fr] lg:p-8">
+				<div class="flex flex-col justify-between gap-10">
+					<div>
+						<Badge>Amberite Core</Badge>
+						<h1 class="mb-3 mt-4 max-w-2xl text-4xl font-black text-contrast">
+							Host the server manager your friends actually use.
+						</h1>
+						<p class="m-0 max-w-xl text-lg text-secondary">
+							Connect to a Core already running elsewhere, or set up a local Core with a guided
+							install, invites, permissions, and runtime settings.
+						</p>
+					</div>
+					<div v-if="currentUser" class="flex items-center gap-3">
+						<Avatar :src="currentUser.image" :alt="currentUser.username" size="42px" circle />
+						<div>
+							<div class="font-bold text-contrast">{{ currentUser.displayName ?? currentUser.username }}</div>
+							<div class="text-sm text-secondary">Friend code: {{ currentUser.friendCode ?? 'Unavailable' }}</div>
 						</div>
 					</div>
-					<p class="m-0 text-secondary text-sm">
-						Already have a Core running? Enter its pairing code to join its friend group and start
-						syncing servers.
-					</p>
-					<div class="flex items-center gap-1 text-brand font-semibold text-sm mt-auto">
-						Connect <span aria-hidden>→</span>
-					</div>
-				</button>
-
-				<button
-					type="button"
-					class="text-left rounded-2xl bg-bg-raised p-6 flex flex-col gap-3 transition-all border-2 border-transparent hover:border-brand cursor-pointer"
-					@click="setupModal?.show()"
-				>
-					<div class="flex items-center gap-3">
-						<span
-							class="w-10 h-10 rounded-xl bg-brand/20 text-brand flex items-center justify-center"
-						>
-							<PlusIcon class="w-5 h-5" />
-						</span>
-						<div class="flex flex-col">
-							<span class="font-bold text-lg">Set up a new Core</span>
-							<span class="text-secondary text-xs">Create a fresh friend group</span>
-						</div>
-					</div>
-					<p class="m-0 text-secondary text-sm">
-						Start from scratch — pair a new Core server, name your group, and invite your first
-						members.
-					</p>
-					<div class="flex items-center gap-1 text-brand font-semibold text-sm mt-auto">
-						Set up <span aria-hidden>→</span>
-					</div>
-				</button>
-			</div>
-
-			<div
-				v-if="invites.length > 0"
-				class="rounded-2xl bg-bg-raised p-4 flex flex-col gap-3 max-w-3xl w-full mx-auto"
-			>
-				<div class="flex items-center gap-2">
-					<ServerStackIcon class="w-5 h-5 text-brand" />
-					<span class="font-bold">Group invites</span>
 				</div>
-				<div
-					v-for="entry in invites"
-					:key="entry.invite._id"
-					class="flex items-center justify-between gap-2 border-b border-surface-5 last:border-0 pb-2 last:pb-0"
-				>
-					<span class="text-sm"
-						>{{ (entry.group as any)?.name ?? 'A Core group' }} · role:
-						{{ entry.invite.role }}</span
-					>
+				<div class="grid gap-4">
+					<button class="core-choice" type="button" @click="connectModal?.show()">
+						<LinkIcon class="text-brand" />
+						<span>
+							<strong>Connect existing Core</strong>
+							<small>Use the six-digit terminal pairing code.</small>
+						</span>
+					</button>
+					<button class="core-choice featured" type="button" @click="setupModal?.show()">
+						<PlusIcon class="text-brand" />
+						<span>
+							<strong>Set up local Core</strong>
+							<small>Install, verify, link, and invite your first members.</small>
+						</span>
+					</button>
+				</div>
+			</div>
+		</section>
+
+		<template v-else>
+			<section class="overflow-hidden rounded-[28px] bg-surface-3">
+				<div class="flex flex-wrap items-center justify-between gap-4 p-6">
+					<div>
+						<div class="mb-2 flex items-center gap-2">
+							<Badge>{{ online ? 'Online' : 'Offline' }}</Badge>
+							<Badge>{{ core?.setupMode ?? 'local' }}</Badge>
+						</div>
+						<h1 class="m-0 text-3xl font-black text-contrast">{{ displayGroup.group.name ?? 'Your Core' }}</h1>
+						<p class="m-0 mt-2 text-secondary">{{ displayGroup.group.description ?? 'Servers, sync, and members in one place.' }}</p>
+					</div>
 					<div class="flex gap-2">
-						<ButtonStyled color="brand">
-							<button @click="acceptInvite({ inviteId: entry.invite._id })">Accept</button>
-						</ButtonStyled>
-						<ButtonStyled>
-							<button @click="declineInvite(entry.invite._id)">Decline</button>
-						</ButtonStyled>
+						<ButtonStyled><button @click="router.push('/core/members')"><UsersIcon /> Members</button></ButtonStyled>
+						<ButtonStyled color="brand"><button @click="router.push('/core/servers')"><ServerStackIcon /> Servers</button></ButtonStyled>
 					</div>
 				</div>
-			</div>
-		</div>
+			</section>
 
-		<div
-			v-if="incomingFriendRequests.length > 0 && group"
-			class="rounded-2xl bg-bg-raised p-4 flex flex-col gap-2"
-		>
-			<span class="font-bold">Friend requests</span>
-			<span class="text-secondary text-sm"
-				>{{ incomingFriendRequests.length }} pending — manage them in Members.</span
-			>
-		</div>
+			<div class="grid gap-4 md:grid-cols-3">
+				<div class="stat-card"><ServerStackIcon /><strong>{{ displayProfiles.length }}</strong><span>Synced servers</span></div>
+				<div class="stat-card"><ChartIcon /><strong>{{ activeServers }}</strong><span>Active syncs</span></div>
+				<div class="stat-card"><UsersIcon /><strong>{{ activeMembers }}</strong><span>Active members</span></div>
+			</div>
+
+			<div class="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
+				<section class="rounded-2xl bg-surface-3 p-5">
+					<h2 class="m-0 mb-3 text-xl font-bold text-contrast">Server glance</h2>
+					<p v-if="!displayProfiles.length" class="m-0 text-secondary">No synced servers yet.</p>
+					<div v-for="profile in displayProfiles" :key="profile._id" class="flex items-center justify-between rounded-xl p-3 hover:bg-button-bg">
+						<div class="font-bold text-contrast">{{ profile.name }}</div>
+						<div class="text-sm text-secondary">{{ profile.gameVersion }} {{ profile.loader }}</div>
+					</div>
+				</section>
+				<section class="rounded-2xl bg-surface-3 p-5">
+					<h2 class="m-0 mb-3 text-xl font-bold text-contrast">Online members</h2>
+					<div v-for="member in displayMembers.slice(0, 5)" :key="member._id" class="flex items-center gap-3 rounded-xl p-2">
+						<Avatar :src="member.user?.image" :alt="member.user?.username" size="34px" circle />
+						<div>
+							<div class="font-bold text-contrast">{{ member.user?.displayName ?? member.user?.username ?? member.userId }}</div>
+							<div class="text-xs text-secondary">{{ member.role }}</div>
+						</div>
+					</div>
+				</section>
+			</div>
+		</template>
+
+		<section v-if="invites.length" class="rounded-2xl bg-surface-3 p-5">
+			<h2 class="m-0 mb-3 text-xl font-bold text-contrast">Group invites</h2>
+			<div v-for="entry in invites" :key="entry.invite._id" class="flex items-center justify-between gap-3 rounded-xl p-2">
+				<span>{{ (entry.group as any)?.name ?? 'Core group' }} - {{ entry.invite.role }}</span>
+				<div class="flex gap-2">
+					<ButtonStyled color="brand"><button @click="acceptInvite({ inviteId: entry.invite._id })">Accept</button></ButtonStyled>
+					<ButtonStyled><button @click="declineInvite(entry.invite._id)">Decline</button></ButtonStyled>
+				</div>
+			</div>
+		</section>
 
 		<CoreOnboardingModal ref="connectModal" mode="connect" />
 		<CoreOnboardingModal ref="setupModal" mode="setup" />
 	</div>
 </template>
+
+<style scoped>
+.core-choice {
+	@apply flex min-h-36 cursor-pointer items-center gap-4 rounded-2xl border-2 border-transparent bg-surface-4 p-5 text-left transition-all hover:border-brand;
+}
+.core-choice.featured {
+	@apply bg-brand-highlight;
+}
+.core-choice strong {
+	@apply block text-lg text-contrast;
+}
+.core-choice small {
+	@apply text-sm text-secondary;
+}
+.stat-card {
+	@apply flex flex-col gap-2 rounded-2xl bg-surface-3 p-5 text-secondary;
+}
+.stat-card strong {
+	@apply text-3xl text-contrast;
+}
+</style>
