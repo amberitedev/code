@@ -57,6 +57,8 @@ Convex is standalone in `convex/` — run directly: `pnpm dlx convex dev`
 | `pnpm build` | Turbo build (all packages) |
 | `pnpm storybook` | `@modrinth/ui` Storybook |
 
+Pre-PR commands run from the root folder before opening a pull request. Do not run `prepr` commands after each user prompt. Only run them when asked. If the user indicates they are about to create a pull request, ask whether they want the relevant `prepr` command run.
+
 Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`, `cargo test`, `cargo run -- check`.
 
 `@amberite/amberite-api` tests: `pnpm --filter @amberite/amberite-api test`.
