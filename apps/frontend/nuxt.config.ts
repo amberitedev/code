@@ -75,10 +75,10 @@ export default defineNuxtConfig({
 		},
 		ssr: {
 			// https://github.com/Akryum/floating-vue/issues/809#issuecomment-1002996240
-			noExternal: ['v-tooltip'],
-			optimizeDeps: {
-				include: ['vue-router'],
-			},
+			noExternal: ['floating-vue', '@floating-ui/core', '@floating-ui/dom'],
+		},
+		optimizeDeps: {
+			include: ['vue-router', 'floating-vue', '@floating-ui/dom'],
 		},
 		define: {
 			global: {},
@@ -104,6 +104,9 @@ export default defineNuxtConfig({
 							params: {
 								overrides: {
 									removeViewBox: false,
+									cleanupIds: {
+										minify: false,
+									},
 								},
 							},
 						},
@@ -221,6 +224,7 @@ export default defineNuxtConfig({
 				globalThis.INTERCOM_APP_ID ||
 				'ykeritl9',
 			production: isProduction(),
+			cookieSecure: isProduction(),
 			buildEnv: process.env.BUILD_ENV,
 			preview: process.env.PREVIEW === 'true',
 			featureFlagOverrides: getFeatureFlagOverrides(),

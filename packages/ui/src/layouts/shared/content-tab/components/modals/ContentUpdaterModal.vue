@@ -216,7 +216,10 @@
 				</ButtonStyled>
 				<ButtonStyled color="brand">
 					<button
-						:disabled="!selectedVersion || selectedVersion.id === currentVersionId"
+						v-tooltip="props.actionDisabled ? props.actionDisabledTooltip : undefined"
+						:disabled="
+							props.actionDisabled || !selectedVersion || selectedVersion.id === currentVersionId
+						"
 						@click="handleUpdate"
 					>
 						<DownloadIcon />
@@ -393,6 +396,8 @@ const props = withDefaults(
 		loading?: boolean
 		/** Whether changelog is being loaded for the selected version */
 		loadingChangelog?: boolean
+		actionDisabled?: boolean
+		actionDisabledTooltip?: string
 	}>(),
 	{
 		projectType: undefined,
@@ -401,6 +406,8 @@ const props = withDefaults(
 		header: undefined,
 		loading: false,
 		loadingChangelog: false,
+		actionDisabled: false,
+		actionDisabledTooltip: undefined,
 	},
 )
 
@@ -426,6 +433,7 @@ const pendingIncompatibleUpdate = ref<{
 } | null>(null)
 // Store the initial version ID to select when versions become available
 const pendingInitialVersionId = ref<string | undefined>(undefined)
+const pinnedInitialVersionId = ref<string | undefined>(undefined)
 
 watch(
 	() => props.versions,
@@ -511,6 +519,7 @@ const filteredVersions = computed(() => {
 			(version) =>
 				version.id === props.currentVersionId ||
 				version.id === selectedVersion.value?.id ||
+				version.id === pinnedInitialVersionId.value ||
 				isVersionCompatible(version),
 		)
 	}
@@ -614,6 +623,7 @@ function handleVersionSelect(version: Labrinth.Versions.v2.Version) {
 }
 
 function handleUpdate(event: MouseEvent) {
+	if (props.actionDisabled) return
 	if (selectedVersion.value) {
 		const changesGameVersion = versionChangesGameVersion(
 			selectedVersion.value,
@@ -683,6 +693,7 @@ function show(initialVersionId?: string, options?: { switchMode?: boolean }) {
 	searchQuery.value = ''
 	hideIncompatibleState.value = !isModpack.value
 	pendingIncompatibleUpdate.value = null
+	pinnedInitialVersionId.value = initialVersionId
 	switchMode.value = options?.switchMode ?? false
 
 	debug('show() called', {

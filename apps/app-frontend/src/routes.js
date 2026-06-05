@@ -114,6 +114,14 @@ const router = createRouter({
 						breadcrumb: [{ name: '?Server' }],
 					},
 				},
+				{
+					path: 'access',
+					name: 'ServerManageAccess',
+					component: Hosting.Access,
+					meta: {
+						breadcrumb: [{ name: '?Server' }],
+					},
+				},
 			],
 		},
 		{
