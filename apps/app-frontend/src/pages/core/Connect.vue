@@ -56,7 +56,7 @@ function back() {
 </script>
 
 <template>
-	<div class="flex flex-col gap-6 w-full max-w-3xl mx-auto">
+	<div class="flex flex-col gap-6 w-full max-w-[min(928px,calc(95vw-10rem))] mx-auto">
 		<button
 			type="button"
 			class="flex items-center gap-2 text-secondary hover:text-contrast transition-colors self-start bg-transparent border-0 p-0 cursor-pointer"
@@ -69,11 +69,11 @@ function back() {
 			<div class="flex items-center gap-3 text-sm text-secondary">
 				<span>Core</span>
 				<span aria-hidden>›</span>
-				<span class="text-contrast font-semibold">Connect to a Core</span>
+				<span class="text-contrast font-semibold">Connect to existing</span>
 			</div>
-			<h1 class="m-0">Connect to a Core</h1>
+			<h1 class="m-0">Connect to existing</h1>
 			<p class="m-0 text-secondary">
-				Got a Core running already? Enter an invite code below to join its friend group.
+				Enter an invite code below to join its friend group.
 			</p>
 		</header>
 

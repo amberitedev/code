@@ -20,6 +20,7 @@ import type {
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
+import { CORE_URL_STORAGE_KEY } from '@/adapters/desktop'
 import { useSocialClient } from '@/composables/useSocialClient'
 
 type Role = 'owner' | 'admin' | 'member'
@@ -106,6 +107,12 @@ export function useSocial(): UseSocialReturn {
 			friends.value = friendsList
 			invites.value = myInvites
 			group.value = groups[0] ?? null
+			try {
+				const connectionUrl = group.value?.core?.connectionUrl
+				if (connectionUrl) window.localStorage.setItem(CORE_URL_STORAGE_KEY, connectionUrl)
+			} catch {
+				// localStorage can be unavailable in tests.
+			}
 			if (group.value) {
 				const gid = group.value.group.id
 				const [memberList, banList] = await Promise.all([

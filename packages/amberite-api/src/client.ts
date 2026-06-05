@@ -102,6 +102,10 @@ export class CoreApiClient {
 		return this.coreUrlPromise
 	}
 
+	clearCoreUrlCache(): void {
+		this.coreUrlPromise = null
+	}
+
 	private async direct<T>(
 		keyOrFn: string | ((ctx: CoreCallContext) => Promise<T>),
 		maybeFn?: (ctx: CoreCallContext) => Promise<T>,
@@ -153,6 +157,26 @@ export class CoreApiClient {
 
 	completeSetup(body: CoreSetupRequest): Promise<CoreSetupResponse> {
 		return this.direct('core.setup.complete', (ctx) => api.completeSetup(ctx, body))
+	}
+
+	completeSetupAt(coreUrl: string, body: CoreSetupRequest): Promise<CoreSetupResponse> {
+		return this.pipeline.callValue({
+			key: 'core.setup.complete',
+			surface: 'core',
+			execute: async (signal, resolvedPolicy) => {
+				const token = await this.adapter.getCurrentJwt()
+				return api.completeSetup(
+					{
+						baseUrl: coreUrl.replace(/\/$/, ''),
+						token,
+						fetchFn: this.adapter.fetchFn,
+						timeoutMs: this.options.timeoutMs ?? resolvedPolicy.timeoutMs,
+						signal,
+					},
+					body,
+				)
+			},
+		})
 	}
 
 	connect(): Promise<ConnectionStatus> {

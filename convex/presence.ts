@@ -122,7 +122,11 @@ export const claimPairingCore = mutation({
 	args: { code: v.string(), ...devActAs },
 	returns: v.union(
 		v.null(),
-		v.object({ coreId: v.string(), connectionUrl: v.optional(v.string()) }),
+		v.object({
+			coreId: v.string(),
+			friendGroupId: v.string(),
+			connectionUrl: v.optional(v.string()),
+		}),
 	),
 	handler: async (ctx, args) => {
 		const userId = await resolveActor(ctx, args.__actAs)
@@ -157,7 +161,11 @@ export const claimPairingCore = mutation({
 			ownerUserId: userId,
 			claimedAt: now,
 		})
-		return { coreId: pairing.coreId, connectionUrl: pairing.connectionUrl }
+		return {
+			coreId: pairing.coreId,
+			friendGroupId: friendGroup,
+			connectionUrl: pairing.connectionUrl,
+		}
 	},
 })
 

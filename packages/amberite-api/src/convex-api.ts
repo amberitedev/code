@@ -119,6 +119,25 @@ export interface AmberiteSocialClient {
 	}): Promise<{ friendGroupId: string }>
 	declineFriendGroupInvite(inviteId: string): Promise<null>
 	revokeFriendGroupInvite(inviteId: string): Promise<null>
+	registerCore(args: {
+		coreId: string
+		ownerUserId: string
+		friendGroupId?: string
+		connectionUrl?: string
+		status?: string
+		metadata?: unknown
+	}): Promise<{ coreId: string }>
+	corePresence(coreId: string): Promise<CorePresence | null>
+	registerPairingCore(args: {
+		code: string
+		coreId: string
+		connectionUrl?: string
+		metadata?: unknown
+		ttlMs?: number
+	}): Promise<{ coreId: string; code: string }>
+	claimPairingCore(
+		code: string,
+	): Promise<{ coreId: string; friendGroupId: string; connectionUrl?: string } | null>
 	registerSyncedProfile(args: {
 		friendGroupId: string
 		coreId: string
@@ -353,7 +372,9 @@ export class ConvexApiClient implements AmberiteSocialClient {
 		return convexMutation(this.adapter, 'presence:registerPairingCore', args)
 	}
 
-	claimPairingCore(code: string): Promise<{ coreId: string; connectionUrl?: string } | null> {
+	claimPairingCore(
+		code: string,
+	): Promise<{ coreId: string; friendGroupId: string; connectionUrl?: string } | null> {
 		return convexMutation(this.adapter, 'presence:claimPairingCore', { code })
 	}
 

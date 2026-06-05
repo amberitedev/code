@@ -92,7 +92,7 @@ function back() {
 </script>
 
 <template>
-	<div class="flex flex-col gap-6 w-full max-w-3xl mx-auto">
+	<div class="flex flex-col gap-6 w-full max-w-[min(928px,calc(95vw-10rem))] mx-auto">
 		<button
 			type="button"
 			class="flex items-center gap-2 text-secondary hover:text-contrast transition-colors self-start bg-transparent border-0 p-0 cursor-pointer"

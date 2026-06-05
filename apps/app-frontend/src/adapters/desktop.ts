@@ -52,6 +52,7 @@ const queueStore = new LocalStorageQueueStore()
 
 /** localStorage key holding the dev "act as" Convex user id (see useSocial dev API). */
 export const DEV_ACTING_USER_KEY = 'amberite:dev:actingUserId'
+export const CORE_URL_STORAGE_KEY = 'amberite:core:url'
 
 export function createDesktopAdapter(): PlatformAdapter {
 	return {
@@ -65,7 +66,13 @@ export function createDesktopAdapter(): PlatformAdapter {
 
 		// Returns the Core HTTP base URL. Falls back to local dev default.
 		async getCoreUrl(): Promise<string | null> {
-			return (import.meta.env.VITE_CORE_URL as string | undefined) ?? 'http://localhost:16662'
+			const envUrl = import.meta.env.VITE_CORE_URL as string | undefined
+			if (envUrl) return envUrl
+			try {
+				return window.localStorage.getItem(CORE_URL_STORAGE_KEY) ?? 'http://localhost:16662'
+			} catch {
+				return 'http://localhost:16662'
+			}
 		},
 
 		// TODO: return real JWT when auth is implemented.

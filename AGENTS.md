@@ -9,7 +9,7 @@ An open-source project that lets users self-host a Rust-based Core server manage
 
 | Subproject        | AGENTS.md                          | Description                                                        |
 | ----------------- | ---------------------------------- | ------------------------------------------------------------------ |
-| `frontend`        | `apps/frontend/AGENTS.md`          | Modrinth website (Nuxt 3, upstream not yet modifyed)               |
+| `frontend`        | `apps/frontend/AGENTS.md`          | Modrinth website (Nuxt 3, upstream not yet modified)               |
 | `app-frontend`    | `apps/app-frontend/AGENTS.md`      | Desktop app frontend (Vue 3, Modrinth fork)                        |
 | `app`             | `apps/app/AGENTS.md`               | Desktop app shell (Tauri)                                          |
 | `core`            | `apps/core/AGENTS.md`              | Amberite Core server manager (Rust)                                |
@@ -96,5 +96,20 @@ Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`
 - Do not modify `packages/app-lib` unless explicitly asked.
 - Never read `PROJECT-HUMAN-ONLY.md` unless the user specifically asks.
 - Do not read plans in `.plan/` for orientation; only read a specific plan if the user explicitly asks.
-- Always use existing: components from the `packages/ui`, text sizes, fonts, laouts, padding, and more
-- Never write new ui unless seificly asked. the compenent library and ui in the desktop app has litlrly everything you need.
+- Always use existing: components from the `packages/ui`, text sizes, fonts, layouts, padding, and more
+- Never write new ui unless seificly asked. the compenent library and ui in the desktop app has everything you need.
+
+## Desktop App UI Rules
+
+These rules apply to any task touching `apps/app-frontend` or app-facing UI in `packages/ui`.
+
+- Load `apps/app-frontend/AGENTS.md` first, then `packages/ui/AGENTS.md`.
+- Treat the desktop app as an extension of the existing Modrinth App UI, not a greenfield design surface.
+- Do not invent new visual systems, spacing scales, font stacks, card styles, button variants, or color palettes.
+- Prefer existing `@modrinth/ui` components, layouts, and patterns over custom markup.
+- Before building any new UI, search for an existing component or layout in `packages/ui/src/components` and `packages/ui/src/layouts`.
+- If an existing shared component is close, adapt or compose it instead of cloning it locally.
+- Only create new UI components when the existing library truly cannot express the need, and state that reason in your final response.
+- Use existing surface, text, border, and semantic color tokens. Do not hardcode hex colors, ad-hoc Tailwind colors, or alternate fonts for production UI.
+- Match existing spacing and density from nearby app screens. New pages should look like they belong next to adjacent routes in `apps/app-frontend/src/pages` without visual surprise.
+- If a request is specifically about desktop app UI fit-and-finish, prioritize consistency over novelty.
