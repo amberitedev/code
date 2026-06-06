@@ -36,7 +36,7 @@ function getNextServerPort(ports: number[]): number {
  * Flip an existing client profile into a synced profile, provisioning the Core
  * instance that backs its server side and linking the two.
  */
-export async function convertToSynced(path: string): Promise<void> {
+export async function convertToSynced(path: string): Promise<string> {
 	const instance = await get(path)
 	if (!instance) throw new Error(`Profile not found: ${path}`)
 
@@ -59,6 +59,7 @@ export async function convertToSynced(path: string): Promise<void> {
 		serverInstanceId: coreInstance.id,
 		instance,
 	})
+	return coreInstance.id
 }
 
 /** Revert a synced profile back to a plain client profile. */

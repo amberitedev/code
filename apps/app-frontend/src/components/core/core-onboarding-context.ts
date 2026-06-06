@@ -1,59 +1,44 @@
-import type { AmberiteUser } from '@amberite/amberite-api'
-import type { InjectionKey, Ref } from 'vue'
+import type {
+	ServerAccessInviteSuggestion,
+	ServerAccessMember,
+	ServerAccessRole,
+	ServerAccessRoleOption,
+} from '@modrinth/ui'
+import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import { inject, provide } from 'vue'
 
-export type OnboardingMode = 'setup' | 'connect'
+export type CoreOnboardingFlow = 'create' | 'connect'
 
-export interface InvitedUser {
-	userId: string
-	username: string
-	image?: string
-	role?: 'admin' | 'member'
+export interface CoreOnboardingContext {
+	flow: Ref<CoreOnboardingFlow>
+	coreName: Ref<string>
+	coreDescription: Ref<string>
+	coreIcon: Ref<string | undefined>
+	connectCode: Ref<string>
+	inviteSearch: Ref<string>
+	inviteAsFriend: Ref<boolean>
+	error: Ref<string>
+	working: Ref<boolean>
+	canManage: ComputedRef<boolean>
+	members: ComputedRef<ServerAccessMember[]>
+	roles: ServerAccessRoleOption[]
+	inviteSuggestions: ComputedRef<ServerAccessInviteSuggestion[]>
+	selectIcon: () => Promise<void>
+	selectInviteSuggestion: (user: ServerAccessInviteSuggestion) => void
+	createInvite: () => void
+	quickInvite: (member: ServerAccessMember) => void
+	updateRole: (member: ServerAccessMember, role: ServerAccessRole) => Promise<void>
+	removeMember: (member: ServerAccessMember) => Promise<void>
 }
 
-export interface OnboardingContext {
-	mode: OnboardingMode
-	code: Ref<string>
-	step1Loading: Ref<boolean>
-	step1Error: Ref<string | null>
-	alreadyPaired: Ref<boolean>
-	coreId: Ref<string | null>
-	groupName: Ref<string>
-	description: Ref<string>
-	iconUrl: Ref<string>
-	bannerUrl: Ref<string>
-	subdomain: Ref<string>
-	runOnStartup: Ref<boolean>
-	runInBackground: Ref<boolean>
-	installPath: Ref<string>
-	backupRetention: Ref<number>
-	shareTelemetry: Ref<boolean>
-	inviteQuery: Ref<string>
-	inviteSearchResults: Ref<AmberiteUser[]>
-	inviteSearchLoading: Ref<boolean>
-	invitedUsers: Ref<InvitedUser[]>
-	generatedInviteCode: Ref<string | null>
-	runMode: Ref<'manual' | 'app_open' | 'startup'>
-	progress: Ref<number>
-	progressLabel: Ref<string>
-	pair: () => Promise<void>
-	saveGeneral: () => Promise<void>
-	searchUsers: () => Promise<void>
-	inviteUser: (userId: string, role: string) => Promise<void>
-	generateInviteLink: (role: string) => Promise<void>
-	saveAdvanced: () => Promise<void>
-	runFinish: () => Promise<void>
-	finish: () => void
+const coreOnboardingKey: InjectionKey<CoreOnboardingContext> = Symbol('CoreOnboarding')
+
+export function provideCoreOnboardingContext(ctx: CoreOnboardingContext) {
+	provide(coreOnboardingKey, ctx)
 }
 
-export const OnboardingKey: InjectionKey<OnboardingContext> = Symbol('CoreOnboarding')
-
-export function provideOnboarding(ctx: OnboardingContext) {
-	provide(OnboardingKey, ctx)
-}
-
-export function useOnboarding(): OnboardingContext {
-	const ctx = inject(OnboardingKey)
-	if (!ctx) throw new Error('useOnboarding must be used inside CoreOnboardingModal')
+export function injectCoreOnboardingContext() {
+	const ctx = inject(coreOnboardingKey)
+	if (!ctx) throw new Error('Core onboarding context is not provided')
 	return ctx
 }

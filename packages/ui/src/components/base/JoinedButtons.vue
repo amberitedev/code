@@ -1,6 +1,6 @@
 <template>
-	<div class="joined-buttons">
-		<ButtonStyled :color="color" :size="size">
+	<div class="joined-buttons" :class="{ 'joined-buttons--merged': merged }">
+		<ButtonStyled :color="color" :size="size" :type="type">
 			<button
 				v-tooltip="primaryTooltip"
 				:class="{ 'joined-buttons__primary--muted': primaryMuted }"
@@ -11,7 +11,7 @@
 				{{ primaryAction.label }}
 			</button>
 		</ButtonStyled>
-		<ButtonStyled v-if="dropdownActions.length > 0" :color="color" :size="size">
+		<ButtonStyled v-if="dropdownActions.length > 0" :color="color" :size="size" :type="type">
 			<OverflowMenu
 				class="btn-dropdown-animation !w-10"
 				:options="dropdownOptions"
@@ -42,15 +42,18 @@ export interface JoinedButtonAction {
 	id: string
 	label: string
 	icon?: Component
-	action: () => void
+	action: () => void | Promise<void>
 	color?: Colors
 	hoverFilled?: boolean
+	disabled?: boolean
 }
 
 interface Props {
 	actions: JoinedButtonAction[]
 	color?: Colors
 	size?: 'standard' | 'large' | 'small'
+	type?: 'standard' | 'outlined' | 'transparent'
+	merged?: boolean
 	disabled?: boolean
 	primaryDisabled?: boolean
 	dropdownDisabled?: boolean
@@ -62,6 +65,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
 	color: 'standard',
 	size: 'standard',
+	type: 'standard',
+	merged: false,
 	disabled: false,
 	primaryDisabled: undefined,
 	dropdownDisabled: undefined,
@@ -103,14 +108,17 @@ const dropdownOptions = computed(() =>
 	dropdownActions.value.map((action) => ({
 		id: action.id,
 		color: action.color ? colorMap[action.color] : undefined,
-		action: action.action,
+		action: () => {
+			void action.action()
+		},
 		hoverFilled: action.hoverFilled ?? true,
+		disabled: action.disabled,
 	})),
 )
 
 function handlePrimaryAction() {
 	if (primaryAction.value && !primaryDisabledResolved.value) {
-		primaryAction.value.action()
+		void primaryAction.value.action()
 	}
 }
 </script>
@@ -146,5 +154,36 @@ function handlePrimaryAction() {
 
 .joined-buttons__primary--muted {
 	opacity: 0.6;
+}
+
+.joined-buttons--merged > :deep(*) {
+	display: contents;
+}
+
+.joined-buttons--merged > * :deep(:is(button, a, .button-like):first-child) {
+	border-radius: 0;
+}
+
+.joined-buttons--merged > :first-child :deep(:is(button, a, .button-like):first-child) {
+	border-top-left-radius: var(--radius-md);
+	border-bottom-left-radius: var(--radius-md);
+}
+
+.joined-buttons--merged > :not(:last-child) :deep(:is(button, a, .button-like):first-child) {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	border-right-color: transparent;
+}
+
+.joined-buttons--merged > :not(:first-child) :deep(:is(button, a, .button-like):first-child) {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.joined-buttons--merged > :last-child :deep(:is(button, a, .button-like):first-child) {
+	border-top-right-radius: var(--radius-md);
+	border-bottom-right-radius: var(--radius-md);
+	border-left-color: currentColor;
+	margin-left: -1px;
 }
 </style>

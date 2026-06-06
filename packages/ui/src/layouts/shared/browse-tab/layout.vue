@@ -5,6 +5,7 @@ import { computed, ref, toValue } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import Combobox, { type ComboboxOption } from '#ui/components/base/Combobox.vue'
+import JoinedButtons from '#ui/components/base/JoinedButtons.vue'
 import LoadingIndicator from '#ui/components/base/LoadingIndicator.vue'
 import NavTabs from '#ui/components/base/NavTabs.vue'
 import Pagination from '#ui/components/base/Pagination.vue'
@@ -20,6 +21,7 @@ import type { SortType } from '#ui/utils/search'
 import SelectedProjectsFloatingBar from './components/SelectedProjectsFloatingBar.vue'
 import BrowseInstallHeader from './header.vue'
 import { injectBrowseManager } from './providers/browse-manager'
+import type { CardAction } from './types'
 
 const ctx = injectBrowseManager()
 const { formatMessage } = useVIntl()
@@ -66,6 +68,29 @@ const messages = defineMessages({
 		defaultMessage: 'No results found for your query!',
 	},
 })
+
+function toJoinedButtonAction(action: CardAction) {
+	return {
+		id: action.key,
+		label: action.label,
+		icon: action.icon,
+		action: action.onClick,
+		color: action.color,
+		disabled: action.disabled,
+	}
+}
+
+function getJoinedCardActions(actions?: CardAction[]) {
+	return actions?.filter((action) => action.joinedActions?.length) ?? []
+}
+
+function getStandardCardActions(actions?: CardAction[]) {
+	return actions?.filter((action) => !action.joinedActions?.length) ?? []
+}
+
+function getJoinedButtonActions(action: CardAction) {
+	return [toJoinedButtonAction(action), ...(action.joinedActions ?? []).map(toJoinedButtonAction)]
+}
 </script>
 
 <template>
@@ -218,8 +243,24 @@ const messages = defineMessages({
 				>
 					<template v-if="ctx.getCardActions?.(result, ctx.projectType.value)?.length" #actions>
 						<div class="flex gap-2">
+							<JoinedButtons
+								v-for="action in getJoinedCardActions(
+									ctx.getCardActions(result, ctx.projectType.value),
+								)"
+								:key="action.key"
+								class="browse-card-joined-button"
+								:actions="getJoinedButtonActions(action)"
+								:color="action.color"
+								:type="action.type"
+								merged
+								:disabled="action.disabled"
+								:primary-tooltip="action.tooltip"
+								@click.stop
+							/>
 							<ButtonStyled
-								v-for="action in ctx.getCardActions(result, ctx.projectType.value)"
+								v-for="action in getStandardCardActions(
+									ctx.getCardActions(result, ctx.projectType.value),
+								)"
 								:key="action.key"
 								:color="action.color"
 								:type="action.type"
@@ -285,8 +326,24 @@ const messages = defineMessages({
 				>
 					<template v-if="ctx.getCardActions?.(result, ctx.projectType.value)?.length" #actions>
 						<div class="flex gap-2">
+							<JoinedButtons
+								v-for="action in getJoinedCardActions(
+									ctx.getCardActions(result, ctx.projectType.value),
+								)"
+								:key="action.key"
+								class="browse-card-joined-button"
+								:actions="getJoinedButtonActions(action)"
+								:color="action.color"
+								:type="action.type"
+								merged
+								:disabled="action.disabled"
+								:primary-tooltip="action.tooltip"
+								@click.stop
+							/>
 							<ButtonStyled
-								v-for="action in ctx.getCardActions(result, ctx.projectType.value)"
+								v-for="action in getStandardCardActions(
+									ctx.getCardActions(result, ctx.projectType.value),
+								)"
 								:key="action.key"
 								:color="action.color"
 								:type="action.type"
@@ -319,3 +376,11 @@ const messages = defineMessages({
 
 	<slot name="after" />
 </template>
+
+<style scoped>
+.browse-card-joined-button :deep(.btn-dropdown-animation) {
+	width: 1.75rem !important;
+	padding-left: 0.25rem !important;
+	padding-right: 0.25rem !important;
+}
+</style>

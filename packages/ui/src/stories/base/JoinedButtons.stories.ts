@@ -15,6 +15,11 @@ const meta = {
 			control: 'select',
 			options: ['small', 'standard', 'large'],
 		},
+		type: {
+			control: 'select',
+			options: ['standard', 'outlined', 'transparent'],
+		},
+		merged: { control: 'boolean' },
 		disabled: { control: 'boolean' },
 		primaryDisabled: { control: 'boolean' },
 		dropdownDisabled: { control: 'boolean' },

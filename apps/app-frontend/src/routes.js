@@ -4,6 +4,8 @@ const Pages = {
 	Index: () => import('@/pages/Index.vue'),
 	Worlds: () => import('@/pages/Worlds.vue'),
 	Servers: () => import('@/pages/Servers.vue'),
+	Core: () => import('@/pages/core/Index.vue'),
+	CoreAccessPreview: () => import('@/pages/core/AccessPreview.vue'),
 	Browse: () => import('@/pages/Browse.vue'),
 	Skins: () => import('@/pages/Skins.vue'),
 }
@@ -14,6 +16,7 @@ const Hosting = {
 	Content: () => import('@/pages/hosting/manage/Content.vue'),
 	Files: () => import('@/pages/hosting/manage/Files.vue'),
 	Backups: () => import('@/pages/hosting/manage/Backups.vue'),
+	Access: () => import('@/pages/hosting/manage/Access.vue'),
 }
 
 const Instance = {
@@ -30,16 +33,6 @@ const Library = {
 	Modpacks: () => import('@/pages/library/Modpacks.vue'),
 	Servers: () => import('@/pages/library/Servers.vue'),
 	Custom: () => import('@/pages/library/Custom.vue'),
-}
-
-const Core = {
-	Index: () => import('@/pages/core/Index.vue'),
-	Overview: () => import('@/pages/core/Overview.vue'),
-	Members: () => import('@/pages/core/Members.vue'),
-	Servers: () => import('@/pages/core/Servers.vue'),
-	Settings: () => import('@/pages/core/Settings.vue'),
-	Setup: () => import('@/pages/core/Setup.vue'),
-	Connect: () => import('@/pages/core/Connect.vue'),
 }
 
 const Project = {
@@ -67,6 +60,22 @@ const router = createRouter({
 			component: Pages.Worlds,
 			meta: {
 				breadcrumb: [{ name: 'Worlds' }],
+			},
+		},
+		{
+			path: '/core',
+			name: 'Core',
+			component: Pages.Core,
+			meta: {
+				breadcrumb: [{ name: 'Core' }],
+			},
+		},
+		{
+			path: '/core/access-preview',
+			name: 'CoreAccessPreview',
+			component: Pages.CoreAccessPreview,
+			meta: {
+				breadcrumb: [{ name: 'Core access preview' }],
 			},
 		},
 		{
@@ -140,45 +149,6 @@ const router = createRouter({
 			meta: {
 				breadcrumb: [{ name: 'Skin selector' }],
 			},
-		},
-		{
-			path: '/core',
-			name: 'Core',
-			component: Core.Index,
-			meta: {
-				breadcrumb: [{ name: 'Core' }],
-			},
-			children: [
-				{
-					path: '',
-					name: 'CoreOverview',
-					component: Core.Overview,
-				},
-				{
-					path: 'members',
-					name: 'CoreMembers',
-					component: Core.Members,
-				},
-
-				{
-					path: 'servers',
-					name: 'CoreServers',
-					component: Core.Servers,
-				},
-				{
-					path: 'settings',
-					name: 'CoreSettings',
-					component: Core.Settings,
-				},
-				{
-					path: 'setup',
-					redirect: '/core',
-				},
-				{
-					path: 'connect',
-					redirect: '/core',
-				},
-			],
 		},
 		{
 			path: '/library',

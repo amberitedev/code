@@ -1,161 +1,99 @@
 <script setup lang="ts">
-import { CheckIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
-import { Avatar, ButtonStyled, StyledInput } from '@modrinth/ui'
-import { computed, reactive, watch } from 'vue'
+import { UserPlusIcon } from '@modrinth/assets'
+import { AccessTable, Avatar, ButtonStyled, Checkbox, Combobox } from '@modrinth/ui'
+import type { ComboboxOption } from '@modrinth/ui'
+import { computed } from 'vue'
 
-import { useSocial } from '@/composables/useSocial'
+import { injectCoreOnboardingContext } from '../core-onboarding-context'
 
-import { useOnboarding } from '../core-onboarding-context'
-import { useCorePreview } from '../use-core-preview'
-
-const ctx = useOnboarding()
-const { friends } = useSocial()
-const { fakeFriends, fakeUsers } = useCorePreview()
-const roleSelections = reactive<Record<string, 'admin' | 'member'>>({})
-let searchTimer: ReturnType<typeof window.setTimeout> | null = null
-
-const friendList = computed(() => {
-	const realFriends = friends.value?.friends ?? []
-	return realFriends.length ? realFriends : fakeFriends
-})
-const invitedIds = computed(() => new Set(ctx.invitedUsers.value.map((user) => user.userId)))
-const query = computed(() => ctx.inviteQuery.value.trim().toLowerCase())
-const searchResults = computed(() => {
-	const realResults = ctx.inviteSearchResults.value.filter((user) => !invitedIds.value.has(user.userId))
-	const fakeResults = fakeUsers
-		.slice(4)
-		.filter((user) => !invitedIds.value.has(user.userId))
-		.filter((user) =>
-			query.value
-				? `${user.username} ${user.displayName} ${user.friendCode}`.toLowerCase().includes(query.value)
-				: false,
-		)
-	return [...realResults, ...fakeResults]
-})
-const showSearch = computed(
-	() => query.value.length > 0 && (ctx.inviteSearchLoading.value || searchResults.value.length > 0),
-)
-const rows = computed(() => [
-	...ctx.invitedUsers.value.map((user) => ({
-		id: user.userId,
-		name: user.username,
-		image: user.image,
-		status: 'Invited',
-		role: user.role ?? 'member',
-		invited: true,
+const ctx = injectCoreOnboardingContext()
+const inviteSuggestionOptions = computed<ComboboxOption<string>[]>(() =>
+	ctx.inviteSuggestions.value.map((user) => ({
+		value: user.username,
+		label: user.username,
+		searchTerms: [user.username, user.id, user.email].filter(Boolean) as string[],
 	})),
-	...friendList.value
-		.filter((friend) => friend.user?.userId && !invitedIds.value.has(friend.user.userId))
-		.filter((friend) =>
-			query.value ? (friend.user?.username ?? '').toLowerCase().includes(query.value) : true,
-		)
-		.map((friend) => ({
-			id: friend.user!.userId,
-			name: friend.user?.displayName ?? friend.user?.username ?? friend.user!.userId,
-			image: friend.user?.image,
-			status: 'Friend',
-			role: roleSelections[friend.user!.userId] ?? 'member',
-			invited: false,
-		})),
-])
-
-async function invite(userId: string) {
-	if (invitedIds.value.has(userId)) return
-	await ctx.inviteUser(userId, roleSelections[userId] ?? 'member')
-}
-
-watch(
-	() => ctx.inviteQuery.value,
-	(value) => {
-		if (searchTimer) window.clearTimeout(searchTimer)
-		if (!value.trim()) {
-			ctx.inviteSearchResults.value = []
-			return
-		}
-		searchTimer = window.setTimeout(() => {
-			void ctx.searchUsers()
-		}, 250)
-	},
 )
+const canCreateInvite = computed(() => {
+	const value = ctx.inviteSearch.value.trim().toLowerCase()
+	if (!value) return false
+	const user = ctx.inviteSuggestions.value.find(
+		(suggestion) =>
+			suggestion.username.toLowerCase() === value ||
+			suggestion.id.toLowerCase() === value ||
+			suggestion.email?.toLowerCase() === value,
+	)
+	return !!user && !ctx.members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)
+})
 </script>
 
 <template>
-	<div class="flex flex-col gap-4">
-		<div class="relative">
-			<StyledInput
-				v-model="ctx.inviteQuery.value"
-				:icon="SearchIcon"
-				placeholder="Search friends or usernames"
-				wrapper-class="w-full"
-				@keyup.enter="ctx.searchUsers"
-			/>
-			<div
-				v-if="showSearch"
-				class="absolute bottom-[calc(100%+0.5rem)] left-0 z-10 flex max-h-56 w-full flex-col overflow-y-auto rounded-2xl border border-solid border-button-border bg-surface-3 shadow-xl"
-			>
-				<div v-if="ctx.inviteSearchLoading.value" class="px-4 py-3 text-sm text-secondary">
-					Searching...
-				</div>
-				<template v-else>
-					<button
-						v-for="user in searchResults"
-						:key="user.userId"
-						type="button"
-						class="flex items-center justify-between gap-3 border-0 border-b border-solid border-surface-5 bg-transparent px-4 py-3 text-left text-primary last:border-b-0 hover:bg-button-bg"
-						@click="invite(user.userId)"
+	<div class="flex min-h-[26rem] flex-col gap-4">
+		<p class="m-0 text-secondary">Manage the friend group roles.</p>
+		<div class="flex flex-col gap-3">
+			<div class="flex flex-col gap-2 md:flex-row md:items-center">
+				<div class="min-w-0 flex-1">
+					<Combobox
+						:model-value="undefined"
+						:options="inviteSuggestionOptions"
+						:search-placeholder="'Search Modrinth username'"
+						:placeholder="'Search Modrinth username'"
+						searchable
+						show-search-icon
+						:show-chevron="false"
+						search-autocomplete="off"
+						search-autocorrect="off"
+						search-autocapitalize="none"
+						:search-spellcheck="false"
+						trigger-class="!h-10 !min-h-10"
+						@search-input="(value) => (ctx.inviteSearch.value = value)"
+						@select="(option) => ctx.selectInviteSuggestion({ id: option.value, username: option.label })"
 					>
-						<span class="flex min-w-0 items-center gap-3">
-							<Avatar :src="user.image" :alt="user.username" size="34px" circle />
-							<span class="truncate font-semibold">{{ user.displayName ?? user.username }}</span>
-						</span>
-						<UserPlusIcon class="size-5 text-secondary" />
+						<template #option="{ item, isSelected }">
+							<div class="flex min-w-0 items-center gap-2">
+								<Avatar
+									:src="ctx.inviteSuggestions.value.find((user) => user.username === item.value)?.avatarUrl"
+									:alt="`${item.label}'s avatar`"
+									:tint-by="item.label"
+									size="1.5rem"
+									circle
+									no-shadow
+								/>
+								<span
+									class="min-w-0 truncate font-semibold"
+									:class="isSelected ? 'text-contrast' : 'text-primary'"
+								>
+									{{ item.label }}
+								</span>
+							</div>
+						</template>
+					</Combobox>
+				</div>
+				<ButtonStyled color="brand">
+					<button class="!h-10 w-full md:w-fit" :disabled="!canCreateInvite" @click="ctx.createInvite">
+						<UserPlusIcon />
+						Invite
 					</button>
-				</template>
+				</ButtonStyled>
+			</div>
+			<div class="flex items-center">
+				<Checkbox
+					v-model="ctx.inviteAsFriend.value"
+					label="Also send a friend request"
+					label-class="text-base text-contrast"
+				/>
 			</div>
 		</div>
-
-		<div class="overflow-hidden rounded-2xl border border-solid border-button-border bg-surface-3">
-			<div
-				class="grid grid-cols-[minmax(0,1fr)_7rem_9rem] gap-4 border-0 border-b border-solid border-surface-5 px-4 py-3 text-sm font-bold text-secondary"
-			>
-				<span>Name</span>
-				<span>Status</span>
-				<span class="text-right">Permissions</span>
-			</div>
-			<div v-if="rows.length === 0" class="px-4 py-8 text-sm text-secondary">
-				Search for someone to invite.
-			</div>
-			<div
-				v-for="row in rows"
-				:key="row.id"
-				class="grid grid-cols-[minmax(0,1fr)_7rem_9rem] items-center gap-4 border-0 border-b border-solid border-surface-5 px-4 py-3 last:border-b-0"
-			>
-				<button
-					type="button"
-					class="flex min-w-0 items-center gap-3 border-0 bg-transparent p-0 text-left text-primary"
-					:class="row.invited ? 'cursor-default' : 'cursor-pointer'"
-					@click="invite(row.id)"
-				>
-					<Avatar :src="row.image" :alt="row.name" size="38px" circle />
-					<span class="min-w-0 truncate font-semibold">{{ row.name }}</span>
-				</button>
-				<span class="text-sm text-secondary">{{ row.status }}</span>
-				<div class="flex items-center justify-end gap-2">
-					<select
-						:value="row.role"
-						class="rounded-xl border-0 bg-surface-4 px-3 py-2 text-sm"
-						:disabled="row.invited"
-						@change="roleSelections[row.id] = ($event.target as HTMLSelectElement).value as 'admin' | 'member'"
-					>
-						<option value="member">Member</option>
-						<option value="admin">Admin</option>
-					</select>
-					<ButtonStyled v-if="!row.invited" size="small" color="brand" circular>
-						<button @click="invite(row.id)"><UserPlusIcon /></button>
-					</ButtonStyled>
-					<CheckIcon v-else class="size-5 text-green" />
-				</div>
-			</div>
-		</div>
+		<AccessTable
+			:members="ctx.members.value"
+			:roles="ctx.roles"
+			:can-manage-users="ctx.canManage.value"
+			status-column-label="Status"
+			show-status-labels
+			@update-role="ctx.updateRole"
+			@invite-member="ctx.quickInvite"
+			@cancel-invite="ctx.removeMember"
+			@remove-member="ctx.removeMember"
+		/>
 	</div>
 </template>

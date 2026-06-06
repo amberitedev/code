@@ -16,9 +16,11 @@ type IconSelectOption = 'select' | 'replace' | 'reset' | 'remove'
 withDefaults(
 	defineProps<{
 		options?: IconSelectOption[]
+		showEditIcon?: boolean
 	}>(),
 	{
 		options: () => ['select', 'replace', 'reset', 'remove'],
+		showEditIcon: true,
 	},
 )
 
@@ -60,7 +62,7 @@ const messages = defineMessages({
 		]"
 	>
 		<Avatar :src="icon" size="108px" class="!border-4 group-hover:brightness-75" no-shadow />
-		<div class="absolute right-0 top-0 m-2">
+		<div v-if="showEditIcon" class="absolute right-0 top-0 m-2">
 			<div
 				class="hovering-icon-shadow m-0 flex aspect-square items-center justify-center rounded-full border-[1px] border-solid border-button-border bg-button-bg p-2 text-primary"
 			>

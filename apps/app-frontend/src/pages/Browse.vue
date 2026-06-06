@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CoreModLoader } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	CheckIcon,
@@ -12,6 +13,7 @@ import type { BrowseInstallContentType, CardAction, ProjectType, Tags } from '@m
 import {
 	BrowsePageLayout,
 	BrowseSidebar,
+	ButtonStyled,
 	commonMessages,
 	CreationFlowModal,
 	defineMessages,
@@ -37,6 +39,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
+import { useCoreClient } from '@/composables/useCoreClient'
 import {
 	get_project,
 	get_project_v3,
@@ -48,8 +51,10 @@ import {
 	get as getInstance,
 	get_installed_project_ids as getInstalledProjectIds,
 } from '@/helpers/profile.js'
+import { get_profile_from_pack_version } from '@/helpers/pack'
 import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
 import { get_profile_worlds } from '@/helpers/worlds'
+import { convertToSynced } from '@/pages/instance/synced/synced-conversion'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
 import {
@@ -273,6 +278,8 @@ if (route.query.shi) {
 }
 const hiddenServerContentProjectIds = ref<Set<string>>(new Set())
 const hiddenServerContentProjectIdsInitialized = ref(false)
+const showUnavailableInstallDropdown = ref(false)
+const projectEnvironmentById = ref(new Map<string, Labrinth.Projects.v3.Environment[]>())
 
 function syncHiddenServerContentProjectIds() {
 	hiddenServerContentProjectIds.value = new Set(serverContentProjectIds.value)
@@ -432,6 +439,14 @@ const messages = defineMessages({
 	syncFilterButton: {
 		id: 'search.filter.locked.instance.sync',
 		defaultMessage: 'Sync with instance',
+	},
+	installOnServer: {
+		id: 'app.browse.card-action.install-on-server',
+		defaultMessage: 'Install on server',
+	},
+	installSynced: {
+		id: 'app.browse.card-action.install-synced',
+		defaultMessage: 'Install synced',
 	},
 })
 
@@ -667,6 +682,84 @@ async function chooseInstanceInstallVersion(
 	return { versionId: selectedVersion.id }
 }
 
+async function getDefaultModpackVersionId(projectId: string) {
+	const project = await get_project(projectId, 'must_revalidate')
+	const versionId = project.versions[project.versions.length - 1]
+	if (!versionId) throw new Error('No installable modpack version found.')
+	return versionId
+}
+
+function toCoreLoader(loader: string): CoreModLoader {
+	if (['vanilla', 'fabric', 'forge', 'neoforge', 'quilt'].includes(loader)) {
+		return loader as CoreModLoader
+	}
+	return 'vanilla'
+}
+
+function getNextServerPort(ports: number[]) {
+	const usedPorts = new Set(ports)
+	let port = 25565
+	while (usedPorts.has(port)) port += 1
+	return port
+}
+
+async function createCoreServerWithModpack(args: {
+	projectId: string
+	versionId: string
+	title: string
+	iconUrl?: string
+}) {
+	const core = useCoreClient()
+	const packProfile = await get_profile_from_pack_version(
+		args.projectId,
+		args.versionId,
+		args.title,
+		args.iconUrl,
+	)
+	const existingServers = await core.listInstances()
+	const coreInstance = await core.createInstance({
+		name: packProfile.name,
+		game_version: packProfile.gameVersion,
+		loader: toCoreLoader(packProfile.modloader),
+		loader_version: packProfile.loaderVersion ?? undefined,
+		port: getNextServerPort(existingServers.map((server) => server.port)),
+		memory: { min_mb: 1024, max_mb: 4096 },
+	})
+
+	await core.installModpackVersion(coreInstance.id, args.projectId, args.versionId)
+	return coreInstance.id
+}
+
+async function getProjectEnvironment(projectId: string) {
+	const cached = projectEnvironmentById.value.get(projectId)
+	if (cached) return cached
+
+	const project = await get_project_v3(projectId, 'must_revalidate').catch(handleError)
+	const environment = project?.environment ?? []
+	projectEnvironmentById.value = new Map(projectEnvironmentById.value).set(projectId, environment)
+	return environment
+}
+
+function supportsDedicatedServerEnvironment(
+	project: { environment?: Labrinth.Projects.v3.Environment[]; server_side?: string },
+) {
+	if (project.environment?.length) {
+		return project.environment.some((environment) =>
+			[
+				'server_only',
+				'dedicated_server_only',
+				'client_and_server',
+				'client_only_server_optional',
+				'server_only_client_optional',
+				'client_or_server',
+				'client_or_server_prefers_both',
+			].includes(environment),
+		)
+	}
+
+	return project.server_side !== 'unsupported'
+}
+
 function getCardActions(
 	result: Labrinth.Search.v2.ResultSearchProject | Labrinth.Search.v3.ResultSearchProject,
 	currentProjectType: string,
@@ -678,6 +771,7 @@ function getCardActions(
 	// Non-server project actions
 	const projectResult = result as (Labrinth.Search.v2.ResultSearchProject &
 		Labrinth.Search.v3.ResultSearchProject) & {
+		environment?: Labrinth.Projects.v3.Environment[]
 		installed?: boolean
 		installing?: boolean
 	}
@@ -687,6 +781,118 @@ function getCardActions(
 		serverContentProjectIds.value.has(projectResult.project_id || '') ||
 		serverContextServerData.value?.upstream?.project_id === projectResult.project_id
 	const isInstalling = installingProjectIds.value.has(projectResult.project_id)
+	const projectTitle = projectResult.title ?? projectResult.name ?? 'Modpack'
+	const projectIconUrl = projectResult.icon_url ?? undefined
+	const isServerInstallSupported = supportsDedicatedServerEnvironment(projectResult)
+
+	async function installModpackOnClient() {
+		const selectedPreferences = getCurrentSelectedInstallPreferences(currentProjectType)
+		return await new Promise<{ profilePath: string; versionId: string }>((resolve, reject) => {
+			let profilePath: string | null = null
+			let versionId: string | null = null
+
+			function finish() {
+				if (profilePath && versionId) {
+					resolve({ profilePath, versionId })
+				}
+			}
+
+			void installVersion(
+				projectResult.project_id,
+				null,
+				null,
+				'SearchCard',
+				(installedVersionId) => {
+					if (!installedVersionId) {
+						reject(new Error('Modpack install was cancelled.'))
+						return
+					}
+					versionId = installedVersionId
+					onSearchResultInstalled(projectResult.project_id)
+					finish()
+				},
+				(createdProfilePath) => {
+					profilePath = createdProfilePath
+					finish()
+				},
+				{
+					preferredLoader: selectedPreferences.loaders?.[0],
+					preferredGameVersion: selectedPreferences.gameVersions?.[0],
+				},
+			).catch(reject)
+		})
+	}
+
+	async function installOnClient() {
+		setProjectInstalling(projectResult.project_id, true)
+		try {
+			const { profilePath } = await installModpackOnClient()
+			await router.push(`/instance/${encodeURIComponent(profilePath)}`)
+		} catch (err) {
+			handleError(err)
+		} finally {
+			setProjectInstalling(projectResult.project_id, false)
+		}
+	}
+
+	async function installSynced() {
+		setProjectInstalling(projectResult.project_id, true)
+		try {
+			const { profilePath, versionId } = await installModpackOnClient()
+			const coreInstanceId = await convertToSynced(profilePath)
+			await useCoreClient().installModpackVersion(
+				coreInstanceId,
+				projectResult.project_id,
+				versionId,
+			)
+			await router.push(`/instance/${encodeURIComponent(profilePath)}`)
+		} catch (err) {
+			handleError(err)
+		} finally {
+			setProjectInstalling(projectResult.project_id, false)
+		}
+	}
+
+	async function installOnServer() {
+		setProjectInstalling(projectResult.project_id, true)
+		try {
+			const versionId = await getDefaultModpackVersionId(projectResult.project_id)
+			const coreInstanceId = await createCoreServerWithModpack({
+				projectId: projectResult.project_id,
+				versionId,
+				title: projectTitle,
+				iconUrl: projectIconUrl,
+			})
+			await router.push(`/instance/${encodeURIComponent(coreInstanceId)}`)
+		} catch (err) {
+			handleError(err)
+		} finally {
+			setProjectInstalling(projectResult.project_id, false)
+		}
+	}
+
+	function getModpackInstallActions() {
+		if (currentProjectType !== 'modpack') return undefined
+		if (!isServerInstallSupported && !showUnavailableInstallDropdown.value) return undefined
+
+		const disabled = !isServerInstallSupported
+		return [
+			{
+				key: 'install-synced',
+				label: formatMessage(messages.installSynced),
+				icon: PlusIcon,
+				disabled,
+				onClick: disabled ? () => {} : installSynced,
+			},
+			{
+				key: 'install-on-server',
+				label: formatMessage(messages.installOnServer),
+				icon: PlusIcon,
+				disabled,
+				onClick: disabled ? () => {} : installOnServer,
+			},
+		]
+	}
 
 	if (
 		isServerContext.value &&
@@ -696,6 +902,48 @@ function getCardActions(
 		const isInstallingSelection = isInstallingQueuedServerInstalls.value
 		const validatingInstall =
 			isInstalling && currentProjectType !== 'modpack' && !isInstallingSelection
+		async function installServerContextContent() {
+			if (isQueued) {
+				removeQueuedServerInstall(projectResult.project_id)
+				return
+			}
+
+			const contentType = currentProjectType as BrowseInstallContentType
+			const isModpack = contentType === 'modpack'
+			const shouldShowInstalling = isModpack || !isQueued
+			if (shouldShowInstalling) {
+				setProjectInstalling(projectResult.project_id, true)
+			}
+			try {
+				await requestInstall({
+					project: projectResult,
+					contentType,
+					mode: isModpack ? 'immediate' : 'queue',
+					selectedFilters: isModpack ? [] : searchState.currentFilters.value,
+					providedFilters: isModpack ? [] : combinedProvidedFilters.value,
+					overriddenProvidedFilterTypes: isModpack
+						? []
+						: searchState.overriddenProvidedFilterTypes.value,
+					targetPreferences: getServerInstallTargetPreferences(contentType),
+					getProjectVersions: getInstallProjectVersions,
+					queue: serverInstallQueue,
+					install: (plan) =>
+						openServerModpackInstallFlow({
+							projectId: plan.projectId,
+							versionId: plan.versionId,
+							name: plan.project.name,
+							iconUrl: plan.project.icon_url ?? undefined,
+						}),
+				})
+			} catch (err) {
+				handleError(err as Error)
+			} finally {
+				if (shouldShowInstalling) {
+					setProjectInstalling(projectResult.project_id, false)
+				}
+			}
+		}
+		const modpackInstallActions = getModpackInstallActions()
 		const installLabel = isInstalled
 			? commonMessages.installedLabel
 			: isQueued
@@ -723,47 +971,12 @@ function getCardActions(
 				disabled: isInstalled || isInstalling || isInstallingSelection,
 				color: isQueued && !isInstalling && !isInstallingSelection ? 'green' : 'brand',
 				type: 'outlined',
-				onClick: async () => {
-					if (isQueued) {
-						removeQueuedServerInstall(projectResult.project_id)
-						return
-					}
-
-					const contentType = currentProjectType as BrowseInstallContentType
-					const isModpack = contentType === 'modpack'
-					const shouldShowInstalling = isModpack || !isQueued
-					if (shouldShowInstalling) {
-						setProjectInstalling(projectResult.project_id, true)
-					}
-					try {
-						await requestInstall({
-							project: projectResult,
-							contentType,
-							mode: isModpack ? 'immediate' : 'queue',
-							selectedFilters: isModpack ? [] : searchState.currentFilters.value,
-							providedFilters: isModpack ? [] : combinedProvidedFilters.value,
-							overriddenProvidedFilterTypes: isModpack
-								? []
-								: searchState.overriddenProvidedFilterTypes.value,
-							targetPreferences: getServerInstallTargetPreferences(contentType),
-							getProjectVersions: getInstallProjectVersions,
-							queue: serverInstallQueue,
-							install: (plan) =>
-								openServerModpackInstallFlow({
-									projectId: plan.projectId,
-									versionId: plan.versionId,
-									name: plan.project.name,
-									iconUrl: plan.project.icon_url ?? undefined,
-								}),
-						})
-					} catch (err) {
-						handleError(err as Error)
-					} finally {
-						if (shouldShowInstalling) {
-							setProjectInstalling(projectResult.project_id, false)
-						}
-					}
-				},
+				joinedActions:
+					modpackInstallActions && !isInstalled && !isInstalling && !isInstallingSelection
+						? modpackInstallActions
+						: undefined,
+				onClick:
+					currentProjectType === 'modpack' ? installOnClient : installServerContextContent,
 			},
 		]
 	}
@@ -788,42 +1001,48 @@ function getCardActions(
 			disabled: isInstalled || isInstalling,
 			color: 'brand',
 			type: 'outlined',
-			onClick: async () => {
-				setProjectInstalling(projectResult.project_id, true)
-				try {
-					const selectedInstall = instance.value
-						? await chooseInstanceInstallVersion(projectResult, currentProjectType)
-						: { versionId: null as string | null }
-					if (selectedInstall === null) {
-						setProjectInstalling(projectResult.project_id, false)
-						return
-					}
-					const selectedPreferences = getCurrentSelectedInstallPreferences(currentProjectType)
-					await installVersion(
-						projectResult.project_id,
-						selectedInstall.versionId,
-						instance.value ? instance.value.path : null,
-						'SearchCard',
-						(versionId) => {
-							setProjectInstalling(projectResult.project_id, false)
-							if (versionId) {
-								onSearchResultInstalled(projectResult.project_id)
+			joinedActions:
+				isModpack && !isInstalled && !isInstalling
+					? getModpackInstallActions()
+					: undefined,
+			onClick: isModpack
+				? installOnClient
+				: async () => {
+						setProjectInstalling(projectResult.project_id, true)
+						try {
+							const selectedInstall = instance.value
+								? await chooseInstanceInstallVersion(projectResult, currentProjectType)
+								: { versionId: null as string | null }
+							if (selectedInstall === null) {
+								setProjectInstalling(projectResult.project_id, false)
+								return
 							}
-						},
-						(profile) => {
-							router.push(`/instance/${profile}`)
-						},
-						{
-							preferredLoader: instance.value?.loader ?? selectedPreferences.loaders?.[0],
-							preferredGameVersion:
-								instance.value?.game_version ?? selectedPreferences.gameVersions?.[0],
-						},
-					)
-				} catch (err) {
-					setProjectInstalling(projectResult.project_id, false)
-					handleError(err)
-				}
-			},
+							const selectedPreferences = getCurrentSelectedInstallPreferences(currentProjectType)
+							await installVersion(
+								projectResult.project_id,
+								selectedInstall.versionId,
+								instance.value ? instance.value.path : null,
+								'SearchCard',
+								(versionId) => {
+									setProjectInstalling(projectResult.project_id, false)
+									if (versionId) {
+										onSearchResultInstalled(projectResult.project_id)
+									}
+								},
+								(profile) => {
+									router.push(`/instance/${profile}`)
+								},
+								{
+									preferredLoader: instance.value?.loader ?? selectedPreferences.loaders?.[0],
+									preferredGameVersion:
+										instance.value?.game_version ?? selectedPreferences.gameVersions?.[0],
+								},
+							)
+						} catch (err) {
+							setProjectInstalling(projectResult.project_id, false)
+							handleError(err)
+						}
+					},
 		},
 	]
 }
@@ -871,22 +1090,31 @@ async function search(requestParams: string) {
 		}
 	}
 
-	const hits = rawResults.result.hits.map((hit) => {
-		const mapped = {
-			...hit,
-			title: hit.name,
-			description: hit.summary,
-		} as unknown as Labrinth.Search.v2.ResultSearchProject & { installed?: boolean }
+	const hits = await Promise.all(
+		rawResults.result.hits.map(async (hit) => {
+			const mapped = {
+				...hit,
+				title: hit.name,
+				description: hit.summary,
+			} as unknown as Labrinth.Search.v2.ResultSearchProject & {
+				environment?: Labrinth.Projects.v3.Environment[]
+				installed?: boolean
+			}
 
-		if (instance.value || isServerContext.value) {
-			const installedIds = instance.value
-				? new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
-				: serverContentProjectIds.value
-			mapped.installed = installedIds.has(hit.project_id)
-		}
+			if (hit.project_types?.includes('modpack')) {
+				mapped.environment = await getProjectEnvironment(hit.project_id)
+			}
 
-		return mapped
-	})
+			if (instance.value || isServerContext.value) {
+				const installedIds = instance.value
+					? new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
+					: serverContentProjectIds.value
+				mapped.installed = installedIds.has(hit.project_id)
+			}
+
+			return mapped
+		}),
+	)
 
 	return {
 		projectHits: hits,
@@ -1103,5 +1331,13 @@ provideBrowseManager({
 		<Teleport to="#sidebar-teleport-target">
 			<BrowseSidebar />
 		</Teleport>
+		<div class="fixed bottom-4 right-4 z-50">
+			<ButtonStyled color="standard" type="outlined" size="small">
+				<button @click="showUnavailableInstallDropdown = !showUnavailableInstallDropdown">
+					Client-only dropdown:
+					{{ showUnavailableInstallDropdown ? 'disabled' : 'hidden' }}
+				</button>
+			</ButtonStyled>
+		</div>
 	</div>
 </template>

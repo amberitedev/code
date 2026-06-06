@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { create } from './profile'
 import type { InstanceLoader } from './types'
 
-interface PackProfileCreator {
+export interface PackProfileCreator {
 	name: string
 	gameVersion: string
 	modloader: InstanceLoader
@@ -38,9 +38,11 @@ export async function create_profile_and_install(
 		title: packTitle,
 		icon_url: iconUrl,
 	}
-	const profile_creator = await invoke<PackProfileCreator>(
-		'plugin:pack|pack_get_profile_from_pack',
-		{ location },
+	const profile_creator = await get_profile_from_pack_version(
+		projectId,
+		versionId,
+		packTitle,
+		iconUrl,
 	)
 	const profile = await create(
 		profile_creator.name,
@@ -53,6 +55,24 @@ export async function create_profile_and_install(
 	createInstanceCallback(profile)
 
 	return await invoke('plugin:pack|pack_install', { location, profile })
+}
+
+export async function get_profile_from_pack_version(
+	projectId: string,
+	versionId: string,
+	packTitle: string,
+	iconUrl?: string,
+): Promise<PackProfileCreator> {
+	const location: PackLocationVersionId = {
+		type: 'fromVersionId',
+		project_id: projectId,
+		version_id: versionId,
+		title: packTitle,
+		icon_url: iconUrl,
+	}
+	return await invoke<PackProfileCreator>('plugin:pack|pack_get_profile_from_pack', {
+		location,
+	})
 }
 
 export async function install_to_existing_profile(

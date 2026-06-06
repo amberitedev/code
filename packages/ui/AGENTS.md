@@ -30,3 +30,4 @@ Load `CLAUDE.md` for architecture and token details. Use the rules below as the 
 ## Escalation Rule
 
 - If you think new UI is necessary, first confirm that no existing shared component or layout can be composed to solve it.
+- Do not edit existing `src/components/` files unless explicitly asked, or unless the change is a general fix/improvement that preserves existing behavior and usages.
