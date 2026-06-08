@@ -19,7 +19,7 @@ const ctx = injectCoreOnboardingContext()
 			/>
 		</div>
 		<div class="flex flex-col gap-3">
-			<StyledInput v-model="ctx.coreName.value" placeholder="Core name" />
+			<StyledInput v-model="ctx.coreName.value" placeholder="Friend group name" />
 			<StyledInput v-model="ctx.coreDescription.value" placeholder="Description" multiline :rows="8" />
 		</div>
 	</div>

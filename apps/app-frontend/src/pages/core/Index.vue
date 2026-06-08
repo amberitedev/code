@@ -5,6 +5,7 @@ import {
 	SearchIcon,
 	ServerStackIcon,
 	SettingsIcon,
+	ShieldIcon,
 	UserPlusIcon,
 } from '@modrinth/assets'
 import {
@@ -24,6 +25,7 @@ import type {
 import { computed, ref } from 'vue'
 
 import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
+import CoreRolePermissionsModal from '@/components/core/CoreRolePermissionsModal.vue'
 import CoreSetupPanel from '@/components/core/CoreSetupPanel.vue'
 import { mockInviteUsers, toAccessMember } from '@/components/core/core-onboarding-members'
 import CoreHostingSettingsModal from '@/components/core/settings/CoreHostingSettingsModal.vue'
@@ -36,13 +38,12 @@ const social = useSocial()
 const connection = useCoreConnection()
 const onboardingModal = ref<InstanceType<typeof CoreOnboardingModal>>()
 const settingsModal = ref<InstanceType<typeof CoreHostingSettingsModal>>()
+const permissionsModal = ref<InstanceType<typeof CoreRolePermissionsModal>>()
 const grantAccessModal = ref<InstanceType<typeof GrantAccessModal>>()
 const search = ref('')
 const roleFilter = ref<RoleFilter>('all')
 const setupVisible = ref(false)
 const hasGroup = computed(() => !!social.group.value)
-const group = computed(() => social.group.value?.group)
-const core = computed(() => social.group.value?.core)
 const roleOptions: ServerAccessRoleOption[] = [
 	{ value: 'owner', label: 'Owner', description: 'Controls the Core and group.' },
 	{ value: 'editor', label: 'Admin', description: 'Manages members and servers.' },
@@ -52,7 +53,6 @@ const roleFilterOptions = [{ value: 'all', label: 'All roles' }, ...roleOptions]
 const selectedRoleFilterLabel = computed(
 	() => roleFilterOptions.find((option) => option.value === roleFilter.value)?.label ?? 'All roles',
 )
-const groupName = computed(() => group.value?.name || 'Amberite Core')
 const memberRows = computed<ServerAccessMember[]>(() => social.members.value.map(toAccessMember))
 const filteredMembers = computed(() => {
 	const query = search.value.trim().toLowerCase()
@@ -61,12 +61,16 @@ const filteredMembers = computed(() => {
 		return !query || member.user.username.toLowerCase().includes(query)
 	})
 })
-const statusClass = computed(() =>
-	connection.status.value?.state === 'connected' ? 'bg-green' : 'bg-red',
-)
-const statusTooltip = computed(() =>
-	connection.status.value?.state === 'connected' ? 'Core online' : 'Core offline',
-)
+const statusState = computed(() => connection.status.value?.state)
+const statusClass = computed(() => {
+	if (connection.loading.value || !statusState.value) return 'bg-orange'
+	return statusState.value === 'connected' ? 'bg-green' : 'bg-red'
+})
+const statusTooltip = computed(() => {
+	if (connection.loading.value) return 'Checking Core status'
+	if (!statusState.value) return 'Core status unknown'
+	return statusState.value === 'connected' ? 'Core online' : 'Core offline'
+})
 
 async function searchUsers(query: string): Promise<ServerAccessInviteSuggestion[]> {
 	const normalized = query.trim().toLowerCase()
@@ -95,11 +99,8 @@ async function removeMember(member: ServerAccessMember) {
 <template>
 	<div class="relative flex min-h-full flex-col p-6">
 		<CoreOnboardingModal ref="onboardingModal" />
-		<CoreHostingSettingsModal
-			ref="settingsModal"
-			:name="groupName"
-			:connection-url="core?.connectionUrl"
-		/>
+		<CoreHostingSettingsModal ref="settingsModal" />
+		<CoreRolePermissionsModal ref="permissionsModal" />
 		<CoreSetupPanel
 			v-if="!hasGroup || setupVisible"
 			@create="onboardingModal?.show('create')"
@@ -109,19 +110,17 @@ async function removeMember(member: ServerAccessMember) {
 			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 				<div class="flex min-w-0 flex-col gap-1">
 					<div class="flex min-w-0 items-center gap-3">
-						<h1 class="m-0 truncate text-3xl font-semibold text-contrast">
-							{{ groupName }}
-						</h1>
-						<span
-							v-tooltip="statusTooltip"
-							class="mt-1 size-2.5 shrink-0 rounded-full"
-							:class="statusClass"
-							aria-label="Core status"
-						/>
+						<h1 class="m-0 truncate text-3xl font-semibold text-contrast">Your Core</h1>
+						<div class="mt-1 flex items-center gap-2 text-sm font-semibold text-secondary">
+							<span>Status</span>
+							<span
+								v-tooltip="statusTooltip"
+								class="size-2.5 shrink-0 rounded-full"
+								:class="statusClass"
+								aria-label="Core status"
+							/>
+						</div>
 					</div>
-					<p class="m-0 max-w-3xl text-secondary">
-						{{ group?.description || core?.connectionUrl || 'Friend group access and Core connection overview.' }}
-					</p>
 				</div>
 				<ButtonStyled>
 					<button @click="settingsModal?.show()">
@@ -148,6 +147,12 @@ async function removeMember(member: ServerAccessMember) {
 					>
 						<template #prefix><FilterIcon class="size-5 text-secondary" /></template>
 					</Combobox>
+					<ButtonStyled>
+						<button class="!h-10 w-full md:w-fit" @click="permissionsModal?.show()">
+							<ShieldIcon />
+							Manage roles
+						</button>
+					</ButtonStyled>
 					<ButtonStyled color="brand">
 						<button class="!h-10 w-full md:w-fit" @click="grantAccessModal?.show()">
 							<UserPlusIcon />

@@ -89,12 +89,6 @@ The binary accepts subcommands via `clap`. Default (no subcommand) is `run`:
 8. Spawn remote pairing registration with Convex if `CONVEX_URL` is set and Core is unpaired
 9. Bind Axum on `{AMBERITE_BIND_HOST}:{PORT}` and serve
 
-## Gotchas
+## Core rules
 
-- **`AMBERITE_DEV` defaults on in debug builds** — if you run `cargo run` and auth seems to be bypassed, that's expected. Set `AMBERITE_DEV=false` in `.env` to test real JWT validation locally.
-- **Pairing lockout**: After 5 wrong pairing-code attempts, `POST /setup` returns 429 permanently until Core is restarted. The counter resets on successful pairing.
-- **`list_directory` does not canonicalize before reading entries.** A symlink inside an instance directory can list filenames outside the instance.
-- **Modrinth API filenames are trusted during install/update.** `file.filename` is joined directly into `mods/` without the same sanitization used for uploads.
-- **FS download tokens have no GC loop.** They expire after 5 minutes but remain in memory until used; only WS tickets are garbage-collected.
-- **`.mrpack` install can panic on empty `downloads`.** It indexes `downloads[0]` without checking length, and `downloads[]` URLs are fetched server-side with no host allowlist.
-- **WS ticket GC**: The `gc_ws_tickets` loop runs every 5 minutes — expired tickets are not evicted on use. The single-use enforcement happens at the handler level; GC just prevents unbounded map growth.
+- 200-ish line limit per file. Ask before going substantially beyond it.

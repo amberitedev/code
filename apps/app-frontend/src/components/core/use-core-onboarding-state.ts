@@ -30,7 +30,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	const socialClient = useSocialClient()
 	const connection = useCoreConnection()
 	const flow = ref<CoreOnboardingFlow>('create')
-	const coreName = ref('Amberite Core')
+	const coreName = ref('Friend group')
 	const coreDescription = ref('')
 	const coreIcon = ref<string>()
 	const connectCode = ref('')
@@ -92,7 +92,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		if (!current?.coreId) throw new Error('Core is not reachable yet.')
 		await social.createGroup({
 			coreId: current.coreId,
-			name: coreName.value.trim() || 'Amberite Core',
+			name: coreName.value.trim() || 'Friend group',
 			description: coreDescription.value.trim() || undefined,
 			setupMode: 'local',
 			connectionUrl: current.coreUrl,

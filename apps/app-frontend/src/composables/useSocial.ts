@@ -60,7 +60,12 @@ export interface UseSocialReturn {
 		setupMode?: 'remote' | 'local'
 		connectionUrl?: string
 	}) => Promise<void>
-	updateGroup: (args: { name?: string; description?: string; subdomain?: string }) => Promise<void>
+	updateGroup: (args: {
+		name?: string
+		description?: string
+		banner?: string
+		subdomain?: string
+	}) => Promise<void>
 	inviteToGroup: (args: {
 		inviteeUserId?: string
 		role?: Role
