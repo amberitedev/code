@@ -2,7 +2,7 @@
  * Synced profile -> Core instance linkage.
  *
  * A synced profile surfaces a client side (the app-lib profile, keyed by its
- * path) and a server side (an Amberite Core instance). For profiles created via
+ * path) and a server side (an Copal instance). For profiles created via
  * the "Synced" creation flow the profile is named after the Core instance id, so
  * `profilePath === coreInstanceId` and no mapping is needed.
  *

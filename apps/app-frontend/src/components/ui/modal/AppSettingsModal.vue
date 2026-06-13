@@ -9,6 +9,7 @@ import {
 	SettingsIcon,
 	ShieldIcon,
 	ToggleRightIcon,
+	UserIcon,
 } from '@modrinth/assets'
 import {
 	commonMessages,
@@ -24,6 +25,7 @@ import { platform as getOsPlatform, version as getOsVersion } from '@tauri-apps/
 import { ref, watch } from 'vue'
 
 import AppearanceSettings from '@/components/ui/settings/AppearanceSettings.vue'
+import AccountsSettings from '@/components/ui/settings/AccountsSettings.vue'
 import DefaultInstanceSettings from '@/components/ui/settings/DefaultInstanceSettings.vue'
 import FeatureFlagSettings from '@/components/ui/settings/FeatureFlagSettings.vue'
 import JavaSettings from '@/components/ui/settings/JavaSettings.vue'
@@ -46,6 +48,14 @@ const developerModeEnabled = defineMessage({
 })
 
 const tabs = [
+	{
+		name: defineMessage({
+			id: 'app.settings.tabs.accounts',
+			defaultMessage: 'Accounts',
+		}),
+		icon: UserIcon,
+		content: AccountsSettings,
+	},
 	{
 		name: defineMessage({
 			id: 'app.settings.tabs.appearance',

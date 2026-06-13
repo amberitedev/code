@@ -86,12 +86,12 @@ warning: struct `PtySpawner` is never constructed
 52 | pub struct PtySpawner;
    |            ^^^^^^^^^^
 
-warning: `amberite-core` (bin "amberite-core") generated 11 warnings
+warning: `copal` (bin "copal") generated 11 warnings
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.99s
-     Running `target\debug\amberite-core.exe`
+     Running `target\debug\copal.exe`
 
 ╔══════════════════════════════╗
-║  Amberite Core — Pairing Code  ║
+║  Copal — Pairing Code  ║
 ║          641145          ║
 ╚══════════════════════════════╝
 
@@ -101,4 +101,4 @@ Location: [35mC:\Users\ilai\.cargo\registry\src\index.crates.io-1949cf8c6b5b557
 
 Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
 Run with RUST_BACKTRACE=full to include source snippets.
-error: process didn't exit successfully: `target\debug\amberite-core.exe` (exit code: 101)
+error: process didn't exit successfully: `target\debug\copal.exe` (exit code: 101)

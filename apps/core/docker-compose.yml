@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: amberite-core:latest
-    container_name: amberite-core
+    image: copal:latest
+    container_name: copal
     restart: unless-stopped
     ports:
       # HOST:CONTAINER — change host port if 16662 is taken.
@@ -21,7 +21,7 @@ services:
       # ALLOWED_ORIGIN: https://amberite.dev   # override if self-hosting
       # AMBERITE_DEV: "false"                  # never set true in prod
     healthcheck:
-      test: ["CMD", "amberite-core", "check"]
+      test: ["CMD", "copal", "check"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,5 +1,5 @@
 /**
- * Global vitest setup: ensures an Amberite Core process is reachable at
+ * Global vitest setup: ensures an Copal process is reachable at
  * http://localhost:16662 before tests run.
  *
  * - If Core is already running, setup is a no-op (does not kill it in teardown).

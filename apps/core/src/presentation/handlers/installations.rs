@@ -9,7 +9,11 @@ use serde_json::{json, Value};
 use crate::{
     application::{installation_service::installation_dir, state::AppState},
     domain::server_installation::{InstallationId, ServerInstallationRecord},
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::{require_core_manager, require_core_member},
+        error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 fn record_json(r: &ServerInstallationRecord) -> Value {
@@ -27,9 +31,10 @@ fn record_json(r: &ServerInstallationRecord) -> Value {
 
 /// GET /installations — list all shared server installations.
 pub async fn list_installations(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     let records = state.installation_store.list().await?;
     let installations: Vec<Value> = records.iter().map(record_json).collect();
     Ok(Json(json!({ "installations": installations })))
@@ -37,16 +42,16 @@ pub async fn list_installations(
 
 /// GET /installations/:id — get a single shared installation.
 pub async fn get_installation(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     let iid = InstallationId(id);
-    let record = state
-        .installation_store
-        .get(&iid)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("installation not found".into()))?;
+    let record =
+        state.installation_store.get(&iid).await?.ok_or_else(|| {
+            ApiError::NotFound("installation not found".into())
+        })?;
     Ok(Json(record_json(&record)))
 }
 
@@ -55,10 +60,11 @@ pub async fn get_installation(
 /// Rejected while any instance is still bound to it, since the shared files
 /// would be removed out from under those instances.
 pub async fn delete_installation(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_manager(&state, &claims.sub).await?;
     let iid = InstallationId(id);
     let bound = state
         .instance_store

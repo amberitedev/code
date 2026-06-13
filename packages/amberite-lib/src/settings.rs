@@ -8,7 +8,7 @@ use tokio::fs;
 /// Persistent app settings stored in `{config_dir}/amberite/settings.json`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
-    /// Base URL of the connected Amberite Core (e.g. "http://localhost:25585")
+    /// Base URL of the connected Copal (e.g. "http://localhost:25585")
     pub core_url: Option<String>,
     /// Display name of the logged-in user
     pub display_name: Option<String>,

@@ -79,6 +79,8 @@ pub async fn profile_create(
         install_stage: ProfileInstallStage::NotInstalled,
         launcher_feature_version: LauncherFeatureVersion::MOST_RECENT,
         profile_type: profile_type.unwrap_or_default(),
+        core_instance_id: None,
+        server_manifest_json: None,
         name,
         icon_path: None,
         game_version,

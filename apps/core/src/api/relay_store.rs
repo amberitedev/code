@@ -108,7 +108,10 @@ impl RelayStore for SqliteRelayStore {
         self.insert(&message).await
     }
 
-    async fn insert(&self, message: &StoredMessage) -> Result<(), ApiCommError> {
+    async fn insert(
+        &self,
+        message: &StoredMessage,
+    ) -> Result<(), ApiCommError> {
         sqlx::query(
             "INSERT INTO core_relay_messages \
              (id, type, version, sender_id, recipient_id, payload, ack, status, created_at, expires_at) \
@@ -129,7 +132,10 @@ impl RelayStore for SqliteRelayStore {
         Ok(())
     }
 
-    async fn pending(&self, recipient_id: &str) -> Result<Vec<StoredMessage>, ApiCommError> {
+    async fn pending(
+        &self,
+        recipient_id: &str,
+    ) -> Result<Vec<StoredMessage>, ApiCommError> {
         let now = chrono::Utc::now().to_rfc3339();
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT id, type, version, sender_id, recipient_id, payload, ack, status, created_at, expires_at \
@@ -145,7 +151,10 @@ impl RelayStore for SqliteRelayStore {
         Ok(rows.into_iter().map(row_to_message).collect())
     }
 
-    async fn get(&self, id: &MessageId) -> Result<Option<StoredMessage>, ApiCommError> {
+    async fn get(
+        &self,
+        id: &MessageId,
+    ) -> Result<Option<StoredMessage>, ApiCommError> {
         type StatusRow = (
             String,
             String,

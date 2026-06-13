@@ -1,4 +1,4 @@
--- Migration 002: Full Amberite Core Rewrite Schema
+-- Migration 002: Full Copal Rewrite Schema
 
 -- Java version registry
 CREATE TABLE IF NOT EXISTS java_installations (

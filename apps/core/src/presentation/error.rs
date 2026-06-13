@@ -10,9 +10,9 @@ use crate::{
         export_service::ExportError, instance_service::InstanceError,
         log_service::LogError, macro_service::MacroError,
         mod_service::ModError, modpack_service::ModpackError,
-        query_service::QueryServiceError,
-        rcon_service::RconServiceError, social_models::SocialError,
-        stats_service::StatsError, task_service::TaskError,
+        query_service::QueryServiceError, rcon_service::RconServiceError,
+        social_models::SocialError, stats_service::StatsError,
+        task_service::TaskError,
     },
     ports::instance_store::StoreError,
 };
@@ -167,6 +167,11 @@ impl From<SocialError> for ApiError {
     fn from(e: SocialError) -> Self {
         match e {
             SocialError::NotFound => Self::NotFound("not found".into()),
+            SocialError::Invalid(message)
+                if message.starts_with("not authorized") =>
+            {
+                Self::Forbidden(message)
+            }
             SocialError::Invalid(message) => Self::BadRequest(message),
             SocialError::Database(e) => Self::Internal(e.to_string()),
             SocialError::Io(e) => Self::Internal(e.to_string()),
@@ -225,8 +230,12 @@ impl From<TaskError> for ApiError {
     fn from(e: TaskError) -> Self {
         match e {
             TaskError::NotFound => Self::NotFound("task not found".into()),
-            TaskError::InvalidType => Self::BadRequest("invalid task type".into()),
-            TaskError::InvalidCron => Self::BadRequest("invalid cron expression".into()),
+            TaskError::InvalidType => {
+                Self::BadRequest("invalid task type".into())
+            }
+            TaskError::InvalidCron => {
+                Self::BadRequest("invalid cron expression".into())
+            }
             e => Self::Internal(e.to_string()),
         }
     }

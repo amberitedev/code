@@ -12,7 +12,7 @@ defineEmits<{
 	<div class="flex flex-1 items-center justify-center">
 		<div class="flex w-full max-w-[760px] flex-col gap-6">
 			<div class="flex max-w-[500px] flex-col gap-2">
-				<h1 class="m-0 text-3xl font-semibold text-contrast">Set up Amberite Core</h1>
+				<h1 class="m-0 text-3xl font-semibold text-contrast">Set up Copal</h1>
 				<p class="m-0 text-base text-secondary">Create a Core friend group or connect to an existing Core.</p>
 			</div>
 			<div class="grid gap-4 md:grid-cols-2">

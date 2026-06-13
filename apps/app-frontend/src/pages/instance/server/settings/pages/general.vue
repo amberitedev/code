@@ -155,7 +155,7 @@ import SaveBanner from '../SaveBanner.vue'
 
 /**
  * Forked verbatim from the hosting server-settings General page. Backend swaps:
- * server rename now hits Amberite Core (`renameInstance`); billing/specs and
+ * server rename now hits Copal (`renameInstance`); billing/specs and
  * subdomain persistence are deferred (subdomain UI gated behind SUBDOMAIN_ENABLED).
  */
 const SUBDOMAIN_ENABLED = false

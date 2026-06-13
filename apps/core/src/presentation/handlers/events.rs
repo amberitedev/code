@@ -11,14 +11,16 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::{
     application::state::AppState,
     domain::event::Event,
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_core_member, error::ApiError, extractors::AuthUser,
+    },
 };
 
 use super::instances::record_list_item;
 
 /// GET /events — live stream of Core state changes for UI state managers.
 pub async fn stream_events(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<
     Sse<
@@ -26,6 +28,7 @@ pub async fn stream_events(
     >,
     ApiError,
 > {
+    require_core_member(&state, &claims.sub).await?;
     let stream = BroadcastStream::new(state.broadcaster.subscribe())
         .filter_map(|msg| async move {
             let event = match msg.ok()? {

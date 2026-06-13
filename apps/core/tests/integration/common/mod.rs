@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use amberite_core::{
+use copal::{
     application::state::AppState,
     config::Config,
     domain::instance::{InstanceId, InstanceInstallStatus},
@@ -20,7 +20,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 // TestApp
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// A running instance of Amberite Core bound to an ephemeral port.
+/// A running instance of Copal bound to an ephemeral port.
 /// Dropped at test end: the TempDir is deleted and the server task is cancelled.
 pub struct TestApp {
     pub base_url: String,

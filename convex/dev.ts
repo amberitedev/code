@@ -14,12 +14,26 @@ function assertDev() {
 	if (!isDevMode()) throw new Error('dev functions are disabled (AMBERITE_DEV_MODE not set)')
 }
 
-/** The four seeded "real" Amberite users used for manual + automated testing. */
+/** Seeded Amberite users used for manual + automated testing. */
 const SEED_USERS = [
-	{ username: 'amber', displayName: 'Amber (you)', gamertag: 'AmberCraft', minecraftUuid: '11111111-1111-4111-8111-111111111111' },
-	{ username: 'birch', displayName: 'Birch', gamertag: 'BirchBuilder', minecraftUuid: '22222222-2222-4222-8222-222222222222' },
-	{ username: 'cedar', displayName: 'Cedar', gamertag: 'CedarSurvival', minecraftUuid: '33333333-3333-4333-8333-333333333333' },
-	{ username: 'dahlia', displayName: 'Dahlia', gamertag: 'DahliaMines', minecraftUuid: '44444444-4444-4444-8444-444444444444' },
+	{ username: 'dev-one', displayName: 'Dev One', gamertag: 'DevOneCraft', minecraftUuid: '11111111-1111-4111-8111-111111111111' },
+	{ username: 'dev-two', displayName: 'Dev Two', gamertag: 'DevTwoCraft', minecraftUuid: '22222222-2222-4222-8222-222222222222' },
+	{ username: 'amber', displayName: 'Amber', gamertag: 'AmberCraft', minecraftUuid: '33333333-3333-4333-8333-333333333333' },
+	{ username: 'birch', displayName: 'Birch', gamertag: 'BirchBuilder', minecraftUuid: '44444444-4444-4444-8444-444444444444' },
+	{ username: 'cedar', displayName: 'Cedar', gamertag: 'CedarSurvival', minecraftUuid: '55555555-5555-4555-8555-555555555555' },
+	{ username: 'dahlia', displayName: 'Dahlia', gamertag: 'DahliaMines', minecraftUuid: '66666666-6666-4666-8666-666666666666' },
+	{ username: 'elm', displayName: 'Elm', gamertag: 'ElmRedstone', minecraftUuid: '77777777-7777-4777-8777-777777777777' },
+	{ username: 'fern', displayName: 'Fern', gamertag: 'FernFarms', minecraftUuid: '88888888-8888-4888-8888-888888888888' },
+	{ username: 'granite', displayName: 'Granite', gamertag: 'GraniteForge', minecraftUuid: '99999999-9999-4999-8999-999999999999' },
+	{ username: 'hazel', displayName: 'Hazel', gamertag: 'HazelBuilder', minecraftUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+	{ username: 'ivy', displayName: 'Ivy', gamertag: 'IvyCrafter', minecraftUuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+	{ username: 'juniper', displayName: 'Juniper', gamertag: 'JuniperHost', minecraftUuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+	{ username: 'kepler', displayName: 'Kepler', gamertag: 'KeplerMods', minecraftUuid: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
+	{ username: 'laurel', displayName: 'Laurel', gamertag: 'LaurelPacks', minecraftUuid: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
+	{ username: 'maple', displayName: 'Maple', gamertag: 'MapleServer', minecraftUuid: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+	{ username: 'nether', displayName: 'Nether', gamertag: 'NetherOps', minecraftUuid: '12121212-1212-4212-8212-121212121212' },
+	{ username: 'opal', displayName: 'Opal', gamertag: 'OpalCraft', minecraftUuid: '34343434-3434-4434-8434-343434343434' },
+	{ username: 'pine', displayName: 'Pine', gamertag: 'PineAdmin', minecraftUuid: '56565656-5656-4565-8565-565656565656' },
 ] as const
 
 /** Ensure a seeded user has a linked Minecraft account so auto-whitelist resolves. */
@@ -55,7 +69,7 @@ async function allocateFriendCode(ctx: MutationCtx): Promise<string> {
 }
 
 /**
- * Create (or top up) the four seeded users. Idempotent: matches on
+ * Create (or top up) the seeded users. Idempotent: matches on
  * normalizedUsername, fills in any missing friendCode / amberiteUserId.
  */
 export const seedDevUsers = mutation({
@@ -144,6 +158,7 @@ const SOCIAL_TABLES = [
 	'friendGroupMembers',
 	'friendRequests',
 	'friendships',
+	'userPresence',
 	'blockedUsers',
 	'friendGroupInvites',
 	'friendGroupBans',

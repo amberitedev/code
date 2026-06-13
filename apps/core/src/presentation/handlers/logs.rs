@@ -16,25 +16,32 @@ use crate::{
         },
         state::AppState,
     },
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 /// GET /instances/:id/logs
 pub async fn list_logs_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:logs")
+        .await?;
     let logs = list_logs(&state, &id).await?;
     Ok(Json(json!({ "logs": logs })))
 }
 
 /// GET /instances/:id/logs/:filename
 pub async fn read_log_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, filename)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:logs")
+        .await?;
     let (path, is_gzipped) = resolve_log(&state, &id, &filename).await?;
     let data = tokio::fs::read(&path)
         .await
@@ -61,20 +68,24 @@ pub async fn read_log_handler(
 
 /// GET /instances/:id/crash-reports
 pub async fn list_crash_reports_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:logs")
+        .await?;
     let reports = list_crash_reports(&state, &id).await?;
     Ok(Json(json!({ "crash_reports": reports })))
 }
 
 /// GET /instances/:id/crash-reports/:filename
 pub async fn read_crash_report_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, filename)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:logs")
+        .await?;
     let path = resolve_crash(&state, &id, &filename).await?;
     let data = tokio::fs::read(&path)
         .await

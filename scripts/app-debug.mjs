@@ -18,7 +18,7 @@ const APP_TITLE = 'Amberite Dev'
 const APP_CDP_PORT = process.env.APP_CDP_PORT ? Number(process.env.APP_CDP_PORT) : 9222
 const cdpBase = `http://127.0.0.1:${APP_CDP_PORT}`
 
-const CORE_TITLE = 'Amberite Core Dev'
+const CORE_TITLE = 'Copal Dev'
 const CORE_HOST = process.env.CORE_HOST || '127.0.0.1'
 const CORE_PORT = Number(process.env.CORE_PORT) || 16662
 const CORE_TIMEOUT_MS = Number(process.env.CORE_DEV_TIMEOUT) || 180_000

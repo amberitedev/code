@@ -1,3 +1,5 @@
+pub mod access_service;
+pub mod activity_service;
 pub mod backup_scheduler;
 pub mod backup_service;
 pub mod export_service;

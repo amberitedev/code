@@ -125,7 +125,11 @@ async fn run_actor<H: ProcessHandle>(
 
     let session_secs = started_at.elapsed().as_secs();
     if session_secs > 0 {
-        if let Err(e) = state.instance_store.add_uptime(&instance_id, session_secs).await {
+        if let Err(e) = state
+            .instance_store
+            .add_uptime(&instance_id, session_secs)
+            .await
+        {
             warn!("Failed to persist uptime for {instance_id}: {e}");
         }
     }

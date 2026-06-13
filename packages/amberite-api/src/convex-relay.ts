@@ -32,6 +32,7 @@ async function convexCall<T>(
 ): Promise<T> {
 	const token = await adapter.getCurrentJwt()
 	const devActingUserId = adapter.getDevActingUserId?.()
+	const authToken = token?.startsWith('dev:') ? null : token
 	const finalArgs =
 		devActingUserId && isPlainArgs(args) ? { ...(args as object), __actAs: devActingUserId } : args
 	const controller = new AbortController()
@@ -43,7 +44,7 @@ async function convexCall<T>(
 			signal: controller.signal,
 			headers: {
 				'Content-Type': 'application/json',
-				...(token ? { Authorization: `Bearer ${token}` } : {}),
+				...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
 			},
 			body: JSON.stringify({ path, args: finalArgs, format: 'json' }),
 		})

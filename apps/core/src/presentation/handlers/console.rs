@@ -27,18 +27,22 @@ use crate::{
         state::{AppState, WsTicket},
     },
     domain::{event::Event, instance::InstanceId},
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 /// POST /ws-token — issue a 60-second WebSocket ticket (requires auth).
 pub async fn issue_ws_token(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Json<Value> {
     let ticket = uuid::Uuid::new_v4().to_string();
     state.ws_tickets.insert(
         ticket.clone(),
         WsTicket {
+            user_id: claims.sub,
             expires_at: Instant::now() + Duration::from_secs(60),
         },
     );
@@ -57,7 +61,7 @@ pub async fn ws_console(
     State(state): State<Arc<AppState>>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    validate_ticket(&state, &q.ticket)?;
+    let user_id = validate_ticket(&state, &q.ticket)?;
 
     let iid = id
         .parse::<InstanceId>()
@@ -69,15 +73,17 @@ pub async fn ws_console(
     if state.instance_store.get(&iid).await.is_err() {
         return Err(ApiError::NotFound(format!("instance {id} not found")));
     }
+    require_instance_permission(&state, &user_id, &id, "server:console")
+        .await?;
 
     let rx = state.broadcaster.subscribe();
     let state_clone = Arc::clone(&state);
     Ok(ws.on_upgrade(move |socket| ws_handler(socket, iid, state_clone, rx)))
 }
 
-fn validate_ticket(state: &AppState, ticket: &str) -> Result<(), ApiError> {
+fn validate_ticket(state: &AppState, ticket: &str) -> Result<String, ApiError> {
     match state.ws_tickets.remove(ticket) {
-        Some((_, t)) if t.expires_at > Instant::now() => Ok(()),
+        Some((_, t)) if t.expires_at > Instant::now() => Ok(t.user_id),
         Some(_) => Err(ApiError::Unauthorized("ticket expired".into())),
         None => Err(ApiError::Unauthorized("invalid ticket".into())),
     }
@@ -139,7 +145,10 @@ async fn collect_stats_for_ws(
     };
 
     // Fetch accumulated total from DB (non-blocking; ignore errors)
-    let db_total = state.instance_store.get(iid).await
+    let db_total = state
+        .instance_store
+        .get(iid)
+        .await
         .map(|r| r.total_uptime_seconds)
         .unwrap_or(0);
     let total_uptime_seconds = db_total + uptime_seconds.unwrap_or(0);
@@ -179,7 +188,7 @@ async fn collect_stats_for_ws(
 
 /// GET /instances/:id/progress — SSE stream for creation progress.
 pub async fn sse_progress(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<
@@ -191,6 +200,8 @@ pub async fn sse_progress(
     let iid = id
         .parse::<InstanceId>()
         .map_err(|_| ApiError::BadRequest("invalid instance id".into()))?;
+    require_instance_permission(&state, &claims.sub, &id, "server:view")
+        .await?;
 
     let stream = BroadcastStream::new(state.broadcaster.subscribe())
         .filter_map(move |msg| {

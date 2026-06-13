@@ -66,9 +66,8 @@ pub async fn get_stats(
     };
 
     let uptime_seconds = Some(handle.started_at.elapsed().as_secs());
-    let total_uptime_seconds = Some(
-        record.total_uptime_seconds + uptime_seconds.unwrap_or(0),
-    );
+    let total_uptime_seconds =
+        Some(record.total_uptime_seconds + uptime_seconds.unwrap_or(0));
     let pid = handle.pid;
     let cmd_tx = handle.cmd_tx.clone();
     drop(handle); // release DashMap guard before any await

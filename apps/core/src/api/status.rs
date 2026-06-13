@@ -30,7 +30,9 @@ impl DeliveryStatus {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            DeliveryStatus::Processed | DeliveryStatus::Expired | DeliveryStatus::Failed
+            DeliveryStatus::Processed
+                | DeliveryStatus::Expired
+                | DeliveryStatus::Failed
         )
     }
 }

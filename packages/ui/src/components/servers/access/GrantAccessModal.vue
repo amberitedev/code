@@ -1,3 +1,6 @@
+<!--
+Summary: Renders the access invite modal, including username lookup, role selection, optional friend request, and the permissions-help link behavior.
+-->
 <template>
 	<NewModal
 		ref="modal"
@@ -22,10 +25,14 @@
 					searchable
 					show-search-icon
 					:show-chevron="false"
-					search-autocomplete="off"
+					search-type="search"
+					search-name="modrinth-server-access-member-search"
+					search-inputmode="search"
+					search-autocomplete="new-password"
 					search-autocorrect="off"
 					search-autocapitalize="none"
 					:search-spellcheck="false"
+					:search-input-attrs="passwordManagerIgnoreAttrs"
 					@open="targetComboboxOpen = true"
 					@close="targetComboboxOpen = false"
 					@search-input="handleTargetSearch"
@@ -93,8 +100,9 @@
 						<template #link="{ children }">
 							<a
 								class="font-medium text-blue hover:underline"
-								href="/news/article/server-access/"
-								target="_blank"
+								:href="permissionsHref"
+								:target="permissionsLinkTarget"
+								@click="viewPermissions"
 							>
 								<component :is="() => children" />
 							</a>
@@ -167,17 +175,24 @@ const props = withDefaults(
 		searchUsers?: (query: string) => Promise<ServerAccessInviteSuggestion[]>
 		canGrant?: boolean
 		permissionDeniedMessage?: string
+		openPermissionsInModal?: boolean
+		permissionsHref?: string
+		permissionsLinkTarget?: string
 	}>(),
 	{
 		members: () => [],
 		suggestions: () => [],
 		friendIds: () => [],
 		canGrant: true,
+		openPermissionsInModal: false,
+		permissionsHref: '/news/article/server-access/',
+		permissionsLinkTarget: '_blank',
 	},
 )
 
 const emit = defineEmits<{
 	grant: [payload: GrantServerAccessPayload]
+	'view-permissions': []
 }>()
 
 const { formatMessage } = useVIntl()
@@ -191,6 +206,13 @@ const targetLookupStatus = ref<'idle' | 'loading' | 'loaded'>('idle')
 const targetLookupRequestId = ref(0)
 const hasSelectedTarget = ref(false)
 const targetComboboxOpen = ref(false)
+const passwordManagerIgnoreAttrs = {
+	'data-1p-ignore': 'true',
+	'data-bwignore': 'true',
+	'data-form-type': 'other',
+	'data-lpignore': 'true',
+	'data-protonpass-ignore': 'true',
+}
 
 const messages = defineMessages({
 	header: {
@@ -453,6 +475,12 @@ function submit() {
 
 	hide()
 	emit('grant', payload)
+}
+
+function viewPermissions(event: MouseEvent) {
+	if (!props.openPermissionsInModal) return
+	event.preventDefault()
+	emit('view-permissions')
 }
 
 defineExpose({ show, hide })

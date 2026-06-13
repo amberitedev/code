@@ -95,7 +95,7 @@ pub async fn complete_setup(
         "remote"
     };
     sqlx::query(
-		"INSERT INTO core_metadata (id, name, setup_mode, updated_at) VALUES (1, 'Amberite Core', ?, ?) \
+		"INSERT INTO core_metadata (id, name, setup_mode, updated_at) VALUES (1, 'Copal', ?, ?) \
 		 ON CONFLICT(id) DO UPDATE SET setup_mode = excluded.setup_mode, updated_at = excluded.updated_at",
 	)
 	.bind(setup_mode)

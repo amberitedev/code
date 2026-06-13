@@ -14,7 +14,7 @@ This repository is a fork of `modrinth/code`. A Git remote named `upstream` is a
 | `frontend`        | `apps/frontend/AGENTS.md`          | Modrinth website (Nuxt 3, upstream not yet modified)               |
 | `app-frontend`    | `apps/app-frontend/AGENTS.md`      | Desktop app frontend (Vue 3, Modrinth fork)                        |
 | `app`             | `apps/app/AGENTS.md`               | Desktop app shell (Tauri)                                          |
-| `core`            | `apps/core/AGENTS.md`              | Amberite Core server manager (Rust)                                |
+| `core`            | `apps/core/AGENTS.md`              | Copal server manager (Rust)                                |
 | `amberite-api`    | `packages/amberite-api/AGENTS.md`  | Shared communication library for app, core, and Convex integration |
 
 ## Architecture
@@ -40,7 +40,7 @@ Run from the repo root unless noted. dont run build or dev commands.
 | ------- | -------------- |
 | `pnpm app:dev` | Desktop app (Tauri + Vite on port **1420**) |
 | `pnpm app:dev:no-hmr` | Same, without HMR (`tauri.no-hmr.conf.json`) |
-| `pnpm core:dev` | Amberite Core (`cargo run` in `apps/core/`, default port **16662**) |
+| `pnpm core:dev` | Copal (`cargo run` in `apps/core/`, default port **16662**) |
 | `pnpm web:dev` | Modrinth website (`apps/frontend/`) |
 | `pnpm docs:dev` | Docs site (`apps/docs/`) |
 

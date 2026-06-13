@@ -1,6 +1,6 @@
 <template>
 	<SyncedIndex v-if="isSyncedProfile" />
-	<ServerIndex v-else-if="isServerProfile" />
+	<ServerIndex v-else-if="isServerProfile" :profile="profile" />
 	<ClientIndex v-else />
 </template>
 
@@ -11,6 +11,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { profile_listener } from '@/helpers/events'
 import { get } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
+import { useBreadcrumbs } from '@/store/breadcrumbs'
 
 import ClientIndex from './Index.vue'
 
@@ -19,9 +20,19 @@ const SyncedIndex = defineAsyncComponent(() => import('./synced/SyncedIndex.vue'
 
 const route = useRoute()
 const router = useRouter()
+const breadcrumbs = useBreadcrumbs()
 const profile = ref<GameInstance | null>(null)
 const isServerProfile = computed(() => profile.value?.profile_type === 'server')
 const isSyncedProfile = computed(() => profile.value?.profile_type === 'synced')
+
+function setInstanceBreadcrumb(name: string) {
+	breadcrumbs.setName('Instance', name.length > 40 ? name.substring(0, 40) + '...' : name)
+	breadcrumbs.setContext({
+		name,
+		link: route.path,
+		query: route.query,
+	})
+}
 
 async function refreshProfile() {
 	let p: GameInstance | null = null
@@ -34,10 +45,12 @@ async function refreshProfile() {
 	if (!p) {
 		// No app-lib record — treat as Core-only server instance.
 		// ServerIndex will handle the actual Core lookup via route param.
+		setInstanceBreadcrumb(route.params.id as string)
 		profile.value = { profile_type: 'server', path: route.params.id as string } as GameInstance
 		return
 	}
 
+	setInstanceBreadcrumb(p.name)
 	profile.value = p
 	if (profile.value?.profile_type === 'client') return
 

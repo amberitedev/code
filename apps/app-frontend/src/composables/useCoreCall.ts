@@ -1,5 +1,5 @@
 /**
- * useCoreCall — safety wrapper for every Amberite Core API call.
+ * useCoreCall — safety wrapper for every Copal API call.
  *
  * Ensures that no call can throw uncaught into Tauri's runtime. All failures are
  * caught and exposed through a reactive `error` ref. Endpoint timeout/retry policy

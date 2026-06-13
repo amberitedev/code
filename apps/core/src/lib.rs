@@ -1,4 +1,4 @@
-/// Amberite Core library — exposes all modules so integration tests can import them.
+/// Copal library — exposes all modules so integration tests can import them.
 ///
 /// Both `main.rs` (binary target) and `lib.rs` (library target) declare the same
 /// modules. Rust compiles them as separate targets from the same source files.

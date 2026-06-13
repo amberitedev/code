@@ -1,5 +1,5 @@
 /**
- * CoreApiClient — primary entry point for all Amberite Core API calls.
+ * CoreApiClient — primary entry point for all Copal API calls.
  *
  * Accepts a PlatformAdapter and talks directly to Core. Relay behavior is not
  * implicit; asynchronous delivery uses explicitly declared message transports.
@@ -50,6 +50,11 @@ import type {
 	CoreModpackManifest,
 	CoreMetadata,
 	CoreMember,
+	CoreAccessResponse,
+	CoreAccessUpsertBody,
+	CoreAccessPatchBody,
+	CoreActivityLogQuery,
+	CoreActivityLogResponse,
 	CoreSyncProfile,
 	CoreCreateSyncProfileFromMrpackMetadata,
 	CoreSyncSnapshot,
@@ -903,6 +908,71 @@ export class CoreApiClient {
 		return this.direct('core.members.remove', (ctx) =>
 			api.removeCoreMember(ctx, userId).then(() => undefined),
 		)
+	}
+
+	listCoreAccess(): Promise<CoreAccessResponse> {
+		return this.direct('core.access.list', api.listCoreAccess)
+	}
+
+	grantCoreAccess(body: CoreAccessUpsertBody): Promise<CoreMember> {
+		return this.direct('core.access.grant', (ctx) => api.grantCoreAccess(ctx, body))
+	}
+
+	updateCoreAccess(userId: string, body: CoreAccessPatchBody): Promise<CoreMember> {
+		return this.direct('core.access.update', (ctx) => api.updateCoreAccess(ctx, userId, body))
+	}
+
+	removeCoreAccess(userId: string): Promise<void> {
+		return this.direct('core.access.remove', (ctx) =>
+			api.removeCoreAccess(ctx, userId).then(() => undefined),
+		)
+	}
+
+	listInstanceAccess(id: string): Promise<CoreAccessResponse> {
+		return this.request((ctx) => api.listInstanceAccess(ctx, id), {
+			method: 'GET',
+			path: `/instances/${id}/access`,
+		})
+	}
+
+	grantInstanceAccess(id: string, body: CoreAccessUpsertBody): Promise<void> {
+		return this.request((ctx) => api.grantInstanceAccess(ctx, id, body).then(() => undefined), {
+			method: 'POST',
+			path: `/instances/${id}/access`,
+			body,
+		})
+	}
+
+	updateInstanceAccess(id: string, userId: string, body: CoreAccessPatchBody): Promise<void> {
+		return this.request(
+			(ctx) => api.updateInstanceAccess(ctx, id, userId, body).then(() => undefined),
+			{
+				method: 'PATCH',
+				path: `/instances/${id}/access/${encodeURIComponent(userId)}`,
+				body,
+			},
+		)
+	}
+
+	removeInstanceAccess(id: string, userId: string): Promise<void> {
+		return this.request(
+			(ctx) => api.removeInstanceAccess(ctx, id, userId).then(() => undefined),
+			{ method: 'DELETE', path: `/instances/${id}/access/${encodeURIComponent(userId)}` },
+		)
+	}
+
+	listActivity(query?: CoreActivityLogQuery): Promise<CoreActivityLogResponse> {
+		return this.direct('core.activity.list', (ctx) => api.listActivity(ctx, query))
+	}
+
+	listInstanceActivity(
+		id: string,
+		query?: CoreActivityLogQuery,
+	): Promise<CoreActivityLogResponse> {
+		return this.request((ctx) => api.listInstanceActivity(ctx, id, query), {
+			method: 'GET',
+			path: `/instances/${id}/activity`,
+		})
 	}
 
 	// ── Sync Profiles ────────────────────────────────────────────────────────

@@ -185,6 +185,26 @@ async fn read_log_wrong_extension_rejected() {
     assert_eq!(res.status(), 400, "non-.log extension must be rejected");
 }
 
+#[tokio::test]
+async fn read_fs_returns_server_properties() {
+    let app = common::TestApp::spawn().await;
+    let id = common::create_test_instance(&app).await;
+    let res = app
+        .client
+        .get(app.url(&format!(
+            "/instances/{id}/fs/read?path=/server.properties"
+        )))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body = res.text().await.unwrap();
+    assert!(
+        body.contains("server-port=25565"),
+        "server.properties should include the configured port; got: {body}"
+    );
+}
+
 /// A filename that literally contains `..` is rejected.
 #[tokio::test]
 async fn read_log_dotdot_in_filename_rejected() {

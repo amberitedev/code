@@ -191,13 +191,13 @@ async fn instance_has_all_expected_fields() {
     assert_eq!(body["port"], 25565);
     assert_eq!(body["status"], "offline");
 
-    // data_dir must contain the instance UUID — proves no path collision between instances.
+    // data_dir uses the instance name slug while id remains the durable UUID.
     let data_dir = body["data_dir"]
         .as_str()
         .expect("data_dir must be a string");
     assert!(
-        data_dir.contains(&id),
-        "data_dir must embed the instance UUID; got: {data_dir}"
+        data_dir.replace('\\', "/").ends_with("/instances/test-server"),
+        "data_dir must use the instance name slug; got: {data_dir}"
     );
 }
 

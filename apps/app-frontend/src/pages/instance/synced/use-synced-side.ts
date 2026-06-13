@@ -6,7 +6,7 @@ import type { TabViewTab } from '@/components/ui/TabView.vue'
 /**
  * The two sides of a synced profile. A synced profile is a single app-lib
  * profile (drives the client side, id == route id) that is also bound 1:1 to an
- * Amberite Core instance (the server side, same id). The Server/Client TabView
+ * Copal instance (the server side, same id). The Server/Client TabView
  * swaps which data is shown — same interface, different source.
  */
 export type SyncedSide = 'server' | 'client'

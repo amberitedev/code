@@ -19,7 +19,10 @@ use crate::{
         state::AppState,
     },
     domain::modpack::ModpackManifest,
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 #[derive(Deserialize)]
@@ -30,11 +33,13 @@ pub struct InstallModpackVersionBody {
 
 /// POST /instances/:id/modpack — upload and install a `.mrpack` file.
 pub async fn install_modpack(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:content")
+        .await?;
     let mut mrpack_bytes: Option<bytes::Bytes> = None;
 
     while let Some(field) = multipart
@@ -68,11 +73,13 @@ pub async fn install_modpack(
 
 /// POST /instances/:id/modpack/modrinth — download and install a Modrinth `.mrpack` version.
 pub async fn install_modpack_modrinth(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<InstallModpackVersionBody>,
 ) -> Result<Json<Value>, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:content")
+        .await?;
     let manifest = install_modrinth_version(
         &state,
         &id,
@@ -85,10 +92,12 @@ pub async fn install_modpack_modrinth(
 
 /// GET /instances/:id/modpack — get the installed modpack manifest.
 pub async fn get_modpack(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:content")
+        .await?;
     let manifest = get_manifest(&state, &id).await?.ok_or_else(|| {
         ApiError::NotFound("no modpack installed for this instance".into())
     })?;
@@ -97,20 +106,24 @@ pub async fn get_modpack(
 
 /// DELETE /instances/:id/modpack — remove the modpack manifest.
 pub async fn remove_modpack(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:content")
+        .await?;
     remove(&state, &id).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
 /// GET /instances/:id/modpack/export — download instance as `.mrpack`.
 pub async fn export_modpack_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
+    require_instance_permission(&state, &claims.sub, &id, "server:content")
+        .await?;
     let (data, filename) = export_modpack(&state, &id).await?;
     let disposition = format!("attachment; filename=\"{filename}\"");
     Ok(Response::builder()

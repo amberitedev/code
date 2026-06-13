@@ -167,6 +167,7 @@ export async function upsertCoreForFriendGroup(
 		subdomain?: string
 		setupMode?: 'remote' | 'local'
 		connectionUrl?: string
+		metadata?: unknown
 	},
 	now: number,
 ) {
@@ -181,7 +182,7 @@ export async function upsertCoreForFriendGroup(
 		...(args.connectionUrl !== undefined ? { connectionUrl: args.connectionUrl } : {}),
 		lastSeenAt: now,
 		status: 'paired',
-		metadata: args,
+		metadata: args.metadata,
 	}
 	if (existingCore) await ctx.db.patch(existingCore._id, value)
 	else await ctx.db.insert('cores', value)

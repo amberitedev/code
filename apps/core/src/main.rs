@@ -16,9 +16,9 @@ mod infrastructure;
 mod ports;
 mod presentation;
 
-/// Amberite Core — self-hosted Minecraft server manager.
+/// Copal — self-hosted Minecraft server manager.
 #[derive(Parser)]
-#[command(name = "amberite-core", version = env!("CARGO_PKG_VERSION"))]
+#[command(name = "copal", version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -47,7 +47,7 @@ async fn main() -> color_eyre::eyre::Result<()> {
 
     match cli.command.unwrap_or(Command::Run) {
         Command::Version => {
-            println!("amberite-core {}", env!("CARGO_PKG_VERSION"));
+            println!("copal {}", env!("CARGO_PKG_VERSION"));
         }
         Command::Migrate => {
             init_tracing();
@@ -105,7 +105,7 @@ fn init_tracing() {
         .with(fmt::layer())
         .with(
             EnvFilter::from_default_env()
-                .add_directive("amberite_core=info".parse().unwrap()),
+                .add_directive("copal=info".parse().unwrap()),
         )
         .init();
 }
@@ -132,9 +132,9 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::backup_scheduler::run_backup_scheduler(
         Arc::clone(&state),
     ));
-    tokio::spawn(application::task_scheduler::run_task_scheduler(
-        Arc::clone(&state),
-    ));
+    tokio::spawn(application::task_scheduler::run_task_scheduler(Arc::clone(
+        &state,
+    )));
     tokio::spawn(application::pairing_service::register_pairing_core(
         Arc::clone(&state),
     ));
@@ -143,7 +143,7 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
     let host: IpAddr = bind_host.parse()?;
     let addr = SocketAddr::new(host, port);
 
-    info!("Amberite Core listening on {addr}");
+    info!("Copal listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;
 

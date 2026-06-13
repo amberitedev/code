@@ -20,6 +20,7 @@ src/
   transport.ts      Explicit message bus — 4 modes, ack policies, message registry
   convex-relay.ts   Raw Convex HTTP query/mutation calls
   core-relay.ts     Direct calls to Core's /relay/messages endpoint
+  logic/            Reusable multi-step Core/Convex logic built on top of raw endpoints
   connection.ts     verifyCoreConnection — nonce handshake against Core
   monitor.ts        CoreConnectionMonitor — periodically runs the Core handshake
   instance-state.ts CoreInstanceStateManager — reactive state combining all of the above
@@ -40,6 +41,8 @@ Everything flows through `PlatformAdapter`. It is the only interface that differ
 `CoreApiClient.method()` → endpoint key policy → `CommunicationPipeline.callValue()` → builds `CoreCallContext` from adapter → calls raw function in `api.ts` → returns typed result.
 
 `CoreApiClient.request()` resolves method/path metadata into an endpoint key using `resolveCoreEndpointKey()`. `CoreApiClient.withPolicy()` creates a lightweight client wrapper with per-call defaults (timeout, retries, methods, queue, auth mode, relay flags).
+
+**Logic rule:** raw endpoint definitions stay in `api.ts`/`client.ts`; reusable multi-step behavior such as installs, Core provisioning, sync manifests, and audit processing belongs in `src/logic/` and is exported through `index.ts`.
 
 **Pipeline rules:**
 

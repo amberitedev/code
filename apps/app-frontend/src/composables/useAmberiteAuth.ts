@@ -1,7 +1,7 @@
 /**
  * useAmberiteAuth — reactive auth façade that replaces the Modrinth credentials ref.
  *
- * In dev mode the "sign-in" flow seeds the 4 dev users and stores the chosen
+ * In dev mode the "sign-in" flow seeds the dev users and stores the chosen
  * Convex user id in localStorage so every Convex call carries __actAs. In
  * production this will be replaced by a Microsoft-OAuth → Amberite account
  * linkage (auto-create on first login).
@@ -33,6 +33,7 @@ export interface UseAmberiteAuthReturn {
 	isLoggedIn: ReturnType<typeof computed<boolean>>
 	isReady: ReturnType<typeof computed<boolean>>
 	signingIn: ReturnType<typeof ref<boolean>>
+	error: ReturnType<typeof ref<Error | null>>
 	signIn: () => Promise<void>
 	logOut: () => Promise<void>
 }
@@ -61,16 +62,43 @@ function mapToAuthUser(
 	}
 }
 
+let devBootstrapStarted = false
+
+async function ensureDevAmberiteSession(social: ReturnType<typeof useSocial>) {
+	if (!import.meta.env.DEV || devBootstrapStarted) return
+	devBootstrapStarted = true
+	try {
+		const client = useSocialClientRaw()
+		const users = await client.rawMutation<
+			Array<{
+				userId: string
+				username?: string
+			}>
+		>('dev:seedDevUsers', {})
+		const existing = window.localStorage.getItem(DEV_ACTING_USER_KEY)
+		if (!existing) {
+			const pick = users.find((u) => u.username === 'amber') ?? users[0]
+			if (pick) window.localStorage.setItem(DEV_ACTING_USER_KEY, pick.userId)
+		}
+		await social.refresh()
+	} catch (e) {
+		console.warn('[amberite] dev auth bootstrap failed', e)
+	}
+}
+
 export function useAmberiteAuth(): UseAmberiteAuthReturn {
 	const social = useSocial()
+	void ensureDevAmberiteSession(social)
 
 	const user = computed<AmberiteAuthUser | null>(() => mapToAuthUser(social.currentUser.value))
 	const isLoggedIn = computed(() => !!social.currentUser.value)
 	const isReady = computed(() => true)
 	const signingIn = ref(false)
+	const error = ref<Error | null>(null)
 
 	async function signIn() {
 		signingIn.value = true
+		error.value = null
 		try {
 			const client = useSocialClientRaw()
 			await client.rawMutation('dev:seedDevUsers', {})
@@ -83,6 +111,11 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 				)
 				await social.refresh()
 			}
+		} catch (e) {
+			console.warn('[amberite] account connection failed', e)
+			error.value = new Error(
+				'Amberite could not connect through Convex. Check VITE_CONVEX_URL and make sure the Convex deployment has AMBERITE_DEV_MODE=true.',
+			)
 		} finally {
 			signingIn.value = false
 		}
@@ -90,8 +123,9 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 
 	async function logOut() {
 		window.localStorage.removeItem(DEV_ACTING_USER_KEY)
+		error.value = null
 		await social.refresh()
 	}
 
-	return { user, isLoggedIn, isReady, signingIn, signIn, logOut }
+	return { user, isLoggedIn, isReady, signingIn, error, signIn, logOut }
 }

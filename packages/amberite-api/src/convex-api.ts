@@ -38,7 +38,12 @@ export interface FriendRequestEntry {
 }
 
 export interface FriendsListResult {
-	friends: { friendshipId: string; user: AmberiteUser | null; createdAt: number }[]
+	friends: {
+		friendshipId: string
+		user: AmberiteUser | null
+		presence?: { online: boolean; status?: string | null; lastSeenAt?: number | null }
+		createdAt: number
+	}[]
 	incoming: FriendRequestEntry[]
 	outgoing: FriendRequestEntry[]
 	blocks: unknown[]
@@ -59,14 +64,18 @@ export interface AmberiteSocialClient {
 	setUsername(username: string, displayName?: string): Promise<{ userId: string; username: string }>
 	ensureSocialProfile(): Promise<AmberiteUser>
 	searchUsers(query: string): Promise<AmberiteUser[]>
+	heartbeat(status?: string): Promise<{
+		online: boolean
+		status?: string | null
+		lastSeenAt?: number | null
+	}>
 	friendsList(): Promise<FriendsListResult>
 	sendFriendRequest(args: {
-		targetUserId?: string
-		friendCode?: string
-		username?: string
+		targetUserId: string
 		message?: string
 	}): Promise<{ requestId: string | null; status: string }>
 	respondFriendRequest(requestId: string, accept: boolean): Promise<null>
+	cancelFriendRequest(requestId: string): Promise<null>
 	removeFriend(userId: string): Promise<null>
 	blockUser(userId: string): Promise<null>
 	unblockUser(userId: string): Promise<null>
@@ -202,14 +211,22 @@ export class ConvexApiClient implements AmberiteSocialClient {
 		return convexQuery(this.adapter, 'friends:searchUsers', { query })
 	}
 
+	heartbeat(status?: string): Promise<{
+		online: boolean
+		status?: string | null
+		lastSeenAt?: number | null
+	}> {
+		return convexMutation(this.adapter, 'friends:heartbeat', {
+			...(status !== undefined ? { status } : {}),
+		})
+	}
+
 	friendsList(): Promise<FriendsListResult> {
 		return convexQuery(this.adapter, 'friends:friendsList', {})
 	}
 
 	sendFriendRequest(args: {
-		targetUserId?: string
-		friendCode?: string
-		username?: string
+		targetUserId: string
 		message?: string
 	}): Promise<{ requestId: string | null; status: string }> {
 		return convexMutation(this.adapter, 'friends:sendFriendRequest', args)
@@ -217,6 +234,10 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	respondFriendRequest(requestId: string, accept: boolean): Promise<null> {
 		return convexMutation(this.adapter, 'friends:respondFriendRequest', { requestId, accept })
+	}
+
+	cancelFriendRequest(requestId: string): Promise<null> {
+		return convexMutation(this.adapter, 'friends:cancelFriendRequest', { requestId })
 	}
 
 	removeFriend(userId: string): Promise<null> {

@@ -1,6 +1,8 @@
 #[path = "integration/common/mod.rs"]
 mod common;
 
+#[path = "integration/access.rs"]
+mod access;
 #[path = "integration/edge_cases.rs"]
 mod edge_cases;
 #[path = "integration/health.rs"]

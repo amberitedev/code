@@ -131,7 +131,7 @@ const PORT = 19666
 const BASE = `http://127.0.0.1:${PORT}`
 
 async function main() {
-	console.log('🔬 Starting Amberite Core diagnostic server...')
+	console.log('🔬 Starting Copal diagnostic server...')
 	const server = await startEchoServer(PORT)
 	console.log(`   Echo server listening on ${BASE}\n`)
 

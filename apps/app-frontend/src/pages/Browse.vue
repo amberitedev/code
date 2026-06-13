@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreModLoader } from '@amberite/amberite-api'
+import { installCoreModpack } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	CheckIcon,
@@ -689,20 +689,6 @@ async function getDefaultModpackVersionId(projectId: string) {
 	return versionId
 }
 
-function toCoreLoader(loader: string): CoreModLoader {
-	if (['vanilla', 'fabric', 'forge', 'neoforge', 'quilt'].includes(loader)) {
-		return loader as CoreModLoader
-	}
-	return 'vanilla'
-}
-
-function getNextServerPort(ports: number[]) {
-	const usedPorts = new Set(ports)
-	let port = 25565
-	while (usedPorts.has(port)) port += 1
-	return port
-}
-
 async function createCoreServerWithModpack(args: {
 	projectId: string
 	versionId: string
@@ -716,18 +702,12 @@ async function createCoreServerWithModpack(args: {
 		args.title,
 		args.iconUrl,
 	)
-	const existingServers = await core.listInstances()
-	const coreInstance = await core.createInstance({
-		name: packProfile.name,
-		game_version: packProfile.gameVersion,
-		loader: toCoreLoader(packProfile.modloader),
-		loader_version: packProfile.loaderVersion ?? undefined,
-		port: getNextServerPort(existingServers.map((server) => server.port)),
-		memory: { min_mb: 1024, max_mb: 4096 },
+	const { instance } = await installCoreModpack(core, {
+		projectId: args.projectId,
+		versionId: args.versionId,
+		profile: packProfile,
 	})
-
-	await core.installModpackVersion(coreInstance.id, args.projectId, args.versionId)
-	return coreInstance.id
+	return instance.id
 }
 
 async function getProjectEnvironment(projectId: string) {
@@ -740,9 +720,10 @@ async function getProjectEnvironment(projectId: string) {
 	return environment
 }
 
-function supportsDedicatedServerEnvironment(
-	project: { environment?: Labrinth.Projects.v3.Environment[]; server_side?: string },
-) {
+function supportsDedicatedServerEnvironment(project: {
+	environment?: Labrinth.Projects.v3.Environment[]
+	server_side?: string
+}) {
 	if (project.environment?.length) {
 		return project.environment.some((environment) =>
 			[
@@ -975,8 +956,7 @@ function getCardActions(
 					modpackInstallActions && !isInstalled && !isInstalling && !isInstallingSelection
 						? modpackInstallActions
 						: undefined,
-				onClick:
-					currentProjectType === 'modpack' ? installOnClient : installServerContextContent,
+				onClick: currentProjectType === 'modpack' ? installOnClient : installServerContextContent,
 			},
 		]
 	}
@@ -1002,9 +982,7 @@ function getCardActions(
 			color: 'brand',
 			type: 'outlined',
 			joinedActions:
-				isModpack && !isInstalled && !isInstalling
-					? getModpackInstallActions()
-					: undefined,
+				isModpack && !isInstalled && !isInstalling ? getModpackInstallActions() : undefined,
 			onClick: isModpack
 				? installOnClient
 				: async () => {

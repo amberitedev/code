@@ -6,7 +6,7 @@
 					<div class="flex flex-col gap-1">
 						<span class="text-lg font-bold text-contrast">Server settings</span>
 						<span class="text-sm font-medium text-secondary">
-							Configure the Amberite Core server: properties, network, installation and more.
+							Configure the Copal server: properties, network, installation and more.
 						</span>
 					</div>
 					<div>

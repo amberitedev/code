@@ -40,6 +40,15 @@ function coreToGameInstance(inst: CoreInstanceSummary): GameInstance {
 		path: inst.id,
 		install_stage: inst.install_status === 'ready' ? 'installed' : 'not_installed',
 		profile_type: 'server',
+		core_instance_id: inst.id,
+		server_manifest_json: {
+			name: inst.name,
+			gameVersion: inst.game_version,
+			modloader: inst.loader,
+			loaderVersion: inst.loader_version,
+			port: inst.port,
+			memory: inst.memory,
+		},
 		name: inst.name,
 		game_version: inst.game_version,
 		loader: inst.loader as GameInstance['loader'],
@@ -56,9 +65,8 @@ function coreToGameInstance(inst: CoreInstanceSummary): GameInstance {
 const instances = computed(() => {
 	const appLib: GameInstance[] = instancesQuery.data.value ?? []
 	const coreServers = [...coreInstanceMap.value.values()].map(coreToGameInstance)
-	// Deduplicate: Core instances that already exist in app-lib (by path/id) should not be doubled.
-	const appLibPaths = new Set(appLib.map((i) => i.path))
-	return [...appLib, ...coreServers.filter((i) => !appLibPaths.has(i.path))]
+	const appLibCoreIds = new Set(appLib.map((i) => i.core_instance_id ?? i.path))
+	return [...appLib, ...coreServers.filter((i) => !appLibCoreIds.has(i.core_instance_id ?? i.path))]
 })
 
 const initialPending = computed(

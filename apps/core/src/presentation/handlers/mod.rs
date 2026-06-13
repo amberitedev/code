@@ -1,3 +1,4 @@
+pub mod access;
 pub mod backups;
 pub mod console;
 pub mod diagnostics;

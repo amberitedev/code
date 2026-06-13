@@ -28,12 +28,15 @@ pub struct Envelope {
 impl Envelope {
     /// Seal a typed message into a transport-ready envelope. The single entry
     /// point for building one; policy constants are stamped here.
-    pub fn seal<M: Message>(message: &M, origin: Option<UserId>) -> Result<Self, ApiCommError> {
+    pub fn seal<M: Message>(
+        message: &M,
+        origin: Option<UserId>,
+    ) -> Result<Self, ApiCommError> {
         let created_at = Utc::now();
         let expires_at = match M::DURABILITY {
-            Durability::Durable => {
-                Some(created_at + Duration::seconds(M::default_ttl_secs() as i64))
-            }
+            Durability::Durable => Some(
+                created_at + Duration::seconds(M::default_ttl_secs() as i64),
+            ),
             Durability::Ephemeral => None,
         };
 

@@ -47,12 +47,13 @@ export interface UseSocialReturn {
 	myRole: ComputedRef<Role | null>
 	canManage: ComputedRef<boolean>
 	refresh: () => Promise<void>
+	searchUsers: (query: string) => Promise<AmberiteUser[]>
 	sendFriendRequest: (args: {
-		friendCode?: string
-		username?: string
+		targetUserId: string
 		message?: string
 	}) => Promise<void>
 	respondFriendRequest: (requestId: string, accept: boolean) => Promise<void>
+	cancelFriendRequest: (requestId: string) => Promise<void>
 	removeFriend: (userId: string) => Promise<void>
 	createGroup: (args: {
 		coreId: string
@@ -104,6 +105,7 @@ export function useSocial(): UseSocialReturn {
 	async function refresh(): Promise<void> {
 		await run(async () => {
 			currentUser.value = await client.currentUser()
+			if (currentUser.value) await client.heartbeat()
 			const [groups, friendsList, myInvites] = await Promise.all([
 				client.listMyFriendGroups(),
 				client.friendsList(),
@@ -141,6 +143,7 @@ export function useSocial(): UseSocialReturn {
 
 	async function mutate<T>(fn: () => Promise<T>): Promise<T | undefined> {
 		const result = await run(fn)
+		if (error.value) return undefined
 		await refresh()
 		return result
 	}
@@ -162,9 +165,12 @@ export function useSocial(): UseSocialReturn {
 		myRole,
 		canManage,
 		refresh,
+		searchUsers: (query) => client.searchUsers(query),
 		sendFriendRequest: (args) => mutate(() => client.sendFriendRequest(args)).then(() => undefined),
 		respondFriendRequest: (requestId, accept) =>
 			mutate(() => client.respondFriendRequest(requestId, accept)).then(() => undefined),
+		cancelFriendRequest: (requestId) =>
+			mutate(() => client.cancelFriendRequest(requestId)).then(() => undefined),
 		removeFriend: (userId) => mutate(() => client.removeFriend(userId)).then(() => undefined),
 		createGroup: (args) => mutate(() => client.ensureCoreFriendGroup(args)).then(() => undefined),
 		updateGroup: (args) =>

@@ -2,8 +2,8 @@
 [workspace]
 
 [package]
-name = "amberite-core"
-description = "Amberite Core — Minecraft server management backend"
+name = "copal"
+description = "Copal — Minecraft server management backend"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85.0"

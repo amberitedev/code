@@ -11,7 +11,7 @@ const core = computed(() => social.group.value?.core)
 
 const connectionUrl = ref('')
 const subdomain = ref('')
-const savedLocalSettings = useStorage('amberite-core-network-settings', {
+const savedLocalSettings = useStorage('copal-network-settings', {
 	requirePairingCodes: true,
 	advertiseOnLan: false,
 })

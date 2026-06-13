@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS core_metadata (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
-	name TEXT NOT NULL DEFAULT 'Amberite Core',
+	name TEXT NOT NULL DEFAULT 'Copal',
 	description TEXT,
 	banner TEXT,
 	subdomain TEXT,

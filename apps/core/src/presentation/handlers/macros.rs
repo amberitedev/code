@@ -15,7 +15,10 @@ use crate::{
         state::AppState,
     },
     domain::instance::InstanceId,
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 fn parse_id(s: &str) -> Result<InstanceId, ApiError> {
@@ -25,11 +28,13 @@ fn parse_id(s: &str) -> Result<InstanceId, ApiError> {
 
 /// GET /instances/:id/macros — list available files + running PIDs.
 pub async fn list_macros_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let iid = parse_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+        .await?;
     let files = list_macro_files(&state, &iid).await;
     let running_pids = list_macros(&state);
     Ok(Json(json!({
@@ -45,23 +50,27 @@ pub struct SpawnBody {
 
 /// POST /instances/:id/macros — spawn a macro by name.
 pub async fn spawn_macro_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<SpawnBody>,
 ) -> Result<Json<Value>, ApiError> {
     let iid = parse_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+        .await?;
     let pid = spawn_macro(&state, iid, body.name)?;
     Ok(Json(json!({ "pid": pid })))
 }
 
 /// DELETE /instances/:id/macros/:pid — kill a running macro.
 pub async fn kill_macro_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, pid_str)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let _iid = parse_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+        .await?;
     let pid: MacroPid = pid_str
         .parse()
         .map_err(|_| ApiError::BadRequest("invalid pid".into()))?;

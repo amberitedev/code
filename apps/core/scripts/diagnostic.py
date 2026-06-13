@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Amberite Core diagnostic — exercises every API endpoint."""
+"""Copal diagnostic — exercises every API endpoint."""
 import argparse, io, sys, time
 import requests
 
@@ -153,7 +153,7 @@ def p_cleanup():
 
 def main():
     global URL, HDR
-    ap = argparse.ArgumentParser(description="Amberite Core diagnostic")
+    ap = argparse.ArgumentParser(description="Copal diagnostic")
     ap.add_argument("--url",          default="http://localhost:16662")
     ap.add_argument("--token",        default="",  help="Supabase JWT")
     ap.add_argument("--pairing-code", default="", dest="pairing_code")
@@ -162,7 +162,7 @@ def main():
     args = ap.parse_args()
     URL = args.url.rstrip("/")
     HDR = {"Authorization": f"Bearer {args.token}"} if args.token else {}
-    print(f"Amberite Core Diagnostic  →  {URL}")
+    print(f"Copal Diagnostic  →  {URL}")
     if not HDR: print("  ⚠  No --token provided; authenticated endpoints will likely 401.")
     p_system(); p_setup(args.pairing_code, args.supabase_url, args.owner_id)
     p_instances(); p_lifecycle(); p_mods(); p_logs()

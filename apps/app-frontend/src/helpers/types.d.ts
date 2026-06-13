@@ -4,6 +4,8 @@ export type GameInstance = {
 	path: string
 	install_stage: InstallStage
 	profile_type: ProfileType
+	core_instance_id?: string | null
+	server_manifest_json?: ServerManifest | null
 
 	name: string
 	icon_path?: string
@@ -47,6 +49,20 @@ type LinkedData = {
 	version_id: ModrinthId
 
 	locked: boolean
+}
+
+export type ServerManifest = {
+	name: string
+	gameVersion: string
+	modloader: string
+	loaderVersion?: string | null
+	port?: number
+	memory?: {
+		min_mb: number
+		max_mb: number
+	}
+	content?: unknown
+	mods?: unknown[]
 }
 
 export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'

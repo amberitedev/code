@@ -1,54 +1,44 @@
-# src/api — typed message layer
+# src/api
 
-Owns the vocabulary for everything Core sends or distributes. `presentation` serves
-these over HTTP; this layer holds no Axum/HTTP code.
+Typed communication layer for Core messages, envelopes, relay storage, and distribution.
 
-## File structure
+This layer defines the vocabulary and routing semantics for Core-to-app and Core-to-Core style communication. It does not own Axum routing; HTTP handlers live in `src/presentation`.
 
-```
-api/
-  mod.rs           — re-exports the public surface
-  connection.rs    — typed request/response for POST /connection/handshake
-  ids.rs           — newtype ids: UserId, CoreId, GroupId, InstanceId, MessageId
-  policy.rs        — Route, Ack, Durability enums (+ wire strings)
-  status.rs        — DeliveryStatus lifecycle
-  kind.rs          — MessageKind closed set (+ dotted wire names)
-  audience.rs      — Endpoint, Audience
-  message.rs       — Message trait (compile-time route/ack/durability per kind)
-  messages.rs      — concrete messages + their Message impls
-  envelope.rs      — Envelope + seal::<M>() / decode::<M>()
-  error.rs         — ApiCommError
-  store.rs         — RelayStore, MembershipResolver async traits
-  relay_store.rs   — SqliteRelayStore + StoredMessage (only place with relay SQL)
-  distributor.rs   — Distributor: post-and-distribute fan-out engine
-```
+## Mental Model
 
-## How it is used
+A message has:
 
-- `presentation/handlers/relay.rs` builds a `SqliteRelayStore` from `state.pool` and
-  calls `insert` / `pending` / `get` / `mark`. Status strings come from
-  `DeliveryStatus::wire()`, never literals.
-- Typed posts: `Envelope::seal::<M>()` stamps an envelope from a `Message`'s policy
-  constants; `Distributor::post` expands an `Audience` and enqueues one durable copy
-  per recipient. Wired in as the post-and-distribute flows land.
+- typed IDs for who or what it refers to
+- a stable `MessageKind` wire name
+- a payload struct
+- route, acknowledgement, and durability policy
+- an envelope used for transport and storage
 
-## Routes
+The API layer separates “what happened or should happen” from “how HTTP exposes it.”
 
-`Route` values and their meaning: `CoreDirect` (request/response), `CorePost`
-(post a fact, Core distributes), `CoreRelay` (one durable message to one recipient),
-`ConvexRelay` (friend invites + core pairing only), `Local` (stays on machine),
-`PeerToPeer` (reserved, no executor — rejected at runtime).
+Relay storage is durable message persistence. Distribution decides who receives message copies. Handlers call into this layer when they need to enqueue, fetch, acknowledge, or inspect messages.
 
-## Adding a message
+You usually do not need to read every file in this folder. Pick based on which part of the system is changing.
 
-1. Add a `MessageKind` variant with its dotted wire name.
-2. Add a payload struct in `messages.rs` and `impl Message` with its policy constants.
-3. Re-export from `mod.rs`.
+## File Relationships
 
-## Facts
+- `ids.rs` defines stable typed IDs shared by messages and relay code.
+- `kind.rs` defines message wire names.
+- `policy.rs` defines route, acknowledgement, and durability concepts.
+- `message.rs` defines the trait tying a payload to its kind and policy.
+- `messages.rs` defines concrete message payloads.
+- `envelope.rs` wraps typed messages for transport/storage.
+- `store.rs` defines relay persistence and membership traits.
+- `relay_store.rs` implements relay persistence with SQLite.
+- `distributor.rs` expands an audience into stored message copies.
+- `mod.rs` re-exports the public API surface.
 
-- `StoredMessage` matches the `core_relay_messages` columns and the wire shape the app
-  already consumes (`type`, `sender_id`, `recipient_id`, `ack`, `status`, …).
-- `result`/`error` are only populated by `get` (the status endpoint), absent from the
-  `pending` list shape.
-- Relay SQL lives only in `relay_store.rs`.
+## Common Changes
+
+| Change | Read |
+| ------ | ---- |
+| Add a new message type | `kind.rs`, `messages.rs`, `message.rs`, `mod.rs` |
+| Change stored relay behavior | `relay_store.rs`, `store.rs` |
+| Change fan-out logic | `distributor.rs`, `audience.rs` |
+| Change envelope format | `envelope.rs` |
+| Change HTTP relay endpoint | `src/presentation/handlers/relay.rs` plus this file |

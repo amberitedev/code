@@ -24,7 +24,10 @@ pub struct Distributor<'a> {
 }
 
 impl<'a> Distributor<'a> {
-    pub fn new(store: &'a dyn RelayStore, resolver: &'a dyn MembershipResolver) -> Self {
+    pub fn new(
+        store: &'a dyn RelayStore,
+        resolver: &'a dyn MembershipResolver,
+    ) -> Self {
         Self { store, resolver }
     }
 
@@ -56,7 +59,10 @@ impl<'a> Distributor<'a> {
         })
     }
 
-    async fn resolve(&self, audience: &Audience) -> Result<Vec<Endpoint>, ApiCommError> {
+    async fn resolve(
+        &self,
+        audience: &Audience,
+    ) -> Result<Vec<Endpoint>, ApiCommError> {
         match audience {
             Audience::Direct { endpoint } => Ok(vec![endpoint.clone()]),
             Audience::InstanceMembers { instance, except } => {

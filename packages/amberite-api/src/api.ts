@@ -1,5 +1,5 @@
 /**
- * Raw HTTP fetch functions for every Amberite Core endpoint.
+ * Raw HTTP fetch functions for every Copal endpoint.
  * Each function accepts a `CoreCallContext` and returns a typed promise.
  *
  * Key functions: get/list/create/delete/patch instances, start/stop/kill/restart,
@@ -48,6 +48,11 @@ import type {
 	CoreConnectionHandshakeResponse,
 	CoreMetadata,
 	CoreMember,
+	CoreAccessResponse,
+	CoreAccessUpsertBody,
+	CoreAccessPatchBody,
+	CoreActivityLogQuery,
+	CoreActivityLogResponse,
 	CoreSyncProfile,
 	CoreCreateSyncProfileFromMrpackMetadata,
 	CoreSyncSnapshot,
@@ -833,6 +838,108 @@ export function removeCoreMember(ctx: CoreCallContext, userId: string): Promise<
 	return apiFetch(ctx, `${ctx.baseUrl}/core/members/${encodeURIComponent(userId)}`, {
 		method: 'DELETE',
 	})
+}
+
+export function listCoreAccess(ctx: CoreCallContext): Promise<CoreAccessResponse> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/access`)
+}
+
+export function grantCoreAccess(
+	ctx: CoreCallContext,
+	body: CoreAccessUpsertBody,
+): Promise<CoreMember> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/access`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function updateCoreAccess(
+	ctx: CoreCallContext,
+	userId: string,
+	body: CoreAccessPatchBody,
+): Promise<CoreMember> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/access/${encodeURIComponent(userId)}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function removeCoreAccess(ctx: CoreCallContext, userId: string): Promise<{ ok: boolean }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/access/${encodeURIComponent(userId)}`, {
+		method: 'DELETE',
+	})
+}
+
+export function listInstanceAccess(
+	ctx: CoreCallContext,
+	id: string,
+): Promise<CoreAccessResponse> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access`)
+}
+
+export function grantInstanceAccess(
+	ctx: CoreCallContext,
+	id: string,
+	body: CoreAccessUpsertBody,
+): Promise<unknown> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function updateInstanceAccess(
+	ctx: CoreCallContext,
+	id: string,
+	userId: string,
+	body: CoreAccessPatchBody,
+): Promise<unknown> {
+	return apiFetch(
+		ctx,
+		`${ctx.baseUrl}/instances/${id}/access/${encodeURIComponent(userId)}`,
+		{
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body),
+		},
+	)
+}
+
+export function removeInstanceAccess(
+	ctx: CoreCallContext,
+	id: string,
+	userId: string,
+): Promise<{ ok: boolean }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access/${encodeURIComponent(userId)}`, {
+		method: 'DELETE',
+	})
+}
+
+export function listActivity(
+	ctx: CoreCallContext,
+	query: CoreActivityLogQuery = {},
+): Promise<CoreActivityLogResponse> {
+	const q = new URLSearchParams()
+	for (const [key, value] of Object.entries(query)) {
+		if (value !== undefined && value !== null) q.set(key, String(value))
+	}
+	return apiFetch(ctx, `${ctx.baseUrl}/activity${q.size ? `?${q}` : ''}`)
+}
+
+export function listInstanceActivity(
+	ctx: CoreCallContext,
+	id: string,
+	query: CoreActivityLogQuery = {},
+): Promise<CoreActivityLogResponse> {
+	const q = new URLSearchParams()
+	for (const [key, value] of Object.entries(query)) {
+		if (value !== undefined && value !== null && key !== 'instance_id') q.set(key, String(value))
+	}
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/activity${q.size ? `?${q}` : ''}`)
 }
 
 // ── Sync Profiles ─────────────────────────────────────────────────────────────

@@ -67,8 +67,7 @@ pub async fn create_instance(
     req: CreateInstanceRequest,
 ) -> Result<InstanceId, InstanceError> {
     let id = InstanceId::new();
-    let data_dir = state.config.data_dir.join("instances").join(id.to_string());
-    tokio::fs::create_dir_all(&data_dir).await?;
+    let data_dir = unique_instance_data_dir(state, &req.name, &id).await?;
 
     // B4: Write initial server.properties so the server can start on first launch.
     write_initial_properties(&data_dir, req.port)
@@ -114,6 +113,68 @@ pub async fn create_instance(
     reconcile_instance(state, &id, &installation_id).await;
 
     Ok(id)
+}
+
+async fn unique_instance_data_dir(
+    state: &Arc<AppState>,
+    name: &str,
+    id: &InstanceId,
+) -> Result<PathBuf, InstanceError> {
+    let base = state.config.data_dir.join("instances");
+    tokio::fs::create_dir_all(&base).await?;
+    let slug = slug_instance_name(name);
+    if let Some(path) = try_create_instance_dir(&base.join(&slug)).await? {
+        return Ok(path);
+    }
+
+    let id_string = id.to_string();
+    let short = &id_string[..4];
+    if let Some(path) = try_create_instance_dir(&base.join(format!("{slug}-{short}"))).await? {
+        return Ok(path);
+    }
+
+    let mut index = 2;
+    loop {
+        let candidate = base.join(format!("{slug}-{short}-{index}"));
+        if let Some(path) = try_create_instance_dir(&candidate).await? {
+            return Ok(path);
+        }
+        index += 1;
+    }
+}
+
+async fn try_create_instance_dir(
+    candidate: &PathBuf,
+) -> Result<Option<PathBuf>, InstanceError> {
+    match tokio::fs::create_dir(candidate).await {
+        Ok(()) => Ok(Some(candidate.clone())),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            Ok(None)
+        }
+        Err(err) => Err(InstanceError::Io(err)),
+    }
+}
+
+fn slug_instance_name(name: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_dash = false;
+    for ch in name.trim().chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_was_dash = false;
+        } else if !last_was_dash && !out.is_empty() {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "server".to_string()
+    } else {
+        out
+    }
 }
 
 /// Re-download/reinstall the shared server files backing an instance ("repair").
@@ -188,9 +249,9 @@ pub async fn change_version(
     bind_instance(state, id, &installation_id).await?;
 
     let updated = state.instance_store.get(id).await?;
-    state.broadcaster.send(Event::InstanceUpdated {
-        instance: updated,
-    });
+    state
+        .broadcaster
+        .send(Event::InstanceUpdated { instance: updated });
 
     reconcile_instance(state, id, &installation_id).await;
     Ok(())

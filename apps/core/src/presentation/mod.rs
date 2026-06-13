@@ -1,3 +1,4 @@
+pub mod authz;
 pub mod error;
 pub mod extractors;
 pub mod handlers;

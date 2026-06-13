@@ -16,7 +16,6 @@ import {
 	HomeIcon,
 	LeftArrowIcon,
 	LibraryIcon,
-	LogInIcon,
 	LogOutIcon,
 	NewspaperIcon,
 	NotepadTextIcon,
@@ -24,6 +23,7 @@ import {
 	RefreshCwIcon,
 	RightArrowIcon,
 	ServerStackIcon,
+	ShieldAlertIcon,
 	SettingsIcon,
 	UserPlusIcon,
 	UserIcon,
@@ -40,6 +40,7 @@ import {
 	defineMessages,
 	I18nDebugPanel,
 	LoadingBar,
+	NewModal,
 	NewsArticleCard,
 	NotificationPanel,
 	OverflowMenu,
@@ -91,13 +92,14 @@ import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
+import { useModrinthLink } from '@/composables/useModrinthLink'
 import { config } from '@/config'
 import { hide_ads_window, init_ads_window, show_ads_window } from '@/helpers/ads.js'
 import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { command_listener, notification_listener, warning_listener } from '@/helpers/events.js'
-import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
+import { cancelLogin } from '@/helpers/mr_auth.ts'
 import { create_profile_and_install_from_file } from '@/helpers/pack'
 import { list } from '@/helpers/profile.js'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
@@ -138,8 +140,12 @@ const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
 const amberiteAuth = useAmberiteAuth()
+const modrinthLink = useModrinthLink()
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
-const credentials = ref()
+const hasMinecraftAccounts = ref(false)
+const amberiteAccountMissing = computed(
+	() => hasMinecraftAccounts.value && !amberiteAuth.user.value,
+)
 const sidebarToggled = ref(true)
 const unsubscribeSidebarToggle = themeStore.$subscribe(() => {
 	sidebarToggled.value = !themeStore.toggleSidebar
@@ -201,9 +207,9 @@ const tauriApiClient = new TauriModrinthClient({
 })
 provideModrinthClient(tauriApiClient)
 const { data: authenticatedModrinthUser } = useQuery({
-	queryKey: computed(() => ['authenticated-user', 'campaigns', credentials.value?.user?.id]),
+	queryKey: computed(() => ['authenticated-user', 'campaigns', modrinthLink.user.value?.id]),
 	queryFn: () => tauriApiClient.labrinth.users_v3.getAuthenticated(),
-	enabled: () => !!credentials.value?.session,
+	enabled: () => modrinthLink.linked.value,
 	retry: false,
 })
 providePageContext({
@@ -441,7 +447,7 @@ async function setupApp() {
 		})
 
 	get_opening_command().then(handleCommand)
-	fetchCredentials()
+	void modrinthLink.refresh()
 
 	try {
 		const skins = (await get_available_skins()) ?? []
@@ -592,6 +598,7 @@ watch(stateInitialized, (ready) => {
 const error = useError()
 const errorModal = ref()
 const minecraftAuthErrorModal = ref()
+const amberiteAccountModal = ref()
 
 const contentInstall = createContentInstall({ router, handleError })
 provideContentInstall(contentInstall)
@@ -638,40 +645,29 @@ setupAuthProvider(amberiteAuth.user, async (_redirectPath) => {
 	await signIn()
 })
 
-async function fetchCredentials() {
-	const creds = await getCreds().catch(handleError)
-	if (creds && creds.user_id) {
-		creds.user = await get_user(creds.user_id, 'bypass').catch(handleError)
-	}
-	credentials.value = creds ?? null
-}
-
 async function signIn() {
-	await amberiteAuth.signIn().catch(handleError)
-	await fetchCredentials()
+	await amberiteAuth.signIn()
 }
 
-async function modrinthSignIn() {
-	try {
-		await login()
-		await fetchCredentials()
-	} catch (error) {
-		if (
-			typeof error === 'object' &&
-			typeof error['message'] === 'string' &&
-			error.message.includes('Login canceled')
-		) {
-			// Not really an error due to being a result of user interaction, show nothing
-		} else {
-			handleError(error)
-		}
+async function handleMinecraftAccountChange(hasAccounts) {
+	hasMinecraftAccounts.value = hasAccounts
+	if (hasAccounts) {
+		await signIn()
+	} else {
+		await amberiteAuth.logOut().catch(handleError)
 	}
 }
+
+watch(amberiteAccountMissing, (missing) => {
+	if (missing) {
+		setTimeout(() => amberiteAccountModal.value?.show(), 0)
+	} else {
+		amberiteAccountModal.value?.hide()
+	}
+})
 
 async function logOut() {
-	await logout().catch(handleError)
 	await amberiteAuth.logOut().catch(handleError)
-	await fetchCredentials()
 }
 
 const hasPlus = computed(() => false)
@@ -1313,7 +1309,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<NavButton v-tooltip.right="'Core'" to="/core">
 				<ServerStackIcon />
 			</NavButton>
-			<NavButton v-tooltip.right="'Core access preview'" to="/core/access-preview">
+			<NavButton v-tooltip.right="'Core access'" to="/core/access">
 				<UserPlusIcon />
 			</NavButton>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
@@ -1387,9 +1383,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					<LogOutIcon />
 				</template>
 			</OverflowMenu>
-			<NavButton v-else v-tooltip.right="'Sign in to Amberite'" :to="() => signIn()">
-				<LogInIcon class="text-brand" />
-			</NavButton>
 		</div>
 		<div data-tauri-drag-region class="app-grid-statusbar bg-bg-raised h-[--top-bar-height] flex">
 			<div data-tauri-drag-region class="flex min-w-0 flex-1 overflow-hidden p-3">
@@ -1529,12 +1522,29 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
 						<h3 class="text-base text-primary font-medium m-0">Playing as</h3>
 						<suspense>
-							<AccountsCard ref="accounts" />
+							<AccountsCard ref="accounts" @change="handleMinecraftAccountChange" />
 						</suspense>
+						<div
+							v-if="!amberiteAuth.user && hasMinecraftAccounts"
+							class="mt-2 text-sm text-secondary leading-tight"
+						>
+							<template v-if="amberiteAuth.signingIn">
+								Connecting your Amberite account...
+							</template>
+							<template v-else>
+								Amberite account is not connected yet.
+								<button
+									class="p-0 border-0 bg-transparent text-brand cursor-pointer"
+									@click="signIn"
+								>
+									Retry
+								</button>
+							</template>
+						</div>
 					</div>
 					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
 						<suspense>
-							<FriendsList :credentials="credentials" :sign-in="() => modrinthSignIn()" />
+							<FriendsList />
 						</suspense>
 					</div>
 					<PrideFundraiserBanner
@@ -1575,6 +1585,43 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	<PopupNotificationPanel :has-sidebar="sidebarVisible" />
 	<ErrorModal ref="errorModal" />
 	<MinecraftAuthErrorModal ref="minecraftAuthErrorModal" />
+	<NewModal
+		ref="amberiteAccountModal"
+		header="Connect your Amberite account"
+		:closable="false"
+		max-width="32rem"
+	>
+		<div class="flex flex-col gap-5">
+			<div class="flex gap-4">
+				<div class="grid size-12 shrink-0 place-content-center rounded-full bg-orange-highlight">
+					<ShieldAlertIcon class="size-6 text-orange" />
+				</div>
+				<div class="flex flex-col gap-2">
+					<p class="m-0 text-base text-primary leading-snug">
+						You are signed in to Minecraft, but Amberite has not finished creating your app
+						account.
+					</p>
+					<p class="m-0 text-sm text-secondary leading-snug">
+						Friends, Core access, invites, and sync need this account before the app can work
+						correctly.
+					</p>
+				</div>
+			</div>
+			<div
+				v-if="amberiteAuth.error.value"
+				class="rounded-lg border border-solid border-surface-5 bg-surface-2 p-3 text-sm text-secondary"
+			>
+				{{ amberiteAuth.error.value.message }}
+			</div>
+			<div class="flex justify-end">
+				<ButtonStyled color="brand">
+					<button :disabled="amberiteAuth.signingIn.value" @click="signIn">
+						{{ amberiteAuth.signingIn.value ? 'Connecting...' : 'Connect Amberite account' }}
+					</button>
+				</ButtonStyled>
+			</div>
+		</div>
+	</NewModal>
 	<ContentInstallModal
 		ref="modInstallModal"
 		:instances="contentInstallInstances"

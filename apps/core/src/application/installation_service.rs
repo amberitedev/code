@@ -1,4 +1,14 @@
-use std::{path::PathBuf, sync::Arc};
+//! Shared server installation orchestration.
+//!
+//! Key functions: installation directory resolution (line 34),
+//! ensure/repair entrypoints (lines 48 and 119), install task spawning and
+//! validation (lines 170 and 214), startup restore/reconcile (lines 260 and
+//! 281), and status propagation helpers (line 356 onward).
+
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use chrono::Utc;
 use tracing::{error, info};
@@ -14,6 +24,7 @@ use crate::{
         },
     },
     infrastructure::minecraft::{
+        installer::{read_launch_config, LaunchStyle},
         java::required_java_version, server_jar::download_server_jar,
     },
 };
@@ -109,11 +120,8 @@ pub async fn repair_installation(
     state: &Arc<AppState>,
     id: &InstallationId,
 ) -> Result<(), InstanceError> {
-    let existing = state
-        .installation_store
-        .get(id)
-        .await?
-        .ok_or_else(|| {
+    let existing =
+        state.installation_store.get(id).await?.ok_or_else(|| {
             InstanceError::NotReady(format!("installation {id} not found"))
         })?;
     mark_instances_installing(state, id).await;
@@ -191,10 +199,60 @@ pub fn spawn_installation_install(
         .await;
 
         match result {
-            Ok(_) => finish_ready(&state, &id).await,
+            Ok(_) => {
+                if let Err(e) = validate_installation_output(&dir).await {
+                    finish_failed(&state, &id, &e).await;
+                } else {
+                    finish_ready(&state, &id).await;
+                }
+            }
             Err(e) => finish_failed(&state, &id, &e.to_string()).await,
         }
     });
+}
+
+async fn validate_installation_output(dir: &Path) -> Result<(), String> {
+    let config = read_launch_config(dir)
+        .await
+        .ok_or_else(|| "installation did not produce launch.json".to_string())?;
+    match config.style {
+        LaunchStyle::Jar { jar } => {
+            let path = dir.join(&jar);
+            if path.is_file() {
+                Ok(())
+            } else {
+                Err(format!("launch jar is missing: {}", path.display()))
+            }
+        }
+        LaunchStyle::ArgsFile { args } => {
+            let path = dir.join(&args);
+            if path.is_file() {
+                Ok(())
+            } else {
+                Err(format!("launch args file is missing: {}", path.display()))
+            }
+        }
+        LaunchStyle::Modular { args } => {
+            if modular_launch_files_present(&args) {
+                Ok(())
+            } else {
+                Err("shared launch files are missing".to_string())
+            }
+        }
+    }
+}
+
+fn modular_launch_files_present(args: &[String]) -> bool {
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    for token in args {
+        for part in token.split(separator) {
+            let path = Path::new(part);
+            if part.ends_with(".jar") && path.is_absolute() && !path.is_file() {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// On startup, respawn installs for any installation left stuck in `Installing`
@@ -225,8 +283,7 @@ pub async fn reconcile_instance(
     instance_id: &InstanceId,
     installation_id: &InstallationId,
 ) {
-    let Ok(Some(inst)) =
-        state.installation_store.get(installation_id).await
+    let Ok(Some(inst)) = state.installation_store.get(installation_id).await
     else {
         return;
     };
@@ -268,7 +325,11 @@ async fn finish_ready(state: &Arc<AppState>, id: &InstallationId) {
     .await;
 }
 
-async fn finish_failed(state: &Arc<AppState>, id: &InstallationId, error: &str) {
+async fn finish_failed(
+    state: &Arc<AppState>,
+    id: &InstallationId,
+    error: &str,
+) {
     let _ = state
         .installation_store
         .update_status(id, InstallationStatus::Failed, Some(error))
@@ -329,10 +390,7 @@ async fn propagate_to_instances(
 
 /// Mark every instance bound to this installation as `Installing` (used by
 /// repair, which restarts the shared install under all of them).
-async fn mark_instances_installing(
-    state: &Arc<AppState>,
-    id: &InstallationId,
-) {
+async fn mark_instances_installing(state: &Arc<AppState>, id: &InstallationId) {
     let instances = state
         .instance_store
         .list_by_installation(&id.to_string())

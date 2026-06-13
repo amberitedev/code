@@ -5,7 +5,6 @@ const Pages = {
 	Worlds: () => import('@/pages/Worlds.vue'),
 	Servers: () => import('@/pages/Servers.vue'),
 	Core: () => import('@/pages/core/Index.vue'),
-	CoreAccessPreview: () => import('@/pages/core/AccessPreview.vue'),
 	Browse: () => import('@/pages/Browse.vue'),
 	Skins: () => import('@/pages/Skins.vue'),
 }
@@ -68,14 +67,6 @@ const router = createRouter({
 			component: Pages.Core,
 			meta: {
 				breadcrumb: [{ name: 'Core' }],
-			},
-		},
-		{
-			path: '/core/access-preview',
-			name: 'CoreAccessPreview',
-			component: Pages.CoreAccessPreview,
-			meta: {
-				breadcrumb: [{ name: 'Core access preview' }],
 			},
 		},
 		{
@@ -305,15 +296,6 @@ const router = createRouter({
 					},
 				},
 				{
-					path: 'players',
-					name: 'ServerInstancePlayers',
-					component: () => import('@/pages/instance/ServerPlayers.vue'),
-					meta: {
-						useRootContext: true,
-						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Players' }],
-					},
-				},
-				{
 					path: 'backups',
 					name: 'ServerInstanceBackups',
 					component: () => import('@/pages/instance/ServerBackups.vue'),
@@ -323,12 +305,12 @@ const router = createRouter({
 					},
 				},
 				{
-					path: 'tasks',
-					name: 'ServerInstanceTasks',
-					component: () => import('@/pages/instance/ServerTasks.vue'),
+					path: 'access',
+					name: 'ServerInstanceAccess',
+					component: () => import('@/pages/instance/ServerAccess.vue'),
 					meta: {
 						useRootContext: true,
-						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Tasks' }],
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Access' }],
 					},
 				},
 				{

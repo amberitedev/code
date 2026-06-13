@@ -7,6 +7,7 @@
     "web:dev": "turbo run dev --filter=@modrinth/frontend",
     "web:build": "turbo run build --filter=@modrinth/frontend",
     "app:dev": "turbo run dev --filter=@modrinth/app",
+    "app:devm": "node scripts/app-devm.mjs",
     "app:debug": "node scripts/app-debug.mjs",
     "devtool:app": "node scripts/app-debug.mjs app",
     "devtool:core": "node scripts/app-debug.mjs core",

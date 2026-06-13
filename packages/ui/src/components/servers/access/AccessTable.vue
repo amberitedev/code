@@ -15,9 +15,10 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 	>
 		<template #cell-user="{ row: member }">
 			<AutoLink
-				:to="userProfilePath(member.user.username)"
+				:to="getUserProfileLink(member.user.username)"
+				:target="userProfileTarget(member.user.username)"
 				class="inline-flex max-w-full min-w-0 items-center gap-2"
-				:class="userProfilePath(member.user.username) ? 'text-primary hover:underline' : ''"
+				:class="getUserProfileLink(member.user.username) ? 'text-primary hover:underline' : ''"
 			>
 				<Avatar
 					:src="member.user.avatarUrl"
@@ -72,13 +73,13 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 		<template #cell-joined="{ row: member }">
 			<span
 				v-if="showStatusLabels"
-				class="inline-flex h-7 items-center rounded-full border border-surface-5 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
+				class="inline-flex h-7 items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 			>
 				{{ statusLabel(member) }}
 			</span>
 			<span
 				v-else-if="member.pending"
-				class="inline-flex h-7 items-center rounded-full border border-surface-5 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
+				class="inline-flex h-7 items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 			>
 				{{ formatMessage(messages.pendingLabel) }}
 			</span>
@@ -130,7 +131,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 
 	<div
 		v-if="members.length > 0"
-		class="overflow-hidden rounded-2xl border border-solid border-surface-5 sm:hidden"
+		class="overflow-hidden rounded-2xl border border-solid border-surface-4 sm:hidden"
 	>
 		<div
 			class="grid min-h-14 grid-cols-[minmax(0,1.35fr)_7.75rem_minmax(6rem,0.8fr)_4rem] bg-surface-3"
@@ -175,15 +176,16 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 		<div
 			v-for="(member, index) in sortedMembers"
 			:key="member.id"
-			class="grid min-h-16 grid-cols-[minmax(0,1.35fr)_7.75rem_minmax(6rem,0.8fr)_4rem] items-center border-0 border-t border-solid border-surface-5"
+			class="grid min-h-16 grid-cols-[minmax(0,1.35fr)_7.75rem_minmax(6rem,0.8fr)_4rem] items-center border-0 border-t border-solid border-surface-4"
 			:class="index % 2 === 0 ? 'bg-surface-2' : 'bg-surface-1.5'"
 		>
 			<div class="flex min-w-0 items-center pl-4">
 				<AutoLink
 					v-tooltip="member.user.username"
-					:to="userProfilePath(member.user.username)"
+					:to="getUserProfileLink(member.user.username)"
+					:target="userProfileTarget(member.user.username)"
 					class="inline-flex min-w-0 items-center gap-2"
-					:class="userProfilePath(member.user.username) ? 'text-primary hover:underline' : ''"
+					:class="getUserProfileLink(member.user.username) ? 'text-primary hover:underline' : ''"
 				>
 					<Avatar
 						:src="member.user.avatarUrl"
@@ -242,13 +244,13 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 			<div class="min-w-0 py-3 pr-2 text-right text-secondary">
 				<span
 					v-if="showStatusLabels"
-					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-5 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
+					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 				>
 					{{ statusLabel(member) }}
 				</span>
 				<span
 					v-else-if="member.pending"
-					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-5 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
+					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 				>
 					{{ formatMessage(messages.pendingLabel) }}
 				</span>
@@ -300,7 +302,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 		</div>
 	</div>
 
-	<div v-else class="overflow-hidden rounded-2xl border border-solid border-surface-5">
+	<div v-else class="overflow-hidden rounded-2xl border border-solid border-surface-4">
 		<div
 			class="grid min-h-14 grid-cols-[3.75rem_7.25rem_minmax(0,1fr)_2.75rem] bg-surface-3 sm:h-14 sm:grid-cols-[32%_28%_28%_12%]"
 		>
@@ -318,7 +320,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 			</div>
 		</div>
 		<div
-			class="border-0 border-t border-solid border-surface-5 bg-surface-2 px-4 py-8 text-center text-secondary"
+			class="border-0 border-t border-solid border-surface-4 bg-surface-2 px-4 py-8 text-center text-secondary"
 		>
 			{{ formatMessage(messages.emptyState) }}
 		</div>
@@ -346,7 +348,12 @@ import ButtonStyled from '../../base/ButtonStyled.vue'
 import Combobox, { type ComboboxOption } from '../../base/Combobox.vue'
 import Table, { type SortDirection, type TableColumn } from '../../base/Table.vue'
 import TeleportOverflowMenu from '../../base/TeleportOverflowMenu.vue'
-import type { ServerAccessMember, ServerAccessRole, ServerAccessRoleOption } from './types'
+import type {
+	ServerAccessMember,
+	ServerAccessRole,
+	ServerAccessRoleOption,
+	ServerAccessUserProfileLink,
+} from './types'
 
 const props = withDefaults(
 	defineProps<{
@@ -354,7 +361,8 @@ const props = withDefaults(
 		roles: ServerAccessRoleOption[]
 		canManageUsers?: boolean
 		permissionDeniedMessage?: string
-		userLink?: (username: string) => string | undefined
+		userLink?: (username: string) => ServerAccessUserProfileLink
+		userProfileLink?: (username: string) => ServerAccessUserProfileLink
 		statusColumnLabel?: string
 		showStatusLabels?: boolean
 	}>(),
@@ -423,11 +431,11 @@ const messages = defineMessages({
 	},
 	cancelInvite: {
 		id: 'servers.access-table.action.cancel-invite',
-		defaultMessage: 'Cancel invite',
+		defaultMessage: 'Revoke invite',
 	},
 	removeUser: {
 		id: 'servers.access-table.action.remove-user',
-		defaultMessage: 'Remove user',
+		defaultMessage: 'Revoke access',
 	},
 	emptyState: {
 		id: 'servers.access-table.empty',
@@ -610,10 +618,14 @@ function roleTriggerClass(role: ServerAccessRole): string {
 	return roleClasses(role)
 }
 
-function userProfilePath(username: string): string | undefined {
-	if (props.userLink) return props.userLink(username)
+function getUserProfileLink(username: string): ServerAccessUserProfileLink {
 	if (!username || username.includes('@')) return undefined
-	return `/user/${encodeURIComponent(username)}`
+	return props.userProfileLink?.(username) ?? props.userLink?.(username) ?? `/user/${encodeURIComponent(username)}`
+}
+
+function userProfileTarget(username: string): string | undefined {
+	const link = getUserProfileLink(username)
+	return typeof link === 'string' && link.startsWith('http') ? '_blank' : undefined
 }
 
 function resendInviteCooldownSeconds(member: ServerAccessMember): number {

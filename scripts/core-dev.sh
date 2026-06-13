@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Small temporary process manager for Amberite Core in dev.
+# Small temporary process manager for Copal in dev.
 # Run from repo root:  bash scripts/core-dev.sh {start|stop|restart|status|logs|wait}
 #
 # Designed for agent loops: restart will block until the HTTP port is open,

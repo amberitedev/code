@@ -141,13 +141,13 @@ async fn get_instance_returns_record() {
     assert_eq!(body["memory"]["min_mb"], 512);
     assert_eq!(body["memory"]["max_mb"], 1024);
 
-    // data_dir must embed the instance UUID (proves correct path segregation).
+    // data_dir uses a stable filesystem-safe slug while the ID remains a UUID.
     let data_dir = body["data_dir"]
         .as_str()
         .expect("data_dir must be a string");
     assert!(
-        data_dir.contains(&id),
-        "data_dir must contain the instance UUID; got: {data_dir}"
+        data_dir.replace('\\', "/").ends_with("/instances/test-server"),
+        "data_dir must use the instance name slug; got: {data_dir}"
     );
 }
 

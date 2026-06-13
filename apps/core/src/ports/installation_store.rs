@@ -19,9 +19,7 @@ pub trait InstallationStore: Send + Sync + 'static {
         id: &InstallationId,
     ) -> Result<Option<ServerInstallationRecord>, StoreError>;
     /// List all known installations.
-    async fn list(
-        &self,
-    ) -> Result<Vec<ServerInstallationRecord>, StoreError>;
+    async fn list(&self) -> Result<Vec<ServerInstallationRecord>, StoreError>;
     /// List all installations currently in a given status (e.g. stuck `Installing`).
     async fn list_by_status(
         &self,

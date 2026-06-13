@@ -40,7 +40,7 @@ RUN mkdir -p src && printf 'fn main(){}' > src/main.rs \
 COPY src/ ./src/
 
 # Touch main.rs so Cargo sees a source change after the stub trick.
-RUN touch src/main.rs && cargo build --release --bin amberite-core
+RUN touch src/main.rs && cargo build --release --bin copal
 
 # ============================================================
 # Stage 2: Runtime
@@ -60,7 +60,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Non-root user for security.
 RUN useradd -m -u 1001 amberite
 
-COPY --from=builder /build/target/release/amberite-core /usr/local/bin/amberite-core
+COPY --from=builder /build/target/release/copal /usr/local/bin/copal
 
 # Persistent data directory — instances, DB, logs all live here.
 RUN mkdir -p /data && chown amberite:amberite /data
@@ -76,5 +76,5 @@ ENV PORT=16662
 ENV ALLOWED_ORIGIN=https://amberite.dev
 # AMBERITE_DEV defaults to false (unset = prod mode).
 
-ENTRYPOINT ["amberite-core"]
+ENTRYPOINT ["copal"]
 CMD ["run"]

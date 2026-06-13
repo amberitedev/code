@@ -26,7 +26,7 @@ pub struct AmberiteState {
     pub http_client: Client,
     /// App settings (loaded at startup, saved on change)
     pub settings: Arc<RwLock<settings::AppSettings>>,
-    /// Handle to a running Amberite Core child process (if launched locally)
+    /// Handle to a running Copal child process (if launched locally)
     pub core_process: Arc<Mutex<Option<core_launcher::CoreProcess>>>,
     /// Active console-streaming tasks keyed by instance ID
     pub console_tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,

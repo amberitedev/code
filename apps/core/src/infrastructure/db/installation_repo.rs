@@ -3,12 +3,14 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 
 use crate::{
+    domain::instance::ModLoader,
     domain::server_installation::{
         InstallationId, InstallationStatus, ServerInstallationRecord,
     },
     infrastructure::db::instance_repo::parse_timestamp,
-    domain::instance::ModLoader,
-    ports::{installation_store::InstallationStore, instance_store::StoreError},
+    ports::{
+        installation_store::InstallationStore, instance_store::StoreError,
+    },
 };
 
 pub struct InstallationRepo {
@@ -87,9 +89,7 @@ impl InstallationStore for InstallationRepo {
         row.map(TryInto::try_into).transpose()
     }
 
-    async fn list(
-        &self,
-    ) -> Result<Vec<ServerInstallationRecord>, StoreError> {
+    async fn list(&self) -> Result<Vec<ServerInstallationRecord>, StoreError> {
         let rows = sqlx::query_as::<_, InstallationRow>(
             "SELECT * FROM server_installations ORDER BY created_at",
         )

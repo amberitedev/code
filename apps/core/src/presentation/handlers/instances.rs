@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
+        access_service, activity_service,
         instance_service::{
             create_instance as svc_create_instance, CreateInstanceRequest,
         },
@@ -20,7 +21,11 @@ use crate::{
         event::Event,
         instance::{InstanceId, InstanceRecord, MemorySettings, ModLoader},
     },
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::{can_access_instance, require_instance_permission},
+        error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 #[derive(Deserialize)]
@@ -59,30 +64,38 @@ fn record_detail(r: &InstanceRecord) -> Value {
 
 /// GET /instances — list all instances.
 pub async fn list_instances(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let records = state.instance_store.list().await?;
-    let instances: Vec<Value> = records.iter().map(record_list_item).collect();
+    let mut instances = Vec::new();
+    for record in records {
+        let id = record.id.to_string();
+        if can_access_instance(&state, &claims.sub, &id, "server:view").await {
+            instances.push(record_list_item(&record));
+        }
+    }
     Ok(Json(json!({ "instances": instances })))
 }
 
 /// GET /instances/:id — get a single instance.
 pub async fn get_instance(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let iid = id.parse::<InstanceId>().map_err(|_| {
         ApiError::BadRequest("invalid instance id — must be a UUID".into())
     })?;
+    require_instance_permission(&state, &claims.sub, &id, "server:view")
+        .await?;
     let record = state.instance_store.get(&iid).await?;
     Ok(Json(record_detail(&record)))
 }
 
 /// POST /instances — create a new instance (JAR download is async).
 pub async fn create_instance(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
@@ -92,6 +105,9 @@ pub async fn create_instance(
     if body.port == 0 {
         return Err(ApiError::BadRequest("port cannot be 0".into()));
     }
+    access_service::require_core_manager(&state, &claims.sub)
+        .await
+        .map_err(|error| ApiError::Forbidden(error.to_string()))?;
     let req = CreateInstanceRequest {
         name: body.name,
         game_version: body.game_version,
@@ -102,6 +118,15 @@ pub async fn create_instance(
     };
     let id = svc_create_instance(&state, req).await?;
     let record = state.instance_store.get(&id).await?;
+    activity_service::record(
+        &state,
+        &claims.sub,
+        "instance_created",
+        Some(&id.to_string()),
+        None,
+        Some(json!({ "name": record.name })),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(record_detail(&record))))
 }
 
@@ -148,7 +173,7 @@ fn normalize_override(value: Option<String>) -> Option<String> {
 }
 
 pub async fn patch_instance(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchBody>,
@@ -156,6 +181,8 @@ pub async fn patch_instance(
     let iid = id.parse::<InstanceId>().map_err(|_| {
         ApiError::BadRequest("invalid instance id — must be a UUID".into())
     })?;
+    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+        .await?;
 
     if let Some(ref name) = body.name {
         if name.trim().is_empty() {
@@ -173,7 +200,9 @@ pub async fn patch_instance(
 
     if let Some(memory) = body.memory {
         if memory.min_mb == 0 || memory.max_mb == 0 {
-            return Err(ApiError::BadRequest("memory must be greater than 0".into()));
+            return Err(ApiError::BadRequest(
+                "memory must be greater than 0".into(),
+            ));
         }
         if memory.min_mb > memory.max_mb {
             return Err(ApiError::BadRequest(
@@ -203,6 +232,15 @@ pub async fn patch_instance(
     }
 
     let record = state.instance_store.get(&iid).await?;
+    activity_service::record(
+        &state,
+        &claims.sub,
+        "instance_updated",
+        Some(&iid.to_string()),
+        None,
+        Some(json!({ "name": record.name })),
+    )
+    .await?;
     state.broadcaster.send(Event::InstanceUpdated {
         instance: record.clone(),
     });
@@ -213,13 +251,15 @@ pub async fn patch_instance(
 /// and effective commands, so the Advanced settings tab can show users exactly
 /// what Core runs and offer a reset baseline.
 pub async fn get_startup(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let iid = id.parse::<InstanceId>().map_err(|_| {
         ApiError::BadRequest("invalid instance id — must be a UUID".into())
     })?;
+    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+        .await?;
     let record = state.instance_store.get(&iid).await?;
     let (def_java, def_args) = default_launch_args(&state, &record).await;
     let (eff_java, eff_args) = resolve_launch(&state, &record).await;
@@ -251,7 +291,7 @@ fn quote_if_needed(token: &str) -> String {
 
 /// DELETE /instances/:id — delete an instance (must be offline).
 pub async fn delete_instance(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
@@ -259,6 +299,8 @@ pub async fn delete_instance(
     let iid = id.parse::<InstanceId>().map_err(|_| {
         ApiError::BadRequest("invalid instance id — must be a UUID".into())
     })?;
+    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+        .await?;
 
     if state.instances.contains_key(&iid) {
         return Err(ApiError::Conflict(
@@ -267,6 +309,15 @@ pub async fn delete_instance(
     }
 
     state.instance_store.delete(&iid).await?;
+    activity_service::record(
+        &state,
+        &claims.sub,
+        "instance_deleted",
+        Some(&iid.to_string()),
+        None,
+        None,
+    )
+    .await?;
     state
         .broadcaster
         .send(Event::InstanceDeleted { instance_id: iid });

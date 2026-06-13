@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Small temporary process manager for Amberite Core in dev.
+    Small temporary process manager for Copal in dev.
 
 .DESCRIPTION
     Start, stop, restart, or check status of the Core backend.

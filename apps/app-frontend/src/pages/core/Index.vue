@@ -1,98 +1,55 @@
 <script setup lang="ts">
-import {
-	FilterIcon,
-	LinkIcon,
-	SearchIcon,
-	ServerStackIcon,
-	SettingsIcon,
-	ShieldIcon,
-	UserPlusIcon,
-} from '@modrinth/assets'
-import {
-	AccessTable,
-	ButtonStyled,
-	Combobox,
-	GrantAccessModal,
-	StyledInput,
-} from '@modrinth/ui'
-import type {
-	GrantServerAccessPayload,
-	ServerAccessInviteSuggestion,
-	ServerAccessMember,
-	ServerAccessRole,
-	ServerAccessRoleOption,
-} from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { InfoIcon, LinkIcon, ServerStackIcon, SettingsIcon } from '@modrinth/assets'
+import { ButtonStyled, NavTabs } from '@modrinth/ui'
+import { computed, ref, watch } from 'vue'
 
+import CoreActivityPanel from '@/components/core/CoreActivityPanel.vue'
+import CoreAccessPanel from '@/components/core/CoreAccessPanel.vue'
 import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
-import CoreRolePermissionsModal from '@/components/core/CoreRolePermissionsModal.vue'
+import CoreRolesPanel from '@/components/core/CoreRolesPanel.vue'
 import CoreSetupPanel from '@/components/core/CoreSetupPanel.vue'
-import { mockInviteUsers, toAccessMember } from '@/components/core/core-onboarding-members'
 import CoreHostingSettingsModal from '@/components/core/settings/CoreHostingSettingsModal.vue'
 import { useCoreConnection } from '@/composables/useCoreConnection'
 import { useSocial } from '@/composables/useSocial'
-
-type RoleFilter = ServerAccessRole | 'all'
 
 const social = useSocial()
 const connection = useCoreConnection()
 const onboardingModal = ref<InstanceType<typeof CoreOnboardingModal>>()
 const settingsModal = ref<InstanceType<typeof CoreHostingSettingsModal>>()
-const permissionsModal = ref<InstanceType<typeof CoreRolePermissionsModal>>()
-const grantAccessModal = ref<InstanceType<typeof GrantAccessModal>>()
-const search = ref('')
-const roleFilter = ref<RoleFilter>('all')
-const setupVisible = ref(false)
+const activeTab = ref<'overview' | 'roles' | 'activity'>('overview')
+const detailsPlacement = ref<'tabs' | 'settings'>('tabs')
 const hasGroup = computed(() => !!social.group.value)
-const roleOptions: ServerAccessRoleOption[] = [
-	{ value: 'owner', label: 'Owner', description: 'Controls the Core and group.' },
-	{ value: 'editor', label: 'Admin', description: 'Manages members and servers.' },
-	{ value: 'viewer', label: 'Member', description: 'Uses shared Core access.' },
-]
-const roleFilterOptions = [{ value: 'all', label: 'All roles' }, ...roleOptions]
-const selectedRoleFilterLabel = computed(
-	() => roleFilterOptions.find((option) => option.value === roleFilter.value)?.label ?? 'All roles',
-)
-const memberRows = computed<ServerAccessMember[]>(() => social.members.value.map(toAccessMember))
-const filteredMembers = computed(() => {
-	const query = search.value.trim().toLowerCase()
-	return memberRows.value.filter((member) => {
-		if (roleFilter.value !== 'all' && member.role !== roleFilter.value) return false
-		return !query || member.user.username.toLowerCase().includes(query)
-	})
+const setupVisible = ref(!hasGroup.value)
+
+watch(hasGroup, (has, had) => {
+	if (has && !had) setupVisible.value = false
 })
+const tabs = [
+	{ label: 'Overview', href: 'overview' },
+	{ label: 'Roles', href: 'roles' },
+	{ label: 'Activity', href: 'activity' },
+]
+const activeTabIndex = computed(() => tabs.findIndex((tab) => tab.href === activeTab.value))
 const statusState = computed(() => connection.status.value?.state)
+const statusLabel = computed(() => {
+	if (connection.loading.value) return 'Checking'
+	if (!statusState.value) return 'Unknown'
+	return statusState.value === 'connected' ? 'Online' : 'Offline'
+})
 const statusClass = computed(() => {
 	if (connection.loading.value || !statusState.value) return 'bg-orange'
 	return statusState.value === 'connected' ? 'bg-green' : 'bg-red'
 })
-const statusTooltip = computed(() => {
-	if (connection.loading.value) return 'Checking Core status'
-	if (!statusState.value) return 'Core status unknown'
-	return statusState.value === 'connected' ? 'Core online' : 'Core offline'
-})
+const statusTooltip = computed(() => `Core ${statusLabel.value.toLowerCase()}`)
 
-async function searchUsers(query: string): Promise<ServerAccessInviteSuggestion[]> {
-	const normalized = query.trim().toLowerCase()
-	return mockInviteUsers.filter((user) => user.username.toLowerCase().includes(normalized))
+function selectTab(tab: { href: string }) {
+	if (tab.href === 'overview' || tab.href === 'roles' || tab.href === 'activity') {
+		activeTab.value = tab.href
+	}
 }
 
-async function grantAccess(payload: GrantServerAccessPayload) {
-	await social.inviteToGroup({
-		inviteeUserId: payload.user.id,
-		role: payload.role === 'editor' ? 'admin' : 'member',
-	})
-	if (payload.addAsFriend) await social.sendFriendRequest({ username: payload.user.username })
-}
-
-async function updateRole(member: ServerAccessMember, role: ServerAccessRole) {
-	if (member.isOwner) return
-	await social.setMemberRole(member.user.id, role === 'editor' ? 'admin' : 'member')
-}
-
-async function removeMember(member: ServerAccessMember) {
-	if (member.isOwner) return
-	await social.kickMember(member.user.id)
+function toggleDetailsPlacement() {
+	detailsPlacement.value = detailsPlacement.value === 'tabs' ? 'settings' : 'tabs'
 }
 </script>
 
@@ -100,89 +57,83 @@ async function removeMember(member: ServerAccessMember) {
 	<div class="relative flex min-h-full flex-col p-6">
 		<CoreOnboardingModal ref="onboardingModal" />
 		<CoreHostingSettingsModal ref="settingsModal" />
-		<CoreRolePermissionsModal ref="permissionsModal" />
 		<CoreSetupPanel
-			v-if="!hasGroup || setupVisible"
+			v-if="setupVisible"
 			@create="onboardingModal?.show('create')"
 			@connect="onboardingModal?.show('connect')"
 		/>
 		<div v-else class="flex w-full flex-1 flex-col gap-4">
-			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-				<div class="flex min-w-0 flex-col gap-1">
-					<div class="flex min-w-0 items-center gap-3">
-						<h1 class="m-0 truncate text-3xl font-semibold text-contrast">Your Core</h1>
-						<div class="mt-1 flex items-center gap-2 text-sm font-semibold text-secondary">
-							<span>Status</span>
+			<div class="flex items-start justify-between gap-4">
+				<div class="flex min-w-0 flex-wrap items-center gap-3">
+					<NavTabs
+						mode="local"
+						:links="tabs"
+						:active-index="activeTabIndex"
+						@tab-click="(_index, tab) => selectTab(tab)"
+					/>
+					<div v-if="detailsPlacement === 'tabs'" class="flex flex-wrap items-center gap-2">
+						<div
+							v-tooltip="statusTooltip"
+							class="flex h-10 items-center gap-2 text-sm font-semibold text-secondary transition-colors hover:text-contrast"
+						>
 							<span
-								v-tooltip="statusTooltip"
-								class="size-2.5 shrink-0 rounded-full"
-								:class="statusClass"
-								aria-label="Core status"
+								class="size-3 rounded-full"
+								:class="[statusClass, connection.loading.value ? 'animate-pulse' : '']"
+								aria-hidden="true"
 							/>
+							<span>{{ statusLabel }}</span>
 						</div>
 					</div>
 				</div>
-				<ButtonStyled>
-					<button @click="settingsModal?.show()">
-						<SettingsIcon />
-						Settings
-					</button>
-				</ButtonStyled>
-			</div>
-			<div class="flex flex-col gap-2 md:flex-row">
-				<StyledInput
-					v-model="search"
-					:icon="SearchIcon"
-					:placeholder="`Search ${memberRows.length} members...`"
-					wrapper-class="min-w-0 flex-1"
-					input-class="!h-10"
-					clearable
-				/>
-				<div class="flex shrink-0 flex-wrap items-center gap-2 md:flex-nowrap">
-					<Combobox
-						v-model="roleFilter"
-						:options="roleFilterOptions"
-						:display-value="selectedRoleFilterLabel"
-						trigger-class="min-w-[225px] !h-10 !min-h-10 !py-0"
-					>
-						<template #prefix><FilterIcon class="size-5 text-secondary" /></template>
-					</Combobox>
-					<ButtonStyled>
-						<button class="!h-10 w-full md:w-fit" @click="permissionsModal?.show()">
-							<ShieldIcon />
-							Manage roles
-						</button>
-					</ButtonStyled>
-					<ButtonStyled color="brand">
-						<button class="!h-10 w-full md:w-fit" @click="grantAccessModal?.show()">
-							<UserPlusIcon />
-							Invite friends
+				<div class="flex shrink-0 items-center gap-2">
+					<div v-if="detailsPlacement === 'settings'" class="hidden items-center gap-2 md:flex">
+						<div
+							v-tooltip="statusTooltip"
+							class="flex h-10 items-center gap-2 text-sm font-semibold text-secondary transition-colors hover:text-contrast"
+						>
+							<span
+								class="size-3 rounded-full"
+								:class="[statusClass, connection.loading.value ? 'animate-pulse' : '']"
+								aria-hidden="true"
+							/>
+							<span>{{ statusLabel }}</span>
+						</div>
+					</div>
+					<ButtonStyled circular>
+						<button
+							v-tooltip="'Settings'"
+							class="!h-12 !w-12"
+							aria-label="Settings"
+							@click="settingsModal?.show()"
+						>
+							<SettingsIcon class="!h-6 !w-6" />
 						</button>
 					</ButtonStyled>
 				</div>
 			</div>
-			<AccessTable
-				:members="filteredMembers"
-				:roles="roleOptions"
-				:user-link="(username) => `https://modrinth.com/user/${encodeURIComponent(username)}`"
-				:can-manage-users="social.canManage.value"
-				@update-role="updateRole"
-				@remove-member="removeMember"
-			/>
-			<GrantAccessModal
-				ref="grantAccessModal"
-				:members="memberRows"
-				:suggestions="mockInviteUsers"
-				:search-users="searchUsers"
-				@grant="grantAccess"
-			/>
+			<CoreAccessPanel v-if="activeTab === 'overview'" @manage-roles="activeTab = 'roles'" />
+			<CoreRolesPanel v-else-if="activeTab === 'roles'" />
+			<CoreActivityPanel v-else />
 		</div>
 		<Teleport to="body">
 			<div
-				v-if="hasGroup"
-				class="fixed z-20"
+				class="fixed z-20 flex items-center gap-2"
 				style="right: 1.25rem; bottom: 1.25rem"
 			>
+				<ButtonStyled circular>
+					<button
+						v-tooltip="
+							detailsPlacement === 'tabs'
+								? 'Move status next to settings'
+								: 'Move status next to tabs'
+						"
+						class="!h-10 !w-10"
+						aria-label="Move Core status"
+						@click="toggleDetailsPlacement"
+					>
+						<InfoIcon />
+					</button>
+				</ButtonStyled>
 				<ButtonStyled circular>
 					<button
 						v-tooltip="setupVisible ? 'Show dashboard' : 'Show setup'"

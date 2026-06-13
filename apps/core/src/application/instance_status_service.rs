@@ -4,8 +4,14 @@ use tokio::time::{sleep, Duration};
 use tracing::warn;
 
 use crate::{
-    application::{instance_service::InstanceError, installation_service::installation_dir, state::AppState},
-    domain::instance::{InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus, MemorySettings},
+    application::{
+        installation_service::installation_dir,
+        instance_service::InstanceError, state::AppState,
+    },
+    domain::instance::{
+        InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
+        MemorySettings,
+    },
     domain::server_installation::InstallationId,
     infrastructure::{
         minecraft::{
@@ -164,10 +170,7 @@ fn modular_files_present(args: &[String]) -> bool {
     for token in args {
         for part in token.split(sep) {
             let path = Path::new(part);
-            if part.ends_with(".jar")
-                && path.is_absolute()
-                && !path.is_file()
-            {
+            if part.ends_with(".jar") && path.is_absolute() && !path.is_file() {
                 return false;
             }
         }
@@ -200,10 +203,9 @@ async fn resolve_target_tokens(
             if record.installation_id.is_some() {
                 match rewrite_args_file(base_dir, &args, data_dir).await {
                     Some(path) => vec![format!("@{}", path.display())],
-                    None => vec![format!(
-                        "@{}",
-                        base_dir.join(&args).display()
-                    )],
+                    None => {
+                        vec![format!("@{}", base_dir.join(&args).display())]
+                    }
                 }
             } else {
                 // Legacy: relative args file resolves from the data dir (cwd).
@@ -253,13 +255,18 @@ pub(crate) async fn resolve_launch(
     let data_dir = PathBuf::from(&record.data_dir);
     let base_dir = launch_base_dir(state, record);
     let target = resolve_target_tokens(record, &base_dir, &data_dir).await;
-    let jvm_extra = record.jvm_args.as_deref().map(split_args).unwrap_or_default();
+    let jvm_extra = record
+        .jvm_args
+        .as_deref()
+        .map(split_args)
+        .unwrap_or_default();
     let server_extra = record
         .server_args
         .as_deref()
         .map(split_args)
         .unwrap_or_default();
-    let args = assemble_args(&record.memory, &jvm_extra, &target, &server_extra);
+    let args =
+        assemble_args(&record.memory, &jvm_extra, &target, &server_extra);
     (java, args)
 }
 

@@ -11,26 +11,41 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        social_models, social_service, social_sync_service, state::AppState,
-        sync_archive_service, sync_query_service,
+        access_service, social_lookup_service, social_models, social_service,
+        social_sync_service, state::AppState, sync_archive_service,
+        sync_query_service,
     },
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 pub async fn list_sync_profiles(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(
-        json!({ "profiles": social_service::list_sync_profiles(&state).await? }),
-    ))
+    let mut profiles = Vec::new();
+    for profile in social_service::list_sync_profiles(&state).await? {
+        if can_access_sync_profile(&state, &claims.sub, &profile).await {
+            profiles.push(profile);
+        }
+    }
+    Ok(Json(json!({ "profiles": profiles })))
 }
 
 pub async fn register_sync_profile(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<social_models::RegisterSyncProfileRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    require_profile_target_permission(
+        &state,
+        &claims.sub,
+        body.core_instance_id.as_deref(),
+        "server:settings",
+    )
+    .await?;
     Ok(Json(json!(
         social_sync_service::register_sync_profile(&state, body).await?
     )))
@@ -50,6 +65,13 @@ pub async fn create_sync_profile_from_mrpack(
             sync_enabled: None,
             notes: None,
         });
+    require_profile_target_permission(
+        &state,
+        &claims.sub,
+        req.core_instance_id.as_deref(),
+        "server:content",
+    )
+    .await?;
     Ok(Json(json!(
         social_sync_service::create_profile_from_mrpack(
             &state,
@@ -62,10 +84,17 @@ pub async fn create_sync_profile_from_mrpack(
 }
 
 pub async fn remove_sync_profile(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(profile_id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_profile_permission(
+        &state,
+        &claims.sub,
+        &profile_id,
+        "server:settings",
+    )
+    .await?;
     social_service::remove_sync_profile(&state, &profile_id).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -76,6 +105,13 @@ pub async fn publish_snapshot(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_profile_permission(
+        &state,
+        &claims.sub,
+        &profile_id,
+        "server:content",
+    )
+    .await?;
     let (archive, _, notes) = parse_mrpack_multipart(&mut multipart).await?;
     Ok(Json(json!(
         social_sync_service::publish_snapshot(
@@ -90,20 +126,34 @@ pub async fn publish_snapshot(
 }
 
 pub async fn check_sync_version(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(profile_id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_profile_permission(
+        &state,
+        &claims.sub,
+        &profile_id,
+        "server:view",
+    )
+    .await?;
     Ok(Json(json!(
         social_sync_service::check_version(&state, &profile_id).await?
     )))
 }
 
 pub async fn download_snapshot(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((profile_id, snapshot_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
+    require_sync_profile_permission(
+        &state,
+        &claims.sub,
+        &profile_id,
+        "server:content",
+    )
+    .await?;
     social_sync_service::ensure_snapshot_in_profile(
         &state,
         &profile_id,
@@ -132,23 +182,92 @@ pub async fn download_snapshot(
 }
 
 pub async fn list_snapshots(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(profile_id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_profile_permission(
+        &state,
+        &claims.sub,
+        &profile_id,
+        "server:view",
+    )
+    .await?;
     Ok(Json(
         json!({ "snapshots": sync_query_service::list_snapshots(&state, &profile_id).await? }),
     ))
 }
 
 pub async fn list_sync_events(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(profile_id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_profile_permission(
+        &state,
+        &claims.sub,
+        &profile_id,
+        "server:view",
+    )
+    .await?;
     Ok(Json(
         json!({ "events": sync_query_service::list_events(&state, &profile_id).await? }),
     ))
+}
+
+async fn can_access_sync_profile(
+    state: &Arc<AppState>,
+    user_id: &str,
+    profile: &social_models::SyncProfile,
+) -> bool {
+    if let Some(instance_id) = profile.core_instance_id.as_deref() {
+        access_service::require_instance_permission(
+            state,
+            user_id,
+            instance_id,
+            "server:view",
+        )
+        .await
+        .is_ok()
+    } else {
+        access_service::require_core_manager(state, user_id)
+            .await
+            .is_ok()
+    }
+}
+
+async fn require_sync_profile_permission(
+    state: &Arc<AppState>,
+    user_id: &str,
+    profile_id: &str,
+    permission: &str,
+) -> Result<(), ApiError> {
+    let profile =
+        social_lookup_service::get_sync_profile(state, profile_id).await?;
+    require_profile_target_permission(
+        state,
+        user_id,
+        profile.core_instance_id.as_deref(),
+        permission,
+    )
+    .await
+}
+
+async fn require_profile_target_permission(
+    state: &Arc<AppState>,
+    user_id: &str,
+    core_instance_id: Option<&str>,
+    permission: &str,
+) -> Result<(), ApiError> {
+    if let Some(instance_id) = core_instance_id {
+        require_instance_permission(state, user_id, instance_id, permission)
+            .await
+    } else {
+        access_service::require_core_manager(state, user_id)
+            .await
+            .map(|_| ())
+            .map_err(|error| ApiError::Forbidden(error.to_string()))
+    }
 }
 
 async fn parse_mrpack_multipart(

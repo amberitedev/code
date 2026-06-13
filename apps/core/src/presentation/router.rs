@@ -16,7 +16,7 @@ use tower_http::{
 use crate::{
     application::state::AppState,
     presentation::handlers::{
-        backups, console, diagnostics, events, fs, installations,
+        access, backups, console, diagnostics, events, fs, installations,
         instance_control, instances, logs, macros, modpack, mods, players,
         properties, rcon, relay, setup, social, stats, sync, tasks,
     },
@@ -50,8 +50,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/core/members", get(social::list_members))
         .route("/core/members", post(social::upsert_member))
         .route("/core/members/:user_id", delete(social::remove_member))
+        .route("/core/access", get(access::list_core_access))
+        .route("/core/access", post(access::grant_core_access))
+        .route("/core/access/:user_id", patch(access::update_core_access))
+        .route("/core/access/:user_id", delete(access::remove_core_access))
         .route("/core/bans", get(social::list_bans))
         .route("/core/bans", post(social::ban_member))
+        .route("/activity", get(access::list_activity))
         .route("/sync/profiles", get(sync::list_sync_profiles))
         .route("/sync/profiles", post(sync::register_sync_profile))
         .route(
@@ -92,9 +97,26 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id", patch(instances::patch_instance))
         .route("/instances/:id", delete(instances::delete_instance))
         .route("/instances/:id/startup", get(instances::get_startup))
+        .route("/instances/:id/access", get(access::list_instance_access))
+        .route("/instances/:id/access", post(access::grant_instance_access))
+        .route(
+            "/instances/:id/access/:user_id",
+            patch(access::update_instance_access),
+        )
+        .route(
+            "/instances/:id/access/:user_id",
+            delete(access::remove_instance_access),
+        )
+        .route(
+            "/instances/:id/activity",
+            get(access::list_instance_activity),
+        )
         .route("/installations", get(installations::list_installations))
         .route("/installations/:id", get(installations::get_installation))
-        .route("/installations/:id", delete(installations::delete_installation))
+        .route(
+            "/installations/:id",
+            delete(installations::delete_installation),
+        )
         // Instance lifecycle
         .route("/instances/:id/start", post(instance_control::start))
         .route("/instances/:id/stop", post(instance_control::stop))
@@ -181,10 +203,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         // Players (whitelist / ops / bans / kick — RCON-backed mutations)
         .route("/instances/:id/players", get(players::list_players_handler))
-        .route(
-            "/instances/:id/players/kick",
-            post(players::kick_handler),
-        )
+        .route("/instances/:id/players/kick", post(players::kick_handler))
         .route("/instances/:id/players/op", post(players::op_handler))
         .route("/instances/:id/players/deop", post(players::deop_handler))
         .route(
@@ -263,36 +282,42 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/tasks", get(tasks::list_handler))
         .route("/instances/:id/tasks", post(tasks::create_handler))
         .route("/instances/:id/tasks/:task_id", get(tasks::get_handler))
-        .route("/instances/:id/tasks/:task_id", patch(tasks::update_handler))
-        .route("/instances/:id/tasks/:task_id", delete(tasks::delete_handler))
+        .route(
+            "/instances/:id/tasks/:task_id",
+            patch(tasks::update_handler),
+        )
+        .route(
+            "/instances/:id/tasks/:task_id",
+            delete(tasks::delete_handler),
+        )
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
 }
 
 fn cors_layer(state: &AppState) -> CorsLayer {
-	if state.config.dev_mode || state.config.allowed_origin == "*" {
-		return CorsLayer::new()
-			.allow_origin(Any)
-			.allow_methods(Any)
-			.allow_headers(Any);
-	}
+    if state.config.dev_mode || state.config.allowed_origin == "*" {
+        return CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+    }
 
-	let origin = state
-		.config
-		.allowed_origin
-		.parse::<HeaderValue>()
-		.unwrap_or_else(|_| HeaderValue::from_static("https://amberite.dev"));
+    let origin = state
+        .config
+        .allowed_origin
+        .parse::<HeaderValue>()
+        .unwrap_or_else(|_| HeaderValue::from_static("https://amberite.dev"));
 
-	CorsLayer::new()
-		.allow_origin(origin)
-		.allow_methods([
-			Method::GET,
-			Method::POST,
-			Method::PUT,
-			Method::PATCH,
-			Method::DELETE,
-		])
-		.allow_headers([AUTHORIZATION, CONTENT_TYPE])
-		.allow_credentials(true)
+    CorsLayer::new()
+        .allow_origin(origin)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+        .allow_credentials(true)
 }

@@ -20,7 +20,10 @@ use crate::{
         state::AppState,
     },
     domain::instance::InstanceId,
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 #[derive(Deserialize)]
@@ -106,12 +109,14 @@ impl From<FsError> for ApiError {
 
 /// GET /instances/:id/fs — list directory contents (paginated).
 pub async fn list_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<ListQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     let path = q.path.as_deref().unwrap_or("");
     let listing = list_directory(
         &state,
@@ -127,12 +132,14 @@ pub async fn list_handler(
 
 /// GET /instances/:id/fs/download — download a single file.
 pub async fn download_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<DownloadQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     let (file, filename) = download_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
@@ -155,12 +162,14 @@ pub async fn download_handler(
 
 /// DELETE /instances/:id/fs — delete a file or directory.
 pub async fn delete_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<DeleteBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     delete_entry(&state, &id, &body.path, body.recursive.unwrap_or(false))
         .await
         .map_err(ApiError::from)?;
@@ -169,13 +178,15 @@ pub async fn delete_handler(
 
 /// POST /instances/:id/fs/upload — upload a file into the instance directory.
 pub async fn upload_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<UploadQuery>,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     let target_dir = q.path.as_deref().unwrap_or("");
 
     while let Some(field) = multipart
@@ -198,12 +209,14 @@ pub async fn upload_handler(
 
 /// GET /instances/:id/fs/read — read a file as raw bytes.
 pub async fn read_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     let file = read_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
@@ -223,13 +236,15 @@ pub async fn read_handler(
 
 /// PUT /instances/:id/fs/write — write raw bytes to a file (creates or overwrites).
 pub async fn write_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     write_file(&state, &id, &q.path, body)
         .await
         .map_err(ApiError::from)?;
@@ -238,12 +253,14 @@ pub async fn write_handler(
 
 /// POST /instances/:id/fs/create — create an empty file.
 pub async fn create_file_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     create_file(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
@@ -252,12 +269,14 @@ pub async fn create_file_handler(
 
 /// POST /instances/:id/fs/mkdir — create a directory (and parents).
 pub async fn mkdir_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     create_dir(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
@@ -266,12 +285,14 @@ pub async fn mkdir_handler(
 
 /// PUT /instances/:id/fs/move — move or rename a file/directory.
 pub async fn move_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<MoveQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     move_entry(&state, &id, &q.from, &q.to)
         .await
         .map_err(ApiError::from)?;
@@ -280,13 +301,15 @@ pub async fn move_handler(
 
 /// POST /instances/:id/fs/unzip — extract an archive.
 pub async fn unzip_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<UnzipBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     unzip_file(
         &state,
         &id,
@@ -300,12 +323,14 @@ pub async fn unzip_handler(
 
 /// POST /instances/:id/fs/zip — zip a list of files.
 pub async fn zip_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<ZipBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     zip_files(&state, &id, body.sources, &body.dest)
         .await
         .map_err(ApiError::from)?;
@@ -314,12 +339,14 @@ pub async fn zip_handler(
 
 /// POST /instances/:id/fs/copy — copy files to a destination directory.
 pub async fn copy_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CopyBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     copy_files(&state, &id, body.sources, &body.dest)
         .await
         .map_err(ApiError::from)?;
@@ -328,12 +355,14 @@ pub async fn copy_handler(
 
 /// GET /instances/:id/fs/url — issue a one-time download token.
 pub async fn url_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     let resp = get_download_url(&state, &id, &q.path)
         .await
         .map_err(ApiError::from)?;
@@ -342,12 +371,14 @@ pub async fn url_handler(
 
 /// GET /instances/:id/fs/search — search files by name.
 pub async fn search_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     Query(q): Query<SearchQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:files")
+        .await?;
     let base = q.path.as_deref().unwrap_or("");
     let results =
         search_files(&state, &id, base, &q.query, q.recursive.unwrap_or(false))

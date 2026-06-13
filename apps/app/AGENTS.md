@@ -10,23 +10,23 @@ Desktop app package. This is the Tauri shell that embeds `apps/app-frontend` and
 
 ## Read These First
 
-| File | Why it matters |
-| --- | --- |
-| `apps/app-frontend/AGENTS.md` | Frontend UI rules and file structure |
-| `packages/ui/AGENTS.md` | Shared UI reuse rules |
-| `packages/amberite-api/AGENTS.md` | Amberite API package guidance |
-| `AGENTS.md` | Repo-wide rules and desktop app constraints |
+| File                              | Why it matters                              |
+| --------------------------------- | ------------------------------------------- |
+| `apps/app-frontend/AGENTS.md`     | Frontend UI rules and file structure        |
+| `packages/ui/AGENTS.md`           | Shared UI reuse rules                       |
+| `packages/amberite-api/AGENTS.md` | Amberite API package guidance               |
+| `AGENTS.md`                       | Repo-wide rules and desktop app constraints |
 
 ## Internal Dependencies
 
-| Dependency | Role here | Guidance |
-| --- | --- | --- |
-| `@modrinth/app-frontend` | Vue frontend rendered inside the Tauri shell | Read `apps/app-frontend/AGENTS.md` |
-| `@modrinth/app-lib` | Native Rust-side app logic, data, launcher behavior, and local integrations | No package AGENTS file; do not modify unless explicitly asked by repo rules |
-| `@modrinth/daedalus` | Shared launcher/backend support crate used by the app stack | No package AGENTS file |
-| `@modrinth/ui` | Shared component and layout system used by the frontend | Read `packages/ui/AGENTS.md` |
-| `@amberite/amberite-api` | Shared Amberite communication layer used across app/core integrations | Read `packages/amberite-api/AGENTS.md` |
-| `@modrinth/api-client` | Shared Modrinth API client used by frontend-side integrations | Read `packages/api-client/AGENTS.md` |
+| Dependency               | Role here                                                                   | Guidance                                                                    |
+| ------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `@modrinth/app-frontend` | Vue frontend rendered inside the Tauri shell                                | Read `apps/app-frontend/AGENTS.md`                                          |
+| `@modrinth/app-lib`      | Native Rust-side app logic, data, launcher behavior, and local integrations | No package AGENTS file; do not modify unless explicitly asked by repo rules |
+| `@modrinth/daedalus`     | Shared launcher/backend support crate used by the app stack                 | No package AGENTS file                                                      |
+| `@modrinth/ui`           | Shared component and layout system used by the frontend                     | Read `packages/ui/AGENTS.md`                                                |
+| `@amberite/amberite-api` | Shared Amberite communication layer used across app/core integrations       | Read `packages/amberite-api/AGENTS.md`                                      |
+| `@modrinth/api-client`   | Shared Modrinth API client used by frontend-side integrations               | Read `packages/api-client/AGENTS.md`                                        |
 
 ## File Structure
 
@@ -53,6 +53,7 @@ apps/app/
 ## General Rules
 
 - Keep changes scoped. Most UI rendering belongs in `apps/app-frontend`; this package is mainly shell, native integration, permissions, and command wiring.
+- All reusable Copal logic must live in `@amberite/amberite-api`; app code should call that bridge instead of composing Core workflows locally.
 - When changing Tauri commands, check both the Rust module in `src/api/` and any capability file that grants access to it.
 - Be careful with capability changes: they define what the webview is allowed to do, including network access, filesystem scope, and plugin usage.
 - Avoid broadening HTTP allowlists or filesystem scope unless the task clearly requires it.

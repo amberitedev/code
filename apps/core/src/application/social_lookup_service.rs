@@ -7,7 +7,7 @@ use crate::application::{
 
 pub async fn ensure_metadata(state: &Arc<AppState>) -> Result<(), SocialError> {
     let now = now();
-    sqlx::query("INSERT OR IGNORE INTO core_metadata (id, name, updated_at) VALUES (1, 'Amberite Core', ?)")
+    sqlx::query("INSERT OR IGNORE INTO core_metadata (id, name, updated_at) VALUES (1, 'Copal', ?)")
 		.bind(now)
 		.execute(&state.pool)
 		.await?;

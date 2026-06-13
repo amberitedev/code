@@ -1,4 +1,4 @@
-# Amberite Core — Diagnostic Runner
+# Copal — Diagnostic Runner
 # Usage: .\run_diag.ps1 -Token <jwt> [-Url http://localhost:16662]
 
 param(

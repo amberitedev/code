@@ -1,6 +1,6 @@
 # Networking & Remote Access — Design Notes (future work)
 
-Captured design ideas for exposing self-hosted Amberite Core instances to the
+Captured design ideas for exposing self-hosted Copal instances to the
 internet. None of this is implemented yet; it records intent and trade-offs so
 we don't lose the reasoning. See the TODOs in
 `src/application/instance_status_service.rs` (`start_instance`).

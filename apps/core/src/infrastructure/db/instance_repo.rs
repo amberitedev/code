@@ -366,7 +366,11 @@ impl InstanceStore for InstanceRepo {
         Ok(result.rows_affected())
     }
 
-    async fn add_uptime(&self, id: &InstanceId, seconds: u64) -> Result<(), StoreError> {
+    async fn add_uptime(
+        &self,
+        id: &InstanceId,
+        seconds: u64,
+    ) -> Result<(), StoreError> {
         let secs = seconds as i64;
         let id_str = id.to_string();
         sqlx::query(

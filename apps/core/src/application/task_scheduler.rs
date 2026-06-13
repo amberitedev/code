@@ -49,7 +49,14 @@ async fn tick(state: &Arc<AppState>) -> Result<(), sqlx::Error> {
             task.task_type
         );
 
-        if let Err(e) = execute_task(state, &task.instance_id, &task.task_type, task.payload_json()).await {
+        if let Err(e) = execute_task(
+            state,
+            &task.instance_id,
+            &task.task_type,
+            task.payload_json(),
+        )
+        .await
+        {
             tracing::error!(
                 "scheduled task {} for instance {} failed: {e}",
                 task.id,

@@ -1,5 +1,5 @@
 /**
- * Integration tests for CoreApiClient against a live Amberite Core process.
+ * Integration tests for CoreApiClient against a live Copal process.
  *
  * Global setup (src/test/global-setup.ts) ensures Core is running before these
  * tests execute. AMBERITE_DEV defaults to true in debug builds, so no JWT is

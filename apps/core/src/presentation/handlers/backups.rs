@@ -17,7 +17,10 @@ use crate::{
         state::AppState,
     },
     domain::instance::InstanceId,
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser,
+    },
 };
 
 fn validate_id(id: &str) -> Result<(), ApiError> {
@@ -70,11 +73,13 @@ pub struct ScheduleBody {
 
 /// GET /instances/:id/backups
 pub async fn list_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     let rows = list_backups(&state, &id).await.map_err(ApiError::from)?;
     let backups: Vec<Value> = rows
         .into_iter()
@@ -98,12 +103,14 @@ pub async fn list_handler(
 
 /// POST /instances/:id/backups
 pub async fn create_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     let backup = create_backup(&state, &id, "manual", body.name)
         .await
         .map_err(ApiError::from)?;
@@ -120,11 +127,13 @@ pub async fn create_handler(
 
 /// DELETE /instances/:id/backups/:bid
 pub async fn delete_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, bid)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     delete_backup(&state, &id, &bid)
         .await
         .map_err(ApiError::from)?;
@@ -133,12 +142,14 @@ pub async fn delete_handler(
 
 /// POST /instances/:id/backups/delete-many
 pub async fn delete_many_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<DeleteManyBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     let deleted = delete_many_backups(&state, &id, &body.ids)
         .await
         .map_err(ApiError::from)?;
@@ -147,12 +158,14 @@ pub async fn delete_many_handler(
 
 /// PATCH /instances/:id/backups/:bid/lock
 pub async fn lock_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, bid)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<LockBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     lock_backup(&state, &id, &bid, body.locked)
         .await
         .map_err(ApiError::from)?;
@@ -161,11 +174,13 @@ pub async fn lock_handler(
 
 /// POST /instances/:id/backups/:bid/restore
 pub async fn restore_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, bid)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     restore_backup(&state, &id, &bid)
         .await
         .map_err(ApiError::from)?;
@@ -174,11 +189,13 @@ pub async fn restore_handler(
 
 /// GET /instances/:id/backups/schedule
 pub async fn get_schedule_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     let schedule = get_backup_schedule(&state, &id)
         .await
         .map_err(ApiError::from)?;
@@ -187,12 +204,14 @@ pub async fn get_schedule_handler(
 
 /// PUT /instances/:id/backups/schedule
 pub async fn set_schedule_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<ScheduleBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     set_backup_schedule(
         &state,
         &id,
@@ -207,12 +226,14 @@ pub async fn set_schedule_handler(
 
 /// PATCH /instances/:id/backups/:bid — rename a backup.
 pub async fn rename_handler(
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Path((id, bid)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<RenameBody>,
 ) -> Result<Json<Value>, ApiError> {
     validate_id(&id)?;
+    require_instance_permission(&state, &claims.sub, &id, "server:backups")
+        .await?;
     rename_backup(&state, &id, &bid, body.name)
         .await
         .map_err(ApiError::from)?;

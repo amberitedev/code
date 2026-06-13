@@ -3,7 +3,7 @@ import { SettingsLabel, StyledInput, Toggle, UnsavedChangesPopup } from '@modrin
 import { useStorage } from '@vueuse/core'
 import { computed, ref } from 'vue'
 
-const savedSettings = useStorage('amberite-core-advanced-settings', {
+const savedSettings = useStorage('copal-advanced-settings', {
 	auditRetentionDays: 90,
 	autoApproveFriends: false,
 	requireKnownAccounts: true,

@@ -21,7 +21,8 @@ use axum::{
 };
 
 use crate::{
-    application::state::AppState, infrastructure::auth::jwks::Claims,
+    application::{access_service, state::AppState},
+    infrastructure::auth::jwks::Claims,
     presentation::error::ApiError,
 };
 
@@ -46,9 +47,22 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Dev mode: skip JWT entirely and grant owner access.
+        // Dev mode: skip JWT validation but honor explicit dev identities.
         if state.config.dev_mode {
-            return Ok(Self(dev_claims()));
+            let mut claims = dev_claims();
+            if let Some(token) = bearer_token(&parts.headers) {
+                if let Some(user_id) = token.strip_prefix("dev:") {
+                    if !user_id.trim().is_empty() {
+                        claims.sub = user_id.trim().to_string();
+                    }
+                }
+            }
+            if claims.sub != "dev-owner" {
+                access_service::require_any_member(state, &claims.sub)
+                    .await
+                    .map_err(|e| ApiError::Forbidden(e.to_string()))?;
+            }
+            return Ok(Self(claims));
         }
 
         let token = bearer_token(&parts.headers).ok_or_else(|| {
@@ -67,14 +81,9 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .await
             .map_err(|e| ApiError::Unauthorized(e.to_string()))?;
 
-        let owner_user_id = state.owner_user_id().await.ok_or_else(|| {
-            ApiError::Unauthorized("Core is not paired".into())
-        })?;
-        if claims.sub != owner_user_id {
-            return Err(ApiError::Forbidden(
-                "token does not belong to this Core owner".into(),
-            ));
-        }
+        access_service::require_any_member(state, &claims.sub)
+            .await
+            .map_err(|e| ApiError::Forbidden(e.to_string()))?;
 
         Ok(Self(claims))
     }

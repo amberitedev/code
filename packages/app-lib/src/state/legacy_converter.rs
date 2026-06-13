@@ -311,6 +311,8 @@ where
                     },
                     launcher_feature_version: LauncherFeatureVersion::None,
                     profile_type: ProfileType::Client,
+                    core_instance_id: None,
+                    server_manifest_json: None,
                     name: profile.metadata.name,
                     icon_path: profile.metadata.icon,
                     game_version: profile.metadata.game_version,

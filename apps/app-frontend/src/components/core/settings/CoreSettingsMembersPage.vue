@@ -3,7 +3,7 @@ import { Combobox, SettingsLabel, Toggle, UnsavedChangesPopup } from '@modrinth/
 import { useStorage } from '@vueuse/core'
 import { computed, ref } from 'vue'
 
-const savedSettings = useStorage('amberite-core-member-settings', {
+const savedSettings = useStorage('copal-member-settings', {
 	defaultRole: 'member',
 	allowMemberInvites: false,
 	requireInviteApproval: true,

@@ -36,6 +36,8 @@ pub struct Profile {
     pub launcher_feature_version: LauncherFeatureVersion,
     #[serde(default)]
     pub profile_type: ProfileType,
+    pub core_instance_id: Option<String>,
+    pub server_manifest_json: Option<serde_json::Value>,
 
     pub name: String,
     pub icon_path: Option<String>,
@@ -325,6 +327,8 @@ struct ProfileQueryResult {
     path: String,
     install_stage: String,
     profile_type: String,
+    core_instance_id: Option<String>,
+    server_manifest_json: Option<serde_json::Value>,
     name: String,
     icon_path: Option<String>,
     game_version: String,
@@ -364,6 +368,8 @@ impl TryFrom<ProfileQueryResult> for Profile {
                 &x.launcher_feature_version,
             ),
             profile_type: ProfileType::from_str(&x.profile_type),
+            core_instance_id: x.core_instance_id,
+            server_manifest_json: x.server_manifest_json,
             name: x.name,
             icon_path: x.icon_path,
             game_version: x.game_version,
@@ -430,7 +436,8 @@ macro_rules! select_profiles_with_predicate {
         sqlx::query_as::<_, ProfileQueryResult>(
             &(r#"
             SELECT
-                path, install_stage, launcher_feature_version, profile_type, name, icon_path,
+                path, install_stage, launcher_feature_version, profile_type, core_instance_id,
+                json(server_manifest_json) as server_manifest_json, name, icon_path,
                 game_version, protocol_version, mod_loader, mod_loader_version,
                 json(groups) as groups,
                 linked_project_id, linked_version_id, locked,
@@ -548,6 +555,11 @@ impl Profile {
 
         let extra_launch_args = serde_json::to_string(&self.extra_launch_args)?;
         let custom_env_vars = serde_json::to_string(&self.custom_env_vars)?;
+        let server_manifest_json = self
+            .server_manifest_json
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
 
         sqlx::query(
             "
@@ -561,7 +573,8 @@ impl Profile {
                 override_java_path, override_extra_launch_args, override_custom_env_vars,
                 override_mc_memory_max, override_mc_force_fullscreen, override_mc_game_resolution_x, override_mc_game_resolution_y,
                 override_hook_pre_launch, override_hook_wrapper, override_hook_post_exit,
-                protocol_version, launcher_feature_version, profile_type
+                protocol_version, launcher_feature_version, profile_type,
+                core_instance_id, server_manifest_json
             )
             VALUES (
                 $1, $2, $3, $4,
@@ -573,7 +586,8 @@ impl Profile {
                 $17, jsonb($18), jsonb($19),
                 $20, $21, $22, $23,
                 $24, $25, $26,
-                $27, $28, $29
+                $27, $28, $29,
+                $30, jsonb($31)
             )
             ON CONFLICT (path) DO UPDATE SET
                 install_stage = $2,
@@ -611,7 +625,9 @@ impl Profile {
 
                 protocol_version = $27,
                 launcher_feature_version = $28,
-                profile_type = $29
+                profile_type = $29,
+                core_instance_id = $30,
+                server_manifest_json = jsonb($31)
             ",
         )
             .bind(&self.path)
@@ -643,6 +659,8 @@ impl Profile {
             .bind(self.protocol_version)
             .bind(launcher_feature_version)
             .bind(profile_type)
+            .bind(&self.core_instance_id)
+            .bind(server_manifest_json)
             .execute(exec)
             .await?;
 

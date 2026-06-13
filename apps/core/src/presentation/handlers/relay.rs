@@ -8,9 +8,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
-    api::{DeliveryStatus, MessageId, RelayStore, SqliteRelayStore, StoredMessage},
+    api::{
+        DeliveryStatus, MessageId, RelayStore, SqliteRelayStore, StoredMessage,
+    },
     application::state::AppState,
-    presentation::{error::ApiError, extractors::AuthUser},
+    presentation::{
+        authz::require_core_member, error::ApiError, extractors::AuthUser,
+    },
 };
 
 #[derive(Deserialize)]
@@ -37,10 +41,11 @@ fn store(state: &Arc<AppState>) -> SqliteRelayStore {
 }
 
 pub async fn publish(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<PublishRelayMessage>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     let now = chrono::Utc::now();
     let ttl_ms = body.ttl_ms.unwrap_or(5 * 60 * 1000).max(1000);
     let expires_at = now + chrono::Duration::milliseconds(ttl_ms);
@@ -70,10 +75,11 @@ pub async fn publish(
 }
 
 pub async fn pending(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Path(recipient_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     let messages = store(&state)
         .pending(&recipient_id)
         .await
@@ -83,10 +89,11 @@ pub async fn pending(
 }
 
 pub async fn status(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     let message = store(&state)
         .get(&MessageId::new(id))
         .await
@@ -96,11 +103,12 @@ pub async fn status(
 }
 
 pub async fn ack(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<AckRelayMessage>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     store(&state)
         .mark(
             &MessageId::new(id),
@@ -116,11 +124,12 @@ pub async fn ack(
 }
 
 pub async fn complete(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<AckRelayMessage>,
 ) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     store(&state)
         .mark(
             &MessageId::new(id),

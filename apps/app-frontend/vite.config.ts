@@ -7,23 +7,33 @@ import svgLoader from 'vite-svg-loader'
 import tauriConf from '../app/tauri.conf.json'
 
 const projectRootDir = resolve(__dirname)
+const workspaceRootDir = resolve(projectRootDir, '../..')
 const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
+const devPort = Number(process.env.AMBERITE_APP_DEV_PORT ?? 1420)
 
-// Load .env from app-lib manually instead of using Vite's envDir, which would auto-load .env.local and override values
-const envFilePath = resolve(appLibEnvDir, '.env')
-if (existsSync(envFilePath)) {
-	for (const line of readFileSync(envFilePath, 'utf-8').split('\n')) {
-		const trimmed = line.trim()
-		if (!trimmed || trimmed.startsWith('#')) continue
-		const eqIndex = trimmed.indexOf('=')
-		if (eqIndex === -1) continue
-		const key = trimmed.slice(0, eqIndex)
-		const value = trimmed.slice(eqIndex + 1)
-		if (!(key in process.env)) {
-			process.env[key] = value
+function loadEnvFile(envFilePath: string) {
+	if (existsSync(envFilePath)) {
+		for (const line of readFileSync(envFilePath, 'utf-8').split('\n')) {
+			const withoutComment = line.split('#')[0]?.trim()
+			if (!withoutComment) continue
+			const eqIndex = withoutComment.indexOf('=')
+			if (eqIndex === -1) continue
+			const key = withoutComment.slice(0, eqIndex)
+			const value = withoutComment.slice(eqIndex + 1)
+			if (!(key in process.env)) {
+				process.env[key] = value
+			}
 		}
 	}
+}
+
+// Load .env from app-lib manually instead of using Vite's envDir, which would auto-load .env.local and override values
+loadEnvFile(resolve(appLibEnvDir, '.env'))
+loadEnvFile(resolve(workspaceRootDir, '.env.local'))
+
+if (!process.env.VITE_CONVEX_URL && process.env.CONVEX_URL) {
+	process.env.VITE_CONVEX_URL = process.env.CONVEX_URL
 }
 
 // https://vitejs.dev/config/
@@ -74,7 +84,7 @@ export default defineConfig({
 	clearScreen: false,
 	// tauri expects a fixed port, fail if that port is not available
 	server: {
-		port: 1420,
+		port: devPort,
 		strictPort: true,
 		headers: {
 			'content-security-policy': Object.entries(tauriConf.app.security.csp)
@@ -82,7 +92,7 @@ export default defineConfig({
 					// An additional websocket connect-src is required for Vite dev tools to work
 					if (directive === 'connect-src') {
 						sources = Array.isArray(sources) ? sources : [sources]
-						sources.push('ws://localhost:1420')
+						sources.push(`ws://localhost:${devPort}`)
 					}
 
 					return Array.isArray(sources)

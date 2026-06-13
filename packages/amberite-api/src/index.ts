@@ -46,6 +46,16 @@ export type {
 	CoreFsOperationKind,
 	CoreMetadata,
 	CoreMember,
+	CoreAccessRole,
+	CorePermissionPreset,
+	CoreAccessMember,
+	CoreAccessViewer,
+	CoreAccessResponse,
+	CoreAccessUpsertBody,
+	CoreAccessPatchBody,
+	CoreActivityLogEntry,
+	CoreActivityLogQuery,
+	CoreActivityLogResponse,
 	CoreSyncProfile,
 } from './types'
 
@@ -140,3 +150,4 @@ export type {
 } from './pipeline-types'
 export { startMicrosoftLogin, completeMicrosoftLogin, type AuthSession } from './auth'
 export { drainQueue } from './drain'
+export * from './logic'

@@ -287,7 +287,7 @@ import { injectServerSettings } from '../server-settings'
 
 /**
  * Forked verbatim from the hosting server-settings Properties page. Backend swap:
- * Amberite Core returns a flat `server.properties` map keyed by the raw on-disk
+ * Copal returns a flat `server.properties` map keyed by the raw on-disk
  * names (hyphenated). The verbatim UI keys everything with underscores, so reads
  * normalize `-` -> `_` and writes denormalize `_` -> `-`. Core's PATCH is a flat
  * `Record<string, string>`, so the known/custom split is collapsed to one map.

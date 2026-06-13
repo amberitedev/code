@@ -41,7 +41,7 @@ async function vanilla() {
 		},
 	})
 	await request('PATCH', `/instances/${instance.id}/properties`, {
-		motd: 'Amberite Core live test',
+		motd: 'Copal live test',
 		'online-mode': 'false',
 	})
 	await waitForInstall(instance.id)

@@ -23,8 +23,8 @@ mod store;
 
 pub use audience::{Audience, Endpoint};
 pub use connection::{
-    ConnectionHandshakeRequest, ConnectionHandshakeResponse, ConnectionRejectReason,
-    HANDSHAKE_PROTOCOL,
+    ConnectionHandshakeRequest, ConnectionHandshakeResponse,
+    ConnectionRejectReason, HANDSHAKE_PROTOCOL,
 };
 pub use distributor::{Distribution, Distributor};
 pub use envelope::Envelope;
@@ -33,7 +33,8 @@ pub use ids::{CoreId, GroupId, InstanceId, MessageId, UserId};
 pub use kind::MessageKind;
 pub use message::Message;
 pub use messages::{
-    CorePairingRegistration, FriendInvite, InstanceModsChanged, InstanceSyncChanged, ModRef,
+    CorePairingRegistration, FriendInvite, InstanceModsChanged,
+    InstanceSyncChanged, ModRef,
 };
 pub use policy::{Ack, Durability, Route};
 pub use relay_store::{SqliteRelayStore, StoredMessage};

@@ -1,16 +1,17 @@
 import type {
 	CoreChangeVersionBody,
+	ConnectionStatus,
 	CoreInstance,
 	CoreInstanceStatus,
 	CoreStats,
 	CoreWsConnection,
 } from '@amberite/amberite-api'
-import { CoreOfflineError } from '@amberite/amberite-api'
+import { CoreApiError, CoreOfflineError } from '@amberite/amberite-api'
 import type { Archon } from '@modrinth/api-client'
 import { injectNotificationManager } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import { useQueryClient } from '@tanstack/vue-query'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, isRef, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'
@@ -25,19 +26,23 @@ import {
 import { provideCoreServerRuntime } from './core-server-providers'
 import type { ServerSettingsTabId } from './settings/tabs'
 
-export function useCoreServerRuntime(instanceIdOverride?: string) {
+export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | null | undefined>) {
 	const route = useRoute()
 	const core = useCoreClient()
 	const queryClient = useQueryClient()
 	const { addNotification, handleError } = injectNotificationManager()
 
-	const instanceId = computed(() => instanceIdOverride ?? (route.params.id as string))
+	const instanceId = computed(() => {
+		if (isRef(instanceIdOverride)) return instanceIdOverride.value ?? (route.params.id as string)
+		return instanceIdOverride ?? (route.params.id as string)
+	})
 	const rawInstance = ref<CoreInstance | null>(null)
 	const server = computed(() => (rawInstance.value ? toHostingServer(rawInstance.value) : null))
 	const loadError = ref<Error | null>(null)
 	const statsData = ref<CoreStats | null>(null)
 	const stats = ref<Stats>(toStats(null))
 	const powerState = ref<Archon.Websocket.v0.PowerState>('stopped')
+	const coreStatus = ref<ConnectionStatus | null>(core.monitor?.currentStatus ?? null)
 	const isConnected = ref(false)
 	const isWsAuthIncorrect = ref(false)
 	const isSyncingContent = ref(false)
@@ -49,6 +54,13 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 	let socketListeners: Array<() => void> = []
 	let statsTimer: ReturnType<typeof setInterval> | null = null
 	let serverTimer: ReturnType<typeof setInterval> | null = null
+	let unsubscribeCoreStatus: (() => void) | undefined
+
+	const isCoreConnected = computed(() => coreStatus.value?.state === 'connected')
+
+	function setOfflineError() {
+		loadError.value = new Error('Core is currently offline. Start Core to manage this server.')
+	}
 
 	const cachedInstance = queryClient.getQueryData<CoreInstance>(['core-server', instanceId.value])
 	if (cachedInstance) {
@@ -57,17 +69,25 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 	}
 
 	async function refreshServer() {
+		if (!isCoreConnected.value) {
+			setOfflineError()
+			return
+		}
+
 		try {
-			loadError.value = null
 			rawInstance.value = await core.getInstance(instanceId.value)
 			powerState.value = toHostingPowerState(rawInstance.value.status)
 			queryClient.setQueryData(['core-server', instanceId.value], rawInstance.value)
+			loadError.value = null
 		} catch (error) {
 			const isOffline =
 				error instanceof CoreOfflineError ||
 				(error instanceof Error && /offline|network|fetch|connection/i.test(error.message))
-			if (isOffline) {
-				loadError.value = new Error('Core is currently offline. Start Core to manage this server.')
+			if (error instanceof CoreApiError && error.status === 404) {
+				loadError.value = new Error('This server no longer exists in Core.')
+			} else if (isOffline) {
+				coreStatus.value = core.monitor?.currentStatus ?? coreStatus.value
+				setOfflineError()
 			} else {
 				loadError.value = error as Error
 				handleError(error as Error)
@@ -76,6 +96,8 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 	}
 
 	async function refreshStats() {
+		if (!isCoreConnected.value) return
+
 		try {
 			statsData.value = await core.getStats(instanceId.value)
 		} catch {
@@ -93,6 +115,8 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 	}
 
 	async function connectConsole() {
+		if (!isCoreConnected.value) return
+
 		disconnectConsole()
 		try {
 			const ticket = await core.issueWsTicket()
@@ -206,6 +230,11 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 	}
 
 	async function refreshFsAuth() {
+		if (!isCoreConnected.value) {
+			fsAuth.value = null
+			return
+		}
+
 		try {
 			const url = await core.adapter.getCoreUrl()
 			const token = await core.adapter.getCurrentJwt()
@@ -254,28 +283,61 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 		refreshFsAuth,
 	})
 
-	onMounted(async () => {
+	async function loadOnlineServerData() {
 		await refreshServer()
 		await refreshStats()
-		void queryClient.prefetchQuery({
-			queryKey: ['core-mods', instanceId.value],
-			queryFn: () => core.listMods(instanceId.value),
-			staleTime: 30_000,
+		if (isCoreConnected.value) {
+			void queryClient.prefetchQuery({
+				queryKey: ['core-mods', instanceId.value],
+				queryFn: () => core.listMods(instanceId.value),
+				staleTime: 30_000,
+			})
+			await connectConsole()
+		}
+		await refreshFsAuth()
+	}
+
+	onMounted(async () => {
+		unsubscribeCoreStatus = core.monitor?.onStatus((next) => {
+			const wasConnected = isCoreConnected.value
+			coreStatus.value = next
+			if (next.state !== 'connected') {
+				disconnectConsole()
+				setOfflineError()
+				return
+			}
+			if (!wasConnected) void loadOnlineServerData()
 		})
-		await connectConsole()
+
+		const currentStatus = core.monitor?.currentStatus ?? (await core.connect().catch(() => null))
+		coreStatus.value = currentStatus
+		if (currentStatus?.state === 'connected') {
+			await loadOnlineServerData()
+		} else {
+			setOfflineError()
+		}
+
 		statsTimer = setInterval(refreshStats, 5000)
 		serverTimer = setInterval(refreshServer, 10_000)
-		await refreshFsAuth()
 	})
 
 	watch(powerState, (next, prev) => {
 		if (next === prev) return
-		if ((next === 'starting' || next === 'running') && !isConnected.value) {
+		if ((next === 'starting' || next === 'running') && !isConnected.value && isCoreConnected.value) {
 			void connectConsole()
 		}
 	})
 
+	watch(instanceId, () => {
+		disconnectConsole()
+		rawInstance.value = null
+		statsData.value = null
+		loadError.value = null
+		if (isCoreConnected.value) void loadOnlineServerData()
+	})
+
 	onUnmounted(() => {
+		unsubscribeCoreStatus?.()
 		disconnectConsole()
 		if (statsTimer) clearInterval(statsTimer)
 		if (serverTimer) clearInterval(serverTimer)
@@ -292,6 +354,7 @@ export function useCoreServerRuntime(instanceIdOverride?: string) {
 		restartServer,
 		killServer,
 		repairServer,
+		refreshServer,
 		changeVersion,
 		copyId,
 		openSettings: (tabId?: ServerSettingsTabId) => settingsController.open(tabId),

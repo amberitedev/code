@@ -121,7 +121,7 @@ const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()
 
 const emit = defineEmits<{
-	change: []
+	change: [hasAccounts: boolean]
 }>()
 
 type MinecraftCredential = {
@@ -163,6 +163,10 @@ async function refreshValues() {
 	}
 }
 
+function emitAccountState() {
+	emit('change', accounts.value.length > 0)
+}
+
 async function setEquippedSkin(skin: Skin) {
 	equippedSkin.value = skin
 
@@ -186,6 +190,7 @@ defineExpose({
 })
 
 await refreshValues()
+emitAccountState()
 
 const selectedAccount = computed(() =>
 	accounts.value.find((account) => account.profile.id === defaultUser.value),
@@ -222,7 +227,7 @@ async function setAccount(account: MinecraftCredential) {
 	defaultUser.value = account.profile.id
 	await set_default_user(account.profile.id).catch(handleError)
 	await refreshValues()
-	emit('change')
+	emitAccountState()
 }
 
 async function login() {
@@ -243,7 +248,7 @@ async function logout(id: string) {
 	if (!selectedAccount.value && accounts.value.length > 0) {
 		await setAccount(accounts.value[0])
 	} else {
-		emit('change')
+		emitAccountState()
 	}
 	trackEvent('AccountLogOut')
 }

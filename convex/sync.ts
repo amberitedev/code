@@ -17,6 +17,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
+	coreById,
 	membersByGroup,
 	membershipByGroupUser,
 	requireFriendGroupRole,
@@ -47,6 +48,7 @@ export const registerSyncedProfile = mutation({
 		const { __actAs, ...rest } = args;
 		const userId = await resolveActor(ctx, __actAs);
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ["owner", "admin"]);
+		await requireCoreInGroup(ctx, args.coreId, args.friendGroupId);
 		const now = Date.now();
 		const existing = await syncedProfileByCoreInstance(ctx, args.coreId, args.coreInstanceId);
 		const value = {
@@ -101,6 +103,12 @@ export const updateSyncedProfileSettings = mutation({
 		const profile = await ctx.db.get(profileId);
 		if (!profile) throw new Error("synced profile not found");
 		await requireFriendGroupRole(ctx, userId, profile.friendGroupId, ["owner", "admin"]);
+		if (patch.visibilityUserIds) {
+			await requireUsersInGroup(ctx, profile.friendGroupId, patch.visibilityUserIds);
+		}
+		if (patch.whitelistUserIds) {
+			await requireUsersInGroup(ctx, profile.friendGroupId, patch.whitelistUserIds);
+		}
 		const clean = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
 		await ctx.db.patch(profileId, { ...clean, updatedAt: Date.now() });
 		return { ok: true };
@@ -153,6 +161,10 @@ export const publishProfileSnapshot = mutation({
 		const profile = await ctx.db.get(args.profileId);
 		if (!profile) throw new Error("synced profile not found");
 		await requireFriendGroupRole(ctx, userId, profile.friendGroupId, ["owner", "admin", "member"]);
+		const membership = await membershipByGroupUser(ctx, profile.friendGroupId, userId);
+		if (!membership || !canViewProfile(membership.role as Role, userId, profile)) {
+			throw new Error("not authorized for synced profile");
+		}
 		const now = Date.now();
 		const snapshotId = await ctx.db.insert("profileSnapshots", {
 			profileId: args.profileId,
@@ -183,6 +195,10 @@ export const listProfileSnapshots = query({
 		const profile = await ctx.db.get(args.profileId);
 		if (!profile) throw new Error("synced profile not found");
 		await requireFriendGroupRole(ctx, userId, profile.friendGroupId, ["owner", "admin", "member"]);
+		const membership = await membershipByGroupUser(ctx, profile.friendGroupId, userId);
+		if (!membership || !canViewProfile(membership.role as Role, userId, profile)) {
+			throw new Error("not authorized for synced profile");
+		}
 		return await snapshotsByProfile(ctx, args.profileId);
 	},
 });
@@ -194,6 +210,10 @@ export const listModSyncEvents = query({
 		const profile = await ctx.db.get(args.profileId);
 		if (!profile) throw new Error("synced profile not found");
 		await requireFriendGroupRole(ctx, userId, profile.friendGroupId, ["owner", "admin", "member"]);
+		const membership = await membershipByGroupUser(ctx, profile.friendGroupId, userId);
+		if (!membership || !canViewProfile(membership.role as Role, userId, profile)) {
+			throw new Error("not authorized for synced profile");
+		}
 		return await syncEventsByProfile(ctx, args.profileId);
 	},
 });
@@ -214,6 +234,28 @@ function isWhitelisted(role: Role, userId: string, profile: any): boolean {
 	if (scope === "roles") return (profile.whitelistRoles ?? []).includes(role);
 	if (scope === "custom") return (profile.whitelistUserIds ?? []).includes(userId);
 	return false;
+}
+
+async function requireCoreInGroup(
+	ctx: QueryCtx | MutationCtx,
+	coreId: string,
+	friendGroupId: string,
+): Promise<void> {
+	const core = await coreById(ctx, coreId);
+	if (!core || core.friendGroupId !== friendGroupId) {
+		throw new Error("Core does not belong to friend group");
+	}
+}
+
+async function requireUsersInGroup(
+	ctx: QueryCtx | MutationCtx,
+	friendGroupId: string,
+	userIds: string[],
+): Promise<void> {
+	for (const userId of userIds) {
+		const membership = await membershipByGroupUser(ctx, friendGroupId, userId);
+		if (!membership) throw new Error("user is not a member of this friend group");
+	}
 }
 
 function syncedProfileByCoreInstance(ctx: QueryCtx | MutationCtx, coreId: string, coreInstanceId: string) {

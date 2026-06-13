@@ -5,6 +5,7 @@ import { resolveActor } from "./_socialRules";
 
 /** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
 const devActAs = { __actAs: v.optional(v.string()) };
+const ONLINE_WINDOW_MS = 60_000;
 
 export const ensureSocialProfile = mutation({
 	args: { ...devActAs },
@@ -26,11 +27,19 @@ export const searchUsers = query({
 		const viewerId = await resolveActor(ctx, args.__actAs);
 		const term = args.query.trim();
 		if (term.length < 3) return [];
-		const byCode = await userByFriendCode(ctx, term);
-		const byName = await userByUsername(ctx, term);
-		return [byCode, byName]
-			.filter((user, index, users) => user && user._id !== viewerId && users.findIndex((u) => u?._id === user._id) === index)
-			.map((user) => publicUser(user!));
+		const normalizedTerm = term.toLowerCase();
+		const users = await ctx.db.query("users").collect();
+		return users
+			.filter((user) => {
+				if (user._id === viewerId) return false;
+				return (
+					user.normalizedUsername?.includes(normalizedTerm) ||
+					user.displayName?.toLowerCase().includes(normalizedTerm) ||
+					user.username?.toLowerCase().includes(normalizedTerm)
+				);
+			})
+			.slice(0, 8)
+			.map((user) => publicUser(user));
 	},
 });
 
@@ -48,8 +57,16 @@ export const friendsList = query({
 		const friendships = [...left, ...right];
 		const friends = await Promise.all(friendships.map(async (friendship) => {
 			const otherId = friendship.userAId === userId ? friendship.userBId : friendship.userAId;
-			const user = await ctx.db.get(otherId as any);
-			return { friendshipId: friendship._id, user: user ? publicUser(user) : null, createdAt: friendship.createdAt };
+			const [user, presence] = await Promise.all([
+				ctx.db.get(otherId as any),
+				presenceByUser(ctx, otherId),
+			]);
+			return {
+				friendshipId: friendship._id,
+				user: user ? publicUser(user) : null,
+				presence: publicPresence(presence),
+				createdAt: friendship.createdAt,
+			};
 		}));
 		const incomingWithUser = await Promise.all(incoming.map(async (request) => {
 			const user = await ctx.db.get(request.fromUserId as any);
@@ -60,6 +77,19 @@ export const friendsList = query({
 			return { request, user: user ? publicUser(user) : null };
 		}));
 		return { friends: friends.filter((friend) => friend.user), incoming: incomingWithUser, outgoing: outgoingWithUser, blocks };
+	},
+});
+
+export const heartbeat = mutation({
+	args: { status: v.optional(v.string()), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
+		const now = Date.now();
+		const existing = await presenceByUser(ctx, userId);
+		const value = { userId, status: args.status, lastSeenAt: now };
+		if (existing) await ctx.db.patch(existing._id, value);
+		else await ctx.db.insert("userPresence", value);
+		return publicPresence({ ...existing, ...value });
 	},
 });
 
@@ -75,6 +105,8 @@ export const sendFriendRequest = mutation({
 		if (friendship) return { requestId: null, status: "already_friends" };
 		const existing = await friendRequestByPair(ctx, fromUserId, target._id);
 		if (existing?.status === "pending") return { requestId: existing._id, status: "pending" };
+		const incoming = await friendRequestByPair(ctx, target._id, fromUserId);
+		if (incoming?.status === "pending") return { requestId: incoming._id, status: "incoming_pending" };
 		const now = Date.now();
 		const requestId = await ctx.db.insert("friendRequests", { fromUserId, toUserId: target._id, status: "pending", message: args.message, createdAt: now, updatedAt: now });
 		return { requestId, status: "pending" };
@@ -94,6 +126,17 @@ export const respondFriendRequest = mutation({
 			const existing = await friendshipByPair(ctx, userAId, userBId);
 			if (!existing) await ctx.db.insert("friendships", { userAId, userBId, createdAt: now });
 		}
+		return null;
+	},
+});
+
+export const cancelFriendRequest = mutation({
+	args: { requestId: v.id("friendRequests"), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
+		const request = await ctx.db.get(args.requestId);
+		if (!request || request.fromUserId !== userId || request.status !== "pending") throw new Error("friend request not found");
+		await ctx.db.patch(args.requestId, { status: "canceled", updatedAt: Date.now() });
 		return null;
 	},
 });
@@ -193,9 +236,15 @@ function friendRequestByPair(ctx: QueryCtx | MutationCtx, fromUserId: string, to
 function blockByPair(ctx: QueryCtx | MutationCtx, blockerUserId: string, blockedUserId: string) {
 	return ctx.db.query("blockedUsers").withIndex("by_blocker_blocked", (q) => q.eq("blockerUserId", blockerUserId).eq("blockedUserId", blockedUserId)).unique();
 }
+function presenceByUser(ctx: QueryCtx | MutationCtx, userId: string) {
+	return ctx.db.query("userPresence").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+}
 
 function canonicalPair(a: string, b: string): [string, string] {
 	return a < b ? [a, b] : [b, a];
 }
 
 const publicUser = (user: any) => ({ userId: user._id, username: user.username, displayName: user.displayName, image: user.image, friendCode: user.friendCode });
+const publicPresence = (presence: any) => presence
+	? { online: Date.now() - presence.lastSeenAt <= ONLINE_WINDOW_MS, status: presence.status, lastSeenAt: presence.lastSeenAt }
+	: { online: false, status: null, lastSeenAt: null };

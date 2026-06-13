@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 
 use crate::domain::instance::{
-    InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus, ModLoader,
+    InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
+    ModLoader,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -87,5 +88,9 @@ pub trait InstanceStore: Send + Sync + 'static {
     /// Called once on startup to recover from unclean shutdown.
     async fn reset_transient_statuses(&self) -> Result<u64, StoreError>;
     /// Add `seconds` to the accumulated `total_uptime_seconds` for the given instance.
-    async fn add_uptime(&self, id: &InstanceId, seconds: u64) -> Result<(), StoreError>;
+    async fn add_uptime(
+        &self,
+        id: &InstanceId,
+        seconds: u64,
+    ) -> Result<(), StoreError>;
 }

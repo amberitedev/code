@@ -75,8 +75,10 @@ export function createDesktopAdapter(): PlatformAdapter {
 			}
 		},
 
-		// TODO: return real JWT when auth is implemented.
+		// Dev identity bridge. Production login will replace this with a real JWT.
 		async getCurrentJwt(): Promise<string | null> {
+			const actingUserId = this.getDevActingUserId?.()
+			if (actingUserId) return `dev:${actingUserId}`
 			return null
 		},
 

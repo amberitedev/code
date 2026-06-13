@@ -1,3 +1,4 @@
+// Summary: Builds representative server action-log fixtures and renders AuditLogTable stories for all events, filters, fallbacks, overflow, and responsive widths.
 import type { Archon } from '@modrinth/api-client'
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { ref } from 'vue'

@@ -54,7 +54,15 @@ export const registerCore = mutation({
 				lastSeenAt: now,
 			})
 		} else {
-			await ctx.db.insert('cores', { ...args, ownerUserId: userId, friendGroupId, lastSeenAt: now })
+			await ctx.db.insert('cores', {
+				coreId: args.coreId,
+				ownerUserId: userId,
+				friendGroupId,
+				connectionUrl: args.connectionUrl,
+				status: args.status,
+				metadata: args.metadata,
+				lastSeenAt: now,
+			})
 		}
 
 		return { coreId: args.coreId }
@@ -83,7 +91,15 @@ export const corePresence = query({
 			.unique()
 		if (!core) return null
 		await requireCoreAccess(ctx, userId, core)
-		return core
+		return {
+			coreId: core.coreId,
+			ownerUserId: core.ownerUserId,
+			friendGroupId: core.friendGroupId,
+			connectionUrl: core.connectionUrl,
+			lastSeenAt: core.lastSeenAt,
+			status: core.status,
+			metadata: core.metadata,
+		}
 	},
 })
 

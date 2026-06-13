@@ -26,7 +26,7 @@ export const publishMessage = mutation({
 	returns: v.object({ messageId: v.string() }),
 	handler: async (ctx, args) => {
 		const userId = await requireUserId(ctx);
-		if (!(await canAccessEndpoint(ctx, userId, args.senderId)) && !(await canAccessEndpoint(ctx, userId, args.recipientId))) {
+		if (!(await canAccessEndpoint(ctx, userId, args.senderId)) || !(await canAccessEndpoint(ctx, userId, args.recipientId))) {
 			throw new Error("not authorized for message endpoint");
 		}
 

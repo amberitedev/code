@@ -35,13 +35,28 @@ apps/app-frontend/
     assets/                 Stylesheets and static assets
 ```
 
+## Page Vocabulary
+
+Routes are defined in `src/routes.js`. Use this section to resolve app page names that are easy to confuse; do not treat it as a full route inventory.
+
+| Name | Means | Primary file(s) |
+| --- | --- | --- |
+| Core | Core management at `/core`, including nested Core screens such as access, roles, rules, and activity panels. | `src/pages/core/Index.vue`, `src/components/core/` |
+| Servers / hosting | Hosted server list and management entry point at `/hosting/manage/`. | `src/pages/Servers.vue` |
+| Hosted server detail / instance hosting | One hosted server at `/hosting/manage/:id`, including overview, content, files, backups, and access child pages. | `src/pages/hosting/manage/`, `packages/ui/src/layouts/wrapped/hosting/manage/` |
+| Client instance | Local client instance at `/instance/:id` when `profile_type === 'client'`, including content, files, worlds, and logs child pages. | `src/pages/instance/InstanceRouter.vue`, `src/pages/instance/Index.vue` |
+| Server instance | Core-managed local server instance at `/instance/:id` when `profile_type === 'server'`, or when no app-lib profile exists and the route id is treated as a Core server id. | `src/pages/instance/ServerIndex.vue`, `src/pages/instance/Server*.vue`, `src/pages/instance/server/` |
+| Synced instance | Synced instance at `/instance/:id` when `profile_type === 'synced'`. | `src/pages/instance/synced/` |
+
+A user may combine these names with a nested screen or tab name. Resolve that as the named page plus the relevant child screen, such as Core page rules, server instance content, or hosted server files.
+
 ## Read These When Working On
 
 | Work | Read |
 | --- | --- |
 | Shared UI, layouts, or reusable components | `packages/ui/AGENTS.md` |
 | Modrinth API client usage or shared API types | `packages/api-client/AGENTS.md` |
-| Amberite Core communication, transports, or client wiring | `packages/amberite-api/AGENTS.md` |
+| Copal communication, transports, or client wiring | `packages/amberite-api/AGENTS.md` |
 | Tauri shell behavior, native permissions, or command wiring | `apps/app/AGENTS.md` |
 
 ## UI Rules

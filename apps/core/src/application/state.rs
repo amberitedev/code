@@ -14,8 +14,8 @@ use crate::{
     infrastructure::{
         auth::jwks::JwksCache,
         db::{
-            instance_repo::InstanceRepo, java_repo::JavaRepo,
-            installation_repo::InstallationRepo, modpack_repo::ModpackRepo,
+            installation_repo::InstallationRepo, instance_repo::InstanceRepo,
+            java_repo::JavaRepo, modpack_repo::ModpackRepo,
         },
         events::EventBroadcaster,
         process::{instance_actor::InstanceHandle, std_spawner::StdSpawner},
@@ -29,6 +29,7 @@ use crate::{
 
 /// Short-lived ticket for WebSocket auth.
 pub struct WsTicket {
+    pub user_id: String,
     pub expires_at: Instant,
 }
 
@@ -92,7 +93,7 @@ impl AppState {
         spawner: Arc<dyn AnySpawner>,
     ) -> color_eyre::eyre::Result<Arc<Self>> {
         let http = reqwest::Client::builder()
-            .user_agent("amberite-core/0.1")
+            .user_agent("copal/0.1")
             .build()?;
         let broadcaster = EventBroadcaster::new();
         let jwks_cache = JwksCache::new(http.clone());
@@ -129,7 +130,7 @@ impl AppState {
             let secret = generate_setup_secret();
             write_local_setup_secret(&config.data_dir, &secret).await?;
             println!("\n╔══════════════════════════════╗");
-            println!("║  Amberite Core — Pairing Code  ║");
+            println!("║  Copal — Pairing Code  ║");
             println!("║          {code}          ║");
             println!("╚══════════════════════════════╝\n");
             (Some(code), Some(secret))

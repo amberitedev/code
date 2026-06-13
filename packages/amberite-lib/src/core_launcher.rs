@@ -7,9 +7,9 @@ use std::{path::PathBuf, sync::OnceLock, time::Duration};
 use tokio::{process::{Child, Command}, sync::Mutex};
 
 const CORE_BINARY_NAME: &str = if cfg!(windows) {
-    "amberite-core.exe"
+    "copal.exe"
 } else {
-    "amberite-core"
+    "copal"
 };
 const DEFAULT_CORE_URL: &str = "http://localhost:16662";
 
@@ -37,13 +37,13 @@ fn core_install_dir() -> Result<PathBuf> {
     let base = dirs::data_dir().ok_or_else(|| {
         AmberiteError::Core("Cannot find data directory".into())
     })?;
-    Ok(base.join("amberite-core"))
+    Ok(base.join("copal"))
 }
 
 fn core_data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("amberite-core")
+        .join("copal")
         .join("data")
 }
 

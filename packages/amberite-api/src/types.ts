@@ -1,4 +1,4 @@
-// All response shapes returned by Amberite Core's HTTP API and WebSocket.
+// All response shapes returned by Copal's HTTP API and WebSocket.
 // These mirror the Rust structs in apps/core/src/ — keep in sync with changes there.
 // Key types: CoreInstance:37, CoreInstanceSummary:54, CoreInstanceEvent:68, CoreStats:82,
 // CoreFsOperationKind:228, CoreMetadata:235, CoreMember:247, CoreSyncProfile:258.
@@ -440,6 +440,75 @@ export interface CoreMember {
 	status: string
 	joined_at: string
 	updated_at: string
+}
+
+export type CoreAccessRole = 'owner' | 'admin' | 'member'
+export type CorePermissionPreset = 'owner' | 'admin' | 'member' | 'viewer' | 'client-only'
+
+export interface CoreAccessMember {
+	user_id: string
+	display_name?: string | null
+	role: CoreAccessRole
+	permission_preset: CorePermissionPreset
+	custom_permissions?: string | null
+	status: string
+	joined_at: string
+	updated_at: string
+	source: 'core' | 'instance'
+}
+
+export interface CoreAccessViewer {
+	user_id: string
+	role: CoreAccessRole
+	permission_preset: CorePermissionPreset
+	permissions: string[]
+	can_manage_users: boolean
+}
+
+export interface CoreAccessResponse {
+	members: CoreAccessMember[]
+	viewer: CoreAccessViewer
+}
+
+export interface CoreAccessUpsertBody {
+	user_id: string
+	display_name?: string | null
+	role: CoreAccessRole
+	permission_preset?: CorePermissionPreset | null
+	custom_permissions?: Record<string, unknown> | null
+}
+
+export interface CoreAccessPatchBody {
+	display_name?: string | null
+	role?: CoreAccessRole
+	permission_preset?: CorePermissionPreset | null
+	custom_permissions?: Record<string, unknown> | null
+}
+
+export interface CoreActivityLogEntry {
+	id: string
+	actor_user_id: string
+	action: string
+	instance_id?: string | null
+	target_user_id?: string | null
+	metadata_json?: string | null
+	created_at: string
+}
+
+export interface CoreActivityLogQuery {
+	instance_id?: string | null
+	actor_user_id?: string | null
+	target_user_id?: string | null
+	action?: string | null
+	min_datetime?: string | null
+	max_datetime?: string | null
+	limit?: number
+	cursor?: string | null
+}
+
+export interface CoreActivityLogResponse {
+	entries: CoreActivityLogEntry[]
+	next_cursor?: string | null
 }
 
 /** Sync profile from GET /sync/profiles — Core-side record for a synced modpack instance. */

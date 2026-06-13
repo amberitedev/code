@@ -58,6 +58,11 @@ export default defineSchema({
 		.index("by_pair", ["userAId", "userBId"])
 		.index("by_user_a", ["userAId"])
 		.index("by_user_b", ["userBId"]),
+	userPresence: defineTable({
+		userId: v.string(), status: v.optional(v.string()), lastSeenAt: v.number(),
+	})
+		.index("by_user", ["userId"])
+		.index("by_last_seen", ["lastSeenAt"]),
 	blockedUsers: defineTable({ blockerUserId: v.string(), blockedUserId: v.string(), createdAt: v.number() })
 		.index("by_blocker_blocked", ["blockerUserId", "blockedUserId"])
 		.index("by_blocker", ["blockerUserId"]),

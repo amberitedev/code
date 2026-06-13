@@ -16,17 +16,27 @@ use super::status::DeliveryStatus;
 #[async_trait]
 pub trait RelayStore: Send + Sync {
     /// Persist a sealed envelope for a specific recipient at `Pending`.
-    async fn enqueue(&self, recipient: &Endpoint, envelope: &Envelope)
-        -> Result<(), ApiCommError>;
+    async fn enqueue(
+        &self,
+        recipient: &Endpoint,
+        envelope: &Envelope,
+    ) -> Result<(), ApiCommError>;
 
     /// Persist a pre-built row (used by the generic, app-addressed publish path).
-    async fn insert(&self, message: &StoredMessage) -> Result<(), ApiCommError>;
+    async fn insert(&self, message: &StoredMessage)
+        -> Result<(), ApiCommError>;
 
     /// Non-expired pending messages for a recipient, oldest first.
-    async fn pending(&self, recipient_id: &str) -> Result<Vec<StoredMessage>, ApiCommError>;
+    async fn pending(
+        &self,
+        recipient_id: &str,
+    ) -> Result<Vec<StoredMessage>, ApiCommError>;
 
     /// Look up a single message by id.
-    async fn get(&self, id: &MessageId) -> Result<Option<StoredMessage>, ApiCommError>;
+    async fn get(
+        &self,
+        id: &MessageId,
+    ) -> Result<Option<StoredMessage>, ApiCommError>;
 
     /// Transition a message to a new status, optionally attaching a result/error.
     async fn mark(

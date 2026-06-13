@@ -1,5 +1,29 @@
 <template>
-	<div v-if="server" class="h-full w-full pt-6">
+	<div v-if="loadError" class="flex min-h-full items-center justify-center p-6 text-contrast">
+		<div class="flex max-w-xl flex-col gap-4">
+			<ErrorInformationCard
+				title="Server unavailable"
+				:description="loadError.message"
+				:icon="TriangleAlertIcon"
+				icon-color="red"
+			/>
+			<div v-if="profile?.profile_type === 'server'" class="flex justify-end gap-2">
+				<ButtonStyled>
+					<button @click="deleteStaleProfile">
+						<TrashIcon />
+						Remove from library
+					</button>
+				</ButtonStyled>
+				<ButtonStyled v-if="canRecreateServer" color="brand">
+					<button :disabled="recreatingServer" @click="recreateServer">
+						<UpdatedIcon />
+						{{ recreatingServer ? 'Recreating...' : 'Recreate server' }}
+					</button>
+				</ButtonStyled>
+			</div>
+		</div>
+	</div>
+	<div v-else-if="server" class="h-full w-full pt-6">
 		<div
 			data-pyro-server-manager-root
 			class="relative mx-auto box-border flex w-full min-w-0 flex-col gap-4 px-6 pb-6 transition-all duration-300"
@@ -57,7 +81,9 @@
 							<OverflowMenu
 								:options="[
 									{ id: 'copy-id', action: copyId },
-									{ id: 'kill', action: killServer, color: 'red' },
+									...(powerState === 'running'
+										? [{ id: 'kill', action: killServer, color: 'red' }]
+										: []),
 								]"
 							>
 								<MoreVerticalIcon />
@@ -85,14 +111,6 @@
 		</div>
 		<ServerSettingsModal />
 	</div>
-	<div v-else-if="loadError" class="flex min-h-full items-center justify-center p-6 text-contrast">
-		<ErrorInformationCard
-			title="Server unavailable"
-			:description="loadError.message"
-			:icon="TriangleAlertIcon"
-			icon-color="red"
-		/>
-	</div>
 	<div v-else class="h-full w-full pt-6">
 		<div class="mx-auto flex w-full min-w-0 flex-col gap-4 px-6 pb-6">
 			<div
@@ -117,7 +135,6 @@
 import {
 	BoxesIcon,
 	ClipboardCopyIcon,
-	ClockIcon,
 	DatabaseBackupIcon,
 	FolderOpenIcon,
 	MoreVerticalIcon,
@@ -128,25 +145,38 @@ import {
 	StopCircleIcon,
 	TerminalSquareIcon,
 	TriangleAlertIcon,
+	TrashIcon,
 	UpdatedIcon,
 	UsersIcon,
 } from '@modrinth/assets'
 import { ButtonStyled, ErrorInformationCard, NavTabs, OverflowMenu } from '@modrinth/ui'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { createCoreInstanceBodyFromProfile } from '@amberite/amberite-api'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+
+import { useBreadcrumbs } from '@/store/breadcrumbs'
+import type { GameInstance } from '@/helpers/types'
+import { edit, remove } from '@/helpers/profile'
+import { useCoreClient } from '@/composables/useCoreClient'
 
 import ServerManageHeader from './server/ServerManageHeader.vue'
 import ServerSettingsModal from './server/settings/ServerSettingsModal.vue'
 import { useCoreServerRuntime } from './server/use-core-server-runtime'
 import ServerBackups from './ServerBackups.vue'
+import ServerAccess from './ServerAccess.vue'
 import ServerBrowsePage from './ServerBrowsePage.vue'
 import ServerContent from './ServerContent.vue'
 import ServerFiles from './ServerFiles.vue'
 import ServerOverview from './ServerOverview.vue'
-import ServerPlayers from './ServerPlayers.vue'
-import ServerTasks from './ServerTasks.vue'
 
 const route = useRoute()
+const router = useRouter()
+const breadcrumbs = useBreadcrumbs()
+const core = useCoreClient()
+const recreatingServer = ref(false)
+const props = defineProps<{
+	profile?: GameInstance | null
+}>()
 const {
 	instanceId,
 	server,
@@ -158,9 +188,10 @@ const {
 	restartServer,
 	killServer,
 	repairServer,
+	refreshServer,
 	copyId,
 	openSettings,
-} = useCoreServerRuntime()
+} = useCoreServerRuntime(computed(() => props.profile?.core_instance_id ?? (route.params.id as string)))
 
 // Tick every second so the displayed uptime increments smoothly.
 const tickSecond = ref(0)
@@ -185,25 +216,75 @@ const displayUptimeSeconds = computed(() => {
 })
 
 const navLinks = computed(() => {
-	const basePath = `/instance/${encodeURIComponent(instanceId.value)}`
+	const basePath = `/instance/${encodeURIComponent(route.params.id as string)}`
 	return [
 		{ label: 'Overview', href: basePath, icon: TerminalSquareIcon },
 		{ label: 'Content', href: `${basePath}/content`, icon: BoxesIcon },
 		{ label: 'Files', href: `${basePath}/files`, icon: FolderOpenIcon },
-		{ label: 'Players', href: `${basePath}/players`, icon: UsersIcon },
 		{ label: 'Backups', href: `${basePath}/backups`, icon: DatabaseBackupIcon },
-		{ label: 'Tasks', href: `${basePath}/tasks`, icon: ClockIcon },
+		{ label: 'Access', href: `${basePath}/access`, icon: UsersIcon },
 	]
 })
 const activePage = computed(() => {
 	if (route.path.endsWith('/browse')) return ServerBrowsePage
 	if (route.path.endsWith('/content')) return ServerContent
 	if (route.path.endsWith('/files')) return ServerFiles
-	if (route.path.endsWith('/players')) return ServerPlayers
+	if (route.path.endsWith('/access')) return ServerAccess
 	if (route.path.endsWith('/backups')) return ServerBackups
-	if (route.path.endsWith('/tasks')) return ServerTasks
 	return ServerOverview
 })
 
 const isBrowsePage = computed(() => route.path.endsWith('/browse'))
+const canRecreateServer = computed(() => !!props.profile?.server_manifest_json)
+
+async function deleteStaleProfile() {
+	if (!props.profile) return
+	await remove(props.profile.path)
+	await router.replace('/library/servers')
+}
+
+async function recreateServer() {
+	const manifest = props.profile?.server_manifest_json
+	if (!props.profile || !manifest) return
+	recreatingServer.value = true
+	try {
+		const recreated = await core.createInstance(
+			createCoreInstanceBodyFromProfile(
+				{
+					name: manifest.name,
+					gameVersion: manifest.gameVersion,
+					modloader: manifest.modloader,
+					loaderVersion: manifest.loaderVersion,
+				},
+				manifest.port ?? 25565,
+				manifest.memory,
+			),
+		)
+		await edit(props.profile.path, {
+			core_instance_id: recreated.id,
+			server_manifest_json: {
+				...manifest,
+				port: recreated.port,
+				memory: recreated.memory,
+			},
+		})
+		await refreshServer()
+	} finally {
+		recreatingServer.value = false
+	}
+}
+
+watch(
+	() => server.value?.name,
+	(name) => {
+		if (!name) return
+		breadcrumbs.setName('Instance', name.length > 40 ? name.substring(0, 40) + '...' : name)
+		breadcrumbs.setContext({
+			name,
+			link: route.path,
+			query: route.query,
+		})
+	},
+	{ immediate: true },
+)
 </script>

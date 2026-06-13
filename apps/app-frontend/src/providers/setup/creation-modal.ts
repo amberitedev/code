@@ -1,4 +1,4 @@
-import type { CoreModLoader } from '@amberite/amberite-api'
+import { createCoreInstanceFromProfile } from '@amberite/amberite-api'
 import type {
 	AbstractPopupNotificationManager,
 	AbstractWebNotificationManager,
@@ -145,18 +145,18 @@ export function setupCreationModal(
 
 			if (config.instanceType.value === 'server') {
 				const core = useCoreClient()
-				const existingServers = await core.listInstances()
-				const port = getNextServerPort(existingServers.map((instance) => instance.port))
-				const coreInstance = await core.createInstance({
+				const profile = {
 					name,
-					game_version: config.selectedGameVersion.value!,
-					loader: toCoreLoader(loader),
-					loader_version: loaderVersion,
-					port,
-					memory: { min_mb: 1024, max_mb: 4096 },
+					gameVersion: config.selectedGameVersion.value!,
+					modloader: loader,
+					loaderVersion,
+				}
+				const coreInstance = await createCoreInstanceFromProfile(core, {
+					profile,
 				})
-				await create(
-					coreInstance.id,
+				const profileSlug = await getAvailableServerProfileSlug(name)
+				const profilePath = await create(
+					profileSlug,
 					config.selectedGameVersion.value!,
 					toProfileLoader(loader),
 					loaderVersion,
@@ -165,23 +165,27 @@ export function setupCreationModal(
 					null,
 					'server',
 				)
-				await edit(coreInstance.id, {
+				await edit(profilePath, {
 					name,
 					profile_type: 'server',
 					install_stage: 'installed',
+					core_instance_id: coreInstance.id,
+					server_manifest_json: {
+						...profile,
+						port: coreInstance.port,
+						memory: coreInstance.memory,
+					},
 				})
-				await router.push(`/instance/${encodeURIComponent(coreInstance.id)}`)
+				await router.push(`/instance/${encodeURIComponent(profilePath)}`)
 			} else if (config.instanceType.value === 'synced') {
 				const core = useCoreClient()
-				const existingServers = await core.listInstances()
-				const port = getNextServerPort(existingServers.map((instance) => instance.port))
-				const coreInstance = await core.createInstance({
-					name,
-					game_version: config.selectedGameVersion.value!,
-					loader: toCoreLoader(loader),
-					loader_version: loaderVersion,
-					port,
-					memory: { min_mb: 1024, max_mb: 4096 },
+				const coreInstance = await createCoreInstanceFromProfile(core, {
+					profile: {
+						name,
+						gameVersion: config.selectedGameVersion.value!,
+						modloader: loader,
+						loaderVersion,
+					},
 				})
 				await create(
 					coreInstance.id,
@@ -233,19 +237,22 @@ export function setupCreationModal(
 		return loader as InstanceLoader
 	}
 
-	function toCoreLoader(loader: string): CoreModLoader {
-		if (loader === 'purpur') return 'paper'
-		if (['vanilla', 'paper', 'fabric', 'forge', 'neoforge', 'quilt'].includes(loader)) {
-			return loader as CoreModLoader
-		}
-		return 'vanilla'
+	function slugServerProfileName(value: string): string {
+		const slug = value
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-+|-+$/g, '')
+		return slug || 'server'
 	}
 
-	function getNextServerPort(ports: number[]): number {
-		const usedPorts = new Set(ports)
-		let port = 25565
-		while (usedPorts.has(port)) port += 1
-		return port
+	async function getAvailableServerProfileSlug(value: string): Promise<string> {
+		const base = slugServerProfileName(value)
+		const existing = new Set((await list().catch(handleError))?.map((instance) => instance.path) ?? [])
+		if (!existing.has(base)) return base
+		let suffix = 2
+		while (existing.has(`${base}-${suffix}`)) suffix += 1
+		return `${base}-${suffix}`
 	}
 
 	const pendingModpackCreation = ref<{
