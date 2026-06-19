@@ -79,7 +79,7 @@ Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableSt
 
 | Consumer                                                | What it does                                                                                                  |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `apps/app-frontend/src/adapters/desktop.ts`             | Implements `PlatformAdapter` using native `window.fetch`, env URLs, no-auth dev mode, and local queue storage |
+| `apps/app-frontend/src/adapters/desktop.ts`             | Implements `PlatformAdapter` using native `window.fetch`, env URLs, persisted Amberite auth JWTs, and local queue storage |
 | `apps/app-frontend/src/composables/useCoreClient.ts`    | Provides the singleton `CoreApiClient`                                                                        |
 | `apps/app-frontend/src/composables/useCoreCall.ts`      | Vue-safe call wrapper; catches errors and exposes reactive refs                                               |
 | `apps/app-frontend/src/composables/useCoreMessage.ts`   | Vue-safe message publish wrapper over `CommunicationPipeline.publish()`                                       |

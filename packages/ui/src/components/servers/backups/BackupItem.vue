@@ -180,7 +180,7 @@ const creatorAvatarSrc = computed(() =>
 	backupCreator.value?.id === 'support'
 		? IntercomBubbleIcon
 		: (backupCreator.value?.avatar_url ?? undefined),
-})
+)
 </script>
 <template>
 	<div

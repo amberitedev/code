@@ -35,6 +35,36 @@
   "app.action-bar.view-logs": {
     "message": "View logs"
   },
+  "app.amberite-account-modal.body": {
+    "message": "You are signed in to Minecraft, but Amberite has not finished creating your app account."
+  },
+  "app.amberite-account-modal.connect": {
+    "message": "Connect Amberite account"
+  },
+  "app.amberite-account-modal.connecting": {
+    "message": "Connecting..."
+  },
+  "app.amberite-account-modal.dismiss": {
+    "message": "Fix later"
+  },
+  "app.amberite-account-modal.dismiss-confirm.back": {
+    "message": "Go back"
+  },
+  "app.amberite-account-modal.dismiss-confirm.body": {
+    "message": "Not fixing this right now will result in features such as Core access, invites, friends, and sync being unavailable."
+  },
+  "app.amberite-account-modal.dismiss-confirm.confirm": {
+    "message": "Yes, dismiss"
+  },
+  "app.amberite-account-modal.dismiss-confirm.header": {
+    "message": "Are you sure?"
+  },
+  "app.amberite-account-modal.header": {
+    "message": "Connect your Amberite account"
+  },
+  "app.amberite-account-modal.hint": {
+    "message": "Friends, Core access, invites, and sync need this account before the app can work correctly."
+  },
   "app.appearance-settings.advanced-rendering.description": {
     "message": "Enables advanced rendering such as blur effects that may cause performance issues without hardware-accelerated rendering."
   },
@@ -130,6 +160,12 @@
   },
   "app.browse.back-to-instance": {
     "message": "Back to instance"
+  },
+  "app.browse.card-action.install-on-server": {
+    "message": "Install on server"
+  },
+  "app.browse.card-action.install-synced": {
+    "message": "Install synced"
   },
   "app.browse.discover-content": {
     "message": "Discover content"
@@ -319,6 +355,9 @@
   },
   "app.settings.downloading": {
     "message": "Downloading v{version}"
+  },
+  "app.settings.tabs.accounts": {
+    "message": "Accounts"
   },
   "app.settings.tabs.appearance": {
     "message": "Appearance"

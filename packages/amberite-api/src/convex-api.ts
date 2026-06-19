@@ -16,7 +16,7 @@
  * listProfileSnapshots, listModSyncEvents.
  */
 import type { PlatformAdapter } from './adapter'
-import { convexQuery, convexMutation } from './convex-relay'
+import { convexQuery, convexMutation, convexAction } from './convex-relay'
 import type {
 	AmberiteUser,
 	ConvexModSyncEvent,
@@ -183,6 +183,10 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	rawMutation<T = unknown>(path: string, args: unknown = {}): Promise<T> {
 		return convexMutation<T>(this.adapter, path, args)
+	}
+
+	rawAction<T = unknown>(path: string, args: unknown = {}): Promise<T> {
+		return convexAction<T>(this.adapter, path, args)
 	}
 
 	// ── Auth ──────────────────────────────────────────────────────────────────

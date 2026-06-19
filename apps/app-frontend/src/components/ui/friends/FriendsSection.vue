@@ -8,7 +8,6 @@ import {
 	OverflowMenu,
 	useVIntl,
 } from '@modrinth/ui'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { useTemplateRef } from 'vue'
 
 import ContextMenu from '@/components/ui/ContextMenu.vue'
@@ -21,6 +20,7 @@ const props = withDefaults(
 		friends: FriendWithUserData[]
 		heading: string
 		removeFriend: (friend: FriendWithUserData) => Promise<void>
+		openProfile?: (friend: FriendWithUserData) => void
 		isSearching?: boolean
 		openByDefault?: boolean
 	}>(),
@@ -31,11 +31,16 @@ const props = withDefaults(
 )
 
 function createContextMenuOptions(friend: FriendWithUserData) {
+	const viewProfile = props.openProfile
+		? [
+				{
+					name: 'view-profile',
+				},
+			]
+		: []
 	if (friend.accepted) {
 		return [
-			{
-				name: 'view-profile',
-			},
+			...viewProfile,
 			{
 				name: 'remove-friend',
 				color: 'danger',
@@ -43,9 +48,7 @@ function createContextMenuOptions(friend: FriendWithUserData) {
 		]
 	} else {
 		return [
-			{
-				name: 'view-profile',
-			},
+			...viewProfile,
 			{
 				name: 'cancel-request',
 			},
@@ -53,8 +56,22 @@ function createContextMenuOptions(friend: FriendWithUserData) {
 	}
 }
 
-function openProfile(username: string) {
-	openUrl('https://modrinth.com/user/' + username)
+function createOverflowMenuOptions(friend: FriendWithUserData) {
+	return [
+		...(props.openProfile
+			? [
+					{
+						id: 'view-profile',
+						action: () => props.openProfile?.(friend),
+					},
+				]
+			: []),
+		{
+			id: 'remove-friend',
+			action: () => props.removeFriend(friend),
+			color: 'red',
+		},
+	]
 }
 
 const friendOptions = useTemplateRef('friendOptions')
@@ -65,7 +82,7 @@ async function handleFriendOptions(args: { item: FriendWithUserData; option: str
 			await props.removeFriend(args.item)
 			break
 		case 'view-profile':
-			openProfile(args.item.username)
+			if (props.openProfile) props.openProfile(args.item)
 	}
 }
 
@@ -156,17 +173,7 @@ const messages = defineMessages({
 					<ButtonStyled v-if="friend.accepted" circular type="transparent">
 						<OverflowMenu
 							class="opacity-0 group-hover:opacity-100 transition-opacity"
-							:options="[
-								{
-									id: 'view-profile',
-									action: () => openProfile(friend.username),
-								},
-								{
-									id: 'remove-friend',
-									action: () => removeFriend(friend),
-									color: 'red',
-								},
-							]"
+							:options="createOverflowMenuOptions(friend)"
 						>
 							<MoreVerticalIcon />
 							<template #view-profile>

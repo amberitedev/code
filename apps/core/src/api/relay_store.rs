@@ -48,21 +48,58 @@ type Row = (
     String,
 );
 
-fn row_to_message(row: Row) -> StoredMessage {
-    StoredMessage {
+type StatusRow = (
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
+fn row_to_message(row: Row) -> Result<StoredMessage, ApiCommError> {
+    Ok(StoredMessage {
         id: row.0,
         r#type: row.1,
         version: row.2,
         sender_id: row.3,
         recipient_id: row.4,
-        payload: serde_json::from_str(&row.5).unwrap_or(Value::Null),
+        payload: serde_json::from_str(&row.5)?,
         ack: row.6,
         status: row.7,
         created_at: row.8,
         expires_at: row.9,
         result: None,
         error: None,
-    }
+    })
+}
+
+fn status_row_to_message(
+    row: StatusRow,
+) -> Result<StoredMessage, ApiCommError> {
+    Ok(StoredMessage {
+        id: row.0,
+        r#type: row.1,
+        version: row.2,
+        sender_id: row.3,
+        recipient_id: row.4,
+        payload: serde_json::from_str(&row.5)?,
+        ack: row.6,
+        status: row.7,
+        created_at: row.8,
+        expires_at: row.9,
+        result: row
+            .10
+            .map(|v| serde_json::from_str::<Value>(&v))
+            .transpose()?,
+        error: row.11,
+    })
 }
 
 /// SQLite implementation of [`RelayStore`].
@@ -148,27 +185,13 @@ impl RelayStore for SqliteRelayStore {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(row_to_message).collect())
+        rows.into_iter().map(row_to_message).collect()
     }
 
     async fn get(
         &self,
         id: &MessageId,
     ) -> Result<Option<StoredMessage>, ApiCommError> {
-        type StatusRow = (
-            String,
-            String,
-            i64,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-        );
         let row: Option<StatusRow> = sqlx::query_as(
             "SELECT id, type, version, sender_id, recipient_id, payload, ack, status, created_at, expires_at, result, error \
              FROM core_relay_messages WHERE id = ?",
@@ -177,20 +200,7 @@ impl RelayStore for SqliteRelayStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|row| StoredMessage {
-            id: row.0,
-            r#type: row.1,
-            version: row.2,
-            sender_id: row.3,
-            recipient_id: row.4,
-            payload: serde_json::from_str(&row.5).unwrap_or(Value::Null),
-            ack: row.6,
-            status: row.7,
-            created_at: row.8,
-            expires_at: row.9,
-            result: row.10.and_then(|v| serde_json::from_str::<Value>(&v).ok()),
-            error: row.11,
-        }))
+        row.map(status_row_to_message).transpose()
     }
 
     async fn mark(

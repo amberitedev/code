@@ -16,7 +16,6 @@ export class CoreConnectionMonitor {
 	constructor(
 		private adapter: PlatformAdapter,
 		private knownCoreId?: string | null,
-		_senderId?: string,
 	) {}
 
 	get currentState(): ConnectionState {

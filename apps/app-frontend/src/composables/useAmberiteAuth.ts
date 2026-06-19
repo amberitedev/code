@@ -1,10 +1,8 @@
 /**
  * useAmberiteAuth — reactive auth façade that replaces the Modrinth credentials ref.
  *
- * In dev mode the "sign-in" flow seeds the dev users and stores the chosen
- * Convex user id in localStorage so every Convex call carries __actAs. In
- * production this will be replaced by a Microsoft-OAuth → Amberite account
- * linkage (auto-create on first login).
+ * The sign-in flow runs Microsoft OAuth through the Tauri shell, stores the
+ * returned Amberite session JWT, and refreshes the Convex-backed social profile.
  *
  * The mapped user object exposes the Labrinth.Users.v2.User shape so
  * @modrinth/ui components and existing auth-gated pages keep working without
@@ -12,9 +10,10 @@
  */
 import { computed, ref } from 'vue'
 
-import { DEV_ACTING_USER_KEY } from '@/adapters/desktop'
+import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
 import { useSocialClientRaw } from '@/composables/useSocialClient'
+import { login as amberiteLogin } from '@/helpers/amberite_auth'
 
 export interface AmberiteAuthUser {
 	id: string
@@ -62,37 +61,13 @@ function mapToAuthUser(
 	}
 }
 
-let devBootstrapStarted = false
-
-async function ensureDevAmberiteSession(social: ReturnType<typeof useSocial>) {
-	if (!import.meta.env.DEV || devBootstrapStarted) return
-	devBootstrapStarted = true
-	try {
-		const client = useSocialClientRaw()
-		const users = await client.rawMutation<
-			Array<{
-				userId: string
-				username?: string
-			}>
-		>('dev:seedDevUsers', {})
-		const existing = window.localStorage.getItem(DEV_ACTING_USER_KEY)
-		if (!existing) {
-			const pick = users.find((u) => u.username === 'amber') ?? users[0]
-			if (pick) window.localStorage.setItem(DEV_ACTING_USER_KEY, pick.userId)
-		}
-		await social.refresh()
-	} catch (e) {
-		console.warn('[amberite] dev auth bootstrap failed', e)
-	}
-}
-
 export function useAmberiteAuth(): UseAmberiteAuthReturn {
 	const social = useSocial()
-	void ensureDevAmberiteSession(social)
+	const adapter = useCoreClient().adapter
 
 	const user = computed<AmberiteAuthUser | null>(() => mapToAuthUser(social.currentUser.value))
 	const isLoggedIn = computed(() => !!social.currentUser.value)
-	const isReady = computed(() => true)
+	const isReady = computed(() => !social.loading.value)
 	const signingIn = ref(false)
 	const error = ref<Error | null>(null)
 
@@ -100,21 +75,21 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 		signingIn.value = true
 		error.value = null
 		try {
-			const client = useSocialClientRaw()
-			await client.rawMutation('dev:seedDevUsers', {})
-			const users = await client.rawQuery<AmberiteAuthUser[]>('dev:listDevUsers', {})
-			const pick = users.find((u: Record<string, unknown>) => u.username === 'amber') ?? users[0]
-			if (pick) {
-				window.localStorage.setItem(
-					DEV_ACTING_USER_KEY,
-					String((pick as Record<string, unknown>).userId),
-				)
-				await social.refresh()
-			}
+			const credential = await amberiteLogin()
+			const session = await useSocialClientRaw().rawAction<{
+				tokens: { token: string; refreshToken: string } | null
+			}>('auth:signIn', {
+				provider: 'minecraft-token',
+				params: { minecraftAccessToken: credential.accessToken },
+			})
+			if (!session.tokens) throw new Error('Amberite account session was not accepted.')
+			await adapter.setCurrentJwt?.(session.tokens.token)
+			await social.refresh()
+			if (!social.currentUser.value) throw new Error('Amberite account session was not accepted.')
 		} catch (e) {
 			console.warn('[amberite] account connection failed', e)
 			error.value = new Error(
-				'Amberite could not connect through Convex. Check VITE_CONVEX_URL and make sure the Convex deployment has AMBERITE_DEV_MODE=true.',
+				'Amberite could not connect your account. Check your connection and try again.',
 			)
 		} finally {
 			signingIn.value = false
@@ -122,7 +97,7 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 	}
 
 	async function logOut() {
-		window.localStorage.removeItem(DEV_ACTING_USER_KEY)
+		await adapter.setCurrentJwt?.(null)
 		error.value = null
 		await social.refresh()
 	}

@@ -35,6 +35,25 @@ const loading = ref(false)
 const error = ref<Error | null>(null)
 let initialized = false
 
+const ACCOUNT_SERVICE_ERROR =
+	'Amberite could not reach the account service. Check your connection and try again.'
+const AUTH_REQUIRED_ERROR = 'Sign in to Amberite to use this feature.'
+
+function clearUserScopedState(clearUser = false) {
+	if (clearUser) currentUser.value = null
+	group.value = null
+	members.value = []
+	bans.value = []
+	invites.value = []
+	friends.value = null
+}
+
+function safeSocialError(e: unknown): Error {
+	const message = e instanceof Error ? e.message.toLowerCase() : String(e).toLowerCase()
+	if (message.includes('not authenticated')) return new Error(AUTH_REQUIRED_ERROR)
+	return new Error(ACCOUNT_SERVICE_ERROR)
+}
+
 export interface UseSocialReturn {
 	currentUser: Ref<(AmberiteUser & { userId: string }) | null>
 	group: Ref<FriendGroupSummary | null>
@@ -48,10 +67,7 @@ export interface UseSocialReturn {
 	canManage: ComputedRef<boolean>
 	refresh: () => Promise<void>
 	searchUsers: (query: string) => Promise<AmberiteUser[]>
-	sendFriendRequest: (args: {
-		targetUserId: string
-		message?: string
-	}) => Promise<void>
+	sendFriendRequest: (args: { targetUserId: string; message?: string }) => Promise<void>
 	respondFriendRequest: (requestId: string, accept: boolean) => Promise<void>
 	cancelFriendRequest: (requestId: string) => Promise<void>
 	removeFriend: (userId: string) => Promise<void>
@@ -95,7 +111,7 @@ export function useSocial(): UseSocialReturn {
 		try {
 			return await fn()
 		} catch (e) {
-			error.value = e instanceof Error ? e : new Error(String(e))
+			error.value = safeSocialError(e)
 			return undefined
 		} finally {
 			loading.value = false
@@ -104,8 +120,16 @@ export function useSocial(): UseSocialReturn {
 
 	async function refresh(): Promise<void> {
 		await run(async () => {
-			currentUser.value = await client.currentUser()
-			if (currentUser.value) await client.heartbeat()
+			const nextUser = await client.currentUser()
+			if (!nextUser) {
+				clearUserScopedState(true)
+				return
+			}
+			currentUser.value = {
+				...(await client.ensureSocialProfile()),
+				userId: nextUser.userId,
+			}
+			await client.heartbeat()
 			const [groups, friendsList, myInvites] = await Promise.all([
 				client.listMyFriendGroups(),
 				client.friendsList(),

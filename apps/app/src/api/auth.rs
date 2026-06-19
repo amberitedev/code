@@ -1,5 +1,6 @@
 use crate::api::Result;
 use chrono::{Duration, Utc};
+use serde::{Deserialize, Serialize};
 use tauri::plugin::TauriPlugin;
 use tauri::{Manager, Runtime, UserAttentionType};
 use theseus::prelude::*;
@@ -13,8 +14,39 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             get_default_user,
             set_default_user,
             get_users,
+            amberite_login,
         ])
         .build()
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinecraftCredential {
+    access_token: String,
+    username: String,
+    uuid: String,
+}
+
+fn other_error(error: impl std::fmt::Display) -> crate::api::TheseusSerializableError {
+    theseus::ErrorKind::OtherError(error.to_string())
+        .as_error()
+        .into()
+}
+
+/// Returns the active Minecraft credentials so the frontend can trade them for an
+/// Amberite session with Convex Auth. The credentials are refreshed if expired.
+#[tauri::command]
+pub async fn amberite_login() -> Result<MinecraftCredential> {
+    let credentials = minecraft_auth::default_credential()
+        .await
+        .map_err(other_error)?
+        .ok_or_else(|| other_error("No Minecraft account is signed in"))?;
+
+    Ok(MinecraftCredential {
+        access_token: credentials.access_token,
+        username: credentials.offline_profile.name,
+        uuid: credentials.offline_profile.id.to_string(),
+    })
 }
 
 /// Checks if the authentication servers are reachable.

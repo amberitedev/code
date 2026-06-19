@@ -50,7 +50,7 @@ export class CoreInstanceStateManager {
 
 	async start(): Promise<void> {
 		if (!this.monitor) {
-			this.monitor = new CoreConnectionMonitor(this.adapter, '', '')
+			this.monitor = new CoreConnectionMonitor(this.adapter)
 			this.monitor.onStateChange((state) => {
 				this.connectionState = state
 				this.emit()
@@ -205,6 +205,7 @@ function toSummary(instance: CoreInstance | CoreInstanceSummary): CoreInstanceSu
 		memory: instance.memory,
 		install_status: instance.install_status,
 		status: instance.status,
+		installation_id: instance.installation_id,
 		created_at: instance.created_at,
 		updated_at: instance.updated_at,
 	}

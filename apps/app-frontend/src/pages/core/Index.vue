@@ -9,10 +9,12 @@ import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
 import CoreRolesPanel from '@/components/core/CoreRolesPanel.vue'
 import CoreSetupPanel from '@/components/core/CoreSetupPanel.vue'
 import CoreHostingSettingsModal from '@/components/core/settings/CoreHostingSettingsModal.vue'
+import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
 import { useCoreConnection } from '@/composables/useCoreConnection'
 import { useSocial } from '@/composables/useSocial'
 
 const social = useSocial()
+const auth = useAmberiteAuth()
 const connection = useCoreConnection()
 const onboardingModal = ref<InstanceType<typeof CoreOnboardingModal>>()
 const settingsModal = ref<InstanceType<typeof CoreHostingSettingsModal>>()
@@ -20,6 +22,7 @@ const activeTab = ref<'overview' | 'roles' | 'activity'>('overview')
 const detailsPlacement = ref<'tabs' | 'settings'>('tabs')
 const hasGroup = computed(() => !!social.group.value)
 const setupVisible = ref(!hasGroup.value)
+const showDevSetupSwitch = import.meta.env.DEV
 
 watch(hasGroup, (has, had) => {
 	if (has && !had) setupVisible.value = false
@@ -50,6 +53,16 @@ function selectTab(tab: { href: string }) {
 
 function toggleDetailsPlacement() {
 	detailsPlacement.value = detailsPlacement.value === 'tabs' ? 'settings' : 'tabs'
+}
+
+async function toggleDevSetupMode() {
+	if (setupVisible.value) {
+		await auth.signIn()
+		setupVisible.value = false
+	} else {
+		await auth.logOut()
+		setupVisible.value = true
+	}
 }
 </script>
 
@@ -142,6 +155,11 @@ function toggleDetailsPlacement() {
 						@click="setupVisible = !setupVisible"
 					>
 						<component :is="setupVisible ? ServerStackIcon : LinkIcon" />
+					</button>
+				</ButtonStyled>
+				<ButtonStyled v-if="showDevSetupSwitch">
+					<button class="!h-10" @click="toggleDevSetupMode">
+						Dev: {{ setupVisible ? 'regular' : 'setup' }}
 					</button>
 				</ButtonStyled>
 			</div>

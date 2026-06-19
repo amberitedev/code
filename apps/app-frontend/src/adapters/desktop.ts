@@ -6,11 +6,13 @@
  * capabilities/plugins.json must include http://localhost:16662/*.
  *
  * Core URL: reads VITE_CORE_URL env var, falls back to http://localhost:16662.
- * JWT: returns null — Core dev mode bypasses auth. TODO: wire up real auth here.
+ * JWT: persisted by the Amberite account sign-in flow.
  */
 import type { PersistentQueueStore, PlatformAdapter, QueuedMessage } from '@amberite/amberite-api'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
+
+import { config } from '@/config'
 
 class LocalStorageQueueStore implements PersistentQueueStore {
 	async list(queueName: string): Promise<QueuedMessage[]> {
@@ -50,8 +52,7 @@ class LocalStorageQueueStore implements PersistentQueueStore {
 
 const queueStore = new LocalStorageQueueStore()
 
-/** localStorage key holding the dev "act as" Convex user id (see useSocial dev API). */
-export const DEV_ACTING_USER_KEY = 'amberite:dev:actingUserId'
+export const AMBERITE_AUTH_TOKEN_KEY = 'amberite:auth:jwt'
 export const CORE_URL_STORAGE_KEY = 'amberite:core:url'
 
 export function createDesktopAdapter(): PlatformAdapter {
@@ -60,7 +61,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 		fetchFn: tauriFetch as typeof fetch,
 
 		// Convex relay URL. Empty string disables Convex-relay transport silently.
-		convexUrl: (import.meta.env.VITE_CONVEX_URL as string | undefined) ?? '',
+		convexUrl: config.convexUrl,
 
 		queueStore,
 
@@ -75,24 +76,20 @@ export function createDesktopAdapter(): PlatformAdapter {
 			}
 		},
 
-		// Dev identity bridge. Production login will replace this with a real JWT.
 		async getCurrentJwt(): Promise<string | null> {
-			const actingUserId = this.getDevActingUserId?.()
-			if (actingUserId) return `dev:${actingUserId}`
-			return null
-		},
-
-		/**
-		 * Dev-only acting-user override. Returns the Convex user id stored by the
-		 * `window.__amberite` dev API so the app can act as any seeded user before
-		 * real Microsoft auth is wired. The Convex deployment ignores this unless
-		 * AMBERITE_DEV_MODE is set, so it is inert in production.
-		 */
-		getDevActingUserId(): string | null {
 			try {
-				return window.localStorage.getItem(DEV_ACTING_USER_KEY)
+				return window.localStorage.getItem(AMBERITE_AUTH_TOKEN_KEY)
 			} catch {
 				return null
+			}
+		},
+
+		async setCurrentJwt(jwt: string | null): Promise<void> {
+			try {
+				if (jwt) window.localStorage.setItem(AMBERITE_AUTH_TOKEN_KEY, jwt)
+				else window.localStorage.removeItem(AMBERITE_AUTH_TOKEN_KEY)
+			} catch {
+				// localStorage can be unavailable in tests.
 			}
 		},
 

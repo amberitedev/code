@@ -4,7 +4,7 @@ Amberite Convex backend for social identity, friend groups, Core presence, synce
 
 ## Critical Workflow
 
-- After changing anything in `convex/`, push it to the dev deployment before calling the work done:
+- After changing anything in `convex/`, push it to the dev deployment before calling the work done. This is required even though normal app/core/web dev servers should not be started during agent work:
 
 ```powershell
 pnpm exec convex dev --once --tail-logs disable
@@ -41,26 +41,39 @@ convex/
 
 ## Core Logic
 
-- `resolveActor(ctx, __actAs)` in `_socialRules.ts` is the identity gate. In production it requires real Convex Auth. In dev only, `AMBERITE_DEV_MODE=true` allows the desktop app to pass `__actAs` so it can act as seeded users before Microsoft auth is wired.
+- `resolveActor(ctx, __actAs)` in `_socialRules.ts` is the identity gate. Production and the desktop app must use real Convex Auth/JWT identity. Dev-only `__actAs` is only for explicit backend test utilities and must not be wired into app clients.
 - Never persist `__actAs`. Convex document fields beginning with `_` are reserved, so destructure it away before inserts, patches, or metadata copies.
 - The one-user/one-Core/one-friend-group invariant is enforced by `requireSingleGroupMembership`, `requireSingleOwnedCore`, `getOrCreateDefaultFriendGroup`, and `upsertCoreForFriendGroup`.
 - Friend-group authorization flows through `requireFriendGroupRole`. Owner outranks admin outranks member; use `roleRank` for operations that compare two members.
 - Public user responses should go through `publicUser` so callers do not receive raw auth/user documents.
 - Queries with `returns` validators must return explicit public objects, not raw Convex documents with `_id`/`_creationTime`, unless the validator allows those fields.
 
+## Auth Architecture
+
+Amberite identity is the same identity as the user's Minecraft login. There is no separate Microsoft OAuth app registration or env-configured auth exchange URL in the desktop app.
+
+- The desktop app authenticates to Minecraft using the upstream Modrinth hardcoded Xbox client ID (`packages/app-lib/src/state/minecraft_auth.rs`).
+- When the app needs an Amberite session, it reads the active Minecraft credentials from the local Rust state and sends the Minecraft access token to Convex.
+- Convex exposes a `ConvexCredentials` provider (`minecraft-token`) in `convex/auth.ts`.
+- The provider verifies the token with `https://api.minecraftservices.com/minecraft/profile`, then finds or creates an Amberite user linked by Minecraft UUID.
+- Convex Auth issues the session JWT, which the desktop app stores and sends as `Authorization: Bearer <token>`.
+
+This keeps the desktop app's auth surface minimal: no client secrets, no browser OAuth redirects, and no extra Microsoft login screen.
+
 ## App Connection Path
 
 - Desktop app adapter: `apps/app-frontend/src/adapters/desktop.ts`
 - Shared Convex client: `packages/amberite-api/src/convex-api.ts`
 - Raw HTTP transport: `packages/amberite-api/src/convex-relay.ts`
-- Dev acting-user storage key: `amberite:dev:actingUserId`
-- Live endpoint shape:
+- The desktop app stores a real Amberite session JWT and sends it as `Authorization: Bearer <token>`.
+- Live endpoint shapes:
 
 ```json
-{ "path": "friends:friendsList", "args": { "__actAs": "..." }, "format": "json" }
+{ "path": "friends:friendsList", "args": {}, "format": "json" }
+{ "path": "auth:signIn", "args": { "provider": "minecraft-token", "params": { "minecraftAccessToken": "..." } }, "format": "json" }
 ```
 
-sent as `POST /api/query` or `POST /api/mutation` on `CONVEX_URL`.
+sent as `POST /api/query`, `/api/mutation`, or `/api/action` on `CONVEX_URL`.
 
 ## Useful Checks
 
@@ -83,7 +96,6 @@ node --env-file=.env.local -e "fetch(process.env.CONVEX_URL + '/api/query', { me
 
 ## Deployment Notes
 
-- Dev deployment env must include `AMBERITE_DEV_MODE=true` for seeded-user desktop testing.
 - `dev.ts` functions are intentionally inert without `AMBERITE_DEV_MODE`.
-- Production/preview deployments must not rely on `__actAs`; real auth should be present.
+- Production/preview deployments and app clients must not rely on `__actAs`; real auth should be present.
 - If `schema.ts` changes, push with `pnpm exec convex dev --once --tail-logs disable` and then run at least one targeted function through `pnpm exec convex run` or `/api/query`/`/api/mutation`.

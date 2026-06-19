@@ -88,3 +88,10 @@ pub async fn users() -> crate::Result<Vec<Credentials>> {
     let users = Credentials::get_all(&state.pool).await?;
     Ok(users.into_iter().map(|x| x.1).collect())
 }
+
+/// Get the active/default Minecraft credentials, refreshing them if needed.
+#[tracing::instrument]
+pub async fn default_credential() -> crate::Result<Option<Credentials>> {
+    let state = State::get().await?;
+    Credentials::get_default_credential(&state.pool).await
+}

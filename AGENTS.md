@@ -32,7 +32,7 @@ This repository is a fork of `modrinth/code`. A Git remote named `upstream` is a
 
 ## Dev commands
 
-Run from the repo root unless noted. dont run build or dev commands.
+Run from the repo root unless noted. dont run build or dev commands, except Convex deploy/codegen pushes required after editing `convex/`.
 
 ### Main dev servers
 
@@ -44,7 +44,7 @@ Run from the repo root unless noted. dont run build or dev commands.
 | `pnpm web:dev` | Modrinth website (`apps/frontend/`) |
 | `pnpm docs:dev` | Docs site (`apps/docs/`) |
 
-Convex is standalone in `convex/` — run directly: `pnpm dlx convex dev`
+Convex is standalone in `convex/`. Whenever code under `convex/` changes, push the update with `pnpm exec convex dev --once --tail-logs disable` before calling the task done. Do not start long-running Convex watchers unless explicitly asked.
 
 ### Lint, test, build
 

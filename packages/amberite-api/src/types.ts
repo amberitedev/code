@@ -104,7 +104,9 @@ export type CoreInstanceEvent =
 	| { type: 'instance_created'; instance: CoreInstanceSummary }
 	| { type: 'instance_updated'; instance: CoreInstanceSummary }
 	| { type: 'instance_deleted'; instance_id: string }
+	| { type: 'instance_output'; instance_id: string; line: string }
 	| { type: 'status_changed'; instance_id: string; status: CoreInstanceStatus }
+	| { type: 'macro_output'; instance_id: string; macro_pid: number; line: string }
 	| {
 			type: 'install_status_changed'
 			instance_id: string
@@ -414,8 +416,10 @@ export type CoreFsOperationKind =
 	| 'write'
 	| 'create'
 	| 'delete'
-	| 'rename'
-	| 'read'
+	| 'upload'
+	| 'zip'
+	| 'unzip'
+	| 'copy'
 	| { move: { from: string } }
 
 /** Response from GET /core — Core identity and configuration. */

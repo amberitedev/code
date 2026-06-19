@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { SendIcon, UserIcon, UserPlusIcon } from '@modrinth/assets'
 import {
-	Avatar,
-	ButtonStyled,
-	injectNotificationManager,
-	StyledInput,
-} from '@modrinth/ui'
+	CheckIcon,
+	MailIcon,
+	RefreshCwIcon,
+	SendIcon,
+	UserIcon,
+	UserPlusIcon,
+	XIcon,
+} from '@modrinth/assets'
+import { Avatar, ButtonStyled, injectNotificationManager, StyledInput } from '@modrinth/ui'
 import dayjs from 'dayjs'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import { useSocial } from '@/composables/useSocial'
@@ -17,26 +20,29 @@ import type { AmberiteUser } from '@amberite/amberite-api'
 
 type PendingFriendWithRequest = FriendWithUserData & { requestId: string }
 
-const { addNotification, handleError } = injectNotificationManager()
+const { addNotification } = injectNotificationManager()
 const {
 	friends,
 	currentUser,
 	loading,
 	error,
+	refresh,
 	searchUsers,
 	sendFriendRequest,
+	respondFriendRequest,
 	cancelFriendRequest,
 	removeFriend,
-} =
-	useSocial()
+} = useSocial()
 
 const search = ref('')
 const addFriendModal = ref()
+const friendInvitesModal = ref()
 const usernameQuery = ref('')
 const userResults = ref<AmberiteUser[]>([])
 const selectedUser = ref<AmberiteUser | null>(null)
 const searchingUsers = ref(false)
 const sending = ref(false)
+const actingOnRequestId = ref<string | null>(null)
 let searchToken = 0
 
 const friendList = computed(() => friends.value?.friends ?? [])
@@ -60,6 +66,20 @@ const acceptedFriends = computed<FriendWithUserData[]>(() =>
 const pendingFriends = computed<PendingFriendWithRequest[]>(() =>
 	outgoing.value.map((request) => ({
 		id: request.user?.userId ?? request.request.toUserId,
+		friend_id: null,
+		status: null,
+		last_updated: null,
+		created: dayjs(request.request.createdAt),
+		username: requestLabel(request),
+		accepted: false,
+		online: false,
+		avatar: request.user?.image ?? '',
+		requestId: request.request._id,
+	})),
+)
+const incomingRequests = computed<PendingFriendWithRequest[]>(() =>
+	incoming.value.map((request) => ({
+		id: request.user?.userId ?? request.request.fromUserId,
 		friend_id: null,
 		status: null,
 		last_updated: null,
@@ -99,14 +119,17 @@ const unavailableUserIds = computed(
 
 const canSendFriendRequest = computed(() => !!selectedUser.value && !sending.value)
 
-watch(error, (value) => {
-	if (!value) return
+function showFriendsServiceError(title = 'Friends unavailable') {
 	addNotification({
-		title: 'Friends error',
-		text: value.message,
+		title,
+		text: 'Amberite could not reach the account service. Check your connection and try again.',
 		type: 'error',
 	})
-})
+}
+
+async function refreshFriends() {
+	await refresh()
+}
 
 async function searchFriendUsers() {
 	const query = usernameQuery.value.trim()
@@ -123,8 +146,9 @@ async function searchFriendUsers() {
 			userResults.value = results.filter((user) => !unavailableUserIds.value.has(user.userId))
 		}
 	} catch (e) {
+		console.warn('[amberite] friend search failed', e)
 		if (token === searchToken) userResults.value = []
-		handleError(e)
+		showFriendsServiceError('Search unavailable')
 	} finally {
 		if (token === searchToken) searchingUsers.value = false
 	}
@@ -143,11 +167,7 @@ async function add() {
 	try {
 		await sendFriendRequest({ targetUserId: user.userId })
 		if (error.value) {
-			addNotification({
-				title: 'Friend request failed',
-				text: error.value.message,
-				type: 'error',
-			})
+			showFriendsServiceError('Friend request failed')
 			return
 		}
 		usernameQuery.value = ''
@@ -160,23 +180,57 @@ async function add() {
 			type: 'success',
 		})
 	} catch (e) {
-		handleError(e)
+		console.warn('[amberite] friend request failed', e)
+		showFriendsServiceError('Friend request failed')
 	} finally {
 		sending.value = false
 	}
 }
 
 async function unfriend(userId: string) {
-	await removeFriend(userId).catch(handleError)
+	await removeFriend(userId)
+	if (error.value) {
+		showFriendsServiceError('Friend update failed')
+	}
 }
 
 async function removeMappedFriend(friend: FriendWithUserData) {
 	if (!friend.accepted) {
 		const requestId = (friend as Partial<PendingFriendWithRequest>).requestId
-		if (requestId) await cancelFriendRequest(requestId).catch(handleError)
+		if (requestId) {
+			await cancelFriendRequest(requestId)
+			if (error.value) {
+				showFriendsServiceError('Friend request update failed')
+			}
+		}
 		return
 	}
 	await unfriend(friend.id)
+}
+
+async function respondToRequest(friend: PendingFriendWithRequest, accept: boolean) {
+	if (actingOnRequestId.value) return
+	actingOnRequestId.value = friend.requestId
+	try {
+		await respondFriendRequest(friend.requestId, accept)
+		if (error.value) {
+			showFriendsServiceError('Friend request update failed')
+			return
+		}
+		addNotification({
+			title: accept ? 'Friend request accepted' : 'Friend request ignored',
+			text: accept
+				? `${friend.username} is now your friend.`
+				: `Ignored the friend request from ${friend.username}.`,
+			type: 'success',
+		})
+		if (incomingRequests.value.length <= 1) friendInvitesModal.value?.hide()
+	} catch (e) {
+		console.warn('[amberite] respond to friend request failed', e)
+		showFriendsServiceError('Friend request update failed')
+	} finally {
+		actingOnRequestId.value = null
+	}
 }
 
 function friendLabel(f: (typeof friendList.value)[number]) {
@@ -189,6 +243,46 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 </script>
 
 <template>
+	<ModalWrapper ref="friendInvitesModal" header="Friend requests">
+		<div class="min-w-[30rem]">
+			<p v-if="incomingRequests.length === 0" class="m-0 text-sm text-secondary">
+				You have no pending friend requests.
+			</p>
+			<div v-else class="flex flex-col gap-3">
+				<div
+					v-for="friend in incomingRequests"
+					:key="friend.requestId"
+					class="grid grid-cols-[auto_1fr_auto] items-center gap-3"
+				>
+					<Avatar :src="friend.avatar" size="36px" circle />
+					<div class="min-w-0">
+						<p class="m-0 truncate text-sm text-contrast">{{ friend.username }}</p>
+						<p class="m-0 text-xs text-secondary">Sent you a friend request</p>
+					</div>
+					<div class="flex gap-2">
+						<ButtonStyled color="brand">
+							<button
+								:disabled="actingOnRequestId !== null"
+								@click="respondToRequest(friend, true)"
+							>
+								<CheckIcon />
+								Accept
+							</button>
+						</ButtonStyled>
+						<ButtonStyled>
+							<button
+								:disabled="actingOnRequestId !== null"
+								@click="respondToRequest(friend, false)"
+							>
+								<XIcon />
+								Ignore
+							</button>
+						</ButtonStyled>
+					</div>
+				</div>
+			</div>
+		</div>
+	</ModalWrapper>
 	<ModalWrapper ref="addFriendModal" header="Adding a friend">
 		<div class="min-w-[30rem]">
 			<h2 class="m-0 text-base font-medium text-primary">
@@ -242,14 +336,29 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 		</div>
 	</ModalWrapper>
 	<div class="flex flex-col h-full">
-		<div v-if="!currentUser" class="text-sm text-secondary">
-			<p class="m-0">Sign in to Minecraft to create your Amberite account and use friends.</p>
+		<div
+			v-if="error && !loading"
+			class="flex flex-col items-start gap-3 rounded-lg border border-solid border-surface-5 bg-surface-2 p-3 text-sm text-secondary"
+		>
+			<p class="m-0">
+				Amberite could not load friends right now. Check your connection and try again.
+			</p>
+			<ButtonStyled>
+				<button @click="refreshFriends">
+					<RefreshCwIcon />
+					Retry
+				</button>
+			</ButtonStyled>
 		</div>
-		<template v-else>
+		<template v-else-if="currentUser">
 			<div class="flex gap-1 items-center mb-3 -ml-1">
 				<template v-if="allFriends.length > 0">
 					<ButtonStyled circular type="transparent">
-						<button v-tooltip="'Add a friend'" aria-label="Add a friend" @click="addFriendModal.show">
+						<button
+							v-tooltip="'Add a friend'"
+							aria-label="Add a friend"
+							@click="addFriendModal.show"
+						>
 							<UserPlusIcon />
 						</button>
 					</ButtonStyled>
@@ -264,6 +373,24 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					/>
 				</template>
 				<h3 v-else class="w-full text-base text-primary font-medium m-0">Friends</h3>
+				<ButtonStyled v-if="incomingRequests.length > 0" circular type="transparent">
+					<button
+						v-tooltip="
+							`${incomingRequests.length} friend request${incomingRequests.length === 1 ? '' : 's'}`
+						"
+						class="relative"
+						aria-label="View friend requests"
+						@click="friendInvitesModal.show"
+					>
+						<MailIcon />
+						<span
+							aria-hidden="true"
+							class="absolute bg-brand text-brand-inverted text-[8px] top-0.5 px-1 right-0.5 min-w-3 h-3 rounded-full flex items-center justify-center font-bold"
+						>
+							{{ incomingRequests.length }}
+						</span>
+					</button>
+				</ButtonStyled>
 			</div>
 
 			<div class="flex flex-col gap-3">
@@ -320,8 +447,18 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 						Add friends
 					</button>
 					to see what they're playing!
+					<button
+						v-if="incomingRequests.length > 0"
+						class="ml-1 font-semibold text-brand cursor-pointer border-0 bg-transparent p-0"
+						@click="friendInvitesModal.show"
+					>
+						View requests
+					</button>
 				</div>
-				<p v-else-if="filteredFriends.length === 0 && search" class="text-sm text-secondary my-1 mx-4">
+				<p
+					v-else-if="filteredFriends.length === 0 && search"
+					class="text-sm text-secondary my-1 mx-4"
+				>
 					No friends matching '{{ search }}'
 				</p>
 			</div>

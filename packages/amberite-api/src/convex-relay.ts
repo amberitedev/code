@@ -3,11 +3,6 @@ import { NetworkError } from './errors'
 
 const CONVEX_REQUEST_TIMEOUT_MS = 15_000
 
-/** Convex args are always a plain JSON object; only then can we add `__actAs`. */
-function isPlainArgs(args: unknown): args is Record<string, unknown> {
-	return typeof args === 'object' && args !== null && !Array.isArray(args)
-}
-
 export async function convexQuery<T = unknown>(
 	adapter: PlatformAdapter,
 	path: string,
@@ -24,17 +19,21 @@ export async function convexMutation<T = unknown>(
 	return await convexCall<T>(adapter, 'mutation', path, args)
 }
 
+export async function convexAction<T = unknown>(
+	adapter: PlatformAdapter,
+	path: string,
+	args: unknown,
+): Promise<T> {
+	return await convexCall<T>(adapter, 'action', path, args)
+}
+
 async function convexCall<T>(
 	adapter: PlatformAdapter,
-	kind: 'query' | 'mutation',
+	kind: 'query' | 'mutation' | 'action',
 	path: string,
 	args: unknown,
 ): Promise<T> {
 	const token = await adapter.getCurrentJwt()
-	const devActingUserId = adapter.getDevActingUserId?.()
-	const authToken = token?.startsWith('dev:') ? null : token
-	const finalArgs =
-		devActingUserId && isPlainArgs(args) ? { ...(args as object), __actAs: devActingUserId } : args
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), CONVEX_REQUEST_TIMEOUT_MS)
 	let res: Response
@@ -44,9 +43,9 @@ async function convexCall<T>(
 			signal: controller.signal,
 			headers: {
 				'Content-Type': 'application/json',
-				...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+				...(token ? { Authorization: `Bearer ${token}` } : {}),
 			},
-			body: JSON.stringify({ path, args: finalArgs, format: 'json' }),
+			body: JSON.stringify({ path, args, format: 'json' }),
 		})
 	} catch (err) {
 		if (err instanceof Error && err.name === 'AbortError') {

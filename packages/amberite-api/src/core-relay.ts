@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './adapter'
-import { CoreOfflineError, NetworkError } from './errors'
+import { CoreApiError, CoreOfflineError, NetworkError, RelayTimeoutError } from './errors'
 import type { MessageEnvelope } from './transport'
 
 const CORE_RELAY_POLL_INTERVAL_MS = 500
@@ -114,13 +114,16 @@ async function coreRelayCall<T = unknown>(
 			},
 		})
 	} catch (error) {
+		if (error instanceof Error && error.name === 'AbortError') {
+			throw new RelayTimeoutError()
+		}
 		const reason = error instanceof Error ? error.message : String(error)
 		throw new NetworkError(reason)
 	} finally {
 		clearTimeout(timeout)
 	}
 	const body = await res.json().catch(() => null)
-	if (!res.ok) throw new NetworkError(body?.error ?? `Core relay failed: ${res.status}`)
+	if (!res.ok) throw new CoreApiError(res.status, body?.error ?? 'Core relay request failed')
 	return body as T
 }
 
@@ -136,7 +139,7 @@ async function waitForCoreRelayStatus(
 		if (state && statuses.includes(state.status)) return state
 		await sleep(CORE_RELAY_POLL_INTERVAL_MS)
 	}
-	throw new NetworkError(`Core relay timed out waiting for ${statuses.join(' or ')}`)
+	throw new RelayTimeoutError()
 }
 
 function sleep(ms: number): Promise<void> {

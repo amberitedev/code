@@ -230,4 +230,46 @@ These are the most urgent engineering problems in priority order:
 
 ---
 
-*Last updated: 2026-05. This is the single source of truth. `PROJECT-NEW.md` is now superseded by this file and can be deleted.*
+## Decisions made on 2026-06-19
+
+These override or clarify earlier sections where the two conflict.
+
+### Identity model
+
+**Amberite-first.** The Amberite account is the primary identity in the desktop app. It is linked to the user's Minecraft account and is used for friends, groups, Core access, and social features. A linked Modrinth account is required only for Modrinth-specific actions: managing uploaded mods/projects, viewing the user's Modrinth profile, and other Modrinth.com operations. If no Modrinth account is linked, those features are unavailable but the rest of the app keeps working.
+
+### Modrinth API authentication
+
+The Modrinth API client must use a real Modrinth bearer token obtained through a real Modrinth login/linking flow. It is not acceptable to send a placeholder string or to rely on public profile data for authenticated actions. The desktop app needs a path for the user to link/authorize their Modrinth account and for the app to obtain a valid Modrinth access token.
+
+### Amberite session storage
+
+Amberite session credentials are stored in the OS keychain (consistent with the existing auth decision in this doc). `localStorage` is not an acceptable place for session tokens or credentials. The implementation should use a Tauri keychain plugin or similar OS-backed secure storage, not `window.localStorage`.
+
+### Dev-mode auth bypasses
+
+All `__actAs`, `dev-owner`, `Bearer dev:<id>`, and similar auth bypasses are being removed. They were temporary scaffolding and must not ship in any build. Debug builds should not silently enable them either; if any dev helper is needed for local development it must be explicitly compile-time gated and impossible to enable in a release binary.
+
+### Core settings persistence
+
+Core settings live in Core's own storage (SQLite/settings file in the Core data directory). The client app may cache settings locally for offline use, but the Core backend is the source of truth. Client-side `localStorage` is not the primary persistence layer for Core settings.
+
+### Automatic Amberite OAuth on Minecraft login
+
+Yes. Adding or selecting a Minecraft account automatically starts the Amberite account setup/linking flow. The UI may show a small explanatory popup so the user understands why a browser window opened, but the flow itself should be automatic.
+
+### Core backend discovery
+
+Core discovery is handled through Convex (the current implementation direction). Convex stores Core registration/redirect metadata per friend group. For a local Core running on the same machine, the app already knows it is local and can short-circuit discovery. Access to a Core is gated by friend-group membership/authorization. Port forwarding / public exposure of a Core is opt-in and separate from Minecraft server access.
+
+### Naming
+
+Keep the `copal` rename. The Core package and product surface stay as Copal.
+
+### Note on backend divergence
+
+The current implementation has moved several subsystems toward Convex (auth, friend groups, Core presence, discovery), while this doc originally described Supabase for those roles. That divergence is acknowledged. The plan is to keep the Convex direction unless a future decision explicitly reverts it, at which point this section should be updated.
+
+---
+
+*Last updated: 2026-06-19. This is the single source of truth. `PROJECT-NEW.md` is now superseded by this file and can be deleted.*

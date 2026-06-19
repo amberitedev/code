@@ -23,9 +23,8 @@ import {
 	RefreshCwIcon,
 	RightArrowIcon,
 	ServerStackIcon,
-	ShieldAlertIcon,
 	SettingsIcon,
-	UserPlusIcon,
+	ShieldAlertIcon,
 	UserIcon,
 	WorldIcon,
 	XIcon,
@@ -105,7 +104,6 @@ import { list } from '@/helpers/profile.js'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
 import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { get_opening_command, initialize_state } from '@/helpers/state'
-import { hasActivePride26Midas, hasMidasBadge } from '@/helpers/user-campaigns.ts'
 import {
 	areUpdatesEnabled,
 	enqueueUpdateForInstallation,
@@ -145,6 +143,18 @@ const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const hasMinecraftAccounts = ref(false)
 const amberiteAccountMissing = computed(
 	() => hasMinecraftAccounts.value && !amberiteAuth.user.value,
+)
+const AMBERITE_ACCOUNT_DISMISS_KEY = 'amberite:account-modal:dismissed'
+const amberiteAccountDismissedForSession = ref(false)
+try {
+	amberiteAccountDismissedForSession.value =
+		window.sessionStorage.getItem(AMBERITE_ACCOUNT_DISMISS_KEY) === 'true'
+} catch {
+	// sessionStorage can be unavailable in tests.
+}
+const amberiteAccountModalStep = ref('main')
+const showAmberiteAccountModal = computed(
+	() => amberiteAccountMissing.value && !amberiteAccountDismissedForSession.value,
 )
 const sidebarToggled = ref(true)
 const unsubscribeSidebarToggle = themeStore.$subscribe(() => {
@@ -206,7 +216,7 @@ const tauriApiClient = new TauriModrinthClient({
 	],
 })
 provideModrinthClient(tauriApiClient)
-const { data: authenticatedModrinthUser } = useQuery({
+useQuery({
 	queryKey: computed(() => ['authenticated-user', 'campaigns', modrinthLink.user.value?.id]),
 	queryFn: () => tauriApiClient.labrinth.users_v3.getAuthenticated(),
 	enabled: () => modrinthLink.linked.value,
@@ -341,6 +351,49 @@ const messages = defineMessages({
 		id: 'app.auth-servers.unreachable.body',
 		defaultMessage:
 			'Minecraft authentication servers may be down right now. Check your internet connection and try again later.',
+	},
+	amberiteAccountModalHeader: {
+		id: 'app.amberite-account-modal.header',
+		defaultMessage: 'Connect your Amberite account',
+	},
+	amberiteAccountModalBody: {
+		id: 'app.amberite-account-modal.body',
+		defaultMessage:
+			'You are signed in to Minecraft, but Amberite has not finished creating your app account.',
+	},
+	amberiteAccountModalHint: {
+		id: 'app.amberite-account-modal.hint',
+		defaultMessage:
+			'Friends, Core access, invites, and sync need this account before the app can work correctly.',
+	},
+	amberiteAccountModalConnect: {
+		id: 'app.amberite-account-modal.connect',
+		defaultMessage: 'Connect Amberite account',
+	},
+	amberiteAccountModalConnecting: {
+		id: 'app.amberite-account-modal.connecting',
+		defaultMessage: 'Connecting...',
+	},
+	amberiteAccountModalDismiss: {
+		id: 'app.amberite-account-modal.dismiss',
+		defaultMessage: 'Fix later',
+	},
+	amberiteAccountModalDismissConfirmHeader: {
+		id: 'app.amberite-account-modal.dismiss-confirm.header',
+		defaultMessage: 'Are you sure?',
+	},
+	amberiteAccountModalDismissConfirmBody: {
+		id: 'app.amberite-account-modal.dismiss-confirm.body',
+		defaultMessage:
+			'Not fixing this right now will result in features such as Core access, invites, friends, and sync being unavailable.',
+	},
+	amberiteAccountModalDismissConfirmBack: {
+		id: 'app.amberite-account-modal.dismiss-confirm.back',
+		defaultMessage: 'Go back',
+	},
+	amberiteAccountModalDismissConfirmConfirm: {
+		id: 'app.amberite-account-modal.dismiss-confirm.confirm',
+		defaultMessage: 'Yes, dismiss',
 	},
 })
 
@@ -658,16 +711,48 @@ async function handleMinecraftAccountChange(hasAccounts) {
 	}
 }
 
-watch(amberiteAccountMissing, (missing) => {
-	if (missing) {
-		setTimeout(() => amberiteAccountModal.value?.show(), 0)
+watch(showAmberiteAccountModal, (shouldShow) => {
+	if (shouldShow) {
+		setTimeout(() => {
+			amberiteAccountModalStep.value = 'main'
+			amberiteAccountModal.value?.show()
+		}, 0)
 	} else {
 		amberiteAccountModal.value?.hide()
 	}
 })
 
+watch(amberiteAuth.user, (user) => {
+	if (user) {
+		amberiteAccountDismissedForSession.value = false
+		try {
+			window.sessionStorage.removeItem(AMBERITE_ACCOUNT_DISMISS_KEY)
+		} catch {
+			// sessionStorage can be unavailable in tests.
+		}
+	}
+})
+
 async function logOut() {
 	await amberiteAuth.logOut().catch(handleError)
+}
+
+function beginDismissAmberiteAccountModal() {
+	amberiteAccountModalStep.value = 'confirm-dismiss'
+}
+
+function cancelDismissAmberiteAccountModal() {
+	amberiteAccountModalStep.value = 'main'
+}
+
+function confirmDismissAmberiteAccountModal() {
+	amberiteAccountDismissedForSession.value = true
+	try {
+		window.sessionStorage.setItem(AMBERITE_ACCOUNT_DISMISS_KEY, 'true')
+	} catch {
+		// sessionStorage can be unavailable in tests.
+	}
+	amberiteAccountModal.value?.hide()
 }
 
 const hasPlus = computed(() => false)
@@ -1309,9 +1394,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<NavButton v-tooltip.right="'Core'" to="/core">
 				<ServerStackIcon />
 			</NavButton>
-			<NavButton v-tooltip.right="'Core access'" to="/core/access">
-				<UserPlusIcon />
-			</NavButton>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
 			<suspense>
 				<QuickInstanceSwitcher />
@@ -1587,23 +1669,47 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	<MinecraftAuthErrorModal ref="minecraftAuthErrorModal" />
 	<NewModal
 		ref="amberiteAccountModal"
-		header="Connect your Amberite account"
+		:header="
+			amberiteAccountModalStep === 'confirm-dismiss'
+				? formatMessage(messages.amberiteAccountModalDismissConfirmHeader)
+				: formatMessage(messages.amberiteAccountModalHeader)
+		"
 		:closable="false"
 		max-width="32rem"
 	>
-		<div class="flex flex-col gap-5">
+		<div v-if="amberiteAccountModalStep === 'confirm-dismiss'" class="flex flex-col gap-5">
+			<div class="flex gap-4">
+				<div class="grid size-12 shrink-0 place-content-center rounded-full bg-red-highlight">
+					<ShieldAlertIcon class="size-6 text-red" />
+				</div>
+				<p class="m-0 text-base text-primary leading-snug">
+					{{ formatMessage(messages.amberiteAccountModalDismissConfirmBody) }}
+				</p>
+			</div>
+			<div class="flex justify-end gap-3">
+				<ButtonStyled type="transparent">
+					<button @click="cancelDismissAmberiteAccountModal">
+						{{ formatMessage(messages.amberiteAccountModalDismissConfirmBack) }}
+					</button>
+				</ButtonStyled>
+				<ButtonStyled color="red">
+					<button @click="confirmDismissAmberiteAccountModal">
+						{{ formatMessage(messages.amberiteAccountModalDismissConfirmConfirm) }}
+					</button>
+				</ButtonStyled>
+			</div>
+		</div>
+		<div v-else class="flex flex-col gap-5">
 			<div class="flex gap-4">
 				<div class="grid size-12 shrink-0 place-content-center rounded-full bg-orange-highlight">
 					<ShieldAlertIcon class="size-6 text-orange" />
 				</div>
 				<div class="flex flex-col gap-2">
 					<p class="m-0 text-base text-primary leading-snug">
-						You are signed in to Minecraft, but Amberite has not finished creating your app
-						account.
+						{{ formatMessage(messages.amberiteAccountModalBody) }}
 					</p>
 					<p class="m-0 text-sm text-secondary leading-snug">
-						Friends, Core access, invites, and sync need this account before the app can work
-						correctly.
+						{{ formatMessage(messages.amberiteAccountModalHint) }}
 					</p>
 				</div>
 			</div>
@@ -1613,10 +1719,22 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				{{ amberiteAuth.error.value.message }}
 			</div>
-			<div class="flex justify-end">
+			<div class="flex justify-end gap-3">
+				<ButtonStyled color="red" type="outlined">
+					<button
+						:disabled="amberiteAuth.signingIn.value"
+						@click="beginDismissAmberiteAccountModal"
+					>
+						{{ formatMessage(messages.amberiteAccountModalDismiss) }}
+					</button>
+				</ButtonStyled>
 				<ButtonStyled color="brand">
 					<button :disabled="amberiteAuth.signingIn.value" @click="signIn">
-						{{ amberiteAuth.signingIn.value ? 'Connecting...' : 'Connect Amberite account' }}
+						{{
+							amberiteAuth.signingIn.value
+								? formatMessage(messages.amberiteAccountModalConnecting)
+								: formatMessage(messages.amberiteAccountModalConnect)
+						}}
 					</button>
 				</ButtonStyled>
 			</div>
@@ -1726,21 +1844,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	--color-button-bg-hover: var(--brand-gradient-border);
 	--color-divider: var(--brand-gradient-border);
 	--color-divider-dark: var(--brand-gradient-border);
-}
-
-.app-sidebar::after {
-	content: '';
-	position: absolute;
-	bottom: 250px;
-	left: 0;
-	right: 0;
-	height: 5rem;
-	background: var(--brand-gradient-fade-out-color);
-	pointer-events: none;
-}
-
-.app-sidebar.has-plus::after {
-	display: none;
 }
 
 .disable-advanced-rendering {

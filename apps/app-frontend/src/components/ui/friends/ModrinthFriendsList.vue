@@ -10,6 +10,7 @@ import {
 	useRelativeTime,
 	useVIntl,
 } from '@modrinth/ui'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
@@ -62,6 +63,10 @@ async function removeFriend(friend: FriendWithUserData) {
 		await remove_friend(id).catch(handleError)
 		await loadFriends()
 	}
+}
+
+function openModrinthProfile(friend: FriendWithUserData) {
+	openUrl('https://modrinth.com/user/' + encodeURIComponent(friend.username))
 }
 
 const userFriends = ref<FriendWithUserData[]>([])
@@ -373,6 +378,7 @@ const messages = defineMessages({
 				:friends="activeFriends"
 				:heading="formatMessage(messages.active)"
 				:remove-friend="removeFriend"
+				:open-profile="openModrinthProfile"
 			/>
 			<FriendsSection
 				v-if="onlineFriends.length > 0"
@@ -381,6 +387,7 @@ const messages = defineMessages({
 				:friends="onlineFriends"
 				:heading="formatMessage(messages.online)"
 				:remove-friend="removeFriend"
+				:open-profile="openModrinthProfile"
 			/>
 			<FriendsSection
 				v-if="offlineFriends.length > 0"
@@ -389,6 +396,7 @@ const messages = defineMessages({
 				:friends="offlineFriends"
 				:heading="formatMessage(messages.offline)"
 				:remove-friend="removeFriend"
+				:open-profile="openModrinthProfile"
 			/>
 			<FriendsSection
 				v-if="pendingFriends.length > 0"
@@ -396,6 +404,7 @@ const messages = defineMessages({
 				:friends="pendingFriends"
 				:heading="formatMessage(messages.pending)"
 				:remove-friend="removeFriend"
+				:open-profile="openModrinthProfile"
 			/>
 			<p v-if="filteredFriends.length === 0 && search" class="text-sm text-secondary my-1 mx-4">
 				{{ formatMessage(messages.noFriendsMatch, { query: search }) }}

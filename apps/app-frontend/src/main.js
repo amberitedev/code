@@ -8,7 +8,6 @@ import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
 import App from '@/App.vue'
-import { installAmberiteDevApi } from '@/dev/amberiteDevApi'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
@@ -47,5 +46,3 @@ app.use(i18nDebugPlugin)
 app.directive('overlay-scrollbars', overlayScrollbarsDirective)
 
 app.mount('#app')
-
-installAmberiteDevApi()

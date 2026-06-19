@@ -149,20 +149,25 @@ fn main() {
         );
     }
 
-    builder = builder
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(payload) = args.get(1) {
-                tracing::info!("Handling deep link from arg {payload}");
-                let payload = payload.clone();
-                tauri::async_runtime::spawn(api::utils::handle_command(
-                    payload,
-                ));
-            }
+    if env::var("AMBERITE_DISABLE_SINGLE_INSTANCE").as_deref() != Ok("1") {
+        builder = builder.plugin(tauri_plugin_single_instance::init(
+            |app, args, _cwd| {
+                if let Some(payload) = args.get(1) {
+                    tracing::info!("Handling deep link from arg {payload}");
+                    let payload = payload.clone();
+                    tauri::async_runtime::spawn(api::utils::handle_command(
+                        payload,
+                    ));
+                }
 
-            if let Some(win) = app.get_window("main") {
-                let _ = win.set_focus();
-            }
-        }))
+                if let Some(win) = app.get_window("main") {
+                    let _ = win.set_focus();
+                }
+            },
+        ));
+    }
+
+    builder = builder
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
@@ -224,6 +229,13 @@ fn main() {
                 && let Err(e) = window.set_shadow(true)
             {
                 tracing::warn!("Failed to set window shadow: {e}");
+            }
+
+            if let Ok(title) = env::var("AMBERITE_DEVM_NAME")
+                && let Some(window) = app.get_window("main")
+                && let Err(e) = window.set_title(&title)
+            {
+                tracing::warn!("Failed to set devm window title: {e}");
             }
 
             Ok(())

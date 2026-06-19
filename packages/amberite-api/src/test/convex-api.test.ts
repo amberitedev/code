@@ -10,13 +10,12 @@ function jsonResponse(value: unknown): Response {
 	})
 }
 
-function adapter(fetchFn: ReturnType<typeof vi.fn>, actingUserId?: string): PlatformAdapter {
+function adapter(fetchFn: ReturnType<typeof vi.fn>, jwt = 'real-session-token'): PlatformAdapter {
 	return {
 		fetchFn: fetchFn as unknown as typeof fetch,
 		convexUrl: 'https://test.convex.cloud',
 		getCoreUrl: async () => null,
-		getCurrentJwt: async () => (actingUserId ? `dev:${actingUserId}` : null),
-		getDevActingUserId: () => actingUserId ?? null,
+		getCurrentJwt: async () => jwt,
 		openExternalAuth: vi.fn(),
 	}
 }
@@ -31,9 +30,9 @@ async function lastBody(fetchFn: ReturnType<typeof vi.fn>) {
 }
 
 describe('ConvexApiClient', () => {
-	it('injects the dev acting user into Convex calls without sending a fake JWT', async () => {
+	it('sends the real session JWT to Convex calls without injecting an acting user', async () => {
 		const fetchFn = vi.fn(async () => jsonResponse(null))
-		const client = new ConvexApiClient(adapter(fetchFn, 'user-1'))
+		const client = new ConvexApiClient(adapter(fetchFn))
 
 		await client.friendsList()
 
@@ -41,34 +40,34 @@ describe('ConvexApiClient', () => {
 			'https://test.convex.cloud/api/query',
 			expect.objectContaining({
 				method: 'POST',
-				headers: expect.not.objectContaining({
-					Authorization: expect.any(String),
+				headers: expect.objectContaining({
+					Authorization: 'Bearer real-session-token',
 				}),
 			}),
 		)
 		expect(await lastBody(fetchFn)).toMatchObject({
 			path: 'friends:friendsList',
-			args: { __actAs: 'user-1' },
+			args: {},
 			format: 'json',
 		})
 	})
 
 	it('routes friend request actions to the Amberite social backend', async () => {
 		const fetchFn = vi.fn(async () => jsonResponse({ requestId: 'req-1', status: 'pending' }))
-		const client = new ConvexApiClient(adapter(fetchFn, 'user-1'))
+		const client = new ConvexApiClient(adapter(fetchFn))
 
 		const result = await client.sendFriendRequest({ targetUserId: 'user-2' })
 
 		expect(result).toEqual({ requestId: 'req-1', status: 'pending' })
 		expect(await lastBody(fetchFn)).toMatchObject({
 			path: 'friends:sendFriendRequest',
-			args: { targetUserId: 'user-2', __actAs: 'user-1' },
+			args: { targetUserId: 'user-2' },
 		})
 	})
 
 	it('routes friend response and removal actions to Convex mutations', async () => {
 		const fetchFn = vi.fn(async () => jsonResponse(null))
-		const client = new ConvexApiClient(adapter(fetchFn, 'user-1'))
+		const client = new ConvexApiClient(adapter(fetchFn))
 
 		await client.respondFriendRequest('req-1', true)
 		await client.cancelFriendRequest('req-2')
@@ -77,7 +76,7 @@ describe('ConvexApiClient', () => {
 		expect(fetchFn).toHaveBeenCalledTimes(3)
 		expect(await lastBody(fetchFn)).toMatchObject({
 			path: 'friends:removeFriend',
-			args: { userId: 'user-2', __actAs: 'user-1' },
+			args: { userId: 'user-2' },
 		})
 	})
 
@@ -85,14 +84,14 @@ describe('ConvexApiClient', () => {
 		const fetchFn = vi.fn(async () =>
 			jsonResponse({ online: true, status: null, lastSeenAt: 123 }),
 		)
-		const client = new ConvexApiClient(adapter(fetchFn, 'user-1'))
+		const client = new ConvexApiClient(adapter(fetchFn))
 
 		const result = await client.heartbeat()
 
 		expect(result).toEqual({ online: true, status: null, lastSeenAt: 123 })
 		expect(await lastBody(fetchFn)).toMatchObject({
 			path: 'friends:heartbeat',
-			args: { __actAs: 'user-1' },
+			args: {},
 		})
 	})
 })
