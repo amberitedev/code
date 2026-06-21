@@ -53,6 +53,11 @@ import type {
 	CoreAccessResponse,
 	CoreAccessUpsertBody,
 	CoreAccessPatchBody,
+	CoreRole,
+	CoreRoleConfiguration,
+	SaveCoreRoleBody,
+	CoreInvitation,
+	CreateCoreInvitationBody,
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,
 	CoreSyncProfile,
@@ -73,7 +78,8 @@ import type { CommunicationPolicyOverride } from './pipeline-types'
 export class CoreApiClient {
 	public monitor: CoreConnectionMonitor | null = null
 	public readonly pipeline: CommunicationPipeline
-	private coreUrlPromise: Promise<string | null> | null = null
+	private coreUrl: string | null = null
+	private hasCoreUrl = false
 
 	constructor(
 		public readonly adapter: PlatformAdapter,
@@ -96,19 +102,37 @@ export class CoreApiClient {
 		})
 	}
 
-	private getCoreUrlCached(): Promise<string | null> {
-		if (!this.coreUrlPromise) {
-			this.coreUrlPromise = this.adapter.getCoreUrl().then((url) => {
-				// Don't cache a null result — Core may come online later.
-				if (url === null) this.coreUrlPromise = null
-				return url
-			})
+	private async getCoreUrlCached(): Promise<string | null> {
+		const next = await this.adapter.getCoreUrl()
+		if (!this.hasCoreUrl || this.coreUrl !== next) {
+			this.coreUrl = next
+			this.hasCoreUrl = true
 		}
-		return this.coreUrlPromise
+		return this.coreUrl
 	}
 
 	clearCoreUrlCache(): void {
-		this.coreUrlPromise = null
+		this.coreUrl = null
+		this.hasCoreUrl = false
+	}
+
+	private async requireVerifiedCore(coreUrl: string): Promise<void> {
+		const knownCoreId = await this.adapter.getConnectedCoreId?.()
+		if (!knownCoreId) return
+		const status = this.monitor?.currentStatus
+		if (
+			status?.state === 'connected' &&
+			status.coreUrl === coreUrl &&
+			status.coreId === knownCoreId
+		)
+			return
+		const checked = await this.connect()
+		if (
+			checked.state !== 'connected' ||
+			checked.coreUrl !== coreUrl ||
+			checked.coreId !== knownCoreId
+		)
+			throw new CoreOfflineError()
 	}
 
 	private async direct<T>(
@@ -127,6 +151,7 @@ export class CoreApiClient {
 			execute: async (signal, resolvedPolicy) => {
 				const coreUrl = await this.getCoreUrlCached()
 				if (!coreUrl) throw new CoreOfflineError()
+				await this.requireVerifiedCore(coreUrl)
 				const token = await this.adapter.getCurrentJwt()
 				const ctx: CoreCallContext = {
 					baseUrl: coreUrl,
@@ -169,11 +194,10 @@ export class CoreApiClient {
 			key: 'core.setup.complete',
 			surface: 'core',
 			execute: async (signal, resolvedPolicy) => {
-				const token = await this.adapter.getCurrentJwt()
 				return api.completeSetup(
 					{
 						baseUrl: coreUrl.replace(/\/$/, ''),
-						token,
+						token: null,
 						fetchFn: this.adapter.fetchFn,
 						timeoutMs: this.options.timeoutMs ?? resolvedPolicy.timeoutMs,
 						signal,
@@ -356,6 +380,7 @@ export class CoreApiClient {
 			execute: async () => {
 				const coreUrl = await this.getCoreUrlCached()
 				if (!coreUrl) throw new CoreOfflineError()
+				await this.requireVerifiedCore(coreUrl)
 				const wsUrl =
 					coreUrl.replace(/^http/, 'ws') +
 					`/instances/${encodeURIComponent(instanceId)}/console?ticket=${encodeURIComponent(ticket)}`
@@ -571,8 +596,9 @@ export class CoreApiClient {
 		let aborted = false
 		const done = (async () => {
 			const coreUrl = await this.getCoreUrlCached()
-			const token = await this.adapter.getCurrentJwt()
 			if (!coreUrl) throw new CoreOfflineError()
+			await this.requireVerifiedCore(coreUrl)
+			const token = await this.adapter.getCurrentJwt()
 			if (aborted) return
 			const ctx: CoreCallContext = {
 				baseUrl: coreUrl,
@@ -707,8 +733,9 @@ export class CoreApiClient {
 		let aborted = false
 		const done = (async () => {
 			const coreUrl = await this.getCoreUrlCached()
-			const token = await this.adapter.getCurrentJwt()
 			if (!coreUrl) throw new CoreOfflineError()
+			await this.requireVerifiedCore(coreUrl)
+			const token = await this.adapter.getCurrentJwt()
 			if (aborted) return
 			const ctx: CoreCallContext = {
 				baseUrl: coreUrl,
@@ -928,6 +955,44 @@ export class CoreApiClient {
 		)
 	}
 
+	getCoreRoles(): Promise<CoreRoleConfiguration> {
+		return this.direct('core.roles.list', api.getCoreRoles)
+	}
+
+	saveCoreRole(body: SaveCoreRoleBody): Promise<CoreRole> {
+		return this.direct('core.roles.save', (ctx) => api.saveCoreRole(ctx, body))
+	}
+
+	retireCoreRole(id: string): Promise<void> {
+		return this.direct('core.roles.retire', (ctx) =>
+			api.retireCoreRole(ctx, id).then(() => undefined),
+		)
+	}
+
+	createCoreInvitation(body: CreateCoreInvitationBody): Promise<CoreInvitation> {
+		return this.direct('core.invitations.create', (ctx) => api.createCoreInvitation(ctx, body))
+	}
+	listCoreInvitations(): Promise<CoreInvitation[]> {
+		return this.direct('core.invitations.list', (ctx) =>
+			api.listCoreInvitations(ctx).then((result) => result.invitations),
+		)
+	}
+	listMyCoreInvitations(): Promise<CoreInvitation[]> {
+		return this.direct('core.invitations.mine', (ctx) =>
+			api.listMyCoreInvitations(ctx).then((result) => result.invitations),
+		)
+	}
+	reviewCoreInvitation(id: string, accept: boolean): Promise<CoreInvitation> {
+		return this.direct('core.invitations.review', (ctx) =>
+			api.reviewCoreInvitation(ctx, id, accept),
+		)
+	}
+	respondToCoreInvitation(id: string, accept: boolean): Promise<CoreInvitation> {
+		return this.direct('core.invitations.respond', (ctx) =>
+			api.respondToCoreInvitation(ctx, id, accept),
+		)
+	}
+
 	listInstanceAccess(id: string): Promise<CoreAccessResponse> {
 		return this.request((ctx) => api.listInstanceAccess(ctx, id), {
 			method: 'GET',
@@ -955,20 +1020,17 @@ export class CoreApiClient {
 	}
 
 	removeInstanceAccess(id: string, userId: string): Promise<void> {
-		return this.request(
-			(ctx) => api.removeInstanceAccess(ctx, id, userId).then(() => undefined),
-			{ method: 'DELETE', path: `/instances/${id}/access/${encodeURIComponent(userId)}` },
-		)
+		return this.request((ctx) => api.removeInstanceAccess(ctx, id, userId).then(() => undefined), {
+			method: 'DELETE',
+			path: `/instances/${id}/access/${encodeURIComponent(userId)}`,
+		})
 	}
 
 	listActivity(query?: CoreActivityLogQuery): Promise<CoreActivityLogResponse> {
 		return this.direct('core.activity.list', (ctx) => api.listActivity(ctx, query))
 	}
 
-	listInstanceActivity(
-		id: string,
-		query?: CoreActivityLogQuery,
-	): Promise<CoreActivityLogResponse> {
+	listInstanceActivity(id: string, query?: CoreActivityLogQuery): Promise<CoreActivityLogResponse> {
 		return this.request((ctx) => api.listInstanceActivity(ctx, id, query), {
 			method: 'GET',
 			path: `/instances/${id}/activity`,

@@ -3,13 +3,10 @@ use std::sync::Arc;
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::application::state::AppState;
+use crate::application::state::{AppState, PAIRING_WINDOW};
 
 /// Register this unpaired Core in Convex so a remote dashboard/app can claim its code.
 pub async fn register_pairing_core(state: Arc<AppState>) {
-    let Some(convex_url) = state.config.convex_url.as_deref() else {
-        return;
-    };
     let code = state.pairing_code.lock().await.clone();
     let Some(code) = code else {
         return;
@@ -19,7 +16,10 @@ pub async fn register_pairing_core(state: Arc<AppState>) {
     let bind_host = state.config.bind_host.clone();
     let port = state.config.port;
 
-    let endpoint = format!("{}/api/mutation", convex_url.trim_end_matches('/'));
+    let endpoint = format!(
+        "{}/api/mutation",
+        state.config.convex_url.trim_end_matches('/')
+    );
     let mut args = json!({
         "code": code,
         "coreId": core_id,
@@ -27,10 +27,9 @@ pub async fn register_pairing_core(state: Arc<AppState>) {
             "bindHost": bind_host,
             "port": port,
         },
+        "ttlMs": PAIRING_WINDOW.as_millis() as u64,
     });
-    if let Some(public_url) = public_url {
-        args["connectionUrl"] = json!(public_url);
-    }
+    args["connectionUrl"] = json!(public_url);
     let body = json!({
         "path": "presence:registerPairingCore",
         "format": "json",

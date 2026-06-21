@@ -23,8 +23,9 @@ export async function convexAction<T = unknown>(
 	adapter: PlatformAdapter,
 	path: string,
 	args: unknown,
+	authenticate = true,
 ): Promise<T> {
-	return await convexCall<T>(adapter, 'action', path, args)
+	return await convexCall<T>(adapter, 'action', path, args, authenticate)
 }
 
 async function convexCall<T>(
@@ -32,8 +33,12 @@ async function convexCall<T>(
 	kind: 'query' | 'mutation' | 'action',
 	path: string,
 	args: unknown,
+	authenticate = true,
 ): Promise<T> {
-	const token = await adapter.getCurrentJwt()
+	if (!adapter.convexUrl) {
+		throw new NetworkError('Convex URL is not configured')
+	}
+	const token = authenticate ? await adapter.getCurrentJwt() : null
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), CONVEX_REQUEST_TIMEOUT_MS)
 	let res: Response

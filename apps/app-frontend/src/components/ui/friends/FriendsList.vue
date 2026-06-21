@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AmberiteUser } from '@amberite/amberite-api'
 import {
 	CheckIcon,
 	MailIcon,
@@ -8,19 +9,25 @@ import {
 	UserPlusIcon,
 	XIcon,
 } from '@modrinth/assets'
-import { Avatar, ButtonStyled, injectNotificationManager, StyledInput } from '@modrinth/ui'
+import {
+	Avatar,
+	ButtonStyled,
+	injectNotificationManager,
+	injectPopupNotificationManager,
+	StyledInput,
+} from '@modrinth/ui'
 import dayjs from 'dayjs'
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
-import { useSocial } from '@/composables/useSocial'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
+import { useSocial } from '@/composables/useSocial'
 import type { FriendWithUserData } from '@/helpers/friends'
-import type { AmberiteUser } from '@amberite/amberite-api'
 
 type PendingFriendWithRequest = FriendWithUserData & { requestId: string }
 
 const { addNotification } = injectNotificationManager()
+const { addPopupNotification } = injectPopupNotificationManager()
 const {
 	friends,
 	currentUser,
@@ -31,6 +38,8 @@ const {
 	sendFriendRequest,
 	respondFriendRequest,
 	cancelFriendRequest,
+	claimFriendRequestNotifications,
+	acknowledgeFriendRequestNotification,
 	removeFriend,
 } = useSocial()
 
@@ -44,6 +53,9 @@ const searchingUsers = ref(false)
 const sending = ref(false)
 const actingOnRequestId = ref<string | null>(null)
 let searchToken = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let friendNotificationTimer: ReturnType<typeof setInterval> | undefined
+let checkingFriendNotifications = false
 
 const friendList = computed(() => friends.value?.friends ?? [])
 const incoming = computed(() => friends.value?.incoming ?? [])
@@ -132,27 +144,87 @@ async function refreshFriends() {
 }
 
 async function searchFriendUsers() {
+	if (searchTimer) clearTimeout(searchTimer)
 	const query = usernameQuery.value.trim()
 	selectedUser.value = null
-	if (query.length < 3) {
+	if (query.length < 2) {
 		userResults.value = []
+		searchingUsers.value = false
 		return
 	}
 	const token = ++searchToken
 	searchingUsers.value = true
-	try {
-		const results = await searchUsers(query)
-		if (token === searchToken) {
-			userResults.value = results.filter((user) => !unavailableUserIds.value.has(user.userId))
+	searchTimer = setTimeout(async () => {
+		try {
+			const results = await searchUsers(query)
+			if (token === searchToken) {
+				userResults.value = results.filter((user) => !unavailableUserIds.value.has(user.userId))
+			}
+		} catch (e) {
+			console.warn('[amberite] friend search failed', e)
+			if (token === searchToken) userResults.value = []
+			showFriendsServiceError('Search unavailable')
+		} finally {
+			if (token === searchToken) searchingUsers.value = false
 		}
+	}, 250)
+}
+
+async function checkFriendRequestNotifications() {
+	if (!currentUser.value || checkingFriendNotifications) return
+	checkingFriendNotifications = true
+	try {
+		const notifications = await claimFriendRequestNotifications()
+		for (const notification of notifications) {
+			const friend: PendingFriendWithRequest = {
+				id: notification.user?.userId ?? notification.request.fromUserId,
+				friend_id: null,
+				status: null,
+				last_updated: null,
+				created: dayjs(notification.request.createdAt),
+				username: notification.user?.displayName ?? notification.user?.username ?? 'Someone',
+				accepted: false,
+				online: false,
+				avatar: notification.user?.image ?? '',
+				requestId: notification.request._id,
+			}
+			addPopupNotification({
+				title: 'Friend request',
+				autoCloseMs: null,
+				toast: {
+					type: 'friend-request',
+					actorName: friend.username,
+					actorAvatarUrl: friend.avatar,
+					onAccept: () => respondToRequest(friend, true),
+					onDecline: () => respondToRequest(friend, false),
+				},
+			})
+			await acknowledgeFriendRequestNotification(notification.request._id)
+		}
+		if (notifications.length > 0) await refresh()
 	} catch (e) {
-		console.warn('[amberite] friend search failed', e)
-		if (token === searchToken) userResults.value = []
-		showFriendsServiceError('Search unavailable')
+		console.warn('[amberite] friend notification check failed', e)
 	} finally {
-		if (token === searchToken) searchingUsers.value = false
+		checkingFriendNotifications = false
 	}
 }
+
+watch(
+	currentUser,
+	(user) => {
+		if (user) void checkFriendRequestNotifications()
+	},
+	{ immediate: true },
+)
+
+friendNotificationTimer = setInterval(() => {
+	void checkFriendRequestNotifications()
+}, 30_000)
+
+onUnmounted(() => {
+	if (searchTimer) clearTimeout(searchTimer)
+	if (friendNotificationTimer) clearInterval(friendNotificationTimer)
+})
 
 function selectUser(user: AmberiteUser) {
 	selectedUser.value = user
@@ -302,12 +374,15 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					@keyup.enter="userResults.length === 1 ? selectUser(userResults[0]) : undefined"
 				/>
 				<div
-					v-if="usernameQuery.trim().length >= 3 && !selectedUser"
+					v-if="usernameQuery.trim().length >= 1 && !selectedUser"
 					class="mt-2 max-h-56 w-full overflow-y-auto rounded-xl border border-solid border-surface-5 bg-bg-raised p-1"
 				>
-					<div v-if="searchingUsers" class="px-3 py-2 text-sm text-secondary">Searching...</div>
+					<div v-if="usernameQuery.trim().length < 2" class="px-3 py-2 text-sm text-secondary">
+						Type one more character to search.
+					</div>
+					<div v-else-if="searchingUsers" class="px-3 py-2 text-sm text-secondary">Searching...</div>
 					<button
-						v-for="user in userResults"
+						v-for="user in usernameQuery.trim().length >= 2 ? userResults : []"
 						:key="user.userId"
 						class="grid w-full cursor-pointer grid-cols-[auto_1fr] items-center gap-2 rounded-lg border-0 bg-transparent px-2 py-2 text-left hover:bg-button-bg"
 						@click="selectUser(user)"
@@ -318,7 +393,7 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 						</span>
 					</button>
 					<div
-						v-if="!searchingUsers && userResults.length === 0"
+						v-if="usernameQuery.trim().length >= 2 && !searchingUsers && userResults.length === 0"
 						class="px-3 py-2 text-sm text-secondary"
 					>
 						No matching users.

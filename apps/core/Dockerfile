@@ -4,7 +4,7 @@
 FROM rust:slim-bookworm AS builder
 
 # Build dependencies:
-#   build-essential — gcc/g++/make for C/C++ crates (rusty_v8, portable-pty)
+#   build-essential — gcc/g++/make for C/C++ crates (libsqlite3-sys, ring)
 #   pkg-config      — library discovery
 #   libssl-dev      — deno_runtime TLS headers (deno links OpenSSL at build time)
 #   ca-certificates — HTTPS downloads during build (rusty_v8 pre-built blob)

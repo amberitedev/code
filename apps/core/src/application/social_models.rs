@@ -59,6 +59,9 @@ pub struct CoreMember {
     pub status: String,
     pub joined_at: String,
     pub updated_at: String,
+    pub role_id: Option<String>,
+    pub role_snapshot_json: Option<String>,
+    pub needs_role_reassignment_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,6 +105,9 @@ pub struct EffectiveAccessMember {
     pub joined_at: String,
     pub updated_at: String,
     pub source: String,
+    pub role_id: Option<String>,
+    pub role_snapshot_json: Option<String>,
+    pub needs_role_reassignment_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

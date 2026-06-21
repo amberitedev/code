@@ -196,7 +196,9 @@ async fn instance_has_all_expected_fields() {
         .as_str()
         .expect("data_dir must be a string");
     assert!(
-        data_dir.replace('\\', "/").ends_with("/instances/test-server"),
+        data_dir
+            .replace('\\', "/")
+            .ends_with("/instances/test-server"),
         "data_dir must use the instance name slug; got: {data_dir}"
     );
 }

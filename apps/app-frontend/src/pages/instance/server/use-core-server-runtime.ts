@@ -1,6 +1,6 @@
 import type {
-	CoreChangeVersionBody,
 	ConnectionStatus,
+	CoreChangeVersionBody,
 	CoreInstance,
 	CoreInstanceStatus,
 	CoreStats,
@@ -11,7 +11,7 @@ import type { Archon } from '@modrinth/api-client'
 import { injectNotificationManager } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import { useQueryClient } from '@tanstack/vue-query'
-import { computed, isRef, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
+import { computed, isRef, onMounted, onUnmounted, type Ref,ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'

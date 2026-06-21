@@ -21,6 +21,11 @@ const ctx = injectCoreOnboardingContext()
 		<div class="flex flex-col gap-3">
 			<StyledInput v-model="ctx.coreName.value" placeholder="Friend group name" />
 			<StyledInput v-model="ctx.coreDescription.value" placeholder="Description" multiline :rows="8" />
+			<StyledInput
+				v-if="ctx.flow.value === 'create'"
+				v-model="ctx.coreUrl.value"
+				placeholder="Core API address, e.g. https://core.example.com"
+			/>
 		</div>
 	</div>
 </template>

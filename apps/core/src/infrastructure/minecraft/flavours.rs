@@ -8,8 +8,6 @@ pub enum FlavourError {
     Http(#[from] reqwest::Error),
     #[error("unsupported loader/version: {0}/{1}")]
     Unsupported(String, String),
-    #[error("sha1 mismatch: expected {expected}, got {actual}")]
-    Sha1Mismatch { expected: String, actual: String },
 }
 
 /// Resolved download info for a server JAR.

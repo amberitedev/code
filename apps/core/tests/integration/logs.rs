@@ -189,14 +189,14 @@ async fn read_log_wrong_extension_rejected() {
 async fn read_fs_returns_server_properties() {
     let app = common::TestApp::spawn().await;
     let id = common::create_test_instance(&app).await;
-    let res = app
-        .client
-        .get(app.url(&format!(
-            "/instances/{id}/fs/read?path=/server.properties"
-        )))
-        .send()
-        .await
-        .unwrap();
+    let res =
+        app.client
+            .get(app.url(&format!(
+                "/instances/{id}/fs/read?path=/server.properties"
+            )))
+            .send()
+            .await
+            .unwrap();
     assert_eq!(res.status(), 200);
     let body = res.text().await.unwrap();
     assert!(

@@ -1,7 +1,13 @@
+const convexSiteUrl = process.env.CONVEX_SITE_URL
+
+if (!convexSiteUrl?.trim()) {
+	throw new Error('Missing required environment variable: CONVEX_SITE_URL')
+}
+
 export default {
 	providers: [
 		{
-			domain: process.env.CONVEX_SITE_URL,
+			domain: convexSiteUrl,
 			applicationID: "convex",
 		},
 	],

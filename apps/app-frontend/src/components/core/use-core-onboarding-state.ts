@@ -1,3 +1,4 @@
+import { verifyCoreConnection } from '@amberite/amberite-api'
 import type {
 	ServerAccessInviteSuggestion,
 	ServerAccessMember,
@@ -9,9 +10,12 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { computed, ref, watch } from 'vue'
 
 import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
+import { useCoreClient } from '@/composables/useCoreClient'
 import { useCoreConnection } from '@/composables/useCoreConnection'
 import { useSocial } from '@/composables/useSocial'
 import { useSocialClient } from '@/composables/useSocialClient'
+import { config } from '@/config'
+import { clearConnectedCore, getConnectedCore, setConnectedCore } from '@/core/connected-core'
 
 import type { CoreOnboardingContext, CoreOnboardingFlow } from './core-onboarding-context'
 import {
@@ -28,10 +32,12 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	const auth = useAmberiteAuth()
 	const social = useSocial()
 	const socialClient = useSocialClient()
+	const coreClient = useCoreClient()
 	const connection = useCoreConnection()
 	const flow = ref<CoreOnboardingFlow>('create')
 	const coreName = ref('Friend group')
 	const coreDescription = ref('')
+	const coreUrl = ref('')
 	const coreIcon = ref<string>()
 	const connectCode = ref('')
 	const connectValidated = ref(false)
@@ -67,6 +73,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		const formatted = formatCoreCode(value)
 		if (formatted !== value) connectCode.value = formatted
 		connectValidated.value = false
+		error.value = ''
 	})
 
 	async function ensureAuth() {
@@ -88,7 +95,18 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	}
 
 	async function createCoreGroup() {
-		const current = connection.status.value?.coreId ? connection.status.value : await connection.check()
+		let current = connection.status.value?.coreId ? connection.status.value : await connection.check()
+		if (!current?.coreId) {
+			const candidateUrl = coreUrl.value.trim()
+			if (!candidateUrl) throw new Error('Enter the Core API address to link it.')
+			const candidate = await verifyCoreConnection(coreClient.adapter, { coreUrl: candidateUrl })
+			if (candidate.state !== 'connected' || !candidate.coreId || !candidate.coreUrl) {
+				throw new Error('The Core at that address could not be reached.')
+			}
+			setConnectedCore({ coreId: candidate.coreId, url: candidate.coreUrl })
+			coreClient.clearCoreUrlCache()
+			current = await connection.check()
+		}
 		if (!current?.coreId) throw new Error('Core is not reachable yet.')
 		await social.createGroup({
 			coreId: current.coreId,
@@ -100,12 +118,59 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	}
 
 	async function connectCore() {
-		const code = connectCode.value.trim()
-		if (!code) throw new Error('Enter a Core code.')
-		if (code.startsWith('AMB-')) await social.acceptInvite({ code })
-		else if (!(await socialClient.claimPairingCore(code))) throw new Error('No Core was found for that code.')
+		const code = normalizeCoreCode(connectCode.value)
+		if (code.length !== 8) throw new Error('Enter all 8 characters of the Core code.')
+		if (!/^[a-hj-np-z2-9]{8}$/.test(code))
+			throw new Error('Code invalid. Please check your Core and try again.')
+		await pairRemoteCore(code)
 		connectValidated.value = true
-		await social.refresh()
+	}
+
+	async function pairRemoteCore(code: string) {
+		const currentUser = await socialClient.currentUser()
+		if (!currentUser?.userId) throw new Error('Sign in to Amberite to connect a Core.')
+
+		const claim = await socialClient.claimPairingCore(code)
+		if (!claim) throw new Error('No Core was found for that code.')
+
+		const coreUrl = resolvePairingCoreUrl(claim)
+		if (!coreUrl) {
+			await socialClient.releasePairingCore({ code, coreId: claim.coreId })
+			throw new Error('That Core did not publish a reachable connection URL.')
+		}
+
+		const previousCore = getConnectedCore()
+		let linked = false
+		try {
+			const response = await coreClient.completeSetupAt(coreUrl, {
+				code,
+				convex_url: config.convexUrl,
+				auth_jwks_url: convexJwksUrl(config.convexUrl),
+				owner_user_id: currentUser.userId,
+			})
+			if (response.core_id !== claim.coreId) throw new Error('The Core answered with a different identity.')
+			setConnectedCore({ coreId: response.core_id, url: coreUrl })
+			linked = true
+			coreClient.clearCoreUrlCache()
+			const connectionStatus = await connection.check()
+			if (connectionStatus?.state !== 'connected') {
+				throw new Error('The Core could not verify its identity after pairing.')
+			}
+			await socialClient.finalizePairingCore({
+				code,
+				coreId: claim.coreId,
+				connectionUrl: coreUrl,
+			})
+			await social.refresh()
+		} catch (error) {
+			if (linked) {
+				if (previousCore) setConnectedCore(previousCore)
+				else clearConnectedCore()
+				coreClient.clearCoreUrlCache()
+			}
+			await socialClient.releasePairingCore({ code, coreId: claim.coreId }).catch(() => undefined)
+			throw error
+		}
 	}
 
 	async function selectIcon() {
@@ -152,12 +217,14 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	}
 
 	async function validateConnectAndContinue() {
+		const startedAt = performance.now()
 		working.value = true
 		error.value = ''
 		try {
 			await ensureAuth()
 			await connectCore()
-			modal.value?.nextStage()
+			await waitForMinimumDuration(startedAt)
+			modal.value?.hide()
 		} catch (reason) {
 			error.value = reason instanceof Error ? reason.message : 'Core connection failed.'
 		} finally {
@@ -168,6 +235,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	function show(nextFlow: CoreOnboardingFlow) {
 		flow.value = nextFlow
 		error.value = ''
+		coreUrl.value = ''
 		connectCode.value = ''
 		connectValidated.value = false
 		inviteSearch.value = ''
@@ -178,7 +246,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	}
 
 	const ctx: CoreOnboardingContext = {
-		flow, coreName, coreDescription, coreIcon, connectCode, inviteSearch, inviteAsFriend,
+		flow, coreName, coreDescription, coreUrl, coreIcon, connectCode, inviteSearch, inviteAsFriend,
 		error, working, canManage: canManageMembers, members, roles, inviteSuggestions,
 		selectIcon, selectInviteSuggestion, createInvite, quickInvite, updateRole, removeMember,
 	}
@@ -186,6 +254,31 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 }
 
 function formatCoreCode(value: string) {
-	const raw = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 9)
-	return raw.length > 3 ? `${raw.slice(0, 3)}-${raw.slice(3)}` : raw
+	const raw = value.toUpperCase().replace(/[^A-Z0-9]/g, '')
+	const code = raw.slice(0, 8)
+	return code.length > 4 ? `${code.slice(0, 4)}-${code.slice(4)}` : code
+}
+
+function normalizeCoreCode(value: string) {
+	return value.replace(/[^A-Z0-9]/gi, '').toLowerCase()
+}
+
+function resolvePairingCoreUrl(claim: { connectionUrl?: string; metadata?: unknown }) {
+	if (claim.connectionUrl) return claim.connectionUrl.replace(/\/$/, '')
+	const metadata = claim.metadata as { bindHost?: unknown; port?: unknown } | undefined
+	const port = typeof metadata?.port === 'number' ? metadata.port : undefined
+	if (!port) return null
+	const host = typeof metadata?.bindHost === 'string' ? metadata.bindHost : '127.0.0.1'
+	if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return null
+	return `http://127.0.0.1:${port}`
+}
+
+function convexJwksUrl(convexUrl: string) {
+	if (!convexUrl) throw new Error('Convex is not configured for Amberite account linking.')
+	return `${convexUrl.replace(/\/$/, '')}/.well-known/jwks.json`
+}
+
+async function waitForMinimumDuration(startedAt: number) {
+	const remaining = 1500 - (performance.now() - startedAt)
+	if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining))
 }

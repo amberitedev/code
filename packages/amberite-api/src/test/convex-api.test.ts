@@ -52,6 +52,20 @@ describe('ConvexApiClient', () => {
 		})
 	})
 
+	it('can call public auth actions without an expired session JWT', async () => {
+		const fetchFn = vi.fn(async () => jsonResponse({ tokens: null }))
+		const client = new ConvexApiClient(adapter(fetchFn, 'expired-session-token'))
+
+		await client.rawAction('auth:signIn', { provider: 'minecraft-token' }, false)
+
+		expect(fetchFn).toHaveBeenCalledWith(
+			'https://test.convex.cloud/api/action',
+			expect.objectContaining({
+				headers: expect.not.objectContaining({ Authorization: expect.anything() }),
+			}),
+		)
+	})
+
 	it('routes friend request actions to the Amberite social backend', async () => {
 		const fetchFn = vi.fn(async () => jsonResponse({ requestId: 'req-1', status: 'pending' }))
 		const client = new ConvexApiClient(adapter(fetchFn))
@@ -62,6 +76,32 @@ describe('ConvexApiClient', () => {
 		expect(await lastBody(fetchFn)).toMatchObject({
 			path: 'friends:sendFriendRequest',
 			args: { targetUserId: 'user-2' },
+		})
+	})
+
+	it('searches for users with a two-character query', async () => {
+		const fetchFn = vi.fn(async () => jsonResponse([]))
+		const client = new ConvexApiClient(adapter(fetchFn))
+
+		await client.searchUsers('th')
+
+		expect(await lastBody(fetchFn)).toMatchObject({
+			path: 'friends:searchUsers',
+			args: { query: 'th' },
+		})
+	})
+
+	it('claims and acknowledges pending friend request notifications', async () => {
+		const fetchFn = vi.fn(async () => jsonResponse([]))
+		const client = new ConvexApiClient(adapter(fetchFn))
+
+		await client.claimFriendRequestNotifications()
+		await client.acknowledgeFriendRequestNotification('req-1')
+
+		expect(fetchFn).toHaveBeenCalledTimes(2)
+		expect(await lastBody(fetchFn)).toMatchObject({
+			path: 'friends:acknowledgeFriendRequestNotification',
+			args: { requestId: 'req-1' },
 		})
 	})
 
@@ -81,9 +121,7 @@ describe('ConvexApiClient', () => {
 	})
 
 	it('routes social presence heartbeat to Convex', async () => {
-		const fetchFn = vi.fn(async () =>
-			jsonResponse({ online: true, status: null, lastSeenAt: 123 }),
-		)
+		const fetchFn = vi.fn(async () => jsonResponse({ online: true, status: null, lastSeenAt: 123 }))
 		const client = new ConvexApiClient(adapter(fetchFn))
 
 		const result = await client.heartbeat()

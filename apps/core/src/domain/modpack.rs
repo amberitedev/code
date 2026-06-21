@@ -44,13 +44,6 @@ pub enum EnvType {
     Unsupported,
 }
 
-/// Link to Modrinth project/version for an installed modpack.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LinkedData {
-    pub project_id: Option<String>,
-    pub version_id: Option<String>,
-}
-
 /// Persisted modpack manifest for an instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModpackManifest {

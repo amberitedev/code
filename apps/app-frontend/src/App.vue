@@ -142,7 +142,7 @@ const modrinthLink = useModrinthLink()
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const hasMinecraftAccounts = ref(false)
 const amberiteAccountMissing = computed(
-	() => hasMinecraftAccounts.value && !amberiteAuth.user.value,
+	() => hasMinecraftAccounts.value && amberiteAuth.isReady.value && !amberiteAuth.user.value,
 )
 const AMBERITE_ACCOUNT_DISMISS_KEY = 'amberite:account-modal:dismissed'
 const amberiteAccountDismissedForSession = ref(false)
@@ -209,7 +209,7 @@ const tauriApiClient = new TauriModrinthClient({
 			},
 		}),
 		new AuthFeature({
-			token: async () => (amberiteAuth.isLoggedIn.value ? 'amberite-session' : null),
+			token: async () => modrinthLink.credentials.value?.session ?? null,
 		}),
 		new PanelVersionFeature(),
 		new VerboseLoggingFeature(),

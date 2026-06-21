@@ -50,6 +50,8 @@ export default defineSchema({
 	friendRequests: defineTable({
 		fromUserId: v.string(), toUserId: v.string(), status: friendRequestStatus,
 		message: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
+		notificationClaimedAt: v.optional(v.number()), notificationClaimExpiresAt: v.optional(v.number()),
+		notificationDeliveredAt: v.optional(v.number()),
 	})
 		.index("by_from_to", ["fromUserId", "toUserId"])
 		.index("by_to_status", ["toUserId", "status"])
@@ -80,6 +82,12 @@ export default defineSchema({
 		.index("by_code", ["code"])
 		.index("by_invitee_status", ["inviteeUserId", "status"])
 		.index("by_group_status", ["friendGroupId", "status"]),
+	coreInviteNotifications: defineTable({
+		recipientUserId: v.string(), coreId: v.string(), coreUrl: v.string(), inviteId: v.string(),
+		createdAt: v.number(), expiresAt: v.number(), readAt: v.optional(v.number()),
+	})
+		.index("by_recipient_expiry", ["recipientUserId", "expiresAt"])
+		.index("by_invite", ["inviteId"]),
 	pairingCores: defineTable({
 		code: v.string(), coreId: v.string(), connectionUrl: v.optional(v.string()), status: pairingStatus,
 		ownerUserId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.number(),

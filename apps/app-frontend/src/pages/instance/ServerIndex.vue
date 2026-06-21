@@ -132,6 +132,7 @@
 </template>
 
 <script setup lang="ts">
+import { createCoreInstanceBodyFromProfile } from '@amberite/amberite-api'
 import {
 	BoxesIcon,
 	ClipboardCopyIcon,
@@ -144,26 +145,25 @@ import {
 	SpinnerIcon,
 	StopCircleIcon,
 	TerminalSquareIcon,
-	TriangleAlertIcon,
 	TrashIcon,
+	TriangleAlertIcon,
 	UpdatedIcon,
 	UsersIcon,
 } from '@modrinth/assets'
 import { ButtonStyled, ErrorInformationCard, NavTabs, OverflowMenu } from '@modrinth/ui'
-import { createCoreInstanceBodyFromProfile } from '@amberite/amberite-api'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { useBreadcrumbs } from '@/store/breadcrumbs'
-import type { GameInstance } from '@/helpers/types'
-import { edit, remove } from '@/helpers/profile'
 import { useCoreClient } from '@/composables/useCoreClient'
+import { edit, remove } from '@/helpers/profile'
+import type { GameInstance } from '@/helpers/types'
+import { useBreadcrumbs } from '@/store/breadcrumbs'
 
 import ServerManageHeader from './server/ServerManageHeader.vue'
 import ServerSettingsModal from './server/settings/ServerSettingsModal.vue'
 import { useCoreServerRuntime } from './server/use-core-server-runtime'
-import ServerBackups from './ServerBackups.vue'
 import ServerAccess from './ServerAccess.vue'
+import ServerBackups from './ServerBackups.vue'
 import ServerBrowsePage from './ServerBrowsePage.vue'
 import ServerContent from './ServerContent.vue'
 import ServerFiles from './ServerFiles.vue'

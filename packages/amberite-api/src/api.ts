@@ -51,6 +51,11 @@ import type {
 	CoreAccessResponse,
 	CoreAccessUpsertBody,
 	CoreAccessPatchBody,
+	CoreRole,
+	CoreRoleConfiguration,
+	SaveCoreRoleBody,
+	CoreInvitation,
+	CreateCoreInvitationBody,
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,
 	CoreSyncProfile,
@@ -873,10 +878,67 @@ export function removeCoreAccess(ctx: CoreCallContext, userId: string): Promise<
 	})
 }
 
-export function listInstanceAccess(
+export function getCoreRoles(ctx: CoreCallContext): Promise<CoreRoleConfiguration> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/roles`)
+}
+
+export function saveCoreRole(ctx: CoreCallContext, body: SaveCoreRoleBody): Promise<CoreRole> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/roles`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function retireCoreRole(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/roles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function createCoreInvitation(
+	ctx: CoreCallContext,
+	body: CreateCoreInvitationBody,
+): Promise<CoreInvitation> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function listCoreInvitations(
+	ctx: CoreCallContext,
+): Promise<{ invitations: CoreInvitation[] }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations`)
+}
+export function listMyCoreInvitations(
+	ctx: CoreCallContext,
+): Promise<{ invitations: CoreInvitation[] }> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations/mine`)
+}
+export function reviewCoreInvitation(
 	ctx: CoreCallContext,
 	id: string,
-): Promise<CoreAccessResponse> {
+	accept: boolean,
+): Promise<CoreInvitation> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations/${encodeURIComponent(id)}/review`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ accept }),
+	})
+}
+export function respondToCoreInvitation(
+	ctx: CoreCallContext,
+	id: string,
+	accept: boolean,
+): Promise<CoreInvitation> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations/${encodeURIComponent(id)}/respond`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ accept }),
+	})
+}
+
+export function listInstanceAccess(ctx: CoreCallContext, id: string): Promise<CoreAccessResponse> {
 	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access`)
 }
 
@@ -898,15 +960,11 @@ export function updateInstanceAccess(
 	userId: string,
 	body: CoreAccessPatchBody,
 ): Promise<unknown> {
-	return apiFetch(
-		ctx,
-		`${ctx.baseUrl}/instances/${id}/access/${encodeURIComponent(userId)}`,
-		{
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body),
-		},
-	)
+	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access/${encodeURIComponent(userId)}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
 }
 
 export function removeInstanceAccess(

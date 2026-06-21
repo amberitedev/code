@@ -1,0 +1,46 @@
+name: Copal release
+
+on:
+  push:
+    tags:
+      - copal-v*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux-x64:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/core
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
+        with:
+          cache: true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#copal-v}"
+          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          [ "$VERSION" = "$CARGO_VERSION" ] || { echo "Tag version $VERSION does not match Cargo version $CARGO_VERSION"; exit 1; }
+      - run: cargo build --release --locked
+      - name: Package release archive
+        run: |
+          mkdir -p dist
+          cp target/release/copal dist/copal
+          tar -C dist -czf copal-linux-x64.tar.gz copal
+          sha256sum copal-linux-x64.tar.gz > SHA256SUMS
+          VERSION="${GITHUB_REF_NAME#copal-v}"
+          node scripts/package-npm.mjs target/release/copal "$VERSION"
+          pnpm --dir ../../packages/copal-linux-x64 pack --pack-destination dist
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" copal-linux-x64.tar.gz SHA256SUMS dist/amberitedev-copal-linux-x64-*.tgz --generate-notes --verify-tag

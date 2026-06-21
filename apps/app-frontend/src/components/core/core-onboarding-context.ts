@@ -13,6 +13,7 @@ export interface CoreOnboardingContext {
 	flow: Ref<CoreOnboardingFlow>
 	coreName: Ref<string>
 	coreDescription: Ref<string>
+	coreUrl: Ref<string>
 	coreIcon: Ref<string | undefined>
 	connectCode: Ref<string>
 	inviteSearch: Ref<string>

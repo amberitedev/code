@@ -109,21 +109,6 @@ impl ModrinthClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn get_version_from_hash(
-        &self,
-        hash: &str,
-    ) -> Result<ModrinthVersion, ModrinthError> {
-        let resp = self
-            .http
-            .get(format!("{MODRINTH_API}/version_file/{hash}"))
-            .send()
-            .await?;
-        if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(ModrinthError::NotFound);
-        }
-        Ok(resp.error_for_status()?.json().await?)
-    }
-
     async fn get<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,

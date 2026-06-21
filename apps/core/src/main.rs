@@ -3,104 +3,28 @@ use std::{
     sync::Arc,
 };
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[allow(dead_code)]
 mod api;
 mod application;
+mod cli;
 mod config;
 mod domain;
 mod infrastructure;
 mod ports;
 mod presentation;
 
-/// Copal — self-hosted Minecraft server manager.
-#[derive(Parser)]
-#[command(name = "copal", version = env!("CARGO_PKG_VERSION"))]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Start the HTTP API server (default when no subcommand is given).
-    Run,
-    /// Validate config and database connectivity without starting the server.
-    Check,
-    /// Apply all pending database migrations and exit.
-    Migrate,
-    /// Print the version string and exit.
-    Version,
-    /// Remove pairing data so Core can be re-paired.
-    /// The next `run` will generate a fresh pairing code.
-    ResetPairing,
-}
-
 #[tokio::main]
 async fn main() -> color_eyre::eyre::Result<()> {
     color_eyre::install()?;
 
-    let cli = Cli::parse();
-
-    match cli.command.unwrap_or(Command::Run) {
-        Command::Version => {
-            println!("copal {}", env!("CARGO_PKG_VERSION"));
-        }
-        Command::Migrate => {
-            init_tracing();
-            let config = config::Config::from_env();
-            tokio::fs::create_dir_all(&config.data_dir).await?;
-            let db_path = config.data_dir.join("data.db");
-            let pool = infrastructure::db::connect(&db_path).await?;
-            sqlx::migrate!("./migrations").run(&pool).await?;
-            println!("Migrations applied successfully.");
-        }
-        Command::Check => {
-            init_tracing();
-            let config = config::Config::from_env();
-            tokio::fs::create_dir_all(&config.data_dir).await?;
-            let db_path = config.data_dir.join("data.db");
-            let pool = infrastructure::db::connect(&db_path).await?;
-            sqlx::migrate!("./migrations").run(&pool).await?;
-            let paired: bool = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM core_config",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0)
-                > 0;
-            println!("Config  : OK (data_dir = {})", config.data_dir.display());
-            println!("Database: OK ({})", db_path.display());
-            println!(
-                "Paired  : {}",
-                if paired { "yes" } else { "no — run to pair" }
-            );
-        }
-        Command::ResetPairing => {
-            init_tracing();
-            let config = config::Config::from_env();
-            let db_path = config.data_dir.join("data.db");
-            let pool = infrastructure::db::connect(&db_path).await?;
-            sqlx::query("DELETE FROM core_config WHERE id = 1")
-                .execute(&pool)
-                .await?;
-            println!(
-                "Pairing reset. Restart Core to generate a new pairing code."
-            );
-        }
-        Command::Run => {
-            init_tracing();
-            run_server().await?;
-        }
-    }
-
-    Ok(())
+    cli::execute(cli::Cli::parse()).await
 }
 
-fn init_tracing() {
+pub(crate) fn init_tracing() {
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(
@@ -110,8 +34,8 @@ fn init_tracing() {
         .init();
 }
 
-async fn run_server() -> color_eyre::eyre::Result<()> {
-    let config = config::Config::from_env();
+pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
+    let config = config::Config::from_env()?;
 
     tokio::fs::create_dir_all(&config.data_dir).await?;
 
@@ -123,6 +47,9 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
     let port = config.port;
     let bind_host = config.bind_host.clone();
     let state = application::state::AppState::new(config, pool).await?;
+
+    #[cfg(unix)]
+    tokio::spawn(cli::admin::serve(Arc::clone(&state)));
 
     tokio::spawn(application::instance_service::restore_instances(
         Arc::clone(&state),
@@ -138,6 +65,7 @@ async fn run_server() -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::pairing_service::register_pairing_core(
         Arc::clone(&state),
     ));
+    tokio::spawn(expire_pairing_window(Arc::clone(&state)));
 
     let router = presentation::router::create_router(state);
     let host: IpAddr = bind_host.parse()?;
@@ -168,5 +96,28 @@ async fn gc_fs_download_tokens(state: Arc<application::state::AppState>) {
         state
             .fs_download_tokens
             .retain(|_, t| t.expires_at > Instant::now());
+    }
+}
+
+async fn expire_pairing_window(state: Arc<application::state::AppState>) {
+    let Some(expires_at) = *state.pairing_code_expires_at.lock().await else {
+        return;
+    };
+    tokio::time::sleep_until(tokio::time::Instant::from_std(expires_at)).await;
+
+    let mut pairing_code = state.pairing_code.lock().await;
+    let mut local_setup_secret = state.local_setup_secret.lock().await;
+    let mut pairing_code_expires_at =
+        state.pairing_code_expires_at.lock().await;
+    if pairing_code.is_some() {
+        *pairing_code = None;
+        *local_setup_secret = None;
+        *pairing_code_expires_at = None;
+        tokio::fs::remove_file(state.config.data_dir.join(".setup_secret"))
+            .await
+            .ok();
+        println!(
+            "\nCopal pairing code expired. Restart Core to generate a new code.\n"
+        );
     }
 }

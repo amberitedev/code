@@ -93,10 +93,10 @@ import type {
 } from '@amberite/amberite-api'
 import {
 	amberiteAccessRoleOptions,
+	formatActivityAction,
 	toAmberiteAccessUiMember,
 	uiAccessRoleToCore,
 	uiAccessRoleToPreset,
-	formatActivityAction,
 } from '@amberite/amberite-api'
 import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
 import {
@@ -105,15 +105,15 @@ import {
 	ButtonStyled,
 	Combobox,
 	GrantAccessModal,
-	RemoveAccessModal,
-	StyledInput,
 	type GrantServerAccessPayload,
+	RemoveAccessModal,
 	type ServerAccessInviteSuggestion,
 	type ServerAccessMember,
 	type ServerAuditLogEntry,
+	StyledInput,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, ref, type Component } from 'vue'
+import { type Component,computed, ref } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocialClient } from '@/composables/useSocialClient'

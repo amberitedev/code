@@ -8,12 +8,17 @@
  * @modrinth/ui components and existing auth-gated pages keep working without
  * churn.
  */
+import { invoke } from '@tauri-apps/api/core'
+import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
 import { useSocialClientRaw } from '@/composables/useSocialClient'
 import { login as amberiteLogin } from '@/helpers/amberite_auth'
+
+const MIN_SIGN_IN_VISIBLE_MS = 2500
+const SIGN_IN_TIMEOUT_MS = 30_000
 
 export interface AmberiteAuthUser {
 	id: string
@@ -28,11 +33,11 @@ export interface AmberiteAuthUser {
 }
 
 export interface UseAmberiteAuthReturn {
-	user: ReturnType<typeof computed<AmberiteAuthUser | null>>
-	isLoggedIn: ReturnType<typeof computed<boolean>>
-	isReady: ReturnType<typeof computed<boolean>>
-	signingIn: ReturnType<typeof ref<boolean>>
-	error: ReturnType<typeof ref<Error | null>>
+	user: ComputedRef<AmberiteAuthUser | null>
+	isLoggedIn: ComputedRef<boolean>
+	isReady: ComputedRef<boolean>
+	signingIn: Ref<boolean>
+	error: Ref<Error | null>
 	signIn: () => Promise<void>
 	logOut: () => Promise<void>
 }
@@ -67,40 +72,100 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 
 	const user = computed<AmberiteAuthUser | null>(() => mapToAuthUser(social.currentUser.value))
 	const isLoggedIn = computed(() => !!social.currentUser.value)
-	const isReady = computed(() => !social.loading.value)
+	const restoring = ref(true)
+	const isReady = computed(() => !social.loading.value && !restoring.value)
 	const signingIn = ref(false)
 	const error = ref<Error | null>(null)
 
 	async function signIn() {
+		if (signingIn.value) return
 		signingIn.value = true
 		error.value = null
+		const startedAt = Date.now()
 		try {
-			const credential = await amberiteLogin()
-			const session = await useSocialClientRaw().rawAction<{
-				tokens: { token: string; refreshToken: string } | null
-			}>('auth:signIn', {
-				provider: 'minecraft-token',
-				params: { minecraftAccessToken: credential.accessToken },
-			})
-			if (!session.tokens) throw new Error('Amberite account session was not accepted.')
-			await adapter.setCurrentJwt?.(session.tokens.token)
-			await social.refresh()
-			if (!social.currentUser.value) throw new Error('Amberite account session was not accepted.')
+			await withTimeout(async () => {
+				const credential = await amberiteLogin()
+				const devPersonaId = await amberiteDevPersonaId()
+				const params: { minecraftAccessToken: string; devPersonaId?: string } = {
+					minecraftAccessToken: credential.accessToken,
+				}
+				if (devPersonaId) params.devPersonaId = devPersonaId
+				const session = await useSocialClientRaw().rawAction<{
+					tokens: { token: string; refreshToken: string } | null
+				}>('auth:signIn', {
+					provider: 'minecraft-token',
+					params,
+				}, false)
+				if (!session.tokens) throw new Error('Amberite account session was not accepted.')
+				await adapter.setCurrentJwt?.(session.tokens.token)
+				await adapter.setCurrentRefreshToken?.(session.tokens.refreshToken)
+				await social.refresh()
+				if (!social.currentUser.value) throw new Error('Amberite account session was not accepted.')
+			}, SIGN_IN_TIMEOUT_MS)
 		} catch (e) {
 			console.warn('[amberite] account connection failed', e)
-			error.value = new Error(
-				'Amberite could not connect your account. Check your connection and try again.',
-			)
+			const detail = e instanceof Error ? e.message : String(e)
+			error.value = new Error(`Amberite could not connect your account. ${detail}`)
 		} finally {
+			const remaining = MIN_SIGN_IN_VISIBLE_MS - (Date.now() - startedAt)
+			if (remaining > 0) {
+				await new Promise((resolve) => setTimeout(resolve, remaining))
+			}
 			signingIn.value = false
 		}
 	}
 
 	async function logOut() {
 		await adapter.setCurrentJwt?.(null)
+		await adapter.setCurrentRefreshToken?.(null)
 		error.value = null
 		await social.refresh()
 	}
 
+	void restoreSession()
+
+	async function restoreSession() {
+		try {
+			const refreshToken = await adapter.getCurrentRefreshToken?.()
+			if (!refreshToken) return
+			const session = await useSocialClientRaw().rawAction<{
+				tokens: { token: string; refreshToken: string } | null
+			}>('auth:signIn', { refreshToken }, false)
+			if (!session.tokens) {
+				await adapter.setCurrentJwt?.(null)
+				await adapter.setCurrentRefreshToken?.(null)
+				return
+			}
+			await adapter.setCurrentJwt?.(session.tokens.token)
+			await adapter.setCurrentRefreshToken?.(session.tokens.refreshToken)
+			await social.refresh()
+		} catch (e) {
+			console.warn('[amberite] session refresh failed', e)
+		} finally {
+			restoring.value = false
+		}
+	}
+
 	return { user, isLoggedIn, isReady, signingIn, error, signIn, logOut }
+}
+
+async function amberiteDevPersonaId(): Promise<string | null> {
+	return await invoke<string | null>('plugin:auth|get_amberite_dev_persona_id')
+}
+
+async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<T> {
+	let timeout: ReturnType<typeof setTimeout> | undefined
+	try {
+		return await Promise.race([
+			fn(),
+			new Promise<never>((_, reject) => {
+				timeout = setTimeout(
+					() => reject(new Error('The Amberite connection timed out. Try again.')),
+					timeoutMs,
+				)
+			}),
+		])
+	} finally {
+		if (timeout) clearTimeout(timeout)
+	}
 }

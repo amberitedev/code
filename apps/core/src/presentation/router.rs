@@ -17,8 +17,9 @@ use crate::{
     application::state::AppState,
     presentation::handlers::{
         access, backups, console, diagnostics, events, fs, installations,
-        instance_control, instances, logs, macros, modpack, mods, players,
-        properties, rcon, relay, setup, social, stats, sync, tasks,
+        instance_control, instances, invites, logs, macros, modpack, mods,
+        players, properties, query, rcon, relay, roles, setup, social, stats,
+        sync, tasks,
     },
 };
 
@@ -54,6 +55,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/core/access", post(access::grant_core_access))
         .route("/core/access/:user_id", patch(access::update_core_access))
         .route("/core/access/:user_id", delete(access::remove_core_access))
+        .route("/core/roles", get(roles::list))
+        .route("/core/roles", put(roles::save))
+        .route("/core/roles/:id", delete(roles::retire))
+        .route("/core/role-settings", put(roles::update_settings))
+        .route(
+            "/core/invitations",
+            get(invites::list).post(invites::create),
+        )
+        .route("/core/invitations/mine", get(invites::list_mine))
+        .route("/core/invitations/:id/review", post(invites::review))
+        .route("/core/invitations/:id/respond", post(invites::respond))
         .route("/core/bans", get(social::list_bans))
         .route("/core/bans", post(social::ban_member))
         .route("/activity", get(access::list_activity))
@@ -131,6 +143,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/instances/:id/command",
             post(instance_control::send_command_handler),
         )
+        .route("/instances/:id/query", get(query::query_instance_handler))
         // Console (WS) + creation progress (SSE)
         .route("/instances/:id/console", get(console::ws_console))
         .route("/instances/:id/progress", get(console::sse_progress))

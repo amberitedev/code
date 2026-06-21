@@ -3536,11 +3536,17 @@
   "servers.access-role.viewer": {
     "defaultMessage": "Limited"
   },
+  "servers.access-table.accepted": {
+    "defaultMessage": "Accepted"
+  },
   "servers.access-table.action.cancel-invite": {
-    "defaultMessage": "Cancel invite"
+    "defaultMessage": "Revoke invite"
+  },
+  "servers.access-table.action.invite-user": {
+    "defaultMessage": "Invite user"
   },
   "servers.access-table.action.remove-user": {
-    "defaultMessage": "Remove user"
+    "defaultMessage": "Revoke access"
   },
   "servers.access-table.action.resend-invite": {
     "defaultMessage": "Resend invite"
@@ -3562,6 +3568,9 @@
   },
   "servers.access-table.empty": {
     "defaultMessage": "No users match your filters."
+  },
+  "servers.access-table.friend": {
+    "defaultMessage": "Friend"
   },
   "servers.access-table.member-actions-label": {
     "defaultMessage": "Actions for {username}"
@@ -3946,6 +3955,12 @@
   },
   "servers.backups.item.backup-schedule": {
     "defaultMessage": "Backup schedule"
+  },
+  "servers.backups.item.creator-avatar-alt": {
+    "defaultMessage": "{username}'s avatar"
+  },
+  "servers.backups.item.creator.support": {
+    "defaultMessage": "Support"
   },
   "servers.backups.item.manual-backup": {
     "defaultMessage": "Manual backup"

@@ -80,7 +80,9 @@ export function toAmberiteAccessUiMember(member: CoreAccessMember): AmberiteAcce
 	}
 }
 
-export function toAmberiteActivityEntry(entry: CoreActivityLogEntry): AmberiteAccessUiActivityEntry {
+export function toAmberiteActivityEntry(
+	entry: CoreActivityLogEntry,
+): AmberiteAccessUiActivityEntry {
 	const metadata = parseMetadata(entry.metadata_json)
 	const instanceName =
 		typeof metadata.instance_name === 'string'

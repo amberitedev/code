@@ -13,7 +13,6 @@ import type { BrowseInstallContentType, CardAction, ProjectType, Tags } from '@m
 import {
 	BrowsePageLayout,
 	BrowseSidebar,
-	ButtonStyled,
 	commonMessages,
 	CreationFlowModal,
 	defineMessages,
@@ -47,11 +46,11 @@ import {
 	get_version_many,
 } from '@/helpers/cache.js'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
+import { get_profile_from_pack_version } from '@/helpers/pack'
 import {
 	get as getInstance,
 	get_installed_project_ids as getInstalledProjectIds,
 } from '@/helpers/profile.js'
-import { get_profile_from_pack_version } from '@/helpers/pack'
 import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
 import { get_profile_worlds } from '@/helpers/worlds'
 import { convertToSynced } from '@/pages/instance/synced/synced-conversion'
@@ -278,7 +277,6 @@ if (route.query.shi) {
 }
 const hiddenServerContentProjectIds = ref<Set<string>>(new Set())
 const hiddenServerContentProjectIdsInitialized = ref(false)
-const showUnavailableInstallDropdown = ref(false)
 const projectEnvironmentById = ref(new Map<string, Labrinth.Projects.v3.Environment[]>())
 
 function syncHiddenServerContentProjectIds() {
@@ -854,23 +852,20 @@ function getCardActions(
 
 	function getModpackInstallActions() {
 		if (currentProjectType !== 'modpack') return undefined
-		if (!isServerInstallSupported && !showUnavailableInstallDropdown.value) return undefined
+		if (!isServerInstallSupported) return undefined
 
-		const disabled = !isServerInstallSupported
 		return [
 			{
 				key: 'install-synced',
 				label: formatMessage(messages.installSynced),
 				icon: PlusIcon,
-				disabled,
-				onClick: disabled ? () => {} : installSynced,
+				onClick: installSynced,
 			},
 			{
 				key: 'install-on-server',
 				label: formatMessage(messages.installOnServer),
 				icon: PlusIcon,
-				disabled,
-				onClick: disabled ? () => {} : installOnServer,
+				onClick: installOnServer,
 			},
 		]
 	}
@@ -1309,13 +1304,5 @@ provideBrowseManager({
 		<Teleport to="#sidebar-teleport-target">
 			<BrowseSidebar />
 		</Teleport>
-		<div class="fixed bottom-4 right-4 z-50">
-			<ButtonStyled color="standard" type="outlined" size="small">
-				<button @click="showUnavailableInstallDropdown = !showUnavailableInstallDropdown">
-					Client-only dropdown:
-					{{ showUnavailableInstallDropdown ? 'disabled' : 'hidden' }}
-				</button>
-			</ButtonStyled>
-		</div>
 	</div>
 </template>

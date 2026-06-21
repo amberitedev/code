@@ -12,6 +12,13 @@ const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
 const devPort = Number(process.env.AMBERITE_APP_DEV_PORT ?? 1420)
 
+const requiredEnvironmentVariables = [
+	'MODRINTH_URL',
+	'MODRINTH_API_BASE_URL',
+	'MODRINTH_ARCHON_BASE_URL',
+	'VITE_CONVEX_URL',
+] as const
+
 function loadEnvFile(envFilePath: string) {
 	if (existsSync(envFilePath)) {
 		for (const line of readFileSync(envFilePath, 'utf-8').split('\n')) {
@@ -34,6 +41,17 @@ loadEnvFile(resolve(workspaceRootDir, '.env.local'))
 
 if (!process.env.VITE_CONVEX_URL && process.env.CONVEX_URL) {
 	process.env.VITE_CONVEX_URL = process.env.CONVEX_URL
+}
+
+const missingEnvironmentVariables = requiredEnvironmentVariables.filter(
+	(key) => !process.env[key]?.trim(),
+)
+
+if (missingEnvironmentVariables.length > 0) {
+	throw new Error(
+		`Missing required environment variables: ${missingEnvironmentVariables.join(', ')}. ` +
+			'Set MODRINTH_* values in packages/app-lib/.env and VITE_* values in .env.local.',
+	)
 }
 
 // https://vitejs.dev/config/

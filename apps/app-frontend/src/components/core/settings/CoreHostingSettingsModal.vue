@@ -17,7 +17,7 @@ const tabs = [
 		content: CoreSettingsGeneralPage,
 	},
 	{
-		name: { id: 'app.core.settings.tabs.members', defaultMessage: 'Members' },
+		name: { id: 'app.core.settings.tabs.members', defaultMessage: 'Default access' },
 		icon: UsersIcon,
 		content: CoreSettingsMembersPage,
 	},

@@ -4,6 +4,8 @@ Amberite Convex backend for social identity, friend groups, Core presence, synce
 
 ## Critical Workflow
 
+- Always deploy every change under `convex/` to the development deployment before considering work complete. Run `pnpm exec convex dev --once --tail-logs disable`; do not leave Convex changes only in the local worktree.
+
 - After changing anything in `convex/`, push it to the dev deployment before calling the work done. This is required even though normal app/core/web dev servers should not be started during agent work:
 
 ```powershell
@@ -14,7 +16,7 @@ pnpm exec convex dev --once --tail-logs disable
 
 ```powershell
 pnpm exec convex env list
-pnpm exec convex run dev:listDevUsers
+pnpm exec convex run dev:devState
 ```
 
 - The current dev app expects `.env.local` at repo root to provide `CONVEX_DEPLOYMENT` and `CONVEX_URL`. Vite maps `CONVEX_URL` to `VITE_CONVEX_URL` in `apps/app-frontend/vite.config.ts`, and the desktop adapter sends requests to `${VITE_CONVEX_URL}/api/query` and `/api/mutation`.
@@ -81,7 +83,7 @@ Run from repo root:
 
 ```powershell
 pnpm exec convex dev --once --tail-logs disable
-pnpm exec convex run dev:listDevUsers
+pnpm exec convex run dev:devState
 pnpm exec convex run dev:devState
 pnpm --filter @amberite/amberite-api test
 ```
@@ -89,7 +91,7 @@ pnpm --filter @amberite/amberite-api test
 Live app-style smoke test pattern:
 
 ```powershell
-node --env-file=.env.local -e "fetch(process.env.CONVEX_URL + '/api/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'dev:listDevUsers', args: {}, format: 'json' }) }).then(r => r.json()).then(console.log)"
+node --env-file=.env.local -e "fetch(process.env.CONVEX_URL + '/api/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'dev:devState', args: {}, format: 'json' }) }).then(r => r.json()).then(console.log)"
 ```
 
 `dev:resetSocial` wipes social/Core/sync test state while keeping users by default when called with `{"includeUsers":false}`.

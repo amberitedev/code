@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, statSync } from 'node:fs'
 import net from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,9 +10,24 @@ const devmDataRoot = process.env.LOCALAPPDATA
 	? join(process.env.LOCALAPPDATA, 'Amberite', 'devm')
 	: join(root, '.devm')
 const debugExe = join(root, 'target', 'debug', process.platform === 'win32' ? 'theseus_gui.exe' : 'theseus_gui')
+const secondDebugExe = join(
+	root,
+	'target',
+	'debug',
+	process.platform === 'win32' ? 'theseus_gui-amber-2.exe' : 'theseus_gui-amber-2',
+)
 const secondProfile = {
 	name: 'amber-2',
 	configDir: join(devmDataRoot, 'amber-2'),
+}
+const primaryAuthEnv = {
+	AMBERITE_DEV_MODE: 'true',
+	AMBERITE_DEV_AUTH_SCOPE: 'owner',
+}
+const secondAuthEnv = {
+	AMBERITE_DEV_MODE: 'true',
+	AMBERITE_DEV_AUTH_SCOPE: 'friend',
+	AMBERITE_DEV_PERSONA_ID: 'theogib2',
 }
 
 const children = new Set()
@@ -23,6 +38,7 @@ let secondExeMtime = null
 let secondWatcher = null
 let secondStartTime = null
 let secondRetryTimer = null
+let secondRestartPending = false
 let waitingLogged = false
 
 process.stdout.on('error', () => {})
@@ -99,6 +115,7 @@ function startPrimaryDev() {
 			stdio: ['inherit', 'pipe', 'pipe'],
 			env: {
 				...process.env,
+				...primaryAuthEnv,
 				AMBERITE_DISABLE_SINGLE_INSTANCE: '1',
 				AMBERITE_DEVM_NAME: 'Amberite 1',
 				RUST_LOG: process.env.RUST_LOG ?? 'info',
@@ -135,19 +152,33 @@ function findWindowsPortOwner(port) {
 	return result.stdout.trim() || null
 }
 
+function prepareSecondExe() {
+	if (!existsSync(debugExe)) return false
+	try {
+		copyFileSync(debugExe, secondDebugExe)
+		return true
+	} catch (error) {
+		console.log(`[${secondProfile.name}] waiting for debug exe copy: ${error.message}`)
+		return false
+	}
+}
+
 function startSecondFromExe() {
 	if (!existsSync(debugExe)) return false
-	secondExeMtime = statSync(debugExe).mtimeMs
+	const sourceMtime = statSync(debugExe).mtimeMs
+	if (!prepareSecondExe()) return false
+	secondExeMtime = sourceMtime
 	secondStartTime = Date.now()
 
 	const child = spawn(
-		debugExe,
+		secondDebugExe,
 		[],
 		{
 			cwd: join(root, 'apps', 'app'),
 			stdio: ['inherit', 'pipe', 'pipe'],
 			env: {
 				...process.env,
+				...secondAuthEnv,
 				AMBERITE_DISABLE_SINGLE_INSTANCE: '1',
 				AMBERITE_DEVM_NAME: 'Amberite 2',
 				THESEUS_CONFIG_DIR: secondProfile.configDir,
@@ -166,7 +197,13 @@ function startSecondFromExe() {
 		if (secondChild === child) secondChild = null
 		const reason = signal ? `signal ${signal}` : `code ${code}`
 		console.log(`[${secondProfile.name}] exited with ${reason}`)
-		if (expectedExits.delete(child)) return
+		if (expectedExits.delete(child)) {
+			if (secondRestartPending && !shuttingDown) {
+				secondRestartPending = false
+				scheduleSecondRetry()
+			}
+			return
+		}
 		if (!shuttingDown && children.size > 0) {
 			const lifetime = secondStartTime ? Date.now() - secondStartTime : 0
 			if (lifetime < 10_000) {
@@ -178,7 +215,7 @@ function startSecondFromExe() {
 		}
 	})
 
-	console.log(`[${secondProfile.name}] starting from ${debugExe} with app data at ${secondProfile.configDir}`)
+	console.log(`[${secondProfile.name}] starting from ${secondDebugExe} with app data at ${secondProfile.configDir}`)
 	return true
 }
 
@@ -217,8 +254,13 @@ function startSecondExeWatcher() {
 
 		const mtime = statSync(debugExe).mtimeMs
 		if (secondExeMtime !== null && mtime !== secondExeMtime) {
+			if (secondRestartPending) return
 			console.log(`[${secondProfile.name}] debug exe changed; restarting second app`)
-			restartChild(secondChild)
+			if (secondChild) {
+				secondRestartPending = true
+				restartChild(secondChild)
+				return
+			}
 			startSecondFromExe()
 		}
 	}, 1500)
@@ -233,6 +275,7 @@ function shutdown(exitCode = 0) {
 	}
 	if (secondWatcher) clearInterval(secondWatcher)
 	if (secondRetryTimer) clearTimeout(secondRetryTimer)
+	secondRestartPending = false
 
 	setTimeout(() => process.exit(exitCode), 500).unref()
 }
@@ -243,7 +286,8 @@ async function main() {
 	process.on('SIGHUP', () => shutdown(0))
 
 	console.log('Starting multiplayer Amberite dev.')
-	console.log('Amberite 1 runs normal pnpm app:dev; Amberite 2 runs from the same debug exe with separate app data.')
+	console.log('Amberite 1 runs normal pnpm app:dev; Amberite 2 runs from a copied debug exe with separate app data.')
+	console.log('Amberite 1 uses the canonical Minecraft account; Amberite 2 uses the Theogib2 dev persona.')
 
 	if (await isPortOpen(1420)) {
 		const owner = findWindowsPortOwner(1420)

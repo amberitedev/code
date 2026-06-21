@@ -25,7 +25,8 @@ use crate::{
     },
     infrastructure::minecraft::{
         installer::{read_launch_config, LaunchStyle},
-        java::required_java_version, server_jar::download_server_jar,
+        java::required_java_version,
+        server_jar::download_server_jar,
     },
 };
 
@@ -212,9 +213,9 @@ pub fn spawn_installation_install(
 }
 
 async fn validate_installation_output(dir: &Path) -> Result<(), String> {
-    let config = read_launch_config(dir)
-        .await
-        .ok_or_else(|| "installation did not produce launch.json".to_string())?;
+    let config = read_launch_config(dir).await.ok_or_else(|| {
+        "installation did not produce launch.json".to_string()
+    })?;
     match config.style {
         LaunchStyle::Jar { jar } => {
             let path = dir.join(&jar);

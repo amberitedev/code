@@ -1,3 +1,6 @@
+//! Test-only fake process spawner. Public so integration tests can inject it.
+#![allow(dead_code)]
+
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

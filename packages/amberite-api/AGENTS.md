@@ -77,19 +77,19 @@ Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableSt
 
 ## Where It Gets Loaded
 
-| Consumer                                                | What it does                                                                                                  |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Consumer                                                | What it does                                                                                                              |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `apps/app-frontend/src/adapters/desktop.ts`             | Implements `PlatformAdapter` using native `window.fetch`, env URLs, persisted Amberite auth JWTs, and local queue storage |
-| `apps/app-frontend/src/composables/useCoreClient.ts`    | Provides the singleton `CoreApiClient`                                                                        |
-| `apps/app-frontend/src/composables/useCoreCall.ts`      | Vue-safe call wrapper; catches errors and exposes reactive refs                                               |
-| `apps/app-frontend/src/composables/useCoreMessage.ts`   | Vue-safe message publish wrapper over `CommunicationPipeline.publish()`                                       |
-| `apps/app-frontend/src/composables/useCoreInstances.ts` | Instances list + SSE state                                                                                    |
+| `apps/app-frontend/src/composables/useCoreClient.ts`    | Provides the singleton `CoreApiClient`                                                                                    |
+| `apps/app-frontend/src/composables/useCoreCall.ts`      | Vue-safe call wrapper; catches errors and exposes reactive refs                                                           |
+| `apps/app-frontend/src/composables/useCoreMessage.ts`   | Vue-safe message publish wrapper over `CommunicationPipeline.publish()`                                                   |
+| `apps/app-frontend/src/composables/useCoreInstances.ts` | Instances list + SSE state                                                                                                |
 
 ---
 
 ## Key Non-Obvious Details
 
-- `CoreApiClient` caches the Core URL promise but **only when non-null** — so if Core is offline, the next call retries discovery instead of caching the miss.
+- `CoreApiClient` resolves the Core URL from the adapter on every call so switching the linked Core takes effect immediately; it never substitutes a localhost default.
 - `types.ts` has no validation — it is purely structural. Drift from Core's Rust structs is silent at runtime.
 - `CoreConnectionMonitor` verifies Core with a nonce handshake at `/connection/handshake`. It does not heartbeat and does not use Convex as a Core liveness bus.
 - `auth.ts` reads env vars with a dual path: `import.meta.env.VITE_*` for Vite builds, `process.env.*` for Node (tests/scripts). Both paths need the corresponding var set.

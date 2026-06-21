@@ -329,7 +329,7 @@ const router = createRouter({
 	linkExactActiveClass: 'router-link-exact-active',
 	scrollBehavior(to, from) {
 		if (to.path === from.path) return
-		document.querySelector('.app-viewport')?.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+		document.querySelector('.app-viewport')?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 	},
 })
 

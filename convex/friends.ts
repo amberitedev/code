@@ -6,6 +6,7 @@ import { resolveActor } from "./_socialRules";
 /** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
 const devActAs = { __actAs: v.optional(v.string()) };
 const ONLINE_WINDOW_MS = 60_000;
+const FRIEND_REQUEST_NOTIFICATION_CLAIM_MS = 60_000;
 
 export const ensureSocialProfile = mutation({
 	args: { ...devActAs },
@@ -26,19 +27,20 @@ export const searchUsers = query({
 	handler: async (ctx, args) => {
 		const viewerId = await resolveActor(ctx, args.__actAs);
 		const term = args.query.trim();
-		if (term.length < 3) return [];
+		if (term.length < 2) return [];
 		const normalizedTerm = term.toLowerCase();
-		const users = await ctx.db.query("users").collect();
+		const upperBound = `${normalizedTerm}\uffff`;
+		const users = await ctx.db
+			.query("users")
+			.withIndex("by_normalized_username", (q) =>
+				q.gte("normalizedUsername", normalizedTerm).lt("normalizedUsername", upperBound),
+			)
+			.take(8);
 		return users
 			.filter((user) => {
 				if (user._id === viewerId) return false;
-				return (
-					user.normalizedUsername?.includes(normalizedTerm) ||
-					user.displayName?.toLowerCase().includes(normalizedTerm) ||
-					user.username?.toLowerCase().includes(normalizedTerm)
-				);
+				return user.normalizedUsername?.startsWith(normalizedTerm);
 			})
-			.slice(0, 8)
 			.map((user) => publicUser(user));
 	},
 });
@@ -108,8 +110,57 @@ export const sendFriendRequest = mutation({
 		const incoming = await friendRequestByPair(ctx, target._id, fromUserId);
 		if (incoming?.status === "pending") return { requestId: incoming._id, status: "incoming_pending" };
 		const now = Date.now();
+		if (existing) {
+			await ctx.db.patch(existing._id, {
+				status: "pending",
+				message: args.message,
+				updatedAt: now,
+				notificationClaimedAt: undefined,
+				notificationClaimExpiresAt: undefined,
+				notificationDeliveredAt: undefined,
+			});
+			return { requestId: existing._id, status: "pending" };
+		}
 		const requestId = await ctx.db.insert("friendRequests", { fromUserId, toUserId: target._id, status: "pending", message: args.message, createdAt: now, updatedAt: now });
 		return { requestId, status: "pending" };
+	},
+});
+
+export const claimFriendRequestNotifications = mutation({
+	args: { ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
+		const now = Date.now();
+		const requests = await friendRequestsTo(ctx, userId);
+		const claimable = requests.filter((request) =>
+			!request.notificationDeliveredAt &&
+			(!request.notificationClaimExpiresAt || request.notificationClaimExpiresAt <= now),
+		);
+		const expiresAt = now + FRIEND_REQUEST_NOTIFICATION_CLAIM_MS;
+		return await Promise.all(claimable.map(async (request) => {
+			await ctx.db.patch(request._id, {
+				notificationClaimedAt: now,
+				notificationClaimExpiresAt: expiresAt,
+			});
+			const user = await ctx.db.get(request.fromUserId as any);
+			return { request: { ...request, notificationClaimedAt: now, notificationClaimExpiresAt: expiresAt }, user: user ? publicUser(user) : null };
+		}));
+	},
+});
+
+export const acknowledgeFriendRequestNotification = mutation({
+	args: { requestId: v.id("friendRequests"), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
+		const request = await ctx.db.get(args.requestId);
+		if (!request || request.toUserId !== userId) throw new Error("friend request not found");
+		if (request.status === "pending" && !request.notificationDeliveredAt) {
+			await ctx.db.patch(request._id, {
+				notificationDeliveredAt: Date.now(),
+				notificationClaimExpiresAt: undefined,
+			});
+		}
+		return null;
 	},
 });
 
@@ -230,7 +281,7 @@ function friendshipByPair(ctx: QueryCtx | MutationCtx, userAId: string, userBId:
 }
 
 function friendRequestByPair(ctx: QueryCtx | MutationCtx, fromUserId: string, toUserId: string) {
-	return ctx.db.query("friendRequests").withIndex("by_from_to", (q) => q.eq("fromUserId", fromUserId).eq("toUserId", toUserId)).unique();
+	return ctx.db.query("friendRequests").withIndex("by_from_to", (q) => q.eq("fromUserId", fromUserId).eq("toUserId", toUserId)).order("desc").first();
 }
 
 function blockByPair(ctx: QueryCtx | MutationCtx, blockerUserId: string, blockedUserId: string) {

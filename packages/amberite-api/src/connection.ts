@@ -28,9 +28,9 @@ const HANDSHAKE_TIMEOUT_MS = 5_000
 
 export async function verifyCoreConnection(
 	adapter: PlatformAdapter,
-	options: { knownCoreId?: string | null; timeoutMs?: number } = {},
+	options: { coreUrl?: string | null; knownCoreId?: string | null; timeoutMs?: number } = {},
 ): Promise<ConnectionStatus> {
-	const coreUrl = await adapter.getCoreUrl()
+	const coreUrl = options.coreUrl ?? (await adapter.getCoreUrl())
 	const checkedAt = Date.now()
 	if (!coreUrl) {
 		return emptyStatus('disconnected', checkedAt, 'core-url-missing')

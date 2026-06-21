@@ -1,0 +1,15 @@
+{
+	"name": "@amberitedev/copal-linux-x64",
+	"version": "0.1.0",
+	"description": "Copal native binary for Linux x64",
+	"license": "GPL-3.0-or-later",
+	"os": [
+		"linux"
+	],
+	"cpu": [
+		"x64"
+	],
+	"files": [
+		"bin"
+	]
+}

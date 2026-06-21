@@ -459,6 +459,9 @@ export interface CoreAccessMember {
 	joined_at: string
 	updated_at: string
 	source: 'core' | 'instance'
+	role_id?: string | null
+	role_snapshot_json?: string | null
+	needs_role_reassignment_at?: string | null
 }
 
 export interface CoreAccessViewer {
@@ -487,6 +490,53 @@ export interface CoreAccessPatchBody {
 	role?: CoreAccessRole
 	permission_preset?: CorePermissionPreset | null
 	custom_permissions?: Record<string, unknown> | null
+}
+
+export interface CoreRole {
+	id: string
+	name: string
+	description: string
+	icon: string
+	grants_json: string
+	retired_at?: string | null
+	created_at: string
+	updated_at: string
+}
+
+export interface CoreRoleConfiguration {
+	roles: CoreRole[]
+	require_invite_approval: boolean
+}
+
+export interface SaveCoreRoleBody {
+	id?: string
+	name: string
+	description: string
+	icon: string
+	grants: string[]
+}
+
+export type CoreInvitationStatus = 'pending_review' | 'sent' | 'rejected' | 'accepted' | 'declined'
+
+export interface CoreInvitation {
+	id: string
+	invitee_user_id: string
+	invitee_display_name?: string | null
+	role_id: string
+	role_snapshot_json: string
+	inviter_user_id: string
+	status: CoreInvitationStatus
+	created_at: string
+	updated_at: string
+	expires_at: string
+	responded_at?: string | null
+	reviewed_by_user_id?: string | null
+}
+
+export interface CreateCoreInvitationBody {
+	invitee_user_id: string
+	invitee_display_name?: string
+	role_id: string
 }
 
 export interface CoreActivityLogEntry {

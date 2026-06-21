@@ -67,6 +67,17 @@ export interface FriendGroupInvite {
 	respondedAt?: number
 }
 
+export interface CoreInviteNotification {
+	_id: string
+	recipientUserId: string
+	coreId: string
+	coreUrl: string
+	inviteId: string
+	createdAt: number
+	expiresAt: number
+	readAt?: number
+}
+
 export interface FriendGroupBan {
 	_id: string
 	friendGroupId: string

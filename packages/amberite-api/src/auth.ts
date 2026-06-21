@@ -3,6 +3,11 @@ import { AuthError } from './errors'
 
 const MICROSOFT_AUTH_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize'
 
+export interface MicrosoftLoginRequest {
+	state: string
+	codeVerifier: string
+}
+
 export interface AuthSession {
 	userId: string
 	displayName: string
@@ -13,29 +18,39 @@ export interface AuthSession {
 export async function startMicrosoftLogin(
 	adapter: PlatformAdapter,
 	redirectUri: string,
-): Promise<void> {
+): Promise<MicrosoftLoginRequest> {
 	const clientId = getMicrosoftClientId()
+	const state = generateState()
+	const codeVerifier = generateCodeVerifier()
 	const params = new URLSearchParams({
 		client_id: clientId,
 		response_type: 'code',
 		redirect_uri: redirectUri,
 		response_mode: 'query',
 		scope: 'openid profile email XboxLive.signin',
-		state: generateState(),
+		state,
+		code_challenge: await sha256Base64Url(codeVerifier),
+		code_challenge_method: 'S256',
 	})
 	await adapter.openExternalAuth(`${MICROSOFT_AUTH_URL}?${params.toString()}`)
+	return { state, codeVerifier }
 }
 
 export async function completeMicrosoftLogin(
 	adapter: PlatformAdapter,
 	code: string,
 	redirectUri: string,
+	codeVerifier?: string,
 ): Promise<AuthSession> {
 	const endpoint = getAuthExchangeUrl()
 	const res = await adapter.fetchFn(endpoint, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ code, redirectUri }),
+		body: JSON.stringify({
+			code,
+			redirectUri,
+			...(codeVerifier ? { codeVerifier } : {}),
+		}),
 	})
 
 	if (!res.ok) {
@@ -70,8 +85,32 @@ function env(importMetaKey: string, processKey: string): string {
 }
 
 function generateState(): string {
-	const arr = new Uint8Array(16)
-	if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(arr)
-	else for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256)
-	return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('')
+	return randomBase64Url(16)
+}
+
+function generateCodeVerifier(): string {
+	return randomBase64Url(32)
+}
+
+function randomBase64Url(length: number): string {
+	const bytes = new Uint8Array(length)
+	if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes)
+	else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+	return base64Url(bytes)
+}
+
+async function sha256Base64Url(value: string): Promise<string> {
+	if (typeof crypto === 'undefined' || !crypto.subtle) {
+		throw new AuthError('WebCrypto is required for Microsoft PKCE')
+	}
+	const data = new TextEncoder().encode(value)
+	return base64Url(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
+}
+
+function base64Url(bytes: Uint8Array): string {
+	let binary = ''
+	for (const byte of bytes) binary += String.fromCharCode(byte)
+	if (typeof btoa === 'undefined') throw new AuthError('base64 encoder is not available')
+	const base64 = btoa(binary)
+	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }

@@ -12,11 +12,20 @@ export interface PlatformAdapter {
 	/** Return the direct Core HTTP URL, e.g. "http://localhost:16662". */
 	getCoreUrl(): Promise<string | null>
 
+	/** Return the identity the current Core URL is linked to, when the platform has one. */
+	getConnectedCoreId?(): Promise<string | null>
+
 	/** Return the current user's auth JWT, if authenticated. */
 	getCurrentJwt(): Promise<string | null>
 
 	/** Persist a refreshed auth JWT when the auth provider returns one. */
 	setCurrentJwt?(jwt: string | null): Promise<void>
+
+	/** Return the Convex Auth refresh token paired with the current session JWT. */
+	getCurrentRefreshToken?(): Promise<string | null>
+
+	/** Persist the Convex Auth refresh token paired with the current session JWT. */
+	setCurrentRefreshToken?(refreshToken: string | null): Promise<void>
 
 	/** Return the one-time local setup secret for an app-launched Core, if present. */
 	getLocalSetupSecret?(): Promise<string | null>

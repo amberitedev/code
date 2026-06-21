@@ -94,6 +94,7 @@ Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`
 - One component per file.
 - Use `@` alias for `src/` in imports.
 - Named exports over default exports.
+- Every application configuration environment variable must fail fast with a clear error when it is unset, empty, or invalid. Do not add fallback values for required configuration. Tool-injected, OS-provided, build metadata, and explicitly optional feature-flag variables may remain optional.
 - Do not modify `packages/app-lib` unless explicitly asked.
 - Never read `PROJECT-HUMAN-ONLY.md` unless the user specifically asks.
 - Do not read plans in `.plan/` for orientation; only read a specific plan if the user explicitly asks.

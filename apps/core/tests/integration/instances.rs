@@ -146,7 +146,9 @@ async fn get_instance_returns_record() {
         .as_str()
         .expect("data_dir must be a string");
     assert!(
-        data_dir.replace('\\', "/").ends_with("/instances/test-server"),
+        data_dir
+            .replace('\\', "/")
+            .ends_with("/instances/test-server"),
         "data_dir must use the instance name slug; got: {data_dir}"
     );
 }

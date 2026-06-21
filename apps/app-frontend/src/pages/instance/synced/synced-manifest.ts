@@ -1,9 +1,9 @@
+import type { SyncedManifest, SyncedManifestEntry } from '@amberite/amberite-api'
 import { buildSyncedManifest as buildSyncedManifestWithAdapters } from '@amberite/amberite-api'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 import { get_content_items } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
-import type { SyncedManifest, SyncedManifestEntry } from '@amberite/amberite-api'
 
 export type { SyncedManifest, SyncedManifestEntry }
 

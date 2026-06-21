@@ -53,6 +53,12 @@ export type {
 	CoreAccessResponse,
 	CoreAccessUpsertBody,
 	CoreAccessPatchBody,
+	CoreRole,
+	CoreRoleConfiguration,
+	SaveCoreRoleBody,
+	CoreInvitation,
+	CoreInvitationStatus,
+	CreateCoreInvitationBody,
 	CoreActivityLogEntry,
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,
@@ -76,6 +82,7 @@ export type {
 	SyncedProfileSettings,
 	ProfileWhitelistEntry,
 	ProfileWhitelistResult,
+	CoreInviteNotification,
 } from './convex-types'
 
 export { CoreApiClient, CoreEventStream } from './client'

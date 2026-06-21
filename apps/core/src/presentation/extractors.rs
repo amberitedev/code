@@ -1,16 +1,4 @@
-//! JWT extraction and dev-mode bypass.
-//!
-//! # Dev mode (`AMBERITE_DEV=true`)
-//!
-//! When `config.dev_mode` is true, [`AuthUser`] **always** returns synthetic
-//! `Claims { sub: "dev-owner" }` regardless of whether an `Authorization`
-//! header is present or not. No JWKS fetch is made. This applies to every
-//! route that uses the `AuthUser` extractor.
-//!
-//! Routes that bypass `AuthUser` entirely (WebSocket console, setup endpoints,
-//! health checks) are unaffected by dev mode — they work the same in all modes.
-//!
-//! **Never enable `AMBERITE_DEV=true` in production.**
+//! JWT extraction for Core HTTP routes.
 
 use std::sync::Arc;
 
@@ -26,16 +14,6 @@ use crate::{
     presentation::error::ApiError,
 };
 
-/// Synthetic claims used in dev mode (no JWT required).
-fn dev_claims() -> Claims {
-    Claims {
-        sub: "dev-owner".to_string(),
-        aud: "authenticated".to_string(),
-        role: Some("authenticated".to_string()),
-        exp: u64::MAX,
-    }
-}
-
 /// Axum extractor that validates an owner JWT and yields its claims.
 pub struct AuthUser(pub Claims);
 
@@ -47,24 +25,6 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Dev mode: skip JWT validation but honor explicit dev identities.
-        if state.config.dev_mode {
-            let mut claims = dev_claims();
-            if let Some(token) = bearer_token(&parts.headers) {
-                if let Some(user_id) = token.strip_prefix("dev:") {
-                    if !user_id.trim().is_empty() {
-                        claims.sub = user_id.trim().to_string();
-                    }
-                }
-            }
-            if claims.sub != "dev-owner" {
-                access_service::require_any_member(state, &claims.sub)
-                    .await
-                    .map_err(|e| ApiError::Forbidden(e.to_string()))?;
-            }
-            return Ok(Self(claims));
-        }
-
         let token = bearer_token(&parts.headers).ok_or_else(|| {
             ApiError::Unauthorized("missing Authorization header".into())
         })?;

@@ -1,4 +1,5 @@
 import type { PlatformAdapter } from './adapter'
+import { verifyCoreConnection } from './connection'
 import { CoreApiError, CoreOfflineError, NetworkError, RelayTimeoutError } from './errors'
 import type { MessageEnvelope } from './transport'
 
@@ -99,6 +100,17 @@ async function coreRelayCall<T = unknown>(
 ): Promise<T> {
 	const coreUrl = await adapter.getCoreUrl()
 	if (!coreUrl) throw new CoreOfflineError()
+	const knownCoreId = await adapter.getConnectedCoreId?.()
+	if (knownCoreId) {
+		const status = await verifyCoreConnection(adapter, { knownCoreId })
+		if (
+			status.state !== 'connected' ||
+			status.coreUrl !== coreUrl ||
+			status.coreId !== knownCoreId
+		) {
+			throw new CoreOfflineError()
+		}
+	}
 	const token = await adapter.getCurrentJwt()
 	const controller = new AbortController()
 	const timeout = setTimeout(() => controller.abort(), 15_000)

@@ -3,16 +3,18 @@
  *
  * Uses @tauri-apps/plugin-http fetch (routes through Rust) instead of window.fetch,
  * so requests to Core bypass browser CSP entirely. The http plugin allowlist in
- * capabilities/plugins.json must include http://localhost:16662/*.
+ * capabilities/plugins.json permits the HTTP origins of linked Cores.
  *
- * Core URL: reads VITE_CORE_URL env var, falls back to http://localhost:16662.
- * JWT: persisted by the Amberite account sign-in flow.
+ * Core URL: read from the identity-bound connected Core record.
+ * JWT: persisted in the OS keychain through the Tauri auth plugin.
  */
 import type { PersistentQueueStore, PlatformAdapter, QueuedMessage } from '@amberite/amberite-api'
+import { invoke } from '@tauri-apps/api/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 import { config } from '@/config'
+import { getConnectedCore } from '@/core/connected-core'
 
 class LocalStorageQueueStore implements PersistentQueueStore {
 	async list(queueName: string): Promise<QueuedMessage[]> {
@@ -52,9 +54,6 @@ class LocalStorageQueueStore implements PersistentQueueStore {
 
 const queueStore = new LocalStorageQueueStore()
 
-export const AMBERITE_AUTH_TOKEN_KEY = 'amberite:auth:jwt'
-export const CORE_URL_STORAGE_KEY = 'amberite:core:url'
-
 export function createDesktopAdapter(): PlatformAdapter {
 	return {
 		// Tauri HTTP plugin fetch — routes through Rust, bypasses browser CSP.
@@ -65,32 +64,29 @@ export function createDesktopAdapter(): PlatformAdapter {
 
 		queueStore,
 
-		// Returns the Core HTTP base URL. Falls back to local dev default.
+		// A Core is only reachable after pairing or restoring an identity-bound link.
 		async getCoreUrl(): Promise<string | null> {
-			const envUrl = import.meta.env.VITE_CORE_URL as string | undefined
-			if (envUrl) return envUrl
-			try {
-				return window.localStorage.getItem(CORE_URL_STORAGE_KEY) ?? 'http://localhost:16662'
-			} catch {
-				return 'http://localhost:16662'
-			}
+			return getConnectedCore()?.url ?? null
+		},
+
+		async getConnectedCoreId(): Promise<string | null> {
+			return getConnectedCore()?.coreId ?? null
 		},
 
 		async getCurrentJwt(): Promise<string | null> {
-			try {
-				return window.localStorage.getItem(AMBERITE_AUTH_TOKEN_KEY)
-			} catch {
-				return null
-			}
+			return await invoke<string | null>('plugin:auth|get_amberite_session_jwt')
 		},
 
 		async setCurrentJwt(jwt: string | null): Promise<void> {
-			try {
-				if (jwt) window.localStorage.setItem(AMBERITE_AUTH_TOKEN_KEY, jwt)
-				else window.localStorage.removeItem(AMBERITE_AUTH_TOKEN_KEY)
-			} catch {
-				// localStorage can be unavailable in tests.
-			}
+			await invoke('plugin:auth|set_amberite_session_jwt', { jwt })
+		},
+
+		async getCurrentRefreshToken(): Promise<string | null> {
+			return await invoke<string | null>('plugin:auth|get_amberite_session_refresh_token')
+		},
+
+		async setCurrentRefreshToken(refreshToken: string | null): Promise<void> {
+			await invoke('plugin:auth|set_amberite_session_refresh_token', { refreshToken })
 		},
 
 		// Opens external URLs (OAuth, docs, etc.) in the system browser.

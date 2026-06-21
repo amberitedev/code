@@ -333,8 +333,8 @@ import {
 	ChevronUpIcon,
 	MoreVerticalIcon,
 	SendIcon,
-	UserXIcon,
 	UserPlusIcon,
+	UserXIcon,
 	XIcon,
 } from '@modrinth/assets'
 import { type Component, computed, onMounted, onUnmounted, ref } from 'vue'

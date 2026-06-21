@@ -14,14 +14,15 @@ import type {
 	FriendGroupBan,
 	FriendGroupMember,
 	FriendGroupSummary,
+	FriendRequestEntry,
 	FriendsListResult,
 	GroupInviteWithGroup,
 } from '@amberite/amberite-api'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
-import { CORE_URL_STORAGE_KEY } from '@/adapters/desktop'
 import { useSocialClient } from '@/composables/useSocialClient'
+import { clearConnectedCore, getConnectedCore, setConnectedCore } from '@/core/connected-core'
 
 type Role = 'owner' | 'admin' | 'member'
 
@@ -70,6 +71,8 @@ export interface UseSocialReturn {
 	sendFriendRequest: (args: { targetUserId: string; message?: string }) => Promise<void>
 	respondFriendRequest: (requestId: string, accept: boolean) => Promise<void>
 	cancelFriendRequest: (requestId: string) => Promise<void>
+	claimFriendRequestNotifications: () => Promise<FriendRequestEntry[]>
+	acknowledgeFriendRequestNotification: (requestId: string) => Promise<void>
 	removeFriend: (userId: string) => Promise<void>
 	createGroup: (args: {
 		coreId: string
@@ -123,6 +126,7 @@ export function useSocial(): UseSocialReturn {
 			const nextUser = await client.currentUser()
 			if (!nextUser) {
 				clearUserScopedState(true)
+				clearConnectedCore()
 				return
 			}
 			currentUser.value = {
@@ -138,11 +142,21 @@ export function useSocial(): UseSocialReturn {
 			friends.value = friendsList
 			invites.value = myInvites
 			group.value = groups[0] ?? null
-			try {
-				const connectionUrl = group.value?.core?.connectionUrl
-				if (connectionUrl) window.localStorage.setItem(CORE_URL_STORAGE_KEY, connectionUrl)
-			} catch {
-				// localStorage can be unavailable in tests.
+			const connectedGroupCore = group.value?.core
+			if (connectedGroupCore?.coreId && connectedGroupCore.connectionUrl) {
+				const current = getConnectedCore()
+				if (
+					current?.coreId !== connectedGroupCore.coreId ||
+					current.url !== connectedGroupCore.connectionUrl
+				) {
+					setConnectedCore({
+						coreId: connectedGroupCore.coreId,
+						url: connectedGroupCore.connectionUrl,
+						groupId: group.value?.group.id,
+					})
+				}
+			} else {
+				clearConnectedCore()
 			}
 			if (group.value) {
 				const gid = group.value.group.id
@@ -195,6 +209,9 @@ export function useSocial(): UseSocialReturn {
 			mutate(() => client.respondFriendRequest(requestId, accept)).then(() => undefined),
 		cancelFriendRequest: (requestId) =>
 			mutate(() => client.cancelFriendRequest(requestId)).then(() => undefined),
+		claimFriendRequestNotifications: () => client.claimFriendRequestNotifications(),
+		acknowledgeFriendRequestNotification: (requestId) =>
+			client.acknowledgeFriendRequestNotification(requestId).then(() => undefined),
 		removeFriend: (userId) => mutate(() => client.removeFriend(userId)).then(() => undefined),
 		createGroup: (args) => mutate(() => client.ensureCoreFriendGroup(args)).then(() => undefined),
 		updateGroup: (args) =>

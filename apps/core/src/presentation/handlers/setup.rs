@@ -11,7 +11,7 @@ const MAX_PAIRING_ATTEMPTS: u32 = 5;
 
 #[derive(Deserialize)]
 pub struct SetupRequest {
-    /// Six-digit pairing code shown on Core's terminal.
+    /// Eight-character pairing code shown on Core's terminal.
     pub code: Option<String>,
     /// One-time secret written locally for app-launched Core auto-pairing.
     pub local_setup_secret: Option<String>,
@@ -43,6 +43,8 @@ pub async fn complete_setup(
     }
 
     let mut pairing_code = state.pairing_code.lock().await;
+    let mut pairing_code_expires_at =
+        state.pairing_code_expires_at.lock().await;
     let mut local_setup_secret = state.local_setup_secret.lock().await;
 
     if pairing_code.is_none() && local_setup_secret.is_none() {
@@ -50,15 +52,25 @@ pub async fn complete_setup(
     }
 
     let pairing_code_valid = body.code.as_deref().is_some_and(|code| {
-        pairing_code
+        let code = normalize_pairing_code(code);
+        let code_is_current = pairing_code
             .as_deref()
-            .is_some_and(|expected| code == expected)
+            .is_some_and(|expected| code == expected);
+        let code_is_unexpired = pairing_code_expires_at
+            .as_ref()
+            .is_some_and(|expires_at| *expires_at > std::time::Instant::now());
+        code_is_current && code_is_unexpired
     });
     let local_secret_valid =
         body.local_setup_secret.as_deref().is_some_and(|secret| {
-            local_setup_secret
+            let secret_is_current = local_setup_secret
                 .as_deref()
-                .is_some_and(|expected| secret == expected)
+                .is_some_and(|expected| secret == expected);
+            let secret_is_unexpired =
+                pairing_code_expires_at.as_ref().is_some_and(|expires_at| {
+                    *expires_at > std::time::Instant::now()
+                });
+            secret_is_current && secret_is_unexpired
         });
 
     if !pairing_code_valid && !local_secret_valid {
@@ -119,6 +131,7 @@ pub async fn complete_setup(
     // Reset attempt counter and clear the pairing code.
     state.wrong_pairing_attempts.store(0, Ordering::Relaxed);
     *pairing_code = None;
+    *pairing_code_expires_at = None;
     *local_setup_secret = None;
     tokio::fs::remove_file(state.config.data_dir.join(".setup_secret"))
         .await
@@ -126,14 +139,19 @@ pub async fn complete_setup(
     Ok(Json(json!({ "ok": true, "core_id": state.core_id })))
 }
 
+fn normalize_pairing_code(code: &str) -> String {
+    code.chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
 /// GET /setup/status — check whether Core is paired.
-/// In dev mode, always reports paired so the App skips the pairing screen.
 pub async fn setup_status(State(state): State<Arc<AppState>>) -> Json<Value> {
-    if state.config.dev_mode {
-        return Json(
-            json!({ "paired": true, "dev_mode": true, "core_id": state.core_id }),
-        );
-    }
     let paired = state.jwks_url().await.is_some();
-    Json(json!({ "paired": paired, "core_id": state.core_id }))
+    Json(json!({
+        "paired": paired,
+        "dev_mode": state.config.dev_mode,
+        "core_id": state.core_id,
+    }))
 }

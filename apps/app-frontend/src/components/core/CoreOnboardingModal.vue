@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { CheckIcon, RightArrowIcon } from '@modrinth/assets'
-import { MultiStageModal } from '@modrinth/ui'
 import type { StageConfigInput } from '@modrinth/ui'
+import { MultiStageModal } from '@modrinth/ui'
 import { ref } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 
 import {
-	provideCoreOnboardingContext,
 	type CoreOnboardingContext,
 	type CoreOnboardingFlow,
+	provideCoreOnboardingContext,
 } from './core-onboarding-context'
 import AdvancedStage from './stages/AdvancedStage.vue'
 import CodeStage from './stages/CodeStage.vue'
@@ -34,7 +34,7 @@ const stages: StageConfigInput<CoreOnboardingContext>[] = [
 			icon: RightArrowIcon,
 			iconPosition: 'after',
 			color: 'brand',
-			disabled: !ctx.connectCode.value.trim(),
+			disabled: ctx.connectCode.value.replace(/[^A-Z0-9]/gi, '').length !== 8,
 			loading: ctx.working.value,
 			onClick: ctx.working.value ? undefined : onboarding.validateConnectAndContinue,
 		}),

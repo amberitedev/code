@@ -88,7 +88,7 @@ impl TestApp {
         .unwrap();
 
         let config = Config {
-            convex_url: Some("https://test.convex.cloud".to_string()),
+            convex_url: "https://test.convex.cloud".to_string(),
             ..Self::dev_config(data_dir.path().to_path_buf())
         };
         let state = AppState::new(config, pool).await.unwrap();
@@ -124,8 +124,8 @@ impl TestApp {
     fn dev_config(data_dir: std::path::PathBuf) -> Config {
         Config {
             data_dir,
-            convex_url: None,
-            public_url: None,
+            convex_url: "https://test.convex.cloud".to_string(),
+            public_url: "http://127.0.0.1".to_string(),
             port: 0,
             bind_host: "127.0.0.1".to_string(),
             allowed_origin: "*".to_string(),

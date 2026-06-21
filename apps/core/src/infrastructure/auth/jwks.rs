@@ -144,6 +144,4 @@ pub enum AuthError {
     Fetch(String),
     #[error("bad key encoding")]
     BadKey,
-    #[error("core is not paired")]
-    NotPaired,
 }

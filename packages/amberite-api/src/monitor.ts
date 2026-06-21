@@ -48,7 +48,8 @@ export class CoreConnectionMonitor {
 	}
 
 	async checkNow(): Promise<ConnectionStatus> {
-		const next = await verifyCoreConnection(this.adapter, { knownCoreId: this.knownCoreId })
+		const knownCoreId = this.knownCoreId ?? (await this.adapter.getConnectedCoreId?.())
+		const next = await verifyCoreConnection(this.adapter, { knownCoreId })
 		this.status = next
 		this.setState(next.state, next)
 		for (const cb of this.statusListeners) cb(next)

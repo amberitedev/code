@@ -5,6 +5,7 @@ import {
 	installVersionDependencies as installVersionDependenciesWithAdapters,
 	isVersionCompatible,
 } from '@amberite/amberite-api'
+
 import { get_project, get_version, get_version_many } from '@/helpers/cache.js'
 import { add_project_from_version, check_installed } from '@/helpers/profile.js'
 import {

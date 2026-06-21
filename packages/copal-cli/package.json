@@ -1,0 +1,19 @@
+{
+	"name": "@amberitedev/copal",
+	"version": "0.1.0",
+	"description": "Copal Core installer and terminal manager",
+	"license": "GPL-3.0-or-later",
+	"type": "module",
+	"bin": {
+		"copal": "./bin/copal.mjs"
+	},
+	"files": [
+		"bin"
+	],
+	"optionalDependencies": {
+		"@amberitedev/copal-linux-x64": "0.1.0"
+	},
+	"engines": {
+		"node": ">=20"
+	}
+}

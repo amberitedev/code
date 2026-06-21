@@ -30,10 +30,17 @@ import type {
 	FriendGroupBan,
 	SyncedProfileSettings,
 	ProfileWhitelistResult,
+	CoreInviteNotification,
 } from './convex-types'
 
 export interface FriendRequestEntry {
-	request: { _id: string; fromUserId: string; toUserId: string; status: string; createdAt: number }
+	request: {
+		_id: string
+		fromUserId: string
+		toUserId: string
+		status: string
+		createdAt: number
+	}
 	user: AmberiteUser | null
 }
 
@@ -76,6 +83,8 @@ export interface AmberiteSocialClient {
 	}): Promise<{ requestId: string | null; status: string }>
 	respondFriendRequest(requestId: string, accept: boolean): Promise<null>
 	cancelFriendRequest(requestId: string): Promise<null>
+	claimFriendRequestNotifications(): Promise<FriendRequestEntry[]>
+	acknowledgeFriendRequestNotification(requestId: string): Promise<null>
 	removeFriend(userId: string): Promise<null>
 	blockUser(userId: string): Promise<null>
 	unblockUser(userId: string): Promise<null>
@@ -146,7 +155,13 @@ export interface AmberiteSocialClient {
 	}): Promise<{ coreId: string; code: string }>
 	claimPairingCore(
 		code: string,
-	): Promise<{ coreId: string; friendGroupId: string; connectionUrl?: string } | null>
+	): Promise<{ coreId: string; connectionUrl?: string; metadata?: unknown } | null>
+	finalizePairingCore(args: {
+		code: string
+		coreId: string
+		connectionUrl?: string
+	}): Promise<{ coreId: string; friendGroupId: string }>
+	releasePairingCore(args: { code: string; coreId: string }): Promise<null>
 	registerSyncedProfile(args: {
 		friendGroupId: string
 		coreId: string
@@ -172,6 +187,15 @@ export interface AmberiteSocialClient {
 	}): Promise<{ snapshotId: string }>
 	listProfileSnapshots(profileId: string): Promise<ConvexProfileSnapshot[]>
 	listModSyncEvents(profileId: string): Promise<ConvexModSyncEvent[]>
+	notifyCoreInvite(args: {
+		recipientUserId: string
+		coreId: string
+		coreUrl: string
+		inviteId: string
+		expiresAt: number
+	}): Promise<{ notificationId: string }>
+	listCoreInviteNotifications(): Promise<CoreInviteNotification[]>
+	markCoreInviteNotificationRead(notificationId: string): Promise<null>
 }
 
 export class ConvexApiClient implements AmberiteSocialClient {
@@ -185,8 +209,8 @@ export class ConvexApiClient implements AmberiteSocialClient {
 		return convexMutation<T>(this.adapter, path, args)
 	}
 
-	rawAction<T = unknown>(path: string, args: unknown = {}): Promise<T> {
-		return convexAction<T>(this.adapter, path, args)
+	rawAction<T = unknown>(path: string, args: unknown = {}, authenticate = true): Promise<T> {
+		return convexAction<T>(this.adapter, path, args, authenticate)
 	}
 
 	// ── Auth ──────────────────────────────────────────────────────────────────
@@ -242,6 +266,14 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	cancelFriendRequest(requestId: string): Promise<null> {
 		return convexMutation(this.adapter, 'friends:cancelFriendRequest', { requestId })
+	}
+
+	claimFriendRequestNotifications(): Promise<FriendRequestEntry[]> {
+		return convexMutation(this.adapter, 'friends:claimFriendRequestNotifications', {})
+	}
+
+	acknowledgeFriendRequestNotification(requestId: string): Promise<null> {
+		return convexMutation(this.adapter, 'friends:acknowledgeFriendRequestNotification', { requestId })
 	}
 
 	removeFriend(userId: string): Promise<null> {
@@ -399,8 +431,20 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	claimPairingCore(
 		code: string,
-	): Promise<{ coreId: string; friendGroupId: string; connectionUrl?: string } | null> {
+	): Promise<{ coreId: string; connectionUrl?: string; metadata?: unknown } | null> {
 		return convexMutation(this.adapter, 'presence:claimPairingCore', { code })
+	}
+
+	finalizePairingCore(args: {
+		code: string
+		coreId: string
+		connectionUrl?: string
+	}): Promise<{ coreId: string; friendGroupId: string }> {
+		return convexMutation(this.adapter, 'presence:finalizePairingCore', args)
+	}
+
+	releasePairingCore(args: { code: string; coreId: string }): Promise<null> {
+		return convexMutation(this.adapter, 'presence:releasePairingCore', args)
 	}
 
 	// ── Synced Profiles ───────────────────────────────────────────────────────
@@ -452,5 +496,23 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	listModSyncEvents(profileId: string): Promise<ConvexModSyncEvent[]> {
 		return convexQuery(this.adapter, 'sync:listModSyncEvents', { profileId })
+	}
+
+	notifyCoreInvite(args: {
+		recipientUserId: string
+		coreId: string
+		coreUrl: string
+		inviteId: string
+		expiresAt: number
+	}): Promise<{ notificationId: string }> {
+		return convexMutation(this.adapter, 'coreInviteNotifications:notify', args)
+	}
+
+	listCoreInviteNotifications(): Promise<CoreInviteNotification[]> {
+		return convexQuery(this.adapter, 'coreInviteNotifications:mine', {})
+	}
+
+	markCoreInviteNotificationRead(notificationId: string): Promise<null> {
+		return convexMutation(this.adapter, 'coreInviteNotifications:markRead', { notificationId })
 	}
 }

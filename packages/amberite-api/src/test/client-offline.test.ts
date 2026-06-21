@@ -59,4 +59,30 @@ describe('CoreApiClient when Core is offline', () => {
 	it('listBackups throws CoreOfflineError', async () => {
 		await expect(client.listBackups('any-id')).rejects.toThrow(CoreOfflineError)
 	})
+
+	it('does not expose the account JWT when the linked Core identity does not match', async () => {
+		const getCurrentJwt = vi.fn(async () => 'account-jwt')
+		const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body))
+			return Response.json({
+				nonce: body.nonce,
+				ok: false,
+				core_id: 'unexpected-core',
+				protocol: 1,
+				version: '0.1.0',
+				reason: 'wrong-core',
+			})
+		}) as unknown as typeof fetch
+		const guardedClient = new CoreApiClient({
+			fetchFn,
+			convexUrl: 'https://test.convex.cloud',
+			getCoreUrl: async () => 'https://core.example.com',
+			getConnectedCoreId: async () => 'expected-core',
+			getCurrentJwt,
+			openExternalAuth: vi.fn(),
+		})
+
+		await expect(guardedClient.listInstances()).rejects.toThrow(CoreOfflineError)
+		expect(getCurrentJwt).not.toHaveBeenCalled()
+	})
 })

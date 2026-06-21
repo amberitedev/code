@@ -1,5 +1,5 @@
-import { UserAccessEvent } from '@modrinth/ui'
 import type { EventEntity, ServerAccessRole, ServerAuditLogEntry } from '@modrinth/ui'
+import { UserAccessEvent } from '@modrinth/ui'
 import { ref } from 'vue'
 
 const auditEntries = ref<ServerAuditLogEntry[]>([])

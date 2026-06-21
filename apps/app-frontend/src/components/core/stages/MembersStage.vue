@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { UserPlusIcon } from '@modrinth/assets'
-import { AccessTable, Avatar, ButtonStyled, Checkbox, Combobox } from '@modrinth/ui'
 import type { ComboboxOption } from '@modrinth/ui'
+import { AccessTable, Avatar, ButtonStyled, Checkbox, Combobox } from '@modrinth/ui'
 import { computed } from 'vue'
 
 import { injectCoreOnboardingContext } from '../core-onboarding-context'

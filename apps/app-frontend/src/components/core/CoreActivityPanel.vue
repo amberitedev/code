@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { AuditLogTable, DropdownFilterBar } from '@modrinth/ui'
 import type { TimeFrameLastUnit, TimeFrameMode, TimeFramePreset } from '@modrinth/ui'
+import { AuditLogTable, DropdownFilterBar } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
 import { useCoreActivityLog } from '@/components/core/use-core-activity-log'

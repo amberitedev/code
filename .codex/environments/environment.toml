@@ -3,7 +3,36 @@ version = 1
 name = "code"
 
 [setup]
-script = "pnpm install"
+script = """
+$source = ((git worktree list --porcelain | Select-String '^worktree ' | Select-Object -First 1).Line -replace '^worktree ', '')
+$environmentDirectories = @($source, (Join-Path $source 'apps'), (Join-Path $source 'packages'), (Join-Path $source 'convex'))
+foreach ($environmentDirectory in $environmentDirectories) {
+	if (-not (Test-Path $environmentDirectory)) {
+		continue
+	}
+
+	Get-ChildItem -Force -File -Path $environmentDirectory -Filter '.env*' | Where-Object { $_.Name -notlike '*.example' } | ForEach-Object {
+		$relativePath = $_.FullName.Substring($source.Length).TrimStart('\\')
+		$destination = Join-Path (Get-Location) $relativePath
+		New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
+		Copy-Item -Force $_.FullName $destination
+	}
+
+	if ($environmentDirectory -eq $source) {
+		continue
+	}
+
+	Get-ChildItem -Force -Directory -Path $environmentDirectory | ForEach-Object {
+		Get-ChildItem -Force -File -Path $_.FullName -Filter '.env*' | Where-Object { $_.Name -notlike '*.example' } | ForEach-Object {
+			$relativePath = $_.FullName.Substring($source.Length).TrimStart('\\')
+			$destination = Join-Path (Get-Location) $relativePath
+			New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
+			Copy-Item -Force $_.FullName $destination
+		}
+	}
+}
+pnpm install
+"""
 
 [[actions]]
 name = "App Dev"

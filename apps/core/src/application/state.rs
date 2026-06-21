@@ -1,7 +1,7 @@
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU32, Arc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use dashmap::DashMap;
@@ -26,6 +26,9 @@ use crate::{
         process_spawner::AnySpawner,
     },
 };
+
+/// Duration that a terminal pairing code remains valid.
+pub const PAIRING_WINDOW: Duration = Duration::from_secs(15 * 60);
 
 /// Short-lived ticket for WebSocket auth.
 pub struct WsTicket {
@@ -61,6 +64,8 @@ pub struct AppState {
     pub fs_download_tokens: DashMap<String, FsDownloadToken>,
     /// First-run pairing code (cleared after pairing).
     pub pairing_code: tokio::sync::Mutex<Option<String>>,
+    /// Expiration instant for the first-run pairing code.
+    pub pairing_code_expires_at: tokio::sync::Mutex<Option<Instant>>,
     /// Local one-time setup secret for app-launched Cores.
     pub local_setup_secret: tokio::sync::Mutex<Option<String>>,
     /// SEC-01: counts wrong pairing-code attempts; locked out after MAX_PAIRING_ATTEMPTS.
@@ -92,9 +97,8 @@ impl AppState {
         pool: SqlitePool,
         spawner: Arc<dyn AnySpawner>,
     ) -> color_eyre::eyre::Result<Arc<Self>> {
-        let http = reqwest::Client::builder()
-            .user_agent("copal/0.1")
-            .build()?;
+        let http =
+            reqwest::Client::builder().user_agent("copal/0.1").build()?;
         let broadcaster = EventBroadcaster::new();
         let jwks_cache = JwksCache::new(http.clone());
 
@@ -122,19 +126,24 @@ impl AppState {
             .ok();
         }
 
-        let (pairing_code, local_setup_secret) = if is_paired || config.dev_mode
-        {
-            (None, None)
-        } else {
-            let code = generate_pairing_code();
-            let secret = generate_setup_secret();
-            write_local_setup_secret(&config.data_dir, &secret).await?;
-            println!("\n╔══════════════════════════════╗");
-            println!("║  Copal — Pairing Code  ║");
-            println!("║          {code}          ║");
-            println!("╚══════════════════════════════╝\n");
-            (Some(code), Some(secret))
-        };
+        let (pairing_code, pairing_code_expires_at, local_setup_secret) =
+            if is_paired {
+                (None, None, None)
+            } else {
+                let code = generate_pairing_code();
+                let secret = generate_setup_secret();
+                write_local_setup_secret(&config.data_dir, &secret).await?;
+                println!(
+                    "\nCopal pairing code: {}",
+                    format_pairing_code(&code)
+                );
+                println!("This code expires in 15 minutes. Restart Core to generate a new code.\n");
+                (
+                    Some(code),
+                    Some(Instant::now() + PAIRING_WINDOW),
+                    Some(secret),
+                )
+            };
 
         Ok(Arc::new(Self {
             pool,
@@ -147,6 +156,9 @@ impl AppState {
             ws_tickets: DashMap::new(),
             fs_download_tokens: DashMap::new(),
             pairing_code: tokio::sync::Mutex::new(pairing_code),
+            pairing_code_expires_at: tokio::sync::Mutex::new(
+                pairing_code_expires_at,
+            ),
             local_setup_secret: tokio::sync::Mutex::new(local_setup_secret),
             wrong_pairing_attempts: AtomicU32::new(0),
             instance_store,
@@ -240,10 +252,49 @@ async fn write_local_setup_secret(
 
 fn generate_pairing_code() -> String {
     use rand::Rng;
-    let n: u32 = rand::thread_rng().gen_range(100_000..=999_999);
-    n.to_string()
+
+    const PAIRING_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut rng = rand::thread_rng();
+    let code: String = (0..8)
+        .map(|_| {
+            let index = rng.gen_range(0..PAIRING_ALPHABET.len());
+            (PAIRING_ALPHABET[index] as char).to_ascii_lowercase()
+        })
+        .collect();
+    code
+}
+
+fn format_pairing_code(code: &str) -> String {
+    format!(
+        "{}-{}",
+        code[..4].to_ascii_uppercase(),
+        code[4..].to_ascii_uppercase()
+    )
 }
 
 fn generate_setup_secret() -> String {
     Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_pairing_code, generate_pairing_code};
+
+    #[test]
+    fn pairing_codes_are_stored_canonically_and_formatted_for_display() {
+        let code = generate_pairing_code();
+        let display = format_pairing_code(&code);
+        let (first, second) = display
+            .split_once('-')
+            .expect("display code should include a dash");
+
+        assert_eq!(code.len(), 8);
+        assert!(code.chars().all(|character| character.is_ascii_lowercase()
+            || character.is_ascii_digit()));
+        assert_eq!(first.len(), 4);
+        assert_eq!(second.len(), 4);
+        assert!(display.chars().all(|character| character == '-'
+            || character.is_ascii_uppercase()
+            || character.is_ascii_digit()));
+    }
 }

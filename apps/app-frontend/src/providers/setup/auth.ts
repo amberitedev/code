@@ -1,5 +1,5 @@
 import { type AuthProvider, provideAuth } from '@modrinth/ui'
-import { computed, type Ref, ref, watchEffect } from 'vue'
+import { computed, type Ref, ref } from 'vue'
 
 export interface AmberiteAuthUser {
 	id: string
@@ -26,12 +26,6 @@ export function setupAuthProvider(
 		isReady,
 		requestSignIn,
 	}
-
-	watchEffect(() => {
-		// Dummy session token derived from user presence so downstream code
-		// that checks `!!session_token` still works.
-		sessionToken.value = user.value ? 'amberite-session' : null
-	})
 
 	provideAuth(authProvider)
 }

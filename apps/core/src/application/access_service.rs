@@ -292,9 +292,101 @@ async fn effective_viewer(
     .bind(user_id)
     .fetch_optional(&state.pool)
     .await?;
-    member
-        .map(|member| viewer(user_id, &member.role, &member.permission_preset))
-        .ok_or(SocialError::Invalid("not authorized for this Core".into()))
+    let member = member
+        .ok_or(SocialError::Invalid("not authorized for this Core".into()))?;
+    viewer_for_core_member(state, user_id, member).await
+}
+
+async fn viewer_for_core_member(
+    state: &Arc<AppState>,
+    user_id: &str,
+    member: CoreMember,
+) -> Result<EffectiveAccessViewer, SocialError> {
+    let permissions =
+        if let Some(snapshot) = member.role_snapshot_json.as_deref() {
+            serde_json::from_str::<serde_json::Value>(snapshot)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("grants_json")
+                        .and_then(|grants| grants.as_str())
+                        .map(str::to_string)
+                })
+                .and_then(|grants| {
+                    serde_json::from_str::<Vec<String>>(&grants).ok()
+                })
+                .unwrap_or_else(|| permissions_for(&member.permission_preset))
+        } else if let Some(role_id) = member.role_id.as_deref() {
+            let grants: Option<String> = sqlx::query_scalar(
+                "SELECT grants_json FROM core_roles WHERE id = ?",
+            )
+            .bind(role_id)
+            .fetch_optional(&state.pool)
+            .await?;
+            grants
+                .and_then(|value| serde_json::from_str(&value).ok())
+                .unwrap_or_else(|| permissions_for(&member.permission_preset))
+        } else {
+            permissions_for(&member.permission_preset)
+        };
+    let permissions = expand_role_grants(permissions);
+    Ok(EffectiveAccessViewer {
+        user_id: user_id.to_string(),
+        role: member.role,
+        permission_preset: member.permission_preset,
+        can_manage_users: permissions.iter().any(|value| {
+            value == "manage-roles" || value == "edit-member-roles"
+        }),
+        permissions,
+    })
+}
+
+fn expand_role_grants(grants: Vec<String>) -> Vec<String> {
+    let mut permissions = grants.clone();
+    if grants.iter().any(|grant| {
+        matches!(
+            grant.as_str(),
+            "manage-instances"
+                | "start-stop-instances"
+                | "restart-instances"
+                | "read-console"
+                | "write-console"
+                | "manage-mods"
+                | "manage-worlds"
+                | "manage-files"
+                | "manage-backups"
+                | "manage-network"
+        )
+    }) {
+        permissions.push("server:view".to_string());
+    }
+    for grant in grants {
+        match grant.as_str() {
+            "manage-instances"
+            | "start-stop-instances"
+            | "restart-instances" => {
+                permissions.push("server:power".to_string())
+            }
+            "manage-mods" | "manage-worlds" => {
+                permissions.push("server:content".to_string())
+            }
+            "manage-files" => permissions.push("server:files".to_string()),
+            "manage-backups" => permissions.push("server:backups".to_string()),
+            "manage-network" | "edit-settings" => {
+                permissions.push("server:settings".to_string())
+            }
+            "read-console" | "write-console" => {
+                permissions.push("server:console".to_string())
+            }
+            "edit-member-roles" | "manage-roles" => {
+                permissions.push("members:manage".to_string())
+            }
+            _ => {}
+        }
+    }
+    permissions.sort();
+    permissions.dedup();
+    permissions
 }
 
 fn viewer(user_id: &str, role: &str, preset: &str) -> EffectiveAccessViewer {
@@ -354,6 +446,9 @@ fn core_member_to_effective(member: CoreMember) -> EffectiveAccessMember {
         joined_at: member.joined_at,
         updated_at: member.updated_at,
         source: "core".to_string(),
+        role_id: member.role_id,
+        role_snapshot_json: member.role_snapshot_json,
+        needs_role_reassignment_at: member.needs_role_reassignment_at,
     }
 }
 
@@ -370,6 +465,9 @@ fn instance_member_to_effective(
         joined_at: member.created_at,
         updated_at: member.updated_at,
         source: "instance".to_string(),
+        role_id: None,
+        role_snapshot_json: None,
+        needs_role_reassignment_at: None,
     }
 }
 

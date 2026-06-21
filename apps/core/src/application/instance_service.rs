@@ -48,8 +48,6 @@ pub enum InstanceError {
     Spawn(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("jar download: {0}")]
-    JarDownload(String),
     #[error("instance is not ready: {0}")]
     NotReady(String),
     #[error("actor channel closed — instance may have crashed")]
@@ -129,7 +127,9 @@ async fn unique_instance_data_dir(
 
     let id_string = id.to_string();
     let short = &id_string[..4];
-    if let Some(path) = try_create_instance_dir(&base.join(format!("{slug}-{short}"))).await? {
+    if let Some(path) =
+        try_create_instance_dir(&base.join(format!("{slug}-{short}"))).await?
+    {
         return Ok(path);
     }
 
@@ -148,9 +148,7 @@ async fn try_create_instance_dir(
 ) -> Result<Option<PathBuf>, InstanceError> {
     match tokio::fs::create_dir(candidate).await {
         Ok(()) => Ok(Some(candidate.clone())),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            Ok(None)
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
         Err(err) => Err(InstanceError::Io(err)),
     }
 }
@@ -322,13 +320,4 @@ pub async fn restore_instances(state: Arc<AppState>) {
             error!("Failed to restore instance {}: {e}", record.id);
         }
     }
-}
-
-/// Get the data directory for an instance by ID.
-pub async fn get_data_dir(
-    state: &Arc<AppState>,
-    id: &InstanceId,
-) -> Result<PathBuf, InstanceError> {
-    let record = load_record(state, id).await?;
-    Ok(PathBuf::from(&record.data_dir))
 }
