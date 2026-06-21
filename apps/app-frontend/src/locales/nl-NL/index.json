@@ -98,6 +98,12 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Waarschuw mij voordat ik onbekende modpacks installeer"
   },
+  "app.auth-servers.unreachable.body": {
+    "message": "Minecraft authenticatie servers zijn mogelijk offline. Controleer je internetverbinding en probeer opnieuw later."
+  },
+  "app.auth-servers.unreachable.header": {
+    "message": "Authenticatieservers kunnen niet worden bereikt"
+  },
   "app.browse.add-servers-to-instance": {
     "message": "Server toevoegen aan instantie"
   },
@@ -316,6 +322,33 @@
   },
   "app.settings.tabs.resource-management": {
     "message": "Bronnenbeheer"
+  },
+  "app.update-popup.body.download-complete": {
+    "message": "Modrinth App v{version} is klaar met downloaden. Herlaad om nu te updaten, of automatisch wanneer je de Modrinth App afsluit."
+  },
+  "app.update-popup.body.linux": {
+    "message": "Modrinth App v{version} is beschikbaar. Gebruik je pakketbeheerder om te updaten voor de laatste functies en oplossingen!"
+  },
+  "app.update-popup.body.metered": {
+    "message": "Modrinth App v{version} is nu beschikbaar! Omdat je nu op een netwerk met datalimiet zit, is de download niet automatisch gestart."
+  },
+  "app.update-popup.changelog": {
+    "message": "Wijzigingen"
+  },
+  "app.update-popup.download": {
+    "message": "Download ({size})"
+  },
+  "app.update-popup.download-complete": {
+    "message": "Downloaden voltooid"
+  },
+  "app.update-popup.title": {
+    "message": "Update beschikbaar"
+  },
+  "app.update.complete-toast.text": {
+    "message": "Klik hier om het wijzigingenlogboek te bekijken."
+  },
+  "app.update.complete-toast.title": {
+    "message": "Versie {version} is succesvol geïnstalleerd!"
   },
   "app.world.server-modal.placeholder-address": {
     "message": "voorbeeld.modrinth.gg"

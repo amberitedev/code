@@ -137,6 +137,9 @@
   "analytics.chart.table-selection.all": {
     "message": "Montrer {itemType, select, project {{count, plural, one {1 projet} other {tous les projets}}} country {{count, plural, one {1 pays} other {tous les pays}}} monetization {{count, plural, one {1 valeur de monétisation} other {toutes les valeurs de monétisation}}} downloadSource {{count, plural, one {1 source de téléchargement} other {toutes les sources de téléchargement}}} downloadReason {{count, plural, one {1 raison de téléchargement} other {toutes les raisons de téléchargement}}} projectVersion {{count, plural, one {1 version de projet} other {toutes les versions de projets}}} loader {{count, plural, one {1 loader} other {tous les loaders}}} gameVersion {{count, plural, one {1 version du jeu} other {toutes les version versions du jeu}}} other {{count, plural, one {l'objet} other {tous les objets}}}} du tableau"
   },
+  "analytics.chart.table-selection.count": {
+    "message": "Affichage de {count} {itemType, select, project {{count, plural, one {projet} other {projets}}} country {{count, plural, one {pays} other {pays}}} monetization {{count, plural, one {valeur de monétisation} other {valeurs de monétisation}}} downloadSource {{count, plural, one {source de téléchargement} other {sources de téléchargement}}} downloadReason {{count, plural, one {raison de téléchargement} other {raisons de téléchargement}}} projectVersion {{count, plural, one {version de projet} other {versions de projet}}} loader {{count, plural, one {chargeur} other {chargeurs}}} gameVersion {{count, plural, one {version de jeu} other {versions de jeu}}} other {{count, plural, one {élément} other {éléments}}}} du tableau"
+  },
   "analytics.chart.tooltip.duration.days": {
     "message": "{count, plural, one {# jour} other {# jours}}"
   },
@@ -341,6 +344,12 @@
   "analytics.project.select": {
     "message": "Sélectionner des projets"
   },
+  "analytics.project.user": {
+    "message": "Projets de {username}"
+  },
+  "analytics.project.your": {
+    "message": "Vos projets"
+  },
   "analytics.query.filter.add": {
     "message": "Ajouter un filtre"
   },
@@ -358,6 +367,15 @@
   },
   "analytics.stat.downloads": {
     "message": "Téléchargements"
+  },
+  "analytics.stat.monetization-banner.body": {
+    "message": "Seules les vues et les téléchargements effectués via Modrinth sont éligibles à la monétisation et doivent passer un filtrage de prévention de la fraude. Les téléchargements de l'application Modrinth exigent également que l'utilisateur soit connecté. Parce que tous les projets ont un ratio similaire de téléchargements monétisés, vos revenus ne changeraient pas de manière significative si tous les téléchargements étaient comptés."
+  },
+  "analytics.stat.monetization-banner.learn-more": {
+    "message": "En savoir plus"
+  },
+  "analytics.stat.monetization-banner.title": {
+    "message": "Comment la monétisation fonctionne-t-elle ?"
   },
   "analytics.stat.playtime": {
     "message": "Temps de jeu"
@@ -407,6 +425,15 @@
   "analytics.table.duration.minutes": {
     "message": "{count, plural, one {# minute} other {# minutes}}"
   },
+  "analytics.table.empty.no-matching-rows": {
+    "message": "Aucune ligne d’analyse correspondante"
+  },
+  "analytics.table.export-csv": {
+    "message": "Exporter en CSV"
+  },
+  "analytics.table.export.cumulative": {
+    "message": "Cumulé"
+  },
   "analytics.table.export.grouped": {
     "message": "Groupé par {groupBy}"
   },
@@ -422,8 +449,14 @@
   "analytics.threshold.country-downloads-aria": {
     "message": "Seuil de téléchargements par pays"
   },
+  "analytics.threshold.game-version-downloads-aria": {
+    "message": "Seuil de téléchargements par version du jeu"
+  },
   "analytics.threshold.game-versions-above": {
     "message": "Versions du jeu ci-dessus"
+  },
+  "analytics.threshold.project-downloads-aria": {
+    "message": "Seuil de téléchargements du projet"
   },
   "analytics.threshold.project-version-downloads-aria": {
     "message": "Seuil de téléchargements des versions du projet"
@@ -1427,6 +1460,24 @@
   "dashboard.creator-withdraw-modal.withdraw-limit-used": {
     "message": "Vous avez atteint votre limite de retrait de <b>{withdrawLimit}</b>. Vous devez remplir un formulaire fiscal pour effectuer un retrait supplémentaire."
   },
+  "dashboard.discord-roles.banner.body": {
+    "message": "Vous êtes éligible aux rôles {roles}. Associez votre compte Discord via Modrinth et nous les synchroniserons automatiquement."
+  },
+  "dashboard.discord-roles.banner.cta": {
+    "message": "Associer Discord"
+  },
+  "dashboard.discord-roles.banner.title": {
+    "message": "Récupérez vos rôles Discord"
+  },
+  "dashboard.discord-roles.role.big-creator": {
+    "message": "+1 M de téléchargements"
+  },
+  "dashboard.discord-roles.role.creator": {
+    "message": "Créateur"
+  },
+  "dashboard.discord-roles.role.pride": {
+    "message": "Pride 2026"
+  },
   "dashboard.head-title": {
     "message": "Tableau de bord"
   },
@@ -1461,7 +1512,7 @@
     "message": "Marquer tout comme lu"
   },
   "dashboard.overview.notifications.button.view-history": {
-    "message": "Voire l'historique"
+    "message": "Voir l'historique"
   },
   "dashboard.overview.notifications.empty.no-unread": {
     "message": "Vous n'avez pas de notifications non lues."
@@ -1920,7 +1971,7 @@
     "message": "Grenouille"
   },
   "hosting-marketing.available-locations": {
-    "message": "Disponible en Amérique du Nord, en Europe et en Asie du Sud-Est pour une couverture étendue."
+    "message": "Disponible en Amérique du Nord, en Europe, en Asie du Sud-Est et en Australie pour une couverture étendue."
   },
   "hosting-marketing.billing.monthly": {
     "message": "Payer mensuellement"
@@ -1983,7 +2034,7 @@
     "message": "Où se trouvent les serveurs de Modrinth Hosting ? Puis-je choisir une région ?"
   },
   "hosting-marketing.faq.location.answer": {
-    "message": "Nous avons des serveurs disponibles en Amérique du Nord, en Europe et en Asie du Sud-Est pour le moment que vous pouvez choisir lors de l'achat. Plus de régions sont à venir ! Si vous voulez changer de région, contactez le support."
+    "message": "Nous avons des serveurs disponibles en Amérique du Nord, en Europe, en Asie du Sud-Est et en Australie au moment où vous pouvez choisir à l'achat. Davantage de régions à venir à l'avenir ! Si vous souhaitez changer de région, veuillez contacter le support."
   },
   "hosting-marketing.faq.versions-loaders": {
     "message": "Quelles versions de Minecraft et loaders peuvent-être utilisés ?"
@@ -2257,6 +2308,9 @@
   },
   "landing.subheading": {
     "message": "Découvrez, jouez et partagez du contenu Minecraft grâce à notre plateforme open-source conçue pour la communauté."
+  },
+  "layout.action.analytics-events": {
+    "message": "Événements d'analyse"
   },
   "layout.action.change-theme": {
     "message": "Changer le thème"
@@ -2812,6 +2866,9 @@
   },
   "profile.bio.fallback.user": {
     "message": "Un utilisateur Modrinth."
+  },
+  "profile.button.analytics": {
+    "message": "Voir les analyses de l'utilisateur"
   },
   "profile.button.billing": {
     "message": "Gérer la facturation de l’utilisateur"

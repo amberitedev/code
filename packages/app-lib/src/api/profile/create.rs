@@ -3,6 +3,7 @@ use crate::launcher::get_loader_version_from_profile;
 use crate::settings::Hooks;
 use crate::state::{
     LauncherFeatureVersion, LinkedData, ProfileInstallStage, ProfileType,
+    ReleaseChannel,
 };
 use crate::util::io::{self, canonicalize};
 use crate::{ErrorKind, pack, profile};
@@ -89,6 +90,7 @@ pub async fn profile_create(
         loader_version: loader.map(|x| x.id),
         groups: Vec::new(),
         linked_data,
+        preferred_update_channel: ReleaseChannel::Release,
         created: Utc::now(),
         modified: Utc::now(),
         last_played: None,
@@ -114,6 +116,7 @@ pub async fn profile_create(
             {
                 let fetched = crate::util::fetch::fetch(
                     icon,
+                    None,
                     None,
                     None,
                     &state.fetch_semaphore,

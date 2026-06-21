@@ -98,6 +98,12 @@
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Varoita minua ennen tuntemattomien modipakettien asentamista"
   },
+  "app.auth-servers.unreachable.body": {
+    "message": "Minecraftin todennuspalvelimet eivät ehkä ole tällä hetkellä tavoitettavissa. Tarkista internetyhteytesi ja yritä myöhemmin uudelleen."
+  },
+  "app.auth-servers.unreachable.header": {
+    "message": "Todennuspalvelimiin ei saada yhteyttä"
+  },
   "app.browse.add-servers-to-instance": {
     "message": "Lisää palvelin instanssiin"
   },
@@ -136,6 +142,9 @@
   },
   "app.browse.server.installing": {
     "message": "Asennetaan"
+  },
+  "app.content-install.no-compatible-versions": {
+    "message": "Yhtään versiota ei ole saatavilla yhteensopivuudella {compatibilityLabel}. Valitse asennettava versio siitä huolimatta. Riippuvuuksia ei asenneta automaattisesti."
   },
   "app.creation-modal.installing-modpack.description": {
     "message": "{fileName}"
@@ -326,6 +335,51 @@
   "app.settings.tabs.resource-management": {
     "message": "Resurssien hallinta"
   },
+  "app.skins.reorder-error.title": {
+    "message": "Skinien järjestyksen muuttaminen epäonnistui"
+  },
+  "app.skins.section.mounts-of-mayhem": {
+    "message": "Sekasorron ratsut"
+  },
+  "app.skins.section.tiny-takeover": {
+    "message": "Pienten vallankumous"
+  },
+  "app.skins.sign-in.title": {
+    "message": "Kirjaudu sisään"
+  },
+  "app.skins.title": {
+    "message": "Skinivalinta"
+  },
+  "app.update-popup.body.download-complete": {
+    "message": "Modrinth App versio {version} on ladattu. Voit käynnistää sovelluksen uudelleen päivittääksesi heti tai antaa päivityksen asentua automaattisesti, kun suljet Modrinth Appin."
+  },
+  "app.update-popup.body.linux": {
+    "message": "Modrinth App versio {version} on saatavilla. Käytä paketinhallintasi ja päivitä käyttääksesi uusimpia ominaisuuksia ja korjauksia!"
+  },
+  "app.update-popup.body.metered": {
+    "message": "Modrinth App versio {version} on nyt saatavilla! Koska käytät käytön mukaan laskutettavaa verkkoa, emme ladannut sitä automaattisesti."
+  },
+  "app.update-popup.changelog": {
+    "message": "Muutosloki"
+  },
+  "app.update-popup.download": {
+    "message": "Lataa ({size})"
+  },
+  "app.update-popup.download-complete": {
+    "message": "Lataus valmis"
+  },
+  "app.update-popup.reload": {
+    "message": "Lataa uudelleen päivittääksesi"
+  },
+  "app.update-popup.title": {
+    "message": "Päivitys saatavilla"
+  },
+  "app.update.complete-toast.text": {
+    "message": "Klikkaa tästä nähdäksesi muutoslokin."
+  },
+  "app.update.complete-toast.title": {
+    "message": "Versio {version} asennettiin onnistuneesti!"
+  },
   "app.world.server-modal.placeholder-address": {
     "message": "example.modrinth.gg"
   },
@@ -514,6 +568,15 @@
   },
   "instance.settings.tabs.general.name": {
     "message": "Nimi"
+  },
+  "instance.settings.tabs.general.update-channel.alpha": {
+    "message": "Alfa"
+  },
+  "instance.settings.tabs.general.update-channel.beta": {
+    "message": "Beta"
+  },
+  "instance.settings.tabs.general.update-channel.release": {
+    "message": "Julkaisu"
   },
   "instance.settings.tabs.hooks": {
     "message": "Aloitustoiminnot"

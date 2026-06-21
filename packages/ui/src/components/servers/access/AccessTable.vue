@@ -77,8 +77,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 			>
 				{{ statusLabel(member) }}
 			</span>
-			<span
-				v-else-if="member.pending"
+			<span v-else-if="member.pending"
 				class="inline-flex h-7 items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 			>
 				{{ formatMessage(messages.pendingLabel) }}
@@ -248,8 +247,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 				>
 					{{ statusLabel(member) }}
 				</span>
-				<span
-					v-else-if="member.pending"
+				<span v-else-if="member.pending"
 					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 				>
 					{{ formatMessage(messages.pendingLabel) }}

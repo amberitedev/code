@@ -269,8 +269,13 @@
 						>
 							<div
 								v-if="isDropdownFilterSectionHeader(item)"
-								class="flex items-center justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-secondary"
-								:class="item.class"
+								class="flex items-center justify-between gap-3 border-0 px-4 py-2.5 text-sm font-semibold text-secondary"
+								:class="[
+									item.class,
+									item.dividerBefore && index > 0
+										? 'border-t border-solid border-surface-5'
+										: undefined,
+								]"
 							>
 								<span class="flex min-w-0 items-center gap-2">
 									<component
@@ -398,6 +403,7 @@ export type DropdownFilterBarSectionHeader = {
 	key?: string
 	icon?: Component
 	class?: string
+	dividerBefore?: boolean
 }
 
 export type DropdownFilterBarItem = DropdownFilterBarOption | DropdownFilterBarSectionHeader
@@ -1868,9 +1874,9 @@ onBeforeUnmount(() => {
 }
 
 .dropdown-filter-bar-options-scrollbar :deep(.os-theme-modrinth) {
-	--os-size: 10px;
-	--os-padding-perpendicular: 2px;
-	--os-padding-axis: 2px;
+	--os-size: 8px;
+	--os-padding-perpendicular: 0px;
+	--os-padding-axis: 0px;
 	--os-track-bg: transparent;
 	--os-track-bg-hover: transparent;
 	--os-track-bg-active: transparent;

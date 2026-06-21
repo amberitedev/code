@@ -29,7 +29,8 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
                 cfg.service(
                     actix_web::web::scope("/admin")
                         .service(admin::count_download)
-                        .service(admin::force_reindex),
+                        .service(admin::force_reindex)
+                        .service(admin::force_reindex_project),
                 );
                 cfg.service(
                     actix_web::web::scope("/session")
@@ -54,7 +55,8 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
                         .service(flows::set_email)
                         .service(flows::verify_email)
                         .service(flows::subscribe_newsletter)
-                        .service(flows::get_newsletter_subscription_status),
+                        .service(flows::get_newsletter_subscription_status)
+                        .service(flows::discord_community_link),
                 );
                 cfg.service(pats::get_pats);
                 cfg.service(pats::create_pat);

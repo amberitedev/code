@@ -20,13 +20,16 @@
 				ref="searchTriggerRef"
 				v-model="searchQuery"
 				:icon="showSearchIcon ? SearchIcon : undefined"
-				type="text"
+				:type="searchType"
+				:name="searchName"
 				:placeholder="searchPlaceholder || placeholder"
 				:disabled="disabled"
 				:autocomplete="searchAutocomplete"
 				:autocorrect="searchAutocorrect"
 				:autocapitalize="searchAutocapitalize"
 				:spellcheck="searchSpellcheck"
+				:inputmode="searchInputmode"
+				:input-attrs="searchInputAttrs"
 				wrapper-class="w-full !bg-transparent"
 				:input-class="searchableInputClass"
 				class="relative z-[1]"
@@ -113,6 +116,7 @@
 						ref="optionsScrollbarRef"
 						class="combobox-options-scrollbar bg-surface-4"
 						data-overlayscrollbars-initialize
+						@mousedown.prevent.stop
 					>
 						<div
 							ref="optionsContainerRef"
@@ -281,8 +285,6 @@ const props = withDefaults(
 		forceDirection?: 'up' | 'down'
 		noOptionsMessage?: string
 		disableSearchFilter?: boolean
-		dropdownClass?: string
-		dropdownMinWidth?: string
 		minSearchLengthToOpen?: number
 		/** Keep the selected option's label in the input after selection, and show all options on focus */
 		syncWithSelection?: boolean
@@ -290,10 +292,14 @@ const props = withDefaults(
 		selectSearchTextOnFocus?: boolean
 		/** Show a search icon in the searchable input */
 		showSearchIcon?: boolean
+		searchType?: 'text' | 'search'
+		searchName?: string
+		searchInputmode?: 'text' | 'search'
 		searchAutocomplete?: string
 		searchAutocorrect?: 'on' | 'off'
 		searchAutocapitalize?: 'none' | 'off' | 'sentences' | 'words' | 'characters'
 		searchSpellcheck?: boolean
+		searchInputAttrs?: Record<string, string | number | boolean | undefined>
 	}>(),
 	{
 		placeholder: 'Select an option',
@@ -309,6 +315,7 @@ const props = withDefaults(
 		syncWithSelection: true,
 		selectSearchTextOnFocus: false,
 		showSearchIcon: false,
+		searchType: 'text',
 		outsideClickIgnore: () => [],
 	},
 )
@@ -963,9 +970,9 @@ watch(
 
 <style scoped>
 .combobox-options-scrollbar :deep(.os-theme-modrinth) {
-	--os-size: 10px;
-	--os-padding-perpendicular: 2px;
-	--os-padding-axis: 2px;
+	--os-size: 8px;
+	--os-padding-perpendicular: 0px;
+	--os-padding-axis: 0px;
 	--os-track-bg: transparent;
 	--os-track-bg-hover: transparent;
 	--os-track-bg-active: transparent;

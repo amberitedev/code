@@ -2,6 +2,9 @@
   "app.action-bar.downloading-java": {
     "message": "Stahování Javy {version}"
   },
+  "app.action-bar.downloading-update": {
+    "message": "Stahování aktualizace"
+  },
   "app.action-bar.downloads": {
     "message": "Stažené Soubory"
   },
@@ -20,11 +23,17 @@
   "app.action-bar.primary-instance": {
     "message": "Primární instance"
   },
+  "app.action-bar.reload-to-update": {
+    "message": "Obnovit pro aktualizaci"
+  },
   "app.action-bar.show-more-running-instances": {
     "message": "Zobrazit další spuštěné instance"
   },
   "app.action-bar.stop-instance": {
     "message": "Ukončit instanci"
+  },
+  "app.action-bar.update": {
+    "message": "Aktualizace"
   },
   "app.action-bar.view-active-downloads": {
     "message": "Zobrazit probíhající stahování"
@@ -86,6 +95,9 @@
   "app.appearance-settings.select-option": {
     "message": "Vyberte možnost"
   },
+  "app.appearance-settings.show-play-time.title": {
+    "message": "Ukázat herní čas"
+  },
   "app.appearance-settings.toggle-sidebar.description": {
     "message": "Umožňí přepínat zobrazení postranního panelu."
   },
@@ -97,6 +109,12 @@
   },
   "app.appearance-settings.unknown-pack-warning.title": {
     "message": "Upozorni mě před instalací neznámých modpacků"
+  },
+  "app.auth-servers.unreachable.body": {
+    "message": "Autořizační servery Minecraftu aktuálně nejsou k dispozici. Zkontrolujte si své připojení k internetu a zkuste to znovu později."
+  },
+  "app.auth-servers.unreachable.header": {
+    "message": "Připojení k autorizačním serverům se nezdařilo"
   },
   "app.browse.add-servers-to-instance": {
     "message": "Přidat server do instance"
@@ -320,6 +338,75 @@
   "app.settings.tabs.resource-management": {
     "message": "Správa zdrojů"
   },
+  "app.skins.add-button": {
+    "message": "Přidat skin"
+  },
+  "app.skins.add-button.drag-and-drop": {
+    "message": "Vem a drž"
+  },
+  "app.skins.apply-button": {
+    "message": "Použít"
+  },
+  "app.skins.delete-button": {
+    "message": "Smazat skin"
+  },
+  "app.skins.edit-button": {
+    "message": "Upravit skin"
+  },
+  "app.skins.modal.add-skin-button": {
+    "message": "Přidat skin"
+  },
+  "app.skins.modal.saving-tooltip": {
+    "message": "Ukládání..."
+  },
+  "app.skins.modal.texture-section": {
+    "message": "Textura"
+  },
+  "app.skins.preview.edit-button": {
+    "message": "Upravit skin"
+  },
+  "app.skins.rate-limit.title": {
+    "message": "Zpomal!"
+  },
+  "app.skins.section.minecon-earth-2017": {
+    "message": "MINECON Earth 2017"
+  },
+  "app.skins.section.modrinth": {
+    "message": "Modrinth"
+  },
+  "app.skins.section.modrinth-pride": {
+    "message": "Modrinth Pride"
+  },
+  "app.skins.section.saved-skins": {
+    "message": "Uložené skiny"
+  },
+  "app.update-popup.body.download-complete": {
+    "message": "Stahování aplikace Modrinth v{version} bylo dokončeno. Nainstalujte aktualizaci nyní nebo automaticky po zavření aplikace Modrinth."
+  },
+  "app.update-popup.body.linux": {
+    "message": "Aplikace Modrinth v{version} je k dispozici. Aktualizujte pomocí svého správce balíčků, abyste získali nejnovější funkce a opravy!"
+  },
+  "app.update-popup.body.metered": {
+    "message": "Aplikace Modrinth v{version} je nyní k dispozici! Protože jste v měřené síti, nebyla stažena automaticky."
+  },
+  "app.update-popup.changelog": {
+    "message": "Seznam změn"
+  },
+  "app.update-popup.download": {
+    "message": "Stáhnout ({size})"
+  },
+  "app.update-popup.download-complete": {
+    "message": "Stahování bylo dokončeno"
+  },
+  "app.update-popup.title": {
+    "message": "Je k dispozici aktualizace"
+  },
+  "app.update.complete-toast.text": {
+    "message": "Kliknutím sem zobrazíte seznam změn."
+  },
+  "app.update.complete-toast.title": {
+    "message": "Verze {version} byla úspěšně nainstalována!"
+  },
   "app.world.server-modal.placeholder-address": {
     "message": "priklad.modrinth.gg"
   },
@@ -505,6 +592,12 @@
   },
   "instance.settings.tabs.general.name": {
     "message": "Název"
+  },
+  "instance.settings.tabs.general.update-channel.alpha": {
+    "message": "Alpha"
+  },
+  "instance.settings.tabs.general.update-channel.beta": {
+    "message": "Beta"
   },
   "instance.settings.tabs.hooks": {
     "message": "Spouštěcí hooky"
