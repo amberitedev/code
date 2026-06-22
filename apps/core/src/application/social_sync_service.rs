@@ -168,14 +168,6 @@ async fn store_snapshot(
 		.execute(&state.pool)
 		.await?;
     sync_archive_service::prune_old_archives(state, &profile.id).await?;
-    sync_profile_support::publish_update_message(
-        state,
-        &profile.id,
-        profile.core_instance_id.as_deref(),
-        &snapshot_id,
-    )
-    .await?;
-
     state.broadcaster.send(Event::SyncEventStatusChanged {
         profile_id: profile.id.clone(),
         event_id: event_id.clone(),

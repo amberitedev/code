@@ -78,7 +78,9 @@ pub async fn ws_console(
 
     let rx = state.broadcaster.subscribe();
     let state_clone = Arc::clone(&state);
-    Ok(ws.on_upgrade(move |socket| ws_handler(socket, iid, state_clone, rx)))
+    Ok(ws.on_upgrade(move |socket| {
+        ws_handler(socket, iid, user_id, state_clone, rx)
+    }))
 }
 
 fn validate_ticket(state: &AppState, ticket: &str) -> Result<String, ApiError> {
@@ -92,6 +94,7 @@ fn validate_ticket(state: &AppState, ticket: &str) -> Result<String, ApiError> {
 async fn ws_handler(
     mut socket: WebSocket,
     iid: InstanceId,
+    user_id: String,
     state: Arc<AppState>,
     mut rx: broadcast::Receiver<Event>,
 ) {
@@ -101,6 +104,10 @@ async fn ws_handler(
     loop {
         tokio::select! {
             _ = stats_interval.tick() => {
+                if require_instance_permission(&state, &user_id, &iid.to_string(), "server:view").await.is_err() {
+                    let _ = socket.send(Message::Text(json!({ "type": "error", "message": "console access was revoked" }).to_string())).await;
+                    break;
+                }
                 let stats = collect_stats_for_ws(&state, &iid).await;
                 let frame = json!({ "type": "stats", "data": stats });
                 if socket.send(Message::Text(frame.to_string())).await.is_err() { break; }
@@ -122,7 +129,13 @@ async fn ws_handler(
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(cmd))) => {
-                        let _ = send_command(&state, &iid, cmd).await;
+                        if require_instance_permission(&state, &user_id, &iid.to_string(), "server:console").await.is_err() {
+                            if socket.send(Message::Text(json!({ "type": "error", "message": "console access was revoked" }).to_string())).await.is_err() { break; }
+                            continue;
+                        }
+                        if let Err(error) = send_command(&state, &iid, cmd).await {
+                            if socket.send(Message::Text(json!({ "type": "error", "message": error.to_string() }).to_string())).await.is_err() { break; }
+                        }
                     }
                     None | Some(Ok(Message::Close(_))) | Some(Err(_)) => break,
                     _ => {}

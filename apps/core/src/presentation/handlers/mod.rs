@@ -16,7 +16,6 @@ pub mod players;
 pub mod properties;
 pub mod query;
 pub mod rcon;
-pub mod relay;
 pub mod roles;
 pub mod setup;
 pub mod social;

@@ -1,5 +1,7 @@
 import {
 	composeSocialSessionState,
+	RealtimePresenceSession,
+	type RealtimeFrame,
 	type LiveSocialState,
 	type AmberiteUser,
 	type DurableSocialSessionState,
@@ -23,7 +25,10 @@ import {
 import { config } from '@/config'
 
 type Role = 'owner' | 'admin' | 'member'
-type SessionWire = Omit<DurableSocialSessionState, 'currentUser' | 'group' | 'members' | 'bans' | 'pendingInvites' | 'core'> & {
+type SessionWire = Omit<
+	DurableSocialSessionState,
+	'currentUser' | 'group' | 'members' | 'bans' | 'pendingInvites' | 'core'
+> & {
 	currentUser: AmberiteUser
 	group: FriendGroupSummary | null
 	members: FriendGroupMember[]
@@ -32,7 +37,9 @@ type SessionWire = Omit<DurableSocialSessionState, 'currentUser' | 'group' | 'me
 	core: DurableSocialSessionState['core']
 }
 
-const sessionStateQuery = makeFunctionReference<'query', Record<string, never>, SessionWire>('social:sessionState')
+const sessionStateQuery = makeFunctionReference<'query', Record<string, never>, SessionWire>(
+	'social:sessionState',
+)
 const currentUser = ref<(AmberiteUser & { userId: string }) | null>(null)
 const group = ref<FriendGroupSummary | null>(null)
 const members = ref<FriendGroupMember[]>([])
@@ -44,12 +51,15 @@ const error = ref<Error | null>(null)
 let subscribed = false
 let durableState: SessionWire | null = null
 let liveState: LiveSocialState = { users: {}, cores: {} }
-let presenceSocket: WebSocket | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let reconnectAttempt = 0
+let presenceSession: RealtimePresenceSession | null = null
 
 function clearUserScopedState(clearUser = false) {
-	if (clearUser) currentUser.value = null
+	if (clearUser) {
+		currentUser.value = null
+		liveState = { users: {}, cores: {} }
+		presenceSession?.dispose()
+		presenceSession = null
+	}
 	group.value = null
 	members.value = []
 	bans.value = []
@@ -59,8 +69,11 @@ function clearUserScopedState(clearUser = false) {
 }
 
 function safeSocialError(value: unknown): Error {
-	if (value instanceof Error && value.message.toLowerCase().includes('not authenticated')) return new Error('Sign in to Amberite to use this feature.')
-	return new Error('Amberite could not reach the account service. Check your connection and try again.')
+	if (value instanceof Error && value.message.toLowerCase().includes('not authenticated'))
+		return new Error('Sign in to Amberite to use this feature.')
+	return new Error(
+		'Amberite could not reach the account service. Check your connection and try again.',
+	)
 }
 
 function applyState(next: SessionWire) {
@@ -76,7 +89,9 @@ function applyState(next: SessionWire) {
 				...state.friends,
 				friends: state.friends.friends.map((friend) => ({
 					...friend,
-					presence: { online: friend.user ? (state.live.users[friend.user.userId]?.online ?? false) : false },
+					presence: {
+						online: friend.user ? (state.live.users[friend.user.userId]?.online ?? false) : false,
+					},
 				})),
 			}
 		: null
@@ -84,74 +99,70 @@ function applyState(next: SessionWire) {
 	if (core?.coreId && core.connectionUrl) {
 		const connected = getConnectedCore()
 		if (connected?.coreId !== core.coreId || connected.url !== core.connectionUrl) {
-			setConnectedCore({ coreId: core.coreId, url: core.connectionUrl, groupId: state.group?.group.id })
+			setConnectedCore({
+				coreId: core.coreId,
+				url: core.connectionUrl,
+				groupId: state.group?.group.id,
+			})
 		}
 	} else {
 		clearConnectedCore()
 	}
 	loading.value = false
 	error.value = null
-	void connectPresence()
+	connectPresence()
 }
 
-async function connectPresence(): Promise<void> {
-	if (!config.realtimeUrl || !currentUser.value || presenceSocket?.readyState === WebSocket.OPEN || presenceSocket?.readyState === WebSocket.CONNECTING) return
-	try {
-		const adapter = useSocialClientRawAdapter()
-		const token = await adapter.getCurrentJwt()
-		if (!token) return
-		const response = await adapter.fetchFn(`${config.realtimeUrl.replace(/\/$/, '')}/v1/desktop-sessions`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${token}`, Origin: 'tauri://localhost' },
+function connectPresence(): void {
+	if (!config.realtimeUrl || !currentUser.value) return
+	const adapter = useSocialClientRawAdapter()
+	if (!presenceSession) {
+		presenceSession = new RealtimePresenceSession({
+			endpoint: config.realtimeUrl,
+			fetchFn: adapter.fetchFn,
+			createWebSocket: (url) => new WebSocket(url),
+			getJwt: () => adapter.getCurrentJwt(),
+			origin: 'tauri://localhost',
+			onFrame: applyLiveFrame,
+			onInvalidated: () => clearUserScopedState(true),
 		})
-		if (!response.ok) throw new Error('realtime session was rejected')
-		const session = await response.json() as { ticket: string }
-		const url = new URL(`${config.realtimeUrl.replace(/\/$/, '')}/v1/connect`)
-		url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-		url.searchParams.set('ticket', session.ticket)
-		const socket = new WebSocket(url)
-		presenceSocket = socket
-		socket.onopen = () => { reconnectAttempt = 0 }
-		socket.onmessage = (event) => applyLiveFrame(event.data)
-		socket.onclose = () => schedulePresenceReconnect()
-		socket.onerror = () => socket.close()
-	} catch {
-		schedulePresenceReconnect()
+	} else {
+		presenceSession.setEndpoint(config.realtimeUrl)
 	}
+	void presenceSession.connect()
 }
 
 function useSocialClientRawAdapter() {
 	return useSocialClientRaw().adapter
 }
 
-function applyLiveFrame(raw: unknown): void {
-	if (typeof raw !== 'string') return
-	try {
-		const frame = JSON.parse(raw) as { type?: string; userId?: string; coreId?: string; online?: boolean; health?: 'healthy' | 'degraded' | 'offline'; diagnostic?: 'none' | 'network' | 'authentication' | 'server'; users?: Record<string, boolean>; cores?: Record<string, { online: boolean }> }
-		if (frame.type === 'presence.snapshot') {
-			liveState = {
-				users: Object.fromEntries(Object.entries(frame.users ?? {}).map(([id, online]) => [id, { online }])),
-				cores: Object.fromEntries(Object.entries(frame.cores ?? {}).map(([id, value]) => [id, value])),
-			}
-		} else if (frame.type === 'presence.user' && frame.userId && typeof frame.online === 'boolean') {
-			liveState = { ...liveState, users: { ...liveState.users, [frame.userId]: { online: frame.online } } }
-		} else if (frame.type === 'presence.core' && frame.coreId && typeof frame.online === 'boolean') {
-			liveState = { ...liveState, cores: { ...liveState.cores, [frame.coreId]: { online: frame.online, health: frame.health, diagnostic: frame.diagnostic } } }
+function applyLiveFrame(frame: RealtimeFrame): void {
+	if (frame.type === 'presence.snapshot') {
+		liveState = {
+			users: Object.fromEntries(
+				Object.entries(frame.users).map(([id, online]) => [id, { online }]),
+			),
+			cores: frame.cores,
 		}
-		if (durableState) applyState(durableState)
-	} catch {
-		return
+	} else if (frame.type === 'presence.user') {
+		liveState = {
+			...liveState,
+			users: { ...liveState.users, [frame.userId]: { online: frame.online } },
+		}
+	} else if (frame.type === 'presence.core') {
+		liveState = {
+			...liveState,
+			cores: {
+				...liveState.cores,
+				[frame.coreId]: {
+					online: frame.online,
+					health: frame.health,
+					diagnostic: frame.diagnostic,
+				},
+			},
+		}
 	}
-}
-
-function schedulePresenceReconnect(): void {
-	presenceSocket = null
-	if (!config.realtimeUrl || !currentUser.value || reconnectTimer) return
-	const delay = Math.min(30_000, 500 * 2 ** reconnectAttempt++)
-	reconnectTimer = setTimeout(() => {
-		reconnectTimer = null
-		void connectPresence()
-	}, delay)
+	if (durableState) applyState(durableState)
 }
 
 export interface UseSocialReturn {
@@ -174,9 +185,23 @@ export interface UseSocialReturn {
 	removeFriend: (userId: string) => Promise<void>
 	blockUser: (userId: string) => Promise<void>
 	unblockUser: (userId: string) => Promise<void>
-	createGroup: (args: { coreId: string; name?: string; setupMode?: 'remote' | 'local'; connectionUrl?: string }) => Promise<void>
-	updateGroup: (args: { name?: string; description?: string; banner?: string; subdomain?: string }) => Promise<void>
-	inviteToGroup: (args: { inviteeUserId?: string; role?: Role; ttlMs?: number }) => Promise<{ inviteId: string; code?: string }>
+	createGroup: (args: {
+		coreId: string
+		name?: string
+		setupMode?: 'remote' | 'local'
+		connectionUrl?: string
+	}) => Promise<void>
+	updateGroup: (args: {
+		name?: string
+		description?: string
+		banner?: string
+		subdomain?: string
+	}) => Promise<void>
+	inviteToGroup: (args: {
+		inviteeUserId?: string
+		role?: Role
+		ttlMs?: number
+	}) => Promise<{ inviteId: string; code?: string }>
 	acceptInvite: (args: { inviteId?: string; code?: string }) => Promise<void>
 	declineInvite: (inviteId: string) => Promise<void>
 	revokeInvite: (inviteId: string) => Promise<void>
@@ -222,26 +247,75 @@ export function useSocial(): UseSocialReturn {
 		})
 	}
 	return {
-		currentUser, group, members, bans, invites, friends, loading, error, myRole, canManage, refresh,
+		currentUser,
+		group,
+		members,
+		bans,
+		invites,
+		friends,
+		loading,
+		error,
+		myRole,
+		canManage,
+		refresh,
 		refreshPresence: async () => undefined,
 		searchUsers: (query) => client.searchUsers(query),
-		sendFriendRequest: async (args) => { await mutation(() => client.sendFriendRequest(args)) },
-		respondFriendRequest: async (requestId, accept) => { await mutation(() => client.respondFriendRequest(requestId, accept)) },
-		cancelFriendRequest: async (requestId) => { await mutation(() => client.cancelFriendRequest(requestId)) },
-		removeFriend: async (userId) => { await mutation(() => client.removeFriend(userId)) },
-		blockUser: async (userId) => { await mutation(() => client.blockUser(userId)) },
-		unblockUser: async (userId) => { await mutation(() => client.unblockUser(userId)) },
-		createGroup: async (args) => { await mutation(() => client.ensureCoreFriendGroup(args)) },
-		updateGroup: async (args) => { await mutation(() => client.updateFriendGroup({ friendGroupId: gid(), ...args })) },
-		inviteToGroup: async (args) => (await mutation(() => client.createFriendGroupInvite({ friendGroupId: gid(), ...args }))) ?? { inviteId: '' },
-		acceptInvite: async (args) => { await mutation(() => client.acceptFriendGroupInvite(args)) },
-		declineInvite: async (inviteId) => { await mutation(() => client.declineFriendGroupInvite(inviteId)) },
-		revokeInvite: async (inviteId) => { await mutation(() => client.revokeFriendGroupInvite(inviteId)) },
-		setMemberRole: async (userId, role, permissionPreset) => { await mutation(() => client.updateMemberRole({ friendGroupId: gid(), userId, role, permissionPreset })) },
-		kickMember: async (userId) => { await mutation(() => client.removeMember(gid(), userId)) },
-		banMember: async (userId, reason) => { await mutation(() => client.banMember(gid(), userId, reason)) },
-		unbanMember: async (userId) => { await mutation(() => client.unbanMember(gid(), userId)) },
-		transferOwnership: async (userId) => { await mutation(() => client.transferOwnership(gid(), userId)) },
-		leaveGroup: async () => { await mutation(() => client.leaveGroup(gid())) },
+		sendFriendRequest: async (args) => {
+			await mutation(() => client.sendFriendRequest(args))
+		},
+		respondFriendRequest: async (requestId, accept) => {
+			await mutation(() => client.respondFriendRequest(requestId, accept))
+		},
+		cancelFriendRequest: async (requestId) => {
+			await mutation(() => client.cancelFriendRequest(requestId))
+		},
+		removeFriend: async (userId) => {
+			await mutation(() => client.removeFriend(userId))
+		},
+		blockUser: async (userId) => {
+			await mutation(() => client.blockUser(userId))
+		},
+		unblockUser: async (userId) => {
+			await mutation(() => client.unblockUser(userId))
+		},
+		createGroup: async (args) => {
+			await mutation(() => client.ensureCoreFriendGroup(args))
+		},
+		updateGroup: async (args) => {
+			await mutation(() => client.updateFriendGroup({ friendGroupId: gid(), ...args }))
+		},
+		inviteToGroup: async (args) =>
+			(await mutation(() => client.createFriendGroupInvite({ friendGroupId: gid(), ...args }))) ?? {
+				inviteId: '',
+			},
+		acceptInvite: async (args) => {
+			await mutation(() => client.acceptFriendGroupInvite(args))
+		},
+		declineInvite: async (inviteId) => {
+			await mutation(() => client.declineFriendGroupInvite(inviteId))
+		},
+		revokeInvite: async (inviteId) => {
+			await mutation(() => client.revokeFriendGroupInvite(inviteId))
+		},
+		setMemberRole: async (userId, role, permissionPreset) => {
+			await mutation(() =>
+				client.updateMemberRole({ friendGroupId: gid(), userId, role, permissionPreset }),
+			)
+		},
+		kickMember: async (userId) => {
+			await mutation(() => client.removeMember(gid(), userId))
+		},
+		banMember: async (userId, reason) => {
+			await mutation(() => client.banMember(gid(), userId, reason))
+		},
+		unbanMember: async (userId) => {
+			await mutation(() => client.unbanMember(gid(), userId))
+		},
+		transferOwnership: async (userId) => {
+			await mutation(() => client.transferOwnership(gid(), userId))
+		},
+		leaveGroup: async () => {
+			await mutation(() => client.leaveGroup(gid()))
+		},
 	}
 }

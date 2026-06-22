@@ -92,9 +92,7 @@ export type {
 	FriendRequestEntry,
 	GroupInviteWithGroup,
 } from './convex-api'
-export {
-	composeSocialSessionState,
-} from './social-session'
+export { composeSocialSessionState } from './social-session'
 export type {
 	DurableSocialSessionState,
 	LiveCoreState,
@@ -103,6 +101,14 @@ export type {
 	SocialSessionState,
 } from './social-session'
 export { CoreWsConnection } from './ws'
+export { RealtimePresenceSession } from './realtime'
+export type {
+	RealtimeCoreDiagnostic,
+	RealtimeCoreHealth,
+	RealtimeFrame,
+	RealtimePresenceSessionOptions,
+	RealtimeSocket,
+} from './realtime'
 export type { PlatformAdapter, PersistentQueueStore, QueuedMessage } from './adapter'
 export type { CoreCallContext } from './context'
 export {

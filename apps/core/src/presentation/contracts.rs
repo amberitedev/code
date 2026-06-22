@@ -1,4 +1,4 @@
-//! Typed app ↔ Core handshake.
+//! Public HTTP contracts owned by Core's presentation boundary.
 
 use serde::{Deserialize, Serialize};
 

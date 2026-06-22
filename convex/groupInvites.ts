@@ -59,16 +59,26 @@ export const listMyGroupInvites = query({
 })
 
 export const getInviteByCode = query({
-	args: { code: v.string() },
+	args: { code: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
+		await resolveActor(ctx, args.__actAs)
 		const invite = await inviteByCode(ctx, args.code)
 		if (!invite || invite.status !== 'pending' || invite.expiresAt <= Date.now()) return null
-		return { invite, group: await ctx.db.get(invite.friendGroupId as any) }
+		const group = await ctx.db.get(invite.friendGroupId as any)
+		if (!group) return null
+		return {
+			invite: { inviteId: invite._id, role: invite.role, expiresAt: invite.expiresAt },
+			group: { id: group._id, name: group.name },
+		}
 	},
 })
 
 export const acceptFriendGroupInvite = mutation({
-	args: { inviteId: v.optional(v.id('friendGroupInvites')), code: v.optional(v.string()), ...devActAs },
+	args: {
+		inviteId: v.optional(v.id('friendGroupInvites')),
+		code: v.optional(v.string()),
+		...devActAs,
+	},
 	handler: async (ctx, args) => {
 		const userId = await resolveActor(ctx, args.__actAs)
 		const invite = await resolveInvite(ctx, args)
@@ -128,11 +138,17 @@ async function resolveInvite(ctx: QueryCtx, args: { inviteId?: string; code?: st
 
 async function createInviteCode(ctx: MutationCtx): Promise<string> {
 	for (let i = 0; i < 10; i++) {
-		const code = Math.random().toString(36).slice(2, 10).toUpperCase()
+		const code = secureInviteCode()
 		const existing = await inviteByCode(ctx, code)
 		if (!existing) return code
 	}
 	throw new Error('could not allocate invite code')
+}
+
+function secureInviteCode(): string {
+	const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+	const bytes = crypto.getRandomValues(new Uint8Array(8))
+	return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('')
 }
 
 function invitesByUser(ctx: QueryCtx, userId: string) {

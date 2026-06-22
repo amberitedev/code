@@ -38,16 +38,10 @@ export function bansByGroup(ctx: QueryCtx | MutationCtx, friendGroupId: string) 
 		.collect()
 }
 
-export function banByGroupUser(
-	ctx: QueryCtx | MutationCtx,
-	friendGroupId: string,
-	userId: string,
-) {
+export function banByGroupUser(ctx: QueryCtx | MutationCtx, friendGroupId: string, userId: string) {
 	return ctx.db
 		.query('friendGroupBans')
-		.withIndex('by_group_user', (q) =>
-			q.eq('friendGroupId', friendGroupId).eq('userId', userId),
-		)
+		.withIndex('by_group_user', (q) => q.eq('friendGroupId', friendGroupId).eq('userId', userId))
 		.unique()
 }
 
@@ -187,13 +181,13 @@ export async function upsertCoreForFriendGroup(
 	if (existingCore) await ctx.db.patch(existingCore._id, value)
 	else await ctx.db.insert('cores', value)
 }
-export function publicUser(user: any) {
+export function publicUser(user: any, includeFriendCode = false) {
 	return {
 		userId: user._id,
 		username: user.username,
 		displayName: user.displayName,
 		image: user.image,
-		friendCode: user.friendCode,
+		...(includeFriendCode && user.friendCode ? { friendCode: user.friendCode } : {}),
 	}
 }
 export function coreById(ctx: QueryCtx | MutationCtx, coreId: string) {

@@ -12,8 +12,24 @@ function assertDev() {
 }
 
 const LEGACY_MOCK_USERNAMES = [
-	'dev-one', 'dev-two', 'amber', 'birch', 'cedar', 'dahlia', 'elm', 'fern', 'granite', 'hazel',
-	'ivy', 'juniper', 'kepler', 'laurel', 'maple', 'nether', 'opal', 'pine',
+	'dev-one',
+	'dev-two',
+	'amber',
+	'birch',
+	'cedar',
+	'dahlia',
+	'elm',
+	'fern',
+	'granite',
+	'hazel',
+	'ivy',
+	'juniper',
+	'kepler',
+	'laurel',
+	'maple',
+	'nether',
+	'opal',
+	'pine',
 ] as const
 
 /** Full snapshot of social state — handy for inspecting flows from DevTools. */
@@ -41,7 +57,6 @@ const SOCIAL_TABLES = [
 	'friendGroupMembers',
 	'friendRequests',
 	'friendships',
-	'userPresence',
 	'blockedUsers',
 	'friendGroupInvites',
 	'friendGroupBans',

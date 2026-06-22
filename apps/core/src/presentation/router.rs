@@ -18,8 +18,8 @@ use crate::{
     presentation::handlers::{
         access, backups, console, diagnostics, events, fs, installations,
         instance_control, instances, invites, logs, macros, modpack, mods,
-        players, properties, query, rcon, relay, roles, setup, social, stats,
-        sync, tasks,
+        players, properties, query, rcon, roles, setup, social, stats, sync,
+        tasks,
     },
 };
 
@@ -40,11 +40,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/setup", post(setup::complete_setup))
         .route("/setup/status", get(setup::setup_status))
         // Core-local relay (Mode 2)
-        .route("/relay/messages", post(relay::publish))
-        .route("/relay/messages/status/:id", get(relay::status))
-        .route("/relay/messages/:recipient_id", get(relay::pending))
-        .route("/relay/messages/:id/ack", post(relay::ack))
-        .route("/relay/messages/:id/complete", post(relay::complete))
         // Core social, permissions, and sync scaffolding
         .route("/core", get(social::get_core))
         .route("/core", patch(social::update_core))

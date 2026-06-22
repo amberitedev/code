@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
-use bytes::Bytes;
-use uuid::Uuid;
-
 use crate::{
     application::{social_models::SocialError, state::AppState},
     domain::{event::Event, modpack::PackFormat},
     infrastructure::minecraft::mrpack::extract_metadata,
 };
+use bytes::Bytes;
 
 pub async fn metadata_from_bytes(
     archive: &Bytes,
@@ -37,30 +35,6 @@ pub async fn mark_event_failed(
         status: "failed".into(),
         message: Some(message.to_string()),
     });
-    Ok(())
-}
-
-pub async fn publish_update_message(
-    state: &Arc<AppState>,
-    profile_id: &str,
-    instance_id: Option<&str>,
-    snapshot_id: &str,
-) -> Result<(), SocialError> {
-    let now = chrono::Utc::now();
-    let expires_at = now + chrono::Duration::days(7);
-    let payload = serde_json::json!({
-        "profile_id": profile_id,
-        "snapshot_id": snapshot_id,
-        "instance_id": instance_id,
-    });
-    sqlx::query("INSERT INTO core_relay_messages (id, type, version, sender_id, recipient_id, payload, ack, status, created_at, expires_at) VALUES (?, 'sync_profile_updated', 1, ?, '*', ?, 'received', 'pending', ?, ?)")
-		.bind(Uuid::new_v4().to_string())
-		.bind(&state.core_id)
-		.bind(payload.to_string())
-		.bind(now.to_rfc3339())
-		.bind(expires_at.to_rfc3339())
-		.execute(&state.pool)
-		.await?;
     Ok(())
 }
 

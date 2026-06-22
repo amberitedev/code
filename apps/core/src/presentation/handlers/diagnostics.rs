@@ -4,11 +4,11 @@ use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
 use crate::{
-    api::{
+    application::state::AppState,
+    presentation::contracts::{
         ConnectionHandshakeRequest, ConnectionHandshakeResponse,
         ConnectionRejectReason, HANDSHAKE_PROTOCOL,
     },
-    application::state::AppState,
 };
 
 /// GET /health — liveness probe.
