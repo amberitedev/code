@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@amberite/amberite-api": "workspace:*",
+		"convex": "^1.40.0",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/ui": "workspace:*",

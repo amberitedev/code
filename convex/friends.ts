@@ -5,22 +5,7 @@ import { resolveActor } from "./_socialRules";
 
 /** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
 const devActAs = { __actAs: v.optional(v.string()) };
-const ONLINE_WINDOW_MS = 60_000;
 const FRIEND_REQUEST_NOTIFICATION_CLAIM_MS = 60_000;
-
-export const ensureSocialProfile = mutation({
-	args: { ...devActAs },
-	handler: async (ctx, args) => {
-		const userId = await resolveActor(ctx, args.__actAs);
-		const user = await ctx.db.get(userId);
-		if (!user) throw new Error("user not found");
-		const patch: Record<string, unknown> = {};
-		if (!user.friendCode) patch.friendCode = await createFriendCode(ctx);
-		if (!user.amberiteUserId) patch.amberiteUserId = crypto.randomUUID();
-		if (Object.keys(patch).length > 0) await ctx.db.patch(userId, patch);
-		return publicUser({ ...user, ...patch, _id: userId });
-	},
-});
 
 export const searchUsers = query({
 	args: { query: v.string(), ...devActAs },
@@ -59,14 +44,10 @@ export const friendsList = query({
 		const friendships = [...left, ...right];
 		const friends = await Promise.all(friendships.map(async (friendship) => {
 			const otherId = friendship.userAId === userId ? friendship.userBId : friendship.userAId;
-			const [user, presence] = await Promise.all([
-				ctx.db.get(otherId as any),
-				presenceByUser(ctx, otherId),
-			]);
+			const user = await ctx.db.get(otherId as any);
 			return {
 				friendshipId: friendship._id,
 				user: user ? publicUser(user) : null,
-				presence: publicPresence(presence),
 				createdAt: friendship.createdAt,
 			};
 		}));
@@ -78,20 +59,15 @@ export const friendsList = query({
 			const user = await ctx.db.get(request.toUserId as any);
 			return { request, user: user ? publicUser(user) : null };
 		}));
-		return { friends: friends.filter((friend) => friend.user), incoming: incomingWithUser, outgoing: outgoingWithUser, blocks };
-	},
-});
-
-export const heartbeat = mutation({
-	args: { status: v.optional(v.string()), ...devActAs },
-	handler: async (ctx, args) => {
-		const userId = await resolveActor(ctx, args.__actAs);
-		const now = Date.now();
-		const existing = await presenceByUser(ctx, userId);
-		const value = { userId, status: args.status, lastSeenAt: now };
-		if (existing) await ctx.db.patch(existing._id, value);
-		else await ctx.db.insert("userPresence", value);
-		return publicPresence({ ...existing, ...value });
+		const blocksWithUser = await Promise.all(blocks.map(async (block) => {
+			const user = await ctx.db.get(block.blockedUserId as any);
+			return {
+				blockId: block._id,
+				user: user ? publicUser(user) : null,
+				createdAt: block.createdAt,
+			};
+		}));
+		return { friends: friends.filter((friend) => friend.user), incoming: incomingWithUser, outgoing: outgoingWithUser, blocks: blocksWithUser };
 	},
 });
 
@@ -225,15 +201,6 @@ export const unblockUser = mutation({
 	},
 });
 
-async function createFriendCode(ctx: MutationCtx): Promise<string> {
-	for (let i = 0; i < 10; i++) {
-		const code = `AMB-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-		const existing = await userByFriendCode(ctx, code);
-		if (!existing) return code;
-	}
-	throw new Error("could not allocate friend code");
-}
-
 async function resolveTargetUser(ctx: MutationCtx, args: { targetUserId?: string; friendCode?: string; username?: string }) {
 	if (args.targetUserId) return await ctx.db.get(args.targetUserId as any);
 	if (args.friendCode) return await userByFriendCode(ctx, args.friendCode);
@@ -287,15 +254,8 @@ function friendRequestByPair(ctx: QueryCtx | MutationCtx, fromUserId: string, to
 function blockByPair(ctx: QueryCtx | MutationCtx, blockerUserId: string, blockedUserId: string) {
 	return ctx.db.query("blockedUsers").withIndex("by_blocker_blocked", (q) => q.eq("blockerUserId", blockerUserId).eq("blockedUserId", blockedUserId)).unique();
 }
-function presenceByUser(ctx: QueryCtx | MutationCtx, userId: string) {
-	return ctx.db.query("userPresence").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-}
-
 function canonicalPair(a: string, b: string): [string, string] {
 	return a < b ? [a, b] : [b, a];
 }
 
 const publicUser = (user: any) => ({ userId: user._id, username: user.username, displayName: user.displayName, image: user.image, friendCode: user.friendCode });
-const publicPresence = (presence: any) => presence
-	? { online: Date.now() - presence.lastSeenAt <= ONLINE_WINDOW_MS, status: presence.status, lastSeenAt: presence.lastSeenAt }
-	: { online: false, status: null, lastSeenAt: null };

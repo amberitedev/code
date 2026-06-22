@@ -65,6 +65,9 @@ pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::pairing_service::register_pairing_core(
         Arc::clone(&state),
     ));
+    tokio::spawn(application::realtime_service::run_realtime_presence(
+        Arc::clone(&state),
+    ));
     tokio::spawn(expire_pairing_window(Arc::clone(&state)));
 
     let router = presentation::router::create_router(state);

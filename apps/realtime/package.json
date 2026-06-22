@@ -1,0 +1,20 @@
+{
+	"name": "@amberite/realtime",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"test": "vitest run",
+		"check": "wrangler check",
+		"types": "wrangler types ./src/worker-configuration.d.ts"
+	},
+	"dependencies": {
+		"jose": "^6.0.10"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.8.36",
+		"@cloudflare/workers-types": "^4.20260612.0",
+		"vitest": "^3.2.0",
+		"wrangler": "^4.26.1"
+	}
+}

@@ -21,9 +21,10 @@
 					:key="`option-${option.id}`"
 					v-tooltip="option.tooltip"
 					:color="option.color ? option.color : 'default'"
+					:class="{ 'btn-hover-invert': option.hoverInvert }"
 					:hover-filled="option.hoverFilled"
 					:hover-filled-only="option.hoverFilledOnly"
-					transparent
+					:transparent="!option.filled"
 					:v-close-popper="!option.remainOnClick"
 					:action="
 						option.action
@@ -91,6 +92,8 @@ interface Item extends BaseOption {
 		| 'purple'
 	hoverFilled?: boolean
 	hoverFilledOnly?: boolean
+	filled?: boolean
+	hoverInvert?: boolean
 	remainOnClick?: boolean
 	disabled?: boolean
 	tooltip?: string
@@ -137,6 +140,11 @@ defineExpose({ open, close })
 </script>
 
 <style lang="scss" scoped>
+:deep(.btn-hover-invert:hover:not(:disabled)) {
+	background-color: var(--color-accent-contrast) !important;
+	color: var(--color-red) !important;
+}
+
 .btn {
 	white-space: nowrap;
 	width: 100%;

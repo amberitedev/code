@@ -28,6 +28,9 @@ export interface CoreSetupRequest {
 	owner_user_id: string
 	/** JWT audience claim to validate. Defaults to "authenticated" if omitted. */
 	auth_audience?: string
+	/** One-time Core credential used exclusively for the realtime Worker. */
+	realtime_credential?: string
+	realtime_url?: string
 }
 
 export interface CoreSetupResponse {

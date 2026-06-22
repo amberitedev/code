@@ -13,8 +13,11 @@ import type {
 } from '@amberite/amberite-api'
 import type { Ref } from 'vue'
 import { ref } from 'vue'
+import { makeFunctionReference } from 'convex/server'
 
-import { useSocialClient } from '@/composables/useSocialClient'
+import { useRealtimeConvexClient, useSocialClient } from '@/composables/useSocialClient'
+
+const serverProfilesState = makeFunctionReference<'query', { friendGroupId: string }, ConvexSyncedProfile[]>('sync:serverProfilesState')
 
 export interface UseSyncedServersReturn {
 	profiles: Ref<ConvexSyncedProfile[]>
@@ -30,7 +33,7 @@ export function useSyncedServers(): UseSyncedServersReturn {
 	const profiles = ref<ConvexSyncedProfile[]>([])
 	const loading = ref(false)
 	const error = ref<Error | null>(null)
-	let lastGroupId: string | null = null
+	let unsubscribe: (() => void) | null = null
 
 	async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
 		loading.value = true
@@ -46,15 +49,20 @@ export function useSyncedServers(): UseSyncedServersReturn {
 	}
 
 	async function refresh(friendGroupId: string): Promise<void> {
-		lastGroupId = friendGroupId
-		await run(async () => {
-			profiles.value = await client.listServerProfiles(friendGroupId)
+		unsubscribe?.()
+		loading.value = true
+		unsubscribe = useRealtimeConvexClient().onUpdate(serverProfilesState, { friendGroupId }, (next) => {
+			profiles.value = next
+			loading.value = false
+			error.value = null
+		}, (reason) => {
+			loading.value = false
+			error.value = reason
 		})
 	}
 
 	async function updateSettings(profileId: string, settings: SyncedProfileSettings): Promise<void> {
 		await run(() => client.updateSyncedProfileSettings(profileId, settings))
-		if (lastGroupId) await refresh(lastGroupId)
 	}
 
 	async function getWhitelist(profileId: string): Promise<ProfileWhitelistResult | null> {

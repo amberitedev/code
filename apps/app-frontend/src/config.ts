@@ -10,4 +10,6 @@ export const config = {
 	labrinthBaseUrl,
 	archonBaseUrl,
 	convexUrl: import.meta.env.VITE_CONVEX_URL,
+	/** Optional rollout flag. When unset, the desktop keeps durable Convex state only. */
+	realtimeUrl: import.meta.env.VITE_REALTIME_URL,
 }

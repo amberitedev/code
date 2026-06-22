@@ -82,7 +82,6 @@ export type {
 	SyncedProfileSettings,
 	ProfileWhitelistEntry,
 	ProfileWhitelistResult,
-	CoreInviteNotification,
 } from './convex-types'
 
 export { CoreApiClient, CoreEventStream } from './client'
@@ -93,6 +92,16 @@ export type {
 	FriendRequestEntry,
 	GroupInviteWithGroup,
 } from './convex-api'
+export {
+	composeSocialSessionState,
+} from './social-session'
+export type {
+	DurableSocialSessionState,
+	LiveCoreState,
+	LiveSocialState,
+	LiveUserState,
+	SocialSessionState,
+} from './social-session'
 export { CoreWsConnection } from './ws'
 export type { PlatformAdapter, PersistentQueueStore, QueuedMessage } from './adapter'
 export type { CoreCallContext } from './context'

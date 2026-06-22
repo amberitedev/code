@@ -17,6 +17,7 @@ pub mod pairing_service;
 pub mod player_service;
 pub mod query_service;
 pub mod rcon_service;
+pub mod realtime_service;
 pub mod role_service;
 pub mod social_lookup_service;
 pub mod social_models;

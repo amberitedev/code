@@ -145,6 +145,7 @@ export const claimPairingCore = mutation({
 			coreId: v.string(),
 			connectionUrl: v.optional(v.string()),
 			metadata: v.optional(v.any()),
+			realtimeCredential: v.string(),
 		}),
 	),
 	handler: async (ctx, args) => {
@@ -163,15 +164,19 @@ export const claimPairingCore = mutation({
 		if (existingCore && existingCore.ownerUserId !== userId)
 			throw new Error('Core already belongs to another user')
 
+		const realtimeCredential = createRealtimeCredential()
 		await ctx.db.patch(pairing._id, {
 			status: 'claimed',
 			ownerUserId: userId,
 			claimedAt: now,
+			realtimeCredentialHash: await hashCredential(realtimeCredential),
+			realtimeCredentialIssuedAt: now,
 		})
 		return {
 			coreId: pairing.coreId,
 			connectionUrl: pairing.connectionUrl,
 			metadata: pairing.metadata,
+			realtimeCredential,
 		}
 	},
 })
@@ -214,6 +219,7 @@ export const finalizePairingCore = mutation({
 			lastSeenAt: now,
 			status: 'paired',
 			metadata: pairing.metadata,
+			realtimeCredentialHash: pairing.realtimeCredentialHash,
 		}
 		if (existingCore) await ctx.db.patch(existingCore._id, coreValue)
 		else await ctx.db.insert('cores', coreValue)
@@ -238,6 +244,8 @@ export const releasePairingCore = mutation({
 				status: 'waiting',
 				ownerUserId: undefined,
 				claimedAt: undefined,
+				realtimeCredentialHash: undefined,
+				realtimeCredentialIssuedAt: undefined,
 			})
 		}
 		return null
@@ -247,6 +255,16 @@ export const releasePairingCore = mutation({
 function normalizePairingCode(code: string): string | null {
 	const normalized = code.trim().replace(/[^a-z0-9]/gi, '').toLowerCase()
 	return /^[a-hj-np-z2-9]{8}$/.test(normalized) ? normalized : null
+}
+
+function createRealtimeCredential(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(32))
+	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function hashCredential(credential: string): Promise<string> {
+	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credential)))
+	return btoa(String.fromCharCode(...digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
 async function removeExpiredPairingCores(ctx: MutationCtx, now: number): Promise<void> {

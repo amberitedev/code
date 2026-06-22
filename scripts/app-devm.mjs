@@ -33,10 +33,12 @@ const secondAuthEnv = {
 const children = new Set()
 const expectedExits = new Set()
 let shuttingDown = false
+let primaryChild = null
 let secondChild = null
 let secondExeMtime = null
 let secondWatcher = null
 let secondStartTime = null
+let primaryRetryTimer = null
 let secondRetryTimer = null
 let secondRestartPending = false
 let waitingLogged = false
@@ -123,17 +125,30 @@ function startPrimaryDev() {
 		},
 	)
 
+	primaryChild = child
 	children.add(child)
 	child.stdout.on('data', (chunk) => prefixOutput(process.stdout, 'amber-1', chunk))
 	child.stderr.on('data', (chunk) => prefixOutput(process.stderr, 'amber-1', chunk))
 	child.on('exit', (code, signal) => {
 		children.delete(child)
+		if (primaryChild === child) primaryChild = null
 		const reason = signal ? `signal ${signal}` : `code ${code}`
 		console.log(`[amber-1] exited with ${reason}`)
-		if (!shuttingDown && children.size > 0) shutdown(1)
+		if (!shuttingDown && (signal || code !== 0)) {
+			console.log('[amber-1] restarting after unexpected exit')
+			schedulePrimaryRetry()
+		}
 	})
 
 	console.log('[amber-1] starting normal pnpm app:dev')
+}
+
+function schedulePrimaryRetry() {
+	if (primaryRetryTimer) return
+	primaryRetryTimer = setTimeout(() => {
+		primaryRetryTimer = null
+		if (!shuttingDown && !primaryChild) startPrimaryDev()
+	}, 2000)
 }
 
 function findWindowsPortOwner(port) {
@@ -204,14 +219,15 @@ function startSecondFromExe() {
 			}
 			return
 		}
-		if (!shuttingDown && children.size > 0) {
+		if (!shuttingDown && (signal || code !== 0)) {
 			const lifetime = secondStartTime ? Date.now() - secondStartTime : 0
 			if (lifetime < 10_000) {
 				console.log(`[${secondProfile.name}] exited quickly; will retry after the dev build is ready`)
 				scheduleSecondRetry()
 				return
 			}
-			shutdown(1)
+			console.log(`[${secondProfile.name}] restarting after unexpected exit`)
+			scheduleSecondRetry()
 		}
 	})
 
@@ -242,8 +258,11 @@ function scheduleSecondRetry() {
 	if (secondRetryTimer) return
 	secondRetryTimer = setTimeout(() => {
 		secondRetryTimer = null
-		if (!shuttingDown && !secondChild && existsSync(debugExe)) {
+		if (shuttingDown || secondChild) return
+		if (existsSync(debugExe)) {
 			startSecondFromExe()
+		} else {
+			startSecondWhenReady()
 		}
 	}, 2000)
 }
@@ -274,6 +293,7 @@ function shutdown(exitCode = 0) {
 		killChild(child)
 	}
 	if (secondWatcher) clearInterval(secondWatcher)
+	if (primaryRetryTimer) clearTimeout(primaryRetryTimer)
 	if (secondRetryTimer) clearTimeout(secondRetryTimer)
 	secondRestartPending = false
 
@@ -286,6 +306,7 @@ async function main() {
 	process.on('SIGHUP', () => shutdown(0))
 
 	console.log('Starting multiplayer Amberite dev.')
+	console.log('Both apps load the shared Vite dev server, so frontend changes hot reload in each window.')
 	console.log('Amberite 1 runs normal pnpm app:dev; Amberite 2 runs from a copied debug exe with separate app data.')
 	console.log('Amberite 1 uses the canonical Minecraft account; Amberite 2 uses the Theogib2 dev persona.')
 

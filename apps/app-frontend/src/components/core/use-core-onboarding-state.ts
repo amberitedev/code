@@ -147,6 +147,8 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 				convex_url: config.convexUrl,
 				auth_jwks_url: convexJwksUrl(config.convexUrl),
 				owner_user_id: currentUser.userId,
+				realtime_credential: claim.realtimeCredential,
+				realtime_url: config.realtimeUrl || undefined,
 			})
 			if (response.core_id !== claim.coreId) throw new Error('The Core answered with a different identity.')
 			setConnectedCore({ coreId: response.core_id, url: coreUrl })

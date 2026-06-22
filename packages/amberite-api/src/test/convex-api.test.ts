@@ -120,16 +120,4 @@ describe('ConvexApiClient', () => {
 		})
 	})
 
-	it('routes social presence heartbeat to Convex', async () => {
-		const fetchFn = vi.fn(async () => jsonResponse({ online: true, status: null, lastSeenAt: 123 }))
-		const client = new ConvexApiClient(adapter(fetchFn))
-
-		const result = await client.heartbeat()
-
-		expect(result).toEqual({ online: true, status: null, lastSeenAt: 123 })
-		expect(await lastBody(fetchFn)).toMatchObject({
-			path: 'friends:heartbeat',
-			args: {},
-		})
-	})
 })

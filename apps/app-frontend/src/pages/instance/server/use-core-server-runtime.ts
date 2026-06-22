@@ -52,8 +52,6 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 	const ramHistory = ref<number[]>([])
 	let socket: CoreWsConnection | null = null
 	let socketListeners: Array<() => void> = []
-	let statsTimer: ReturnType<typeof setInterval> | null = null
-	let serverTimer: ReturnType<typeof setInterval> | null = null
 	let unsubscribeCoreStatus: (() => void) | undefined
 
 	const isCoreConnected = computed(() => coreStatus.value?.state === 'connected')
@@ -317,8 +315,6 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 			setOfflineError()
 		}
 
-		statsTimer = setInterval(refreshStats, 5000)
-		serverTimer = setInterval(refreshServer, 10_000)
 	})
 
 	watch(powerState, (next, prev) => {
@@ -339,8 +335,6 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 	onUnmounted(() => {
 		unsubscribeCoreStatus?.()
 		disconnectConsole()
-		if (statsTimer) clearInterval(statsTimer)
-		if (serverTimer) clearInterval(serverTimer)
 	})
 
 	return {

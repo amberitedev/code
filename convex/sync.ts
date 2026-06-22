@@ -82,6 +82,38 @@ export const listServerProfiles = query({
 	},
 });
 
+/** Scoped reactive profile list for the active friend group. */
+export const serverProfilesState = query({
+	args: { friendGroupId: v.string(), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
+		const membership = await membershipByGroupUser(ctx, args.friendGroupId, userId);
+		if (!membership) throw new Error("not authorized for friend group");
+		const role = membership.role as Role;
+		const manages = role === "owner" || role === "admin";
+		return (await syncedProfilesByGroup(ctx, args.friendGroupId))
+			.filter((profile) => canViewProfile(role, userId, profile))
+			.map((profile) => ({ ...profile, viewerCanManage: manages }));
+	},
+});
+
+/** Scoped reactive detail for a visible synced profile. */
+export const profileState = query({
+	args: { profileId: v.id("syncedProfiles"), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs);
+		const profile = await ctx.db.get(args.profileId);
+		if (!profile) throw new Error("synced profile not found");
+		const membership = await membershipByGroupUser(ctx, profile.friendGroupId, userId);
+		if (!membership || !canViewProfile(membership.role as Role, userId, profile)) throw new Error("not authorized for synced profile");
+		return {
+			profile: { ...profile, viewerCanManage: membership.role === "owner" || membership.role === "admin" },
+			snapshots: await snapshotsByProfile(ctx, args.profileId),
+			events: await syncEventsByProfile(ctx, args.profileId),
+		};
+	},
+});
+
 export const updateSyncedProfileSettings = mutation({
 	args: {
 		profileId: v.id("syncedProfiles"),

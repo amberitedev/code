@@ -60,11 +60,6 @@ export default defineSchema({
 		.index("by_pair", ["userAId", "userBId"])
 		.index("by_user_a", ["userAId"])
 		.index("by_user_b", ["userBId"]),
-	userPresence: defineTable({
-		userId: v.string(), status: v.optional(v.string()), lastSeenAt: v.number(),
-	})
-		.index("by_user", ["userId"])
-		.index("by_last_seen", ["lastSeenAt"]),
 	blockedUsers: defineTable({ blockerUserId: v.string(), blockedUserId: v.string(), createdAt: v.number() })
 		.index("by_blocker_blocked", ["blockerUserId", "blockedUserId"])
 		.index("by_blocker", ["blockerUserId"]),
@@ -82,16 +77,11 @@ export default defineSchema({
 		.index("by_code", ["code"])
 		.index("by_invitee_status", ["inviteeUserId", "status"])
 		.index("by_group_status", ["friendGroupId", "status"]),
-	coreInviteNotifications: defineTable({
-		recipientUserId: v.string(), coreId: v.string(), coreUrl: v.string(), inviteId: v.string(),
-		createdAt: v.number(), expiresAt: v.number(), readAt: v.optional(v.number()),
-	})
-		.index("by_recipient_expiry", ["recipientUserId", "expiresAt"])
-		.index("by_invite", ["inviteId"]),
 	pairingCores: defineTable({
 		code: v.string(), coreId: v.string(), connectionUrl: v.optional(v.string()), status: pairingStatus,
 		ownerUserId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.number(),
 		expiresAt: v.number(), claimedAt: v.optional(v.number()),
+		realtimeCredentialHash: v.optional(v.string()), realtimeCredentialIssuedAt: v.optional(v.number()),
 	})
 		.index("by_code", ["code"])
 		.index("by_core_id", ["coreId"])
@@ -106,7 +96,7 @@ export default defineSchema({
 		setupMode: v.optional(v.union(v.literal("remote"), v.literal("local"))),
 		connectionUrl: v.optional(v.string()),
 		lastSeenAt: v.number(),
-		status: v.optional(v.string()),
+		status: v.optional(v.string()), realtimeCredentialHash: v.optional(v.string()),
 		metadata: v.optional(v.any()),
 	})
 		.index("by_core_id", ["coreId"])

@@ -1,25 +1,39 @@
 /**
- * Singleton ConvexApiClient (typed as AmberiteSocialClient) for the desktop app.
- *
- * Shares the same PlatformAdapter instance as the Core client so the dev
- * "act as" override and any future auth state stay consistent across both.
+ * Desktop Convex transports. Durable screen state is subscribed through the
+ * singleton WebSocket client; HTTP remains available for auth and one-shot
+ * action-oriented calls.
  */
 import type { AmberiteSocialClient } from '@amberite/amberite-api'
 import { ConvexApiClient } from '@amberite/amberite-api'
+import { ConvexClient } from 'convex/browser'
 
 import { useCoreClient } from '@/composables/useCoreClient'
+import { config } from '@/config'
 
-let _client: ConvexApiClient | null = null
+let socialClient: ConvexApiClient | null = null
+let realtimeClient: ConvexClient | null = null
 
 export function useSocialClient(): AmberiteSocialClient {
-	if (!_client) {
-		_client = new ConvexApiClient(useCoreClient().adapter)
-	}
-	return _client
+	if (!socialClient) socialClient = new ConvexApiClient(useCoreClient().adapter)
+	return socialClient
 }
 
-/** Raw client escape hatch for dev tooling that needs rawQuery/rawMutation. */
+/** Raw HTTP client for the Convex Auth bootstrap endpoints. */
 export function useSocialClientRaw(): ConvexApiClient {
 	useSocialClient()
-	return _client as ConvexApiClient
+	return socialClient as ConvexApiClient
+}
+
+export function useRealtimeConvexClient(): ConvexClient {
+	if (!realtimeClient) {
+		if (!config.convexUrl) throw new Error('VITE_CONVEX_URL must be configured for realtime social state.')
+		realtimeClient = new ConvexClient(config.convexUrl, { unsavedChangesWarning: false })
+		realtimeClient.setAuth(async () => await useCoreClient().adapter.getCurrentJwt())
+	}
+	return realtimeClient
+}
+
+export function refreshRealtimeConvexAuth(): void {
+	const client = useRealtimeConvexClient()
+	client.setAuth(async () => await useCoreClient().adapter.getCurrentJwt())
 }

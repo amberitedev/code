@@ -23,6 +23,10 @@ pub struct SetupRequest {
     pub owner_user_id: String,
     /// JWT audience claim to validate. Defaults to "authenticated" if omitted.
     pub auth_audience: Option<String>,
+    /// One-time realtime credential issued by Convex after a successful claim.
+    pub realtime_credential: Option<String>,
+    /// Optional rollout endpoint for Cloudflare presence.
+    pub realtime_url: Option<String>,
 }
 
 /// POST /setup — complete first-run pairing.
@@ -83,12 +87,30 @@ pub async fn complete_setup(
             "owner_user_id cannot be empty".into(),
         ));
     }
+    if let Some(credential) = &body.realtime_credential {
+        if credential.len() != 64
+            || !credential
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        {
+            return Err(ApiError::BadRequest(
+                "realtime_credential must be a 32-byte hexadecimal secret"
+                    .into(),
+            ));
+        }
+    }
+    if body.realtime_credential.is_some() != body.realtime_url.is_some() {
+        return Err(ApiError::BadRequest(
+            "realtime_url and realtime_credential must be supplied together"
+                .into(),
+        ));
+    }
 
     let now = chrono::Utc::now().to_rfc3339();
 
     sqlx::query(
 		"INSERT OR REPLACE INTO core_config \
-		 (id, supabase_url, convex_url, auth_jwks_url, auth_audience, owner_user_id, paired_at, core_id) VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+		 (id, supabase_url, convex_url, auth_jwks_url, auth_audience, owner_user_id, paired_at, core_id, realtime_credential, realtime_url) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 	)
 	.bind(&body.convex_url)
 	.bind(&body.convex_url)
@@ -97,6 +119,8 @@ pub async fn complete_setup(
 	.bind(&body.owner_user_id)
     .bind(&now)
     .bind(&state.core_id)
+    .bind(&body.realtime_credential)
+    .bind(&body.realtime_url)
     .execute(&state.pool)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -133,6 +157,13 @@ pub async fn complete_setup(
     *pairing_code = None;
     *pairing_code_expires_at = None;
     *local_setup_secret = None;
+    if body.realtime_url.is_some() {
+        tokio::spawn(
+            crate::application::realtime_service::run_realtime_presence(
+                Arc::clone(&state),
+            ),
+        );
+    }
     tokio::fs::remove_file(state.config.data_dir.join(".setup_secret"))
         .await
         .ok();

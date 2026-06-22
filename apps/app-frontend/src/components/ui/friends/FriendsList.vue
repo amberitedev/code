@@ -1,9 +1,9 @@
+<!-- Friend-state mapping: 66-140; user search: 167-194; Core group actions: 245-309; request responses: 316-341. -->
 <script setup lang="ts">
 import type { AmberiteUser } from '@amberite/amberite-api'
 import {
 	CheckIcon,
 	MailIcon,
-	RefreshCwIcon,
 	SendIcon,
 	UserIcon,
 	UserPlusIcon,
@@ -13,11 +13,11 @@ import {
 	Avatar,
 	ButtonStyled,
 	injectNotificationManager,
-	injectPopupNotificationManager,
 	StyledInput,
+	useRelativeTime,
 } from '@modrinth/ui'
 import dayjs from 'dayjs'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
@@ -27,20 +27,22 @@ import type { FriendWithUserData } from '@/helpers/friends'
 type PendingFriendWithRequest = FriendWithUserData & { requestId: string }
 
 const { addNotification } = injectNotificationManager()
-const { addPopupNotification } = injectPopupNotificationManager()
+const formatRelativeTime = useRelativeTime()
 const {
 	friends,
 	currentUser,
 	loading,
 	error,
-	refresh,
+	group,
+	canManage,
 	searchUsers,
 	sendFriendRequest,
 	respondFriendRequest,
 	cancelFriendRequest,
-	claimFriendRequestNotifications,
-	acknowledgeFriendRequestNotification,
 	removeFriend,
+	inviteToGroup,
+	blockUser,
+	unblockUser,
 } = useSocial()
 
 const search = ref('')
@@ -54,8 +56,6 @@ const sending = ref(false)
 const actingOnRequestId = ref<string | null>(null)
 let searchToken = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-let friendNotificationTimer: ReturnType<typeof setInterval> | undefined
-let checkingFriendNotifications = false
 
 const friendList = computed(() => friends.value?.friends ?? [])
 const incoming = computed(() => friends.value?.incoming ?? [])
@@ -103,8 +103,25 @@ const incomingRequests = computed<PendingFriendWithRequest[]>(() =>
 		requestId: request.request._id,
 	})),
 )
+const blockedFriends = computed<FriendWithUserData[]>(() =>
+	(friends.value?.blocks ?? []).map((block) => ({
+		id: block.user?.userId ?? block.blockId,
+		friend_id: null,
+		status: null,
+		last_updated: null,
+		created: dayjs(block.createdAt),
+		username: block.user?.displayName ?? block.user?.username ?? 'User',
+		accepted: true,
+		online: false,
+		avatar: block.user?.image ?? '',
+	})),
+)
 
-const allFriends = computed(() => [...acceptedFriends.value, ...pendingFriends.value])
+const allFriends = computed(() => [
+	...acceptedFriends.value,
+	...pendingFriends.value,
+	...incomingRequests.value,
+])
 
 const filteredFriends = computed<FriendWithUserData[]>(() => {
 	const q = search.value.trim().toLowerCase()
@@ -119,7 +136,13 @@ const onlineFriends = computed(() =>
 	filteredFriends.value.filter((f) => f.online && !f.status && f.accepted),
 )
 const offlineFriends = computed(() => filteredFriends.value.filter((f) => !f.online && f.accepted))
-const filteredPendingFriends = computed(() => filteredFriends.value.filter((f) => !f.accepted))
+const filteredPendingFriends = computed(() =>
+	filteredFriends.value.filter(
+		(friend) =>
+			!friend.accepted &&
+			pendingFriends.value.some((pending) => pending.requestId === (friend as PendingFriendWithRequest).requestId),
+	),
+)
 const unavailableUserIds = computed(
 	() =>
 		new Set([
@@ -137,10 +160,6 @@ function showFriendsServiceError(title = 'Friends unavailable') {
 		text: 'Amberite could not reach the account service. Check your connection and try again.',
 		type: 'error',
 	})
-}
-
-async function refreshFriends() {
-	await refresh()
 }
 
 async function searchFriendUsers() {
@@ -170,60 +189,8 @@ async function searchFriendUsers() {
 	}, 250)
 }
 
-async function checkFriendRequestNotifications() {
-	if (!currentUser.value || checkingFriendNotifications) return
-	checkingFriendNotifications = true
-	try {
-		const notifications = await claimFriendRequestNotifications()
-		for (const notification of notifications) {
-			const friend: PendingFriendWithRequest = {
-				id: notification.user?.userId ?? notification.request.fromUserId,
-				friend_id: null,
-				status: null,
-				last_updated: null,
-				created: dayjs(notification.request.createdAt),
-				username: notification.user?.displayName ?? notification.user?.username ?? 'Someone',
-				accepted: false,
-				online: false,
-				avatar: notification.user?.image ?? '',
-				requestId: notification.request._id,
-			}
-			addPopupNotification({
-				title: 'Friend request',
-				autoCloseMs: null,
-				toast: {
-					type: 'friend-request',
-					actorName: friend.username,
-					actorAvatarUrl: friend.avatar,
-					onAccept: () => respondToRequest(friend, true),
-					onDecline: () => respondToRequest(friend, false),
-				},
-			})
-			await acknowledgeFriendRequestNotification(notification.request._id)
-		}
-		if (notifications.length > 0) await refresh()
-	} catch (e) {
-		console.warn('[amberite] friend notification check failed', e)
-	} finally {
-		checkingFriendNotifications = false
-	}
-}
-
-watch(
-	currentUser,
-	(user) => {
-		if (user) void checkFriendRequestNotifications()
-	},
-	{ immediate: true },
-)
-
-friendNotificationTimer = setInterval(() => {
-	void checkFriendRequestNotifications()
-}, 30_000)
-
 onUnmounted(() => {
 	if (searchTimer) clearTimeout(searchTimer)
-	if (friendNotificationTimer) clearInterval(friendNotificationTimer)
 })
 
 function selectUser(user: AmberiteUser) {
@@ -264,6 +231,63 @@ async function unfriend(userId: string) {
 	if (error.value) {
 		showFriendsServiceError('Friend update failed')
 	}
+}
+
+async function inviteFriendToGroup(friend: FriendWithUserData) {
+	await inviteToGroup({ inviteeUserId: friend.id })
+	if (error.value) {
+		showFriendsServiceError('Friend group invite failed')
+		return
+	}
+	addNotification({
+		title: 'Friend group invitation sent',
+		text: `Invited ${friend.username} to your friend group.`,
+		type: 'success',
+	})
+}
+
+async function blockFriend(friend: FriendWithUserData) {
+	await blockUser(friend.id)
+	if (error.value) {
+		showFriendsServiceError('Block failed')
+		return
+	}
+	addNotification({
+		title: 'Friend blocked',
+		text: `${friend.username} was removed from your friends and blocked.`,
+		type: 'success',
+	})
+}
+
+async function unblockFriend(friend: FriendWithUserData) {
+	await unblockUser(friend.id)
+	if (error.value) {
+		showFriendsServiceError('Unblock failed')
+		return
+	}
+	addNotification({
+		title: 'Friend unblocked',
+		text: `${friend.username} can send you friend requests again.`,
+		type: 'success',
+	})
+}
+
+async function inviteFriendToPlay(friend: FriendWithUserData) {
+	const connectionUrl = group.value?.core?.connectionUrl
+	if (!connectionUrl) {
+		addNotification({
+			title: 'Play invitation unavailable',
+			text: 'This Core does not have a connection link to share yet.',
+			type: 'error',
+		})
+		return
+	}
+	await navigator.clipboard.writeText(connectionUrl)
+	addNotification({
+		title: 'Play invitation copied',
+		text: `Share your Core connection link with ${friend.username} to invite them to play.`,
+		type: 'success',
+	})
 }
 
 async function removeMappedFriend(friend: FriendWithUserData) {
@@ -315,21 +339,23 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 </script>
 
 <template>
-	<ModalWrapper ref="friendInvitesModal" header="Friend requests">
+	<ModalWrapper ref="friendInvitesModal" header="View friend requests">
 		<div class="min-w-[30rem]">
 			<p v-if="incomingRequests.length === 0" class="m-0 text-sm text-secondary">
 				You have no pending friend requests.
 			</p>
-			<div v-else class="flex flex-col gap-3">
+			<div v-else class="flex flex-col gap-4 min-w-[40rem]">
 				<div
 					v-for="friend in incomingRequests"
 					:key="friend.requestId"
 					class="grid grid-cols-[auto_1fr_auto] items-center gap-3"
 				>
-					<Avatar :src="friend.avatar" size="36px" circle />
+					<Avatar :src="friend.avatar" class="w-12 h-12 rounded-full" size="2.25rem" circle />
 					<div class="min-w-0">
 						<p class="m-0 truncate text-sm text-contrast">{{ friend.username }}</p>
-						<p class="m-0 text-xs text-secondary">Sent you a friend request</p>
+						<p class="m-0 text-xs text-secondary">
+							Sent you a friend request · {{ formatRelativeTime(friend.created.toISOString()) }}
+						</p>
 					</div>
 					<div class="flex gap-2">
 						<ButtonStyled color="brand">
@@ -411,21 +437,7 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 		</div>
 	</ModalWrapper>
 	<div class="flex flex-col h-full">
-		<div
-			v-if="error && !loading"
-			class="flex flex-col items-start gap-3 rounded-lg border border-solid border-surface-5 bg-surface-2 p-3 text-sm text-secondary"
-		>
-			<p class="m-0">
-				Amberite could not load friends right now. Check your connection and try again.
-			</p>
-			<ButtonStyled>
-				<button @click="refreshFriends">
-					<RefreshCwIcon />
-					Retry
-				</button>
-			</ButtonStyled>
-		</div>
-		<template v-else-if="currentUser">
+		<template v-if="currentUser">
 			<div class="flex gap-1 items-center mb-3 -ml-1">
 				<template v-if="allFriends.length > 0">
 					<ButtonStyled circular type="transparent">
@@ -483,37 +495,18 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 			</div>
 
 			<div v-else class="flex-1 overflow-y-auto space-y-3">
-				<FriendsSection
-					v-if="activeFriends.length > 0"
-					:is-searching="!!search"
-					open-by-default
-					:friends="activeFriends"
-					heading="Active"
-					:remove-friend="removeMappedFriend"
-				/>
-				<FriendsSection
-					v-if="onlineFriends.length > 0"
-					:is-searching="!!search"
-					open-by-default
-					:friends="onlineFriends"
-					heading="Online"
-					:remove-friend="removeMappedFriend"
-				/>
-				<FriendsSection
-					v-if="offlineFriends.length > 0"
-					:is-searching="!!search"
-					:open-by-default="activeFriends.length + onlineFriends.length < 3"
-					:friends="offlineFriends"
-					heading="Offline"
-					:remove-friend="removeMappedFriend"
-				/>
-				<FriendsSection
-					v-if="filteredPendingFriends.length > 0"
-					:is-searching="!!search"
-					:friends="filteredPendingFriends"
-					heading="Pending"
-					:remove-friend="removeMappedFriend"
-				/>
+				<div
+					v-if="acceptedFriends.length === 0 && pendingFriends.length === 0 && incomingRequests.length > 0"
+					class="whitespace-nowrap text-sm text-secondary"
+				>
+					Friend request.
+					<button
+						class="ml-1 font-semibold text-brand cursor-pointer border-0 bg-transparent p-0"
+						@click="friendInvitesModal.show"
+					>
+						View requests
+					</button>
+				</div>
 				<div v-if="allFriends.length === 0 && !search" class="text-sm text-secondary">
 					<button
 						class="font-semibold text-brand cursor-pointer border-0 bg-transparent p-0"
@@ -522,14 +515,57 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 						Add friends
 					</button>
 					to see what they're playing!
-					<button
-						v-if="incomingRequests.length > 0"
-						class="ml-1 font-semibold text-brand cursor-pointer border-0 bg-transparent p-0"
-						@click="friendInvitesModal.show"
-					>
-						View requests
-					</button>
 				</div>
+				<FriendsSection
+					v-if="activeFriends.length > 0"
+					:is-searching="!!search"
+					open-by-default
+					:friends="activeFriends"
+					heading="Active"
+					:remove-friend="removeMappedFriend"
+					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
+					:block-friend="blockFriend"
+					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
+				/>
+				<FriendsSection
+					v-if="onlineFriends.length > 0"
+					:is-searching="!!search"
+					open-by-default
+					:friends="onlineFriends"
+					heading="Online"
+					:remove-friend="removeMappedFriend"
+					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
+					:block-friend="blockFriend"
+					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
+				/>
+				<FriendsSection
+					v-if="offlineFriends.length > 0"
+					:is-searching="!!search"
+					:open-by-default="activeFriends.length + onlineFriends.length < 3"
+					:friends="offlineFriends"
+					heading="Offline"
+					:remove-friend="removeMappedFriend"
+					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
+					:block-friend="blockFriend"
+					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
+				/>
+				<FriendsSection
+					v-if="filteredPendingFriends.length > 0"
+					:is-searching="!!search"
+					:friends="filteredPendingFriends"
+					heading="Pending"
+					:remove-friend="removeMappedFriend"
+					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
+					:block-friend="blockFriend"
+					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
+				/>
+				<FriendsSection
+					v-if="blockedFriends.length > 0"
+					:friends="blockedFriends"
+					heading="Blocked"
+					:remove-friend="unblockFriend"
+					:unblock-friend="unblockFriend"
+				/>
 				<p
 					v-else-if="filteredFriends.length === 0 && search"
 					class="text-sm text-secondary my-1 mx-4"

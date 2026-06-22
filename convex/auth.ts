@@ -61,6 +61,7 @@ function personaProfile(gamertag: string, accountId: string, personaId: string |
 	if (!personaId) {
 		return {
 			amberiteUserId: accountId,
+			friendCode: createFriendCode(),
 			displayName: gamertag,
 			username: gamertag,
 			normalizedUsername: gamertag.toLowerCase(),
@@ -76,11 +77,17 @@ function personaProfile(gamertag: string, accountId: string, personaId: string |
 	const username = personaId.replace(/-/g, "_");
 	return {
 		amberiteUserId: accountId,
+		friendCode: createFriendCode(),
 		displayName: label || gamertag,
 		username,
 		normalizedUsername: username.toLowerCase(),
 		onboardedAt: Date.now(),
 	};
+}
+
+function createFriendCode(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(5));
+	return `AMB-${Array.from(bytes, (byte) => byte.toString(36).padStart(2, "0")).join("").slice(0, 8).toUpperCase()}`;
 }
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({

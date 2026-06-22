@@ -4,14 +4,12 @@ import { verifyCoreConnection, type ConnectionState, type ConnectionStatus } fro
 type StateChangeListener = (state: ConnectionState, status: ConnectionStatus) => void
 type StatusListener = (status: ConnectionStatus) => void
 
-const CHECK_INTERVAL_MS = 10_000
 
 export class CoreConnectionMonitor {
 	private state: ConnectionState = 'unknown'
 	private status: ConnectionStatus | null = null
 	private stateListeners: Array<StateChangeListener> = []
 	private statusListeners: Array<StatusListener> = []
-	private timer: ReturnType<typeof setInterval> | null = null
 
 	constructor(
 		private adapter: PlatformAdapter,
@@ -38,13 +36,10 @@ export class CoreConnectionMonitor {
 
 	async start(): Promise<void> {
 		this.setState('connecting')
-		this.timer = setInterval(() => this.checkNow().catch(() => {}), CHECK_INTERVAL_MS)
 		await this.checkNow()
 	}
 
 	stop(): void {
-		if (this.timer) clearInterval(this.timer)
-		this.timer = null
 	}
 
 	async checkNow(): Promise<ConnectionStatus> {

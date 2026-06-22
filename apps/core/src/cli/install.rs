@@ -61,7 +61,9 @@ pub(crate) async fn execute(args: InstallArgs) -> Result<()> {
         return Ok(());
     }
     let data_dir = data_dir_from_env_file(&env_file).ok_or_else(|| {
-        color_eyre::eyre::eyre!("AMBERITE_DATA_DIR is required in the Core environment file.")
+        color_eyre::eyre::eyre!(
+            "AMBERITE_DATA_DIR is required in the Core environment file."
+        )
     })?;
     install_systemd_service(&env_file, &unit, &data_dir, args.no_start).await?;
     metadata::save(method, "stable", Some(data_dir))?;
@@ -151,19 +153,11 @@ async fn install_systemd_service(
         "/etc/copal",
     ])
     .await?;
-	let data_dir = data_dir.display().to_string();
-	run_sudo(&[
-		"install",
-		"-d",
-		"-o",
-		"copal",
-		"-g",
-		"copal",
-		"-m",
-		"0750",
-		&data_dir,
-	])
-	.await?;
+    let data_dir = data_dir.display().to_string();
+    run_sudo(&[
+        "install", "-d", "-o", "copal", "-g", "copal", "-m", "0750", &data_dir,
+    ])
+    .await?;
     let env_path = env_file.display().to_string();
     let unit_path = temporary_unit.display().to_string();
     run_sudo(&[

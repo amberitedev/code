@@ -50,7 +50,6 @@ const SOCIAL_TABLES = [
 	'syncedProfiles',
 	'profileSnapshots',
 	'modSyncEvents',
-	'coreInviteNotifications',
 ] as const
 
 async function clearSocialState(ctx: MutationCtx) {

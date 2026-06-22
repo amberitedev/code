@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MoreVerticalIcon, TrashIcon, UserIcon, XIcon } from '@modrinth/assets'
+import { BanIcon, MoreVerticalIcon, PlayIcon, TrashIcon, UserIcon, UserPlusIcon, XIcon } from '@modrinth/assets'
 import {
 	Accordion,
 	Avatar,
@@ -8,9 +8,7 @@ import {
 	OverflowMenu,
 	useVIntl,
 } from '@modrinth/ui'
-import { useTemplateRef } from 'vue'
 
-import ContextMenu from '@/components/ui/ContextMenu.vue'
 import type { FriendWithUserData } from '@/helpers/friends.ts'
 
 const { formatMessage } = useVIntl()
@@ -21,6 +19,10 @@ const props = withDefaults(
 		heading: string
 		removeFriend: (friend: FriendWithUserData) => Promise<void>
 		openProfile?: (friend: FriendWithUserData) => void
+		inviteToGroup?: (friend: FriendWithUserData) => Promise<void>
+		blockFriend?: (friend: FriendWithUserData) => Promise<void>
+		unblockFriend?: (friend: FriendWithUserData) => Promise<void>
+		inviteToPlay?: (friend: FriendWithUserData) => Promise<void>
 		isSearching?: boolean
 		openByDefault?: boolean
 	}>(),
@@ -30,33 +32,16 @@ const props = withDefaults(
 	},
 )
 
-function createContextMenuOptions(friend: FriendWithUserData) {
-	const viewProfile = props.openProfile
-		? [
-				{
-					name: 'view-profile',
-				},
-			]
-		: []
-	if (friend.accepted) {
+function createOverflowMenuOptions(friend: FriendWithUserData) {
+	if (props.unblockFriend) {
 		return [
-			...viewProfile,
 			{
-				name: 'remove-friend',
-				color: 'danger',
-			},
-		]
-	} else {
-		return [
-			...viewProfile,
-			{
-				name: 'cancel-request',
+				id: 'unblock-friend',
+				action: () => props.unblockFriend?.(friend),
 			},
 		]
 	}
-}
 
-function createOverflowMenuOptions(friend: FriendWithUserData) {
 	return [
 		...(props.openProfile
 			? [
@@ -65,25 +50,45 @@ function createOverflowMenuOptions(friend: FriendWithUserData) {
 						action: () => props.openProfile?.(friend),
 					},
 				]
+		: []),
+		...(props.inviteToGroup
+			? [
+					{
+						id: 'invite-to-group',
+						action: () => props.inviteToGroup?.(friend),
+					},
+				]
+			: []),
+		...(props.inviteToPlay
+			? [
+					{
+						id: 'invite-to-play',
+						action: () => props.inviteToPlay?.(friend),
+					},
+				]
 			: []),
 		{
 			id: 'remove-friend',
 			action: () => props.removeFriend(friend),
 			color: 'red',
 		},
+		...(props.blockFriend
+			? [
+					{
+						id: 'block-friend',
+						action: () => props.blockFriend?.(friend),
+						color: 'danger' as const,
+						filled: true,
+						hoverInvert: true,
+					},
+				]
+			: []),
 	]
 }
 
-const friendOptions = useTemplateRef('friendOptions')
-async function handleFriendOptions(args: { item: FriendWithUserData; option: string }) {
-	switch (args.option) {
-		case 'remove-friend':
-		case 'cancel-request':
-			await props.removeFriend(args.item)
-			break
-		case 'view-profile':
-			if (props.openProfile) props.openProfile(args.item)
-	}
+function openFriendOverflowMenu(event: MouseEvent) {
+	if (!(event.currentTarget instanceof HTMLElement)) return
+	event.currentTarget.querySelector<HTMLButtonElement>('button')?.click()
 }
 
 const messages = defineMessages({
@@ -107,18 +112,26 @@ const messages = defineMessages({
 		id: 'friends.friend.view-profile',
 		defaultMessage: 'View profile',
 	},
+	inviteToGroup: {
+		id: 'friends.friend.invite-to-group',
+		defaultMessage: 'Invite to friend group',
+	},
+	inviteToPlay: {
+		id: 'friends.friend.invite-to-play',
+		defaultMessage: 'Invite to play',
+	},
+	blockFriend: {
+		id: 'friends.friend.block',
+		defaultMessage: 'Block',
+	},
+	unblockFriend: {
+		id: 'friends.friend.unblock',
+		defaultMessage: 'Unblock',
+	},
 })
 </script>
 
 <template>
-	<ContextMenu ref="friendOptions" @option-clicked="handleFriendOptions">
-		<template #view-profile>
-			<UserIcon />
-			{{ formatMessage(messages.viewProfile) }}
-		</template>
-		<template #remove-friend> <TrashIcon /> {{ formatMessage(messages.removeFriend) }} </template>
-		<template #cancel-request> <XIcon /> {{ formatMessage(messages.cancelRequest) }} </template>
-	</ContextMenu>
 	<Accordion
 		:open-by-default="openByDefault"
 		:force-open="isSearching"
@@ -140,9 +153,7 @@ const messages = defineMessages({
 					v-for="friend in friends"
 					:key="friend.username"
 					class="group grid items-center grid-cols-[auto_1fr_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
-					@contextmenu.prevent.stop="
-						(event) => friendOptions?.showMenu(event, friend, createContextMenuOptions(friend))
-					"
+					@contextmenu.prevent.stop="openFriendOverflowMenu"
 				>
 					<div class="relative">
 						<Avatar
@@ -179,6 +190,22 @@ const messages = defineMessages({
 							<template #view-profile>
 								<UserIcon />
 								{{ formatMessage(messages.viewProfile) }}
+							</template>
+							<template #invite-to-group>
+								<UserPlusIcon />
+								{{ formatMessage(messages.inviteToGroup) }}
+							</template>
+							<template #invite-to-play>
+								<PlayIcon />
+								{{ formatMessage(messages.inviteToPlay) }}
+							</template>
+							<template #block-friend>
+								<BanIcon />
+								{{ formatMessage(messages.blockFriend) }}
+							</template>
+							<template #unblock-friend>
+								<BanIcon />
+								{{ formatMessage(messages.unblockFriend) }}
 							</template>
 							<template #remove-friend>
 								<TrashIcon />
