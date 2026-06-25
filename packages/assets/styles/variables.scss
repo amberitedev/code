@@ -1,23 +1,25 @@
+// Summary: `.light-properties` defines shared/light theme tokens (line 3), and `html` adds global sizing, tooltip, ad, link, and shadow tokens (line 191).
+// `.dark-mode` defines the app dark palette (line 231), `.oled-mode` overrides it for pure black displays (line 418), and `.retro-mode` adds legacy overrides (line 439).
 .light-properties {
-	--surface-1: #ededee;
-	--surface-1-5: #f1f1f2;
-	--surface-2: #f7f7f8;
-	--surface-2-5: #f0f0f1;
-	--surface-3: #fafafa;
+	--surface-1: #ebebeb;
+	--surface-1-5: #ededed;
+	--surface-2: #f5f5f5;
+	--surface-2-5: #eef1f5;
+	--surface-3: #f8f8f8;
 	--surface-4: #ffffff;
-	--surface-5: #dedee0;
+	--surface-5: #dddddd;
 
-	--color-red-50: #fef2f2;
-	--color-red-100: #fee5e7;
-	--color-red-200: #fccfd3;
-	--color-red-300: #faa7b1;
-	--color-red-400: #f67687;
-	--color-red-500: #ed4661;
-	--color-red-600: #cb2245;
-	--color-red-700: #b7193d;
-	--color-red-800: #9a1739;
-	--color-red-900: #841738;
-	--color-red-950: #490819;
+	--color-red-50: #fff1f1;
+	--color-red-100: #ffe1e1;
+	--color-red-200: #ffc8c8;
+	--color-red-300: #ff9f9f;
+	--color-red-400: #ff6b6b;
+	--color-red-500: #f54242;
+	--color-red-600: #dc2626;
+	--color-red-700: #b91c1c;
+	--color-red-800: #991b1b;
+	--color-red-900: #7f1d1d;
+	--color-red-950: #450a0a;
 	--color-red: var(--color-red-600);
 
 	--color-orange-50: #fff7f2;
@@ -27,11 +29,13 @@
 	--color-orange-400: #ff9252;
 	--color-orange-500: #ff7630;
 	--color-orange-600: #ff641a;
-	--color-orange-700: #d63c01;
-	--color-orange-800: #a73403;
-	--color-orange-900: #6f260c;
-	--color-orange-950: #3d1f0f;
-	--color-orange: var(--color-orange-500);
+	--color-orange-700: #e44900;
+	--color-orange-800: #c43d00;
+	--color-orange-900: #9e3100;
+	--color-orange-950: #661f00;
+	--color-orange: var(--color-orange-600);
+	--color-warning: #d85a00;
+	--color-warning-contrast: #171717;
 
 	--color-green-50: #eefff6;
 	--color-green-100: #d7ffeb;
@@ -72,17 +76,17 @@
 	--color-purple-950: #370368;
 	--color-purple: var(--color-purple-600);
 
-	--color-gray-50: #f7f7f8;
-	--color-gray-100: #e9e9eb;
-	--color-gray-200: #d1d1d4;
-	--color-gray-300: #afafb4;
-	--color-gray-400: #85858c;
-	--color-gray-500: #68686e;
-	--color-gray-600: #55555a;
-	--color-gray-700: #48484d;
-	--color-gray-800: #404041;
-	--color-gray-900: #303033;
-	--color-gray-950: #1d1d1f;
+	--color-gray-50: #f5f5f6;
+	--color-gray-100: #e5e5e8;
+	--color-gray-200: #cecfd3;
+	--color-gray-300: #adb0b3;
+	--color-gray-400: #83868d;
+	--color-gray-500: #686a72;
+	--color-gray-600: #595b61;
+	--color-gray-700: #4c4e52;
+	--color-gray-800: #434447;
+	--color-gray-900: #3b3b3e;
+	--color-gray-950: #252627;
 	--color-gray: var(--color-gray-600);
 
 	--color-text-primary: #1a202c;
@@ -96,6 +100,12 @@
 	--color-super-raised-bg: var(--surface-4);
 
 	--color-button-bg: var(--surface-4);
+	--color-button-bg-hover: var(--surface-5);
+	--color-clear-button-bg-hover: var(--color-button-bg);
+	--color-orange-accent-button-bg-hover: var(--surface-5);
+	--color-left-nav-button-bg-hover: var(--surface-5);
+	--color-sidebar-button-bg-hover: var(--surface-5);
+	--color-sidebar-accent-border: var(--surface-5);
 	--color-button-border: rgba(161, 161, 161, 0.35);
 	--color-scrollbar: #96a2b0;
 
@@ -105,17 +115,19 @@
 	--color-base: var(--color-text-default);
 	--color-secondary: var(--color-text-tertiary);
 	--color-contrast: var(--color-text-primary);
-	--color-accent-contrast: #000000;
+	--color-accent-contrast: #ffffff;
 
 	--color-red-highlight: rgba(203, 34, 69, 0.25);
-	--color-orange-highlight: rgba(255, 100, 26, 0.25);
+	--color-orange-highlight: var(--color-orange-100);
+	--color-warning-highlight: rgba(255, 138, 31, 0.34);
 	--color-green-highlight: rgba(0, 175, 92, 0.25);
 	--color-blue-highlight: rgba(31, 104, 192, 0.25);
 	--color-purple-highlight: rgba(142, 50, 243, 0.25);
 	--color-gray-highlight: rgba(89, 91, 97, 0.25);
 
 	--color-red-bg: rgba(203, 34, 69, 0.1);
-	--color-orange-bg: rgba(255, 100, 26, 0.1);
+	--color-orange-bg: var(--color-orange-50);
+	--color-warning-bg: #ffead6;
 	--color-green-bg: rgba(0, 175, 92, 0.1);
 	--color-blue-bg: rgba(31, 104, 192, 0.1);
 	--color-purple-bg: rgba(142, 50, 243, 0.1);
@@ -139,26 +151,22 @@
 
 	--shadow-card: rgba(50, 50, 100, 0.1) 0px 2px 4px 0px;
 
-	--brand-gradient-bg: linear-gradient(
-		0deg,
-		rgba(255, 118, 48, 0.18) 0%,
-		rgba(255, 100, 26, 0.13) 100%
+	--brand-gradient-bg: linear-gradient(0deg, var(--surface-2) 0%, var(--surface-2) 100%);
+	--brand-gradient-strong-bg: linear-gradient(270deg, var(--surface-2) 0%, var(--surface-2) 100%);
+	--brand-gradient-button: var(--surface-4);
+	--brand-gradient-border: var(--surface-5);
+	--brand-gradient-fade-out-color: linear-gradient(
+		to bottom,
+		var(--surface-1) 0%,
+		var(--surface-1) 70%
 	);
-	--brand-gradient-strong-bg: linear-gradient(
-		270deg,
-		rgba(255, 118, 48, 0.18) 0%,
-		rgba(255, 100, 26, 0.12) 100%
-	);
-	--brand-gradient-button: rgba(255, 255, 255, 0.5);
-	--brand-gradient-border: rgba(64, 64, 65, 0.15);
-	--brand-gradient-fade-out-color: linear-gradient(to bottom, rgba(255, 231, 217, 0), #ffe7d9 70%);
 
 	--color-button-bg-selected: var(--color-brand);
 	--color-button-text-selected: var(--color-accent-contrast);
 
 	--color-gradient-button-bg: linear-gradient(180deg, #f8f9fa 0%, #dce0e6 100%);
 
-	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, #ff7630 100%);
+	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) 100%);
 
 	--color-platform-fabric: #8a7b71;
 	--color-platform-quilt: #8b61b4;
@@ -183,8 +191,8 @@
 
 html {
 	@extend .light-properties;
-	--dark-color-base: #f0e3de;
-	--dark-color-contrast: #fffbf5;
+	--dark-color-base: #e7e7e7;
+	--dark-color-contrast: #ffffff;
 
 	--gap-xs: 0.25rem;
 	--gap-sm: 0.5rem;
@@ -213,7 +221,7 @@ html {
 
 	--shadow-button: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.15);
 
-	--color-focus-ring: #ff7038;
+	--color-focus-ring: #ff641a;
 }
 
 .light-mode,
@@ -224,25 +232,25 @@ html {
 .dark-mode,
 .dark,
 :root[data-theme='dark'] {
-	--surface-1: #101010;
-	--surface-1-5: #131313;
-	--surface-2: #171615;
-	--surface-2-5: #1b1a19;
-	--surface-3: #211f1e;
-	--surface-4: #2a2725;
-	--surface-5: #38322e;
+	--surface-1: #0f0f0f;
+	--surface-1-5: #111111;
+	--surface-2: #141414;
+	--surface-2-5: #171717;
+	--surface-3: #1b1b1b;
+	--surface-4: #242424;
+	--surface-5: #333333;
 
-	--color-red-50: #fff0f1;
-	--color-red-100: #ffe2e6;
-	--color-red-200: #ffcad3;
-	--color-red-300: #ff9fae;
-	--color-red-400: #ff6984;
-	--color-red-500: #ff496e;
-	--color-red-600: #ed1148;
-	--color-red-700: #c8083d;
-	--color-red-800: #a8093a;
-	--color-red-900: #8f0c38;
-	--color-red-950: #50011a;
+	--color-red-50: #fff1f1;
+	--color-red-100: #ffe1e1;
+	--color-red-200: #ffc8c8;
+	--color-red-300: #ff9f9f;
+	--color-red-400: #ff6b6b;
+	--color-red-500: #ff3b3b;
+	--color-red-600: #e52525;
+	--color-red-700: #c51f1f;
+	--color-red-800: #a31d1d;
+	--color-red-900: #861d1d;
+	--color-red-950: #4a0a0a;
 	--color-red: var(--color-red-500);
 
 	--color-orange-50: #fff7f2;
@@ -252,11 +260,13 @@ html {
 	--color-orange-400: #ff9252;
 	--color-orange-500: #ff7630;
 	--color-orange-600: #ff641a;
-	--color-orange-700: #d63c01;
-	--color-orange-800: #a73403;
-	--color-orange-900: #6f260c;
-	--color-orange-950: #3d1f0f;
+	--color-orange-700: #e44900;
+	--color-orange-800: #c43d00;
+	--color-orange-900: #9e3100;
+	--color-orange-950: #661f00;
 	--color-orange: var(--color-orange-600);
+	--color-warning: #ff8a1f;
+	--color-warning-contrast: #171717;
 
 	--color-green-50: #effef5;
 	--color-green-100: #dafee8;
@@ -310,9 +320,9 @@ html {
 	--color-gray-950: #1d1d1f;
 	--color-gray: var(--color-gray-500);
 
-	--color-text-primary: #fffbf5;
-	--color-text-default: #f0e3de;
-	--color-text-tertiary: #a3a3a3;
+	--color-text-primary: #ffffff;
+	--color-text-default: #e7e7e7;
+	--color-text-tertiary: #a8a8a8;
 
 	// ===
 
@@ -321,29 +331,37 @@ html {
 	--color-super-raised-bg: var(--surface-4);
 
 	--color-button-bg: var(--surface-4);
-	--color-button-border: rgba(240, 227, 222, 0.125);
+	--color-button-bg-hover: var(--surface-5);
+	--color-clear-button-bg-hover: var(--color-button-bg);
+	--color-orange-accent-button-bg-hover: #43301d;
+	--color-left-nav-button-bg-hover: #3d2519;
+	--color-sidebar-button-bg-hover: #351f15;
+	--color-sidebar-accent-border: var(--surface-5);
+	--color-button-border: var(--surface-5);
 	--color-scrollbar: var(--surface-5);
 
-	--color-divider: rgba(240, 227, 222, 0.125);
-	--color-divider-dark: rgba(240, 227, 222, 0.25);
+	--color-divider: var(--surface-5);
+	--color-divider-dark: #454545;
 
 	--color-base: var(--color-text-default);
 	--color-secondary: var(--color-text-tertiary);
 	--color-contrast: var(--color-text-primary);
-	--color-accent-contrast: #000000;
+	--color-accent-contrast: #ffffff;
 
-	--color-red-highlight: rgba(255, 73, 110, 0.25);
-	--color-orange-highlight: rgba(255, 100, 26, 0.36);
-	--color-green-highlight: rgba(27, 217, 106, 0.25);
-	--color-blue-highlight: rgba(79, 156, 255, 0.25);
-	--color-purple-highlight: rgba(199, 138, 255, 0.25);
-	--color-gray-highlight: rgba(163, 163, 163, 0.25);
+	--color-red-highlight: var(--surface-4);
+	--color-orange-highlight: var(--surface-4);
+	--color-warning-highlight: var(--surface-4);
+	--color-green-highlight: var(--surface-4);
+	--color-blue-highlight: var(--surface-4);
+	--color-purple-highlight: var(--surface-4);
+	--color-gray-highlight: var(--surface-4);
 
-	--color-red-bg: rgba(255, 73, 110, 0.2);
-	--color-orange-bg: rgba(255, 100, 26, 0.2);
-	--color-green-bg: rgba(27, 217, 106, 0.2);
-	--color-blue-bg: rgba(79, 156, 255, 0.2);
-	--color-purple-bg: rgba(199, 138, 255, 0.2);
+	--color-red-bg: var(--surface-3);
+	--color-orange-bg: var(--surface-3);
+	--color-warning-bg: #43301d;
+	--color-green-bg: var(--surface-3);
+	--color-blue-bg: var(--surface-3);
+	--color-purple-bg: var(--surface-3);
 
 	--color-brand: var(--color-orange);
 	--color-brand-highlight: var(--color-orange-highlight);
@@ -361,18 +379,22 @@ html {
 
 	--shadow-card: rgba(0, 0, 0, 0.25) 0px 2px 4px 0px;
 
-	--brand-gradient-bg: linear-gradient(0deg, rgba(61, 31, 15, 0.22) 0%, rgba(255, 100, 26, 0.1) 100%);
-	--brand-gradient-strong-bg: linear-gradient(270deg, #101010 10%, #17120f 100%);
-	--brand-gradient-button: rgba(255, 255, 255, 0.08);
-	--brand-gradient-border: rgba(240, 227, 222, 0.125);
-	--brand-gradient-fade-out-color: linear-gradient(to bottom, rgba(21, 20, 20, 0), #151414 80%);
+	--brand-gradient-bg: linear-gradient(0deg, var(--surface-2) 0%, var(--surface-2) 100%);
+	--brand-gradient-strong-bg: linear-gradient(270deg, var(--surface-1) 0%, var(--surface-1) 100%);
+	--brand-gradient-button: var(--surface-4);
+	--brand-gradient-border: var(--surface-5);
+	--brand-gradient-fade-out-color: linear-gradient(
+		to bottom,
+		var(--surface-1) 0%,
+		var(--surface-1) 80%
+	);
 
-	--color-button-bg-selected: rgba(255, 94, 31, 0.32);
-	--color-button-text-selected: #ff9252;
+	--color-button-bg-selected: var(--color-brand);
+	--color-button-text-selected: var(--color-accent-contrast);
 
-	--color-gradient-button-bg: linear-gradient(180deg, #2a2725 0%, #211f1e 100%);
+	--color-gradient-button-bg: linear-gradient(180deg, var(--surface-4) 0%, var(--surface-4) 100%);
 
-	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, #ff7630 100%);
+	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) 100%);
 
 	--color-platform-fabric: #dbb69b;
 	--color-platform-quilt: #c796f9;
@@ -392,36 +414,32 @@ html {
 	--color-platform-bta-babric: #72cc4a;
 	--color-platform-nilloader: #f45e9a;
 
-	--hover-brightness: 1.25;
+	--hover-brightness: 0.9;
 }
 
 .oled-mode {
 	@extend .dark-mode;
 	--surface-1: #000000;
-	--surface-1-5: #070707;
-	--surface-2: #0b0b0b;
-	--surface-2-5: #0f0e0e;
-	--surface-3: #131211;
-	--surface-4: #1b1918;
-	--surface-5: #2a2725;
+	--surface-1-5: #050505;
+	--surface-2: #080808;
+	--surface-2-5: #0d0d0d;
+	--surface-3: #111111;
+	--surface-4: #1a1a1a;
+	--surface-5: #2a2a2a;
+	--color-clear-button-bg-hover: var(--color-button-bg);
+	--color-orange-accent-button-bg-hover: #43301d;
+	--color-left-nav-button-bg-hover: #2c170d;
+	--color-sidebar-button-bg-hover: #261208;
 
 	--color-ad: #0d1828;
 
-	--brand-gradient-bg: linear-gradient(
-		0deg,
-		rgba(61, 31, 15, 0.18) 0%,
-		rgba(255, 100, 26, 0.08) 100%
-	);
-	--brand-gradient-strong-bg: linear-gradient(
-		270deg,
-		rgba(16, 16, 16, 0.8) 10%,
-		rgba(23, 18, 15, 0.6) 100%
-	);
+	--brand-gradient-bg: linear-gradient(0deg, var(--surface-2) 0%, var(--surface-2) 100%);
+	--brand-gradient-strong-bg: linear-gradient(270deg, var(--surface-1) 0%, var(--surface-1) 100%);
 
-	--color-gradient-button-bg: linear-gradient(180deg, #1b1918 0%, #2a2725 100%);
+	--color-gradient-button-bg: linear-gradient(180deg, var(--surface-4) 0%, var(--surface-4) 100%);
 }
 
 .retro-mode {
 	--surface-2-5: #3a3c3e;
-	--brand-gradient-strong-bg: #3a3b38;
+	--brand-gradient-strong-bg: #3a3a3a;
 }

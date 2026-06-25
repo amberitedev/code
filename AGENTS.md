@@ -115,3 +115,11 @@ These rules apply to any task touching `apps/app-frontend` or app-facing UI in `
 - Use existing surface, text, border, and semantic color tokens. Do not hardcode hex colors, ad-hoc Tailwind colors, or alternate fonts for production UI.
 - Match existing spacing and density from nearby app screens. New pages should look like they belong next to adjacent routes in `apps/app-frontend/src/pages` without visual surprise.
 - If a request is specifically about desktop app UI fit-and-finish, prioritize consistency over novelty.
+
+### Shared UI component changes
+
+- Do not modify `packages/ui` unless specifically asked or the change is a genuine shared bug fix; start at the page/usage definition, move downward through local wrappers/composition, and skip shared package edits unless every other option is exhausted.
+
+`packages/ui` is a shared UI library used throughout the desktop app and website, and it should stay as close to upstream as possible. A change made there can silently alter many unrelated surfaces, create random UI regressions, and make future upstream UI usage harder.
+
+Shared package modifications must be as minimal as possible, and the best outcome is usually to avoid them entirely. This rule does not block genuine shared bug fixes or changes that are intentionally needed across all usages.

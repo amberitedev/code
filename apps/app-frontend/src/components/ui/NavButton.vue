@@ -9,7 +9,7 @@
 			'subpage-active': isSubpage && isSubpage(route),
 			disabled: disabled,
 		}"
-		class="w-12 h-12 text-primary rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bg hover:text-contrast"
+		class="w-12 h-12 text-primary rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bgHover hover:text-contrast"
 		@mouseenter="preloadRoute"
 		@focus="preloadRoute"
 	>
@@ -18,7 +18,7 @@
 	<button
 		v-else
 		v-bind="$attrs"
-		class="button-animation border-none text-primary cursor-pointer w-12 h-12 rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bg hover:text-contrast"
+		class="button-animation border-none text-primary cursor-pointer w-12 h-12 rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bgHover hover:text-contrast"
 		:disabled="disabled"
 		@click="to"
 	>
@@ -83,6 +83,9 @@ defineOptions({
 
 .router-link-active {
 	@apply text-[--color-button-text-selected] bg-[--color-button-bg-selected];
+	box-shadow:
+		0 0 0 1px rgba(255, 100, 26, 0.38),
+		0 0 18px rgba(255, 100, 26, 0.24);
 }
 
 .subpage-active {

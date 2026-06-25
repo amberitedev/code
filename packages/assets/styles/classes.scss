@@ -361,9 +361,9 @@ a:not(.no-click-animation),
 	}
 
 	&.btn-orange {
-		--_text-color: var(--color-accent-contrast);
-		--_background-color: var(--color-orange);
-		--_accent-color: var(--color-orange);
+		--_text-color: var(--color-warning-contrast);
+		--_background-color: var(--color-warning);
+		--_accent-color: var(--color-warning);
 	}
 
 	&.btn-green {
@@ -555,6 +555,10 @@ a:not(.no-click-animation),
 	word-break: break-word;
 	-webkit-hyphens: auto;
 	hyphens: auto;
+}
+
+.orange-hover-accent {
+	--color-clear-button-bg-hover: var(--color-orange-accent-button-bg-hover);
 }
 
 .sr-only {

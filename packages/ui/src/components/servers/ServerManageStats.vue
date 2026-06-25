@@ -171,7 +171,7 @@ const buildChartOptions = (warning: boolean, index: number, dataMax: number) => 
 		tickAmount: GRAPH_SIZE,
 	},
 	yaxis: { show: false, min: 0, max: dataMax, forceNiceScale: false },
-	colors: [warning ? 'var(--color-orange)' : 'var(--color-brand)'],
+	colors: [warning ? 'var(--color-warning)' : 'var(--color-brand)'],
 	dataLabels: { enabled: false },
 })
 

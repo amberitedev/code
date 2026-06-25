@@ -1,7 +1,7 @@
 <template>
 	<div
 		v-if="accounts.length === 0"
-		class="flex flex-col gap-3 bg-button-bg border border-solid border-surface-5 rounded-xl p-3 mt-2"
+		class="mt-2 flex flex-col gap-3 rounded-xl border border-solid border-surface-5 bg-surface-3 p-3"
 	>
 		<span>{{ formatMessage(messages.notSignedIn) }}</span>
 		<ButtonStyled color="brand">
@@ -14,8 +14,8 @@
 	</div>
 	<Accordion
 		v-else
-		class="w-full mt-2 bg-button-bg border border-solid border-surface-5 rounded-xl overflow-clip"
-		button-class="button-base w-full bg-transparent px-3 py-2 border-0 cursor-pointer"
+		class="mt-2 w-full overflow-clip rounded-xl border border-solid border-surface-5 bg-surface-3"
+		button-class="button-base w-full bg-transparent px-3 py-2 border-0 cursor-pointer hover:bg-surface-4"
 		:open-by-default="false"
 	>
 		<template #title>
@@ -36,11 +36,11 @@
 				</div>
 			</div>
 		</template>
-		<div class="bg-button-bg pt-1 pb-2 border border-solid border-surface-5">
+		<div class="border-0 border-t border-solid border-surface-5 bg-surface-3 pb-2 pt-1">
 			<template v-if="accounts.length > 0">
 				<div v-for="account in accounts" :key="account.profile.id" class="flex gap-1 items-center">
 					<button
-						class="flex items-center flex-shrink flex-grow overflow-clip gap-2 p-2 border-0 bg-transparent cursor-pointer button-base min-w-0"
+						class="button-base flex min-w-0 flex-shrink flex-grow cursor-pointer items-center gap-2 overflow-clip rounded-lg border-0 bg-transparent p-2 hover:bg-surface-4"
 						@click="setAccount(account)"
 					>
 						<RadioButtonCheckedIcon
@@ -72,7 +72,7 @@
 				</div>
 			</template>
 			<div class="flex flex-col gap-2 px-2 pt-2">
-				<ButtonStyled v-if="accounts.length > 0" class="w-full">
+				<ButtonStyled v-if="accounts.length > 0" class="w-full" type="outlined">
 					<button :disabled="loginDisabled" @click="login()">
 						<PlusIcon />
 						{{ formatMessage(messages.addAccount) }}

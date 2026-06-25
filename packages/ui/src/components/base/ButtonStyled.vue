@@ -31,7 +31,7 @@ const highlightedColorVar = computed(() => {
 		case 'red':
 			return 'var(--color-red-highlight)'
 		case 'orange':
-			return 'var(--color-orange-highlight)'
+			return 'var(--color-warning-highlight)'
 		case 'green':
 			return 'var(--color-green-highlight)'
 		case 'medal-promo':
@@ -52,7 +52,7 @@ const colorVar = computed(() => {
 		case 'red':
 			return 'var(--color-red)'
 		case 'orange':
-			return 'var(--color-orange)'
+			return 'var(--color-warning)'
 		case 'green':
 			return 'var(--color-green)'
 		case 'blue':
@@ -64,6 +64,16 @@ const colorVar = computed(() => {
 		case 'standard':
 		default:
 			return null
+	}
+})
+
+const contrastColorVar = computed(() => {
+	switch (props.color) {
+		case 'orange':
+			return 'var(--color-warning-contrast)'
+		case 'standard':
+		default:
+			return 'var(--color-accent-contrast)'
 	}
 })
 
@@ -154,7 +164,7 @@ function setColorFill(
 				colors.text = colorVar.value
 			} else {
 				colors.bg = colorVar.value
-				colors.text = 'var(--color-accent-contrast)'
+				colors.text = contrastColorVar.value
 			}
 		} else if (fill === 'text') {
 			colors.text = colorVar.value
@@ -196,14 +206,15 @@ const colorVariables = computed(() => {
 		bg: 'var(--color-button-bg)',
 		text: 'var(--color-base)',
 	}
-	let hoverColors = JSON.parse(JSON.stringify(colors))
-
-	if (props.type === 'outlined') {
-		hoverColors.bg = 'transparent'
+	let hoverColors = {
+		...colors,
+		bg: 'var(--color-button-bg-hover, var(--color-button-bg))',
 	}
 
 	if (props.type === 'outlined' || props.type === 'transparent') {
 		colors.bg = 'transparent'
+		hoverColors.bg =
+			'var(--color-clear-button-bg-hover, var(--color-button-bg-hover, var(--color-button-bg)))'
 		colors = setColorFill(colors, props.colorFill === 'auto' ? 'text' : props.colorFill)
 		hoverColors = setColorFill(
 			hoverColors,
@@ -300,6 +311,7 @@ const fontSize = computed(() => {
 		&:focus-visible svg:first-child {
 			color: var(--_hover-icon, var(--_hover-text));
 		}
+
 	}
 }
 

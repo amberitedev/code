@@ -1,27 +1,12 @@
 <template>
 	<div v-if="loadError" class="flex min-h-full items-center justify-center p-6 text-contrast">
-		<div class="flex max-w-xl flex-col gap-4">
-			<ErrorInformationCard
-				title="Server unavailable"
-				:description="loadError.message"
-				:icon="TriangleAlertIcon"
-				icon-color="red"
-			/>
-			<div v-if="profile?.profile_type === 'server'" class="flex justify-end gap-2">
-				<ButtonStyled>
-					<button @click="deleteStaleProfile">
-						<TrashIcon />
-						Remove from library
-					</button>
-				</ButtonStyled>
-				<ButtonStyled v-if="canRecreateServer" color="brand">
-					<button :disabled="recreatingServer" @click="recreateServer">
-						<UpdatedIcon />
-						{{ recreatingServer ? 'Recreating...' : 'Recreate server' }}
-					</button>
-				</ButtonStyled>
-			</div>
-		</div>
+		<ErrorInformationCard
+			title="Server unavailable"
+			:description="loadError.message"
+			:icon="TriangleAlertIcon"
+			icon-color="red"
+			:action="profile?.profile_type === 'server' ? backToLibraryAction : undefined"
+		/>
 	</div>
 	<div v-else-if="server" class="h-full w-full pt-6">
 		<div
@@ -132,8 +117,8 @@
 </template>
 
 <script setup lang="ts">
-import { createCoreInstanceBodyFromProfile } from '@amberite/amberite-api'
 import {
+	ArrowLeftIcon,
 	BoxesIcon,
 	ClipboardCopyIcon,
 	DatabaseBackupIcon,
@@ -145,7 +130,6 @@ import {
 	SpinnerIcon,
 	StopCircleIcon,
 	TerminalSquareIcon,
-	TrashIcon,
 	TriangleAlertIcon,
 	UpdatedIcon,
 	UsersIcon,
@@ -154,8 +138,6 @@ import { ButtonStyled, ErrorInformationCard, NavTabs, OverflowMenu } from '@modr
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { useCoreClient } from '@/composables/useCoreClient'
-import { edit, remove } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
@@ -172,8 +154,6 @@ import ServerOverview from './ServerOverview.vue'
 const route = useRoute()
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
-const core = useCoreClient()
-const recreatingServer = ref(false)
 const props = defineProps<{
 	profile?: GameInstance | null
 }>()
@@ -188,7 +168,6 @@ const {
 	restartServer,
 	killServer,
 	repairServer,
-	refreshServer,
 	copyId,
 	openSettings,
 } = useCoreServerRuntime(computed(() => props.profile?.core_instance_id ?? (route.params.id as string)))
@@ -235,43 +214,15 @@ const activePage = computed(() => {
 })
 
 const isBrowsePage = computed(() => route.path.endsWith('/browse'))
-const canRecreateServer = computed(() => !!props.profile?.server_manifest_json)
+const backToLibraryAction = computed(() => ({
+	label: 'Back to library',
+	onClick: backToServerLibrary,
+	color: 'standard' as const,
+	icon: ArrowLeftIcon,
+}))
 
-async function deleteStaleProfile() {
-	if (!props.profile) return
-	await remove(props.profile.path)
+async function backToServerLibrary() {
 	await router.replace('/library/servers')
-}
-
-async function recreateServer() {
-	const manifest = props.profile?.server_manifest_json
-	if (!props.profile || !manifest) return
-	recreatingServer.value = true
-	try {
-		const recreated = await core.createInstance(
-			createCoreInstanceBodyFromProfile(
-				{
-					name: manifest.name,
-					gameVersion: manifest.gameVersion,
-					modloader: manifest.modloader,
-					loaderVersion: manifest.loaderVersion,
-				},
-				manifest.port ?? 25565,
-				manifest.memory,
-			),
-		)
-		await edit(props.profile.path, {
-			core_instance_id: recreated.id,
-			server_manifest_json: {
-				...manifest,
-				port: recreated.port,
-				memory: recreated.memory,
-			},
-		})
-		await refreshServer()
-	} finally {
-		recreatingServer.value = false
-	}
 }
 
 watch(

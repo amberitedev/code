@@ -963,7 +963,7 @@ function getCardActions(
 				iconClass: isInstalling || isInstallingSelection ? 'animate-spin' : undefined,
 				disabled: isInstalled || isInstalling || isInstallingSelection,
 				color: isQueued && !isInstalling && !isInstallingSelection ? 'green' : 'brand',
-				type: 'outlined',
+				type: 'standard',
 				joinedActions:
 					modpackInstallActions && !isInstalled && !isInstalling && !isInstallingSelection
 						? modpackInstallActions
@@ -992,7 +992,7 @@ function getCardActions(
 			iconClass: isInstalling ? 'animate-spin' : undefined,
 			disabled: isInstalled || isInstalling,
 			color: 'brand',
-			type: 'outlined',
+			type: 'standard',
 			joinedActions:
 				isModpack && !isInstalled && !isInstalling ? getModpackInstallActions() : undefined,
 			onClick: isModpack

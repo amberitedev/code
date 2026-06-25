@@ -20,8 +20,8 @@ export const NOTICE_LEVELS: Record<
 			defaultMessage: 'Warning',
 		}),
 		colors: {
-			text: 'var(--color-orange)',
-			bg: 'var(--color-orange-bg)',
+			text: 'var(--color-warning)',
+			bg: 'var(--color-warning-bg)',
 		},
 	},
 	critical: {

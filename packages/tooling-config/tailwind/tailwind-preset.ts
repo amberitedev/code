@@ -40,7 +40,7 @@ const config: Config = {
 					950: 'var(--color-red-950)',
 				},
 				orange: {
-					DEFAULT: 'var(--color-orange)',
+					DEFAULT: 'var(--color-warning)',
 					50: 'var(--color-orange-50)',
 					100: 'var(--color-orange-100)',
 					200: 'var(--color-orange-200)',
@@ -120,7 +120,7 @@ const config: Config = {
 				bg: {
 					DEFAULT: 'var(--surface-1)', // var(--color-bg)
 					red: 'var(--color-red-bg)',
-					orange: 'var(--color-orange-bg)',
+					orange: 'var(--color-warning-bg)',
 					green: 'var(--color-green-bg)',
 					blue: 'var(--color-blue-bg)',
 					purple: 'var(--color-purple-bg)',
@@ -146,7 +146,7 @@ const config: Config = {
 				highlight: {
 					DEFAULT: 'var(--color-brand-highlight)',
 					red: 'var(--color-red-highlight)',
-					orange: 'var(--color-orange-highlight)',
+					orange: 'var(--color-warning-highlight)',
 					green: 'var(--color-green-highlight)',
 					blue: 'var(--color-blue-highlight)',
 					purple: 'var(--color-purple-highlight)',
@@ -209,12 +209,13 @@ const config: Config = {
 					active: 'var(--color-link-active)',
 				},
 				warning: {
+					DEFAULT: 'var(--color-warning)',
 					bg: 'var(--color-warning-bg)',
-					text: 'var(--color-warning-text)',
+					text: 'var(--color-warning)',
 					banner: {
-						text: 'var(--color-warning-banner-text)',
-						bg: 'var(--color-warning-banner-bg)',
-						side: 'var(--color-warning-banner-side)',
+						text: 'var(--color-warning)',
+						bg: 'var(--color-warning-bg)',
+						side: 'var(--color-warning)',
 					},
 				},
 				infoBanner: {

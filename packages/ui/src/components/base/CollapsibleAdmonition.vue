@@ -108,14 +108,14 @@ function handleDismiss() {
 
 const headerBgClasses = {
 	info: 'bg-bg-blue',
-	warning: 'bg-bg-orange',
+	warning: 'bg-warning-bg',
 	critical: 'bg-bg-red',
 	success: 'bg-bg-green',
 }
 
 const iconClasses = {
 	info: 'text-brand-blue',
-	warning: 'text-brand-orange',
+	warning: 'text-warning-text',
 	critical: 'text-brand-red',
 	success: 'text-brand-green',
 }

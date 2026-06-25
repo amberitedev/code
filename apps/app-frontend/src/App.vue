@@ -1639,7 +1639,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</RouterView>
 		</div>
 		<div
-			class="app-sidebar mt-px shrink-0 flex flex-col border-0 border-l-[1px] border-[--brand-gradient-border] border-solid"
+			class="app-sidebar mt-px shrink-0 flex flex-col border-0 border-l-[1px] border-[--color-sidebar-accent-border] border-solid"
 			:class="{ 'has-plus': hasPlus }"
 		>
 			<div
@@ -1844,6 +1844,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	grid-area: nav;
 	position: relative;
 	z-index: 2;
+	--color-button-bg-hover: var(--color-left-nav-button-bg-hover);
 }
 
 .app-grid-statusbar {
@@ -1890,7 +1891,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	background: var(--brand-gradient-bg);
 
 	--color-button-bg: var(--brand-gradient-button);
-	--color-button-bg-hover: var(--brand-gradient-border);
+	--color-button-bg-hover: var(--color-sidebar-button-bg-hover);
+	--color-clear-button-bg-hover: var(--color-sidebar-button-bg-hover);
 	--color-divider: var(--brand-gradient-border);
 	--color-divider-dark: var(--brand-gradient-border);
 }
@@ -1913,7 +1915,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 
 .app-sidebar::before {
 	content: '';
-	box-shadow: -15px 0 15px -15px rgba(0, 0, 0, 0.1) inset;
+	box-shadow: -15px 0 15px -15px rgba(0, 0, 0, 0.16) inset;
 	top: 0;
 	bottom: 0;
 	left: -2rem;

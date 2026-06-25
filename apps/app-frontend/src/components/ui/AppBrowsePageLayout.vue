@@ -386,9 +386,42 @@ function getJoinedButtonActions(action: AppCardAction) {
 </template>
 
 <style scoped>
+.browse-card-joined-button {
+	position: relative;
+}
+
+.browse-card-joined-button::after {
+	content: '';
+	position: absolute;
+	right: calc(1.75rem - 1px);
+	top: 50%;
+	z-index: 1;
+	width: 1px;
+	height: 1.8rem;
+	transform: translateY(-50%);
+	background: linear-gradient(
+		to bottom,
+		rgb(255 255 255 / 0),
+		rgb(255 255 255 / 0.76) 18%,
+		rgb(255 255 255 / 0.76) 82%,
+		rgb(255 255 255 / 0)
+	);
+	pointer-events: none;
+}
+
+.browse-card-joined-button :deep(:is(button, a, .button-like):first-child:active) {
+	scale: 1 !important;
+}
+
+.browse-card-joined-button:is(:hover, :has(:focus-visible), :has(:active))
+	:deep(:is(button, a, .button-like):first-child) {
+	filter: brightness(var(--hover-brightness));
+}
+
 .browse-card-joined-button :deep(.btn-dropdown-animation) {
 	width: 1.75rem !important;
 	padding-left: 0.25rem !important;
 	padding-right: 0.25rem !important;
+	border-left-color: var(--_bg) !important;
 }
 </style>

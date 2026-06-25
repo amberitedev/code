@@ -9,7 +9,6 @@ import {
 	SettingsIcon,
 	ShieldIcon,
 	ToggleRightIcon,
-	UserIcon,
 } from '@modrinth/assets'
 import {
 	commonMessages,
@@ -18,13 +17,14 @@ import {
 	defineMessages,
 	ProgressBar,
 	TabbedModal,
+	Toggle,
 	useVIntl,
 } from '@modrinth/ui'
 import { getVersion } from '@tauri-apps/api/app'
 import { platform as getOsPlatform, version as getOsVersion } from '@tauri-apps/plugin-os'
+import { useStorage } from '@vueuse/core'
 import { ref, watch } from 'vue'
 
-import AccountsSettings from '@/components/ui/settings/AccountsSettings.vue'
 import AppearanceSettings from '@/components/ui/settings/AppearanceSettings.vue'
 import DefaultInstanceSettings from '@/components/ui/settings/DefaultInstanceSettings.vue'
 import FeatureFlagSettings from '@/components/ui/settings/FeatureFlagSettings.vue'
@@ -41,6 +41,7 @@ const themeStore = useTheming()
 const { formatMessage } = useVIntl()
 
 const devModeCounter = ref(0)
+const settingsTabWireframe = useStorage('app-settings-tab-wireframe', false)
 
 const developerModeEnabled = defineMessage({
 	id: 'app.settings.developer-mode-enabled',
@@ -48,14 +49,6 @@ const developerModeEnabled = defineMessage({
 })
 
 const tabs = [
-	{
-		name: defineMessage({
-			id: 'app.settings.tabs.accounts',
-			defaultMessage: 'Accounts',
-		}),
-		icon: UserIcon,
-		content: AccountsSettings,
-	},
 	{
 		name: defineMessage({
 			id: 'app.settings.tabs.appearance',
@@ -154,10 +147,18 @@ const messages = defineMessages({
 		id: 'app.settings.downloading',
 		defaultMessage: 'Downloading v{version}',
 	},
+	tabStyleToggle: {
+		id: 'app.settings.tab-style-toggle',
+		defaultMessage: 'Wireframe tabs',
+	},
 })
 </script>
 <template>
-	<TabbedModal ref="modal" :tabs="tabs.filter((t) => !t.developerOnly || themeStore.devMode)">
+	<TabbedModal
+		ref="modal"
+		:tabs="tabs.filter((t) => !t.developerOnly || themeStore.devMode)"
+		:selected-style="settingsTabWireframe ? 'wireframe' : 'filled'"
+	>
 		<template #title>
 			<span class="flex items-center gap-2 text-lg font-extrabold text-contrast">
 				<SettingsIcon /> Settings
@@ -176,6 +177,12 @@ const messages = defineMessages({
 				<p v-if="themeStore.devMode" class="text-brand font-semibold m-0 mb-2">
 					{{ formatMessage(developerModeEnabled) }}
 				</p>
+				<div class="mb-3 flex items-center justify-between gap-3 rounded-xl bg-surface-3 px-3 py-2">
+					<span class="text-xs font-semibold uppercase tracking-[0.08em] text-secondary">
+						{{ formatMessage(messages.tabStyleToggle) }}
+					</span>
+					<Toggle id="app-settings-tab-style-toggle" v-model="settingsTabWireframe" small />
+				</div>
 				<div class="flex items-center gap-3">
 					<button
 						class="p-0 m-0 bg-transparent border-none cursor-pointer button-animation"

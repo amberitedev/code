@@ -138,8 +138,8 @@ const timestampTooltip = computed(() => {
 
 const typeClasses = {
 	info: 'border-brand-blue bg-bg-blue',
-	warning: 'border-brand-orange bg-bg-orange',
-	'circle-warning': 'border-brand-orange bg-bg-orange',
+	warning: 'border-warning-text bg-warning-bg',
+	'circle-warning': 'border-warning-text bg-warning-bg',
 	critical: 'border-brand-red bg-bg-red',
 	success: 'border-brand-green bg-bg-green',
 	moderation: 'border-brand-orange bg-bg-orange',
@@ -147,8 +147,8 @@ const typeClasses = {
 
 const iconClasses = {
 	info: 'text-brand-blue',
-	warning: 'text-brand-orange',
-	'circle-warning': 'text-brand-orange',
+	warning: 'text-warning-text',
+	'circle-warning': 'text-warning-text',
 	critical: 'text-brand-red',
 	success: 'text-brand-green',
 	moderation: 'text-brand-orange',
@@ -165,8 +165,8 @@ const buttonColors = {
 
 const progressTrackClasses = {
 	info: 'bg-brand-blue/20',
-	warning: 'bg-brand-orange/20',
-	'circle-warning': 'bg-brand-orange/20',
+	warning: 'bg-warning-text/20',
+	'circle-warning': 'bg-warning-text/20',
 	critical: 'bg-brand-red/20',
 	success: 'bg-brand-green/20',
 	moderation: 'bg-brand-orange/20',
@@ -174,8 +174,8 @@ const progressTrackClasses = {
 
 const progressFillClasses = {
 	info: 'bg-brand-blue',
-	warning: 'bg-brand-orange',
-	'circle-warning': 'bg-brand-orange',
+	warning: 'bg-warning-text',
+	'circle-warning': 'bg-warning-text',
 	critical: 'bg-brand-red',
 	success: 'bg-brand-green',
 	blue: 'bg-brand-blue',
