@@ -75,6 +75,10 @@ versions/*/server-*.jar
 !.claude/skills/
 .letta
 
+# Agent instruction files are local to this fork. Do not pick up new Claude files.
+CLAUDE.md
+**/CLAUDE.md
+
 # labrinth demo fixtures
 apps/labrinth/fixtures/demo
 

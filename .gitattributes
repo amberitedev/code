@@ -33,3 +33,9 @@
 /packages/app-lib/migrations/20240813205023_drop-active-unique.sql !eol
 /packages/app-lib/migrations/20240930001852_disable-personalized-ads.sql !eol
 /packages/app-lib/migrations/20241222013857_feature-flags.sql !eol
+
+# Keep this fork's agent instructions during upstream merges.
+AGENTS.md merge=keepLocal
+**/AGENTS.md merge=keepLocal
+CLAUDE.md merge=keepLocal
+**/CLAUDE.md merge=keepLocal
