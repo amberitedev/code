@@ -56,7 +56,6 @@ export interface CardAction {
 	circular?: boolean
 	tooltip?: string
 	onClick: () => void | Promise<void>
-	joinedActions?: CardAction[]
 }
 
 export interface ServerModpackContent {

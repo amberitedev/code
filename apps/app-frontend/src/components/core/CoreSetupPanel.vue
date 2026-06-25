@@ -9,7 +9,7 @@ defineEmits<{
 </script>
 
 <template>
-	<div class="flex flex-1 items-center justify-center">
+	<div class="absolute inset-0 flex items-center justify-center p-6">
 		<div class="flex w-full max-w-[760px] flex-col gap-6">
 			<div class="flex max-w-[500px] flex-col gap-2">
 				<h1 class="m-0 text-3xl font-semibold text-contrast">Set up Copal</h1>

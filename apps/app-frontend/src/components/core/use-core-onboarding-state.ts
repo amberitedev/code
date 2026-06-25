@@ -1,7 +1,6 @@
 import { verifyCoreConnection } from '@amberite/amberite-api'
 import type {
 	ServerAccessInviteSuggestion,
-	ServerAccessMember,
 	ServerAccessRole,
 	ServerAccessRoleOption,
 } from '@modrinth/ui'
@@ -25,6 +24,7 @@ import {
 	toInviteCandidate,
 	toPendingInvite,
 } from './core-onboarding-members'
+import type { CoreAccessMember } from './core-access-types'
 
 interface CoreOnboardingModalRef { hide: () => void; show: () => void; nextStage: () => void; setStage: (stage: string) => void }
 
@@ -43,7 +43,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	const connectValidated = ref(false)
 	const inviteSearch = ref('')
 	const inviteAsFriend = ref(true)
-	const pendingInvites = ref<ServerAccessMember[]>([])
+	const pendingInvites = ref<CoreAccessMember[]>([])
 	const error = ref('')
 	const working = ref(false)
 	const canManageMembers = computed(() => flow.value === 'create' || social.canManage.value)
@@ -52,12 +52,12 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		{ value: 'editor', label: 'Admin', description: 'Manages members and servers.' },
 		{ value: 'viewer', label: 'Member', description: 'Uses shared Core access.' },
 	]
-	const members = computed<ServerAccessMember[]>(() => [
+	const members = computed<CoreAccessMember[]>(() => [
 		...social.members.value.map(toAccessMember),
 		...pendingInvites.value,
 		...friendInviteCandidates.value,
 	])
-	const friendInviteCandidates = computed<ServerAccessMember[]>(() => {
+	const friendInviteCandidates = computed<CoreAccessMember[]>(() => {
 		const existingIds = new Set([...social.members.value.map((x) => x.userId), ...pendingInvites.value.map((x) => x.user.id)])
 		const friends = social.friends.value?.friends
 			.map((friend) => friend.user)
@@ -142,14 +142,15 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		const previousCore = getConnectedCore()
 		let linked = false
 		try {
-			const response = await coreClient.completeSetupAt(coreUrl, {
-				code,
-				convex_url: config.convexUrl,
-				auth_jwks_url: convexJwksUrl(config.convexUrl),
-				owner_user_id: currentUser.userId,
-				realtime_credential: claim.realtimeCredential,
-				realtime_url: config.realtimeUrl || undefined,
-			})
+		const response = await coreClient.completeSetupAt(coreUrl, {
+			code,
+			convex_url: config.convexUrl,
+			auth_jwks_url: convexJwksUrl(config.convexUrl),
+			owner_user_id: currentUser.userId,
+			...(config.realtimeUrl
+				? { realtime_credential: claim.realtimeCredential, realtime_url: config.realtimeUrl }
+				: {}),
+		})
 			if (response.core_id !== claim.coreId) throw new Error('The Core answered with a different identity.')
 			setConnectedCore({ coreId: response.core_id, url: coreUrl })
 			linked = true
@@ -195,12 +196,12 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		inviteSearch.value = ''
 	}
 
-	function quickInvite(member: ServerAccessMember) {
+	function quickInvite(member: CoreAccessMember) {
 		if (!member.inviteCandidate) return
 		pendingInvites.value.push({ ...member, id: member.user.id, inviteCandidate: false, pending: true })
 	}
 
-	async function updateRole(member: ServerAccessMember, role: ServerAccessRole) {
+	async function updateRole(member: CoreAccessMember, role: ServerAccessRole) {
 		if (member.pending) {
 			pendingInvites.value = pendingInvites.value.map((invite) =>
 				invite.id === member.id ? { ...invite, role } : invite,
@@ -210,7 +211,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		if (!member.isOwner) await social.setMemberRole(member.user.id, role === 'editor' ? 'admin' : 'member')
 	}
 
-	async function removeMember(member: ServerAccessMember) {
+	async function removeMember(member: CoreAccessMember) {
 		if (member.pending) {
 			pendingInvites.value = pendingInvites.value.filter((invite) => invite.id !== member.id)
 			return

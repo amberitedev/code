@@ -4,6 +4,8 @@ import {
 	type RealtimeFrame,
 	type LiveSocialState,
 	type AmberiteUser,
+	type CoreListEntry,
+	type CorePresence,
 	type DurableSocialSessionState,
 	type FriendGroupBan,
 	type FriendGroupMember,
@@ -25,16 +27,14 @@ import {
 import { config } from '@/config'
 
 type Role = 'owner' | 'admin' | 'member'
-type SessionWire = Omit<
-	DurableSocialSessionState,
-	'currentUser' | 'group' | 'members' | 'bans' | 'pendingInvites' | 'core'
-> & {
+const INITIAL_SOCIAL_STATE_TIMEOUT_MS = 15_000
+type SessionWire = DurableSocialSessionState & {
 	currentUser: AmberiteUser
-	group: FriendGroupSummary | null
-	members: FriendGroupMember[]
-	bans: FriendGroupBan[]
-	pendingInvites: GroupInviteWithGroup[]
-	core: DurableSocialSessionState['core']
+	group?: FriendGroupSummary | null
+	members?: FriendGroupMember[]
+	bans?: FriendGroupBan[]
+	pendingInvites?: GroupInviteWithGroup[]
+	core?: CorePresence | null
 }
 
 const sessionStateQuery = makeFunctionReference<'query', Record<string, never>, SessionWire>(
@@ -46,17 +46,21 @@ const members = ref<FriendGroupMember[]>([])
 const bans = ref<FriendGroupBan[]>([])
 const invites = ref<GroupInviteWithGroup[]>([])
 const friends = ref<FriendsListResult | null>(null)
+const coreLinks = ref<CoreListEntry[]>([])
 const loading = ref(true)
 const error = ref<Error | null>(null)
 let subscribed = false
 let durableState: SessionWire | null = null
-let liveState: LiveSocialState = { users: {}, cores: {} }
+let liveState: LiveSocialState = { users: {} }
 let presenceSession: RealtimePresenceSession | null = null
+let initialStateReceived = false
+let initialStateTimer: ReturnType<typeof setTimeout> | null = null
+let stateWaiters: Array<() => void> = []
 
 function clearUserScopedState(clearUser = false) {
 	if (clearUser) {
 		currentUser.value = null
-		liveState = { users: {}, cores: {} }
+		liveState = { users: {} }
 		presenceSession?.dispose()
 		presenceSession = null
 	}
@@ -65,6 +69,7 @@ function clearUserScopedState(clearUser = false) {
 	bans.value = []
 	invites.value = []
 	friends.value = null
+	coreLinks.value = []
 	clearConnectedCore()
 }
 
@@ -76,14 +81,48 @@ function safeSocialError(value: unknown): Error {
 	)
 }
 
+function settleStateWaiters() {
+	const waiters = stateWaiters
+	stateWaiters = []
+	for (const resolve of waiters) resolve()
+}
+
+function waitForSocialState(): Promise<void> {
+	return new Promise((resolve) => {
+		let timeout: ReturnType<typeof setTimeout> | null = null
+		const done = () => {
+			if (timeout) clearTimeout(timeout)
+			resolve()
+		}
+		timeout = setTimeout(() => {
+			stateWaiters = stateWaiters.filter((waiter) => waiter !== done)
+			done()
+		}, INITIAL_SOCIAL_STATE_TIMEOUT_MS)
+		stateWaiters.push(done)
+	})
+}
+
+function handleSubscriptionError(reason: unknown) {
+	if (initialStateTimer) {
+		clearTimeout(initialStateTimer)
+		initialStateTimer = null
+	}
+	loading.value = false
+	error.value = safeSocialError(reason)
+	settleStateWaiters()
+	if (reason instanceof Error && reason.message.toLowerCase().includes('not authenticated'))
+		clearUserScopedState(true)
+}
+
 function applyState(next: SessionWire) {
 	durableState = next
 	const state = composeSocialSessionState(next, liveState)
 	currentUser.value = state.currentUser
-	group.value = state.group
-	members.value = state.members
-	bans.value = state.bans
-	invites.value = state.pendingInvites
+	group.value = next.group ?? null
+	members.value = next.members ?? []
+	bans.value = next.bans ?? []
+	invites.value = next.pendingInvites ?? []
+	coreLinks.value = state.coreLinks
 	friends.value = state.friends
 		? {
 				...state.friends,
@@ -95,14 +134,17 @@ function applyState(next: SessionWire) {
 				})),
 			}
 		: null
-	const core = state.core
+	const core =
+		next.core ??
+		state.coreLinks.find((entry) => entry.linkState === 'linked' && entry.connectionUrl) ??
+		null
 	if (core?.coreId && core.connectionUrl) {
 		const connected = getConnectedCore()
 		if (connected?.coreId !== core.coreId || connected.url !== core.connectionUrl) {
 			setConnectedCore({
 				coreId: core.coreId,
 				url: core.connectionUrl,
-				groupId: state.group?.group.id,
+				groupId: next.group?.group.id,
 			})
 		}
 	} else {
@@ -110,6 +152,12 @@ function applyState(next: SessionWire) {
 	}
 	loading.value = false
 	error.value = null
+	initialStateReceived = true
+	if (initialStateTimer) {
+		clearTimeout(initialStateTimer)
+		initialStateTimer = null
+	}
+	settleStateWaiters()
 	connectPresence()
 }
 
@@ -142,24 +190,11 @@ function applyLiveFrame(frame: RealtimeFrame): void {
 			users: Object.fromEntries(
 				Object.entries(frame.users).map(([id, online]) => [id, { online }]),
 			),
-			cores: frame.cores,
 		}
 	} else if (frame.type === 'presence.user') {
 		liveState = {
 			...liveState,
 			users: { ...liveState.users, [frame.userId]: { online: frame.online } },
-		}
-	} else if (frame.type === 'presence.core') {
-		liveState = {
-			...liveState,
-			cores: {
-				...liveState.cores,
-				[frame.coreId]: {
-					online: frame.online,
-					health: frame.health,
-					diagnostic: frame.diagnostic,
-				},
-			},
 		}
 	}
 	if (durableState) applyState(durableState)
@@ -172,6 +207,7 @@ export interface UseSocialReturn {
 	bans: Ref<FriendGroupBan[]>
 	invites: Ref<GroupInviteWithGroup[]>
 	friends: Ref<FriendsListResult | null>
+	coreLinks: Ref<CoreListEntry[]>
 	loading: Ref<boolean>
 	error: Ref<Error | null>
 	myRole: ComputedRef<Role | null>
@@ -235,16 +271,24 @@ export function useSocial(): UseSocialReturn {
 		}
 	}
 	async function refresh(): Promise<void> {
-		loading.value = true
+		error.value = null
+		const stateReady = waitForSocialState()
 		refreshRealtimeConvexAuth()
+		await stateReady
 	}
 	if (!subscribed) {
 		subscribed = true
-		useRealtimeConvexClient().onUpdate(sessionStateQuery, {}, applyState, (reason) => {
-			loading.value = false
-			error.value = safeSocialError(reason)
-			if (reason.message.toLowerCase().includes('not authenticated')) clearUserScopedState(true)
-		})
+		initialStateTimer = setTimeout(() => {
+			if (!initialStateReceived)
+				handleSubscriptionError(new Error('Timed out waiting for social state.'))
+		}, INITIAL_SOCIAL_STATE_TIMEOUT_MS)
+		useRealtimeConvexClient().onUpdate(sessionStateQuery, {}, (next) => {
+			try {
+				applyState(next)
+			} catch (reason) {
+				handleSubscriptionError(reason)
+			}
+		}, handleSubscriptionError)
 	}
 	return {
 		currentUser,
@@ -253,6 +297,7 @@ export function useSocial(): UseSocialReturn {
 		bans,
 		invites,
 		friends,
+		coreLinks,
 		loading,
 		error,
 		myRole,

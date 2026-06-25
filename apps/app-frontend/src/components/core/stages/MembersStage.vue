@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { UserPlusIcon } from '@modrinth/assets'
 import type { ComboboxOption } from '@modrinth/ui'
-import { AccessTable, Avatar, ButtonStyled, Checkbox, Combobox } from '@modrinth/ui'
+import { Avatar, ButtonStyled, Checkbox, Combobox } from '@modrinth/ui'
 import { computed } from 'vue'
 
+import CoreAccessTable from '../CoreAccessTable.vue'
 import { injectCoreOnboardingContext } from '../core-onboarding-context'
 
 const ctx = injectCoreOnboardingContext()
@@ -84,7 +85,7 @@ const canCreateInvite = computed(() => {
 				/>
 			</div>
 		</div>
-		<AccessTable
+		<CoreAccessTable
 			:members="ctx.members.value"
 			:roles="ctx.roles"
 			:can-manage-users="ctx.canManage.value"

@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * Desktop browse route with instance and Core-server installation contexts.
+ * - `initInstanceContext` (217) loads the active browse context and installed content.
+ * - `selectableProjectTypes` (515) and `installContext` (570) derive the active UI state.
+ * - `getCardActions` (759) creates app-specific install actions for each result.
+ * - `search` (1062) normalizes results; `provideBrowseManager` (1283) exposes the layout context.
+ */
 import { installCoreModpack } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
 import {
@@ -11,7 +18,6 @@ import {
 } from '@modrinth/assets'
 import type { BrowseInstallContentType, CardAction, ProjectType, Tags } from '@modrinth/ui'
 import {
-	BrowsePageLayout,
 	BrowseSidebar,
 	commonMessages,
 	CreationFlowModal,
@@ -36,6 +42,7 @@ import type { LocationQuery } from 'vue-router'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
 import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
+import AppBrowsePageLayout from '@/components/ui/AppBrowsePageLayout.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
 import { useCoreClient } from '@/composables/useCoreClient'
@@ -745,10 +752,14 @@ function supportsDedicatedServerEnvironment(project: {
 	return project.server_side !== 'unsupported'
 }
 
+type AppCardAction = CardAction & {
+	joinedActions?: AppCardAction[]
+}
+
 function getCardActions(
 	result: Labrinth.Search.v2.ResultSearchProject | Labrinth.Search.v3.ResultSearchProject,
 	currentProjectType: string,
-): CardAction[] {
+): AppCardAction[] {
 	if (currentProjectType === 'server') {
 		return getServerCardActions(result as Labrinth.Search.v3.ResultSearchProject)
 	}
@@ -1327,7 +1338,7 @@ provideBrowseManager({
 <template>
 	<div class="flex flex-col gap-3 p-6">
 		<AppPageSkeleton v-if="browseInitialPending" variant="list" class="!p-0" />
-		<BrowsePageLayout v-else>
+		<AppBrowsePageLayout v-else>
 			<template #after>
 				<ContextMenu ref="contextMenuRef" @option-clicked="handleOptionsClick">
 					<template #open_link>
@@ -1338,7 +1349,7 @@ provideBrowseManager({
 					</template>
 				</ContextMenu>
 			</template>
-		</BrowsePageLayout>
+		</AppBrowsePageLayout>
 		<CreationFlowModal
 			v-if="isServerContext && projectType === 'modpack'"
 			ref="serverSetupModalRef"

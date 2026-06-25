@@ -2,6 +2,8 @@
 
 Nuxt website frontend.
 
+Amberite backend profile fields intentionally mirror Modrinth profile naming where practical (`id`, `username`, `avatar_url`, `bio`, `created`). Amberite profile, social, and Core-list reads are authenticated viewer-safe data, not anonymous public APIs; website pages must require login before calling them.
+
 ## Context Loading
 
 - Load `CLAUDE.md` for architecture and package-specific conventions.

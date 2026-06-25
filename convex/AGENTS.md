@@ -1,103 +1,87 @@
 # convex
 
-Amberite Convex backend for social identity, friend groups, Core presence, synced profiles, and relay messaging. This directory is deployed from the repo root `convex.json`.
+Amberite's durable backend. Convex is auth-required by default and is authoritative for Amberite identity, sessions, profiles, friends, blocks, linked Modrinth accounts, encrypted Modrinth tokens, Core pairing credentials, minimal Core list projection, and cross-device sync metadata. Core remains authoritative for Core roles, permissions, bans, invites, instance access, and audit logs. Convex is not a presence server, a generic message bus, or a timer-driven client cache.
 
-## Critical Workflow
+## Communication architecture
 
-- Always deploy every change under `convex/` to the development deployment before considering work complete. Run `pnpm exec convex dev --once --tail-logs disable`; do not leave Convex changes only in the local worktree.
+```text
+Desktop / web dashboard
+  ├─ one ConvexClient subscription for durable social state
+  ├─ user actions as authenticated Convex mutations
+  └─ direct WebSocket to the realtime Worker for ephemeral presence
 
-- After changing anything in `convex/`, push it to the dev deployment before calling the work done. This is required even though normal app/core/web dev servers should not be started during agent work:
+Core
+  └─ direct HTTP/SSE/WebSocket API for local Core control
 
-```powershell
-pnpm exec convex dev --once --tail-logs disable
+Cloudflare Worker
+  └─ authenticated bridge calls to Convex only for startup scope resolution,
+     invalidation, and recipient lookup; normal online/offline transitions
+     do not read or write Convex
 ```
 
-- Confirm the target deployment before relying on it:
+The normal desktop session uses `social.sessionState` as one authorization-preserving durable subscription. Convex reruns it only when its durable dependencies change. Social mutations change durable state and let that subscription converge; they must not trigger a client-wide refresh chain.
 
-```powershell
-pnpm exec convex env list
-pnpm exec convex run dev:devState
-```
+Use narrowly scoped subscriptions only while the relevant screen is open, such as `sync.serverProfilesState` and `sync.profileState`. Keep expensive, action-oriented work such as whitelist resolution on demand. One-shot HTTP requests remain acceptable for auth bootstrap, debounced search, and non-subscription callers, but are not the default state transport.
 
-- The current dev app expects `.env.local` at repo root to provide `CONVEX_DEPLOYMENT` and `CONVEX_URL`. Vite maps `CONVEX_URL` to `VITE_CONVEX_URL` in `apps/app-frontend/vite.config.ts`, and the desktop adapter sends requests to `${VITE_CONVEX_URL}/api/query` and `/api/mutation`.
-- Do not start long-running `convex dev` watchers unless explicitly asked. Use `--once` for agent work.
-- Do not commit or document real secrets from `.env.local`.
+## Non-negotiable rules
 
-## Navigation Map
+- Do not add heartbeats, presence tables, client polling, periodic refreshes, or "event then fetch again" flows. Time spent with the app open must not create Convex function calls.
+- Do not use `messaging.ts`, relay tables, receipts, or a generic recipient/sender envelope for new functionality. Durable user actions are mutations; transient desktop online state belongs in the realtime Worker.
+- A client never supplies authority. Every query, mutation, action, bridge request, and returned field must derive authorization from the authenticated identity and the current database state.
+- Return explicit public DTOs. Never return raw user, group, Core, or membership documents when they contain credentials, hashes, private metadata, or internal-only fields.
+- Convex is the only owner of durable social authorization. Cloudflare may cache only connection-lifetime or TTL-bound session data and must ask the bridge for current fan-out recipients.
+- Keep queries bounded and indexed. Do not replace a composed subscription with an N+1 client fan-out.
+- Treat schema changes as migrations. Widen, backfill, switch callers, then remove old fields/tables; do not combine a destructive schema change with an incompatible client release.
+
+## Realtime bridge
+
+`realtimeBridge.ts` is a service-only HTTP endpoint. The Worker signs bounded requests with `REALTIME_BRIDGE_HMAC_SECRET`; its request ID and timestamp bound replay risk. It exposes only two operations:
+
+- `desktopScope`: resolve a JWT-authenticated user's visible friends and group members.
+- `recipients`: resolve the current authorized audience for an actual desktop lifecycle transition.
+
+The bridge is never a public desktop or Core API. Do not add Core presence, general data reads, relay delivery, or regular polling to it. Core credentials are random secrets returned once during pairing; store only their hash here, rotate them on ownership transfer/unpairing, and never return the hash in a public DTO. Core projection sync uses the dedicated HTTP endpoint in `coreProjection.ts`, not generic Convex mutations.
+
+## Navigation map
 
 ```text
 convex/
-  schema.ts          Tables, validators, and indexes for auth, users, groups, cores, sync, messages
-  _socialRules.ts    Shared auth/authorization helpers, group/core invariants, public user shaping
-  auth.ts            Auth/current user functions and username setup
-  dev.ts             Dev-only seed/reset/state helpers guarded by AMBERITE_DEV_MODE
-  friends.ts         Social profiles, search, heartbeat, friend requests, blocks
-  friendGroups.ts    Core-owned friend groups, roles, bans, ownership transfer, group Core listing
-  groupInvites.ts    Direct and code-based friend-group invites
-  presence.ts        Core registration, Core presence, pairing-code claim flow
-  sync.ts            Synced server profiles, visibility, auto-whitelist resolution, snapshots
-  messaging.ts       Authenticated Core/user relay messages and receipts
-  http.ts            HTTP route registration, if any external HTTP endpoints are added
-  _generated/        Convex-generated types; update through Convex codegen/dev, do not hand-edit
+  schema.ts            Durable table definitions, validators, indexes, and bridge replay records
+  auth.ts              Minecraft-backed Convex Auth and first-account social initialization
+  _socialRules.ts      Identity, authorization, invariants, and public DTO helpers
+  profiles.ts          Auth-required Amberite profile reads/search/update
+  social.ts            sessionState subscription and live visibility-scope derivation
+  friends.ts           Friend/profile/search/block mutations and queries
+  coreList.ts          Auth-required minimal Core list and projected member-link reads
+  coreProjection.ts    Credential-authenticated Core projection HTTP endpoint
+  modrinth.ts          Linked Modrinth metadata, token encryption, and reconnect status
+  friendGroups.ts      Deprecated migration table API; Core is the new authority
+  groupInvites.ts      Deprecated migration invite API; Core is the new authority
+  presence.ts          Pairing and Core credential lifecycle; not live presence
+  sync.ts              Scoped durable sync-profile/snapshot/event state
+  bridge.ts            Internal desktop-scope queries used only by the realtime bridge
+  realtimeBridge.ts    HMAC-authenticated Worker HTTP boundary and replay protection
+  crons.ts             Bounded cleanup of bridge replay records
+  http.ts              Registration for external Convex HTTP endpoints
+  messaging.ts         Legacy relay code; do not extend and remove after migration
+  dev.ts               Development-only helpers guarded by AMBERITE_DEV_MODE
+  _generated/          Generated Convex bindings; never hand-edit
 ```
 
-## Core Logic
+## How to change this area
 
-- `resolveActor(ctx, __actAs)` in `_socialRules.ts` is the identity gate. Production and the desktop app must use real Convex Auth/JWT identity. Dev-only `__actAs` is only for explicit backend test utilities and must not be wired into app clients.
-- Never persist `__actAs`. Convex document fields beginning with `_` are reserved, so destructure it away before inserts, patches, or metadata copies.
-- The one-user/one-Core/one-friend-group invariant is enforced by `requireSingleGroupMembership`, `requireSingleOwnedCore`, `getOrCreateDefaultFriendGroup`, and `upsertCoreForFriendGroup`.
-- Friend-group authorization flows through `requireFriendGroupRole`. Owner outranks admin outranks member; use `roleRank` for operations that compare two members.
-- Public user responses should go through `publicUser` so callers do not receive raw auth/user documents.
-- Queries with `returns` validators must return explicit public objects, not raw Convex documents with `_id`/`_creationTime`, unless the validator allows those fields.
+1. Start with `schema.ts`, `_socialRules.ts`, and the affected domain file. Read `social.ts` as well when a change affects a durable entity that appears in the shell.
+2. Add or reuse an indexed, authorization-preserving query; extend `sessionState` only for state every signed-in shell needs. Otherwise add a screen-scoped query with a strict bound.
+3. Make mutations idempotent where retries or double-clicks are possible. Enforce ownership, membership, block, ban, and role invariants on the server.
+4. If a durable authorization change affects desktop live visibility, ensure the next Worker transition resolves recipients through `bridge.ts`; the desktop composer must discard now-unauthorized live entries immediately.
+5. Update the public TypeScript contract in `packages/amberite-api` and test both authorization and subscription convergence.
 
-## Auth Architecture
+## Deployment and checks
 
-Amberite identity is the same identity as the user's Minecraft login. There is no separate Microsoft OAuth app registration or env-configured auth exchange URL in the desktop app.
-
-- The desktop app authenticates to Minecraft using the upstream Modrinth hardcoded Xbox client ID (`packages/app-lib/src/state/minecraft_auth.rs`).
-- When the app needs an Amberite session, it reads the active Minecraft credentials from the local Rust state and sends the Minecraft access token to Convex.
-- Convex exposes a `ConvexCredentials` provider (`minecraft-token`) in `convex/auth.ts`.
-- The provider verifies the token with `https://api.minecraftservices.com/minecraft/profile`, then finds or creates an Amberite user linked by Minecraft UUID.
-- Convex Auth issues the session JWT, which the desktop app stores and sends as `Authorization: Bearer <token>`.
-
-This keeps the desktop app's auth surface minimal: no client secrets, no browser OAuth redirects, and no extra Microsoft login screen.
-
-## App Connection Path
-
-- Desktop app adapter: `apps/app-frontend/src/adapters/desktop.ts`
-- Shared Convex client: `packages/amberite-api/src/convex-api.ts`
-- Raw HTTP transport: `packages/amberite-api/src/convex-relay.ts`
-- The desktop app stores a real Amberite session JWT and sends it as `Authorization: Bearer <token>`.
-- Live endpoint shapes:
-
-```json
-{ "path": "friends:friendsList", "args": {}, "format": "json" }
-{ "path": "auth:signIn", "args": { "provider": "minecraft-token", "params": { "minecraftAccessToken": "..." } }, "format": "json" }
-```
-
-sent as `POST /api/query`, `/api/mutation`, or `/api/action` on `CONVEX_URL`.
-
-## Useful Checks
-
-Run from repo root:
+Do not start a long-running watcher. After every source change under `convex/`, deploy the development target before completing the task:
 
 ```powershell
 pnpm exec convex dev --once --tail-logs disable
-pnpm exec convex run dev:devState
-pnpm exec convex run dev:devState
-pnpm --filter @amberite/amberite-api test
 ```
 
-Live app-style smoke test pattern:
-
-```powershell
-node --env-file=.env.local -e "fetch(process.env.CONVEX_URL + '/api/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'dev:devState', args: {}, format: 'json' }) }).then(r => r.json()).then(console.log)"
-```
-
-`dev:resetSocial` wipes social/Core/sync test state while keeping users by default when called with `{"includeUsers":false}`.
-
-## Deployment Notes
-
-- `dev.ts` functions are intentionally inert without `AMBERITE_DEV_MODE`.
-- Production/preview deployments and app clients must not rely on `__actAs`; real auth should be present.
-- If `schema.ts` changes, push with `pnpm exec convex dev --once --tail-logs disable` and then run at least one targeted function through `pnpm exec convex run` or `/api/query`/`/api/mutation`.
+Confirm the target deployment first with `pnpm exec convex env list`. Never document or commit secrets from `.env.local`. Use the migration component and an expand/migrate/narrow rollout for breaking schema work.

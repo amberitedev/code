@@ -96,38 +96,3 @@ export const ExistingMember: Story = {
 		`,
 	}),
 }
-
-export const PermissionsLinkOpensModal: Story = {
-	render: () => ({
-		components: { ButtonStyled, GrantAccessModal },
-		setup() {
-			const modalRef = ref<InstanceType<typeof GrantAccessModal> | null>(null)
-			const openedPermissions = ref(false)
-			const users = [{ id: 'fetch', username: 'Fetch' }]
-			async function searchUsers(query: string) {
-				const normalizedQuery = query.trim().toLowerCase()
-				return users.filter((user) => user.username.toLowerCase().startsWith(normalizedQuery))
-			}
-			function handleViewPermissions() {
-				openedPermissions.value = true
-			}
-			return { modalRef, searchUsers, openedPermissions, handleViewPermissions }
-		},
-		template: /* html */ `
-			<div class="flex flex-col items-center gap-4">
-				<ButtonStyled color="brand">
-					<button @click="modalRef?.show($event)">Add user</button>
-				</ButtonStyled>
-				<p v-if="openedPermissions" class="m-0 text-sm text-secondary">Permissions opened</p>
-				<GrantAccessModal
-					ref="modalRef"
-					:search-users="searchUsers"
-					open-permissions-in-modal
-					permissions-href="#"
-					permissions-link-target="_self"
-					@view-permissions="handleViewPermissions"
-				/>
-			</div>
-		`,
-	}),
-}

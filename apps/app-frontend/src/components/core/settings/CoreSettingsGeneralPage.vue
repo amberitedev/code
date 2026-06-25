@@ -93,8 +93,8 @@ async function selectIcon() {
 						<span class="font-semibold text-contrast">Icon</span>
 						<IconSelect
 							v-model="iconUrl"
+							class="hide-icon-select-edit-icon"
 							:options="['select', 'remove']"
-							:show-edit-icon="false"
 							@select="selectIcon"
 							@remove="iconUrl = undefined"
 						/>
@@ -126,3 +126,9 @@ async function selectIcon() {
 		/>
 	</div>
 </template>
+
+<style scoped>
+.hide-icon-select-edit-icon :deep(.hovering-icon-shadow) {
+	display: none;
+}
+</style>

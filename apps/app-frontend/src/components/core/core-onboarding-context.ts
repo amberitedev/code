@@ -1,11 +1,12 @@
 import type {
 	ServerAccessInviteSuggestion,
-	ServerAccessMember,
 	ServerAccessRole,
 	ServerAccessRoleOption,
 } from '@modrinth/ui'
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import { inject, provide } from 'vue'
+
+import type { CoreAccessMember } from './core-access-types'
 
 export type CoreOnboardingFlow = 'create' | 'connect'
 
@@ -21,15 +22,15 @@ export interface CoreOnboardingContext {
 	error: Ref<string>
 	working: Ref<boolean>
 	canManage: ComputedRef<boolean>
-	members: ComputedRef<ServerAccessMember[]>
+	members: ComputedRef<CoreAccessMember[]>
 	roles: ServerAccessRoleOption[]
 	inviteSuggestions: ComputedRef<ServerAccessInviteSuggestion[]>
 	selectIcon: () => Promise<void>
 	selectInviteSuggestion: (user: ServerAccessInviteSuggestion) => void
 	createInvite: () => void
-	quickInvite: (member: ServerAccessMember) => void
-	updateRole: (member: ServerAccessMember, role: ServerAccessRole) => Promise<void>
-	removeMember: (member: ServerAccessMember) => Promise<void>
+	quickInvite: (member: CoreAccessMember) => void
+	updateRole: (member: CoreAccessMember, role: ServerAccessRole) => Promise<void>
+	removeMember: (member: CoreAccessMember) => Promise<void>
 }
 
 const coreOnboardingKey: InjectionKey<CoreOnboardingContext> = Symbol('CoreOnboarding')

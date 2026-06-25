@@ -28,7 +28,7 @@ export interface CoreSetupRequest {
 	owner_user_id: string
 	/** JWT audience claim to validate. Defaults to "authenticated" if omitted. */
 	auth_audience?: string
-	/** One-time Core credential used exclusively for the realtime Worker. */
+	/** Legacy one-time Core realtime credential retained for setup compatibility. */
 	realtime_credential?: string
 	realtime_url?: string
 }
@@ -435,6 +435,14 @@ export interface CoreMetadata {
 	setup_mode: 'remote' | 'local'
 	run_mode: 'manual' | 'app_open' | 'startup'
 	updated_at: string
+}
+
+export interface CoreProjectionSyncResult {
+	ok: boolean
+	status: 'applied' | 'stale' | string
+	coreId?: string | null
+	projectionRevision?: number | null
+	syncedAt?: number | null
 }
 
 /** Member record from GET /core/members. */

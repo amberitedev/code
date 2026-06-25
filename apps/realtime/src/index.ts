@@ -1,30 +1,29 @@
 import { DurableObject } from 'cloudflare:workers'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
-type ConnectionKind = 'desktop' | 'core'
-type CoreHealth = 'healthy' | 'degraded' | 'offline'
-type CoreDiagnostic = 'none' | 'network' | 'authentication' | 'server'
+/**
+ * Realtime Worker routes desktop session tickets and upgrades (fetch: 50; desktopSession: 220),
+ * maintains hibernating desktop presence WebSockets (PresenceHub: 64), and signs Convex
+ * bridge calls (bridge: 321; signedJson: 379). Durable Object cleanup is bounded and
+ * rescheduled by alarm: 133.
+ */
+
 type Scope = {
 	userId?: string
 	friendUserIds?: string[]
 	memberUserIds?: string[]
-	coreId?: string | null
 }
 type Ticket = {
-	kind: ConnectionKind
+	kind: 'desktop'
 	id: string
-	credentialHash?: string
 	scope: Scope
 	expiresAt: number
 	jwtExpiresAt?: number
 	sessionId: string
 }
 type Attachment = {
-	kind: ConnectionKind
+	kind: 'desktop'
 	id: string
-	credentialHash?: string
-	health?: CoreHealth
-	diagnostic?: CoreDiagnostic
 	expiresAt?: number
 	sessionId: string
 }
@@ -42,6 +41,8 @@ const MAX_BODY_BYTES = 2048
 const TICKET_TTL_MS = 60_000
 const MAX_SESSION_ATTEMPTS_PER_MINUTE = 20
 const MAX_INVALIDATION_IDENTITIES = 100
+const CLEANUP_PAGE_SIZE = 100
+const BRIDGE_TIMEOUT_MS = 5_000
 let jwksUrl: string | null = null
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null
 
@@ -51,11 +52,11 @@ export default {
 		if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }), request, env)
 		if (url.pathname === '/v1/desktop-sessions' && request.method === 'POST')
 			return cors(await desktopSession(request, env), request, env)
-		if (url.pathname === '/v1/core-sessions' && request.method === 'POST')
-			return cors(await coreSession(request, env), request, env)
 		if (url.pathname === '/v1/connect' && request.method === 'GET') return connect(request, env)
 		if (url.pathname === '/v1/invalidate' && request.method === 'POST')
 			return invalidate(request, env)
+		if (url.pathname === '/v1/debug-presence' && request.method === 'POST')
+			return debugPresence(request, env)
 		return new Response('Not found', { status: 404 })
 	},
 }
@@ -93,7 +94,6 @@ export class PresenceHub extends DurableObject<Env> {
 		const attachment: Attachment = {
 			kind: ticket.kind,
 			id: ticket.id,
-			credentialHash: ticket.credentialHash,
 			expiresAt: ticket.jwtExpiresAt,
 			sessionId: ticket.sessionId,
 		}
@@ -111,23 +111,7 @@ export class PresenceHub extends DurableObject<Env> {
 	async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
 		if (typeof message !== 'string' || message.length > MAX_BODY_BYTES)
 			return socket.close(1009, 'Message too large')
-		const attachment = socket.deserializeAttachment() as Attachment | null
-		if (attachment?.expiresAt && attachment.expiresAt <= Date.now())
-			return socket.close(4001, 'Authorization expired')
-		if (!attachment || attachment.kind !== 'core') return socket.close(1008, 'Unsupported message')
-		let frame: { type?: unknown; health?: unknown; diagnostic?: unknown }
-		try {
-			frame = JSON.parse(message)
-		} catch {
-			return socket.close(1008, 'Invalid message')
-		}
-		if (frame.type !== 'core.health' || !isHealth(frame.health) || !isDiagnostic(frame.diagnostic))
-			return socket.close(1008, 'Invalid health frame')
-		if (attachment.health === frame.health && attachment.diagnostic === frame.diagnostic) return
-		attachment.health = frame.health
-		attachment.diagnostic = frame.diagnostic
-		socket.serializeAttachment(attachment)
-		await this.publishCore(attachment)
+		socket.close(1008, 'Unsupported message')
 	}
 
 	async webSocketClose(socket: WebSocket): Promise<void> {
@@ -148,114 +132,88 @@ export class PresenceHub extends DurableObject<Env> {
 
 	async alarm(): Promise<void> {
 		const now = Date.now()
-		for (const entry of await this.ctx.storage.list<Ticket>({ prefix: 'ticket:', limit: 100 }))
-			if (entry[1].expiresAt <= now) await this.ctx.storage.delete(entry[0])
-		for (const entry of await this.ctx.storage.list<{ expiresAt: number }>({
-			prefix: 'rate:',
-			limit: 100,
-		}))
-			if (entry[1].expiresAt <= now) await this.ctx.storage.delete(entry[0])
-		for (const entry of await this.ctx.storage.list<{ expiresAt: number }>({
-			prefix: 'session:',
-			limit: 100,
-		})) {
-			if (entry[1].expiresAt > now) continue
-			for (const socket of this.ctx.getWebSockets(sessionTag(entry[0].slice('session:'.length))))
+		const tickets = await this.cleanupExpired<Ticket>('ticket:', now)
+		const rates = await this.cleanupExpired<{ expiresAt: number }>('rate:', now)
+		const sessions = await this.cleanupExpired<{ expiresAt: number }>('session:', now, (key) => {
+			for (const socket of this.ctx.getWebSockets(sessionTag(key.slice('session:'.length))))
 				socket.close(4001, 'Authorization expired')
-			await this.ctx.storage.delete(entry[0])
-		}
+		})
+		await this.ctx.storage.setAlarm(
+			tickets.deleted === CLEANUP_PAGE_SIZE || rates.deleted === CLEANUP_PAGE_SIZE || sessions.deleted === CLEANUP_PAGE_SIZE
+				? now + 1
+				: now + TICKET_TTL_MS,
+		)
 	}
 
-	async invalidate(input: { userIds: string[]; coreIds: string[] }): Promise<void> {
+	async invalidate(input: { userIds: string[] }): Promise<void> {
 		for (const userId of input.userIds) {
 			for (const socket of this.ctx.getWebSockets(tag('desktop', userId))) {
 				socket.send(JSON.stringify({ type: 'authorization.invalidated' }))
 				socket.close(4003, 'Authorization invalidated')
 			}
 		}
-		for (const coreId of input.coreIds)
-			for (const socket of this.ctx.getWebSockets(tag('core', coreId)))
-				socket.close(4003, 'Authorization invalidated')
+	}
+
+	async debugPresence(): Promise<{
+		users: Array<{ id: string; connections: number }>
+	}> {
+		const users = new Map<string, number>()
+		for (const socket of this.ctx.getWebSockets()) {
+			const attachment = socket.deserializeAttachment() as Attachment | null
+			if (!attachment) continue
+			users.set(attachment.id, (users.get(attachment.id) ?? 0) + 1)
+		}
+		return {
+			users: [...users].map(([id, connections]) => ({ id, connections })),
+		}
 	}
 
 	private async publishLifecycle(attachment: Attachment, connected: boolean): Promise<void> {
-		const sockets = this.ctx.getWebSockets(tag(attachment.kind, attachment.id))
-		const online = connected ? sockets.length === 1 : sockets.length === 0
-		if (!online) return
-		const scope = await bridge(
-			this.env,
-			attachment.kind === 'desktop'
-				? { operation: 'recipients', kind: 'desktop', id: attachment.id }
-				: {
-						operation: 'recipients',
-						kind: 'core',
-						id: attachment.id,
-						credentialHash: attachment.credentialHash,
-					},
-		)
-		if (!scope) return
-		const recipients =
-			attachment.kind === 'desktop' ? (scope.friendUserIds ?? []) : (scope.memberUserIds ?? [])
-		const frame =
-			attachment.kind === 'desktop'
-				? { type: 'presence.user', userId: attachment.id, online: connected }
-				: {
-						type: 'presence.core',
-						coreId: attachment.id,
-						online: connected,
-						health: attachment.health ?? 'offline',
-						diagnostic: attachment.diagnostic ?? 'none',
-					}
-		this.sendUsers(recipients, frame)
-	}
-
-	private async publishCore(attachment: Attachment): Promise<void> {
+		const sockets = this.ctx.getWebSockets(tag('desktop', attachment.id))
+		const changed = connected ? sockets.length === 1 : sockets.length === 0
+		if (!changed) return
 		const scope = await bridge(this.env, {
 			operation: 'recipients',
-			kind: 'core',
+			kind: 'desktop',
 			id: attachment.id,
-			credentialHash: attachment.credentialHash,
 		})
 		if (!scope) return
-		this.sendUsers(scope.memberUserIds ?? [], {
-			type: 'presence.core',
-			coreId: attachment.id,
-			online: this.ctx.getWebSockets(tag('core', attachment.id)).length > 0,
-			health: attachment.health,
-			diagnostic: attachment.diagnostic,
+		this.sendUsers(visibleUserIds(scope), {
+			type: 'presence.user',
+			userId: attachment.id,
+			online: connected,
 		})
 	}
 
 	private async sendSnapshot(socket: WebSocket, ticket: Ticket): Promise<void> {
 		const users = Object.fromEntries(
-			(ticket.scope.friendUserIds ?? []).map((id) => [
+			visibleUserIds(ticket.scope).map((id) => [
 				id,
 				this.ctx.getWebSockets(tag('desktop', id)).length > 0,
 			]),
 		)
-		const coreId = ticket.scope.coreId
-		const cores = coreId ? { [coreId]: this.coreSnapshot(coreId) } : {}
-		socket.send(JSON.stringify({ type: 'presence.snapshot', users, cores }))
-	}
-
-	private coreSnapshot(coreId: string): {
-		online: boolean
-		health: CoreHealth
-		diagnostic: CoreDiagnostic
-	} {
-		const core = this.ctx.getWebSockets(tag('core', coreId))[0]
-		const attachment = core?.deserializeAttachment() as Attachment | null
-		return {
-			online: !!core,
-			health: attachment?.health ?? 'offline',
-			diagnostic: attachment?.diagnostic ?? 'none',
-		}
+		socket.send(JSON.stringify({ type: 'presence.snapshot', users }))
 	}
 
 	private sendUsers(userIds: string[], frame: unknown): void {
 		const payload = JSON.stringify(frame)
 		for (const userId of new Set(userIds))
 			for (const socket of this.ctx.getWebSockets(tag('desktop', userId))) socket.send(payload)
+	}
+
+	private async cleanupExpired<T extends { expiresAt: number }>(
+		prefix: string,
+		now: number,
+		onDelete?: (key: string) => void,
+	): Promise<{ deleted: number }> {
+		let deleted = 0
+		for (const [key, value] of await this.ctx.storage.list<T>({ prefix, limit: CLEANUP_PAGE_SIZE })) {
+			if (value.expiresAt > now) continue
+			onDelete?.(key)
+			await this.ctx.storage.delete(key)
+			deleted += 1
+		}
+		return { deleted }
 	}
 }
 
@@ -272,42 +230,20 @@ async function desktopSession(request: Request, env: Env): Promise<Response> {
 	const jwtExpiresAt = typeof payload.exp === 'number' ? payload.exp * 1000 : null
 	if (!jwtExpiresAt || jwtExpiresAt <= Date.now())
 		return new Response('Unauthorized', { status: 401 })
+	const expiresAt = Math.min(Date.now() + TICKET_TTL_MS, jwtExpiresAt)
 	const tokenValue = await hub(env).issueTicket(
 		{
 			kind: 'desktop',
 			id: userId,
 			scope,
-			expiresAt: Math.min(Date.now() + TICKET_TTL_MS, jwtExpiresAt),
+			expiresAt,
 			jwtExpiresAt,
 			sessionId: crypto.randomUUID(),
 		},
 		clientAddress(request),
 	)
 	return tokenValue
-		? Response.json({ ticket: tokenValue, expiresAt: Date.now() + TICKET_TTL_MS })
-		: new Response('Too many requests', { status: 429 })
-}
-
-async function coreSession(request: Request, env: Env): Promise<Response> {
-	const input = await boundedJson<{ coreId?: string; credential?: string }>(request)
-	if (!input?.coreId || !input.credential || input.credential.length !== 64)
-		return new Response('Unauthorized', { status: 401 })
-	const credentialHash = await sha256(input.credential)
-	const scope = await bridge(env, { operation: 'coreScope', coreId: input.coreId, credentialHash })
-	if (!scope) return new Response('Unauthorized', { status: 401 })
-	const tokenValue = await hub(env).issueTicket(
-		{
-			kind: 'core',
-			id: input.coreId,
-			credentialHash,
-			scope,
-			expiresAt: Date.now() + TICKET_TTL_MS,
-			sessionId: crypto.randomUUID(),
-		},
-		clientAddress(request),
-	)
-	return tokenValue
-		? Response.json({ ticket: tokenValue, expiresAt: Date.now() + TICKET_TTL_MS })
+		? Response.json({ ticket: tokenValue, expiresAt })
 		: new Response('Too many requests', { status: 429 })
 }
 
@@ -317,23 +253,30 @@ async function connect(request: Request, env: Env): Promise<Response> {
 	const token = new URL(request.url).searchParams.get('ticket')
 	if (!token || !/^[a-f0-9]{32}$/.test(token)) return new Response('Unauthorized', { status: 401 })
 	const ticket = await hub(env).consumeTicket(token)
+	if (ticket && !allowedOrigin(request.headers.get('origin') ?? '', env))
+		return new Response('Forbidden', { status: 403 })
 	return ticket ? hub(env).accept(request, ticket) : new Response('Unauthorized', { status: 401 })
 }
 
 async function invalidate(request: Request, env: Env): Promise<Response> {
-	const input = await signedJson<{ userIds?: unknown; coreIds?: unknown }>(request, env)
+	const input = await signedJson<{ userIds?: unknown }>(request, env)
 	if (!input) return new Response('Unauthorized', { status: 401 })
 	const userIds = validIds(input.userIds)
-	const coreIds = validIds(input.coreIds)
-	if (!userIds || !coreIds) return new Response('Bad request', { status: 400 })
-	await hub(env).invalidate({ userIds, coreIds })
+	if (!userIds || userIds.length === 0) return new Response('Bad request', { status: 400 })
+	await hub(env).invalidate({ userIds })
 	return Response.json({ ok: true })
+}
+
+async function debugPresence(request: Request, env: Env): Promise<Response> {
+	if (env.ENVIRONMENT !== 'development') return new Response('Not found', { status: 404 })
+	if (!(await signedJson(request, env))) return new Response('Unauthorized', { status: 401 })
+	return Response.json(await hub(env).debugPresence())
 }
 
 function hub(env: Env) {
 	return env.PRESENCE_HUB.getByName('global-v1')
 }
-function tag(kind: ConnectionKind, id: string) {
+function tag(kind: 'desktop', id: string) {
 	return `${kind}:${id}`
 }
 function sessionTag(sessionId: string) {
@@ -345,12 +288,6 @@ function bearer(request: Request) {
 }
 function clientAddress(request: Request) {
 	return request.headers.get('CF-Connecting-IP') ?? 'unknown'
-}
-function isHealth(value: unknown): value is CoreHealth {
-	return value === 'healthy' || value === 'degraded' || value === 'offline'
-}
-function isDiagnostic(value: unknown): value is CoreDiagnostic {
-	return value === 'none' || value === 'network' || value === 'authentication' || value === 'server'
 }
 function allowedOrigin(origin: string, env: Env) {
 	return config(env)
@@ -367,17 +304,6 @@ function cors(response: Response, request: Request, env: Env) {
 	headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type')
 	headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
 	return new Response(response.body, { status: response.status, headers })
-}
-async function boundedJson<T>(request: Request): Promise<T | null> {
-	const length = Number(request.headers.get('content-length') ?? 0)
-	if (length > MAX_BODY_BYTES) return null
-	const body = await request.text()
-	if (body.length > MAX_BODY_BYTES) return null
-	try {
-		return JSON.parse(body) as T
-	} catch {
-		return null
-	}
 }
 async function verifyDesktopJwt(token: string, env: Env) {
 	const runtime = config(env)
@@ -396,17 +322,28 @@ async function bridge(env: Env, body: Record<string, unknown>): Promise<Scope | 
 	const runtime = config(env)
 	const serialized = JSON.stringify(body)
 	const timestamp = String(Date.now())
-	const signature = await hmac(`${timestamp}.${serialized}`, runtime.REALTIME_BRIDGE_HMAC_SECRET)
-	const response = await fetch(runtime.CONVEX_BRIDGE_URL, {
-		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			'x-amberite-timestamp': timestamp,
-			'x-amberite-signature': signature,
-		},
-		body: serialized,
-	})
-	return response.ok ? ((await response.json()) as Scope) : null
+	const requestId = crypto.randomUUID()
+	const signature = await hmac(`${timestamp}.${requestId}.${serialized}`, runtime.REALTIME_BRIDGE_HMAC_SECRET)
+	const controller = new AbortController()
+	const timeout = setTimeout(() => controller.abort(), BRIDGE_TIMEOUT_MS)
+	try {
+		const response = await fetch(runtime.CONVEX_BRIDGE_URL, {
+			method: 'POST',
+			signal: controller.signal,
+			headers: {
+				'content-type': 'application/json',
+				'x-amberite-timestamp': timestamp,
+				'x-amberite-request-id': requestId,
+				'x-amberite-signature': signature,
+			},
+			body: serialized,
+		})
+		return response.ok ? ((await response.json()) as Scope) : null
+	} catch {
+		return null
+	} finally {
+		clearTimeout(timeout)
+	}
 }
 async function hmac(value: string, secret: string) {
 	const key = await crypto.subtle.importKey(
@@ -420,11 +357,7 @@ async function hmac(value: string, secret: string) {
 		new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value))),
 	)
 }
-async function sha256(value: string) {
-	return base64Url(
-		new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))),
-	)
-}
+
 function base64Url(bytes: Uint8Array) {
 	let value = ''
 	for (const byte of bytes) value += String.fromCharCode(byte)
@@ -447,11 +380,9 @@ async function signedJson<T>(request: Request, env: Env): Promise<T | null> {
 	const timestamp = request.headers.get('x-amberite-timestamp')
 	const signature = request.headers.get('x-amberite-signature')
 	if (!timestamp || !signature || Math.abs(Date.now() - Number(timestamp)) > 30_000) return null
-	const length = Number(request.headers.get('content-length') ?? 0)
-	if (length > MAX_BODY_BYTES) return null
-	const body = await request.text()
+	const body = await boundedBody(request)
 	if (
-		body.length > MAX_BODY_BYTES ||
+		body === null ||
 		!(await validHmac(`${timestamp}.${body}`, signature, config(env).REALTIME_BRIDGE_HMAC_SECRET))
 	)
 		return null
@@ -461,12 +392,43 @@ async function signedJson<T>(request: Request, env: Env): Promise<T | null> {
 		return null
 	}
 }
+
+async function boundedBody(request: Request): Promise<string | null> {
+	const contentLength = request.headers.get('content-length')
+	if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES)) return null
+	const reader = request.body?.getReader()
+	if (!reader) return ''
+	const chunks: Uint8Array[] = []
+	let length = 0
+	try {
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			length += value.byteLength
+			if (length > MAX_BODY_BYTES) return null
+			chunks.push(value)
+		}
+	} finally {
+		reader.releaseLock()
+	}
+	const bytes = new Uint8Array(length)
+	let offset = 0
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset)
+		offset += chunk.byteLength
+	}
+	return new TextDecoder().decode(bytes)
+}
+
 function validIds(value: unknown): string[] | null {
 	return Array.isArray(value) &&
 		value.length <= MAX_INVALIDATION_IDENTITIES &&
 		value.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 256)
 		? value
 		: null
+}
+function visibleUserIds(scope: Scope): string[] {
+	return [...new Set([scope.userId, ...(scope.friendUserIds ?? []), ...(scope.memberUserIds ?? [])].filter(Boolean) as string[])]
 }
 async function validHmac(value: string, signature: string, secret: string): Promise<boolean> {
 	const expected = new TextEncoder().encode(await hmac(value, secret))

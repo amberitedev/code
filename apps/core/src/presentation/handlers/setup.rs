@@ -1,10 +1,11 @@
-use std::sync::Arc;
-
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{application::state::AppState, presentation::error::ApiError};
+use crate::{
+    application::{core_projection_service, state::AppState},
+    presentation::error::ApiError,
+};
 
 /// Maximum wrong pairing-code attempts before lockout (SEC-01).
 const MAX_PAIRING_ATTEMPTS: u32 = 5;
@@ -15,7 +16,7 @@ pub struct SetupRequest {
     pub code: Option<String>,
     /// One-time secret written locally for app-launched Core auto-pairing.
     pub local_setup_secret: Option<String>,
-    /// Convex deployment URL used for relay and presence.
+    /// Convex deployment URL used for durable account and social state.
     pub convex_url: String,
     /// JWKS URL for the current auth provider.
     pub auth_jwks_url: String,
@@ -23,9 +24,9 @@ pub struct SetupRequest {
     pub owner_user_id: String,
     /// JWT audience claim to validate. Defaults to "authenticated" if omitted.
     pub auth_audience: Option<String>,
-    /// One-time realtime credential issued by Convex after a successful claim.
+    /// Legacy one-time realtime credential issued by Convex after a successful claim.
     pub realtime_credential: Option<String>,
-    /// Optional rollout endpoint for Cloudflare presence.
+    /// Legacy optional rollout endpoint for Cloudflare presence.
     pub realtime_url: Option<String>,
 }
 
@@ -157,16 +158,13 @@ pub async fn complete_setup(
     *pairing_code = None;
     *pairing_code_expires_at = None;
     *local_setup_secret = None;
-    if body.realtime_url.is_some() {
-        tokio::spawn(
-            crate::application::realtime_service::run_realtime_presence(
-                Arc::clone(&state),
-            ),
-        );
-    }
     tokio::fs::remove_file(state.config.data_dir.join(".setup_secret"))
         .await
         .ok();
+    drop(pairing_code);
+    drop(pairing_code_expires_at);
+    drop(local_setup_secret);
+    core_projection_service::sync_projection_best_effort(&state, "setup").await;
     Ok(Json(json!({ "ok": true, "core_id": state.core_id })))
 }
 
@@ -186,3 +184,4 @@ pub async fn setup_status(State(state): State<Arc<AppState>>) -> Json<Value> {
         "core_id": state.core_id,
     }))
 }
+use std::sync::Arc;

@@ -7,7 +7,9 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::{
-    application::{social_models, social_service, state::AppState},
+    application::{
+        core_projection_service, social_models, social_service, state::AppState,
+    },
     presentation::{
         authz::{require_core_manager, require_core_member},
         error::ApiError,
@@ -52,9 +54,13 @@ pub async fn upsert_member(
     Json(body): Json<social_models::UpsertMemberRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_core_manager(&state, &claims.sub).await?;
-    Ok(Json(json!(
-        social_service::upsert_member(&state, body).await?
-    )))
+    let member = social_service::upsert_member(&state, body).await?;
+    core_projection_service::sync_projection_best_effort(
+        &state,
+        "core-member-upsert",
+    )
+    .await;
+    Ok(Json(json!(member)))
 }
 
 pub async fn remove_member(
@@ -64,6 +70,11 @@ pub async fn remove_member(
 ) -> Result<Json<Value>, ApiError> {
     require_core_manager(&state, &claims.sub).await?;
     social_service::remove_member(&state, &user_id).await?;
+    core_projection_service::sync_projection_best_effort(
+        &state,
+        "core-member-remove",
+    )
+    .await;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -73,9 +84,13 @@ pub async fn ban_member(
     Json(body): Json<social_models::BanMemberRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_core_manager(&state, &claims.sub).await?;
-    Ok(Json(json!(
-        social_service::ban_member(&state, body, &claims.sub).await?
-    )))
+    let ban = social_service::ban_member(&state, body, &claims.sub).await?;
+    core_projection_service::sync_projection_best_effort(
+        &state,
+        "core-member-ban",
+    )
+    .await;
+    Ok(Json(json!(ban)))
 }
 
 pub async fn list_bans(

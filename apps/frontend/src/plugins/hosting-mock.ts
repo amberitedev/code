@@ -14,6 +14,8 @@
 
 import { defineNuxtPlugin, useRuntimeConfig } from '#app'
 
+const MOCK_FETCH_FLAG = '__modrinthHostingMockFetch'
+
 // ── Mock User ─────────────────────────────────────────────────────────────────
 
 const MOCK_USER = {
@@ -502,8 +504,28 @@ function routeBilling(method: string, pathname: string): Response | null {
 
 function routeUser(method: string, pathname: string): Response | null {
   // GET /v2/user - Get current user
-  if (method === 'GET' && (pathname === '/v2/user' || pathname === '/user')) {
+  if (method === 'GET' && (pathname === '/v3/user' || pathname === '/v2/user' || pathname === '/user')) {
     return json(MOCK_USER)
+  }
+
+  // GET /v2/user/:id/follows - Get followed projects
+  if (method === 'GET' && /^\/v2\/user\/[^/]+\/follows$/.test(pathname)) {
+    return json([])
+  }
+
+  // GET /v2/user/:id/projects - Get user's projects
+  if (method === 'GET' && /^\/v2\/user\/[^/]+\/projects$/.test(pathname)) {
+    return json([])
+  }
+
+  // GET /v3/user/:id/collections - Get user's collections
+  if (method === 'GET' && /^\/v3\/user\/[^/]+\/collections$/.test(pathname)) {
+    return json([])
+  }
+
+  // GET /v3/user/:id/projects - Get user's projects
+  if (method === 'GET' && /^\/v3\/user\/[^/]+\/projects$/.test(pathname)) {
+    return json([])
   }
 
   // GET /v2/user/servers - Get user's servers (if this endpoint exists)
@@ -517,8 +539,8 @@ function routeUser(method: string, pathname: string): Response | null {
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default defineNuxtPlugin(() => {
-  // Safety: never run in production
-  if (import.meta.env.PROD) {
+  // Safety: only run in development
+  if (!import.meta.dev) {
     console.log('[hosting-mock] Disabled in production')
     return
   }
@@ -538,6 +560,12 @@ export default defineNuxtPlugin(() => {
 
   console.log(`[hosting-mock] Archon base: ${archonBase}`)
   console.log(`[hosting-mock] Labrinth base: ${labrinthBase}`)
+
+  if ((globalThis as typeof globalThis & { [MOCK_FETCH_FLAG]?: boolean })[MOCK_FETCH_FLAG]) {
+    return
+  }
+
+  ;(globalThis as typeof globalThis & { [MOCK_FETCH_FLAG]?: boolean })[MOCK_FETCH_FLAG] = true
 
   const originalFetch = globalThis.fetch.bind(globalThis)
 
@@ -569,7 +597,10 @@ export default defineNuxtPlugin(() => {
       }
 
       // Intercept Labrinth user API calls
-      if (urlStr.startsWith(labrinthBase) && (pathname === '/v2/user' || pathname === '/user')) {
+      if (
+        urlStr.startsWith(labrinthBase) &&
+        (pathname === '/v3/user' || pathname === '/v2/user' || pathname === '/user' || /^\/v[23]\/user\//.test(pathname))
+      ) {
         console.log(`[hosting-mock] User: ${method} ${pathname}`)
         const response = routeUser(method, pathname)
         if (response !== null) return response

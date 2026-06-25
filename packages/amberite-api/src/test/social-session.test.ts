@@ -7,16 +7,11 @@ describe('composeSocialSessionState', () => {
 		const result = composeSocialSessionState({
 			currentUser: { userId: 'me' },
 			friends: { friends: [{ friendshipId: 'friendship', user: { userId: 'friend' }, createdAt: 0 }], incoming: [], outgoing: [], blocks: [] },
-			group: null,
-			members: [],
-			bans: [],
-			pendingInvites: [],
-			core: null,
+			coreLinks: [{ coreId: 'core', ownerUserId: 'me', linkState: 'linked', createdAt: 0, lastSeenAt: 0, projectionRevision: 0, syncedAt: 0, isOwner: true, memberUserIds: ['core-member'] }],
 		}, {
-			users: { friend: { online: true }, removed: { online: true } },
-			cores: { removedCore: { online: true } },
+			users: { friend: { online: true }, 'core-member': { online: true }, removed: { online: true } },
 		})
 
-		expect(result.live).toEqual({ users: { friend: { online: true } }, cores: {} })
+		expect(result.live).toEqual({ users: { friend: { online: true }, 'core-member': { online: true } } })
 	})
 })

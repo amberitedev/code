@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use color_eyre::eyre::{eyre, Result, WrapErr};
 
-/// Runtime configuration loaded from environment variables.
+/// Runtime configuration loaded from the active Core environment profile.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Directory where all instance data is stored.
@@ -25,9 +25,7 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        load_local_env();
-        dotenvy::dotenv().ok();
-        let dev_mode = required_env("AMBERITE_DEV")?;
+        load_environment_profile()?;
         let sync_retain_count: usize =
             required_env("AMBERITE_SYNC_RETAIN_COUNT")?
                 .parse()
@@ -48,15 +46,7 @@ impl Config {
                 .wrap_err("PORT must be a valid port number")?,
             bind_host: required_env("AMBERITE_BIND_HOST")?,
             allowed_origin: required_env("ALLOWED_ORIGIN")?,
-            dev_mode: match dev_mode.as_str() {
-                "true" | "1" => true,
-                "false" | "0" => false,
-                _ => {
-                    return Err(eyre!(
-                        "AMBERITE_DEV must be true, false, 1, or 0"
-                    ))
-                }
-            },
+            dev_mode: cfg!(debug_assertions),
             sync_retain_count,
         })
     }
@@ -71,20 +61,21 @@ fn required_env(name: &str) -> Result<String> {
     Ok(value)
 }
 
-/// Load the workspace's development environment when Core runs from `apps/core`.
-///
-/// `dotenvy::dotenv` only looks for `.env`, while the desktop app and Convex use
-/// the repository-level `.env.local` for `CONVEX_URL`.
-fn load_local_env() {
-    let Ok(current_dir) = std::env::current_dir() else {
-        return;
+fn load_environment_profile() -> Result<()> {
+    let filename = if cfg!(debug_assertions) {
+        ".env.local"
+    } else {
+        ".env.prod"
     };
-
-    for directory in current_dir.ancestors() {
-        let path = directory.join(".env.local");
-        if path.is_file() {
-            dotenvy::from_path(path).ok();
-            return;
-        }
+    let path = std::env::current_dir()
+        .map_err(|error| {
+            eyre!("Unable to resolve the Core working directory: {error}")
+        })?
+        .join(filename);
+    if path.is_file() {
+        dotenvy::from_path(path).map_err(|error| {
+            eyre!("Unable to load the Core environment profile: {error}")
+        })?;
     }
+    Ok(())
 }

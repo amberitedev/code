@@ -55,7 +55,7 @@ function selectTab(tab: { href: string }) {
 </script>
 
 <template>
-	<div class="relative flex min-h-full flex-col p-6">
+	<div class="flex min-h-full flex-col p-6">
 		<CoreOnboardingModal ref="onboardingModal" />
 		<CoreHostingSettingsModal ref="settingsModal" />
 		<CoreSetupPanel

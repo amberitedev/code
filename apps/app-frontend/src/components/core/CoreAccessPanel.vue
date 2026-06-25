@@ -134,7 +134,7 @@ onMounted(loadCoreState)
 		<AccessTable
 			:members="filteredMembers"
 			:roles="roleOptions"
-			:user-link="(username) => `https://modrinth.com/user/${encodeURIComponent(username)}`"
+			:user-profile-link="(username) => `https://modrinth.com/user/${encodeURIComponent(username)}`"
 			:can-manage-users="social.canManage.value"
 			@update-role="updateRole"
 			@remove-member="removeMember"

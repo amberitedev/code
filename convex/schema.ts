@@ -6,6 +6,8 @@ const ackPolicy = v.union(v.literal("none"), v.literal("received"), v.literal("p
 const friendGroupRole = v.union(v.literal("owner"), v.literal("admin"), v.literal("member"));
 const friendRequestStatus = v.union(v.literal("pending"), v.literal("accepted"), v.literal("declined"), v.literal("canceled"));
 const groupInviteStatus = v.union(v.literal("pending"), v.literal("accepted"), v.literal("declined"), v.literal("revoked"), v.literal("expired"));
+const coreLinkState = v.union(v.literal("unlinked"), v.literal("linked"));
+const linkedAccountStatus = v.union(v.literal("active"), v.literal("needs_reconnect"), v.literal("revoked"));
 const messageStatus = v.union(v.literal("pending"), v.literal("received"), v.literal("processed"), v.literal("expired"));
 const pairingStatus = v.union(v.literal("waiting"), v.literal("claimed"), v.literal("expired"));
 const syncStatus = v.union(v.literal("active"), v.literal("paused"), v.literal("archived"));
@@ -19,7 +21,11 @@ export default defineSchema({
 		normalizedUsername: v.optional(v.string()), friendCode: v.optional(v.string()),
 		amberiteUserId: v.optional(v.string()), email: v.optional(v.string()), emailVerificationTime: v.optional(v.number()),
 		phone: v.optional(v.string()), phoneVerificationTime: v.optional(v.number()), image: v.optional(v.string()),
-		isAnonymous: v.optional(v.boolean()), onboardedAt: v.optional(v.number()),
+		bio: v.optional(v.string()), avatarUrl: v.optional(v.string()), avatarStorageId: v.optional(v.string()),
+		avatarMimeType: v.optional(v.string()), avatarSizeBytes: v.optional(v.number()),
+		profileUpdatedAt: v.optional(v.number()), deletedAt: v.optional(v.number()),
+		deletedReason: v.optional(v.string()), isAnonymous: v.optional(v.boolean()),
+		onboardedAt: v.optional(v.number()),
 	})
 		.index("email", ["email"])
 		.index("by_amberite_user_id", ["amberiteUserId"])
@@ -31,6 +37,17 @@ export default defineSchema({
 	})
 		.index("by_amberite_user", ["amberiteUserId"])
 		.index("by_microsoft_account", ["microsoftAccountId"]),
+	linkedModrinthAccounts: defineTable({
+		userId: v.id("users"), modrinthUserId: v.string(), username: v.string(),
+		avatarUrl: v.optional(v.string()), scopes: v.array(v.string()),
+		encryptedAccessToken: v.string(), encryptedRefreshToken: v.optional(v.string()),
+		expiresAt: v.optional(v.number()), status: linkedAccountStatus,
+		needsReconnect: v.optional(v.boolean()), reconnectReason: v.optional(v.string()),
+		linkedAt: v.number(), updatedAt: v.number(),
+	})
+		.index("by_user", ["userId"])
+		.index("by_modrinth_user", ["modrinthUserId"]),
+	/** Deprecated migration authority. Core owns names, roles, permissions, bans, invites, and audit data. */
 	friendGroups: defineTable({
 		name: v.optional(v.string()), description: v.optional(v.string()), banner: v.optional(v.string()),
 		subdomain: v.optional(v.string()), ownerUserId: v.string(), coreId: v.optional(v.string()),
@@ -87,6 +104,22 @@ export default defineSchema({
 		.index("by_core_id", ["coreId"])
 		.index("by_expires_at", ["expiresAt"])
 		.index("by_status", ["status"]),
+	coreList: defineTable({
+		coreId: v.string(), ownerUserId: v.string(), linkState: coreLinkState,
+		connectionUrl: v.optional(v.string()), setupMode: v.optional(v.union(v.literal("remote"), v.literal("local"))),
+		createdAt: v.number(), lastSeenAt: v.number(), projectionRevision: v.number(),
+		syncedAt: v.number(), syncCredentialHash: v.optional(v.string()),
+	})
+		.index("by_core_id", ["coreId"])
+		.index("by_owner", ["ownerUserId"])
+		.index("by_link_state", ["linkState"]),
+	coreMemberLinks: defineTable({
+		coreId: v.string(), userId: v.string(), isOwner: v.boolean(), syncedAt: v.number(),
+	})
+		.index("by_core_user", ["coreId", "userId"])
+		.index("by_core", ["coreId"])
+		.index("by_user", ["userId"]),
+	/** Deprecated migration authority. Use coreList and coreMemberLinks for new Convex/Core projection reads. */
 	cores: defineTable({
 		coreId: v.string(),
 		ownerUserId: v.string(),
@@ -172,4 +205,9 @@ export default defineSchema({
 	})
 		.index("by_message_id", ["messageId"])
 		.index("by_recipient", ["recipientId"]),
+	realtimeBridgeRequests: defineTable({
+		requestId: v.string(), expiresAt: v.number(),
+	})
+		.index("by_request_id", ["requestId"])
+		.index("by_expires_at", ["expiresAt"]),
 });

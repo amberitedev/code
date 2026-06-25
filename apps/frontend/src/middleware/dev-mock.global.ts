@@ -9,7 +9,7 @@ import type { Labrinth } from '@modrinth/api-client'
  * No-ops in production.
  */
 
-// Same mock user as hosting-mock.client.ts for consistency
+// Same mock user as hosting-mock.ts for consistency
 const MOCK_USER: Labrinth.Users.v2.User = {
   id: 'mock-user-id',
   username: 'devuser',

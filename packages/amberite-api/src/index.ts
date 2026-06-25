@@ -45,6 +45,7 @@ export type {
 	FsCopyRequest,
 	CoreFsOperationKind,
 	CoreMetadata,
+	CoreProjectionSyncResult,
 	CoreMember,
 	CoreAccessRole,
 	CorePermissionPreset,
@@ -67,6 +68,10 @@ export type {
 
 export type {
 	AmberiteUser,
+	AmberiteProfile,
+	AmberitePublicProfile,
+	LinkedModrinthAccount,
+	CoreListEntry,
 	CorePresence,
 	FriendGroupInfo,
 	FriendGroupSummary,
@@ -95,7 +100,6 @@ export type {
 export { composeSocialSessionState } from './social-session'
 export type {
 	DurableSocialSessionState,
-	LiveCoreState,
 	LiveSocialState,
 	LiveUserState,
 	SocialSessionState,
@@ -103,8 +107,6 @@ export type {
 export { CoreWsConnection } from './ws'
 export { RealtimePresenceSession } from './realtime'
 export type {
-	RealtimeCoreDiagnostic,
-	RealtimeCoreHealth,
 	RealtimeFrame,
 	RealtimePresenceSessionOptions,
 	RealtimeSocket,

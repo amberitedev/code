@@ -5,11 +5,12 @@ import {
 	Avatar,
 	ButtonStyled,
 	defineMessages,
-	OverflowMenu,
 	useVIntl,
 } from '@modrinth/ui'
 
 import type { FriendWithUserData } from '@/helpers/friends.ts'
+
+import FriendOverflowMenu from './FriendOverflowMenu.vue'
 
 const { formatMessage } = useVIntl()
 
@@ -182,7 +183,7 @@ const messages = defineMessages({
 						<span v-else-if="friend.status" class="m-0 text-xs">{{ friend.status }}</span>
 					</div>
 					<ButtonStyled v-if="friend.accepted" circular type="transparent">
-						<OverflowMenu
+						<FriendOverflowMenu
 							class="opacity-0 group-hover:opacity-100 transition-opacity"
 							:options="createOverflowMenuOptions(friend)"
 						>
@@ -211,7 +212,7 @@ const messages = defineMessages({
 								<TrashIcon />
 								{{ formatMessage(messages.removeFriend) }}
 							</template>
-						</OverflowMenu>
+						</FriendOverflowMenu>
 					</ButtonStyled>
 					<ButtonStyled v-else type="transparent" circular>
 						<button v-tooltip="formatMessage(messages.cancelRequest)" @click="removeFriend(friend)">

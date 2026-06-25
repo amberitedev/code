@@ -201,17 +201,6 @@ impl AppState {
             .ok()
             .flatten()
     }
-
-    /// Realtime endpoint and credential written during authenticated pairing.
-    pub async fn realtime_config(&self) -> Option<(String, String)> {
-        sqlx::query_as::<_, (String, String)>(
-            "SELECT realtime_url, realtime_credential FROM core_config WHERE id = 1 AND realtime_url IS NOT NULL AND realtime_credential IS NOT NULL",
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten()
-    }
 }
 
 async fn load_or_create_core_id(

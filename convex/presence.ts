@@ -64,6 +64,17 @@ export const registerCore = mutation({
 				lastSeenAt: now,
 			})
 		}
+		await upsertCoreList(ctx, {
+			coreId: args.coreId,
+			ownerUserId: userId,
+			linkState: 'linked',
+			connectionUrl: args.connectionUrl,
+			lastSeenAt: now,
+			projectionRevision: now,
+			syncedAt: now,
+			syncCredentialHash: existing?.realtimeCredentialHash,
+		})
+		await upsertCoreMemberLink(ctx, args.coreId, userId, true, now)
 
 		return { coreId: args.coreId }
 	},
@@ -165,13 +176,25 @@ export const claimPairingCore = mutation({
 			throw new Error('Core already belongs to another user')
 
 		const realtimeCredential = createRealtimeCredential()
+		const realtimeCredentialHash = await hashCredential(realtimeCredential)
 		await ctx.db.patch(pairing._id, {
 			status: 'claimed',
 			ownerUserId: userId,
 			claimedAt: now,
-			realtimeCredentialHash: await hashCredential(realtimeCredential),
+			realtimeCredentialHash,
 			realtimeCredentialIssuedAt: now,
 		})
+		await upsertCoreList(ctx, {
+			coreId: pairing.coreId,
+			ownerUserId: userId,
+			linkState: 'unlinked',
+			connectionUrl: pairing.connectionUrl,
+			lastSeenAt: now,
+			projectionRevision: now,
+			syncedAt: now,
+			syncCredentialHash: realtimeCredentialHash,
+		})
+		await upsertCoreMemberLink(ctx, pairing.coreId, userId, true, now)
 		return {
 			coreId: pairing.coreId,
 			connectionUrl: pairing.connectionUrl,
@@ -223,6 +246,18 @@ export const finalizePairingCore = mutation({
 		}
 		if (existingCore) await ctx.db.patch(existingCore._id, coreValue)
 		else await ctx.db.insert('cores', coreValue)
+		await upsertCoreList(ctx, {
+			coreId: pairing.coreId,
+			ownerUserId: userId,
+			linkState: 'linked',
+			connectionUrl: args.connectionUrl ?? pairing.connectionUrl,
+			setupMode: undefined,
+			lastSeenAt: now,
+			projectionRevision: now,
+			syncedAt: now,
+			syncCredentialHash: pairing.realtimeCredentialHash,
+		})
+		await upsertCoreMemberLink(ctx, pairing.coreId, userId, true, now)
 		await ctx.db.delete(pairing._id)
 		return { coreId: pairing.coreId, friendGroupId: friendGroup }
 	},
@@ -247,6 +282,18 @@ export const releasePairingCore = mutation({
 				realtimeCredentialHash: undefined,
 				realtimeCredentialIssuedAt: undefined,
 			})
+			const coreList = await ctx.db
+				.query('coreList')
+				.withIndex('by_core_id', (q) => q.eq('coreId', args.coreId))
+				.unique()
+			if (coreList?.ownerUserId === userId && coreList.linkState === 'unlinked') {
+				const links = await ctx.db
+					.query('coreMemberLinks')
+					.withIndex('by_core', (q) => q.eq('coreId', args.coreId))
+					.collect()
+				for (const link of links) await ctx.db.delete(link._id)
+				await ctx.db.delete(coreList._id)
+			}
 		}
 		return null
 	},
@@ -273,6 +320,54 @@ async function removeExpiredPairingCores(ctx: MutationCtx, now: number): Promise
 		.withIndex('by_expires_at', (q) => q.lte('expiresAt', now))
 		.take(10)
 	await Promise.all(expired.map((core) => ctx.db.delete(core._id)))
+}
+
+async function upsertCoreList(
+	ctx: MutationCtx,
+	value: {
+		coreId: string
+		ownerUserId: string
+		linkState: 'unlinked' | 'linked'
+		connectionUrl?: string
+		setupMode?: 'remote' | 'local'
+		lastSeenAt: number
+		projectionRevision: number
+		syncedAt: number
+		syncCredentialHash?: string
+	},
+) {
+	const existing = await ctx.db
+		.query('coreList')
+		.withIndex('by_core_id', (q) => q.eq('coreId', value.coreId))
+		.unique()
+	const patch = {
+		ownerUserId: value.ownerUserId,
+		linkState: value.linkState,
+		connectionUrl: value.connectionUrl,
+		setupMode: value.setupMode,
+		lastSeenAt: value.lastSeenAt,
+		projectionRevision: value.projectionRevision,
+		syncedAt: value.syncedAt,
+		syncCredentialHash: value.syncCredentialHash ?? existing?.syncCredentialHash,
+	}
+	if (existing) await ctx.db.patch(existing._id, patch)
+	else await ctx.db.insert('coreList', { ...patch, coreId: value.coreId, createdAt: value.syncedAt })
+}
+
+async function upsertCoreMemberLink(
+	ctx: MutationCtx,
+	coreId: string,
+	userId: string,
+	isOwner: boolean,
+	syncedAt: number,
+) {
+	const existing = await ctx.db
+		.query('coreMemberLinks')
+		.withIndex('by_core_user', (q) => q.eq('coreId', coreId).eq('userId', userId))
+		.unique()
+	const value = { coreId, userId, isOwner, syncedAt }
+	if (existing) await ctx.db.patch(existing._id, value)
+	else await ctx.db.insert('coreMemberLinks', value)
 }
 
 async function requireCoreRole(

@@ -2,14 +2,14 @@ import { createCoreInstanceFromProfile } from '@amberite/amberite-api'
 import type {
 	AbstractPopupNotificationManager,
 	AbstractWebNotificationManager,
-	CreationFlowContextValue,
-	CreationFlowModal,
 } from '@modrinth/ui'
 import { defineMessages, useVIntl } from '@modrinth/ui'
 import { provide, ref, useTemplateRef } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 import { useRouter } from 'vue-router'
 
+import type InstanceCreationFlowModal from '@/components/ui/creation-flow/InstanceCreationFlowModal.vue'
+import type { InstanceCreationFlowContextValue } from '@/components/ui/creation-flow/types'
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import { useCoreClient } from '@/composables/useCoreClient'
@@ -42,7 +42,7 @@ export function setupCreationModal(
 	})
 
 	const installationModal =
-		useTemplateRef<ComponentExposed<typeof CreationFlowModal>>('installationModal')
+		useTemplateRef<ComponentExposed<typeof InstanceCreationFlowModal>>('installationModal')
 	const unknownPackWarningModal =
 		useTemplateRef<InstanceType<typeof UnknownPackWarningModal>>('unknownPackWarningModal')
 	const modpackAlreadyInstalledModal = ref<InstanceType<typeof ModpackAlreadyInstalledModal>>()
@@ -72,7 +72,7 @@ export function setupCreationModal(
 		trackEvent('InstanceCreate', { source: 'CreationModalModpack' })
 	}
 
-	async function handleCreate(config: CreationFlowContextValue) {
+	async function handleCreate(config: InstanceCreationFlowContextValue) {
 		try {
 			if (config.modpackSelection.value) {
 				const { projectId, versionId, name, iconUrl } = config.modpackSelection.value

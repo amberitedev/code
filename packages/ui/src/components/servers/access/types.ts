@@ -21,7 +21,6 @@ export interface ServerAccessMember {
 	joinedAt: string | null
 	inviteResendAvailableAt?: string | null
 	pending?: boolean
-	inviteCandidate?: boolean
 	isOwner?: boolean
 }
 

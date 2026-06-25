@@ -2,6 +2,8 @@
 
 Copal is a Rust/Axum server that manages Minecraft server instances and exposes them to the desktop app.
 
+Core is authoritative for Core membership, roles, permissions, bans, invites, instance access, and audit logs. Convex receives only a minimal authenticated projection containing Core routing/link state and active member user IDs.
+
 ## Start Here
 
 Do not scan, glob, or broad-search the Core tree for orientation. Context is pregenerated in these AGENTS files.
@@ -54,6 +56,7 @@ Pick the matching area below, read that AGENTS.md, then read only the source fil
 
 ## Core Constraints
 
+- Push minimal projection snapshots to Convex after setup and membership changes. Projection sync failures should log a warning and must not roll back the local SQLite mutation.
 - Keep files around 200 lines. Ask before going substantially beyond that.
 - Run Core commands from `apps/core/`.
 - Do not run dev/build commands unless explicitly asked.

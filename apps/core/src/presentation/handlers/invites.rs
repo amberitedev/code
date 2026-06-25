@@ -1,5 +1,6 @@
 use crate::{
     application::{
+        core_projection_service,
         invite_service::{self, CreateInvitationRequest},
         state::AppState,
     },
@@ -69,7 +70,15 @@ pub async fn respond(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ResponseRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!(
-        invite_service::respond(&state, &claims.sub, &id, body.accept).await?
-    )))
+    let accepted = body.accept;
+    let invitation =
+        invite_service::respond(&state, &claims.sub, &id, accepted).await?;
+    if accepted {
+        core_projection_service::sync_projection_best_effort(
+            &state,
+            "core-invite-accepted",
+        )
+        .await;
+    }
+    Ok(Json(json!(invitation)))
 }

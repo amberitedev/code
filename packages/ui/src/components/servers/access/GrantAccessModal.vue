@@ -1,6 +1,3 @@
-<!--
-Summary: Renders the access invite modal, including username lookup, role selection, optional friend request, and the permissions-help link behavior.
--->
 <template>
 	<NewModal
 		ref="modal"
@@ -100,9 +97,8 @@ Summary: Renders the access invite modal, including username lookup, role select
 						<template #link="{ children }">
 							<a
 								class="font-medium text-blue hover:underline"
-								:href="permissionsHref"
-								:target="permissionsLinkTarget"
-								@click="viewPermissions"
+								href="/news/article/server-access/"
+								target="_blank"
 							>
 								<component :is="() => children" />
 							</a>
@@ -175,24 +171,17 @@ const props = withDefaults(
 		searchUsers?: (query: string) => Promise<ServerAccessInviteSuggestion[]>
 		canGrant?: boolean
 		permissionDeniedMessage?: string
-		openPermissionsInModal?: boolean
-		permissionsHref?: string
-		permissionsLinkTarget?: string
 	}>(),
 	{
 		members: () => [],
 		suggestions: () => [],
 		friendIds: () => [],
 		canGrant: true,
-		openPermissionsInModal: false,
-		permissionsHref: '/news/article/server-access/',
-		permissionsLinkTarget: '_blank',
 	},
 )
 
 const emit = defineEmits<{
 	grant: [payload: GrantServerAccessPayload]
-	'view-permissions': []
 }>()
 
 const { formatMessage } = useVIntl()
@@ -475,12 +464,6 @@ function submit() {
 
 	hide()
 	emit('grant', payload)
-}
-
-function viewPermissions(event: MouseEvent) {
-	if (!props.openPermissionsInModal) return
-	event.preventDefault()
-	emit('view-permissions')
 }
 
 defineExpose({ show, hide })

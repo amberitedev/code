@@ -2,11 +2,68 @@
 // Derived from packages/convex/ function handlers — keep in sync with changes there.
 
 export interface AmberiteUser {
+	id?: string
 	userId: string
 	username?: string
+	name?: string
 	displayName?: string
 	image?: string
+	avatar_url?: string | null
+	bio?: string | null
+	created?: string
 	friendCode?: string
+}
+
+export interface AmberitePublicProfile {
+	id: string
+	userId: string
+	username?: string
+	name?: string
+	displayName?: string
+	avatar_url: string | null
+	image?: string
+	bio: string | null
+	created: string
+	createdAt?: number | null
+	profileUpdatedAt?: number | null
+}
+
+export interface AmberiteProfile extends AmberitePublicProfile {
+	friendCode?: string
+	avatarStorageId?: string
+	avatarMimeType?: string
+	avatarSizeBytes?: number
+	deletedAt?: number
+	deletedReason?: string
+}
+
+export interface LinkedModrinthAccount {
+	id: string
+	userId: string
+	modrinthUserId: string
+	username: string
+	avatar_url: string | null
+	scopes: string[]
+	expiresAt: number | null
+	status: 'active' | 'needs_reconnect' | 'revoked'
+	needsReconnect: boolean
+	reconnectReason?: string | null
+	linkedAt: number
+	updatedAt: number
+}
+
+export interface CoreListEntry {
+	coreId: string
+	ownerUserId: string
+	linkState: 'unlinked' | 'linked'
+	connectionUrl?: string
+	setupMode?: 'remote' | 'local'
+	createdAt: number
+	lastSeenAt: number
+	projectionRevision: number
+	syncedAt: number
+	isOwner: boolean
+	memberUserIds?: string[]
 }
 
 export interface CorePresence {

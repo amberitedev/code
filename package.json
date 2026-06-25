@@ -16,6 +16,8 @@
     "app:build": "turbo run build --filter=@modrinth/app",
     "docs:dev": "turbo run dev --filter=@modrinth/docs",
     "pages:build": "NITRO_PRESET=cloudflare-pages pnpm --filter frontend run build",
+    "realtime:dev": "node apps/realtime/scripts/deploy-development.mjs",
+    "realtime:status": "node apps/realtime/scripts/status-development.mjs",
     "build": "turbo run build --continue",
     "lint": "turbo run lint lint:ancillary --continue",
     "lint:ancillary": "prettier --check .github *.*",

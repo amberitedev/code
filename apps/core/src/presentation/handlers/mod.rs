@@ -13,6 +13,7 @@ pub mod macros;
 pub mod modpack;
 pub mod mods;
 pub mod players;
+pub mod projection;
 pub mod properties;
 pub mod query;
 pub mod rcon;

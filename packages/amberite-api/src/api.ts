@@ -47,6 +47,7 @@ import type {
 	CoreConnectionHandshakeRequest,
 	CoreConnectionHandshakeResponse,
 	CoreMetadata,
+	CoreProjectionSyncResult,
 	CoreMember,
 	CoreAccessResponse,
 	CoreAccessUpsertBody,
@@ -843,6 +844,10 @@ export function removeCoreMember(ctx: CoreCallContext, userId: string): Promise<
 	return apiFetch(ctx, `${ctx.baseUrl}/core/members/${encodeURIComponent(userId)}`, {
 		method: 'DELETE',
 	})
+}
+
+export function resyncCoreProjection(ctx: CoreCallContext): Promise<CoreProjectionSyncResult> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/projection/resync`, { method: 'POST' })
 }
 
 export function listCoreAccess(ctx: CoreCallContext): Promise<CoreAccessResponse> {

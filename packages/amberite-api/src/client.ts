@@ -49,6 +49,7 @@ import type {
 	CoreInstanceEvent,
 	CoreModpackManifest,
 	CoreMetadata,
+	CoreProjectionSyncResult,
 	CoreMember,
 	CoreAccessResponse,
 	CoreAccessUpsertBody,
@@ -935,6 +936,10 @@ export class CoreApiClient {
 		return this.direct('core.members.remove', (ctx) =>
 			api.removeCoreMember(ctx, userId).then(() => undefined),
 		)
+	}
+
+	resyncCoreProjection(): Promise<CoreProjectionSyncResult> {
+		return this.direct('core.projection.resync', api.resyncCoreProjection)
 	}
 
 	listCoreAccess(): Promise<CoreAccessResponse> {

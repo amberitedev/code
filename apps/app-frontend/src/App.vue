@@ -17,7 +17,6 @@ import {
 	LeftArrowIcon,
 	LibraryIcon,
 	LogOutIcon,
-	NewspaperIcon,
 	NotepadTextIcon,
 	PlusIcon,
 	RefreshCwIcon,
@@ -36,12 +35,10 @@ import {
 	commonMessages,
 	ContentInstallModal,
 	ContentUpdaterModal,
-	CreationFlowModal,
 	defineMessages,
 	I18nDebugPanel,
 	LoadingBar,
 	NewModal,
-	NewsArticleCard,
 	NotificationPanel,
 	OverflowMenu,
 	PopupNotificationPanel,
@@ -73,6 +70,7 @@ import AccountsCard from '@/components/ui/AccountsCard.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
+import InstanceCreationFlowModal from '@/components/ui/creation-flow/InstanceCreationFlowModal.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
 import UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
@@ -266,7 +264,6 @@ const {
 	handleModpackDuplicateGoToInstance,
 } = setupProviders(notificationManager, popupNotificationManager)
 
-const news = ref([])
 const availableSurvey = ref(false)
 const displayedServerInviteNotifications = new Set()
 
@@ -479,22 +476,6 @@ async function setupApp() {
 			console.log(
 				`No critical announcement found at https://api.modrinth.com/appCriticalAnnouncement.json?version=${version}`,
 			)
-		})
-
-	fetch(`https://modrinth.com/news/feed/articles.json`)
-		.then((response) => response.json())
-		.then((res) => {
-			if (res && res.articles) {
-				news.value = res.articles
-					.map((article) => ({
-						...article,
-						path: article.link,
-					}))
-					.slice(0, 4)
-			}
-		})
-		.catch((error) => {
-			console.error('Failed to fetch news articles', error)
 		})
 
 	get_opening_command().then(handleCommand)
@@ -1441,7 +1422,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<AuthGrantFlowWaitModal ref="modrinthLoginFlowWaitModal" @flow-cancel="cancelLogin" />
 		</Suspense>
 
-		<CreationFlowModal
+		<InstanceCreationFlowModal
 			ref="installationModal"
 			type="instance"
 			show-snapshot-toggle
@@ -1584,7 +1565,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			'disable-advanced-rendering': !themeStore.advancedRendering,
 		}"
 	>
-		<div class="app-viewport flex-grow router-view">
+		<div class="app-viewport relative flex-grow router-view">
 			<transition name="popup-survey">
 				<div
 					v-if="availableSurvey"
@@ -1701,21 +1682,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 						v-if="prideFundraiserEnabled"
 						class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid"
 					/>
-					<div v-if="news && news.length > 0" class="p-4 flex flex-col items-center">
-						<h3 class="text-base mb-4 text-primary font-medium m-0 text-left w-full">News</h3>
-						<div class="space-y-4 flex flex-col items-center w-full">
-							<NewsArticleCard
-								v-for="(item, index) in news"
-								:key="`news-${index}`"
-								:article="item"
-							/>
-							<ButtonStyled color="brand" size="large">
-								<a href="https://modrinth.com/news" target="_blank" class="my-4">
-									<NewspaperIcon /> View all news
-								</a>
-							</ButtonStyled>
-						</div>
-					</div>
 				</div>
 			</div>
 			<template v-if="showAd">

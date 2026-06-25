@@ -18,8 +18,8 @@ use crate::{
     presentation::handlers::{
         access, backups, console, diagnostics, events, fs, installations,
         instance_control, instances, invites, logs, macros, modpack, mods,
-        players, properties, query, rcon, roles, setup, social, stats, sync,
-        tasks,
+        players, projection, properties, query, rcon, roles, setup, social,
+        stats, sync, tasks,
     },
 };
 
@@ -63,6 +63,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/core/invitations/:id/respond", post(invites::respond))
         .route("/core/bans", get(social::list_bans))
         .route("/core/bans", post(social::ban_member))
+        .route("/core/projection/resync", post(projection::resync))
         .route("/activity", get(access::list_activity))
         .route("/sync/profiles", get(sync::list_sync_profiles))
         .route("/sync/profiles", post(sync::register_sync_profile))

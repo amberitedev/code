@@ -70,11 +70,10 @@ USER amberite
 VOLUME ["/data"]
 EXPOSE 16662
 
-# Defaults — override via env_file or environment: in compose.
+# Defaults — override via the production environment profile in compose.
 ENV AMBERITE_DATA_DIR=/data
 ENV PORT=16662
 ENV ALLOWED_ORIGIN=https://amberite.dev
-# AMBERITE_DEV defaults to false (unset = prod mode).
 
 ENTRYPOINT ["copal"]
 CMD ["run"]

@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        access_service, activity_service,
+        access_service, activity_service, core_projection_service,
         social_models::{
             ActivityLogQuery, PatchAccessRequest, UpsertAccessRequest,
         },
@@ -44,6 +44,11 @@ pub async fn grant_core_access(
         Some(json!({ "scope": "core", "role": member.role })),
     )
     .await?;
+    core_projection_service::sync_projection_best_effort(
+        &state,
+        "core-access-grant",
+    )
+    .await;
     Ok(Json(json!(member)))
 }
 
@@ -65,6 +70,11 @@ pub async fn update_core_access(
         Some(json!({ "scope": "core", "role": member.role })),
     )
     .await?;
+    core_projection_service::sync_projection_best_effort(
+        &state,
+        "core-access-update",
+    )
+    .await;
     Ok(Json(json!(member)))
 }
 
@@ -83,6 +93,11 @@ pub async fn remove_core_access(
         Some(json!({ "scope": "core" })),
     )
     .await?;
+    core_projection_service::sync_projection_best_effort(
+        &state,
+        "core-access-remove",
+    )
+    .await;
     Ok(Json(json!({ "ok": true })))
 }
 

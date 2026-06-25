@@ -13,13 +13,12 @@ services:
       # Named volume: instance data, SQLite DB, server JARs, logs.
       - core-data:/data
     env_file:
-      # Copy .env.example → .env and fill in your values before starting.
-      - .env
+      # Copy .env.example → .env.prod and fill in your values before deploying.
+      - .env.prod
     environment:
       AMBERITE_DATA_DIR: /data
       PORT: "16662"
       # ALLOWED_ORIGIN: https://amberite.dev   # override if self-hosting
-      # AMBERITE_DEV: "false"                  # never set true in prod
     healthcheck:
       test: ["CMD", "copal", "check"]
       interval: 30s

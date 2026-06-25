@@ -1,7 +1,3 @@
-<!--
-AccessTable renders server/friend-group access rows for desktop and mobile.
-Key areas: desktop table template near line 10, mobile compact rows near line 120, role/status/action helpers near line 400.
--->
 <template>
 	<Table
 		v-if="members.length > 0"
@@ -42,13 +38,6 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 			>
 				{{ formatRole(member.role) }}
 			</span>
-			<span
-				v-else-if="member.inviteCandidate"
-				class="inline-flex h-7 items-center rounded-full border border-solid px-2.5 py-1 text-sm font-semibold leading-none"
-				:class="roleClasses(member.role)"
-			>
-				{{ formatRole(member.role) }}
-			</span>
 			<div v-else v-tooltip="accessManagementTooltip" class="w-fit">
 				<Combobox
 					:model-value="member.role"
@@ -72,12 +61,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 
 		<template #cell-joined="{ row: member }">
 			<span
-				v-if="showStatusLabels"
-				class="inline-flex h-7 items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
-			>
-				{{ statusLabel(member) }}
-			</span>
-			<span v-else-if="member.pending"
+				v-if="member.pending"
 				class="inline-flex h-7 items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 			>
 				{{ formatMessage(messages.pendingLabel) }}
@@ -90,17 +74,6 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 
 		<template #cell-actions="{ row: member }">
 			<div v-if="!member.isOwner" class="flex items-center justify-end gap-1">
-				<ButtonStyled v-if="member.inviteCandidate" circular type="transparent">
-					<button
-						v-tooltip="formatMessage(messages.inviteUser)"
-						:aria-label="formatMessage(messages.inviteUser)"
-						:disabled="!canManageUsers"
-						class="text-secondary hover:!filter-none hover:text-brand focus-visible:!filter-none active:!scale-100 active:!filter-none disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-secondary"
-						@click="handleInviteMember(member)"
-					>
-						<UserPlusIcon aria-hidden="true" />
-					</button>
-				</ButtonStyled>
 				<ButtonStyled v-if="member.pending" circular type="transparent">
 					<button
 						v-tooltip="resendInviteTooltip(member)"
@@ -112,7 +85,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 						<SendIcon aria-hidden="true" />
 					</button>
 				</ButtonStyled>
-				<ButtonStyled v-if="!member.inviteCandidate" circular type="transparent">
+				<ButtonStyled circular type="transparent">
 					<button
 						v-tooltip="memberAccessActionTooltip(member)"
 						:aria-label="memberAccessActionLabel(member)"
@@ -164,7 +137,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 					:class="sortColumn === 'joined' ? 'text-contrast' : 'text-secondary'"
 					@click="toggleSort('joined')"
 				>
-					{{ props.statusColumnLabel ?? formatMessage(messages.joinedColumn) }}
+					{{ formatMessage(messages.joinedColumn) }}
 					<component :is="sortIcon('joined')" v-if="sortIcon('joined')" class="size-4" />
 				</button>
 			</div>
@@ -200,21 +173,14 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 				</AutoLink>
 			</div>
 			<div class="min-w-0 py-3 pr-2">
-					<span
-						v-if="member.isOwner"
-						class="inline-flex h-7 max-w-full items-center truncate rounded-full border border-solid px-2.5 py-1 text-sm font-semibold leading-none"
-						:class="roleClasses(member.role)"
-					>
-						{{ formatRole(member.role) }}
-					</span>
-					<span
-						v-else-if="member.inviteCandidate"
-						class="inline-flex h-7 max-w-full items-center truncate rounded-full border border-solid px-2.5 py-1 text-sm font-semibold leading-none"
-						:class="roleClasses(member.role)"
-					>
-						{{ formatRole(member.role) }}
-					</span>
-					<div v-else v-tooltip="accessManagementTooltip" class="min-w-0">
+				<span
+					v-if="member.isOwner"
+					class="inline-flex h-7 max-w-full items-center truncate rounded-full border border-solid px-2.5 py-1 text-sm font-semibold leading-none"
+					:class="roleClasses(member.role)"
+				>
+					{{ formatRole(member.role) }}
+				</span>
+				<div v-else v-tooltip="accessManagementTooltip" class="min-w-0">
 					<Combobox
 						:model-value="member.role"
 						:options="roleComboboxOptions"
@@ -242,12 +208,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 			</div>
 			<div class="min-w-0 py-3 pr-2 text-right text-secondary">
 				<span
-					v-if="showStatusLabels"
-					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
-				>
-					{{ statusLabel(member) }}
-				</span>
-				<span v-else-if="member.pending"
+					v-if="member.pending"
 					class="inline-flex h-7 max-w-full items-center rounded-full border border-surface-4 border-solid bg-surface-4 px-2.5 py-1 text-sm font-semibold text-secondary"
 				>
 					{{ formatMessage(messages.pendingLabel) }}
@@ -262,18 +223,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 				<span v-else>{{ formatMessage(messages.unknownJoinedDate) }}</span>
 			</div>
 			<div class="flex min-w-0 items-center justify-end pr-4">
-				<ButtonStyled v-if="member.inviteCandidate" circular type="transparent">
-					<button
-						v-tooltip="formatMessage(messages.inviteUser)"
-						:aria-label="formatMessage(messages.inviteUser)"
-						:disabled="!canManageUsers"
-						class="text-secondary hover:!filter-none hover:text-brand focus-visible:!filter-none active:!scale-100 active:!filter-none disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-secondary"
-						@click="handleInviteMember(member)"
-					>
-						<UserPlusIcon aria-hidden="true" />
-					</button>
-				</ButtonStyled>
-				<ButtonStyled v-if="!member.isOwner && !member.inviteCandidate" circular type="transparent">
+				<ButtonStyled v-if="!member.isOwner" circular type="transparent">
 					<TeleportOverflowMenu
 						:options="memberActionOptions(member)"
 						btn-class="hover:!filter-none focus-visible:!filter-none active:!scale-100 active:!filter-none"
@@ -311,7 +261,7 @@ Key areas: desktop table template near line 10, mobile compact rows near line 12
 				{{ formatMessage(messages.roleColumn) }}
 			</div>
 			<div class="flex items-center font-semibold text-secondary">
-				{{ props.statusColumnLabel ?? formatMessage(messages.joinedColumn) }}
+				{{ formatMessage(messages.joinedColumn) }}
 			</div>
 			<div class="flex items-center justify-end pr-4 font-semibold text-secondary">
 				{{ formatMessage(messages.actionsColumn) }}
@@ -331,7 +281,6 @@ import {
 	ChevronUpIcon,
 	MoreVerticalIcon,
 	SendIcon,
-	UserPlusIcon,
 	UserXIcon,
 	XIcon,
 } from '@modrinth/assets'
@@ -359,14 +308,10 @@ const props = withDefaults(
 		roles: ServerAccessRoleOption[]
 		canManageUsers?: boolean
 		permissionDeniedMessage?: string
-		userLink?: (username: string) => ServerAccessUserProfileLink
 		userProfileLink?: (username: string) => ServerAccessUserProfileLink
-		statusColumnLabel?: string
-		showStatusLabels?: boolean
 	}>(),
 	{
 		canManageUsers: true,
-		showStatusLabels: false,
 	},
 )
 
@@ -375,7 +320,6 @@ const emit = defineEmits<{
 	resendInvite: [member: ServerAccessMember]
 	cancelInvite: [member: ServerAccessMember]
 	removeMember: [member: ServerAccessMember]
-	inviteMember: [member: ServerAccessMember]
 }>()
 
 const { formatMessage } = useVIntl()
@@ -406,18 +350,6 @@ const messages = defineMessages({
 	pendingLabel: {
 		id: 'servers.access-table.pending',
 		defaultMessage: 'Pending',
-	},
-	acceptedLabel: {
-		id: 'servers.access-table.accepted',
-		defaultMessage: 'Accepted',
-	},
-	friendLabel: {
-		id: 'servers.access-table.friend',
-		defaultMessage: 'Friend',
-	},
-	inviteUser: {
-		id: 'servers.access-table.action.invite-user',
-		defaultMessage: 'Invite user',
 	},
 	unknownJoinedDate: {
 		id: 'servers.access-table.unknown-joined-date',
@@ -477,7 +409,7 @@ type OverflowMenuOption = {
 const columns = computed<TableColumn<AccessTableColumn>[]>(() => [
 	{ key: 'user', label: formatMessage(messages.userColumn), width: '32%', enableSorting: true },
 	{ key: 'role', label: formatMessage(messages.roleColumn), width: '28%', enableSorting: true },
-	{ key: 'joined', label: props.statusColumnLabel ?? formatMessage(messages.joinedColumn), enableSorting: true },
+	{ key: 'joined', label: formatMessage(messages.joinedColumn), enableSorting: true },
 	{ key: 'actions', label: formatMessage(messages.actionsColumn), align: 'right', width: '7rem' },
 ])
 
@@ -534,12 +466,6 @@ function formatRole(role: ServerAccessRole): string {
 	}
 }
 
-function statusLabel(member: ServerAccessMember): string {
-	if (member.inviteCandidate) return formatMessage(messages.friendLabel)
-	if (member.pending) return formatMessage(messages.pendingLabel)
-	return formatMessage(messages.acceptedLabel)
-}
-
 const roleComboboxOptions = computed<ComboboxOption<ServerAccessRole>[]>(() =>
 	props.roles
 		.filter((role) => role.value !== 'owner')
@@ -570,7 +496,6 @@ function normalizeSortColumn(column: string | undefined): AccessTableSortableCol
 }
 
 function joinedTimestamp(member: ServerAccessMember): number {
-	if (member.inviteCandidate) return Number.NEGATIVE_INFINITY - 1
 	if (member.pending) return Number.NEGATIVE_INFINITY
 	return member.joinedAt ? new Date(member.joinedAt).getTime() : 0
 }
@@ -618,7 +543,7 @@ function roleTriggerClass(role: ServerAccessRole): string {
 
 function getUserProfileLink(username: string): ServerAccessUserProfileLink {
 	if (!username || username.includes('@')) return undefined
-	return props.userProfileLink?.(username) ?? props.userLink?.(username) ?? `/user/${encodeURIComponent(username)}`
+	return props.userProfileLink?.(username) ?? `/user/${encodeURIComponent(username)}`
 }
 
 function userProfileTarget(username: string): string | undefined {
@@ -678,11 +603,6 @@ function handleCancelInvite(member: ServerAccessMember) {
 function handleRemoveMember(member: ServerAccessMember) {
 	if (!canManageUsers.value) return
 	emit('removeMember', member)
-}
-
-function handleInviteMember(member: ServerAccessMember) {
-	if (!canManageUsers.value) return
-	emit('inviteMember', member)
 }
 
 function memberActionOptions(member: ServerAccessMember): OverflowMenuOption[] {

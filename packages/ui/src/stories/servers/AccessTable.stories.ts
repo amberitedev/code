@@ -47,13 +47,6 @@ const members: ServerAccessMember[] = [
 		joinedAt: null,
 		pending: true,
 	},
-	{
-		id: 'friend',
-		user: { id: 'friend', username: 'Friend' },
-		role: 'viewer',
-		joinedAt: null,
-		inviteCandidate: true,
-	},
 ]
 
 const meta = {
@@ -84,34 +77,19 @@ export const Default: Story = {
 			function removeMember(member: ServerAccessMember) {
 				rows.value = rows.value.filter((row) => row.id !== member.id)
 			}
-			function inviteMember(member: ServerAccessMember) {
-				rows.value = rows.value.map((row) =>
-					row.id === member.id ? { ...row, inviteCandidate: false, pending: true } : row,
-				)
-			}
-			return { rows, roleOptions, updateRole, removeMember, inviteMember }
+			return { rows, roleOptions, updateRole, removeMember }
 		},
 		template: /* html */ `
 			<AccessTable
 				:members="rows"
 				:roles="roleOptions"
 				@update-role="updateRole"
-				@invite-member="inviteMember"
 				@resend-invite="() => {}"
 				@cancel-invite="removeMember"
 				@remove-member="removeMember"
 			/>
 		`,
 	}),
-}
-
-export const FriendInviteCandidate: Story = {
-	args: {
-		members: [members[3]],
-		roles: roleOptions,
-		statusColumnLabel: 'Status',
-		showStatusLabels: true,
-	},
 }
 
 export const PendingInvite: Story = {
@@ -140,14 +118,6 @@ export const OwnerFixed: Story = {
 	},
 }
 
-export const ExternalUserLinks: Story = {
-	args: {
-		members,
-		roles: roleOptions,
-		userLink: (username: string) => `https://modrinth.com/user/${encodeURIComponent(username)}`,
-	},
-}
-
 export const MobileCompact: Story = {
 	render: () => ({
 		components: { AccessTable },
@@ -159,12 +129,7 @@ export const MobileCompact: Story = {
 			function removeMember(member: ServerAccessMember) {
 				rows.value = rows.value.filter((row) => row.id !== member.id)
 			}
-			function inviteMember(member: ServerAccessMember) {
-				rows.value = rows.value.map((row) =>
-					row.id === member.id ? { ...row, inviteCandidate: false, pending: true } : row,
-				)
-			}
-			return { rows, roleOptions, updateRole, removeMember, inviteMember }
+			return { rows, roleOptions, updateRole, removeMember }
 		},
 		template: /* html */ `
 			<div style="max-width: 390px;">
@@ -172,7 +137,6 @@ export const MobileCompact: Story = {
 					:members="rows"
 					:roles="roleOptions"
 					@update-role="updateRole"
-					@invite-member="inviteMember"
 					@resend-invite="() => {}"
 					@cancel-invite="removeMember"
 					@remove-member="removeMember"

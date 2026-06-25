@@ -61,6 +61,7 @@ target
 generated
 .env
 .env.local
+!apps/core/.env.local
 
 # app testing dir
 app-playground-data/*

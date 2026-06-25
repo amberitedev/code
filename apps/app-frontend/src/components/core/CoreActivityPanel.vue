@@ -81,7 +81,6 @@ function uniqueOptions(options: Array<{ value: string; label: string }>) {
 			:loading-more="false"
 			:show-world-column="false"
 			:suppress-row-transitions="false"
-			no-activity-message="Perform an action in your Core and you will see it here!"
 		>
 			<template #filters>
 				<DropdownFilterBar

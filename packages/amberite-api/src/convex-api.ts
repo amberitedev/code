@@ -3,7 +3,8 @@
  * Reads the JWT from PlatformAdapter.getCurrentJwt() on each call.
  * Callers are responsible for ensuring a valid session before use.
  *
- * Key methods (line numbers): rawQuery:18, rawMutation:22, currentUser:28, setUsername:32,
+ * Key methods: rawQuery, rawMutation, currentUser, currentProfile, getProfile,
+ * updateCurrentProfile, linkedModrinthAccount, listLinkedCoreList, setUsername,
  * searchUsers, friendsList, and durable social mutations.
  * respondFriendRequest:65, removeFriend:69, blockUser:73, unblockUser:77,
  * listMyFriendGroups:82, getFriendGroup:86, listFriendGroupMembers:91,
@@ -19,15 +20,19 @@ import type { PlatformAdapter } from './adapter'
 import { convexQuery, convexMutation, convexAction } from './convex-relay'
 import type {
 	AmberiteUser,
+	AmberiteProfile,
+	AmberitePublicProfile,
 	ConvexModSyncEvent,
 	ConvexProfileSnapshot,
 	ConvexSyncedProfile,
+	CoreListEntry,
 	CorePresence,
 	FriendGroupInfo,
 	FriendGroupSummary,
 	FriendGroupMember,
 	FriendGroupInvite,
 	FriendGroupBan,
+	LinkedModrinthAccount,
 	SyncedProfileSettings,
 	ProfileWhitelistResult,
 } from './convex-types'
@@ -71,6 +76,30 @@ export interface GroupInviteWithGroup {
  */
 export interface AmberiteSocialClient {
 	currentUser(): Promise<(AmberiteUser & { userId: string }) | null>
+	currentProfile(): Promise<AmberiteProfile>
+	getProfile(idOrUsername: string): Promise<AmberitePublicProfile | null>
+	searchProfiles(query: string, limit?: number): Promise<AmberitePublicProfile[]>
+	updateCurrentProfile(args: {
+		username?: string
+		bio?: string
+		avatar?: null | {
+			url: string
+			storageId?: string
+			mimeType?: string
+			sizeBytes?: number
+		}
+	}): Promise<AmberiteProfile>
+	linkedModrinthAccount(): Promise<LinkedModrinthAccount | null>
+	storeModrinthOAuthTokens(args: {
+		accessToken: string
+		refreshToken?: string
+		scopes: string[]
+		expiresAt?: number
+	}): Promise<LinkedModrinthAccount>
+	refreshModrinthAccount(): Promise<LinkedModrinthAccount | null>
+	disconnectModrinthAccount(): Promise<null>
+	listMyCoreList(): Promise<CoreListEntry[]>
+	listLinkedCoreList(): Promise<CoreListEntry[]>
 	setUsername(username: string, displayName?: string): Promise<{ userId: string; username: string }>
 	searchUsers(query: string): Promise<AmberiteUser[]>
 	friendsList(): Promise<FriendsListResult>
@@ -205,6 +234,63 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	currentUser(): Promise<(AmberiteUser & { userId: string }) | null> {
 		return convexQuery(this.adapter, 'auth:currentUser', {})
+	}
+
+	currentProfile(): Promise<AmberiteProfile> {
+		return convexQuery(this.adapter, 'profiles:current', {})
+	}
+
+	getProfile(idOrUsername: string): Promise<AmberitePublicProfile | null> {
+		return convexQuery(this.adapter, 'profiles:get', { idOrUsername })
+	}
+
+	searchProfiles(query: string, limit?: number): Promise<AmberitePublicProfile[]> {
+		return convexQuery(this.adapter, 'profiles:search', {
+			query,
+			...(limit !== undefined ? { limit } : {}),
+		})
+	}
+
+	updateCurrentProfile(args: {
+		username?: string
+		bio?: string
+		avatar?: null | {
+			url: string
+			storageId?: string
+			mimeType?: string
+			sizeBytes?: number
+		}
+	}): Promise<AmberiteProfile> {
+		return convexMutation(this.adapter, 'profiles:updateCurrent', args)
+	}
+
+	linkedModrinthAccount(): Promise<LinkedModrinthAccount | null> {
+		return convexQuery(this.adapter, 'modrinth:current', {})
+	}
+
+	storeModrinthOAuthTokens(args: {
+		accessToken: string
+		refreshToken?: string
+		scopes: string[]
+		expiresAt?: number
+	}): Promise<LinkedModrinthAccount> {
+		return convexAction(this.adapter, 'modrinth:storeCurrentOAuthTokens', args)
+	}
+
+	refreshModrinthAccount(): Promise<LinkedModrinthAccount | null> {
+		return convexAction(this.adapter, 'modrinth:refreshCurrentStatus', {})
+	}
+
+	disconnectModrinthAccount(): Promise<null> {
+		return convexMutation(this.adapter, 'modrinth:disconnectCurrent', {})
+	}
+
+	listMyCoreList(): Promise<CoreListEntry[]> {
+		return convexQuery(this.adapter, 'coreList:listMine', {})
+	}
+
+	listLinkedCoreList(): Promise<CoreListEntry[]> {
+		return convexQuery(this.adapter, 'coreList:listLinkedForCurrent', {})
 	}
 
 	setUsername(

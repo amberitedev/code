@@ -1,6 +1,3 @@
-<!--
-Summary: Renders server access audit entries with timeframe controls, optional external filters, responsive table/card layouts, empty/loading states, sorting, and infinite-load observation.
--->
 <template>
 	<div class="@container flex flex-col gap-4">
 		<div class="flex min-w-0 flex-col items-start gap-3 @[640px]:flex-row @[640px]:items-center">
@@ -229,7 +226,7 @@ Summary: Renders server access audit entries with timeframe controls, optional e
 					<div
 						class="border-0 border-solid border-surface-4 bg-surface-2 px-4 py-8 text-center text-secondary @[800px]:border-t"
 					>
-						{{ emptyStateText }}
+						{{ formatMessage(emptyStateMessage) }}
 					</div>
 				</div>
 			</div>
@@ -277,7 +274,6 @@ const props = defineProps<{
 	hasMore?: boolean
 	loading?: boolean
 	loadingMore?: boolean
-	noActivityMessage?: string
 	showWorldColumn?: boolean
 	suppressRowTransitions?: boolean
 }>()
@@ -514,10 +510,10 @@ const hasActiveFilters = computed(
 		(showWorldColumn.value && !!filters.value.worldId),
 )
 
-const emptyStateText = computed(() =>
+const emptyStateMessage = computed(() =>
 	props.entries.length === 0 && !hasActiveFilters.value
-		? (props.noActivityMessage ?? formatMessage(messages.noActivityEmptyState))
-		: formatMessage(messages.emptyState),
+		? messages.noActivityEmptyState
+		: messages.emptyState,
 )
 
 function actorName(entry: ServerAuditLogEntry): string {

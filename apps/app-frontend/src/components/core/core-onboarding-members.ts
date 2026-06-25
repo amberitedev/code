@@ -1,5 +1,7 @@
 import type { AmberiteUser, FriendGroupMember } from '@amberite/amberite-api'
-import type { ServerAccessInviteSuggestion, ServerAccessMember } from '@modrinth/ui'
+import type { ServerAccessInviteSuggestion } from '@modrinth/ui'
+
+import type { CoreAccessMember } from './core-access-types'
 
 type FriendUser = AmberiteUser & { userId: string }
 
@@ -10,7 +12,7 @@ export const mockInviteUsers = [
 	{ id: 'sol', userId: 'sol', username: 'Sol' },
 ]
 
-export function toAccessMember(member: FriendGroupMember): ServerAccessMember {
+export function toAccessMember(member: FriendGroupMember): CoreAccessMember {
 	return {
 		id: member.userId,
 		role: member.role === 'owner' ? 'owner' : member.role === 'admin' ? 'editor' : 'viewer',
@@ -24,7 +26,7 @@ export function toAccessMember(member: FriendGroupMember): ServerAccessMember {
 	}
 }
 
-export function toInviteCandidate(user: FriendUser): ServerAccessMember {
+export function toInviteCandidate(user: FriendUser): CoreAccessMember {
 	return {
 		id: `friend-${user.userId}`,
 		user: { id: user.userId, username: user.username || user.displayName || user.userId, avatarUrl: user.image },
@@ -34,7 +36,7 @@ export function toInviteCandidate(user: FriendUser): ServerAccessMember {
 	}
 }
 
-export function toPendingInvite(user: ServerAccessInviteSuggestion): ServerAccessMember {
+export function toPendingInvite(user: ServerAccessInviteSuggestion): CoreAccessMember {
 	return {
 		id: user.id,
 		user: { id: user.id, username: user.username, avatarUrl: user.avatarUrl },

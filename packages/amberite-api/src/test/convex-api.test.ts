@@ -91,6 +91,35 @@ describe('ConvexApiClient', () => {
 		})
 	})
 
+	it('routes profile and core list reads to the authenticated backend', async () => {
+		const fetchFn = vi.fn(async () => jsonResponse(null))
+		const client = new ConvexApiClient(adapter(fetchFn))
+
+		await client.getProfile('amber')
+		await client.listLinkedCoreList()
+
+		expect(fetchFn).toHaveBeenCalledTimes(2)
+		expect(await lastBody(fetchFn)).toMatchObject({
+			path: 'coreList:listLinkedForCurrent',
+			args: {},
+		})
+	})
+
+	it('routes profile updates and Modrinth linking through redacted contracts', async () => {
+		const fetchFn = vi.fn(async () => jsonResponse(null))
+		const client = new ConvexApiClient(adapter(fetchFn))
+
+		await client.updateCurrentProfile({ username: 'amber', bio: 'hello' })
+		await client.linkedModrinthAccount()
+		await client.disconnectModrinthAccount()
+
+		expect(fetchFn).toHaveBeenCalledTimes(3)
+		expect(await lastBody(fetchFn)).toMatchObject({
+			path: 'modrinth:disconnectCurrent',
+			args: {},
+		})
+	})
+
 	it('claims and acknowledges pending friend request notifications', async () => {
 		const fetchFn = vi.fn(async () => jsonResponse([]))
 		const client = new ConvexApiClient(adapter(fetchFn))

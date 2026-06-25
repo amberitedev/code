@@ -40,12 +40,6 @@ const DEFAULT_TTL_MS = 5 * 60 * 1000
 const RELAY_TIMEOUT_MS = 30_000
 
 export const messageDefinitions = {
-	coreHealthProbe: {
-		type: 'core.health.probe',
-		version: 1,
-		mode: 'direct-fire-and-forget',
-		ack: 'none',
-	},
 	coreConfigChanged: {
 		type: 'core.config.changed',
 		version: 1,

@@ -1,23 +1,9 @@
-export type RealtimeCoreHealth = 'healthy' | 'degraded' | 'offline'
-export type RealtimeCoreDiagnostic = 'none' | 'network' | 'authentication' | 'server'
-
 export type RealtimeFrame =
 	| {
 			type: 'presence.snapshot'
 			users: Record<string, boolean>
-			cores: Record<
-				string,
-				{ online: boolean; health?: RealtimeCoreHealth; diagnostic?: RealtimeCoreDiagnostic }
-			>
 	  }
 	| { type: 'presence.user'; userId: string; online: boolean }
-	| {
-			type: 'presence.core'
-			coreId: string
-			online: boolean
-			health?: RealtimeCoreHealth
-			diagnostic?: RealtimeCoreDiagnostic
-	  }
 	| { type: 'authorization.invalidated' }
 
 export interface RealtimeSocket {
@@ -189,15 +175,7 @@ function parseFrame(value: unknown): RealtimeFrame | null {
 			typeof frame.online === 'boolean'
 		)
 			return frame
-		if (
-			frame.type === 'presence.core' &&
-			typeof frame.coreId === 'string' &&
-			typeof frame.online === 'boolean' &&
-			validHealth(frame.health) &&
-			validDiagnostic(frame.diagnostic)
-		)
-			return frame
-		if (frame.type === 'presence.snapshot' && validUsers(frame.users) && validCores(frame.cores))
+		if (frame.type === 'presence.snapshot' && validUsers(frame.users))
 			return frame
 	} catch {
 		return null
@@ -220,38 +198,6 @@ function jwtExpiry(token: string): number | null {
 
 function validUsers(value: unknown): value is Record<string, boolean> {
 	return isRecord(value) && Object.values(value).every((online) => typeof online === 'boolean')
-}
-
-function validCores(
-	value: unknown,
-): value is Record<
-	string,
-	{ online: boolean; health?: RealtimeCoreHealth; diagnostic?: RealtimeCoreDiagnostic }
-> {
-	return (
-		isRecord(value) &&
-		Object.values(value).every(
-			(core) =>
-				isRecord(core) &&
-				typeof core.online === 'boolean' &&
-				validHealth(core.health) &&
-				validDiagnostic(core.diagnostic),
-		)
-	)
-}
-
-function validHealth(value: unknown): value is RealtimeCoreHealth | undefined {
-	return value === undefined || value === 'healthy' || value === 'degraded' || value === 'offline'
-}
-
-function validDiagnostic(value: unknown): value is RealtimeCoreDiagnostic | undefined {
-	return (
-		value === undefined ||
-		value === 'none' ||
-		value === 'network' ||
-		value === 'authentication' ||
-		value === 'server'
-	)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

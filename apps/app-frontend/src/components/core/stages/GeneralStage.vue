@@ -12,8 +12,8 @@ const ctx = injectCoreOnboardingContext()
 			<span class="font-semibold text-contrast">Icon</span>
 			<IconSelect
 				v-model="ctx.coreIcon.value"
+				class="hide-icon-select-edit-icon"
 				:options="['select', 'remove']"
-				:show-edit-icon="false"
 				@select="ctx.selectIcon"
 				@remove="ctx.coreIcon.value = undefined"
 			/>
@@ -29,3 +29,9 @@ const ctx = injectCoreOnboardingContext()
 		</div>
 	</div>
 </template>
+
+<style scoped>
+.hide-icon-select-edit-icon :deep(.hovering-icon-shadow) {
+	display: none;
+}
+</style>

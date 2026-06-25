@@ -1,95 +1,86 @@
 # amberite-api
 
-Shared communication library — typed HTTP client, WebSocket, SSE, and explicit message transports for the Amberite desktop app, Core server, and Convex backend. Zero npm dependencies; platform differences are injected via `PlatformAdapter`.
-
----
-
-## File Structure
-
-```
-src/
-  adapter.ts        PlatformAdapter contract — fetch, auth, Core URL, queue store
-  context.ts        CoreCallContext — resolved baseUrl + token passed to api.ts
-  api.ts            Raw typed HTTP functions for every Core endpoint
-  client.ts         CoreApiClient class + CoreEventStream (SSE) class
-  pipeline.ts       CommunicationPipeline — timeout/retry/queue/relay policy runner
-  endpoint-policies.ts Defaults for every Core endpoint key
-  pipeline-types.ts Communication surfaces, methods, policies, nodes, results
-  queue.ts          MemoryQueueStore + CompositeQueueStore implementations
-  ws.ts             CoreWsConnection — typed WebSocket for instance consoles
-  transport.ts      Explicit message bus — 4 modes, ack policies, message registry
-  convex-relay.ts   Raw Convex HTTP query/mutation calls
-  core-relay.ts     Direct calls to Core's /relay/messages endpoint
-  logic/            Reusable multi-step Core/Convex logic built on top of raw endpoints
-  connection.ts     verifyCoreConnection — nonce handshake against Core
-  monitor.ts        CoreConnectionMonitor — periodically runs the Core handshake
-  instance-state.ts CoreInstanceStateManager — reactive state combining all of the above
-  drain.ts          drainQueue — flushes direct-queued messages to Core when online
-  auth.ts           Microsoft OAuth — startMicrosoftLogin / completeMicrosoftLogin
-  errors.ts         Error hierarchy: AmberiteApiError → NetworkError, AuthError,
-                    CoreOfflineError, RelayTimeoutError, CoreApiError
-  types.ts          TypeScript mirrors of Core's Rust structs — must sync with apps/core/
-```
-
----
+Shared, platform-neutral communication boundary for Amberite desktop and web clients. This package owns Amberite-specific wire contracts, direct Core transport primitives, realtime protocol validation, and pure durable/live state composition. It does not own Vue state, browser/Tauri globals, Convex subscription lifetime, durable storage, or a generic peer-to-peer messaging system.
 
 ## Architecture
 
-Everything flows through `PlatformAdapter`. It is the only interface that differs between desktop (Tauri) and web. The library itself has no platform code.
+```text
+ConvexClient subscription ─┐
+                           ├─ durable SocialSessionState input
+Worker WebSocket frames ───┘
+                           │
+                  composeSocialSessionState()
+                           │
+                        UI state
 
-**Call path for a normal API call:**
-`CoreApiClient.method()` → endpoint key policy → `CommunicationPipeline.callValue()` → builds `CoreCallContext` from adapter → calls raw function in `api.ts` → returns typed result.
+Direct Core HTTP / SSE / console WebSocket
+                           │
+                  focused Core control operations
+```
 
-`CoreApiClient.request()` resolves method/path metadata into an endpoint key using `resolveCoreEndpointKey()`. `CoreApiClient.withPolicy()` creates a lightweight client wrapper with per-call defaults (timeout, retries, methods, queue, auth mode, relay flags).
+Convex is authoritative for durable identity, profiles, relationships, linked Modrinth accounts, minimal Core list projection, pairing, and sync metadata. Core is authoritative for real Core roles, permissions, bans, invites, instance access, and audit logs. The Cloudflare Worker is authoritative only for ephemeral desktop online state. This package merges those independently delivered inputs without granting new authority: live users absent from the latest durable authorization set are removed before UI code receives state.
 
-**Logic rule:** raw endpoint definitions stay in `api.ts`/`client.ts`; reusable multi-step behavior such as installs, Core provisioning, sync manifests, and audit processing belongs in `src/logic/` and is exported through `index.ts`.
+The desktop/web integration owns a real `ConvexClient` subscription and passes its result into the composer. A social mutation changes durable Convex state; the subscription converges it. Do not follow every mutation with a full refresh. The Worker socket owns no durable state and reconnects with a bounded backoff after genuine disconnects.
 
-**Pipeline rules:**
+Direct Core calls remain appropriate for Core-local actions and snapshots. Core SSE and console WebSockets deliver watched local changes. They are not a generic social transport.
 
-- Every Core endpoint has a default policy in `endpoint-policies.ts`.
-- Direct calls use `core-direct`; async messages use `CommunicationPipeline.publish()`.
-- Convex relay is opt-in through `allowConvexRelay`; default policies avoid expensive Convex traffic.
-- Queue fallback requires `adapter.queueStore` and a payload. Desktop currently supplies a localStorage-backed queue.
-- `throwOnError` defaults true inside the library. App composables catch errors and expose refs so failures do not escape into Tauri uncaught.
+## Non-negotiable rules
 
-**Event flow:**
-Core pushes SSE events at `GET /events`. `CoreEventStream` reads the `ReadableStream`, splits on `\n\n`, strips `data:` prefixes, and emits typed `CoreInstanceEvent` objects. `CoreInstanceStateManager` subscribes to these and patches its internal `Map<id, CoreInstanceSummary>`.
+- Do not add polling, heartbeat loops, timer-based full refreshes, or "event then fetch again" paths. Convex function calls must correspond to user actions or real durable changes, not elapsed open-app time.
+- Do not add a peer-to-peer role model, arbitrary `senderId`/`recipientId`, relay envelope, delivery receipt, or offline message queue. There is no product requirement for a generic transport bus.
+- Do not use `ConvexApiClient` or raw Convex HTTP calls as the normal desktop state transport. Use one-shot calls only for auth bootstrap, debounced search, and callers that cannot subscribe.
+- Keep this package dependency-free and platform-neutral. Inject `fetch`, WebSocket creation, token lookup, and storage through narrow interfaces; never import Vue, Tauri, browser globals, or a Convex client implementation here.
+- Validate every external frame and DTO at the boundary. Do not let untyped `unknown` or raw backend documents reach UI consumers.
+- Model contracts explicitly and preserve backward compatibility. A desktop client may be older than the Core or Worker it connects to.
+- Do not merge this package into `packages/api-client`. That package is a Modrinth API client with Modrinth module and feature semantics; sharing a TypeScript runtime does not create a shared domain boundary.
 
-**WebSocket consoles:**
-`issueWsTicket()` must be called first to get a short-lived ticket — the ticket goes in the WS URL query string so auth tokens aren't in WS headers. `CoreWsConnection` dispatches `log`, `stats`, and `state` typed events. Unparseable frames fall back to plain log strings.
+## Supported boundary and migration status
 
----
+```text
+src/
+  social-session.ts      Pure durable + live social-state composer and authorization pruning
+  realtime.ts            Desktop Worker ticket/socket lifecycle, frame validation, bounded reconnect
+  convex-types.ts        Public durable Convex wire DTOs
+  api.ts                 Direct typed Core HTTP operations
+  client.ts              Core API client and Core SSE event stream
+  ws.ts                  Core console WebSocket contract
+  connection.ts          One-shot Core connectivity handshake
+  context.ts, adapter.ts Narrow injected platform/Core-call context
+  errors.ts              Shared, safe client error types
+  types.ts               Core HTTP/SSE/console DTOs; keep aligned with Core contracts
+  index.ts               Deliberate public exports only
 
-## Message Transport Modes (`transport.ts`)
+  convex-api.ts          Legacy raw Convex HTTP facade; do not extend
+  convex-relay.ts        Legacy Convex relay transport; remove after migration
+  core-relay.ts          Legacy Core relay transport; remove after migration
+  transport.ts           Legacy generic message model; remove after migration
+  pipeline*.ts,
+  endpoint-policies.ts   Legacy policy/retry/queue abstraction; remove after migration
+  queue.ts, drain.ts     Legacy offline generic-message queue; remove after migration
+  monitor.ts,
+  instance-state.ts      Legacy state ownership; do not add new polling/state orchestration
+  auth.ts                Legacy Microsoft OAuth path; do not extend
+  logic/                 App workflow helpers; move non-transport workflows to their owning app
+```
 
-| Mode                     | Behavior                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------- |
-| `direct-fire-and-forget` | Envelope returned; nothing persisted or sent                                                 |
-| `direct-queued`          | Stored in `PersistentQueueStore`; `drainQueue()` delivers when Core is online                |
-| `core-relay`             | POSTed directly to Core's `/relay/messages`                                                  |
-| `convex-relay`           | POSTed to Convex `messaging:publishMessage`; `waitForResult` polls `messaging:messageStatus` |
+## How to change this area
 
-`CommunicationPipeline.publish()` adds higher-level methods over these modes: `core-relay`, `convex-relay`, `memory-queue`, `persistent-queue`, and `fire-and-forget`. It can wait for received or processed acknowledgements through Core relay or Convex relay based on policy.
+For durable social or Worker presence changes, read `social-session.ts`, `realtime.ts`, the matching `convex/social.ts`, `convex/coreList.ts`, `convex/realtimeBridge.ts`, and `apps/realtime/src/index.ts` together. Update producer, consumer, validator, and tests as one protocol change.
 
-`drainQueue()` is **not auto-called** — the consumer must call it when `CoreConnectionMonitor` transitions to `connected`.
+Durable shell state is profile, friends, Core list/member-link projection, and live user presence only. UI that needs actual Core permissions, roles, bans, invites, or audit logs must fetch them directly from Core.
 
----
+For Core control changes, read the endpoint in `apps/core/src/presentation/router.rs`, its handler and contract, then update the narrowly matching types/client call here. The Core's SSE and console WebSocket schemas must change with their Rust producers and consumer validation.
 
-## Where It Gets Loaded
+Put app-specific UI formatting and Modrinth install workflows in the app, not here. The correct abstraction is a small, pure contract/composition library, not a universal client framework.
 
-| Consumer                                                | What it does                                                                                                              |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `apps/app-frontend/src/adapters/desktop.ts`             | Implements `PlatformAdapter` using native `window.fetch`, env URLs, persisted Amberite auth JWTs, and local queue storage |
-| `apps/app-frontend/src/composables/useCoreClient.ts`    | Provides the singleton `CoreApiClient`                                                                                    |
-| `apps/app-frontend/src/composables/useCoreCall.ts`      | Vue-safe call wrapper; catches errors and exposes reactive refs                                                           |
-| `apps/app-frontend/src/composables/useCoreMessage.ts`   | Vue-safe message publish wrapper over `CommunicationPipeline.publish()`                                                   |
-| `apps/app-frontend/src/composables/useCoreInstances.ts` | Instances list + SSE state                                                                                                |
+## Consumers and checks
 
----
+The desktop adapter and composition live under `apps/app-frontend/src/adapters/desktop.ts` and `apps/app-frontend/src/composables/useSocial.ts`. Web consumers must use the same contracts but supply their own platform bindings.
 
-## Key Non-Obvious Details
+Run the focused package tests after code changes:
 
-- `CoreApiClient` resolves the Core URL from the adapter on every call so switching the linked Core takes effect immediately; it never substitutes a localhost default.
-- `types.ts` has no validation — it is purely structural. Drift from Core's Rust structs is silent at runtime.
-- `CoreConnectionMonitor` verifies Core with a nonce handshake at `/connection/handshake`. It does not heartbeat and does not use Convex as a Core liveness bus.
-- `auth.ts` reads env vars with a dual path: `import.meta.env.VITE_*` for Vite builds, `process.env.*` for Node (tests/scripts). Both paths need the corresponding var set.
+```powershell
+pnpm --filter @amberite/amberite-api test
+```
+
+Add integration coverage for social-state composition, authorization pruning, malformed Worker frames, reconnect/disposal, Core contracts, and subscription convergence. Do not make an integration test start a Core development server as hidden test setup.

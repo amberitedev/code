@@ -182,12 +182,45 @@ export async function upsertCoreForFriendGroup(
 	else await ctx.db.insert('cores', value)
 }
 export function publicUser(user: any, includeFriendCode = false) {
+	const avatarUrl = user.avatarUrl ?? user.image
 	return {
+		id: user._id,
 		userId: user._id,
 		username: user.username,
 		displayName: user.displayName,
+		name: user.displayName ?? user.username,
 		image: user.image,
+		avatar_url: avatarUrl ?? null,
+		bio: user.bio ?? null,
+		created: new Date(user._creationTime ?? Date.now()).toISOString(),
 		...(includeFriendCode && user.friendCode ? { friendCode: user.friendCode } : {}),
+	}
+}
+export function publicProfile(user: any) {
+	const avatarUrl = user.avatarUrl ?? user.image
+	return {
+		id: user._id,
+		userId: user._id,
+		username: user.username,
+		name: user.displayName ?? user.username,
+		displayName: user.displayName,
+		avatar_url: avatarUrl ?? null,
+		image: user.image,
+		bio: user.bio ?? null,
+		created: new Date(user._creationTime ?? Date.now()).toISOString(),
+		createdAt: user._creationTime ?? null,
+		profileUpdatedAt: user.profileUpdatedAt ?? null,
+	}
+}
+export function publicCurrentProfile(user: any) {
+	return {
+		...publicProfile(user),
+		friendCode: user.friendCode,
+		avatarStorageId: user.avatarStorageId,
+		avatarMimeType: user.avatarMimeType,
+		avatarSizeBytes: user.avatarSizeBytes,
+		deletedAt: user.deletedAt,
+		deletedReason: user.deletedReason,
 	}
 }
 export function coreById(ctx: QueryCtx | MutationCtx, coreId: string) {
@@ -235,4 +268,10 @@ export function coresByGroup(ctx: QueryCtx, friendGroupId: string) {
 		.query('cores')
 		.withIndex('by_friend_group', (q) => q.eq('friendGroupId', friendGroupId))
 		.collect()
+}
+export function coreListById(ctx: QueryCtx | MutationCtx, coreId: string) {
+	return ctx.db
+		.query('coreList')
+		.withIndex('by_core_id', (q) => q.eq('coreId', coreId))
+		.unique()
 }

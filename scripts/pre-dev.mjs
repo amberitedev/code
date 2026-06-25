@@ -27,7 +27,7 @@ const content = readFileSync(envPath, 'utf8')
 const required = [
 	{
 		key: 'VITE_CONVEX_URL',
-		hint: 'Set to http://127.0.0.1:3210 for local Convex (matches packages/convex/.env.local)',
+		hint: 'Set the Convex deployment URL for the active desktop app profile.',
 	},
 ]
 

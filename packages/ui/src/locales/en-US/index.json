@@ -5320,26 +5320,5 @@
   },
   "user.profile.badge.staff.name": {
     "defaultMessage": "Modrinth Team"
-  },
-  "creation-flow.modal.custom-setup.instance-type.client": {
-    "defaultMessage": "Client"
-  },
-  "creation-flow.modal.custom-setup.instance-type.label": {
-    "defaultMessage": "Instance type"
-  },
-  "creation-flow.modal.custom-setup.instance-type.server": {
-    "defaultMessage": "Server"
-  },
-  "creation-flow.modal.custom-setup.instance-type.synced": {
-    "defaultMessage": "Synced"
-  },
-  "servers.access-table.accepted": {
-    "defaultMessage": "Accepted"
-  },
-  "servers.access-table.action.invite-user": {
-    "defaultMessage": "Invite user"
-  },
-  "servers.access-table.friend": {
-    "defaultMessage": "Friend"
   }
 }

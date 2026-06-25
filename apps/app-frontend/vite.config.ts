@@ -7,7 +7,6 @@ import svgLoader from 'vite-svg-loader'
 import tauriConf from '../app/tauri.conf.json'
 
 const projectRootDir = resolve(__dirname)
-const workspaceRootDir = resolve(projectRootDir, '../..')
 const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
 const devPort = Number(process.env.AMBERITE_APP_DEV_PORT ?? 1420)
@@ -37,11 +36,6 @@ function loadEnvFile(envFilePath: string) {
 
 // Load .env from app-lib manually instead of using Vite's envDir, which would auto-load .env.local and override values
 loadEnvFile(resolve(appLibEnvDir, '.env'))
-loadEnvFile(resolve(workspaceRootDir, '.env.local'))
-
-if (!process.env.VITE_CONVEX_URL && process.env.CONVEX_URL) {
-	process.env.VITE_CONVEX_URL = process.env.CONVEX_URL
-}
 
 const missingEnvironmentVariables = requiredEnvironmentVariables.filter(
 	(key) => !process.env[key]?.trim(),
@@ -50,7 +44,7 @@ const missingEnvironmentVariables = requiredEnvironmentVariables.filter(
 if (missingEnvironmentVariables.length > 0) {
 	throw new Error(
 		`Missing required environment variables: ${missingEnvironmentVariables.join(', ')}. ` +
-			'Set MODRINTH_* values in packages/app-lib/.env and VITE_* values in .env.local.',
+			'Set them in packages/app-lib/.env.',
 	)
 }
 
