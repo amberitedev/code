@@ -4103,6 +4103,9 @@
   "settings.account.security.passkey.add": {
     "message": "Add passkey"
   },
+  "settings.account.security.passkey.action.delete": {
+    "message": "Delete passkey"
+  },
   "settings.account.security.passkey.add-modal.name.description": {
     "message": "Make sure to pick something memorable, so you can identify this passkey later."
   },
