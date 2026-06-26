@@ -4,6 +4,7 @@ import type { Id } from './_generated/dataModel'
 import type { QueryCtx } from './_generated/server'
 import { coreLinksForUser, coreMemberUserIdsForUser } from './coreList'
 import {
+	currentAccountFields,
 	publicCurrentProfile,
 	publicUser,
 	resolveActor,
@@ -20,6 +21,7 @@ export const sessionState = query({
 export async function sessionStateForUser(ctx: QueryCtx, userId: Id<'users'>) {
 	const user = await ctx.db.get(userId)
 	if (!user) throw new Error('user not found')
+	const accountFields = await currentAccountFields(ctx, userId)
 	const [left, right, incoming, outgoing, blocks, coreLinks] = await Promise.all([
 		ctx.db
 			.query('friendships')
@@ -63,8 +65,8 @@ export async function sessionStateForUser(ctx: QueryCtx, userId: Id<'users'>) {
 			}),
 		)
 	return {
-		currentUser: publicUser(user, true),
-		profile: publicCurrentProfile(user),
+		currentUser: publicUser(user, true, accountFields),
+		profile: publicCurrentProfile(user, accountFields),
 		friends: {
 			friends: friendships.filter(
 				(friendship): friendship is NonNullable<typeof friendship> => friendship !== null,

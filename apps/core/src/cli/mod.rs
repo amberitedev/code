@@ -262,9 +262,19 @@ async fn reset_pairing() -> Result<()> {
     let config = crate::config::Config::from_env()?;
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
-    sqlx::query("DELETE FROM core_config WHERE id = 1")
-        .execute(&pool)
-        .await?;
+    for statement in [
+        "DELETE FROM core_config WHERE id = 1",
+        "DELETE FROM core_members",
+        "DELETE FROM instance_members",
+        "DELETE FROM core_group_bans",
+        "DELETE FROM core_invitations",
+        "DELETE FROM activity_log",
+    ] {
+        sqlx::query(statement).execute(&pool).await?;
+    }
+    tokio::fs::remove_file(config.data_dir.join(".setup_secret"))
+        .await
+        .ok();
     println!("Pairing reset. Restart Core to generate a new pairing code.");
     Ok(())
 }

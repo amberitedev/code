@@ -13,6 +13,7 @@ pub async fn connect(path: &Path) -> color_eyre::eyre::Result<SqlitePool> {
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true)
+        .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
         .busy_timeout(Duration::from_secs(5));
     let pool = SqlitePool::connect_with(options).await?;

@@ -281,6 +281,9 @@ importers:
 
   apps/frontend:
     dependencies:
+      '@amberite/amberite-api':
+        specifier: workspace:*
+        version: link:../../packages/amberite-api
       '@formatjs/intl-localematcher':
         specifier: ^0.5.4
         version: 0.5.10
@@ -722,6 +725,9 @@ importers:
       '@intercom/messenger-js-sdk':
         specifier: ^0.0.14
         version: 0.0.14
+      '@amberite/amberite-api':
+        specifier: workspace:*
+        version: link:../amberite-api
       '@modrinth/api-client':
         specifier: workspace:*
         version: link:../api-client

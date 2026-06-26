@@ -88,6 +88,23 @@ pub async fn complete_setup(
             "owner_user_id cannot be empty".into(),
         ));
     }
+    validate_https_url(&body.convex_url, "convex_url")?;
+    validate_https_url(&body.auth_jwks_url, "auth_jwks_url")?;
+    if let Some(url) = &body.realtime_url {
+        validate_https_url(url, "realtime_url")?;
+    }
+    let auth_audience = body
+        .auth_audience
+        .as_deref()
+        .unwrap_or("authenticated")
+        .trim()
+        .to_string();
+    if auth_audience.is_empty() || auth_audience.chars().any(char::is_control) {
+        return Err(ApiError::BadRequest(
+            "auth_audience cannot be empty or contain control characters"
+                .into(),
+        ));
+    }
     if let Some(credential) = &body.realtime_credential {
         if credential.len() != 64
             || !credential
@@ -116,7 +133,7 @@ pub async fn complete_setup(
 	.bind(&body.convex_url)
 	.bind(&body.convex_url)
 	.bind(&body.auth_jwks_url)
-	.bind(body.auth_audience.as_deref().unwrap_or("authenticated"))
+	.bind(&auth_audience)
 	.bind(&body.owner_user_id)
     .bind(&now)
     .bind(&state.core_id)
@@ -173,6 +190,18 @@ fn normalize_pairing_code(code: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase()
+}
+
+fn validate_https_url(value: &str, field: &str) -> Result<(), ApiError> {
+    let parsed = url::Url::parse(value).map_err(|_| {
+        ApiError::BadRequest(format!("{field} must be a valid URL"))
+    })?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return Err(ApiError::BadRequest(format!(
+            "{field} must be an HTTPS URL with a host"
+        )));
+    }
+    Ok(())
 }
 
 /// GET /setup/status — check whether Core is paired.

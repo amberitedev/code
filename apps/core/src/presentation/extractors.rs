@@ -29,17 +29,15 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             ApiError::Unauthorized("missing Authorization header".into())
         })?;
 
-        let jwks_url = state.jwks_url().await.ok_or_else(|| {
-            ApiError::Unauthorized("Core is not paired".into())
-        })?;
-
-        let audience = state.auth_audience().await;
-
-        let claims = state
-            .jwks_cache
-            .validate(token, &jwks_url, &audience)
-            .await
-            .map_err(|e| ApiError::Unauthorized(e.to_string()))?;
+        let claims = if state.config.dev_mode {
+            if let Some(claims) = dev_claims(token)? {
+                claims
+            } else {
+                validate_jwt(state, token).await?
+            }
+        } else {
+            validate_jwt(state, token).await?
+        };
 
         access_service::require_any_member(state, &claims.sub)
             .await
@@ -52,6 +50,41 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let val = headers.get("authorization")?.to_str().ok()?;
     val.strip_prefix("Bearer ")
+}
+
+async fn validate_jwt(
+    state: &Arc<AppState>,
+    token: &str,
+) -> Result<Claims, ApiError> {
+    let jwks_url = state
+        .jwks_url()
+        .await
+        .ok_or_else(|| ApiError::Unauthorized("Core is not paired".into()))?;
+
+    let audience = state.auth_audience().await.ok_or_else(|| {
+        ApiError::Unauthorized("Core auth audience is not configured".into())
+    })?;
+
+    state
+        .jwks_cache
+        .validate(token, &jwks_url, &audience)
+        .await
+        .map_err(|e| ApiError::Unauthorized(e.to_string()))
+}
+
+fn dev_claims(token: &str) -> Result<Option<Claims>, ApiError> {
+    let Some(user_id) = token.strip_prefix("dev:") else {
+        return Ok(None);
+    };
+    if user_id.is_empty() || user_id.chars().any(char::is_control) {
+        return Err(ApiError::Unauthorized("invalid dev token".into()));
+    }
+    Ok(Some(Claims {
+        sub: user_id.to_string(),
+        aud: "dev".to_string(),
+        role: Some("dev".to_string()),
+        exp: (chrono::Utc::now().timestamp() + 3600) as u64,
+    }))
 }
 
 #[cfg(test)]

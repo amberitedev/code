@@ -35,6 +35,7 @@ import type { LocationQueryValue } from 'vue-router'
 
 import CreateAccountView from '@/components/ui/auth/CreateAccount.vue'
 import SignUpView from '@/components/ui/auth/SignUp.vue'
+import { useAmberiteAuthClient } from '@/composables/amberite-client.ts'
 import {
 	LAST_SIGN_IN_OAUTH_PROVIDER_STORAGE_KEY,
 	PENDING_SIGN_IN_OAUTH_PROVIDER_STORAGE_KEY,
@@ -78,6 +79,7 @@ const getErrorMessage = (error: unknown): string => {
 }
 
 const client = injectModrinthClient()
+const amberiteAuthClient = useAmberiteAuthClient()
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 
@@ -236,7 +238,7 @@ async function findAvailableRandomUsername(): Promise<string> {
 }
 
 async function validateCreateAccountCandidate(candidateUsername: string): Promise<void> {
-	await client.labrinth.auth_v2.validateCreateAccount({
+	await amberiteAuthClient.validatePasswordAccount({
 		username: candidateUsername,
 		password: password.value,
 		email: email.value,
@@ -253,15 +255,14 @@ function isUsernameTakenValidationError(error: unknown): boolean {
 async function createAccount() {
 	startLoading()
 	try {
-		const res = await client.labrinth.auth_v2.createAccount({
+		const res = await amberiteAuthClient.signUpWithPassword({
 			username: username.value.trim() || generateUsernameFromEmail(email.value),
 			password: password.value,
 			email: email.value,
 			challenge: token.value,
-			sign_up_newsletter: subscribe.value,
 		})
 
-		await useAuth(res.session)
+		await useAuth(res.tokens.token)
 		await useUser()
 
 		promotePendingSignInOAuthProvider()

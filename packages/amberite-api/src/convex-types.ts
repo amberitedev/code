@@ -12,6 +12,13 @@ export interface AmberiteUser {
 	bio?: string | null
 	created?: string
 	friendCode?: string
+	email?: string | null
+	email_verified?: boolean
+	auth_providers?: string[]
+	has_password?: boolean
+	has_totp?: boolean
+	role?: string
+	badges?: number
 }
 
 export interface AmberitePublicProfile {
@@ -35,6 +42,13 @@ export interface AmberiteProfile extends AmberitePublicProfile {
 	avatarSizeBytes?: number
 	deletedAt?: number
 	deletedReason?: string
+	email?: string | null
+	email_verified?: boolean
+	auth_providers?: string[]
+	has_password?: boolean
+	has_totp?: boolean
+	role?: string
+	badges?: number
 }
 
 export interface LinkedModrinthAccount {

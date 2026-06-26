@@ -8,12 +8,14 @@
 use std::sync::Arc;
 
 use copal::{
-    application::state::AppState,
+    application::{installation_service::installation_dir, state::AppState},
     config::Config,
     domain::instance::{InstanceId, InstanceInstallStatus},
+    domain::server_installation::InstallationId,
     infrastructure::process::mock_spawner::MockSpawner,
     presentation::router::create_router,
 };
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use sqlx::sqlite::SqliteConnectOptions;
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -36,7 +38,7 @@ pub struct TestApp {
 impl TestApp {
     // ── Constructors ──────────────────────────────────────────────────────────
 
-    /// Unpaired core, dev_mode = true (no JWT required).
+    /// Unpaired core, dev_mode = true (uses the explicit dev bearer token).
     pub async fn spawn() -> Self {
         let (pool, data_dir) = Self::db_and_dir().await;
         let config = Self::dev_config(data_dir.path().to_path_buf());
@@ -111,7 +113,7 @@ impl TestApp {
         let options = SqliteConnectOptions::new()
             .filename(&db_path)
             .create_if_missing(true);
-        let pool = sqlx::SqlitePool::connect_with(options)
+        let pool = sqlx::SqlitePool::connect_with(options.foreign_keys(true))
             .await
             .expect("failed to open test SQLite");
         sqlx::migrate!("./migrations")
@@ -140,6 +142,19 @@ impl TestApp {
         pairing_code: Option<String>,
     ) -> Self {
         let router = create_router(Arc::clone(&state));
+        let client = if state.config.dev_mode {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_static("Bearer dev:dev-owner"),
+            );
+            reqwest::Client::builder()
+                .default_headers(headers)
+                .build()
+                .expect("failed to build authenticated test client")
+        } else {
+            reqwest::Client::new()
+        };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind test listener");
@@ -149,7 +164,7 @@ impl TestApp {
         });
         Self {
             base_url: format!("http://127.0.0.1:{port}"),
-            client: reqwest::Client::new(),
+            client,
             state,
             pairing_code,
             _data_dir: data_dir,
@@ -174,10 +189,16 @@ pub fn default_create_body() -> serde_json::Value {
 
 /// Create one instance and return its ID string.
 pub async fn create_test_instance(app: &TestApp) -> String {
+    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM instances")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let mut body = default_create_body();
+    body["port"] = serde_json::json!(25565 + existing);
     let res = app
         .client
         .post(app.url("/instances"))
-        .json(&default_create_body())
+        .json(&body)
         .send()
         .await
         .unwrap();
@@ -194,6 +215,16 @@ pub async fn create_test_instance(app: &TestApp) -> String {
     app.state
         .instance_store
         .update_install_status(&parsed, InstanceInstallStatus::Ready)
+        .await
+        .unwrap();
+    let record = app.state.instance_store.get(&parsed).await.unwrap();
+    let launch_dir = record
+        .installation_id
+        .as_ref()
+        .map(|id| installation_dir(&app.state, &InstallationId(id.clone())))
+        .unwrap_or_else(|| std::path::PathBuf::from(&record.data_dir));
+    tokio::fs::create_dir_all(&launch_dir).await.unwrap();
+    tokio::fs::write(launch_dir.join("server.jar"), b"dummy")
         .await
         .unwrap();
     id

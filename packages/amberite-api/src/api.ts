@@ -34,6 +34,8 @@ import type {
 	CoreBackupsResponse,
 	CoreBackupSchedule,
 	CoreBackupScheduleBody,
+	CoreNetworkStatus,
+	CoreUploadSession,
 	CoreModpackManifest,
 	UploadHandle,
 	CoreFsEntry,
@@ -146,6 +148,10 @@ export function connectionHandshake(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
 	})
+}
+
+export function getNetworkStatus(ctx: CoreCallContext): Promise<CoreNetworkStatus> {
+	return apiFetch(ctx, `${ctx.baseUrl}/network/status`)
 }
 
 // ── Instances ─────────────────────────────────────────────────────────────────
@@ -722,6 +728,62 @@ export function searchFiles(
 	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/search?${q}`)
 }
 
+export async function createResumableUpload(
+	ctx: CoreCallContext,
+	id: string,
+	path: string,
+	length: number,
+	sha256Hex?: string,
+): Promise<CoreUploadSession> {
+	const q = new URLSearchParams({ path })
+	const headers: Record<string, string> = { 'Upload-Length': String(length) }
+	if (sha256Hex) headers['Upload-Metadata'] = `sha256 ${base64FromText(sha256Hex)}`
+	const response = await rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads?${q}`, {
+		method: 'POST',
+		headers,
+	})
+	return uploadSessionFromHeaders(response)
+}
+
+export async function getResumableUploadStatus(
+	ctx: CoreCallContext,
+	id: string,
+	uploadId: string,
+): Promise<CoreUploadSession> {
+	const response = await rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads/${uploadId}`, {
+		method: 'HEAD',
+	})
+	return uploadSessionFromHeaders(response, uploadId)
+}
+
+export async function appendResumableUpload(
+	ctx: CoreCallContext,
+	id: string,
+	uploadId: string,
+	offset: number,
+	chunk: BodyInit,
+	sha256DigestBase64?: string,
+): Promise<CoreUploadSession> {
+	const headers: Record<string, string> = { 'Upload-Offset': String(offset) }
+	if (sha256DigestBase64) headers['Upload-Checksum'] = `sha256 ${sha256DigestBase64}`
+	const response = await rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads/${uploadId}`, {
+		method: 'PATCH',
+		headers,
+		body: chunk,
+	})
+	return uploadSessionFromHeaders(response, uploadId)
+}
+
+export function cancelResumableUpload(
+	ctx: CoreCallContext,
+	id: string,
+	uploadId: string,
+): Promise<Response> {
+	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads/${uploadId}`, {
+		method: 'DELETE',
+	})
+}
+
 // ── Backups ───────────────────────────────────────────────────────────────────
 
 export function listBackups(ctx: CoreCallContext, id: string): Promise<CoreBackupsResponse> {
@@ -1168,4 +1230,22 @@ function xhrUpload(ctx: CoreCallContext, url: string, file: File): UploadHandle 
 		done,
 		abort: () => xhr.abort(),
 	}
+}
+
+function uploadSessionFromHeaders(response: Response, uploadId?: string): CoreUploadSession {
+	const location = response.headers.get('Location') ?? ''
+	const id = uploadId ?? location.split('/').pop() ?? ''
+	return {
+		id,
+		location,
+		offset: Number(response.headers.get('Upload-Offset') ?? 0),
+		length: Number(response.headers.get('Upload-Length') ?? 0),
+	}
+}
+
+function base64FromText(value: string): string {
+	const bytes = new TextEncoder().encode(value)
+	let binary = ''
+	for (const byte of bytes) binary += String.fromCharCode(byte)
+	return btoa(binary)
 }

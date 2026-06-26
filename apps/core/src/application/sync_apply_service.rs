@@ -7,6 +7,7 @@ use sha2::Digest;
 use crate::{
     application::{social_models::SocialError, state::AppState},
     domain::modpack::PackFormat,
+    infrastructure::minecraft::mrpack::validate_download_url,
 };
 
 #[derive(Debug, Serialize)]
@@ -115,6 +116,7 @@ async fn desired_mods(
                 file.path
             ))
         })?;
+        validate_download_url(url)?;
         desired.insert(
             filename.clone(),
             DesiredMod {

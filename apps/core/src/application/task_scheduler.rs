@@ -1,13 +1,17 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
-use chrono::{Datelike, Timelike, Utc};
+use chrono::{Duration, Utc};
 use serde_json::Value;
 
 use crate::application::{
-    backup_service::create_backup,
+    backup_service::{create_backup, enforce_backup_retention},
     instance_status_service::{restart_instance, send_command},
     state::AppState,
-    task_service::{list_all_enabled_tasks, record_task_run, TaskType},
+    task_service::{
+        list_all_enabled_tasks, normalize_cron_expression, record_task_run,
+        TaskType,
+    },
 };
 
 /// Background task: wakes every 60 seconds and fires scheduled instance tasks when due.
@@ -31,14 +35,7 @@ async fn tick(state: &Arc<AppState>) -> Result<(), sqlx::Error> {
     };
 
     for task in tasks {
-        if !cron_matches(
-            &task.cron,
-            now.minute(),
-            now.hour(),
-            now.day(),
-            now.month(),
-            now.weekday().num_days_from_sunday(),
-        ) {
+        if !cron_due(&task.cron, now) {
             continue;
         }
 
@@ -81,7 +78,13 @@ async fn execute_task(
     let iid = instance_id.parse::<crate::domain::instance::InstanceId>()?;
     match task_type.parse::<TaskType>()? {
         TaskType::Backup => {
-            create_backup(state, instance_id, "automated", None).await?;
+            create_backup(state, instance_id, "scheduled", None).await?;
+            let retain_count = payload
+                .as_ref()
+                .and_then(|payload| payload.get("retain_count"))
+                .and_then(|value| value.as_i64())
+                .unwrap_or(5);
+            enforce_backup_retention(state, instance_id, retain_count).await?;
         }
         TaskType::Restart => {
             restart_instance(state, &iid).await?;
@@ -107,28 +110,16 @@ async fn execute_task(
     Ok(())
 }
 
-fn cron_matches(
-    cron: &str,
-    minute: u32,
-    hour: u32,
-    dom: u32,
-    month: u32,
-    dow: u32,
-) -> bool {
-    let parts: Vec<&str> = cron.split_whitespace().collect();
-    if parts.len() != 5 {
+fn cron_due(cron: &str, now: chrono::DateTime<Utc>) -> bool {
+    let Ok(normalized) = normalize_cron_expression(cron) else {
         return false;
-    }
-    field_matches(parts[0], minute)
-        && field_matches(parts[1], hour)
-        && field_matches(parts[2], dom)
-        && field_matches(parts[3], month)
-        && field_matches(parts[4], dow)
-}
-
-fn field_matches(field: &str, value: u32) -> bool {
-    if field == "*" {
-        return true;
-    }
-    field.parse::<u32>().map(|n| n == value).unwrap_or(false)
+    };
+    let Ok(schedule) = cron::Schedule::from_str(&normalized) else {
+        return false;
+    };
+    let window_start = now - Duration::seconds(59);
+    schedule
+        .after(&window_start)
+        .next()
+        .is_some_and(|scheduled| scheduled <= now)
 }

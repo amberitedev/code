@@ -16,6 +16,7 @@ const Hosting = {
 	Files: () => import('@/pages/hosting/manage/Files.vue'),
 	Backups: () => import('@/pages/hosting/manage/Backups.vue'),
 	Access: () => import('@/pages/hosting/manage/Access.vue'),
+	Browse: () => import('@/pages/hosting/manage/Browse.vue'),
 }
 
 const Instance = {
@@ -120,6 +121,14 @@ const router = createRouter({
 					component: Hosting.Access,
 					meta: {
 						breadcrumb: [{ name: '?Server' }],
+					},
+				},
+				{
+					path: 'browse',
+					name: 'ServerManageBrowse',
+					component: Hosting.Browse,
+					meta: {
+						breadcrumb: [{ name: '?Server' }, { name: 'Add content' }],
 					},
 				},
 			],

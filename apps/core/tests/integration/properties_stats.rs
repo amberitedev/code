@@ -52,6 +52,23 @@ async fn get_properties_contains_server_port() {
     );
 }
 
+#[tokio::test]
+async fn new_instance_defaults_online_mode_true() {
+    let app = common::TestApp::spawn().await;
+    let id = common::create_test_instance(&app).await;
+
+    let res = app
+        .client
+        .get(app.url(&format!("/instances/{id}/properties")))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["properties"]["online-mode"], "true");
+}
+
 /// GET /instances/:id/properties for a nonexistent (but valid UUID) instance
 /// returns 404.
 #[tokio::test]
@@ -110,6 +127,38 @@ async fn patch_properties_valid_key_returns_200() {
         Some(true),
         "response must have ok=true; got: {body:?}"
     );
+}
+
+#[tokio::test]
+async fn patch_properties_rejects_control_character_injection() {
+    let app = common::TestApp::spawn().await;
+    let id = common::create_test_instance(&app).await;
+
+    let res = app
+        .client
+        .patch(app.url(&format!("/instances/{id}/properties")))
+        .json(&json!({ "motd": "hello\nevil=true" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn patch_properties_rejects_unsafe_keys() {
+    let app = common::TestApp::spawn().await;
+    let id = common::create_test_instance(&app).await;
+
+    let res = app
+        .client
+        .patch(app.url(&format!("/instances/{id}/properties")))
+        .json(&json!({ "../server-port": "25566" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
 }
 
 /// After a PATCH, GET should reflect the new value.

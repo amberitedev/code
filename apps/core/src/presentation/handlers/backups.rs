@@ -39,6 +39,16 @@ impl From<BackupError> for ApiError {
             BackupError::MustBeOffline => {
                 ApiError::Conflict("instance must be offline to restore".into())
             }
+            BackupError::RconRequiredForHotBackup => {
+                ApiError::Conflict("rcon_required_for_hot_backup".into())
+            }
+            BackupError::PathTraversal => {
+                ApiError::BadRequest("path traversal rejected".into())
+            }
+            BackupError::InvalidSchedule(message) => {
+                ApiError::BadRequest(message)
+            }
+            BackupError::Rcon(message) => ApiError::ServiceUnavailable(message),
             e => ApiError::Internal(e.to_string()),
         }
     }
@@ -81,20 +91,7 @@ pub async fn list_handler(
     require_instance_permission(&state, &claims.sub, &id, "server:backups")
         .await?;
     let rows = list_backups(&state, &id).await.map_err(ApiError::from)?;
-    let backups: Vec<Value> = rows
-        .into_iter()
-        .map(|b| {
-            json!({
-                "id": b.id,
-                "name": b.name,
-                "size_bytes": b.size_bytes,
-                "locked": b.locked,
-                "automated": b.trigger == "automatic",
-                "status": "done",
-                "created_at": b.created_at,
-            })
-        })
-        .collect();
+    let backups: Vec<Value> = rows.into_iter().map(backup_json).collect();
     let active_operations: Vec<Value> = vec![];
     Ok(Json(
         json!({ "backups": backups, "active_operations": active_operations }),
@@ -114,15 +111,22 @@ pub async fn create_handler(
     let backup = create_backup(&state, &id, "manual", body.name)
         .await
         .map_err(ApiError::from)?;
-    Ok(Json(json!({
-        "id": backup.id,
-        "name": backup.name,
-        "size_bytes": backup.size_bytes,
-        "locked": backup.locked,
-        "automated": backup.trigger == "automatic",
+    Ok(Json(backup_json(backup)))
+}
+
+fn backup_json(b: crate::application::backup_service::BackupRecord) -> Value {
+    json!({
+        "id": b.id,
+        "name": b.name,
+        "size_bytes": b.size_bytes,
+        "locked": b.locked,
+        "automated": b.trigger == "scheduled",
+        "hot": b.hot,
+        "consistency": b.consistency,
+        "trigger": b.trigger,
         "status": "done",
-        "created_at": backup.created_at,
-    })))
+        "created_at": b.created_at,
+    })
 }
 
 /// DELETE /instances/:id/backups/:bid

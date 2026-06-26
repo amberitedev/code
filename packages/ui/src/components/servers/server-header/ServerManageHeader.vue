@@ -34,13 +34,13 @@
 					/>
 
 					<div
-						v-if="props.server?.net?.domain && !userPreferences.hideSubdomainLabel"
+						v-if="displayAddress && !userPreferences.hideSubdomainLabel"
 						v-tooltip="'Copy server address'"
 						class="flex cursor-pointer items-center gap-2 font-medium hover:underline text-nowrap"
 						@click="copyServerAddress"
 					>
 						<LinkIcon class="flex size-5 shrink-0" />
-						{{ props.server.net.domain }}.modrinth.gg
+						{{ displayAddress }}
 					</div>
 
 					<div v-if="showUptime" class="h-1.5 w-1.5 rounded-full bg-surface-5" />
@@ -108,6 +108,7 @@ const props = withDefaults(
 		serverImage?: string | null
 		serverProject?: ServerProjectSummary | null
 		serverProjectLink?: string
+		serverAddress?: string | null
 		uptimeSeconds?: number
 		showUptime?: boolean
 		backHref?: string
@@ -118,6 +119,7 @@ const props = withDefaults(
 		serverImage: null,
 		serverProject: null,
 		serverProjectLink: '',
+		serverAddress: null,
 		uptimeSeconds: 0,
 		showUptime: true,
 		backHref: '/hosting/manage',
@@ -160,6 +162,12 @@ const formattedUptime = computed(() => {
 
 const showProject = computed(() => !!props.serverProject)
 
+const displayAddress = computed(() => {
+	if (props.serverAddress) return props.serverAddress
+	if (!props.server?.net?.domain) return ''
+	return `${props.server.net.domain}.modrinth.gg`
+})
+
 const serverProjectLink = computed(() => {
 	if (props.serverProjectLink) {
 		return props.serverProjectLink
@@ -171,8 +179,8 @@ const serverProjectLink = computed(() => {
 })
 
 function copyServerAddress() {
-	if (!props.server?.net?.domain) return
-	navigator.clipboard.writeText(`${props.server.net.domain}.modrinth.gg`)
+	if (!displayAddress.value) return
+	navigator.clipboard.writeText(displayAddress.value)
 	addNotification({
 		title: 'Server address copied',
 		text: "Your server's address has been copied to your clipboard.",

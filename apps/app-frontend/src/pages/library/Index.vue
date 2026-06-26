@@ -9,6 +9,7 @@ import { useRoute } from 'vue-router'
 import { NewInstanceImage } from '@/assets/icons'
 import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import { useCoreInstances } from '@/composables/useCoreInstances'
+import { useOptimisticLoading } from '@/composables/useOptimisticPreload'
 import { profile_listener } from '@/helpers/events.js'
 import { list } from '@/helpers/profile.js'
 import type { GameInstance } from '@/helpers/types'
@@ -33,7 +34,7 @@ const instancesQuery = useQuery({
 	gcTime: 10 * 60_000,
 })
 
-const { instances: coreInstanceMap } = useCoreInstances()
+const { instances: coreInstanceMap, loading: coreInstancesLoading } = useCoreInstances()
 
 function coreToGameInstance(inst: CoreInstanceSummary): GameInstance {
 	return {
@@ -70,8 +71,11 @@ const instances = computed(() => {
 })
 
 const initialPending = computed(
-	() => instancesQuery.isPending.value && instances.value.length === 0,
+	() =>
+		(instancesQuery.isPending.value || coreInstancesLoading.value) && instances.value.length === 0,
 )
+const hasLibraryContent = computed(() => instances.value.length > 0)
+const showLibrarySkeleton = useOptimisticLoading(initialPending, hasLibraryContent)
 useLoadingBarToken(initialPending)
 
 const offline = ref(!navigator.onLine)
@@ -95,7 +99,7 @@ onUnmounted(() => {
 
 <template>
 	<div class="p-6 flex flex-col gap-3">
-		<AppPageSkeleton v-if="initialPending" variant="list" class="!p-0" />
+		<AppPageSkeleton v-if="showLibrarySkeleton" variant="library" class="!p-0" />
 		<h1 class="m-0 text-2xl hidden">Library</h1>
 		<NavTabs
 			:links="[
@@ -107,7 +111,7 @@ onUnmounted(() => {
 				{ label: 'Saved', href: `/library/saved`, shown: false },
 			]"
 		/>
-		<template v-if="!initialPending && instances && instances.length > 0">
+		<template v-if="(!initialPending || hasLibraryContent) && instances && instances.length > 0">
 			<RouterView v-if="route.path.startsWith('/library')" :instances="instances" />
 		</template>
 		<div v-else-if="!initialPending" class="no-instance">

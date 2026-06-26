@@ -118,6 +118,15 @@ pub async fn respond(
             "invite cannot be responded to".into(),
         ));
     }
+    let expired: i64 = sqlx::query_scalar(
+		"SELECT CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END FROM core_invitations WHERE id = ?",
+	)
+	.bind(id)
+	.fetch_one(&state.pool)
+	.await?;
+    if expired != 0 {
+        return Err(SocialError::Invalid("invite has expired".into()));
+    }
     let timestamp = now();
     if accept {
         sqlx::query("INSERT INTO core_members (user_id, display_name, role, permission_preset, role_id, status, joined_at, updated_at) VALUES (?, ?, 'member', 'member', ?, 'active', ?, ?) ON CONFLICT(user_id) DO UPDATE SET display_name = excluded.display_name, role_id = excluded.role_id, role_snapshot_json = NULL, needs_role_reassignment_at = NULL, status = 'active', updated_at = excluded.updated_at")

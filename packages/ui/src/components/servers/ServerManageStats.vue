@@ -85,11 +85,13 @@ const props = withDefaults(
 		data?: ServerStats
 		loading?: boolean
 		showMemoryAsBytes?: boolean
+		storageLink?: string | null
 	}>(),
 	{
 		data: undefined,
 		loading: false,
 		showMemoryAsBytes: false,
+		storageLink: null,
 	},
 )
 
@@ -190,7 +192,7 @@ const metrics = computed(() => {
 		showGraph: false,
 		chartOptions: null as ReturnType<typeof buildChartOptions> | null,
 		series: null as { name: string; data: number[] }[] | null,
-		link: `/hosting/manage/${encodeURIComponent(serverId)}/files`,
+		link: props.storageLink ?? `/hosting/manage/${encodeURIComponent(serverId)}/files`,
 	}
 
 	if (props.loading) {

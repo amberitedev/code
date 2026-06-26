@@ -3,10 +3,13 @@ use std::{
     sync::Arc,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::application::state::AppState;
+use crate::{
+    application::{rcon_service, state::AppState, task_service::validate_cron},
+    domain::instance::{InstanceId, InstanceStatus},
+};
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct BackupRecord {
@@ -16,6 +19,8 @@ pub struct BackupRecord {
     pub size_bytes: i64,
     pub locked: bool,
     pub trigger: String,
+    pub hot: bool,
+    pub consistency: String,
     pub created_at: String,
 }
 
@@ -24,6 +29,11 @@ pub struct BackupSchedule {
     pub enabled: bool,
     pub cron: String,
     pub retain_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BackupTaskPayload {
+    retain_count: i64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +52,12 @@ pub enum BackupError {
     MustBeOffline,
     #[error("path traversal rejected")]
     PathTraversal,
+    #[error("rcon_required_for_hot_backup")]
+    RconRequiredForHotBackup,
+    #[error("rcon: {0}")]
+    Rcon(String),
+    #[error("invalid schedule: {0}")]
+    InvalidSchedule(String),
 }
 
 async fn data_dir_for(
@@ -162,7 +178,7 @@ pub async fn list_backups(
     instance_id: &str,
 ) -> Result<Vec<BackupRecord>, BackupError> {
     let rows = sqlx::query_as::<_, BackupRecord>(
-		"SELECT id, instance_id, name, size_bytes, locked, trigger, created_at FROM backups WHERE instance_id = ? ORDER BY created_at DESC",
+		"SELECT id, instance_id, name, size_bytes, locked, trigger, hot, consistency, created_at FROM backups WHERE instance_id = ? ORDER BY created_at DESC",
 	)
 	.bind(instance_id)
 	.fetch_all(&state.pool)
@@ -176,7 +192,17 @@ pub async fn create_backup(
     trigger: &str,
     name: Option<String>,
 ) -> Result<BackupRecord, BackupError> {
-    let data_dir = data_dir_for(state, instance_id).await?;
+    let iid: InstanceId =
+        instance_id.parse().map_err(|_| BackupError::NotFound)?;
+    let record = state
+        .instance_store
+        .get(&iid)
+        .await
+        .map_err(|_| BackupError::NotFound)?;
+    let data_dir = PathBuf::from(&record.data_dir);
+    let running = record.status == InstanceStatus::Running
+        || state.instances.contains_key(&iid);
+    let trigger = normalize_trigger(trigger);
     let store_dir = storage_dir(state, instance_id);
     let id = Uuid::new_v4().to_string();
     let zip_path = store_dir.join(format!("{id}.zip"));
@@ -185,25 +211,42 @@ pub async fn create_backup(
             .format("backup-%Y%m%d-%H%M%S")
             .to_string()
     });
-    let data_dir_c = data_dir.clone();
-    let zip_path_c = zip_path.clone();
-    let store_dir_c = store_dir.clone();
-    let size_bytes = tokio::task::spawn_blocking(move || {
-        std::fs::create_dir_all(&store_dir_c)?;
-        zip_data_dir(&data_dir_c, &zip_path_c)
-    })
-    .await
-    .map_err(|e| BackupError::Zip(e.to_string()))??;
+    let (hot, consistency, size_bytes) = if running {
+        run_rcon_for_backup(state, instance_id, "save-off").await?;
+        let result = async {
+            run_rcon_for_backup(state, instance_id, "save-all flush").await?;
+            write_backup_archive(&data_dir, &zip_path, &store_dir).await
+        }
+        .await;
+        if let Err(error) =
+            run_rcon_for_backup(state, instance_id, "save-on").await
+        {
+            tracing::warn!(
+                instance_id,
+                error = %error,
+                "failed to re-enable world saves after hot backup"
+            );
+        }
+        (true, "rcon_flush".to_string(), result?)
+    } else {
+        (
+            false,
+            "offline".to_string(),
+            write_backup_archive(&data_dir, &zip_path, &store_dir).await?,
+        )
+    };
 
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
-		"INSERT INTO backups (id, instance_id, name, size_bytes, locked, trigger, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+		"INSERT INTO backups (id, instance_id, name, size_bytes, locked, trigger, hot, consistency, created_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
 	)
 	.bind(&id)
 	.bind(instance_id)
 	.bind(&display_name)
 	.bind(size_bytes as i64)
-	.bind(trigger)
+	.bind(&trigger)
+	.bind(hot)
+	.bind(&consistency)
 	.bind(&now)
 	.execute(&state.pool)
 	.await?;
@@ -214,9 +257,51 @@ pub async fn create_backup(
         name: display_name,
         size_bytes: size_bytes as i64,
         locked: false,
-        trigger: trigger.to_string(),
+        trigger,
+        hot,
+        consistency,
         created_at: now,
     })
+}
+
+fn normalize_trigger(trigger: &str) -> String {
+    match trigger {
+        "automatic" | "automated" | "scheduled" => "scheduled".to_string(),
+        _ => "manual".to_string(),
+    }
+}
+
+async fn write_backup_archive(
+    data_dir: &Path,
+    zip_path: &Path,
+    store_dir: &Path,
+) -> Result<u64, BackupError> {
+    let data_dir_c = data_dir.to_path_buf();
+    let zip_path_c = zip_path.to_path_buf();
+    let store_dir_c = store_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&store_dir_c)?;
+        zip_data_dir(&data_dir_c, &zip_path_c)
+    })
+    .await
+    .map_err(|e| BackupError::Zip(e.to_string()))?
+}
+
+async fn run_rcon_for_backup(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    command: &str,
+) -> Result<(), BackupError> {
+    rcon_service::execute_command(state, instance_id, command)
+        .await
+        .map(|_| ())
+        .map_err(|error| match error {
+            rcon_service::RconServiceError::NotEnabled
+            | rcon_service::RconServiceError::NotRunning => {
+                BackupError::RconRequiredForHotBackup
+            }
+            other => BackupError::Rcon(other.to_string()),
+        })
 }
 
 pub async fn delete_backup(
@@ -283,14 +368,14 @@ pub async fn restore_backup(
     instance_id: &str,
     backup_id: &str,
 ) -> Result<(), BackupError> {
-    use crate::domain::instance::InstanceId;
     let iid: InstanceId =
         instance_id.parse().map_err(|_| BackupError::NotFound)?;
     if state.instances.contains_key(&iid) {
         return Err(BackupError::MustBeOffline);
     }
+    let backup = get_backup(state, instance_id, backup_id).await?;
     let zip = storage_dir(state, instance_id).join(format!("{backup_id}.zip"));
-    if !zip.exists() {
+    if !zip.exists() || backup.instance_id != instance_id {
         return Err(BackupError::NotFound);
     }
     let data_dir = data_dir_for(state, instance_id).await?;
@@ -304,22 +389,66 @@ pub async fn restore_backup(
     )
     .await;
 
-    // Clear data_dir and extract backup.
     tokio::task::spawn_blocking(move || {
-        for entry in std::fs::read_dir(&data_dir)? {
-            let entry = entry?;
-            let metadata = std::fs::symlink_metadata(entry.path())?;
-            if metadata.is_dir() {
-                std::fs::remove_dir_all(entry.path())?;
-            } else {
-                std::fs::remove_file(entry.path())?;
-            }
-        }
-        unzip_to(&zip, &data_dir)
+        restore_data_dir_atomically(&zip, &data_dir)
     })
     .await
     .map_err(|e| BackupError::Zip(e.to_string()))??;
     Ok(())
+}
+
+async fn get_backup(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    backup_id: &str,
+) -> Result<BackupRecord, BackupError> {
+    sqlx::query_as::<_, BackupRecord>(
+		"SELECT id, instance_id, name, size_bytes, locked, trigger, hot, consistency, created_at FROM backups WHERE id = ? AND instance_id = ?",
+	)
+	.bind(backup_id)
+	.bind(instance_id)
+	.fetch_optional(&state.pool)
+	.await?
+	.ok_or(BackupError::NotFound)
+}
+
+fn restore_data_dir_atomically(
+    zip: &Path,
+    data_dir: &Path,
+) -> Result<(), BackupError> {
+    let parent = data_dir.parent().ok_or_else(|| {
+        BackupError::Io(std::io::Error::other(
+            "instance data dir has no parent",
+        ))
+    })?;
+    std::fs::create_dir_all(parent).map_err(BackupError::Io)?;
+    let nonce = Uuid::new_v4();
+    let tmp = parent.join(format!(".restore-{nonce}"));
+    let old = parent.join(format!(".restore-old-{nonce}"));
+    std::fs::create_dir(&tmp).map_err(BackupError::Io)?;
+    let result = (|| {
+        unzip_to(zip, &tmp)?;
+        if data_dir.exists() {
+            std::fs::rename(data_dir, &old).map_err(BackupError::Io)?;
+        }
+        std::fs::rename(&tmp, data_dir).map_err(BackupError::Io)?;
+        if old.exists() {
+            std::fs::remove_dir_all(&old).map_err(BackupError::Io)?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        if old.exists() && !data_dir.exists() {
+            std::fs::rename(&old, data_dir).ok();
+        }
+        if tmp.exists() {
+            std::fs::remove_dir_all(&tmp).ok();
+        }
+        if old.exists() {
+            std::fs::remove_dir_all(&old).ok();
+        }
+    }
+    result
 }
 
 pub async fn get_backup_schedule(
@@ -352,6 +481,19 @@ pub async fn set_backup_schedule(
     cron: &str,
     retain_count: i64,
 ) -> Result<(), BackupError> {
+    let _ = data_dir_for(state, instance_id).await?;
+    if retain_count <= 0 {
+        return Err(BackupError::InvalidSchedule(
+            "retain_count must be greater than 0".into(),
+        ));
+    }
+    validate_cron(cron).map_err(|_| {
+        BackupError::InvalidSchedule("invalid cron expression".into())
+    })?;
+    let task_id = backup_task_id(instance_id);
+    let now = chrono::Utc::now().to_rfc3339();
+    let payload = serde_json::to_string(&BackupTaskPayload { retain_count })
+        .map_err(|error| BackupError::InvalidSchedule(error.to_string()))?;
     sqlx::query(
 		"INSERT INTO backup_schedules (instance_id, enabled, cron, retain_count) VALUES (?, ?, ?, ?) ON CONFLICT(instance_id) DO UPDATE SET enabled=excluded.enabled, cron=excluded.cron, retain_count=excluded.retain_count",
 	)
@@ -361,6 +503,58 @@ pub async fn set_backup_schedule(
 	.bind(retain_count)
 	.execute(&state.pool)
 	.await?;
+    sqlx::query(
+		"INSERT INTO scheduled_tasks (id, instance_id, task_type, cron, enabled, payload, created_at, updated_at) VALUES (?, ?, 'backup', ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET cron = excluded.cron, enabled = excluded.enabled, payload = excluded.payload, updated_at = excluded.updated_at",
+	)
+	.bind(&task_id)
+	.bind(instance_id)
+	.bind(cron)
+	.bind(enabled as i32)
+	.bind(payload)
+	.bind(&now)
+	.bind(&now)
+	.execute(&state.pool)
+	.await?;
+    Ok(())
+}
+
+fn backup_task_id(instance_id: &str) -> String {
+    format!("backup-schedule-{instance_id}")
+}
+
+pub async fn enforce_backup_retention(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    retain_count: i64,
+) -> Result<(), BackupError> {
+    let total: i64 = sqlx::query_scalar(
+		"SELECT COUNT(*) FROM backups WHERE instance_id = ? AND trigger = 'scheduled' AND locked = 0",
+	)
+	.bind(instance_id)
+	.fetch_one(&state.pool)
+	.await?;
+
+    let excess = (total - retain_count).max(0);
+    if excess == 0 {
+        return Ok(());
+    }
+
+    let ids: Vec<(String,)> = sqlx::query_as(
+		"SELECT id FROM backups WHERE instance_id = ? AND trigger = 'scheduled' AND locked = 0 ORDER BY created_at ASC LIMIT ?",
+	)
+	.bind(instance_id)
+	.bind(excess)
+	.fetch_all(&state.pool)
+	.await?;
+
+    for (id,) in ids {
+        let zip = storage_dir(state, instance_id).join(format!("{id}.zip"));
+        tokio::fs::remove_file(&zip).await.ok();
+        sqlx::query("DELETE FROM backups WHERE id = ?")
+            .bind(&id)
+            .execute(&state.pool)
+            .await?;
+    }
     Ok(())
 }
 

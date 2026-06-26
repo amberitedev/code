@@ -11,11 +11,11 @@ import type {
 } from '../types'
 
 export interface FileManagerContext {
-	items: Ref<FileItem[]>
-	loading: Ref<boolean>
-	error: Ref<Error | null>
+	items: Ref<FileItem[]> | ComputedRef<FileItem[]>
+	loading: Ref<boolean> | ComputedRef<boolean>
+	error: Ref<Error | null> | ComputedRef<Error | null>
 
-	currentPath: Ref<string>
+	currentPath: Ref<string> | ComputedRef<string>
 	navigateTo: (path: string) => void
 
 	editingFile: Ref<EditingFile | null>

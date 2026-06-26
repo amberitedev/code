@@ -103,6 +103,8 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 
+import { useAmberiteAuthClient } from '@/composables/amberite-client.ts'
+
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 
@@ -147,6 +149,7 @@ useHead({
 })
 
 const auth = await useAuth()
+const amberiteAuthClient = useAmberiteAuthClient()
 
 // Avatar state (separate from useSavable)
 const avatarUrl = ref(auth.value.user.avatar_url)
@@ -202,42 +205,33 @@ function removePreviewImage() {
 async function save() {
 	saving.value = true
 	try {
+		const patch = {}
+
 		if (pendingAvatarDeletion.value) {
-			await useBaseFetch(`user/${auth.value.user.id}/icon`, {
-				method: 'DELETE',
-			})
+			patch.avatar = null
 			pendingAvatarDeletion.value = false
 			previewImage.value = null
 		}
 
-		if (icon.value) {
-			await useBaseFetch(
-				`user/${auth.value.user.id}/icon?ext=${
-					icon.value.type.split('/')[icon.value.type.split('/').length - 1]
-				}`,
-				{
-					method: 'PATCH',
-					body: icon.value,
-				},
-			)
+		if (icon.value && typeof previewImage.value === 'string') {
+			patch.avatar = {
+				url: previewImage.value,
+				mimeType: icon.value.type,
+				sizeBytes: icon.value.size,
+			}
 			icon.value = null
 			previewImage.value = null
 		}
 
-		const body = {}
-
 		if (auth.value.user.username !== current.value.username) {
-			body.username = current.value.username
+			patch.username = current.value.username
 		}
 
 		if (auth.value.user.bio !== current.value.bio) {
-			body.bio = current.value.bio
+			patch.bio = current.value.bio
 		}
 
-		await useBaseFetch(`user/${auth.value.user.id}`, {
-			method: 'PATCH',
-			body,
-		})
+		if (Object.keys(patch).length > 0) await amberiteAuthClient.updateCurrentProfile(patch)
 		await useAuth(auth.value.token)
 		avatarUrl.value = auth.value.user.avatar_url
 	} catch (err) {

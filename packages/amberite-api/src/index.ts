@@ -97,6 +97,28 @@ export type {
 	FriendRequestEntry,
 	GroupInviteWithGroup,
 } from './convex-api'
+export { ConvexAmberiteAuthClient } from './auth-client'
+export type {
+	AmberiteAuthClient,
+	AmberiteSession,
+	AmberitePasswordSignInRequest,
+	AmberitePasswordSignUpRequest,
+	AmberiteMinecraftTokenSignInRequest,
+} from './auth-client'
+export { MockAmberiteAuthClient, defaultMockUser } from './mock-client'
+export type { MockAmberiteAuthClientOptions } from './mock-client'
+export {
+	adapterSessionStorage,
+	createMemoryAmberiteSessionStorage,
+	isAmberiteSessionTokens,
+	validateAmberiteSessionTokens,
+} from './session'
+export type { AmberiteSessionTokens, AmberiteSessionStorage } from './session'
+export {
+	mapAmberiteUserToAccountUser,
+	normalizeAmberiteAccountUser,
+} from './profile'
+export type { AmberiteAccountUser, AmberiteProfilePatch } from './profile'
 export { composeSocialSessionState } from './social-session'
 export type {
 	DurableSocialSessionState,

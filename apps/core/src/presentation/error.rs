@@ -59,12 +59,16 @@ impl From<InstanceError> for ApiError {
             InstanceError::AlreadyRunning => {
                 Self::Conflict("instance already running".into())
             }
+            InstanceError::MustBeOffline => {
+                Self::Conflict("stop the instance before deleting".into())
+            }
             InstanceError::NotRunning => {
                 Self::Conflict("instance not running".into())
             }
             InstanceError::ActorDead => Self::ServiceUnavailable(
                 "instance actor is not responding".into(),
             ),
+            InstanceError::Invalid(message) => Self::BadRequest(message),
             InstanceError::NotReady(message) => {
                 Self::Conflict(format!("instance is not ready: {message}"))
             }

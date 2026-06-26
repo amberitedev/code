@@ -1,3 +1,10 @@
+<!--
+Account settings page summary:
+- saveEmail refreshes the current account email and profile state near line 822.
+- savePassword changes or removes the password credential near line 855.
+- showTwoFactorModal, verifyTwoFactorCode, and removeTwoFactor own the existing 2FA modal flow near line 882.
+- deleteAccount and exportData handle destructive/export actions near lines 999 and 1019.
+-->
 <template>
 	<div>
 		<ConfirmModal
@@ -515,6 +522,7 @@ import SteamIcon from 'assets/icons/auth/sso-steam.svg'
 import QrcodeVue from 'qrcode.vue'
 
 import PasskeySettings from '~/components/ui/auth/PasskeySettings.vue'
+import { useAmberiteAuthClient } from '~/composables/amberite-client.ts'
 import { getAuthUrl, removeAuthProvider } from '~/composables/auth.ts'
 
 definePageMeta({
@@ -523,6 +531,7 @@ definePageMeta({
 
 const { addNotification } = injectNotificationManager()
 const auth = await useAuth()
+const amberiteAuthClient = useAmberiteAuthClient()
 
 const { formatMessage } = useVIntl()
 
@@ -817,12 +826,7 @@ async function saveEmail() {
 
 	startLoading()
 	try {
-		await useBaseFetch(`auth/email`, {
-			method: 'PATCH',
-			body: {
-				email: email.value,
-			},
-		})
+		await amberiteAuthClient.updateEmail(email.value)
 		changeEmailModal.value.hide()
 		await useAuth(auth.value.token)
 	} catch (err) {
@@ -855,12 +859,9 @@ async function savePassword() {
 
 	startLoading()
 	try {
-		await useBaseFetch(`auth/password`, {
-			method: 'PATCH',
-			body: {
-				old_password: auth.value.user.has_password ? oldPassword.value : null,
-				new_password: removePasswordMode.value ? null : newPassword.value,
-			},
+		await amberiteAuthClient.updatePassword({
+			oldPassword: auth.value.user.has_password ? oldPassword.value : null,
+			newPassword: removePasswordMode.value ? null : newPassword.value,
 		})
 		managePasswordModal.value.hide()
 		await useAuth(auth.value.token)
@@ -998,9 +999,7 @@ const manageProvidersColumns = computed(() => [
 async function deleteAccount() {
 	startLoading()
 	try {
-		await useBaseFetch(`user/${auth.value.user.id}`, {
-			method: 'DELETE',
-		})
+		await amberiteAuthClient.deleteCurrentAccount()
 	} catch (err) {
 		addNotification({
 			title: formatMessage(commonMessages.errorNotificationTitle),
@@ -1009,7 +1008,7 @@ async function deleteAccount() {
 		})
 	}
 
-	useCookie('auth-token').value = null
+	await useAuth('none')
 	window.location.href = '/'
 
 	stopLoading()

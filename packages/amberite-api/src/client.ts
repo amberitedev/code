@@ -38,6 +38,8 @@ import type {
 	CoreBackup,
 	CoreBackupSchedule,
 	CoreBackupScheduleBody,
+	CoreNetworkStatus,
+	CoreUploadSession,
 	UploadHandle,
 	FsDownloadUrlResponse,
 	UnzipOption,
@@ -211,6 +213,10 @@ export class CoreApiClient {
 
 	connect(): Promise<ConnectionStatus> {
 		return this.monitor?.checkNow() ?? new CoreConnectionMonitor(this.adapter).checkNow()
+	}
+
+	getNetworkStatus(): Promise<CoreNetworkStatus> {
+		return this.direct('core.network.status', api.getNetworkStatus)
 	}
 
 	async completeLocalSetup(ownerUserId: string, authJwksUrl: string): Promise<CoreSetupResponse> {
@@ -761,6 +767,51 @@ export class CoreApiClient {
 				innerAbort()
 			},
 		}
+	}
+
+	createResumableUpload(
+		id: string,
+		path: string,
+		length: number,
+		sha256Hex?: string,
+	): Promise<CoreUploadSession> {
+		return this.request((ctx) => api.createResumableUpload(ctx, id, path, length, sha256Hex), {
+			method: 'POST',
+			path: `/instances/${id}/fs/uploads?path=${encodeURIComponent(path)}`,
+		})
+	}
+
+	getResumableUploadStatus(id: string, uploadId: string): Promise<CoreUploadSession> {
+		return this.request((ctx) => api.getResumableUploadStatus(ctx, id, uploadId), {
+			method: 'HEAD',
+			path: `/instances/${id}/fs/uploads/${uploadId}`,
+		})
+	}
+
+	appendResumableUpload(
+		id: string,
+		uploadId: string,
+		offset: number,
+		chunk: BodyInit,
+		sha256DigestBase64?: string,
+	): Promise<CoreUploadSession> {
+		return this.request(
+			(ctx) => api.appendResumableUpload(ctx, id, uploadId, offset, chunk, sha256DigestBase64),
+			{
+				method: 'PATCH',
+				path: `/instances/${id}/fs/uploads/${uploadId}`,
+			},
+		)
+	}
+
+	cancelResumableUpload(id: string, uploadId: string): Promise<void> {
+		return this.request(
+			(ctx) => api.cancelResumableUpload(ctx, id, uploadId).then(() => undefined),
+			{
+				method: 'DELETE',
+				path: `/instances/${id}/fs/uploads/${uploadId}`,
+			},
+		)
 	}
 
 	readFile(id: string, path: string): Promise<ArrayBuffer> {

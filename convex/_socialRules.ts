@@ -181,7 +181,50 @@ export async function upsertCoreForFriendGroup(
 	if (existingCore) await ctx.db.patch(existingCore._id, value)
 	else await ctx.db.insert('cores', value)
 }
-export function publicUser(user: any, includeFriendCode = false) {
+export interface CurrentAccountFields {
+	email: string | null
+	email_verified: boolean
+	auth_providers: string[]
+	has_password: boolean
+	has_totp: boolean
+	role: string
+	badges: number
+}
+export async function currentAccountFields(
+	ctx: QueryCtx | MutationCtx,
+	userId: Id<'users'>,
+): Promise<CurrentAccountFields> {
+	const user = await ctx.db.get(userId)
+	const accounts = await ctx.db
+		.query('authAccounts')
+		.withIndex('userIdAndProvider', (q) => q.eq('userId', userId))
+		.collect()
+	return {
+		email: user?.email ?? null,
+		email_verified: Boolean(user?.emailVerificationTime),
+		auth_providers: accounts
+			.map((account) => account.provider)
+			.filter((provider) => provider !== 'web-password' && provider !== 'password')
+			.map((provider) =>
+				provider === 'modrinth-token'
+					? 'modrinth'
+					: provider === 'minecraft-token'
+						? 'microsoft'
+						: provider,
+			),
+		has_password: accounts.some(
+			(account) => account.provider === 'web-password' || account.provider === 'password',
+		),
+		has_totp: false,
+		role: '',
+		badges: 0,
+	}
+}
+export function publicUser(
+	user: any,
+	includeFriendCode = false,
+	accountFields?: CurrentAccountFields,
+) {
 	const avatarUrl = user.avatarUrl ?? user.image
 	return {
 		id: user._id,
@@ -193,6 +236,7 @@ export function publicUser(user: any, includeFriendCode = false) {
 		avatar_url: avatarUrl ?? null,
 		bio: user.bio ?? null,
 		created: new Date(user._creationTime ?? Date.now()).toISOString(),
+		...(accountFields ?? {}),
 		...(includeFriendCode && user.friendCode ? { friendCode: user.friendCode } : {}),
 	}
 }
@@ -212,7 +256,7 @@ export function publicProfile(user: any) {
 		profileUpdatedAt: user.profileUpdatedAt ?? null,
 	}
 }
-export function publicCurrentProfile(user: any) {
+export function publicCurrentProfile(user: any, accountFields?: CurrentAccountFields) {
 	return {
 		...publicProfile(user),
 		friendCode: user.friendCode,
@@ -221,6 +265,7 @@ export function publicCurrentProfile(user: any) {
 		avatarSizeBytes: user.avatarSizeBytes,
 		deletedAt: user.deletedAt,
 		deletedReason: user.deletedReason,
+		...(accountFields ?? {}),
 	}
 }
 export function coreById(ctx: QueryCtx | MutationCtx, coreId: string) {

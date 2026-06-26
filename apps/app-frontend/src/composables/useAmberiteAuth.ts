@@ -8,29 +8,23 @@
  * @modrinth/ui components and existing auth-gated pages keep working without
  * churn.
  */
+import {
+	ConvexAmberiteAuthClient,
+	mapAmberiteUserToAccountUser,
+	type AmberiteAccountUser,
+} from '@amberite/amberite-api'
 import { invoke } from '@tauri-apps/api/core'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
-import { useSocialClientRaw } from '@/composables/useSocialClient'
 import { login as amberiteLogin } from '@/helpers/amberite_auth'
 
 const MIN_SIGN_IN_VISIBLE_MS = 2500
 const SIGN_IN_TIMEOUT_MS = 30_000
 
-export interface AmberiteAuthUser {
-	id: string
-	username: string
-	name: string
-	avatar_url: string
-	role: string
-	badges: number
-	created: string
-	bio?: string
-	email?: string | null
-}
+export type AmberiteAuthUser = AmberiteAccountUser
 
 export interface UseAmberiteAuthReturn {
 	user: ComputedRef<AmberiteAuthUser | null>
@@ -44,31 +38,29 @@ export interface UseAmberiteAuthReturn {
 
 function mapToAuthUser(
 	cu: {
+		id?: string
 		userId: string
 		username?: string
+		name?: string
 		displayName?: string
 		image?: string
+		avatar_url?: string | null
+		bio?: string | null
 		createdAt?: number
 	} | null,
 ): AmberiteAuthUser | null {
 	if (!cu) return null
-	const username = cu.username ?? cu.displayName ?? 'User'
-	return {
-		id: cu.userId,
-		username,
-		name: cu.displayName ?? username,
-		avatar_url: cu.image ?? '',
-		role: '',
-		badges: 0,
+	return mapAmberiteUserToAccountUser({
+		...cu,
+		id: cu.id ?? cu.userId,
 		created: cu.createdAt ? new Date(cu.createdAt).toISOString() : new Date().toISOString(),
-		bio: '',
-		email: null,
-	}
+	})
 }
 
 export function useAmberiteAuth(): UseAmberiteAuthReturn {
 	const social = useSocial()
 	const adapter = useCoreClient().adapter
+	const authClient = new ConvexAmberiteAuthClient({ adapter })
 
 	const user = computed<AmberiteAuthUser | null>(() => mapToAuthUser(social.currentUser.value))
 	const isLoggedIn = computed(() => !!social.currentUser.value)
@@ -90,15 +82,7 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 					minecraftAccessToken: credential.accessToken,
 				}
 				if (devPersonaId) params.devPersonaId = devPersonaId
-				const session = await useSocialClientRaw().rawAction<{
-					tokens: { token: string; refreshToken: string } | null
-				}>('auth:signIn', {
-					provider: 'minecraft-token',
-					params,
-				}, false)
-				if (!session.tokens) throw new Error('Amberite account session was not accepted.')
-				await adapter.setCurrentJwt?.(session.tokens.token)
-				await adapter.setCurrentRefreshToken?.(session.tokens.refreshToken)
+				await authClient.signInWithMinecraftToken(params)
 				await social.refresh()
 				if (!social.currentUser.value) throw new Error('Amberite account session was not accepted.')
 			}, SIGN_IN_TIMEOUT_MS)
@@ -128,16 +112,12 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 		try {
 			const refreshToken = await adapter.getCurrentRefreshToken?.()
 			if (!refreshToken) return
-			const session = await useSocialClientRaw().rawAction<{
-				tokens: { token: string; refreshToken: string } | null
-			}>('auth:signIn', { refreshToken }, false)
-			if (!session.tokens) {
+			const session = await authClient.refreshSession(refreshToken)
+			if (!session) {
 				await adapter.setCurrentJwt?.(null)
 				await adapter.setCurrentRefreshToken?.(null)
 				return
 			}
-			await adapter.setCurrentJwt?.(session.tokens.token)
-			await adapter.setCurrentRefreshToken?.(session.tokens.refreshToken)
 			await social.refresh()
 		} catch (e) {
 			console.warn('[amberite] session refresh failed', e)

@@ -14,7 +14,7 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import type { FileOperation } from '#ui/layouts/shared/files-tab/types'
-import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
+import { injectHostingBackend, injectModrinthServerContext } from '#ui/providers'
 
 import BackupAdmonition, { type BackupAdmonitionEntry } from './BackupAdmonition.vue'
 import FileOperationAdmonition from './FileOperationAdmonition.vue'
@@ -30,7 +30,7 @@ const emit = defineEmits<{
 }>()
 
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
+const backend = injectHostingBackend()
 const ctx = injectModrinthServerContext()
 const route = useRoute()
 const { canSetup, canManageBackups, permissionDeniedMessage } = useServerPermissions()
@@ -286,30 +286,7 @@ const hasBulkDismissableItems = computed(() => stackItems.value.some((it) => it.
 
 async function onBackupDismiss(item: BackupAdmonitionEntry) {
 	dismissedIds.add(item.key)
-	if (item.syntheticLegacy || item.operationId == null) {
-		await invalidate()
-		return
-	}
-	try {
-		if (item.type === 'create') {
-			await client.archon.backups_queue_v1.ackCreate(
-				ctx.serverId,
-				ctx.worldId.value!,
-				item.operationId,
-			)
-		} else {
-			await client.archon.backups_queue_v1.ackRestore(
-				ctx.serverId,
-				ctx.worldId.value!,
-				item.operationId,
-			)
-		}
-	} catch (err) {
-		dismissedIds.delete(item.key)
-		console.error('Failed to acknowledge backup operation', err)
-	} finally {
-		await invalidate()
-	}
+	await invalidate()
 }
 
 async function onBackupCancel(item: BackupAdmonitionEntry) {
@@ -317,21 +294,8 @@ async function onBackupCancel(item: BackupAdmonitionEntry) {
 	if (cancellingIds.has(item.key)) return
 	cancellingIds.add(item.key)
 	try {
-		if (item.operationId == null) {
-			await client.archon.backups_v1.delete(ctx.serverId, ctx.worldId.value!, item.backupId)
-		} else if (item.type === 'create') {
-			await client.archon.backups_queue_v1.cancelCreate(
-				ctx.serverId,
-				ctx.worldId.value!,
-				item.operationId,
-			)
-		} else {
-			await client.archon.backups_queue_v1.cancelRestore(
-				ctx.serverId,
-				ctx.worldId.value!,
-				item.operationId,
-			)
-		}
+		await backend.core.deleteBackup(ctx.serverId, item.backupId)
+		dismissedIds.add(item.key)
 		await invalidate()
 	} catch (err) {
 		cancellingIds.delete(item.key)
@@ -341,7 +305,11 @@ async function onBackupCancel(item: BackupAdmonitionEntry) {
 
 async function onBackupRetry(item: BackupAdmonitionEntry) {
 	if (!canManageBackups.value) return
-	await client.archon.backups_queue_v1.retry(ctx.serverId, ctx.worldId.value!, item.backupId)
+	if (item.type === 'restore') {
+		await backend.core.restoreBackup(ctx.serverId, item.backupId)
+	} else {
+		await backend.core.createBackup(ctx.serverId, item.name)
+	}
 	dismissedIds.add(item.key)
 	await invalidate()
 }

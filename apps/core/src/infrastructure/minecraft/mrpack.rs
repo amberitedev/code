@@ -140,7 +140,7 @@ async fn download_with_sha1(
     Ok(())
 }
 
-fn validate_download_url(url: &str) -> Result<(), MrpackError> {
+pub(crate) fn validate_download_url(url: &str) -> Result<(), MrpackError> {
     let parsed = url::Url::parse(url)
         .map_err(|_| MrpackError::DisallowedDownloadUrl(url.to_string()))?;
     if parsed.scheme() != "https" {

@@ -3,6 +3,8 @@ mod common;
 
 #[path = "integration/access.rs"]
 mod access;
+#[path = "integration/backups.rs"]
+mod backups;
 #[path = "integration/edge_cases.rs"]
 mod edge_cases;
 #[path = "integration/health.rs"]
@@ -23,3 +25,5 @@ mod properties_stats;
 mod security;
 #[path = "integration/setup.rs"]
 mod setup;
+#[path = "integration/uploads.rs"]
+mod uploads;

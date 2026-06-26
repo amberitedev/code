@@ -1,11 +1,14 @@
+import type { AmberiteAccountUser } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
 import { useStorage } from '@vueuse/core'
 import type { LocationQueryValue, RouteLocationNormalizedLoaded } from 'vue-router'
 
 import type { CookieOptions } from '#app'
 
+import { useAmberiteAuthClient } from './amberite-client'
+
 type AuthState = {
-	user: Labrinth.Users.v2.User | null
+	user: (AmberiteAccountUser & Partial<Labrinth.Users.v2.User>) | null
 	token: string
 }
 
@@ -55,8 +58,10 @@ export const initAuth = async (oldToken: string | null | undefined = null) => {
 		user: null,
 		token: '',
 	}
+	const authClient = useAmberiteAuthClient()
 
 	if (oldToken === 'none') {
+		await authClient.logOut()
 		return auth
 	}
 
@@ -94,60 +99,20 @@ export const initAuth = async (oldToken: string | null | undefined = null) => {
 	if (authCookie.value != null && tokenStr === '') {
 		authCookie.value = null
 	} else if (tokenStr) {
-		auth.token = tokenStr
-
-		if (!auth.token.startsWith('mra_')) {
-			return auth
-		}
-
 		try {
-			auth.user = (await useBaseFetch(
-				'user',
-				{
-					apiVersion: 3,
-					headers: {
-						Authorization: auth.token,
-					},
-				},
-				true,
-			)) as Labrinth.Users.v2.User
-		} catch {
-			/* empty */
-		}
-	}
-
-	if (!auth.user && auth.token) {
-		try {
-			const session = (await useBaseFetch(
-				'session/refresh',
-				{
-					method: 'POST',
-					headers: {
-						Authorization: auth.token,
-					},
-				},
-				true,
-			)) as { session: unknown }
-
-			auth.token = normalizeAuthToken(session.session)
-			if (auth.token) {
-				authCookie.value = auth.token
-				auth.user = (await useBaseFetch(
-					'user',
-					{
-						apiVersion: 3,
-						headers: {
-							Authorization: auth.token,
-						},
-					},
-					true,
-				)) as Labrinth.Users.v2.User
+			const session = tokenStr.startsWith('mra_')
+				? await authClient.signInWithModrinthToken(tokenStr)
+				: await authClient.restoreSession()
+			if (session) {
+				auth.token = session.tokens.token
+				auth.user = session.user
+				authCookie.value = session.tokens.token
 			} else {
 				authCookie.value = null
-				auth.token = ''
 			}
 		} catch {
 			authCookie.value = null
+			auth.token = ''
 		}
 	}
 

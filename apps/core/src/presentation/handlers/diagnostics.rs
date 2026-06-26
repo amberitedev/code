@@ -4,10 +4,13 @@ use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
 use crate::{
-    application::state::AppState,
+    application::{network_service, state::AppState},
     presentation::contracts::{
         ConnectionHandshakeRequest, ConnectionHandshakeResponse,
         ConnectionRejectReason, HANDSHAKE_PROTOCOL,
+    },
+    presentation::{
+        authz::require_core_member, error::ApiError, extractors::AuthUser,
     },
 };
 
@@ -53,12 +56,22 @@ pub async fn version() -> Json<Value> {
 
 /// GET /java — list detected Java installations (ARCH-08: via JavaStore port).
 pub async fn java_installations(
+    AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
     let installs = state.java_store.list_all().await;
     let installations: Vec<Value> = installs
-        .into_iter()
-        .map(|j| json!({ "version": j.version, "path": j.path.display().to_string() }))
-        .collect();
-    Json(json!({ "installations": installations }))
+		.into_iter()
+		.map(|j| json!({ "version": j.version, "path": j.path.display().to_string() }))
+		.collect();
+    Ok(Json(json!({ "installations": installations })))
+}
+
+pub async fn network_status(
+    AuthUser(claims): AuthUser,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    require_core_member(&state, &claims.sub).await?;
+    Ok(Json(json!(network_service::network_status(&state).await)))
 }

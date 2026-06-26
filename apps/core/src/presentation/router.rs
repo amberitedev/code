@@ -5,7 +5,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
         HeaderValue, Method,
     },
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, head, patch, post, put},
     Router,
 };
 use tower_http::{
@@ -19,7 +19,7 @@ use crate::{
         access, backups, console, diagnostics, events, fs, installations,
         instance_control, instances, invites, logs, macros, modpack, mods,
         players, projection, properties, query, rcon, roles, setup, social,
-        stats, sync, tasks,
+        stats, sync, tasks, uploads,
     },
 };
 
@@ -36,6 +36,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         .route("/version", get(diagnostics::version))
         .route("/java", get(diagnostics::java_installations))
+        .route("/network/status", get(diagnostics::network_status))
         // First-run pairing
         .route("/setup", post(setup::complete_setup))
         .route("/setup/status", get(setup::setup_status))
@@ -245,6 +246,22 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/instances/:id/fs", delete(fs::delete_handler))
         .route("/instances/:id/fs/download", get(fs::download_handler))
         .route("/instances/:id/fs/upload", post(fs::upload_handler))
+        .route(
+            "/instances/:id/fs/uploads",
+            post(uploads::create_upload_handler),
+        )
+        .route(
+            "/instances/:id/fs/uploads/:upload_id",
+            head(uploads::upload_status_handler),
+        )
+        .route(
+            "/instances/:id/fs/uploads/:upload_id",
+            patch(uploads::append_upload_handler),
+        )
+        .route(
+            "/instances/:id/fs/uploads/:upload_id",
+            delete(uploads::cancel_upload_handler),
+        )
         .route("/instances/:id/fs/read", get(fs::read_handler))
         .route("/instances/:id/fs/write", put(fs::write_handler))
         .route("/instances/:id/fs/create", post(fs::create_file_handler))
@@ -316,7 +333,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
         .config
         .allowed_origin
         .parse::<HeaderValue>()
-        .unwrap_or_else(|_| HeaderValue::from_static("https://amberite.dev"));
+        .expect("ALLOWED_ORIGIN must be '*' or a valid HTTP origin");
 
     CorsLayer::new()
         .allow_origin(origin)

@@ -1,7 +1,11 @@
 import type { CoreChangeVersionBody, CoreInstance, CoreStats } from '@amberite/amberite-api'
 import type { Archon, UploadState } from '@modrinth/api-client'
-import type { LogLine } from '@modrinth/ui'
-import { provideModrinthServerContext, provideServerSettingsModal } from '@modrinth/ui'
+import type { LogLine, SharedCoreServerContext } from '@modrinth/ui'
+import {
+	provideModrinthServerContext,
+	provideServerSettingsModal,
+	sharedCoreServerContextKey,
+} from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, provide, ref } from 'vue'
@@ -130,6 +134,27 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		repairServer: state.repairServer,
 		changeVersion: state.changeVersion,
 	})
+	provide<SharedCoreServerContext>(sharedCoreServerContextKey, {
+		instanceId: state.instanceId,
+		rawInstance: state.rawInstance,
+		server: state.server,
+		statsData: state.statsData,
+		stats: state.stats,
+		powerState: state.powerState,
+		logLines: state.logLines,
+		refreshServer: state.refreshServer,
+		refreshStats: state.refreshStats,
+		sendCommand: state.sendCommand,
+		startServer: state.startServer,
+		stopServer: state.stopServer,
+		restartServer: state.restartServer,
+		killServer: state.killServer,
+		repairServer: state.repairServer,
+		changeVersion: state.changeVersion,
+		copyId: async () => {
+			await navigator.clipboard.writeText(state.instanceId.value)
+		},
+	})
 
 	return { settingsController, fsAuth }
 }
@@ -146,6 +171,7 @@ function createFallbackInstance(id: string): CoreInstance {
 		java_version: null,
 		install_status: 'ready',
 		status: 'offline',
+		installation_id: null,
 		data_dir: '',
 		created_at: new Date().toISOString(),
 		updated_at: new Date().toISOString(),

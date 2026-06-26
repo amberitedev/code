@@ -57,7 +57,7 @@ import { computed, nextTick, ref } from 'vue'
 
 import { useVIntl } from '../../../composables/i18n'
 import {
-	injectModrinthClient,
+	injectHostingBackend,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '../../../providers'
@@ -68,7 +68,7 @@ import NewModal from '../../modal/NewModal.vue'
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
+const backend = injectHostingBackend()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
@@ -85,11 +85,11 @@ const props = withDefaults(
 	},
 )
 
-const backupsQueryKey = ['backups', 'queue', ctx.serverId]
+const backupsQueryKey = ['core-backups', ctx.serverId]
 
 const renameMutation = useMutation({
 	mutationFn: ({ backupId, name }: { backupId: string; name: string }) =>
-		client.archon.backups_v1.rename(ctx.serverId, ctx.worldId.value!, backupId, { name }),
+		backend.core.renameBackup(ctx.serverId, backupId, name),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 

@@ -42,6 +42,8 @@ pub enum InstanceError {
     AlreadyRunning,
     #[error("not running")]
     NotRunning,
+    #[error("instance must be stopped before this operation")]
+    MustBeOffline,
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("spawn: {0}")]
@@ -52,6 +54,8 @@ pub enum InstanceError {
     NotReady(String),
     #[error("actor channel closed — instance may have crashed")]
     ActorDead,
+    #[error("invalid instance request: {0}")]
+    Invalid(String),
 }
 
 /// Create a new instance: write its per-instance data dir + server.properties,
@@ -64,6 +68,7 @@ pub async fn create_instance(
     state: &Arc<AppState>,
     req: CreateInstanceRequest,
 ) -> Result<InstanceId, InstanceError> {
+    validate_create_request(state, &req).await?;
     let id = InstanceId::new();
     let data_dir = unique_instance_data_dir(state, &req.name, &id).await?;
 
@@ -111,6 +116,56 @@ pub async fn create_instance(
     reconcile_instance(state, &id, &installation_id).await;
 
     Ok(id)
+}
+
+async fn validate_create_request(
+    state: &Arc<AppState>,
+    req: &CreateInstanceRequest,
+) -> Result<(), InstanceError> {
+    if req.port == 0 {
+        return Err(InstanceError::Invalid("port cannot be 0".into()));
+    }
+    if req.memory.min_mb == 0 || req.memory.max_mb == 0 {
+        return Err(InstanceError::Invalid(
+            "memory must be greater than 0".into(),
+        ));
+    }
+    if req.memory.min_mb > req.memory.max_mb {
+        return Err(InstanceError::Invalid(
+            "memory min_mb cannot exceed max_mb".into(),
+        ));
+    }
+    require_port_available(state, req.port, None).await?;
+    Ok(())
+}
+
+async fn require_port_available(
+    state: &Arc<AppState>,
+    port: u16,
+    except: Option<&InstanceId>,
+) -> Result<(), InstanceError> {
+    let count: i64 = if let Some(except) = except {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM instances WHERE port = ? AND id != ?",
+        )
+        .bind(port as i64)
+        .bind(except.to_string())
+        .fetch_one(&state.pool)
+        .await
+        .map_err(StoreError::Database)?
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM instances WHERE port = ?")
+            .bind(port as i64)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(StoreError::Database)?
+    };
+    if count > 0 {
+        return Err(InstanceError::Invalid(format!(
+            "port {port} is already in use"
+        )));
+    }
+    Ok(())
 }
 
 async fn unique_instance_data_dir(
@@ -285,8 +340,37 @@ pub async fn update_port(
     id: &InstanceId,
     port: u16,
 ) -> Result<(), InstanceError> {
+    if port == 0 {
+        return Err(InstanceError::Invalid("port cannot be 0".into()));
+    }
+    require_port_available(state, port, Some(id)).await?;
     state.instance_store.update_port(id, port).await?;
     Ok(())
+}
+
+/// Delete an offline instance and its local data/backup storage.
+pub async fn delete_instance(
+    state: &Arc<AppState>,
+    id: &InstanceId,
+) -> Result<(), InstanceError> {
+    if state.instances.contains_key(id) {
+        return Err(InstanceError::MustBeOffline);
+    }
+    let record = load_record(state, id).await?;
+    let backup_dir =
+        crate::application::backup_service::storage_dir(state, &id.to_string());
+    remove_dir_if_exists(PathBuf::from(&record.data_dir)).await?;
+    remove_dir_if_exists(backup_dir).await?;
+    state.instance_store.delete(id).await?;
+    Ok(())
+}
+
+async fn remove_dir_if_exists(path: PathBuf) -> Result<(), InstanceError> {
+    match tokio::fs::remove_dir_all(&path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(InstanceError::Io(error)),
+    }
 }
 
 /// On startup, detect Java, resume interrupted shared installations, and restore

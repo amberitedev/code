@@ -1,25 +1,8 @@
 <script setup lang="ts">
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	ServersManageFilesPage,
-} from '@modrinth/ui'
-import { useQueryClient } from '@tanstack/vue-query'
+import { injectModrinthServerContext, ServersManageFilesPage } from '@modrinth/ui'
 
-const client = injectModrinthClient()
-const { server, serverId } = injectModrinthServerContext()
-const queryClient = useQueryClient()
+const { server } = injectModrinthServerContext()
 const flags = useFeatureFlags()
-
-try {
-	await queryClient.ensureQueryData({
-		queryKey: ['files', serverId, '/'],
-		queryFn: () => client.kyros.files_v0.listDirectory('/', 1, 2000),
-		staleTime: 30_000,
-	})
-} catch {
-	// Let mounted layouts' useQuery surface errors; do not fail route setup.
-}
 
 useHead({
 	title: computed(() => `Files - ${server.value?.name ?? 'Server'} - Modrinth`),

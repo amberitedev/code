@@ -12,7 +12,8 @@ use crate::{
     application::{
         access_service, activity_service,
         instance_service::{
-            create_instance as svc_create_instance, CreateInstanceRequest,
+            create_instance as svc_create_instance,
+            delete_instance as svc_delete_instance, CreateInstanceRequest,
         },
         instance_status_service::{default_launch_args, resolve_launch},
         state::AppState,
@@ -101,9 +102,6 @@ pub async fn create_instance(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     if body.name.trim().is_empty() {
         return Err(ApiError::BadRequest("name cannot be empty".into()));
-    }
-    if body.port == 0 {
-        return Err(ApiError::BadRequest("port cannot be 0".into()));
     }
     access_service::require_core_manager(&state, &claims.sub)
         .await
@@ -302,13 +300,7 @@ pub async fn delete_instance(
     require_instance_permission(&state, &claims.sub, &id, "server:settings")
         .await?;
 
-    if state.instances.contains_key(&iid) {
-        return Err(ApiError::Conflict(
-            "stop the instance before deleting".into(),
-        ));
-    }
-
-    state.instance_store.delete(&iid).await?;
+    svc_delete_instance(&state, &iid).await?;
     activity_service::record(
         &state,
         &claims.sub,

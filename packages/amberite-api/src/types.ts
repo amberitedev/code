@@ -301,8 +301,42 @@ export interface CoreBackup {
 	size_bytes: number
 	locked: boolean
 	automated: boolean
+	hot: boolean
+	consistency: 'offline' | 'rcon_flush'
+	trigger: 'manual' | 'scheduled' | string
 	status: 'done' | 'in_progress'
 	created_at: string
+}
+
+export interface CoreNetworkStatus {
+	direct_api_url: string
+	lan_api_url: string | null
+	public_api_url: string
+	upnp: {
+		state: string
+		external_ip: string | null
+		external_port: number | null
+		error: string | null
+	}
+	cloudflare_tunnel: {
+		state: string
+		url: string | null
+	}
+	minecraft_exposure: {
+		state: string
+		cloudflare_tunnel: boolean
+	}
+	playit: {
+		state: string
+		url: string | null
+	}
+}
+
+export interface CoreUploadSession {
+	id: string
+	location: string
+	offset: number
+	length: number
 }
 
 /** Active backup operation returned as part of CoreBackupsResponse */

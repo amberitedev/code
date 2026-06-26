@@ -36,8 +36,8 @@ export interface ContentDependencyWarning {
 export interface ContentManagerContext {
 	// Data
 	items: Ref<ContentItem[]> | ComputedRef<ContentItem[]>
-	loading: Ref<boolean>
-	error: Ref<Error | null>
+	loading: Ref<boolean> | ComputedRef<boolean>
+	error: Ref<Error | null> | ComputedRef<Error | null>
 
 	// Modpack
 	modpack: Ref<ContentModpackData | null> | ComputedRef<ContentModpackData | null>

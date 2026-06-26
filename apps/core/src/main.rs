@@ -54,9 +54,7 @@ pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
     ));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
     tokio::spawn(gc_fs_download_tokens(Arc::clone(&state)));
-    tokio::spawn(application::backup_scheduler::run_backup_scheduler(
-        Arc::clone(&state),
-    ));
+    tokio::spawn(gc_fs_upload_sessions(Arc::clone(&state)));
     tokio::spawn(application::task_scheduler::run_task_scheduler(Arc::clone(
         &state,
     )));
@@ -94,6 +92,29 @@ async fn gc_fs_download_tokens(state: Arc<application::state::AppState>) {
         state
             .fs_download_tokens
             .retain(|_, t| t.expires_at > Instant::now());
+    }
+}
+
+async fn gc_fs_upload_sessions(state: Arc<application::state::AppState>) {
+    use std::time::Instant;
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        let now = Instant::now();
+        let expired: Vec<(String, std::path::PathBuf)> = state
+            .fs_upload_sessions
+            .iter()
+            .filter_map(|session| {
+                if session.expires_at <= now {
+                    Some((session.key().clone(), session.partial_path.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (id, partial_path) in expired {
+            state.fs_upload_sessions.remove(&id);
+            tokio::fs::remove_file(partial_path).await.ok();
+        }
     }
 }
 

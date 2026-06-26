@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * Skin selector route.
+ * - loadSkins (350) refreshes available skins and preview renders.
+ * - applySelectedSkin (699) updates the equipped skin and schedules Mojang refresh.
+ * - processSkinFileBuffer (922) normalizes imported PNG files before opening the editor.
+ * - checkUserChanges (987) keeps the selector in sync with account switches.
+ */
 import {
 	CheckIcon,
 	EditIcon,

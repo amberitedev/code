@@ -42,6 +42,18 @@ pub struct FsDownloadToken {
     pub expires_at: Instant,
 }
 
+/// In-progress resumable upload tracked by Core.
+#[derive(Clone)]
+pub struct FsUploadSession {
+    pub instance_id: String,
+    pub destination: PathBuf,
+    pub partial_path: PathBuf,
+    pub length: u64,
+    pub offset: u64,
+    pub sha256: Option<String>,
+    pub expires_at: Instant,
+}
+
 /// Central shared state — passed as `Arc<AppState>` through all layers.
 pub struct AppState {
     /// SQLite connection pool (kept for legacy/direct queries).
@@ -54,6 +66,9 @@ pub struct AppState {
     pub core_id: String,
     /// Running instance handles, keyed by instance ID.
     pub instances: DashMap<InstanceId, InstanceHandle>,
+    /// Short-lived per-instance operation locks for lifecycle mutations.
+    pub instance_operation_locks:
+        DashMap<InstanceId, Arc<tokio::sync::Mutex<()>>>,
     /// Broadcast channel for all instance events.
     pub broadcaster: EventBroadcaster,
     /// JWKS cache for auth JWT validation.
@@ -62,6 +77,8 @@ pub struct AppState {
     pub ws_tickets: DashMap<String, WsTicket>,
     /// In-memory short-lived file download tokens (issued by GET /instances/:id/fs/url).
     pub fs_download_tokens: DashMap<String, FsDownloadToken>,
+    /// In-memory resumable upload sessions.
+    pub fs_upload_sessions: DashMap<String, FsUploadSession>,
     /// First-run pairing code (cleared after pairing).
     pub pairing_code: tokio::sync::Mutex<Option<String>>,
     /// Expiration instant for the first-run pairing code.
@@ -151,10 +168,12 @@ impl AppState {
             config,
             core_id,
             instances: DashMap::new(),
+            instance_operation_locks: DashMap::new(),
             broadcaster,
             jwks_cache,
             ws_tickets: DashMap::new(),
             fs_download_tokens: DashMap::new(),
+            fs_upload_sessions: DashMap::new(),
             pairing_code: tokio::sync::Mutex::new(pairing_code),
             pairing_code_expires_at: tokio::sync::Mutex::new(
                 pairing_code_expires_at,
@@ -181,8 +200,8 @@ impl AppState {
         row.map(|(url,)| url)
     }
 
-    /// Expected JWT audience for the active auth provider (defaults to "authenticated").
-    pub async fn auth_audience(&self) -> String {
+    /// Expected JWT audience for the active auth provider.
+    pub async fn auth_audience(&self) -> Option<String> {
         sqlx::query_scalar::<_, String>(
             "SELECT auth_audience FROM core_config WHERE id = 1",
         )
@@ -190,7 +209,6 @@ impl AppState {
         .await
         .ok()
         .flatten()
-        .unwrap_or_else(|| "authenticated".to_string())
     }
 
     /// Owner user id written during setup. Only this user may administer Core.

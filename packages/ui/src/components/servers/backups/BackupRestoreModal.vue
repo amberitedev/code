@@ -47,7 +47,7 @@ import { computed, ref } from 'vue'
 
 import { useVIntl } from '../../../composables/i18n'
 import {
-	injectModrinthClient,
+	injectHostingBackend,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '../../../providers'
@@ -59,7 +59,7 @@ import BackupItem from './BackupItem.vue'
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
+const backend = injectHostingBackend()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
@@ -74,16 +74,10 @@ const props = withDefaults(
 	},
 )
 
-const backupsQueryKey = ['backups', 'queue', ctx.serverId]
-
-function safetyBackupName(backupName: string) {
-	const base = `Before restoring "${backupName}"`
-	return base.slice(0, 92)
-}
+const backupsQueryKey = ['core-backups', ctx.serverId]
 
 const restoreMutation = useMutation({
-	mutationFn: ({ backupId, name }: { backupId: string; name: string }) =>
-		client.archon.backups_queue_v1.restore(ctx.serverId, ctx.worldId.value!, backupId, { name }),
+	mutationFn: (backupId: string) => backend.core.restoreBackup(ctx.serverId, backupId),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 
@@ -118,10 +112,7 @@ const restoreBackup = () => {
 
 	isRestoring.value = true
 	restoreMutation.mutate(
-		{
-			backupId: currentBackup.value.id,
-			name: safetyBackupName(currentBackup.value.name),
-		},
+		currentBackup.value.id,
 		{
 			onSuccess: () => {
 				modal.value?.hide()

@@ -94,6 +94,41 @@ async fn create_instance_port_too_high() {
     assert_eq!(res.status(), 422, "port > 65535 overflows u16 → 422");
 }
 
+#[tokio::test]
+async fn create_instance_duplicate_port_returns_400() {
+    let app = common::TestApp::spawn().await;
+    common::create_test_instance(&app).await;
+    let mut body = common::default_create_body();
+    body["name"] = json!("same-port");
+
+    let res = app
+        .client
+        .post(app.url("/instances"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn create_instance_invalid_memory_returns_400() {
+    let app = common::TestApp::spawn().await;
+    let mut body = common::default_create_body();
+    body["memory"] = json!({ "min_mb": 2048, "max_mb": 1024 });
+
+    let res = app
+        .client
+        .post(app.url("/instances"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
 // ── Idempotency ───────────────────────────────────────────────────────────────
 
 /// First DELETE returns 200; second DELETE of the same (now-gone) ID returns 404.
@@ -250,6 +285,7 @@ async fn create_two_instances_concurrently() {
 
     let mut body_b = common::default_create_body();
     body_b["name"] = json!("server-beta");
+    body_b["port"] = json!(25566);
 
     let (res_a, res_b) = tokio::join!(
         app.client.post(app.url("/instances")).json(&body_a).send(),

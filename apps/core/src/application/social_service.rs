@@ -133,6 +133,10 @@ pub async fn ban_member(
     sqlx::query("INSERT OR REPLACE INTO core_group_bans (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)")
 		.bind(&req.user_id).bind(req.reason).bind(banned_by).bind(&now).execute(&state.pool).await?;
     remove_member(state, &req.user_id).await?;
+    sqlx::query("DELETE FROM instance_members WHERE user_id = ?")
+        .bind(&req.user_id)
+        .execute(&state.pool)
+        .await?;
     Ok(
         sqlx::query_as("SELECT * FROM core_group_bans WHERE user_id = ?")
             .bind(&req.user_id)

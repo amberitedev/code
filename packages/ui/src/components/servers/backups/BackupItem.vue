@@ -2,7 +2,6 @@
 import type { Archon } from '@modrinth/api-client'
 import {
 	ClipboardCopyIcon,
-	DownloadIcon,
 	EditIcon,
 	IntercomBubbleIcon,
 	MoreVerticalIcon,
@@ -37,8 +36,6 @@ const props = withDefaults(
 		backup: Archon.BackupsQueue.v1.BackupQueueBackup
 		creator?: Archon.BackupsQueue.v1.UserInfo | null
 		preview?: boolean
-		kyrosUrl?: string
-		jwt?: string
 		showCopyIdAction?: boolean
 		showDebugInfo?: boolean
 		restoreDisabled?: string
@@ -50,8 +47,6 @@ const props = withDefaults(
 	{
 		creator: undefined,
 		preview: false,
-		kyrosUrl: undefined,
-		jwt: undefined,
 		showCopyIdAction: false,
 		showDebugInfo: false,
 		restoreDisabled: undefined,
@@ -106,13 +101,6 @@ const overflowMenuOptions = computed<OverflowOption[]>(() => {
 	if (options.length > 0) {
 		options.push({ divider: true })
 	}
-
-	options.push({
-		id: 'download',
-		action: () => emit('download'),
-		link: `https://${props.kyrosUrl}/modrinth/v0/backups/${props.backup.id}/download?auth=${props.jwt}`,
-		disabled: !props.kyrosUrl || !props.jwt,
-	})
 
 	options.push({
 		id: 'rename',
@@ -284,9 +272,6 @@ const creatorAvatarSrc = computed(() =>
 					<template #copy-id>
 						<ClipboardCopyIcon class="size-5" />
 						{{ formatMessage(commonMessages.copyIdButton) }}
-					</template>
-					<template #download>
-						<DownloadIcon class="size-5" /> {{ formatMessage(commonMessages.downloadButton) }}
 					</template>
 					<template #rename>
 						<EditIcon class="size-5" /> {{ formatMessage(messages.rename) }}

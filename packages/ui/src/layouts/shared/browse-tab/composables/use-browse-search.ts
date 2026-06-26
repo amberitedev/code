@@ -23,6 +23,7 @@ export interface UseBrowseSearchOptions {
 	getExtraQueryParams?: () => Record<string, string | undefined>
 	maxResultsOptions?: ComputedRef<number[]>
 	displayMode?: Ref<'list' | 'grid' | 'gallery'> | ComputedRef<'list' | 'grid' | 'gallery'>
+	immediateProjectTypeSearch?: boolean
 }
 
 export interface BrowseSearchState {
@@ -171,6 +172,7 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 
 	let searchVersion = 0
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+	let lastProjectType = options.projectType.value
 
 	const providedFiltersOrEmpty = computed(() => options.providedFilters?.value ?? [])
 
@@ -198,6 +200,14 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			to: newVal?.substring(0, 80),
 		})
 		if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+		const projectTypeChanged = lastProjectType !== options.projectType.value
+		lastProjectType = options.projectType.value
+
+		if (options.immediateProjectTypeSearch && projectTypeChanged) {
+			void refreshSearch()
+			return
+		}
+
 		searchDebounceTimer = setTimeout(() => {
 			refreshSearch()
 		}, 200)

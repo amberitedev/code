@@ -2,7 +2,12 @@ import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { Id } from './_generated/dataModel'
 import type { MutationCtx, QueryCtx } from './_generated/server'
-import { publicCurrentProfile, publicProfile, requireUserId } from './_socialRules'
+import {
+	currentAccountFields,
+	publicCurrentProfile,
+	publicProfile,
+	requireUserId,
+} from './_socialRules'
 
 const MAX_BIO_LENGTH = 1_024
 const MAX_SEARCH_LIMIT = 20
@@ -25,7 +30,7 @@ export const current = query({
 		const userId = await requireUserId(ctx)
 		const user = await ctx.db.get(userId)
 		if (!user) throw new Error('user not found')
-		return publicCurrentProfile(user)
+		return publicCurrentProfile(user, await currentAccountFields(ctx, userId))
 	},
 })
 
@@ -107,7 +112,7 @@ export const updateCurrent = mutation({
 		await ctx.db.patch(userId, patch)
 		const updated = await ctx.db.get(userId)
 		if (!updated) throw new Error('user not found')
-		return publicCurrentProfile(updated)
+		return publicCurrentProfile(updated, await currentAccountFields(ctx, userId))
 	},
 })
 
@@ -147,6 +152,10 @@ function normalizeBio(value: string): string {
 
 function normalizeAvatarUrl(value: string): string {
 	const url = value.trim()
+	if (/^data:image\/(png|jpeg|gif|webp);base64,[a-zA-Z0-9+/=]+$/.test(url)) {
+		if (url.length > 400_000) throw new Error('avatar image is too large')
+		return url
+	}
 	if (url.length > 2_048) throw new Error('avatar URL is too long')
 	try {
 		const parsed = new URL(url)

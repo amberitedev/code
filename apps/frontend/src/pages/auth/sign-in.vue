@@ -29,6 +29,7 @@ import { useStorage } from '@vueuse/core'
 import type { LocationQueryValue } from 'vue-router'
 
 import SignInView from '@/components/ui/auth/SignIn.vue'
+import { useAmberiteAuthClient } from '@/composables/amberite-client.ts'
 import {
 	getLauncherRedirectUrl,
 	LAST_SIGN_IN_OAUTH_PROVIDER_STORAGE_KEY,
@@ -69,6 +70,7 @@ const getErrorMessage = (error: unknown): string => {
 }
 
 const client = injectModrinthClient()
+const amberiteAuthClient = useAmberiteAuthClient()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
@@ -152,17 +154,13 @@ async function beginPasswordSignIn() {
 	lastSignInOAuthProvider.value = null
 	startLoading()
 	try {
-		const res = await client.labrinth.auth_v2.login({
-			username: email.value,
+		const res = await amberiteAuthClient.signInWithPassword({
+			login: email.value,
 			password: password.value,
 			challenge: token.value,
 		})
 
-		if (res.flow) {
-			flow.value = res.flow
-		} else {
-			await finishSignIn(res.session)
-		}
+		await finishSignIn(res.tokens.token)
 	} catch (err) {
 		addNotification({
 			title: formatMessage(commonMessages.errorNotificationTitle),

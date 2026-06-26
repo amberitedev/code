@@ -30,6 +30,13 @@ pub async fn start_instance(
     state: &Arc<AppState>,
     id: &InstanceId,
 ) -> Result<(), InstanceError> {
+    let operation_lock = state
+        .instance_operation_locks
+        .entry(id.clone())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    let _operation_guard = operation_lock.lock().await;
+
     if state.instances.contains_key(id) {
         return Err(InstanceError::AlreadyRunning);
     }
@@ -301,7 +308,11 @@ pub async fn stop_instance(
         return Err(InstanceError::NotRunning);
     }
     let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
-    let _ = handle.cmd_tx.send(crate::infrastructure::process::instance_actor::ActorCmd::GracefulStop).await;
+    handle
+		.cmd_tx
+		.send(crate::infrastructure::process::instance_actor::ActorCmd::GracefulStop)
+		.await
+		.map_err(|_| InstanceError::ActorDead)?;
     Ok(())
 }
 
@@ -319,10 +330,11 @@ pub async fn kill_instance(
         return Err(InstanceError::NotRunning);
     }
     let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
-    let _ = handle
+    handle
         .cmd_tx
         .send(crate::infrastructure::process::instance_actor::ActorCmd::Kill)
-        .await;
+        .await
+        .map_err(|_| InstanceError::ActorDead)?;
     Ok(())
 }
 

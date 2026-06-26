@@ -1,3 +1,10 @@
+//! Core and instance access workflows.
+//!
+//! Key entry points: list access responses (lines 18 and 35), mutate Core and
+//! instance grants (lines 67 and 137), enforce route permissions (line 237),
+//! calculate effective access with bans/custom grants (line 267), and map role
+//! presets/grants into API-facing permissions (line 367).
+
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -196,6 +203,7 @@ pub async fn require_any_member(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> Result<EffectiveAccessViewer, SocialError> {
+    reject_banned(state, user_id).await?;
     match effective_viewer(state, user_id, None).await {
         Ok(viewer) => Ok(viewer),
         Err(core_error) => {
@@ -207,7 +215,12 @@ pub async fn require_any_member(
             .await?;
             member
                 .map(|member| {
-                    viewer(user_id, &member.role, &member.permission_preset)
+                    viewer_with_custom(
+                        user_id,
+                        &member.role,
+                        &member.permission_preset,
+                        member.custom_permissions.as_deref(),
+                    )
                 })
                 .ok_or(core_error)
         }
@@ -264,6 +277,7 @@ async fn effective_viewer(
     user_id: &str,
     instance_id: Option<&str>,
 ) -> Result<EffectiveAccessViewer, SocialError> {
+    reject_banned(state, user_id).await?;
     if state.config.dev_mode && user_id == "dev-owner" {
         return Ok(viewer(user_id, "owner", "owner"));
     }
@@ -279,12 +293,13 @@ async fn effective_viewer(
         .fetch_optional(&state.pool)
         .await?
         {
-            return Ok(viewer(
-                user_id,
-                &member.role,
-                &member.permission_preset,
-            ));
-        }
+			return Ok(viewer_with_custom(
+				user_id,
+				&member.role,
+				&member.permission_preset,
+				member.custom_permissions.as_deref(),
+			));
+		}
     }
     let member: Option<CoreMember> = sqlx::query_as(
         "SELECT * FROM core_members WHERE user_id = ? AND status = 'active'",
@@ -295,6 +310,24 @@ async fn effective_viewer(
     let member = member
         .ok_or(SocialError::Invalid("not authorized for this Core".into()))?;
     viewer_for_core_member(state, user_id, member).await
+}
+
+async fn reject_banned(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<(), SocialError> {
+    let banned: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM core_group_bans WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if banned > 0 {
+        return Err(SocialError::Invalid(
+            "not authorized for this Core".into(),
+        ));
+    }
+    Ok(())
 }
 
 async fn viewer_for_core_member(
@@ -329,14 +362,19 @@ async fn viewer_for_core_member(
         } else {
             permissions_for(&member.permission_preset)
         };
-    let permissions = expand_role_grants(permissions);
+    let permissions = expand_role_grants(apply_custom_permissions(
+        permissions,
+        member.custom_permissions.as_deref(),
+    ));
+    let permissions = apply_custom_permissions(
+        permissions,
+        member.custom_permissions.as_deref(),
+    );
     Ok(EffectiveAccessViewer {
         user_id: user_id.to_string(),
         role: member.role,
         permission_preset: member.permission_preset,
-        can_manage_users: permissions.iter().any(|value| {
-            value == "manage-roles" || value == "edit-member-roles"
-        }),
+        can_manage_users: can_manage_users(&permissions),
         permissions,
     })
 }
@@ -390,16 +428,95 @@ fn expand_role_grants(grants: Vec<String>) -> Vec<String> {
 }
 
 fn viewer(user_id: &str, role: &str, preset: &str) -> EffectiveAccessViewer {
-    let permissions = permissions_for(preset);
+    viewer_with_custom(user_id, role, preset, None)
+}
+
+fn viewer_with_custom(
+    user_id: &str,
+    role: &str,
+    preset: &str,
+    custom_permissions: Option<&str>,
+) -> EffectiveAccessViewer {
+    let permissions = expand_role_grants(apply_custom_permissions(
+        permissions_for(preset),
+        custom_permissions,
+    ));
+    let permissions = apply_custom_permissions(permissions, custom_permissions);
     EffectiveAccessViewer {
         user_id: user_id.to_string(),
         role: role.to_string(),
         permission_preset: preset.to_string(),
-        can_manage_users: permissions
-            .iter()
-            .any(|value| value == "members:manage"),
+        can_manage_users: can_manage_users(&permissions),
         permissions,
     }
+}
+
+fn can_manage_users(permissions: &[String]) -> bool {
+    permissions.iter().any(|value| {
+        matches!(
+            value.as_str(),
+            "members:manage" | "manage-roles" | "edit-member-roles"
+        )
+    })
+}
+
+fn apply_custom_permissions(
+    mut permissions: Vec<String>,
+    custom_permissions: Option<&str>,
+) -> Vec<String> {
+    let Some(custom_permissions) = custom_permissions else {
+        return permissions;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(custom_permissions) else {
+        return permissions;
+    };
+    let (additions, removals) = custom_permission_delta(&value);
+    permissions
+        .retain(|permission| !removals.iter().any(|value| value == permission));
+    for permission in additions {
+        if !permissions.iter().any(|value| value == &permission) {
+            permissions.push(permission);
+        }
+    }
+    permissions.sort();
+    permissions.dedup();
+    permissions
+}
+
+fn custom_permission_delta(value: &Value) -> (Vec<String>, Vec<String>) {
+    match value {
+        Value::Array(values) => (string_values(values), vec![]),
+        Value::Object(map) => {
+            let mut additions = Vec::new();
+            let mut removals = Vec::new();
+            for (key, value) in map {
+                match (key.as_str(), value) {
+                    (
+                        "grants" | "allow" | "permissions",
+                        Value::Array(values),
+                    ) => {
+                        additions.extend(string_values(values));
+                    }
+                    ("denies" | "remove", Value::Array(values)) => {
+                        removals.extend(string_values(values));
+                    }
+                    (_, Value::Bool(true)) => additions.push(key.clone()),
+                    (_, Value::Bool(false)) => removals.push(key.clone()),
+                    _ => {}
+                }
+            }
+            (additions, removals)
+        }
+        _ => (vec![], vec![]),
+    }
+}
+
+fn string_values(values: &[Value]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| value.as_str())
+        .map(str::to_string)
+        .collect()
 }
 
 fn permissions_for(preset: &str) -> Vec<String> {

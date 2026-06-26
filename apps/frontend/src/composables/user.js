@@ -149,15 +149,6 @@ export const resendVerifyEmail = async () => {
 
 export const logout = async () => {
 	startLoading()
-	const auth = await useAuth()
-	try {
-		await useBaseFetch(`session/${auth.value.token}`, {
-			method: 'DELETE',
-		})
-	} catch {
-		/* empty */
-	}
-
 	await useAuth('none')
 	useCookie('auth-token').value = null
 	useAppQueryClient().clear()

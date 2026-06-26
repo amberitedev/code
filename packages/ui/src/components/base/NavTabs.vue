@@ -33,6 +33,8 @@
 				ref="tabLinkElements"
 				class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
 				:class="getSSRFallbackClasses(index)"
+				@mouseenter="link.onHover?.()"
+				@focus="link.onHover?.()"
 				@click="emit('tabClick', index, link)"
 			>
 				<component :is="link.icon" v-if="link.icon" class="size-5" :class="getIconClasses(index)" />
@@ -79,11 +81,17 @@ const props = withDefaults(
 		query?: string
 		mode?: 'navigation' | 'local'
 		activeIndex?: number
+		transitionDuration?: string
+		transitionStaggerDelay?: string
+		opacityTransitionDuration?: string
 	}>(),
 	{
 		mode: 'navigation',
 		query: undefined,
 		activeIndex: undefined,
+		transitionDuration: '150ms',
+		transitionStaggerDelay: '200ms',
+		opacityTransitionDuration: '250ms',
 	},
 )
 
@@ -126,6 +134,8 @@ const leftDelay = computed(() => sliderDelays.value.left)
 const rightDelay = computed(() => sliderDelays.value.right)
 const topDelay = computed(() => sliderDelays.value.top)
 const bottomDelay = computed(() => sliderDelays.value.bottom)
+const transitionDuration = computed(() => props.transitionDuration)
+const opacityTransitionDuration = computed(() => props.opacityTransitionDuration)
 
 const isActiveAndNotSubpage = computed(
 	() => (index: number) => currentActiveIndex.value === index && !subpageSelected.value,
@@ -244,7 +254,7 @@ function animateSliderTo(newPosition: {
 	right: number
 	bottom: number
 }) {
-	const STAGGER_DELAY = '200ms'
+	const STAGGER_DELAY = props.transitionStaggerDelay
 
 	sliderDelays.value = {
 		left: newPosition.left < sliderLeft.value ? '0ms' : STAGGER_DELAY,
@@ -312,10 +322,10 @@ watch(
 <style scoped>
 .navtabs-transition {
 	transition:
-		left 150ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(leftDelay),
-		right 150ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(rightDelay),
-		top 150ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(topDelay),
-		bottom 150ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(bottomDelay),
-		opacity 250ms cubic-bezier(0.5, 0, 0.2, 1) 50ms;
+		left v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(leftDelay),
+		right v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(rightDelay),
+		top v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(topDelay),
+		bottom v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(bottomDelay),
+		opacity v-bind(opacityTransitionDuration) cubic-bezier(0.5, 0, 0.2, 1) 50ms;
 }
 </style>

@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -92,12 +93,20 @@ pub struct UpdateTaskBody {
     pub payload: Option<Value>,
 }
 
-fn validate_cron(cron: &str) -> Result<(), TaskError> {
+pub fn normalize_cron_expression(cron: &str) -> Result<String, TaskError> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
-    if parts.len() != 5 {
-        return Err(TaskError::InvalidCron);
-    }
-    Ok(())
+    let normalized = match parts.len() {
+        5 => format!("0 {cron}"),
+        6 | 7 => cron.to_string(),
+        _ => return Err(TaskError::InvalidCron),
+    };
+    cron::Schedule::from_str(&normalized)
+        .map_err(|_| TaskError::InvalidCron)?;
+    Ok(normalized)
+}
+
+pub fn validate_cron(cron: &str) -> Result<(), TaskError> {
+    normalize_cron_expression(cron).map(|_| ())
 }
 
 pub async fn list_tasks(

@@ -56,8 +56,19 @@ pub async fn patch_properties_handler(
 
     let _updated = patch_properties(&data_dir, &body)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(properties_error)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+fn properties_error(
+    error: crate::infrastructure::minecraft::server_properties::PropertiesError,
+) -> ApiError {
+    match error {
+		crate::infrastructure::minecraft::server_properties::PropertiesError::Invalid(message) => {
+			ApiError::BadRequest(message)
+		}
+		other => ApiError::Internal(other.to_string()),
+	}
 }
 
 fn normalize_properties(

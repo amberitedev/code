@@ -1,4 +1,12 @@
 <script setup lang="ts">
+/**
+ * App browse layout.
+ * - `sortOptions` (56) and `maxResultsOptions` (63) adapt shared browse state to controls.
+ * - `cardSlideEnabled` (94) and `loadingBarEnabled` (95) persist Discover page polish toggles.
+ * - `activeProjectTypeTabIndex` (106) and `selectProjectTypeTab` (123) drive instant local tabs.
+ * - `resultsTransitionKey` (102) and `browseCardsTransition` (103) drive discover card slides.
+ * - Template result cards (309) render app-specific browse actions and server metadata.
+ */
 import type { Labrinth } from '@modrinth/api-client'
 import { SearchIcon } from '@modrinth/assets'
 import {
@@ -20,12 +28,16 @@ import {
 	SelectedProjectsFloatingBar,
 	type SortType,
 	StyledInput,
+	Toggle,
 	useStickyObserver,
 	useVIntl,
 } from '@modrinth/ui'
-import { computed, ref, toValue } from 'vue'
+import { useStorage } from '@vueuse/core'
+import { computed, ref, toValue, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import AppJoinedButtons from '@/components/ui/AppJoinedButtons.vue'
+import { getDiscoverProjectTypeFromHref } from '@/composables/useDiscoverContentPreload'
 
 interface AppCardAction extends CardAction {
 	joinedActions?: AppCardAction[]
@@ -33,6 +45,7 @@ interface AppCardAction extends CardAction {
 
 const ctx = injectBrowseManager()
 const { formatMessage } = useVIntl()
+const router = useRouter()
 const lockedMessages = computed(() => toValue(ctx.lockedFilterMessages))
 const stickyInstallHeaderRef = ref<HTMLElement | null>(null)
 const { isStuck: isInstallHeaderStuck } = useStickyObserver(
@@ -77,6 +90,66 @@ const messages = defineMessages({
 	},
 })
 
+const BROWSE_LOADING_BAR_STORAGE_KEY = 'app-browse-loading-bar-enabled'
+const cardSlideEnabled = useStorage('app-browse-card-slide-animation', true)
+const loadingBarEnabled = useStorage(BROWSE_LOADING_BAR_STORAGE_KEY, false)
+const slideDirection = ref<'forward' | 'backward'>('forward')
+const optimisticProjectType = ref<string | null>(null)
+const resultSignature = computed(() => {
+	const hits = ctx.isServerType.value ? ctx.serverHits.value : ctx.projectHits.value
+	return hits.map((hit) => hit.project_id).join('|')
+})
+const resultsTransitionKey = ref(`${ctx.projectType.value}:${resultSignature.value}`)
+const browseCardsTransition = computed(() =>
+	cardSlideEnabled.value ? `browse-cards-${slideDirection.value}` : undefined,
+)
+const activeProjectTypeTabIndex = computed(() =>
+	ctx.selectableProjectTypes.value
+		.filter((link) => link.shown ?? true)
+		.findIndex(
+			(link) =>
+				getDiscoverProjectTypeFromHref(link.href) ===
+				(optimisticProjectType.value ?? ctx.projectType.value),
+		),
+)
+
+function getProjectTypeOrder() {
+	return ctx.selectableProjectTypes.value
+		.filter((link) => link.shown ?? true)
+		.map((link) => link.href.match(/^\/browse\/([^?]+)/)?.[1])
+		.filter((type): type is string => !!type)
+}
+
+function selectProjectTypeTab(_index: number, tab: { href: string; onHover?: () => void }) {
+	tab.onHover?.()
+
+	const nextProjectType = getDiscoverProjectTypeFromHref(tab.href)
+	if (nextProjectType) {
+		optimisticProjectType.value = nextProjectType
+	}
+
+	void router.push(tab.href).catch(() => undefined)
+}
+
+watch(
+	() => ctx.projectType.value,
+	(next, previous) => {
+		optimisticProjectType.value = null
+
+		const order = getProjectTypeOrder()
+		const previousIndex = order.indexOf(previous)
+		const nextIndex = order.indexOf(next)
+
+		if (previousIndex !== -1 && nextIndex !== -1) {
+			slideDirection.value = nextIndex > previousIndex ? 'forward' : 'backward'
+		}
+	},
+)
+
+watch(resultSignature, () => {
+	resultsTransitionKey.value = `${ctx.projectType.value}:${resultSignature.value}`
+})
+
 function toJoinedButtonAction(action: CardAction) {
 	return {
 		id: action.key,
@@ -113,7 +186,16 @@ function getJoinedButtonActions(action: AppCardAction) {
 	</template>
 	<SelectedProjectsFloatingBar v-if="ctx.installContext?.value && ctx.variant !== 'web'" />
 
-	<NavTabs v-if="ctx.showProjectTypeTabs.value" :links="ctx.selectableProjectTypes.value" />
+	<NavTabs
+		v-if="ctx.showProjectTypeTabs.value"
+		mode="local"
+		:links="ctx.selectableProjectTypes.value"
+		:active-index="activeProjectTypeTabIndex"
+		transition-duration="95ms"
+		transition-stagger-delay="35ms"
+		opacity-transition-duration="120ms"
+		@tab-click="selectProjectTypeTab"
+	/>
 
 	<StyledInput
 		v-model="ctx.query.value"
@@ -221,156 +303,158 @@ function getJoinedButtonActions(action: AppCardAction) {
 			<p>{{ formatMessage(messages.noResults) }}</p>
 		</section>
 
-		<ProjectCardList v-else :layout="ctx.effectiveLayout.value">
-			<template v-if="ctx.isServerType.value">
-				<ProjectCard
-					v-for="result in ctx.serverHits.value"
-					:key="`server-card-${result.project_id}`"
-					:title="result.name"
-					:icon-url="result.icon_url || undefined"
-					:summary="result.summary"
-					:tags="result.categories"
-					:link="ctx.getServerProjectLink(result)"
-					:server-online-players="result.minecraft_java_server?.ping?.data?.players_online ?? 0"
-					:server-region="result.minecraft_server?.region"
-					:server-recent-plays="result.minecraft_java_server?.verified_plays_2w ?? 0"
-					:server-modpack-content="ctx.getServerModpackContent?.(result)"
-					:server-ping="ctx.serverPings?.value?.[result.project_id]"
-					:server-status-online="!!result.minecraft_java_server?.ping?.data"
-					:hide-online-players-label="ctx.variant === 'app'"
-					:hide-recent-plays-label="ctx.variant === 'app'"
-					:layout="ctx.effectiveLayout.value"
-					:max-tags="2"
-					is-server-project
-					exclude-loaders
-					:color="result.color ?? undefined"
-					:banner="result.featured_gallery ?? undefined"
-					@contextmenu.prevent.stop="(event: MouseEvent) => ctx.onContextMenu?.(event, result)"
-					@mouseenter="ctx.onServerProjectHover?.(result)"
-					@mouseleave="ctx.onProjectHoverEnd?.()"
-				>
-					<template v-if="ctx.getCardActions?.(result, ctx.projectType.value)?.length" #actions>
-						<div class="flex gap-2">
-							<AppJoinedButtons
-								v-for="action in getJoinedCardActions(
-									ctx.getCardActions(result, ctx.projectType.value),
-								)"
-								:key="action.key"
-								class="browse-card-joined-button"
-								:actions="getJoinedButtonActions(action)"
-								:color="action.color"
-								:type="action.type"
-								merged
-								:disabled="action.disabled"
-								:primary-tooltip="action.tooltip"
-								@click.stop
-							/>
-							<ButtonStyled
-								v-for="action in getStandardCardActions(
-									ctx.getCardActions(result, ctx.projectType.value),
-								)"
-								:key="action.key"
-								:color="action.color"
-								:type="action.type"
-								:circular="action.circular"
-							>
-								<button
-									v-tooltip="action.tooltip"
+		<Transition v-else :name="browseCardsTransition" mode="out-in">
+			<ProjectCardList :key="resultsTransitionKey" :layout="ctx.effectiveLayout.value">
+				<template v-if="ctx.isServerType.value">
+					<ProjectCard
+						v-for="result in ctx.serverHits.value"
+						:key="`server-card-${result.project_id}`"
+						:title="result.name"
+						:icon-url="result.icon_url || undefined"
+						:summary="result.summary"
+						:tags="result.categories"
+						:link="ctx.getServerProjectLink(result)"
+						:server-online-players="result.minecraft_java_server?.ping?.data?.players_online ?? 0"
+						:server-region="result.minecraft_server?.region"
+						:server-recent-plays="result.minecraft_java_server?.verified_plays_2w ?? 0"
+						:server-modpack-content="ctx.getServerModpackContent?.(result)"
+						:server-ping="ctx.serverPings?.value?.[result.project_id]"
+						:server-status-online="!!result.minecraft_java_server?.ping?.data"
+						:hide-online-players-label="ctx.variant === 'app'"
+						:hide-recent-plays-label="ctx.variant === 'app'"
+						:layout="ctx.effectiveLayout.value"
+						:max-tags="2"
+						is-server-project
+						exclude-loaders
+						:color="result.color ?? undefined"
+						:banner="result.featured_gallery ?? undefined"
+						@contextmenu.prevent.stop="(event: MouseEvent) => ctx.onContextMenu?.(event, result)"
+						@mouseenter="ctx.onServerProjectHover?.(result)"
+						@mouseleave="ctx.onProjectHoverEnd?.()"
+					>
+						<template v-if="ctx.getCardActions?.(result, ctx.projectType.value)?.length" #actions>
+							<div class="flex gap-2">
+								<AppJoinedButtons
+									v-for="action in getJoinedCardActions(
+										ctx.getCardActions(result, ctx.projectType.value),
+									)"
+									:key="action.key"
+									class="browse-card-joined-button"
+									:actions="getJoinedButtonActions(action)"
+									:color="action.color"
+									:type="action.type"
+									merged
 									:disabled="action.disabled"
-									@click.stop="action.onClick"
+									:primary-tooltip="action.tooltip"
+									@click.stop
+								/>
+								<ButtonStyled
+									v-for="action in getStandardCardActions(
+										ctx.getCardActions(result, ctx.projectType.value),
+									)"
+									:key="action.key"
+									:color="action.color"
+									:type="action.type"
+									:circular="action.circular"
 								>
-									<component :is="action.icon" :class="action.iconClass" />
-									<template v-if="!action.circular">{{ action.label }}</template>
-								</button>
-							</ButtonStyled>
-						</div>
-					</template>
-				</ProjectCard>
-			</template>
-			<template v-else>
-				<ProjectCard
-					v-for="result in ctx.projectHits.value"
-					:key="result.project_id"
-					:link="ctx.getProjectLink(result)"
-					:title="result.title"
-					:icon-url="result.icon_url"
-					:author="{
-						name: result.organization == null ? result.author : result.organization,
-						link:
-							result.organization_id == null
-								? ctx.variant === 'web'
-									? `/user/${result.author_id ?? result.author}`
-									: `https://modrinth.com/user/${result.author_id ?? result.author}`
-								: ctx.variant === 'web'
-									? `/organization/${result.organization_id}`
-									: `https://modrinth.com/organization/${result.organization_id}`,
-					}"
-					:date-updated="result.date_modified"
-					:date-published="result.date_created"
-					:displayed-date="
-						ctx.effectiveCurrentSortType.value.name === 'newest' ? 'published' : 'updated'
-					"
-					:downloads="result.downloads"
-					:summary="result.description"
-					:tags="result.display_categories"
-					:all-tags="result.categories"
-					:deprioritized-tags="ctx.deprioritizedTags.value"
-					:exclude-loaders="ctx.excludeLoaders.value"
-					:followers="result.follows"
-					:banner="result.featured_gallery ?? undefined"
-					:color="result.color ?? undefined"
-					:environment="
-						['mod', 'modpack'].includes(ctx.projectType.value)
-							? {
-									clientSide: result.client_side as Labrinth.Projects.v2.Environment,
-									serverSide: result.server_side as Labrinth.Projects.v2.Environment,
-								}
-							: undefined
-					"
-					:layout="ctx.effectiveLayout.value"
-					@contextmenu.prevent.stop="(event: MouseEvent) => ctx.onContextMenu?.(event, result)"
-					@mouseenter="ctx.onProjectHover?.(result)"
-					@mouseleave="ctx.onProjectHoverEnd?.()"
-				>
-					<template v-if="ctx.getCardActions?.(result, ctx.projectType.value)?.length" #actions>
-						<div class="flex gap-2">
-							<AppJoinedButtons
-								v-for="action in getJoinedCardActions(
-									ctx.getCardActions(result, ctx.projectType.value),
-								)"
-								:key="action.key"
-								class="browse-card-joined-button"
-								:actions="getJoinedButtonActions(action)"
-								:color="action.color"
-								:type="action.type"
-								merged
-								:disabled="action.disabled"
-								:primary-tooltip="action.tooltip"
-								@click.stop
-							/>
-							<ButtonStyled
-								v-for="action in getStandardCardActions(
-									ctx.getCardActions(result, ctx.projectType.value),
-								)"
-								:key="action.key"
-								:color="action.color"
-								:type="action.type"
-								:circular="action.circular"
-							>
-								<button
-									v-tooltip="action.tooltip"
+									<button
+										v-tooltip="action.tooltip"
+										:disabled="action.disabled"
+										@click.stop="action.onClick"
+									>
+										<component :is="action.icon" :class="action.iconClass" />
+										<template v-if="!action.circular">{{ action.label }}</template>
+									</button>
+								</ButtonStyled>
+							</div>
+						</template>
+					</ProjectCard>
+				</template>
+				<template v-else>
+					<ProjectCard
+						v-for="result in ctx.projectHits.value"
+						:key="result.project_id"
+						:link="ctx.getProjectLink(result)"
+						:title="result.title"
+						:icon-url="result.icon_url"
+						:author="{
+							name: result.organization == null ? result.author : result.organization,
+							link:
+								result.organization_id == null
+									? ctx.variant === 'web'
+										? `/user/${result.author_id ?? result.author}`
+										: `https://modrinth.com/user/${result.author_id ?? result.author}`
+									: ctx.variant === 'web'
+										? `/organization/${result.organization_id}`
+										: `https://modrinth.com/organization/${result.organization_id}`,
+						}"
+						:date-updated="result.date_modified"
+						:date-published="result.date_created"
+						:displayed-date="
+							ctx.effectiveCurrentSortType.value.name === 'newest' ? 'published' : 'updated'
+						"
+						:downloads="result.downloads"
+						:summary="result.description"
+						:tags="result.display_categories"
+						:all-tags="result.categories"
+						:deprioritized-tags="ctx.deprioritizedTags.value"
+						:exclude-loaders="ctx.excludeLoaders.value"
+						:followers="result.follows"
+						:banner="result.featured_gallery ?? undefined"
+						:color="result.color ?? undefined"
+						:environment="
+							['mod', 'modpack'].includes(ctx.projectType.value)
+								? {
+										clientSide: result.client_side as Labrinth.Projects.v2.Environment,
+										serverSide: result.server_side as Labrinth.Projects.v2.Environment,
+									}
+								: undefined
+						"
+						:layout="ctx.effectiveLayout.value"
+						@contextmenu.prevent.stop="(event: MouseEvent) => ctx.onContextMenu?.(event, result)"
+						@mouseenter="ctx.onProjectHover?.(result)"
+						@mouseleave="ctx.onProjectHoverEnd?.()"
+					>
+						<template v-if="ctx.getCardActions?.(result, ctx.projectType.value)?.length" #actions>
+							<div class="flex gap-2">
+								<AppJoinedButtons
+									v-for="action in getJoinedCardActions(
+										ctx.getCardActions(result, ctx.projectType.value),
+									)"
+									:key="action.key"
+									class="browse-card-joined-button"
+									:actions="getJoinedButtonActions(action)"
+									:color="action.color"
+									:type="action.type"
+									merged
 									:disabled="action.disabled"
-									@click.stop="action.onClick"
+									:primary-tooltip="action.tooltip"
+									@click.stop
+								/>
+								<ButtonStyled
+									v-for="action in getStandardCardActions(
+										ctx.getCardActions(result, ctx.projectType.value),
+									)"
+									:key="action.key"
+									:color="action.color"
+									:type="action.type"
+									:circular="action.circular"
 								>
-									<component :is="action.icon" :class="action.iconClass" />
-									<template v-if="!action.circular">{{ action.label }}</template>
-								</button>
-							</ButtonStyled>
-						</div>
-					</template>
-				</ProjectCard>
-			</template>
-		</ProjectCardList>
+									<button
+										v-tooltip="action.tooltip"
+										:disabled="action.disabled"
+										@click.stop="action.onClick"
+									>
+										<component :is="action.icon" :class="action.iconClass" />
+										<template v-if="!action.circular">{{ action.label }}</template>
+									</button>
+								</ButtonStyled>
+							</div>
+						</template>
+					</ProjectCard>
+				</template>
+			</ProjectCardList>
+		</Transition>
 
 		<div :class="ctx.variant === 'web' ? 'pagination-after mt-3' : 'flex justify-end mt-3'">
 			<Pagination
@@ -383,6 +467,29 @@ function getJoinedButtonActions(action: AppCardAction) {
 	</div>
 
 	<slot name="after" />
+
+	<Teleport to="body">
+		<div class="fixed z-20 flex items-center gap-2" style="right: 1.25rem; bottom: 1.25rem">
+			<div class="rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg">
+				<Toggle
+					id="browse-loading-bar-toggle"
+					v-model="loadingBarEnabled"
+					v-tooltip="'Show Discover loading bar'"
+					small
+					aria-label="Show Discover loading bar"
+				/>
+			</div>
+			<div class="rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg">
+				<Toggle
+					id="browse-card-slide-toggle"
+					v-model="cardSlideEnabled"
+					v-tooltip="'Animate browse cards'"
+					small
+					aria-label="Animate browse cards"
+				/>
+			</div>
+		</div>
+	</Teleport>
 </template>
 
 <style scoped>
@@ -423,5 +530,36 @@ function getJoinedButtonActions(action: AppCardAction) {
 	padding-left: 0.25rem !important;
 	padding-right: 0.25rem !important;
 	border-left-color: var(--_bg) !important;
+}
+
+.browse-cards-forward-enter-active,
+.browse-cards-forward-leave-active,
+.browse-cards-backward-enter-active,
+.browse-cards-backward-leave-active {
+	transition:
+		opacity 90ms cubic-bezier(0.2, 0, 0, 1),
+		transform 90ms cubic-bezier(0.2, 0, 0, 1);
+	will-change: opacity, transform;
+}
+
+.browse-cards-forward-enter-from,
+.browse-cards-backward-leave-to {
+	opacity: 0;
+	transform: translateX(1rem);
+}
+
+.browse-cards-forward-leave-to,
+.browse-cards-backward-enter-from {
+	opacity: 0;
+	transform: translateX(-1rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.browse-cards-forward-enter-active,
+	.browse-cards-forward-leave-active,
+	.browse-cards-backward-enter-active,
+	.browse-cards-backward-leave-active {
+		transition: none;
+	}
 }
 </style>

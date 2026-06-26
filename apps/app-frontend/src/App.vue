@@ -1,4 +1,11 @@
 <script setup>
+/**
+ * App shell.
+ * - setupApp (404) initializes settings, auth, state, update, and provider wiring.
+ * - Route guards (569) manage the global loading bar and page analytics.
+ * - Suspense handlers (594) bridge route component loading into the shared loading state.
+ * - RouterView template (1669) renders route content inside the app shell.
+ */
 import {
 	AuthFeature,
 	ModrinthApiError,
@@ -35,6 +42,7 @@ import {
 	commonMessages,
 	ContentInstallModal,
 	ContentUpdaterModal,
+	CoreHostingBackend,
 	defineMessages,
 	I18nDebugPanel,
 	LoadingBar,
@@ -44,6 +52,7 @@ import {
 	PopupNotificationPanel,
 	provideModalBehavior,
 	provideModrinthClient,
+	provideHostingBackend,
 	provideNotificationManager,
 	providePageContext,
 	providePopupNotificationManager,
@@ -88,7 +97,10 @@ import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
+import { useCoreClient } from '@/composables/useCoreClient'
+import { preloadDiscoverContentQueries } from '@/composables/useDiscoverContentPreload'
 import { useModrinthLink } from '@/composables/useModrinthLink'
+import { useSocialClient } from '@/composables/useSocialClient'
 import { config } from '@/config'
 import { hide_ads_window, init_ads_window, show_ads_window } from '@/helpers/ads.js'
 import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
@@ -144,7 +156,10 @@ const route = useRoute()
 const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
+const BROWSE_LOADING_BAR_STORAGE_KEY = 'app-browse-loading-bar-enabled'
 const amberiteAuth = useAmberiteAuth()
+const coreClient = useCoreClient()
+const socialClient = useSocialClient()
 const modrinthLink = useModrinthLink()
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const hasMinecraftAccounts = ref(false)
@@ -223,6 +238,18 @@ const tauriApiClient = new TauriModrinthClient({
 	],
 })
 provideModrinthClient(tauriApiClient)
+provideHostingBackend(
+	new CoreHostingBackend(coreClient, {
+		searchUsers: async (query) => {
+			const users = await socialClient.searchUsers(query).catch(() => [])
+			return users.map((user) => ({
+				id: user.userId,
+				username: user.username ?? user.displayName ?? user.userId,
+				avatarUrl: user.image,
+			}))
+		},
+	}),
+)
 useQuery({
 	queryKey: computed(() => ['authenticated-user', 'campaigns', modrinthLink.user.value?.id]),
 	queryFn: () => tauriApiClient.labrinth.users_v3.getAuthenticated(),
@@ -537,10 +564,30 @@ const sidebarOverlayScrollbarsOptions = Object.freeze({
 	},
 })
 
-router.beforeEach(() => {
+function isBrowseRoute(path) {
+	return path.startsWith('/browse')
+}
+
+function isBrowseLoadingBarDisabled() {
+	try {
+		return localStorage.getItem(BROWSE_LOADING_BAR_STORAGE_KEY) !== 'true'
+	} catch {
+		return true
+	}
+}
+
+function shouldSuppressBrowseRouteLoading(to, from) {
+	return isBrowseRoute(to.path) && isBrowseRoute(from.path) && isBrowseLoadingBarDisabled()
+}
+
+function shouldSuppressCurrentRouteLoading() {
+	return isBrowseRoute(route.path) && isBrowseLoadingBarDisabled()
+}
+
+router.beforeEach((to, from) => {
 	suspensePending = false
 	if (routerToken) loading.end(routerToken)
-	routerToken = loading.begin()
+	routerToken = shouldSuppressBrowseRouteLoading(to, from) ? null : loading.begin()
 })
 router.afterEach((to, from, failure) => {
 	trackEvent('PageView', {
@@ -565,7 +612,7 @@ router.afterEach((to, from, failure) => {
 function onSuspensePending() {
 	suspensePending = true
 	if (suspenseToken) loading.end(suspenseToken)
-	suspenseToken = loading.begin()
+	suspenseToken = shouldSuppressCurrentRouteLoading() ? null : loading.begin()
 }
 
 function onSuspenseResolve() {
@@ -581,6 +628,10 @@ function onSuspenseResolve() {
 
 const queryClient = useQueryClient()
 
+function preloadDiscoverContent() {
+	preloadDiscoverContentQueries(queryClient)
+}
+
 watch(stateInitialized, (ready) => {
 	if (ready) {
 		if (initialLoadToken) {
@@ -592,6 +643,7 @@ watch(stateInitialized, (ready) => {
 			routerToken = null
 		}
 
+		preloadDiscoverContent()
 		queryClient.prefetchQuery({
 			queryKey: ['servers'],
 			queryFn: async () => {
@@ -1448,6 +1500,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				to="/browse/modpack"
 				:is-primary="() => route.path.startsWith('/browse') && !route.query.i"
 				:is-subpage="(route) => route.path.startsWith('/project') && !route.query.i"
+				@mouseenter="preloadDiscoverContent"
+				@focus="preloadDiscoverContent"
 			>
 				<CompassIcon />
 			</NavButton>

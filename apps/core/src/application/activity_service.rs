@@ -107,6 +107,10 @@ pub async fn list_for_viewer(
 ) -> Result<ActivityLogResponse, SocialError> {
     let mut response = list(state, query).await?;
     let mut entries = Vec::with_capacity(response.entries.len());
+    let can_view_core_events =
+        access_service::require_core_member(state, actor_user_id)
+            .await
+            .is_ok();
 
     for entry in response.entries {
         if let Some(instance_id) = entry.instance_id.as_deref() {
@@ -121,7 +125,7 @@ pub async fn list_for_viewer(
             {
                 entries.push(entry);
             }
-        } else {
+        } else if can_view_core_events {
             entries.push(entry);
         }
     }

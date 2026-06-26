@@ -225,6 +225,10 @@ export default defineNuxtConfig({
 				'ykeritl9',
 			production: isProduction(),
 			cookieSecure: isProduction(),
+			amberiteConvexUrl: getAmberiteConvexUrl(),
+			amberiteCoreUrl: getAmberiteCoreUrl(),
+			amberiteCoreJwt: getAmberiteCoreJwt(),
+			amberiteConnectedCoreId: getAmberiteConnectedCoreId(),
 			buildEnv: process.env.BUILD_ENV,
 			preview: process.env.PREVIEW === 'true',
 			featureFlagOverrides: getFeatureFlagOverrides(),
@@ -381,4 +385,55 @@ function getDomain() {
 		const port = process.env.PORT || 3000
 		return `http://localhost:${port}`
 	}
+}
+
+function getAmberiteConvexUrl() {
+	return (
+		process.env.NUXT_PUBLIC_AMBERITE_CONVEX_URL ||
+		process.env.AMBERITE_CONVEX_URL ||
+		process.env.CONVEX_URL ||
+		// @ts-ignore
+		globalThis.NUXT_PUBLIC_AMBERITE_CONVEX_URL ||
+		// @ts-ignore
+		globalThis.AMBERITE_CONVEX_URL ||
+		// @ts-ignore
+		globalThis.CONVEX_URL ||
+		''
+	)
+}
+
+function getAmberiteCoreUrl() {
+	return (
+		process.env.NUXT_PUBLIC_AMBERITE_CORE_URL ||
+		process.env.AMBERITE_CORE_URL ||
+		// @ts-ignore
+		globalThis.NUXT_PUBLIC_AMBERITE_CORE_URL ||
+		// @ts-ignore
+		globalThis.AMBERITE_CORE_URL ||
+		''
+	)
+}
+
+function getAmberiteCoreJwt() {
+	return (
+		process.env.NUXT_PUBLIC_AMBERITE_CORE_JWT ||
+		process.env.AMBERITE_CORE_JWT ||
+		// @ts-ignore
+		globalThis.NUXT_PUBLIC_AMBERITE_CORE_JWT ||
+		// @ts-ignore
+		globalThis.AMBERITE_CORE_JWT ||
+		''
+	)
+}
+
+function getAmberiteConnectedCoreId() {
+	return (
+		process.env.NUXT_PUBLIC_AMBERITE_CONNECTED_CORE_ID ||
+		process.env.AMBERITE_CONNECTED_CORE_ID ||
+		// @ts-ignore
+		globalThis.NUXT_PUBLIC_AMBERITE_CONNECTED_CORE_ID ||
+		// @ts-ignore
+		globalThis.AMBERITE_CONNECTED_CORE_ID ||
+		''
+	)
 }

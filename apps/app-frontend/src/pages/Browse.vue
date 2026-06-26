@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
  * Desktop browse route with instance and Core-server installation contexts.
- * - `initInstanceContext` (217) loads the active browse context and installed content.
- * - `selectableProjectTypes` (515) and `installContext` (570) derive the active UI state.
- * - `getCardActions` (759) creates app-specific install actions for each result.
- * - `search` (1062) normalizes results; `provideBrowseManager` (1283) exposes the layout context.
+ * - `initInstanceContext` (227) loads the active browse context and installed content.
+ * - `selectableProjectTypes` (552) and `installContext` (598) derive the active UI state.
+ * - `getCardActions` (787) creates app-specific install actions for each result.
+ * - `search` (1090) normalizes results; `preloadProjectType` (1154) warms tab targets.
+ * - `provideBrowseManager` (1334) exposes the layout context.
  */
 import { installCoreModpack } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
@@ -36,6 +37,7 @@ import {
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { useStorage } from '@vueuse/core'
 import type { Ref } from 'vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { LocationQuery } from 'vue-router'
@@ -46,6 +48,13 @@ import AppBrowsePageLayout from '@/components/ui/AppBrowsePageLayout.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
 import { useCoreClient } from '@/composables/useCoreClient'
+import {
+	buildDiscoverSearchParams,
+	DISCOVER_PRELOAD_STALE_MS,
+	getDiscoverProjectTypeFromHref,
+	type RawDiscoverSearchResults,
+} from '@/composables/useDiscoverContentPreload'
+import { useOptimisticLoading } from '@/composables/useOptimisticPreload'
 import {
 	get_project,
 	get_project_v3,
@@ -81,6 +90,7 @@ const { installingServerProjects, playServerProject, showAddServerToInstanceModa
 const { install: installVersion } = injectContentInstall()
 const queryClient = useQueryClient()
 const debugLog = useDebugLogger('Browse')
+const BROWSE_LOADING_BAR_STORAGE_KEY = 'app-browse-loading-bar-enabled'
 
 const router = useRouter()
 const route = useRoute()
@@ -512,6 +522,33 @@ watch(
 	},
 )
 
+function createBrowseTab(
+	type: ProjectType,
+	label: string,
+	suffix: string,
+	shown: boolean | undefined = undefined,
+) {
+	return {
+		label,
+		href: `/browse/${type}${suffix}`,
+		shown,
+		onHover: () => preloadProjectType(type),
+	}
+}
+
+const browseTabSuffix = computed(() => {
+	const params: LocationQuery = {}
+
+	if (route.query.i) params.i = route.query.i
+	if (route.query.ai) params.ai = route.query.ai
+	if (route.query.from) params.from = route.query.from
+	if (route.query.sid) params.sid = route.query.sid
+	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
+
+	const queryString = new URLSearchParams(params as Record<string, string>).toString()
+	return queryString ? `?${queryString}` : ''
+})
+
 const selectableProjectTypes = computed(() => {
 	let dataPacks = false,
 		mods = false,
@@ -536,34 +573,25 @@ const selectableProjectTypes = computed(() => {
 		modpacks = true
 	}
 
-	const params: LocationQuery = {}
-
-	if (route.query.i) params.i = route.query.i
-	if (route.query.ai) params.ai = route.query.ai
-	if (route.query.from) params.from = route.query.from
-	if (route.query.sid) params.sid = route.query.sid
-	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
-
-	const queryString = new URLSearchParams(params as Record<string, string>).toString()
-	const suffix = queryString ? `?${queryString}` : ''
+	const suffix = browseTabSuffix.value
 
 	if (isSetupServerContext.value) {
 		return [
-			{ label: formatMessage(messages.modpacksProjectType), href: `/browse/modpack${suffix}` },
+			createBrowseTab('modpack', formatMessage(messages.modpacksProjectType), suffix),
 		]
 	}
 
 	if (isFromWorlds.value) {
-		return [{ label: 'Servers', href: `/browse/server${suffix}` }]
+		return [createBrowseTab('server', 'Servers', suffix)]
 	}
 
 	return [
-		{ label: 'Modpacks', href: `/browse/modpack${suffix}`, shown: modpacks },
-		{ label: 'Mods', href: `/browse/mod${suffix}`, shown: mods },
-		{ label: 'Resource Packs', href: `/browse/resourcepack${suffix}` },
-		{ label: 'Data Packs', href: `/browse/datapack${suffix}`, shown: dataPacks },
-		{ label: 'Shaders', href: `/browse/shader${suffix}` },
-		{ label: 'Servers', href: `/browse/server${suffix}`, shown: !instance.value },
+		createBrowseTab('modpack', 'Modpacks', suffix, modpacks),
+		createBrowseTab('mod', 'Mods', suffix, mods),
+		createBrowseTab('resourcepack', 'Resource Packs', suffix),
+		createBrowseTab('datapack', 'Data Packs', suffix, dataPacks),
+		createBrowseTab('shader', 'Shaders', suffix),
+		createBrowseTab('server', 'Servers', suffix, !instance.value),
 	]
 })
 
@@ -1059,19 +1087,14 @@ function onSearchResultsInstalled(ids: string[]) {
 	newlyInstalled.value = Array.from(new Set([...newlyInstalled.value, ...ids]))
 }
 
-async function search(requestParams: string) {
+async function search(requestParams: string, searchProjectType: ProjectType = projectType.value) {
 	debugLog('searching v3', requestParams)
-	const isServer = projectType.value === 'server'
+	const isServer = searchProjectType === 'server'
 
 	const rawResults = await queryClient.fetchQuery({
 		queryKey: ['search', 'v3', requestParams],
-		queryFn: () =>
-			get_search_results_v3(requestParams) as Promise<{
-				result: Labrinth.Search.v3.SearchResults & {
-					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
-				}
-			} | null>,
-		staleTime: 30_000,
+		queryFn: () => get_search_results_v3(requestParams) as Promise<RawDiscoverSearchResults>,
+		staleTime: DISCOVER_PRELOAD_STALE_MS,
 	})
 
 	if (!rawResults) {
@@ -1105,7 +1128,7 @@ async function search(requestParams: string) {
 				installed?: boolean
 			}
 
-			if (hit.project_types?.includes('modpack')) {
+			if (searchProjectType === 'modpack' || hit.project_types?.includes('modpack')) {
 				mapped.environment = await getProjectEnvironment(hit.project_id)
 			}
 
@@ -1125,6 +1148,22 @@ async function search(requestParams: string) {
 		serverHits: [],
 		total_hits: rawResults.result.total_hits,
 		per_page: rawResults.result.hits_per_page,
+	}
+}
+
+function preloadProjectType(type: ProjectType) {
+	if (!tagsLoaded.value || !contextLoaded.value || type === projectType.value) return
+
+	const requestParams = buildDiscoverSearchParams(type)
+	void search(requestParams, type).catch(() => undefined)
+}
+
+function preloadSelectableProjectTypes() {
+	for (const link of selectableProjectTypes.value) {
+		if (link.shown === false) continue
+
+		const type = getDiscoverProjectTypeFromHref(link.href)
+		if (type) preloadProjectType(type)
 	}
 }
 
@@ -1153,6 +1192,7 @@ const searchState = useBrowseSearch({
 	tags,
 	providedFilters: combinedProvidedFilters,
 	search,
+	immediateProjectTypeSearch: true,
 	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
@@ -1204,7 +1244,17 @@ const browseInitialPending = computed(
 				? searchState.serverHits.value.length === 0
 				: searchState.projectHits.value.length === 0)),
 )
-useLoadingBarToken(browseInitialPending)
+const hasBrowseContent = computed(() =>
+	searchState.isServerType.value
+		? searchState.serverHits.value.length > 0
+		: searchState.projectHits.value.length > 0,
+)
+const browseLoadingBarEnabled = useStorage(BROWSE_LOADING_BAR_STORAGE_KEY, false)
+const browseLoadingBarPending = computed(
+	() => browseLoadingBarEnabled.value && browseInitialPending.value,
+)
+const showBrowseSkeleton = useOptimisticLoading(browseInitialPending, hasBrowseContent)
+useLoadingBarToken(browseLoadingBarPending)
 
 onMounted(async () => {
 	contextLoaded.value = false
@@ -1238,6 +1288,7 @@ onMounted(async () => {
 	await initInstanceContext()
 	contextLoaded.value = true
 	await searchState.refreshSearch()
+	preloadSelectableProjectTypes()
 })
 
 type UnlistenFn = () => void
@@ -1337,8 +1388,8 @@ provideBrowseManager({
 
 <template>
 	<div class="flex flex-col gap-3 p-6">
-		<AppPageSkeleton v-if="browseInitialPending" variant="list" class="!p-0" />
-		<AppBrowsePageLayout v-else>
+		<AppPageSkeleton v-if="showBrowseSkeleton" variant="browse" class="!p-0" />
+		<AppBrowsePageLayout v-else-if="!browseInitialPending || hasBrowseContent">
 			<template #after>
 				<ContextMenu ref="contextMenuRef" @option-clicked="handleOptionsClick">
 					<template #open_link>

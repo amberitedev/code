@@ -23,3 +23,4 @@ pub mod social;
 pub mod stats;
 pub mod sync;
 pub mod tasks;
+pub mod uploads;

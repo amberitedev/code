@@ -40,3 +40,27 @@ async fn java_returns_list() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["installations"].is_array());
 }
+
+#[tokio::test]
+async fn java_requires_authorization() {
+    let app = common::TestApp::spawn().await;
+    let client = reqwest::Client::new();
+    let res = client.get(app.url("/java")).send().await.unwrap();
+    assert_eq!(res.status(), 401);
+}
+
+#[tokio::test]
+async fn network_status_returns_structured_fields() {
+    let app = common::TestApp::spawn().await;
+    let res = app
+        .client
+        .get(app.url("/network/status"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body["direct_api_url"].is_string());
+    assert!(body["upnp"]["state"].is_string());
+    assert_eq!(body["minecraft_exposure"]["cloudflare_tunnel"], false);
+}

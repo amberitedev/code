@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { LinkIcon, ServerStackIcon, SettingsIcon } from '@modrinth/assets'
-import { ButtonStyled, NavTabs } from '@modrinth/ui'
-import { computed, ref, watch } from 'vue'
+import { ButtonStyled, NavTabs, Toggle, useLoadingBarToken } from '@modrinth/ui'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
+import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import CoreAccessPanel from '@/components/core/CoreAccessPanel.vue'
 import CoreActivityPanel from '@/components/core/CoreActivityPanel.vue'
 import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
 import CoreSetupPanel from '@/components/core/CoreSetupPanel.vue'
 import CoreHostingSettingsModal from '@/components/core/settings/CoreHostingSettingsModal.vue'
+import { useOptimisticLoading } from '@/composables/useOptimisticPreload'
 import { useCoreConnection } from '@/composables/useCoreConnection'
 import { useSocial } from '@/composables/useSocial'
 import { useConnectedCore } from '@/core/connected-core'
@@ -18,6 +20,23 @@ const connectedCore = useConnectedCore()
 const onboardingModal = ref<InstanceType<typeof CoreOnboardingModal>>()
 const settingsModal = ref<InstanceType<typeof CoreHostingSettingsModal>>()
 const activeTab = ref<'overview' | 'activity'>('overview')
+const hasResolvedDashboard = ref(!social.loading.value)
+watch(
+	() => social.loading.value,
+	(loading) => {
+		if (!loading) hasResolvedDashboard.value = true
+	},
+	{ immediate: true },
+)
+const dashboardPending = computed(() => social.loading.value && !hasResolvedDashboard.value)
+const hasDashboardDecision = computed(() => hasResolvedDashboard.value)
+const initialDashboardSkeleton = useOptimisticLoading(dashboardPending, hasDashboardDecision)
+const forceDashboardSkeleton = ref(false)
+let forceDashboardSkeletonTimeout: ReturnType<typeof window.setTimeout> | null = null
+const showDashboardSkeleton = computed(
+	() => initialDashboardSkeleton.value || forceDashboardSkeleton.value,
+)
+useLoadingBarToken(dashboardPending)
 const hasGroup = computed(() => !!social.group.value)
 const setupVisible = ref(!hasGroup.value || !connectedCore.value)
 
@@ -52,14 +71,37 @@ function selectTab(tab: { href: string }) {
 		activeTab.value = tab.href
 	}
 }
+
+function setForceDashboardSkeleton(enabled: boolean) {
+	if (forceDashboardSkeletonTimeout !== null) {
+		window.clearTimeout(forceDashboardSkeletonTimeout)
+		forceDashboardSkeletonTimeout = null
+	}
+
+	forceDashboardSkeleton.value = enabled
+
+	if (!enabled) return
+
+	forceDashboardSkeletonTimeout = window.setTimeout(() => {
+		forceDashboardSkeleton.value = false
+		forceDashboardSkeletonTimeout = null
+	}, 3000)
+}
+
+onUnmounted(() => {
+	if (forceDashboardSkeletonTimeout !== null) {
+		window.clearTimeout(forceDashboardSkeletonTimeout)
+	}
+})
 </script>
 
 <template>
 	<div class="flex min-h-full flex-col p-6">
 		<CoreOnboardingModal ref="onboardingModal" />
 		<CoreHostingSettingsModal ref="settingsModal" />
+		<AppPageSkeleton v-if="showDashboardSkeleton" variant="core-overview" class="!p-0" />
 		<CoreSetupPanel
-			v-if="setupVisible"
+			v-else-if="setupVisible"
 			@create="onboardingModal?.show('create')"
 			@connect="onboardingModal?.show('connect')"
 		/>
@@ -105,7 +147,17 @@ function selectTab(tab: { href: string }) {
 				class="fixed z-20 flex items-center gap-2"
 				style="right: 1.25rem; bottom: 1.25rem"
 			>
-				<ButtonStyled circular>
+				<div class="rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg">
+					<Toggle
+						id="core-force-ghost-toggle"
+						:model-value="forceDashboardSkeleton"
+						v-tooltip="'Force dashboard ghost for 3 seconds'"
+						small
+						aria-label="Force dashboard ghost for 3 seconds"
+						@update:model-value="setForceDashboardSkeleton"
+					/>
+				</div>
+				<ButtonStyled v-if="!showDashboardSkeleton" circular>
 					<button
 						v-tooltip="setupVisible ? 'Show dashboard' : 'Show setup'"
 						class="!h-10 !w-10"

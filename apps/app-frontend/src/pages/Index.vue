@@ -6,7 +6,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import RowDisplay from '@/components/RowDisplay.vue'
-import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import RecentWorldsList from '@/components/ui/world/RecentWorldsList.vue'
 import { get_search_results } from '@/helpers/cache.js'
 import { profile_listener } from '@/helpers/events'
@@ -129,8 +128,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<AppPageSkeleton v-if="initialPending" />
-	<div v-else class="p-6 flex flex-col gap-2">
+	<div class="p-6 flex flex-col gap-2">
 		<h1 v-if="recentInstances?.length > 0" class="m-0 text-2xl font-extrabold">Welcome back!</h1>
 		<h1 v-else class="m-0 text-2xl font-extrabold">Welcome to Modrinth App!</h1>
 		<RecentWorldsList :recent-instances="recentInstances" />

@@ -93,6 +93,7 @@ jsonwebtoken = "9.3"
 # TIER 2 - DATA & PARSING
 # ============================================================
 chrono = { version = "0.4", features = ["serde"] }
+cron = "0.12"
 time = "0.3"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"

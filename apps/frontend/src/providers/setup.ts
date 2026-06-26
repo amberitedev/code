@@ -2,6 +2,7 @@ import { provideNotificationManager } from '@modrinth/ui'
 
 import { FrontendNotificationManager } from './frontend-notifications'
 import { setupAuthProvider } from './setup/auth'
+import { setupCoreHostingProvider } from './setup/core-hosting'
 import { setupFilePickerProvider } from './setup/file-picker'
 import { setupLoadingStateProvider } from './setup/loading-state'
 import { setupModrinthClientProvider } from './setup/modrinth-client'
@@ -13,6 +14,7 @@ export function setupProviders(auth: Awaited<ReturnType<typeof useAuth>>) {
 
 	setupAuthProvider(auth)
 	setupModrinthClientProvider(auth)
+	setupCoreHostingProvider(auth)
 	setupTagsProvider()
 	setupFilePickerProvider()
 	setupPageContextProvider()

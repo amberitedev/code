@@ -1,33 +1,14 @@
 <template>
 	<ServersManageRootLayout
 		:server-id="serverId"
+		:base-path="`/hosting/manage/${serverId}`"
 		:reload-page="() => reloadNuxtApp({ path: route.path })"
 		:resolve-viewer="resolveViewer"
 		:show-copy-id-action="flags.developerMode"
 		:show-advanced-debug-info="flags.advancedDebugInfo"
-		:stripe-publishable-key="config.public.stripePublishableKey as string"
-		:site-url="config.public.siteUrl as string"
-		:products="products"
 		:auth-user="authUser"
-		:navigate-to-billing="() => router.push('/settings/billing')"
 		:navigate-to-servers="() => router.push('/hosting/manage')"
 		constrain-width
-		:browse-modpacks="
-			({ serverId: sid, worldId: wid, from }) => {
-				navigateTo({
-					path: '/discover/modpacks',
-					query: { sid, from, wid: wid ?? undefined },
-				})
-			}
-		"
-		:browse-content="
-			({ serverId: sid, worldId: wid, type }) => {
-				navigateTo({
-					path: `/discover/${type}s`,
-					query: { sid, wid: wid ?? undefined },
-				})
-			}
-		"
 	>
 		<template #default="{ onReinstall, onReinstallFailed }">
 			<NuxtPage :route="route" @reinstall="onReinstall" @reinstall-failed="onReinstallFailed" />
@@ -36,37 +17,17 @@
 </template>
 
 <script setup lang="ts">
-import { injectModrinthClient, ServersManageRootLayout } from '@modrinth/ui'
-import { useQueryClient } from '@tanstack/vue-query'
+import { ServersManageRootLayout } from '@modrinth/ui'
 
 import { reloadNuxtApp } from '#app'
-import { products } from '~/generated/state.json'
 
 const flags = useFeatureFlags()
 const route = useNativeRoute()
 const router = useRouter()
-const config = useRuntimeConfig()
 const serverId = route.params.id as string
-
-const client = injectModrinthClient()
-const queryClient = useQueryClient()
-
-if (serverId) {
-	try {
-		await queryClient.ensureQueryData({
-			queryKey: ['servers', 'detail', serverId],
-			queryFn: () => client.archon.servers_v0.get(serverId)!,
-			staleTime: 30_000,
-		})
-	} catch {
-		// Let mounted layouts' useQuery surface errors; do not fail route setup.
-	}
-}
-
 const auth = (await useAuth()) as unknown as {
-	value: { user: { id: string; username: string; email: string; created: string } }
+	value: { user: { id: string; username: string; email: string; created: string; role?: string } }
 }
-
 const authUser = auth.value?.user
 	? {
 			id: auth.value.user.id,
@@ -79,20 +40,11 @@ const authUser = auth.value?.user
 async function resolveViewer(): Promise<{ userId: string | null; userRole: string | null }> {
 	return {
 		userId: auth.value?.user?.id ?? null,
-		userRole: (auth.value?.user as any)?.role ?? null,
+		userRole: auth.value?.user?.role ?? null,
 	}
 }
 
 definePageMeta({
 	middleware: 'auth',
-})
-
-useHead({
-	script: [
-		{
-			src: 'https://tally.so/widgets/embed.js',
-			defer: true,
-		},
-	],
 })
 </script>
