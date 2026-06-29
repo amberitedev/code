@@ -78,7 +78,7 @@ export function createBrowserCoreHostingBackend(
 	options: BrowserCoreHostingBackendOptions,
 ): CoreHostingBackend {
 	const adapter: PlatformAdapter = {
-		fetchFn: fetch,
+		fetchFn: globalThis.fetch.bind(globalThis) as typeof fetch,
 		convexUrl: options.convexUrl ?? '',
 		getCoreUrl: async () => resolveRequiredCoreUrl(options.coreUrl),
 		getCurrentJwt: async () => resolveOptionalString(options.jwt),

@@ -56,6 +56,9 @@ import {
 	provideNotificationManager,
 	providePageContext,
 	providePopupNotificationManager,
+	UiMotionTransition,
+	getUiMotionTypeForDirection,
+	reverseUiMotionDirection,
 	useDebugLogger,
 	useFormatBytes,
 	useHostingIntercom,
@@ -70,6 +73,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { type } from '@tauri-apps/plugin-os'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
+import { useStorage } from '@vueuse/core'
 import { $fetch } from 'ofetch'
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
@@ -156,7 +160,8 @@ const route = useRoute()
 const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
-const BROWSE_LOADING_BAR_STORAGE_KEY = 'app-browse-loading-bar-enabled'
+const LIBRARY_INSTANCE_ROUTE_MOTION_DIRECTION_STORAGE_KEY =
+	'app-library-instance-route-motion-direction'
 const amberiteAuth = useAmberiteAuth()
 const coreClient = useCoreClient()
 const socialClient = useSocialClient()
@@ -471,7 +476,7 @@ async function setupApp() {
 
 	if (telemetry) {
 		initAnalytics()
-		if (dev) debugAnalytics()
+		debugAnalytics()
 		trackEvent('Launched', { version, dev, onboarded })
 	}
 
@@ -492,18 +497,7 @@ async function setupApp() {
 		}),
 	)
 
-	fetch(`https://api.modrinth.com/appCriticalAnnouncement.json?version=${version}`)
-		.then((response) => response.json())
-		.then((res) => {
-			if (res && res.header && res.body) {
-				criticalErrorMessage.value = res
-			}
-		})
-		.catch(() => {
-			console.log(
-				`No critical announcement found at https://api.modrinth.com/appCriticalAnnouncement.json?version=${version}`,
-			)
-		})
+	void fetchCriticalAnnouncement(version, dev)
 
 	get_opening_command().then(handleCommand)
 	void modrinthLink.refresh()
@@ -554,8 +548,21 @@ loading.setEnabled(false)
 let initialLoadToken = loading.begin()
 let routerToken = null
 let suspenseToken = null
+let pendingRouteMotion = null
 
 let suspensePending = false
+const libraryInstanceRouteMotionDirection = useStorage(
+	LIBRARY_INSTANCE_ROUTE_MOTION_DIRECTION_STORAGE_KEY,
+	'Right',
+)
+const routeMotion = ref({
+	enabled: false,
+	key: 'initial-route',
+	direction: 'right',
+	type: 'slide',
+})
+const suppressLocalRouteLoadingBar = ref(false)
+provide('suppressLocalRouteLoadingBar', suppressLocalRouteLoadingBar)
 
 const sidebarOverlayScrollbarsOptions = Object.freeze({
 	overflow: {
@@ -568,28 +575,114 @@ function isBrowseRoute(path) {
 	return path.startsWith('/browse')
 }
 
-function isBrowseLoadingBarDisabled() {
-	try {
-		return localStorage.getItem(BROWSE_LOADING_BAR_STORAGE_KEY) !== 'true'
-	} catch {
-		return true
-	}
+function isLibraryRoute(path) {
+	return path === '/library' || path.startsWith('/library/')
 }
 
-function shouldSuppressBrowseRouteLoading(to, from) {
-	return isBrowseRoute(to.path) && isBrowseRoute(from.path) && isBrowseLoadingBarDisabled()
+function isInstanceRoute(path) {
+	return path.startsWith('/instance/')
+}
+
+function getProjectRouteRoot(path) {
+	const match = path.match(/^\/project\/[^/]+/)
+	return match?.[0] ?? null
+}
+
+function getInstanceRouteRoot(path) {
+	const match = path.match(/^\/instance\/[^/]+/)
+	return match?.[0] ?? null
+}
+
+function getHostingManageRouteRoot(path) {
+	const match = path.match(/^\/hosting\/manage\/[^/]+/)
+	return match?.[0] ?? null
+}
+
+function getLocalTabRouteGroup(path) {
+	if (isBrowseRoute(path)) return 'browse'
+	if (path.startsWith('/library')) return 'library'
+
+	return getProjectRouteRoot(path) ?? getInstanceRouteRoot(path) ?? getHostingManageRouteRoot(path)
+}
+
+function shouldSuppressLocalTabRouteLoading(to, from) {
+	const toGroup = getLocalTabRouteGroup(to.path)
+	const opensInstanceFromLibrary = isLibraryRoute(from.path) && isInstanceRoute(to.path)
+	const returnsToLibraryFromInstance = isInstanceRoute(from.path) && isLibraryRoute(to.path)
+
+	return (
+		(!!toGroup && toGroup === getLocalTabRouteGroup(from.path)) ||
+		opensInstanceFromLibrary ||
+		returnsToLibraryFromInstance
+	)
 }
 
 function shouldSuppressCurrentRouteLoading() {
-	return isBrowseRoute(route.path) && isBrowseLoadingBarDisabled()
+	return suppressLocalRouteLoadingBar.value || !!getLocalTabRouteGroup(route.path)
+}
+
+function getLibraryInstanceRouteMotionDirection() {
+	let configuredDirection = libraryInstanceRouteMotionDirection.value
+	try {
+		configuredDirection =
+			localStorage.getItem(LIBRARY_INSTANCE_ROUTE_MOTION_DIRECTION_STORAGE_KEY) ??
+			configuredDirection
+	} catch {
+		// Use the reactive storage fallback when localStorage is not available.
+	}
+
+	const direction = String(configuredDirection ?? 'Right').toLowerCase()
+
+	if (['left', 'right', 'up', 'down', 'middle'].includes(direction)) {
+		return direction
+	}
+
+	return 'right'
+}
+
+function getStaticRouteMotion() {
+	return {
+		enabled: false,
+		key: 'static-route',
+		direction: 'middle',
+		type: 'none',
+	}
+}
+
+function getRouteMotion(to, from) {
+	const opensInstanceFromLibrary = isLibraryRoute(from.path) && isInstanceRoute(to.path)
+	const returnsToLibraryFromInstance = isInstanceRoute(from.path) && isLibraryRoute(to.path)
+
+	if (!opensInstanceFromLibrary && !returnsToLibraryFromInstance) {
+		return getStaticRouteMotion()
+	}
+
+	const configuredDirection = getLibraryInstanceRouteMotionDirection()
+	const direction = returnsToLibraryFromInstance
+		? reverseUiMotionDirection(configuredDirection)
+		: configuredDirection
+
+	return {
+		enabled: true,
+		key: to.fullPath,
+		direction,
+		type: getUiMotionTypeForDirection(direction),
+	}
 }
 
 router.beforeEach((to, from) => {
 	suspensePending = false
 	if (routerToken) loading.end(routerToken)
-	routerToken = shouldSuppressBrowseRouteLoading(to, from) ? null : loading.begin()
+	pendingRouteMotion = getRouteMotion(to, from)
+	suppressLocalRouteLoadingBar.value = shouldSuppressLocalTabRouteLoading(to, from)
+	routerToken = suppressLocalRouteLoadingBar.value ? null : loading.begin()
 })
 router.afterEach((to, from, failure) => {
+	routeMotion.value = failure ? getStaticRouteMotion() : (pendingRouteMotion ?? getStaticRouteMotion())
+	pendingRouteMotion = null
+	if (failure) {
+		suppressLocalRouteLoadingBar.value = false
+	}
 	trackEvent('PageView', {
 		path: to.path,
 		fromPath: from.path,
@@ -624,6 +717,7 @@ function onSuspenseResolve() {
 		loading.end(routerToken)
 		routerToken = null
 	}
+	suppressLocalRouteLoadingBar.value = false
 }
 
 const queryClient = useQueryClient()
@@ -1122,7 +1216,7 @@ function showDelayedUpdatePopup() {
 
 async function checkUpdates() {
 	if (!(await areUpdatesEnabled())) {
-		console.log('Skipping update check as updates are disabled in this build or environment')
+		console.debug('Skipping update check as updates are disabled in this build or environment')
 		updatesEnabled.value = false
 
 		if (os.value === 'Linux' && !isDevEnvironment.value) {
@@ -1175,6 +1269,24 @@ async function checkUpdates() {
 		},
 		5 /* min */ * 60 /* sec */ * 1000 /* ms */,
 	)
+}
+
+async function fetchCriticalAnnouncement(version, dev) {
+	if (dev || version.endsWith('-local')) return
+
+	const announcementUrl = `${config.labrinthBaseUrl}/appCriticalAnnouncement.json?version=${encodeURIComponent(version)}`
+	try {
+		const response = await fetch(announcementUrl)
+		if (response.status === 404) return
+		if (!response.ok) throw new Error(`Failed to fetch critical announcement: ${response.status}`)
+
+		const res = await response.json()
+		if (res && res.header && res.body) {
+			criticalErrorMessage.value = res
+		}
+	} catch (error) {
+		console.debug('Failed to fetch critical announcement', error)
+	}
 }
 
 async function checkLinuxUpdates() {
@@ -1685,7 +1797,26 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				{{ formatMessage(messages.authUnreachableBody) }}
 			</Admonition>
 			<RouterView v-slot="{ Component }">
-				<template v-if="Component">
+				<UiMotionTransition
+					v-if="routeMotion.enabled"
+					:content-key="routeMotion.key"
+					enabled
+					:direction="routeMotion.direction"
+					:type="routeMotion.type"
+					:enter-ms="120"
+					:leave-ms="120"
+					easing="content-slide"
+					mode="out-in"
+					distance="1rem"
+					:lock-height="false"
+				>
+					<template v-if="Component">
+						<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
+							<component :is="Component"></component>
+						</Suspense>
+					</template>
+				</UiMotionTransition>
+				<template v-else-if="Component">
 					<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
 						<component :is="Component"></component>
 					</Suspense>

@@ -33,9 +33,6 @@
 			</div>
 		</div>
 
-		<div v-if="accessError" class="rounded-lg bg-red-highlight p-4 font-semibold text-contrast">
-			Failed to load access: {{ accessError.message }}
-		</div>
 		<AccessTable
 			:members="filteredMembers"
 			:roles="roleOptions"
@@ -105,6 +102,7 @@ import {
 	ButtonStyled,
 	Combobox,
 	GrantAccessModal,
+	injectNotificationManager,
 	type GrantServerAccessPayload,
 	RemoveAccessModal,
 	type ServerAccessInviteSuggestion,
@@ -113,7 +111,7 @@ import {
 	StyledInput,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { type Component,computed, ref } from 'vue'
+import { type Component, computed, ref, watch } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocialClient } from '@/composables/useSocialClient'
@@ -127,6 +125,7 @@ const props = defineProps<{
 const core = useCoreClient()
 const social = useSocialClient()
 const queryClient = useQueryClient()
+const { addNotification } = injectNotificationManager()
 const search = ref('')
 const roleFilter = ref<AmberiteAccessUiRole | 'all'>('all')
 const grantAccessModal = ref<InstanceType<typeof GrantAccessModal>>()
@@ -187,7 +186,6 @@ const activityQuery = useQuery({
 const members = computed<ServerAccessMember[]>(() =>
 	(accessQuery.data.value?.members ?? []).map(toAmberiteAccessUiMember),
 )
-const accessError = computed(() => (accessQuery.error.value as Error | null) ?? null)
 const canManageUsers = computed(() => accessQuery.data.value?.viewer.can_manage_users ?? false)
 const activityLoading = computed(() => activityQuery.isLoading.value)
 const filteredMembers = computed(() => {
@@ -226,6 +224,18 @@ const auditEntries = computed<ServerAuditLogEntry[]>(() =>
 	})),
 )
 const hasMoreActivity = computed(() => !!activityCursor.value)
+
+watch(
+	() => accessQuery.error.value,
+	(error, previous) => {
+		if (!error || error === previous) return
+		addNotification({
+			type: 'error',
+			title: 'Failed to load access',
+			text: error instanceof Error ? error.message : String(error),
+		})
+	},
+)
 
 async function refresh() {
 	activityCursor.value = null
@@ -274,7 +284,8 @@ function requestRemove(member: ServerAccessMember) {
 
 async function confirmRemove() {
 	if (!pendingRemoval.value) return
-	if (props.instanceId) await core.removeInstanceAccess(props.instanceId, pendingRemoval.value.user.id)
+	if (props.instanceId)
+		await core.removeInstanceAccess(props.instanceId, pendingRemoval.value.user.id)
 	else await core.removeCoreAccess(pendingRemoval.value.user.id)
 	pendingRemoval.value = undefined
 	await refresh()
@@ -294,6 +305,8 @@ async function loadMoreActivity() {
 
 function fetchActivityPage(cursor: string | null) {
 	const query: CoreActivityLogQuery = { limit: 50, cursor }
-	return props.instanceId ? core.listInstanceActivity(props.instanceId, query) : core.listActivity(query)
+	return props.instanceId
+		? core.listInstanceActivity(props.instanceId, query)
+		: core.listActivity(query)
 }
 </script>

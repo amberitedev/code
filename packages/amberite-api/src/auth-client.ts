@@ -15,19 +15,6 @@ export interface AmberiteSession {
 	user: AmberiteAccountUser
 }
 
-export interface AmberitePasswordSignInRequest {
-	login: string
-	password: string
-	challenge?: string
-}
-
-export interface AmberitePasswordSignUpRequest {
-	email: string
-	password: string
-	username: string
-	challenge?: string
-}
-
 export interface AmberiteMinecraftTokenSignInRequest {
 	minecraftAccessToken: string
 	devPersonaId?: string
@@ -36,15 +23,9 @@ export interface AmberiteMinecraftTokenSignInRequest {
 export interface AmberiteAuthClient {
 	restoreSession(): Promise<AmberiteSession | null>
 	refreshSession(refreshToken?: string | null): Promise<AmberiteSession | null>
-	signInWithPassword(request: AmberitePasswordSignInRequest): Promise<AmberiteSession>
-	signUpWithPassword(request: AmberitePasswordSignUpRequest): Promise<AmberiteSession>
 	signInWithMinecraftToken(request: AmberiteMinecraftTokenSignInRequest): Promise<AmberiteSession>
-	signInWithModrinthToken(modrinthToken: string): Promise<AmberiteSession>
-	validatePasswordAccount(request: AmberitePasswordSignUpRequest): Promise<{ ok: true }>
 	currentUser(): Promise<AmberiteAccountUser | null>
 	updateCurrentProfile(patch: AmberiteProfilePatch): Promise<AmberiteAccountUser>
-	updateEmail(email: string): Promise<AmberiteAccountUser>
-	updatePassword(request: { oldPassword?: string | null; newPassword?: string | null }): Promise<AmberiteAccountUser>
 	deleteCurrentAccount(): Promise<void>
 	logOut(): Promise<void>
 }
@@ -101,41 +82,6 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 		return await this.acceptTokens(response.tokens)
 	}
 
-	async signInWithPassword(request: AmberitePasswordSignInRequest): Promise<AmberiteSession> {
-		const response = await this.convex.rawAction<{ tokens: unknown }>(
-			'auth:signIn',
-			{
-				provider: 'web-password',
-				params: {
-					flow: 'signIn',
-					login: request.login,
-					password: request.password,
-					...(request.challenge ? { challenge: request.challenge } : {}),
-				},
-			},
-			false,
-		)
-		return await this.requireTokens(response.tokens)
-	}
-
-	async signUpWithPassword(request: AmberitePasswordSignUpRequest): Promise<AmberiteSession> {
-		const response = await this.convex.rawAction<{ tokens: unknown }>(
-			'auth:signIn',
-			{
-				provider: 'web-password',
-				params: {
-					flow: 'signUp',
-					email: request.email,
-					password: request.password,
-					username: request.username,
-					...(request.challenge ? { challenge: request.challenge } : {}),
-				},
-			},
-			false,
-		)
-		return await this.requireTokens(response.tokens)
-	}
-
 	async signInWithMinecraftToken(
 		request: AmberiteMinecraftTokenSignInRequest,
 	): Promise<AmberiteSession> {
@@ -153,27 +99,6 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 		return await this.requireTokens(response.tokens)
 	}
 
-	async signInWithModrinthToken(modrinthToken: string): Promise<AmberiteSession> {
-		const response = await this.convex.rawAction<{ tokens: unknown }>(
-			'auth:signIn',
-			{
-				provider: 'modrinth-token',
-				params: { modrinthToken },
-			},
-			false,
-		)
-		return await this.requireTokens(response.tokens)
-	}
-
-	async validatePasswordAccount(request: AmberitePasswordSignUpRequest): Promise<{ ok: true }> {
-		await this.convex.rawQuery('auth:validateWebPasswordAccount', {
-			email: request.email,
-			password: request.password,
-			username: request.username,
-		})
-		return { ok: true }
-	}
-
 	async currentUser(): Promise<AmberiteAccountUser | null> {
 		const profile = await this.convex.currentProfile().catch((error) => {
 			if (error instanceof Error && error.message.toLowerCase().includes('not authenticated'))
@@ -186,19 +111,6 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 	async updateCurrentProfile(patch: AmberiteProfilePatch): Promise<AmberiteAccountUser> {
 		const profile = await this.convex.updateCurrentProfile(patch)
 		return mapAmberiteUserToAccountUser(profile)
-	}
-
-	async updateEmail(email: string): Promise<AmberiteAccountUser> {
-		const profile = await this.convex.rawMutation('auth:updateCurrentEmail', { email })
-		return mapAmberiteUserToAccountUser(profile as any)
-	}
-
-	async updatePassword(request: {
-		oldPassword?: string | null
-		newPassword?: string | null
-	}): Promise<AmberiteAccountUser> {
-		const profile = await this.convex.rawMutation('auth:updateCurrentPassword', request)
-		return mapAmberiteUserToAccountUser(profile as any)
 	}
 
 	async deleteCurrentAccount(): Promise<void> {

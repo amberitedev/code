@@ -1,15 +1,20 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc, time::Instant};
 
+use color_eyre::eyre::Result;
 use serde_json::json;
+use sqlx::SqlitePool;
 use tracing::{info, warn};
 
-use crate::application::state::{AppState, PAIRING_WINDOW};
+use crate::application::state::{
+    format_pairing_code, generate_pairing_code, generate_setup_secret,
+    write_local_setup_secret, AppState, PAIRING_WINDOW,
+};
 
 /// Register this unpaired Core in Convex so a remote dashboard/app can claim its code.
-pub async fn register_pairing_core(state: Arc<AppState>) {
+pub async fn register_pairing_core(state: Arc<AppState>) -> bool {
     let code = state.pairing_code.lock().await.clone();
     let Some(code) = code else {
-        return;
+        return false;
     };
     let core_id = state.core_id.clone();
     let public_url = state.config.public_url.clone();
@@ -44,6 +49,12 @@ pub async fn register_pairing_core(state: Arc<AppState>) {
                 == Some("success")
             {
                 info!(%core_id, "registered Core pairing code with Convex");
+                println!(
+                    "\nCopal pairing code: {}",
+                    format_pairing_code(&code)
+                );
+                println!("This code expires in 15 minutes. Restart Core to generate a new code.\n");
+                return true;
             } else {
                 warn!(response = %body, "Convex rejected Core pairing registration");
             }
@@ -54,5 +65,74 @@ pub async fn register_pairing_core(state: Arc<AppState>) {
         Err(error) => {
             warn!(%error, "failed to reach Convex for Core pairing registration");
         }
+    }
+    false
+}
+
+pub async fn reset_running_pairing(state: Arc<AppState>) -> Result<bool> {
+    clear_pairing_storage(&state.pool, &state.config.data_dir).await?;
+
+    let code = generate_pairing_code();
+    let secret = generate_setup_secret();
+    write_local_setup_secret(&state.config.data_dir, &secret).await?;
+
+    state
+        .wrong_pairing_attempts
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+    let expires_at = Instant::now() + PAIRING_WINDOW;
+    *state.pairing_code.lock().await = Some(code);
+    *state.pairing_code_expires_at.lock().await = Some(expires_at);
+    *state.local_setup_secret.lock().await = Some(secret);
+
+    tokio::spawn(expire_pairing_window(Arc::clone(&state), expires_at));
+    Ok(register_pairing_core(state).await)
+}
+
+pub async fn clear_pairing_storage(
+    pool: &SqlitePool,
+    data_dir: &Path,
+) -> Result<()> {
+    for statement in [
+        "DELETE FROM core_config WHERE id = 1",
+        "DELETE FROM core_members",
+        "DELETE FROM instance_members",
+        "DELETE FROM core_group_bans",
+        "DELETE FROM core_invitations",
+        "DELETE FROM activity_log",
+    ] {
+        sqlx::query(statement).execute(pool).await?;
+    }
+    tokio::fs::remove_file(data_dir.join(".setup_secret"))
+        .await
+        .ok();
+    Ok(())
+}
+
+pub async fn expire_pairing_window(
+    state: Arc<AppState>,
+    expected_expires_at: Instant,
+) {
+    tokio::time::sleep_until(tokio::time::Instant::from_std(
+        expected_expires_at,
+    ))
+    .await;
+
+    let mut pairing_code = state.pairing_code.lock().await;
+    let mut local_setup_secret = state.local_setup_secret.lock().await;
+    let mut pairing_code_expires_at =
+        state.pairing_code_expires_at.lock().await;
+    if *pairing_code_expires_at != Some(expected_expires_at) {
+        return;
+    }
+    if pairing_code.is_some() {
+        *pairing_code = None;
+        *local_setup_secret = None;
+        *pairing_code_expires_at = None;
+        tokio::fs::remove_file(state.config.data_dir.join(".setup_secret"))
+            .await
+            .ok();
+        println!(
+            "\nCopal pairing code expired. Use `clear` to generate a new code.\n"
+        );
     }
 }

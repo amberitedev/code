@@ -1,0 +1,10 @@
+{
+  "style": {
+    "type": "modular",
+    "args": [
+      "-jar",
+      "C:\\Users\\ilai\\code\\apps\\core\\.copal\\meta\\versions\\1.21.4\\server.jar",
+      "--nogui"
+    ]
+  }
+}

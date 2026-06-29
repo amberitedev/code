@@ -9,7 +9,7 @@
 				</template>
 				<template #copy-id>
 					<ClipboardCopyIcon class="h-5 w-5" aria-hidden="true" />
-					<span>Copy ID</span>
+					<span>{{ copyIdLabel }}</span>
 				</template>
 			</TeleportOverflowMenu>
 		</ButtonStyled>
@@ -29,12 +29,14 @@ const props = withDefaults(
 	defineProps<{
 		disabled?: boolean
 		showCopyIdAction?: boolean
+		copyIdLabel?: string
 		showDebugInfo?: boolean
 		uptimeSeconds?: number
 	}>(),
 	{
 		disabled: false,
 		showCopyIdAction: false,
+		copyIdLabel: 'Copy ID',
 		showDebugInfo: false,
 		uptimeSeconds: 0,
 	},
@@ -52,7 +54,7 @@ const menuOptions = computed(() => [
 	},
 	{
 		id: 'copy-id',
-		label: 'Copy ID',
+		label: props.copyIdLabel,
 		icon: ClipboardCopyIcon,
 		action: () => copyId(),
 		shown: props.showCopyIdAction,

@@ -1,87 +1,78 @@
 <template>
-	<div v-if="loaders && gameVersions">
-		<ProjectPageVersions
-			:loaders="loaders"
-			:game-versions="gameVersions"
-			:versions="versions"
-			:project="project"
-			:version-link="(version) => buildProjectHref(`/project/${project.id}/version/${version.id}`)"
-		>
-			<template #actions="{ version }">
-				<ButtonStyled circular type="transparent">
-					<button
-						v-tooltip="`Install`"
-						:class="{
-							'group-hover:!bg-brand group-hover:[&>svg]:!text-brand-inverted':
-								!installed || version.id !== installedVersion,
-						}"
-						:disabled="installing || (installed && version.id === installedVersion)"
-						@click.stop="() => install(version.id)"
-					>
-						<DownloadIcon v-if="!installed" />
-						<SwapIcon v-else-if="installed && version.id !== installedVersion" />
-						<CheckIcon v-else />
-					</button>
-				</ButtonStyled>
-				<ButtonStyled circular type="transparent">
-					<OverflowMenu
-						v-if="false"
-						class="group-hover:!bg-button-bg"
-						:options="[
-							{
-								id: 'install-elsewhere',
-								action: () => {},
-								shown: false && !!instance,
-								color: 'primary',
-								hoverFilled: true,
-							},
-							{
-								id: 'open-in-browser',
-								link: `https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`,
-							},
-						]"
-						aria-label="More options"
-					>
-						<MoreVerticalIcon aria-hidden="true" />
-						<template #install-elsewhere>
-							<DownloadIcon aria-hidden="true" />
-							Add to another instance
-						</template>
-						<template #open-in-browser> <ExternalIcon /> Open in browser </template>
-					</OverflowMenu>
-					<a
-						v-else
-						v-tooltip="`Open in browser`"
-						class="group-hover:!bg-button-bg"
-						:href="`https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`"
-						target="_blank"
-					>
-						<ExternalIcon />
-					</a>
-				</ButtonStyled>
-			</template>
-		</ProjectPageVersions>
-	</div>
-	<AppPageSkeleton v-else variant="list" class="!p-0" />
+	<ProjectPageVersions
+		v-if="loaders && gameVersions"
+		:loaders="loaders"
+		:game-versions="gameVersions"
+		:versions="versions"
+		:project="project"
+		:version-link="(version) => buildProjectHref(`/project/${project.id}/version/${version.id}`)"
+	>
+		<template #actions="{ version }">
+			<ButtonStyled circular type="transparent">
+				<button
+					v-tooltip="`Install`"
+					:class="{
+						'group-hover:!bg-brand group-hover:[&>svg]:!text-brand-inverted':
+							!installed || version.id !== installedVersion,
+					}"
+					:disabled="installing || (installed && version.id === installedVersion)"
+					@click.stop="() => install(version.id)"
+				>
+					<DownloadIcon v-if="!installed" />
+					<SwapIcon v-else-if="installed && version.id !== installedVersion" />
+					<CheckIcon v-else />
+				</button>
+			</ButtonStyled>
+			<ButtonStyled circular type="transparent">
+				<OverflowMenu
+					v-if="false"
+					class="group-hover:!bg-button-bg"
+					:options="[
+						{
+							id: 'install-elsewhere',
+							action: () => {},
+							shown: false && !!instance,
+							color: 'primary',
+							hoverFilled: true,
+						},
+						{
+							id: 'open-in-browser',
+							link: `https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`,
+						},
+					]"
+					aria-label="More options"
+				>
+					<MoreVerticalIcon aria-hidden="true" />
+					<template #install-elsewhere>
+						<DownloadIcon aria-hidden="true" />
+						Add to another instance
+					</template>
+					<template #open-in-browser> <ExternalIcon /> Open in browser </template>
+				</OverflowMenu>
+				<a
+					v-else
+					v-tooltip="`Open in browser`"
+					class="group-hover:!bg-button-bg"
+					:href="`https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`"
+					target="_blank"
+				>
+					<ExternalIcon />
+				</a>
+			</ButtonStyled>
+		</template>
+	</ProjectPageVersions>
 </template>
 
 <script setup>
 import { CheckIcon, DownloadIcon, ExternalIcon, MoreVerticalIcon } from '@modrinth/assets'
 import {
 	ButtonStyled,
-	injectNotificationManager,
 	OverflowMenu,
 	ProjectPageVersions,
-	useLoadingBarToken,
 } from '@modrinth/ui'
-import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons/index.js'
-import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
-import { get_game_versions, get_loaders } from '@/helpers/tags.js'
-
-const { handleError } = injectNotificationManager()
 
 defineProps({
 	project: {
@@ -112,12 +103,15 @@ defineProps({
 		type: String,
 		default: null,
 	},
+	loaders: {
+		type: Array,
+		default: null,
+	},
+	gameVersions: {
+		type: Array,
+		default: null,
+	},
 })
-
-const loaders = ref(null)
-const gameVersions = ref(null)
-const tagsPending = computed(() => !loaders.value || !gameVersions.value)
-useLoadingBarToken(tagsPending)
 const route = useRoute()
 
 function buildProjectHref(path) {
@@ -133,12 +127,6 @@ function buildProjectHref(path) {
 	return qs ? `${path}?${qs}` : path
 }
 
-onMounted(async () => {
-	;[loaders.value, gameVersions.value] = await Promise.all([
-		get_loaders().catch(handleError),
-		get_game_versions().catch(handleError),
-	])
-})
 </script>
 
 <style scoped lang="scss">

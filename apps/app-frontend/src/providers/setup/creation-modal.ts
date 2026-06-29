@@ -4,6 +4,7 @@ import type {
 	AbstractWebNotificationManager,
 } from '@modrinth/ui'
 import { defineMessages, useVIntl } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { provide, ref, useTemplateRef } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 import { useRouter } from 'vue-router'
@@ -13,6 +14,7 @@ import type { InstanceCreationFlowContextValue } from '@/components/ui/creation-
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import { useCoreClient } from '@/composables/useCoreClient'
+import { upsertCoreInstanceInCache } from '@/composables/useCoreInstances'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_search_results } from '@/helpers/cache.js'
 import { import_instance } from '@/helpers/import.js'
@@ -21,6 +23,7 @@ import { create_profile_and_install, create_profile_and_install_from_file } from
 import { create, edit, list } from '@/helpers/profile.js'
 import type { InstanceLoader } from '@/helpers/types'
 import { registerSyncedProfileBackend } from '@/pages/instance/synced/synced-registration'
+import { setLinkedServerId, setLinkedServerPath } from '@/pages/instance/synced/use-synced-link'
 
 export function setupCreationModal(
 	notificationManager: AbstractWebNotificationManager,
@@ -29,6 +32,8 @@ export function setupCreationModal(
 	const { handleError } = notificationManager
 	const { formatMessage } = useVIntl()
 	const router = useRouter()
+	const queryClient = useQueryClient()
+	const core = useCoreClient()
 
 	const messages = defineMessages({
 		installingModpackTitle: {
@@ -54,8 +59,16 @@ export function setupCreationModal(
 	}
 
 	async function fetchExistingInstanceNames(): Promise<string[]> {
-		const instances = await list().catch(handleError)
-		return instances?.map((i) => i.name) ?? []
+		const [instances, coreInstances] = await Promise.all([
+			list().catch(handleError),
+			core.listInstances().catch(() => []),
+		])
+		return [
+			...(instances ?? [])
+				.filter((instance) => instance.profile_type !== 'server')
+				.map((instance) => instance.name),
+			...coreInstances.map((instance) => instance.name),
+		]
 	}
 
 	provide('showCreationModal', () => {
@@ -144,7 +157,6 @@ export function setupCreationModal(
 			const name = config.instanceName.value.trim() || config.autoInstanceName.value
 
 			if (config.instanceType.value === 'server') {
-				const core = useCoreClient()
 				const profile = {
 					name,
 					gameVersion: config.selectedGameVersion.value!,
@@ -154,31 +166,9 @@ export function setupCreationModal(
 				const coreInstance = await createCoreInstanceFromProfile(core, {
 					profile,
 				})
-				const profileSlug = await getAvailableServerProfileSlug(name)
-				const profilePath = await create(
-					profileSlug,
-					config.selectedGameVersion.value!,
-					toProfileLoader(loader),
-					loaderVersion,
-					iconPath,
-					true,
-					null,
-					'server',
-				)
-				await edit(profilePath, {
-					name,
-					profile_type: 'server',
-					install_stage: 'installed',
-					core_instance_id: coreInstance.id,
-					server_manifest_json: {
-						...profile,
-						port: coreInstance.port,
-						memory: coreInstance.memory,
-					},
-				})
-				await router.push(`/instance/${encodeURIComponent(profilePath)}`)
+				upsertCoreInstanceInCache(queryClient, coreInstance)
+				await router.push(`/instance/${encodeURIComponent(coreInstance.path)}`)
 			} else if (config.instanceType.value === 'synced') {
-				const core = useCoreClient()
 				const coreInstance = await createCoreInstanceFromProfile(core, {
 					profile: {
 						name,
@@ -187,8 +177,9 @@ export function setupCreationModal(
 						loaderVersion,
 					},
 				})
-				await create(
-					coreInstance.id,
+				upsertCoreInstanceInCache(queryClient, coreInstance)
+				const profilePath = await create(
+					name,
 					config.selectedGameVersion.value!,
 					toProfileLoader(loader),
 					loaderVersion,
@@ -197,12 +188,14 @@ export function setupCreationModal(
 					null,
 					'synced',
 				)
-				await edit(coreInstance.id, {
+				await edit(profilePath, {
 					name,
 					profile_type: 'synced',
 				})
+				setLinkedServerId(profilePath, coreInstance.id)
+				setLinkedServerPath(profilePath, coreInstance.path)
 				await registerSyncedProfileBackend({
-					profilePath: coreInstance.id,
+					profilePath,
 					serverInstanceId: coreInstance.id,
 					instance: {
 						name,
@@ -210,7 +203,7 @@ export function setupCreationModal(
 						loader: toProfileLoader(loader),
 					},
 				})
-				await router.push(`/instance/${encodeURIComponent(coreInstance.id)}`)
+				await router.push(`/instance/${encodeURIComponent(profilePath)}`)
 			} else {
 				await create(
 					name,
@@ -235,24 +228,6 @@ export function setupCreationModal(
 	function toProfileLoader(loader: string): InstanceLoader {
 		if (loader === 'paper' || loader === 'purpur') return 'vanilla'
 		return loader as InstanceLoader
-	}
-
-	function slugServerProfileName(value: string): string {
-		const slug = value
-			.trim()
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-		return slug || 'server'
-	}
-
-	async function getAvailableServerProfileSlug(value: string): Promise<string> {
-		const base = slugServerProfileName(value)
-		const existing = new Set((await list().catch(handleError))?.map((instance) => instance.path) ?? [])
-		if (!existing.has(base)) return base
-		let suffix = 2
-		while (existing.has(`${base}-${suffix}`)) suffix += 1
-		return `${base}-${suffix}`
 	}
 
 	const pendingModpackCreation = ref<{

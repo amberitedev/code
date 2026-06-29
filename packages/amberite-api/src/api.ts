@@ -46,6 +46,7 @@ import type {
 	CoreSetupStatus,
 	CoreSetupRequest,
 	CoreSetupResponse,
+	CoreSetupDevResetResponse,
 	CoreConnectionHandshakeRequest,
 	CoreConnectionHandshakeResponse,
 	CoreMetadata,
@@ -124,6 +125,10 @@ async function rawFetch(ctx: CoreCallContext, url: string, init?: RequestInit): 
 	return request(ctx, url, init)
 }
 
+function instanceBaseUrl(ctx: CoreCallContext, path: string): string {
+	return `${ctx.baseUrl}/instances/${encodeURIComponent(path)}`
+}
+
 export function getSetupStatus(ctx: CoreCallContext): Promise<CoreSetupStatus> {
 	return apiFetch(ctx, `${ctx.baseUrl}/setup/status`)
 }
@@ -137,6 +142,10 @@ export function completeSetup(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
 	})
+}
+
+export function devResetSetup(ctx: CoreCallContext): Promise<CoreSetupDevResetResponse> {
+	return apiFetch(ctx, `${ctx.baseUrl}/setup/dev-reset`, { method: 'POST' })
 }
 
 export function connectionHandshake(
@@ -161,7 +170,7 @@ export function listInstances(ctx: CoreCallContext): Promise<{ instances: CoreIn
 }
 
 export function getInstance(ctx: CoreCallContext, id: string): Promise<CoreInstance> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}`)
 }
 
 export function createInstance(
@@ -176,7 +185,7 @@ export function createInstance(
 }
 
 export function deleteInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}`, { method: 'DELETE' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}`, { method: 'DELETE' })
 }
 
 export function patchInstance(
@@ -184,7 +193,7 @@ export function patchInstance(
 	id: string,
 	body: CorePatchInstanceBody,
 ): Promise<CoreInstance> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -192,29 +201,29 @@ export function patchInstance(
 }
 
 export function getStartup(ctx: CoreCallContext, id: string): Promise<CoreStartupSettings> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/startup`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/startup`)
 }
 
 // ── Instance lifecycle ────────────────────────────────────────────────────────
 
 export function startInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/start`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/start`, { method: 'POST' })
 }
 
 export function stopInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/stop`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/stop`, { method: 'POST' })
 }
 
 export function killInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/kill`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/kill`, { method: 'POST' })
 }
 
 export function restartInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/restart`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/restart`, { method: 'POST' })
 }
 
 export function repairInstance(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/repair`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/repair`, { method: 'POST' })
 }
 
 export function changeInstanceVersion(
@@ -222,7 +231,7 @@ export function changeInstanceVersion(
 	id: string,
 	body: CoreChangeVersionBody,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/change-version`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/change-version`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -234,7 +243,7 @@ export function sendCommand(
 	id: string,
 	command: string,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/command`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/command`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ command }),
@@ -254,17 +263,17 @@ export function openEventStream(ctx: CoreCallContext): Promise<Response> {
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 export function getStats(ctx: CoreCallContext, id: string): Promise<CoreStats> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/stats`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/stats`)
 }
 
 // ── Mods ──────────────────────────────────────────────────────────────────────
 
 export function listMods(ctx: CoreCallContext, id: string): Promise<{ mods: CoreMod[] }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/mods`)
 }
 
 export function addMod(ctx: CoreCallContext, id: string, versionId: string): Promise<CoreMod> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/mods`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ version_id: versionId }),
@@ -276,7 +285,7 @@ export function addModProject(
 	id: string,
 	projectId: string,
 ): Promise<CoreMod> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/mods`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ project_id: projectId }),
@@ -284,7 +293,7 @@ export function addModProject(
 }
 
 export function uploadModFile(ctx: CoreCallContext, id: string, file: File): UploadHandle {
-	return xhrUpload(ctx, `${ctx.baseUrl}/instances/${id}/mods/upload`, file)
+	return xhrUpload(ctx, `${instanceBaseUrl(ctx, id)}/mods/upload`, file)
 }
 
 export function installModpackVersion(
@@ -293,7 +302,7 @@ export function installModpackVersion(
 	projectId: string,
 	versionId: string,
 ): Promise<CoreModpackManifest> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/modpack/modrinth`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/modpack/modrinth`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ project_id: projectId, version_id: versionId }),
@@ -305,7 +314,7 @@ export function deleteMod(
 	id: string,
 	filename: string,
 ): Promise<{ ok: boolean; restart_required: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods/${encodeURIComponent(filename)}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/mods/${encodeURIComponent(filename)}`, {
 		method: 'DELETE',
 	})
 }
@@ -316,7 +325,7 @@ export function toggleMod(
 	filename: string,
 	enabled: boolean,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods/${encodeURIComponent(filename)}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/mods/${encodeURIComponent(filename)}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ enabled }),
@@ -330,7 +339,7 @@ export function updateMod(
 ): Promise<{ updated: boolean }> {
 	return apiFetch(
 		ctx,
-		`${ctx.baseUrl}/instances/${id}/mods/${encodeURIComponent(filename)}/update`,
+		`${instanceBaseUrl(ctx, id)}/mods/${encodeURIComponent(filename)}/update`,
 		{
 			method: 'PUT',
 		},
@@ -341,17 +350,17 @@ export function updateAllMods(
 	ctx: CoreCallContext,
 	id: string,
 ): Promise<{ updated: string[]; already_latest: string[]; failed: unknown[] }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/mods/update-all`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/mods/update-all`, { method: 'POST' })
 }
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
 export function listLogs(ctx: CoreCallContext, id: string): Promise<{ logs: string[] }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/logs`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/logs`)
 }
 
 export function readLog(ctx: CoreCallContext, id: string, filename: string): Promise<string> {
-	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/logs/${encodeURIComponent(filename)}`).then(
+	return rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/logs/${encodeURIComponent(filename)}`).then(
 		(r) => r.text(),
 	)
 }
@@ -360,7 +369,7 @@ export function listCrashReports(
 	ctx: CoreCallContext,
 	id: string,
 ): Promise<{ crash_reports: string[] }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/crash-reports`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/crash-reports`)
 }
 
 export function readCrashReport(
@@ -370,7 +379,7 @@ export function readCrashReport(
 ): Promise<string> {
 	return rawFetch(
 		ctx,
-		`${ctx.baseUrl}/instances/${id}/crash-reports/${encodeURIComponent(filename)}`,
+		`${instanceBaseUrl(ctx, id)}/crash-reports/${encodeURIComponent(filename)}`,
 	).then((r) => r.text())
 }
 
@@ -380,7 +389,7 @@ export function getProperties(
 	ctx: CoreCallContext,
 	id: string,
 ): Promise<{ properties: Record<string, string> }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/properties`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/properties`)
 }
 
 export function patchProperties(
@@ -388,7 +397,7 @@ export function patchProperties(
 	id: string,
 	updates: Record<string, string>,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/properties`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/properties`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(updates),
@@ -402,7 +411,7 @@ export function executeRcon(
 	id: string,
 	command: string,
 ): Promise<{ response: string }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/rcon`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/rcon`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ command }),
@@ -410,7 +419,7 @@ export function executeRcon(
 }
 
 export function enableRcon(ctx: CoreCallContext, id: string): Promise<CoreRconEnableResult> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/rcon/enable`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/rcon/enable`, {
 		method: 'POST',
 	})
 }
@@ -418,7 +427,7 @@ export function enableRcon(ctx: CoreCallContext, id: string): Promise<CoreRconEn
 // ── Server Query ──────────────────────────────────────────────────────────────
 
 export function queryInstance(ctx: CoreCallContext, id: string): Promise<CoreServerQuery> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/query`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/query`)
 }
 
 // ── Scheduled Tasks ───────────────────────────────────────────────────────────
@@ -427,7 +436,7 @@ export function listTasks(
 	ctx: CoreCallContext,
 	id: string,
 ): Promise<{ tasks: CoreScheduledTask[] }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/tasks`)
 }
 
 export function createTask(
@@ -435,7 +444,7 @@ export function createTask(
 	id: string,
 	body: CoreCreateTaskBody,
 ): Promise<CoreScheduledTask> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/tasks`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -447,7 +456,7 @@ export function getTask(
 	id: string,
 	taskId: string,
 ): Promise<CoreScheduledTask> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks/${encodeURIComponent(taskId)}`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/tasks/${encodeURIComponent(taskId)}`)
 }
 
 export function updateTask(
@@ -456,7 +465,7 @@ export function updateTask(
 	taskId: string,
 	body: CoreUpdateTaskBody,
 ): Promise<CoreScheduledTask> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks/${encodeURIComponent(taskId)}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/tasks/${encodeURIComponent(taskId)}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -468,7 +477,7 @@ export function deleteTask(
 	id: string,
 	taskId: string,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/tasks/${encodeURIComponent(taskId)}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/tasks/${encodeURIComponent(taskId)}`, {
 		method: 'DELETE',
 	})
 }
@@ -476,7 +485,7 @@ export function deleteTask(
 // ── Players ───────────────────────────────────────────────────────────────────
 
 export function listPlayers(ctx: CoreCallContext, id: string): Promise<CorePlayers> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/players`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/players`)
 }
 
 function playerAction(
@@ -485,7 +494,7 @@ function playerAction(
 	action: string,
 	body: Record<string, unknown>,
 ): Promise<{ response: string }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/players/${action}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/players/${action}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -574,7 +583,7 @@ export function removeFromWhitelist(
 ): Promise<{ response: string }> {
 	return apiFetch(
 		ctx,
-		`${ctx.baseUrl}/instances/${id}/players/whitelist/${encodeURIComponent(name)}`,
+		`${instanceBaseUrl(ctx, id)}/players/whitelist/${encodeURIComponent(name)}`,
 		{ method: 'DELETE' },
 	)
 }
@@ -592,12 +601,12 @@ export function listDirectory(
 		page: String(page),
 		page_size: String(pageSize),
 	})
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs?${q}`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs?${q}`)
 }
 
 export function downloadFile(ctx: CoreCallContext, id: string, path: string): Promise<Blob> {
 	const q = new URLSearchParams({ path })
-	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/download?${q}`).then((r) => r.blob())
+	return rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/download?${q}`).then((r) => r.blob())
 }
 
 export function deleteFileOrFolder(
@@ -606,7 +615,7 @@ export function deleteFileOrFolder(
 	path: string,
 	recursive = false,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs`, {
 		method: 'DELETE',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path, recursive }),
@@ -619,13 +628,13 @@ export function uploadFile(
 	targetDir: string,
 	file: File,
 ): UploadHandle {
-	const url = `${ctx.baseUrl}/instances/${id}/fs/upload?path=${encodeURIComponent(targetDir)}`
+	const url = `${instanceBaseUrl(ctx, id)}/fs/upload?path=${encodeURIComponent(targetDir)}`
 	return xhrUpload(ctx, url, file)
 }
 
 export function readFile(ctx: CoreCallContext, id: string, path: string): Promise<ArrayBuffer> {
 	const q = new URLSearchParams({ path })
-	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/read?${q}`).then((r) => r.arrayBuffer())
+	return rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/read?${q}`).then((r) => r.arrayBuffer())
 }
 
 export function writeFile(
@@ -636,7 +645,7 @@ export function writeFile(
 ): Promise<{ ok: boolean }> {
 	const q = new URLSearchParams({ path })
 	const body = typeof content === 'string' ? new TextEncoder().encode(content) : content
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/write?${q}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/write?${q}`, {
 		method: 'PUT',
 		body,
 	})
@@ -648,7 +657,7 @@ export function createFile(
 	path: string,
 ): Promise<{ ok: boolean }> {
 	const q = new URLSearchParams({ path })
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/create?${q}`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/create?${q}`, { method: 'POST' })
 }
 
 export function createDir(
@@ -657,7 +666,7 @@ export function createDir(
 	path: string,
 ): Promise<{ ok: boolean }> {
 	const q = new URLSearchParams({ path })
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/mkdir?${q}`, { method: 'POST' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/mkdir?${q}`, { method: 'POST' })
 }
 
 export function moveEntry(
@@ -667,7 +676,7 @@ export function moveEntry(
 	to: string,
 ): Promise<{ ok: boolean }> {
 	const q = new URLSearchParams({ from, to })
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/move?${q}`, { method: 'PUT' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/move?${q}`, { method: 'PUT' })
 }
 
 export function unzipFile(
@@ -677,7 +686,7 @@ export function unzipFile(
 	option: UnzipOption,
 ): Promise<{ ok: boolean }> {
 	const q = new URLSearchParams({ path })
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/unzip?${q}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/unzip?${q}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ option }),
@@ -689,7 +698,7 @@ export function zipFiles(
 	id: string,
 	req: FsZipRequest,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/zip`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/zip`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(req),
@@ -701,7 +710,7 @@ export function copyFiles(
 	id: string,
 	req: FsCopyRequest,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/copy`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/copy`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(req),
@@ -714,7 +723,7 @@ export function getDownloadUrl(
 	path: string,
 ): Promise<FsDownloadUrlResponse> {
 	const q = new URLSearchParams({ path })
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/url?${q}`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/url?${q}`)
 }
 
 export function searchFiles(
@@ -725,7 +734,7 @@ export function searchFiles(
 	recursive: boolean,
 ): Promise<CoreFsEntry[]> {
 	const q = new URLSearchParams({ path, query, recursive: String(recursive) })
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/search?${q}`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/search?${q}`)
 }
 
 export async function createResumableUpload(
@@ -738,7 +747,7 @@ export async function createResumableUpload(
 	const q = new URLSearchParams({ path })
 	const headers: Record<string, string> = { 'Upload-Length': String(length) }
 	if (sha256Hex) headers['Upload-Metadata'] = `sha256 ${base64FromText(sha256Hex)}`
-	const response = await rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads?${q}`, {
+	const response = await rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/uploads?${q}`, {
 		method: 'POST',
 		headers,
 	})
@@ -750,7 +759,7 @@ export async function getResumableUploadStatus(
 	id: string,
 	uploadId: string,
 ): Promise<CoreUploadSession> {
-	const response = await rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads/${uploadId}`, {
+	const response = await rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/uploads/${uploadId}`, {
 		method: 'HEAD',
 	})
 	return uploadSessionFromHeaders(response, uploadId)
@@ -766,7 +775,7 @@ export async function appendResumableUpload(
 ): Promise<CoreUploadSession> {
 	const headers: Record<string, string> = { 'Upload-Offset': String(offset) }
 	if (sha256DigestBase64) headers['Upload-Checksum'] = `sha256 ${sha256DigestBase64}`
-	const response = await rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads/${uploadId}`, {
+	const response = await rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/uploads/${uploadId}`, {
 		method: 'PATCH',
 		headers,
 		body: chunk,
@@ -779,7 +788,7 @@ export function cancelResumableUpload(
 	id: string,
 	uploadId: string,
 ): Promise<Response> {
-	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/fs/uploads/${uploadId}`, {
+	return rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/fs/uploads/${uploadId}`, {
 		method: 'DELETE',
 	})
 }
@@ -787,11 +796,11 @@ export function cancelResumableUpload(
 // ── Backups ───────────────────────────────────────────────────────────────────
 
 export function listBackups(ctx: CoreCallContext, id: string): Promise<CoreBackupsResponse> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups`)
 }
 
 export function createBackup(ctx: CoreCallContext, id: string, name?: string): Promise<CoreBackup> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ name: name ?? null }),
@@ -803,7 +812,7 @@ export function deleteBackup(
 	id: string,
 	backupId: string,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/${backupId}`, { method: 'DELETE' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/${backupId}`, { method: 'DELETE' })
 }
 
 export function deleteManyBackups(
@@ -811,7 +820,7 @@ export function deleteManyBackups(
 	id: string,
 	backupIds: string[],
 ): Promise<{ deleted: number }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/delete-many`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/delete-many`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ids: backupIds }),
@@ -824,7 +833,7 @@ export function renameBackup(
 	backupId: string,
 	name: string,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/${backupId}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/${backupId}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ name }),
@@ -837,7 +846,7 @@ export function lockBackup(
 	backupId: string,
 	locked: boolean,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/${backupId}/lock`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/${backupId}/lock`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ locked }),
@@ -849,13 +858,13 @@ export function restoreBackup(
 	id: string,
 	backupId: string,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/${backupId}/restore`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/${backupId}/restore`, {
 		method: 'POST',
 	})
 }
 
 export function getBackupSchedule(ctx: CoreCallContext, id: string): Promise<CoreBackupSchedule> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/schedule`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/schedule`)
 }
 
 export function setBackupSchedule(
@@ -863,7 +872,7 @@ export function setBackupSchedule(
 	id: string,
 	schedule: CoreBackupScheduleBody,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/backups/schedule`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/backups/schedule`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(schedule),
@@ -1006,7 +1015,7 @@ export function respondToCoreInvitation(
 }
 
 export function listInstanceAccess(ctx: CoreCallContext, id: string): Promise<CoreAccessResponse> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/access`)
 }
 
 export function grantInstanceAccess(
@@ -1014,7 +1023,7 @@ export function grantInstanceAccess(
 	id: string,
 	body: CoreAccessUpsertBody,
 ): Promise<unknown> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/access`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -1027,7 +1036,7 @@ export function updateInstanceAccess(
 	userId: string,
 	body: CoreAccessPatchBody,
 ): Promise<unknown> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access/${encodeURIComponent(userId)}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/access/${encodeURIComponent(userId)}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -1039,7 +1048,7 @@ export function removeInstanceAccess(
 	id: string,
 	userId: string,
 ): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/access/${encodeURIComponent(userId)}`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/access/${encodeURIComponent(userId)}`, {
 		method: 'DELETE',
 	})
 }
@@ -1064,7 +1073,7 @@ export function listInstanceActivity(
 	for (const [key, value] of Object.entries(query)) {
 		if (value !== undefined && value !== null && key !== 'instance_id') q.set(key, String(value))
 	}
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/activity${q.size ? `?${q}` : ''}`)
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/activity${q.size ? `?${q}` : ''}`)
 }
 
 // ── Sync Profiles ─────────────────────────────────────────────────────────────
@@ -1164,7 +1173,7 @@ export async function getModpack(
 	id: string,
 ): Promise<CoreModpackManifest | null> {
 	try {
-		return await apiFetch<CoreModpackManifest>(ctx, `${ctx.baseUrl}/instances/${id}/modpack`)
+		return await apiFetch<CoreModpackManifest>(ctx, `${instanceBaseUrl(ctx, id)}/modpack`)
 	} catch (e) {
 		if (e instanceof CoreApiError && e.status === 404) return null
 		throw e
@@ -1172,11 +1181,11 @@ export async function getModpack(
 }
 
 export function removeModpack(ctx: CoreCallContext, id: string): Promise<{ ok: boolean }> {
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/modpack`, { method: 'DELETE' })
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/modpack`, { method: 'DELETE' })
 }
 
 export function exportModpack(ctx: CoreCallContext, id: string): Promise<Blob> {
-	return rawFetch(ctx, `${ctx.baseUrl}/instances/${id}/modpack/export`).then((r) => r.blob())
+	return rawFetch(ctx, `${instanceBaseUrl(ctx, id)}/modpack/export`).then((r) => r.blob())
 }
 
 export function installModpackFile(
@@ -1186,7 +1195,7 @@ export function installModpackFile(
 ): Promise<CoreModpackManifest> {
 	const form = new FormData()
 	form.append('file', file, file.name)
-	return apiFetch(ctx, `${ctx.baseUrl}/instances/${id}/modpack/upload`, {
+	return apiFetch(ctx, `${instanceBaseUrl(ctx, id)}/modpack/upload`, {
 		method: 'POST',
 		body: form,
 	})

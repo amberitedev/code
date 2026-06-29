@@ -1,3 +1,9 @@
+/**
+ * Summary:
+ * - Lines 36-362 define the Nuxt app, Vite/Nitro options, generated-state hook, runtime config, and route rules.
+ * - Lines 147-205 regenerate generated state and robots.txt before builds.
+ * - Lines 364-465 resolve API/domain URLs and Amberite environment values.
+ */
 import serverSidedVue from '@vitejs/plugin-vue'
 import fs from 'fs/promises'
 import { defineNuxtConfig } from 'nuxt/config'
@@ -210,6 +216,8 @@ export default defineNuxtConfig({
 		// @ts-ignore
 		rateLimitKey: process.env.RATE_LIMIT_IGNORE_KEY ?? globalThis.RATE_LIMIT_IGNORE_KEY,
 		pyroBaseUrl: process.env.PYRO_BASE_URL,
+		amberiteMinecraftOAuthClientId: getAmberiteMinecraftOAuthClientId(),
+		amberiteMinecraftOAuthClientSecret: getAmberiteMinecraftOAuthClientSecret(),
 		intercomIdentitySecret:
 			process.env.INTERCOM_IDENTITY_SECRET ??
 			// @ts-ignore
@@ -434,6 +442,24 @@ function getAmberiteConnectedCoreId() {
 		globalThis.NUXT_PUBLIC_AMBERITE_CONNECTED_CORE_ID ||
 		// @ts-ignore
 		globalThis.AMBERITE_CONNECTED_CORE_ID ||
+		''
+	)
+}
+
+function getAmberiteMinecraftOAuthClientId() {
+	return (
+		process.env.AMBERITE_MINECRAFT_OAUTH_CLIENT_ID ||
+		// @ts-ignore
+		globalThis.AMBERITE_MINECRAFT_OAUTH_CLIENT_ID ||
+		''
+	)
+}
+
+function getAmberiteMinecraftOAuthClientSecret() {
+	return (
+		process.env.AMBERITE_MINECRAFT_OAUTH_CLIENT_SECRET ||
+		// @ts-ignore
+		globalThis.AMBERITE_MINECRAFT_OAUTH_CLIENT_SECRET ||
 		''
 	)
 }

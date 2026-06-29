@@ -69,6 +69,7 @@ export const search = query({
 
 export const updateCurrent = mutation({
 	args: {
+		displayName: v.optional(v.string()),
 		username: v.optional(v.string()),
 		bio: v.optional(v.string()),
 		avatar: v.optional(avatarInput),
@@ -85,10 +86,19 @@ export const updateCurrent = mutation({
 			if (existing && existing._id !== userId) throw new Error('username is already taken')
 			patch.username = username
 			patch.normalizedUsername = username.toLowerCase()
-			patch.displayName = username
-			patch.name = username
 			patch.onboardedAt = user.onboardedAt ?? Date.now()
 			patch.amberiteUserId = user.amberiteUserId ?? crypto.randomUUID()
+		}
+
+		if (args.displayName !== undefined) {
+			const displayName = normalizeDisplayName(args.displayName)
+			patch.displayName = displayName
+			patch.name = displayName
+			patch.onboardedAt = user.onboardedAt ?? Date.now()
+			patch.amberiteUserId = user.amberiteUserId ?? crypto.randomUUID()
+		} else if (args.username !== undefined && !user.displayName) {
+			patch.displayName = patch.username
+			patch.name = patch.username
 		}
 
 		if (args.bio !== undefined) patch.bio = normalizeBio(args.bio)
@@ -142,6 +152,13 @@ function normalizeUsername(value: string): string {
 	if (!USERNAME_PATTERN.test(username))
 		throw new Error('username must be 3-24 letters, numbers, or underscores')
 	return username
+}
+
+function normalizeDisplayName(value: string): string {
+	const displayName = value.trim()
+	if (displayName.length < 1 || displayName.length > 64)
+		throw new Error('display name must be between 1 and 64 characters')
+	return displayName
 }
 
 function normalizeBio(value: string): string {

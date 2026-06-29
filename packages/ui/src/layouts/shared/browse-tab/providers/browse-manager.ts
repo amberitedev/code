@@ -34,6 +34,9 @@ export interface BrowseManagerContext {
 	projectHits: ShallowRef<BrowseSearchResponse['projectHits']>
 	serverHits: ShallowRef<BrowseSearchResponse['serverHits']>
 	totalHits: Ref<number>
+	activeResultKey?: ComputedRef<string>
+	visibleResultKey?: Ref<string>
+	visibleProjectType?: Ref<string>
 	pageCount: ComputedRef<number>
 	maxResults: Ref<number>
 	currentPage: Ref<number>
@@ -42,6 +45,11 @@ export interface BrowseManagerContext {
 	deprioritizedTags: ComputedRef<string[]>
 	excludeLoaders: ComputedRef<boolean>
 	refreshSearch: () => Promise<void>
+	cacheSearchResponse?: (
+		projectType: string,
+		requestParams: string,
+		response: BrowseSearchResponse,
+	) => void
 	setPage: (page: number) => Promise<void>
 	clearSearch: () => void
 	onFilterChange: () => void

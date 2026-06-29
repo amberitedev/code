@@ -1,4 +1,4 @@
-import { ConvexAmberiteAuthClient, type PlatformAdapter } from '@amberite/amberite-api'
+import { ConvexAmberiteAuthClient, ConvexApiClient, type PlatformAdapter } from '@amberite/amberite-api'
 
 import type { CookieOptions } from '#app'
 
@@ -16,6 +16,10 @@ const amberiteCookieOptions = () =>
 
 export function useAmberiteAuthClient(): ConvexAmberiteAuthClient {
 	return new ConvexAmberiteAuthClient({ adapter: createAmberiteWebAdapter() })
+}
+
+export function useAmberiteSocialClient(): ConvexApiClient {
+	return new ConvexApiClient(createAmberiteWebAdapter())
 }
 
 function createAmberiteWebAdapter(): PlatformAdapter {

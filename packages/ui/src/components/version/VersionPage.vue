@@ -1,3 +1,9 @@
+<!--
+Version page layout.
+- Dependency enrichment and included-content loading rows: lines 104-166.
+- Version metadata, author resolution, and table columns: lines 168-338.
+- Compatibility, dependency, changelog, and content sections: lines 342-558.
+-->
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
 import { DownloadIcon, ExternalIcon, FileIcon, SearchIcon } from '@modrinth/assets'
@@ -25,6 +31,8 @@ import {
 
 import AutoLink from '../base/AutoLink.vue'
 import Avatar from '../base/Avatar.vue'
+import GhostMedia from '../base/GhostMedia.vue'
+import GhostText from '../base/GhostText.vue'
 import StyledInput from '../base/StyledInput.vue'
 import Table from '../base/Table.vue'
 import TagItem from '../base/TagItem.vue'
@@ -372,10 +380,10 @@ const authorLink = computed(() =>
 						<Avatar :src="author?.avatar_url" size="1.5rem" circle />
 						{{ author?.username }}
 					</AutoLink>
-					<div
-						v-else-if="loadingAuthor"
-						class="w-32 h-6 bg-surface-3 rounded-md animate-pulse flex"
-					></div>
+					<template v-else-if="loadingAuthor">
+						<GhostMedia kind="circle" class="!w-6 shrink-0" />
+						<GhostText kind="body" width="100%" :style="{ width: '8rem' }" />
+					</template>
 				</div>
 			</div>
 			<div class="flex gap-2 flex-wrap items-center">
@@ -515,9 +523,10 @@ const authorLink = computed(() =>
 					/>
 				</template>
 				<template #cell-icon="{ row }">
-					<div
+					<GhostMedia
 						v-if="isIncludedContentLoadingRow(row)"
-						class="size-[2rem] shrink-0 rounded-[16%] bg-surface-3 animate-pulse"
+						kind="rounded"
+						class="!w-[2rem] shrink-0"
 					/>
 					<AutoLink v-else :to="row.link" tabindex="-1" class="flex" target="_blank">
 						<Avatar v-if="row.hasProject || row.icon_url" :src="row.icon_url" alt="" size="2rem" />
@@ -527,9 +536,11 @@ const authorLink = computed(() =>
 					</AutoLink>
 				</template>
 				<template #cell-name="{ row }">
-					<div
+					<GhostText
 						v-if="isIncludedContentLoadingRow(row)"
-						class="h-4 max-w-[12rem] rounded-lg bg-surface-3 animate-pulse"
+						kind="body"
+						width="100%"
+						:style="{ width: '12rem' }"
 					/>
 					<AutoLink
 						v-else
@@ -543,9 +554,11 @@ const authorLink = computed(() =>
 					</AutoLink>
 				</template>
 				<template #cell-version="{ row }">
-					<div
+					<GhostText
 						v-if="isIncludedContentLoadingRow(row)"
-						class="h-4 w-16 rounded-lg bg-surface-3 animate-pulse"
+						kind="body"
+						width="100%"
+						:style="{ width: '4rem' }"
 					/>
 					<AutoLink
 						v-else

@@ -147,9 +147,15 @@ async function focusInput(index: number) {
 			Enter the pairing code from the Core you want to connect.
 		</p>
 		<div class="flex flex-1 flex-col items-center justify-center gap-4">
-			<div class="flex items-center gap-3" :class="{ 'animate-shake': shouldAnimateError }" @animationend="clearErrorAnimation">
+			<div
+				class="flex items-center gap-3"
+				:class="{ 'animate-shake': shouldAnimateError }"
+				@animationend="clearErrorAnimation"
+			>
 				<template v-for="(_, index) in characters" :key="index">
-					<span v-if="index === 4" class="text-5xl font-bold text-contrast" aria-hidden="true">-</span>
+					<span v-if="index === 4" class="text-5xl font-bold text-contrast" aria-hidden="true"
+						>-</span
+					>
 					<input
 						:ref="(element) => setInputRef(element, index)"
 						:value="characters[index]"
@@ -160,8 +166,16 @@ async function focusInput(index: number) {
 						spellcheck="false"
 						maxlength="1"
 						:aria-label="`Code character ${index + 1}`"
+						:disabled="ctx.connectValidated.value"
 						class="h-28 w-20 rounded-xl border border-solid bg-surface-4 text-center font-mono text-5xl font-bold text-contrast outline-none transition focus:border-brand focus:ring-4 focus:ring-brand-shadow"
-						:class="isInvalid ? ['!border-red !ring-4 !ring-red', { 'animate-code-error': shouldAnimateError }] : 'border-button-bg'"
+						:class="
+							isInvalid
+								? ['!border-red !ring-4 !ring-red', { 'animate-code-error': shouldAnimateError }]
+								: [
+										'border-button-bg',
+										ctx.connectValidated.value ? 'cursor-not-allowed opacity-70' : '',
+									]
+						"
 						@beforeinput="handleBeforeInput"
 						@input="handleInput($event, index)"
 						@paste="handlePaste($event, index)"
@@ -194,9 +208,16 @@ async function focusInput(index: number) {
 
 <style scoped>
 @keyframes shake {
-	0%, 100% { transform: translateX(0); }
-	33% { transform: translateX(-0.25rem); }
-	66% { transform: translateX(0.25rem); }
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	33% {
+		transform: translateX(-0.25rem);
+	}
+	66% {
+		transform: translateX(0.25rem);
+	}
 }
 
 .animate-shake {
@@ -208,7 +229,12 @@ async function focusInput(index: number) {
 }
 
 @keyframes flash-error {
-	0%, 100% { opacity: 1; }
-	50% { opacity: 0.45; }
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.45;
+	}
 }
 </style>

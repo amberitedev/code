@@ -1,25 +1,37 @@
 <script setup lang="ts">
-import { LinkIcon, ServerStackIcon, SettingsIcon } from '@modrinth/assets'
-import { ButtonStyled, NavTabs, Toggle, useLoadingBarToken } from '@modrinth/ui'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { SettingsIcon, UnlinkIcon } from '@modrinth/assets'
+import {
+	ButtonStyled,
+	injectNotificationManager,
+	NavTabs,
+	Toggle,
+	useLoadingBarToken,
+} from '@modrinth/ui'
+import { computed, ref, watch } from 'vue'
 
-import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import CoreAccessPanel from '@/components/core/CoreAccessPanel.vue'
 import CoreActivityPanel from '@/components/core/CoreActivityPanel.vue'
 import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
+import CoreOverviewGhost from '@/components/core/CoreOverviewGhost.vue'
 import CoreSetupPanel from '@/components/core/CoreSetupPanel.vue'
 import CoreHostingSettingsModal from '@/components/core/settings/CoreHostingSettingsModal.vue'
 import { useOptimisticLoading } from '@/composables/useOptimisticPreload'
+import { useCoreClient } from '@/composables/useCoreClient'
 import { useCoreConnection } from '@/composables/useCoreConnection'
 import { useSocial } from '@/composables/useSocial'
-import { useConnectedCore } from '@/core/connected-core'
+import { useSocialClientRaw } from '@/composables/useSocialClient'
+import { clearConnectedCore, useConnectedCore } from '@/core/connected-core'
 
 const social = useSocial()
+const coreClient = useCoreClient()
+const socialClient = useSocialClientRaw()
 const connection = useCoreConnection()
 const connectedCore = useConnectedCore()
+const { addNotification } = injectNotificationManager()
 const onboardingModal = ref<InstanceType<typeof CoreOnboardingModal>>()
 const settingsModal = ref<InstanceType<typeof CoreHostingSettingsModal>>()
 const activeTab = ref<'overview' | 'activity'>('overview')
+const clearingLinkedCore = ref(false)
 const hasResolvedDashboard = ref(!social.loading.value)
 watch(
 	() => social.loading.value,
@@ -32,17 +44,15 @@ const dashboardPending = computed(() => social.loading.value && !hasResolvedDash
 const hasDashboardDecision = computed(() => hasResolvedDashboard.value)
 const initialDashboardSkeleton = useOptimisticLoading(dashboardPending, hasDashboardDecision)
 const forceDashboardSkeleton = ref(false)
-let forceDashboardSkeletonTimeout: ReturnType<typeof window.setTimeout> | null = null
 const showDashboardSkeleton = computed(
 	() => initialDashboardSkeleton.value || forceDashboardSkeleton.value,
 )
 useLoadingBarToken(dashboardPending)
-const hasGroup = computed(() => !!social.group.value)
-const setupVisible = ref(!hasGroup.value || !connectedCore.value)
+const hasConnectedCore = computed(() => !!connectedCore.value)
+const setupVisible = ref(!hasConnectedCore.value)
 
-watch([hasGroup, connectedCore], ([has, core], [hadGroup, previousCore]) => {
-	if (!has || !core) setupVisible.value = true
-	else if (!hadGroup || !previousCore) setupVisible.value = false
+watch(hasConnectedCore, (hasCore) => {
+	setupVisible.value = !hasCore
 })
 const tabs = [
 	{ label: 'Overview', href: 'overview' },
@@ -65,6 +75,9 @@ const statusTooltip = computed(() => {
 	if (!connectedCore.value) return 'No Core is linked to this app.'
 	return `Core ${connectedCore.value.coreId}: ${statusLabel.value.toLowerCase()}`
 })
+const clearLinkedCoreLabel = computed(() =>
+	clearingLinkedCore.value ? 'Clearing linked Core' : 'Clear linked Core',
+)
 
 function selectTab(tab: { href: string }) {
 	if (tab.href === 'overview' || tab.href === 'activity') {
@@ -72,38 +85,53 @@ function selectTab(tab: { href: string }) {
 	}
 }
 
-function setForceDashboardSkeleton(enabled: boolean) {
-	if (forceDashboardSkeletonTimeout !== null) {
-		window.clearTimeout(forceDashboardSkeletonTimeout)
-		forceDashboardSkeletonTimeout = null
-	}
-
-	forceDashboardSkeleton.value = enabled
-
-	if (!enabled) return
-
-	forceDashboardSkeletonTimeout = window.setTimeout(() => {
-		forceDashboardSkeleton.value = false
-		forceDashboardSkeletonTimeout = null
-	}, 3000)
+function showOnboarding(flow: 'create' | 'connect') {
+	if (connectedCore.value) return
+	onboardingModal.value?.show(flow)
 }
 
-onUnmounted(() => {
-	if (forceDashboardSkeletonTimeout !== null) {
-		window.clearTimeout(forceDashboardSkeletonTimeout)
+function clearErrorMessage(reason: unknown): string {
+	return reason instanceof Error ? reason.message : String(reason)
+}
+
+async function clearLinkedCoreForDev() {
+	if (clearingLinkedCore.value) return
+	clearingLinkedCore.value = true
+	const coreId = connectedCore.value?.coreId
+	const coreUrl = connectedCore.value?.url
+
+	try {
+		await socialClient.rawMutation<{ clearedCoreIds: string[] }>(
+			'dev:clearCoreLink',
+			coreId ? { coreId } : {},
+		)
+		if (coreUrl) await coreClient.devResetSetupAt(coreUrl)
+		clearConnectedCore()
+		coreClient.clearCoreUrlCache()
+		setupVisible.value = true
+		await social.refresh()
+		await connection.check()
+	} catch (reason) {
+		addNotification({
+			type: 'error',
+			title: 'Failed to clear linked Core',
+			text: clearErrorMessage(reason),
+		})
+	} finally {
+		clearingLinkedCore.value = false
 	}
-})
+}
 </script>
 
 <template>
 	<div class="flex min-h-full flex-col p-6">
 		<CoreOnboardingModal ref="onboardingModal" />
 		<CoreHostingSettingsModal ref="settingsModal" />
-		<AppPageSkeleton v-if="showDashboardSkeleton" variant="core-overview" class="!p-0" />
+		<CoreOverviewGhost v-if="showDashboardSkeleton" />
 		<CoreSetupPanel
-			v-else-if="setupVisible"
-			@create="onboardingModal?.show('create')"
-			@connect="onboardingModal?.show('connect')"
+			v-else-if="setupVisible && !connectedCore"
+			@create="showOnboarding('create')"
+			@connect="showOnboarding('connect')"
 		/>
 		<div v-else class="flex w-full flex-1 flex-col gap-4">
 			<div class="flex items-start justify-between gap-4">
@@ -143,28 +171,27 @@ onUnmounted(() => {
 			<CoreActivityPanel v-else />
 		</div>
 		<Teleport to="body">
-			<div
-				class="fixed z-20 flex items-center gap-2"
-				style="right: 1.25rem; bottom: 1.25rem"
-			>
+			<div class="fixed z-20 flex items-center gap-2" style="right: 1.25rem; bottom: 1.25rem">
 				<div class="rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg">
 					<Toggle
 						id="core-force-ghost-toggle"
-						:model-value="forceDashboardSkeleton"
-						v-tooltip="'Force dashboard ghost for 3 seconds'"
+						v-model="forceDashboardSkeleton"
+						v-tooltip="'Show dashboard ghost'"
 						small
-						aria-label="Force dashboard ghost for 3 seconds"
-						@update:model-value="setForceDashboardSkeleton"
+						aria-label="Show dashboard ghost"
 					/>
 				</div>
-				<ButtonStyled v-if="!showDashboardSkeleton" circular>
+				<ButtonStyled v-if="connectedCore && !showDashboardSkeleton" color="orange">
 					<button
-						v-tooltip="setupVisible ? 'Show dashboard' : 'Show setup'"
-						class="!h-10 !w-10"
-						:aria-label="setupVisible ? 'Show dashboard' : 'Show setup'"
-						@click="setupVisible = !setupVisible"
+						v-tooltip="
+							'Dev reset: clear this linked Core and make Core generate a new pairing code'
+						"
+						class="!h-10"
+						:disabled="clearingLinkedCore"
+						@click="clearLinkedCoreForDev"
 					>
-						<component :is="setupVisible ? ServerStackIcon : LinkIcon" />
+						<UnlinkIcon />
+						{{ clearLinkedCoreLabel }}
 					</button>
 				</ButtonStyled>
 			</div>

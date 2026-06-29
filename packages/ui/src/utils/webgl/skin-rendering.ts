@@ -13,6 +13,31 @@ const modelCache: Map<string, GLTF> = new Map()
 const modelPromiseCache: Map<string, Promise<GLTF>> = new Map()
 const textureCache: Map<string, THREE.Texture> = new Map()
 const texturePromiseCache: Map<string, Promise<THREE.Texture>> = new Map()
+const WHITE_TEXTURE_DATA_URL =
+	'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%221%22%20height=%221%22%3E%3Crect%20width=%221%22%20height=%221%22%20fill=%22white%22/%3E%3C/svg%3E'
+const TRANSPARENT_TEXTURE_DATA_URL =
+	'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%221%22%20height=%221%22/%3E'
+
+function getUrlBasename(url: string) {
+	try {
+		return new URL(url, window.location.href).pathname.split('/').pop() ?? url
+	} catch {
+		return url.split('/').pop() ?? url
+	}
+}
+
+function createSkinModelLoadingManager() {
+	const manager = new THREE.LoadingManager()
+
+	manager.setURLModifier((url) => {
+		const basename = getUrlBasename(url)
+		if (basename === 'cape') return TRANSPARENT_TEXTURE_DATA_URL
+		if (basename === 'steve.png' || basename === 'sunny.png') return WHITE_TEXTURE_DATA_URL
+		return url
+	})
+
+	return manager
+}
 
 export async function loadModel(modelUrl: string): Promise<GLTF> {
 	if (modelCache.has(modelUrl)) {
@@ -23,7 +48,7 @@ export async function loadModel(modelUrl: string): Promise<GLTF> {
 		return modelPromiseCache.get(modelUrl)!
 	}
 
-	const loader = new GLTFLoader()
+	const loader = new GLTFLoader(createSkinModelLoadingManager())
 	const promise = new Promise<GLTF>((resolve, reject) => {
 		loader.load(
 			modelUrl,

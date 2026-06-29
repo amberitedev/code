@@ -1,5 +1,8 @@
 <template>
-	<div v-if="loadError" class="flex min-h-full items-center justify-center p-6 text-contrast">
+	<div
+		v-if="loadError"
+		class="flex min-h-full items-center justify-center p-6 text-contrast"
+	>
 		<ErrorInformationCard
 			title="Server unavailable"
 			:description="loadError.message"
@@ -8,11 +11,16 @@
 			:action="serversAction"
 		/>
 	</div>
-	<div v-else-if="server" class="h-full w-full pt-6">
+	<div
+		v-else-if="server"
+		class="relative mx-auto box-border flex w-full min-w-0 flex-col gap-4 px-6 pt-6 transition-all duration-300"
+		:class="
+			constrainWidth ? 'min-h-[100svh] max-w-[1280px] pb-16' : 'min-h-[calc(100svh-100px)] pb-6'
+		"
+	>
 		<div
 			data-core-server-manager-root
-			class="relative mx-auto box-border flex w-full min-w-0 flex-col gap-4 px-6 pb-6 transition-all duration-300"
-			:class="{ 'max-w-[1280px]': constrainWidth }"
+			class="relative flex w-full min-w-0 flex-col gap-4"
 			:style="{
 				'--server-bg-image':
 					'linear-gradient(180deg, rgba(153,153,153,1) 0%, rgba(87,87,87,1) 100%)',
@@ -24,55 +32,19 @@
 				:server-address="server.net?.domain"
 			>
 				<template #actions>
-					<div class="flex flex-wrap gap-2">
-						<ButtonStyled v-if="powerState === 'running'" color="orange" size="large">
-							<button @click="restartServer">
-								<UpdatedIcon />
-								Restart
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-if="powerState === 'running'" color="red" size="large">
-							<button @click="stopServer">
-								<StopCircleIcon />
-								Stop
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-else-if="server.flows?.intro" color="brand" size="large">
-							<button disabled>
-								<SpinnerIcon class="animate-spin" />
-								Installing...
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-else-if="server.status === 'broken'" color="red" size="large">
-							<button @click="repairServer">
-								<TriangleAlertIcon />
-								Repair
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-else color="brand" size="large">
-							<button
-								:disabled="powerState === 'starting' || powerState === 'stopping'"
-								@click="startServer"
-							>
-								<PlayIcon />
-								{{ powerState === 'starting' ? 'Starting' : 'Start' }}
-							</button>
-						</ButtonStyled>
-						<ButtonStyled v-if="showCopyIdAction" circular type="transparent" size="large">
-							<button v-tooltip="'Copy server ID'" @click="copyId">
-								<ClipboardCopyIcon />
-							</button>
-						</ButtonStyled>
+					<div class="flex gap-2">
+						<PanelServerActionButton />
 						<ButtonStyled circular size="large">
 							<button v-tooltip="'Server settings'" @click="settingsOpen = true">
 								<SettingsIcon />
 							</button>
 						</ButtonStyled>
-						<ButtonStyled v-if="powerState === 'running'" circular type="transparent" size="large">
-							<button v-tooltip="'Kill server'" class="text-red" @click="killServer">
-								<SlashIcon />
-							</button>
-						</ButtonStyled>
+						<PanelServerOverflowMenu
+							:uptime-seconds="displayUptimeSeconds"
+							:show-copy-id-action="showCopyIdAction"
+							:copy-id-label="copyIdLabel"
+							:show-debug-info="showAdvancedDebugInfo"
+						/>
 					</div>
 				</template>
 			</ServerManageHeader>
@@ -81,13 +53,29 @@
 				data-core-navigation
 				class="isolate flex w-full select-none flex-col justify-between gap-4 overflow-auto md:flex-row md:items-center"
 			>
-				<NavTabs :links="navLinks" replace />
+				<NavTabs
+					mode="local"
+					:links="navLinks"
+					:active-index="visibleManageTabIndex"
+					@tab-click="manageTabController.selectTab"
+				/>
 			</div>
 
 			<div data-core-mount class="h-full w-full flex-1">
-				<Suspense>
-					<slot :on-reinstall="repairServer" :on-reinstall-failed="refreshServer" />
-				</Suspense>
+				<NavTabContentTransition
+					:content-key="manageTabContentKey"
+					:direction="manageTabSlideDirection"
+					:visible="manageTabContentVisible"
+					@before-leave="manageTabController.handleBeforeLeave"
+					@after-leave="manageTabController.handleAfterLeave"
+					@after-enter="manageTabController.handleAfterEnter"
+					@enter-cancelled="manageTabController.handleEnterCancelled"
+					@leave-cancelled="manageTabController.handleLeaveCancelled"
+				>
+					<Suspense>
+						<slot :on-reinstall="repairServer" :on-reinstall-failed="refreshServer" />
+					</Suspense>
+				</NavTabContentTransition>
 			</div>
 		</div>
 		<CoreServerSettingsModal
@@ -107,31 +95,42 @@
 			</div>
 		</div>
 	</div>
+	<div
+		v-if="server && showAdvancedDebugInfo"
+		class="relative mx-auto mt-6 box-border w-full min-w-0 px-6"
+		:class="{ 'max-w-[1280px]': constrainWidth }"
+	>
+		<h2 class="m-0 text-lg font-extrabold text-contrast">Server data</h2>
+		<pre class="markdown-body w-full overflow-auto rounded-2xl bg-bg-raised p-4 text-sm">{{
+			safeStringify(server)
+		}}</pre>
+	</div>
 </template>
 
 <script setup lang="ts">
 import {
 	BoxesIcon,
-	ClipboardCopyIcon,
 	DatabaseBackupIcon,
 	FolderOpenIcon,
-	PlayIcon,
+	LayoutTemplateIcon,
 	SettingsIcon,
-	SlashIcon,
-	SpinnerIcon,
-	StopCircleIcon,
 	TerminalSquareIcon,
 	TriangleAlertIcon,
-	UpdatedIcon,
 	UsersIcon,
 } from '@modrinth/assets'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import ErrorInformationCard from '#ui/components/base/ErrorInformationCard.vue'
+import NavTabContentTransition from '#ui/components/base/NavTabContentTransition.vue'
 import NavTabs from '#ui/components/base/NavTabs.vue'
-import ServerManageHeader from '#ui/components/servers/server-header/ServerManageHeader.vue'
+import { useNavTabContentController } from '#ui/composables/nav-tab-content-controller'
+import {
+	PanelServerActionButton,
+	PanelServerOverflowMenu,
+	ServerManageHeader,
+} from '#ui/components/servers/server-header'
 
 import CoreServerSettingsModal from './settings/CoreServerSettingsModal.vue'
 import { useCoreServerRuntime } from './use-core-server-runtime'
@@ -143,6 +142,7 @@ const props = withDefaults(
 		serversPath?: string
 		constrainWidth?: boolean
 		showCopyIdAction?: boolean
+		copyIdLabel?: string
 		reloadPage?: () => void
 		resolveViewer?: () => Promise<{ userId: string | null; userRole: string | null }>
 		authUser?: unknown
@@ -154,6 +154,7 @@ const props = withDefaults(
 		serversPath: '/hosting/manage',
 		constrainWidth: false,
 		showCopyIdAction: false,
+		copyIdLabel: 'Copy ID',
 		reloadPage: undefined,
 		resolveViewer: undefined,
 		authUser: undefined,
@@ -163,20 +164,15 @@ const props = withDefaults(
 )
 
 const router = useRouter()
+const route = useRoute()
 const settingsOpen = ref(false)
 const {
 	instanceId,
 	server,
 	loadError,
 	statsData,
-	powerState,
-	startServer,
-	stopServer,
-	restartServer,
-	killServer,
 	repairServer,
 	refreshServer,
-	copyId,
 } = useCoreServerRuntime(computed(() => props.serverId))
 
 const tickSecond = ref(0)
@@ -190,18 +186,44 @@ onBeforeUnmount(() => {
 	if (tickInterval !== null) clearInterval(tickInterval)
 })
 
-const basePath = computed(() => props.basePath ?? `/hosting/manage/${encodeURIComponent(props.serverId)}`)
+const basePath = computed(
+	() => props.basePath ?? `/hosting/manage/${encodeURIComponent(props.serverId)}`,
+)
+function getManageTabKind(path: string) {
+	if (path.endsWith('/content')) return 'content'
+	if (path.endsWith('/files')) return 'files'
+	if (path.endsWith('/backups')) return 'backups'
+	if (path.endsWith('/access')) return 'access'
+	if (path.endsWith('/browse')) return 'browse'
+	return 'overview'
+}
+
 const displayUptimeSeconds = computed(() => {
 	void tickSecond.value
 	return statsData.value?.total_uptime_seconds ?? statsData.value?.uptime_seconds ?? 0
 })
 const navLinks = computed(() => [
-	{ label: 'Overview', href: basePath.value, icon: TerminalSquareIcon },
-	{ label: 'Content', href: `${basePath.value}/content`, icon: BoxesIcon },
-	{ label: 'Files', href: `${basePath.value}/files`, icon: FolderOpenIcon },
-	{ label: 'Backups', href: `${basePath.value}/backups`, icon: DatabaseBackupIcon },
-	{ label: 'Access', href: `${basePath.value}/access`, icon: UsersIcon },
+	{ label: 'Overview', href: basePath.value, icon: LayoutTemplateIcon, kind: 'overview' },
+	{ label: 'Content', href: `${basePath.value}/content`, icon: BoxesIcon, kind: 'content' },
+	{ label: 'Files', href: `${basePath.value}/files`, icon: FolderOpenIcon, kind: 'files' },
+	{ label: 'Backups', href: `${basePath.value}/backups`, icon: DatabaseBackupIcon, kind: 'backups' },
+	{ label: 'Access', href: `${basePath.value}/access`, icon: UsersIcon, kind: 'access' },
 ])
+const activeManageTabKind = computed(() => getManageTabKind(route.path))
+const activeManageTabIndex = computed(() =>
+	navLinks.value.findIndex((tab) => tab.kind === activeManageTabKind.value),
+)
+const manageTabController = useNavTabContentController({
+	activeIndex: activeManageTabIndex,
+	router,
+	replace: true,
+})
+const visibleManageTabIndex = manageTabController.activeIndex
+const manageTabSlideDirection = manageTabController.direction
+const manageTabContentVisible = manageTabController.visible
+const manageTabContentKey = computed(
+	() => `${basePath.value}:${activeManageTabKind.value}`,
+)
 const serversAction = computed(() => ({
 	label: 'Back to servers',
 	onClick: () => {
@@ -214,4 +236,21 @@ const serversAction = computed(() => ({
 	color: 'standard' as const,
 	icon: TerminalSquareIcon,
 }))
+
+function safeStringify(value: unknown, indent = ' '): string {
+	const seen = new WeakSet()
+	return JSON.stringify(
+		value,
+		(_key, nextValue) => {
+			if (typeof nextValue === 'object' && nextValue !== null) {
+				if (seen.has(nextValue)) {
+					return '[Circular]'
+				}
+				seen.add(nextValue)
+			}
+			return nextValue
+		},
+		indent,
+	)
+}
 </script>

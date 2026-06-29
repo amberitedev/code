@@ -247,6 +247,7 @@ mod tests {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceRecord {
     pub id: InstanceId,
+    pub path: String,
     pub name: String,
     pub game_version: String,
     pub loader: ModLoader,

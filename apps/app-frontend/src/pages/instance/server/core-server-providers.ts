@@ -21,6 +21,7 @@ import type { ServerSettingsTabId } from './settings/tabs'
 
 type CoreServerProviderState = {
 	instanceId: ComputedRef<string>
+	publicInstanceId: ComputedRef<string>
 	rawInstance: Ref<CoreInstance | null>
 	server: ComputedRef<CoreServerViewData | null>
 	statsData: Ref<CoreStats | null>
@@ -63,7 +64,8 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 	const isServerRunning = computed(() => state.powerState.value === 'running')
 	const powerStateDetails = ref(undefined)
 	const serverContextServer = computed(
-		() => state.server.value ?? toHostingServer(createFallbackInstance(state.instanceId.value)),
+		() =>
+			state.server.value ?? toHostingServer(createFallbackInstance(state.publicInstanceId.value)),
 	)
 
 	const settingsController = createServerSettingsController()
@@ -71,7 +73,7 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 
 	provideModrinthServerContext({
 		get serverId() {
-			return state.instanceId.value
+			return state.publicInstanceId.value
 		},
 		worldId,
 		server: serverContextServer,
@@ -135,7 +137,7 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		changeVersion: state.changeVersion,
 	})
 	provide<SharedCoreServerContext>(sharedCoreServerContextKey, {
-		instanceId: state.instanceId,
+		instanceId: state.publicInstanceId,
 		rawInstance: state.rawInstance,
 		server: state.server,
 		statsData: state.statsData,
@@ -152,7 +154,9 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 		repairServer: state.repairServer,
 		changeVersion: state.changeVersion,
 		copyId: async () => {
-			await navigator.clipboard.writeText(state.instanceId.value)
+			if (state.publicInstanceId.value) {
+				await navigator.clipboard.writeText(state.publicInstanceId.value)
+			}
 		},
 	})
 
@@ -162,6 +166,7 @@ export function provideCoreServerRuntime(state: CoreServerProviderState) {
 function createFallbackInstance(id: string): CoreInstance {
 	return {
 		id,
+		path: id,
 		name: id,
 		game_version: 'Unknown',
 		loader: 'vanilla',

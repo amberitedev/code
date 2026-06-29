@@ -80,6 +80,7 @@ export interface AmberiteSocialClient {
 	getProfile(idOrUsername: string): Promise<AmberitePublicProfile | null>
 	searchProfiles(query: string, limit?: number): Promise<AmberitePublicProfile[]>
 	updateCurrentProfile(args: {
+		displayName?: string
 		username?: string
 		bio?: string
 		avatar?: null | {
@@ -252,6 +253,7 @@ export class ConvexApiClient implements AmberiteSocialClient {
 	}
 
 	updateCurrentProfile(args: {
+		displayName?: string
 		username?: string
 		bio?: string
 		avatar?: null | {

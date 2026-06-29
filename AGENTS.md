@@ -119,6 +119,7 @@ These rules apply to any task touching `apps/app-frontend` or app-facing UI in `
 ### Shared UI component changes
 
 - Do not modify `packages/ui` unless specifically asked or the change is a genuine shared bug fix; start at the page/usage definition, move downward through local wrappers/composition, and skip shared package edits unless every other option is exhausted.
+- HARD RULE: Do not modify the `NavTabs` selected-slider animation unless the user explicitly asks for that animation to change. It is the upstream Modrinth staggered `left`/`right`/`top`/`bottom` slide transition, not a FLIP, transform, scale, or Web Animations animation. If adjacent code must change, preserve the exact timing, easing, delay, and edge-delay behavior from `packages/ui/src/composables/ui-motion.ts`.
 
 `packages/ui` is a shared UI library used throughout the desktop app and website, and it should stay as close to upstream as possible. A change made there can silently alter many unrelated surfaces, create random UI regressions, and make future upstream UI usage harder.
 

@@ -19,6 +19,7 @@ export interface AmberiteAccountUser {
 }
 
 export interface AmberiteProfilePatch {
+	displayName?: string
 	username?: string
 	bio?: string
 	avatar?: null | {

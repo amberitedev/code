@@ -147,8 +147,6 @@ function applyState(next: SessionWire) {
 				groupId: next.group?.group.id,
 			})
 		}
-	} else {
-		clearConnectedCore()
 	}
 	loading.value = false
 	error.value = null
@@ -282,13 +280,18 @@ export function useSocial(): UseSocialReturn {
 			if (!initialStateReceived)
 				handleSubscriptionError(new Error('Timed out waiting for social state.'))
 		}, INITIAL_SOCIAL_STATE_TIMEOUT_MS)
-		useRealtimeConvexClient().onUpdate(sessionStateQuery, {}, (next) => {
-			try {
-				applyState(next)
-			} catch (reason) {
-				handleSubscriptionError(reason)
-			}
-		}, handleSubscriptionError)
+		useRealtimeConvexClient().onUpdate(
+			sessionStateQuery,
+			{},
+			(next) => {
+				try {
+					applyState(next)
+				} catch (reason) {
+					handleSubscriptionError(reason)
+				}
+			},
+			handleSubscriptionError,
+		)
 	}
 	return {
 		currentUser,

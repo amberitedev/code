@@ -17,8 +17,9 @@ use crate::{
         state::AppState,
     },
     presentation::{
-        authz::require_instance_permission, error::ApiError,
+        error::ApiError,
         extractors::AuthUser,
+        instance_path::resolve_authorized_instance_id,
     },
 };
 
@@ -28,9 +29,11 @@ pub async fn list_logs_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:logs")
-        .await?;
-    let logs = list_logs(&state, &id).await?;
+    let instance_id =
+        resolve_authorized_instance_id(&state, &claims.sub, &id, "server:logs")
+            .await?
+            .to_string();
+    let logs = list_logs(&state, &instance_id).await?;
     Ok(Json(json!({ "logs": logs })))
 }
 
@@ -40,9 +43,12 @@ pub async fn read_log_handler(
     Path((id, filename)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:logs")
-        .await?;
-    let (path, is_gzipped) = resolve_log(&state, &id, &filename).await?;
+    let instance_id =
+        resolve_authorized_instance_id(&state, &claims.sub, &id, "server:logs")
+            .await?
+            .to_string();
+    let (path, is_gzipped) =
+        resolve_log(&state, &instance_id, &filename).await?;
     let data = tokio::fs::read(&path)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -72,9 +78,11 @@ pub async fn list_crash_reports_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:logs")
-        .await?;
-    let reports = list_crash_reports(&state, &id).await?;
+    let instance_id =
+        resolve_authorized_instance_id(&state, &claims.sub, &id, "server:logs")
+            .await?
+            .to_string();
+    let reports = list_crash_reports(&state, &instance_id).await?;
     Ok(Json(json!({ "crash_reports": reports })))
 }
 
@@ -84,9 +92,11 @@ pub async fn read_crash_report_handler(
     Path((id, filename)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:logs")
-        .await?;
-    let path = resolve_crash(&state, &id, &filename).await?;
+    let instance_id =
+        resolve_authorized_instance_id(&state, &claims.sub, &id, "server:logs")
+            .await?
+            .to_string();
+    let path = resolve_crash(&state, &instance_id, &filename).await?;
     let data = tokio::fs::read(&path)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;

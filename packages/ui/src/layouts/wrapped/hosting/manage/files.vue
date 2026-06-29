@@ -1,12 +1,16 @@
 <template>
-	<FilePageLayout :show-debug-info="showDebugInfo" :show-refresh-button="showRefreshButton" />
+	<ReadyTransition :pending="filesReadyPending">
+		<FilePageLayout :show-debug-info="showDebugInfo" :show-refresh-button="showRefreshButton" />
+	</ReadyTransition>
 </template>
 
 <script setup lang="ts">
 import { useQuery } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
+import { useReadyState } from '#ui/composables'
 import { injectHostingBackend, injectNotificationManager } from '#ui/providers'
 import FilePageLayout from '#ui/layouts/shared/files-tab/layout.vue'
 import { provideFileManager } from '#ui/layouts/shared/files-tab/providers/file-manager'
@@ -56,6 +60,27 @@ const filesQuery = useQuery({
 const items = computed(() => filesQuery.data.value ?? [])
 const loading = computed(() => filesQuery.isLoading.value)
 const error = computed(() => (filesQuery.error.value as Error | null) ?? null)
+const filesReadyPending = useReadyState(filesQuery)
+const isBusy = computed(
+	() => ctx.powerState.value === 'starting' || ctx.powerState.value === 'stopping',
+)
+const busyTooltip = computed(() => (isBusy.value ? 'Please wait' : undefined))
+
+watch(
+	() => route.query,
+	(newQuery, oldQuery) => {
+		if (newQuery.editing && editingFile.value?.path !== newQuery.editing) {
+			const filePath = newQuery.editing as string
+			editingFile.value = {
+				name: filePath.split('/').pop() || '',
+				path: filePath,
+			}
+		} else if (oldQuery?.editing && !newQuery.editing) {
+			editingFile.value = null
+		}
+	},
+	{ deep: true, immediate: true },
+)
 
 function navigateTo(path: string) {
 	const query = { ...route.query }
@@ -161,7 +186,8 @@ provideFileManager({
 	uploadFiles,
 	uploadState,
 	refresh: () => void refresh(),
-	isBusy: computed(() => false),
+	isBusy,
+	busyTooltip,
 	extractFile: (path, _override, dry) =>
 		dry
 			? Promise.resolve({ modpack_name: null, conflicting_files: [] })

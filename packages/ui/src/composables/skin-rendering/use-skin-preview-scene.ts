@@ -1,11 +1,8 @@
-import { useGLTF } from '@tresjs/cientos'
-import { useTexture } from '@tresjs/core'
 import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
 	type ComputedRef,
 	markRaw,
-	onBeforeMount,
 	onUnmounted,
 	type Ref,
 	ref,
@@ -17,6 +14,7 @@ import {
 	applyCapeTexture,
 	applyTexture,
 	createTransparentTexture,
+	loadModel as loadSkinModel,
 	loadTexture as loadSkinTexture,
 } from '#ui/utils/webgl/skin-rendering.ts'
 
@@ -164,7 +162,7 @@ export function useSkinPreviewScene({
 
 		try {
 			isModelLoaded.value = false
-			const { scene: loadedScene, animations } = await useGLTF(src)
+			const { scene: loadedScene, animations } = await loadSkinModel(src)
 			const clonedScene = cloneSceneForRenderer(loadedScene)
 			if (isUnmounted || loadVersion !== modelLoadVersion) {
 				disposeSceneMaterials(clonedScene)
@@ -199,16 +197,7 @@ export function useSkinPreviewScene({
 		if (!src) return null
 
 		try {
-			try {
-				return await loadSkinTexture(src)
-			} catch {
-				const tex = await useTexture([src])
-				tex.colorSpace = THREE.SRGBColorSpace
-				tex.flipY = false
-				tex.magFilter = THREE.NearestFilter
-				tex.minFilter = THREE.NearestFilter
-				return tex
-			}
+			return await loadSkinTexture(src)
 		} catch (error) {
 			console.error('Failed to load texture:', error)
 			return null
@@ -254,6 +243,7 @@ export function useSkinPreviewScene({
 	watch(
 		() => selectedModelSrc.value,
 		(src) => loadModel(src),
+		{ immediate: true },
 	)
 	watch(
 		() => textureSrc.value,
@@ -269,30 +259,15 @@ export function useSkinPreviewScene({
 			applyTextureToLoadedModel()
 			isTextureLoaded.value = true
 		},
+		{ immediate: true },
 	)
 	watch(
 		() => capeSrc.value,
 		async (newCapeSrc) => {
 			await loadAndApplyCapeTexture(newCapeSrc)
 		},
+		{ immediate: true },
 	)
-
-	onBeforeMount(async () => {
-		try {
-			isTextureLoaded.value = false
-			texture.value = await loadAndApplyTexture(textureSrc.value)
-			loadedTextureSrc.value = textureSrc.value
-			isTextureLoaded.value = true
-
-			await loadModel(selectedModelSrc.value)
-
-			if (capeSrc.value) {
-				await loadAndApplyCapeTexture(capeSrc.value)
-			}
-		} catch (error) {
-			console.error('Failed to initialize skin preview:', error)
-		}
-	})
 
 	onUnmounted(() => {
 		isUnmounted = true

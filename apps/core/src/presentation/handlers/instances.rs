@@ -20,12 +20,13 @@ use crate::{
     },
     domain::{
         event::Event,
-        instance::{InstanceId, InstanceRecord, MemorySettings, ModLoader},
+        instance::{InstanceRecord, MemorySettings, ModLoader},
     },
     presentation::{
         authz::{can_access_instance, require_instance_permission},
         error::ApiError,
         extractors::AuthUser,
+        instance_path::resolve_instance_path,
     },
 };
 
@@ -41,7 +42,7 @@ pub struct CreateBody {
 
 pub(crate) fn record_list_item(r: &InstanceRecord) -> Value {
     json!({
-        "id": r.id.to_string(), "name": r.name, "game_version": r.game_version,
+        "id": r.id.to_string(), "path": r.path, "name": r.name, "game_version": r.game_version,
         "loader": r.loader.to_string(), "loader_version": r.loader_version,
         "port": r.port, "memory": { "min_mb": r.memory.min_mb, "max_mb": r.memory.max_mb },
         "status": r.status.to_string(), "install_status": r.install_status.to_string(),
@@ -52,7 +53,7 @@ pub(crate) fn record_list_item(r: &InstanceRecord) -> Value {
 
 fn record_detail(r: &InstanceRecord) -> Value {
     json!({
-        "id": r.id.to_string(), "name": r.name, "game_version": r.game_version,
+        "id": r.id.to_string(), "path": r.path, "name": r.name, "game_version": r.game_version,
         "loader": r.loader.to_string(), "loader_version": r.loader_version,
         "port": r.port, "memory": { "min_mb": r.memory.min_mb, "max_mb": r.memory.max_mb },
         "java_version": r.java_version, "jvm_args": r.jvm_args, "server_args": r.server_args,
@@ -71,8 +72,8 @@ pub async fn list_instances(
     let records = state.instance_store.list().await?;
     let mut instances = Vec::new();
     for record in records {
-        let id = record.id.to_string();
-        if can_access_instance(&state, &claims.sub, &id, "server:view").await {
+        let instance_id = record.id.to_string();
+        if can_access_instance(&state, &claims.sub, &instance_id, "server:view").await {
             instances.push(record_list_item(&record));
         }
     }
@@ -82,15 +83,13 @@ pub async fn list_instances(
 /// GET /instances/:id — get a single instance.
 pub async fn get_instance(
     AuthUser(claims): AuthUser,
-    Path(id): Path<String>,
+    Path(path): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = id.parse::<InstanceId>().map_err(|_| {
-        ApiError::BadRequest("invalid instance id — must be a UUID".into())
-    })?;
-    require_instance_permission(&state, &claims.sub, &id, "server:view")
+    let record = resolve_instance_path(&state, &path).await?;
+    let instance_id = record.id.to_string();
+    require_instance_permission(&state, &claims.sub, &instance_id, "server:view")
         .await?;
-    let record = state.instance_store.get(&iid).await?;
     Ok(Json(record_detail(&record)))
 }
 
@@ -172,14 +171,14 @@ fn normalize_override(value: Option<String>) -> Option<String> {
 
 pub async fn patch_instance(
     AuthUser(claims): AuthUser,
-    Path(id): Path<String>,
+    Path(path): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = id.parse::<InstanceId>().map_err(|_| {
-        ApiError::BadRequest("invalid instance id — must be a UUID".into())
-    })?;
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+    let mut record = resolve_instance_path(&state, &path).await?;
+    let iid = record.id.clone();
+    let instance_id = iid.to_string();
+    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
         .await?;
 
     if let Some(ref name) = body.name {
@@ -214,7 +213,7 @@ pub async fn patch_instance(
     }
 
     if body.jvm_args.is_some() || body.server_args.is_some() {
-        let current = state.instance_store.get(&iid).await?;
+        let current = record;
         let jvm = match body.jvm_args {
             Some(value) => normalize_override(value),
             None => current.jvm_args,
@@ -229,7 +228,7 @@ pub async fn patch_instance(
             .await?;
     }
 
-    let record = state.instance_store.get(&iid).await?;
+    record = state.instance_store.get(&iid).await?;
     activity_service::record(
         &state,
         &claims.sub,
@@ -250,15 +249,13 @@ pub async fn patch_instance(
 /// what Core runs and offer a reset baseline.
 pub async fn get_startup(
     AuthUser(claims): AuthUser,
-    Path(id): Path<String>,
+    Path(path): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = id.parse::<InstanceId>().map_err(|_| {
-        ApiError::BadRequest("invalid instance id — must be a UUID".into())
-    })?;
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+    let record = resolve_instance_path(&state, &path).await?;
+    let instance_id = record.id.to_string();
+    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
         .await?;
-    let record = state.instance_store.get(&iid).await?;
     let (def_java, def_args) = default_launch_args(&state, &record).await;
     let (eff_java, eff_args) = resolve_launch(&state, &record).await;
     Ok(Json(json!({
@@ -290,14 +287,13 @@ fn quote_if_needed(token: &str) -> String {
 /// DELETE /instances/:id — delete an instance (must be offline).
 pub async fn delete_instance(
     AuthUser(claims): AuthUser,
-    Path(id): Path<String>,
+    Path(path): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    // SEC-04: reject non-UUID paths before touching the database.
-    let iid = id.parse::<InstanceId>().map_err(|_| {
-        ApiError::BadRequest("invalid instance id — must be a UUID".into())
-    })?;
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
+    let record = resolve_instance_path(&state, &path).await?;
+    let iid = record.id;
+    let instance_id = iid.to_string();
+    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
         .await?;
 
     svc_delete_instance(&state, &iid).await?;

@@ -28,6 +28,7 @@ export class CoreInstanceStateManager {
 	private connectionState: ConnectionState = 'unknown'
 	private isRefreshing = false
 	private error: unknown | null = null
+	private starting = false
 
 	constructor(private readonly adapter: PlatformAdapter) {
 		this.client = new CoreApiClient(adapter)
@@ -54,6 +55,7 @@ export class CoreInstanceStateManager {
 			this.monitor.onStateChange((state) => {
 				this.connectionState = state
 				this.emit()
+				if (this.starting) return
 				if (state === 'connected') {
 					void this.refresh().catch(() => {})
 					void this.connectEvents().catch(() => {})
@@ -62,9 +64,16 @@ export class CoreInstanceStateManager {
 				}
 			})
 		}
-		await this.monitor.start()
-		await this.refresh().catch(() => {})
-		await this.connectEvents().catch(() => {})
+		this.starting = true
+		try {
+			await this.monitor.start()
+		} finally {
+			this.starting = false
+		}
+		if (this.connectionState === 'connected') {
+			await this.refresh().catch(() => {})
+			await this.connectEvents().catch(() => {})
+		}
 	}
 
 	stop(): void {
@@ -130,16 +139,19 @@ export class CoreInstanceStateManager {
 	private async connectEvents(): Promise<void> {
 		if (this.events || this.connectionState !== 'connected') return
 		try {
-			this.events = await this.client.openEvents()
-			this.events.onEvent((event) => this.applyEvent(event))
-			this.events.onError((error) => {
+			const events = await this.client.openEvents()
+			this.events = events
+			events.onEvent((event) => this.applyEvent(event))
+			events.onError((error) => {
 				this.error = error
 				this.emit()
 			})
-			this.events.onClose(() => {
+			events.onClose(() => {
+				if (this.events !== events) return
 				this.events = null
 				if (this.connectionState === 'connected') this.scheduleEventReconnect()
 			})
+			await this.refresh().catch(() => {})
 		} catch (error) {
 			this.error = error
 			this.emit()
@@ -197,6 +209,7 @@ export class CoreInstanceStateManager {
 function toSummary(instance: CoreInstance | CoreInstanceSummary): CoreInstanceSummary {
 	return {
 		id: instance.id,
+		path: instance.path,
 		name: instance.name,
 		game_version: instance.game_version,
 		loader: instance.loader,

@@ -12,11 +12,8 @@ export type CoreOnboardingFlow = 'create' | 'connect'
 
 export interface CoreOnboardingContext {
 	flow: Ref<CoreOnboardingFlow>
-	coreName: Ref<string>
-	coreDescription: Ref<string>
-	coreUrl: Ref<string>
-	coreIcon: Ref<string | undefined>
 	connectCode: Ref<string>
+	connectValidated: Ref<boolean>
 	inviteSearch: Ref<string>
 	inviteAsFriend: Ref<boolean>
 	error: Ref<string>
@@ -25,7 +22,6 @@ export interface CoreOnboardingContext {
 	members: ComputedRef<CoreAccessMember[]>
 	roles: ServerAccessRoleOption[]
 	inviteSuggestions: ComputedRef<ServerAccessInviteSuggestion[]>
-	selectIcon: () => Promise<void>
 	selectInviteSuggestion: (user: ServerAccessInviteSuggestion) => void
 	createInvite: () => void
 	quickInvite: (member: CoreAccessMember) => void

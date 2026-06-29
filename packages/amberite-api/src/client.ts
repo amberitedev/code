@@ -48,6 +48,7 @@ import type {
 	CoreSetupStatus,
 	CoreSetupRequest,
 	CoreSetupResponse,
+	CoreSetupDevResetResponse,
 	CoreInstanceEvent,
 	CoreModpackManifest,
 	CoreMetadata,
@@ -190,6 +191,26 @@ export class CoreApiClient {
 
 	completeSetup(body: CoreSetupRequest): Promise<CoreSetupResponse> {
 		return this.direct('core.setup.complete', (ctx) => api.completeSetup(ctx, body))
+	}
+
+	devResetSetup(): Promise<CoreSetupDevResetResponse> {
+		return this.direct('core.setup.dev_reset', api.devResetSetup)
+	}
+
+	devResetSetupAt(coreUrl: string): Promise<CoreSetupDevResetResponse> {
+		return this.pipeline.callValue({
+			key: 'core.setup.dev_reset',
+			surface: 'core',
+			execute: async (signal, resolvedPolicy) => {
+				return api.devResetSetup({
+					baseUrl: coreUrl.replace(/\/$/, ''),
+					token: null,
+					fetchFn: this.adapter.fetchFn,
+					timeoutMs: this.options.timeoutMs ?? resolvedPolicy.timeoutMs,
+					signal,
+				})
+			},
+		})
 	}
 
 	completeSetupAt(coreUrl: string, body: CoreSetupRequest): Promise<CoreSetupResponse> {

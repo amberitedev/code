@@ -23,6 +23,9 @@ pub(crate) struct Cli {
     /// Include diagnostic detail in failures.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
+    /// Disable HTTP auth and permission checks. Debug builds only.
+    #[arg(short = 'n', long = "no-auth", alias = "noauth", global = true)]
+    no_auth: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -198,7 +201,7 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
     match cli.command.unwrap_or(Command::Run) {
         Command::Run => {
             crate::init_tracing();
-            crate::run_server().await
+            crate::run_server(cli.no_auth).await
         }
         Command::Check => check().await,
         Command::Migrate => migrate().await,
@@ -262,19 +265,11 @@ async fn reset_pairing() -> Result<()> {
     let config = crate::config::Config::from_env()?;
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
-    for statement in [
-        "DELETE FROM core_config WHERE id = 1",
-        "DELETE FROM core_members",
-        "DELETE FROM instance_members",
-        "DELETE FROM core_group_bans",
-        "DELETE FROM core_invitations",
-        "DELETE FROM activity_log",
-    ] {
-        sqlx::query(statement).execute(&pool).await?;
-    }
-    tokio::fs::remove_file(config.data_dir.join(".setup_secret"))
-        .await
-        .ok();
+    crate::application::pairing_service::clear_pairing_storage(
+        &pool,
+        &config.data_dir,
+    )
+    .await?;
     println!("Pairing reset. Restart Core to generate a new pairing code.");
     Ok(())
 }

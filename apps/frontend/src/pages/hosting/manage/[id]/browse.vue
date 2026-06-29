@@ -7,10 +7,6 @@ const backPath = computed(() => `/hosting/manage/${encodeURIComponent(route.para
 useHead({
 	title: 'Add content - Modrinth',
 })
-
-definePageMeta({
-	middleware: 'auth',
-})
 </script>
 
 <template>

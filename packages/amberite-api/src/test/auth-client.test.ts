@@ -50,10 +50,10 @@ describe('ConvexAmberiteAuthClient', () => {
 				avatar_url: null,
 				bio: 'hello',
 				created: '2026-01-01T00:00:00.000Z',
-				email: 'amber@example.com',
-				email_verified: true,
-				auth_providers: ['github'],
-				has_password: true,
+				email: null,
+				email_verified: false,
+				auth_providers: ['minecraft'],
+				has_password: false,
 				has_totp: false,
 			})
 		})
@@ -66,9 +66,9 @@ describe('ConvexAmberiteAuthClient', () => {
 		expect(session?.user).toMatchObject({
 			id: 'user-1',
 			username: 'amber',
-			email: 'amber@example.com',
-			auth_providers: ['github'],
-			has_password: true,
+			email: null,
+			auth_providers: ['minecraft'],
+			has_password: false,
 		})
 		expect(await adapterSessionStorage(adapter).read()).toEqual({
 			token: 'new-token',
@@ -76,7 +76,7 @@ describe('ConvexAmberiteAuthClient', () => {
 		})
 	})
 
-	it('routes password and Modrinth-token sign-in through explicit Amberite auth providers', async () => {
+	it('routes Minecraft token sign-in through the only Amberite auth provider', async () => {
 		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body))
 			if (body.path === 'auth:signIn') {
@@ -91,17 +91,15 @@ describe('ConvexAmberiteAuthClient', () => {
 		})
 		const client = new ConvexAmberiteAuthClient({ adapter: createAdapter(fetchFn) })
 
-		await client.signInWithPassword({ login: 'amber@example.com', password: 'password123' })
-		await client.signInWithModrinthToken('mra_token')
+		await client.signInWithMinecraftToken({ minecraftAccessToken: 'minecraft-token' })
 
 		const bodies = await requestBodies(fetchFn)
 		expect(bodies[0]).toMatchObject({
 			path: 'auth:signIn',
-			args: { provider: 'web-password', params: { flow: 'signIn' } },
-		})
-		expect(bodies[2]).toMatchObject({
-			path: 'auth:signIn',
-			args: { provider: 'modrinth-token', params: { modrinthToken: 'mra_token' } },
+			args: {
+				provider: 'minecraft-token',
+				params: { minecraftAccessToken: 'minecraft-token' },
+			},
 		})
 	})
 

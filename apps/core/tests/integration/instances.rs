@@ -27,6 +27,7 @@ async fn list_instances_shows_created() {
     assert_eq!(instances[0]["install_status"], "ready");
     assert!(instances[0]["created_at"].is_string());
     assert!(instances[0]["updated_at"].is_string());
+    assert!(instances[0]["path"].is_string());
     assert!(instances[0]["data_dir"].is_null());
     // Verify the actual IDs are present — not just any 3 items.
     let returned_ids: Vec<&str> = instances
@@ -56,6 +57,8 @@ async fn create_instance_returns_id() {
     assert_eq!(res.status(), 201);
     let body: serde_json::Value = res.json().await.unwrap();
     let id = body["id"].as_str().expect("id must be a string");
+    let path = body["path"].as_str().expect("path must be a string");
+    assert_eq!(path, "test-server");
 
     // Validate UUID format: 8-4-4-4-12 hex groups.
     let parts: Vec<&str> = id.split('-').collect();
@@ -70,10 +73,10 @@ async fn create_instance_returns_id() {
     assert_eq!(parts[3].len(), 4, "UUID group 3 must be 4 chars: {id}");
     assert_eq!(parts[4].len(), 12, "UUID group 4 must be 12 chars: {id}");
 
-    // The returned ID must be fetchable via GET.
+    // The returned path must be fetchable via GET.
     let fetched: serde_json::Value = app
         .client
-        .get(app.url(&format!("/instances/{id}")))
+        .get(app.url(&format!("/instances/{}", encode_path_segment(path))))
         .send()
         .await
         .unwrap()
@@ -85,6 +88,60 @@ async fn create_instance_returns_id() {
         id,
         "GET must return same ID as create"
     );
+    assert_eq!(fetched["path"].as_str().unwrap(), path);
+}
+
+#[tokio::test]
+async fn create_instance_assigns_collision_suffix_paths() {
+    let app = common::TestApp::spawn().await;
+    let mut first_body = common::default_create_body();
+    first_body["name"] = json!("Collision Server");
+    first_body["port"] = json!(25580);
+    let first: serde_json::Value = app
+        .client
+        .post(app.url("/instances"))
+        .json(&first_body)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let mut second_body = first_body.clone();
+    second_body["port"] = json!(25581);
+    let second: serde_json::Value = app
+        .client
+        .post(app.url("/instances"))
+        .json(&second_body)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(first["path"], "Collision Server");
+    assert_eq!(second["path"], "Collision Server (1)");
+}
+
+#[tokio::test]
+async fn create_instance_sanitizes_public_path() {
+    let app = common::TestApp::spawn().await;
+    let mut body = common::default_create_body();
+    body["name"] = json!("bad/\\?*:'\"|<>!name");
+    let created: serde_json::Value = app
+        .client
+        .post(app.url("/instances"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(created["path"], "bad___________name");
 }
 
 #[tokio::test]
@@ -132,6 +189,7 @@ async fn get_instance_returns_record() {
 
     // Core fields match what was sent in default_create_body().
     assert_eq!(body["id"].as_str().unwrap(), id);
+    assert_eq!(body["path"], "test-server");
     assert_eq!(body["name"], "test-server");
     assert_eq!(body["status"], "offline");
     assert_eq!(body["install_status"], "ready");
@@ -154,6 +212,41 @@ async fn get_instance_returns_record() {
 }
 
 #[tokio::test]
+async fn instance_path_is_stable_after_rename() {
+    let app = common::TestApp::spawn().await;
+    let id = common::create_test_instance(&app).await;
+    let record = app.state.instance_store.get(&id.parse().unwrap()).await.unwrap();
+    let path = record.path;
+    let encoded_path = encode_path_segment(&path);
+
+    let updated: serde_json::Value = app
+        .client
+        .patch(app.url(&format!("/instances/{encoded_path}")))
+        .json(&json!({ "name": "renamed server" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["id"], id);
+    assert_eq!(updated["path"], path);
+    assert_eq!(updated["name"], "renamed server");
+
+    let fetched: serde_json::Value = app
+        .client
+        .get(app.url(&format!("/instances/{encoded_path}")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched["path"], path);
+    assert_eq!(fetched["name"], "renamed server");
+}
+
+#[tokio::test]
 async fn get_instance_not_found_returns_404() {
     let app = common::TestApp::spawn().await;
     let res = app
@@ -171,10 +264,12 @@ async fn get_instance_not_found_returns_404() {
 async fn delete_instance_removes_record() {
     let app = common::TestApp::spawn().await;
     let id = common::create_test_instance(&app).await;
+    let record = app.state.instance_store.get(&id.parse().unwrap()).await.unwrap();
+    let path = encode_path_segment(&record.path);
 
     let del = app
         .client
-        .delete(app.url(&format!("/instances/{id}")))
+        .delete(app.url(&format!("/instances/{path}")))
         .send()
         .await
         .unwrap();
@@ -182,7 +277,7 @@ async fn delete_instance_removes_record() {
 
     let get = app
         .client
-        .get(app.url(&format!("/instances/{id}")))
+        .get(app.url(&format!("/instances/{path}")))
         .send()
         .await
         .unwrap();
@@ -220,21 +315,33 @@ async fn delete_running_instance_returns_409() {
     );
 }
 
-/// SEC-04 fixed: deleting a non-UUID path now returns 400 Bad Request.
 #[tokio::test]
-async fn delete_instance_invalid_uuid_returns_400() {
+async fn delete_instance_unknown_path_returns_404() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .delete(app.url("/instances/not-a-uuid"))
+        .delete(app.url("/instances/not-a-known-path"))
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        res.status(),
-        400,
-        "SEC-04 fixed: non-UUID path must return 400"
-    );
+    assert_eq!(res.status(), 404);
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["error"].is_string());
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'.'
+            | b'_'
+            | b'~' => encoded.push(*byte as char),
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
 }

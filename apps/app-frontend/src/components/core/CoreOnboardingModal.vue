@@ -12,7 +12,6 @@ import {
 } from './core-onboarding-context'
 import AdvancedStage from './stages/AdvancedStage.vue'
 import CodeStage from './stages/CodeStage.vue'
-import GeneralStage from './stages/GeneralStage.vue'
 import MembersStage from './stages/MembersStage.vue'
 import { useCoreOnboardingState } from './use-core-onboarding-state'
 
@@ -30,36 +29,30 @@ const stages: StageConfigInput<CoreOnboardingContext>[] = [
 		cannotNavigateForward: () => !onboarding.connectValidated.value,
 		leftButtonConfig: null,
 		rightButtonConfig: (ctx) => ({
-			label: 'Connect',
+			label: onboarding.connectValidated.value ? 'Continue' : 'Connect',
 			icon: RightArrowIcon,
 			iconPosition: 'after',
 			color: 'brand',
-			disabled: ctx.connectCode.value.replace(/[^A-Z0-9]/gi, '').length !== 8,
+			disabled:
+				!onboarding.connectValidated.value &&
+				ctx.connectCode.value.replace(/[^A-Z0-9]/gi, '').length !== 8,
 			loading: ctx.working.value,
-			onClick: ctx.working.value ? undefined : onboarding.validateConnectAndContinue,
+			onClick: ctx.working.value
+				? undefined
+				: onboarding.connectValidated.value
+					? () => modal.value?.nextStage()
+					: onboarding.validateConnectAndContinue,
 		}),
-		maxWidth: '800px',
-	},
-	{
-		id: 'general',
-		title: 'General',
-		stageContent: GeneralStage,
-		leftButtonConfig: (ctx) =>
-			ctx.flow.value === 'create' ? null : { label: 'Back', onClick: () => modal.value?.prevStage() },
-		rightButtonConfig: {
-			label: 'Next',
-			icon: RightArrowIcon,
-			iconPosition: 'after',
-			color: 'brand',
-			onClick: () => modal.value?.nextStage(),
-		},
 		maxWidth: '800px',
 	},
 	{
 		id: 'members',
 		title: 'Members',
 		stageContent: MembersStage,
-		leftButtonConfig: { label: 'Back', onClick: () => modal.value?.prevStage() },
+		leftButtonConfig: (ctx) =>
+			ctx.flow.value === 'create'
+				? null
+				: { label: 'Back', onClick: () => modal.value?.prevStage() },
 		rightButtonConfig: {
 			label: 'Next',
 			icon: RightArrowIcon,

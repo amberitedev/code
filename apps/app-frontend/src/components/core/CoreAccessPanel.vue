@@ -1,34 +1,33 @@
 <script setup lang="ts">
-import type { CoreAccessMember, CoreInvitation, CoreRole } from '@amberite/amberite-api'
-import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
 import type {
-	ServerAccessMember,
-	ServerAccessRole,
-	ServerAccessRoleOption,
-} from '@modrinth/ui'
+	AmberiteAccessUiRole,
+	CoreAccessMember,
+	CoreInvitation,
+	CoreRole,
+} from '@amberite/amberite-api'
 import {
-	AccessTable,
-	ButtonStyled,
-	Combobox,
-	StyledInput,
-} from '@modrinth/ui'
+	amberiteAccessRoleOptions,
+	toAmberiteAccessUiMember,
+	uiAccessRoleToCore,
+	uiAccessRoleToPreset,
+} from '@amberite/amberite-api'
+import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
+import type { ServerAccessMember } from '@modrinth/ui'
+import { AccessTable, ButtonStyled, Combobox, StyledInput } from '@modrinth/ui'
 import { computed, onMounted, ref } from 'vue'
 
-import { toAccessMember } from '@/components/core/core-onboarding-members'
 import CoreInviteMemberModal from '@/components/core/CoreInviteMemberModal.vue'
 import { useCoreActivityLog } from '@/components/core/use-core-activity-log'
 import { useCoreClient } from '@/composables/useCoreClient'
-import { useSocial } from '@/composables/useSocial'
 import { useSocialClient } from '@/composables/useSocialClient'
 
-type RoleFilter = ServerAccessRole | 'all'
+type RoleFilter = AmberiteAccessUiRole | 'all'
 
 const emit = defineEmits<{
 	'manage-roles': []
 	'manage-new-roles': []
 }>()
 
-const social = useSocial()
 const socialClient = useSocialClient()
 const core = useCoreClient()
 const { recordUserAccessEvent } = useCoreActivityLog()
@@ -36,18 +35,17 @@ const grantAccessModal = ref<InstanceType<typeof CoreInviteMemberModal>>()
 const coreRoles = ref<CoreRole[]>([])
 const coreMembers = ref<CoreAccessMember[]>([])
 const coreInvitations = ref<CoreInvitation[]>([])
+const canManageUsers = ref(false)
 const search = ref('')
 const roleFilter = ref<RoleFilter>('all')
-const roleOptions: ServerAccessRoleOption[] = [
-	{ value: 'owner', label: 'Owner', description: 'Controls the Core and group.' },
-	{ value: 'editor', label: 'Admin', description: 'Manages members and servers.' },
-	{ value: 'viewer', label: 'Member', description: 'Uses shared Core access.' },
-]
+const roleOptions = amberiteAccessRoleOptions
 const roleFilterOptions = [{ value: 'all', label: 'All roles' }, ...roleOptions]
 const selectedRoleFilterLabel = computed(
 	() => roleFilterOptions.find((option) => option.value === roleFilter.value)?.label ?? 'All roles',
 )
-const memberRows = computed<ServerAccessMember[]>(() => social.members.value.map(toAccessMember))
+const memberRows = computed<ServerAccessMember[]>(() =>
+	coreMembers.value.map(toAmberiteAccessUiMember),
+)
 const filteredMembers = computed(() => {
 	const query = search.value.trim().toLowerCase()
 	return memberRows.value.filter((member) => {
@@ -63,23 +61,44 @@ async function grantAccess(user: { id: string; username: string }, roleId: strin
 		role_id: roleId,
 	})
 	if (invite.status === 'sent') {
-		const [metadata, coreUrl] = await Promise.all([core.getCoreMetadata(), core.adapter.getCoreUrl()])
-		if (coreUrl) await socialClient.notifyCoreInvite({ recipientUserId: user.id, coreId: metadata.core_id, coreUrl, inviteId: invite.id, expiresAt: Date.parse(invite.expires_at) })
+		const [metadata, coreUrl] = await Promise.all([
+			core.getCoreMetadata(),
+			core.adapter.getCoreUrl(),
+		])
+		if (coreUrl)
+			await socialClient.notifyCoreInvite({
+				recipientUserId: user.id,
+				coreId: metadata.core_id,
+				coreUrl,
+				inviteId: invite.id,
+				expiresAt: Date.parse(invite.expires_at),
+			})
 	}
 	recordUserAccessEvent('invited', user.id, user.username, undefined, 'viewer')
 	await loadCoreState()
 }
 
-async function updateRole(member: ServerAccessMember, role: ServerAccessRole) {
+async function updateRole(member: ServerAccessMember, role: AmberiteAccessUiRole) {
 	if (member.isOwner) return
-	await social.setMemberRole(member.user.id, role === 'editor' ? 'admin' : 'member')
-	recordUserAccessEvent('permission_modified', member.user.id, member.user.username, member.user.avatarUrl, role)
+	await core.updateCoreAccess(member.user.id, {
+		role: uiAccessRoleToCore(role),
+		permission_preset: uiAccessRoleToPreset(role),
+	})
+	recordUserAccessEvent(
+		'permission_modified',
+		member.user.id,
+		member.user.username,
+		member.user.avatarUrl,
+		role,
+	)
+	await loadCoreState()
 }
 
 async function removeMember(member: ServerAccessMember) {
 	if (member.isOwner) return
-	await social.kickMember(member.user.id)
+	await core.removeCoreAccess(member.user.id)
 	recordUserAccessEvent('removed', member.user.id, member.user.username, member.user.avatarUrl)
+	await loadCoreState()
 }
 
 async function loadCoreState() {
@@ -91,10 +110,12 @@ async function loadCoreState() {
 		])
 		coreRoles.value = roles.roles
 		coreMembers.value = access.members
+		canManageUsers.value = access.viewer.can_manage_users
 		coreInvitations.value = invitations
 	} catch {
 		coreRoles.value = []
 		coreMembers.value = []
+		canManageUsers.value = false
 		coreInvitations.value = []
 	}
 }
@@ -123,7 +144,11 @@ onMounted(loadCoreState)
 					<template #prefix><FilterIcon class="size-5 text-secondary" /></template>
 				</Combobox>
 				<ButtonStyled color="brand">
-					<button class="!h-10 w-full md:w-fit" @click="grantAccessModal?.show()">
+					<button
+						class="!h-10 w-full md:w-fit"
+						:disabled="!canManageUsers"
+						@click="grantAccessModal?.show()"
+					>
 						<UserPlusIcon />
 						Invite friends
 					</button>
@@ -135,14 +160,35 @@ onMounted(loadCoreState)
 			:members="filteredMembers"
 			:roles="roleOptions"
 			:user-profile-link="(username) => `https://modrinth.com/user/${encodeURIComponent(username)}`"
-			:can-manage-users="social.canManage.value"
+			:can-manage-users="canManageUsers"
 			@update-role="updateRole"
 			@remove-member="removeMember"
 		/>
-		<section v-if="coreMembers.some((member) => member.needs_role_reassignment_at) || coreInvitations.length" class="flex flex-col gap-2 rounded-xl bg-surface-2 p-4">
+		<section
+			v-if="
+				coreMembers.some((member) => member.needs_role_reassignment_at) || coreInvitations.length
+			"
+			class="flex flex-col gap-2 rounded-xl bg-surface-2 p-4"
+		>
 			<span class="font-semibold text-contrast">Core access status</span>
-			<div v-for="member in coreMembers.filter((item) => item.needs_role_reassignment_at)" :key="member.user_id" class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2"><span class="text-primary">{{ member.display_name ?? member.user_id }}</span><span class="rounded-full bg-orange-highlight px-2 py-1 text-xs font-semibold text-orange">Role removed — reassignment required</span></div>
-			<div v-for="invite in coreInvitations" :key="invite.id" class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2 text-sm"><span class="text-primary">{{ invite.invitee_display_name ?? invite.invitee_user_id }}</span><span class="text-secondary">{{ invite.status.replace('_', ' ') }}</span></div>
+			<div
+				v-for="member in coreMembers.filter((item) => item.needs_role_reassignment_at)"
+				:key="member.user_id"
+				class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2"
+			>
+				<span class="text-primary">{{ member.display_name ?? member.user_id }}</span
+				><span class="rounded-full bg-orange-highlight px-2 py-1 text-xs font-semibold text-orange"
+					>Role removed — reassignment required</span
+				>
+			</div>
+			<div
+				v-for="invite in coreInvitations"
+				:key="invite.id"
+				class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2 text-sm"
+			>
+				<span class="text-primary">{{ invite.invitee_display_name ?? invite.invitee_user_id }}</span
+				><span class="text-secondary">{{ invite.status.replace('_', ' ') }}</span>
+			</div>
 		</section>
 
 		<CoreInviteMemberModal

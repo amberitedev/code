@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
+import GhostMedia from '../base/GhostMedia.vue'
+
 const emit = defineEmits<{
 	(e: 'select'): void
 	(e: 'edit', event: MouseEvent): void
@@ -74,9 +76,11 @@ watch(
 			class="pointer-events-none absolute right-3 top-3 z-20 size-3 rounded-full border-2 border-solid border-surface-3 bg-green"
 		></span>
 
-		<div v-if="!imagesLoaded.forward" class="skeleton-loader h-full w-full">
-			<div class="skeleton absolute inset-0 aspect-[5/7]"></div>
-		</div>
+		<GhostMedia
+			v-if="!imagesLoaded.forward"
+			kind="rounded"
+			class="absolute inset-0 !h-full !w-full"
+		/>
 
 		<span
 			v-show="imagesLoaded.forward"
@@ -104,30 +108,6 @@ watch(
 </template>
 
 <style scoped lang="scss">
-.skeleton-loader {
-	aspect-ratio: 31 / 40;
-}
-
-.skeleton {
-	background: linear-gradient(
-		90deg,
-		var(--color-bg) 25%,
-		var(--color-raised-bg) 50%,
-		var(--color-bg) 75%
-	);
-	background-size: 200% 100%;
-	animation: wave 1500ms infinite linear;
-}
-
-@keyframes wave {
-	0% {
-		background-position: -200% 0;
-	}
-	100% {
-		background-position: 200% 0;
-	}
-}
-
 .skin-button {
 	aspect-ratio: 31 / 40;
 	border-color: var(--surface-4);

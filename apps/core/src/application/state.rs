@@ -150,11 +150,6 @@ impl AppState {
                 let code = generate_pairing_code();
                 let secret = generate_setup_secret();
                 write_local_setup_secret(&config.data_dir, &secret).await?;
-                println!(
-                    "\nCopal pairing code: {}",
-                    format_pairing_code(&code)
-                );
-                println!("This code expires in 15 minutes. Restart Core to generate a new code.\n");
                 (
                     Some(code),
                     Some(Instant::now() + PAIRING_WINDOW),
@@ -249,7 +244,7 @@ async fn load_or_create_core_id(
     .await?)
 }
 
-async fn write_local_setup_secret(
+pub async fn write_local_setup_secret(
     data_dir: &std::path::Path,
     secret: &str,
 ) -> color_eyre::eyre::Result<()> {
@@ -268,7 +263,7 @@ async fn write_local_setup_secret(
     Ok(())
 }
 
-fn generate_pairing_code() -> String {
+pub fn generate_pairing_code() -> String {
     use rand::Rng;
 
     const PAIRING_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -282,7 +277,7 @@ fn generate_pairing_code() -> String {
     code
 }
 
-fn format_pairing_code(code: &str) -> String {
+pub fn format_pairing_code(code: &str) -> String {
     format!(
         "{}-{}",
         code[..4].to_ascii_uppercase(),
@@ -290,7 +285,7 @@ fn format_pairing_code(code: &str) -> String {
     )
 }
 
-fn generate_setup_secret() -> String {
+pub fn generate_setup_secret() -> String {
     Uuid::new_v4().to_string()
 }
 

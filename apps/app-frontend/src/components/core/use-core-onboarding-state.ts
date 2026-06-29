@@ -1,11 +1,8 @@
-import { verifyCoreConnection } from '@amberite/amberite-api'
 import type {
 	ServerAccessInviteSuggestion,
 	ServerAccessRole,
 	ServerAccessRoleOption,
 } from '@modrinth/ui'
-import { convertFileSrc } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
 import { computed, ref, watch } from 'vue'
 
 import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
@@ -26,7 +23,12 @@ import {
 } from './core-onboarding-members'
 import type { CoreAccessMember } from './core-access-types'
 
-interface CoreOnboardingModalRef { hide: () => void; show: () => void; nextStage: () => void; setStage: (stage: string) => void }
+interface CoreOnboardingModalRef {
+	hide: () => void
+	show: () => void
+	nextStage: () => void
+	setStage: (stage: string) => void
+}
 
 export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingModalRef | null }) {
 	const auth = useAmberiteAuth()
@@ -35,10 +37,6 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	const coreClient = useCoreClient()
 	const connection = useCoreConnection()
 	const flow = ref<CoreOnboardingFlow>('create')
-	const coreName = ref('Friend group')
-	const coreDescription = ref('')
-	const coreUrl = ref('')
-	const coreIcon = ref<string>()
 	const connectCode = ref('')
 	const connectValidated = ref(false)
 	const inviteSearch = ref('')
@@ -58,10 +56,14 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		...friendInviteCandidates.value,
 	])
 	const friendInviteCandidates = computed<CoreAccessMember[]>(() => {
-		const existingIds = new Set([...social.members.value.map((x) => x.userId), ...pendingInvites.value.map((x) => x.user.id)])
-		const friends = social.friends.value?.friends
-			.map((friend) => friend.user)
-			.filter((user): user is NonNullable<typeof user> => !!user) ?? mockInviteUsers.slice(0, 2)
+		const existingIds = new Set([
+			...social.members.value.map((x) => x.userId),
+			...pendingInvites.value.map((x) => x.user.id),
+		])
+		const friends =
+			social.friends.value?.friends
+				.map((friend) => friend.user)
+				.filter((user): user is NonNullable<typeof user> => !!user) ?? mockInviteUsers.slice(0, 2)
 		return friends.filter((user) => !existingIds.has(user.userId)).map(toInviteCandidate)
 	})
 	const inviteSuggestions = computed<ServerAccessInviteSuggestion[]>(() => {
@@ -84,8 +86,11 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		working.value = true
 		error.value = ''
 		try {
+			if (flow.value === 'create')
+				ensureNoConnectedCore('Cannot create a new Core: a Core is already connected.')
 			await ensureAuth()
 			if (flow.value === 'create') await createCoreGroup()
+			await social.refresh()
 			modal.value?.hide()
 		} catch (reason) {
 			error.value = reason instanceof Error ? reason.message : 'Core setup failed.'
@@ -95,29 +100,23 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	}
 
 	async function createCoreGroup() {
-		let current = connection.status.value?.coreId ? connection.status.value : await connection.check()
-		if (!current?.coreId) {
-			const candidateUrl = coreUrl.value.trim()
-			if (!candidateUrl) throw new Error('Enter the Core API address to link it.')
-			const candidate = await verifyCoreConnection(coreClient.adapter, { coreUrl: candidateUrl })
-			if (candidate.state !== 'connected' || !candidate.coreId || !candidate.coreUrl) {
-				throw new Error('The Core at that address could not be reached.')
-			}
-			setConnectedCore({ coreId: candidate.coreId, url: candidate.coreUrl })
-			coreClient.clearCoreUrlCache()
-			current = await connection.check()
+		ensureNoConnectedCore('Cannot create a new Core: a Core is already connected.')
+		const current = await connection.check()
+		if (!current?.coreId || !current.coreUrl) {
+			throw new Error('Start Core before finishing setup.')
 		}
-		if (!current?.coreId) throw new Error('Core is not reachable yet.')
+		setConnectedCore({ coreId: current.coreId, url: current.coreUrl })
+		coreClient.clearCoreUrlCache()
 		await social.createGroup({
 			coreId: current.coreId,
-			name: coreName.value.trim() || 'Friend group',
-			description: coreDescription.value.trim() || undefined,
+			name: 'Friend group',
 			setupMode: 'local',
 			connectionUrl: current.coreUrl,
 		})
 	}
 
 	async function connectCore() {
+		ensureNoConnectedCore('Cannot connect: a Core is already connected.')
 		const code = normalizeCoreCode(connectCode.value)
 		if (code.length !== 8) throw new Error('Enter all 8 characters of the Core code.')
 		if (!/^[a-hj-np-z2-9]{8}$/.test(code))
@@ -142,16 +141,17 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		const previousCore = getConnectedCore()
 		let linked = false
 		try {
-		const response = await coreClient.completeSetupAt(coreUrl, {
-			code,
-			convex_url: config.convexUrl,
-			auth_jwks_url: convexJwksUrl(config.convexUrl),
-			owner_user_id: currentUser.userId,
-			...(config.realtimeUrl
-				? { realtime_credential: claim.realtimeCredential, realtime_url: config.realtimeUrl }
-				: {}),
-		})
-			if (response.core_id !== claim.coreId) throw new Error('The Core answered with a different identity.')
+			const response = await coreClient.completeSetupAt(coreUrl, {
+				code,
+				convex_url: config.convexUrl,
+				auth_jwks_url: convexJwksUrl(config.convexUrl),
+				owner_user_id: currentUser.userId,
+				...(config.realtimeUrl
+					? { realtime_credential: claim.realtimeCredential, realtime_url: config.realtimeUrl }
+					: {}),
+			})
+			if (response.core_id !== claim.coreId)
+				throw new Error('The Core answered with a different identity.')
 			setConnectedCore({ coreId: response.core_id, url: coreUrl })
 			linked = true
 			coreClient.clearCoreUrlCache()
@@ -176,29 +176,32 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		}
 	}
 
-	async function selectIcon() {
-		const value = await open({
-			multiple: false,
-			filters: [{ name: 'Image', extensions: ['png', 'jpeg', 'svg', 'webp', 'gif', 'jpg'] }],
-		})
-		if (typeof value === 'string') coreIcon.value = convertFileSrc(value)
-	}
-
 	function selectInviteSuggestion(user: ServerAccessInviteSuggestion) {
 		inviteSearch.value = user.username
 	}
 
 	function createInvite() {
 		const value = inviteSearch.value.trim().toLowerCase()
-		const user = inviteSuggestions.value.find((suggestion) => matchesInviteSuggestion(suggestion, value))
-		if (!user || members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)) return
+		const user = inviteSuggestions.value.find((suggestion) =>
+			matchesInviteSuggestion(suggestion, value),
+		)
+		if (
+			!user ||
+			members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)
+		)
+			return
 		pendingInvites.value.push(toPendingInvite(user))
 		inviteSearch.value = ''
 	}
 
 	function quickInvite(member: CoreAccessMember) {
 		if (!member.inviteCandidate) return
-		pendingInvites.value.push({ ...member, id: member.user.id, inviteCandidate: false, pending: true })
+		pendingInvites.value.push({
+			...member,
+			id: member.user.id,
+			inviteCandidate: false,
+			pending: true,
+		})
 	}
 
 	async function updateRole(member: CoreAccessMember, role: ServerAccessRole) {
@@ -208,7 +211,8 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 			)
 			return
 		}
-		if (!member.isOwner) await social.setMemberRole(member.user.id, role === 'editor' ? 'admin' : 'member')
+		if (!member.isOwner)
+			await social.setMemberRole(member.user.id, role === 'editor' ? 'admin' : 'member')
 	}
 
 	async function removeMember(member: CoreAccessMember) {
@@ -224,10 +228,11 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		working.value = true
 		error.value = ''
 		try {
+			ensureNoConnectedCore('Cannot connect: a Core is already connected.')
 			await ensureAuth()
 			await connectCore()
 			await waitForMinimumDuration(startedAt)
-			modal.value?.hide()
+			modal.value?.nextStage()
 		} catch (reason) {
 			error.value = reason instanceof Error ? reason.message : 'Core connection failed.'
 		} finally {
@@ -238,22 +243,39 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 	function show(nextFlow: CoreOnboardingFlow) {
 		flow.value = nextFlow
 		error.value = ''
-		coreUrl.value = ''
 		connectCode.value = ''
 		connectValidated.value = false
 		inviteSearch.value = ''
 		inviteAsFriend.value = true
 		pendingInvites.value = []
-		modal.value?.setStage(nextFlow === 'connect' ? 'connect' : 'general')
+		modal.value?.setStage(nextFlow === 'connect' ? 'connect' : 'members')
 		modal.value?.show()
 	}
 
 	const ctx: CoreOnboardingContext = {
-		flow, coreName, coreDescription, coreUrl, coreIcon, connectCode, inviteSearch, inviteAsFriend,
-		error, working, canManage: canManageMembers, members, roles, inviteSuggestions,
-		selectIcon, selectInviteSuggestion, createInvite, quickInvite, updateRole, removeMember,
+		flow,
+		connectCode,
+		connectValidated,
+		inviteSearch,
+		inviteAsFriend,
+		error,
+		working,
+		canManage: canManageMembers,
+		members,
+		roles,
+		inviteSuggestions,
+		selectInviteSuggestion,
+		createInvite,
+		quickInvite,
+		updateRole,
+		removeMember,
 	}
 	return { ctx, connectValidated, finish, show, validateConnectAndContinue }
+}
+
+function ensureNoConnectedCore(message: string) {
+	const connected = getConnectedCore()
+	if (connected?.coreId) throw new Error(message)
 }
 
 function formatCoreCode(value: string) {

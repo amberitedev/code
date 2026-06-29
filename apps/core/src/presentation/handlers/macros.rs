@@ -14,17 +14,12 @@ use crate::{
         },
         state::AppState,
     },
-    domain::instance::InstanceId,
     presentation::{
-        authz::require_instance_permission, error::ApiError,
+        error::ApiError,
         extractors::AuthUser,
+        instance_path::resolve_authorized_instance_id,
     },
 };
-
-fn parse_id(s: &str) -> Result<InstanceId, ApiError> {
-    s.parse::<InstanceId>()
-        .map_err(|_| ApiError::BadRequest("invalid instance id".into()))
-}
 
 /// GET /instances/:id/macros — list available files + running PIDs.
 pub async fn list_macros_handler(
@@ -32,9 +27,13 @@ pub async fn list_macros_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = parse_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
-        .await?;
+    let iid = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:settings",
+    )
+    .await?;
     let files = list_macro_files(&state, &iid).await;
     let running_pids = list_macros(&state);
     Ok(Json(json!({
@@ -55,9 +54,13 @@ pub async fn spawn_macro_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SpawnBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = parse_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
-        .await?;
+    let iid = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:settings",
+    )
+    .await?;
     let pid = spawn_macro(&state, iid, body.name)?;
     Ok(Json(json!({ "pid": pid })))
 }
@@ -68,9 +71,13 @@ pub async fn kill_macro_handler(
     Path((id, pid_str)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let _iid = parse_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
-        .await?;
+    let _iid = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:settings",
+    )
+    .await?;
     let pid: MacroPid = pid_str
         .parse()
         .map_err(|_| ApiError::BadRequest("invalid pid".into()))?;

@@ -1,9 +1,11 @@
+use std::sync::{atomic::Ordering, Arc};
+
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
-    application::{core_projection_service, state::AppState},
+    application::{core_projection_service, pairing_service, state::AppState},
     presentation::error::ApiError,
 };
 
@@ -37,8 +39,6 @@ pub async fn complete_setup(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SetupRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    use std::sync::atomic::Ordering;
-
     // SEC-01: refuse if too many wrong attempts have been made.
     let attempts = state.wrong_pairing_attempts.load(Ordering::Relaxed);
     if attempts >= MAX_PAIRING_ATTEMPTS {
@@ -213,4 +213,22 @@ pub async fn setup_status(State(state): State<Arc<AppState>>) -> Json<Value> {
         "core_id": state.core_id,
     }))
 }
-use std::sync::Arc;
+
+/// POST /setup/dev-reset — reset local pairing state in dev builds.
+pub async fn dev_reset_setup(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    if !state.config.dev_mode {
+        return Err(ApiError::NotFound("not found".into()));
+    }
+
+    let registered = pairing_service::reset_running_pairing(state.clone())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "core_id": state.core_id,
+        "registered": registered,
+    })))
+}

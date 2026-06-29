@@ -14,6 +14,8 @@ use crate::{
     presentation::error::ApiError,
 };
 
+const NO_AUTH_USER_ID: &str = "local-noauth-owner";
+
 /// Axum extractor that validates an owner JWT and yields its claims.
 pub struct AuthUser(pub Claims);
 
@@ -25,6 +27,10 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
+        if state.config.no_auth {
+            return Ok(Self(no_auth_claims()));
+        }
+
         let token = bearer_token(&parts.headers).ok_or_else(|| {
             ApiError::Unauthorized("missing Authorization header".into())
         })?;
@@ -44,6 +50,15 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .map_err(|e| ApiError::Forbidden(e.to_string()))?;
 
         Ok(Self(claims))
+    }
+}
+
+fn no_auth_claims() -> Claims {
+    Claims {
+        sub: NO_AUTH_USER_ID.to_string(),
+        aud: "no-auth".to_string(),
+        role: Some("owner".to_string()),
+        exp: (chrono::Utc::now().timestamp() + 3600) as u64,
     }
 }
 

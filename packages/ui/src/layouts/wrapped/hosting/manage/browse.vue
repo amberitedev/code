@@ -1,5 +1,7 @@
 <template>
-	<BrowsePageLayout />
+	<div class="flex flex-col gap-3 p-6">
+		<BrowsePageLayout />
+	</div>
 </template>
 
 <script setup lang="ts">
@@ -56,6 +58,22 @@ const messages = defineMessages({
 	added: {
 		id: 'core-server.browse.added',
 		defaultMessage: '{title} was added to the server.',
+	},
+	gameVersionProvidedByServer: {
+		id: 'core-server.browse.game-version-provided',
+		defaultMessage: 'Game version is provided by the server',
+	},
+	modLoaderProvidedByServer: {
+		id: 'core-server.browse.loader-provided',
+		defaultMessage: 'Loader is provided by the server',
+	},
+	environmentProvidedByServer: {
+		id: 'core-server.browse.environment-provided',
+		defaultMessage: 'Environment is provided by the server',
+	},
+	providedByServer: {
+		id: 'core-server.browse.provided-by',
+		defaultMessage: 'Provided by the server',
 	},
 })
 
@@ -256,10 +274,10 @@ provideBrowseManager({
 	getProjectLink: (result) => `/project/${result.project_id ?? result.slug}`,
 	getServerProjectLink: (result) => `/project/${result.slug ?? result.project_id}`,
 	lockedFilterMessages: {
-		gameVersion: 'Provided by your server',
-		modLoader: 'Provided by your server',
-		environment: 'Provided by your server',
-		providedBy: 'Provided by your server',
+		gameVersion: formatMessage(messages.gameVersionProvidedByServer),
+		modLoader: formatMessage(messages.modLoaderProvidedByServer),
+		environment: formatMessage(messages.environmentProvidedByServer),
+		providedBy: formatMessage(messages.providedByServer),
 	},
 })
 

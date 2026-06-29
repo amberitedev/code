@@ -18,7 +18,7 @@ import type { CoreServerViewData } from './context'
 
 export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 	return {
-		server_id: instance.id,
+		server_id: instance.path,
 		name: instance.name,
 		owner_id: 'local',
 		net: {
@@ -38,7 +38,7 @@ export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 		sftp_username: '',
 		sftp_password: '',
 		sftp_host: '',
-		datacenter: 'Local Core',
+		datacenter: 'Local',
 		notices: [],
 		node: null,
 		flows: { intro: instance.install_status === 'installing' },
@@ -49,6 +49,7 @@ export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 export function createFallbackInstance(id: string): CoreInstance {
 	return {
 		id,
+		path: id,
 		name: id,
 		game_version: 'Unknown',
 		loader: 'vanilla',

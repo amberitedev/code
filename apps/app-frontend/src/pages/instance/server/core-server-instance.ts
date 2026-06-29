@@ -46,7 +46,7 @@ export function injectCoreServerContext(): CoreServerContext {
 
 export function toHostingServer(instance: CoreInstance): CoreServerViewData {
 	return {
-		server_id: instance.id,
+		server_id: instance.path,
 		name: instance.name,
 		owner_id: 'local',
 		net: {

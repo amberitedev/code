@@ -164,8 +164,10 @@ export async function get_optimal_jre_key(path: string): Promise<JavaVersion | n
 
 // Get a copy of the profile set
 // Returns hashmap of path -> Profile
-export async function list(): Promise<GameInstance[]> {
-	return await invoke('plugin:profile|profile_list')
+export async function list(options: { includeServerProfiles?: boolean } = {}): Promise<GameInstance[]> {
+	const profiles = await invoke<GameInstance[]>('plugin:profile|profile_list')
+	if (options.includeServerProfiles) return profiles
+	return profiles.filter((profile) => profile.profile_type !== 'server')
 }
 
 export async function check_installed(path: string, projectId: string): Promise<boolean> {

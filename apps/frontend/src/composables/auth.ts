@@ -18,6 +18,7 @@ type LauncherRoute = Pick<RouteLocationNormalizedLoaded, 'query'>
 
 export const LAST_SIGN_IN_OAUTH_PROVIDER_STORAGE_KEY = 'auth-last-sign-in-oauth-provider'
 export const PENDING_SIGN_IN_OAUTH_PROVIDER_STORAGE_KEY = 'auth-pending-sign-in-oauth-provider'
+export type AmberiteMinecraftAuthMode = 'signin' | 'signup'
 
 const AUTH_COOKIE_OPTIONS = {
 	maxAge: 60 * 60 * 24 * 365 * 10,
@@ -65,7 +66,6 @@ export const initAuth = async (oldToken: string | null | undefined = null) => {
 		return auth
 	}
 
-	const route = useRoute()
 	const config = useRuntimeConfig()
 	const authCookie = useCookie<string | null>('auth-token', {
 		...AUTH_COOKIE_OPTIONS,
@@ -79,30 +79,13 @@ export const initAuth = async (oldToken: string | null | undefined = null) => {
 		}
 	}
 
-	const oauthCode = normalizeAuthToken(route.query.code)
-	if (oauthCode && !route.fullPath.includes('new_account=true')) {
-		authCookie.value = oauthCode
-	}
-
-	if (route.fullPath.includes('new_account=true') && route.path !== '/auth/welcome') {
-		const redirect = route.path.startsWith('/auth/') ? null : route.fullPath
-
-		await navigateTo(
-			`/auth/welcome?authToken=${oauthCode}${
-				redirect ? `&redirect=${encodeURIComponent(redirect)}` : ''
-			}`,
-		)
-	}
-
 	const tokenStr = normalizeAuthToken(authCookie.value)
 
 	if (authCookie.value != null && tokenStr === '') {
 		authCookie.value = null
 	} else if (tokenStr) {
 		try {
-			const session = tokenStr.startsWith('mra_')
-				? await authClient.signInWithModrinthToken(tokenStr)
-				: await authClient.restoreSession()
+			const session = await authClient.restoreSession()
 			if (session) {
 				auth.token = session.tokens.token
 				auth.user = session.user
@@ -160,6 +143,40 @@ export const getAuthUrl = (provider: string, redirect = '/dashboard') => {
 		: `${config.public.siteUrl}/auth/sign-in?redirect=${encodeURIComponent(redirect)}`
 
 	return `${config.public.apiBaseUrl}auth/init?provider=${provider}&url=${encodeURIComponent(fullURL)}`
+}
+
+export const getMinecraftAuthUrl = (
+	mode: AmberiteMinecraftAuthMode = 'signin',
+	redirect = '/dashboard',
+) => {
+	const config = useRuntimeConfig()
+	const route = useNativeRoute()
+	const launcher = getQueryString(route.query.launcher)
+
+	const redirectTarget = launcher
+		? (() => {
+				const callbackUrl = new URL('/auth/sign-in', config.public.siteUrl)
+				callbackUrl.searchParams.set('launcher', launcher)
+
+				const ipver = getQueryString(route.query.ipver)
+				const port = getQueryString(route.query.port)
+
+				if (ipver) {
+					callbackUrl.searchParams.set('ipver', ipver)
+				}
+
+				if (port) {
+					callbackUrl.searchParams.set('port', port)
+				}
+
+				return `${callbackUrl.pathname}${callbackUrl.search}`
+			})()
+		: redirect || '/dashboard'
+
+	const url = new URL('/api/amberite/minecraft/start', config.public.siteUrl)
+	url.searchParams.set('mode', mode)
+	url.searchParams.set('redirect', redirectTarget)
+	return `${url.pathname}${url.search}`
 }
 
 export const promotePendingSignInOAuthProvider = () => {

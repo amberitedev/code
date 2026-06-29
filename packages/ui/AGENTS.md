@@ -30,6 +30,10 @@ Files inside `layouts/` use the `#ui/*` import alias, resolved through the packa
 
 # Code Guidelines
 
+## Motion Rules
+
+- HARD RULE: Do not modify the `NavTabs` selected-slider animation unless the user explicitly asks for that animation to change. It is the upstream Modrinth staggered `left`/`right`/`top`/`bottom` slide transition, not a FLIP, transform, scale, or Web Animations animation. If adjacent code must change, preserve the exact timing, easing, delay, and edge-delay behavior from `src/composables/ui-motion.ts`.
+
 ### Tailwind Configuration
 
 All frontend packages share a Tailwind preset at `packages/tooling-config/tailwind/tailwind-preset.ts`. This package's `tailwind.config.ts` extends it:
@@ -46,21 +50,21 @@ The current product palette is charcoal/black surfaces plus one strong orange br
 
 **Use `surface-*` variables for backgrounds. Do not use aliased `bg-*` color variables for general surfaces.**
 
-| Token | Usage |
-| --- | --- |
-| `bg-surface-1` | Deepest app background |
-| `bg-surface-1.5` | Odd row background |
-| `bg-surface-2` | Even row background, secondary panels |
-| `bg-surface-3` | Headers, floating bars, inputs |
-| `bg-surface-4` | Cards and elevated surfaces |
-| `bg-surface-5` | Borders and dividers |
+| Token            | Usage                                 |
+| ---------------- | ------------------------------------- |
+| `bg-surface-1`   | Deepest app background                |
+| `bg-surface-1.5` | Odd row background                    |
+| `bg-surface-2`   | Even row background, secondary panels |
+| `bg-surface-3`   | Headers, floating bars, inputs        |
+| `bg-surface-4`   | Cards and elevated surfaces           |
+| `bg-surface-5`   | Borders and dividers                  |
 
 **For text colors:**
 
-| Class | Usage |
-| --- | --- |
-| `text-contrast` | Primary headings |
-| `text-primary` | Default body text |
+| Class            | Usage                               |
+| ---------------- | ----------------------------------- |
+| `text-contrast`  | Primary headings                    |
+| `text-primary`   | Default body text                   |
 | `text-secondary` | Reduced emphasis and secondary info |
 
 **Brand orange rules:**
@@ -87,6 +91,11 @@ Key providers exported from this package:
 - `provideModrinthClient` / `injectModrinthClient`: API client
 - `provideNotificationManager` / `injectNotificationManager`: Notifications
 
+## Error Display Guidance
+
+Prefer notification errors for regular page action/load failures; use `injectNotificationManager()` and `addNotification({ type: 'error', title, text })`.
+The notification implementation is in `packages/ui/src/providers/web-notifications.ts`; reserve inline errors for modals, setup/full-page states, and forms where the error belongs next to the field.
+
 ## Vue Template Rules
 
 ### Multi-statement event handlers
@@ -107,41 +116,52 @@ Use this inventory as the first pass before building new UI. Prefer the public e
 
 If you add a new shared component or materially change the role or description of an existing shared component, update this list in the same change.
 
-| Component | Description | Filepath |
-| --- | --- | --- |
-| `affiliate` | Affiliate link management UI, including listing cards and creation modal flows. | `packages/ui/src/components/affiliate/index.ts` |
-| `base` | Core shared primitives such as buttons, cards, inputs, selects, tables, tabs, modals, empty states, progress, and page scaffolding. | `packages/ui/src/components/base/index.ts` |
-| `billing` | Purchase, payment method, subscription, and hosted server checkout UI. | `packages/ui/src/components/billing/index.ts` |
-| `brand` | Shared Modrinth branding components such as animated and text logos. | `packages/ui/src/components/brand/index.ts` |
-| `changelog` | Changelog entry presentation for release and update content. | `packages/ui/src/components/changelog/index.ts` |
-| `chart` | Shared chart visualizations, including compact chart variants. | `packages/ui/src/components/chart/index.ts` |
-| `content` | Shared content list and article card UI for browse-style surfaces. | `packages/ui/src/components/content/index.ts` |
-| `external_files` | UI for looking up and describing external project file licensing and permissions. | `packages/ui/src/components/external_files/index.ts` |
-| `modal` | Shared modal shells and common confirmation, share, and install modal variants. | `packages/ui/src/components/modal/index.ts` |
-| `nav` | Shared navigation UI such as breadcrumbs, banners, and notification panels. | `packages/ui/src/components/nav/index.ts` |
-| `notifications` | Toast and notification stack rendering. | `packages/ui/src/components/notifications/index.ts` |
-| `page` | Reusable page-level wrappers such as normal pages and sidebar cards. | `packages/ui/src/components/page/index.ts` |
-| `project` | Project cards, headers, sidebars, version displays, server info, and project settings UI. | `packages/ui/src/components/project/index.ts` |
-| `search` | Shared search filters, categories, and sidebar filtering controls. | `packages/ui/src/components/search/index.ts` |
-| `servers` | Hosted server UI, including listings, access management, backups, headers, icons, setup flows, labels, and promos. | `packages/ui/src/components/servers/index.ts` |
-| `settings` | Shared settings selectors such as language and theme pickers. | `packages/ui/src/components/settings/index.ts` |
-| `skin` | Skin and cape buttons plus skin preview rendering UI. | `packages/ui/src/components/skin/index.ts` |
-| `user` | Shared user badge and user status presentation. | `packages/ui/src/components/user/index.ts` |
-| `version` | Version summary and filtering UI. | `packages/ui/src/components/version/index.ts` |
-| `BrowsePageLayout` | Shared browse tab layout with sidebar, header, selection bar, and browse install helpers. | `packages/ui/src/layouts/shared/browse-tab/index.ts` |
-| `ConsolePageLayout` | Shared console page layout and console manager/provider surface. | `packages/ui/src/layouts/shared/console/index.ts` |
-| `ContentPageLayout` | Shared content tab layout with cards, tables, selection, and content install and update modal flows. | `packages/ui/src/layouts/shared/content-tab/index.ts` |
-| `FilePageLayout` | Shared file manager layout with editor, upload, rename, move, delete, and conflict UI. | `packages/ui/src/layouts/shared/files-tab/index.ts` |
-| `InstallationSettingsLayout` | Shared installation settings layout and content diff and incompatibility flows. | `packages/ui/src/layouts/shared/installation-settings/index.ts` |
-| `ServerSettingsGeneralPage` | Shared general server settings page export. | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
-| `ServerSettingsInstallationPage` | Shared installation settings page for server configuration. | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
-| `ServerSettingsNetworkPage` | Shared network settings page for hosted servers. | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
-| `ServerSettingsPropertiesPage` | Shared properties editor and settings page for servers. | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
-| `ServerSettingsAdvancedPage` | Shared advanced settings page for server management. | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
-| `ServersManageRootLayout` | Wrapped hosted server management root layout for full page route composition. | `packages/ui/src/layouts/wrapped/index.ts` |
-| `ServersManageOverviewPage` | Wrapped hosted server overview page. | `packages/ui/src/layouts/wrapped/index.ts` |
-| `ServersManageContentPage` | Wrapped hosted server content management page. | `packages/ui/src/layouts/wrapped/index.ts` |
-| `ServersManageFilesPage` | Wrapped hosted server file manager page. | `packages/ui/src/layouts/wrapped/index.ts` |
-| `ServersManageBackupsPage` | Wrapped hosted server backups page. | `packages/ui/src/layouts/wrapped/index.ts` |
-| `ServersManageAccessPage` | Wrapped hosted server access management page. | `packages/ui/src/layouts/wrapped/index.ts` |
-| `ServerOnboardingPanelPage` | Wrapped hosted server onboarding page. | `packages/ui/src/layouts/wrapped/index.ts` |
+| Component                        | Description                                                                                                                                                                             | Filepath                                                        |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `affiliate`                      | Affiliate link management UI, including listing cards and creation modal flows.                                                                                                         | `packages/ui/src/components/affiliate/index.ts`                 |
+| `base`                           | Core shared primitives such as buttons, cards, inputs, selects, tables, tabs, modals, empty states, progress, readiness, lazy mounting, ghost loading primitives, and page scaffolding. | `packages/ui/src/components/base/index.ts`                      |
+| `GhostBlock`                     | Shared inert ghost block with shaped presets and scan-line shimmer for loading placeholders.                                                                                            | `packages/ui/src/components/base/GhostBlock.vue`                |
+| `GhostText`                      | Shared ghost text lines for title, body, and metadata placeholders.                                                                                                                     | `packages/ui/src/components/base/GhostText.vue`                 |
+| `GhostMedia`                     | Shared ghost media placeholder for square, rounded, circle, and banner shapes.                                                                                                          | `packages/ui/src/components/base/GhostMedia.vue`                |
+| `GhostControl`                   | Shared ghost control placeholder for input, select, button, icon button, chip, and pagination shapes.                                                                                   | `packages/ui/src/components/base/GhostControl.vue`              |
+| `GhostTabGroup`                  | Inert ghost tab group that composes real `NavTabs` instead of duplicating tab visuals.                                                                                                  | `packages/ui/src/components/base/GhostTabGroup.vue`             |
+| `NavTabContentTransition`        | Opt-in page slide transition for tabbed routed content, with 120ms default timing, frozen outgoing frames, slow-motion debugging, and transition safety cleanup.                        | `packages/ui/src/components/base/NavTabContentTransition.vue`   |
+| `ReadyTransition`                | Shared readiness boundary with delayed ghost, timeout, error, content-key, keep-previous, silent, and global loading-token support.                                                     | `packages/ui/src/components/base/ReadyTransition.vue`           |
+| `UiLazyMount`                    | SSR-safe lazy mount wrapper with visible, idle, delay, and immediate modes plus fallback slots.                                                                                         | `packages/ui/src/components/base/UiLazyMount.vue`               |
+| `UiMotionTransition`             | Shared configurable motion wrapper for keyed content, route, and tab transitions with slide, fade, scale-fade, height, none, and frozen-leave support.                                  | `packages/ui/src/components/base/UiMotionTransition.vue`        |
+| `TextMorph`                      | Shared per-character text morph animation with Motion shared layout IDs, pop-layout exit handling, and variants/transition overrides.                                                   | `packages/ui/src/components/base/TextMorph.vue`                 |
+| `StageContentTransition`         | Shared directional stage/page transition with horizontal or vertical push animation and smooth height release for modal and tab content.                                                | `packages/ui/src/components/base/StageContentTransition.vue`    |
+| `billing`                        | Purchase, payment method, subscription, and hosted server checkout UI.                                                                                                                  | `packages/ui/src/components/billing/index.ts`                   |
+| `brand`                          | Shared Modrinth branding components such as animated and text logos.                                                                                                                    | `packages/ui/src/components/brand/index.ts`                     |
+| `changelog`                      | Changelog entry presentation for release and update content.                                                                                                                            | `packages/ui/src/components/changelog/index.ts`                 |
+| `chart`                          | Shared chart visualizations, including compact chart variants.                                                                                                                          | `packages/ui/src/components/chart/index.ts`                     |
+| `content`                        | Shared content list and article card UI for browse-style surfaces.                                                                                                                      | `packages/ui/src/components/content/index.ts`                   |
+| `external_files`                 | UI for looking up and describing external project file licensing and permissions.                                                                                                       | `packages/ui/src/components/external_files/index.ts`            |
+| `modal`                          | Shared modal shells and common confirmation, share, and install modal variants.                                                                                                         | `packages/ui/src/components/modal/index.ts`                     |
+| `nav`                            | Shared navigation UI such as breadcrumbs, banners, and notification panels.                                                                                                             | `packages/ui/src/components/nav/index.ts`                       |
+| `notifications`                  | Toast and notification stack rendering.                                                                                                                                                 | `packages/ui/src/components/notifications/index.ts`             |
+| `page`                           | Reusable page-level wrappers such as normal pages and sidebar cards.                                                                                                                    | `packages/ui/src/components/page/index.ts`                      |
+| `project`                        | Project cards, headers, sidebars, version displays, server info, and project settings UI.                                                                                               | `packages/ui/src/components/project/index.ts`                   |
+| `search`                         | Shared search filters, categories, and sidebar filtering controls.                                                                                                                      | `packages/ui/src/components/search/index.ts`                    |
+| `servers`                        | Hosted server UI, including listings, access management, backups, headers, icons, setup flows, labels, and promos.                                                                      | `packages/ui/src/components/servers/index.ts`                   |
+| `settings`                       | Shared settings selectors such as language and theme pickers.                                                                                                                           | `packages/ui/src/components/settings/index.ts`                  |
+| `skin`                           | Skin and cape buttons plus skin preview rendering UI.                                                                                                                                   | `packages/ui/src/components/skin/index.ts`                      |
+| `user`                           | Shared user badge and user status presentation.                                                                                                                                         | `packages/ui/src/components/user/index.ts`                      |
+| `version`                        | Version summary and filtering UI.                                                                                                                                                       | `packages/ui/src/components/version/index.ts`                   |
+| `BrowsePageLayout`               | Shared browse tab layout with sidebar, header, selection bar, and browse install helpers.                                                                                               | `packages/ui/src/layouts/shared/browse-tab/index.ts`            |
+| `ConsolePageLayout`              | Shared console page layout and console manager/provider surface.                                                                                                                        | `packages/ui/src/layouts/shared/console/index.ts`               |
+| `ContentPageLayout`              | Shared content tab layout with cards, tables, selection, and content install and update modal flows.                                                                                    | `packages/ui/src/layouts/shared/content-tab/index.ts`           |
+| `FilePageLayout`                 | Shared file manager layout with editor, upload, rename, move, delete, and conflict UI.                                                                                                  | `packages/ui/src/layouts/shared/files-tab/index.ts`             |
+| `InstallationSettingsLayout`     | Shared installation settings layout and content diff and incompatibility flows.                                                                                                         | `packages/ui/src/layouts/shared/installation-settings/index.ts` |
+| `ServerSettingsGeneralPage`      | Shared general server settings page export.                                                                                                                                             | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
+| `ServerSettingsInstallationPage` | Shared installation settings page for server configuration.                                                                                                                             | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
+| `ServerSettingsNetworkPage`      | Shared network settings page for hosted servers.                                                                                                                                        | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
+| `ServerSettingsPropertiesPage`   | Shared properties editor and settings page for servers.                                                                                                                                 | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
+| `ServerSettingsAdvancedPage`     | Shared advanced settings page for server management.                                                                                                                                    | `packages/ui/src/layouts/shared/server-settings/pages/index.ts` |
+| `ServersManageRootLayout`        | Wrapped hosted server management root layout for full page route composition.                                                                                                           | `packages/ui/src/layouts/wrapped/index.ts`                      |
+| `ServersManageOverviewPage`      | Wrapped hosted server overview page.                                                                                                                                                    | `packages/ui/src/layouts/wrapped/index.ts`                      |
+| `ServersManageContentPage`       | Wrapped hosted server content management page.                                                                                                                                          | `packages/ui/src/layouts/wrapped/index.ts`                      |
+| `ServersManageFilesPage`         | Wrapped hosted server file manager page.                                                                                                                                                | `packages/ui/src/layouts/wrapped/index.ts`                      |
+| `ServersManageBackupsPage`       | Wrapped hosted server backups page.                                                                                                                                                     | `packages/ui/src/layouts/wrapped/index.ts`                      |
+| `ServersManageAccessPage`        | Wrapped hosted server access management page.                                                                                                                                           | `packages/ui/src/layouts/wrapped/index.ts`                      |
+| `ServerOnboardingPanelPage`      | Wrapped hosted server onboarding page.                                                                                                                                                  | `packages/ui/src/layouts/wrapped/index.ts`                      |

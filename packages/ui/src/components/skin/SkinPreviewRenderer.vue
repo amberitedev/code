@@ -1,5 +1,4 @@
 <template>
-	<!-- eslint-disable vue/no-undef-components -->
 	<div
 		ref="skinPreviewContainer"
 		class="relative w-full h-full overflow-visible cursor-grab"
@@ -57,28 +56,24 @@
 			@pointerup="onPointerUp"
 			@pointerleave="onPointerUp"
 		>
-			<Suspense>
-				<Group
-					:rotation="animatedModelGroupRotation"
-					:position="animatedModelGroupPosition"
-					:scale="animatedModelGroupScale"
-				>
-					<Group :position="modelOffset">
-						<primitive v-if="scene" :object="scene" />
-					</Group>
-				</Group>
-			</Suspense>
+			<TresGroup
+				:rotation="animatedModelGroupRotation"
+				:position="animatedModelGroupPosition"
+				:scale="animatedModelGroupScale"
+			>
+				<TresGroup :position="modelOffset">
+					<primitive v-if="scene" :object="scene" />
+				</TresGroup>
+			</TresGroup>
 
-			<Suspense>
-				<TresMesh
-					:position="spotlightPosition"
-					:rotation="[-Math.PI / 2, 0, 0]"
-					:scale="spotlightScale"
-				>
-					<TresCircleGeometry :args="[1, 128]" />
-					<TresShaderMaterial v-bind="radialSpotlightShader" />
-				</TresMesh>
-			</Suspense>
+			<TresMesh
+				:position="spotlightPosition"
+				:rotation="[-Math.PI / 2, 0, 0]"
+				:scale="spotlightScale"
+			>
+				<TresCircleGeometry :args="[1, 128]" />
+				<TresShaderMaterial v-bind="radialSpotlightShader" />
+			</TresMesh>
 
 			<TresPerspectiveCamera
 				:make-default.camel="true"

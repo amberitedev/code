@@ -20,10 +20,12 @@ import {
 } from '@modrinth/ui'
 import { capitalizeString } from '@modrinth/utils'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { useQueryClient } from '@tanstack/vue-query'
 import type { Dayjs } from 'dayjs'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { useCoreClient } from '@/composables/useCoreClient'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project } from '@/helpers/cache'
 import { process_listener } from '@/helpers/events'
@@ -42,6 +44,8 @@ const formatDateTime = useFormatDateTime({
 })
 
 const router = useRouter()
+const core = useCoreClient()
+const queryClient = useQueryClient()
 
 const emit = defineEmits<{
 	(e: 'play' | 'stop'): void
@@ -98,6 +102,15 @@ const play = async (event: MouseEvent) => {
 	loading.value = false
 }
 
+function preloadServerDetail() {
+	if (props.instance.profile_type !== 'server') return
+	void queryClient.prefetchQuery({
+		queryKey: ['core-server', props.instance.path],
+		queryFn: () => core.getInstance(props.instance.path),
+		staleTime: 30_000,
+	})
+}
+
 const stop = async (event: MouseEvent) => {
 	event?.stopPropagation()
 	loading.value = true
@@ -140,6 +153,8 @@ onUnmounted(() => {
 		</template>
 		<div
 			class="grid grid-cols-[auto_minmax(0,3fr)_minmax(0,4fr)_auto] items-center gap-2 p-3 bg-bg-raised card-shadow rounded-xl smart-clickable:highlight-on-hover"
+			@focusin="preloadServerDetail"
+			@pointerenter="preloadServerDetail"
 		>
 			<Avatar
 				:src="instanceIcon ? convertFileSrc(instanceIcon) : undefined"
@@ -212,7 +227,7 @@ onUnmounted(() => {
 							{
 								id: 'open-instance',
 								shown: !!instance.path,
-								action: () => router.push(encodeURI(`/instance/${instance.path}`)),
+								action: () => router.push(`/instance/${encodeURIComponent(instance.path)}`),
 							},
 							{
 								id: 'open-folder',

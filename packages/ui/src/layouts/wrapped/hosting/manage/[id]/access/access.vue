@@ -1,10 +1,5 @@
 <template>
 	<div class="flex w-full flex-col gap-4">
-		<div class="flex flex-col gap-1">
-			<h2 class="m-0 text-2xl font-semibold text-contrast">Access</h2>
-			<p class="m-0 text-secondary">Manage access and review activity for this server.</p>
-		</div>
-
 		<div class="flex flex-col gap-2 md:flex-row">
 			<StyledInput
 				v-model="search"
@@ -14,22 +9,45 @@
 				input-class="!h-10"
 				clearable
 			/>
-			<ButtonStyled color="brand">
-				<button class="!h-10 w-full md:w-fit" :disabled="!canManageUsers" @click="grantAccessModal?.show($event)">
-					<UserPlusIcon aria-hidden="true" />
-					Add user
-				</button>
-			</ButtonStyled>
+			<div class="flex shrink-0 flex-wrap items-center gap-2 md:flex-nowrap">
+				<Combobox
+					v-model="roleFilter"
+					:options="roleFilterOptions"
+					:display-value="selectedRoleFilterLabel"
+					trigger-class="min-w-[225px] !h-10 !min-h-10 !py-0"
+				>
+					<template #prefix>
+						<FilterIcon class="size-5 text-secondary" aria-hidden="true" />
+					</template>
+				</Combobox>
+				<ButtonStyled color="brand">
+					<button
+						class="!h-10 w-full md:w-fit"
+						:disabled="!canManageUsers"
+						@click="grantAccessModal?.show($event)"
+					>
+						<UserPlusIcon aria-hidden="true" />
+						Add user
+					</button>
+				</ButtonStyled>
+			</div>
 		</div>
 
 		<div v-if="accessError" class="rounded-lg bg-red-highlight p-4 font-semibold text-contrast">
 			Failed to load access: {{ accessError.message }}
 		</div>
+		<div
+			v-else-if="accessLoading"
+			class="rounded-2xl border border-solid border-surface-4 bg-surface-2 px-4 py-8 text-center text-secondary"
+		>
+			Loading access...
+		</div>
 		<AccessTable
+			v-else
 			:members="filteredMembers"
 			:roles="roleOptions"
 			:can-manage-users="canManageUsers"
-			:user-profile-link="userProfileLink"
+			:user-profile-link="props.userProfileLink"
 			permission-denied-message="You do not have permission to manage access."
 			@update-role="updateRole"
 			@cancel-invite="requestRemove"
@@ -88,7 +106,7 @@ import {
 	uiAccessRoleToCore,
 	uiAccessRoleToPreset,
 } from '@amberite/amberite-api'
-import { SearchIcon, UserPlusIcon } from '@modrinth/assets'
+import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { type Component, computed, ref } from 'vue'
 
@@ -96,6 +114,7 @@ import AccessTable from '#ui/components/servers/access/AccessTable.vue'
 import AuditLogTable from '#ui/components/servers/access/AuditLogTable.vue'
 import GrantAccessModal from '#ui/components/servers/access/GrantAccessModal.vue'
 import RemoveAccessModal from '#ui/components/servers/access/RemoveAccessModal.vue'
+import Combobox, { type ComboboxOption } from '#ui/components/base/Combobox.vue'
 import type {
 	TimeFrameLastUnit,
 	TimeFrameMode,
@@ -125,6 +144,8 @@ const props = withDefaults(
 		userProfileLink: undefined,
 	},
 )
+
+type RoleFilter = AmberiteAccessUiRole | 'all'
 
 const backend = injectHostingBackend()
 const core = backend.core
@@ -169,13 +190,25 @@ const members = computed<ServerAccessMember[]>(() =>
 	(accessQuery.data.value?.members ?? []).map(toAmberiteAccessUiMember),
 )
 const accessError = computed(() => (accessQuery.error.value as Error | null) ?? null)
+const accessLoading = computed(
+	() => accessQuery.isLoading.value && accessQuery.data.value === undefined && !accessError.value,
+)
 const canManageUsers = computed(() => accessQuery.data.value?.viewer.can_manage_users ?? false)
 const activityLoading = computed(() => activityQuery.isLoading.value)
+const roleFilter = ref<RoleFilter>('all')
+const roleFilterOptions = computed<ComboboxOption<RoleFilter>[]>(() => [
+	{ value: 'all', label: 'All roles' },
+	...roleOptions.map((role) => ({ value: role.value, label: role.label })),
+])
+const selectedRoleFilterLabel = computed(
+	() => roleFilterOptions.value.find((option) => option.value === roleFilter.value)?.label ?? 'All roles',
+)
 const filteredMembers = computed(() => {
 	const normalized = search.value.trim().toLowerCase()
-	return members.value.filter(
-		(member) => !normalized || member.user.username.toLowerCase().includes(normalized),
-	)
+	return members.value.filter((member) => {
+		if (roleFilter.value !== 'all' && member.role !== roleFilter.value) return false
+		return !normalized || member.user.username.toLowerCase().includes(normalized)
+	})
 })
 const suggestions = computed<ServerAccessInviteSuggestion[]>(() =>
 	members.value.map((member) => ({

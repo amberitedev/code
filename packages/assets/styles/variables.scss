@@ -1,13 +1,13 @@
 // Summary: `.light-properties` defines shared/light theme tokens (line 3), and `html` adds global sizing, tooltip, ad, link, and shadow tokens (line 191).
 // `.dark-mode` defines the app dark palette (line 231), `.oled-mode` overrides it for pure black displays (line 418), and `.retro-mode` adds legacy overrides (line 439).
 .light-properties {
-	--surface-1: #ebebeb;
-	--surface-1-5: #ededed;
-	--surface-2: #f5f5f5;
-	--surface-2-5: #eef1f5;
-	--surface-3: #f8f8f8;
-	--surface-4: #ffffff;
-	--surface-5: #dddddd;
+	--surface-1: #f3eee5;
+	--surface-1-5: #f7f1e8;
+	--surface-2: #fbf6ee;
+	--surface-2-5: #f1e7dc;
+	--surface-3: #fffaf2;
+	--surface-4: #fffdf8;
+	--surface-5: #d8cec1;
 
 	--color-red-50: #fff1f1;
 	--color-red-100: #ffe1e1;
@@ -100,14 +100,14 @@
 	--color-super-raised-bg: var(--surface-4);
 
 	--color-button-bg: var(--surface-4);
-	--color-button-bg-hover: var(--surface-5);
+	--color-button-bg-hover: var(--surface-2-5);
 	--color-clear-button-bg-hover: var(--color-button-bg);
-	--color-orange-accent-button-bg-hover: var(--surface-5);
-	--color-left-nav-button-bg-hover: var(--surface-5);
-	--color-sidebar-button-bg-hover: var(--surface-5);
+	--color-orange-accent-button-bg-hover: var(--surface-2-5);
+	--color-left-nav-button-bg-hover: var(--surface-2-5);
+	--color-sidebar-button-bg-hover: var(--surface-2-5);
 	--color-sidebar-accent-border: var(--surface-5);
-	--color-button-border: rgba(161, 161, 161, 0.35);
-	--color-scrollbar: #96a2b0;
+	--color-button-border: rgba(122, 100, 75, 0.28);
+	--color-scrollbar: #a8947e;
 
 	--color-divider: var(--surface-5);
 	--color-divider-dark: var(--surface-5);
@@ -164,7 +164,7 @@
 	--color-button-bg-selected: var(--color-brand);
 	--color-button-text-selected: var(--color-accent-contrast);
 
-	--color-gradient-button-bg: linear-gradient(180deg, #f8f9fa 0%, #dce0e6 100%);
+	--color-gradient-button-bg: linear-gradient(180deg, #fffaf2 0%, #e6d9ca 100%);
 
 	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) 100%);
 
@@ -348,20 +348,20 @@ html {
 	--color-contrast: var(--color-text-primary);
 	--color-accent-contrast: #ffffff;
 
-	--color-red-highlight: var(--surface-4);
-	--color-orange-highlight: var(--surface-4);
-	--color-warning-highlight: var(--surface-4);
-	--color-green-highlight: var(--surface-4);
-	--color-blue-highlight: var(--surface-4);
-	--color-purple-highlight: var(--surface-4);
-	--color-gray-highlight: var(--surface-4);
+	--color-red-highlight: rgba(255, 59, 59, 0.25);
+	--color-orange-highlight: rgba(255, 100, 26, 0.25);
+	--color-warning-highlight: rgba(255, 138, 31, 0.25);
+	--color-green-highlight: rgba(27, 217, 106, 0.25);
+	--color-blue-highlight: rgba(79, 156, 255, 0.25);
+	--color-purple-highlight: rgba(199, 138, 255, 0.25);
+	--color-gray-highlight: rgba(133, 133, 140, 0.25);
 
-	--color-red-bg: var(--surface-3);
-	--color-orange-bg: var(--surface-3);
+	--color-red-bg: rgba(255, 59, 59, 0.2);
+	--color-orange-bg: rgba(255, 100, 26, 0.2);
 	--color-warning-bg: #43301d;
-	--color-green-bg: var(--surface-3);
-	--color-blue-bg: var(--surface-3);
-	--color-purple-bg: var(--surface-3);
+	--color-green-bg: rgba(27, 217, 106, 0.2);
+	--color-blue-bg: rgba(79, 156, 255, 0.2);
+	--color-purple-bg: rgba(199, 138, 255, 0.2);
 
 	--color-brand: var(--color-orange);
 	--color-brand-highlight: var(--color-orange-highlight);

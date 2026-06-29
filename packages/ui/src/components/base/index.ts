@@ -39,6 +39,18 @@ export { default as FilterPills } from './FilterPills.vue'
 export { default as FloatingActionBar } from './FloatingActionBar.vue'
 export { default as FloatingPanel } from './FloatingPanel.vue'
 export { default as FormattedTag } from './FormattedTag.vue'
+export type {
+	GhostControlKind,
+	GhostControlSize,
+	GhostMediaKind,
+	GhostShape,
+	GhostTextKind,
+} from './ghost'
+export { default as GhostBlock } from './GhostBlock.vue'
+export { default as GhostControl } from './GhostControl.vue'
+export { default as GhostMedia } from './GhostMedia.vue'
+export { default as GhostTabGroup } from './GhostTabGroup.vue'
+export { default as GhostText } from './GhostText.vue'
 export { default as HeadingLink } from './HeadingLink.vue'
 export { default as HorizontalRule } from './HorizontalRule.vue'
 export { default as I18nDebugPanel } from './I18nDebugPanel.vue'
@@ -58,7 +70,9 @@ export type {
 export { default as MultiSelect } from './MultiSelect.vue'
 export type { MaybeCtxFn, StageButtonConfig, StageConfigInput } from './MultiStageModal.vue'
 export { default as MultiStageModal, resolveCtxFn } from './MultiStageModal.vue'
+export { default as NavTabContentTransition } from './NavTabContentTransition.vue'
 export { default as NavTabs } from './NavTabs.vue'
+export { default as UiMotionTransition } from './UiMotionTransition.vue'
 export { default as OptionGroup } from './OptionGroup.vue'
 export type { Option as OverflowMenuOption } from './OverflowMenu.vue'
 export { default as OverflowMenu } from './OverflowMenu.vue'
@@ -70,6 +84,7 @@ export { default as ProgressBar } from './ProgressBar.vue'
 export { default as ProgressSpinner } from './ProgressSpinner.vue'
 export { default as RadialHeader } from './RadialHeader.vue'
 export { default as RadioButtons } from './RadioButtons.vue'
+export type { ReadyTransitionSlotProps, ReadyTransitionState } from './ready-transition'
 export { default as ReadyTransition } from './ReadyTransition.vue'
 export { default as ScrollablePanel } from './ScrollablePanel.vue'
 export { default as ServerNotice } from './ServerNotice.vue'
@@ -77,6 +92,11 @@ export { default as SettingsLabel } from './SettingsLabel.vue'
 export { default as SimpleBadge } from './SimpleBadge.vue'
 export { default as Slider } from './Slider.vue'
 export { default as SmartClickable } from './SmartClickable.vue'
+export type {
+	StageContentTransitionAxis,
+	StageContentTransitionDirection,
+} from './StageContentTransition.vue'
+export { default as StageContentTransition } from './StageContentTransition.vue'
 export type { StackedAdmonitionItem, StackedAdmonitionType } from './StackedAdmonitions.vue'
 export { default as StackedAdmonitions } from './StackedAdmonitions.vue'
 export { default as StatItem } from './StatItem.vue'
@@ -87,6 +107,8 @@ export type { TabsTab, TabsValue } from './Tabs.vue'
 export { default as Tabs } from './Tabs.vue'
 export { default as TagItem } from './TagItem.vue'
 export { default as TagTagItem } from './TagTagItem.vue'
+export type { TextMorphTransition, TextMorphVariants } from './TextMorph.vue'
+export { default as TextMorph } from './TextMorph.vue'
 export type {
 	TimeFrameLastUnit,
 	TimeFrameLastUnitOption,
@@ -97,4 +119,6 @@ export type {
 export { default as TimeFramePicker } from './TimeFramePicker.vue'
 export { default as Timeline } from './Timeline.vue'
 export { default as Toggle } from './Toggle.vue'
+export type { UiLazyMountMode } from '../../composables/use-lazy-mount'
+export { default as UiLazyMount } from './UiLazyMount.vue'
 export { default as UnsavedChangesPopup } from './UnsavedChangesPopup.vue'

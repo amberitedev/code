@@ -1,5 +1,5 @@
 <template>
-	<div v-if="instance" class="flex h-full flex-col">
+	<div v-if="instance && server" class="flex h-full flex-col">
 		<div class="shrink-0 p-6 pr-2 pb-4">
 			<InstanceSettingsModal
 				:key="instance.path"
@@ -82,7 +82,7 @@
 							>
 								<MoreVerticalIcon />
 								<template #open-folder><FolderOpenIcon /> Open folder</template>
-								<template #copy-id><ClipboardCopyIcon /> Copy ID</template>
+								<template #copy-id><ClipboardCopyIcon /> Copy server path</template>
 								<template
 									v-for="preset in PERMISSION_PRESET_ORDER"
 									#[`view-as-${preset}`]
@@ -100,13 +100,29 @@
 		</div>
 
 		<div class="shrink-0 px-6">
-			<NavTabs mode="local" :links="navLinks" :active-index="activeIndex" @tab-click="onNavClick" />
+			<NavTabs
+				mode="local"
+				:links="navLinks"
+				:active-index="visibleActiveIndex"
+				@tab-click="syncedTabController.selectTab"
+			/>
 		</div>
 
 		<div class="min-h-0 flex-1 overflow-hidden p-6 pt-4">
-			<Suspense>
-				<component :is="activePage" :instance="instance" :offline="offline" :playing="playing" />
-			</Suspense>
+			<NavTabContentTransition
+				:content-key="activeTabKey"
+				:direction="syncedTabSlideDirection"
+				:visible="syncedTabContentVisible"
+				@before-leave="syncedTabController.handleBeforeLeave"
+				@after-leave="syncedTabController.handleAfterLeave"
+				@after-enter="syncedTabController.handleAfterEnter"
+				@enter-cancelled="syncedTabController.handleEnterCancelled"
+				@leave-cancelled="syncedTabController.handleLeaveCancelled"
+			>
+				<Suspense>
+					<component :is="activePage" :instance="instance" :offline="offline" :playing="playing" />
+				</Suspense>
+			</NavTabContentTransition>
 		</div>
 
 		<ServerSettingsModal />
@@ -149,11 +165,13 @@ import {
 	ContentPageHeader,
 	ErrorInformationCard,
 	injectNotificationManager,
+	NavTabContentTransition,
 	NavTabs,
 	OverflowMenu,
+	useNavTabContentController,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { computed, defineAsyncComponent, provide, ref } from 'vue'
+import { computed, defineAsyncComponent, provide, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
@@ -164,7 +182,7 @@ import { showProfileInFolder } from '@/helpers/utils.js'
 
 import ServerSettingsModal from '../server/settings/ServerSettingsModal.vue'
 import { useCoreServerRuntime } from '../server/use-core-server-runtime'
-import { getLinkedServerId } from './use-synced-link'
+import { getLinkedServerId, getLinkedServerPath, setLinkedServerPath } from './use-synced-link'
 import {
 	provideSyncedPermissions,
 	SYNCED_PERMISSION_PRESET_LABELS,
@@ -191,8 +209,19 @@ const { handleError } = injectNotificationManager()
 
 provideSyncedSide('server')
 const serverInstanceId = getLinkedServerId(route.params.id as string)
-const { powerState, startServer, stopServer, copyId, loadError, openSettings } =
-	useCoreServerRuntime(serverInstanceId)
+const cachedServerPath = ref(getLinkedServerPath(route.params.id as string))
+const { powerState, startServer, stopServer, copyId, loadError, openSettings, server } =
+	useCoreServerRuntime(serverInstanceId, cachedServerPath)
+
+watch(
+	server,
+	(next) => {
+		if (!next?.server_id) return
+		cachedServerPath.value = next.server_id
+		setLinkedServerPath(route.params.id as string, next.server_id)
+	},
+	{ immediate: true },
+)
 
 const permissionPreset = provideSyncedPermissions(useSyncedRolePreset(serverInstanceId).preset)
 const permissions = computed(() => new Set(SYNCED_PERMISSION_PRESETS[permissionPreset.value]))
@@ -259,10 +288,17 @@ const navLinks = [
 	{ label: 'Settings', href: 'settings', icon: SettingsIcon },
 ]
 const activeIndex = ref(0)
+const syncedTabController = useNavTabContentController({
+	activeIndex,
+	changeTab: (index) => {
+		activeIndex.value = index
+	},
+})
+const visibleActiveIndex = syncedTabController.activeIndex
+const syncedTabSlideDirection = syncedTabController.direction
+const syncedTabContentVisible = syncedTabController.visible
+const activeTabKey = computed(() => navLinks[activeIndex.value]?.href ?? activeIndex.value)
 const activePage = computed(() => pages[activeIndex.value])
-function onNavClick(index: number) {
-	activeIndex.value = index
-}
 
 async function fetchInstance() {
 	const next = await get(route.params.id as string).catch(handleError)

@@ -24,6 +24,7 @@ impl InstanceRepo {
 #[derive(sqlx::FromRow)]
 struct InstanceRow {
     id: String,
+    path: String,
     name: String,
     game_version: String,
     loader: String,
@@ -52,6 +53,7 @@ impl TryFrom<InstanceRow> for InstanceRecord {
                 .parse::<uuid::Uuid>()
                 .map(InstanceId)
                 .map_err(|e| StoreError::Parse(e.to_string()))?,
+            path: r.path,
             name: r.name,
             game_version: r.game_version,
             loader: r.loader.parse::<ModLoader>().map_err(StoreError::Parse)?,
@@ -97,9 +99,10 @@ pub(crate) fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, StoreError> {
 impl InstanceStore for InstanceRepo {
     async fn create(&self, r: &InstanceRecord) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO instances (id,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,jvm_args,server_args,install_status,status,data_dir,installation_id,total_uptime_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO instances (id,path,name,game_version,loader,loader_version,port,memory_min,memory_max,java_version,jvm_args,server_args,install_status,status,data_dir,installation_id,total_uptime_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         .bind(r.id.to_string())
+        .bind(&r.path)
         .bind(&r.name)
         .bind(&r.game_version)
         .bind(r.loader.to_string())
@@ -130,6 +133,17 @@ impl InstanceStore for InstanceRepo {
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+        row.try_into()
+    }
+
+    async fn get_by_path(&self, path: &str) -> Result<InstanceRecord, StoreError> {
+        let row = sqlx::query_as::<_, InstanceRow>(
+            "SELECT * FROM instances WHERE path = ?",
+        )
+        .bind(path)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| StoreError::NotFound(path.to_string()))?;
         row.try_into()
     }
 

@@ -70,6 +70,7 @@ pub async fn create_instance(
 ) -> Result<InstanceId, InstanceError> {
     validate_create_request(state, &req).await?;
     let id = InstanceId::new();
+    let path = unique_instance_path(state, &req.name).await?;
     let data_dir = unique_instance_data_dir(state, &req.name, &id).await?;
 
     // B4: Write initial server.properties so the server can start on first launch.
@@ -88,6 +89,7 @@ pub async fn create_instance(
     let now = chrono::Utc::now();
     let record = InstanceRecord {
         id: id.clone(),
+        path,
         name: req.name,
         game_version: req.game_version,
         loader: req.loader,
@@ -137,6 +139,41 @@ async fn validate_create_request(
     }
     require_port_available(state, req.port, None).await?;
     Ok(())
+}
+
+async fn unique_instance_path(
+	state: &Arc<AppState>,
+	name: &str,
+) -> Result<String, InstanceError> {
+	let base = sanitize_instance_path(name);
+	match state.instance_store.get_by_path(&base).await {
+		Ok(_) => {}
+		Err(StoreError::NotFound(_)) => return Ok(base),
+		Err(error) => return Err(error.into()),
+	}
+
+	let mut index = 1;
+	loop {
+		let candidate = format!("{base} ({index})");
+		match state.instance_store.get_by_path(&candidate).await {
+			Ok(_) => {}
+			Err(StoreError::NotFound(_)) => return Ok(candidate),
+			Err(error) => return Err(error.into()),
+		}
+		index += 1;
+	}
+}
+
+pub fn sanitize_instance_path(input: &str) -> String {
+    let path = input.trim().replace(
+        ['/', '\\', '?', '*', ':', '\'', '\"', '|', '<', '>', '!'],
+        "_",
+    );
+    if path.trim().is_empty() {
+        "server".to_string()
+    } else {
+        path
+    }
 }
 
 async fn require_port_available(
@@ -403,5 +440,31 @@ pub async fn restore_instances(state: Arc<AppState>) {
         {
             error!("Failed to restore instance {}: {e}", record.id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_instance_path;
+
+    #[test]
+    fn sanitize_instance_path_replaces_profile_forbidden_characters() {
+        assert_eq!(
+            sanitize_instance_path("bad/\\?*:'\"|<>!name"),
+            "bad___________name"
+        );
+    }
+
+    #[test]
+    fn sanitize_instance_path_preserves_readable_text() {
+        assert_eq!(
+            sanitize_instance_path("My Fabric Server"),
+            "My Fabric Server"
+        );
+    }
+
+    #[test]
+    fn sanitize_instance_path_uses_empty_name_fallback() {
+        assert_eq!(sanitize_instance_path("   "), "server");
     }
 }

@@ -5,17 +5,17 @@ import { edit, get } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
 
 import { registerSyncedProfileBackend } from './synced-registration'
-import { clearLinkedServerId, setLinkedServerId } from './use-synced-link'
+import { clearLinkedServerId, setLinkedServerId, setLinkedServerPath } from './use-synced-link'
 
 /**
  * Synced profile conversion helpers.
  *
  * A "synced" profile is a single profile that surfaces both a client instance
  * (the profile itself) and a server instance (an Copal instance). For
- * profiles created through the Synced creation flow the profile is named after
- * the Core instance id, so the two share an id. Converting an existing client
- * profile keeps its original path, so we provision a fresh Core instance and
- * record the `profilePath -> coreInstanceId` link (see use-synced-link.ts).
+ * profiles created through the Synced creation flow keep a readable app-lib
+ * path and store a local link to Core's internal UUID plus public path.
+ * Converting an existing client profile keeps its original path and records the
+ * same mapping.
  */
 
 /**
@@ -29,6 +29,7 @@ export async function convertToSynced(path: string): Promise<string> {
 		getProfile: get,
 		editProfile: edit,
 		setLinkedServerId,
+		setLinkedServerPath,
 		registerSyncedProfile: registerSyncedProfileBackend,
 	})
 }

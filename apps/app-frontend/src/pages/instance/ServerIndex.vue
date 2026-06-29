@@ -5,6 +5,7 @@
 		servers-path="/library/servers"
 		:navigate-to-servers="backToServerLibrary"
 		show-copy-id-action
+		copy-id-label="Copy path"
 	>
 		<component :is="activePage" v-bind="activePageProps" />
 	</ServersManageRootLayout>
@@ -23,6 +24,7 @@ import {
 import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { useCoreInstances } from '@/composables/useCoreInstances'
 import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
@@ -33,7 +35,11 @@ const props = defineProps<{
 	profile?: GameInstance | null
 }>()
 
-const serverId = computed(() => props.profile?.core_instance_id ?? (route.params.id as string))
+const { instances: coreInstances } = useCoreInstances()
+const serverId = computed(() => route.params.id as string)
+const coreInstance = computed(() =>
+	[...coreInstances.value.values()].find((instance) => instance.path === serverId.value),
+)
 const basePath = computed(() => `/instance/${encodeURIComponent(route.params.id as string)}`)
 const activePage = computed(() => {
 	if (route.path.endsWith('/content')) return ServersManageContentPage
@@ -53,12 +59,13 @@ async function backToServerLibrary() {
 }
 
 watch(
-	serverId,
-	(id) => {
+	[serverId, coreInstance],
+	([id, instance]) => {
 		if (!id) return
-		breadcrumbs.setName('Instance', id.length > 40 ? id.substring(0, 40) + '...' : id)
+		const name = instance?.name ?? props.profile?.name ?? id
+		breadcrumbs.setName('Instance', name.length > 40 ? name.substring(0, 40) + '...' : name)
 		breadcrumbs.setContext({
-			name: id,
+			name,
 			link: route.path,
 			query: route.query,
 		})

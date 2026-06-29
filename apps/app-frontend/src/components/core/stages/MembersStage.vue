@@ -24,13 +24,16 @@ const canCreateInvite = computed(() => {
 			suggestion.id.toLowerCase() === value ||
 			suggestion.email?.toLowerCase() === value,
 	)
-	return !!user && !ctx.members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)
+	return (
+		!!user &&
+		!ctx.members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)
+	)
 })
 </script>
 
 <template>
 	<div class="flex min-h-[26rem] flex-col gap-4">
-		<p class="m-0 text-secondary">Manage the friend group roles.</p>
+		<p class="m-0 text-secondary">Manage Core members and roles.</p>
 		<div class="flex flex-col gap-3">
 			<div class="flex flex-col gap-2 md:flex-row md:items-center">
 				<div class="min-w-0 flex-1">
@@ -48,12 +51,17 @@ const canCreateInvite = computed(() => {
 						:search-spellcheck="false"
 						trigger-class="!h-10 !min-h-10"
 						@search-input="(value) => (ctx.inviteSearch.value = value)"
-						@select="(option) => ctx.selectInviteSuggestion({ id: option.value, username: option.label })"
+						@select="
+							(option) => ctx.selectInviteSuggestion({ id: option.value, username: option.label })
+						"
 					>
 						<template #option="{ item, isSelected }">
 							<div class="flex min-w-0 items-center gap-2">
 								<Avatar
-									:src="ctx.inviteSuggestions.value.find((user) => user.username === item.value)?.avatarUrl"
+									:src="
+										ctx.inviteSuggestions.value.find((user) => user.username === item.value)
+											?.avatarUrl
+									"
 									:alt="`${item.label}'s avatar`"
 									:tint-by="item.label"
 									size="1.5rem"
@@ -71,7 +79,11 @@ const canCreateInvite = computed(() => {
 					</Combobox>
 				</div>
 				<ButtonStyled color="brand">
-					<button class="!h-10 w-full md:w-fit" :disabled="!canCreateInvite" @click="ctx.createInvite">
+					<button
+						class="!h-10 w-full md:w-fit"
+						:disabled="!canCreateInvite"
+						@click="ctx.createInvite"
+					>
 						<UserPlusIcon />
 						Invite
 					</button>

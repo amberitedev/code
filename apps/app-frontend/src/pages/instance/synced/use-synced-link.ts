@@ -2,24 +2,20 @@
  * Synced profile -> Core instance linkage.
  *
  * A synced profile surfaces a client side (the app-lib profile, keyed by its
- * path) and a server side (an Copal instance). For profiles created via
- * the "Synced" creation flow the profile is named after the Core instance id, so
- * `profilePath === coreInstanceId` and no mapping is needed.
- *
- * Profiles converted from an existing client profile keep their original path,
- * which can never equal a freshly generated Core UUID. For those we persist an
- * explicit `profilePath -> coreInstanceId` mapping so the server side can resolve
- * the right Core instance. The map is frontend-local (localStorage) so it needs
- * no app-lib or Core backend changes.
+ * path) and a server side (a Copal instance). The app-lib profile path stays
+ * readable, while this local map points it at the Core UUID used by durable sync
+ * records. A second local display map caches the Core public path so synced
+ * server tabs can use readable path-based URLs before the next SSE snapshot.
  */
 
-const STORAGE_KEY = 'amberite:synced-links'
+const ID_STORAGE_KEY = 'amberite:synced-links'
+const PATH_STORAGE_KEY = 'amberite:synced-paths'
 
 type SyncedLinkMap = Record<string, string>
 
-function readMap(): SyncedLinkMap {
+function readMap(storageKey: string): SyncedLinkMap {
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY)
+		const raw = localStorage.getItem(storageKey)
 		if (!raw) return {}
 		const parsed = JSON.parse(raw) as unknown
 		return parsed && typeof parsed === 'object' ? (parsed as SyncedLinkMap) : {}
@@ -28,9 +24,9 @@ function readMap(): SyncedLinkMap {
 	}
 }
 
-function writeMap(map: SyncedLinkMap): void {
+function writeMap(storageKey: string, map: SyncedLinkMap): void {
 	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
+		localStorage.setItem(storageKey, JSON.stringify(map))
 	} catch {
 		// Ignore storage failures — the server side just falls back to the path.
 	}
@@ -42,24 +38,49 @@ export function setLinkedServerId(profilePath: string, coreInstanceId: string): 
 		clearLinkedServerId(profilePath)
 		return
 	}
-	const map = readMap()
+	const map = readMap(ID_STORAGE_KEY)
 	map[profilePath] = coreInstanceId
-	writeMap(map)
+	writeMap(ID_STORAGE_KEY, map)
 }
 
 /**
  * Resolve the Core instance id for a synced profile, falling back to the profile
- * path itself (the created-synced identity case).
+ * path for older local mappings.
  */
 export function getLinkedServerId(profilePath: string): string {
-	return readMap()[profilePath] ?? profilePath
+	return readMap(ID_STORAGE_KEY)[profilePath] ?? profilePath
+}
+
+/** Cache a synced profile's Core public path for display and path-based calls. */
+export function setLinkedServerPath(profilePath: string, coreInstancePath: string): void {
+	if (profilePath === coreInstancePath) {
+		clearLinkedServerPath(profilePath)
+		return
+	}
+	const map = readMap(PATH_STORAGE_KEY)
+	map[profilePath] = coreInstancePath
+	writeMap(PATH_STORAGE_KEY, map)
+}
+
+/** Resolve the cached public Core path for a synced profile, when known. */
+export function getLinkedServerPath(profilePath: string): string | null {
+	return readMap(PATH_STORAGE_KEY)[profilePath] ?? null
 }
 
 /** Drop a synced profile's server link (e.g. when reverting to a client profile). */
 export function clearLinkedServerId(profilePath: string): void {
-	const map = readMap()
+	const map = readMap(ID_STORAGE_KEY)
 	if (profilePath in map) {
 		const { [profilePath]: _removed, ...rest } = map
-		writeMap(rest)
+		writeMap(ID_STORAGE_KEY, rest)
+	}
+	clearLinkedServerPath(profilePath)
+}
+
+export function clearLinkedServerPath(profilePath: string): void {
+	const map = readMap(PATH_STORAGE_KEY)
+	if (profilePath in map) {
+		const { [profilePath]: _removed, ...rest } = map
+		writeMap(PATH_STORAGE_KEY, rest)
 	}
 }

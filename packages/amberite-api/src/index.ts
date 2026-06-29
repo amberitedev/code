@@ -35,6 +35,7 @@ export type {
 	CoreSetupStatus,
 	CoreSetupRequest,
 	CoreSetupResponse,
+	CoreSetupDevResetResponse,
 	CoreConnectionHandshakeRequest,
 	CoreConnectionHandshakeResponse,
 	CoreConnectionRejectReason,
@@ -101,8 +102,6 @@ export { ConvexAmberiteAuthClient } from './auth-client'
 export type {
 	AmberiteAuthClient,
 	AmberiteSession,
-	AmberitePasswordSignInRequest,
-	AmberitePasswordSignUpRequest,
 	AmberiteMinecraftTokenSignInRequest,
 } from './auth-client'
 export { MockAmberiteAuthClient, defaultMockUser } from './mock-client'
@@ -114,10 +113,7 @@ export {
 	validateAmberiteSessionTokens,
 } from './session'
 export type { AmberiteSessionTokens, AmberiteSessionStorage } from './session'
-export {
-	mapAmberiteUserToAccountUser,
-	normalizeAmberiteAccountUser,
-} from './profile'
+export { mapAmberiteUserToAccountUser, normalizeAmberiteAccountUser } from './profile'
 export type { AmberiteAccountUser, AmberiteProfilePatch } from './profile'
 export { composeSocialSessionState } from './social-session'
 export type {
@@ -128,11 +124,7 @@ export type {
 } from './social-session'
 export { CoreWsConnection } from './ws'
 export { RealtimePresenceSession } from './realtime'
-export type {
-	RealtimeFrame,
-	RealtimePresenceSessionOptions,
-	RealtimeSocket,
-} from './realtime'
+export type { RealtimeFrame, RealtimePresenceSessionOptions, RealtimeSocket } from './realtime'
 export type { PlatformAdapter, PersistentQueueStore, QueuedMessage } from './adapter'
 export type { CoreCallContext } from './context'
 export {
@@ -194,6 +186,5 @@ export type {
 	CommunicationResult,
 	EndpointPolicyMap,
 } from './pipeline-types'
-export { startMicrosoftLogin, completeMicrosoftLogin, type AuthSession } from './auth'
 export { drainQueue } from './drain'
 export * from './logic'

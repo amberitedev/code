@@ -13,8 +13,9 @@ use crate::{
         state::AppState,
     },
     presentation::{
-        authz::require_instance_permission, error::ApiError,
+        error::ApiError,
         extractors::AuthUser,
+        instance_path::resolve_authorized_instance_id,
     },
 };
 
@@ -33,13 +34,19 @@ pub async fn execute_rcon_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RconCommandRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:console")
-        .await?;
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:console",
+    )
+    .await?
+    .to_string();
     let command = body.command.trim();
     if command.is_empty() {
         return Err(ApiError::BadRequest("command must not be empty".into()));
     }
-    let response = execute_command(&state, &id, command).await?;
+    let response = execute_command(&state, &instance_id, command).await?;
     Ok(Json(json!({ "response": response })))
 }
 
@@ -53,8 +60,14 @@ pub async fn enable_rcon_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:settings")
-        .await?;
-    let result = enable_rcon(&state, &id).await?;
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:settings",
+    )
+    .await?
+    .to_string();
+    let result = enable_rcon(&state, &instance_id).await?;
     Ok(Json(json!(result)))
 }

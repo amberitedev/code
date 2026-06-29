@@ -44,9 +44,34 @@ type AnalyticsEventMap = {
 export type AnalyticsEvent = keyof AnalyticsEventMap
 
 let initialized = false
+let disabled = false
+
+function isLocalHost() {
+	const { hostname } = window.location
+	return (
+		hostname === 'localhost' ||
+		hostname.endsWith('.localhost') ||
+		hostname === '127.0.0.1' ||
+		hostname === '::1'
+	)
+}
+
+function shouldEnablePostHog() {
+	if (import.meta.env.VITE_ENABLE_POSTHOG === 'true') return true
+	return !import.meta.env.DEV && !isLocalHost()
+}
+
+function shouldEnablePostHogDebug() {
+	return import.meta.env.VITE_POSTHOG_DEBUG === 'true'
+}
 
 export const initAnalytics = () => {
-	if (initialized) return
+	if (initialized || disabled) return
+	if (!shouldEnablePostHog()) {
+		disabled = true
+		return
+	}
+
 	posthog.init('phc_9Iqi6lFs9sr5BSqh9RRNRSJ0mATS9PSgirDiX3iOYJ', {
 		persistence: 'localStorage',
 		api_host: 'https://posthog.modrinth.com',
@@ -55,7 +80,7 @@ export const initAnalytics = () => {
 }
 
 export const debugAnalytics = () => {
-	if (!initialized) return
+	if (!initialized || !shouldEnablePostHogDebug()) return
 	posthog.debug()
 }
 
@@ -66,6 +91,7 @@ export const optOutAnalytics = () => {
 
 export const optInAnalytics = () => {
 	initAnalytics()
+	if (!initialized) return
 	posthog.opt_in_capturing()
 }
 

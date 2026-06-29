@@ -18,12 +18,11 @@ use crate::{
             FsError, UnzipOption,
         },
         state::AppState,
-    },
-    domain::instance::InstanceId,
-    presentation::{
-        authz::require_instance_permission, error::ApiError,
-        extractors::AuthUser,
-    },
+	},
+	presentation::{
+		error::ApiError, extractors::AuthUser,
+		instance_path::resolve_authorized_instance_id,
+	},
 };
 
 #[derive(Deserialize)]
@@ -84,12 +83,6 @@ pub struct CopyBody {
     pub dest: String,
 }
 
-fn validate_id(id: &str) -> Result<(), ApiError> {
-    id.parse::<InstanceId>()
-        .map(|_| ())
-        .map_err(|_| ApiError::BadRequest("invalid instance id".into()))
-}
-
 impl From<FsError> for ApiError {
     fn from(e: FsError) -> Self {
         match e {
@@ -114,15 +107,14 @@ pub async fn list_handler(
     Query(q): Query<ListQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let path = q.path.as_deref().unwrap_or("");
-    let listing = list_directory(
-        &state,
-        &id,
-        path,
-        q.page.unwrap_or(0),
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let path = q.path.as_deref().unwrap_or("");
+	let listing = list_directory(
+		&state,
+		&instance_id,
+		path,
+		q.page.unwrap_or(0),
         q.page_size.unwrap_or(50),
     )
     .await
@@ -137,12 +129,11 @@ pub async fn download_handler(
     Query(q): Query<DownloadQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let (file, filename) = download_file(&state, &id, &q.path)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let (file, filename) = download_file(&state, &instance_id, &q.path)
+		.await
+		.map_err(ApiError::from)?;
     let len = file
         .metadata()
         .await
@@ -167,13 +158,17 @@ pub async fn delete_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<DeleteBody>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    delete_entry(&state, &id, &body.path, body.recursive.unwrap_or(false))
-        .await
-        .map_err(ApiError::from)?;
-    Ok(Json(json!({ "ok": true })))
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	delete_entry(
+		&state,
+		&instance_id,
+		&body.path,
+		body.recursive.unwrap_or(false),
+	)
+	.await
+	.map_err(ApiError::from)?;
+	Ok(Json(json!({ "ok": true })))
 }
 
 /// POST /instances/:id/fs/upload — upload a file into the instance directory.
@@ -184,10 +179,9 @@ pub async fn upload_handler(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let target_dir = q.path.as_deref().unwrap_or("");
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let target_dir = q.path.as_deref().unwrap_or("");
 
     while let Some(field) = multipart
         .next_field()
@@ -199,9 +193,9 @@ pub async fn upload_handler(
             .bytes()
             .await
             .map_err(|e| ApiError::BadRequest(e.to_string()))?;
-        upload_file(&state, &id, target_dir, &filename, data)
-            .await
-            .map_err(ApiError::from)?;
+		upload_file(&state, &instance_id, target_dir, &filename, data)
+			.await
+			.map_err(ApiError::from)?;
         return Ok(Json(json!({ "ok": true, "filename": filename })));
     }
     Err(ApiError::BadRequest("no file provided".into()))
@@ -214,12 +208,11 @@ pub async fn read_handler(
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let file = read_file(&state, &id, &q.path)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let file = read_file(&state, &instance_id, &q.path)
+		.await
+		.map_err(ApiError::from)?;
     let len = file
         .metadata()
         .await
@@ -242,12 +235,11 @@ pub async fn write_handler(
     State(state): State<Arc<AppState>>,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    write_file(&state, &id, &q.path, body)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	write_file(&state, &instance_id, &q.path, body)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -258,12 +250,11 @@ pub async fn create_file_handler(
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    create_file(&state, &id, &q.path)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	create_file(&state, &instance_id, &q.path)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -274,12 +265,11 @@ pub async fn mkdir_handler(
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    create_dir(&state, &id, &q.path)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	create_dir(&state, &instance_id, &q.path)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -290,12 +280,11 @@ pub async fn move_handler(
     Query(q): Query<MoveQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    move_entry(&state, &id, &q.from, &q.to)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	move_entry(&state, &instance_id, &q.from, &q.to)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -307,14 +296,13 @@ pub async fn unzip_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<UnzipBody>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    unzip_file(
-        &state,
-        &id,
-        &q.path,
-        body.option.unwrap_or(UnzipOption::Normal),
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	unzip_file(
+		&state,
+		&instance_id,
+		&q.path,
+		body.option.unwrap_or(UnzipOption::Normal),
     )
     .await
     .map_err(ApiError::from)?;
@@ -328,12 +316,11 @@ pub async fn zip_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ZipBody>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    zip_files(&state, &id, body.sources, &body.dest)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	zip_files(&state, &instance_id, body.sources, &body.dest)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -344,12 +331,11 @@ pub async fn copy_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CopyBody>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    copy_files(&state, &id, body.sources, &body.dest)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	copy_files(&state, &instance_id, body.sources, &body.dest)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -360,12 +346,11 @@ pub async fn url_handler(
     Query(q): Query<PathQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let resp = get_download_url(&state, &id, &q.path)
-        .await
-        .map_err(ApiError::from)?;
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let resp = get_download_url(&state, &instance_id, &q.path)
+		.await
+		.map_err(ApiError::from)?;
     Ok(Json(json!(resp)))
 }
 
@@ -376,15 +361,30 @@ pub async fn search_handler(
     Query(q): Query<SearchQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    validate_id(&id)?;
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let base = q.path.as_deref().unwrap_or("");
-    let results =
-        search_files(&state, &id, base, &q.query, q.recursive.unwrap_or(false))
-            .await
-            .map_err(ApiError::from)?;
-    Ok(Json(json!(results)))
+	let instance_id = resolve_fs_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let base = q.path.as_deref().unwrap_or("");
+	let results =
+		search_files(
+			&state,
+			&instance_id,
+			base,
+			&q.query,
+			q.recursive.unwrap_or(false),
+		)
+		.await
+		.map_err(ApiError::from)?;
+	Ok(Json(json!(results)))
+}
+
+async fn resolve_fs_instance_id(
+	state: &Arc<AppState>,
+	user_id: &str,
+	path: &str,
+) -> Result<String, ApiError> {
+	Ok(resolve_authorized_instance_id(state, user_id, path, "server:files")
+		.await?
+		.to_string())
 }
 
 /// GET /fs/file/:key — stream a file using a one-time download token (no auth — token IS the credential).

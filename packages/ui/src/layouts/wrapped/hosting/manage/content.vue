@@ -1,13 +1,17 @@
 <template>
-	<ContentPageLayout />
+	<ReadyTransition :pending="contentReadyPending">
+		<ContentPageLayout :bottom-padding="false" />
+	</ReadyTransition>
 </template>
 
 <script setup lang="ts">
 import type { ContentItem } from '#ui/layouts/shared/content-tab/types'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
+import { useReadyState } from '#ui/composables'
 import { injectHostingBackend, injectNotificationManager } from '#ui/providers'
 import ContentPageLayout from '#ui/layouts/shared/content-tab/layout.vue'
 import type { ContentModpackData } from '#ui/layouts/shared/content-tab/providers/content-manager'
@@ -87,9 +91,17 @@ const items = computed(() =>
 		return item
 	}),
 )
+const contentReadyPending = useReadyState(modsQuery)
+const contentType = computed(() => {
+	const loader = ctx.server.value?.loader?.toLowerCase()
+	if (loader === 'paper' || loader === 'purpur') return 'plugin'
+	if (loader === 'vanilla') return 'datapack'
+	return 'mod'
+})
 const isBusy = computed(
 	() => ctx.powerState.value === 'starting' || ctx.powerState.value === 'stopping',
 )
+const busyMessage = computed(() => (isBusy.value ? 'Please wait' : null))
 const browsePath = computed(() => props.browsePath ?? route.path.replace(/\/content\/?$/, '/browse'))
 const modpack = computed<ContentModpackData | null>(() => {
 	const pack = rawModpack.value
@@ -140,7 +152,7 @@ function uploadFiles() {
 	const input = document.createElement('input')
 	input.type = 'file'
 	input.multiple = true
-	input.accept = '.jar'
+	input.accept = contentType.value === 'datapack' ? '.zip' : '.jar'
 	input.onchange = async () => {
 		if (!input.files?.length) return
 		const files = Array.from(input.files)
@@ -171,7 +183,8 @@ provideContentManager({
 	modpack,
 	isPackLocked: computed(() => false),
 	isBusy,
-	contentTypeLabel: ref('content'),
+	busyMessage,
+	contentTypeLabel: contentType,
 	toggleEnabled,
 	deleteItem,
 	bulkDeleteItems: (selected) => Promise.all(selected.map(deleteItem)).then(() => {}),

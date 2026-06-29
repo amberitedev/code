@@ -1,6 +1,6 @@
 import type { Labrinth } from '@modrinth/api-client'
 import type { ComputedRef, Ref, ShallowRef } from 'vue'
-import { computed, nextTick, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useDebugLogger } from '#ui/composables/debug-logger'
@@ -45,6 +45,9 @@ export interface BrowseSearchState {
 	projectHits: ShallowRef<BrowseSearchResponse['projectHits']>
 	serverHits: ShallowRef<BrowseSearchResponse['serverHits']>
 	totalHits: Ref<number>
+	activeResultKey: ComputedRef<string>
+	visibleResultKey: Ref<string>
+	visibleProjectType: Ref<string>
 	pageCount: ComputedRef<number>
 
 	maxResults: Ref<number>
@@ -56,6 +59,11 @@ export interface BrowseSearchState {
 	excludeLoaders: ComputedRef<boolean>
 
 	refreshSearch: () => Promise<void>
+	cacheSearchResponse: (
+		projectType: string,
+		requestParams: string,
+		response: BrowseSearchResponse,
+	) => void
 	setPage: (page: number) => Promise<void>
 	clearSearch: () => void
 	onFilterChange: () => void
@@ -164,17 +172,70 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 	const projectHits = shallowRef<BrowseSearchResponse['projectHits']>([])
 	const serverHits = shallowRef<BrowseSearchResponse['serverHits']>([])
 	const totalHits = ref(0)
+	const activeResultKey = computed(() =>
+		createSnapshotKey(options.projectType.value, effectiveRequestParams.value),
+	)
+	const visibleResultKey = ref(activeResultKey.value)
+	const visibleProjectType = ref(options.projectType.value)
 
 	const pageCount = computed(() => {
 		if (totalHits.value === 0) return 1
 		return Math.ceil(totalHits.value / maxResults.value)
 	})
 
+	type SearchSnapshot = {
+		projectHits: BrowseSearchResponse['projectHits']
+		serverHits: BrowseSearchResponse['serverHits']
+		totalHits: number
+	}
+
+	const MAX_SNAPSHOT_COUNT = 24
+	const searchSnapshots = new Map<string, SearchSnapshot>()
 	let searchVersion = 0
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 	let lastProjectType = options.projectType.value
+	let disposed = false
 
 	const providedFiltersOrEmpty = computed(() => options.providedFilters?.value ?? [])
+
+	function createSnapshotKey(projectType: string, requestParams: string) {
+		return `${projectType}:${requestParams}`
+	}
+
+	function setSearchSnapshot(key: string, response: BrowseSearchResponse) {
+		if (searchSnapshots.has(key)) {
+			searchSnapshots.delete(key)
+		}
+
+		searchSnapshots.set(key, {
+			projectHits: response.projectHits,
+			serverHits: response.serverHits,
+			totalHits: response.total_hits,
+		})
+
+		if (searchSnapshots.size > MAX_SNAPSHOT_COUNT) {
+			const oldestKey = searchSnapshots.keys().next().value
+			if (oldestKey) {
+				searchSnapshots.delete(oldestKey)
+			}
+		}
+	}
+
+	function restoreSearchSnapshot(
+		key = activeResultKey.value,
+		projectType = options.projectType.value,
+	) {
+		const snapshot = searchSnapshots.get(key)
+		if (!snapshot) return false
+
+		projectHits.value = snapshot.projectHits
+		serverHits.value = snapshot.serverHits
+		totalHits.value = snapshot.totalHits
+		visibleResultKey.value = key
+		visibleProjectType.value = projectType
+		loading.value = false
+		return true
+	}
 
 	watch(
 		[
@@ -191,57 +252,82 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		() => {
 			currentPage.value = 1
 		},
-		{ deep: true },
+		{ deep: true, flush: 'sync' },
 	)
 
-	watch(effectiveRequestParams, (newVal, oldVal) => {
-		debug('effectiveRequestParams changed', {
-			from: oldVal?.substring(0, 80),
-			to: newVal?.substring(0, 80),
-		})
-		if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
-		const projectTypeChanged = lastProjectType !== options.projectType.value
-		lastProjectType = options.projectType.value
+	watch(
+		() => options.projectType.value,
+		(newType, oldType) => {
+			debug('projectType changed', { from: oldType, to: newType })
+			effectiveCurrentSortType.value =
+				effectiveSortTypes.value.find((sortType) => sortType.name === 'relevance') ??
+				effectiveSortTypes.value[0]
+			query.value = ''
+		},
+		{ flush: 'sync' },
+	)
 
-		if (options.immediateProjectTypeSearch && projectTypeChanged) {
-			void refreshSearch()
-			return
-		}
+	watch(
+		effectiveRequestParams,
+		(newVal, oldVal) => {
+			debug('effectiveRequestParams changed', {
+				from: oldVal?.substring(0, 80),
+				to: newVal?.substring(0, 80),
+			})
+			restoreSearchSnapshot()
+			if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+			const projectTypeChanged = lastProjectType !== options.projectType.value
+			lastProjectType = options.projectType.value
 
-		searchDebounceTimer = setTimeout(() => {
-			refreshSearch()
-		}, 200)
-	})
+			if (options.immediateProjectTypeSearch && projectTypeChanged) {
+				void refreshSearch()
+				return
+			}
+
+			searchDebounceTimer = setTimeout(() => {
+				refreshSearch()
+			}, 200)
+		},
+		{ flush: 'sync' },
+	)
 
 	async function refreshSearch() {
 		const version = ++searchVersion
+		const requestProjectType = options.projectType.value
+		const requestParams = effectiveRequestParams.value
+		const requestKey = createSnapshotKey(requestProjectType, requestParams)
+		const requestIsServerType = requestProjectType === 'server'
+		const hasCachedSnapshot = searchSnapshots.has(requestKey)
 		debug('refreshSearch start', {
 			version,
-			projectType: options.projectType.value,
-			params: effectiveRequestParams.value.substring(0, 100),
+			projectType: requestProjectType,
+			params: requestParams.substring(0, 100),
 		})
 
-		const currentHitsEmpty = isServerType.value
+		const currentHitsEmpty = requestIsServerType
 			? serverHits.value.length === 0
 			: projectHits.value.length === 0
-		if (currentHitsEmpty) {
+		if (currentHitsEmpty && !hasCachedSnapshot && visibleResultKey.value === requestKey) {
 			loading.value = true
 		}
 
 		try {
-			const response = await options.search(effectiveRequestParams.value)
+			const response = await options.search(requestParams)
+			setSearchSnapshot(requestKey, response)
 
-			if (version !== searchVersion) {
+			if (disposed || version !== searchVersion) {
 				debug('refreshSearch stale, discarding', { version, current: searchVersion })
 				return
 			}
 
-			if (isServerType.value) {
+			if (requestIsServerType) {
 				serverHits.value = response.serverHits
 			} else {
 				projectHits.value = response.projectHits
 			}
 			totalHits.value = response.total_hits
+			visibleResultKey.value = requestKey
+			visibleProjectType.value = requestProjectType
 			debug('refreshSearch complete', {
 				version,
 				hits: response.total_hits,
@@ -260,7 +346,17 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		}
 	}
 
+	function cacheSearchResponse(
+		projectType: string,
+		requestParams: string,
+		response: BrowseSearchResponse,
+	) {
+		setSearchSnapshot(createSnapshotKey(projectType, requestParams), response)
+	}
+
 	function updateUrlParams() {
+		if (disposed) return
+
 		debug('updateUrlParams', { path: route.path })
 		const persistentParams: Record<string, string | (string | null)[] | null | undefined> = {}
 
@@ -282,7 +378,9 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			...(isServerType.value ? createServerPageParams() : createPageParams()),
 		}
 
-		router.replace({ path: route.path, query: params })
+		void router.replace({ path: route.path, query: params }).catch((error) => {
+			debug('updateUrlParams failed', error)
+		})
 	}
 
 	async function setPage(newPageNumber: number) {
@@ -300,16 +398,15 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
 	}
 
-	watch(
-		() => options.projectType.value,
-		(newType, oldType) => {
-			debug('projectType changed', { from: oldType, to: newType })
-			effectiveCurrentSortType.value =
-				effectiveSortTypes.value.find((sortType) => sortType.name === 'relevance') ??
-				effectiveSortTypes.value[0]
-			query.value = ''
-		},
-	)
+	onScopeDispose(() => {
+		disposed = true
+		searchVersion++
+
+		if (searchDebounceTimer) {
+			clearTimeout(searchDebounceTimer)
+			searchDebounceTimer = null
+		}
+	})
 
 	return {
 		query,
@@ -326,6 +423,9 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		projectHits,
 		serverHits,
 		totalHits,
+		activeResultKey,
+		visibleResultKey,
+		visibleProjectType,
 		pageCount,
 		maxResults,
 		currentPage,
@@ -334,6 +434,7 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		deprioritizedTags,
 		excludeLoaders,
 		refreshSearch,
+		cacheSearchResponse,
 		setPage,
 		clearSearch,
 		onFilterChange,

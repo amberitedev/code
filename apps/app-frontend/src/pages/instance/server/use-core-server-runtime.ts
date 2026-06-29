@@ -11,10 +11,14 @@ import type { Archon } from '@modrinth/api-client'
 import { injectNotificationManager } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import { useQueryClient } from '@tanstack/vue-query'
-import { computed, isRef, onMounted, onUnmounted, type Ref,ref, watch } from 'vue'
+import { computed, isRef, onMounted, onUnmounted, type Ref, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'
+import {
+	patchCoreInstanceInCache,
+	upsertCoreInstanceInCache,
+} from '@/composables/useCoreInstances'
 
 import {
 	appendSocketListeners,
@@ -26,7 +30,10 @@ import {
 import { provideCoreServerRuntime } from './core-server-providers'
 import type { ServerSettingsTabId } from './settings/tabs'
 
-export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | null | undefined>) {
+export function useCoreServerRuntime(
+	instanceIdOverride?: string | Ref<string | null | undefined>,
+	publicPathOverride?: string | Ref<string | null | undefined>,
+) {
 	const route = useRoute()
 	const core = useCoreClient()
 	const queryClient = useQueryClient()
@@ -36,8 +43,18 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 		if (isRef(instanceIdOverride)) return instanceIdOverride.value ?? (route.params.id as string)
 		return instanceIdOverride ?? (route.params.id as string)
 	})
+	const publicPath = computed(() => {
+		if (isRef(publicPathOverride)) return publicPathOverride.value ?? null
+		return publicPathOverride ?? null
+	})
 	const rawInstance = ref<CoreInstance | null>(null)
 	const server = computed(() => (rawInstance.value ? toHostingServer(rawInstance.value) : null))
+	const publicInstanceId = computed(
+		() =>
+			rawInstance.value?.path ??
+			publicPath.value ??
+			(isUuid(instanceId.value) ? '' : instanceId.value),
+	)
 	const loadError = ref<Error | null>(null)
 	const statsData = ref<CoreStats | null>(null)
 	const stats = ref<Stats>(toStats(null))
@@ -76,6 +93,10 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 			rawInstance.value = await core.getInstance(instanceId.value)
 			powerState.value = toHostingPowerState(rawInstance.value.status)
 			queryClient.setQueryData(['core-server', instanceId.value], rawInstance.value)
+			if (publicInstanceId.value && publicInstanceId.value !== instanceId.value) {
+				queryClient.setQueryData(['core-server', publicInstanceId.value], rawInstance.value)
+			}
+			upsertCoreInstanceInCache(queryClient, rawInstance.value)
 			loadError.value = null
 		} catch (error) {
 			const isOffline =
@@ -174,23 +195,35 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 
 	async function startServer() {
 		powerState.value = 'starting'
+		if (rawInstance.value) {
+			patchCoreInstanceInCache(queryClient, rawInstance.value.id, { status: 'starting' })
+		}
 		await core.start(instanceId.value).catch(handleError)
 		await refreshServer()
 	}
 
 	async function stopServer() {
 		powerState.value = 'stopping'
+		if (rawInstance.value) {
+			patchCoreInstanceInCache(queryClient, rawInstance.value.id, { status: 'stopping' })
+		}
 		await core.stop(instanceId.value).catch(handleError)
 		await refreshServer()
 	}
 
 	async function restartServer() {
 		powerState.value = 'starting'
+		if (rawInstance.value) {
+			patchCoreInstanceInCache(queryClient, rawInstance.value.id, { status: 'starting' })
+		}
 		await core.restart(instanceId.value).catch(handleError)
 		await refreshServer()
 	}
 
 	async function killServer() {
+		if (rawInstance.value) {
+			patchCoreInstanceInCache(queryClient, rawInstance.value.id, { status: 'offline' })
+		}
 		await core.kill(instanceId.value).catch(handleError)
 		await refreshServer()
 	}
@@ -250,16 +283,30 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 	}
 
 	async function copyId() {
-		await navigator.clipboard.writeText(instanceId.value)
+		if (!rawInstance.value && isCoreConnected.value) {
+			await refreshServer()
+		}
+		if (!publicInstanceId.value) {
+			handleError(new Error('Server path is unavailable while Core is offline.'))
+			return
+		}
+		await navigator.clipboard.writeText(publicInstanceId.value)
 		addNotification({
-			title: 'Server ID copied',
-			text: 'The server ID is in your clipboard.',
+			title: 'Server path copied',
+			text: 'The server path is in your clipboard.',
 			type: 'success',
 		})
 	}
 
+	function isUuid(value: string): boolean {
+		return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+			value,
+		)
+	}
+
 	const { settingsController, fsAuth } = provideCoreServerRuntime({
 		instanceId,
+		publicInstanceId,
 		rawInstance,
 		server,
 		statsData,
@@ -314,7 +361,6 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 		} else {
 			setOfflineError()
 		}
-
 	})
 
 	watch(powerState, (next, prev) => {
@@ -339,6 +385,7 @@ export function useCoreServerRuntime(instanceIdOverride?: string | Ref<string | 
 
 	return {
 		instanceId,
+		publicInstanceId,
 		server,
 		loadError,
 		statsData,

@@ -53,14 +53,41 @@ const installed = computed(() => props.instance.install_stage === 'installed')
 
 const router = useRouter()
 
+const instanceRoute = computed(() => `/instance/${encodeURIComponent(props.instance.path)}`)
+
+async function preloadInstanceRoute() {
+	const matchedRoutes = router.resolve(instanceRoute.value).matched
+	const preloadPromises = []
+
+	for (const record of matchedRoutes) {
+		for (const component of Object.values(record.components ?? {})) {
+			if (typeof component === 'function') {
+				preloadPromises.push(Promise.resolve(component()).catch(() => undefined))
+			}
+		}
+	}
+
+	await Promise.all(preloadPromises)
+}
+
 const seeInstance = async () => {
-	await router.push(`/instance/${encodeURIComponent(props.instance.path)}`)
+	await preloadInstanceRoute()
+	await router.push(instanceRoute.value)
 }
 
 const checkProcess = async () => {
 	const runningProcesses = await get_by_profile_path(props.instance.path).catch(handleError)
 
 	playing.value = runningProcesses.length > 0
+}
+
+const handleCardWarmup = () => {
+	void preloadInstanceRoute()
+	void checkProcess()
+}
+
+const handleRouteWarmup = () => {
+	void preloadInstanceRoute()
 }
 
 const play = async (e, context) => {
@@ -119,17 +146,38 @@ defineExpose({
 
 const currentEvent = ref(null)
 
-const unlisten = await process_listener((e) => {
+let mounted = false
+let unlistenProcess = null
+
+const handleProcessEvent = (e) => {
 	if (e.profile_path_id === props.instance.path) {
 		currentEvent.value = e.event
 		if (e.event === 'finished') {
 			playing.value = false
 		}
 	}
-})
+}
 
-onMounted(() => checkProcess())
-onUnmounted(() => unlisten())
+onMounted(() => {
+	mounted = true
+	void checkProcess()
+
+	void process_listener(handleProcessEvent)
+		.then((unlisten) => {
+			if (!mounted) {
+				unlisten()
+				return
+			}
+
+			unlistenProcess = unlisten
+		})
+		.catch(handleError)
+})
+onUnmounted(() => {
+	mounted = false
+	unlistenProcess?.()
+	unlistenProcess = null
+})
 </script>
 
 <template>
@@ -137,7 +185,9 @@ onUnmounted(() => unlisten())
 		<div
 			class="card-shadow grid grid-cols-[auto_1fr_auto] bg-bg-raised rounded-xl p-3 pl-4 gap-2 cursor-pointer hover:brightness-90 transition-all"
 			@click="seeInstance"
-			@mouseenter="checkProcess"
+			@mouseenter="handleCardWarmup"
+			@focusin="handleRouteWarmup"
+			@pointerdown="handleRouteWarmup"
 		>
 			<Avatar
 				size="48px"
@@ -185,7 +235,9 @@ onUnmounted(() => unlisten())
 		<div
 			class="button-base bg-bg-raised p-4 rounded-xl flex gap-3 group"
 			@click="seeInstance"
-			@mouseenter="checkProcess"
+			@mouseenter="handleCardWarmup"
+			@focusin="handleRouteWarmup"
+			@pointerdown="handleRouteWarmup"
 		>
 			<div class="relative flex items-center justify-center">
 				<Avatar

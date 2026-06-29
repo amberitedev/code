@@ -19,11 +19,11 @@ use crate::{
             append_upload, cancel_upload, create_upload_session, upload_status,
             UploadError,
         },
-    },
-    presentation::{
-        authz::require_instance_permission, error::ApiError,
-        extractors::AuthUser,
-    },
+	},
+	presentation::{
+		error::ApiError, extractors::AuthUser,
+		instance_path::resolve_authorized_instance_id,
+	},
 };
 
 const UPLOAD_LENGTH: HeaderName = HeaderName::from_static("upload-length");
@@ -43,16 +43,20 @@ pub async fn create_upload_handler(
     Query(query): Query<CreateUploadQuery>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let length = parse_required_u64(&headers, &UPLOAD_LENGTH)?;
-    let sha256 = upload_metadata(&headers, "sha256")?;
-    let session =
-        create_upload_session(&state, &id, &query.path, length, sha256)
-            .await
-            .map_err(upload_error)?;
-    let location = format!("/instances/{id}/fs/uploads/{}", session.id);
-    let mut response = StatusCode::CREATED.into_response();
+	let instance_id = resolve_upload_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let length = parse_required_u64(&headers, &UPLOAD_LENGTH)?;
+	let sha256 = upload_metadata(&headers, "sha256")?;
+	let session =
+		create_upload_session(&state, &instance_id, &query.path, length, sha256)
+			.await
+			.map_err(upload_error)?;
+	let location = format!(
+		"/instances/{}/fs/uploads/{}",
+		encode_path_segment(&id),
+		session.id
+	);
+	let mut response = StatusCode::CREATED.into_response();
     let headers = response.headers_mut();
     headers.insert(LOCATION, header_value(&location)?);
     headers.insert(UPLOAD_OFFSET, HeaderValue::from_static("0"));
@@ -65,11 +69,12 @@ pub async fn upload_status_handler(
     Path((id, upload_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let session =
-        upload_status(&state, &id, &upload_id).map_err(upload_error)?;
-    let mut response = StatusCode::NO_CONTENT.into_response();
+	let instance_id = resolve_upload_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let session =
+		upload_status(&state, &instance_id, &upload_id)
+			.map_err(upload_error)?;
+	let mut response = StatusCode::NO_CONTENT.into_response();
     let headers = response.headers_mut();
     headers.insert(UPLOAD_OFFSET, header_value(&session.offset.to_string())?);
     headers.insert(UPLOAD_LENGTH, header_value(&session.length.to_string())?);
@@ -83,14 +88,14 @@ pub async fn append_upload_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    let offset = parse_required_u64(&headers, &UPLOAD_OFFSET)?;
-    let checksum = upload_checksum(&headers)?;
-    let session =
-        append_upload(&state, &id, &upload_id, offset, body, checksum)
-            .await
-            .map_err(upload_error)?;
+	let instance_id = resolve_upload_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let offset = parse_required_u64(&headers, &UPLOAD_OFFSET)?;
+	let checksum = upload_checksum(&headers)?;
+	let session =
+		append_upload(&state, &instance_id, &upload_id, offset, body, checksum)
+			.await
+			.map_err(upload_error)?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     response
         .headers_mut()
@@ -103,12 +108,39 @@ pub async fn cancel_upload_handler(
     Path((id, upload_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:files")
-        .await?;
-    cancel_upload(&state, &id, &upload_id)
-        .await
-        .map_err(upload_error)?;
-    Ok(StatusCode::NO_CONTENT.into_response())
+	let instance_id = resolve_upload_instance_id(&state, &claims.sub, &id)
+		.await?;
+	cancel_upload(&state, &instance_id, &upload_id)
+		.await
+		.map_err(upload_error)?;
+	Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn resolve_upload_instance_id(
+	state: &Arc<AppState>,
+	user_id: &str,
+	path: &str,
+) -> Result<String, ApiError> {
+	Ok(resolve_authorized_instance_id(state, user_id, path, "server:files")
+		.await?
+		.to_string())
+}
+
+fn encode_path_segment(value: &str) -> String {
+	let mut encoded = String::new();
+	for byte in value.as_bytes() {
+		match *byte {
+			b'A'..=b'Z'
+			| b'a'..=b'z'
+			| b'0'..=b'9'
+			| b'-'
+			| b'.'
+			| b'_'
+			| b'~' => encoded.push(*byte as char),
+			other => encoded.push_str(&format!("%{other:02X}")),
+		}
+	}
+	encoded
 }
 
 fn parse_required_u64(

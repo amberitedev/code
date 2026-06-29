@@ -13,9 +13,12 @@ use crate::{
             ActivityLogQuery, PatchAccessRequest, UpsertAccessRequest,
         },
         state::AppState,
-    },
-    domain::instance::InstanceId,
-    presentation::{error::ApiError, extractors::AuthUser},
+	},
+	presentation::{
+		error::ApiError,
+		extractors::AuthUser,
+		instance_path::{resolve_authorized_instance_id, resolve_instance_path},
+	},
 };
 
 pub async fn list_core_access(
@@ -106,10 +109,11 @@ pub async fn list_instance_access(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    parse_instance_id(&id)?;
-    Ok(Json(json!(
-        access_service::list_instance_access(&state, &claims.sub, &id).await?
-    )))
+	let instance_id = resolve_instance_path(&state, &id).await?.id.to_string();
+	Ok(Json(json!(
+		access_service::list_instance_access(&state, &claims.sub, &instance_id)
+			.await?
+	)))
 }
 
 pub async fn grant_instance_access(
@@ -118,18 +122,23 @@ pub async fn grant_instance_access(
     State(state): State<Arc<AppState>>,
     Json(body): Json<UpsertAccessRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    parse_instance_id(&id)?;
-    let target = body.user_id.clone();
-    let member =
-        access_service::upsert_instance_access(&state, &claims.sub, &id, body)
-            .await?;
-    activity_service::record(
-        &state,
-        &claims.sub,
-        "user_access_granted",
-        Some(&id),
-        Some(&target),
-        Some(json!({ "scope": "instance", "role": member.role })),
+	let instance_id = resolve_instance_path(&state, &id).await?.id.to_string();
+	let target = body.user_id.clone();
+	let member =
+		access_service::upsert_instance_access(
+			&state,
+			&claims.sub,
+			&instance_id,
+			body,
+		)
+		.await?;
+	activity_service::record(
+		&state,
+		&claims.sub,
+		"user_access_granted",
+		Some(&instance_id),
+		Some(&target),
+		Some(json!({ "scope": "instance", "role": member.role })),
     )
     .await?;
     Ok(Json(json!(member)))
@@ -141,22 +150,22 @@ pub async fn update_instance_access(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchAccessRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    parse_instance_id(&id)?;
-    let member = access_service::patch_instance_access(
-        &state,
-        &claims.sub,
-        &id,
-        &user_id,
-        body,
+	let instance_id = resolve_instance_path(&state, &id).await?.id.to_string();
+	let member = access_service::patch_instance_access(
+		&state,
+		&claims.sub,
+		&instance_id,
+		&user_id,
+		body,
     )
     .await?;
     activity_service::record(
-        &state,
-        &claims.sub,
-        "user_access_updated",
-        Some(&id),
-        Some(&user_id),
-        Some(json!({ "scope": "instance", "role": member.role })),
+		&state,
+		&claims.sub,
+		"user_access_updated",
+		Some(&instance_id),
+		Some(&user_id),
+		Some(json!({ "scope": "instance", "role": member.role })),
     )
     .await?;
     Ok(Json(json!(member)))
@@ -167,16 +176,21 @@ pub async fn remove_instance_access(
     Path((id, user_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    parse_instance_id(&id)?;
-    access_service::remove_instance_access(&state, &claims.sub, &id, &user_id)
-        .await?;
-    activity_service::record(
-        &state,
-        &claims.sub,
-        "user_access_removed",
-        Some(&id),
-        Some(&user_id),
-        Some(json!({ "scope": "instance" })),
+	let instance_id = resolve_instance_path(&state, &id).await?.id.to_string();
+	access_service::remove_instance_access(
+		&state,
+		&claims.sub,
+		&instance_id,
+		&user_id,
+	)
+	.await?;
+	activity_service::record(
+		&state,
+		&claims.sub,
+		"user_access_removed",
+		Some(&instance_id),
+		Some(&user_id),
+		Some(json!({ "scope": "instance" })),
     )
     .await?;
     Ok(Json(json!({ "ok": true })))
@@ -198,23 +212,16 @@ pub async fn list_instance_activity(
     Query(mut query): Query<ActivityLogQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    parse_instance_id(&id)?;
-    access_service::require_instance_permission(
-        &state,
-        &claims.sub,
-        &id,
-        "server:view",
-    )
-    .await
-    .map_err(|error| ApiError::Forbidden(error.to_string()))?;
-    query.instance_id = Some(id);
-    Ok(Json(json!(
-        activity_service::list_for_viewer(&state, &claims.sub, query).await?
-    )))
-}
-
-fn parse_instance_id(id: &str) -> Result<(), ApiError> {
-    id.parse::<InstanceId>().map(|_| ()).map_err(|_| {
-        ApiError::BadRequest("invalid instance id — must be a UUID".into())
-    })
+	let instance_id = resolve_authorized_instance_id(
+		&state,
+		&claims.sub,
+		&id,
+		"server:view",
+	)
+	.await?
+	.to_string();
+	query.instance_id = Some(instance_id);
+	Ok(Json(json!(
+		activity_service::list_for_viewer(&state, &claims.sub, query).await?
+	)))
 }

@@ -1,5 +1,4 @@
 <template>
-	<AppPageSkeleton v-if="!instance" variant="detail" />
 	<div v-if="instance" :class="{ 'flex h-full flex-col': isFixedRender }">
 		<div
 			:class="['p-6 pr-2 pb-4', { 'shrink-0': isFixedRender }]"
@@ -221,7 +220,12 @@
 			</ContentPageHeader>
 		</div>
 		<div :class="['px-6', { 'shrink-0': isFixedRender }]">
-			<NavTabs :links="tabs" />
+			<NavTabs
+				mode="local"
+				:links="tabs"
+				:active-index="visibleInstanceTabIndex"
+				@tab-click="instanceTabController.selectTab"
+			/>
 		</div>
 		<div :class="['p-6 pt-4', { 'min-h-0 flex-1 overflow-y-auto': isFixedRender }]">
 			<RouterView
@@ -229,7 +233,17 @@
 				v-slot="{ Component }"
 				:key="instance.path"
 			>
-				<template v-if="Component">
+				<NavTabContentTransition
+					v-if="Component"
+					:content-key="instanceRouteKey"
+					:direction="instanceTabSlideDirection"
+					:visible="instanceTabContentVisible"
+					@before-leave="instanceTabController.handleBeforeLeave"
+					@after-leave="instanceTabController.handleAfterLeave"
+					@after-enter="instanceTabController.handleAfterEnter"
+					@enter-cancelled="instanceTabController.handleEnterCancelled"
+					@leave-cancelled="instanceTabController.handleLeaveCancelled"
+				>
 					<Suspense
 						:key="instance.path"
 						@pending="subpagePending = true"
@@ -249,7 +263,7 @@
 							@stop="() => stopInstance('InstanceSubpage')"
 						></component>
 					</Suspense>
-				</template>
+				</NavTabContentTransition>
 			</RouterView>
 		</div>
 		<ContextMenu ref="options" @option-clicked="handleOptionsClick">
@@ -307,6 +321,7 @@ import {
 	ButtonStyled,
 	ContentPageHeader,
 	injectNotificationManager,
+	NavTabContentTransition,
 	NavTabs,
 	OverflowMenu,
 	ServerOnlinePlayers,
@@ -314,16 +329,16 @@ import {
 	ServerRecentPlays,
 	ServerRegion,
 	useLoadingBarToken,
+	useNavTabContentController,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, inject, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
@@ -367,6 +382,7 @@ window.addEventListener('online', () => {
 
 const instance = ref<GameInstance>()
 const instancePending = computed(() => !instance.value)
+const suppressLocalRouteLoadingBar = inject<Ref<boolean>>('suppressLocalRouteLoadingBar', ref(false))
 const preloadedContent = ref<InstanceContentData | null>(null)
 const playing = ref(false)
 const loading = ref(false)
@@ -374,9 +390,15 @@ const subpagePending = ref(false)
 const stopping = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
 const updateToPlayModal = ref<InstanceType<typeof UpdateToPlayModal>>()
+const subpagePendingLoadingBar = computed(
+	() => subpagePending.value && !suppressLocalRouteLoadingBar.value,
+)
+const instancePendingLoadingBar = computed(
+	() => instancePending.value && !suppressLocalRouteLoadingBar.value,
+)
 
-useLoadingBarToken(subpagePending)
-useLoadingBarToken(instancePending)
+useLoadingBarToken(subpagePendingLoadingBar)
+useLoadingBarToken(instancePendingLoadingBar)
 
 async function syncToServer() {
 	if (!instance.value) return
@@ -511,28 +533,53 @@ const contentSubpageProps = computed(() =>
 	isContentSubpageRoute() ? { preloadedContent: preloadedContent.value } : {},
 )
 
+function getInstanceTabKind(path: string) {
+	if (path.endsWith('/files')) return 'files'
+	if (path.endsWith('/worlds')) return 'worlds'
+	if (path.endsWith('/logs')) return 'logs'
+	return 'content'
+}
+
 const tabs = computed(() => [
 	{
 		label: 'Content',
 		href: `${basePath.value}`,
 		icon: BoxesIcon,
+		kind: 'content',
 	},
 	{
 		label: 'Files',
 		href: `${basePath.value}/files`,
 		icon: FolderOpenIcon,
+		kind: 'files',
 	},
 	{
 		label: 'Worlds',
 		href: `${basePath.value}/worlds`,
 		icon: GlobeIcon,
+		kind: 'worlds',
 	},
 	{
 		label: 'Logs',
 		href: `${basePath.value}/logs`,
 		icon: TerminalSquareIcon,
+		kind: 'logs',
 	},
 ])
+const activeInstanceTabKind = computed(() => getInstanceTabKind(route.path))
+const activeInstanceTabIndex = computed(() =>
+	tabs.value.findIndex((tab) => tab.kind === activeInstanceTabKind.value),
+)
+const instanceTabController = useNavTabContentController({
+	activeIndex: activeInstanceTabIndex,
+	router,
+})
+const visibleInstanceTabIndex = instanceTabController.activeIndex
+const instanceTabSlideDirection = instanceTabController.direction
+const instanceTabContentVisible = instanceTabController.visible
+const instanceRouteKey = computed(
+	() => `${instance.value?.path ?? route.params.id}:${activeInstanceTabKind.value}`,
+)
 
 if (instance.value) {
 	breadcrumbs.setName(

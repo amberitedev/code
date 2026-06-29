@@ -38,6 +38,12 @@ export interface CoreSetupResponse {
 	core_id: string
 }
 
+export interface CoreSetupDevResetResponse {
+	ok: boolean
+	core_id: string
+	registered: boolean
+}
+
 export type CoreConnectionRejectReason = 'protocol-mismatch' | 'wrong-core'
 
 export interface CoreConnectionHandshakeRequest {
@@ -58,6 +64,7 @@ export interface CoreConnectionHandshakeResponse {
 /** Full detail response from GET /instances/:id */
 export interface CoreInstance {
 	id: string
+	path: string
 	name: string
 	game_version: string
 	loader: CoreModLoader
@@ -76,6 +83,7 @@ export interface CoreInstance {
 /** Summary response from GET /instances list */
 export interface CoreInstanceSummary {
 	id: string
+	path: string
 	name: string
 	game_version: string
 	loader: CoreModLoader

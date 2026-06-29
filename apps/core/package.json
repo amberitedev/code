@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "cargo run",
+		"dev:noauth": "cargo run -- --no-auth",
 		"build": "cargo build --release",
 		"check": "cargo check",
 		"test": "cargo test --lib",

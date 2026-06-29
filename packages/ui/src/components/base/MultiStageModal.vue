@@ -65,7 +65,14 @@
 			class="w-full h-1 appearance-none border-none absolute top-0 left-0"
 		></progress>
 
-		<component :is="currentStage?.stageContent" />
+		<StageContentTransition
+			:content-key="currentStage?.id ?? currentStageIndex"
+			:active-index="currentStageIndex"
+			:axis="stageTransitionAxis"
+			:direction="stageTransitionDirection"
+		>
+			<component :is="currentStage?.stageContent" />
+		</StageContentTransition>
 
 		<template #actions>
 			<div
@@ -123,6 +130,11 @@ import { ButtonStyled, NewModal } from '@modrinth/ui'
 import type { Component } from 'vue'
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 
+import StageContentTransition, {
+	type StageContentTransitionAxis,
+	type StageContentTransitionDirection,
+} from './StageContentTransition.vue'
+
 export interface StageButtonConfig {
 	label?: string
 	icon?: Component | null
@@ -169,9 +181,13 @@ const props = withDefaults(
 		fade?: 'standard' | 'warning' | 'danger'
 		disableProgress?: boolean
 		closeOnClickOutside?: boolean
+		stageTransitionAxis?: StageContentTransitionAxis
+		stageTransitionDirection?: StageContentTransitionDirection
 	}>(),
 	{
 		closeOnClickOutside: true,
+		stageTransitionAxis: 'horizontal',
+		stageTransitionDirection: undefined,
 	},
 )
 

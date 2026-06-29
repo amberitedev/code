@@ -9,7 +9,7 @@ import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { profile_listener } from '@/helpers/events'
-import { get } from '@/helpers/profile'
+import { get, remove as removeProfile } from '@/helpers/profile'
 import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
@@ -35,18 +35,26 @@ function setInstanceBreadcrumb(name: string) {
 }
 
 async function refreshProfile() {
+	const routeId = route.params.id as string
 	let p: GameInstance | null = null
 	try {
-		p = await get(route.params.id as string)
+		p = await get(routeId)
 	} catch {
 		p = null
 	}
 
+	if (p?.profile_type === 'server') {
+		void removeProfile(p.path).catch(() => undefined)
+		p = null
+	}
+
 	if (!p) {
-		// No app-lib record — treat as Core-only server instance.
-		// ServerIndex will handle the actual Core lookup via route param.
-		setInstanceBreadcrumb(route.params.id as string)
-		profile.value = { profile_type: 'server', path: route.params.id as string } as GameInstance
+		if (isUuid(routeId)) {
+			await router.replace('/library/servers')
+			return
+		}
+		setInstanceBreadcrumb(routeId)
+		profile.value = { profile_type: 'server', path: routeId } as GameInstance
 		return
 	}
 
@@ -60,6 +68,12 @@ async function refreshProfile() {
 			query: route.query,
 		})
 	}
+}
+
+function isUuid(value: string): boolean {
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+		value,
+	)
 }
 
 await refreshProfile()

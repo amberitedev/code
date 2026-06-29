@@ -202,19 +202,10 @@ export async function currentAccountFields(
 	return {
 		email: user?.email ?? null,
 		email_verified: Boolean(user?.emailVerificationTime),
-		auth_providers: accounts
-			.map((account) => account.provider)
-			.filter((provider) => provider !== 'web-password' && provider !== 'password')
-			.map((provider) =>
-				provider === 'modrinth-token'
-					? 'modrinth'
-					: provider === 'minecraft-token'
-						? 'microsoft'
-						: provider,
-			),
-		has_password: accounts.some(
-			(account) => account.provider === 'web-password' || account.provider === 'password',
-		),
+		auth_providers: accounts.some((account) => account.provider === 'minecraft-token')
+			? ['minecraft']
+			: [],
+		has_password: false,
 		has_totp: false,
 		role: '',
 		badges: 0,

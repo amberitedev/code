@@ -41,6 +41,7 @@ export interface ConvertToSyncedOptions<TProfile extends SyncedLocalProfile> {
 	getProfile: (path: string) => Promise<TProfile | null>
 	editProfile: (path: string, edit: Partial<TProfile>) => Promise<unknown>
 	setLinkedServerId: (profilePath: string, serverInstanceId: string) => void
+	setLinkedServerPath?: (profilePath: string, serverInstancePath: string) => void
 	registerSyncedProfile?: (args: {
 		profilePath: string
 		serverInstanceId: string
@@ -67,6 +68,7 @@ export async function convertProfileToSynced<TProfile extends SyncedLocalProfile
 	})
 
 	options.setLinkedServerId(options.profilePath, coreInstance.id)
+	options.setLinkedServerPath?.(options.profilePath, coreInstance.path)
 	await options.editProfile(options.profilePath, { profile_type: 'synced' } as Partial<TProfile>)
 	await options.registerSyncedProfile?.({
 		profilePath: options.profilePath,

@@ -4,6 +4,8 @@ import {
 	Avatar,
 	ButtonStyled,
 	defineMessages,
+	GhostMedia,
+	GhostText,
 	injectNotificationManager,
 	IntlFormatted,
 	StyledInput,
@@ -340,11 +342,11 @@ const messages = defineMessages({
 			{{ formatMessage(messages.friends) }}
 		</h3>
 		<template v-if="loading">
-			<div v-for="n in 5" :key="n" class="flex gap-2 items-center animate-pulse">
-				<div class="min-w-9 min-h-9 bg-button-bg rounded-full"></div>
-				<div class="flex flex-col w-full">
-					<div class="h-3 bg-button-bg rounded-full w-1/2 mb-1"></div>
-					<div class="h-2.5 bg-button-bg rounded-full w-3/4"></div>
+			<div v-for="n in 4" :key="n" class="flex gap-2 items-center">
+				<GhostMedia kind="circle" class="!w-9 shrink-0" />
+				<div class="flex flex-col w-full gap-1">
+					<GhostText kind="body" width="50%" />
+					<GhostText kind="metadata" width="75%" />
 				</div>
 			</div>
 		</template>

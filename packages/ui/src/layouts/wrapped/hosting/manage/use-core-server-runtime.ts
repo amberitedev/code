@@ -285,8 +285,8 @@ export function useCoreServerRuntime(serverIdOverride?: ServerIdInput) {
 	async function copyId() {
 		await navigator.clipboard.writeText(instanceId.value)
 		addNotification({
-			title: 'Server ID copied',
-			text: 'The server ID is in your clipboard.',
+			title: 'Server path copied',
+			text: 'The server path is in your clipboard.',
 			type: 'success',
 		})
 	}

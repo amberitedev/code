@@ -17,11 +17,11 @@ use crate::{
     application::{
         player_service::{list_players, run_command},
         state::AppState,
-    },
-    presentation::{
-        authz::require_instance_permission, error::ApiError,
-        extractors::AuthUser,
-    },
+	},
+	presentation::{
+		error::ApiError, extractors::AuthUser,
+		instance_path::resolve_authorized_instance_id,
+	},
 };
 
 #[derive(Debug, Deserialize)]
@@ -49,10 +49,10 @@ pub async fn list_players_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let players = list_players(&state, &id).await?;
-    Ok(Json(json!(players)))
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let players = list_players(&state, &instance_id).await?;
+	Ok(Json(json!(players)))
 }
 
 /// Validate a Minecraft username: 1–16 chars of `[A-Za-z0-9_]`.
@@ -90,12 +90,22 @@ fn sanitize_reason(reason: &Option<String>) -> String {
 }
 
 async fn exec(
-    state: &Arc<AppState>,
-    id: &str,
-    command: String,
+	state: &Arc<AppState>,
+	instance_id: &str,
+	command: String,
 ) -> Result<Json<Value>, ApiError> {
-    let response = run_command(state, id, command).await?;
-    Ok(Json(json!({ "response": response })))
+	let response = run_command(state, instance_id, command).await?;
+	Ok(Json(json!({ "response": response })))
+}
+
+async fn resolve_player_instance_id(
+	state: &Arc<AppState>,
+	user_id: &str,
+	path: &str,
+) -> Result<String, ApiError> {
+	Ok(resolve_authorized_instance_id(state, user_id, path, "server:players")
+		.await?
+		.to_string())
 }
 
 /// POST /instances/:id/players/kick
@@ -105,16 +115,16 @@ pub async fn kick_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PlayerNameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&body.name)?;
-    let reason = sanitize_reason(&body.reason);
-    let command = if reason.is_empty() {
-        format!("kick {name}")
-    } else {
-        format!("kick {name} {reason}")
-    };
-    exec(&state, &id, command).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&body.name)?;
+	let reason = sanitize_reason(&body.reason);
+	let command = if reason.is_empty() {
+		format!("kick {name}")
+	} else {
+		format!("kick {name} {reason}")
+	};
+	exec(&state, &instance_id, command).await
 }
 
 /// POST /instances/:id/players/op
@@ -124,10 +134,10 @@ pub async fn op_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PlayerNameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&body.name)?;
-    exec(&state, &id, format!("op {name}")).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&body.name)?;
+	exec(&state, &instance_id, format!("op {name}")).await
 }
 
 /// POST /instances/:id/players/deop
@@ -137,10 +147,10 @@ pub async fn deop_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PlayerNameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&body.name)?;
-    exec(&state, &id, format!("deop {name}")).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&body.name)?;
+	exec(&state, &instance_id, format!("deop {name}")).await
 }
 
 /// POST /instances/:id/players/whitelist
@@ -150,10 +160,10 @@ pub async fn whitelist_add_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PlayerNameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&body.name)?;
-    exec(&state, &id, format!("whitelist add {name}")).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&body.name)?;
+	exec(&state, &instance_id, format!("whitelist add {name}")).await
 }
 
 /// DELETE /instances/:id/players/whitelist/:name
@@ -162,10 +172,10 @@ pub async fn whitelist_remove_handler(
     Path((id, name)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&name)?;
-    exec(&state, &id, format!("whitelist remove {name}")).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&name)?;
+	exec(&state, &instance_id, format!("whitelist remove {name}")).await
 }
 
 /// POST /instances/:id/players/whitelist/toggle
@@ -175,14 +185,14 @@ pub async fn whitelist_toggle_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<WhitelistToggleRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let command = if body.enabled {
-        "whitelist on"
-    } else {
-        "whitelist off"
-    };
-    exec(&state, &id, command.to_string()).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let command = if body.enabled {
+		"whitelist on"
+	} else {
+		"whitelist off"
+	};
+	exec(&state, &instance_id, command.to_string()).await
 }
 
 /// POST /instances/:id/players/ban
@@ -192,16 +202,16 @@ pub async fn ban_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PlayerNameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&body.name)?;
-    let reason = sanitize_reason(&body.reason);
-    let command = if reason.is_empty() {
-        format!("ban {name}")
-    } else {
-        format!("ban {name} {reason}")
-    };
-    exec(&state, &id, command).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&body.name)?;
+	let reason = sanitize_reason(&body.reason);
+	let command = if reason.is_empty() {
+		format!("ban {name}")
+	} else {
+		format!("ban {name} {reason}")
+	};
+	exec(&state, &instance_id, command).await
 }
 
 /// POST /instances/:id/players/pardon
@@ -211,10 +221,10 @@ pub async fn pardon_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PlayerNameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let name = validate_name(&body.name)?;
-    exec(&state, &id, format!("pardon {name}")).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let name = validate_name(&body.name)?;
+	exec(&state, &instance_id, format!("pardon {name}")).await
 }
 
 /// POST /instances/:id/players/ban-ip
@@ -224,16 +234,16 @@ pub async fn ban_ip_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IpRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let ip = validate_ip(&body.ip)?;
-    let reason = sanitize_reason(&body.reason);
-    let command = if reason.is_empty() {
-        format!("ban-ip {ip}")
-    } else {
-        format!("ban-ip {ip} {reason}")
-    };
-    exec(&state, &id, command).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let ip = validate_ip(&body.ip)?;
+	let reason = sanitize_reason(&body.reason);
+	let command = if reason.is_empty() {
+		format!("ban-ip {ip}")
+	} else {
+		format!("ban-ip {ip} {reason}")
+	};
+	exec(&state, &instance_id, command).await
 }
 
 /// POST /instances/:id/players/pardon-ip
@@ -243,8 +253,8 @@ pub async fn pardon_ip_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IpRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:players")
-        .await?;
-    let ip = validate_ip(&body.ip)?;
-    exec(&state, &id, format!("pardon-ip {ip}")).await
+	let instance_id = resolve_player_instance_id(&state, &claims.sub, &id)
+		.await?;
+	let ip = validate_ip(&body.ip)?;
+	exec(&state, &instance_id, format!("pardon-ip {ip}")).await
 }

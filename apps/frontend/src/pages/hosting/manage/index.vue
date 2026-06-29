@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { ServersManagePageIndex } from '@modrinth/ui'
 
-definePageMeta({
-	middleware: 'auth',
-})
-
 useHead({
 	title: 'Hosting - Modrinth',
 })

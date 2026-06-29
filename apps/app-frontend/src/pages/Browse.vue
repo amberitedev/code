@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
  * Desktop browse route with instance and Core-server installation contexts.
- * - `initInstanceContext` (227) loads the active browse context and installed content.
- * - `selectableProjectTypes` (552) and `installContext` (598) derive the active UI state.
- * - `getCardActions` (787) creates app-specific install actions for each result.
- * - `search` (1090) normalizes results; `preloadProjectType` (1154) warms tab targets.
- * - `provideBrowseManager` (1334) exposes the layout context.
+ * - `initInstanceContext` (232) loads the active browse context and installed content.
+ * - `selectableProjectTypes` (557) and `installContext` (601) derive the active UI state.
+ * - `getCardActions` (870) creates app-specific install actions for each result.
+ * - `search` (1171) normalizes results; `preloadProjectType` (1236) warms tab targets.
+ * - `provideBrowseManager` (1430) exposes the layout context.
  */
 import { installCoreModpack } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
@@ -17,7 +17,13 @@ import {
 	PlusIcon,
 	SpinnerIcon,
 } from '@modrinth/assets'
-import type { BrowseInstallContentType, CardAction, ProjectType, Tags } from '@modrinth/ui'
+import type {
+	BrowseInstallContentType,
+	CardAction,
+	ProjectType,
+	Tags,
+	UiMotionDirection,
+} from '@modrinth/ui'
 import {
 	BrowseSidebar,
 	commonMessages,
@@ -30,20 +36,19 @@ import {
 	preferencesDiffer,
 	provideBrowseManager,
 	requestInstall,
+	Toggle,
 	useBrowseSearch,
 	useDebugLogger,
-	useLoadingBarToken,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { useStorage } from '@vueuse/core'
 import type { Ref } from 'vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { LocationQuery } from 'vue-router'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
-import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
+import AppBrowsePageGhost from '@/components/ui/AppBrowsePageGhost.vue'
 import AppBrowsePageLayout from '@/components/ui/AppBrowsePageLayout.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
@@ -54,7 +59,6 @@ import {
 	getDiscoverProjectTypeFromHref,
 	type RawDiscoverSearchResults,
 } from '@/composables/useDiscoverContentPreload'
-import { useOptimisticLoading } from '@/composables/useOptimisticPreload'
 import {
 	get_project,
 	get_project_v3,
@@ -90,11 +94,12 @@ const { installingServerProjects, playServerProject, showAddServerToInstanceModa
 const { install: installVersion } = injectContentInstall()
 const queryClient = useQueryClient()
 const debugLog = useDebugLogger('Browse')
-const BROWSE_LOADING_BAR_STORAGE_KEY = 'app-browse-loading-bar-enabled'
 
 const router = useRouter()
 const route = useRoute()
 const serverSetupModalRef = ref<InstanceType<typeof CreationFlowModal> | null>(null)
+const browseTransitioning = ref(false)
+const browseTransitionDirection = ref<UiMotionDirection>('forward')
 const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
 provideServerInstallContent(serverInstallContent)
 const {
@@ -576,9 +581,7 @@ const selectableProjectTypes = computed(() => {
 	const suffix = browseTabSuffix.value
 
 	if (isSetupServerContext.value) {
-		return [
-			createBrowseTab('modpack', formatMessage(messages.modpacksProjectType), suffix),
-		]
+		return [createBrowseTab('modpack', formatMessage(messages.modpacksProjectType), suffix)]
 	}
 
 	if (isFromWorlds.value) {
@@ -778,6 +781,86 @@ function supportsDedicatedServerEnvironment(project: {
 	}
 
 	return project.server_side !== 'unsupported'
+}
+
+function runAfterBrowseFrame(callback: () => void) {
+	requestAnimationFrame(() => {
+		const windowWithIdleCallback = window as Window & {
+			requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
+		}
+
+		if (windowWithIdleCallback.requestIdleCallback) {
+			windowWithIdleCallback.requestIdleCallback(() => callback(), { timeout: 750 })
+			return
+		}
+
+		setTimeout(callback, 0)
+	})
+}
+
+type BrowseProjectHit = Labrinth.Search.v2.ResultSearchProject &
+	Labrinth.Search.v3.ResultSearchProject & {
+		environment?: Labrinth.Projects.v3.Environment[]
+		installed?: boolean
+	}
+
+function shouldHydrateProjectEnvironment(
+	project: BrowseProjectHit,
+	searchProjectType: ProjectType,
+) {
+	return (
+		(searchProjectType === 'modpack' || project.project_types?.includes('modpack')) &&
+		!projectEnvironmentById.value.has(project.project_id)
+	)
+}
+
+function scheduleProjectEnvironmentHydration(
+	hits: BrowseProjectHit[],
+	searchProjectType: ProjectType,
+	requestParams: string,
+) {
+	const projectIds = hits
+		.filter((hit) => shouldHydrateProjectEnvironment(hit, searchProjectType))
+		.map((hit) => hit.project_id)
+
+	if (projectIds.length === 0) return
+
+	runAfterBrowseFrame(() => {
+		void hydrateProjectEnvironments(projectIds, searchProjectType, requestParams)
+	})
+}
+
+async function hydrateProjectEnvironments(
+	projectIds: string[],
+	searchProjectType: ProjectType,
+	requestParams: string,
+) {
+	const updates = new Map<string, Labrinth.Projects.v3.Environment[]>()
+
+	await Promise.all(
+		projectIds.map(async (projectId) => {
+			const environment = await getProjectEnvironment(projectId)
+			updates.set(projectId, environment)
+		}),
+	)
+
+	if (updates.size === 0) return
+	if (searchState.activeResultKey.value !== `${searchProjectType}:${requestParams}`) return
+
+	let changed = false
+	const nextHits = searchState.projectHits.value.map((hit) => {
+		const environment = updates.get(hit.project_id)
+		if (environment === undefined || hit.environment === environment) {
+			return hit
+		}
+
+		changed = true
+		return { ...hit, environment }
+	})
+
+	if (changed) {
+		searchState.projectHits.value = nextHits
+	}
 }
 
 type AppCardAction = CardAction & {
@@ -1044,9 +1127,7 @@ function getCardActions(
 								(versionId, installedProjectIds) => {
 									setProjectInstalling(projectResult.project_id, false)
 									if (versionId) {
-										onSearchResultsInstalled(
-											installedProjectIds ?? [projectResult.project_id],
-										)
+										onSearchResultsInstalled(installedProjectIds ?? [projectResult.project_id])
 									}
 								},
 								(profile) => {
@@ -1117,31 +1198,32 @@ async function search(requestParams: string, searchProjectType: ProjectType = pr
 		}
 	}
 
-	const hits = await Promise.all(
-		rawResults.result.hits.map(async (hit) => {
-			const mapped = {
-				...hit,
-				title: hit.name,
-				description: hit.summary,
-			} as unknown as Labrinth.Search.v2.ResultSearchProject & {
-				environment?: Labrinth.Projects.v3.Environment[]
-				installed?: boolean
-			}
+	const hits = rawResults.result.hits.map((hit) => {
+		const mapped = {
+			...hit,
+			title: hit.name,
+			description: hit.summary,
+		} as unknown as BrowseProjectHit
 
-			if (searchProjectType === 'modpack' || hit.project_types?.includes('modpack')) {
-				mapped.environment = await getProjectEnvironment(hit.project_id)
-			}
+		const cachedEnvironment = projectEnvironmentById.value.get(hit.project_id)
+		if (
+			cachedEnvironment &&
+			(searchProjectType === 'modpack' || hit.project_types?.includes('modpack'))
+		) {
+			mapped.environment = cachedEnvironment
+		}
 
-			if (instance.value || isServerContext.value) {
-				const installedIds = instance.value
-					? new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
-					: serverContentProjectIds.value
-				mapped.installed = installedIds.has(hit.project_id)
-			}
+		if (instance.value || isServerContext.value) {
+			const installedIds = instance.value
+				? new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
+				: serverContentProjectIds.value
+			mapped.installed = installedIds.has(hit.project_id)
+		}
 
-			return mapped
-		}),
-	)
+		return mapped
+	})
+
+	scheduleProjectEnvironmentHydration(hits, searchProjectType, requestParams)
 
 	return {
 		projectHits: hits,
@@ -1155,7 +1237,11 @@ function preloadProjectType(type: ProjectType) {
 	if (!tagsLoaded.value || !contextLoaded.value || type === projectType.value) return
 
 	const requestParams = buildDiscoverSearchParams(type)
-	void search(requestParams, type).catch(() => undefined)
+	void search(requestParams, type)
+		.then((response) => {
+			searchState.cacheSearchResponse(type, requestParams, response)
+		})
+		.catch(() => undefined)
 }
 
 function preloadSelectableProjectTypes() {
@@ -1249,12 +1335,22 @@ const hasBrowseContent = computed(() =>
 		? searchState.serverHits.value.length > 0
 		: searchState.projectHits.value.length > 0,
 )
-const browseLoadingBarEnabled = useStorage(BROWSE_LOADING_BAR_STORAGE_KEY, false)
-const browseLoadingBarPending = computed(
-	() => browseLoadingBarEnabled.value && browseInitialPending.value,
+const hasMountedBrowseLayout = ref(false)
+const forceBrowseGhost = ref(false)
+const browseReadyForLayout = computed(() => !browseInitialPending.value || hasBrowseContent.value)
+watch(
+	browseReadyForLayout,
+	(ready) => {
+		if (ready) {
+			hasMountedBrowseLayout.value = true
+		}
+	},
+	{ immediate: true },
 )
-const showBrowseSkeleton = useOptimisticLoading(browseInitialPending, hasBrowseContent)
-useLoadingBarToken(browseLoadingBarPending)
+const showBrowseGhost = computed(
+	() => forceBrowseGhost.value || (!hasMountedBrowseLayout.value && browseInitialPending.value),
+)
+const showBrowseLayout = computed(() => hasMountedBrowseLayout.value && !forceBrowseGhost.value)
 
 onMounted(async () => {
 	contextLoaded.value = false
@@ -1387,9 +1483,22 @@ provideBrowseManager({
 </script>
 
 <template>
-	<div class="flex flex-col gap-3 p-6">
-		<AppPageSkeleton v-if="showBrowseSkeleton" variant="browse" class="!p-0" />
-		<AppBrowsePageLayout v-else-if="!browseInitialPending || hasBrowseContent">
+	<div
+		class="browse-page relative flex flex-col gap-3 p-6"
+		:class="{
+			'browse-page--ghost': showBrowseGhost,
+			'browse-page--transitioning': browseTransitioning,
+		}"
+		:data-browse-transition-direction="browseTransitionDirection"
+	>
+		<AppBrowsePageGhost v-if="showBrowseGhost" class="browse-page-ghost-frame" />
+		<AppBrowsePageLayout
+			v-if="hasMountedBrowseLayout"
+			v-show="showBrowseLayout"
+			v-model:transitioning="browseTransitioning"
+			v-model:transition-direction="browseTransitionDirection"
+			:inert="browseTransitioning ? true : undefined"
+		>
 			<template #after>
 				<ContextMenu ref="contextMenuRef" @option-clicked="handleOptionsClick">
 					<template #open_link>
@@ -1401,6 +1510,7 @@ provideBrowseManager({
 				</ContextMenu>
 			</template>
 		</AppBrowsePageLayout>
+		<div v-if="browseTransitioning" class="browse-page-transition-lock" aria-hidden="true"></div>
 		<CreationFlowModal
 			v-if="isServerContext && projectType === 'modpack'"
 			ref="serverSetupModalRef"
@@ -1415,8 +1525,88 @@ provideBrowseManager({
 			@browse-modpacks="() => {}"
 			@create="handleServerModpackFlowCreate"
 		/>
-		<Teleport to="#sidebar-teleport-target">
-			<BrowseSidebar />
+		<Teleport defer to="#sidebar-teleport-target">
+			<div
+				class="browse-sidebar-transition-frame"
+				:class="{ 'browse-sidebar-transition-frame--transitioning': browseTransitioning }"
+				:data-browse-transition-direction="browseTransitionDirection"
+				:inert="browseTransitioning ? true : undefined"
+			>
+				<div class="browse-sidebar-transition-content">
+					<BrowseSidebar />
+				</div>
+				<div
+					v-if="browseTransitioning"
+					class="browse-sidebar-transition-lock"
+					aria-hidden="true"
+				></div>
+			</div>
+		</Teleport>
+		<Teleport to="body">
+			<div
+				class="fixed z-20 rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg"
+				style="right: 1.25rem; bottom: 1.25rem"
+			>
+				<Toggle
+					id="browse-force-ghost-toggle"
+					v-model="forceBrowseGhost"
+					v-tooltip="'Show browse ghost'"
+					small
+					aria-label="Show browse ghost"
+				/>
+			</div>
 		</Teleport>
 	</div>
 </template>
+
+<style scoped>
+.browse-page--ghost {
+	box-sizing: border-box;
+	height: 100%;
+	max-height: calc(100vh - var(--top-bar-height));
+	min-height: 0;
+	overflow: hidden;
+}
+
+.browse-page-ghost-frame {
+	flex: 1 1 auto;
+	height: 100%;
+	min-height: 0;
+}
+
+.browse-page-transition-lock {
+	position: absolute;
+	inset: 0;
+	z-index: 9999;
+	pointer-events: auto;
+	background: transparent;
+}
+
+.browse-sidebar-transition-frame {
+	position: relative;
+	min-height: 100%;
+}
+
+.browse-sidebar-transition-content {
+	min-height: 100%;
+	transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.browse-sidebar-transition-frame--transitioning .browse-sidebar-transition-content {
+	opacity: 0.45;
+}
+
+.browse-sidebar-transition-lock {
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	pointer-events: auto;
+	background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.browse-sidebar-transition-content {
+		transition-duration: 1ms;
+	}
+}
+</style>

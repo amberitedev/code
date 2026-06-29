@@ -17,12 +17,30 @@ const pinia = createPinia()
 
 let app = createApp(App)
 
-Sentry.init({
-	app,
-	dsn: 'https://9508775ee5034536bc70433f5f531dd4@o485889.ingest.us.sentry.io/4504579615227904',
-	integrations: [Sentry.browserTracingIntegration({ router })],
-	tracesSampleRate: 0.1,
-})
+function isLocalHost() {
+	const { hostname } = window.location
+	return (
+		hostname === 'localhost' ||
+		hostname.endsWith('.localhost') ||
+		hostname === '127.0.0.1' ||
+		hostname === '::1'
+	)
+}
+
+function shouldEnableSentry() {
+	if (import.meta.env.VITE_ENABLE_SENTRY === 'true') return true
+	return !import.meta.env.DEV && !isLocalHost()
+}
+
+const sentryDsn = import.meta.env.VITE_SENTRY_DSN?.trim()
+if (sentryDsn && shouldEnableSentry()) {
+	Sentry.init({
+		app,
+		dsn: sentryDsn,
+		integrations: [Sentry.browserTracingIntegration({ router })],
+		tracesSampleRate: Number(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
+	})
+}
 
 app.use(VueQueryPlugin)
 app.use(router)

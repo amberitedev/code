@@ -212,6 +212,7 @@ const messages = defineMessages({
 					exclude-loaders
 					:color="result.color ?? undefined"
 					:banner="result.featured_gallery ?? undefined"
+					image-loading="lazy"
 					@contextmenu.prevent.stop="(event: MouseEvent) => ctx.onContextMenu?.(event, result)"
 					@mouseenter="ctx.onServerProjectHover?.(result)"
 					@mouseleave="ctx.onProjectHoverEnd?.()"
@@ -279,6 +280,7 @@ const messages = defineMessages({
 							: undefined
 					"
 					:layout="ctx.effectiveLayout.value"
+					image-loading="lazy"
 					@contextmenu.prevent.stop="(event: MouseEvent) => ctx.onContextMenu?.(event, result)"
 					@mouseenter="ctx.onProjectHover?.(result)"
 					@mouseleave="ctx.onProjectHoverEnd?.()"

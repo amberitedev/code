@@ -20,8 +20,9 @@ use crate::{
     },
     domain::modpack::ModpackManifest,
     presentation::{
-        authz::require_instance_permission, error::ApiError,
+        error::ApiError,
         extractors::AuthUser,
+        instance_path::resolve_authorized_instance_id,
     },
 };
 
@@ -38,8 +39,14 @@ pub async fn install_modpack(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:content")
-        .await?;
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:content",
+    )
+    .await?
+    .to_string();
     let mut mrpack_bytes: Option<bytes::Bytes> = None;
 
     while let Some(field) = multipart
@@ -67,7 +74,7 @@ pub async fn install_modpack(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let manifest = install(&state, &id, tmp.path()).await?;
+    let manifest = install(&state, &instance_id, tmp.path()).await?;
     Ok(Json(manifest_to_value(&manifest)))
 }
 
@@ -78,11 +85,17 @@ pub async fn install_modpack_modrinth(
     State(state): State<Arc<AppState>>,
     Json(body): Json<InstallModpackVersionBody>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:content")
-        .await?;
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:content",
+    )
+    .await?
+    .to_string();
     let manifest = install_modrinth_version(
         &state,
-        &id,
+        &instance_id,
         &body.project_id,
         &body.version_id,
     )
@@ -96,9 +109,15 @@ pub async fn get_modpack(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:content")
-        .await?;
-    let manifest = get_manifest(&state, &id).await?.ok_or_else(|| {
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:content",
+    )
+    .await?
+    .to_string();
+    let manifest = get_manifest(&state, &instance_id).await?.ok_or_else(|| {
         ApiError::NotFound("no modpack installed for this instance".into())
     })?;
     Ok(Json(manifest_to_value(&manifest)))
@@ -110,9 +129,15 @@ pub async fn remove_modpack(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:content")
-        .await?;
-    remove(&state, &id).await?;
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:content",
+    )
+    .await?
+    .to_string();
+    remove(&state, &instance_id).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -122,9 +147,15 @@ pub async fn export_modpack_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
-    require_instance_permission(&state, &claims.sub, &id, "server:content")
-        .await?;
-    let (data, filename) = export_modpack(&state, &id).await?;
+    let instance_id = resolve_authorized_instance_id(
+        &state,
+        &claims.sub,
+        &id,
+        "server:content",
+    )
+    .await?
+    .to_string();
+    let (data, filename) = export_modpack(&state, &instance_id).await?;
     let disposition = format!("attachment; filename=\"{filename}\"");
     Ok(Response::builder()
         .status(StatusCode::OK)

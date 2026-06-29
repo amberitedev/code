@@ -14,7 +14,7 @@ export function setupProviders(auth: Awaited<ReturnType<typeof useAuth>>) {
 
 	setupAuthProvider(auth)
 	setupModrinthClientProvider(auth)
-	setupCoreHostingProvider(auth)
+	setupCoreHostingProvider()
 	setupTagsProvider()
 	setupFilePickerProvider()
 	setupPageContextProvider()

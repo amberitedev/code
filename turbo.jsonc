@@ -37,6 +37,9 @@
 				"INTERCOM_APP_ID",
 				"INTERCOM_IDENTITY_SECRET",
 				"PYRO_BASE_URL",
+				"NUXT_PUBLIC_AMBERITE_*",
+				"AMBERITE_*",
+				"CONVEX_URL",
 				"PROD_OVERRIDE",
 				"PYRO_MASTER_KEY",
 				"PORT",
@@ -79,7 +82,7 @@
 			"cache": false,
 			"persistent": true,
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
-			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*", "PORT", "AMBERITE_*", "SUPABASE_*", "ALLOWED_ORIGIN", "CONVEX_*"],
+			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*", "PORT", "NUXT_PUBLIC_AMBERITE_*", "AMBERITE_*", "SUPABASE_*", "ALLOWED_ORIGIN", "CONVEX_*"],
 			"passThroughEnv": ["DISPLAY", "WEBKIT_DISABLE_DMABUF_RENDERER", "JAVA_HOME", "CARGO_INCREMENTAL", "SCCACHE_*", "RUSTC_WRAPPER"]
 		},
 		"test": {

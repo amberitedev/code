@@ -1,7 +1,6 @@
 <template>
-	<AppPageSkeleton v-if="!data" variant="detail" />
 	<div v-if="data">
-		<Teleport to="#sidebar-teleport-target">
+		<Teleport defer to="#sidebar-teleport-target">
 			<ProjectSidebarCompatibility
 				v-if="!isServerProject"
 				:project="data"
@@ -181,35 +180,41 @@
 					</template>
 				</ProjectHeader>
 				<NavTabs
-					:links="[
-						{
-							label: 'Description',
-							href: projectDescriptionHref,
-						},
-						{
-							label: 'Versions',
-							href: versionsHref,
-							subpages: ['version'],
-							shown: projectV3?.minecraft_server == null,
-						},
-						{
-							label: 'Gallery',
-							href: projectGalleryHref,
-							shown: data.gallery.length > 0,
-						},
-					]"
+					mode="local"
+					:links="projectTabs"
+					:active-index="visibleProjectTabIndex"
+					@tab-click="projectTabController.selectTab"
 				/>
 				<RouterView
 					v-if="route.path.startsWith('/project')"
-					:project="data"
-					:versions="versions"
-					:members="members"
-					:instance="instance"
-					:install="install"
-					:installed="installed"
-					:installing="installing"
-					:installed-version="installedVersion"
-				/>
+					v-slot="{ Component }"
+				>
+					<NavTabContentTransition
+						v-if="Component"
+						:content-key="projectRouteKey"
+						:direction="projectTabSlideDirection"
+						:visible="projectTabContentVisible"
+						@before-leave="projectTabController.handleBeforeLeave"
+						@after-leave="projectTabController.handleAfterLeave"
+						@after-enter="projectTabController.handleAfterEnter"
+						@enter-cancelled="projectTabController.handleEnterCancelled"
+						@leave-cancelled="projectTabController.handleLeaveCancelled"
+					>
+						<component
+							:is="Component"
+							:project="data"
+							:versions="versions"
+							:members="members"
+							:instance="instance"
+							:install="install"
+							:installed="installed"
+							:installing="installing"
+							:installed-version="installedVersion"
+							:loaders="allLoaders"
+							:game-versions="allGameVersions"
+						/>
+					</NavTabContentTransition>
+				</RouterView>
 			</template>
 			<template v-else> Project data couldn't not be loaded. </template>
 		</div>
@@ -273,7 +278,6 @@ import {
 	defineMessages,
 	getTargetInstallPreferences,
 	injectNotificationManager,
-	NavTabs,
 	OverflowMenu,
 	ProjectBackgroundGradient,
 	ProjectHeader,
@@ -285,7 +289,9 @@ import {
 	ProjectSidebarTags,
 	requestInstall,
 	SelectedProjectsFloatingBar,
-	useLoadingBarToken,
+	NavTabContentTransition,
+	NavTabs,
+	useNavTabContentController,
 	useVIntl,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -295,7 +301,6 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import AppPageSkeleton from '@/components/ui/AppPageSkeleton.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import InstanceIndicator from '@/components/ui/InstanceIndicator.vue'
 import {
@@ -353,7 +358,6 @@ const { installingServerProjects, playServerProject, showAddServerToInstanceModa
 	injectServerInstall()
 const installing = ref(false)
 const data = shallowRef(null)
-const projectPending = computed(() => !data.value)
 const versions = shallowRef([])
 const members = shallowRef([])
 const categories = shallowRef([])
@@ -375,7 +379,6 @@ const serverInstancePath = ref(null)
 const serverPlaying = ref(false)
 const serverSetupModalRef = ref(null)
 const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
-useLoadingBarToken(projectPending)
 
 serverInstallContent.watchServerContextChanges()
 await serverInstallContent.initServerContext()
@@ -430,6 +433,43 @@ const versionsHref = computed(() =>
 	buildProjectHref(`/project/${route.params.id}/versions`, instanceFilters.value),
 )
 const projectGalleryHref = computed(() => buildProjectHref(`/project/${route.params.id}/gallery`))
+const projectTabs = computed(() => [
+	{
+		label: 'Description',
+		href: projectDescriptionHref.value,
+		kind: 'description',
+	},
+	{
+		label: 'Versions',
+		href: versionsHref.value,
+		kind: 'versions',
+		shown: projectV3.value?.minecraft_server == null,
+	},
+	{
+		label: 'Gallery',
+		href: projectGalleryHref.value,
+		kind: 'gallery',
+		shown: data.value.gallery.length > 0,
+	},
+])
+const activeProjectTabKind = computed(() => {
+	if (route.path.includes('/versions') || route.path.includes('/version/')) return 'versions'
+	if (route.path.endsWith('/gallery')) return 'gallery'
+	return 'description'
+})
+const activeProjectTabIndex = computed(() =>
+	projectTabs.value
+		.filter((tab) => tab.shown ?? true)
+		.findIndex((tab) => tab.kind === activeProjectTabKind.value),
+)
+const projectRouteKey = computed(() => route.path)
+const projectTabController = useNavTabContentController({
+	activeIndex: activeProjectTabIndex,
+	router,
+})
+const visibleProjectTabIndex = projectTabController.activeIndex
+const projectTabSlideDirection = projectTabController.direction
+const projectTabContentVisible = projectTabController.visible
 
 const projectBrowseBackUrl = computed(() => {
 	const browsePath = route.query.b
@@ -968,4 +1008,5 @@ const handleOptionsClick = (args) => {
 .project-sidebar-section {
 	@apply p-4 flex flex-col gap-2 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid;
 }
+
 </style>

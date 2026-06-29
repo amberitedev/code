@@ -15,6 +15,8 @@
 				:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
 				class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 				:class="getSSRFallbackClasses(index)"
+				@pointerup="handleNavigationTabPointerUp(index, $event)"
+				@click.capture="handleNavigationTabClick(index, $event)"
 				@mouseenter="link.onHover?.()"
 				@focus="link.onHover?.()"
 			>
@@ -33,9 +35,10 @@
 				ref="tabLinkElements"
 				class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
 				:class="getSSRFallbackClasses(index)"
+				@pointerup="handleLocalTabPointerUp(index, link, $event)"
+				@click="handleLocalTabClick(index, link)"
 				@mouseenter="link.onHover?.()"
 				@focus="link.onHover?.()"
-				@click="emit('tabClick', index, link)"
 			>
 				<component :is="link.icon" v-if="link.icon" class="size-5" :class="getIconClasses(index)" />
 				<span class="text-nowrap" :class="getLabelClasses(index)">
@@ -60,8 +63,17 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+
+import {
+	UI_MOTION_NAV_TABS_FADE_DELAY_MS,
+	UI_MOTION_NAV_TABS_FADE_EASING,
+	UI_MOTION_NAV_TABS_FADE_MS,
+	UI_MOTION_NAV_TABS_SLIDER_EASING,
+	UI_MOTION_NAV_TABS_SLIDER_MS,
+	UI_MOTION_NAV_TABS_SLIDER_STAGGER_DELAY_MS,
+} from '#ui/composables/ui-motion'
 
 const route = useRoute()
 
@@ -74,6 +86,13 @@ interface Tab {
 	onHover?: () => void
 }
 
+interface SliderPosition {
+	left: number
+	top: number
+	right: number
+	bottom: number
+}
+
 const props = withDefaults(
 	defineProps<{
 		replace?: boolean
@@ -81,17 +100,11 @@ const props = withDefaults(
 		query?: string
 		mode?: 'navigation' | 'local'
 		activeIndex?: number
-		transitionDuration?: string
-		transitionStaggerDelay?: string
-		opacityTransitionDuration?: string
 	}>(),
 	{
 		mode: 'navigation',
 		query: undefined,
 		activeIndex: undefined,
-		transitionDuration: '150ms',
-		transitionStaggerDelay: '200ms',
-		opacityTransitionDuration: '250ms',
 	},
 )
 
@@ -121,6 +134,14 @@ const transitionsEnabled = ref(false)
 const sliderDelays = ref({ left: '0ms', top: '0ms', right: '0ms', bottom: '0ms' })
 
 const filteredLinks = computed(() => props.links.filter((link) => link.shown ?? true))
+const linkLayoutSignature = computed(() =>
+	filteredLinks.value
+		.map(
+			(link) =>
+				`${link.label}:${link.shown === false ? 'hidden' : 'shown'}:${link.icon ? 'icon' : 'text'}`,
+		)
+		.join('|'),
+)
 
 const sliderStyle = computed(() => ({
 	left: `${sliderLeft.value}px`,
@@ -128,18 +149,82 @@ const sliderStyle = computed(() => ({
 	right: `${sliderRight.value}px`,
 	bottom: `${sliderBottom.value}px`,
 	opacity: sliderReady.value && currentActiveIndex.value !== -1 ? 1 : 0,
+	'--navtabs-fade-delay-ms': `${UI_MOTION_NAV_TABS_FADE_DELAY_MS}ms`,
+	'--navtabs-fade-easing': UI_MOTION_NAV_TABS_FADE_EASING,
+	'--navtabs-fade-ms': `${UI_MOTION_NAV_TABS_FADE_MS}ms`,
+	'--navtabs-left-delay': sliderDelays.value.left,
+	'--navtabs-right-delay': sliderDelays.value.right,
+	'--navtabs-top-delay': sliderDelays.value.top,
+	'--navtabs-bottom-delay': sliderDelays.value.bottom,
+	'--navtabs-slider-easing': UI_MOTION_NAV_TABS_SLIDER_EASING,
+	'--navtabs-slider-ms': `${UI_MOTION_NAV_TABS_SLIDER_MS}ms`,
 }))
-
-const leftDelay = computed(() => sliderDelays.value.left)
-const rightDelay = computed(() => sliderDelays.value.right)
-const topDelay = computed(() => sliderDelays.value.top)
-const bottomDelay = computed(() => sliderDelays.value.bottom)
-const transitionDuration = computed(() => props.transitionDuration)
-const opacityTransitionDuration = computed(() => props.opacityTransitionDuration)
 
 const isActiveAndNotSubpage = computed(
 	() => (index: number) => currentActiveIndex.value === index && !subpageSelected.value,
 )
+
+let layoutResizeObserver: ResizeObserver | null = null
+let layoutMutationObserver: MutationObserver | null = null
+let remeasureFrame: number | null = null
+let suppressNextLocalClickIndex: number | null = null
+
+function cancelRemeasureFrame() {
+	if (remeasureFrame === null) return
+
+	cancelAnimationFrame(remeasureFrame)
+	remeasureFrame = null
+}
+
+function scheduleSliderRemeasure() {
+	if (typeof window === 'undefined') return
+
+	cancelRemeasureFrame()
+	remeasureFrame = requestAnimationFrame(() => {
+		remeasureFrame = null
+		void updateActiveTab()
+	})
+}
+
+function disconnectLayoutObservers() {
+	layoutResizeObserver?.disconnect()
+	layoutResizeObserver = null
+	layoutMutationObserver?.disconnect()
+	layoutMutationObserver = null
+}
+
+function getTabElements() {
+	const container = scrollContainer.value
+	if (!container) return []
+
+	return Array.from(container.querySelectorAll<HTMLElement>('.button-animation'))
+}
+
+function setupLayoutObservers() {
+	if (typeof window === 'undefined') return
+
+	disconnectLayoutObservers()
+
+	const container = scrollContainer.value
+	if (!container) return
+
+	if (typeof ResizeObserver !== 'undefined') {
+		layoutResizeObserver = new ResizeObserver(scheduleSliderRemeasure)
+		layoutResizeObserver.observe(container)
+		getTabElements().forEach((element) => layoutResizeObserver?.observe(element))
+	}
+
+	if (typeof MutationObserver !== 'undefined') {
+		layoutMutationObserver = new MutationObserver(() => {
+			setupLayoutObservers()
+			scheduleSliderRemeasure()
+		})
+		layoutMutationObserver.observe(container, {
+			childList: true,
+			subtree: false,
+		})
+	}
+}
 
 function getSSRFallbackClasses(index: number) {
 	if (sliderReady.value) return {}
@@ -207,11 +292,7 @@ function computeActiveIndex(): { index: number; isSubpage: boolean } {
 function getTabElement(index: number): HTMLElement | null {
 	if (index === -1) return null
 
-	const container = scrollContainer.value as HTMLElement | undefined
-	if (!container) return null
-
-	const tabs = container.querySelectorAll('.button-animation')
-	const element = tabs[index] as HTMLElement | undefined
+	const element = getTabElements()[index]
 
 	if (!element) return null
 
@@ -230,47 +311,114 @@ function positionSlider() {
 		bottom: parent.offsetHeight - el.offsetTop - el.offsetHeight,
 	}
 
-	const isInitialPosition = sliderLeft.value === 4 && sliderRight.value === 4
-
-	if (!sliderReady.value || isInitialPosition) {
-		sliderLeft.value = newPosition.left
-		sliderRight.value = newPosition.right
-		sliderTop.value = newPosition.top
-		sliderBottom.value = newPosition.bottom
-
+	if (!sliderReady.value) {
+		applySliderPosition(newPosition)
 		sliderReady.value = true
 
 		requestAnimationFrame(() => {
 			transitionsEnabled.value = true
 		})
+	} else if (isSameSliderPosition(newPosition)) {
+		return
 	} else {
 		animateSliderTo(newPosition)
 	}
 }
 
-function animateSliderTo(newPosition: {
-	left: number
-	top: number
-	right: number
-	bottom: number
-}) {
-	const STAGGER_DELAY = props.transitionStaggerDelay
-
-	sliderDelays.value = {
-		left: newPosition.left < sliderLeft.value ? '0ms' : STAGGER_DELAY,
-		right: newPosition.left < sliderLeft.value ? STAGGER_DELAY : '0ms',
-		top: newPosition.top < sliderTop.value ? '0ms' : STAGGER_DELAY,
-		bottom: newPosition.top < sliderTop.value ? STAGGER_DELAY : '0ms',
-	}
-
-	sliderLeft.value = newPosition.left
-	sliderRight.value = newPosition.right
-	sliderTop.value = newPosition.top
-	sliderBottom.value = newPosition.bottom
+function isSameSliderPosition(position: SliderPosition) {
+	return (
+		position.left === sliderLeft.value &&
+		position.right === sliderRight.value &&
+		position.top === sliderTop.value &&
+		position.bottom === sliderBottom.value
+	)
 }
 
-async function updateActiveTab() {
-	await nextTick()
+function applySliderPosition(position: SliderPosition) {
+	sliderLeft.value = position.left
+	sliderRight.value = position.right
+	sliderTop.value = position.top
+	sliderBottom.value = position.bottom
+}
+
+function animateSliderTo(newPosition: SliderPosition) {
+	const staggerDelay = `${UI_MOTION_NAV_TABS_SLIDER_STAGGER_DELAY_MS}ms`
+
+	sliderDelays.value = {
+		left: newPosition.left < sliderLeft.value ? '0ms' : staggerDelay,
+		right: newPosition.left < sliderLeft.value ? staggerDelay : '0ms',
+		top: newPosition.top < sliderTop.value ? '0ms' : staggerDelay,
+		bottom: newPosition.top < sliderTop.value ? staggerDelay : '0ms',
+	}
+
+	applySliderPosition(newPosition)
+}
+
+function setLocalActiveTab(index: number) {
+	if (index < 0 || index >= filteredLinks.value.length) return
+	if (currentActiveIndex.value === index && !subpageSelected.value) return
+
+	currentActiveIndex.value = index
+	subpageSelected.value = false
+
+	if (sliderReady.value) {
+		positionSlider()
+	} else {
+		positionSlider()
+		if (!sliderReady.value) {
+			void nextTick(positionSlider)
+		}
+	}
+}
+
+function isPrimaryTabIntent(event: MouseEvent | PointerEvent) {
+	return !(
+		event.defaultPrevented ||
+		event.button !== 0 ||
+		event.metaKey ||
+		event.altKey ||
+		event.ctrlKey ||
+		event.shiftKey
+	)
+}
+
+function handleNavigationTabPointerUp(index: number, event: PointerEvent) {
+	if (!isPrimaryTabIntent(event)) return
+
+	setLocalActiveTab(index)
+}
+
+function handleNavigationTabClick(index: number, event: MouseEvent) {
+	if (!isPrimaryTabIntent(event)) return
+
+	setLocalActiveTab(index)
+}
+
+function handleLocalTabPointerUp(index: number, link: Tab, event: PointerEvent) {
+	if (!isPrimaryTabIntent(event)) return
+
+	setLocalActiveTab(index)
+	suppressNextLocalClickIndex = index
+	emit('tabClick', index, link)
+
+	setTimeout(() => {
+		if (suppressNextLocalClickIndex === index) {
+			suppressNextLocalClickIndex = null
+		}
+	}, 0)
+}
+
+function handleLocalTabClick(index: number, link: Tab) {
+	if (suppressNextLocalClickIndex === index) {
+		suppressNextLocalClickIndex = null
+		return
+	}
+
+	setLocalActiveTab(index)
+	emit('tabClick', index, link)
+}
+
+function updateActiveTab() {
 	const { index, isSubpage } = computeActiveIndex()
 	currentActiveIndex.value = index
 	subpageSelected.value = isSubpage
@@ -287,7 +435,21 @@ const initialActive = computeActiveIndex()
 currentActiveIndex.value = initialActive.index
 subpageSelected.value = initialActive.isSubpage
 
-onMounted(updateActiveTab)
+onMounted(() => {
+	void updateActiveTab()
+	void nextTick(() => {
+		setupLayoutObservers()
+		scheduleSliderRemeasure()
+	})
+
+	if (typeof window !== 'undefined') {
+		window.addEventListener('resize', scheduleSliderRemeasure)
+	}
+
+	if (typeof document !== 'undefined' && document.fonts) {
+		void document.fonts.ready.then(scheduleSliderRemeasure).catch(() => undefined)
+	}
+})
 
 watch(
 	() => [route.path, route.query],
@@ -300,32 +462,43 @@ watch(
 
 watch(
 	() => props.activeIndex,
-	() => {
-		if (props.mode === 'local') {
+	(activeIndex) => {
+		if (props.mode !== 'local') return
+		if (activeIndex === undefined || activeIndex === -1) {
 			updateActiveTab()
+			return
 		}
+
+		setLocalActiveTab(Math.min(activeIndex, filteredLinks.value.length - 1))
 	},
 )
 
-watch(
-	() => props.links,
-	async () => {
-		sliderReady.value = false
-		transitionsEnabled.value = false
-		await nextTick()
-		updateActiveTab()
-	},
-	{ deep: true },
-)
+watch(linkLayoutSignature, async () => {
+	sliderReady.value = false
+	transitionsEnabled.value = false
+	await nextTick()
+	updateActiveTab()
+	setupLayoutObservers()
+	scheduleSliderRemeasure()
+})
+
+onUnmounted(() => {
+	cancelRemeasureFrame()
+	disconnectLayoutObservers()
+
+	if (typeof window !== 'undefined') {
+		window.removeEventListener('resize', scheduleSliderRemeasure)
+	}
+})
 </script>
 
 <style scoped>
 .navtabs-transition {
 	transition:
-		left v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(leftDelay),
-		right v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(rightDelay),
-		top v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(topDelay),
-		bottom v-bind(transitionDuration) cubic-bezier(0.4, 0, 0.2, 1) v-bind(bottomDelay),
-		opacity v-bind(opacityTransitionDuration) cubic-bezier(0.5, 0, 0.2, 1) 50ms;
+		left var(--navtabs-slider-ms) var(--navtabs-slider-easing) var(--navtabs-left-delay),
+		right var(--navtabs-slider-ms) var(--navtabs-slider-easing) var(--navtabs-right-delay),
+		top var(--navtabs-slider-ms) var(--navtabs-slider-easing) var(--navtabs-top-delay),
+		bottom var(--navtabs-slider-ms) var(--navtabs-slider-easing) var(--navtabs-bottom-delay),
+		opacity var(--navtabs-fade-ms) var(--navtabs-fade-easing) var(--navtabs-fade-delay-ms);
 }
 </style>
