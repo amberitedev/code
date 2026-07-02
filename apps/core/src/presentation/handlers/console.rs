@@ -27,11 +27,10 @@ use crate::{
         state::{AppState, WsTicket},
     },
     domain::{event::Event, instance::InstanceId},
-	presentation::{
-		authz::require_instance_permission, error::ApiError,
-		extractors::AuthUser,
-		instance_path::resolve_authorized_instance_id,
-	},
+    presentation::{
+        authz::require_instance_permission, error::ApiError,
+        extractors::AuthUser, instance_path::resolve_authorized_instance_id,
+    },
 };
 
 /// POST /ws-token — issue a 60-second WebSocket ticket (requires auth).
@@ -62,18 +61,14 @@ pub async fn ws_console(
     State(state): State<Arc<AppState>>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-	let user_id = validate_ticket(&state, &q.ticket)?;
+    let user_id = validate_ticket(&state, &q.ticket)?;
 
-	// Allow connecting to any existing instance, even while stopped — the
-	// socket then streams logs/state/stats once the instance starts. This
-	// mirrors the upstream hosting console, which is always connectable.
-	let iid = resolve_authorized_instance_id(
-		&state,
-		&user_id,
-		&id,
-		"server:console",
-	)
-	.await?;
+    // Allow connecting to any existing instance, even while stopped — the
+    // socket then streams logs/state/stats once the instance starts. This
+    // mirrors the upstream hosting console, which is always connectable.
+    let iid =
+        resolve_authorized_instance_id(&state, &user_id, &id, "server:console")
+            .await?;
 
     let rx = state.broadcaster.subscribe();
     let state_clone = Arc::clone(&state);
@@ -209,13 +204,9 @@ pub async fn sse_progress(
     >,
     ApiError,
 > {
-	let iid = resolve_authorized_instance_id(
-		&state,
-		&claims.sub,
-		&id,
-		"server:view",
-	)
-	.await?;
+    let iid =
+        resolve_authorized_instance_id(&state, &claims.sub, &id, "server:view")
+            .await?;
 
     let stream = BroadcastStream::new(state.broadcaster.subscribe())
         .filter_map(move |msg| {

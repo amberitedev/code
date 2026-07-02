@@ -215,7 +215,12 @@ async fn get_instance_returns_record() {
 async fn instance_path_is_stable_after_rename() {
     let app = common::TestApp::spawn().await;
     let id = common::create_test_instance(&app).await;
-    let record = app.state.instance_store.get(&id.parse().unwrap()).await.unwrap();
+    let record = app
+        .state
+        .instance_store
+        .get(&id.parse().unwrap())
+        .await
+        .unwrap();
     let path = record.path;
     let encoded_path = encode_path_segment(&path);
 
@@ -264,7 +269,12 @@ async fn get_instance_not_found_returns_404() {
 async fn delete_instance_removes_record() {
     let app = common::TestApp::spawn().await;
     let id = common::create_test_instance(&app).await;
-    let record = app.state.instance_store.get(&id.parse().unwrap()).await.unwrap();
+    let record = app
+        .state
+        .instance_store
+        .get(&id.parse().unwrap())
+        .await
+        .unwrap();
     let path = encode_path_segment(&record.path);
 
     let del = app

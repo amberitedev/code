@@ -8,10 +8,10 @@
 		<Transition
 			name="stage-content-transition-panel"
 			:duration="durationMs"
-			@after-enter="measureActivePanelHeight"
-			@after-leave="measureActivePanelHeight"
-			@enter-cancelled="measureActivePanelHeight"
-			@leave-cancelled="measureActivePanelHeight"
+			@after-enter="finishPanelTransition"
+			@after-leave="finishPanelTransition"
+			@enter-cancelled="finishPanelTransition"
+			@leave-cancelled="finishPanelTransition"
 		>
 			<div
 				:key="contentKey"
@@ -34,8 +34,8 @@ export type StageContentTransitionDirection =
 	| 'up'
 	| 'down'
 
-const DEFAULT_STAGE_CONTENT_TRANSITION_MS = 320
-const DEFAULT_STAGE_CONTENT_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
+const DEFAULT_STAGE_CONTENT_TRANSITION_MS = 180
+const DEFAULT_STAGE_CONTENT_TRANSITION_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
 </script>
 
 <script setup lang="ts">
@@ -67,7 +67,6 @@ const contentKeyString = computed(() => String(props.contentKey))
 
 let resizeObserver: ResizeObserver | null = null
 let heightFrame: number | null = null
-let heightReleaseTimer: ReturnType<typeof setTimeout> | null = null
 
 const transitionOffsets = computed(() => {
 	const direction = normalizedDirection.value
@@ -133,7 +132,6 @@ function measureActivePanelHeight() {
 	if (!panel) return
 
 	lockedHeight.value = `${roundHeightForDevicePixels(panel.getBoundingClientRect().height)}px`
-	releaseLockedHeightAfterTransition()
 }
 
 function cancelHeightFrame() {
@@ -143,25 +141,9 @@ function cancelHeightFrame() {
 	heightFrame = null
 }
 
-function cancelHeightReleaseTimer() {
-	if (!heightReleaseTimer) return
-
-	clearTimeout(heightReleaseTimer)
-	heightReleaseTimer = null
-}
-
-function releaseLockedHeight() {
-	cancelHeightReleaseTimer()
-	lockedHeight.value = undefined
+function finishPanelTransition() {
+	measureActivePanelHeight()
 	transitionActive.value = false
-}
-
-function releaseLockedHeightAfterTransition() {
-	cancelHeightReleaseTimer()
-	heightReleaseTimer = setTimeout(() => {
-		heightReleaseTimer = null
-		releaseLockedHeight()
-	}, props.durationMs)
 }
 
 function getViewportHeight() {
@@ -247,7 +229,6 @@ onMounted(() => {
 onUnmounted(() => {
 	disconnectResizeObserver()
 	cancelHeightFrame()
-	cancelHeightReleaseTimer()
 
 	if (typeof window !== 'undefined') {
 		window.removeEventListener('resize', scheduleActivePanelHeightMeasure)
@@ -257,6 +238,7 @@ onUnmounted(() => {
 
 <style scoped>
 .stage-content-transition {
+	display: flow-root;
 	position: relative;
 	width: 100%;
 	transition: height var(--stage-content-transition-ms) var(--stage-content-transition-easing);
@@ -273,10 +255,8 @@ onUnmounted(() => {
 
 .stage-content-transition-panel-enter-active,
 .stage-content-transition-panel-leave-active {
-	transition:
-		transform var(--stage-content-transition-ms) var(--stage-content-transition-easing),
-		filter var(--stage-content-transition-ms) var(--stage-content-transition-easing);
-	will-change: transform, filter;
+	transition: transform var(--stage-content-transition-ms) var(--stage-content-transition-easing);
+	will-change: transform;
 }
 
 .stage-content-transition-panel-leave-active {
@@ -293,7 +273,6 @@ onUnmounted(() => {
 		var(--stage-content-transition-enter-y),
 		0
 	);
-	filter: blur(4px);
 }
 
 .stage-content-transition-panel-leave-to {
@@ -302,13 +281,11 @@ onUnmounted(() => {
 		var(--stage-content-transition-leave-y),
 		0
 	);
-	filter: blur(4px);
 }
 
 .stage-content-transition-panel-enter-to,
 .stage-content-transition-panel-leave-from {
 	transform: translate3d(0, 0, 0);
-	filter: blur(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -323,7 +300,6 @@ onUnmounted(() => {
 	.stage-content-transition-panel-enter-to,
 	.stage-content-transition-panel-leave-from {
 		transform: translate3d(0, 0, 0);
-		filter: blur(0);
 	}
 }
 </style>

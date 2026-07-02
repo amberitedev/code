@@ -16,6 +16,7 @@ const requiredEnvironmentVariables = [
 	'MODRINTH_API_BASE_URL',
 	'MODRINTH_ARCHON_BASE_URL',
 	'VITE_CONVEX_URL',
+	'VITE_CONVEX_SITE_URL',
 ] as const
 
 function loadEnvFile(envFilePath: string) {
@@ -97,6 +98,9 @@ export default defineConfig({
 			},
 		}),
 	],
+	optimizeDeps: {
+		exclude: ['@tresjs/core'],
+	},
 
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	// prevent vite from obscuring rust errors

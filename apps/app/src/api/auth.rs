@@ -21,6 +21,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             set_amberite_session_jwt,
             get_amberite_session_refresh_token,
             set_amberite_session_refresh_token,
+            get_amberite_local_setup_secret,
         ])
         .build()
 }
@@ -32,6 +33,7 @@ const AMBERITE_SESSION_REFRESH_TOKEN_ACCOUNT: &str =
 const AMBERITE_DEV_AUTH_SCOPE_ENV: &str = "AMBERITE_DEV_AUTH_SCOPE";
 const AMBERITE_DEV_MODE_ENV: &str = "AMBERITE_DEV_MODE";
 const AMBERITE_DEV_PERSONA_ID_ENV: &str = "AMBERITE_DEV_PERSONA_ID";
+const AMBERITE_LOCAL_CORE_DATA_DIR_ENV: &str = "AMBERITE_LOCAL_CORE_DATA_DIR";
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -178,6 +180,37 @@ pub async fn set_amberite_session_refresh_token(
         },
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_amberite_local_setup_secret() -> Result<Option<String>> {
+    for data_dir in local_core_data_dir_candidates() {
+        let path = data_dir.join(".setup_secret");
+        let Ok(value) = tokio::fs::read_to_string(&path).await else {
+            continue;
+        };
+        let secret = value.trim().to_string();
+        if !secret.is_empty() {
+            return Ok(Some(secret));
+        }
+    }
+    Ok(None)
+}
+
+fn local_core_data_dir_candidates() -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(value) = env::var(AMBERITE_LOCAL_CORE_DATA_DIR_ENV) {
+        let value = value.trim();
+        if !value.is_empty() {
+            candidates.push(std::path::PathBuf::from(value));
+        }
+    }
+    if let Ok(cwd) = env::current_dir() {
+        candidates.push(cwd.join(".copal"));
+        candidates.push(cwd.join("apps").join("core").join(".copal"));
+        candidates.push(cwd.join("..").join("core").join(".copal"));
+    }
+    candidates
 }
 
 /// Checks if the authentication servers are reachable.

@@ -1,16 +1,6 @@
 use std::{io::Read, path::Path};
 
-use crate::{
-    application::social_models::SocialError,
-    domain::modpack::{EnvType, PackFile},
-};
-
-pub fn is_client_only(file: &PackFile) -> bool {
-    matches!(
-        file.env.as_ref().map(|e| &e.server),
-        Some(EnvType::Unsupported)
-    )
-}
+use crate::application::social_models::SocialError;
 
 pub async fn archive_mods(
     path: &Path,
@@ -44,6 +34,38 @@ pub async fn archive_mods(
             Ok(mods)
         },
     )
+    .await
+    .map_err(|e| SocialError::Invalid(e.to_string()))?
+}
+
+pub async fn archive_mod_names(
+    path: &Path,
+) -> Result<Vec<String>, SocialError> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<Vec<String>, SocialError> {
+        let file = std::fs::File::open(path)?;
+        let mut zip = zip::ZipArchive::new(file)
+            .map_err(|e| SocialError::Invalid(e.to_string()))?;
+        let mut mods = Vec::new();
+        for i in 0..zip.len() {
+            let entry = zip
+                .by_index(i)
+                .map_err(|e| SocialError::Invalid(e.to_string()))?;
+            let name = entry.name().replace('\\', "/");
+            let Some(filename) = name
+                .strip_prefix("overrides/mods/")
+                .or_else(|| name.strip_prefix("server-overrides/mods/"))
+            else {
+                continue;
+            };
+            if !filename.ends_with(".jar") || entry.is_dir() {
+                continue;
+            }
+            validate_filename(filename)?;
+            mods.push(filename.to_string());
+        }
+        Ok(mods)
+    })
     .await
     .map_err(|e| SocialError::Invalid(e.to_string()))?
 }

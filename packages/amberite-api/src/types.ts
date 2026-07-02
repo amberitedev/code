@@ -1,8 +1,3 @@
-// All response shapes returned by Copal's HTTP API and WebSocket.
-// These mirror the Rust structs in apps/core/src/ — keep in sync with changes there.
-// Key types: CoreInstance:37, CoreInstanceSummary:54, CoreInstanceEvent:68, CoreStats:82,
-// CoreFsOperationKind:228, CoreMetadata:235, CoreMember:247, CoreSyncProfile:258.
-
 export type CoreInstanceStatus = 'offline' | 'starting' | 'running' | 'stopping' | 'crashed'
 
 export type CoreInstanceInstallStatus = 'installing' | 'ready' | 'failed'
@@ -26,6 +21,7 @@ export interface CoreSetupRequest {
 	convex_url: string
 	auth_jwks_url: string
 	owner_user_id: string
+	owner_display_name?: string
 	/** JWT audience claim to validate. Defaults to "authenticated" if omitted. */
 	auth_audience?: string
 	/** Legacy one-time Core realtime credential retained for setup compatibility. */
@@ -569,7 +565,13 @@ export interface SaveCoreRoleBody {
 	grants: string[]
 }
 
-export type CoreInvitationStatus = 'pending_review' | 'sent' | 'rejected' | 'accepted' | 'declined'
+export type CoreInvitationStatus =
+	| 'pending_review'
+	| 'sent'
+	| 'rejected'
+	| 'accepted'
+	| 'declined'
+	| 'revoked'
 
 export interface CoreInvitation {
 	id: string
@@ -657,6 +659,48 @@ export interface CoreSyncEvent {
 	applied_at?: string | null
 }
 
+export type CoreMrpackSideSupport = 'required' | 'optional' | 'unsupported'
+export type CoreMrpackOverrideSideState = 'enabled' | 'disabled' | 'removed'
+
+export interface CoreMrpackFileHashes {
+	sha1?: string | null
+	sha512?: string | null
+	[algorithm: string]: string | null | undefined
+}
+
+export interface CoreMrpackFileEnv {
+	client: CoreMrpackSideSupport
+	server: CoreMrpackSideSupport
+}
+
+export interface CoreMrpackFile {
+	path: string
+	projectId?: string | null
+	versionId?: string | null
+	hashes: CoreMrpackFileHashes
+	env?: CoreMrpackFileEnv | null
+	downloads: string[]
+	fileSize: number
+}
+
+export interface CoreMrpackOverride {
+	projectId?: string | null
+	path?: string | null
+	client?: CoreMrpackOverrideSideState | null
+	server?: CoreMrpackOverrideSideState | null
+}
+
+export interface CoreMrpackManifest {
+	formatVersion?: number | null
+	game: string
+	versionId: string
+	name: string
+	summary?: string | null
+	files: CoreMrpackFile[]
+	dependencies: Record<string, string>
+	overrides?: CoreMrpackOverride[]
+}
+
 export interface CoreSyncSnapshotPublishResult {
 	profile: CoreSyncProfile
 	snapshot: CoreSyncSnapshot
@@ -668,6 +712,10 @@ export interface CoreCreateSyncProfileFromMrpackMetadata {
 	client_profile_id?: string | null
 	core_instance_id?: string | null
 	sync_enabled?: boolean | null
+	notes?: string | null
+}
+
+export interface CorePublishSyncSnapshotMetadata {
 	notes?: string | null
 }
 

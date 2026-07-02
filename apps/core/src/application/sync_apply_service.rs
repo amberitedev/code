@@ -1,33 +1,38 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+};
 
 use bytes::Bytes;
 use serde::Serialize;
 use sha2::Digest;
 
 use crate::{
-    application::{social_models::SocialError, state::AppState},
+    application::{
+        social_models::SocialError,
+        state::AppState,
+        sync_mrpack_plan::{
+            self, InvalidOverride, PlannedModSource, PlannedModState,
+            PlannedServerMod,
+        },
+    },
     domain::modpack::PackFormat,
-    infrastructure::minecraft::mrpack::validate_download_url,
 };
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncDiff {
     pub added: Vec<String>,
     pub removed: Vec<String>,
     pub updated: Vec<String>,
     pub unchanged: Vec<String>,
+    pub invalid_overrides: Vec<InvalidOverride>,
 }
 
-struct DesiredMod {
-    filename: String,
-    sha512: Option<String>,
-    sha1: Option<String>,
-    source: ModSource,
-}
-
-enum ModSource {
-    Download(String),
-    Archive(Bytes),
+struct CurrentMod {
+    sha512: String,
+    enabled: bool,
 }
 
 pub async fn apply_snapshot(
@@ -35,6 +40,8 @@ pub async fn apply_snapshot(
     instance_id: &str,
     archive_path: &Path,
     metadata: &PackFormat,
+    previous_archive_path: Option<&Path>,
+    previous_metadata: Option<&PackFormat>,
 ) -> Result<SyncDiff, SocialError> {
     let data_dir: String =
         sqlx::query_scalar("SELECT data_dir FROM instances WHERE id = ?")
@@ -45,49 +52,87 @@ pub async fn apply_snapshot(
     let mods_dir = Path::new(&data_dir).join("mods");
     tokio::fs::create_dir_all(&mods_dir).await?;
 
-    let desired = desired_mods(archive_path, metadata).await?;
-    let current = current_mod_hashes(&mods_dir).await?;
+    let plan = sync_mrpack_plan::server_plan(archive_path, metadata).await?;
+    let desired_names = plan.mods.keys().cloned().collect::<HashSet<_>>();
+    let previous_managed =
+        previous_managed_names(previous_archive_path, previous_metadata)
+            .await?;
+    let current = current_mods(&mods_dir).await?;
     let mut diff = SyncDiff {
         added: vec![],
         removed: vec![],
         updated: vec![],
         unchanged: vec![],
+        invalid_overrides: plan.invalid_overrides,
     };
 
-    for filename in current.keys() {
-        if !desired.contains_key(filename) {
-            remove_mod_file(&mods_dir, filename).await?;
-            sqlx::query(
-                "DELETE FROM mods WHERE instance_id = ? AND filename = ?",
-            )
-            .bind(instance_id)
-            .bind(filename)
-            .execute(&state.pool)
-            .await?;
+    let mut removals = plan.removed;
+    for filename in previous_managed {
+        if !desired_names.contains(&filename) {
+            removals.insert(filename);
+        }
+    }
+
+    for filename in sorted_strings(removals) {
+        validate_filename(&filename)?;
+        let existed_on_disk = current.contains_key(&filename);
+        remove_mod_file(&mods_dir, &filename).await?;
+        let deleted = sqlx::query(
+            "DELETE FROM mods WHERE instance_id = ? AND filename = ?",
+        )
+        .bind(instance_id)
+        .bind(&filename)
+        .execute(&state.pool)
+        .await?
+        .rows_affected()
+            > 0;
+        if existed_on_disk || deleted {
             diff.removed.push(filename.clone());
         }
     }
 
-    for desired_mod in desired.values() {
-        let current_hash = current.get(&desired_mod.filename);
-        if desired_mod
-            .sha512
-            .as_ref()
-            .is_some_and(|sha| current_hash == Some(sha))
-        {
-            diff.unchanged.push(desired_mod.filename.clone());
+    for desired_mod in sorted_mods(plan.mods) {
+        let current_mod = current.get(&desired_mod.filename);
+        if desired_mod.sha512.as_ref().is_some_and(|sha| {
+            current_mod.is_some_and(|current| &current.sha512 == sha)
+        }) {
+            let desired_enabled =
+                matches!(desired_mod.state, PlannedModState::Enabled);
+            if current_mod
+                .is_some_and(|current| current.enabled == desired_enabled)
+            {
+                upsert_mod_row(
+                    state,
+                    instance_id,
+                    &desired_mod,
+                    desired_mod.sha512.as_deref().unwrap(),
+                )
+                .await?;
+                diff.unchanged.push(desired_mod.filename.clone());
+            } else {
+                set_existing_mod_state(
+                    &mods_dir,
+                    &desired_mod.filename,
+                    desired_enabled,
+                )
+                .await?;
+                upsert_mod_row(
+                    state,
+                    instance_id,
+                    &desired_mod,
+                    desired_mod.sha512.as_deref().unwrap(),
+                )
+                .await?;
+                diff.updated.push(desired_mod.filename.clone());
+            }
             continue;
         }
-        let bytes = mod_bytes(state, desired_mod).await?;
-        verify_hashes(desired_mod, &bytes)?;
+        let bytes = mod_bytes(state, &desired_mod).await?;
+        verify_hashes(&desired_mod, &bytes)?;
         let sha512 = hex::encode(sha2::Sha512::digest(&bytes));
-        let tmp = mods_dir.join(format!("{}.tmp", desired_mod.filename));
-        tokio::fs::write(&tmp, &bytes).await?;
-        remove_mod_file(&mods_dir, &desired_mod.filename).await?;
-        tokio::fs::rename(tmp, mods_dir.join(&desired_mod.filename)).await?;
-        upsert_mod_row(state, instance_id, &desired_mod.filename, &sha512)
-            .await?;
-        if current_hash.is_some() {
+        write_mod_file(&mods_dir, &desired_mod, &bytes).await?;
+        upsert_mod_row(state, instance_id, &desired_mod, &sha512).await?;
+        if current_mod.is_some() {
             diff.updated.push(desired_mod.filename.clone());
         } else {
             diff.added.push(desired_mod.filename.clone());
@@ -96,78 +141,57 @@ pub async fn apply_snapshot(
     Ok(diff)
 }
 
-async fn desired_mods(
-    archive_path: &Path,
-    metadata: &PackFormat,
-) -> Result<HashMap<String, DesiredMod>, SocialError> {
-    let mut desired = HashMap::new();
-    for file in &metadata.files {
-        if super::sync_mrpack_files::is_client_only(file)
-            || !file.path.starts_with("mods/")
-            || !file.path.ends_with(".jar")
-        {
-            continue;
-        }
-        let filename = file.path.trim_start_matches("mods/").to_string();
-        validate_filename(&filename)?;
-        let url = file.downloads.first().ok_or_else(|| {
-            SocialError::Invalid(format!(
-                "mod file has no download: {}",
-                file.path
-            ))
-        })?;
-        validate_download_url(url)?;
-        desired.insert(
-            filename.clone(),
-            DesiredMod {
-                filename,
-                sha512: file.hashes.sha512.clone(),
-                sha1: file.hashes.sha1.clone(),
-                source: ModSource::Download(url.clone()),
-            },
-        );
+async fn previous_managed_names(
+    archive_path: Option<&Path>,
+    metadata: Option<&PackFormat>,
+) -> Result<HashSet<String>, SocialError> {
+    if let Some(metadata) = metadata {
+        sync_mrpack_plan::installed_managed_names(archive_path, metadata).await
+    } else {
+        Ok(HashSet::new())
     }
-    for (filename, data) in
-        super::sync_mrpack_files::archive_mods(archive_path).await?
-    {
-        let sha512 = hex::encode(sha2::Sha512::digest(&data));
-        desired.insert(
-            filename.clone(),
-            DesiredMod {
-                filename,
-                sha512: Some(sha512),
-                sha1: Some(hex::encode(sha1::Sha1::digest(&data))),
-                source: ModSource::Archive(Bytes::from(data)),
-            },
-        );
-    }
-    Ok(desired)
 }
 
-async fn current_mod_hashes(
+async fn current_mods(
     mods_dir: &Path,
-) -> Result<HashMap<String, String>, SocialError> {
+) -> Result<HashMap<String, CurrentMod>, SocialError> {
     let mut current = HashMap::new();
     let mut entries = tokio::fs::read_dir(mods_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         let filename = entry.file_name().to_string_lossy().to_string();
-        if !filename.ends_with(".jar") && !filename.ends_with(".jar.disabled") {
+        let (canonical, enabled) = if filename.ends_with(".jar") {
+            (filename.clone(), true)
+        } else if filename.ends_with(".jar.disabled") {
+            (filename.trim_end_matches(".disabled").to_string(), false)
+        } else {
+            continue;
+        };
+        if !enabled
+            && current
+                .get(&canonical)
+                .is_some_and(|current: &CurrentMod| current.enabled)
+        {
             continue;
         }
-        let canonical = filename.trim_end_matches(".disabled").to_string();
         let bytes = tokio::fs::read(entry.path()).await?;
-        current.insert(canonical, hex::encode(sha2::Sha512::digest(&bytes)));
+        current.insert(
+            canonical,
+            CurrentMod {
+                sha512: hex::encode(sha2::Sha512::digest(&bytes)),
+                enabled,
+            },
+        );
     }
     Ok(current)
 }
 
 async fn mod_bytes(
     state: &Arc<AppState>,
-    desired: &DesiredMod,
+    desired: &PlannedServerMod,
 ) -> Result<Bytes, SocialError> {
     match &desired.source {
-        ModSource::Archive(bytes) => Ok(bytes.clone()),
-        ModSource::Download(url) => Ok(state
+        PlannedModSource::Archive(bytes) => Ok(bytes.clone()),
+        PlannedModSource::Download(url) => Ok(state
             .http
             .get(url)
             .send()
@@ -182,7 +206,7 @@ async fn mod_bytes(
 }
 
 fn verify_hashes(
-    desired: &DesiredMod,
+    desired: &PlannedServerMod,
     bytes: &[u8],
 ) -> Result<(), SocialError> {
     if let Some(expected) = &desired.sha1 {
@@ -206,6 +230,42 @@ fn verify_hashes(
     Ok(())
 }
 
+async fn write_mod_file(
+    mods_dir: &Path,
+    desired: &PlannedServerMod,
+    bytes: &[u8],
+) -> Result<(), SocialError> {
+    let tmp = mods_dir.join(format!("{}.tmp", desired.filename));
+    tokio::fs::write(&tmp, bytes).await?;
+    remove_mod_file(mods_dir, &desired.filename).await?;
+    let dest = if matches!(desired.state, PlannedModState::Enabled) {
+        mods_dir.join(&desired.filename)
+    } else {
+        mods_dir.join(format!("{}.disabled", desired.filename))
+    };
+    tokio::fs::rename(tmp, dest).await?;
+    Ok(())
+}
+
+async fn set_existing_mod_state(
+    mods_dir: &Path,
+    filename: &str,
+    enabled: bool,
+) -> Result<(), SocialError> {
+    let jar = mods_dir.join(filename);
+    let disabled = mods_dir.join(format!("{filename}.disabled"));
+    if enabled {
+        if disabled.exists() {
+            let _ = tokio::fs::remove_file(&jar).await;
+            tokio::fs::rename(disabled, jar).await?;
+        }
+    } else if jar.exists() {
+        let _ = tokio::fs::remove_file(&disabled).await;
+        tokio::fs::rename(jar, disabled).await?;
+    }
+    Ok(())
+}
+
 async fn remove_mod_file(
     mods_dir: &Path,
     filename: &str,
@@ -220,18 +280,35 @@ async fn remove_mod_file(
 async fn upsert_mod_row(
     state: &Arc<AppState>,
     instance_id: &str,
-    filename: &str,
+    desired: &PlannedServerMod,
     sha512: &str,
 ) -> Result<(), SocialError> {
-    sqlx::query("INSERT INTO mods (id, instance_id, filename, sha512, enabled, installed_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(instance_id, filename) DO UPDATE SET sha512 = excluded.sha512, enabled = 1")
+    sqlx::query("INSERT INTO mods (id, instance_id, filename, modrinth_project_id, modrinth_version_id, sha512, enabled, installed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(instance_id, filename) DO UPDATE SET modrinth_project_id = excluded.modrinth_project_id, modrinth_version_id = excluded.modrinth_version_id, sha512 = excluded.sha512, enabled = excluded.enabled")
 		.bind(uuid::Uuid::new_v4().to_string())
 		.bind(instance_id)
-		.bind(filename)
+		.bind(&desired.filename)
+        .bind(&desired.project_id)
+        .bind(&desired.version_id)
 		.bind(sha512)
+        .bind(matches!(desired.state, PlannedModState::Enabled) as i64)
 		.bind(chrono::Utc::now().to_rfc3339())
 		.execute(&state.pool)
 		.await?;
     Ok(())
+}
+
+fn sorted_mods(
+    mods: HashMap<String, PlannedServerMod>,
+) -> Vec<PlannedServerMod> {
+    let mut mods = mods.into_values().collect::<Vec<_>>();
+    mods.sort_by(|a, b| a.filename.cmp(&b.filename));
+    mods
+}
+
+fn sorted_strings(values: HashSet<String>) -> Vec<String> {
+    let mut values = values.into_iter().collect::<Vec<_>>();
+    values.sort();
+    values
 }
 
 fn validate_filename(name: &str) -> Result<(), SocialError> {

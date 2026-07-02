@@ -1,14 +1,22 @@
 <template>
-	<ServersManageRootLayout
-		:server-id="serverId"
-		:base-path="basePath"
-		servers-path="/library/servers"
-		:navigate-to-servers="backToServerLibrary"
-		show-copy-id-action
-		copy-id-label="Copy path"
+	<div
+		data-library-instance-page-ready
+		class="h-full"
+		:data-library-instance-title="instanceTitle"
+		:data-library-instance-subtitle="instanceSubtitle"
 	>
-		<component :is="activePage" v-bind="activePageProps" />
-	</ServersManageRootLayout>
+		<ServersManageRootLayout
+			:server-id="serverId"
+			:base-path="basePath"
+			servers-path="/library/servers"
+			servers-action-label="Back"
+			:navigate-to-servers="backToServerLibrary"
+			show-copy-id-action
+			copy-id-label="Copy path"
+		>
+			<component :is="activePage" v-bind="activePageProps" />
+		</ServersManageRootLayout>
+	</div>
 </template>
 
 <script setup lang="ts">
@@ -21,7 +29,7 @@ import {
 	ServersManageOverviewPage,
 	ServersManageRootLayout,
 } from '@modrinth/ui'
-import { computed, watch } from 'vue'
+import { computed, inject, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useCoreInstances } from '@/composables/useCoreInstances'
@@ -31,6 +39,10 @@ import { useBreadcrumbs } from '@/store/breadcrumbs'
 const route = useRoute()
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
+const backToLastLibraryRoute = inject<() => void | Promise<void>>(
+	'libraryInstanceBackToLastLibraryRoute',
+	undefined,
+)
 const props = defineProps<{
 	profile?: GameInstance | null
 }>()
@@ -40,6 +52,13 @@ const serverId = computed(() => route.params.id as string)
 const coreInstance = computed(() =>
 	[...coreInstances.value.values()].find((instance) => instance.path === serverId.value),
 )
+const instanceTitle = computed(() => coreInstance.value?.name ?? props.profile?.name ?? serverId.value)
+const instanceSubtitle = computed(() => {
+	const instance = coreInstance.value
+	if (!instance) return 'Server'
+
+	return `${instance.loader} ${instance.game_version}`
+})
 const basePath = computed(() => `/instance/${encodeURIComponent(route.params.id as string)}`)
 const activePage = computed(() => {
 	if (route.path.endsWith('/content')) return ServersManageContentPage
@@ -55,7 +74,12 @@ const activePageProps = computed(() => {
 })
 
 async function backToServerLibrary() {
-	await router.replace('/library/servers')
+	if (backToLastLibraryRoute) {
+		await backToLastLibraryRoute()
+		return
+	}
+
+	await router.replace('/library')
 }
 
 watch(

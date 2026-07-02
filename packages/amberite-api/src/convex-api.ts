@@ -1,21 +1,3 @@
-/**
- * ConvexApiClient — typed wrapper for all Convex queries and mutations.
- * Reads the JWT from PlatformAdapter.getCurrentJwt() on each call.
- * Callers are responsible for ensuring a valid session before use.
- *
- * Key methods: rawQuery, rawMutation, currentUser, currentProfile, getProfile,
- * updateCurrentProfile, linkedModrinthAccount, listLinkedCoreList, setUsername,
- * searchUsers, friendsList, and durable social mutations.
- * respondFriendRequest:65, removeFriend:69, blockUser:73, unblockUser:77,
- * listMyFriendGroups:82, getFriendGroup:86, listFriendGroupMembers:91,
- * ensureCoreFriendGroup, updateFriendGroup, updateMemberRole, removeMember,
- * transferOwnership, leaveGroup, banMember, unbanMember, listFriendGroupBans,
- * friendGroupCores, createFriendGroupInvite, listMyGroupInvites, getInviteByCode,
- * acceptFriendGroupInvite, declineFriendGroupInvite, revokeFriendGroupInvite,
- * registerCore, corePresence, registerPairingCore, claimPairingCore,
- * registerSyncedProfile, listServerProfiles, publishProfileSnapshot,
- * listProfileSnapshots, listModSyncEvents.
- */
 import type { PlatformAdapter } from './adapter'
 import { convexQuery, convexMutation, convexAction } from './convex-relay'
 import type {

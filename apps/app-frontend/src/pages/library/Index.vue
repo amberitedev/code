@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import type { CoreInstanceSummary } from '@amberite/amberite-api'
 import { PlusIcon } from '@modrinth/assets'
-import {
-	ButtonStyled,
-	DropdownSelect,
-	injectNotificationManager,
-	NavTabs,
-} from '@modrinth/ui'
+import { ButtonStyled, injectNotificationManager, NavTabs } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useStorage } from '@vueuse/core'
 import { computed, inject, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
@@ -31,24 +26,22 @@ const showCreationModal = inject('showCreationModal')
 const route = useRoute()
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
-const instanceOpenAnimationDirection = useStorage(
-	'app-library-instance-route-motion-direction',
-	'Right',
+const libraryContentAnimationMode = useStorage('app-library-content-animation-mode', 'Card changes')
+const props = withDefaults(
+	defineProps<{
+		inertUnderlay?: boolean
+		underlayPath?: string
+	}>(),
+	{
+		inertUnderlay: false,
+		underlayPath: '',
+	},
 )
-const instanceOpenAnimationDirections = ['Right', 'Left', 'Up', 'Down', 'Middle']
-const libraryContentAnimationMode = useStorage(
-	'app-library-content-animation-mode',
-	'Card changes',
-)
-const libraryContentAnimationModes = [
-	'Card changes',
-	'Subtle page',
-	'In only',
-	'Push',
-	'None',
-]
+const effectiveRoutePath = computed(() => props.underlayPath || route.path)
 
-breadcrumbs.setRootContext({ name: 'Library', link: route.path })
+if (!props.inertUnderlay) {
+	breadcrumbs.setRootContext({ name: 'Library', link: route.path })
+}
 
 const instancesQuery = useQuery({
 	queryKey: ['library', 'instances'],
@@ -131,26 +124,23 @@ function isLibraryPath(path: string) {
 	return path === '/library' || path.startsWith('/library/')
 }
 
-const activeLibraryTabKind = ref(getLibraryTabKind(route.path))
+const activeLibraryTabKind = ref(getLibraryTabKind(effectiveRoutePath.value))
 const libraryTabSlideDirection = ref<'forward' | 'backward'>('forward')
-watch(
-	() => route.path,
-	(path) => {
-		if (isLibraryPath(path)) {
-			const previousIndex = visibleLibraryTabs.value.findIndex(
-				(tab) => tab.kind === activeLibraryTabKind.value,
-			)
-			const nextKind = getLibraryTabKind(path)
-			const nextIndex = visibleLibraryTabs.value.findIndex((tab) => tab.kind === nextKind)
+watch(effectiveRoutePath, (path) => {
+	if (isLibraryPath(path)) {
+		const previousIndex = visibleLibraryTabs.value.findIndex(
+			(tab) => tab.kind === activeLibraryTabKind.value,
+		)
+		const nextKind = getLibraryTabKind(path)
+		const nextIndex = visibleLibraryTabs.value.findIndex((tab) => tab.kind === nextKind)
 
-			if (previousIndex >= 0 && nextIndex >= 0 && previousIndex !== nextIndex) {
-				libraryTabSlideDirection.value = nextIndex > previousIndex ? 'forward' : 'backward'
-			}
-
-			activeLibraryTabKind.value = nextKind
+		if (previousIndex >= 0 && nextIndex >= 0 && previousIndex !== nextIndex) {
+			libraryTabSlideDirection.value = nextIndex > previousIndex ? 'forward' : 'backward'
 		}
-	},
-)
+
+		activeLibraryTabKind.value = nextKind
+	}
+})
 const activeLibraryTabIndex = computed(() =>
 	visibleLibraryTabs.value.findIndex((tab) => tab.kind === activeLibraryTabKind.value),
 )
@@ -172,6 +162,8 @@ const libraryContentAnimationModeValue = computed(() => {
 })
 
 function selectLibraryTab(index: number, tab: { href: string }) {
+	if (props.inertUnderlay) return
+
 	if (index !== activeLibraryTabIndex.value) {
 		libraryTabSlideDirection.value = index > activeLibraryTabIndex.value ? 'forward' : 'backward'
 	}
@@ -232,53 +224,32 @@ watchEffect(async () => {
 })
 
 const offline = ref(!navigator.onLine)
-window.addEventListener('offline', () => {
+
+function handleOffline() {
 	offline.value = true
-})
-window.addEventListener('online', () => {
+}
+
+function handleOnline() {
 	offline.value = false
-})
+}
 
 let unlistenProfile: (() => void) | undefined
 onMounted(async () => {
+	window.addEventListener('offline', handleOffline)
+	window.addEventListener('online', handleOnline)
 	unlistenProfile = await profile_listener(async () => {
 		await queryClient.invalidateQueries({ queryKey: ['library', 'instances'] })
 	})
 })
 onUnmounted(() => {
+	window.removeEventListener('offline', handleOffline)
+	window.removeEventListener('online', handleOnline)
 	unlistenProfile?.()
 })
 </script>
 
 <template>
 	<div class="p-6 flex flex-col gap-3 relative min-h-full">
-		<Teleport defer to="#sidebar-teleport-target">
-			<div class="library-sidebar-controls">
-				<div class="library-sidebar-control-section">
-					<h3 class="text-base text-primary font-medium m-0">Library animation</h3>
-					<DropdownSelect
-						v-slot="{ selected }"
-						v-model="instanceOpenAnimationDirection"
-						name="Instance open animation direction"
-						class="!w-full"
-						:options="instanceOpenAnimationDirections"
-					>
-						<span class="font-semibold text-primary">Open: </span>
-						<span class="font-semibold text-secondary">{{ selected }}</span>
-					</DropdownSelect>
-					<DropdownSelect
-						v-slot="{ selected }"
-						v-model="libraryContentAnimationMode"
-						name="Library animation mode"
-						class="!w-full"
-						:options="libraryContentAnimationModes"
-					>
-						<span class="font-semibold text-primary">Animation: </span>
-						<span class="font-semibold text-secondary">{{ selected }}</span>
-					</DropdownSelect>
-				</div>
-			</div>
-		</Teleport>
 		<h1 class="m-0 text-2xl hidden">Library</h1>
 		<div class="flex flex-wrap items-center justify-between gap-2">
 			<NavTabs
@@ -330,18 +301,5 @@ onUnmounted(() => {
 			height: 10rem;
 		}
 	}
-}
-
-.library-sidebar-controls {
-	display: flex;
-	flex-direction: column;
-	gap: 1rem;
-	padding: 1rem;
-}
-
-.library-sidebar-control-section {
-	display: flex;
-	flex-direction: column;
-	gap: 0.75rem;
 }
 </style>

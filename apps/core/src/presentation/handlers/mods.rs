@@ -16,8 +16,7 @@ use crate::{
         state::AppState,
     },
     presentation::{
-        error::ApiError,
-        extractors::AuthUser,
+        error::ApiError, extractors::AuthUser,
         instance_path::resolve_authorized_instance_id,
     },
 };
@@ -103,7 +102,8 @@ pub async fn upload_mod_handler(
             .bytes()
             .await
             .map_err(|e| ApiError::BadRequest(e.to_string()))?;
-        let filename = upload_mod(&state, &instance_id, &filename, data).await?;
+        let filename =
+            upload_mod(&state, &instance_id, &filename, data).await?;
         return Ok(Json(json!({ "ok": true, "filename": filename })));
     }
     Err(ApiError::BadRequest("no file provided".into()))

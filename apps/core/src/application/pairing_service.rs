@@ -1,4 +1,10 @@
-use std::{path::Path, sync::Arc, time::Instant};
+use std::{
+    io::{self, Write},
+    path::Path,
+    process::{Command, Stdio},
+    sync::Arc,
+    time::Instant,
+};
 
 use color_eyre::eyre::Result;
 use serde_json::json;
@@ -49,10 +55,14 @@ pub async fn register_pairing_core(state: Arc<AppState>) -> bool {
                 == Some("success")
             {
                 info!(%core_id, "registered Core pairing code with Convex");
-                println!(
-                    "\nCopal pairing code: {}",
-                    format_pairing_code(&code)
-                );
+                let formatted_code = format_pairing_code(&code);
+                println!("\nCopal pairing code: {formatted_code}");
+                match copy_pairing_code_to_clipboard(&formatted_code) {
+                    Ok(()) => println!("Pairing code copied to clipboard."),
+                    Err(error) => {
+                        warn!(%error, "failed to copy Core pairing code to clipboard");
+                    }
+                }
                 println!("This code expires in 15 minutes. Restart Core to generate a new code.\n");
                 return true;
             } else {
@@ -67,6 +77,77 @@ pub async fn register_pairing_core(state: Arc<AppState>) -> bool {
         }
     }
     false
+}
+
+fn copy_pairing_code_to_clipboard(code: &str) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        return write_to_clipboard_command("clip", &[], code);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return write_to_clipboard_command("pbcopy", &[], code);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let attempts: [(&str, &[&str]); 3] = [
+            ("wl-copy", &[]),
+            ("xclip", &["-selection", "clipboard"]),
+            ("xsel", &["--clipboard", "--input"]),
+        ];
+        let mut last_error = None;
+        for (program, args) in attempts {
+            match write_to_clipboard_command(program, args, code) {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        return Err(last_error.unwrap_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "no clipboard command found",
+            )
+        }));
+    }
+
+    #[allow(unreachable_code)]
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "clipboard is not supported on this platform",
+    ))
+}
+
+fn write_to_clipboard_command(
+    program: &str,
+    args: &[&str],
+    text: &str,
+) -> io::Result<()> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "clipboard command stdin is unavailable",
+        )
+    })?;
+    stdin.write_all(text.as_bytes())?;
+    drop(stdin);
+
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("clipboard command `{program}` exited with {status}"),
+        ))
+    }
 }
 
 pub async fn reset_running_pairing(state: Arc<AppState>) -> Result<bool> {

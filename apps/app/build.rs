@@ -24,6 +24,7 @@ fn main() {
                         "set_amberite_session_jwt",
                         "get_amberite_session_refresh_token",
                         "set_amberite_session_refresh_token",
+                        "get_amberite_local_setup_secret",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

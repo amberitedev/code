@@ -224,7 +224,7 @@ export interface UseSocialReturn {
 		name?: string
 		setupMode?: 'remote' | 'local'
 		connectionUrl?: string
-	}) => Promise<void>
+	}) => Promise<{ friendGroupId: string } | undefined>
 	updateGroup: (args: {
 		name?: string
 		description?: string
@@ -232,6 +232,7 @@ export interface UseSocialReturn {
 		subdomain?: string
 	}) => Promise<void>
 	inviteToGroup: (args: {
+		friendGroupId?: string
 		inviteeUserId?: string
 		role?: Role
 		ttlMs?: number
@@ -327,13 +328,15 @@ export function useSocial(): UseSocialReturn {
 			await mutation(() => client.unblockUser(userId))
 		},
 		createGroup: async (args) => {
-			await mutation(() => client.ensureCoreFriendGroup(args))
+			return await mutation(() => client.ensureCoreFriendGroup(args))
 		},
 		updateGroup: async (args) => {
 			await mutation(() => client.updateFriendGroup({ friendGroupId: gid(), ...args }))
 		},
-		inviteToGroup: async (args) =>
-			(await mutation(() => client.createFriendGroupInvite({ friendGroupId: gid(), ...args }))) ?? {
+		inviteToGroup: async ({ friendGroupId, ...args }) =>
+			(await mutation(() =>
+				client.createFriendGroupInvite({ friendGroupId: friendGroupId ?? gid(), ...args }),
+			)) ?? {
 				inviteId: '',
 			},
 		acceptInvite: async (args) => {

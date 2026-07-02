@@ -184,17 +184,6 @@ export const claimPairingCore = mutation({
 			realtimeCredentialHash,
 			realtimeCredentialIssuedAt: now,
 		})
-		await upsertCoreList(ctx, {
-			coreId: pairing.coreId,
-			ownerUserId: userId,
-			linkState: 'unlinked',
-			connectionUrl: pairing.connectionUrl,
-			lastSeenAt: now,
-			projectionRevision: now,
-			syncedAt: now,
-			syncCredentialHash: realtimeCredentialHash,
-		})
-		await upsertCoreMemberLink(ctx, pairing.coreId, userId, true, now)
 		return {
 			coreId: pairing.coreId,
 			connectionUrl: pairing.connectionUrl,

@@ -180,7 +180,6 @@ import {
 const { handleError } = injectNotificationManager()
 const popupNotificationManager = injectPopupNotificationManager()
 const { formatMessage } = useVIntl()
-
 const router = useRouter()
 
 const showProfiles = ref(false)

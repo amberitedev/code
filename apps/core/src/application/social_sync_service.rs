@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use uuid::Uuid;
@@ -99,6 +99,8 @@ async fn store_snapshot(
             .await?;
     let manifest = serde_json::to_string(&metadata)
         .map_err(|e| SocialError::Invalid(e.to_string()))?;
+    let (previous_archive_path, previous_metadata) =
+        previous_snapshot_metadata(state, &profile).await?;
 
     sqlx::query("INSERT INTO sync_snapshots (id, profile_id, author_user_id, manifest_json, notes, created_at, archive_path, archived) VALUES (?, ?, ?, ?, ?, ?, ?, 0)")
 		.bind(&snapshot_id)
@@ -131,6 +133,8 @@ async fn store_snapshot(
             instance_id,
             &archive_path,
             &metadata,
+            previous_archive_path.as_deref(),
+            previous_metadata.as_ref(),
         )
         .await
         {
@@ -192,6 +196,32 @@ async fn store_snapshot(
             .fetch_one(&state.pool)
             .await?,
     })
+}
+
+async fn previous_snapshot_metadata(
+    state: &Arc<AppState>,
+    profile: &SyncProfile,
+) -> Result<(Option<PathBuf>, Option<PackFormat>), SocialError> {
+    let Some(snapshot_id) = profile.current_snapshot_id.as_deref() else {
+        return Ok((None, None));
+    };
+    let row: Option<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT manifest_json, archive_path, archived FROM sync_snapshots WHERE id = ?",
+    )
+    .bind(snapshot_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some((manifest_json, archive_path, archived)) = row else {
+        return Ok((None, None));
+    };
+    let metadata = serde_json::from_str::<PackFormat>(&manifest_json)
+        .map_err(|e| SocialError::Invalid(e.to_string()))?;
+    let archive_path = if archived {
+        None
+    } else {
+        archive_path.map(PathBuf::from)
+    };
+    Ok((archive_path, Some(metadata)))
 }
 
 pub async fn check_version(

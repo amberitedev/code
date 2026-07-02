@@ -37,6 +37,7 @@ export interface BrowseManagerContext {
 	activeResultKey?: ComputedRef<string>
 	visibleResultKey?: Ref<string>
 	visibleProjectType?: Ref<string>
+	transitioning?: Ref<boolean>
 	pageCount: ComputedRef<number>
 	maxResults: Ref<number>
 	currentPage: Ref<number>

@@ -14,6 +14,7 @@ pub struct JwksCache {
 }
 
 struct CacheEntry {
+    jwks_url: String,
     keys: Vec<JwkEntry>,
     fetched_at: Instant,
 }
@@ -93,18 +94,25 @@ impl JwksCache {
         {
             let guard = self.inner.read().await;
             if let Some(ref e) = *guard {
-                if e.fetched_at.elapsed() < CACHE_TTL {
+                if e.jwks_url == jwks_url && e.fetched_at.elapsed() < CACHE_TTL {
                     return Ok(());
                 }
             }
         }
         debug!("Refreshing JWKS from {jwks_url}");
-        let doc: JwksDoc = self
+        let response = self
             .http
             .get(jwks_url)
             .send()
             .await
-            .map_err(|e| AuthError::Fetch(e.to_string()))?
+            .map_err(|e| AuthError::Fetch(e.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AuthError::Fetch(format!(
+                "JWKS endpoint returned HTTP {status}"
+            )));
+        }
+        let doc: JwksDoc = response
             .json()
             .await
             .map_err(|e| AuthError::Fetch(e.to_string()))?;
@@ -127,6 +135,7 @@ impl JwksCache {
             }
         }
         *self.inner.write().await = Some(CacheEntry {
+            jwks_url: jwks_url.to_string(),
             keys,
             fetched_at: Instant::now(),
         });

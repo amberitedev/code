@@ -10,41 +10,86 @@ const devmDataRoot = process.env.LOCALAPPDATA
 	? join(process.env.LOCALAPPDATA, 'Amberite', 'devm')
 	: join(root, '.devm')
 const debugExe = join(root, 'target', 'debug', process.platform === 'win32' ? 'theseus_gui.exe' : 'theseus_gui')
-const secondDebugExe = join(
-	root,
-	'target',
-	'debug',
-	process.platform === 'win32' ? 'theseus_gui-amber-2.exe' : 'theseus_gui-amber-2',
-)
-const secondProfile = {
-	name: 'amber-2',
-	configDir: join(devmDataRoot, 'amber-2'),
-}
+const defaultPlayerCount = 2
+const maxPlayerCount = 9
 const primaryAuthEnv = {
 	AMBERITE_DEV_MODE: 'true',
 	AMBERITE_DEV_AUTH_SCOPE: 'owner',
 }
-const secondAuthEnv = {
-	AMBERITE_DEV_MODE: 'true',
-	AMBERITE_DEV_AUTH_SCOPE: 'friend',
-	AMBERITE_DEV_PERSONA_ID: 'theogib2',
-}
+let secondaryProfiles = []
 
 const children = new Set()
 const expectedExits = new Set()
 let shuttingDown = false
 let primaryChild = null
-let secondChild = null
-let secondExeMtime = null
-let secondWatcher = null
-let secondStartTime = null
+let secondaryWatcher = null
 let primaryRetryTimer = null
-let secondRetryTimer = null
-let secondRestartPending = false
-let waitingLogged = false
 
 process.stdout.on('error', () => {})
 process.stderr.on('error', () => {})
+
+function parsePlayerCount() {
+	const raw = process.argv[2] ?? process.env.AMBERITE_DEVM_PLAYERS ?? String(defaultPlayerCount)
+	const value = raw.startsWith('--players=') ? raw.slice('--players='.length) : raw
+	const playerCount = Number(value)
+	if (!Number.isInteger(playerCount) || playerCount < defaultPlayerCount || playerCount > maxPlayerCount) {
+		throw new Error(`Player count must be an integer from ${defaultPlayerCount} to ${maxPlayerCount}.`)
+	}
+	return playerCount
+}
+
+function commandLabel(playerCount) {
+	if (process.env.npm_lifecycle_event) return process.env.npm_lifecycle_event
+	return playerCount === defaultPlayerCount ? 'app:devm' : `app:devm -- ${playerCount}`
+}
+
+function secondaryDebugExe(number) {
+	return join(
+		root,
+		'target',
+		'debug',
+		process.platform === 'win32' ? `theseus_gui-amber-${number}.exe` : `theseus_gui-amber-${number}`,
+	)
+}
+
+function secondaryAuthScope(number) {
+	return number === 2 ? 'friend' : `friend-${number}`
+}
+
+function secondaryPersonaId(number) {
+	return `theogib${number}`
+}
+
+function buildSecondaryProfiles(playerCount) {
+	return Array.from({ length: playerCount - 1 }, (_, index) => {
+		const number = index + 2
+		return {
+			number,
+			name: `amber-${number}`,
+			displayName: `Amberite ${number}`,
+			configDir: join(devmDataRoot, `amber-${number}`),
+			debugExe: secondaryDebugExe(number),
+			authEnv: {
+				AMBERITE_DEV_MODE: 'true',
+				AMBERITE_DEV_AUTH_SCOPE: secondaryAuthScope(number),
+				AMBERITE_DEV_PERSONA_ID: secondaryPersonaId(number),
+			},
+			child: null,
+			exeMtime: null,
+			startTime: null,
+			retryTimer: null,
+			restartPending: false,
+			waitTimer: null,
+			waitingLogged: false,
+		}
+	})
+}
+
+function secondaryProfileSummary() {
+	return secondaryProfiles
+		.map((profile) => `${profile.displayName} uses the ${profile.authEnv.AMBERITE_DEV_PERSONA_ID} dev persona`)
+		.join('; ')
+}
 
 function prefixOutput(stream, prefix, chunk) {
 	const text = chunk.toString()
@@ -55,15 +100,18 @@ function prefixOutput(stream, prefix, chunk) {
 	}
 }
 
-function pnpmCommand() {
-	const command = process.platform === 'win32' && process.env.APPDATA
-		? process.execPath
-		: 'pnpm'
-	const pnpmArgs = process.platform === 'win32' && process.env.APPDATA
-		? [join(process.env.APPDATA, 'npm', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')]
-		: []
+function pnpmCommand(args) {
+	if (process.platform === 'win32') {
+		return {
+			command: 'cmd.exe',
+			args: ['/d', '/s', '/c', ['corepack', 'pnpm', ...args].join(' ')],
+		}
+	}
 
-	return { command, pnpmArgs }
+	return {
+		command: 'corepack',
+		args: ['pnpm', ...args],
+	}
 }
 
 function killChild(child) {
@@ -106,17 +154,19 @@ async function isPortOpen(port) {
 }
 
 function startPrimaryDev() {
-	const { command, pnpmArgs } = pnpmCommand()
+	const { command, args } = pnpmCommand([
+		'--filter',
+		'@modrinth/app',
+		'dev',
+	])
 	const child = spawn(
 		command,
-		[
-			...pnpmArgs,
-			'app:dev',
-		],
+		args,
 		{
 			stdio: ['inherit', 'pipe', 'pipe'],
 			env: {
 				...process.env,
+				COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
 				...primaryAuthEnv,
 				AMBERITE_DISABLE_SINGLE_INSTANCE: '1',
 				AMBERITE_DEVM_NAME: 'Amberite 1',
@@ -140,7 +190,7 @@ function startPrimaryDev() {
 		}
 	})
 
-	console.log('[amber-1] starting normal pnpm app:dev')
+	console.log('[amber-1] starting app dev task')
 }
 
 function schedulePrimaryRetry() {
@@ -167,120 +217,126 @@ function findWindowsPortOwner(port) {
 	return result.stdout.trim() || null
 }
 
-function prepareSecondExe() {
+function prepareSecondaryExe(profile) {
 	if (!existsSync(debugExe)) return false
 	try {
-		copyFileSync(debugExe, secondDebugExe)
+		copyFileSync(debugExe, profile.debugExe)
 		return true
 	} catch (error) {
-		console.log(`[${secondProfile.name}] waiting for debug exe copy: ${error.message}`)
+		console.log(`[${profile.name}] waiting for debug exe copy: ${error.message}`)
 		return false
 	}
 }
 
-function startSecondFromExe() {
+function startSecondaryFromExe(profile) {
 	if (!existsSync(debugExe)) return false
 	const sourceMtime = statSync(debugExe).mtimeMs
-	if (!prepareSecondExe()) return false
-	secondExeMtime = sourceMtime
-	secondStartTime = Date.now()
+	if (!prepareSecondaryExe(profile)) return false
+	profile.exeMtime = sourceMtime
+	profile.startTime = Date.now()
 
 	const child = spawn(
-		secondDebugExe,
+		profile.debugExe,
 		[],
 		{
 			cwd: join(root, 'apps', 'app'),
 			stdio: ['inherit', 'pipe', 'pipe'],
 			env: {
 				...process.env,
-				...secondAuthEnv,
+				...profile.authEnv,
 				AMBERITE_DISABLE_SINGLE_INSTANCE: '1',
-				AMBERITE_DEVM_NAME: 'Amberite 2',
-				THESEUS_CONFIG_DIR: secondProfile.configDir,
-				WEBVIEW2_USER_DATA_FOLDER: join(secondProfile.configDir, 'webview2'),
+				AMBERITE_DEVM_NAME: profile.displayName,
+				THESEUS_CONFIG_DIR: profile.configDir,
+				WEBVIEW2_USER_DATA_FOLDER: join(profile.configDir, 'webview2'),
 				RUST_LOG: process.env.RUST_LOG ?? 'info',
 			},
 		},
 	)
 
-	secondChild = child
+	profile.child = child
 	children.add(child)
-	child.stdout.on('data', (chunk) => prefixOutput(process.stdout, secondProfile.name, chunk))
-	child.stderr.on('data', (chunk) => prefixOutput(process.stderr, secondProfile.name, chunk))
+	child.stdout.on('data', (chunk) => prefixOutput(process.stdout, profile.name, chunk))
+	child.stderr.on('data', (chunk) => prefixOutput(process.stderr, profile.name, chunk))
 	child.on('exit', (code, signal) => {
 		children.delete(child)
-		if (secondChild === child) secondChild = null
+		if (profile.child === child) profile.child = null
 		const reason = signal ? `signal ${signal}` : `code ${code}`
-		console.log(`[${secondProfile.name}] exited with ${reason}`)
+		console.log(`[${profile.name}] exited with ${reason}`)
 		if (expectedExits.delete(child)) {
-			if (secondRestartPending && !shuttingDown) {
-				secondRestartPending = false
-				scheduleSecondRetry()
+			if (profile.restartPending && !shuttingDown) {
+				profile.restartPending = false
+				scheduleSecondaryRetry(profile)
 			}
 			return
 		}
 		if (!shuttingDown && (signal || code !== 0)) {
-			const lifetime = secondStartTime ? Date.now() - secondStartTime : 0
+			const lifetime = profile.startTime ? Date.now() - profile.startTime : 0
 			if (lifetime < 10_000) {
-				console.log(`[${secondProfile.name}] exited quickly; will retry after the dev build is ready`)
-				scheduleSecondRetry()
+				console.log(`[${profile.name}] exited quickly; will retry after the dev build is ready`)
+				scheduleSecondaryRetry(profile)
 				return
 			}
-			console.log(`[${secondProfile.name}] restarting after unexpected exit`)
-			scheduleSecondRetry()
+			console.log(`[${profile.name}] restarting after unexpected exit`)
+			scheduleSecondaryRetry(profile)
 		}
 	})
 
-	console.log(`[${secondProfile.name}] starting from ${secondDebugExe} with app data at ${secondProfile.configDir}`)
+	console.log(`[${profile.name}] starting from ${profile.debugExe} with app data at ${profile.configDir}`)
 	return true
 }
 
-function startSecondWhenReady() {
-	const wait = setInterval(async () => {
+function startSecondaryWhenReady(profile) {
+	if (profile.waitTimer) return
+	profile.waitTimer = setInterval(async () => {
 		if (shuttingDown) {
-			clearInterval(wait)
+			clearInterval(profile.waitTimer)
+			profile.waitTimer = null
 			return
 		}
 
-		if (!waitingLogged) {
-			console.log(`[${secondProfile.name}] waiting for ${debugExe} and Vite on localhost:1420`)
-			waitingLogged = true
+		if (!profile.waitingLogged) {
+			console.log(`[${profile.name}] waiting for ${debugExe} and Vite on localhost:1420`)
+			profile.waitingLogged = true
 		}
 
-		if (existsSync(debugExe) && await isPortOpen(1420) && !secondChild && startSecondFromExe()) {
-			clearInterval(wait)
-			startSecondExeWatcher()
+		if (existsSync(debugExe) && await isPortOpen(1420) && !profile.child && startSecondaryFromExe(profile)) {
+			clearInterval(profile.waitTimer)
+			profile.waitTimer = null
+			startSecondaryExeWatcher()
 		}
 	}, 1000)
 }
 
-function scheduleSecondRetry() {
-	if (secondRetryTimer) return
-	secondRetryTimer = setTimeout(() => {
-		secondRetryTimer = null
-		if (shuttingDown || secondChild) return
+function scheduleSecondaryRetry(profile) {
+	if (profile.retryTimer) return
+	profile.retryTimer = setTimeout(() => {
+		profile.retryTimer = null
+		if (shuttingDown || profile.child) return
 		if (existsSync(debugExe)) {
-			startSecondFromExe()
+			if (!startSecondaryFromExe(profile)) scheduleSecondaryRetry(profile)
 		} else {
-			startSecondWhenReady()
+			startSecondaryWhenReady(profile)
 		}
 	}, 2000)
 }
 
-function startSecondExeWatcher() {
-	secondWatcher = setInterval(() => {
+function startSecondaryExeWatcher() {
+	if (secondaryWatcher) return
+	secondaryWatcher = setInterval(() => {
 		if (shuttingDown || !existsSync(debugExe)) return
 
 		const mtime = statSync(debugExe).mtimeMs
-		if (secondExeMtime !== null && mtime !== secondExeMtime) {
-			if (secondRestartPending) return
-			console.log(`[${secondProfile.name}] debug exe changed; restarting second app`)
-			if (secondChild) {
-				secondRestartPending = true
-				restartChild(secondChild)
-				return
+		for (const profile of secondaryProfiles) {
+			if (profile.exeMtime !== null && mtime !== profile.exeMtime) {
+				if (profile.restartPending) continue
+				console.log(`[${profile.name}] debug exe changed; restarting app`)
+				if (profile.child) {
+					profile.restartPending = true
+					restartChild(profile.child)
+					continue
+				}
+				startSecondaryFromExe(profile)
 			}
-			startSecondFromExe()
 		}
 	}, 1500)
 }
@@ -292,33 +348,41 @@ function shutdown(exitCode = 0) {
 	for (const child of children) {
 		killChild(child)
 	}
-	if (secondWatcher) clearInterval(secondWatcher)
+	if (secondaryWatcher) clearInterval(secondaryWatcher)
 	if (primaryRetryTimer) clearTimeout(primaryRetryTimer)
-	if (secondRetryTimer) clearTimeout(secondRetryTimer)
-	secondRestartPending = false
+	for (const profile of secondaryProfiles) {
+		if (profile.retryTimer) clearTimeout(profile.retryTimer)
+		if (profile.waitTimer) clearInterval(profile.waitTimer)
+		profile.restartPending = false
+	}
 
 	setTimeout(() => process.exit(exitCode), 500).unref()
 }
 
 async function main() {
+	const playerCount = parsePlayerCount()
+	secondaryProfiles = buildSecondaryProfiles(playerCount)
+
 	process.on('SIGINT', () => shutdown(0))
 	process.on('SIGTERM', () => shutdown(0))
 	process.on('SIGHUP', () => shutdown(0))
 
-	console.log('Starting multiplayer Amberite dev.')
-	console.log('Both apps load the shared Vite dev server, so frontend changes hot reload in each window.')
-	console.log('Amberite 1 runs normal pnpm app:dev; Amberite 2 runs from a copied debug exe with separate app data.')
-	console.log('Amberite 1 uses the canonical Minecraft account; Amberite 2 uses the Theogib2 dev persona.')
+	console.log(`Starting ${playerCount}-player Amberite dev.`)
+	console.log(`All ${playerCount} apps load the shared Vite dev server, so frontend changes hot reload in each window.`)
+	console.log('Amberite 1 runs the normal app dev task; additional players run from copied debug exes with separate app data.')
+	console.log(`Amberite 1 uses the canonical Minecraft account; ${secondaryProfileSummary()}.`)
 
 	if (await isPortOpen(1420)) {
 		const owner = findWindowsPortOwner(1420)
 		throw new Error(
-			`Port 1420 is already in use${owner ? ` by ${owner}` : ''}. Stop the existing app/frontend dev process before running app:devm.`,
+			`Port 1420 is already in use${owner ? ` by ${owner}` : ''}. Stop the existing app/frontend dev process before running ${commandLabel(playerCount)}.`,
 		)
 	}
 
 	startPrimaryDev()
-	startSecondWhenReady()
+	for (const profile of secondaryProfiles) {
+		startSecondaryWhenReady(profile)
+	}
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -9,8 +9,7 @@ use serde_json::{json, Value};
 use crate::{
     application::{state::AppState, stats_service::get_stats},
     presentation::{
-        error::ApiError,
-        extractors::AuthUser,
+        error::ApiError, extractors::AuthUser,
         instance_path::resolve_authorized_instance_id,
     },
 };

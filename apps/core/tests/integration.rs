@@ -25,5 +25,7 @@ mod properties_stats;
 mod security;
 #[path = "integration/setup.rs"]
 mod setup;
+#[path = "integration/sync.rs"]
+mod sync;
 #[path = "integration/uploads.rs"]
 mod uploads;

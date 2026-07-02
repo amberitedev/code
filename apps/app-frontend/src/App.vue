@@ -1,10 +1,12 @@
 <script setup>
 /**
  * App shell.
- * - setupApp (404) initializes settings, auth, state, update, and provider wiring.
- * - Route guards (569) manage the global loading bar and page analytics.
- * - Suspense handlers (594) bridge route component loading into the shared loading state.
- * - RouterView template (1669) renders route content inside the app shell.
+ * - Left nav slider state (227) measures and animates the app rail selected background.
+ * - setupApp (671) initializes settings, auth, state, update, and provider wiring.
+ * - clearMinimizedInstancePullState (892) keeps the pull-down snapshot cleanup centralized.
+ * - Route guards (1018) manage the global loading bar, route motion, and page analytics.
+ * - Suspense handlers (1078) bridge route component loading into the shared loading state.
+ * - RouterView template (2258) renders route content inside the app shell.
  */
 import {
 	AuthFeature,
@@ -56,9 +58,12 @@ import {
 	provideNotificationManager,
 	providePageContext,
 	providePopupNotificationManager,
+	UI_MOTION_NAV_TABS_FADE_DELAY_MS,
+	UI_MOTION_NAV_TABS_FADE_EASING,
+	UI_MOTION_NAV_TABS_FADE_MS,
+	UI_MOTION_NAV_TABS_SLIDER_EASING,
+	UI_MOTION_NAV_TABS_SLIDER_MS,
 	UiMotionTransition,
-	getUiMotionTypeForDirection,
-	reverseUiMotionDirection,
 	useDebugLogger,
 	useFormatBytes,
 	useHostingIntercom,
@@ -73,9 +78,8 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { type } from '@tauri-apps/plugin-os'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
-import { useStorage } from '@vueuse/core'
 import { $fetch } from 'ofetch'
-import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
 import ModrinthAppLogo from '@/assets/modrinth_app.svg?component'
@@ -84,6 +88,7 @@ import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
 import InstanceCreationFlowModal from '@/components/ui/creation-flow/InstanceCreationFlowModal.vue'
+import LibraryInstancePullSurface from '@/components/ui/LibraryInstancePullSurface.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
 import UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
@@ -146,8 +151,10 @@ import { createServerInstall, provideServerInstall } from '@/providers/server-in
 import { setupProviders } from '@/providers/setup'
 import { setupAuthProvider } from '@/providers/setup/auth'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
+import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
+import LibraryPage from '@/pages/library/Index.vue'
 
 import { generateSkinPreviews } from './helpers/rendering/batch-skin-renderer'
 import { get_available_capes, get_available_skins } from './helpers/skins'
@@ -157,11 +164,11 @@ import { AppPopupNotificationManager } from './providers/app-popup-notifications
 const themeStore = useTheming()
 const router = useRouter()
 const route = useRoute()
+const breadcrumbData = useBreadcrumbs()
 const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
-const LIBRARY_INSTANCE_ROUTE_MOTION_DIRECTION_STORAGE_KEY =
-	'app-library-instance-route-motion-direction'
+const LEFT_NAV_SLIDER_STUTTER_MS = 15
 const amberiteAuth = useAmberiteAuth()
 const coreClient = useCoreClient()
 const socialClient = useSocialClient()
@@ -212,6 +219,338 @@ const hostingIntercom = useHostingIntercom({
 			: INTERCOM_BUBBLE_DEFAULT_PADDING,
 	),
 })
+
+const leftNav = ref(null)
+const leftNavSliderReady = ref(false)
+const leftNavSliderTransitionsEnabled = ref(false)
+const leftNavSliderSubpageSelected = ref(false)
+const leftNavSliderPosition = ref({ left: 0, top: 0, right: 0, bottom: 0 })
+const leftNavSliderDelays = ref({ left: '0ms', top: '0ms', right: '0ms', bottom: '0ms' })
+const LEFT_NAV_OPTIMISTIC_ACTIVE_CLASS = 'left-nav-optimistic-active'
+const leftNavSliderStyle = computed(() => ({
+	left: `${leftNavSliderPosition.value.left}px`,
+	top: `${leftNavSliderPosition.value.top}px`,
+	right: `${leftNavSliderPosition.value.right}px`,
+	bottom: `${leftNavSliderPosition.value.bottom}px`,
+	opacity: leftNavSliderReady.value ? 1 : 0,
+	'--left-nav-fade-delay-ms': `${UI_MOTION_NAV_TABS_FADE_DELAY_MS}ms`,
+	'--left-nav-fade-easing': UI_MOTION_NAV_TABS_FADE_EASING,
+	'--left-nav-fade-ms': `${UI_MOTION_NAV_TABS_FADE_MS}ms`,
+	'--left-nav-left-delay': leftNavSliderDelays.value.left,
+	'--left-nav-right-delay': leftNavSliderDelays.value.right,
+	'--left-nav-top-delay': leftNavSliderDelays.value.top,
+	'--left-nav-bottom-delay': leftNavSliderDelays.value.bottom,
+	'--left-nav-slider-easing': UI_MOTION_NAV_TABS_SLIDER_EASING,
+	'--left-nav-slider-ms': `${UI_MOTION_NAV_TABS_SLIDER_MS}ms`,
+}))
+
+let leftNavResizeObserver = null
+let leftNavMutationObserver = null
+let leftNavRemeasureFrame = null
+
+function cancelLeftNavRemeasureFrame() {
+	if (leftNavRemeasureFrame === null) return
+
+	cancelAnimationFrame(leftNavRemeasureFrame)
+	leftNavRemeasureFrame = null
+}
+
+function scheduleLeftNavSliderRemeasure() {
+	if (typeof window === 'undefined') return
+
+	cancelLeftNavRemeasureFrame()
+	leftNavRemeasureFrame = requestAnimationFrame(() => {
+		leftNavRemeasureFrame = null
+		updateLeftNavSlider()
+	})
+}
+
+function disconnectLeftNavLayoutObservers() {
+	leftNavResizeObserver?.disconnect()
+	leftNavResizeObserver = null
+	leftNavMutationObserver?.disconnect()
+	leftNavMutationObserver = null
+}
+
+function getLeftNavButtons() {
+	const nav = leftNav.value
+	if (!nav) return []
+
+	return Array.from(nav.querySelectorAll('.app-nav-button'))
+}
+
+function clearOptimisticLeftNavSelection() {
+	getLeftNavButtons().forEach((button) =>
+		button.classList.remove(LEFT_NAV_OPTIMISTIC_ACTIVE_CLASS),
+	)
+}
+
+function setOptimisticLeftNavSelection(button) {
+	clearOptimisticLeftNavSelection()
+	button.classList.add(LEFT_NAV_OPTIMISTIC_ACTIVE_CLASS)
+}
+
+function setupLeftNavLayoutObservers() {
+	if (typeof window === 'undefined') return
+
+	disconnectLeftNavLayoutObservers()
+
+	const nav = leftNav.value
+	if (!nav) return
+
+	if (typeof ResizeObserver !== 'undefined') {
+		leftNavResizeObserver = new ResizeObserver(scheduleLeftNavSliderRemeasure)
+		leftNavResizeObserver.observe(nav)
+		getLeftNavButtons().forEach((button) => leftNavResizeObserver?.observe(button))
+	}
+
+	if (typeof MutationObserver !== 'undefined') {
+		leftNavMutationObserver = new MutationObserver(() => {
+			setupLeftNavLayoutObservers()
+			scheduleLeftNavSliderRemeasure()
+		})
+		leftNavMutationObserver.observe(nav, {
+			childList: true,
+			subtree: true,
+		})
+	}
+}
+
+function getLeftNavLibraryButton() {
+	const nav = leftNav.value
+	if (!nav) return null
+
+	return nav.querySelector('[data-left-nav-library]')
+}
+
+function getRouteActiveLeftNavButton() {
+	const nav = leftNav.value
+	if (!nav) return null
+
+	return (
+		nav.querySelector(`.app-nav-button.${LEFT_NAV_OPTIMISTIC_ACTIVE_CLASS}:not(.disabled)`) ??
+		nav.querySelector('.app-nav-button.router-link-active:not(.disabled)') ??
+		nav.querySelector('.app-nav-button.subpage-active:not(.disabled)')
+	)
+}
+
+function getLeftNavInstanceButtonForRoutePath(path) {
+	if (!path) return null
+
+	let targetPath = ''
+	try {
+		targetPath = router.resolve(path).path
+	} catch {
+		return null
+	}
+
+	return (
+		getLeftNavButtons().find(
+			(button) => button.getAttribute('data-left-nav-instance-route') === targetPath,
+		) ?? null
+	)
+}
+
+function getLibraryInstanceLeftNavMotionButton() {
+	if (libraryInstancePullBreadcrumbMode.value === 'restore') {
+		return (
+			getLeftNavInstanceButtonForRoutePath(minimizedInstanceRoutePath.value) ??
+			getRouteActiveLeftNavButton()
+		)
+	}
+
+	return getRouteActiveLeftNavButton()
+}
+
+function getLibraryInstanceLeftNavScrubProgress() {
+	if (!['dismiss', 'restore', 'open', 'close'].includes(libraryInstancePullBreadcrumbMode.value)) {
+		return null
+	}
+
+	return Math.min(1, Math.max(0, libraryInstancePullBreadcrumbProgress.value))
+}
+
+function getActiveLeftNavButton() {
+	if (libraryInstanceLeftNavSelectionFrozen.value) {
+		const libraryButton = getLeftNavLibraryButton()
+		if (libraryButton) return libraryButton
+	}
+
+	return getRouteActiveLeftNavButton()
+}
+
+function getLeftNavSliderPosition(button) {
+	const nav = leftNav.value
+	if (!nav) return null
+
+	return {
+		left: button.offsetLeft,
+		top: button.offsetTop,
+		right: nav.offsetWidth - button.offsetLeft - button.offsetWidth,
+		bottom: nav.offsetHeight - button.offsetTop - button.offsetHeight,
+	}
+}
+
+function isSameLeftNavSliderPosition(position) {
+	return (
+		position.left === leftNavSliderPosition.value.left &&
+		position.right === leftNavSliderPosition.value.right &&
+		position.top === leftNavSliderPosition.value.top &&
+		position.bottom === leftNavSliderPosition.value.bottom
+	)
+}
+
+function applyLeftNavSliderPosition(position) {
+	leftNavSliderPosition.value = position
+}
+
+function setLeftNavSliderDelaysToZero() {
+	leftNavSliderDelays.value = { left: '0ms', top: '0ms', right: '0ms', bottom: '0ms' }
+}
+
+function restoreLeftNavSliderTransitionsAfterScrub() {
+	requestAnimationFrame(() => {
+		if (getLibraryInstanceLeftNavScrubProgress() === null) {
+			leftNavSliderTransitionsEnabled.value = true
+		}
+	})
+}
+
+function animateLeftNavSliderTo(position) {
+	const staggerDelay = `${LEFT_NAV_SLIDER_STUTTER_MS}ms`
+	const currentPosition = leftNavSliderPosition.value
+
+	leftNavSliderDelays.value = {
+		left: position.left < currentPosition.left ? '0ms' : staggerDelay,
+		right: position.left < currentPosition.left ? staggerDelay : '0ms',
+		top: position.top < currentPosition.top ? '0ms' : staggerDelay,
+		bottom: position.top < currentPosition.top ? staggerDelay : '0ms',
+	}
+
+	applyLeftNavSliderPosition(position)
+}
+
+function interpolateLeftNavSliderPosition(from, to, progress) {
+	const interpolate = (start, end) => start + (end - start) * progress
+
+	return {
+		left: interpolate(from.left, to.left),
+		top: interpolate(from.top, to.top),
+		right: interpolate(from.right, to.right),
+		bottom: interpolate(from.bottom, to.bottom),
+	}
+}
+
+function positionLeftNavSliderAt(button, subpageSelected) {
+	const position = getLeftNavSliderPosition(button)
+	if (!position) return
+
+	leftNavSliderSubpageSelected.value = subpageSelected
+
+	if (!leftNavSliderReady.value) {
+		applyLeftNavSliderPosition(position)
+		leftNavSliderReady.value = true
+
+		restoreLeftNavSliderTransitionsAfterScrub()
+	} else if (!isSameLeftNavSliderPosition(position)) {
+		if (!leftNavSliderTransitionsEnabled.value) {
+			restoreLeftNavSliderTransitionsAfterScrub()
+		}
+		animateLeftNavSliderTo(position)
+	} else if (!leftNavSliderTransitionsEnabled.value) {
+		restoreLeftNavSliderTransitionsAfterScrub()
+	}
+}
+
+function scrubLeftNavSliderForLibraryInstanceMotion() {
+	const progress = getLibraryInstanceLeftNavScrubProgress()
+	if (progress === null) return false
+
+	const instanceButton = getLibraryInstanceLeftNavMotionButton()
+	const libraryButton = getLeftNavLibraryButton()
+	if (!instanceButton || !libraryButton) return false
+
+	const instancePosition = getLeftNavSliderPosition(instanceButton)
+	const libraryPosition = getLeftNavSliderPosition(libraryButton)
+	if (!instancePosition || !libraryPosition) return false
+
+	leftNavSliderSubpageSelected.value =
+		progress < 0.98 &&
+		instanceButton.classList.contains('subpage-active') &&
+		!instanceButton.classList.contains('router-link-active')
+	leftNavSliderTransitionsEnabled.value = false
+	setLeftNavSliderDelaysToZero()
+	applyLeftNavSliderPosition(
+		interpolateLeftNavSliderPosition(instancePosition, libraryPosition, progress),
+	)
+	leftNavSliderReady.value = true
+	return true
+}
+
+function updateLeftNavSlider() {
+	if (scrubLeftNavSliderForLibraryInstanceMotion()) return
+
+	const activeButton = getActiveLeftNavButton()
+	if (!activeButton) {
+		leftNavSliderReady.value = false
+		leftNavSliderTransitionsEnabled.value = false
+		return
+	}
+
+	positionLeftNavSliderAt(
+		activeButton,
+		activeButton.classList.contains('subpage-active') &&
+			!activeButton.classList.contains('router-link-active'),
+	)
+}
+
+function isPrimaryLeftNavPointerIntent(event) {
+	return !(
+		event.defaultPrevented ||
+		event.button !== 0 ||
+		event.metaKey ||
+		event.altKey ||
+		event.ctrlKey ||
+		event.shiftKey
+	)
+}
+
+function handleLeftNavPointerIntent(event) {
+	if (!isPrimaryLeftNavPointerIntent(event)) return
+
+	const target = event.target instanceof Element ? event.target : null
+	const button = target?.closest('.app-nav-button')
+	if (!button || !leftNav.value?.contains(button)) return
+	if (button.tagName !== 'A' || button.classList.contains('disabled')) return
+
+	setOptimisticLeftNavSelection(button)
+	if (
+		button.hasAttribute('data-left-nav-instance-route') &&
+		!isInstanceRoute(route.path) &&
+		canShowLibraryInstanceMotion.value
+	) {
+		leftNavSliderTransitionsEnabled.value = false
+		setLeftNavSliderDelaysToZero()
+		return
+	}
+
+	positionLeftNavSliderAt(button, false)
+}
+
+async function setupLeftNavSlider() {
+	await nextTick()
+	setupLeftNavLayoutObservers()
+	scheduleLeftNavSliderRemeasure()
+}
+
+watch(
+	() => route.fullPath,
+	async () => {
+		await nextTick()
+		clearOptimisticLeftNavSelection()
+		scheduleLeftNavSliderRemeasure()
+	},
+)
 
 const notificationManager = new AppNotificationManager()
 provideNotificationManager(notificationManager)
@@ -314,6 +653,16 @@ const os = ref('')
 const isDevEnvironment = ref(false)
 
 const stateInitialized = ref(false)
+watch(stateInitialized, async (ready) => {
+	if (!ready) {
+		leftNavSliderReady.value = false
+		leftNavSliderTransitionsEnabled.value = false
+		disconnectLeftNavLayoutObservers()
+		return
+	}
+
+	await setupLeftNavSlider()
+})
 
 const criticalErrorMessage = ref()
 
@@ -327,6 +676,7 @@ const authServerQuery = useQuery({
 		authUnreachableDebug('Auth servers are reachable')
 		return true
 	},
+	enabled: () => stateInitialized.value,
 	refetchInterval: 5 * 60 * 1000, // 5 minutes
 	retry: false,
 	refetchOnWindowFocus: false,
@@ -346,7 +696,15 @@ onMounted(async () => {
 	document.querySelector('body').addEventListener('click', handleClick)
 	document.querySelector('body').addEventListener('auxclick', handleAuxClick)
 
-	checkUpdates()
+	if (stateInitialized.value) {
+		await setupLeftNavSlider()
+	}
+
+	window.addEventListener('resize', scheduleLeftNavSliderRemeasure)
+
+	if (document.fonts) {
+		void document.fonts.ready.then(scheduleLeftNavSliderRemeasure).catch(() => undefined)
+	}
 })
 
 onUnmounted(async () => {
@@ -354,8 +712,21 @@ onUnmounted(async () => {
 	document.querySelector('body').removeEventListener('auxclick', handleAuxClick)
 	unsubscribeSidebarToggle()
 	clearDelayedUpdatePopup()
+	cancelLeftNavRemeasureFrame()
+	cancelLibraryInstanceRestoreOverlayFrame()
+	disconnectLibraryInstanceRouteContentObserver()
+	disconnectLeftNavLayoutObservers()
+	window.removeEventListener('resize', scheduleLeftNavSliderRemeasure)
 
 	await unlistenUpdateDownload?.()
+})
+
+let updatesCheckStarted = false
+watch(stateInitialized, (ready) => {
+	if (!ready || updatesCheckStarted) return
+
+	updatesCheckStarted = true
+	void checkUpdates()
 })
 
 const { formatMessage } = useVIntl()
@@ -549,20 +920,92 @@ let initialLoadToken = loading.begin()
 let routerToken = null
 let suspenseToken = null
 let pendingRouteMotion = null
+let forcedNextRouteMotion = null
 
 let suspensePending = false
-const libraryInstanceRouteMotionDirection = useStorage(
-	LIBRARY_INSTANCE_ROUTE_MOTION_DIRECTION_STORAGE_KEY,
-	'Right',
-)
 const routeMotion = ref({
 	enabled: false,
 	key: 'initial-route',
-	direction: 'right',
+	direction: 'down',
 	type: 'slide',
 })
 const suppressLocalRouteLoadingBar = ref(false)
 provide('suppressLocalRouteLoadingBar', suppressLocalRouteLoadingBar)
+const suppressNextLibraryInstanceRouteMotion = ref(false)
+const lastLibraryRoutePath = ref('/library')
+const minimizedInstanceRoutePath = ref('')
+const minimizedInstanceSnapshotHtml = ref('')
+const minimizedInstanceBreadcrumbs = ref(null)
+const libraryInstancePullBreadcrumbProgress = ref(0)
+const libraryInstancePullBreadcrumbMode = ref('none')
+const restoringLibraryInstanceRoute = ref(false)
+const libraryInstanceProgrammaticClose = ref(false)
+const libraryInstanceOpening = ref(false)
+const libraryInstanceOpeningFromMinimized = ref(false)
+const libraryInstanceRouteReady = ref(false)
+const libraryInstanceDragDisabled = ref(false)
+const libraryInstanceOpenAnimationKey = ref(0)
+const libraryInstanceCloseAnimationKey = ref(0)
+const libraryInstanceOpenStartedForPath = ref('')
+const libraryInstanceOpenAnimationComplete = ref(false)
+const libraryInstanceCloseTarget = ref('')
+let libraryInstanceRestoreOverlayFrame = null
+let libraryInstanceRouteContentObserver = null
+let libraryInstanceRouteContentObserverTarget = null
+let libraryInstanceRouteContentObserverFrame = null
+const canShowLibraryInstanceMotion = computed(
+	() => stateInitialized.value && !stateFailed.value && !criticalErrorMessage.value,
+)
+const libraryInstanceBackToLastLibraryRoute = async () => {
+	const target = lastLibraryRoutePath.value || '/library'
+	forcedNextRouteMotion = createRouteSlideMotion(target, 'right')
+	await router.push(target)
+}
+provide('libraryInstanceBackToLastLibraryRoute', libraryInstanceBackToLastLibraryRoute)
+provide('beginLibraryInstanceOpenNavigation', beginLibraryInstanceOpenNavigation)
+const isLibraryInstancePullActive = computed(
+	() =>
+		canShowLibraryInstanceMotion.value &&
+		isInstanceRoute(route.path) &&
+		libraryInstanceRouteReady.value &&
+		!libraryInstanceDragDisabled.value,
+)
+const showLibraryInstanceRestoreNotch = computed(
+	() =>
+		canShowLibraryInstanceMotion.value &&
+		!!minimizedInstanceRoutePath.value &&
+		((isLibraryRoute(route.path) && !libraryInstanceOpenStartedForPath.value) ||
+			restoringLibraryInstanceRoute.value ||
+			libraryInstanceOpeningFromMinimized.value),
+)
+const libraryBreadcrumbPreview = Object.freeze([{ name: 'Library' }])
+const libraryInstancePullPreviewBreadcrumbs = computed(() =>
+	libraryInstancePullBreadcrumbMode.value === 'restore'
+		? (minimizedInstanceBreadcrumbs.value ?? undefined)
+		: isInstanceRoute(route.path) ||
+			  libraryInstancePullBreadcrumbMode.value === 'open' ||
+			  libraryInstancePullBreadcrumbMode.value === 'close' ||
+			  libraryInstancePullBreadcrumbProgress.value > 0
+			? libraryBreadcrumbPreview
+			: undefined,
+)
+const libraryInstancePullBreadcrumbPreviewProgress = computed(() =>
+	libraryInstancePullBreadcrumbMode.value === 'restore'
+		? 1 - libraryInstancePullBreadcrumbProgress.value
+		: libraryInstancePullBreadcrumbProgress.value,
+)
+const libraryInstanceLeftNavSelectionFrozen = computed(
+	() =>
+		libraryInstanceProgrammaticClose.value ||
+		libraryInstancePullBreadcrumbMode.value === 'dismiss' ||
+		libraryInstancePullBreadcrumbMode.value === 'open' ||
+		libraryInstancePullBreadcrumbMode.value === 'restore' ||
+		libraryInstancePullBreadcrumbMode.value === 'close',
+)
+
+watch([libraryInstanceLeftNavSelectionFrozen, libraryInstancePullBreadcrumbProgress], () => {
+	scheduleLeftNavSliderRemeasure()
+})
 
 const sidebarOverlayScrollbarsOptions = Object.freeze({
 	overflow: {
@@ -581,6 +1024,233 @@ function isLibraryRoute(path) {
 
 function isInstanceRoute(path) {
 	return path.startsWith('/instance/')
+}
+
+function cloneBreadcrumbs(breadcrumbs) {
+	return breadcrumbs.map((breadcrumb) => ({
+		...breadcrumb,
+		query: breadcrumb.query ? { ...breadcrumb.query } : breadcrumb.query,
+	}))
+}
+
+function getCurrentRouteBreadcrumbs() {
+	const additionalContext =
+		route.meta.useContext === true
+			? breadcrumbData.context
+			: route.meta.useRootContext === true
+				? breadcrumbData.rootContext
+				: null
+	const crumbs = route.meta.breadcrumb ?? []
+	return cloneBreadcrumbs(additionalContext ? [additionalContext, ...crumbs] : crumbs)
+}
+
+function createRouteSlideMotion(target, direction = 'left') {
+	const resolved = router.resolve(target)
+	return {
+		enabled: true,
+		key: `route-slide:${resolved.fullPath || resolved.path}:${Date.now()}`,
+		direction,
+		type: 'slide',
+	}
+}
+
+function beginLibraryInstanceOpenNavigation(target) {
+	if (!canShowLibraryInstanceMotion.value || isInstanceRoute(route.path)) return
+
+	const resolved = router.resolve(target)
+	if (!isInstanceRoute(resolved.path)) return
+
+	const targetFullPath = resolved.fullPath || resolved.path
+	const opensInstanceFromLibrary = isLibraryRoute(route.path)
+	const opensInstanceFromMinimized =
+		opensInstanceFromLibrary && !!minimizedInstanceRoutePath.value
+
+	if (opensInstanceFromLibrary) {
+		lastLibraryRoutePath.value = route.fullPath || route.path
+	}
+
+	if (opensInstanceFromMinimized) {
+		restoringLibraryInstanceRoute.value = false
+		libraryInstanceProgrammaticClose.value = false
+		libraryInstanceOpeningFromMinimized.value = true
+	} else {
+		clearMinimizedInstancePullState()
+		libraryInstanceOpeningFromMinimized.value = false
+	}
+
+	libraryInstanceOpening.value = true
+	libraryInstanceRouteReady.value = false
+	libraryInstanceDragDisabled.value = false
+	libraryInstanceOpenAnimationComplete.value = false
+	libraryInstancePullBreadcrumbProgress.value = 1
+	libraryInstancePullBreadcrumbMode.value = 'open'
+}
+
+function captureInstancePullSnapshot() {
+	const routeContent = document.querySelector('[data-library-instance-route-content]')
+	if (routeContent instanceof HTMLElement) {
+		minimizedInstanceSnapshotHtml.value = routeContent.innerHTML
+	}
+	minimizedInstanceBreadcrumbs.value = getCurrentRouteBreadcrumbs()
+}
+
+function clearMinimizedInstanceSnapshot() {
+	minimizedInstanceRoutePath.value = ''
+	minimizedInstanceSnapshotHtml.value = ''
+	minimizedInstanceBreadcrumbs.value = null
+}
+
+function clearMinimizedInstancePullState() {
+	cancelLibraryInstanceRestoreOverlayFrame()
+	clearMinimizedInstanceSnapshot()
+	libraryInstancePullBreadcrumbProgress.value = 0
+	libraryInstancePullBreadcrumbMode.value = 'none'
+	restoringLibraryInstanceRoute.value = false
+	libraryInstanceProgrammaticClose.value = false
+	libraryInstanceOpening.value = false
+	libraryInstanceOpeningFromMinimized.value = false
+	libraryInstanceDragDisabled.value = false
+	libraryInstanceOpenStartedForPath.value = ''
+	libraryInstanceOpenAnimationComplete.value = false
+	libraryInstanceCloseTarget.value = ''
+}
+
+function cancelLibraryInstanceRestoreOverlayFrame() {
+	if (libraryInstanceRestoreOverlayFrame === null) return
+
+	cancelAnimationFrame(libraryInstanceRestoreOverlayFrame)
+	libraryInstanceRestoreOverlayFrame = null
+}
+
+function cancelLibraryInstanceRouteContentObserverFrame() {
+	if (libraryInstanceRouteContentObserverFrame === null) return
+
+	cancelAnimationFrame(libraryInstanceRouteContentObserverFrame)
+	libraryInstanceRouteContentObserverFrame = null
+}
+
+function disconnectLibraryInstanceRouteContentObserver() {
+	cancelLibraryInstanceRouteContentObserverFrame()
+	libraryInstanceRouteContentObserver?.disconnect()
+	libraryInstanceRouteContentObserver = null
+	libraryInstanceRouteContentObserverTarget = null
+}
+
+function scheduleLibraryInstanceRouteContentRefresh() {
+	if (libraryInstanceRouteContentObserverFrame !== null) return
+
+	libraryInstanceRouteContentObserverFrame = requestAnimationFrame(() => {
+		libraryInstanceRouteContentObserverFrame = null
+		void refreshLibraryInstanceRouteReady()
+	})
+}
+
+function syncLibraryInstanceRouteContentObserver() {
+	if (
+		typeof window === 'undefined' ||
+		typeof MutationObserver === 'undefined' ||
+		!isInstanceRoute(route.path)
+	) {
+		disconnectLibraryInstanceRouteContentObserver()
+		return
+	}
+
+	const routeContent = document.querySelector('[data-library-instance-route-content]')
+	if (!routeContent) {
+		disconnectLibraryInstanceRouteContentObserver()
+		return
+	}
+
+	if (libraryInstanceRouteContentObserverTarget === routeContent) return
+
+	disconnectLibraryInstanceRouteContentObserver()
+	libraryInstanceRouteContentObserverTarget = routeContent
+	libraryInstanceRouteContentObserver = new MutationObserver(scheduleLibraryInstanceRouteContentRefresh)
+	libraryInstanceRouteContentObserver.observe(routeContent, {
+		childList: true,
+		subtree: true,
+		attributes: true,
+		attributeFilter: [
+			'data-library-instance-page-ready',
+			'data-library-instance-drag-disabled',
+			'data-library-instance-error-state',
+		],
+	})
+}
+
+function queueLibraryInstanceRestoreOverlayClear() {
+	if (!restoringLibraryInstanceRoute.value) return
+	if (typeof window === 'undefined') {
+		clearMinimizedInstancePullState()
+		return
+	}
+
+	cancelLibraryInstanceRestoreOverlayFrame()
+	libraryInstanceRestoreOverlayFrame = requestAnimationFrame(() => {
+		libraryInstanceRestoreOverlayFrame = requestAnimationFrame(() => {
+			libraryInstanceRestoreOverlayFrame = null
+			if (restoringLibraryInstanceRoute.value && isInstanceRoute(route.path)) {
+				clearMinimizedInstancePullState()
+			}
+		})
+	})
+}
+
+function hasReadyLibraryInstanceRouteContent() {
+	if (!isInstanceRoute(route.path) || !canShowLibraryInstanceMotion.value) return false
+
+	const routeContent = document.querySelector('[data-library-instance-route-content]')
+	return !!routeContent?.querySelector('[data-library-instance-page-ready]')
+}
+
+function hasDragDisabledLibraryInstanceRouteContent() {
+	if (!isInstanceRoute(route.path) || !canShowLibraryInstanceMotion.value) return false
+
+	const routeContent = document.querySelector('[data-library-instance-route-content]')
+	return !!routeContent?.querySelector('[data-library-instance-drag-disabled]')
+}
+
+async function refreshLibraryInstanceRouteReady() {
+	await nextTick()
+	syncLibraryInstanceRouteContentObserver()
+	libraryInstanceRouteReady.value = hasReadyLibraryInstanceRouteContent()
+	libraryInstanceDragDisabled.value = hasDragDisabledLibraryInstanceRouteContent()
+	if (finishLibraryInstanceOpenAnimationIfReady()) return
+	maybeStartLibraryInstanceOpenAnimation()
+}
+
+function finishLibraryInstanceOpenAnimationIfReady() {
+	if (
+		!libraryInstanceOpening.value ||
+		!libraryInstanceOpenAnimationComplete.value ||
+		!libraryInstanceRouteReady.value ||
+		!isInstanceRoute(route.path)
+	) {
+		return false
+	}
+
+	libraryInstancePullBreadcrumbProgress.value = 0
+	libraryInstancePullBreadcrumbMode.value = 'none'
+	libraryInstanceProgrammaticClose.value = false
+	libraryInstanceOpening.value = false
+	libraryInstanceOpeningFromMinimized.value = false
+	clearMinimizedInstanceSnapshot()
+	return true
+}
+
+function maybeStartLibraryInstanceOpenAnimation(path = route.fullPath, requireReady = true) {
+	if (
+		!libraryInstanceOpening.value ||
+		(requireReady && !libraryInstanceRouteReady.value) ||
+		restoringLibraryInstanceRoute.value ||
+		libraryInstanceOpenStartedForPath.value === path
+	) {
+		return
+	}
+
+	libraryInstanceOpenStartedForPath.value = path
+	libraryInstanceOpenAnimationComplete.value = false
+	libraryInstanceOpenAnimationKey.value += 1
 }
 
 function getProjectRouteRoot(path) {
@@ -621,25 +1291,6 @@ function shouldSuppressCurrentRouteLoading() {
 	return suppressLocalRouteLoadingBar.value || !!getLocalTabRouteGroup(route.path)
 }
 
-function getLibraryInstanceRouteMotionDirection() {
-	let configuredDirection = libraryInstanceRouteMotionDirection.value
-	try {
-		configuredDirection =
-			localStorage.getItem(LIBRARY_INSTANCE_ROUTE_MOTION_DIRECTION_STORAGE_KEY) ??
-			configuredDirection
-	} catch {
-		// Use the reactive storage fallback when localStorage is not available.
-	}
-
-	const direction = String(configuredDirection ?? 'Right').toLowerCase()
-
-	if (['left', 'right', 'up', 'down', 'middle'].includes(direction)) {
-		return direction
-	}
-
-	return 'right'
-}
-
 function getStaticRouteMotion() {
 	return {
 		enabled: false,
@@ -650,38 +1301,146 @@ function getStaticRouteMotion() {
 }
 
 function getRouteMotion(to, from) {
-	const opensInstanceFromLibrary = isLibraryRoute(from.path) && isInstanceRoute(to.path)
-	const returnsToLibraryFromInstance = isInstanceRoute(from.path) && isLibraryRoute(to.path)
+	if (forcedNextRouteMotion) {
+		const motion = forcedNextRouteMotion
+		forcedNextRouteMotion = null
+		return motion
+	}
 
-	if (!opensInstanceFromLibrary && !returnsToLibraryFromInstance) {
+	if (suppressNextLibraryInstanceRouteMotion.value) {
 		return getStaticRouteMotion()
 	}
 
-	const configuredDirection = getLibraryInstanceRouteMotionDirection()
-	const direction = returnsToLibraryFromInstance
-		? reverseUiMotionDirection(configuredDirection)
-		: configuredDirection
+	const opensInstanceFromLibrary = isLibraryRoute(from.path) && isInstanceRoute(to.path)
+	const returnsToLibraryFromInstance = isInstanceRoute(from.path) && isLibraryRoute(to.path)
 
-	return {
-		enabled: true,
-		key: to.fullPath,
-		direction,
-		type: getUiMotionTypeForDirection(direction),
+	if (returnsToLibraryFromInstance) {
+		return createRouteSlideMotion(to.fullPath || to.path, 'right')
 	}
+
+	if (opensInstanceFromLibrary) {
+		return getStaticRouteMotion()
+	}
+
+	return getStaticRouteMotion()
 }
 
 router.beforeEach((to, from) => {
 	suspensePending = false
 	if (routerToken) loading.end(routerToken)
+	const initialNavigation = from.matched.length === 0
+	const opensInstanceRoute =
+		!initialNavigation && !isInstanceRoute(from.path) && isInstanceRoute(to.path)
+	const opensInstanceFromLibrary = isLibraryRoute(from.path) && isInstanceRoute(to.path)
+	if (opensInstanceFromLibrary && !suppressNextLibraryInstanceRouteMotion.value) {
+		lastLibraryRoutePath.value = from.fullPath || from.path
+	}
+	if (opensInstanceRoute && !suppressNextLibraryInstanceRouteMotion.value) {
+		const targetFullPath = to.fullPath || to.path
+		const openAlreadyStartedForTarget =
+			libraryInstanceOpening.value && libraryInstanceOpenStartedForPath.value === targetFullPath
+		if (!openAlreadyStartedForTarget) {
+			beginLibraryInstanceOpenNavigation(targetFullPath)
+		} else {
+			libraryInstanceRouteReady.value = false
+			libraryInstanceDragDisabled.value = false
+			libraryInstancePullBreadcrumbProgress.value = 1
+			libraryInstancePullBreadcrumbMode.value = 'open'
+		}
+	}
+	if (!isLibraryRoute(to.path) && !isInstanceRoute(to.path)) {
+		clearMinimizedInstancePullState()
+	}
 	pendingRouteMotion = getRouteMotion(to, from)
 	suppressLocalRouteLoadingBar.value = shouldSuppressLocalTabRouteLoading(to, from)
 	routerToken = suppressLocalRouteLoadingBar.value ? null : loading.begin()
 })
 router.afterEach((to, from, failure) => {
-	routeMotion.value = failure ? getStaticRouteMotion() : (pendingRouteMotion ?? getStaticRouteMotion())
+	routeMotion.value = failure
+		? getStaticRouteMotion()
+		: (pendingRouteMotion ?? getStaticRouteMotion())
 	pendingRouteMotion = null
 	if (failure) {
+		clearOptimisticLeftNavSelection()
+		scheduleLeftNavSliderRemeasure()
 		suppressLocalRouteLoadingBar.value = false
+		suppressNextLibraryInstanceRouteMotion.value = false
+		if (libraryInstancePullBreadcrumbMode.value === 'open') {
+			libraryInstancePullBreadcrumbProgress.value = 0
+			libraryInstancePullBreadcrumbMode.value = 'none'
+			libraryInstanceOpening.value = false
+			libraryInstanceRouteReady.value = false
+			libraryInstanceDragDisabled.value = false
+			libraryInstanceOpenStartedForPath.value = ''
+			libraryInstanceOpenAnimationComplete.value = false
+		}
+		libraryInstanceOpeningFromMinimized.value = false
+		if (
+			!libraryInstanceProgrammaticClose.value ||
+			libraryInstancePullBreadcrumbMode.value !== 'close'
+		) {
+			libraryInstanceProgrammaticClose.value = false
+		}
+	} else {
+		if (isLibraryRoute(to.path)) {
+			disconnectLibraryInstanceRouteContentObserver()
+			lastLibraryRoutePath.value = to.fullPath || to.path
+			libraryInstancePullBreadcrumbProgress.value = 0
+			libraryInstancePullBreadcrumbMode.value = 'none'
+			libraryInstanceProgrammaticClose.value = false
+			libraryInstanceOpening.value = false
+			libraryInstanceOpeningFromMinimized.value = false
+			libraryInstanceRouteReady.value = false
+			libraryInstanceDragDisabled.value = false
+			libraryInstanceOpenStartedForPath.value = ''
+			libraryInstanceOpenAnimationComplete.value = false
+			libraryInstanceCloseTarget.value = ''
+		}
+		if (isInstanceRoute(to.path) && !restoringLibraryInstanceRoute.value) {
+			const targetFullPath = to.fullPath || to.path
+			const openStartedForTarget = libraryInstanceOpenStartedForPath.value === targetFullPath
+			const preserveOpenMotion = libraryInstancePullBreadcrumbMode.value === 'open'
+			const preserveOpening = libraryInstanceOpening.value
+			const preserveMinimizedCard =
+				preserveOpenMotion &&
+				libraryInstanceOpeningFromMinimized.value &&
+				!!minimizedInstanceRoutePath.value
+			libraryInstanceRouteReady.value = false
+			libraryInstanceDragDisabled.value = false
+			if (preserveOpenMotion) {
+				libraryInstanceProgrammaticClose.value = false
+				libraryInstanceCloseTarget.value = ''
+				if (!preserveMinimizedCard) {
+					clearMinimizedInstanceSnapshot()
+				}
+				if (!openStartedForTarget) {
+					libraryInstanceOpenStartedForPath.value = ''
+				}
+			} else {
+				clearMinimizedInstancePullState()
+			}
+			if (preserveOpenMotion) {
+				libraryInstanceOpening.value = preserveOpening
+				libraryInstanceRouteReady.value = false
+				if (!openStartedForTarget) {
+					libraryInstanceOpenStartedForPath.value = ''
+				}
+				libraryInstancePullBreadcrumbProgress.value = libraryInstanceOpenAnimationComplete.value
+					? 0
+					: 1
+				libraryInstancePullBreadcrumbMode.value = 'open'
+				void refreshLibraryInstanceRouteReady()
+			} else {
+				void refreshLibraryInstanceRouteReady()
+			}
+		}
+		if (!isLibraryRoute(to.path) && !isInstanceRoute(to.path)) {
+			disconnectLibraryInstanceRouteContentObserver()
+			clearMinimizedInstancePullState()
+			libraryInstanceRouteReady.value = false
+			libraryInstanceDragDisabled.value = false
+		}
+		suppressNextLibraryInstanceRouteMotion.value = false
 	}
 	trackEvent('PageView', {
 		path: to.path,
@@ -718,6 +1477,115 @@ function onSuspenseResolve() {
 		routerToken = null
 	}
 	suppressLocalRouteLoadingBar.value = false
+	if (isInstanceRoute(route.path)) {
+		void refreshLibraryInstanceRouteReady()
+	}
+	if (restoringLibraryInstanceRoute.value && isInstanceRoute(route.path)) {
+		queueLibraryInstanceRestoreOverlayClear()
+	}
+}
+
+async function dismissInstanceToLibrary() {
+	if (!isInstanceRoute(route.path)) return
+
+	captureInstancePullSnapshot()
+	minimizedInstanceRoutePath.value = route.fullPath
+	libraryInstanceProgrammaticClose.value = false
+	suppressNextLibraryInstanceRouteMotion.value = true
+	try {
+		await router.push(lastLibraryRoutePath.value || '/library')
+	} catch {
+		suppressNextLibraryInstanceRouteMotion.value = false
+	}
+}
+
+async function restoreInstanceFromLibraryNotch() {
+	const target = minimizedInstanceRoutePath.value
+	if (!target) return
+
+	restoringLibraryInstanceRoute.value = true
+	suppressNextLibraryInstanceRouteMotion.value = true
+	try {
+		await router.push(target)
+		await nextTick()
+		if (!suspensePending) {
+			queueLibraryInstanceRestoreOverlayClear()
+		}
+	} catch {
+		minimizedInstanceRoutePath.value = target
+		restoringLibraryInstanceRoute.value = false
+		suppressNextLibraryInstanceRouteMotion.value = false
+	}
+}
+
+async function finishProgrammaticLibraryInstanceClose() {
+	const target = libraryInstanceCloseTarget.value || lastLibraryRoutePath.value || '/library'
+	const targetPath = router.resolve(target).path
+	const shouldKeepMinimizedCard = isInstanceRoute(route.path) && isLibraryRoute(targetPath)
+	if (shouldKeepMinimizedCard) {
+		captureInstancePullSnapshot()
+		minimizedInstanceRoutePath.value = route.fullPath
+	}
+	suppressNextLibraryInstanceRouteMotion.value = true
+	try {
+		await router.push(target)
+	} catch {
+		if (shouldKeepMinimizedCard) {
+			minimizedInstanceRoutePath.value = ''
+			minimizedInstanceSnapshotHtml.value = ''
+			minimizedInstanceBreadcrumbs.value = null
+		}
+		suppressNextLibraryInstanceRouteMotion.value = false
+		libraryInstanceProgrammaticClose.value = false
+		libraryInstanceCloseTarget.value = ''
+		libraryInstancePullBreadcrumbProgress.value = 0
+		libraryInstancePullBreadcrumbMode.value = 'none'
+	}
+}
+
+function clearMinimizedInstanceFromLibraryPull() {
+	clearMinimizedInstancePullState()
+}
+
+function handleLibraryInstancePullDragging(dragging) {
+	if (!dragging && !isLibraryRoute(route.path) && !minimizedInstanceRoutePath.value) {
+		libraryInstancePullBreadcrumbProgress.value = 0
+		libraryInstancePullBreadcrumbMode.value = 'none'
+	}
+}
+
+function handleLibraryInstancePullProgress(progress, mode) {
+	if (mode === 'dismiss' || mode === 'restore') {
+		libraryInstancePullBreadcrumbProgress.value = Math.min(1, Math.max(0, progress))
+		libraryInstancePullBreadcrumbMode.value = mode
+	} else if (mode === 'open' || mode === 'close') {
+		libraryInstancePullBreadcrumbProgress.value = Math.min(1, Math.max(0, progress))
+		libraryInstancePullBreadcrumbMode.value = mode
+	} else if (mode === 'none') {
+		if (libraryInstanceOpening.value) {
+			libraryInstanceOpenAnimationComplete.value = true
+			libraryInstancePullBreadcrumbProgress.value = 0
+			if (!finishLibraryInstanceOpenAnimationIfReady()) {
+				libraryInstancePullBreadcrumbMode.value = 'open'
+				libraryInstanceProgrammaticClose.value = false
+			}
+
+			if (leftNav.value) {
+				updateLeftNavSlider()
+			}
+			return
+		}
+
+		libraryInstancePullBreadcrumbProgress.value = 0
+		libraryInstancePullBreadcrumbMode.value = 'none'
+		libraryInstanceProgrammaticClose.value = false
+		libraryInstanceOpening.value = false
+		libraryInstanceOpeningFromMinimized.value = false
+	}
+
+	if (leftNav.value) {
+		updateLeftNavSlider()
+	}
 }
 
 const queryClient = useQueryClient()
@@ -1599,8 +2467,21 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		/>
 		<UnknownPackWarningModal ref="unknownPackWarningModal" />
 		<div
+			ref="leftNav"
 			class="app-grid-navbar bg-bg-raised flex flex-col p-[0.5rem] pt-0 gap-[0.5rem] w-[--left-bar-width]"
+			:class="{ 'left-nav-slider-ready': leftNavSliderReady }"
+			@pointerdown="handleLeftNavPointerIntent"
 		>
+			<div
+				v-if="leftNavSliderReady"
+				class="left-nav-slider"
+				:class="{
+					'left-nav-slider--subpage': leftNavSliderSubpageSelected,
+					'left-nav-slider-transition': leftNavSliderTransitionsEnabled,
+				}"
+				:style="leftNavSliderStyle"
+				aria-hidden="true"
+			/>
 			<NavButton v-tooltip.right="'Home'" to="/">
 				<HomeIcon />
 			</NavButton>
@@ -1623,7 +2504,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<NavButton
 				v-tooltip.right="'Library'"
 				to="/library"
-				:is-primary="(r) => r.path === '/library' || r.path === '/library'"
+				data-left-nav-library
+				:is-primary="(r) => isLibraryRoute(r.path)"
 				:is-subpage="
 					() =>
 						route.path.startsWith('/instance') ||
@@ -1686,19 +2568,25 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				<ModrinthAppLogo class="h-full w-auto shrink-0 text-contrast pointer-events-none" />
 				<div data-tauri-drag-region class="flex shrink-0 items-center gap-1 ml-3">
 					<button
+						data-tauri-drag-region-exclude
 						class="cursor-pointer p-0 m-0 text-contrast border-none outline-none bg-button-bg rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
 						@click="router.back()"
 					>
 						<LeftArrowIcon />
 					</button>
 					<button
+						data-tauri-drag-region-exclude
 						class="cursor-pointer p-0 m-0 text-contrast border-none outline-none bg-button-bg rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
 						@click="router.forward()"
 					>
 						<RightArrowIcon />
 					</button>
 				</div>
-				<Breadcrumbs class="pt-[2px]" />
+				<Breadcrumbs
+					class="pt-[2px]"
+					:preview-breadcrumbs="libraryInstancePullPreviewBreadcrumbs"
+					:preview-progress="libraryInstancePullBreadcrumbPreviewProgress"
+				/>
 			</div>
 			<section data-tauri-drag-region class="flex shrink-0 ml-auto items-center">
 				<ButtonStyled
@@ -1796,32 +2684,62 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				{{ formatMessage(messages.authUnreachableBody) }}
 			</Admonition>
-			<RouterView v-slot="{ Component }">
-				<UiMotionTransition
-					v-if="routeMotion.enabled"
-					:content-key="routeMotion.key"
-					enabled
-					:direction="routeMotion.direction"
-					:type="routeMotion.type"
-					:enter-ms="120"
-					:leave-ms="120"
-					easing="content-slide"
-					mode="out-in"
-					distance="1rem"
-					:lock-height="false"
-				>
-					<template v-if="Component">
-						<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
-							<component :is="Component"></component>
-						</Suspense>
-					</template>
-				</UiMotionTransition>
-				<template v-else-if="Component">
-					<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
-						<component :is="Component"></component>
-					</Suspense>
+			<LibraryInstancePullSurface
+				:active="isLibraryInstancePullActive"
+				:minimized="showLibraryInstanceRestoreNotch"
+				:opening="libraryInstanceOpening && isInstanceRoute(route.path)"
+				:closing="libraryInstanceProgrammaticClose"
+				:drag-disabled="libraryInstanceDragDisabled"
+				:open-key="libraryInstanceOpenAnimationKey"
+				:close-key="libraryInstanceCloseAnimationKey"
+				:restore-snapshot-html="minimizedInstanceSnapshotHtml"
+				:sidebar-visible="sidebarVisible"
+				@dismiss="dismissInstanceToLibrary"
+				@restore="restoreInstanceFromLibraryNotch"
+				@clear="clearMinimizedInstanceFromLibraryPull"
+				@close-complete="finishProgrammaticLibraryInstanceClose"
+				@dragging="handleLibraryInstancePullDragging"
+				@progress="handleLibraryInstancePullProgress"
+			>
+				<template #underlay>
+					<LibraryPage inert-underlay :underlay-path="lastLibraryRoutePath" />
 				</template>
-			</RouterView>
+				<template #content>
+					<div
+						data-library-instance-route-content
+						class="library-instance-route-content"
+					>
+						<div class="library-instance-router-content">
+							<RouterView v-slot="{ Component }">
+								<UiMotionTransition
+									v-if="routeMotion.enabled"
+									:content-key="routeMotion.key"
+									enabled
+									:direction="routeMotion.direction"
+									:type="routeMotion.type"
+									:enter-ms="120"
+									:leave-ms="120"
+									easing="content-slide"
+									mode="out-in"
+									distance="2rem"
+									:lock-height="false"
+								>
+									<template v-if="Component">
+										<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
+											<component :is="Component"></component>
+										</Suspense>
+									</template>
+								</UiMotionTransition>
+								<template v-else-if="Component">
+									<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
+										<component :is="Component"></component>
+									</Suspense>
+								</template>
+							</RouterView>
+						</div>
+					</div>
+				</template>
+			</LibraryInstancePullSurface>
 		</div>
 		<div
 			class="app-sidebar mt-px shrink-0 flex flex-col border-0 border-l-[1px] border-[--color-sidebar-accent-border] border-solid"
@@ -1869,6 +2787,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					/>
 				</div>
 			</div>
+			<div id="sidebar-bottom-teleport-target" class="sidebar-bottom-teleport-content"></div>
 			<template v-if="showAd">
 				<a
 					href="https://modrinth.plus?app"
@@ -2030,6 +2949,65 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	position: relative;
 	z-index: 2;
 	--color-button-bg-hover: var(--color-left-nav-button-bg-hover);
+
+	&.left-nav-slider-ready {
+		:deep(.app-nav-button.router-link-active),
+		:deep(.app-nav-button.left-nav-optimistic-active) {
+			--nav-button-active-bg: transparent;
+			--nav-button-active-shadow: none;
+		}
+
+		:deep(.app-nav-button.subpage-active) {
+			--nav-button-subpage-bg: transparent;
+		}
+	}
+
+	:deep(.app-nav-button.left-nav-optimistic-active) {
+		@apply text-[--color-button-text-selected];
+		background: var(--nav-button-active-bg, var(--color-button-bg-selected));
+		box-shadow: var(
+			--nav-button-active-shadow,
+			0 0 0 1px color-mix(in srgb, var(--color-brand) 38%, transparent),
+			0 0 18px color-mix(in srgb, var(--color-brand) 24%, transparent)
+		);
+
+		svg {
+			filter: drop-shadow(0 0 0.5rem black);
+		}
+	}
+
+	:deep(.app-nav-button.left-nav-optimistic-active:hover) {
+		@apply text-[--color-button-text-selected];
+		background: var(--nav-button-active-bg, var(--color-button-bg-selected));
+	}
+}
+
+.left-nav-slider {
+	position: absolute;
+	z-index: 0;
+	pointer-events: none;
+	overflow: hidden;
+	border-radius: 100vw;
+	background-color: var(--color-button-bg-selected);
+	box-shadow:
+		0 0 0 1px color-mix(in srgb, var(--color-brand) 38%, transparent),
+		0 0 18px color-mix(in srgb, var(--color-brand) 24%, transparent);
+}
+
+.left-nav-slider--subpage {
+	background-color: var(--color-button-bg);
+	box-shadow: none;
+}
+
+.left-nav-slider-transition {
+	transition:
+		left var(--left-nav-slider-ms) var(--left-nav-slider-easing) var(--left-nav-left-delay),
+		right var(--left-nav-slider-ms) var(--left-nav-slider-easing) var(--left-nav-right-delay),
+		top var(--left-nav-slider-ms) var(--left-nav-slider-easing) var(--left-nav-top-delay),
+		bottom var(--left-nav-slider-ms) var(--left-nav-slider-easing) var(--left-nav-bottom-delay),
+		opacity var(--left-nav-fade-ms) var(--left-nav-fade-easing) var(--left-nav-fade-delay-ms),
+		background-color var(--left-nav-fade-ms) var(--left-nav-fade-easing),
+		box-shadow var(--left-nav-fade-ms) var(--left-nav-fade-easing);
 }
 
 .app-grid-statusbar {
@@ -2039,7 +3017,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	z-index: 2;
 }
 
-[data-tauri-drag-region-exclude] {
+:global([data-tauri-drag-region-exclude]) {
 	-webkit-app-region: no-drag;
 }
 
@@ -2114,7 +3092,18 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	height: 100%;
 	overflow: auto;
 	overflow-x: hidden;
-	scrollbar-gutter: stable;
+	scrollbar-gutter: stable both-edges;
+}
+
+.library-instance-route-content {
+	position: relative;
+	min-height: 100%;
+	height: 100%;
+}
+
+.library-instance-router-content {
+	min-height: 100%;
+	height: 100%;
 }
 
 .app-contents::before {
@@ -2135,6 +3124,15 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 
 .sidebar-teleport-content {
 	display: contents;
+}
+
+.sidebar-bottom-teleport-content {
+	flex: none;
+	padding: 1rem;
+}
+
+.sidebar-bottom-teleport-content:empty {
+	display: none;
 }
 
 .sidebar-default-content {

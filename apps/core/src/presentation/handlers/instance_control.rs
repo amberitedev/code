@@ -32,8 +32,13 @@ pub async fn start(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:power")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:power",
+    )
+    .await?;
     start_instance(&state, &iid).await?;
     log_action(&state, &claims.sub, "instance_started", &iid).await?;
     Ok(Json(json!({ "ok": true })))
@@ -47,8 +52,13 @@ pub async fn stop(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:power")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:power",
+    )
+    .await?;
     stop_instance(&state, &iid).await?;
     log_action(&state, &claims.sub, "instance_stopped", &iid).await?;
     Ok(Json(json!({ "ok": true })))
@@ -62,8 +72,13 @@ pub async fn kill(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:power")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:power",
+    )
+    .await?;
     kill_instance(&state, &iid).await?;
     log_action(&state, &claims.sub, "instance_killed", &iid).await?;
     Ok(Json(json!({ "ok": true })))
@@ -77,8 +92,13 @@ pub async fn restart(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:power")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:power",
+    )
+    .await?;
     restart_instance(&state, &iid).await.map_err(|e| {
         if e.to_string().contains("timed out") {
             ApiError::Internal("Shutdown timed out".into())
@@ -104,8 +124,13 @@ pub async fn send_command_handler(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:power")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:power",
+    )
+    .await?;
     send_command(&state, &iid, body.command).await?;
     log_action(&state, &claims.sub, "console_command_executed", &iid).await?;
     Ok(Json(json!({ "ok": true })))
@@ -120,8 +145,13 @@ pub async fn repair(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:settings",
+    )
+    .await?;
     repair_instance(&state, &iid).await?;
     log_action(&state, &claims.sub, "instance_repaired", &iid).await?;
     Ok(Json(json!({ "ok": true })))
@@ -155,8 +185,13 @@ pub async fn change_version_handler(
 ) -> Result<Json<Value>, ApiError> {
     let iid = resolve_instance_id(&state, &id).await?;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:settings",
+    )
+    .await?;
     change_version(
         &state,
         &iid,

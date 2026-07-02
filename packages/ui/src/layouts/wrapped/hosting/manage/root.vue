@@ -1,6 +1,9 @@
 <template>
 	<div
 		v-if="loadError"
+		data-library-instance-page-ready
+		data-library-instance-drag-disabled
+		data-library-instance-error-state
 		class="flex min-h-full items-center justify-center p-6 text-contrast"
 	>
 		<ErrorInformationCard
@@ -113,8 +116,8 @@ import {
 	DatabaseBackupIcon,
 	FolderOpenIcon,
 	LayoutTemplateIcon,
+	LeftArrowIcon,
 	SettingsIcon,
-	TerminalSquareIcon,
 	TriangleAlertIcon,
 	UsersIcon,
 } from '@modrinth/assets'
@@ -147,6 +150,7 @@ const props = withDefaults(
 		resolveViewer?: () => Promise<{ userId: string | null; userRole: string | null }>
 		authUser?: unknown
 		navigateToServers?: () => void
+		serversActionLabel?: string
 		showAdvancedDebugInfo?: boolean
 	}>(),
 	{
@@ -159,6 +163,7 @@ const props = withDefaults(
 		resolveViewer: undefined,
 		authUser: undefined,
 		navigateToServers: undefined,
+		serversActionLabel: 'Back to servers',
 		showAdvancedDebugInfo: false,
 	},
 )
@@ -225,7 +230,7 @@ const manageTabContentKey = computed(
 	() => `${basePath.value}:${activeManageTabKind.value}`,
 )
 const serversAction = computed(() => ({
-	label: 'Back to servers',
+	label: props.serversActionLabel,
 	onClick: () => {
 		if (props.navigateToServers) {
 			props.navigateToServers()
@@ -234,7 +239,7 @@ const serversAction = computed(() => ({
 		void router.push(props.serversPath)
 	},
 	color: 'standard' as const,
-	icon: TerminalSquareIcon,
+	icon: LeftArrowIcon,
 }))
 
 function safeStringify(value: unknown, indent = ' '): string {

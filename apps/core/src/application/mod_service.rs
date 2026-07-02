@@ -135,8 +135,10 @@ pub async fn list_mods(
     if let Ok(mut rd) = tokio::fs::read_dir(data_dir.join("mods")).await {
         while let Ok(Some(e)) = rd.next_entry().await {
             let n = e.file_name().to_string_lossy().to_string();
+            let canonical = n.trim_end_matches(".disabled").to_string();
             if (n.ends_with(".jar") || n.ends_with(".jar.disabled"))
                 && !tracked.contains(&n)
+                && !tracked.contains(&canonical)
             {
                 infos.push(ModInfo {
                     id: None,

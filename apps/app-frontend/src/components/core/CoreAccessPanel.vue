@@ -8,27 +8,32 @@ import type {
 import {
 	amberiteAccessRoleOptions,
 	toAmberiteAccessUiMember,
-	uiAccessRoleToCore,
-	uiAccessRoleToPreset,
 } from '@amberite/amberite-api'
 import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
-import type { ServerAccessMember } from '@modrinth/ui'
+import type {
+	GrantServerAccessPayload,
+	ServerAccessInviteSuggestion,
+	ServerAccessMember,
+	ServerAccessRole,
+} from '@modrinth/ui'
 import { AccessTable, ButtonStyled, Combobox, StyledInput } from '@modrinth/ui'
 import { computed, onMounted, ref } from 'vue'
 
 import CoreInviteMemberModal from '@/components/core/CoreInviteMemberModal.vue'
 import { useCoreActivityLog } from '@/components/core/use-core-activity-log'
 import { useCoreClient } from '@/composables/useCoreClient'
-import { useSocialClient } from '@/composables/useSocialClient'
+import { useSocial } from '@/composables/useSocial'
+import { toInviteSuggestion } from './core-onboarding-members'
 
 type RoleFilter = AmberiteAccessUiRole | 'all'
+type CoreAccessTableMember = ServerAccessMember & { inviteId?: string; inviteStatus?: string }
 
 const emit = defineEmits<{
 	'manage-roles': []
 	'manage-new-roles': []
 }>()
 
-const socialClient = useSocialClient()
+const social = useSocial()
 const core = useCoreClient()
 const { recordUserAccessEvent } = useCoreActivityLog()
 const grantAccessModal = ref<InstanceType<typeof CoreInviteMemberModal>>()
@@ -43,9 +48,31 @@ const roleFilterOptions = [{ value: 'all', label: 'All roles' }, ...roleOptions]
 const selectedRoleFilterLabel = computed(
 	() => roleFilterOptions.find((option) => option.value === roleFilter.value)?.label ?? 'All roles',
 )
-const memberRows = computed<ServerAccessMember[]>(() =>
-	coreMembers.value.map(toAmberiteAccessUiMember),
+const activeInvitations = computed(() =>
+	coreInvitations.value.filter(
+		(invite) => invite.status === 'sent' || invite.status === 'pending_review',
+	),
 )
+const memberRows = computed<CoreAccessTableMember[]>(() => {
+	const rows: CoreAccessTableMember[] = coreMembers.value.map(toAmberiteAccessUiMember)
+	const memberIds = new Set(coreMembers.value.map((member) => member.user_id))
+	for (const invite of activeInvitations.value) {
+		if (memberIds.has(invite.invitee_user_id)) continue
+		rows.push({
+			id: `invite-${invite.id}`,
+			user: {
+				id: invite.invitee_user_id,
+				username: invite.invitee_display_name ?? invite.invitee_user_id,
+			},
+			role: roleIdToAccessRole(invite.role_id),
+			joinedAt: null,
+			pending: true,
+			inviteId: invite.id,
+			inviteStatus: invite.status,
+		})
+	}
+	return rows
+})
 const filteredMembers = computed(() => {
 	const query = search.value.trim().toLowerCase()
 	return memberRows.value.filter((member) => {
@@ -53,36 +80,55 @@ const filteredMembers = computed(() => {
 		return !query || member.user.username.toLowerCase().includes(query)
 	})
 })
+const inviteSuggestions = computed<ServerAccessInviteSuggestion[]>(() =>
+	(social.friends.value?.friends ?? [])
+		.map((friend) => friend.user)
+		.filter((user): user is NonNullable<typeof user> => !!user)
+		.map(toInviteSuggestion)
+		.filter((user) => !unavailableInviteUserIds.value.has(user.id)),
+)
+const friendIds = computed(() => inviteSuggestions.value.map((user) => user.id))
+const unavailableInviteUserIds = computed(
+	() =>
+		new Set(
+			[
+				social.currentUser.value?.userId,
+				...coreMembers.value.map((member) => member.user_id),
+				...activeInvitations.value.map((invite) => invite.invitee_user_id),
+			].filter((id): id is string => !!id),
+		),
+)
 
-async function grantAccess(user: { id: string; username: string }, roleId: string) {
-	const invite = await core.createCoreInvitation({
-		invitee_user_id: user.id,
-		invitee_display_name: user.username,
+async function grantAccess(payload: GrantServerAccessPayload) {
+	const roleId = accessRoleToRoleId(payload.role)
+	await core.createCoreInvitation({
+		invitee_user_id: payload.user.id,
+		invitee_display_name: payload.user.username,
 		role_id: roleId,
 	})
-	if (invite.status === 'sent') {
-		const [metadata, coreUrl] = await Promise.all([
-			core.getCoreMetadata(),
-			core.adapter.getCoreUrl(),
-		])
-		if (coreUrl)
-			await socialClient.notifyCoreInvite({
-				recipientUserId: user.id,
-				coreId: metadata.core_id,
-				coreUrl,
-				inviteId: invite.id,
-				expiresAt: Date.parse(invite.expires_at),
-			})
+	if (payload.addAsFriend) {
+		await social.sendFriendRequest({ targetUserId: payload.user.id })
+		if (social.error.value) throw social.error.value
 	}
-	recordUserAccessEvent('invited', user.id, user.username, undefined, 'viewer')
+	recordUserAccessEvent('invited', payload.user.id, payload.user.username, undefined, payload.role)
 	await loadCoreState()
 }
 
-async function updateRole(member: ServerAccessMember, role: AmberiteAccessUiRole) {
-	if (member.isOwner) return
+async function updateRole(member: CoreAccessTableMember, role: ServerAccessRole) {
+	if (member.isOwner || role === 'owner') return
+	if (member.pending && member.inviteId) {
+		await core.revokeCoreInvitation(member.inviteId)
+		await core.createCoreInvitation({
+			invitee_user_id: member.user.id,
+			invitee_display_name: member.user.username,
+			role_id: accessRoleToRoleId(role),
+		})
+		await loadCoreState()
+		return
+	}
 	await core.updateCoreAccess(member.user.id, {
-		role: uiAccessRoleToCore(role),
-		permission_preset: uiAccessRoleToPreset(role),
+		role: role === 'editor' ? 'admin' : 'member',
+		permission_preset: role === 'editor' ? 'admin' : 'member',
 	})
 	recordUserAccessEvent(
 		'permission_modified',
@@ -94,10 +140,25 @@ async function updateRole(member: ServerAccessMember, role: AmberiteAccessUiRole
 	await loadCoreState()
 }
 
-async function removeMember(member: ServerAccessMember) {
+async function removeMember(member: CoreAccessTableMember) {
 	if (member.isOwner) return
+	if (member.pending && member.inviteId) {
+		await core.revokeCoreInvitation(member.inviteId)
+		await loadCoreState()
+		return
+	}
 	await core.removeCoreAccess(member.user.id)
 	recordUserAccessEvent('removed', member.user.id, member.user.username, member.user.avatarUrl)
+	await loadCoreState()
+}
+
+async function resendInvite(member: CoreAccessTableMember) {
+	if (!member.pending || !member.inviteId) return
+	await core.createCoreInvitation({
+		invitee_user_id: member.user.id,
+		invitee_display_name: member.user.username,
+		role_id: accessRoleToRoleId(member.role),
+	})
 	await loadCoreState()
 }
 
@@ -117,6 +178,45 @@ async function loadCoreState() {
 		coreMembers.value = []
 		canManageUsers.value = false
 		coreInvitations.value = []
+	}
+}
+
+async function searchInviteUsers(query: string) {
+	const users = await social.searchUsers(query)
+	return users.map(toInviteSuggestion).filter((user) => !unavailableInviteUserIds.value.has(user.id))
+}
+
+function accessRoleToRoleId(role: ServerAccessRole) {
+	return role === 'editor' ? 'role-admin' : 'role-member'
+}
+
+function roleIdToAccessRole(roleId: string): AmberiteAccessUiRole {
+	if (roleId === 'role-admin') return 'editor'
+	const role = coreRoles.value.find((item) => item.id === roleId)
+	if (!role) return 'viewer'
+	const grants = parseRoleGrants(role)
+	return grants.some((grant) =>
+		[
+			'invite-members',
+			'remove-members',
+			'ban-members',
+			'manage-roles',
+			'edit-member-roles',
+			'approve-invites',
+			'manage-instances',
+			'edit-settings',
+		].includes(grant),
+	)
+		? 'editor'
+		: 'viewer'
+}
+
+function parseRoleGrants(role: CoreRole) {
+	try {
+		const value = JSON.parse(role.grants_json)
+		return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+	} catch {
+		return []
 	}
 }
 
@@ -162,11 +262,16 @@ onMounted(loadCoreState)
 			:user-profile-link="(username) => `https://modrinth.com/user/${encodeURIComponent(username)}`"
 			:can-manage-users="canManageUsers"
 			@update-role="updateRole"
+			@resend-invite="resendInvite"
+			@cancel-invite="removeMember"
 			@remove-member="removeMember"
 		/>
 		<section
 			v-if="
-				coreMembers.some((member) => member.needs_role_reassignment_at) || coreInvitations.length
+				coreMembers.some((member) => member.needs_role_reassignment_at) ||
+				coreInvitations.some(
+					(invite) => !['sent', 'pending_review'].includes(invite.status),
+				)
 			"
 			class="flex flex-col gap-2 rounded-xl bg-surface-2 p-4"
 		>
@@ -178,11 +283,13 @@ onMounted(loadCoreState)
 			>
 				<span class="text-primary">{{ member.display_name ?? member.user_id }}</span
 				><span class="rounded-full bg-orange-highlight px-2 py-1 text-xs font-semibold text-orange"
-					>Role removed — reassignment required</span
+					>Role removed - reassignment required</span
 				>
 			</div>
 			<div
-				v-for="invite in coreInvitations"
+				v-for="invite in coreInvitations.filter(
+					(item) => !['sent', 'pending_review'].includes(item.status),
+				)"
 				:key="invite.id"
 				class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2 text-sm"
 			>
@@ -193,9 +300,12 @@ onMounted(loadCoreState)
 
 		<CoreInviteMemberModal
 			ref="grantAccessModal"
-			:roles="coreRoles"
-			@invite="grantAccess"
-			@open-role="emit('manage-new-roles')"
+			:members="memberRows"
+			:suggestions="inviteSuggestions"
+			:friend-ids="friendIds"
+			:search-users="searchInviteUsers"
+			:can-grant="canManageUsers"
+			@grant="grantAccess"
 		/>
 	</div>
 </template>

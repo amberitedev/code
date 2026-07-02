@@ -10,7 +10,6 @@ const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
 const envFile = await readFile(envPath, 'utf8')
 const localEnv = parseEnv(envFile)
-const convexUrl = required(localEnv, 'CONVEX_URL')
 const convexSiteUrl = required(localEnv, 'CONVEX_SITE_URL')
 const hmacSecret = localEnv.REALTIME_BRIDGE_HMAC_SECRET || randomBytes(32).toString('base64url')
 
@@ -33,7 +32,7 @@ const workerUrl = deployment.match(/https:\/\/[^\s]+\.workers\.dev/)?.[0]
 if (!workerUrl) throw new Error('Wrangler did not report a development Worker URL.')
 
 const secrets = {
-	CONVEX_JWKS_URL: `${convexUrl.replace(/\/$/, '')}/.well-known/jwks.json`,
+	CONVEX_JWKS_URL: `${convexSiteUrl.replace(/\/$/, '')}/.well-known/jwks.json`,
 	CONVEX_JWT_ISSUER: convexSiteUrl.replace(/\/$/, ''),
 	CONVEX_JWT_AUDIENCE: 'convex',
 	CONVEX_BRIDGE_URL: `${convexSiteUrl.replace(/\/$/, '')}/realtime/bridge`,

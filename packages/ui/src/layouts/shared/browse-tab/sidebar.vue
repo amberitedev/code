@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { InfoIcon, XIcon } from '@modrinth/assets'
-import { computed, toValue } from 'vue'
+import { computed, shallowRef, toValue, watch } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import Checkbox from '#ui/components/base/Checkbox.vue'
@@ -15,6 +15,21 @@ const { formatMessage } = useVIntl()
 
 const isApp = computed(() => ctx.variant === 'app')
 const lockedMessages = computed(() => toValue(ctx.lockedFilterMessages))
+const isTransitioning = computed(() => ctx.transitioning?.value ?? false)
+const visibleProjectType = shallowRef(ctx.visibleProjectType?.value ?? ctx.projectType.value)
+const visibleFilters = shallowRef(ctx.filters.value.filter((filter) => filter.display !== 'none'))
+const visibleServerFilterTypes = shallowRef(
+	ctx.serverFilterTypes.value.filter((filter) => filter.options.length > 0),
+)
+const visibleIsServerType = computed(() => visibleProjectType.value === 'server')
+
+function syncVisibleSidebarState() {
+	visibleProjectType.value = ctx.visibleProjectType?.value ?? ctx.projectType.value
+	visibleFilters.value = ctx.filters.value.filter((filter) => filter.display !== 'none')
+	visibleServerFilterTypes.value = ctx.serverFilterTypes.value.filter(
+		(filter) => filter.options.length > 0,
+	)
+}
 
 function closeFiltersMenu() {
 	if (ctx.filtersMenuOpen) {
@@ -51,7 +66,7 @@ function getFilterOpenByDefault(filterId: string): boolean {
 	if (hasProvidedFilter(filterId)) {
 		return true
 	}
-	if (ctx.isServerType.value) {
+	if (visibleIsServerType.value) {
 		return ![
 			'server_category_minecraft_server_meta',
 			'server_category_minecraft_server_community',
@@ -64,13 +79,28 @@ function getFilterOpenByDefault(filterId: string): boolean {
 	}
 	if (
 		lockedMessages.value?.gameVersionShaderMessage &&
-		ctx.projectType.value === 'shader' &&
+		visibleProjectType.value === 'shader' &&
 		filterId === 'game_version'
 	) {
 		return false
 	}
 	return true
 }
+
+watch(
+	[
+		isTransitioning,
+		() => ctx.visibleProjectType?.value ?? ctx.projectType.value,
+		() => ctx.filters.value,
+		() => ctx.serverFilterTypes.value,
+	],
+	() => {
+		if (isTransitioning.value) return
+
+		syncVisibleSidebarState()
+	},
+	{ immediate: true },
+)
 </script>
 
 <template>
@@ -128,9 +158,9 @@ function getFilterOpenByDefault(filterId: string): boolean {
 			/>
 		</div>
 
-		<template v-if="ctx.isServerType.value">
+		<template v-if="visibleIsServerType">
 			<SearchSidebarFilter
-				v-for="filterType in ctx.serverFilterTypes.value.filter((f) => f.options.length > 0)"
+				v-for="filterType in visibleServerFilterTypes"
 				:key="`server-filter-${filterType.id}`"
 				v-model:selected-filters="ctx.serverCurrentFilters.value"
 				v-model:toggled-groups="ctx.serverToggledGroups.value"
@@ -151,7 +181,7 @@ function getFilterOpenByDefault(filterId: string): boolean {
 		</template>
 		<template v-else>
 			<SearchSidebarFilter
-				v-for="filter in ctx.filters.value.filter((f) => f.display !== 'none')"
+				v-for="filter in visibleFilters"
 				:key="`filter-${filter.id}`"
 				v-model:selected-filters="ctx.currentFilters.value"
 				v-model:toggled-groups="ctx.toggledGroups.value"
@@ -172,7 +202,7 @@ function getFilterOpenByDefault(filterId: string): boolean {
 				<template
 					v-if="
 						lockedMessages?.gameVersionShaderMessage &&
-						ctx.projectType.value === 'shader' &&
+						visibleProjectType === 'shader' &&
 						filter.id === 'game_version'
 					"
 					#prefix

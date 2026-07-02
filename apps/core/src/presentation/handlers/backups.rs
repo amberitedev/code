@@ -15,11 +15,11 @@ use crate::{
             restore_backup, set_backup_schedule, BackupError,
         },
         state::AppState,
-	},
-	presentation::{
-		error::ApiError, extractors::AuthUser,
-		instance_path::resolve_authorized_instance_id,
-	},
+    },
+    presentation::{
+        error::ApiError, extractors::AuthUser,
+        instance_path::resolve_authorized_instance_id,
+    },
 };
 
 impl From<BackupError> for ApiError {
@@ -80,11 +80,11 @@ pub async fn list_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	let rows = list_backups(&state, &instance_id)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    let rows = list_backups(&state, &instance_id)
+        .await
+        .map_err(ApiError::from)?;
     let backups: Vec<Value> = rows.into_iter().map(backup_json).collect();
     let active_operations: Vec<Value> = vec![];
     Ok(Json(
@@ -99,11 +99,11 @@ pub async fn create_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateBody>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	let backup = create_backup(&state, &instance_id, "manual", body.name)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    let backup = create_backup(&state, &instance_id, "manual", body.name)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(backup_json(backup)))
 }
 
@@ -128,11 +128,11 @@ pub async fn delete_handler(
     Path((id, bid)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	delete_backup(&state, &instance_id, &bid)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    delete_backup(&state, &instance_id, &bid)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -143,11 +143,11 @@ pub async fn delete_many_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<DeleteManyBody>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	let deleted = delete_many_backups(&state, &instance_id, &body.ids)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    let deleted = delete_many_backups(&state, &instance_id, &body.ids)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -158,11 +158,11 @@ pub async fn lock_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<LockBody>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	lock_backup(&state, &instance_id, &bid, body.locked)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    lock_backup(&state, &instance_id, &bid, body.locked)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -172,11 +172,11 @@ pub async fn restore_handler(
     Path((id, bid)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	restore_backup(&state, &instance_id, &bid)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    restore_backup(&state, &instance_id, &bid)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -186,11 +186,11 @@ pub async fn get_schedule_handler(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	let schedule = get_backup_schedule(&state, &instance_id)
-		.await
-		.map_err(ApiError::from)?;
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    let schedule = get_backup_schedule(&state, &instance_id)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(json!(schedule)))
 }
 
@@ -201,13 +201,13 @@ pub async fn set_schedule_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ScheduleBody>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	set_backup_schedule(
-		&state,
-		&instance_id,
-		body.enabled,
-		&body.cron,
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    set_backup_schedule(
+        &state,
+        &instance_id,
+        body.enabled,
+        &body.cron,
         body.retain_count,
     )
     .await
@@ -222,20 +222,22 @@ pub async fn rename_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RenameBody>,
 ) -> Result<Json<Value>, ApiError> {
-	let instance_id = resolve_backup_instance_id(&state, &claims.sub, &id)
-		.await?;
-	rename_backup(&state, &instance_id, &bid, body.name)
-		.await
-		.map_err(ApiError::from)?;
-	Ok(Json(json!({ "ok": true })))
+    let instance_id =
+        resolve_backup_instance_id(&state, &claims.sub, &id).await?;
+    rename_backup(&state, &instance_id, &bid, body.name)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn resolve_backup_instance_id(
-	state: &Arc<AppState>,
-	user_id: &str,
-	path: &str,
+    state: &Arc<AppState>,
+    user_id: &str,
+    path: &str,
 ) -> Result<String, ApiError> {
-	Ok(resolve_authorized_instance_id(state, user_id, path, "server:backups")
-		.await?
-		.to_string())
+    Ok(
+        resolve_authorized_instance_id(state, user_id, path, "server:backups")
+            .await?
+            .to_string(),
+    )
 }

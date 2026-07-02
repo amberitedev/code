@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { SettingsIcon, UnlinkIcon } from '@modrinth/assets'
+import { DashboardIcon, ServerStackIcon, SettingsIcon, UnlinkIcon } from '@modrinth/assets'
 import {
 	ButtonStyled,
 	injectNotificationManager,
@@ -49,9 +49,11 @@ const showDashboardSkeleton = computed(
 )
 useLoadingBarToken(dashboardPending)
 const hasConnectedCore = computed(() => !!connectedCore.value)
+const onboardingVisible = ref(false)
 const setupVisible = ref(!hasConnectedCore.value)
 
 watch(hasConnectedCore, (hasCore) => {
+	if (hasCore && onboardingVisible.value) return
 	setupVisible.value = !hasCore
 })
 const tabs = [
@@ -78,6 +80,11 @@ const statusTooltip = computed(() => {
 const clearLinkedCoreLabel = computed(() =>
 	clearingLinkedCore.value ? 'Clearing linked Core' : 'Clear linked Core',
 )
+const devViewToggleLabel = computed(() => (setupVisible.value ? 'Show dashboard' : 'Show setup'))
+const devViewToggleTooltip = computed(() =>
+	setupVisible.value ? 'Show Core dashboard' : 'Show Core setup',
+)
+const devViewToggleIcon = computed(() => (setupVisible.value ? DashboardIcon : ServerStackIcon))
 
 function selectTab(tab: { href: string }) {
 	if (tab.href === 'overview' || tab.href === 'activity') {
@@ -85,9 +92,19 @@ function selectTab(tab: { href: string }) {
 	}
 }
 
+function toggleCoreViewForDev() {
+	setupVisible.value = !setupVisible.value
+}
+
 function showOnboarding(flow: 'create' | 'connect') {
 	if (connectedCore.value) return
+	onboardingVisible.value = true
 	onboardingModal.value?.show(flow)
+}
+
+function handleOnboardingHide() {
+	onboardingVisible.value = false
+	setupVisible.value = !hasConnectedCore.value
 }
 
 function clearErrorMessage(reason: unknown): string {
@@ -125,11 +142,10 @@ async function clearLinkedCoreForDev() {
 
 <template>
 	<div class="flex min-h-full flex-col p-6">
-		<CoreOnboardingModal ref="onboardingModal" />
+		<CoreOnboardingModal ref="onboardingModal" @hide="handleOnboardingHide" />
 		<CoreHostingSettingsModal ref="settingsModal" />
-		<CoreOverviewGhost v-if="showDashboardSkeleton" />
 		<CoreSetupPanel
-			v-else-if="setupVisible && !connectedCore"
+			v-if="!showDashboardSkeleton && setupVisible"
 			@create="showOnboarding('create')"
 			@connect="showOnboarding('connect')"
 		/>
@@ -167,11 +183,22 @@ async function clearLinkedCoreForDev() {
 					</ButtonStyled>
 				</div>
 			</div>
-			<CoreAccessPanel v-if="activeTab === 'overview'" />
+			<CoreOverviewGhost v-if="showDashboardSkeleton && activeTab === 'overview'" />
+			<CoreAccessPanel v-else-if="activeTab === 'overview'" />
 			<CoreActivityPanel v-else />
 		</div>
 		<Teleport to="body">
 			<div class="fixed z-20 flex items-center gap-2" style="right: 1.25rem; bottom: 1.25rem">
+				<ButtonStyled>
+					<button
+						v-tooltip="devViewToggleTooltip"
+						class="!h-10"
+						@click="toggleCoreViewForDev"
+					>
+						<component :is="devViewToggleIcon" />
+						{{ devViewToggleLabel }}
+					</button>
+				</ButtonStyled>
 				<div class="rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg">
 					<Toggle
 						id="core-force-ghost-toggle"

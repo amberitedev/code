@@ -87,7 +87,11 @@
 							data-modal-content
 							:class="[
 								'flex-1 min-h-0',
-								props.noPadding ? '' : 'overflow-y-auto p-6 !pb-1 sm:pb-6',
+								props.noPadding
+									? ''
+									: props.disableContentScroll
+										? 'overflow-hidden p-6 !pb-1 sm:pb-6'
+										: 'overflow-y-auto p-6 !pb-1 sm:pb-6',
 								{ 'pt-12': props.mergeHeader && closable && !props.noPadding },
 							]"
 							:style="props.noPadding ? {} : { maxHeight: maxContentHeight }"
@@ -116,7 +120,11 @@
 						data-modal-content
 						:class="[
 							'min-h-0',
-							props.noPadding ? '' : 'overflow-y-auto p-6',
+							props.noPadding
+								? ''
+								: props.disableContentScroll
+									? 'overflow-hidden p-6'
+									: 'overflow-y-auto p-6',
 							{ 'pt-12': props.mergeHeader && closable && !props.noPadding },
 						]"
 					>
@@ -174,6 +182,7 @@ const props = withDefaults(
 		mergeHeader?: boolean
 		scrollable?: boolean
 		maxContentHeight?: string
+		disableContentScroll?: boolean
 		/** Removes padding from the content area. Useful for edge-to-edge layouts. */
 		noPadding?: boolean
 		/** Max width for the modal (e.g., '460px', '600px'). Defaults to '60rem'. */
@@ -201,6 +210,7 @@ const props = withDefaults(
 		// TODO: migrate all modals to use scrollable and remove this prop
 		scrollable: false,
 		maxContentHeight: '70vh',
+		disableContentScroll: false,
 		noPadding: false,
 		maxWidth: undefined,
 		width: undefined,

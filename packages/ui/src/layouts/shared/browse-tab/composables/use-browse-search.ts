@@ -24,6 +24,10 @@ export interface UseBrowseSearchOptions {
 	maxResultsOptions?: ComputedRef<number[]>
 	displayMode?: Ref<'list' | 'grid' | 'gallery'> | ComputedRef<'list' | 'grid' | 'gallery'>
 	immediateProjectTypeSearch?: boolean
+	getCachedSearchResponse?: (
+		requestParams: string,
+		projectType: string,
+	) => BrowseSearchResponse | undefined
 }
 
 export interface BrowseSearchState {
@@ -237,6 +241,20 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		return true
 	}
 
+	function restoreCachedSearchResponse(
+		requestParams = effectiveRequestParams.value,
+		projectType = options.projectType.value,
+		key = createSnapshotKey(projectType, requestParams),
+	) {
+		const response = options.getCachedSearchResponse?.(requestParams, projectType)
+		if (!response) return false
+
+		setSearchSnapshot(key, response)
+		return restoreSearchSnapshot(key, projectType)
+	}
+
+	restoreCachedSearchResponse()
+
 	watch(
 		[
 			query,
@@ -274,13 +292,19 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 				from: oldVal?.substring(0, 80),
 				to: newVal?.substring(0, 80),
 			})
-			restoreSearchSnapshot()
+			const restored = restoreSearchSnapshot() || restoreCachedSearchResponse()
 			if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
 			const projectTypeChanged = lastProjectType !== options.projectType.value
 			lastProjectType = options.projectType.value
 
 			if (options.immediateProjectTypeSearch && projectTypeChanged) {
-				void refreshSearch()
+				if (!restored) void refreshSearch()
+				else updateUrlParams()
+				return
+			}
+
+			if (restored) {
+				updateUrlParams()
 				return
 			}
 
@@ -341,6 +365,14 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			debug('refreshSearch error', err)
 			console.error('Browse search error:', err)
 			if (version === searchVersion) {
+				if (requestIsServerType) {
+					serverHits.value = []
+				} else {
+					projectHits.value = []
+				}
+				totalHits.value = 0
+				visibleResultKey.value = requestKey
+				visibleProjectType.value = requestProjectType
 				loading.value = false
 			}
 		}

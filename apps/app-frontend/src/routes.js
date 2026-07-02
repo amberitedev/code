@@ -1,11 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import BrowsePage from '@/pages/Browse.vue'
+
 const Pages = {
 	Index: () => import('@/pages/Index.vue'),
 	Worlds: () => import('@/pages/Worlds.vue'),
 	Servers: () => import('@/pages/Servers.vue'),
 	Core: () => import('@/pages/core/Index.vue'),
-	Browse: () => import('@/pages/Browse.vue'),
+	Browse: BrowsePage,
 	Skins: () => import('@/pages/Skins.vue'),
 }
 

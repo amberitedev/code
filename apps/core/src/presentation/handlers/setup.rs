@@ -24,6 +24,8 @@ pub struct SetupRequest {
     pub auth_jwks_url: String,
     /// Auth user ID of the owner (from their JWT sub).
     pub owner_user_id: String,
+    /// Display name to show for the owner in Core access lists.
+    pub owner_display_name: Option<String>,
     /// JWT audience claim to validate. Defaults to "authenticated" if omitted.
     pub auth_audience: Option<String>,
     /// Legacy one-time realtime credential issued by Convex after a successful claim.
@@ -88,6 +90,12 @@ pub async fn complete_setup(
             "owner_user_id cannot be empty".into(),
         ));
     }
+    let owner_display_name = body
+        .owner_display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     validate_https_url(&body.convex_url, "convex_url")?;
     validate_https_url(&body.auth_jwks_url, "auth_jwks_url")?;
     if let Some(url) = &body.realtime_url {
@@ -159,11 +167,12 @@ pub async fn complete_setup(
 	.map_err(|e| ApiError::Internal(e.to_string()))?;
 
     sqlx::query(
-		"INSERT INTO core_members (user_id, role, permission_preset, status, joined_at, updated_at) \
-		 VALUES (?, 'owner', 'owner', 'active', ?, ?) \
-		 ON CONFLICT(user_id) DO UPDATE SET role = 'owner', permission_preset = 'owner', status = 'active', updated_at = excluded.updated_at",
+		"INSERT INTO core_members (user_id, display_name, role, permission_preset, status, joined_at, updated_at) \
+		 VALUES (?, ?, 'owner', 'owner', 'active', ?, ?) \
+		 ON CONFLICT(user_id) DO UPDATE SET display_name = COALESCE(excluded.display_name, core_members.display_name), role = 'owner', permission_preset = 'owner', status = 'active', updated_at = excluded.updated_at",
 	)
 	.bind(&body.owner_user_id)
+	.bind(owner_display_name)
 	.bind(&now)
 	.bind(&now)
 	.execute(&state.pool)

@@ -92,6 +92,7 @@ export { default as SettingsLabel } from './SettingsLabel.vue'
 export { default as SimpleBadge } from './SimpleBadge.vue'
 export { default as Slider } from './Slider.vue'
 export { default as SmartClickable } from './SmartClickable.vue'
+export { default as SwipeDismissSurface } from './SwipeDismissSurface.vue'
 export type {
 	StageContentTransitionAxis,
 	StageContentTransitionDirection,

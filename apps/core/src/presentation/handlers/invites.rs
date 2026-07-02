@@ -64,6 +64,15 @@ pub async fn review(
         invite_service::review(&state, &claims.sub, &id, body.accept).await?
     )))
 }
+pub async fn revoke(
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!(
+        invite_service::revoke(&state, &claims.sub, &id).await?
+    )))
+}
 pub async fn respond(
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,

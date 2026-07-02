@@ -36,7 +36,6 @@ import {
 	preferencesDiffer,
 	provideBrowseManager,
 	requestInstall,
-	Toggle,
 	useBrowseSearch,
 	useDebugLogger,
 	useVIntl,
@@ -55,6 +54,7 @@ import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
 import { useCoreClient } from '@/composables/useCoreClient'
 import {
 	buildDiscoverSearchParams,
+	DISCOVER_METADATA_STALE_MS,
 	DISCOVER_PRELOAD_STALE_MS,
 	getDiscoverProjectTypeFromHref,
 	type RawDiscoverSearchResults,
@@ -138,10 +138,34 @@ const {
 } = serverInstallContent
 
 debugLog('fetching tags (categories, loaders, gameVersions)')
-const categories = ref<Labrinth.Tags.v2.Category[]>([])
-const loaders = ref<Labrinth.Tags.v2.Loader[]>([])
-const availableGameVersions = ref<Labrinth.Tags.v2.GameVersion[]>([])
-const tagsLoaded = ref(false)
+const TAG_CATEGORIES_QUERY_KEY = ['tags', 'categories'] as const
+const TAG_LOADERS_QUERY_KEY = ['tags', 'loaders'] as const
+const TAG_GAME_VERSIONS_QUERY_KEY = ['tags', 'game-versions'] as const
+
+function getFreshQueryData<T>(queryKey: readonly unknown[], staleTime: number) {
+	const state = queryClient.getQueryState<T>(queryKey)
+	if (!state || state.data === undefined) return undefined
+	if (Date.now() - state.dataUpdatedAt > staleTime) return undefined
+	return state.data
+}
+
+const cachedCategories = getFreshQueryData<Labrinth.Tags.v2.Category[]>(
+	TAG_CATEGORIES_QUERY_KEY,
+	DISCOVER_METADATA_STALE_MS,
+)
+const cachedLoaders = getFreshQueryData<Labrinth.Tags.v2.Loader[]>(
+	TAG_LOADERS_QUERY_KEY,
+	DISCOVER_METADATA_STALE_MS,
+)
+const cachedGameVersions = getFreshQueryData<Labrinth.Tags.v2.GameVersion[]>(
+	TAG_GAME_VERSIONS_QUERY_KEY,
+	DISCOVER_METADATA_STALE_MS,
+)
+
+const categories = ref<Labrinth.Tags.v2.Category[]>(cachedCategories ?? [])
+const loaders = ref<Labrinth.Tags.v2.Loader[]>(cachedLoaders ?? [])
+const availableGameVersions = ref<Labrinth.Tags.v2.GameVersion[]>(cachedGameVersions ?? [])
+const tagsLoaded = ref(!!cachedCategories && !!cachedLoaders && !!cachedGameVersions)
 
 const tags: Ref<Tags> = computed(() => ({
 	gameVersions: availableGameVersions.value ?? [],
@@ -205,7 +229,11 @@ watch(
 
 watchServerContextChanges()
 
-const contextLoaded = ref(false)
+function hasAsyncBrowseContext() {
+	return !!route.query.i || !!serverIdQuery.value
+}
+
+const contextLoaded = ref(!hasAsyncBrowseContext())
 
 async function refreshInstalledProjectIds() {
 	if (!route.query.i) return
@@ -1168,15 +1196,12 @@ function onSearchResultsInstalled(ids: string[]) {
 	newlyInstalled.value = Array.from(new Set([...newlyInstalled.value, ...ids]))
 }
 
-async function search(requestParams: string, searchProjectType: ProjectType = projectType.value) {
-	debugLog('searching v3', requestParams)
+function createBrowseSearchResponse(
+	rawResults: RawDiscoverSearchResults,
+	searchProjectType: ProjectType,
+	requestParams: string,
+) {
 	const isServer = searchProjectType === 'server'
-
-	const rawResults = await queryClient.fetchQuery({
-		queryKey: ['search', 'v3', requestParams],
-		queryFn: () => get_search_results_v3(requestParams) as Promise<RawDiscoverSearchResults>,
-		staleTime: DISCOVER_PRELOAD_STALE_MS,
-	})
 
 	if (!rawResults) {
 		return {
@@ -1233,13 +1258,39 @@ async function search(requestParams: string, searchProjectType: ProjectType = pr
 	}
 }
 
+function getCachedSearchResponse(requestParams: string, searchProjectType: string) {
+	if (!tagsLoaded.value) return undefined
+	if (hasAsyncBrowseContext()) return undefined
+
+	const rawResults = getFreshQueryData<RawDiscoverSearchResults>(
+		['search', 'v3', requestParams],
+		DISCOVER_PRELOAD_STALE_MS,
+	)
+	if (rawResults === undefined) return undefined
+
+	return createBrowseSearchResponse(rawResults, searchProjectType as ProjectType, requestParams)
+}
+
+async function search(requestParams: string, searchProjectType: ProjectType = projectType.value) {
+	debugLog('searching v3', requestParams)
+	const rawResults = await queryClient.fetchQuery({
+		queryKey: ['search', 'v3', requestParams],
+		queryFn: () => get_search_results_v3(requestParams) as Promise<RawDiscoverSearchResults>,
+		staleTime: DISCOVER_PRELOAD_STALE_MS,
+	})
+
+	return createBrowseSearchResponse(rawResults, searchProjectType, requestParams)
+}
+
 function preloadProjectType(type: ProjectType) {
 	if (!tagsLoaded.value || !contextLoaded.value || type === projectType.value) return
 
-	const requestParams = buildDiscoverSearchParams(type)
-	void search(requestParams, type)
-		.then((response) => {
-			searchState.cacheSearchResponse(type, requestParams, response)
+	const requestParams = buildDiscoverSearchParams(type, searchState.maxResults.value)
+	void queryClient
+		.prefetchQuery({
+			queryKey: ['search', 'v3', requestParams],
+			queryFn: () => get_search_results_v3(requestParams) as Promise<RawDiscoverSearchResults>,
+			staleTime: DISCOVER_PRELOAD_STALE_MS,
 		})
 		.catch(() => undefined)
 }
@@ -1278,6 +1329,7 @@ const searchState = useBrowseSearch({
 	tags,
 	providedFilters: combinedProvidedFilters,
 	search,
+	getCachedSearchResponse,
 	immediateProjectTypeSearch: true,
 	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
@@ -1321,6 +1373,7 @@ if (instance.value?.game_version) {
 	}
 }
 
+const BROWSE_GHOST_DELAY_MS = 80
 const browseInitialPending = computed(
 	() =>
 		!tagsLoaded.value ||
@@ -1336,7 +1389,6 @@ const hasBrowseContent = computed(() =>
 		: searchState.projectHits.value.length > 0,
 )
 const hasMountedBrowseLayout = ref(false)
-const forceBrowseGhost = ref(false)
 const browseReadyForLayout = computed(() => !browseInitialPending.value || hasBrowseContent.value)
 watch(
 	browseReadyForLayout,
@@ -1347,33 +1399,72 @@ watch(
 	},
 	{ immediate: true },
 )
+const browseGhostVisible = ref(false)
+let browseGhostDelayTimer: ReturnType<typeof setTimeout> | null = null
 const showBrowseGhost = computed(
-	() => forceBrowseGhost.value || (!hasMountedBrowseLayout.value && browseInitialPending.value),
+	() => browseGhostVisible.value && !hasMountedBrowseLayout.value && browseInitialPending.value,
 )
-const showBrowseLayout = computed(() => hasMountedBrowseLayout.value && !forceBrowseGhost.value)
+const showBrowseLayout = computed(() => hasMountedBrowseLayout.value)
+
+function clearBrowseGhostDelayTimer() {
+	if (browseGhostDelayTimer === null) return
+
+	clearTimeout(browseGhostDelayTimer)
+	browseGhostDelayTimer = null
+}
+
+function scheduleBrowseGhostDelay() {
+	clearBrowseGhostDelayTimer()
+	browseGhostDelayTimer = setTimeout(() => {
+		browseGhostDelayTimer = null
+		if (browseInitialPending.value && !hasMountedBrowseLayout.value) {
+			browseGhostVisible.value = true
+		}
+	}, BROWSE_GHOST_DELAY_MS)
+}
+
+watch(
+	() => [browseInitialPending.value, hasMountedBrowseLayout.value],
+	([pending, mounted]) => {
+		if (pending && !mounted) {
+			scheduleBrowseGhostDelay()
+			return
+		}
+
+		clearBrowseGhostDelayTimer()
+		browseGhostVisible.value = false
+	},
+	{ immediate: true },
+)
 
 onMounted(async () => {
-	contextLoaded.value = false
+	contextLoaded.value = !hasAsyncBrowseContext()
+	const canRefreshSearchDuringMetadataLoad =
+		!hasAsyncBrowseContext() && Object.keys(route.query).length === 0
+	const initialSearchRefresh = canRefreshSearchDuringMetadataLoad
+		? searchState.refreshSearch()
+		: null
+
 	const [nextCategories, nextLoaders, nextGameVersions] = await Promise.all([
 		queryClient
 			.fetchQuery({
-				queryKey: ['tags', 'categories'],
+				queryKey: TAG_CATEGORIES_QUERY_KEY,
 				queryFn: get_categories,
-				staleTime: 10 * 60_000,
+				staleTime: DISCOVER_METADATA_STALE_MS,
 			})
 			.catch(handleError),
 		queryClient
 			.fetchQuery({
-				queryKey: ['tags', 'loaders'],
+				queryKey: TAG_LOADERS_QUERY_KEY,
 				queryFn: get_loaders,
-				staleTime: 10 * 60_000,
+				staleTime: DISCOVER_METADATA_STALE_MS,
 			})
 			.catch(handleError),
 		queryClient
 			.fetchQuery({
-				queryKey: ['tags', 'game-versions'],
+				queryKey: TAG_GAME_VERSIONS_QUERY_KEY,
 				queryFn: get_game_versions,
-				staleTime: 10 * 60_000,
+				staleTime: DISCOVER_METADATA_STALE_MS,
 			})
 			.catch(handleError),
 	])
@@ -1383,7 +1474,7 @@ onMounted(async () => {
 	tagsLoaded.value = true
 	await initInstanceContext()
 	contextLoaded.value = true
-	await searchState.refreshSearch()
+	await (initialSearchRefresh ?? searchState.refreshSearch())
 	preloadSelectableProjectTypes()
 })
 
@@ -1416,6 +1507,7 @@ onMounted(() => {
 
 onUnmounted(() => {
 	isUnmounted = true
+	clearBrowseGhostDelayTimer()
 	unlistenProfiles?.()
 })
 
@@ -1431,6 +1523,7 @@ provideBrowseManager({
 	tags,
 	projectType,
 	...searchState,
+	transitioning: browseTransitioning,
 	getProjectLink: (result: Labrinth.Search.v2.ResultSearchProject) => ({
 		path: `/project/${result.project_id ?? result.slug}`,
 		query: getProjectBrowseQuery(),
@@ -1540,20 +1633,6 @@ provideBrowseManager({
 					class="browse-sidebar-transition-lock"
 					aria-hidden="true"
 				></div>
-			</div>
-		</Teleport>
-		<Teleport to="body">
-			<div
-				class="fixed z-20 rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg"
-				style="right: 1.25rem; bottom: 1.25rem"
-			>
-				<Toggle
-					id="browse-force-ghost-toggle"
-					v-model="forceBrowseGhost"
-					v-tooltip="'Show browse ghost'"
-					small
-					aria-label="Show browse ghost"
-				/>
 			</div>
 		</Teleport>
 	</div>

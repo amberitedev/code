@@ -38,10 +38,10 @@ const DEFAULT_MAX_ITEMS = 14
 
 function toRect(rect: DOMRect | BrowseFreezeFrameRect): BrowseFreezeFrameRect {
 	return {
-		left: Math.round(rect.left),
-		top: Math.round(rect.top),
-		width: Math.round(rect.width),
-		height: Math.round(rect.height),
+		left: rect.left,
+		top: rect.top,
+		width: rect.width,
+		height: rect.height,
 	}
 }
 
@@ -50,8 +50,8 @@ function toMeasuredRect(rect: DOMRect | BrowseFreezeFrameRect): MeasuredRect {
 
 	return {
 		...base,
-		right: Math.round('right' in rect ? rect.right : rect.left + rect.width),
-		bottom: Math.round('bottom' in rect ? rect.bottom : rect.top + rect.height),
+		right: 'right' in rect ? rect.right : rect.left + rect.width,
+		bottom: 'bottom' in rect ? rect.bottom : rect.top + rect.height,
 	}
 }
 
@@ -103,6 +103,8 @@ function cloneFreezeFrameElement(element: HTMLElement, rect: BrowseFreezeFrameRe
 
 	clone.removeAttribute('id')
 	clone.setAttribute('aria-hidden', 'true')
+	clone.setAttribute('data-browse-freeze-frame-clone', '')
+	clone.classList.add('app-browse-freeze-frame__clone')
 	;(clone as HTMLElement & { inert?: boolean }).inert = true
 
 	for (const child of clone.querySelectorAll<HTMLElement>('[id]')) {
@@ -131,8 +133,11 @@ function cloneFreezeFrameElement(element: HTMLElement, rect: BrowseFreezeFrameRe
 		transform: 'none',
 		transformOrigin: 'center',
 		boxSizing: 'border-box',
+		maxWidth: 'none',
+		minWidth: '0',
 		pointerEvents: 'none',
 		contain: 'layout paint',
+		transition: 'none',
 		willChange: 'opacity, transform',
 	})
 

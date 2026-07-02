@@ -9,7 +9,7 @@ use crate::application::{
 
 pub const MAX_ACTIVE_ROLES: i64 = 4;
 
-#[derive(Debug, Serialize, sqlx::FromRow, Clone)]
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow, Clone)]
 pub struct CoreRole {
     pub id: String,
     pub name: String,

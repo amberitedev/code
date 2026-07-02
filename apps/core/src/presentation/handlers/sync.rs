@@ -56,8 +56,9 @@ pub async fn create_sync_profile_from_mrpack(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
-    let (archive, metadata, _) = parse_mrpack_multipart(&mut multipart).await?;
-    let req =
+    let (archive, metadata, notes) =
+        parse_mrpack_multipart(&mut multipart).await?;
+    let mut req =
         metadata.unwrap_or(social_models::CreateSyncProfileFromMrpackRequest {
             name: None,
             client_profile_id: None,
@@ -65,6 +66,9 @@ pub async fn create_sync_profile_from_mrpack(
             sync_enabled: None,
             notes: None,
         });
+    if req.notes.is_none() {
+        req.notes = notes;
+    }
     require_profile_target_permission(
         &state,
         &claims.sub,
@@ -112,7 +116,9 @@ pub async fn publish_snapshot(
         "server:content",
     )
     .await?;
-    let (archive, _, notes) = parse_mrpack_multipart(&mut multipart).await?;
+    let (archive, metadata, notes) =
+        parse_mrpack_multipart(&mut multipart).await?;
+    let notes = notes.or_else(|| metadata.and_then(|metadata| metadata.notes));
     Ok(Json(json!(
         social_sync_service::publish_snapshot(
             &state,

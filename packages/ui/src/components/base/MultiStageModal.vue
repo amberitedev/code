@@ -1,8 +1,9 @@
 <template>
 	<NewModal
 		ref="modal"
-		:scrollable="true"
-		max-content-height="72vh"
+		:scrollable="scrollable"
+		:max-content-height="maxContentHeight"
+		:disable-content-scroll="disableContentScroll"
 		:on-hide="onModalHide"
 		:closable="true"
 		:close-on-click-outside="closeOnClickOutside"
@@ -181,11 +182,17 @@ const props = withDefaults(
 		fade?: 'standard' | 'warning' | 'danger'
 		disableProgress?: boolean
 		closeOnClickOutside?: boolean
+		scrollable?: boolean
+		disableContentScroll?: boolean
+		maxContentHeight?: string
 		stageTransitionAxis?: StageContentTransitionAxis
 		stageTransitionDirection?: StageContentTransitionDirection
 	}>(),
 	{
 		closeOnClickOutside: true,
+		scrollable: true,
+		disableContentScroll: false,
+		maxContentHeight: '72vh',
 		stageTransitionAxis: 'horizontal',
 		stageTransitionDirection: undefined,
 	},

@@ -1,16 +1,6 @@
 import { CpuIcon, DatabaseIcon, FolderOpenIcon } from '@modrinth/assets'
 import type { Component } from 'vue'
 
-/**
- * Pure chart/metric helpers for the forked Core server stats card.
- *
- * Extracted from `@modrinth/ui`'s ServerManageStats so the desktop app can own a
- * Core-native variant (storage links to the local instance files page) without
- * editing the shared component library.
- *
- * Key exports: GRAPH_SIZE, padGraph, buildChartOptions, buildMetrics, ServerMetric.
- */
-
 export const GRAPH_SIZE = 10
 
 export const CPU_DATA_MAX = 104

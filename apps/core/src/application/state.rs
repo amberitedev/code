@@ -185,25 +185,39 @@ impl AppState {
 
     /// JWKS URL written during setup for the active auth provider.
     pub async fn jwks_url(&self) -> Option<String> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT auth_jwks_url FROM core_config WHERE id = 1",
+        let row: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT auth_jwks_url, convex_url FROM core_config WHERE id = 1",
         )
         .fetch_optional(&self.pool)
         .await
         .ok()
         .flatten();
-        row.map(|(url,)| url)
+        row.map(|(url, convex_url)| {
+            normalize_convex_jwks_url(&url, convex_url.as_deref())
+        })
     }
 
     /// Expected JWT audience for the active auth provider.
     pub async fn auth_audience(&self) -> Option<String> {
-        sqlx::query_scalar::<_, String>(
-            "SELECT auth_audience FROM core_config WHERE id = 1",
+        let row: Option<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT auth_audience, auth_jwks_url, convex_url FROM core_config WHERE id = 1",
         )
         .fetch_optional(&self.pool)
         .await
         .ok()
-        .flatten()
+        .flatten();
+        row.map(|(audience, jwks_url, convex_url)| {
+            if audience == "authenticated"
+                && is_convex_jwks_url(&normalize_convex_jwks_url(
+                    &jwks_url,
+                    convex_url.as_deref(),
+                ))
+            {
+                "convex".to_string()
+            } else {
+                audience
+            }
+        })
     }
 
     /// Owner user id written during setup. Only this user may administer Core.
@@ -289,9 +303,53 @@ pub fn generate_setup_secret() -> String {
     Uuid::new_v4().to_string()
 }
 
+fn normalize_convex_jwks_url(
+    auth_jwks_url: &str,
+    convex_url: Option<&str>,
+) -> String {
+    if is_convex_cloud_jwks_url(auth_jwks_url) {
+        return auth_jwks_url.replace(".convex.cloud/", ".convex.site/");
+    }
+
+    let Some(convex_url) = convex_url else {
+        return auth_jwks_url.to_string();
+    };
+    let legacy = format!(
+        "{}/.well-known/jwks.json",
+        convex_url.trim_end_matches('/')
+    );
+    if auth_jwks_url == legacy && convex_url.contains(".convex.cloud") {
+        return legacy.replace(".convex.cloud/", ".convex.site/");
+    }
+
+    auth_jwks_url.to_string()
+}
+
+fn is_convex_cloud_jwks_url(value: &str) -> bool {
+    url::Url::parse(value)
+        .ok()
+        .is_some_and(|url| {
+            url.host_str()
+                .is_some_and(|host| host.ends_with(".convex.cloud"))
+                && url.path() == "/.well-known/jwks.json"
+        })
+}
+
+fn is_convex_jwks_url(value: &str) -> bool {
+    url::Url::parse(value)
+        .ok()
+        .is_some_and(|url| {
+            url.host_str()
+                .is_some_and(|host| host.ends_with(".convex.site"))
+                && url.path() == "/.well-known/jwks.json"
+        })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_pairing_code, generate_pairing_code};
+    use super::{
+        format_pairing_code, generate_pairing_code, normalize_convex_jwks_url,
+    };
 
     #[test]
     fn pairing_codes_are_stored_canonically_and_formatted_for_display() {
@@ -309,5 +367,23 @@ mod tests {
         assert!(display.chars().all(|character| character == '-'
             || character.is_ascii_uppercase()
             || character.is_ascii_digit()));
+    }
+
+    #[test]
+    fn normalizes_convex_cloud_jwks_to_site_jwks() {
+        assert_eq!(
+            normalize_convex_jwks_url(
+                "https://example.convex.cloud/.well-known/jwks.json",
+                None,
+            ),
+            "https://example.convex.site/.well-known/jwks.json",
+        );
+        assert_eq!(
+            normalize_convex_jwks_url(
+                "https://example.convex.cloud/.well-known/jwks.json",
+                Some("https://example.convex.cloud"),
+            ),
+            "https://example.convex.site/.well-known/jwks.json",
+        );
     }
 }

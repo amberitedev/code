@@ -1,5 +1,5 @@
 <template>
-	<div class="flex max-w-lg flex-col items-center rounded-3xl bg-bg-raised p-8 shadow-xl">
+	<div class="error-information-card flex max-w-lg flex-col items-center rounded-3xl bg-bg-raised p-8 shadow-xl">
 		<div class="flex flex-col items-center text-center">
 			<div class="flex flex-col items-center gap-4">
 				<div class="grid place-content-center rounded-full bg-bg-orange p-4">
@@ -119,3 +119,24 @@ const copyErrorInformation = async () => {
 	}, 2000)
 }
 </script>
+
+<style scoped lang="scss">
+@media (prefers-reduced-motion: no-preference) {
+	.error-information-card {
+		animation: error-information-card-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+		transform-origin: center;
+	}
+
+	@keyframes error-information-card-enter {
+		from {
+			opacity: 0;
+			transform: translate3d(0, 0.75rem, 0) scale(0.98);
+		}
+
+		to {
+			opacity: 1;
+			transform: translate3d(0, 0, 0) scale(1);
+		}
+	}
+}
+</style>

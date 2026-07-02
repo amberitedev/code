@@ -1,18 +1,3 @@
-/**
- * Raw HTTP fetch functions for every Copal endpoint.
- * Each function accepts a `CoreCallContext` and returns a typed promise.
- *
- * Key functions: get/list/create/delete/patch instances, start/stop/kill/restart,
- * issueWsTicket, listMods/addMod/addModProject/uploadMod/deleteMod/toggleMod/updateMod/updateAllMods,
- * getStats, listLogs/readLog, listCrashReports/readCrashReport,
- * getProperties/patchProperties, listFs/downloadFile/deleteFs/uploadFile,
- * listBackups/createBackup/deleteBackup/deleteManyBackups/lockBackup/restoreBackup,
- * getBackupSchedule/setBackupSchedule,
- * getCoreMetadata/updateCoreMetadata/listCoreMembers/upsertCoreMember/removeCoreMember,
- * listSyncProfiles/registerSyncProfile/removeSyncProfile,
- * getModpack/removeModpack/exportModpack/installModpackFile.
- */
-
 import type { CoreCallContext } from './context'
 import type {
 	CoreInstance,
@@ -68,6 +53,7 @@ import type {
 	CoreSyncEvent,
 	CoreSyncSnapshotPublishResult,
 	CoreSyncVersionStatus,
+	CorePublishSyncSnapshotMetadata,
 } from './types'
 import { NetworkError, CoreApiError } from './errors'
 
@@ -1002,6 +988,11 @@ export function reviewCoreInvitation(
 		body: JSON.stringify({ accept }),
 	})
 }
+export function revokeCoreInvitation(ctx: CoreCallContext, id: string): Promise<CoreInvitation> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations/${encodeURIComponent(id)}`, {
+		method: 'DELETE',
+	})
+}
 export function respondToCoreInvitation(
 	ctx: CoreCallContext,
 	id: string,
@@ -1120,11 +1111,13 @@ export function publishSyncSnapshot(
 	ctx: CoreCallContext,
 	profileId: string,
 	file: File,
-	notes?: string,
+	metadata?: string | CorePublishSyncSnapshotMetadata,
 ): Promise<CoreSyncSnapshotPublishResult> {
 	const form = new FormData()
 	form.append('mrpack', file, file.name)
+	const notes = typeof metadata === 'string' ? metadata : metadata?.notes
 	if (notes) form.append('notes', notes)
+	if (metadata && typeof metadata !== 'string') form.append('metadata', JSON.stringify(metadata))
 	return apiFetch(ctx, `${ctx.baseUrl}/sync/profiles/${encodeURIComponent(profileId)}/snapshots`, {
 		method: 'POST',
 		body: form,

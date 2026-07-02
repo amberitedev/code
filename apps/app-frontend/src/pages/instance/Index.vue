@@ -1,7 +1,13 @@
 <template>
-	<div v-if="instance" :class="{ 'flex h-full flex-col': isFixedRender }">
+	<div
+		v-if="instance"
+		data-library-instance-page-ready
+		:class="{ 'flex h-full flex-col': isFixedRender }"
+		:data-library-instance-title="instance.name"
+		:data-library-instance-subtitle="instancePreviewSubtitle"
+	>
 		<div
-			:class="['p-6 pr-2 pb-4', { 'shrink-0': isFixedRender }]"
+			:class="['p-6 pb-4', { 'shrink-0': isFixedRender }]"
 			@contextmenu.prevent.stop="(event) => handleRightClick(event)"
 		>
 			<ExportModal ref="exportModal" :instance="instance" />
@@ -768,6 +774,14 @@ const timePlayedHumanized = computed(() => {
 
 	const seconds = Math.floor(duration.asSeconds())
 	return seconds + ' second' + (seconds > 1 ? 's' : '')
+})
+const instancePreviewSubtitle = computed(() => {
+	if (!instance.value) return ''
+
+	const base = `${instance.value.loader} ${instance.value.game_version}`
+	return showInstancePlayTime.value && timePlayed.value > 0
+		? `${base} - ${timePlayedHumanized.value}`
+		: base
 })
 
 onUnmounted(() => {

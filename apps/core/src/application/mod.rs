@@ -28,6 +28,7 @@ pub mod stats_service;
 pub mod sync_apply_service;
 pub mod sync_archive_service;
 pub mod sync_mrpack_files;
+pub mod sync_mrpack_plan;
 pub mod sync_profile_support;
 pub mod sync_query_service;
 pub mod task_scheduler;

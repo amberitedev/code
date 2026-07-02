@@ -302,47 +302,37 @@ const pageContentKey = computed(() =>
 </script>
 <template>
 	<div class="grid-display">
-		<div class="grid-display-controls-stage">
-			<Transition :name="contentTransitionName">
-				<div
-					v-if="contentVisible"
-					:key="`${pageContentKey}:controls`"
-					class="grid-display-controls-frame"
-				>
-					<div class="grid-display-controls">
-						<StyledInput
-							v-model="search"
-							:icon="SearchIcon"
-							type="text"
-							placeholder="Search"
-							clearable
-							wrapper-class="flex-1"
-						/>
-						<DropdownSelect
-							v-slot="{ selected }"
-							v-model="state.sortBy"
-							name="Sort Dropdown"
-							class="max-w-[16rem]"
-							:options="['Name', 'Last played', 'Date created', 'Date modified', 'Game version']"
-							placeholder="Select..."
-						>
-							<span class="font-semibold text-primary">Sort by: </span>
-							<span class="font-semibold text-secondary">{{ selected }}</span>
-						</DropdownSelect>
-						<DropdownSelect
-							v-slot="{ selected }"
-							v-model="state.group"
-							class="max-w-[16rem]"
-							name="Group Dropdown"
-							:options="['Group', 'Loader', 'Game version', 'None']"
-							placeholder="Select..."
-						>
-							<span class="font-semibold text-primary">Group by: </span>
-							<span class="font-semibold text-secondary">{{ selected }}</span>
-						</DropdownSelect>
-					</div>
-				</div>
-			</Transition>
+		<div class="grid-display-controls">
+			<StyledInput
+				v-model="search"
+				:icon="SearchIcon"
+				type="text"
+				placeholder="Search"
+				clearable
+				wrapper-class="flex-1"
+			/>
+			<DropdownSelect
+				v-slot="{ selected }"
+				v-model="state.sortBy"
+				name="Sort Dropdown"
+				class="max-w-[16rem]"
+				:options="['Name', 'Last played', 'Date created', 'Date modified', 'Game version']"
+				placeholder="Select..."
+			>
+				<span class="font-semibold text-primary">Sort by: </span>
+				<span class="font-semibold text-secondary">{{ selected }}</span>
+			</DropdownSelect>
+			<DropdownSelect
+				v-slot="{ selected }"
+				v-model="state.group"
+				class="max-w-[16rem]"
+				name="Group Dropdown"
+				:options="['Group', 'Loader', 'Game version', 'None']"
+				placeholder="Select..."
+			>
+				<span class="font-semibold text-primary">Group by: </span>
+				<span class="font-semibold text-secondary">{{ selected }}</span>
+			</DropdownSelect>
 		</div>
 		<div class="grid-display-results-stage">
 			<Transition :name="contentTransitionName">
@@ -415,19 +405,6 @@ const pageContentKey = computed(() =>
 	display: flex;
 	flex-direction: column;
 	gap: 0.75rem;
-}
-
-.grid-display-controls-stage {
-	display: grid;
-	min-width: 0;
-	overflow: visible;
-}
-
-.grid-display-controls-frame {
-	grid-area: 1 / 1;
-	min-width: 0;
-	width: 100%;
-	background: var(--color-bg);
 }
 
 .grid-display-controls {
@@ -583,7 +560,7 @@ const pageContentKey = computed(() =>
 
 .instances {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
 	width: 100%;
 	gap: 0.75rem;
 	margin-right: auto;

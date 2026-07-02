@@ -89,6 +89,10 @@ export function createDesktopAdapter(): PlatformAdapter {
 			await invoke('plugin:auth|set_amberite_session_refresh_token', { refreshToken })
 		},
 
+		async getLocalSetupSecret(): Promise<string | null> {
+			return await invoke<string | null>('plugin:auth|get_amberite_local_setup_secret')
+		},
+
 		// Opens external URLs (OAuth, docs, etc.) in the system browser.
 		openExternalAuth(url: string): void {
 			openUrl(url).catch((e) => console.error('[DesktopAdapter] openExternalAuth failed:', e))

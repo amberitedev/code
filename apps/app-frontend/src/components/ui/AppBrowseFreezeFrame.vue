@@ -37,4 +37,10 @@ onBeforeUnmount(() => {
 	inset: 0;
 	pointer-events: none;
 }
+
+.app-browse-freeze-frame :deep(.app-browse-freeze-frame__clone),
+.app-browse-freeze-frame :deep(.app-browse-freeze-frame__clone *) {
+	animation-play-state: paused !important;
+	transition: none !important;
+}
 </style>

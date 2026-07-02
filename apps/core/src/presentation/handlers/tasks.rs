@@ -15,8 +15,7 @@ use crate::{
         },
     },
     presentation::{
-        error::ApiError,
-        extractors::AuthUser,
+        error::ApiError, extractors::AuthUser,
         instance_path::resolve_authorized_instance_id,
     },
 };

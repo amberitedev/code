@@ -136,7 +136,10 @@ impl InstanceStore for InstanceRepo {
         row.try_into()
     }
 
-    async fn get_by_path(&self, path: &str) -> Result<InstanceRecord, StoreError> {
+    async fn get_by_path(
+        &self,
+        path: &str,
+    ) -> Result<InstanceRecord, StoreError> {
         let row = sqlx::query_as::<_, InstanceRow>(
             "SELECT * FROM instances WHERE path = ?",
         )

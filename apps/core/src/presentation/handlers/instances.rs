@@ -73,7 +73,9 @@ pub async fn list_instances(
     let mut instances = Vec::new();
     for record in records {
         let instance_id = record.id.to_string();
-        if can_access_instance(&state, &claims.sub, &instance_id, "server:view").await {
+        if can_access_instance(&state, &claims.sub, &instance_id, "server:view")
+            .await
+        {
             instances.push(record_list_item(&record));
         }
     }
@@ -88,8 +90,13 @@ pub async fn get_instance(
 ) -> Result<Json<Value>, ApiError> {
     let record = resolve_instance_path(&state, &path).await?;
     let instance_id = record.id.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:view")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:view",
+    )
+    .await?;
     Ok(Json(record_detail(&record)))
 }
 
@@ -178,8 +185,13 @@ pub async fn patch_instance(
     let mut record = resolve_instance_path(&state, &path).await?;
     let iid = record.id.clone();
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:settings",
+    )
+    .await?;
 
     if let Some(ref name) = body.name {
         if name.trim().is_empty() {
@@ -254,8 +266,13 @@ pub async fn get_startup(
 ) -> Result<Json<Value>, ApiError> {
     let record = resolve_instance_path(&state, &path).await?;
     let instance_id = record.id.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:settings",
+    )
+    .await?;
     let (def_java, def_args) = default_launch_args(&state, &record).await;
     let (eff_java, eff_args) = resolve_launch(&state, &record).await;
     Ok(Json(json!({
@@ -293,8 +310,13 @@ pub async fn delete_instance(
     let record = resolve_instance_path(&state, &path).await?;
     let iid = record.id;
     let instance_id = iid.to_string();
-    require_instance_permission(&state, &claims.sub, &instance_id, "server:settings")
-        .await?;
+    require_instance_permission(
+        &state,
+        &claims.sub,
+        &instance_id,
+        "server:settings",
+    )
+    .await?;
 
     svc_delete_instance(&state, &iid).await?;
     activity_service::record(

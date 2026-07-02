@@ -13,14 +13,32 @@ import {
 import AdvancedStage from './stages/AdvancedStage.vue'
 import CodeStage from './stages/CodeStage.vue'
 import MembersStage from './stages/MembersStage.vue'
+import StartStage from './stages/StartStage.vue'
 import { useCoreOnboardingState } from './use-core-onboarding-state'
 
 const modal = ref<ComponentExposed<typeof MultiStageModal> | null>(null)
 const onboarding = useCoreOnboardingState(modal)
+const emit = defineEmits<{ hide: [] }>()
 
 provideCoreOnboardingContext(onboarding.ctx)
 
 const stages: StageConfigInput<CoreOnboardingContext>[] = [
+	{
+		id: 'start',
+		title: 'Start',
+		stageContent: StartStage,
+		skip: (ctx) => ctx.flow.value !== 'create',
+		cannotNavigateForward: () => true,
+		leftButtonConfig: null,
+		rightButtonConfig: {
+			label: 'Start',
+			icon: RightArrowIcon,
+			iconPosition: 'after',
+			color: 'brand',
+			onClick: () => modal.value?.nextStage(),
+		},
+		maxWidth: '800px',
+	},
 	{
 		id: 'connect',
 		title: 'Connect',
@@ -49,10 +67,7 @@ const stages: StageConfigInput<CoreOnboardingContext>[] = [
 		id: 'members',
 		title: 'Members',
 		stageContent: MembersStage,
-		leftButtonConfig: (ctx) =>
-			ctx.flow.value === 'create'
-				? null
-				: { label: 'Back', onClick: () => modal.value?.prevStage() },
+		leftButtonConfig: { label: 'Back', onClick: () => modal.value?.prevStage() },
 		rightButtonConfig: {
 			label: 'Next',
 			icon: RightArrowIcon,
@@ -83,9 +98,23 @@ function show(flow: CoreOnboardingFlow) {
 	onboarding.show(flow)
 }
 
+function handleHide() {
+	onboarding.handleModalHide()
+	emit('hide')
+}
+
 defineExpose({ show })
 </script>
 
 <template>
-	<MultiStageModal ref="modal" :stages="stages" :context="onboarding.ctx" breadcrumbs />
+	<MultiStageModal
+		ref="modal"
+		:stages="stages"
+		:context="onboarding.ctx"
+		breadcrumbs
+		disable-progress
+		:scrollable="false"
+		disable-content-scroll
+		@hide="handleHide"
+	/>
 </template>

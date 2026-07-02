@@ -1,3 +1,10 @@
+//! Tauri shell entrypoint.
+//!
+//! Key functions:
+//! - `initialize_state` (line 37) prepares app state and filesystem scopes.
+//! - `show_window` (line 58) reveals the main window after Vue mounts.
+//! - `main` (line 124) wires plugins, commands, lifecycle hooks, deep links, and updater behavior.
+
 #![cfg_attr(
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
@@ -6,7 +13,7 @@
 
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::env;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Listener, Manager};
 use tauri_plugin_fs::FsExt;
 use theseus::prelude::*;
@@ -22,7 +29,9 @@ mod updater_impl;
 #[cfg(not(feature = "updater"))]
 mod updater_impl_noop;
 
-// Should be called in launcher initialization
+static MAIN_WINDOW_HAS_BEEN_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// Should be called in launcher initialization.
 #[tracing::instrument(skip_all)]
 #[tauri::command]
 async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
@@ -43,7 +52,7 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
     Ok(())
 }
 
-// Should be call once Vue has mounted the app
+/// Should be called once Vue has mounted the app.
 #[tracing::instrument(skip_all)]
 #[tauri::command]
 fn show_window(app: tauri::AppHandle) {
@@ -59,7 +68,9 @@ fn show_window(app: tauri::AppHandle) {
             .show()
             .unwrap();
         panic!("cannot display application window")
-    } else {
+    }
+
+    if !MAIN_WINDOW_HAS_BEEN_SHOWN.swap(true, Ordering::Relaxed) {
         let _ = win.set_focus();
     }
 }

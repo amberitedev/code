@@ -12,8 +12,7 @@ use crate::{
         patch_properties, read_properties,
     },
     presentation::{
-        error::ApiError,
-        extractors::AuthUser,
+        error::ApiError, extractors::AuthUser,
         instance_path::resolve_authorized_instance_id,
     },
 };

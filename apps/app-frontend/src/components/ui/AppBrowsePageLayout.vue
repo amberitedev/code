@@ -2,8 +2,7 @@
 /**
  * App browse layout.
  * - sortOptions (90) and projectTypeTabController (134) adapt shared browse state to controls and tab motion.
- * - createBrowseFreezeFrame (259) captures real outgoing card DOM for tab switch visuals.
- * - prepareIncomingBrowseContent (366) limits incoming rendering to the first card slice during motion.
+ * - prepareIncomingBrowseContent limits incoming rendering to the first card slice during motion.
  * - AppFreezeFrameTransition (568) wraps the result list; ProjectCard rendering starts at 606 and 673.
  */
 import type { Labrinth } from '@modrinth/api-client'
@@ -29,27 +28,21 @@ import {
 	type UiMotionDirection,
 	StyledInput,
 	TextMorph,
+	UI_MOTION_NAV_TABS_SLIDER_MS,
+	UI_MOTION_NAV_TABS_SLIDER_STAGGER_DELAY_MS,
 	useNavTabContentController,
 	useStickyObserver,
 	useVIntl,
 } from '@modrinth/ui'
 import type { ComponentPublicInstance } from 'vue'
-import { computed, nextTick, onUnmounted, ref, toValue, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, shallowRef, toValue, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import AppBrowseFreezeFrame from '@/components/ui/AppBrowseFreezeFrame.vue'
 import AppFreezeFrameTransition from '@/components/ui/AppFreezeFrameTransition.vue'
 import AppJoinedButtons from '@/components/ui/AppJoinedButtons.vue'
 import { getDiscoverProjectTypeFromHref } from '@/composables/useDiscoverContentPreload'
 
-import type {
-	BrowseDomFreezeFrameSnapshot,
-	BrowseFreezeFrameSource,
-} from './browse-freeze-frame'
-import {
-	createBrowseDomFreezeFrameSnapshot,
-	decodeImagesInElement,
-} from './browse-freeze-frame'
+import { decodeImagesInElement } from './browse-freeze-frame'
 
 interface AppCardAction extends CardAction {
 	joinedActions?: AppCardAction[]
@@ -72,12 +65,33 @@ const { isStuck: isControlsStuck } = useStickyObserver(stickyControlsRef, 'Brows
 const cardFrameElements = new Map<string, { element: HTMLElement; index: number }>()
 const transitionActive = ref(false)
 const renderedCardLimit = ref<number | null>(null)
+const visibleControlsProjectType = ref(ctx.visibleProjectType?.value ?? ctx.projectType.value)
+const visibleControlFilters = shallowRef(
+	ctx.filters.value.filter((filter) => filter.display !== 'none'),
+)
+const visibleServerFilterTypes = shallowRef(ctx.serverFilterTypes.value)
 
-const BROWSE_FREEZE_FRAME_OVERSCAN_PX = 160
-const BROWSE_FREEZE_FRAME_MAX_CARDS = 14
 const BROWSE_INCOMING_PREVIEW_CARD_COUNT = 6
 const BROWSE_PROGRESSIVE_CARD_BATCH_SIZE = 12
 const BROWSE_PROGRESSIVE_CARD_BATCH_DELAY_MS = 16
+const BROWSE_HEIGHT_RELEASE_DELAY_MS = 220
+const BROWSE_NAV_SLIDER_QUIET_BUFFER_MS = 32
+const BROWSE_NAV_SLIDER_QUIET_WINDOW_MS =
+	UI_MOTION_NAV_TABS_SLIDER_MS +
+	UI_MOTION_NAV_TABS_SLIDER_STAGGER_DELAY_MS +
+	BROWSE_NAV_SLIDER_QUIET_BUFFER_MS
+const BROWSE_SCROLL_LOCK_SAFETY_MS = 1500
+const BROWSE_SCROLL_LOCK_KEYS = new Set([
+	'ArrowDown',
+	'ArrowLeft',
+	'ArrowRight',
+	'ArrowUp',
+	'End',
+	'Home',
+	'PageDown',
+	'PageUp',
+	' ',
+])
 
 const emit = defineEmits<{
 	(e: 'update:transitioning', transitioning: boolean): void
@@ -86,7 +100,11 @@ const emit = defineEmits<{
 
 let stickyHeaderResizeObserver: ResizeObserver | undefined
 let progressiveRenderTimer: ReturnType<typeof setTimeout> | undefined
+let progressiveRenderFrame: ReturnType<typeof requestAnimationFrame> | undefined
 let imageDecodeFrame: ReturnType<typeof requestAnimationFrame> | undefined
+let browseScrollUnlock: (() => void) | undefined
+let browseScrollLockSafetyTimer: ReturnType<typeof setTimeout> | undefined
+let lastProjectTypeTabClickAt = 0
 
 const sortOptions = computed<ComboboxOption<SortType>[]>(() =>
 	ctx.effectiveSortTypes.value.map((st) => ({
@@ -128,9 +146,10 @@ const messages = defineMessages({
 const displayedProjectType = computed(() => ctx.visibleProjectType?.value ?? ctx.projectType.value)
 const searchPlaceholderText = computed(() =>
 	formatMessage(messages.searchPlaceholder, {
-		projectType: formatProjectTypeSentence(formatMessage, ctx.projectType.value, 2),
+		projectType: formatProjectTypeSentence(formatMessage, visibleControlsProjectType.value, 2),
 	}),
 )
+const visibleControlsIsServerType = computed(() => visibleControlsProjectType.value === 'server')
 const browseContentKey = computed(() => ctx.projectType.value)
 const routeProjectTypeTabIndex = computed(() =>
 	ctx.selectableProjectTypes.value
@@ -189,8 +208,11 @@ function getCardActionsForResult(
 	return (ctx.getCardActions?.(result, displayedProjectType.value) ?? []) as AppCardAction[]
 }
 
-const serverCards = computed(() =>
-	ctx.serverHits.value.map((result) => ({
+const renderedServerHits = computed(() => getRenderedCardSlice(ctx.serverHits.value))
+const renderedProjectHits = computed(() => getRenderedCardSlice(ctx.projectHits.value))
+
+const renderedServerCards = computed(() =>
+	renderedServerHits.value.map((result) => ({
 		result,
 		actions: getCardActionsForResult(result),
 		modpackContent: ctx.getServerModpackContent?.(result),
@@ -198,31 +220,115 @@ const serverCards = computed(() =>
 	})),
 )
 
-const projectCards = computed(() =>
-	ctx.projectHits.value.map((result) => ({
+const renderedProjectCards = computed(() =>
+	renderedProjectHits.value.map((result) => ({
 		result,
 		actions: getCardActionsForResult(result),
 	})),
 )
 
-const renderedServerCards = computed(() => getRenderedCardSlice(serverCards.value))
-const renderedProjectCards = computed(() => getRenderedCardSlice(projectCards.value))
-
 type BrowseProjectTypeTab = Parameters<typeof selectProjectTypeTab>[1]
 
+function markBrowseTransition(name: string) {
+	if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return
+
+	performance.mark(`browse-tab:${name}`)
+}
+
+function getNow() {
+	if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+		return performance.now()
+	}
+
+	return Date.now()
+}
+
+function wait(ms: number) {
+	if (ms <= 0) return Promise.resolve()
+
+	return new Promise<void>((resolve) => {
+		setTimeout(resolve, ms)
+	})
+}
+
+async function waitForNavSliderQuietWindow() {
+	if (!lastProjectTypeTabClickAt) return
+
+	const elapsed = getNow() - lastProjectTypeTabClickAt
+	const remaining = BROWSE_NAV_SLIDER_QUIET_WINDOW_MS - elapsed
+	if (remaining <= 0) return
+
+	await wait(remaining)
+}
+
 function handleProjectTypeTabClick(index: number, tab: BrowseProjectTypeTab) {
+	lastProjectTypeTabClickAt = getNow()
+	markBrowseTransition('tab-click')
 	selectProjectTypeTab(index, { ...tab, onHover: undefined })
+}
+
+function syncVisibleControlsState() {
+	visibleControlsProjectType.value = ctx.visibleProjectType?.value ?? ctx.projectType.value
+	visibleControlFilters.value = ctx.filters.value.filter((filter) => filter.display !== 'none')
+	visibleServerFilterTypes.value = ctx.serverFilterTypes.value
 }
 
 function getScrollContainer() {
 	return stickyControlsRef.value?.closest('.app-viewport') as HTMLElement | null | undefined
 }
 
-function resolveCardFrameElement(target: Element | ComponentPublicInstance | null) {
-	if (target instanceof HTMLElement) return target
+function preventBrowseScroll(event: Event) {
+	event.preventDefault()
+}
 
-	const element = target?.$el
-	return element instanceof HTMLElement ? element : null
+function preventBrowseKeyScroll(event: KeyboardEvent) {
+	if (!BROWSE_SCROLL_LOCK_KEYS.has(event.key)) return
+
+	event.preventDefault()
+}
+
+function unlockBrowseScroll() {
+	if (browseScrollLockSafetyTimer) {
+		clearTimeout(browseScrollLockSafetyTimer)
+		browseScrollLockSafetyTimer = undefined
+	}
+
+	browseScrollUnlock?.()
+	browseScrollUnlock = undefined
+}
+
+function lockBrowseScroll() {
+	if (typeof window === 'undefined') return
+
+	unlockBrowseScroll()
+
+	const scrollContainer = getScrollContainer()
+	if (!scrollContainer) return
+
+	const scrollOptions = { passive: false }
+	const keyOptions = { capture: true }
+
+	scrollContainer.addEventListener('wheel', preventBrowseScroll, scrollOptions)
+	scrollContainer.addEventListener('touchmove', preventBrowseScroll, scrollOptions)
+	window.addEventListener('keydown', preventBrowseKeyScroll, keyOptions)
+
+	browseScrollUnlock = () => {
+		scrollContainer.removeEventListener('wheel', preventBrowseScroll)
+		scrollContainer.removeEventListener('touchmove', preventBrowseScroll)
+		window.removeEventListener('keydown', preventBrowseKeyScroll, keyOptions)
+	}
+	browseScrollLockSafetyTimer = setTimeout(unlockBrowseScroll, BROWSE_SCROLL_LOCK_SAFETY_MS)
+}
+
+function resolveCardFrameElement(target: Element | ComponentPublicInstance | null) {
+	const element = target instanceof HTMLElement ? target : target?.$el
+	if (!(element instanceof HTMLElement)) return null
+
+	const visualFrame = Array.from(element.children).find((child): child is HTMLElement =>
+		child instanceof HTMLElement && child.classList.contains('smart-clickable__contents'),
+	)
+
+	return visualFrame ?? element
 }
 
 function setCardFrameRef(
@@ -252,7 +358,7 @@ function getRenderedCardSlice<T>(cards: T[]) {
 	return limit === null ? cards : cards.slice(0, limit)
 }
 
-function getCardFrameSources(): BrowseFreezeFrameSource[] {
+function getCardFrameSources() {
 	return Array.from(cardFrameElements.entries())
 		.map(([key, frame]) => ({
 			key,
@@ -260,16 +366,6 @@ function getCardFrameSources(): BrowseFreezeFrameSource[] {
 			index: frame.index,
 		}))
 		.sort((a, b) => a.index - b.index)
-}
-
-function createBrowseFreezeFrame(): BrowseDomFreezeFrameSnapshot | null {
-	if (typeof window === 'undefined') return null
-
-	return createBrowseDomFreezeFrameSnapshot(getCardFrameSources(), {
-		viewport: getScrollContainer() ?? undefined,
-		overscan: BROWSE_FREEZE_FRAME_OVERSCAN_PX,
-		maxItems: BROWSE_FREEZE_FRAME_MAX_CARDS,
-	})
 }
 
 function resetBrowseScroll() {
@@ -285,10 +381,15 @@ function resetBrowseScroll() {
 }
 
 function clearProgressiveRenderTimer() {
-	if (!progressiveRenderTimer) return
+	if (progressiveRenderTimer) {
+		clearTimeout(progressiveRenderTimer)
+		progressiveRenderTimer = undefined
+	}
 
-	clearTimeout(progressiveRenderTimer)
-	progressiveRenderTimer = undefined
+	if (progressiveRenderFrame) {
+		cancelAnimationFrame(progressiveRenderFrame)
+		progressiveRenderFrame = undefined
+	}
 }
 
 function clearImageDecodeFrame() {
@@ -304,7 +405,9 @@ function prepareIncomingCardSlice() {
 }
 
 function getActiveRenderedCardCount() {
-	return displayedProjectType.value === 'server' ? serverCards.value.length : projectCards.value.length
+	return displayedProjectType.value === 'server'
+		? ctx.serverHits.value.length
+		: ctx.projectHits.value.length
 }
 
 function renderAllIncomingCards() {
@@ -339,10 +442,18 @@ function renderNextIncomingCardBatch() {
 
 function scheduleProgressiveCardRender() {
 	clearProgressiveRenderTimer()
-	progressiveRenderTimer = setTimeout(
-		renderNextIncomingCardBatch,
-		BROWSE_PROGRESSIVE_CARD_BATCH_DELAY_MS,
-	)
+	progressiveRenderTimer = setTimeout(() => {
+		progressiveRenderTimer = undefined
+		if (typeof requestAnimationFrame === 'undefined') {
+			renderNextIncomingCardBatch()
+			return
+		}
+
+		progressiveRenderFrame = requestAnimationFrame(() => {
+			progressiveRenderFrame = undefined
+			renderNextIncomingCardBatch()
+		})
+	}, BROWSE_PROGRESSIVE_CARD_BATCH_DELAY_MS)
 }
 
 function startProgressiveCardRender() {
@@ -372,9 +483,13 @@ function shouldEagerLoadIncomingCard(index: number) {
 async function prepareIncomingBrowseContent(el?: Element) {
 	void el
 	prepareIncomingCardSlice()
+	await waitForNavSliderQuietWindow()
+	markBrowseTransition('route-commit-start')
 	await projectTypeTabController.handleBeforeLeave()
+	markBrowseTransition('route-commit-end')
 	resetBrowseScroll()
 	await nextTick()
+	markBrowseTransition('incoming-mount')
 	scheduleIncomingImageDecode()
 }
 
@@ -385,6 +500,14 @@ function isIncomingBrowseFirstSliceReady() {
 function handleAfterEnter() {
 	projectTypeTabController.handleAfterEnter()
 	startProgressiveCardRender()
+}
+
+function handleBeforeLeave() {
+	markBrowseTransition('content-out-start')
+}
+
+function handleBeforeEnter() {
+	markBrowseTransition('enter-start')
 }
 
 function handleEnterCancelled() {
@@ -414,15 +537,37 @@ watch(
 	{ flush: 'post' },
 )
 
-watch(transitionActive, (transitioning) => emit('update:transitioning', transitioning))
+watch(transitionActive, (transitioning) => {
+	emit('update:transitioning', transitioning)
+
+	if (transitioning) {
+		lockBrowseScroll()
+	} else {
+		unlockBrowseScroll()
+	}
+})
+watch(
+	[
+		transitionActive,
+		() => ctx.visibleProjectType?.value ?? ctx.projectType.value,
+		() => ctx.filters.value,
+		() => ctx.serverFilterTypes.value,
+	],
+	() => {
+		if (transitionActive.value) return
+
+		syncVisibleControlsState()
+	},
+	{ immediate: true },
+)
 watch(slideDirection, (direction) => emit('update:transitionDirection', direction), {
 	immediate: true,
 })
 watch(
 	[
 		() => displayedProjectType.value,
-		() => projectCards.value.length,
-		() => serverCards.value.length,
+		() => ctx.projectHits.value.length,
+		() => ctx.serverHits.value.length,
 		() => contentProjectTypePending.value,
 		() => showLoadingState.value,
 	],
@@ -439,6 +584,7 @@ watch(
 
 onUnmounted(() => {
 	stickyHeaderResizeObserver?.disconnect()
+	unlockBrowseScroll()
 	clearProgressiveRenderTimer()
 	clearImageDecodeFrame()
 	cardFrameElements.clear()
@@ -559,10 +705,10 @@ onUnmounted(() => {
 			</div>
 
 			<SearchFilterControl
-				v-if="ctx.isServerType.value"
+				v-if="visibleControlsIsServerType"
 				v-model:selected-filters="ctx.serverCurrentFilters.value"
 				class="browse-filter-chips"
-				:filters="ctx.serverFilterTypes.value"
+				:filters="visibleServerFilterTypes"
 				:provided-filters="[]"
 				:overridden-provided-filter-types="[]"
 			/>
@@ -570,7 +716,7 @@ onUnmounted(() => {
 				v-else
 				v-model:selected-filters="ctx.currentFilters.value"
 				class="browse-filter-chips"
-				:filters="ctx.filters.value.filter((f) => f.display !== 'none')"
+				:filters="visibleControlFilters"
 				:provided-filters="ctx.providedFilters?.value ?? []"
 				:overridden-provided-filter-types="ctx.overriddenProvidedFilterTypes.value"
 				:provided-message="lockedMessages?.providedBy"
@@ -583,17 +729,16 @@ onUnmounted(() => {
 			:content-key="browseContentKey"
 			:direction="slideDirection"
 			:visible="contentVisible"
-			:create-freeze-frame="createBrowseFreezeFrame"
+			:height-release-delay-ms="BROWSE_HEIGHT_RELEASE_DELAY_MS"
 			:prepare-incoming-freeze-frame="prepareIncomingBrowseContent"
 			:is-incoming-ready="isIncomingBrowseFirstSliceReady"
+			@before-leave="handleBeforeLeave"
+			@before-enter="handleBeforeEnter"
 			@after-leave="projectTypeTabController.handleAfterLeave"
 			@after-enter="handleAfterEnter"
 			@enter-cancelled="handleEnterCancelled"
 			@leave-cancelled="handleLeaveCancelled"
 		>
-			<template #freeze-frame="{ snapshot }">
-				<AppBrowseFreezeFrame :snapshot="snapshot as BrowseDomFreezeFrameSnapshot" />
-			</template>
 			<div class="flex min-w-0 flex-col gap-3">
 				<div class="search">
 					<section v-if="showLoadingState" class="offline">

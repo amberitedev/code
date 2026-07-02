@@ -9,6 +9,8 @@ import { inject, provide } from 'vue'
 import type { CoreAccessMember } from './core-access-types'
 
 export type CoreOnboardingFlow = 'create' | 'connect'
+export type CoreStartupRunMode = 'manual' | 'app_open' | 'startup'
+export type CoreInviteLookupStatus = 'idle' | 'loading' | 'loaded'
 
 export interface CoreOnboardingContext {
 	flow: Ref<CoreOnboardingFlow>
@@ -16,6 +18,8 @@ export interface CoreOnboardingContext {
 	connectValidated: Ref<boolean>
 	inviteSearch: Ref<string>
 	inviteAsFriend: Ref<boolean>
+	inviteLookupStatus: Ref<CoreInviteLookupStatus>
+	startupRunMode: Ref<CoreStartupRunMode>
 	error: Ref<string>
 	working: Ref<boolean>
 	canManage: ComputedRef<boolean>

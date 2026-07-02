@@ -32,14 +32,14 @@ function getDiscoverSearchProjectType(type: ProjectType) {
 	return type === 'server' ? 'minecraft_java_server' : type
 }
 
-export function buildDiscoverSearchParams(type: ProjectType) {
+export function buildDiscoverSearchParams(type: ProjectType, limit = 20) {
 	if (type === 'server') {
-		return `?limit=20&index=relevance&new_filters=${encodeURIComponent(
+		return `?limit=${limit}&index=relevance&new_filters=${encodeURIComponent(
 			'project_types = minecraft_java_server AND minecraft_java_server.ping.data EXISTS',
 		)}`
 	}
 
-	return `?limit=20&index=relevance&new_filters=${encodeURIComponent(
+	return `?limit=${limit}&index=relevance&new_filters=${encodeURIComponent(
 		`project_types = ${formatDiscoverSearchFilterValue(getDiscoverSearchProjectType(type))}`,
 	)}`
 }

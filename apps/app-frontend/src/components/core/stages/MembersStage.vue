@@ -15,6 +15,12 @@ const inviteSuggestionOptions = computed<ComboboxOption<string>[]>(() =>
 		searchTerms: [user.username, user.id, user.email].filter(Boolean) as string[],
 	})),
 )
+const inviteLookupMessage = computed(() => {
+	const query = ctx.inviteSearch.value.trim()
+	if (query.length < 2) return 'Type at least 2 characters to search.'
+	if (ctx.inviteLookupStatus.value === 'loading') return 'Searching...'
+	return 'No matching Amberite users.'
+})
 const canCreateInvite = computed(() => {
 	const value = ctx.inviteSearch.value.trim().toLowerCase()
 	if (!value) return false
@@ -29,31 +35,45 @@ const canCreateInvite = computed(() => {
 		!ctx.members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)
 	)
 })
+
+function selectInviteOption(option: ComboboxOption<string>) {
+	ctx.selectInviteSuggestion(
+		ctx.inviteSuggestions.value.find((user) => user.username === option.value) ?? {
+			id: option.value,
+			username: option.label,
+		},
+	)
+}
 </script>
 
 <template>
 	<div class="flex min-h-[26rem] flex-col gap-4">
-		<p class="m-0 text-secondary">Manage Core members and roles.</p>
+		<p class="m-0 text-secondary">
+			Invite Amberite users and choose the role they will receive.
+		</p>
 		<div class="flex flex-col gap-3">
 			<div class="flex flex-col gap-2 md:flex-row md:items-center">
 				<div class="min-w-0 flex-1">
 					<Combobox
 						:model-value="undefined"
 						:options="inviteSuggestionOptions"
-						:search-placeholder="'Search Modrinth username'"
-						:placeholder="'Search Modrinth username'"
+						:search-placeholder="'Search Amberite username'"
+						:placeholder="'Search Amberite username'"
+						:no-options-message="inviteLookupMessage"
+						:min-search-length-to-open="2"
+						:disable-search-filter="true"
 						searchable
 						show-search-icon
 						:show-chevron="false"
+						search-type="search"
+						search-name="amberite-core-member-search"
 						search-autocomplete="off"
 						search-autocorrect="off"
 						search-autocapitalize="none"
 						:search-spellcheck="false"
 						trigger-class="!h-10 !min-h-10"
 						@search-input="(value) => (ctx.inviteSearch.value = value)"
-						@select="
-							(option) => ctx.selectInviteSuggestion({ id: option.value, username: option.label })
-						"
+						@select="selectInviteOption"
 					>
 						<template #option="{ item, isSelected }">
 							<div class="flex min-w-0 items-center gap-2">

@@ -19,7 +19,10 @@ pub enum StoreError {
 pub trait InstanceStore: Send + Sync + 'static {
     async fn create(&self, record: &InstanceRecord) -> Result<(), StoreError>;
     async fn get(&self, id: &InstanceId) -> Result<InstanceRecord, StoreError>;
-    async fn get_by_path(&self, path: &str) -> Result<InstanceRecord, StoreError>;
+    async fn get_by_path(
+        &self,
+        path: &str,
+    ) -> Result<InstanceRecord, StoreError>;
     async fn list(&self) -> Result<Vec<InstanceRecord>, StoreError>;
     async fn update_status(
         &self,

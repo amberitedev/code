@@ -1,8 +1,9 @@
 <!--
 App freeze-frame transition summary:
-- captureFreezeFrame (238) stores the outgoing DOM snapshot before route/state changes.
-- runLeaveTransition (301) starts incoming route preparation while the outgoing frame animates.
-- runEnterTransition (388) reveals and animates the real incoming content after first paint.
+- runLeaveTransition animates the current DOM out before route/state changes.
+- runEnterTransition reveals and animates the real incoming content after it is mounted.
+- Freeze-frame slots remain supported for callers that provide snapshots, but browse tab switches
+	now leave with the live DOM to avoid synchronous capture jank.
 -->
 <template>
 	<div ref="host" class="app-freeze-frame-transition" :style="{ minHeight: lockedHeight }">
@@ -16,35 +17,37 @@ App freeze-frame transition summary:
 			<slot />
 		</div>
 
-		<div
-			v-if="freezeFrameVisible"
-			class="app-freeze-frame-transition__freeze-cover"
-			aria-hidden="true"
-			inert
-		>
+		<Teleport to="body">
 			<div
-				v-if="outgoingFreezeSnapshot !== null"
-				ref="outgoingFreezeFrameElement"
-				class="app-freeze-frame-transition__freeze-frame app-freeze-frame-transition__freeze-frame--outgoing"
+				v-if="freezeFrameVisible"
+				class="app-freeze-frame-transition__freeze-cover"
+				aria-hidden="true"
+				inert
 			>
-				<slot
-					name="freeze-frame"
-					:snapshot="outgoingFreezeSnapshot"
-					phase="outgoing"
-					:direction="motion.direction"
-					:transitioning="transitioningActive"
+				<div
+					v-if="outgoingFreezeSnapshot !== null"
+					ref="outgoingFreezeFrameElement"
+					class="app-freeze-frame-transition__freeze-frame app-freeze-frame-transition__freeze-frame--outgoing"
 				>
-					<component
-						:is="freezeFrame"
-						v-if="freezeFrame"
+					<slot
+						name="freeze-frame"
 						:snapshot="outgoingFreezeSnapshot"
 						phase="outgoing"
 						:direction="motion.direction"
 						:transitioning="transitioningActive"
-					/>
-				</slot>
+					>
+						<component
+							:is="freezeFrame"
+							v-if="freezeFrame"
+							:snapshot="outgoingFreezeSnapshot"
+							phase="outgoing"
+							:direction="motion.direction"
+							:transitioning="transitioningActive"
+						/>
+					</slot>
+				</div>
 			</div>
-		</div>
+		</Teleport>
 	</div>
 </template>
 
@@ -72,11 +75,13 @@ const props = withDefaults(
 		prepareIncomingFreezeFrame?: (el?: Element) => void | Promise<void>
 		isIncomingReady?: () => boolean
 		incomingHoldMs?: number
+		heightReleaseDelayMs?: number
 	}>(),
 	{
 		contentKey: '',
 		visible: true,
 		incomingHoldMs: 160,
+		heightReleaseDelayMs: 0,
 	},
 )
 
@@ -127,6 +132,7 @@ const freezeFrameVisible = ref(false)
 const transitioningActive = ref(false)
 
 let heightReleaseTimer: ReturnType<typeof setTimeout> | undefined
+let safetyTimer: ReturnType<typeof setTimeout> | undefined
 let outgoingFreezeFrameAnimation: Animation | undefined
 let contentFrameAnimation: Animation | undefined
 let transitionToken = 0
@@ -136,6 +142,13 @@ function clearHeightReleaseTimer() {
 
 	clearTimeout(heightReleaseTimer)
 	heightReleaseTimer = undefined
+}
+
+function clearSafetyTimer() {
+	if (!safetyTimer) return
+
+	clearTimeout(safetyTimer)
+	safetyTimer = undefined
 }
 
 function cancelContentFrameAnimation() {
@@ -173,9 +186,59 @@ function lockHostHeight(el?: Element) {
 	}
 }
 
-function releaseHostHeight() {
+function releaseHostHeight(delayMs = 0) {
 	clearHeightReleaseTimer()
+
+	if (delayMs > 0) {
+		heightReleaseTimer = setTimeout(() => {
+			heightReleaseTimer = undefined
+			lockedHeight.value = undefined
+		}, delayMs)
+		return
+	}
+
 	lockedHeight.value = undefined
+}
+
+function getSafetyTimeoutMs() {
+	return (
+		Math.max(
+			motion.value.safetyMs,
+			transitionDuration.value.enter + transitionDuration.value.leave + props.incomingHoldMs,
+		) +
+		props.heightReleaseDelayMs +
+		250
+	)
+}
+
+function cancelActiveTransitionForSafety(
+	token: number,
+	phase: 'enter' | 'leave',
+	el?: Element,
+) {
+	if (token !== transitionToken) return
+
+	transitionToken++
+	cancelContentFrameAnimation()
+	clearFreezeFrame()
+	releaseHostHeight()
+	renderContent.value = props.visible
+	setTransitioning(false)
+
+	if (!el) return
+	if (phase === 'enter') {
+		emit('enter-cancelled', el)
+	} else {
+		emit('leave-cancelled', el)
+	}
+}
+
+function scheduleSafetyCleanup(token: number, phase: 'enter' | 'leave', el?: Element) {
+	clearSafetyTimer()
+	safetyTimer = setTimeout(() => {
+		safetyTimer = undefined
+		cancelActiveTransitionForSafety(token, phase, el)
+	}, getSafetyTimeoutMs())
 }
 
 function getFreezeFrameEnterTransform() {
@@ -190,11 +253,45 @@ function getFreezeFrameLeaveTransform() {
 		: 'none'
 }
 
+function getContentFrameEnterStart() {
+	return {
+		opacity: fadesFrame.value ? 0 : 1,
+		transform: getFreezeFrameEnterTransform(),
+	}
+}
+
+function getContentFrameLeaveEnd() {
+	return {
+		opacity: fadesFrame.value ? 0 : 1,
+		transform: getFreezeFrameLeaveTransform(),
+	}
+}
+
 function resetContentFrameStyle(element: HTMLElement | null) {
 	if (!element) return
 
 	element.style.opacity = ''
 	element.style.transform = ''
+}
+
+function setContentFrameStyle(
+	element: HTMLElement,
+	style: {
+		opacity: number
+		transform: string
+	},
+) {
+	element.style.opacity = `${style.opacity}`
+	element.style.transform = style.transform
+}
+
+function setContentFrameEnterStart(element: HTMLElement) {
+	if (!motion.value.enabled || motion.value.type === 'none' || transitionDuration.value.enter <= 0) {
+		resetContentFrameStyle(element)
+		return
+	}
+
+	setContentFrameStyle(element, getContentFrameEnterStart())
 }
 
 async function playOutgoingFreezeFrameLeave() {
@@ -309,9 +406,8 @@ async function runLeaveTransition() {
 
 	const hasFreezeFrame = captureFreezeFrame()
 	setTransitioning(true)
+	scheduleSafetyCleanup(token, 'leave', transitionElement)
 	if (transitionElement) emit('before-leave', transitionElement)
-
-	const incomingPrep = prepareIncomingFreezeFrame(transitionElement)
 
 	try {
 		await nextTick()
@@ -319,19 +415,40 @@ async function runLeaveTransition() {
 
 		const outgoingMotion = hasFreezeFrame
 			? playOutgoingFreezeFrameLeave()
-			: Promise.resolve()
+			: transitionElement instanceof HTMLElement
+				? playContentFrameLeave(transitionElement)
+				: Promise.resolve()
 
-		await Promise.all([incomingPrep, outgoingMotion])
+		await outgoingMotion
+
+		if (token !== transitionToken) return
+
+		renderContent.value = false
+		await nextTick()
+
+		if (token !== transitionToken) return
+
+		await prepareIncomingFreezeFrame(transitionElement)
 
 		if (token !== transitionToken) return
 
 		renderContent.value = true
+		await nextTick()
+
+		if (token !== transitionToken) return
+
+		const incomingElement = contentFrameElement.value
+		if (incomingElement instanceof HTMLElement) {
+			setContentFrameEnterStart(incomingElement)
+		}
+
 		await waitForIncomingFirstPaint(token)
 
 		if (token !== transitionToken) return
 		if (transitionElement) emit('after-leave', transitionElement)
 	} catch {
 		if (token === transitionToken) {
+			clearSafetyTimer()
 			clearFreezeFrame()
 			releaseHostHeight()
 			setTransitioning(false)
@@ -341,6 +458,42 @@ async function runLeaveTransition() {
 	}
 }
 
+async function playContentFrameLeave(element: HTMLElement) {
+	if (!motion.value.enabled || motion.value.type === 'none' || transitionDuration.value.leave <= 0) {
+		resetContentFrameStyle(element)
+		return
+	}
+
+	contentFrameAnimation?.cancel()
+	contentFrameAnimation = undefined
+
+	const keyframes = [{ opacity: 1, transform: 'none' }, getContentFrameLeaveEnd()]
+	const duration = transitionDuration.value.leave
+
+	if (typeof element.animate === 'function') {
+		const animation = element.animate(keyframes, {
+			duration,
+			easing: motion.value.leaveEasing,
+			fill: 'forwards',
+		})
+		contentFrameAnimation = animation
+
+		try {
+			await animation.finished
+		} catch {
+			return
+		}
+
+		if (contentFrameAnimation === animation) {
+			contentFrameAnimation = undefined
+		}
+
+		return
+	}
+
+	setContentFrameStyle(element, keyframes[keyframes.length - 1])
+}
+
 async function playContentFrameEnter(element: HTMLElement) {
 	if (!motion.value.enabled || motion.value.type === 'none' || transitionDuration.value.enter <= 0) {
 		clearFreezeFrame()
@@ -348,16 +501,9 @@ async function playContentFrameEnter(element: HTMLElement) {
 		return
 	}
 
-	const keyframes = [
-		{
-			opacity: fadesFrame.value ? 0 : 1,
-			transform: getFreezeFrameEnterTransform(),
-		},
-		{ opacity: 1, transform: 'none' },
-	]
+	const keyframes = [getContentFrameEnterStart(), { opacity: 1, transform: 'none' }]
 
-	element.style.opacity = `${keyframes[0].opacity}`
-	element.style.transform = keyframes[0].transform
+	setContentFrameStyle(element, keyframes[0])
 	clearFreezeFrame()
 
 	await nextPaint()
@@ -391,14 +537,15 @@ async function runEnterTransition() {
 	clearHeightReleaseTimer()
 	cancelContentFrameAnimation()
 	renderContent.value = true
+	setTransitioning(true)
 
 	try {
 		await nextTick()
-		await nextPaint()
 
 		if (token !== transitionToken) return
 
 		const transitionElement = contentFrameElement.value ?? host.value ?? undefined
+		scheduleSafetyCleanup(token, 'enter', transitionElement)
 		if (transitionElement) emit('before-enter', transitionElement)
 
 		if (transitionElement instanceof HTMLElement) {
@@ -409,16 +556,83 @@ async function runEnterTransition() {
 
 		if (token !== transitionToken) return
 
-		releaseHostHeight()
+		clearSafetyTimer()
+		releaseHostHeight(props.heightReleaseDelayMs)
 		setTransitioning(false)
 		if (transitionElement) emit('after-enter', transitionElement)
 	} catch {
 		if (token === transitionToken) {
+			clearSafetyTimer()
 			clearFreezeFrame()
 			releaseHostHeight()
 			setTransitioning(false)
 			const transitionElement = contentFrameElement.value ?? host.value ?? undefined
 			if (transitionElement) emit('enter-cancelled', transitionElement)
+		}
+	} finally {
+		if (token === transitionToken && !transitioningActive.value) {
+			renderContent.value = props.visible
+		}
+	}
+}
+
+async function runContentKeyTransition() {
+	const token = ++transitionToken
+	const transitionElement = contentFrameElement.value ?? host.value ?? undefined
+
+	cancelContentFrameAnimation()
+	clearFreezeFrame()
+	clearHeightReleaseTimer()
+	lockHostHeight(transitionElement)
+
+	const hasFreezeFrame = captureFreezeFrame()
+	setTransitioning(true)
+	scheduleSafetyCleanup(token, 'enter', transitionElement)
+	if (transitionElement) emit('before-leave', transitionElement)
+
+	const incomingPrep = prepareIncomingFreezeFrame(transitionElement)
+
+	try {
+		await nextTick()
+		await nextPaint()
+
+		const outgoingMotion = hasFreezeFrame
+			? playOutgoingFreezeFrameLeave()
+			: Promise.resolve()
+
+		await Promise.all([incomingPrep, outgoingMotion])
+
+		if (token !== transitionToken) return
+
+		await waitForIncomingFirstPaint(token)
+
+		if (token !== transitionToken) return
+		if (transitionElement) emit('after-leave', transitionElement)
+
+		const enterElement = contentFrameElement.value ?? host.value ?? undefined
+		if (enterElement) emit('before-enter', enterElement)
+
+		if (enterElement instanceof HTMLElement) {
+			await playContentFrameEnter(enterElement)
+		} else {
+			clearFreezeFrame()
+		}
+
+		if (token !== transitionToken) return
+
+		clearSafetyTimer()
+		releaseHostHeight(props.heightReleaseDelayMs)
+		setTransitioning(false)
+		if (enterElement) emit('after-enter', enterElement)
+	} catch {
+		if (token === transitionToken) {
+			clearSafetyTimer()
+			clearFreezeFrame()
+			releaseHostHeight()
+			setTransitioning(false)
+			renderContent.value = props.visible
+			const enterElement = contentFrameElement.value ?? host.value ?? undefined
+			if (enterElement) emit('enter-cancelled', enterElement)
 		}
 	} finally {
 		if (token === transitionToken && !transitioningActive.value) {
@@ -438,8 +652,19 @@ watch(
 	},
 )
 
+watch(
+	() => props.contentKey,
+	(next, previous) => {
+		if (next === previous || !props.visible || transitioningActive.value) return
+
+		void runContentKeyTransition()
+	},
+	{ flush: 'pre' },
+)
+
 onUnmounted(() => {
 	transitionToken++
+	clearSafetyTimer()
 	clearHeightReleaseTimer()
 	cancelContentFrameAnimation()
 	clearFreezeFrame()
@@ -452,7 +677,6 @@ onUnmounted(() => {
 	position: relative;
 	isolation: isolate;
 	width: 100%;
-	height: 100%;
 	min-height: 100%;
 	min-width: 0;
 }
@@ -460,7 +684,6 @@ onUnmounted(() => {
 .app-freeze-frame-transition__frame {
 	position: relative;
 	width: 100%;
-	height: 100%;
 	min-height: inherit;
 	min-width: 0;
 }

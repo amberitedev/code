@@ -3,13 +3,14 @@ import { SpinnerIcon } from '@modrinth/assets'
 import { Avatar, injectNotificationManager } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import dayjs from 'dayjs'
-import { onUnmounted, ref } from 'vue'
+import { inject, onUnmounted, ref } from 'vue'
 
 import NavButton from '@/components/ui/NavButton.vue'
 import { profile_listener } from '@/helpers/events.js'
 import { list } from '@/helpers/profile'
 
 const { handleError } = injectNotificationManager()
+const beginLibraryInstanceOpenNavigation = inject('beginLibraryInstanceOpenNavigation', null)
 
 const recentInstances = ref([])
 const getInstances = async () => {
@@ -48,11 +49,24 @@ unlistenProfile = await profile_listener(async (event) => {
 		await getInstances()
 	}
 })
+
+function instanceRoute(instance) {
+	return `/instance/${encodeURIComponent(instance.path)}`
+}
+
+function beginInstanceOpen(instance) {
+	beginLibraryInstanceOpenNavigation?.(instanceRoute(instance))
+}
 </script>
 
 <template>
 	<div v-for="instance in recentInstances" :key="instance.id" v-tooltip.right="instance.name">
-		<NavButton :to="`/instance/${encodeURIComponent(instance.path)}`" class="relative">
+		<NavButton
+			:to="instanceRoute(instance)"
+			:data-left-nav-instance-route="instanceRoute(instance)"
+			class="relative"
+			@pointerdown="beginInstanceOpen(instance)"
+		>
 			<Avatar
 				:src="instance.icon_path ? convertFileSrc(instance.icon_path) : null"
 				size="28px"

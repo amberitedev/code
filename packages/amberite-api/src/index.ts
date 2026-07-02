@@ -65,6 +65,19 @@ export type {
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,
 	CoreSyncProfile,
+	CoreSyncSnapshot,
+	CoreSyncEvent,
+	CoreSyncSnapshotPublishResult,
+	CoreCreateSyncProfileFromMrpackMetadata,
+	CorePublishSyncSnapshotMetadata,
+	CoreSyncVersionStatus,
+	CoreMrpackSideSupport,
+	CoreMrpackOverrideSideState,
+	CoreMrpackFileHashes,
+	CoreMrpackFileEnv,
+	CoreMrpackFile,
+	CoreMrpackOverride,
+	CoreMrpackManifest,
 } from './types'
 
 export type {

@@ -142,26 +142,26 @@ async fn validate_create_request(
 }
 
 async fn unique_instance_path(
-	state: &Arc<AppState>,
-	name: &str,
+    state: &Arc<AppState>,
+    name: &str,
 ) -> Result<String, InstanceError> {
-	let base = sanitize_instance_path(name);
-	match state.instance_store.get_by_path(&base).await {
-		Ok(_) => {}
-		Err(StoreError::NotFound(_)) => return Ok(base),
-		Err(error) => return Err(error.into()),
-	}
+    let base = sanitize_instance_path(name);
+    match state.instance_store.get_by_path(&base).await {
+        Ok(_) => {}
+        Err(StoreError::NotFound(_)) => return Ok(base),
+        Err(error) => return Err(error.into()),
+    }
 
-	let mut index = 1;
-	loop {
-		let candidate = format!("{base} ({index})");
-		match state.instance_store.get_by_path(&candidate).await {
-			Ok(_) => {}
-			Err(StoreError::NotFound(_)) => return Ok(candidate),
-			Err(error) => return Err(error.into()),
-		}
-		index += 1;
-	}
+    let mut index = 1;
+    loop {
+        let candidate = format!("{base} ({index})");
+        match state.instance_store.get_by_path(&candidate).await {
+            Ok(_) => {}
+            Err(StoreError::NotFound(_)) => return Ok(candidate),
+            Err(error) => return Err(error.into()),
+        }
+        index += 1;
+    }
 }
 
 pub fn sanitize_instance_path(input: &str) -> String {

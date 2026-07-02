@@ -1,18 +1,3 @@
-/**
- * sync.ts — synced server profiles for a friend group.
- *
- * Beyond basic registration/snapshots this owns two user-facing features:
- *  - Selective visibility: a profile can be shown to everyone in the group,
- *    to specific roles, or to a hand-picked set of members (private servers).
- *  - Automatic whitelists: when enabled, the eligible members' linked Minecraft
- *    accounts are resolved into a whitelist the Core can apply.
- *
- * All functions resolve the acting user through `resolveActor` so the dev
- * identity override (`__actAs`) works in dev and tests; production uses real auth.
- *
- * Key functions: registerSyncedProfile:30, listServerProfiles:54 (visibility-gated),
- * updateSyncedProfileSettings:74, getProfileWhitelist:104, publishProfileSnapshot:130.
- */
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";

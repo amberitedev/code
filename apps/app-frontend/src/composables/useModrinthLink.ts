@@ -13,7 +13,6 @@ const credentials = ref<ModrinthCredentials | null>(null)
 const user = ref<Labrinth.Users.v2.User | null>(null)
 const loading = ref(false)
 const error = ref<Error | null>(null)
-let initialized = false
 
 export function useModrinthLink() {
 	const linked = computed(() => !!credentials.value?.session && !!credentials.value?.user_id)
@@ -70,11 +69,6 @@ export function useModrinthLink() {
 		} finally {
 			loading.value = false
 		}
-	}
-
-	if (!initialized) {
-		initialized = true
-		void refresh()
 	}
 
 	return {

@@ -1,8 +1,3 @@
-// CDP client: connects to Tauri WebView DevTools, populates store via event streaming.
-// Key exports: CdpClient class, cdp singleton.
-// Methods: connect(), disconnect(), evaluate(), request(). Auto-reconnects on disconnect.
-// Injects console interceptor on connect and re-injects on Page.frameNavigated.
-
 import { WebSocket } from "ws";
 import { store } from "./store.js";
 

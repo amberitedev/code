@@ -3,6 +3,7 @@ import {
 	DownloadIcon,
 	GameIcon,
 	PlayIcon,
+	ServerIcon,
 	SpinnerIcon,
 	StopCircleIcon,
 	TimerIcon,
@@ -10,7 +11,7 @@ import {
 import { Avatar, ButtonStyled, injectNotificationManager, useRelativeTime } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import dayjs from 'dayjs'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { trackEvent } from '@/helpers/analytics'
@@ -50,8 +51,15 @@ const modLoading = computed(
 )
 const installing = computed(() => props.instance.install_stage.includes('installing'))
 const installed = computed(() => props.instance.install_stage === 'installed')
+const isServerProfile = computed(() => props.instance.profile_type === 'server')
+const instanceTypeLabel = computed(() => {
+	if (props.instance.profile_type === 'server') return 'Server'
+	if (props.instance.profile_type === 'synced') return 'Synced'
+	return 'Client'
+})
 
 const router = useRouter()
+const beginLibraryInstanceOpenNavigation = inject('beginLibraryInstanceOpenNavigation', null)
 
 const instanceRoute = computed(() => `/instance/${encodeURIComponent(props.instance.path)}`)
 
@@ -71,8 +79,10 @@ async function preloadInstanceRoute() {
 }
 
 const seeInstance = async () => {
-	await preloadInstanceRoute()
-	await router.push(instanceRoute.value)
+	const target = instanceRoute.value
+	beginLibraryInstanceOpenNavigation?.(target)
+	void preloadInstanceRoute()
+	await router.push(target)
 }
 
 const checkProcess = async () => {
@@ -189,14 +199,22 @@ onUnmounted(() => {
 			@focusin="handleRouteWarmup"
 			@pointerdown="handleRouteWarmup"
 		>
-			<Avatar
-				size="48px"
-				:src="instance.icon_path ? convertFileSrc(instance.icon_path) : null"
-				:tint-by="instance.path"
-				alt="Mod card"
-			/>
-			<div class="h-full flex items-center font-bold text-contrast leading-normal">
-				<span class="line-clamp-2">{{ instance.name }}</span>
+			<div class="relative flex items-center justify-center">
+				<Avatar
+					size="48px"
+					:src="instance.icon_path ? convertFileSrc(instance.icon_path) : null"
+					:tint-by="instance.path"
+					alt="Mod card"
+				/>
+			</div>
+			<div class="flex min-w-0 flex-col justify-center gap-1 leading-normal">
+				<span class="line-clamp-1 font-bold text-contrast">{{ instance.name }}</span>
+				<div class="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-secondary">
+					<component :is="isServerProfile ? ServerIcon : GameIcon" class="size-3.5 shrink-0" />
+					<span class="truncate capitalize">
+						{{ instanceTypeLabel }} - {{ instance.loader }} {{ instance.game_version }}
+					</span>
+				</div>
 			</div>
 			<div class="flex items-center">
 				<ButtonStyled v-if="playing" color="red" circular @mousehover="checkProcess">
@@ -220,7 +238,7 @@ onUnmounted(() => {
 					</button>
 				</ButtonStyled>
 			</div>
-			<div class="flex items-center col-span-3 gap-1 text-secondary font-semibold">
+			<div class="flex min-w-0 items-center col-span-3 gap-1 text-secondary font-semibold">
 				<TimerIcon />
 				<span class="text-sm">
 					<template v-if="instance.last_played">
@@ -286,14 +304,14 @@ onUnmounted(() => {
 					</ButtonStyled>
 				</div>
 			</div>
-			<div class="flex flex-col gap-1">
+			<div class="flex min-w-0 flex-col gap-1">
 				<p class="m-0 text-md font-bold text-contrast leading-tight line-clamp-1">
 					{{ instance.name }}
 				</p>
-				<div class="flex items-center col-span-3 gap-1 text-secondary font-semibold mt-auto">
-					<GameIcon class="shrink-0" />
-					<span class="text-sm capitalize">
-						{{ instance.loader }} {{ instance.game_version }}
+				<div class="flex min-w-0 items-center col-span-3 gap-1 text-secondary font-semibold">
+					<component :is="isServerProfile ? ServerIcon : GameIcon" class="size-4 shrink-0" />
+					<span class="truncate text-sm capitalize">
+						{{ instanceTypeLabel }} - {{ instance.loader }} {{ instance.game_version }}
 					</span>
 				</div>
 			</div>

@@ -22,7 +22,7 @@ import { capitalizeString } from '@modrinth/utils'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useQueryClient } from '@tanstack/vue-query'
 import type { Dayjs } from 'dayjs'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'
@@ -46,6 +46,10 @@ const formatDateTime = useFormatDateTime({
 const router = useRouter()
 const core = useCoreClient()
 const queryClient = useQueryClient()
+const beginLibraryInstanceOpenNavigation = inject<((target: string) => void) | null>(
+	'beginLibraryInstanceOpenNavigation',
+	null,
+)
 
 const emit = defineEmits<{
 	(e: 'play' | 'stop'): void
@@ -82,10 +86,19 @@ const loader = computed(() => {
 const loading = ref(false)
 const playing = ref(false)
 
+function getInstanceRoute() {
+	return `/instance/${encodeURIComponent(props.instance.path)}`
+}
+
+function beginInstanceOpen() {
+	beginLibraryInstanceOpenNavigation?.(getInstanceRoute())
+}
+
 const play = async (event: MouseEvent) => {
 	event?.stopPropagation()
 	if (props.instance.profile_type === 'server') {
-		await router.push(`/instance/${encodeURIComponent(props.instance.path)}`)
+		beginInstanceOpen()
+		await router.push(getInstanceRoute())
 		return
 	}
 	loading.value = true
@@ -148,7 +161,8 @@ onUnmounted(() => {
 		<template #clickable>
 			<router-link
 				class="no-click-animation"
-				:to="`/instance/${encodeURIComponent(instance.path)}`"
+				:to="getInstanceRoute()"
+				@pointerdown="beginInstanceOpen"
 			/>
 		</template>
 		<div
@@ -227,7 +241,10 @@ onUnmounted(() => {
 							{
 								id: 'open-instance',
 								shown: !!instance.path,
-								action: () => router.push(`/instance/${encodeURIComponent(instance.path)}`),
+								action: () => {
+									beginInstanceOpen()
+									return router.push(getInstanceRoute())
+								},
 							},
 							{
 								id: 'open-folder',

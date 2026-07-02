@@ -5,13 +5,6 @@ import type { CoreAccessMember } from './core-access-types'
 
 type FriendUser = AmberiteUser & { userId: string }
 
-export const mockInviteUsers = [
-	{ id: 'nora', userId: 'nora', username: 'Nora' },
-	{ id: 'kai', userId: 'kai', username: 'Kai' },
-	{ id: 'mika', userId: 'mika', username: 'Mika' },
-	{ id: 'sol', userId: 'sol', username: 'Sol' },
-]
-
 export function toAccessMember(member: FriendGroupMember): CoreAccessMember {
 	return {
 		id: member.userId,
@@ -23,6 +16,15 @@ export function toAccessMember(member: FriendGroupMember): CoreAccessMember {
 			username: member.user?.username || member.user?.displayName || member.userId,
 			avatarUrl: member.user?.image,
 		},
+	}
+}
+
+export function toInviteSuggestion(user: AmberiteUser): ServerAccessInviteSuggestion {
+	return {
+		id: user.userId,
+		username: user.username || user.displayName || user.userId,
+		avatarUrl: user.image || user.avatar_url || undefined,
+		email: user.email || undefined,
 	}
 }
 

@@ -72,7 +72,6 @@ Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`
 ### Comments
 - DO NOT use heading comments like `=== Helper methods ===`.
 - Use doc comments only. Avoid inline comments unless absolutely necessary — code should be self-documenting.
-- If a file exceeds 400 lines: check for a summary comment at the top first. If one exists, read that. If not, read the entire file then add a brief summary comment at the top listing the most important functions and key info with their line numbers.
 
 ## Bash Guidelines
 

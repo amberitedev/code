@@ -1,9 +1,3 @@
-/**
- * Summary:
- * - Lines 36-362 define the Nuxt app, Vite/Nitro options, generated-state hook, runtime config, and route rules.
- * - Lines 147-205 regenerate generated state and robots.txt before builds.
- * - Lines 364-465 resolve API/domain URLs and Amberite environment values.
- */
 import serverSidedVue from '@vitejs/plugin-vue'
 import fs from 'fs/promises'
 import { defineNuxtConfig } from 'nuxt/config'

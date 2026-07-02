@@ -20,8 +20,7 @@ use crate::{
     },
     domain::modpack::ModpackManifest,
     presentation::{
-        error::ApiError,
-        extractors::AuthUser,
+        error::ApiError, extractors::AuthUser,
         instance_path::resolve_authorized_instance_id,
     },
 };
@@ -117,9 +116,10 @@ pub async fn get_modpack(
     )
     .await?
     .to_string();
-    let manifest = get_manifest(&state, &instance_id).await?.ok_or_else(|| {
-        ApiError::NotFound("no modpack installed for this instance".into())
-    })?;
+    let manifest =
+        get_manifest(&state, &instance_id).await?.ok_or_else(|| {
+            ApiError::NotFound("no modpack installed for this instance".into())
+        })?;
     Ok(Json(manifest_to_value(&manifest)))
 }
 

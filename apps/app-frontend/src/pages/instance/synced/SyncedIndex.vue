@@ -1,6 +1,12 @@
 <template>
-	<div v-if="instance && server" class="flex h-full flex-col">
-		<div class="shrink-0 p-6 pr-2 pb-4">
+	<div
+		v-if="instance && server"
+		data-library-instance-page-ready
+		class="flex h-full flex-col"
+		:data-library-instance-title="instance.name"
+		:data-library-instance-subtitle="instancePreviewSubtitle"
+	>
+		<div class="shrink-0 p-6 pb-4">
 			<InstanceSettingsModal
 				:key="instance.path"
 				ref="settingsModal"
@@ -127,12 +133,19 @@
 
 		<ServerSettingsModal />
 	</div>
-	<div v-else-if="loadError" class="flex min-h-full items-center justify-center p-6 text-contrast">
+	<div
+		v-else-if="loadError"
+		data-library-instance-page-ready
+		data-library-instance-drag-disabled
+		data-library-instance-error-state
+		class="flex min-h-full items-center justify-center p-6 text-contrast"
+	>
 		<ErrorInformationCard
 			title="Synced profile unavailable"
 			:description="loadError.message"
 			:icon="TriangleAlertIcon"
 			icon-color="red"
+			:action="errorBackAction"
 		/>
 	</div>
 	<div v-else class="flex min-h-full items-center justify-center">
@@ -149,6 +162,7 @@ import {
 	EyeIcon,
 	FolderOpenIcon,
 	HistoryIcon,
+	LeftArrowIcon,
 	LinkIcon,
 	MoreVerticalIcon,
 	PlayIcon,
@@ -171,8 +185,8 @@ import {
 	useNavTabContentController,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { computed, defineAsyncComponent, provide, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, defineAsyncComponent, inject, provide, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
 import { get_by_profile_path } from '@/helpers/process'
@@ -205,7 +219,12 @@ const SyncedSync = defineAsyncComponent(() => import('./SyncedSync.vue'))
 const SyncedSettings = defineAsyncComponent(() => import('./SyncedSettings.vue'))
 
 const route = useRoute()
+const router = useRouter()
 const { handleError } = injectNotificationManager()
+const backToLastLibraryRoute = inject<() => void | Promise<void>>(
+	'libraryInstanceBackToLastLibraryRoute',
+	undefined,
+)
 
 provideSyncedSide('server')
 const serverInstanceId = getLinkedServerId(route.params.id as string)
@@ -270,6 +289,21 @@ const powerLabel = computed(() => {
 			return 'Server offline'
 	}
 })
+const instancePreviewSubtitle = computed(() =>
+	instance.value ? `${instance.value.loader} ${instance.value.game_version} - Synced` : 'Synced',
+)
+const errorBackAction = computed(() => ({
+	label: 'Back',
+	onClick: () => {
+		if (backToLastLibraryRoute) {
+			void backToLastLibraryRoute()
+			return
+		}
+		void router.replace('/library')
+	},
+	color: 'standard' as const,
+	icon: LeftArrowIcon,
+}))
 
 const pages = [
 	SyncedOverview,

@@ -1,21 +1,3 @@
-/**
- * CoreApiClient — primary entry point for all Copal API calls.
- *
- * Accepts a PlatformAdapter and talks directly to Core. Relay behavior is not
- * implicit; asynchronous delivery uses explicitly declared message transports.
- *
- * Key methods: getInstance, listInstances, createInstance, deleteInstance, renameInstance,
- * updateJavaVersion, start/stop/kill/restart, issueWsTicket, openConsole, getStats,
- * listMods/addMod/addModProject/uploadModFile/deleteMod/toggleMod/updateMod/updateAllMods,
- * listLogs/readLog, listCrashReports/readCrashReport,
- * getProperties/patchProperties, listDirectory/downloadFile/deleteFileOrFolder/uploadFile,
- * listBackups/createBackup/renameBackup/deleteBackup/deleteManyBackups/lockBackup/restoreBackup,
- * getBackupSchedule/setBackupSchedule,
- * getCoreMetadata/updateCoreMetadata/listCoreMembers/upsertCoreMember/removeCoreMember,
- * listSyncProfiles/registerSyncProfile/removeSyncProfile,
- * getModpack/removeModpack/exportModpack/installModpackFile.
- */
-
 import type { PlatformAdapter } from './adapter'
 import type { CoreCallContext } from './context'
 import type {
@@ -70,6 +52,7 @@ import type {
 	CoreSyncEvent,
 	CoreSyncSnapshotPublishResult,
 	CoreSyncVersionStatus,
+	CorePublishSyncSnapshotMetadata,
 } from './types'
 import * as api from './api'
 import { CoreWsConnection } from './ws'
@@ -240,7 +223,12 @@ export class CoreApiClient {
 		return this.direct('core.network.status', api.getNetworkStatus)
 	}
 
-	async completeLocalSetup(ownerUserId: string, authJwksUrl: string): Promise<CoreSetupResponse> {
+	async completeLocalSetup(
+		ownerUserId: string,
+		authJwksUrl: string,
+		ownerDisplayName?: string,
+		authAudience = 'convex',
+	): Promise<CoreSetupResponse> {
 		const localSetupSecret = await this.adapter.getLocalSetupSecret?.()
 		if (!localSetupSecret) throw new Error('Local Core setup secret is not available')
 
@@ -248,7 +236,9 @@ export class CoreApiClient {
 			local_setup_secret: localSetupSecret,
 			convex_url: this.adapter.convexUrl,
 			auth_jwks_url: authJwksUrl,
+			auth_audience: authAudience,
 			owner_user_id: ownerUserId,
+			owner_display_name: ownerDisplayName,
 		})
 	}
 
@@ -1064,6 +1054,11 @@ export class CoreApiClient {
 			api.reviewCoreInvitation(ctx, id, accept),
 		)
 	}
+	revokeCoreInvitation(id: string): Promise<CoreInvitation> {
+		return this.direct('core.invitations.revoke', (ctx) =>
+			api.revokeCoreInvitation(ctx, id),
+		)
+	}
 	respondToCoreInvitation(id: string, accept: boolean): Promise<CoreInvitation> {
 		return this.direct('core.invitations.respond', (ctx) =>
 			api.respondToCoreInvitation(ctx, id, accept),
@@ -1144,10 +1139,10 @@ export class CoreApiClient {
 	publishSyncSnapshot(
 		profileId: string,
 		file: File,
-		notes?: string,
+		metadata?: string | CorePublishSyncSnapshotMetadata,
 	): Promise<CoreSyncSnapshotPublishResult> {
 		return this.direct('core.sync_snapshots.publish', (ctx) =>
-			api.publishSyncSnapshot(ctx, profileId, file, notes),
+			api.publishSyncSnapshot(ctx, profileId, file, metadata),
 		)
 	}
 
