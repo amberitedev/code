@@ -7,7 +7,7 @@ import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { Id } from './_generated/dataModel'
 import type { MutationCtx } from './_generated/server'
-import { isDevMode, requireUserId } from './_socialRules'
+import { isDevMode, publicLegacyCore, requireUserId } from './_socialRules'
 
 function assertDev() {
 	if (!isDevMode()) throw new Error('dev functions are disabled (AMBERITE_DEV_MODE not set)')
@@ -71,8 +71,11 @@ export const devState = query({
 			bans,
 			coreList,
 			coreMemberLinks,
-			cores,
-			pairing,
+			cores: cores.map(publicLegacyCore),
+			pairing: pairing.map((core) => ({
+				...core,
+				realtimeCredentialHash: undefined,
+			})),
 		}
 	},
 })

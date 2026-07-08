@@ -13,6 +13,11 @@ import {
 
 /** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
 const devActAs = { __actAs: v.optional(v.string()) }
+const PAIRING_MIN_TTL_MS = 60_000
+const PAIRING_MAX_TTL_MS = 15 * 60 * 1000
+const PAIRING_REREGISTER_COOLDOWN_MS = 5_000
+const MAX_CONNECTION_URL_LENGTH = 2_048
+const MAX_BIND_HOST_LENGTH = 128
 
 export const registerCore = mutation({
 	args: {
@@ -114,6 +119,10 @@ export const corePresence = query({
 	},
 })
 
+/**
+ * The only unauthenticated pairing exception. Core uses this before it has an
+ * owner session so the signed-in desktop app can claim the terminal code.
+ */
 export const registerPairingCore = mutation({
 	args: {
 		code: v.string(),
@@ -126,20 +135,28 @@ export const registerPairingCore = mutation({
 	handler: async (ctx, args) => {
 		const code = normalizePairingCode(args.code)
 		if (!code) throw new Error('invalid pairing code format')
+		if (!validId(args.coreId)) throw new Error('invalid Core id')
+		if (args.connectionUrl !== undefined && !validOptionalString(args.connectionUrl, MAX_CONNECTION_URL_LENGTH))
+			throw new Error('invalid connection URL')
+		const metadata = pairingMetadata(args.metadata)
+		const ttlMs = clampTtl(args.ttlMs)
 		const now = Date.now()
 		await removeExpiredPairingCores(ctx, now)
 		const existing = await ctx.db
 			.query('pairingCores')
 			.withIndex('by_core_id', (q) => q.eq('coreId', args.coreId))
 			.unique()
+		if (existing && now - existing.createdAt < PAIRING_REREGISTER_COOLDOWN_MS) {
+			throw new Error('pairing registration is cooling down')
+		}
 		const value = {
 			code,
 			coreId: args.coreId,
 			connectionUrl: args.connectionUrl,
 			status: 'waiting' as const,
-			metadata: args.metadata,
+			metadata,
 			createdAt: now,
-			expiresAt: now + (args.ttlMs ?? 15 * 60 * 1000),
+			expiresAt: now + ttlMs,
 		}
 
 		if (existing) await ctx.db.patch(existing._id, value)
@@ -291,6 +308,30 @@ export const releasePairingCore = mutation({
 function normalizePairingCode(code: string): string | null {
 	const normalized = code.trim().replace(/[^a-z0-9]/gi, '').toLowerCase()
 	return /^[a-hj-np-z2-9]{8}$/.test(normalized) ? normalized : null
+}
+
+function validId(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\u0000-\u001f]/.test(value)
+}
+
+function validOptionalString(value: unknown, max: number): value is string {
+	return typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value)
+}
+
+function clampTtl(value: number | undefined): number {
+	if (value === undefined || !Number.isFinite(value)) return PAIRING_MAX_TTL_MS
+	return Math.max(PAIRING_MIN_TTL_MS, Math.min(PAIRING_MAX_TTL_MS, Math.floor(value)))
+}
+
+function pairingMetadata(value: unknown): { bindHost?: string; port?: number } | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+	const record = value as Record<string, unknown>
+	const metadata: { bindHost?: string; port?: number } = {}
+	if (validOptionalString(record.bindHost, MAX_BIND_HOST_LENGTH)) metadata.bindHost = record.bindHost
+	if (typeof record.port === 'number' && Number.isInteger(record.port) && record.port > 0 && record.port <= 65_535) {
+		metadata.port = record.port
+	}
+	return Object.keys(metadata).length > 0 ? metadata : undefined
 }
 
 function createRealtimeCredential(): string {

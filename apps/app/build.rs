@@ -26,9 +26,14 @@ fn main() {
                         "set_amberite_session_refresh_token",
                         "get_amberite_local_setup_secret",
                     ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
+                    .default_permission(DefaultPermissionRule::Allow(vec![
+                        "allow-check-reachable".into(),
+                        "allow-login".into(),
+                        "allow-remove-user".into(),
+                        "allow-get-default-user".into(),
+                        "allow-set-default-user".into(),
+                        "allow-get-users".into(),
+                    ])),
             )
             .plugin(
                 "cache",

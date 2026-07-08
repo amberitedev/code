@@ -314,10 +314,8 @@ fn normalize_convex_jwks_url(
     let Some(convex_url) = convex_url else {
         return auth_jwks_url.to_string();
     };
-    let legacy = format!(
-        "{}/.well-known/jwks.json",
-        convex_url.trim_end_matches('/')
-    );
+    let legacy =
+        format!("{}/.well-known/jwks.json", convex_url.trim_end_matches('/'));
     if auth_jwks_url == legacy && convex_url.contains(".convex.cloud") {
         return legacy.replace(".convex.cloud/", ".convex.site/");
     }
@@ -326,23 +324,19 @@ fn normalize_convex_jwks_url(
 }
 
 fn is_convex_cloud_jwks_url(value: &str) -> bool {
-    url::Url::parse(value)
-        .ok()
-        .is_some_and(|url| {
-            url.host_str()
-                .is_some_and(|host| host.ends_with(".convex.cloud"))
-                && url.path() == "/.well-known/jwks.json"
-        })
+    url::Url::parse(value).ok().is_some_and(|url| {
+        url.host_str()
+            .is_some_and(|host| host.ends_with(".convex.cloud"))
+            && url.path() == "/.well-known/jwks.json"
+    })
 }
 
 fn is_convex_jwks_url(value: &str) -> bool {
-    url::Url::parse(value)
-        .ok()
-        .is_some_and(|url| {
-            url.host_str()
-                .is_some_and(|host| host.ends_with(".convex.site"))
-                && url.path() == "/.well-known/jwks.json"
-        })
+    url::Url::parse(value).ok().is_some_and(|url| {
+        url.host_str()
+            .is_some_and(|host| host.ends_with(".convex.site"))
+            && url.path() == "/.well-known/jwks.json"
+    })
 }
 
 #[cfg(test)]

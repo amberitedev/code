@@ -90,6 +90,14 @@ export async function install_to_existing_profile(
 	return await invoke('plugin:pack|pack_install', { location, profile: profilePath })
 }
 
+export async function install_profile_from_file(path: string, profilePath: string): Promise<void> {
+	const location: PackLocationFile = {
+		type: 'fromFile',
+		path,
+	}
+	return await invoke('plugin:pack|pack_install', { location, profile: profilePath })
+}
+
 export async function create_profile_and_install_from_file(
 	path: string,
 	showUnknownPackWarningModal?: (createProfile: () => Promise<void>, fileName: string) => void,

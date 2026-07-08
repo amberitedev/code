@@ -10,7 +10,7 @@ use crate::{
         ConnectionRejectReason, HANDSHAKE_PROTOCOL,
     },
     presentation::{
-        authz::require_core_member, error::ApiError, extractors::AuthUser,
+        authz::require_core_manager, error::ApiError, extractors::AuthUser,
     },
 };
 
@@ -59,7 +59,7 @@ pub async fn java_installations(
     AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_core_member(&state, &claims.sub).await?;
+    require_core_manager(&state, &claims.sub).await?;
     let installs = state.java_store.list_all().await;
     let installations: Vec<Value> = installs
 		.into_iter()
@@ -72,6 +72,6 @@ pub async fn network_status(
     AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_core_member(&state, &claims.sub).await?;
+    require_core_manager(&state, &claims.sub).await?;
     Ok(Json(json!(network_service::network_status(&state).await)))
 }

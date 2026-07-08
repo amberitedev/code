@@ -31,6 +31,7 @@ pub struct TestApp {
     /// The first-run pairing code, if this app was spawned in prod (unpaired) mode.
     /// `None` for dev-mode spawns (pairing is skipped) and already-paired spawns.
     pub pairing_code: Option<String>,
+    pub local_setup_secret: Option<String>,
     /// Keeps the temp directory alive until the TestApp is dropped.
     _data_dir: tempfile::TempDir,
 }
@@ -43,7 +44,7 @@ impl TestApp {
         let (pool, data_dir) = Self::db_and_dir().await;
         let config = Self::dev_config(data_dir.path().to_path_buf());
         let state = AppState::new(config, pool).await.unwrap();
-        Self::start(state, data_dir, None).await
+        Self::start(state, data_dir, None, None).await
     }
 
     /// Unpaired core, dev_mode = true, with MockSpawner injected.
@@ -55,7 +56,7 @@ impl TestApp {
             AppState::new_with_spawner(config, pool, Arc::new(MockSpawner))
                 .await
                 .unwrap();
-        Self::start(state, data_dir, None).await
+        Self::start(state, data_dir, None, None).await
     }
 
     /// Unpaired core, dev_mode = false (real JWT enforcement).
@@ -69,7 +70,8 @@ impl TestApp {
         };
         let state = AppState::new(config, pool).await.unwrap();
         let pairing_code = state.pairing_code.lock().await.clone();
-        Self::start(state, data_dir, pairing_code).await
+        let local_setup_secret = state.local_setup_secret.lock().await.clone();
+        Self::start(state, data_dir, pairing_code, local_setup_secret).await
     }
 
     /// Already-paired core, dev_mode = true.
@@ -94,7 +96,7 @@ impl TestApp {
             ..Self::dev_config(data_dir.path().to_path_buf())
         };
         let state = AppState::new(config, pool).await.unwrap();
-        Self::start(state, data_dir, None).await
+        Self::start(state, data_dir, None, None).await
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -141,6 +143,7 @@ impl TestApp {
         state: Arc<AppState>,
         data_dir: tempfile::TempDir,
         pairing_code: Option<String>,
+        local_setup_secret: Option<String>,
     ) -> Self {
         let router = create_router(Arc::clone(&state));
         let client = if state.config.dev_mode {
@@ -168,6 +171,7 @@ impl TestApp {
             client,
             state,
             pairing_code,
+            local_setup_secret,
             _data_dir: data_dir,
         }
     }

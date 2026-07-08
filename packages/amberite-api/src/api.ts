@@ -45,6 +45,7 @@ import type {
 	SaveCoreRoleBody,
 	CoreInvitation,
 	CreateCoreInvitationBody,
+	UpdateCoreInvitationBody,
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,
 	CoreSyncProfile,
@@ -962,6 +963,18 @@ export function createCoreInvitation(
 ): Promise<CoreInvitation> {
 	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations`, {
 		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+export function updateCoreInvitation(
+	ctx: CoreCallContext,
+	id: string,
+	body: UpdateCoreInvitationBody,
+): Promise<CoreInvitation> {
+	return apiFetch(ctx, `${ctx.baseUrl}/core/invitations/${encodeURIComponent(id)}`, {
+		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
 	})

@@ -228,6 +228,7 @@ const renderedProjectCards = computed(() =>
 )
 
 type BrowseProjectTypeTab = Parameters<typeof selectProjectTypeTab>[1]
+let queuedProjectTypeTab: { index: number; tab: BrowseProjectTypeTab } | undefined
 
 function markBrowseTransition(name: string) {
 	if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return
@@ -261,10 +262,33 @@ async function waitForNavSliderQuietWindow() {
 	await wait(remaining)
 }
 
+function getSelectableProjectTypeTab(tab: BrowseProjectTypeTab) {
+	return { ...tab, onHover: undefined }
+}
+
+function isProjectTypeTabTransitioning() {
+	return !contentVisible.value || transitionActive.value
+}
+
 function handleProjectTypeTabClick(index: number, tab: BrowseProjectTypeTab) {
 	lastProjectTypeTabClickAt = getNow()
 	markBrowseTransition('tab-click')
-	selectProjectTypeTab(index, { ...tab, onHover: undefined })
+	const projectTypeTab = getSelectableProjectTypeTab(tab)
+
+	if (isProjectTypeTabTransitioning()) {
+		queuedProjectTypeTab = { index, tab: projectTypeTab }
+		return
+	}
+
+	selectProjectTypeTab(index, projectTypeTab)
+}
+
+function flushQueuedProjectTypeTab() {
+	const queued = queuedProjectTypeTab
+	if (!queued) return
+
+	queuedProjectTypeTab = undefined
+	selectProjectTypeTab(queued.index, queued.tab)
 }
 
 function syncVisibleControlsState() {
@@ -500,6 +524,7 @@ function isIncomingBrowseFirstSliceReady() {
 function handleAfterEnter() {
 	projectTypeTabController.handleAfterEnter()
 	startProgressiveCardRender()
+	flushQueuedProjectTypeTab()
 }
 
 function handleBeforeLeave() {
@@ -513,11 +538,13 @@ function handleBeforeEnter() {
 function handleEnterCancelled() {
 	renderAllIncomingCards()
 	projectTypeTabController.handleEnterCancelled()
+	flushQueuedProjectTypeTab()
 }
 
 function handleLeaveCancelled() {
 	renderAllIncomingCards()
 	projectTypeTabController.handleLeaveCancelled()
+	flushQueuedProjectTypeTab()
 }
 
 watch(
@@ -587,6 +614,7 @@ onUnmounted(() => {
 	unlockBrowseScroll()
 	clearProgressiveRenderTimer()
 	clearImageDecodeFrame()
+	queuedProjectTypeTab = undefined
 	cardFrameElements.clear()
 })
 </script>

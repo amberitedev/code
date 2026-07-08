@@ -126,13 +126,13 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		if (!auth.isLoggedIn.value) await auth.signIn()
 	}
 
-	async function finish() {
+	async function finish(): Promise<boolean> {
 		working.value = true
 		error.value = ''
 		try {
 			await ensureAuth()
 			if (flow.value === 'create') {
-				if (!getConnectedCore()?.coreId) await createCoreGroup()
+				if (!connectedCoreForCurrentAccount()?.coreId) await createCoreGroup()
 				await applyCreateSettings()
 			} else {
 				finalizingReservedPairing = true
@@ -143,8 +143,10 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 			working.value = false
 			await nextTick()
 			modal.value?.hide()
+			return true
 		} catch (reason) {
 			error.value = reason instanceof Error ? reason.message : 'Core setup failed.'
+			return false
 		} finally {
 			const shouldReleaseClosedPairing = !modalOpen.value && flow.value === 'connect'
 			finalizingReservedPairing = false
@@ -213,9 +215,9 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 					auth_audience: 'convex',
 					owner_user_id: claim.ownerUserId,
 					owner_display_name: claim.ownerDisplayName,
+					realtime_credential: claim.realtimeCredential,
 					...(config.realtimeUrl
 						? {
-								realtime_credential: claim.realtimeCredential,
 								realtime_url: config.realtimeUrl,
 							}
 						: {}),
@@ -256,7 +258,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 				invitee_display_name: invite.user.username,
 				role_id: inviteRoleId(invite.role),
 			})
-			if (inviteAsFriend.value) {
+			if (inviteAsFriend.value && !friendRequestUnavailableUserIds().has(invite.user.id)) {
 				await social.sendFriendRequest({ targetUserId: invite.user.id })
 				if (social.error.value) throw social.error.value
 			}
@@ -389,6 +391,16 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		)
 	}
 
+	function friendRequestUnavailableUserIds() {
+		return new Set([
+			...(social.friends.value?.friends ?? [])
+				.map((friend) => friend.user?.userId)
+				.filter((id): id is string => !!id),
+			...(social.friends.value?.incoming ?? []).map((request) => request.request.fromUserId),
+			...(social.friends.value?.outgoing ?? []).map((request) => request.request.toUserId),
+		])
+	}
+
 	function selectInviteSuggestion(user: ServerAccessInviteSuggestion) {
 		selectedInviteSuggestion.value = user
 		inviteSearch.value = user.username
@@ -481,6 +493,19 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		void releaseReservedPairingCore()
 	}
 
+	function connectedCoreForCurrentAccount() {
+		const connected = getConnectedCore()
+		if (!connected?.coreId) return null
+		const link = social.coreLinks.value.find(
+			(core) =>
+				core.coreId === connected.coreId && core.linkState === 'linked' && !!core.connectionUrl,
+		)
+		if (link) return connected
+		clearConnectedCore()
+		coreClient.clearCoreUrlCache()
+		return null
+	}
+
 	const ctx: CoreOnboardingContext = {
 		flow,
 		connectCode,
@@ -495,6 +520,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		members,
 		roles,
 		inviteSuggestions,
+		selectedInviteSuggestion,
 		selectInviteSuggestion,
 		createInvite,
 		quickInvite,

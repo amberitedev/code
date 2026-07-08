@@ -17,6 +17,7 @@ import { makeFunctionReference } from 'convex/server'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
+import { useCoreClient } from '@/composables/useCoreClient'
 import { clearConnectedCore, getConnectedCore, setConnectedCore } from '@/core/connected-core'
 import {
 	refreshRealtimeConvexAuth,
@@ -138,16 +139,7 @@ function applyState(next: SessionWire) {
 		next.core ??
 		state.coreLinks.find((entry) => entry.linkState === 'linked' && entry.connectionUrl) ??
 		null
-	if (core?.coreId && core.connectionUrl) {
-		const connected = getConnectedCore()
-		if (connected?.coreId !== core.coreId || connected.url !== core.connectionUrl) {
-			setConnectedCore({
-				coreId: core.coreId,
-				url: core.connectionUrl,
-				groupId: next.group?.group.id,
-			})
-		}
-	}
+	syncConnectedCoreLink(core, state.coreLinks, next.group?.group.id)
 	loading.value = false
 	error.value = null
 	initialStateReceived = true
@@ -157,6 +149,35 @@ function applyState(next: SessionWire) {
 	}
 	settleStateWaiters()
 	connectPresence()
+}
+
+function syncConnectedCoreLink(
+	core: CorePresence | CoreListEntry | null,
+	coreLinks: CoreListEntry[],
+	groupId?: string,
+) {
+	const connected = getConnectedCore()
+	if (core?.coreId && core.connectionUrl) {
+		if (connected?.coreId !== core.coreId || connected.url !== core.connectionUrl) {
+			setConnectedCore({
+				coreId: core.coreId,
+				url: core.connectionUrl,
+				groupId,
+			})
+		}
+		return
+	}
+
+	if (
+		connected &&
+		!coreLinks.some(
+			(entry) =>
+				entry.coreId === connected.coreId && entry.linkState === 'linked' && !!entry.connectionUrl,
+		)
+	) {
+		clearConnectedCore()
+		useCoreClient().clearCoreUrlCache()
+	}
 }
 
 function connectPresence(): void {

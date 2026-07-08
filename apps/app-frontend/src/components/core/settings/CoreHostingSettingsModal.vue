@@ -12,28 +12,34 @@ const modal = ref<InstanceType<typeof TabbedModal> | null>(null)
 
 const tabs = [
 	{
+		id: 'general',
 		name: { id: 'app.core.settings.tabs.general', defaultMessage: 'General' },
 		icon: InfoIcon,
 		content: CoreSettingsGeneralPage,
 	},
 	{
+		id: 'members',
 		name: { id: 'app.core.settings.tabs.members', defaultMessage: 'Default access' },
 		icon: UsersIcon,
 		content: CoreSettingsMembersPage,
 	},
 	{
+		id: 'network',
 		name: { id: 'app.core.settings.tabs.network', defaultMessage: 'Network' },
 		icon: GlobeIcon,
 		content: CoreSettingsNetworkPage,
 	},
 	{
+		id: 'advanced',
 		name: { id: 'app.core.settings.tabs.advanced', defaultMessage: 'Advanced' },
 		icon: WrenchIcon,
 		content: CoreSettingsAdvancedPage,
 	},
 ]
 
-function show() {
+function show(tab?: 'general' | 'members' | 'network' | 'advanced') {
+	const index = tab ? tabs.findIndex((item) => item.id === tab) : -1
+	if (index >= 0) modal.value?.setTab(index)
 	modal.value?.show()
 }
 

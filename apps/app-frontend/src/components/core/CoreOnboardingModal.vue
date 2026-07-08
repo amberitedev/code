@@ -18,7 +18,10 @@ import { useCoreOnboardingState } from './use-core-onboarding-state'
 
 const modal = ref<ComponentExposed<typeof MultiStageModal> | null>(null)
 const onboarding = useCoreOnboardingState(modal)
-const emit = defineEmits<{ hide: [] }>()
+const emit = defineEmits<{
+	hide: []
+	finish: []
+}>()
 
 provideCoreOnboardingContext(onboarding.ctx)
 
@@ -88,7 +91,7 @@ const stages: StageConfigInput<CoreOnboardingContext>[] = [
 			iconPosition: 'before',
 			color: 'brand',
 			loading: ctx.working.value,
-			onClick: ctx.working.value ? undefined : onboarding.finish,
+			onClick: ctx.working.value ? undefined : finish,
 		}),
 		maxWidth: '800px',
 	},
@@ -101,6 +104,10 @@ function show(flow: CoreOnboardingFlow) {
 function handleHide() {
 	onboarding.handleModalHide()
 	emit('hide')
+}
+
+async function finish() {
+	if (await onboarding.finish()) emit('finish')
 }
 
 defineExpose({ show })

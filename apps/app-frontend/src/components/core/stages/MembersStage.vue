@@ -4,10 +4,13 @@ import type { ComboboxOption } from '@modrinth/ui'
 import { Avatar, ButtonStyled, Checkbox, Combobox } from '@modrinth/ui'
 import { computed } from 'vue'
 
+import { useSocial } from '@/composables/useSocial'
+
 import CoreAccessTable from '../CoreAccessTable.vue'
 import { injectCoreOnboardingContext } from '../core-onboarding-context'
 
 const ctx = injectCoreOnboardingContext()
+const social = useSocial()
 const inviteSuggestionOptions = computed<ComboboxOption<string>[]>(() =>
 	ctx.inviteSuggestions.value.map((user) => ({
 		value: user.username,
@@ -21,6 +24,16 @@ const inviteLookupMessage = computed(() => {
 	if (ctx.inviteLookupStatus.value === 'loading') return 'Searching...'
 	return 'No matching Amberite users.'
 })
+const friendRequestUnavailableIds = computed(
+	() =>
+		new Set([
+			...(social.friends.value?.friends ?? [])
+				.map((friend) => friend.user?.userId)
+				.filter((id): id is string => !!id),
+			...(social.friends.value?.incoming ?? []).map((request) => request.request.fromUserId),
+			...(social.friends.value?.outgoing ?? []).map((request) => request.request.toUserId),
+		]),
+)
 const canCreateInvite = computed(() => {
 	const value = ctx.inviteSearch.value.trim().toLowerCase()
 	if (!value) return false
@@ -34,6 +47,10 @@ const canCreateInvite = computed(() => {
 		!!user &&
 		!ctx.members.value.some((member) => !member.inviteCandidate && member.user.id === user.id)
 	)
+})
+const showFriendRequestToggle = computed(() => {
+	const userId = ctx.selectedInviteSuggestion.value?.id
+	return !!userId && !friendRequestUnavailableIds.value.has(userId)
 })
 
 function selectInviteOption(option: ComboboxOption<string>) {
@@ -49,16 +66,16 @@ function selectInviteOption(option: ComboboxOption<string>) {
 <template>
 	<div class="flex min-h-[26rem] flex-col gap-4">
 		<p class="m-0 text-secondary">
-			Invite Amberite users and choose the role they will receive.
+			Invite users by their unique Amberite username or their Minecraft username.
 		</p>
 		<div class="flex flex-col gap-3">
 			<div class="flex flex-col gap-2 md:flex-row md:items-center">
 				<div class="min-w-0 flex-1">
 					<Combobox
-						:model-value="undefined"
+						:model-value="ctx.selectedInviteSuggestion.value?.username"
 						:options="inviteSuggestionOptions"
-						:search-placeholder="'Search Amberite username'"
-						:placeholder="'Search Amberite username'"
+						:search-placeholder="'Search Amberite or Minecraft username'"
+						:placeholder="'Search Amberite or Minecraft username'"
 						:no-options-message="inviteLookupMessage"
 						:min-search-length-to-open="2"
 						:disable-search-filter="true"
@@ -111,6 +128,7 @@ function selectInviteOption(option: ComboboxOption<string>) {
 			</div>
 			<div class="flex items-center">
 				<Checkbox
+					v-if="showFriendRequestToggle"
 					v-model="ctx.inviteAsFriend.value"
 					label="Also send a friend request"
 					label-class="text-base text-contrast"

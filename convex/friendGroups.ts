@@ -10,6 +10,7 @@ import {
 	membershipByGroupUser,
 	membershipsByUser,
 	publicUser,
+	publicLegacyCore,
 	requireFriendGroupRole,
 	requireSingleGroupMembership,
 	requireSingleOwnedCore,
@@ -34,7 +35,7 @@ export const listMyFriendGroups = query({
 							group: { ...group, id: group._id },
 							role: membership.role,
 							permissionPreset: membership.permissionPreset,
-							core,
+							core: publicLegacyCore(core),
 						}
 					: null
 			}),
@@ -51,7 +52,7 @@ export const getFriendGroup = query({
 		return group
 			? {
 					group: { ...group, id: group._id },
-					core: group.coreId ? await coreById(ctx, group.coreId) : null,
+					core: group.coreId ? publicLegacyCore(await coreById(ctx, group.coreId)) : null,
 				}
 			: null
 	},
@@ -309,6 +310,6 @@ export const friendGroupCores = query({
 	handler: async (ctx, args) => {
 		const userId = await resolveActor(ctx, args.__actAs)
 		await requireFriendGroupRole(ctx, userId, args.friendGroupId, ['owner', 'admin', 'member'])
-		return await coresByGroup(ctx, args.friendGroupId)
+		return (await coresByGroup(ctx, args.friendGroupId)).map(publicLegacyCore)
 	},
 })

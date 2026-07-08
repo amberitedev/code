@@ -35,7 +35,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             ApiError::Unauthorized("missing Authorization header".into())
         })?;
 
-        let claims = if state.config.dev_mode {
+        let mut claims = if state.config.dev_mode {
             if let Some(claims) = dev_claims(token)? {
                 claims
             } else {
@@ -44,6 +44,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         } else {
             validate_jwt(state, token).await?
         };
+        claims.sub = auth_user_id(&claims.sub).to_string();
 
         access_service::require_any_member(state, &claims.sub)
             .await
@@ -65,6 +66,17 @@ fn no_auth_claims() -> Claims {
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let val = headers.get("authorization")?.to_str().ok()?;
     val.strip_prefix("Bearer ")
+}
+
+fn auth_user_id(subject: &str) -> &str {
+    match subject.split_once('|') {
+        Some((user_id, session_id))
+            if !user_id.is_empty() && !session_id.is_empty() =>
+        {
+            user_id
+        }
+        _ => subject,
+    }
 }
 
 async fn validate_jwt(
@@ -104,7 +116,7 @@ fn dev_claims(token: &str) -> Result<Option<Claims>, ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::bearer_token;
+    use super::{auth_user_id, bearer_token};
     use axum::http::{header, HeaderMap, HeaderValue};
 
     fn with_auth(value: &str) -> HeaderMap {
@@ -142,5 +154,24 @@ mod tests {
         // HTTP convention: scheme names are case-insensitive, but our impl uses exact match
         let headers = with_auth("bearer abc123");
         assert_eq!(bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn convex_auth_subject_uses_user_id() {
+        assert_eq!(
+            auth_user_id("users:abc123|sessions:def456"),
+            "users:abc123"
+        );
+    }
+
+    #[test]
+    fn bare_subject_is_unchanged() {
+        assert_eq!(auth_user_id("dev-owner"), "dev-owner");
+    }
+
+    #[test]
+    fn malformed_subject_is_unchanged() {
+        assert_eq!(auth_user_id("users:abc123|"), "users:abc123|");
+        assert_eq!(auth_user_id("|sessions:def456"), "|sessions:def456");
     }
 }

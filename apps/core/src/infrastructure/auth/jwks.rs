@@ -94,7 +94,8 @@ impl JwksCache {
         {
             let guard = self.inner.read().await;
             if let Some(ref e) = *guard {
-                if e.jwks_url == jwks_url && e.fetched_at.elapsed() < CACHE_TTL {
+                if e.jwks_url == jwks_url && e.fetched_at.elapsed() < CACHE_TTL
+                {
                     return Ok(());
                 }
             }

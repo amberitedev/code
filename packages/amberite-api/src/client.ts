@@ -44,6 +44,7 @@ import type {
 	SaveCoreRoleBody,
 	CoreInvitation,
 	CreateCoreInvitationBody,
+	UpdateCoreInvitationBody,
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,
 	CoreSyncProfile,
@@ -1038,6 +1039,11 @@ export class CoreApiClient {
 
 	createCoreInvitation(body: CreateCoreInvitationBody): Promise<CoreInvitation> {
 		return this.direct('core.invitations.create', (ctx) => api.createCoreInvitation(ctx, body))
+	}
+	updateCoreInvitation(id: string, body: UpdateCoreInvitationBody): Promise<CoreInvitation> {
+		return this.direct('core.invitations.update', (ctx) =>
+			api.updateCoreInvitation(ctx, id, body),
+		)
 	}
 	listCoreInvitations(): Promise<CoreInvitation[]> {
 		return this.direct('core.invitations.list', (ctx) =>

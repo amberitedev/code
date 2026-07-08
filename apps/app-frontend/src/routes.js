@@ -9,6 +9,7 @@ const Pages = {
 	Core: () => import('@/pages/core/Index.vue'),
 	Browse: BrowsePage,
 	Skins: () => import('@/pages/Skins.vue'),
+	User: () => import('@/pages/user/Index.vue'),
 }
 
 const Hosting = {
@@ -153,6 +154,14 @@ const router = createRouter({
 			},
 		},
 		{
+			path: '/user/:user/:projectType?',
+			name: 'User',
+			component: Pages.User,
+			meta: {
+				breadcrumb: [{ name: '?User' }],
+			},
+		},
+		{
 			path: '/library',
 			name: 'Library',
 			component: Library.Index,
@@ -184,6 +193,11 @@ const router = createRouter({
 					path: 'custom',
 					name: 'Custom',
 					component: Library.Custom,
+				},
+				{
+					path: 'shared',
+					name: 'Shared',
+					component: Library.Overview,
 				},
 			],
 		},

@@ -66,8 +66,13 @@
 			ref="grantAccessModal"
 			:members="members"
 			:suggestions="suggestions"
+			:friend-ids="friendIds"
+			:friend-request-unavailable-ids="pendingFriendRequestIds"
 			:search-users="searchUsers"
 			:can-grant="canManageUsers"
+			target-label="Username"
+			target-placeholder="Search Amberite or Minecraft username"
+			target-help="Use their unique Amberite username or their Minecraft username."
 			@grant="grantAccess"
 		/>
 		<RemoveAccessModal
@@ -114,6 +119,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { type Component, computed, ref, watch } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
+import { useSocial } from '@/composables/useSocial'
 import { useSocialClient } from '@/composables/useSocialClient'
 
 import CoreActivityEvent from './CoreActivityEvent.vue'
@@ -124,6 +130,7 @@ const props = defineProps<{
 
 const core = useCoreClient()
 const social = useSocialClient()
+const socialState = useSocial()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
 const search = ref('')
@@ -202,6 +209,15 @@ const suggestions = computed<ServerAccessInviteSuggestion[]>(() =>
 		avatarUrl: member.user.avatarUrl,
 	})),
 )
+const friendIds = computed(() =>
+	(socialState.friends.value?.friends ?? [])
+		.map((friend) => friend.user?.userId)
+		.filter((id): id is string => !!id),
+)
+const pendingFriendRequestIds = computed(() => [
+	...(socialState.friends.value?.incoming ?? []).map((request) => request.request.fromUserId),
+	...(socialState.friends.value?.outgoing ?? []).map((request) => request.request.toUserId),
+])
 const auditEntries = computed<ServerAuditLogEntry[]>(() =>
 	activityEntries.value.map((entry) => ({
 		id: entry.id,

@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import type { CoreInstanceSummary } from '@amberite/amberite-api'
+import {
+	CoreOfflineError,
+	installSyncedProfileFromCore,
+	NetworkError,
+	resolveInstallableSyncedProfiles,
+	type CoreInstanceSummary,
+	type InstallableSyncedProfile,
+} from '@amberite/amberite-api'
 import { PlusIcon } from '@modrinth/assets'
 import { ButtonStyled, injectNotificationManager, NavTabs } from '@modrinth/ui'
+import { join } from '@tauri-apps/api/path'
+import { remove as removeFile, writeFile as writeFileBytes } from '@tauri-apps/plugin-fs'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useStorage } from '@vueuse/core'
 import { computed, inject, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
@@ -9,23 +18,32 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { NewInstanceImage } from '@/assets/icons'
 import GridDisplay from '@/components/GridDisplay.vue'
+import { useCoreClient } from '@/composables/useCoreClient'
 import { useCoreInstances } from '@/composables/useCoreInstances'
+import { useSocial } from '@/composables/useSocial'
+import { useSyncedServers } from '@/composables/useSyncedServers'
 import { get_project_v3_many } from '@/helpers/cache.js'
 import { profile_listener } from '@/helpers/events.js'
-import { list, remove as removeProfile } from '@/helpers/profile.js'
+import { install_profile_from_file } from '@/helpers/pack'
+import { create, edit, get_full_path, list, remove as removeProfile } from '@/helpers/profile.js'
 import type { GameInstance } from '@/helpers/types'
+import { getLinkedServerId, setLinkedServerId } from '@/pages/instance/synced/use-synced-link'
 import { useBreadcrumbs } from '@/store/breadcrumbs.js'
 
 defineOptions({
 	name: 'LibraryPage',
 })
 
-const { handleError } = injectNotificationManager()
+const { addNotification, handleError } = injectNotificationManager()
 const queryClient = useQueryClient()
 const showCreationModal = inject('showCreationModal')
 const route = useRoute()
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
+const core = useCoreClient()
+const social = useSocial()
+const syncedServers = useSyncedServers()
+const libraryTabSwitchAnimationEnabled = false
 const libraryContentAnimationMode = useStorage('app-library-content-animation-mode', 'Card changes')
 const props = withDefaults(
 	defineProps<{
@@ -56,6 +74,36 @@ const instancesQuery = useQuery({
 	staleTime: 30_000,
 	gcTime: 10 * 60_000,
 })
+
+const coreSyncProfilesQuery = useQuery({
+	queryKey: ['library', 'core-sync-profiles'],
+	queryFn: () => core.listSyncProfiles(),
+	enabled: computed(() => !props.inertUnderlay && !!social.group.value?.group.id),
+	retry: false,
+	staleTime: 30_000,
+	gcTime: 10 * 60_000,
+})
+
+watch(
+	() => social.group.value?.group.id,
+	(friendGroupId) => {
+		if (!friendGroupId || props.inertUnderlay) return
+		void syncedServers.refresh(friendGroupId).catch(handleError)
+	},
+	{ immediate: true },
+)
+
+watch(
+	() => syncedServers.error.value,
+	(error) => {
+		if (!error) return
+		addNotification({
+			title: 'Shared instances unavailable',
+			text: error.message,
+			type: 'warning',
+		})
+	},
+)
 
 const { instances: coreInstanceMap, loading: coreInstancesLoading } = useCoreInstances()
 
@@ -92,6 +140,31 @@ const instances = computed(() => {
 	return [...appLib, ...coreServers]
 })
 
+const localProfilesForSharedInstall = computed(() =>
+	(instancesQuery.data.value ?? []).map((profile) =>
+		profile.profile_type === 'synced'
+			? {
+					...profile,
+					core_instance_id: profile.core_instance_id ?? getLinkedServerId(profile.path),
+				}
+			: profile,
+	),
+)
+
+const installableInstances = computed(() => {
+	if (!social.group.value || syncedServers.profiles.value.length === 0) return []
+	const coreProfilesLoaded =
+		coreSyncProfilesQuery.data.value !== undefined || coreSyncProfilesQuery.isError.value
+	if (!coreProfilesLoaded) return []
+
+	return resolveInstallableSyncedProfiles({
+		socialProfiles: syncedServers.profiles.value,
+		coreProfiles: coreSyncProfilesQuery.data.value ?? null,
+		localProfiles: localProfilesForSharedInstall.value,
+		coreAvailable: !coreSyncProfilesQuery.isError.value,
+	})
+})
+
 async function cleanupLegacyServerProfiles(profiles: GameInstance[]): Promise<void> {
 	for (const profile of profiles) {
 		await removeProfile(profile.path).catch(handleError)
@@ -99,17 +172,12 @@ async function cleanupLegacyServerProfiles(profiles: GameInstance[]): Promise<vo
 	await queryClient.invalidateQueries({ queryKey: ['library', 'instances'] })
 }
 
-const initialPending = computed(
-	() =>
-		(instancesQuery.isPending.value || coreInstancesLoading.value) && instances.value.length === 0,
-)
-const hasLibraryContent = computed(() => instances.value.length > 0)
 const libraryTabs = [
 	{ label: 'All instances', href: '/library', kind: 'overview' },
 	{ label: 'Modpacks', href: '/library/modpacks', kind: 'modpacks' },
 	{ label: 'Servers', href: '/library/servers', kind: 'servers' },
 	{ label: 'Custom', href: '/library/custom', kind: 'custom' },
-	{ label: 'Shared with me', href: '/library/shared', kind: 'shared', shown: false },
+	{ label: 'Shared', href: '/library/shared', kind: 'shared' },
 	{ label: 'Saved', href: '/library/saved', kind: 'saved', shown: false },
 ]
 const visibleLibraryTabs = computed(() => libraryTabs.filter((tab) => tab.shown ?? true))
@@ -117,6 +185,7 @@ function getLibraryTabKind(path: string) {
 	if (path.endsWith('/modpacks')) return 'modpacks'
 	if (path.endsWith('/servers')) return 'servers'
 	if (path.endsWith('/custom')) return 'custom'
+	if (path.endsWith('/shared')) return 'shared'
 	return 'overview'
 }
 
@@ -147,6 +216,8 @@ const activeLibraryTabIndex = computed(() =>
 const visibleLibraryTabIndex = activeLibraryTabIndex
 const libraryRouteKey = computed(() => `library-tab:${activeLibraryTabKind.value}`)
 const libraryContentAnimationModeValue = computed(() => {
+	if (!libraryTabSwitchAnimationEnabled) return 'none'
+
 	switch (libraryContentAnimationMode.value) {
 		case 'Subtle page':
 			return 'subtle-page'
@@ -195,10 +266,107 @@ const activeLibraryInstances = computed(() => {
 			]
 		case 'custom':
 			return instances.value.filter((i) => !i.linked_data)
+		case 'shared':
+			return []
 		default:
 			return instances.value
 	}
 })
+
+const activeLibraryInstallableInstances = computed(() => {
+	switch (activeLibraryTabKind.value) {
+		case 'servers':
+		case 'custom':
+			return []
+		case 'shared':
+		case 'modpacks':
+		default:
+			return installableInstances.value
+	}
+})
+
+const hasLibraryContent = computed(
+	() =>
+		activeLibraryInstances.value.length > 0 ||
+		activeLibraryInstallableInstances.value.length > 0,
+)
+const initialPending = computed(
+	() =>
+		(instancesQuery.isPending.value ||
+			coreInstancesLoading.value ||
+			(!!social.group.value && syncedServers.loading.value) ||
+			(!!social.group.value && coreSyncProfilesQuery.isPending.value)) &&
+		!hasLibraryContent.value,
+)
+
+const installingSharedInstanceIds = ref(new Set<string>())
+const installingInstallableIds = computed(() => [...installingSharedInstanceIds.value])
+
+async function installSharedInstance(profile: InstallableSyncedProfile): Promise<void> {
+	if (installingSharedInstanceIds.value.has(profile.coreInstanceId)) return
+
+	if (profile.availability !== 'installable') {
+		addNotification({
+			title: 'Shared instance unavailable',
+			text: profile.unavailableReason ?? 'This shared instance is not installable yet.',
+			type: 'warning',
+		})
+		return
+	}
+
+	const nextInstalling = new Set(installingSharedInstanceIds.value)
+	nextInstalling.add(profile.coreInstanceId)
+	installingSharedInstanceIds.value = nextInstalling
+
+	try {
+		await installSyncedProfileFromCore<GameInstance>({
+			core,
+			profile,
+			createProfile: ({ name, gameVersion, loader, profileType }) =>
+				create(
+					name,
+					gameVersion,
+					loader as GameInstance['loader'],
+					null,
+					null,
+					true,
+					null,
+					profileType,
+				),
+			getProfileFullPath: get_full_path,
+			joinPath: join,
+			writeFile: writeFileBytes,
+			removeFile,
+			installMrpackFromPath: install_profile_from_file,
+			editProfile: edit,
+			removeProfile,
+			linkServerId: setLinkedServerId,
+		})
+		await Promise.all([
+			queryClient.invalidateQueries({ queryKey: ['library', 'instances'] }),
+			queryClient.invalidateQueries({ queryKey: ['library', 'core-sync-profiles'] }),
+		])
+		addNotification({
+			title: 'Instance installed',
+			text: `${profile.name} is ready in your library.`,
+			type: 'success',
+		})
+	} catch (error) {
+		if (error instanceof CoreOfflineError || error instanceof NetworkError) {
+			addNotification({
+				title: 'Core unavailable',
+				text: 'Connect to Core to install this shared instance.',
+				type: 'warning',
+			})
+		} else {
+			handleError(error instanceof Error ? error : new Error(String(error)))
+		}
+	} finally {
+		const remainingInstalling = new Set(installingSharedInstanceIds.value)
+		remainingInstalling.delete(profile.coreInstanceId)
+		installingSharedInstanceIds.value = remainingInstalling
+	}
+}
 
 watchEffect(async () => {
 	const projectIds = [
@@ -262,16 +430,21 @@ onUnmounted(() => {
 		<GridDisplay
 			label="Instances"
 			:instances="activeLibraryInstances"
+			:installable-instances="activeLibraryInstallableInstances"
+			:installing-installable-ids="installingInstallableIds"
 			:content-key="libraryRouteKey"
 			:content-direction="libraryTabSlideDirection"
 			:animation-mode="libraryContentAnimationModeValue"
+			@install-instance="installSharedInstance"
 		/>
 		<div v-if="!initialPending && !hasLibraryContent" class="no-instance">
 			<div class="icon">
 				<NewInstanceImage />
 			</div>
-			<h3>No instances found</h3>
-			<ButtonStyled color="brand">
+			<h3>
+				{{ activeLibraryTabKind === 'shared' ? 'No shared instances found' : 'No instances found' }}
+			</h3>
+			<ButtonStyled v-if="activeLibraryTabKind !== 'shared'" color="brand">
 				<button :disabled="offline" @click="showCreationModal?.()">
 					<PlusIcon />
 					Create new instance

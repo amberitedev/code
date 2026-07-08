@@ -2,20 +2,18 @@
 import { DashboardIcon, ServerStackIcon, SettingsIcon, UnlinkIcon } from '@modrinth/assets'
 import {
 	ButtonStyled,
+	EmptyState,
 	injectNotificationManager,
 	NavTabs,
-	Toggle,
-	useLoadingBarToken,
 } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 
 import CoreAccessPanel from '@/components/core/CoreAccessPanel.vue'
 import CoreActivityPanel from '@/components/core/CoreActivityPanel.vue'
 import CoreOnboardingModal from '@/components/core/CoreOnboardingModal.vue'
-import CoreOverviewGhost from '@/components/core/CoreOverviewGhost.vue'
+import CoreOverviewPanel from '@/components/core/CoreOverviewPanel.vue'
 import CoreSetupPanel from '@/components/core/CoreSetupPanel.vue'
 import CoreHostingSettingsModal from '@/components/core/settings/CoreHostingSettingsModal.vue'
-import { useOptimisticLoading } from '@/composables/useOptimisticPreload'
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useCoreConnection } from '@/composables/useCoreConnection'
 import { useSocial } from '@/composables/useSocial'
@@ -30,24 +28,8 @@ const connectedCore = useConnectedCore()
 const { addNotification } = injectNotificationManager()
 const onboardingModal = ref<InstanceType<typeof CoreOnboardingModal>>()
 const settingsModal = ref<InstanceType<typeof CoreHostingSettingsModal>>()
-const activeTab = ref<'overview' | 'activity'>('overview')
+const activeTab = ref<'overview' | 'members' | 'activity'>('overview')
 const clearingLinkedCore = ref(false)
-const hasResolvedDashboard = ref(!social.loading.value)
-watch(
-	() => social.loading.value,
-	(loading) => {
-		if (!loading) hasResolvedDashboard.value = true
-	},
-	{ immediate: true },
-)
-const dashboardPending = computed(() => social.loading.value && !hasResolvedDashboard.value)
-const hasDashboardDecision = computed(() => hasResolvedDashboard.value)
-const initialDashboardSkeleton = useOptimisticLoading(dashboardPending, hasDashboardDecision)
-const forceDashboardSkeleton = ref(false)
-const showDashboardSkeleton = computed(
-	() => initialDashboardSkeleton.value || forceDashboardSkeleton.value,
-)
-useLoadingBarToken(dashboardPending)
 const hasConnectedCore = computed(() => !!connectedCore.value)
 const onboardingVisible = ref(false)
 const setupVisible = ref(!hasConnectedCore.value)
@@ -58,6 +40,7 @@ watch(hasConnectedCore, (hasCore) => {
 })
 const tabs = [
 	{ label: 'Overview', href: 'overview' },
+	{ label: 'Members', href: 'members' },
 	{ label: 'Activity', href: 'activity' },
 ]
 const activeTabIndex = computed(() => tabs.findIndex((tab) => tab.href === activeTab.value))
@@ -87,7 +70,7 @@ const devViewToggleTooltip = computed(() =>
 const devViewToggleIcon = computed(() => (setupVisible.value ? DashboardIcon : ServerStackIcon))
 
 function selectTab(tab: { href: string }) {
-	if (tab.href === 'overview' || tab.href === 'activity') {
+	if (tab.href === 'overview' || tab.href === 'members' || tab.href === 'activity') {
 		activeTab.value = tab.href
 	}
 }
@@ -104,7 +87,20 @@ function showOnboarding(flow: 'create' | 'connect') {
 
 function handleOnboardingHide() {
 	onboardingVisible.value = false
-	setupVisible.value = !hasConnectedCore.value
+}
+
+function handleOnboardingFinish() {
+	onboardingVisible.value = false
+	setupVisible.value = false
+	activeTab.value = 'overview'
+}
+
+function openPermissionsSettings() {
+	settingsModal.value?.show('members')
+}
+
+function openGeneralSettings() {
+	settingsModal.value?.show('general')
 }
 
 function clearErrorMessage(reason: unknown): string {
@@ -142,10 +138,14 @@ async function clearLinkedCoreForDev() {
 
 <template>
 	<div class="flex min-h-full flex-col p-6">
-		<CoreOnboardingModal ref="onboardingModal" @hide="handleOnboardingHide" />
+		<CoreOnboardingModal
+			ref="onboardingModal"
+			@hide="handleOnboardingHide"
+			@finish="handleOnboardingFinish"
+		/>
 		<CoreHostingSettingsModal ref="settingsModal" />
 		<CoreSetupPanel
-			v-if="!showDashboardSkeleton && setupVisible"
+			v-if="setupVisible"
 			@create="showOnboarding('create')"
 			@connect="showOnboarding('connect')"
 		/>
@@ -183,8 +183,20 @@ async function clearLinkedCoreForDev() {
 					</ButtonStyled>
 				</div>
 			</div>
-			<CoreOverviewGhost v-if="showDashboardSkeleton && activeTab === 'overview'" />
-			<CoreAccessPanel v-else-if="activeTab === 'overview'" />
+			<EmptyState
+				v-if="!hasConnectedCore"
+				type="empty"
+				heading="No friend group linked"
+				description="Create or connect a Core to show its friend group profile."
+			/>
+			<CoreOverviewPanel
+				v-else-if="activeTab === 'overview'"
+				@open-settings="openGeneralSettings"
+			/>
+			<CoreAccessPanel
+				v-else-if="activeTab === 'members'"
+				@open-permissions-settings="openPermissionsSettings"
+			/>
 			<CoreActivityPanel v-else />
 		</div>
 		<Teleport to="body">
@@ -199,16 +211,7 @@ async function clearLinkedCoreForDev() {
 						{{ devViewToggleLabel }}
 					</button>
 				</ButtonStyled>
-				<div class="rounded-full border border-solid border-surface-5 bg-surface-3 p-2 shadow-lg">
-					<Toggle
-						id="core-force-ghost-toggle"
-						v-model="forceDashboardSkeleton"
-						v-tooltip="'Show dashboard ghost'"
-						small
-						aria-label="Show dashboard ghost"
-					/>
-				</div>
-				<ButtonStyled v-if="connectedCore && !showDashboardSkeleton" color="orange">
+				<ButtonStyled v-if="connectedCore" color="orange">
 					<button
 						v-tooltip="
 							'Dev reset: clear this linked Core and make Core generate a new pairing code'

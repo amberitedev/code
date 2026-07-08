@@ -259,6 +259,22 @@ export function publicCurrentProfile(user: any, accountFields?: CurrentAccountFi
 		...(accountFields ?? {}),
 	}
 }
+export function publicLegacyCore(core: any) {
+	if (!core) return null
+	return {
+		_id: core._id,
+		coreId: core.coreId,
+		ownerUserId: core.ownerUserId,
+		friendGroupId: core.friendGroupId,
+		name: core.name,
+		subdomain: core.subdomain,
+		setupMode: core.setupMode,
+		connectionUrl: core.connectionUrl,
+		lastSeenAt: core.lastSeenAt,
+		status: core.status,
+		metadata: core.metadata,
+	}
+}
 export function coreById(ctx: QueryCtx | MutationCtx, coreId: string) {
 	return ctx.db
 		.query('cores')

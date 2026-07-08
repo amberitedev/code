@@ -44,6 +44,11 @@ export const handle = httpAction(async (ctx, request) => {
 	const body = await readBoundedBody(request);
 	if (body === null || !(await validSignature(timestamp, requestId, body, signature)))
 		return new Response("Unauthorized", { status: 401 });
+	const accepted = await ctx.runMutation(internal.realtimeBridge.consumeRequest, {
+		requestId,
+		expiresAt: Number(timestamp) + MAX_CLOCK_SKEW_MS,
+	});
+	if (!accepted) return new Response("Replay rejected", { status: 409 });
 	const input = parseRequest(body);
 	if (!input) return new Response("Bad request", { status: 400 });
 	if (input.operation === "desktopScope") return Response.json(await ctx.runQuery(internal.bridge.desktopScope, { userId: input.userId as never }));

@@ -191,6 +191,7 @@ export function setupCreationModal(
 				await edit(profilePath, {
 					name,
 					profile_type: 'synced',
+					core_instance_id: coreInstance.id,
 				})
 				setLinkedServerId(profilePath, coreInstance.id)
 				setLinkedServerPath(profilePath, coreInstance.path)

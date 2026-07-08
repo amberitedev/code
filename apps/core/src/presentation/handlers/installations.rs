@@ -10,9 +10,7 @@ use crate::{
     application::{installation_service::installation_dir, state::AppState},
     domain::server_installation::{InstallationId, ServerInstallationRecord},
     presentation::{
-        authz::{require_core_manager, require_core_member},
-        error::ApiError,
-        extractors::AuthUser,
+        authz::require_core_manager, error::ApiError, extractors::AuthUser,
     },
 };
 
@@ -34,7 +32,7 @@ pub async fn list_installations(
     AuthUser(claims): AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_core_member(&state, &claims.sub).await?;
+    require_core_manager(&state, &claims.sub).await?;
     let records = state.installation_store.list().await?;
     let installations: Vec<Value> = records.iter().map(record_json).collect();
     Ok(Json(json!({ "installations": installations })))
@@ -46,7 +44,7 @@ pub async fn get_installation(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    require_core_member(&state, &claims.sub).await?;
+    require_core_manager(&state, &claims.sub).await?;
     let iid = InstallationId(id);
     let record =
         state.installation_store.get(&iid).await?.ok_or_else(|| {

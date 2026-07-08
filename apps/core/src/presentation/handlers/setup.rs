@@ -28,10 +28,15 @@ pub struct SetupRequest {
     pub owner_display_name: Option<String>,
     /// JWT audience claim to validate. Defaults to "authenticated" if omitted.
     pub auth_audience: Option<String>,
-    /// Legacy one-time realtime credential issued by Convex after a successful claim.
+    /// One-time Core pairing credential issued by Convex after a successful claim.
     pub realtime_credential: Option<String>,
     /// Legacy optional rollout endpoint for Cloudflare presence.
     pub realtime_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SetupClaimVerification {
+    ok: bool,
 }
 
 /// POST /setup — complete first-run pairing.
@@ -125,11 +130,21 @@ pub async fn complete_setup(
             ));
         }
     }
-    if body.realtime_credential.is_some() != body.realtime_url.is_some() {
-        return Err(ApiError::BadRequest(
-            "realtime_url and realtime_credential must be supplied together"
-                .into(),
-        ));
+    if pairing_code_valid {
+        let credential =
+            body.realtime_credential.as_deref().ok_or_else(|| {
+                ApiError::BadRequest(
+                    "realtime_credential is required for remote setup".into(),
+                )
+            })?;
+        verify_remote_setup_claim(
+            &state,
+            &body.convex_url,
+            &state.core_id,
+            &body.owner_user_id,
+            credential,
+        )
+        .await?;
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -211,6 +226,60 @@ fn validate_https_url(value: &str, field: &str) -> Result<(), ApiError> {
         )));
     }
     Ok(())
+}
+
+async fn verify_remote_setup_claim(
+    state: &Arc<AppState>,
+    convex_url: &str,
+    core_id: &str,
+    owner_user_id: &str,
+    credential: &str,
+) -> Result<(), ApiError> {
+    let endpoint = format!(
+        "{}/core/setup-claim",
+        convex_site_url(convex_url).trim_end_matches('/')
+    );
+    let response = state
+        .http
+        .post(endpoint)
+        .bearer_auth(credential)
+        .json(&json!({
+            "coreId": core_id,
+            "ownerUserId": owner_user_id,
+        }))
+        .send()
+        .await
+        .map_err(|error| {
+            ApiError::Unauthorized(format!(
+                "failed to verify pairing claim: {error}"
+            ))
+        })?;
+    if !response.status().is_success() {
+        return Err(ApiError::Unauthorized(
+            "pairing claim verification failed".into(),
+        ));
+    }
+    let verification: SetupClaimVerification =
+        response.json().await.map_err(|error| {
+            ApiError::Unauthorized(format!(
+                "invalid pairing claim verification response: {error}"
+            ))
+        })?;
+    if verification.ok {
+        Ok(())
+    } else {
+        Err(ApiError::Unauthorized(
+            "pairing claim verification failed".into(),
+        ))
+    }
+}
+
+fn convex_site_url(value: &str) -> String {
+    if value.contains(".convex.site") {
+        value.to_string()
+    } else {
+        value.replace(".convex.cloud", ".convex.site")
+    }
 }
 
 /// GET /setup/status — check whether Core is paired.

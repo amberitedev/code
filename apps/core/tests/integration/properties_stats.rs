@@ -87,16 +87,14 @@ async fn get_properties_nonexistent_instance_returns_404() {
     assert_eq!(res.status(), 404);
 }
 
-/// GET /instances/:id/properties with a non-UUID id returns 400.
-/// SEC-04 fix applied to `properties.rs::fetch_data_dir`: UUID is parsed
-/// upfront via `InstanceId` → `ParseError` → 400 Bad Request.
+/// GET /instances/:id/properties with invalid public path syntax returns 400.
 #[tokio::test]
-async fn get_properties_non_uuid_id_returns_400() {
+async fn get_properties_invalid_path_returns_400() {
     let app = common::TestApp::spawn().await;
 
     let res = app
         .client
-        .get(app.url("/instances/not-a-uuid/properties"))
+        .get(app.url("/instances/bad:name/properties"))
         .send()
         .await
         .unwrap();
@@ -209,15 +207,14 @@ async fn patch_properties_nonexistent_instance_returns_404() {
     assert_eq!(res.status(), 404);
 }
 
-/// PATCH /instances/:id/properties with a non-UUID id returns 400.
-/// SEC-04 fix: `fetch_data_dir` now parses UUID upfront → 400 Bad Request.
+/// PATCH /instances/:id/properties with invalid public path syntax returns 400.
 #[tokio::test]
-async fn patch_properties_non_uuid_id_returns_400() {
+async fn patch_properties_invalid_path_returns_400() {
     let app = common::TestApp::spawn().await;
 
     let res = app
         .client
-        .patch(app.url("/instances/not-a-uuid/properties"))
+        .patch(app.url("/instances/bad:name/properties"))
         .json(&json!({ "max-players": "10" }))
         .send()
         .await

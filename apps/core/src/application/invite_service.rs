@@ -31,6 +31,12 @@ pub struct CreateInvitationRequest {
     pub role_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateInvitationRequest {
+    pub invitee_display_name: Option<String>,
+    pub role_id: String,
+}
+
 pub async fn create(
     state: &Arc<AppState>,
     actor: &str,
@@ -50,15 +56,18 @@ pub async fn create(
     if role.retired_at.is_some() {
         return Err(SocialError::Invalid("role is retired".into()));
     }
+    let can_manage = has_permission(&viewer.permissions, "members:manage");
+    let can_approve =
+        has_permission(&viewer.permissions, "approve-invites") || can_manage;
+    if !can_approve {
+        require_invitable_role(&viewer.permissions, &role)?;
+    }
     let approval: i64 = sqlx::query_scalar(
         "SELECT require_invite_approval FROM core_role_settings WHERE id = 1",
     )
     .fetch_optional(&state.pool)
     .await?
     .unwrap_or(1);
-    let can_approve = viewer.permissions.iter().any(|permission| {
-        permission == "approve-invites" || permission == "members:manage"
-    });
     if active_member_exists(state, &request.invitee_user_id).await? {
         return Err(SocialError::Invalid(
             "user already has Core access".into(),
@@ -94,6 +103,63 @@ pub async fn create(
     sqlx::query("INSERT INTO core_invitations (id, invitee_user_id, invitee_display_name, role_id, role_snapshot_json, inviter_user_id, status, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+7 days'))")
 		.bind(&id).bind(&request.invitee_user_id).bind(invitee_display_name).bind(&role.id).bind(role_snapshot).bind(actor).bind(status).bind(&timestamp).bind(&timestamp).execute(&state.pool).await?;
     get(state, &id).await
+}
+
+pub async fn update(
+    state: &Arc<AppState>,
+    actor: &str,
+    id: &str,
+    request: UpdateInvitationRequest,
+) -> Result<CoreInvitation, SocialError> {
+    let viewer = access_service::require_core_member(state, actor).await?;
+    if !viewer.permissions.iter().any(|permission| {
+        permission == "invite-members"
+            || permission == "approve-invites"
+            || permission == "members:manage"
+    }) {
+        return Err(SocialError::Invalid(
+            "not authorized to update invitations".into(),
+        ));
+    }
+    let invite = get(state, id).await?;
+    if invite.status != "sent" && invite.status != "pending_review" {
+        return Err(SocialError::Invalid("invite cannot be updated".into()));
+    }
+    let role = role_service::get(state, &request.role_id).await?;
+    if role.retired_at.is_some() {
+        return Err(SocialError::Invalid("role is retired".into()));
+    }
+    let can_manage = has_permission(&viewer.permissions, "members:manage");
+    let can_approve =
+        has_permission(&viewer.permissions, "approve-invites") || can_manage;
+    if !can_approve {
+        require_invitable_role(&viewer.permissions, &role)?;
+    }
+    let approval: i64 = sqlx::query_scalar(
+        "SELECT require_invite_approval FROM core_role_settings WHERE id = 1",
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .unwrap_or(1);
+    let status = if approval == 0 || can_approve {
+        "sent"
+    } else {
+        "pending_review"
+    };
+    let role_snapshot = serde_json::to_string(&role)
+        .map_err(|error| SocialError::Invalid(error.to_string()))?;
+    let display_name =
+        request.invitee_display_name.or(invite.invitee_display_name);
+    sqlx::query("UPDATE core_invitations SET invitee_display_name = ?, role_id = ?, role_snapshot_json = ?, status = ?, updated_at = ?, reviewed_by_user_id = NULL WHERE id = ? AND status IN ('pending_review', 'sent')")
+        .bind(display_name)
+        .bind(&role.id)
+        .bind(role_snapshot)
+        .bind(status)
+        .bind(now())
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+    get(state, id).await
 }
 
 pub async fn list(
@@ -144,6 +210,14 @@ pub async fn revoke(
     }) {
         return Err(SocialError::Invalid(
             "not authorized to revoke invitations".into(),
+        ));
+    }
+    let invite = get(state, id).await?;
+    let can_revoke_any = has_permission(&viewer.permissions, "approve-invites")
+        || has_permission(&viewer.permissions, "members:manage");
+    if !can_revoke_any && invite.inviter_user_id != actor {
+        return Err(SocialError::Invalid(
+            "not authorized to revoke this invitation".into(),
         ));
     }
     sqlx::query("UPDATE core_invitations SET status = 'revoked', reviewed_by_user_id = ?, updated_at = ? WHERE id = ? AND status IN ('pending_review', 'sent')")
@@ -251,4 +325,32 @@ fn invitation_access(
     } else {
         Ok(("member", "member"))
     }
+}
+
+fn require_invitable_role(
+    viewer_permissions: &[String],
+    role: &role_service::CoreRole,
+) -> Result<(), SocialError> {
+    let grants = role_grants(role)?;
+    if grants
+        .iter()
+        .all(|grant| has_permission(viewer_permissions, grant))
+    {
+        Ok(())
+    } else {
+        Err(SocialError::Invalid(
+            "cannot invite a role above your own authority".into(),
+        ))
+    }
+}
+
+fn role_grants(
+    role: &role_service::CoreRole,
+) -> Result<Vec<String>, SocialError> {
+    serde_json::from_str::<Vec<String>>(&role.grants_json)
+        .map_err(|error| SocialError::Invalid(error.to_string()))
+}
+
+fn has_permission(permissions: &[String], permission: &str) -> bool {
+    permissions.iter().any(|value| value == permission)
 }

@@ -208,9 +208,13 @@ pub async fn sse_progress(
         resolve_authorized_instance_id(&state, &claims.sub, &id, "server:view")
             .await?;
 
+    let stream_state = Arc::clone(&state);
+    let user_id = claims.sub;
     let stream = BroadcastStream::new(state.broadcaster.subscribe())
         .filter_map(move |msg| {
+            let state = Arc::clone(&stream_state);
             let iid = iid.clone();
+            let user_id = user_id.clone();
             async move {
                 if let Ok(Event::CreationProgress {
                     instance_id,
@@ -219,6 +223,17 @@ pub async fn sse_progress(
                 }) = msg
                 {
                     if instance_id == iid {
+                        if require_instance_permission(
+                            &state,
+                            &user_id,
+                            &iid.to_string(),
+                            "server:view",
+                        )
+                        .await
+                        .is_err()
+                        {
+                            return None;
+                        }
                         let data =
                             json!({ "progress": progress, "message": message });
                         return Some(Ok(

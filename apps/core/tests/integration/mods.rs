@@ -18,14 +18,13 @@ async fn list_mods_no_instance() {
     assert!(body["error"].is_string());
 }
 
-/// SEC-04 applied to mods handlers via `validate_instance_id()`: a non-UUID
-/// path segment is rejected with 400 before any DB access.
+/// Invalid public instance path syntax is rejected with 400 before any DB access.
 #[tokio::test]
-async fn list_mods_invalid_uuid() {
+async fn list_mods_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .get(app.url("/instances/not-a-uuid/mods"))
+        .get(app.url("/instances/bad:name/mods"))
         .send()
         .await
         .unwrap();
@@ -51,9 +50,9 @@ async fn list_mods_empty() {
 
 // ── upload_mod ────────────────────────────────────────────────────────────────
 
-/// SEC-04 fix applied: `validate_instance_id()` rejects non-UUID before multipart parse.
+/// Invalid public instance path syntax is rejected before multipart parse.
 #[tokio::test]
-async fn upload_mod_invalid_uuid() {
+async fn upload_mod_invalid_path() {
     let app = common::TestApp::spawn().await;
     let form = multipart::Form::new().part(
         "file",
@@ -64,7 +63,7 @@ async fn upload_mod_invalid_uuid() {
     );
     let res = app
         .client
-        .post(app.url("/instances/not-a-uuid/mods/upload"))
+        .post(app.url("/instances/bad:name/mods/upload"))
         .multipart(form)
         .send()
         .await
@@ -179,13 +178,13 @@ async fn delete_mod_nonexistent_file() {
     assert!(body["error"].is_string());
 }
 
-/// SEC-04 fix applied: `validate_instance_id()` returns 400 for non-UUID.
+/// Invalid public instance path syntax returns 400.
 #[tokio::test]
-async fn delete_mod_invalid_uuid() {
+async fn delete_mod_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .delete(app.url("/instances/not-a-uuid/mods/test.jar"))
+        .delete(app.url("/instances/bad:name/mods/test.jar"))
         .send()
         .await
         .unwrap();
@@ -194,13 +193,13 @@ async fn delete_mod_invalid_uuid() {
 
 // ── toggle_mod ────────────────────────────────────────────────────────────────
 
-/// SEC-04 fix applied: `validate_instance_id()` returns 400 for non-UUID.
+/// Invalid public instance path syntax returns 400.
 #[tokio::test]
-async fn toggle_mod_invalid_uuid() {
+async fn toggle_mod_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .patch(app.url("/instances/not-a-uuid/mods/test.jar"))
+        .patch(app.url("/instances/bad:name/mods/test.jar"))
         .json(&serde_json::json!({ "enabled": true }))
         .send()
         .await
@@ -210,13 +209,13 @@ async fn toggle_mod_invalid_uuid() {
 
 // ── add_mod ───────────────────────────────────────────────────────────────────
 
-/// SEC-04 fix applied: `validate_instance_id()` returns 400 for non-UUID.
+/// Invalid public instance path syntax returns 400.
 #[tokio::test]
-async fn add_mod_invalid_uuid() {
+async fn add_mod_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .post(app.url("/instances/not-a-uuid/mods"))
+        .post(app.url("/instances/bad:name/mods"))
         .json(&serde_json::json!({ "version_id": "AABBCCDD" }))
         .send()
         .await

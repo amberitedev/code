@@ -5,7 +5,7 @@ use serde_json::json;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
-const BAD_UUID: &str = "not-a-uuid";
+const BAD_PATH: &str = "bad:name";
 
 // ── start ─────────────────────────────────────────────────────────────────────
 
@@ -24,11 +24,11 @@ async fn start_nonexistent_instance() {
 }
 
 #[tokio::test]
-async fn start_invalid_uuid() {
+async fn start_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .post(app.url(&format!("/instances/{BAD_UUID}/start")))
+        .post(app.url(&format!("/instances/{BAD_PATH}/start")))
         .send()
         .await
         .unwrap();
@@ -57,11 +57,11 @@ async fn stop_nonexistent_instance() {
 }
 
 #[tokio::test]
-async fn stop_invalid_uuid() {
+async fn stop_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .post(app.url(&format!("/instances/{BAD_UUID}/stop")))
+        .post(app.url(&format!("/instances/{BAD_PATH}/stop")))
         .send()
         .await
         .unwrap();
@@ -88,11 +88,11 @@ async fn kill_nonexistent_instance() {
 }
 
 #[tokio::test]
-async fn kill_invalid_uuid() {
+async fn kill_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .post(app.url(&format!("/instances/{BAD_UUID}/kill")))
+        .post(app.url(&format!("/instances/{BAD_PATH}/kill")))
         .send()
         .await
         .unwrap();
@@ -138,11 +138,11 @@ async fn command_nonexistent_instance() {
 }
 
 #[tokio::test]
-async fn command_invalid_uuid() {
+async fn command_invalid_path() {
     let app = common::TestApp::spawn().await;
     let res = app
         .client
-        .post(app.url(&format!("/instances/{BAD_UUID}/command")))
+        .post(app.url(&format!("/instances/{BAD_PATH}/command")))
         .json(&json!({ "command": "say hello" }))
         .send()
         .await

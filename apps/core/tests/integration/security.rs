@@ -125,7 +125,7 @@ async fn pairing_empty_string_code_rejected() {
     assert_eq!(res.status(), 401);
 }
 
-// ── DELETE with invalid UUID (SEC-04) ─────────────────────────────────────────
+// ── DELETE with invalid instance path syntax ─────────────────────────────────
 
 /// Deleting a valid zero UUID with no matching row returns 404 Not Found.
 /// BEH-03 fixed: delete of non-existent record returns 404, not 200.
@@ -142,11 +142,11 @@ async fn delete_zero_uuid_nonexistent_returns_404() {
     assert_eq!(res.status(), 404);
 }
 
-/// SEC-04 fixed: non-UUID paths for DELETE /instances/:id return 400 Bad Request.
+/// Invalid public instance paths for DELETE /instances/:id return 400 Bad Request.
 #[tokio::test]
-async fn delete_non_uuid_path_returns_400() {
+async fn delete_invalid_path_returns_400() {
     let app = common::TestApp::spawn().await;
-    let cases = ["not-a-uuid", "'; DROP TABLE instances; --", "1=1"];
+    let cases = ["bad:name", "bad!name", "bad'name"];
     for case in cases {
         let res = app
             .client
@@ -157,7 +157,7 @@ async fn delete_non_uuid_path_returns_400() {
         assert_eq!(
             res.status(),
             400,
-            "SEC-04: non-UUID path {case:?} must return 400"
+            "invalid instance path {case:?} must return 400"
         );
     }
 }

@@ -1,3 +1,20 @@
+<script lang="ts">
+import type {
+	CoreAccessMember as CachedCoreAccessMember,
+	CoreInvitation as CachedCoreInvitation,
+	CoreRole as CachedCoreRole,
+} from '@amberite/amberite-api'
+
+type CoreAccessCacheEntry = {
+	roles: CachedCoreRole[]
+	members: CachedCoreAccessMember[]
+	invitations: CachedCoreInvitation[]
+	canManageUsers: boolean
+}
+
+const coreAccessCache = new Map<string, CoreAccessCacheEntry>()
+</script>
+
 <script setup lang="ts">
 import type {
 	AmberiteAccessUiRole,
@@ -16,13 +33,19 @@ import type {
 	ServerAccessMember,
 	ServerAccessRole,
 } from '@modrinth/ui'
-import { AccessTable, ButtonStyled, Combobox, StyledInput } from '@modrinth/ui'
-import { computed, onMounted, ref } from 'vue'
+import {
+	AccessTable,
+	ButtonStyled,
+	Combobox,
+	injectNotificationManager,
+	StyledInput,
+} from '@modrinth/ui'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import CoreInviteMemberModal from '@/components/core/CoreInviteMemberModal.vue'
-import { useCoreActivityLog } from '@/components/core/use-core-activity-log'
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
+import { useConnectedCore } from '@/core/connected-core'
 import { toInviteSuggestion } from './core-onboarding-members'
 
 type RoleFilter = AmberiteAccessUiRole | 'all'
@@ -31,16 +54,20 @@ type CoreAccessTableMember = ServerAccessMember & { inviteId?: string; inviteSta
 const emit = defineEmits<{
 	'manage-roles': []
 	'manage-new-roles': []
+	'open-permissions-settings': []
 }>()
 
 const social = useSocial()
 const core = useCoreClient()
-const { recordUserAccessEvent } = useCoreActivityLog()
+const connectedCore = useConnectedCore()
+const { addNotification } = injectNotificationManager()
 const grantAccessModal = ref<InstanceType<typeof CoreInviteMemberModal>>()
-const coreRoles = ref<CoreRole[]>([])
-const coreMembers = ref<CoreAccessMember[]>([])
-const coreInvitations = ref<CoreInvitation[]>([])
-const canManageUsers = ref(false)
+const coreAccessCacheKey = computed(() => connectedCore.value?.coreId ?? 'core')
+const cachedCoreAccess = coreAccessCache.get(coreAccessCacheKey.value)
+const coreRoles = ref<CoreRole[]>(cachedCoreAccess?.roles ?? [])
+const coreMembers = ref<CoreAccessMember[]>(cachedCoreAccess?.members ?? [])
+const coreInvitations = ref<CoreInvitation[]>(cachedCoreAccess?.invitations ?? [])
+const canManageUsers = ref(cachedCoreAccess?.canManageUsers ?? false)
 const search = ref('')
 const roleFilter = ref<RoleFilter>('all')
 const roleOptions = amberiteAccessRoleOptions
@@ -87,7 +114,15 @@ const inviteSuggestions = computed<ServerAccessInviteSuggestion[]>(() =>
 		.map(toInviteSuggestion)
 		.filter((user) => !unavailableInviteUserIds.value.has(user.id)),
 )
-const friendIds = computed(() => inviteSuggestions.value.map((user) => user.id))
+const friendIds = computed(() =>
+	(social.friends.value?.friends ?? [])
+		.map((friend) => friend.user?.userId)
+		.filter((id): id is string => !!id),
+)
+const pendingFriendRequestIds = computed(() => [
+	...(social.friends.value?.incoming ?? []).map((request) => request.request.fromUserId),
+	...(social.friends.value?.outgoing ?? []).map((request) => request.request.toUserId),
+])
 const unavailableInviteUserIds = computed(
 	() =>
 		new Set(
@@ -110,16 +145,13 @@ async function grantAccess(payload: GrantServerAccessPayload) {
 		await social.sendFriendRequest({ targetUserId: payload.user.id })
 		if (social.error.value) throw social.error.value
 	}
-	recordUserAccessEvent('invited', payload.user.id, payload.user.username, undefined, payload.role)
 	await loadCoreState()
 }
 
 async function updateRole(member: CoreAccessTableMember, role: ServerAccessRole) {
 	if (member.isOwner || role === 'owner') return
 	if (member.pending && member.inviteId) {
-		await core.revokeCoreInvitation(member.inviteId)
-		await core.createCoreInvitation({
-			invitee_user_id: member.user.id,
+		await core.updateCoreInvitation(member.inviteId, {
 			invitee_display_name: member.user.username,
 			role_id: accessRoleToRoleId(role),
 		})
@@ -130,13 +162,6 @@ async function updateRole(member: CoreAccessTableMember, role: ServerAccessRole)
 		role: role === 'editor' ? 'admin' : 'member',
 		permission_preset: role === 'editor' ? 'admin' : 'member',
 	})
-	recordUserAccessEvent(
-		'permission_modified',
-		member.user.id,
-		member.user.username,
-		member.user.avatarUrl,
-		role,
-	)
 	await loadCoreState()
 }
 
@@ -148,7 +173,6 @@ async function removeMember(member: CoreAccessTableMember) {
 		return
 	}
 	await core.removeCoreAccess(member.user.id)
-	recordUserAccessEvent('removed', member.user.id, member.user.username, member.user.avatarUrl)
 	await loadCoreState()
 }
 
@@ -163,27 +187,51 @@ async function resendInvite(member: CoreAccessTableMember) {
 }
 
 async function loadCoreState() {
-	try {
-		const [roles, access, invitations] = await Promise.all([
-			core.getCoreRoles(),
-			core.listCoreAccess(),
-			core.listCoreInvitations().catch(() => []),
-		])
-		coreRoles.value = roles.roles
+	const requestedCacheKey = coreAccessCacheKey.value
+	const [rolesResult, accessResult, invitationsResult] = await Promise.allSettled([
+		core.getCoreRoles(),
+		core.listCoreAccess(),
+		core.listCoreInvitations(),
+	])
+
+	if (requestedCacheKey !== coreAccessCacheKey.value) return
+	let refreshed = false
+
+	if (accessResult.status === 'fulfilled') {
+		const access = accessResult.value
 		coreMembers.value = access.members
 		canManageUsers.value = access.viewer.can_manage_users
-		coreInvitations.value = invitations
-	} catch {
-		coreRoles.value = []
-		coreMembers.value = []
-		canManageUsers.value = false
-		coreInvitations.value = []
+		refreshed = true
+	} else {
+		addNotification({
+			type: 'error',
+			title: 'Failed to load Core members',
+			text: errorMessage(accessResult.reason),
+		})
 	}
+
+	if (rolesResult.status === 'fulfilled') {
+		const roles = rolesResult.value
+		coreRoles.value = roles.roles
+		refreshed = true
+	}
+
+	if (invitationsResult.status === 'fulfilled') {
+		coreInvitations.value = invitationsResult.value
+		refreshed = true
+	}
+
+	if (refreshed) cacheCoreAccessState()
 }
 
 async function searchInviteUsers(query: string) {
 	const users = await social.searchUsers(query)
 	return users.map(toInviteSuggestion).filter((user) => !unavailableInviteUserIds.value.has(user.id))
+}
+
+function openPermissionsSettings(event: MouseEvent) {
+	event.preventDefault()
+	emit('open-permissions-settings')
 }
 
 function accessRoleToRoleId(role: ServerAccessRole) {
@@ -220,7 +268,41 @@ function parseRoleGrants(role: CoreRole) {
 	}
 }
 
-onMounted(loadCoreState)
+function errorMessage(reason: unknown): string {
+	return reason instanceof Error ? reason.message : String(reason)
+}
+
+function applyCachedCoreAccessState() {
+	const cached = coreAccessCache.get(coreAccessCacheKey.value)
+	coreRoles.value = cached?.roles ?? []
+	coreMembers.value = cached?.members ?? []
+	coreInvitations.value = cached?.invitations ?? []
+	canManageUsers.value = cached?.canManageUsers ?? false
+}
+
+function cacheCoreAccessState() {
+	const next = {
+		roles: coreRoles.value,
+		members: coreMembers.value,
+		invitations: coreInvitations.value,
+		canManageUsers: canManageUsers.value,
+	}
+	const current = coreAccessCache.get(coreAccessCacheKey.value)
+	if (!current || !sameSerialized(current, next)) {
+		coreAccessCache.set(coreAccessCacheKey.value, next)
+	}
+}
+
+function sameSerialized(left: unknown, right: unknown) {
+	return JSON.stringify(left) === JSON.stringify(right)
+}
+
+watch(coreAccessCacheKey, () => {
+	applyCachedCoreAccessState()
+	void loadCoreState()
+})
+
+onMounted(() => void loadCoreState())
 </script>
 
 <template>
@@ -259,53 +341,29 @@ onMounted(loadCoreState)
 		<AccessTable
 			:members="filteredMembers"
 			:roles="roleOptions"
-			:user-profile-link="(username) => `https://modrinth.com/user/${encodeURIComponent(username)}`"
 			:can-manage-users="canManageUsers"
 			@update-role="updateRole"
 			@resend-invite="resendInvite"
 			@cancel-invite="removeMember"
 			@remove-member="removeMember"
 		/>
-		<section
-			v-if="
-				coreMembers.some((member) => member.needs_role_reassignment_at) ||
-				coreInvitations.some(
-					(invite) => !['sent', 'pending_review'].includes(invite.status),
-				)
-			"
-			class="flex flex-col gap-2 rounded-xl bg-surface-2 p-4"
-		>
-			<span class="font-semibold text-contrast">Core access status</span>
-			<div
-				v-for="member in coreMembers.filter((item) => item.needs_role_reassignment_at)"
-				:key="member.user_id"
-				class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2"
-			>
-				<span class="text-primary">{{ member.display_name ?? member.user_id }}</span
-				><span class="rounded-full bg-orange-highlight px-2 py-1 text-xs font-semibold text-orange"
-					>Role removed - reassignment required</span
-				>
-			</div>
-			<div
-				v-for="invite in coreInvitations.filter(
-					(item) => !['sent', 'pending_review'].includes(item.status),
-				)"
-				:key="invite.id"
-				class="flex items-center justify-between gap-3 rounded-lg bg-surface-3 px-3 py-2 text-sm"
-			>
-				<span class="text-primary">{{ invite.invitee_display_name ?? invite.invitee_user_id }}</span
-				><span class="text-secondary">{{ invite.status.replace('_', ' ') }}</span>
-			</div>
-		</section>
 
 		<CoreInviteMemberModal
 			ref="grantAccessModal"
 			:members="memberRows"
 			:suggestions="inviteSuggestions"
 			:friend-ids="friendIds"
+			:friend-request-unavailable-ids="pendingFriendRequestIds"
 			:search-users="searchInviteUsers"
 			:can-grant="canManageUsers"
+			target-label="Username"
+			target-placeholder="Search Amberite or Minecraft username"
+			target-help="Use their unique Amberite username or their Minecraft username."
+			permissions-help="See or edit the permissions <link>here</link>."
+			permissions-help-href="#core-permissions"
+			permissions-help-target="_self"
 			@grant="grantAccess"
+			@permissions-help-click="openPermissionsSettings"
 		/>
 	</div>
 </template>

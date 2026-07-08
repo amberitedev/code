@@ -8,6 +8,7 @@ use theseus::{
 
 use crate::api::{Result, TheseusSerializableError};
 use dashmap::DashMap;
+use std::io::{Error as IoError, ErrorKind};
 use std::path::{Path, PathBuf};
 use theseus::prelude::canonicalize;
 use url::Url;
@@ -86,7 +87,8 @@ pub async fn should_disable_mouseover() -> bool {
 pub async fn highlight_in_folder<R: Runtime>(
     app: tauri::AppHandle<R>,
     path: PathBuf,
-) {
+) -> Result<()> {
+    let path = ensure_open_path_allowed(&path).await?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(e) = app.opener().reveal_item_in_dir(path) {
             tracing::error!("Failed to highlight file in folder: {}", e);
@@ -94,10 +96,15 @@ pub async fn highlight_in_folder<R: Runtime>(
     })
     .await
     .ok();
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn open_path<R: Runtime>(app: tauri::AppHandle<R>, path: PathBuf) {
+pub async fn open_path<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: PathBuf,
+) -> Result<()> {
+    let path = ensure_open_path_allowed(&path).await?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(e) =
             app.opener().open_path(path.to_string_lossy(), None::<&str>)
@@ -107,16 +114,19 @@ pub async fn open_path<R: Runtime>(app: tauri::AppHandle<R>, path: PathBuf) {
     })
     .await
     .ok();
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn show_launcher_logs_folder<R: Runtime>(app: tauri::AppHandle<R>) {
+pub async fn show_launcher_logs_folder<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<()> {
     if let Some(d) = DirectoryInfo::global_handle_if_ready() {
         let path = d.launcher_logs_dir().unwrap_or_default();
-        // failure to get folder just opens filesystem
-        // (ie: if in debug mode only and launcher_logs never created)
-        open_path(app, path).await;
+        tokio::fs::create_dir_all(&path).await.ok();
+        open_path(app, path).await?;
     }
+    Ok(())
 }
 
 // Get opening command
@@ -185,4 +195,40 @@ pub(crate) fn tauri_convert_file_src(path: &Path) -> Result<Url> {
     let encoded = urlencoding::encode(&path);
 
     Ok(theseus_try!(Url::parse(&format!("{BASE}{encoded}"))))
+}
+
+async fn ensure_open_path_allowed(path: &Path) -> Result<PathBuf> {
+    let target = tokio::fs::canonicalize(path).await?;
+    let roots = allowed_open_roots().await?;
+    if roots.iter().any(|root| target.starts_with(root)) {
+        return Ok(target);
+    }
+    Err(permission_denied(
+        "path is outside the app profile, cache, and launcher-log directories",
+    ))
+}
+
+async fn allowed_open_roots() -> Result<Vec<PathBuf>> {
+    let Some(directories) = DirectoryInfo::global_handle_if_ready() else {
+        return Err(permission_denied("app directories are not initialized"));
+    };
+    let mut candidates = vec![directories.profiles_dir(), directories.caches_dir()];
+    if let Some(path) = directories.launcher_logs_dir() {
+        candidates.push(path);
+    }
+
+    let mut roots = Vec::new();
+    for candidate in candidates {
+        if let Ok(path) = tokio::fs::canonicalize(candidate).await {
+            roots.push(path);
+        }
+    }
+    if roots.is_empty() {
+        return Err(permission_denied("no allowed app directories are available"));
+    }
+    Ok(roots)
+}
+
+fn permission_denied(message: &str) -> TheseusSerializableError {
+    IoError::new(ErrorKind::PermissionDenied, message).into()
 }

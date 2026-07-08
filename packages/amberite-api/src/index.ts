@@ -61,6 +61,7 @@ export type {
 	CoreInvitation,
 	CoreInvitationStatus,
 	CreateCoreInvitationBody,
+	UpdateCoreInvitationBody,
 	CoreActivityLogEntry,
 	CoreActivityLogQuery,
 	CoreActivityLogResponse,

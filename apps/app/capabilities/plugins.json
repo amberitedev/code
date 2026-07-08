@@ -25,18 +25,6 @@
 			"identifier": "http:default",
 			"allow": [
 				{
-					"url": "http://*/*"
-				},
-				{
-					"url": "https://*/*"
-				},
-				{
-					"url": "ws://*/*"
-				},
-				{
-					"url": "wss://*/*"
-				},
-				{
 					"url": "https://modrinth.com/*"
 				},
 				{
@@ -67,16 +55,34 @@
 					"url": "http://127.0.0.1:16662/*"
 				},
 				{
+					"url": "ws://localhost:16662/*"
+				},
+				{
+					"url": "ws://127.0.0.1:16662/*"
+				},
+				{
 					"url": "http://*.taila228c5.ts.net/*"
 				},
 				{
 					"url": "https://*.taila228c5.ts.net/*"
 				},
 				{
+					"url": "ws://*.taila228c5.ts.net/*"
+				},
+				{
+					"url": "wss://*.taila228c5.ts.net/*"
+				},
+				{
 					"url": "https://*.convex.cloud/*"
 				},
 				{
 					"url": "https://*.convex.site/*"
+				},
+				{
+					"url": "wss://*.convex.cloud/*"
+				},
+				{
+					"url": "wss://*.convex.site/*"
 				}
 			]
 		},
@@ -117,6 +123,13 @@
 			]
 		},
 		"auth:default",
+		"auth:allow-amberite-login",
+		"auth:allow-get-amberite-dev-persona-id",
+		"auth:allow-get-amberite-session-jwt",
+		"auth:allow-set-amberite-session-jwt",
+		"auth:allow-get-amberite-session-refresh-token",
+		"auth:allow-set-amberite-session-refresh-token",
+		"auth:allow-get-amberite-local-setup-secret",
 		"import:default",
 		"jre:default",
 		"logs:default",

@@ -594,6 +594,11 @@ export interface CreateCoreInvitationBody {
 	role_id: string
 }
 
+export interface UpdateCoreInvitationBody {
+	invitee_display_name?: string
+	role_id: string
+}
+
 export interface CoreActivityLogEntry {
 	id: string
 	actor_user_id: string

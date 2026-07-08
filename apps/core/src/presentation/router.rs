@@ -61,7 +61,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             get(invites::list).post(invites::create),
         )
         .route("/core/invitations/mine", get(invites::list_mine))
-        .route("/core/invitations/:id", delete(invites::revoke))
+        .route(
+            "/core/invitations/:id",
+            patch(invites::update).delete(invites::revoke),
+        )
         .route("/core/invitations/:id/review", post(invites::review))
         .route("/core/invitations/:id/respond", post(invites::respond))
         .route("/core/bans", get(social::list_bans))

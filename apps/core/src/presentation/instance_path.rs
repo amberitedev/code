@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    application::{access_service, state::AppState},
+    application::{
+        access_service, instance_service::sanitize_instance_path,
+        state::AppState,
+    },
     domain::instance::{InstanceId, InstanceRecord},
     ports::instance_store::StoreError,
     presentation::error::ApiError,
@@ -15,6 +18,9 @@ pub async fn resolve_instance_path(
         return Err(ApiError::BadRequest(
             "instance path cannot be empty".into(),
         ));
+    }
+    if sanitize_instance_path(path) != path {
+        return Err(ApiError::BadRequest("invalid instance path".into()));
     }
     match state.instance_store.get_by_path(path).await {
         Ok(record) => Ok(record),

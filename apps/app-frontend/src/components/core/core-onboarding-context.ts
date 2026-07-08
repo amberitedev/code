@@ -26,6 +26,7 @@ export interface CoreOnboardingContext {
 	members: ComputedRef<CoreAccessMember[]>
 	roles: ServerAccessRoleOption[]
 	inviteSuggestions: ComputedRef<ServerAccessInviteSuggestion[]>
+	selectedInviteSuggestion: Ref<ServerAccessInviteSuggestion | null>
 	selectInviteSuggestion: (user: ServerAccessInviteSuggestion) => void
 	createInvite: () => void
 	quickInvite: (member: CoreAccessMember) => void

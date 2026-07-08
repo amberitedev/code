@@ -73,9 +73,9 @@ async fn setup_already_paired_returns_400() {
     assert_eq!(res.status(), 400);
 }
 
-/// POST /setup with the correct pairing code succeeds and marks Core as paired.
+/// Remote pairing-code setup requires the Convex-issued claim credential.
 #[tokio::test]
-async fn setup_correct_code_pairs_core() {
+async fn setup_remote_code_without_claim_credential_returns_400() {
     let app = common::TestApp::spawn_prod_unpaired().await;
     let code = app
         .pairing_code
@@ -87,6 +87,30 @@ async fn setup_correct_code_pairs_core() {
         .post(app.url("/setup"))
         .json(&json!({
             "code": code,
+            "convex_url": "https://test.convex.cloud",
+            "auth_jwks_url": "https://auth.test/.well-known/jwks.json",
+            "owner_user_id": "user-123"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+/// POST /setup with the local setup secret succeeds and marks Core as paired.
+#[tokio::test]
+async fn setup_correct_local_secret_pairs_core() {
+    let app = common::TestApp::spawn_prod_unpaired().await;
+    let secret = app
+        .local_setup_secret
+        .as_deref()
+        .expect("spawn_prod_unpaired must populate local_setup_secret");
+
+    let res = app
+        .client
+        .post(app.url("/setup"))
+        .json(&json!({
+            "local_setup_secret": secret,
             "convex_url": "https://test.convex.cloud",
             "auth_jwks_url": "https://auth.test/.well-known/jwks.json",
             "owner_user_id": "user-123"

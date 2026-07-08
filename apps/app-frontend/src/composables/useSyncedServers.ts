@@ -12,7 +12,7 @@ import type {
 	SyncedProfileSettings,
 } from '@amberite/amberite-api'
 import type { Ref } from 'vue'
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { makeFunctionReference } from 'convex/server'
 
 import { useRealtimeConvexClient, useSocialClient } from '@/composables/useSocialClient'
@@ -34,6 +34,7 @@ export function useSyncedServers(): UseSyncedServersReturn {
 	const loading = ref(false)
 	const error = ref<Error | null>(null)
 	let unsubscribe: (() => void) | null = null
+	let subscribedFriendGroupId: string | null = null
 
 	async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
 		loading.value = true
@@ -49,7 +50,10 @@ export function useSyncedServers(): UseSyncedServersReturn {
 	}
 
 	async function refresh(friendGroupId: string): Promise<void> {
+		if (subscribedFriendGroupId === friendGroupId && unsubscribe) return
 		unsubscribe?.()
+		unsubscribe = null
+		subscribedFriendGroupId = friendGroupId
 		loading.value = true
 		unsubscribe = useRealtimeConvexClient().onUpdate(serverProfilesState, { friendGroupId }, (next) => {
 			profiles.value = next
@@ -60,6 +64,12 @@ export function useSyncedServers(): UseSyncedServersReturn {
 			error.value = reason
 		})
 	}
+
+	onUnmounted(() => {
+		unsubscribe?.()
+		unsubscribe = null
+		subscribedFriendGroupId = null
+	})
 
 	async function updateSettings(profileId: string, settings: SyncedProfileSettings): Promise<void> {
 		await run(() => client.updateSyncedProfileSettings(profileId, settings))

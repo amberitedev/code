@@ -1,7 +1,9 @@
 use crate::{
     application::{
-        core_projection_service,
-        invite_service::{self, CreateInvitationRequest},
+        activity_service, core_projection_service,
+        invite_service::{
+            self, CreateInvitationRequest, UpdateInvitationRequest,
+        },
         state::AppState,
     },
     presentation::{
@@ -33,9 +35,25 @@ pub async fn create(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateInvitationRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!(
-        invite_service::create(&state, &claims.sub, body).await?
-    )))
+    let invitee_user_id = body.invitee_user_id.clone();
+    let invitee_display_name = body.invitee_display_name.clone();
+    let role_id = body.role_id.clone();
+    let invitation = invite_service::create(&state, &claims.sub, body).await?;
+    activity_service::record(
+        &state,
+        &claims.sub,
+        "user_invited",
+        None,
+        Some(&invitee_user_id),
+        Some(json!({
+            "user_id": invitee_user_id,
+            "username": invitee_display_name,
+            "role_id": role_id,
+            "permissions": permissions_for_role_id(&role_id),
+        })),
+    )
+    .await?;
+    Ok(Json(json!(invitation)))
 }
 pub async fn list(
     AuthUser(claims): AuthUser,
@@ -54,6 +72,32 @@ pub async fn list_mine(
         invitations: invite_service::list_mine(&state, &claims.sub).await?,
     }))
 }
+pub async fn update(
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<UpdateInvitationRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let role_id = body.role_id.clone();
+    let invitation =
+        invite_service::update(&state, &claims.sub, &id, body).await?;
+    activity_service::record(
+        &state,
+        &claims.sub,
+        "user_access_updated",
+        None,
+        Some(&invitation.invitee_user_id),
+        Some(json!({
+            "scope": "core",
+            "user_id": invitation.invitee_user_id,
+            "username": invitation.invitee_display_name,
+            "role_id": role_id,
+            "permissions": permissions_for_role_id(&role_id),
+        })),
+    )
+    .await?;
+    Ok(Json(json!(invitation)))
+}
 pub async fn review(
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -69,9 +113,21 @@ pub async fn revoke(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!(
-        invite_service::revoke(&state, &claims.sub, &id).await?
-    )))
+    let invitation = invite_service::revoke(&state, &claims.sub, &id).await?;
+    activity_service::record(
+        &state,
+        &claims.sub,
+        "user_invite_revoked",
+        None,
+        Some(&invitation.invitee_user_id),
+        Some(json!({
+            "user_id": invitation.invitee_user_id,
+            "username": invitation.invitee_display_name,
+            "role_id": invitation.role_id,
+        })),
+    )
+    .await?;
+    Ok(Json(json!(invitation)))
 }
 pub async fn respond(
     AuthUser(claims): AuthUser,
@@ -90,4 +146,12 @@ pub async fn respond(
         .await;
     }
     Ok(Json(json!(invitation)))
+}
+
+fn permissions_for_role_id(role_id: &str) -> &'static str {
+    if role_id == "role-admin" {
+        "BASE_READ | POWER_ACTIONS | FILES_WRITE"
+    } else {
+        "BASE_READ"
+    }
 }

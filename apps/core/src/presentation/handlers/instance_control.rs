@@ -128,7 +128,7 @@ pub async fn send_command_handler(
         &state,
         &claims.sub,
         &instance_id,
-        "server:power",
+        "server:console",
     )
     .await?;
     send_command(&state, &iid, body.command).await?;

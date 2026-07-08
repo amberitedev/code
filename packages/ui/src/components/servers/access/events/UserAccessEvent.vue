@@ -115,7 +115,7 @@ function roleClasses(role: ServerAccessRole): string {
 		case 'owner':
 			return 'border-orange bg-highlight-orange text-orange'
 		case 'editor':
-			return 'border-green bg-highlight-green text-brand'
+			return 'border-purple bg-highlight-purple text-purple'
 		case 'viewer':
 			return 'border-blue bg-highlight-blue text-blue'
 	}

@@ -22,6 +22,7 @@ import dayjs from 'dayjs'
 import { computed, ref } from 'vue'
 
 import ContextMenu from '@/components/ui/ContextMenu.vue'
+import FadedInstanceCard from '@/components/ui/FadedInstanceCard.vue'
 import Instance from '@/components/ui/Instance.vue'
 import ConfirmDeleteInstanceModal from '@/components/ui/modal/ConfirmDeleteInstanceModal.vue'
 import { duplicate, remove } from '@/helpers/profile.js'
@@ -32,6 +33,18 @@ const { formatMessage } = useVIntl()
 
 const props = defineProps({
 	instances: {
+		type: Array,
+		default() {
+			return []
+		},
+	},
+	installableInstances: {
+		type: Array,
+		default() {
+			return []
+		},
+	},
+	installingInstallableIds: {
 		type: Array,
 		default() {
 			return []
@@ -58,6 +71,7 @@ const props = defineProps({
 		default: 'subtle-page',
 	},
 })
+const emit = defineEmits(['install-instance'])
 const instanceOptions = ref(null)
 const instanceComponents = ref(null)
 
@@ -66,9 +80,11 @@ const confirmModal = ref(null)
 
 async function deleteProfile() {
 	if (currentDeleteInstance.value) {
-		instanceComponents.value = instanceComponents.value.filter(
-			(x) => x.instance.path !== currentDeleteInstance.value,
-		)
+		if (instanceComponents.value) {
+			instanceComponents.value = instanceComponents.value.filter(
+				(x) => x.instance.path !== currentDeleteInstance.value,
+			)
+		}
 		await remove(currentDeleteInstance.value).catch(handleError)
 	}
 }
@@ -78,7 +94,9 @@ async function duplicateProfile(p) {
 }
 
 const handleRightClick = (event, profilePathId) => {
-	const item = instanceComponents.value.find((x) => x.instance.path === profilePathId)
+	const item = instanceComponents.value?.find((x) => x.instance.path === profilePathId)
+	if (!item) return
+
 	const baseOptions = [
 		{ name: 'add_content' },
 		{ type: 'divider' },
@@ -181,7 +199,32 @@ const setSectionCollapsed = (sectionName, collapsed) => {
 const filteredResults = computed(() => {
 	const { group = 'Group', sortBy = 'Name' } = state.value
 
-	const instances = props.instances.filter((instance) => {
+	const instances = [
+		...props.instances.map((instance) => ({
+			type: 'local',
+			key: `local:${instance.path}:${instance.install_stage}`,
+			name: instance.name,
+			game_version: instance.game_version,
+			loader: instance.loader,
+			groups: instance.groups,
+			last_played: instance.last_played,
+			date_created: instance.date_created ?? instance.created,
+			date_modified: instance.date_modified ?? instance.modified,
+			instance,
+		})),
+		...props.installableInstances.map((instance) => ({
+			type: 'installable',
+			key: `installable:${instance.coreInstanceId}:${instance.currentSnapshotId ?? instance.availability}`,
+			name: instance.name,
+			game_version: instance.gameVersion ?? 'Unknown',
+			loader: instance.loader ?? 'unknown',
+			groups: ['Shared'],
+			last_played: null,
+			date_created: null,
+			date_modified: null,
+			instance,
+		})),
+	].filter((instance) => {
 		return instance.name.toLowerCase().includes(search.value.toLowerCase())
 	})
 
@@ -199,19 +242,19 @@ const filteredResults = computed(() => {
 
 	if (sortBy === 'Last played') {
 		instances.sort((a, b) => {
-			return dayjs(b.last_played ?? 0).diff(dayjs(a.last_played ?? 0))
+			return getTime(b.last_played) - getTime(a.last_played)
 		})
 	}
 
 	if (sortBy === 'Date created') {
 		instances.sort((a, b) => {
-			return dayjs(b.date_created).diff(dayjs(a.date_created))
+			return getTime(b.date_created) - getTime(a.date_created)
 		})
 	}
 
 	if (sortBy === 'Date modified') {
 		instances.sort((a, b) => {
-			return dayjs(b.date_modified).diff(dayjs(a.date_modified))
+			return getTime(b.date_modified) - getTime(a.date_modified)
 		})
 	}
 
@@ -282,6 +325,10 @@ const filteredResults = computed(() => {
 
 	return instanceMap
 })
+
+function getTime(value) {
+	return value ? dayjs(value).valueOf() : 0
+}
 
 const contentTransitionName = computed(() =>
 	[
@@ -359,22 +406,40 @@ const pageContentKey = computed(() =>
 								tag="section"
 								class="instances"
 							>
-								<Instance
-									v-for="instance in instanceSection.value"
-									ref="instanceComponents"
-									:key="instance.path + instance.install_stage"
-									:instance="instance"
-									@contextmenu.prevent.stop="(event) => handleRightClick(event, instance.path)"
-								/>
+								<div v-for="item in instanceSection.value" :key="item.key" class="contents">
+									<Instance
+										v-if="item.type === 'local'"
+										ref="instanceComponents"
+										:instance="item.instance"
+										@contextmenu.prevent.stop="
+											(event) => handleRightClick(event, item.instance.path)
+										"
+									/>
+									<FadedInstanceCard
+										v-else
+										:instance="item.instance"
+										:installing="installingInstallableIds.includes(item.instance.coreInstanceId)"
+										@install="(instance) => emit('install-instance', instance)"
+									/>
+								</div>
 							</TransitionGroup>
 							<section v-else class="instances">
-								<Instance
-									v-for="instance in instanceSection.value"
-									ref="instanceComponents"
-									:key="instance.path + instance.install_stage"
-									:instance="instance"
-									@contextmenu.prevent.stop="(event) => handleRightClick(event, instance.path)"
-								/>
+								<div v-for="item in instanceSection.value" :key="item.key" class="contents">
+									<Instance
+										v-if="item.type === 'local'"
+										ref="instanceComponents"
+										:instance="item.instance"
+										@contextmenu.prevent.stop="
+											(event) => handleRightClick(event, item.instance.path)
+										"
+									/>
+									<FadedInstanceCard
+										v-else
+										:instance="item.instance"
+										:installing="installingInstallableIds.includes(item.instance.coreInstanceId)"
+										@install="(instance) => emit('install-instance', instance)"
+									/>
+								</div>
 							</section>
 						</Accordion>
 					</div>

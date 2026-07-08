@@ -11,10 +11,10 @@
 	>
 		<template #cell-user="{ row: member }">
 			<AutoLink
-				:to="getUserProfileLink(member.user.username)"
-				:target="userProfileTarget(member.user.username)"
+				:to="getUserProfileLink(member.user)"
+				:target="userProfileTarget(member.user)"
 				class="inline-flex max-w-full min-w-0 items-center gap-2"
-				:class="getUserProfileLink(member.user.username) ? 'text-primary hover:underline' : ''"
+				:class="getUserProfileLink(member.user) ? 'text-primary hover:underline' : ''"
 			>
 				<Avatar
 					:src="member.user.avatarUrl"
@@ -154,10 +154,10 @@
 			<div class="flex min-w-0 items-center pl-4">
 				<AutoLink
 					v-tooltip="member.user.username"
-					:to="getUserProfileLink(member.user.username)"
-					:target="userProfileTarget(member.user.username)"
+					:to="getUserProfileLink(member.user)"
+					:target="userProfileTarget(member.user)"
 					class="inline-flex min-w-0 items-center gap-2"
-					:class="getUserProfileLink(member.user.username) ? 'text-primary hover:underline' : ''"
+					:class="getUserProfileLink(member.user) ? 'text-primary hover:underline' : ''"
 				>
 					<Avatar
 						:src="member.user.avatarUrl"
@@ -299,6 +299,7 @@ import type {
 	ServerAccessMember,
 	ServerAccessRole,
 	ServerAccessRoleOption,
+	ServerAccessUser,
 	ServerAccessUserProfileLink,
 } from './types'
 
@@ -541,13 +542,13 @@ function roleTriggerClass(role: ServerAccessRole): string {
 	return roleClasses(role)
 }
 
-function getUserProfileLink(username: string): ServerAccessUserProfileLink {
-	if (!username || username.includes('@')) return undefined
-	return props.userProfileLink?.(username) ?? `/user/${encodeURIComponent(username)}`
+function getUserProfileLink(user: ServerAccessUser): ServerAccessUserProfileLink {
+	if (!user.id || user.id.includes('@')) return undefined
+	return props.userProfileLink?.(user.username) ?? `/user/${encodeURIComponent(user.id)}`
 }
 
-function userProfileTarget(username: string): string | undefined {
-	const link = getUserProfileLink(username)
+function userProfileTarget(user: ServerAccessUser): string | undefined {
+	const link = getUserProfileLink(user)
 	return typeof link === 'string' && link.startsWith('http') ? '_blank' : undefined
 }
 

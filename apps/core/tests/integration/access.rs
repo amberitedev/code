@@ -39,6 +39,96 @@ async fn owner_can_grant_core_access_and_activity_is_recorded() {
 }
 
 #[tokio::test]
+async fn owner_can_invite_core_member_and_activity_is_recorded() {
+    let app = TestApp::spawn().await;
+
+    let invite = app
+        .client
+        .post(app.url("/core/invitations"))
+        .json(&json!({
+            "invitee_user_id": "dev-invitee",
+            "invitee_display_name": "Dev Invitee",
+            "role_id": "role-member"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invite.status(), 200);
+
+    let activity = app.client.get(app.url("/activity")).send().await.unwrap();
+    assert_eq!(activity.status(), 200);
+    let body = activity.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(body["entries"][0]["action"], "user_invited");
+    assert_eq!(body["entries"][0]["target_user_id"], "dev-invitee");
+    let metadata: serde_json::Value = serde_json::from_str(
+        body["entries"][0]["metadata_json"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata["username"], "Dev Invitee");
+    assert_eq!(metadata["permissions"], "BASE_READ");
+}
+
+#[tokio::test]
+async fn owner_can_update_pending_invite_role_without_revoking_it() {
+    let app = TestApp::spawn().await;
+
+    let invite = app
+        .client
+        .post(app.url("/core/invitations"))
+        .json(&json!({
+            "invitee_user_id": "dev-invitee",
+            "invitee_display_name": "Dev Invitee",
+            "role_id": "role-member"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invite.status(), 200);
+    let invite_body = invite.json::<serde_json::Value>().await.unwrap();
+    let invite_id = invite_body["id"].as_str().unwrap();
+
+    let update = app
+        .client
+        .patch(app.url(&format!("/core/invitations/{invite_id}")))
+        .json(&json!({
+            "invitee_display_name": "Dev Invitee",
+            "role_id": "role-admin"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(update.status(), 200);
+    let update_body = update.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(update_body["id"], invite_id);
+    assert_eq!(update_body["role_id"], "role-admin");
+    assert_eq!(update_body["status"], "sent");
+
+    let invitations = app
+        .client
+        .get(app.url("/core/invitations"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invitations.status(), 200);
+    let invitations_body =
+        invitations.json::<serde_json::Value>().await.unwrap();
+    let invitations = invitations_body["invitations"].as_array().unwrap();
+    assert_eq!(invitations.len(), 1);
+    assert_eq!(invitations[0]["id"], invite_id);
+    assert_eq!(invitations[0]["role_id"], "role-admin");
+
+    let activity = app.client.get(app.url("/activity")).send().await.unwrap();
+    assert_eq!(activity.status(), 200);
+    let body = activity.json::<serde_json::Value>().await.unwrap();
+    let entries = body["entries"].as_array().unwrap();
+    assert_eq!(entries[0]["action"], "user_access_updated");
+    assert_eq!(entries[0]["target_user_id"], "dev-invitee");
+    assert!(entries
+        .iter()
+        .all(|entry| entry["action"] != "user_invite_revoked"));
+}
+
+#[tokio::test]
 async fn admin_can_grant_instance_access() {
     let app = TestApp::spawn().await;
     let instance_id = create_test_instance(&app).await;
@@ -99,6 +189,23 @@ async fn outsider_cannot_read_core_access() {
 }
 
 #[tokio::test]
+async fn convex_auth_subject_is_normalized_for_core_access() {
+    let app = TestApp::spawn().await;
+
+    let res = app
+        .client
+        .get(app.url("/core/access"))
+        .header("Authorization", "Bearer dev:dev-owner|session-id")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body = res.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(body["viewer"]["user_id"], "dev-owner");
+}
+
+#[tokio::test]
 async fn instance_activity_filters_to_instance() {
     let app = TestApp::spawn().await;
     let first_id = create_test_instance(&app).await;
@@ -145,6 +252,38 @@ async fn viewer_cannot_read_instance_logs() {
         .send()
         .await
         .unwrap();
+    assert_eq!(res.status(), 403);
+}
+
+#[tokio::test]
+async fn command_requires_console_permission_not_power() {
+    let app = TestApp::spawn().await;
+    let instance_id = create_test_instance(&app).await;
+
+    let grant = app
+        .client
+        .post(app.url(&format!("/instances/{instance_id}/access")))
+        .json(&json!({
+            "user_id": "power-only",
+            "display_name": "Power Only",
+            "role": "member",
+            "permission_preset": "viewer",
+            "custom_permissions": { "server:power": true }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(grant.status(), 200);
+
+    let res = app
+        .client
+        .post(app.url(&format!("/instances/{instance_id}/command")))
+        .header("Authorization", "Bearer dev:power-only")
+        .json(&json!({ "command": "say denied" }))
+        .send()
+        .await
+        .unwrap();
+
     assert_eq!(res.status(), 403);
 }
 
