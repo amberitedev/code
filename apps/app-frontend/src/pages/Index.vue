@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { injectNotificationManager, useLoadingBarToken } from '@modrinth/ui'
+import { UserPlusIcon, UsersIcon } from '@modrinth/assets'
+import { ButtonStyled, injectNotificationManager, useLoadingBarToken } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import dayjs from 'dayjs'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -131,6 +132,20 @@ onUnmounted(() => {
 	<div class="p-6 flex flex-col gap-2">
 		<h1 v-if="recentInstances?.length > 0" class="m-0 text-2xl font-extrabold">Welcome back!</h1>
 		<h1 v-else class="m-0 text-2xl font-extrabold">Welcome to Modrinth App!</h1>
+		<div class="flex flex-wrap gap-2">
+			<ButtonStyled>
+				<RouterLink to="/group/mock">
+					<UsersIcon aria-hidden="true" />
+					Mock group profile
+				</RouterLink>
+			</ButtonStyled>
+			<ButtonStyled type="outlined">
+				<RouterLink to="/group/mock-public">
+					<UserPlusIcon aria-hidden="true" />
+					Mock public group
+				</RouterLink>
+			</ButtonStyled>
+		</div>
 		<RecentWorldsList :recent-instances="recentInstances" />
 		<RowDisplay
 			v-if="hasFeaturedProjects"

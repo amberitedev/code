@@ -51,6 +51,112 @@ export interface AmberiteProfile extends AmberitePublicProfile {
 	badges?: number
 }
 
+export type ProfileSectionVisibility = 'everyone' | 'friends' | 'friend_group' | 'private'
+export type ProfileRelationship = 'self' | 'friend' | 'friend_group' | 'group_manager' | 'public' | 'blocked'
+
+export interface ProfileVisibilitySettings {
+	friends: ProfileSectionVisibility
+	friendGroup: ProfileSectionVisibility
+	corePresence: ProfileSectionVisibility
+	favoriteModpacks: ProfileSectionVisibility
+	achievements: ProfileSectionVisibility
+}
+
+export interface ProfileViewUserSummary extends AmberiteUser {
+	id: string
+	userId: string
+	avatar_url: string | null
+	bio?: string | null
+	created?: string
+}
+
+export interface ProfileView {
+	user: AmberitePublicProfile
+	viewer: {
+		relationship: ProfileRelationship
+		isSelf: boolean
+		isFriend: boolean
+		isFriendGroup: boolean
+		isGroupManager: boolean
+		blocked: boolean
+		viewerBlockedTarget: boolean
+		targetBlockedViewer: boolean
+	}
+	settings?: ProfileVisibilitySettings
+	favoriteModpacks?: {
+		projectIds: string[]
+	}
+	achievements?: {
+		achievementIds: string[]
+	}
+	friendGroup?: {
+		group: {
+			id: string
+			_id: string
+			name: string | null
+			description: string | null
+			banner: string | null
+			subdomain: string | null
+			coreId: string | null
+			ownerUserId: string
+			createdAt: number
+			updatedAt: number | null
+		}
+		membership: {
+			role: FriendGroupRoleName
+			permissionPreset: string | null
+			createdAt: number
+			updatedAt: number | null
+		}
+	}
+	corePresence?: {
+		coreId: string
+		ownerUserId: string
+		linkState: 'unlinked' | 'linked' | null
+		name: string | null
+		subdomain: string | null
+		setupMode: 'remote' | 'local' | null
+		lastSeenAt: number | null
+		status: string | null
+	}
+	friends?: {
+		count: number
+		hasMore: boolean
+		items: ProfileViewUserSummary[]
+		mutualCount: number
+		mutualHasMore: boolean
+		mutual: ProfileViewUserSummary[]
+	}
+	management?: {
+		friendGroupId: string
+		userId: string
+		role?: FriendGroupRoleName
+		permissionPreset?: string | null
+		banned?: boolean
+		canUpdateRole?: boolean
+		canKick?: boolean
+		canBan?: boolean
+		canUnban?: boolean
+		roles?: Array<'admin' | 'member'>
+	}
+	actions: {
+		editProfile?: boolean
+		editAccount?: boolean
+		addFriend?: boolean
+		cancelFriendRequest?: { requestId: string }
+		acceptFriendRequest?: { requestId: string }
+		declineFriendRequest?: { requestId: string }
+		removeFriend?: boolean
+		block?: boolean
+		unblock?: boolean
+		inviteToFriendGroup?: { friendGroupId: string }
+		updateMemberRole?: { friendGroupId: string; roles: Array<'admin' | 'member'> }
+		kick?: { friendGroupId: string }
+		ban?: { friendGroupId: string }
+		unban?: { friendGroupId: string }
+	}
+}
+
 export interface LinkedModrinthAccount {
 	id: string
 	userId: string
@@ -123,6 +229,25 @@ export interface FriendGroupMember {
 	createdAt: number
 	updatedAt?: number
 	user?: AmberiteUser | null
+}
+
+export interface FriendGroupPublicProfile {
+	group: FriendGroupInfo
+	core: CorePresence | null
+	members: FriendGroupMember[]
+	viewer: {
+		isMember: boolean
+		role: FriendGroupRoleName | null
+		permissionPreset?: string | null
+		canManage: boolean
+		isOwner: boolean
+		banned: boolean
+	}
+	actions: {
+		manage?: boolean
+		leave?: boolean
+		createInvite?: boolean
+	}
 }
 
 export interface FriendGroupInvite {

@@ -4,7 +4,12 @@ import type { Id } from './_generated/dataModel'
 import type { QueryCtx } from './_generated/server'
 import { coreLinksForUser, coreMemberUserIdsForUser } from './coreList'
 import {
+	bansByGroup,
+	coreById,
 	currentAccountFields,
+	membersByGroup,
+	membershipsByUser,
+	publicLegacyCore,
 	publicCurrentProfile,
 	publicUser,
 	resolveActor,
@@ -22,28 +27,50 @@ export async function sessionStateForUser(ctx: QueryCtx, userId: Id<'users'>) {
 	const user = await ctx.db.get(userId)
 	if (!user) throw new Error('user not found')
 	const accountFields = await currentAccountFields(ctx, userId)
-	const [left, right, incoming, outgoing, blocks, coreLinks] = await Promise.all([
-		ctx.db
-			.query('friendships')
-			.withIndex('by_user_a', (q) => q.eq('userAId', userId))
-			.collect(),
-		ctx.db
-			.query('friendships')
-			.withIndex('by_user_b', (q) => q.eq('userBId', userId))
-			.collect(),
-		ctx.db
-			.query('friendRequests')
-			.withIndex('by_to_status', (q) => q.eq('toUserId', userId).eq('status', 'pending'))
-			.collect(),
-		ctx.db
-			.query('friendRequests')
-			.withIndex('by_from_status', (q) => q.eq('fromUserId', userId).eq('status', 'pending'))
-			.collect(),
-		ctx.db
-			.query('blockedUsers')
-			.withIndex('by_blocker', (q) => q.eq('blockerUserId', userId))
-			.collect(),
-		coreLinksForUser(ctx, userId),
+	const [left, right, incoming, outgoing, blocks, coreLinks, memberships, pendingInvites] =
+		await Promise.all([
+			ctx.db
+				.query('friendships')
+				.withIndex('by_user_a', (q) => q.eq('userAId', userId))
+				.collect(),
+			ctx.db
+				.query('friendships')
+				.withIndex('by_user_b', (q) => q.eq('userBId', userId))
+				.collect(),
+			ctx.db
+				.query('friendRequests')
+				.withIndex('by_to_status', (q) => q.eq('toUserId', userId).eq('status', 'pending'))
+				.collect(),
+			ctx.db
+				.query('friendRequests')
+				.withIndex('by_from_status', (q) => q.eq('fromUserId', userId).eq('status', 'pending'))
+				.collect(),
+			ctx.db
+				.query('blockedUsers')
+				.withIndex('by_blocker', (q) => q.eq('blockerUserId', userId))
+				.collect(),
+			coreLinksForUser(ctx, userId),
+			membershipsByUser(ctx, userId),
+			pendingGroupInvitesByUser(ctx, userId),
+		])
+	const membership = memberships[0] ?? null
+	const activeGroup = membership ? await ctx.db.get(membership.friendGroupId as any) : null
+	const activeGroupId = activeGroup?._id.toString()
+	const [activeCore, activeMembers, activeBans, groupInvites] = await Promise.all([
+		activeGroup?.coreId ? coreById(ctx, activeGroup.coreId) : Promise.resolve(null),
+		activeGroupId ? publicMembersByGroup(ctx, activeGroupId) : Promise.resolve([]),
+		activeGroupId && membership && canManageGroup(membership.role)
+			? publicBansByGroup(ctx, activeGroupId)
+			: Promise.resolve([]),
+		Promise.all(
+			pendingInvites.map(async (invite) => {
+				const group = await ctx.db.get(invite.friendGroupId as any)
+				return {
+					invite,
+					group: group ? publicFriendGroup(group) : null,
+				}
+			}),
+		),
 	])
 	const friendships = await Promise.all(
 		[...left, ...right].map(async (friendship) => {
@@ -85,7 +112,57 @@ export async function sessionStateForUser(ctx: QueryCtx, userId: Id<'users'>) {
 			),
 		},
 		coreLinks,
+		group:
+			activeGroup && membership
+				? {
+						group: publicFriendGroup(activeGroup),
+						role: membership.role,
+						permissionPreset: membership.permissionPreset,
+						core: publicLegacyCore(activeCore),
+					}
+				: null,
+		members: activeMembers,
+		bans: activeBans,
+		pendingInvites: groupInvites,
+		core: publicLegacyCore(activeCore),
 	}
+}
+
+async function publicMembersByGroup(ctx: QueryCtx, friendGroupId: string) {
+	const members = await membersByGroup(ctx, friendGroupId)
+	return await Promise.all(
+		members.map(async (member) => {
+			const memberUser = await ctx.db.get(member.userId as any)
+			return { ...member, user: memberUser ? publicUser(memberUser) : null }
+		}),
+	)
+}
+
+async function publicBansByGroup(ctx: QueryCtx, friendGroupId: string) {
+	const bans = await bansByGroup(ctx, friendGroupId)
+	return await Promise.all(
+		bans.map(async (ban) => {
+			const bannedUser = await ctx.db.get(ban.userId as any)
+			return { ...ban, user: bannedUser ? publicUser(bannedUser) : null }
+		}),
+	)
+}
+
+async function pendingGroupInvitesByUser(ctx: QueryCtx, userId: string) {
+	const now = Date.now()
+	const invites = await ctx.db
+		.query('friendGroupInvites')
+		.withIndex('by_invitee_status', (q) => q.eq('inviteeUserId', userId).eq('status', 'pending'))
+		.collect()
+	return invites.filter((invite) => invite.expiresAt > now)
+}
+
+function publicFriendGroup(group: any) {
+	return { ...group, id: group._id }
+}
+
+function canManageGroup(role: string) {
+	return role === 'owner' || role === 'admin'
 }
 
 function publicFriendRequest(request: any) {

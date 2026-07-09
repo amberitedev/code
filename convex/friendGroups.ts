@@ -6,6 +6,7 @@ import {
 	coreById,
 	coresByGroup,
 	groupByCoreId,
+	groupByIdOrSubdomain,
 	membersByGroup,
 	membershipByGroupUser,
 	membershipsByUser,
@@ -55,6 +56,51 @@ export const getFriendGroup = query({
 					core: group.coreId ? publicLegacyCore(await coreById(ctx, group.coreId)) : null,
 				}
 			: null
+	},
+})
+
+export const getPublicFriendGroupProfile = query({
+	args: { idOrSubdomain: v.string(), ...devActAs },
+	handler: async (ctx, args) => {
+		const userId = await resolveActor(ctx, args.__actAs)
+		const group = await groupByIdOrSubdomain(ctx, args.idOrSubdomain)
+		if (!group) return null
+
+		const friendGroupId = group._id.toString()
+		const [members, viewerMembership, viewerBan, core] = await Promise.all([
+			membersByGroup(ctx, friendGroupId),
+			membershipByGroupUser(ctx, friendGroupId, userId),
+			banByGroupUser(ctx, friendGroupId, userId),
+			group.coreId ? coreById(ctx, group.coreId) : Promise.resolve(null),
+		])
+		const publicMembers = await Promise.all(
+			members.map(async (member) => {
+				const user = await ctx.db.get(member.userId as any)
+				return { ...member, user: user ? publicUser(user) : null }
+			}),
+		)
+		const canManage = viewerMembership
+			? viewerMembership.role === 'owner' || viewerMembership.role === 'admin'
+			: false
+
+		return {
+			group: { ...group, id: friendGroupId },
+			core: publicLegacyCore(core),
+			members: publicMembers,
+			viewer: {
+				isMember: Boolean(viewerMembership),
+				role: viewerMembership?.role ?? null,
+				permissionPreset: viewerMembership?.permissionPreset ?? null,
+				canManage,
+				isOwner: viewerMembership?.role === 'owner',
+				banned: Boolean(viewerBan),
+			},
+			actions: {
+				manage: canManage,
+				leave: Boolean(viewerMembership && viewerMembership.role !== 'owner'),
+				createInvite: canManage,
+			},
+		}
 	},
 })
 

@@ -22,6 +22,7 @@ export interface BrowseInstallContext {
 	name: string
 	loader: string
 	gameVersion: string
+	profileTypeLabel?: string
 	serverId?: string | null
 	upstream?: { project_id?: string | null } | null
 	iconSrc?: string | null

@@ -10,6 +10,7 @@ const Pages = {
 	Browse: BrowsePage,
 	Skins: () => import('@/pages/Skins.vue'),
 	User: () => import('@/pages/user/Index.vue'),
+	Group: () => import('@/pages/group/Index.vue'),
 }
 
 const Hosting = {
@@ -159,6 +160,14 @@ const router = createRouter({
 			component: Pages.User,
 			meta: {
 				breadcrumb: [{ name: '?User' }],
+			},
+		},
+		{
+			path: '/group/:group',
+			name: 'Group',
+			component: Pages.Group,
+			meta: {
+				breadcrumb: [{ name: '?Group' }],
 			},
 		},
 		{

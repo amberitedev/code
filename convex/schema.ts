@@ -12,6 +12,7 @@ const messageStatus = v.union(v.literal("pending"), v.literal("received"), v.lit
 const pairingStatus = v.union(v.literal("waiting"), v.literal("claimed"), v.literal("expired"));
 const syncStatus = v.union(v.literal("active"), v.literal("paused"), v.literal("archived"));
 const profileVisibility = v.union(v.literal("everyone"), v.literal("roles"), v.literal("custom"));
+const profileSectionVisibility = v.union(v.literal("everyone"), v.literal("friends"), v.literal("friend_group"), v.literal("private"));
 const whitelistScope = v.union(v.literal("viewers"), v.literal("roles"), v.literal("custom"));
 
 export default defineSchema({
@@ -26,6 +27,15 @@ export default defineSchema({
 		profileUpdatedAt: v.optional(v.number()), deletedAt: v.optional(v.number()),
 		deletedReason: v.optional(v.string()), isAnonymous: v.optional(v.boolean()),
 		onboardedAt: v.optional(v.number()),
+		profileVisibility: v.optional(v.object({
+			friends: profileSectionVisibility,
+			friendGroup: profileSectionVisibility,
+			corePresence: profileSectionVisibility,
+			favoriteModpacks: profileSectionVisibility,
+			achievements: profileSectionVisibility,
+		})),
+		favoriteModpackProjectIds: v.optional(v.array(v.string())),
+		showcaseAchievementIds: v.optional(v.array(v.string())),
 	})
 		.index("email", ["email"])
 		.index("by_amberite_user_id", ["amberiteUserId"])
@@ -54,7 +64,8 @@ export default defineSchema({
 		createdAt: v.number(), updatedAt: v.optional(v.number()),
 	})
 		.index("by_owner", ["ownerUserId"])
-		.index("by_core_id", ["coreId"]),
+		.index("by_core_id", ["coreId"])
+		.index("by_subdomain", ["subdomain"]),
 	friendGroupMembers: defineTable({
 		friendGroupId: v.string(), userId: v.string(), role: friendGroupRole,
 		permissionPreset: v.optional(v.string()), customPermissions: v.optional(v.any()),

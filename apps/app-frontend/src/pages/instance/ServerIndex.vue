@@ -1,5 +1,7 @@
 <template>
+	<ServerBrowsePage v-if="isBrowsePage" />
 	<div
+		v-else
 		data-library-instance-page-ready
 		class="h-full"
 		:data-library-instance-title="instanceTitle"
@@ -14,7 +16,7 @@
 			show-copy-id-action
 			copy-id-label="Copy path"
 		>
-			<component :is="activePage" v-bind="activePageProps" />
+			<component :is="activePage" />
 		</ServersManageRootLayout>
 	</div>
 </template>
@@ -23,7 +25,6 @@
 import {
 	ServersManageAccessPage,
 	ServersManageBackupsPage,
-	ServersManageBrowsePage,
 	ServersManageContentPage,
 	ServersManageFilesPage,
 	ServersManageOverviewPage,
@@ -35,6 +36,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCoreInstances } from '@/composables/useCoreInstances'
 import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
+
+import ServerBrowsePage from './ServerBrowsePage.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -60,17 +63,13 @@ const instanceSubtitle = computed(() => {
 	return `${instance.loader} ${instance.game_version}`
 })
 const basePath = computed(() => `/instance/${encodeURIComponent(route.params.id as string)}`)
+const isBrowsePage = computed(() => route.path.endsWith('/browse'))
 const activePage = computed(() => {
 	if (route.path.endsWith('/content')) return ServersManageContentPage
 	if (route.path.endsWith('/files')) return ServersManageFilesPage
 	if (route.path.endsWith('/access')) return ServersManageAccessPage
 	if (route.path.endsWith('/backups')) return ServersManageBackupsPage
-	if (route.path.endsWith('/browse')) return ServersManageBrowsePage
 	return ServersManageOverviewPage
-})
-const activePageProps = computed(() => {
-	if (route.path.endsWith('/browse')) return { backPath: `${basePath.value}/content` }
-	return {}
 })
 
 async function backToServerLibrary() {

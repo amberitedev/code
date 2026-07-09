@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import { BanIcon, MoreVerticalIcon, PlayIcon, TrashIcon, UserIcon, UserPlusIcon, XIcon } from '@modrinth/assets'
-import {
-	Accordion,
-	Avatar,
-	ButtonStyled,
-	defineMessages,
-	useVIntl,
-} from '@modrinth/ui'
+import { Accordion, Avatar, ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
 
 import type { FriendWithUserData } from '@/helpers/friends.ts'
 
@@ -36,6 +30,14 @@ const props = withDefaults(
 function createOverflowMenuOptions(friend: FriendWithUserData) {
 	if (props.unblockFriend) {
 		return [
+			...(props.openProfile
+				? [
+						{
+							id: 'view-profile',
+							action: () => props.openProfile?.(friend),
+						},
+					]
+				: []),
 			{
 				id: 'unblock-friend',
 				action: () => props.unblockFriend?.(friend),
@@ -52,7 +54,7 @@ function createOverflowMenuOptions(friend: FriendWithUserData) {
 					},
 				]
 		: []),
-		...(props.inviteToGroup
+		...(props.inviteToGroup && !friend.friendGroupRole
 			? [
 					{
 						id: 'invite-to-group',
@@ -89,7 +91,7 @@ function createOverflowMenuOptions(friend: FriendWithUserData) {
 
 function openFriendOverflowMenu(event: MouseEvent) {
 	if (!(event.currentTarget instanceof HTMLElement)) return
-	event.currentTarget.querySelector<HTMLButtonElement>('button')?.click()
+	event.currentTarget.querySelector<HTMLButtonElement>('[data-friend-overflow]')?.click()
 }
 
 const messages = defineMessages({
@@ -120,6 +122,10 @@ const messages = defineMessages({
 	inviteToPlay: {
 		id: 'friends.friend.invite-to-play',
 		defaultMessage: 'Invite to play',
+	},
+	sameGroup: {
+		id: 'friends.friend.same-group',
+		defaultMessage: 'In your Core',
 	},
 	blockFriend: {
 		id: 'friends.friend.block',
@@ -153,39 +159,61 @@ const messages = defineMessages({
 				<div
 					v-for="friend in friends"
 					:key="friend.username"
-					class="group grid items-center grid-cols-[auto_1fr_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
+					class="group grid items-center grid-cols-[minmax(0,1fr)_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
 					@contextmenu.prevent.stop="openFriendOverflowMenu"
 				>
-					<div class="relative">
-						<Avatar
-							:src="friend.avatar"
-							:class="{ grayscale: !friend.online && friend.accepted }"
-							class="w-12 h-12 rounded-full"
-							size="32px"
-							circle
-						/>
-						<span
-							v-if="friend.online"
-							aria-hidden="true"
-							class="bottom-[2px] right-[-2px] absolute w-3 h-3 bg-brand border-2 border-black border-solid rounded-full"
-						/>
-					</div>
-					<div class="flex flex-col">
-						<span
-							class="text-sm m-0"
-							:class="friend.online || !friend.accepted ? 'text-contrast' : 'text-primary'"
-						>
-							{{ friend.username }}
-						</span>
-						<span v-if="!friend.accepted" class="m-0 text-xs">
-							{{ formatMessage(messages.friendRequestSent) }}
-						</span>
-						<span v-else-if="friend.status" class="m-0 text-xs">{{ friend.status }}</span>
-					</div>
+					<component
+						:is="openProfile ? 'button' : 'div'"
+						:type="openProfile ? 'button' : undefined"
+						class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent p-0 text-left"
+						:class="
+							openProfile
+								? 'cursor-pointer rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand'
+								: ''
+						"
+						@click="openProfile?.(friend)"
+					>
+						<div class="relative">
+							<Avatar
+								:src="friend.avatar"
+								:class="{ grayscale: !friend.online && friend.accepted }"
+								class="w-12 h-12 rounded-full"
+								size="32px"
+								circle
+							/>
+							<span
+								v-if="friend.online"
+								aria-hidden="true"
+								class="bottom-[2px] right-[-2px] absolute w-3 h-3 bg-brand border-2 border-black border-solid rounded-full"
+							/>
+						</div>
+						<div class="flex min-w-0 flex-col">
+							<span
+								class="truncate text-sm m-0"
+								:class="friend.online || !friend.accepted ? 'text-contrast' : 'text-primary'"
+							>
+								{{ friend.username }}
+							</span>
+							<span v-if="!friend.accepted" class="m-0 truncate text-xs">
+								{{ formatMessage(messages.friendRequestSent) }}
+							</span>
+							<span
+								v-else-if="friend.status || friend.friendGroupRole"
+								class="m-0 truncate text-xs text-secondary"
+							>
+								<template v-if="friend.status">{{ friend.status }}</template>
+								<template v-if="friend.status && friend.friendGroupRole"> - </template>
+								<template v-if="friend.friendGroupRole">
+									{{ formatMessage(messages.sameGroup) }}
+								</template>
+							</span>
+						</div>
+					</component>
 					<ButtonStyled v-if="friend.accepted" circular type="transparent">
 						<FriendOverflowMenu
 							class="opacity-0 group-hover:opacity-100 transition-opacity"
 							:options="createOverflowMenuOptions(friend)"
+							data-friend-overflow
 						>
 							<MoreVerticalIcon />
 							<template #view-profile>

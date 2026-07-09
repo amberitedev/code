@@ -52,7 +52,7 @@ export const listMyGroupInvites = query({
 		return await Promise.all(
 			invites.map(async (invite) => ({
 				invite,
-				group: await ctx.db.get(invite.friendGroupId as any),
+				group: publicFriendGroup(await ctx.db.get(invite.friendGroupId as any)),
 			})),
 		)
 	},
@@ -151,15 +151,21 @@ function secureInviteCode(): string {
 	return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('')
 }
 
-function invitesByUser(ctx: QueryCtx, userId: string) {
-	return ctx.db
+async function invitesByUser(ctx: QueryCtx, userId: string) {
+	const now = Date.now()
+	const invites = await ctx.db
 		.query('friendGroupInvites')
 		.withIndex('by_invitee_status', (q) => q.eq('inviteeUserId', userId).eq('status', 'pending'))
 		.collect()
+	return invites.filter((invite) => invite.expiresAt > now)
 }
 function inviteByCode(ctx: QueryCtx | MutationCtx, code: string) {
 	return ctx.db
 		.query('friendGroupInvites')
 		.withIndex('by_code', (q) => q.eq('code', code.trim().toUpperCase()))
 		.unique()
+}
+
+function publicFriendGroup(group: any) {
+	return group ? { ...group, id: group._id } : null
 }

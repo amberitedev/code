@@ -1,3 +1,4 @@
+import type { FriendGroupRoleName } from '@amberite/amberite-api'
 import type { User } from '@modrinth/utils'
 import { invoke } from '@tauri-apps/api/core'
 import type { Dayjs } from 'dayjs'
@@ -42,9 +43,11 @@ export type FriendWithUserData = {
 	last_updated: Dayjs | null
 	created: Dayjs
 	username: string
+	profileUsername?: string | null
 	accepted: boolean
 	online: boolean
 	avatar: string
+	friendGroupRole?: FriendGroupRoleName | null
 }
 export async function transformFriends(
 	friends: UserFriend[],
@@ -72,6 +75,7 @@ export async function transformFriends(
 			created: dayjs(friend.created),
 			avatar: user?.avatar_url ?? '',
 			username: user?.username ?? '',
+			profileUsername: user?.username ?? null,
 			online: !!status,
 			accepted: friend.accepted,
 		}

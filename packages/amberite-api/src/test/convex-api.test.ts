@@ -105,6 +105,18 @@ describe('ConvexApiClient', () => {
 		})
 	})
 
+	it('routes profile views to the sanitized Convex profile view query', async () => {
+		const fetchFn = vi.fn(async () => jsonResponse(null))
+		const client = new ConvexApiClient(adapter(fetchFn))
+
+		await client.getProfileView('amber')
+
+		expect(await lastBody(fetchFn)).toMatchObject({
+			path: 'profiles:view',
+			args: { idOrUsername: 'amber' },
+		})
+	})
+
 	it('routes profile updates and Modrinth linking through redacted contracts', async () => {
 		const fetchFn = vi.fn(async () => jsonResponse(null))
 		const client = new ConvexApiClient(adapter(fetchFn))

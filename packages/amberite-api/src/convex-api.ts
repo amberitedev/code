@@ -10,11 +10,14 @@ import type {
 	CoreListEntry,
 	CorePresence,
 	FriendGroupInfo,
+	FriendGroupPublicProfile,
 	FriendGroupSummary,
 	FriendGroupMember,
 	FriendGroupInvite,
 	FriendGroupBan,
 	LinkedModrinthAccount,
+	ProfileView,
+	ProfileVisibilitySettings,
 	SyncedProfileSettings,
 	ProfileWhitelistResult,
 } from './convex-types'
@@ -48,7 +51,18 @@ export interface FriendsListResult {
 
 export interface GroupInviteWithGroup {
 	invite: FriendGroupInvite
-	group: unknown
+	group: {
+		id?: string
+		_id?: string
+		name?: string | null
+		description?: string | null
+		banner?: string | null
+		subdomain?: string | null
+		coreId?: string | null
+		ownerUserId?: string
+		createdAt?: number
+		updatedAt?: number | null
+	} | null
 }
 
 /**
@@ -60,6 +74,7 @@ export interface AmberiteSocialClient {
 	currentUser(): Promise<(AmberiteUser & { userId: string }) | null>
 	currentProfile(): Promise<AmberiteProfile>
 	getProfile(idOrUsername: string): Promise<AmberitePublicProfile | null>
+	getProfileView(idOrUsername: string): Promise<ProfileView | null>
 	searchProfiles(query: string, limit?: number): Promise<AmberitePublicProfile[]>
 	updateCurrentProfile(args: {
 		displayName?: string
@@ -71,6 +86,9 @@ export interface AmberiteSocialClient {
 			mimeType?: string
 			sizeBytes?: number
 		}
+		profileVisibility?: Partial<ProfileVisibilitySettings>
+		favoriteModpackProjectIds?: string[]
+		showcaseAchievementIds?: string[]
 	}): Promise<AmberiteProfile>
 	linkedModrinthAccount(): Promise<LinkedModrinthAccount | null>
 	storeModrinthOAuthTokens(args: {
@@ -98,6 +116,7 @@ export interface AmberiteSocialClient {
 	blockUser(userId: string): Promise<null>
 	unblockUser(userId: string): Promise<null>
 	listMyFriendGroups(): Promise<FriendGroupSummary[]>
+	getPublicFriendGroupProfile(idOrSubdomain: string): Promise<FriendGroupPublicProfile | null>
 	getFriendGroup(
 		friendGroupId: string,
 	): Promise<{ group: FriendGroupInfo; core: CorePresence | null } | null>
@@ -227,6 +246,10 @@ export class ConvexApiClient implements AmberiteSocialClient {
 		return convexQuery(this.adapter, 'profiles:get', { idOrUsername })
 	}
 
+	getProfileView(idOrUsername: string): Promise<ProfileView | null> {
+		return convexQuery(this.adapter, 'profiles:view', { idOrUsername })
+	}
+
 	searchProfiles(query: string, limit?: number): Promise<AmberitePublicProfile[]> {
 		return convexQuery(this.adapter, 'profiles:search', {
 			query,
@@ -244,6 +267,9 @@ export class ConvexApiClient implements AmberiteSocialClient {
 			mimeType?: string
 			sizeBytes?: number
 		}
+		profileVisibility?: Partial<ProfileVisibilitySettings>
+		favoriteModpackProjectIds?: string[]
+		showcaseAchievementIds?: string[]
 	}): Promise<AmberiteProfile> {
 		return convexMutation(this.adapter, 'profiles:updateCurrent', args)
 	}
@@ -336,6 +362,12 @@ export class ConvexApiClient implements AmberiteSocialClient {
 
 	listMyFriendGroups(): Promise<FriendGroupSummary[]> {
 		return convexQuery(this.adapter, 'friendGroups:listMyFriendGroups', {})
+	}
+
+	getPublicFriendGroupProfile(idOrSubdomain: string): Promise<FriendGroupPublicProfile | null> {
+		return convexQuery(this.adapter, 'friendGroups:getPublicFriendGroupProfile', {
+			idOrSubdomain,
+		})
 	}
 
 	getFriendGroup(

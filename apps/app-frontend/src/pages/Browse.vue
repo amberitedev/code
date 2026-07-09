@@ -178,6 +178,7 @@ type Instance = {
 	loader: string
 	path: string
 	install_stage: string
+	profile_type?: 'client' | 'server' | 'synced'
 	icon_path?: string
 	name: string
 	linked_data?: {
@@ -465,6 +466,18 @@ const messages = defineMessages({
 		id: 'app.browse.back-to-instance',
 		defaultMessage: 'Back to instance',
 	},
+	clientProfileType: {
+		id: 'app.browse.profile-type.client',
+		defaultMessage: 'Client',
+	},
+	serverProfileType: {
+		id: 'app.browse.profile-type.server',
+		defaultMessage: 'Server',
+	},
+	syncedProfileType: {
+		id: 'app.browse.profile-type.synced',
+		defaultMessage: 'Synced',
+	},
 	serverInstanceContentWarning: {
 		id: 'app.browse.server-instance-content-warning',
 		defaultMessage:
@@ -626,12 +639,19 @@ const selectableProjectTypes = computed(() => {
 	]
 })
 
+function getProfileTypeLabel(profileType: Instance['profile_type']) {
+	if (profileType === 'server') return formatMessage(messages.serverProfileType)
+	if (profileType === 'synced') return formatMessage(messages.syncedProfileType)
+	return formatMessage(messages.clientProfileType)
+}
+
 const installContext = computed(() => {
 	if (isServerContext.value && serverContextServerData.value) {
 		return {
 			name: serverContextServerData.value.name,
 			loader: serverContextServerData.value.loader ?? '',
 			gameVersion: serverContextServerData.value.mc_version ?? '',
+			profileTypeLabel: formatMessage(messages.serverProfileType),
 			serverId: serverIdQuery.value,
 			upstream: serverContextServerData.value.upstream,
 			iconSrc: null as string | null,
@@ -655,6 +675,7 @@ const installContext = computed(() => {
 			name: instance.value.name,
 			loader: instance.value.loader,
 			gameVersion: instance.value.game_version,
+			profileTypeLabel: getProfileTypeLabel(instance.value.profile_type),
 			iconSrc: instance.value.icon_path ? convertFileSrc(instance.value.icon_path) : null,
 			backUrl: `/instance/${encodeURIComponent(instance.value.path)}${isFromWorlds.value ? '/worlds' : ''}`,
 			backLabel: formatMessage(messages.backToInstance),

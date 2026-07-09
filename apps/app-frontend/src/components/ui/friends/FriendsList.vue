@@ -1,15 +1,15 @@
-<!-- Friend-state mapping: 66-140; user search: 167-194; Core group actions: 245-309; request responses: 316-341. -->
 <script setup lang="ts">
 import type { AmberiteUser } from '@amberite/amberite-api'
 import {
 	CheckIcon,
-	MailIcon,
 	SendIcon,
 	UserIcon,
 	UserPlusIcon,
+	UsersIcon,
 	XIcon,
 } from '@modrinth/assets'
 import {
+	Accordion,
 	Avatar,
 	ButtonStyled,
 	GhostMedia,
@@ -20,6 +20,7 @@ import {
 } from '@modrinth/ui'
 import dayjs from 'dayjs'
 import { computed, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
@@ -30,12 +31,15 @@ type PendingFriendWithRequest = FriendWithUserData & { requestId: string }
 
 const { addNotification } = injectNotificationManager()
 const formatRelativeTime = useRelativeTime()
+const router = useRouter()
 const {
 	friends,
 	currentUser,
 	loading,
 	error,
 	group,
+	members,
+	invites,
 	canManage,
 	searchUsers,
 	sendFriendRequest,
@@ -43,38 +47,48 @@ const {
 	cancelFriendRequest,
 	removeFriend,
 	inviteToGroup,
+	acceptInvite,
+	declineInvite,
 	blockUser,
 	unblockUser,
 } = useSocial()
 
 const search = ref('')
 const addFriendModal = ref()
-const friendInvitesModal = ref()
 const usernameQuery = ref('')
 const userResults = ref<AmberiteUser[]>([])
 const selectedUser = ref<AmberiteUser | null>(null)
 const searchingUsers = ref(false)
 const sending = ref(false)
 const actingOnRequestId = ref<string | null>(null)
+const actingOnGroupInviteId = ref<string | null>(null)
 let searchToken = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const friendList = computed(() => friends.value?.friends ?? [])
 const incoming = computed(() => friends.value?.incoming ?? [])
 const outgoing = computed(() => friends.value?.outgoing ?? [])
+const groupMemberByUserId = computed(
+	() => new Map(members.value.map((member) => [member.userId, member])),
+)
 
 const acceptedFriends = computed<FriendWithUserData[]>(() =>
-	friendList.value.map((friend) => ({
-		id: friend.user?.userId ?? friend.friendshipId,
-		friend_id: null,
-		status: friend.presence?.status ?? null,
-		last_updated: friend.presence?.lastSeenAt ? dayjs(friend.presence.lastSeenAt) : null,
-		created: dayjs(friend.createdAt),
-		username: friendLabel(friend),
-		accepted: true,
-		online: !!friend.presence?.online,
-		avatar: friend.user?.image ?? '',
-	})),
+	friendList.value.map((friend) => {
+		const userId = friend.user?.userId ?? friend.friendshipId
+		return {
+			id: userId,
+			friend_id: null,
+			status: friend.presence?.status ?? null,
+			last_updated: friend.presence?.lastSeenAt ? dayjs(friend.presence.lastSeenAt) : null,
+			created: dayjs(friend.createdAt),
+			username: friendLabel(friend),
+			profileUsername: friend.user?.username ?? friend.user?.userId ?? null,
+			accepted: true,
+			online: !!friend.presence?.online,
+			avatar: friend.user?.image ?? '',
+			friendGroupRole: groupMemberByUserId.value.get(userId)?.role ?? null,
+		}
+	}),
 )
 
 const pendingFriends = computed<PendingFriendWithRequest[]>(() =>
@@ -85,6 +99,7 @@ const pendingFriends = computed<PendingFriendWithRequest[]>(() =>
 		last_updated: null,
 		created: dayjs(request.request.createdAt),
 		username: requestLabel(request),
+		profileUsername: request.user?.username ?? request.request.toUserId,
 		accepted: false,
 		online: false,
 		avatar: request.user?.image ?? '',
@@ -99,6 +114,7 @@ const incomingRequests = computed<PendingFriendWithRequest[]>(() =>
 		last_updated: null,
 		created: dayjs(request.request.createdAt),
 		username: requestLabel(request),
+		profileUsername: request.user?.username ?? request.request.fromUserId,
 		accepted: false,
 		online: false,
 		avatar: request.user?.image ?? '',
@@ -113,6 +129,7 @@ const blockedFriends = computed<FriendWithUserData[]>(() =>
 		last_updated: null,
 		created: dayjs(block.createdAt),
 		username: block.user?.displayName ?? block.user?.username ?? 'User',
+		profileUsername: block.user?.username ?? block.user?.userId ?? null,
 		accepted: true,
 		online: false,
 		avatar: block.user?.image ?? '',
@@ -145,6 +162,17 @@ const filteredPendingFriends = computed(() =>
 			pendingFriends.value.some((pending) => pending.requestId === (friend as PendingFriendWithRequest).requestId),
 	),
 )
+const filteredIncomingRequests = computed(() => {
+	const q = search.value.trim().toLowerCase()
+	if (!q) return incomingRequests.value
+	return incomingRequests.value.filter((friend) => friend.username.toLowerCase().includes(q))
+})
+const filteredGroupInvites = computed(() => {
+	const q = search.value.trim().toLowerCase()
+	if (!q) return invites.value
+	return invites.value.filter((invite) => groupInviteName(invite).toLowerCase().includes(q))
+})
+const inviteCount = computed(() => filteredIncomingRequests.value.length + filteredGroupInvites.value.length)
 const unavailableUserIds = computed(
 	() =>
 		new Set([
@@ -199,6 +227,12 @@ function selectUser(user: AmberiteUser) {
 	selectedUser.value = user
 	usernameQuery.value = user.username ?? user.displayName ?? ''
 	userResults.value = []
+}
+
+function openProfile(friend: FriendWithUserData) {
+	const user = friend.profileUsername || friend.id || friend.username
+	if (!user) return
+	void router.push(`/user/${encodeURIComponent(user)}`)
 }
 
 async function add() {
@@ -322,13 +356,50 @@ async function respondToRequest(friend: PendingFriendWithRequest, accept: boolea
 				: `Ignored the friend request from ${friend.username}.`,
 			type: 'success',
 		})
-		if (incomingRequests.value.length <= 1) friendInvitesModal.value?.hide()
 	} catch (e) {
 		console.warn('[amberite] respond to friend request failed', e)
 		showFriendsServiceError('Friend request update failed')
 	} finally {
 		actingOnRequestId.value = null
 	}
+}
+
+async function respondToGroupInvite(invite: (typeof invites.value)[number], accept: boolean) {
+	const inviteId = invite.invite._id
+	if (!inviteId || actingOnGroupInviteId.value) return
+	actingOnGroupInviteId.value = inviteId
+	const groupName = groupInviteName(invite)
+	try {
+		if (accept) {
+			await acceptInvite({ inviteId })
+		} else {
+			await declineInvite(inviteId)
+		}
+		if (error.value) {
+			showFriendsServiceError('Friend group invite failed')
+			return
+		}
+		addNotification({
+			title: accept ? 'Friend group invite accepted' : 'Friend group invite ignored',
+			text: accept ? `Joined ${groupName}.` : `Ignored the invite to ${groupName}.`,
+			type: 'success',
+		})
+	} catch (e) {
+		console.warn('[amberite] respond to friend group invite failed', e)
+		showFriendsServiceError('Friend group invite failed')
+	} finally {
+		actingOnGroupInviteId.value = null
+	}
+}
+
+function openGroupInvite(invite: (typeof invites.value)[number]) {
+	const groupId = invite.group?.subdomain || invite.group?.id || invite.group?._id
+	if (!groupId) return
+	void router.push(`/group/${encodeURIComponent(groupId)}`)
+}
+
+function groupInviteName(invite: (typeof invites.value)[number]) {
+	return invite.group?.name || invite.group?.subdomain || invite.group?.id || 'Friend group'
 }
 
 function friendLabel(f: (typeof friendList.value)[number]) {
@@ -341,48 +412,6 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 </script>
 
 <template>
-	<ModalWrapper ref="friendInvitesModal" header="View friend requests">
-		<div class="min-w-[30rem]">
-			<p v-if="incomingRequests.length === 0" class="m-0 text-sm text-secondary">
-				You have no pending friend requests.
-			</p>
-			<div v-else class="flex flex-col gap-4 min-w-[40rem]">
-				<div
-					v-for="friend in incomingRequests"
-					:key="friend.requestId"
-					class="grid grid-cols-[auto_1fr_auto] items-center gap-3"
-				>
-					<Avatar :src="friend.avatar" class="w-12 h-12 rounded-full" size="2.25rem" circle />
-					<div class="min-w-0">
-						<p class="m-0 truncate text-sm text-contrast">{{ friend.username }}</p>
-						<p class="m-0 text-xs text-secondary">
-							Sent you a friend request · {{ formatRelativeTime(friend.created.toISOString()) }}
-						</p>
-					</div>
-					<div class="flex gap-2">
-						<ButtonStyled color="brand">
-							<button
-								:disabled="actingOnRequestId !== null"
-								@click="respondToRequest(friend, true)"
-							>
-								<CheckIcon />
-								Accept
-							</button>
-						</ButtonStyled>
-						<ButtonStyled>
-							<button
-								:disabled="actingOnRequestId !== null"
-								@click="respondToRequest(friend, false)"
-							>
-								<XIcon />
-								Ignore
-							</button>
-						</ButtonStyled>
-					</div>
-				</div>
-			</div>
-		</div>
-	</ModalWrapper>
 	<ModalWrapper ref="addFriendModal" header="Adding a friend">
 		<div class="min-w-[30rem]">
 			<h2 class="m-0 text-base font-medium text-primary">
@@ -462,24 +491,6 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					/>
 				</template>
 				<h3 v-else class="w-full text-base text-primary font-medium m-0">Friends</h3>
-				<ButtonStyled v-if="incomingRequests.length > 0" circular type="transparent">
-					<button
-						v-tooltip="
-							`${incomingRequests.length} friend request${incomingRequests.length === 1 ? '' : 's'}`
-						"
-						class="relative"
-						aria-label="View friend requests"
-						@click="friendInvitesModal.show"
-					>
-						<MailIcon />
-						<span
-							aria-hidden="true"
-							class="absolute bg-brand text-brand-inverted text-[8px] top-0.5 px-1 right-0.5 min-w-3 h-3 rounded-full flex items-center justify-center font-bold"
-						>
-							{{ incomingRequests.length }}
-						</span>
-					</button>
-				</ButtonStyled>
 			</div>
 
 			<div class="flex flex-col gap-3">
@@ -497,18 +508,132 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 			</div>
 
 			<div v-else class="flex-1 overflow-y-auto space-y-3">
-				<div
-					v-if="acceptedFriends.length === 0 && pendingFriends.length === 0 && incomingRequests.length > 0"
-					class="whitespace-nowrap text-sm text-secondary"
+				<Accordion
+					v-if="inviteCount > 0"
+					:force-open="!!search"
+					open-by-default
+					:button-class="
+						'flex w-full items-center bg-transparent border-0 p-0' +
+						(search
+							? ''
+							: ' cursor-pointer hover:brightness-[--hover-brightness] active:scale-[0.98] transition-all')
+					"
 				>
-					Friend request.
-					<button
-						class="ml-1 font-semibold text-brand cursor-pointer border-0 bg-transparent p-0"
-						@click="friendInvitesModal.show"
-					>
-						View requests
-					</button>
-				</div>
+					<template #title>
+						<h3 class="text-base text-primary font-medium m-0">
+							Invites - {{ inviteCount }}
+						</h3>
+					</template>
+					<template #default>
+						<div class="pt-3 flex flex-col gap-3">
+							<div v-if="filteredGroupInvites.length > 0" class="flex flex-col gap-1">
+								<h4
+									v-if="filteredIncomingRequests.length > 0"
+									class="m-0 px-2 text-xs font-semibold text-secondary"
+								>
+									Group invites
+								</h4>
+								<div
+									v-for="invite in filteredGroupInvites"
+									:key="invite.invite._id"
+									class="group grid items-center grid-cols-[minmax(0,1fr)_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
+								>
+									<button
+										type="button"
+										class="grid min-w-0 cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-full border-0 bg-transparent p-0 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+										@click="openGroupInvite(invite)"
+									>
+										<span
+											class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-3 text-secondary"
+										>
+											<UsersIcon class="size-5" aria-hidden="true" />
+										</span>
+										<div class="flex min-w-0 flex-col">
+											<span class="m-0 truncate text-sm text-contrast">
+												{{ groupInviteName(invite) }}
+											</span>
+											<span class="m-0 truncate text-xs text-secondary">
+												Invited you to a Core -
+												{{ formatRelativeTime(new Date(invite.invite.createdAt).toISOString()) }}
+											</span>
+										</div>
+									</button>
+									<div class="flex gap-1">
+										<ButtonStyled circular type="transparent">
+											<button
+												v-tooltip="'Accept group invite'"
+												:disabled="actingOnGroupInviteId !== null"
+												aria-label="Accept group invite"
+												@click="respondToGroupInvite(invite, true)"
+											>
+												<CheckIcon />
+											</button>
+										</ButtonStyled>
+										<ButtonStyled circular type="transparent">
+											<button
+												v-tooltip="'Ignore group invite'"
+												:disabled="actingOnGroupInviteId !== null"
+												aria-label="Ignore group invite"
+												@click="respondToGroupInvite(invite, false)"
+											>
+												<XIcon />
+											</button>
+										</ButtonStyled>
+									</div>
+								</div>
+							</div>
+							<div v-if="filteredIncomingRequests.length > 0" class="flex flex-col gap-1">
+								<h4
+									v-if="filteredGroupInvites.length > 0"
+									class="m-0 px-2 text-xs font-semibold text-secondary"
+								>
+									Friend requests
+								</h4>
+								<div
+									v-for="friend in filteredIncomingRequests"
+									:key="friend.requestId"
+									class="group grid items-center grid-cols-[minmax(0,1fr)_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
+								>
+									<button
+										type="button"
+										class="grid min-w-0 cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-full border-0 bg-transparent p-0 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+										@click="openProfile(friend)"
+									>
+										<Avatar :src="friend.avatar" class="w-12 h-12 rounded-full" size="32px" circle />
+										<div class="flex min-w-0 flex-col">
+											<span class="m-0 truncate text-sm text-contrast">{{ friend.username }}</span>
+											<span class="m-0 truncate text-xs text-secondary">
+												Sent you a request - {{ formatRelativeTime(friend.created.toISOString()) }}
+											</span>
+										</div>
+									</button>
+									<div class="flex gap-1">
+										<ButtonStyled circular type="transparent">
+											<button
+												v-tooltip="'Accept friend request'"
+												:disabled="actingOnRequestId !== null"
+												aria-label="Accept friend request"
+												@click="respondToRequest(friend, true)"
+											>
+												<CheckIcon />
+											</button>
+										</ButtonStyled>
+										<ButtonStyled circular type="transparent">
+											<button
+												v-tooltip="'Ignore friend request'"
+												:disabled="actingOnRequestId !== null"
+												aria-label="Ignore friend request"
+												@click="respondToRequest(friend, false)"
+											>
+												<XIcon />
+											</button>
+										</ButtonStyled>
+									</div>
+								</div>
+							</div>
+						</div>
+					</template>
+				</Accordion>
 				<div v-if="allFriends.length === 0 && !search" class="text-sm text-secondary">
 					<button
 						class="font-semibold text-brand cursor-pointer border-0 bg-transparent p-0"
@@ -525,6 +650,7 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					:friends="activeFriends"
 					heading="Active"
 					:remove-friend="removeMappedFriend"
+					:open-profile="openProfile"
 					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
 					:block-friend="blockFriend"
 					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
@@ -536,6 +662,7 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					:friends="onlineFriends"
 					heading="Online"
 					:remove-friend="removeMappedFriend"
+					:open-profile="openProfile"
 					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
 					:block-friend="blockFriend"
 					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
@@ -547,6 +674,7 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					:friends="offlineFriends"
 					heading="Offline"
 					:remove-friend="removeMappedFriend"
+					:open-profile="openProfile"
 					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
 					:block-friend="blockFriend"
 					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
@@ -557,6 +685,7 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					:friends="filteredPendingFriends"
 					heading="Pending"
 					:remove-friend="removeMappedFriend"
+					:open-profile="openProfile"
 					:invite-to-group="group && canManage ? inviteFriendToGroup : undefined"
 					:block-friend="blockFriend"
 					:invite-to-play="group?.core ? inviteFriendToPlay : undefined"
@@ -566,10 +695,11 @@ function requestLabel(req: (typeof outgoing.value)[number]) {
 					:friends="blockedFriends"
 					heading="Blocked"
 					:remove-friend="unblockFriend"
+					:open-profile="openProfile"
 					:unblock-friend="unblockFriend"
 				/>
 				<p
-					v-else-if="filteredFriends.length === 0 && search"
+					v-else-if="filteredFriends.length === 0 && inviteCount === 0 && search"
 					class="text-sm text-secondary my-1 mx-4"
 				>
 					No friends matching '{{ search }}'

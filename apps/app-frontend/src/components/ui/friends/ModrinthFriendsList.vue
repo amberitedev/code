@@ -12,8 +12,8 @@ import {
 	useRelativeTime,
 	useVIntl,
 } from '@modrinth/ui'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
@@ -31,6 +31,7 @@ const { formatMessage } = useVIntl()
 
 const { handleError } = injectNotificationManager()
 const formatRelativeTime = useRelativeTime()
+const router = useRouter()
 
 const props = defineProps<{
 	credentials: ModrinthCredentials | null
@@ -68,7 +69,7 @@ async function removeFriend(friend: FriendWithUserData) {
 }
 
 function openModrinthProfile(friend: FriendWithUserData) {
-	openUrl('https://modrinth.com/user/' + encodeURIComponent(friend.username))
+	void router.push(`/user/${encodeURIComponent(friend.profileUsername || friend.id || friend.username)}`)
 }
 
 const userFriends = ref<FriendWithUserData[]>([])

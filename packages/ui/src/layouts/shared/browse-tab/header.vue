@@ -42,6 +42,7 @@ const metadataItems = computed(() => {
 	if (!context) return []
 	return [
 		context.heading,
+		context.profileTypeLabel,
 		context.gameVersion ? `MC ${context.gameVersion}` : '',
 		context.loader ? formatLoaderLabel(context.loader) : '',
 	].filter(Boolean)

@@ -15,6 +15,7 @@ export const DISCOVER_PRELOAD_PROJECT_TYPES: ProjectType[] = [
 	'resourcepack',
 	'datapack',
 	'shader',
+	'plugin',
 	'server',
 ]
 
@@ -46,7 +47,17 @@ export function buildDiscoverSearchParams(type: ProjectType, limit = 20) {
 
 export function getDiscoverProjectTypeFromHref(href: string): ProjectType | null {
 	const match = href.match(/^\/browse\/([^?]+)/)
-	const type = match?.[1] as ProjectType | undefined
+	let type = match?.[1] as ProjectType | undefined
+
+	if (!type) {
+		try {
+			const queryType = new URL(href, 'https://app.local').searchParams.get('type')
+			type = queryType ? (queryType as ProjectType) : undefined
+		} catch {
+			type = undefined
+		}
+	}
+
 	return type && DISCOVER_PRELOAD_PROJECT_TYPES.includes(type) ? type : null
 }
 

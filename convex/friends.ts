@@ -1,7 +1,13 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
-import { publicUser, resolveActor } from './_socialRules'
+import {
+	acceptedFriendship,
+	blockByPair,
+	friendRequestByPair,
+	publicUser,
+	resolveActor,
+} from './_socialRules'
 
 /** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
 const devActAs = { __actAs: v.optional(v.string()) }
@@ -97,8 +103,7 @@ export const sendFriendRequest = mutation({
 		const target = await resolveTargetUser(ctx, args)
 		if (!target || target._id === fromUserId) throw new Error('friend target not found')
 		await assertNotBlocked(ctx, fromUserId, target._id)
-		const [userAId, userBId] = canonicalPair(fromUserId, target._id)
-		const friendship = await friendshipByPair(ctx, userAId, userBId)
+		const friendship = await acceptedFriendship(ctx, fromUserId, target._id)
 		if (friendship) return { requestId: null, status: 'already_friends' }
 		const existing = await friendRequestByPair(ctx, fromUserId, target._id)
 		if (existing?.status === 'pending') return { requestId: existing._id, status: 'pending' }
@@ -214,8 +219,7 @@ export const removeFriend = mutation({
 	args: { userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
 		const userId = await resolveActor(ctx, args.__actAs)
-		const [userAId, userBId] = canonicalPair(userId, args.userId)
-		const friendship = await friendshipByPair(ctx, userAId, userBId)
+		const friendship = await acceptedFriendship(ctx, userId, args.userId)
 		if (friendship) await ctx.db.delete(friendship._id)
 		return null
 	},
@@ -264,8 +268,7 @@ async function assertNotBlocked(ctx: QueryCtx, a: string, b: string) {
 }
 
 async function removeFriendship(ctx: MutationCtx, a: string, b: string) {
-	const [userAId, userBId] = canonicalPair(a, b)
-	const friendship = await friendshipByPair(ctx, userAId, userBId)
+	const friendship = await acceptedFriendship(ctx, a, b)
 	if (friendship) await ctx.db.delete(friendship._id)
 }
 
@@ -312,30 +315,4 @@ function blocksByUser(ctx: QueryCtx, userId: string) {
 		.query('blockedUsers')
 		.withIndex('by_blocker', (q) => q.eq('blockerUserId', userId))
 		.collect()
-}
-function friendshipByPair(ctx: QueryCtx | MutationCtx, userAId: string, userBId: string) {
-	return ctx.db
-		.query('friendships')
-		.withIndex('by_pair', (q) => q.eq('userAId', userAId).eq('userBId', userBId))
-		.unique()
-}
-
-function friendRequestByPair(ctx: QueryCtx | MutationCtx, fromUserId: string, toUserId: string) {
-	return ctx.db
-		.query('friendRequests')
-		.withIndex('by_from_to', (q) => q.eq('fromUserId', fromUserId).eq('toUserId', toUserId))
-		.order('desc')
-		.first()
-}
-
-function blockByPair(ctx: QueryCtx | MutationCtx, blockerUserId: string, blockedUserId: string) {
-	return ctx.db
-		.query('blockedUsers')
-		.withIndex('by_blocker_blocked', (q) =>
-			q.eq('blockerUserId', blockerUserId).eq('blockedUserId', blockedUserId),
-		)
-		.unique()
-}
-function canonicalPair(a: string, b: string): [string, string] {
-	return a < b ? [a, b] : [b, a]
 }

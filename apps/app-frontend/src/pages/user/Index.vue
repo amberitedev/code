@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import type { AmberitePublicProfile } from '@amberite/amberite-api'
+import type {
+	AmberiteProfile,
+	ProfileSectionVisibility,
+	ProfileView,
+	ProfileVisibilitySettings,
+} from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	BadgeCheckIcon,
+	BanIcon,
 	BoxIcon,
 	CalendarIcon,
+	CheckIcon,
 	ClipboardCopyIcon,
+	CrownIcon,
 	DownloadIcon,
+	EditIcon,
 	ExternalIcon,
 	GlobeIcon,
 	LibraryIcon,
@@ -14,6 +23,13 @@ import {
 	LockIcon,
 	MoreVerticalIcon,
 	ReportIcon,
+	SendIcon,
+	SettingsIcon,
+	ShieldIcon,
+	UserIcon,
+	UserPlusIcon,
+	UsersIcon,
+	UserXIcon,
 	XIcon,
 } from '@modrinth/assets'
 import {
@@ -23,6 +39,7 @@ import {
 	commonMessages,
 	ContentPageHeader,
 	defineMessages,
+	DropdownSelect,
 	EmptyState,
 	getProjectTypeCategoryMessage,
 	injectModrinthClient,
@@ -32,26 +49,29 @@ import {
 	OverflowMenu,
 	ProjectCard,
 	ProjectCardList,
-	UserBadges,
+	SettingsLabel,
+	StyledInput,
 	useCompactNumber,
 	useFormatDateTime,
 	useFormatNumber,
+	UserBadges,
 	useRelativeTime,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import type { Component } from 'vue'
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
+import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
+import { useSocialClient } from '@/composables/useSocialClient'
+import { get_loaders } from '@/helpers/tags'
 import {
 	hasActivePride26Midas,
 	hasMidasBadge,
 	hasPride26Badge,
 } from '@/helpers/user-campaigns.ts'
-import { useSocialClient } from '@/composables/useSocialClient'
-import { get_loaders } from '@/helpers/tags'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
 type ProfileProject = Labrinth.Projects.v2.Project
@@ -68,6 +88,28 @@ type ProjectUrlType =
 	| 'project'
 type ProjectSorting = 'publish_time' | 'queue_time' | 'downloads'
 type ProjectStatusPriority = { order: number; sort: ProjectSorting }
+type FriendGroupManageRole = 'admin' | 'member'
+type ModalRef = { show: (event?: MouseEvent) => void; hide: () => void }
+type AmberiteHeaderStat = {
+	id: string
+	icon: Component
+	label: string
+	tooltip?: string
+}
+
+const visibilityOptions: ProfileSectionVisibility[] = [
+	'everyone',
+	'friends',
+	'friend_group',
+	'private',
+]
+
+const visibilityLabels: Record<ProfileSectionVisibility, string> = {
+	everyone: 'Everyone',
+	friends: 'Friends',
+	friend_group: 'Friend group',
+	private: 'Private',
+}
 
 const projectStatusPriority: Record<
 	Labrinth.Projects.v2.ProjectStatus,
@@ -174,8 +216,10 @@ const messages = defineMessages({
 
 const client = injectModrinthClient()
 const social = useSocialClient()
+const queryClient = useQueryClient()
 const notifications = injectNotificationManager()
 const route = useRoute()
+const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
 const { formatMessage } = useVIntl()
 const formatNumber = useFormatNumber()
@@ -187,6 +231,27 @@ const formatDateTime = useFormatDateTime({
 })
 
 const notifiedError = ref<unknown>(null)
+const profileModal = ref<ModalRef | null>(null)
+const accountModal = ref<ModalRef | null>(null)
+const profileSaving = ref(false)
+const profileActionPending = ref<string | null>(null)
+const managementRole = ref<FriendGroupManageRole>('member')
+const managementPreset = ref('')
+const profileForm = ref({
+	displayName: '',
+	username: '',
+	bio: '',
+	avatarUrl: '',
+	favoriteModpackProjectIds: '',
+	showcaseAchievementIds: '',
+	visibility: {
+		friends: 'friends',
+		friendGroup: 'friend_group',
+		corePresence: 'friend_group',
+		favoriteModpacks: 'everyone',
+		achievements: 'everyone',
+	} as ProfileVisibilitySettings,
+})
 
 const routeUser = computed(() => String(route.params.user ?? ''))
 const routeUserPath = computed(() => encodeURIComponent(routeUser.value))
@@ -210,8 +275,15 @@ const userQuery = useQuery({
 
 const amberiteProfileQuery = useQuery({
 	queryKey: computed(() => ['amberite-user-profile', routeUser.value]),
-	queryFn: () => social.getProfile(routeUser.value),
+	queryFn: () => social.getProfileView(routeUser.value),
 	enabled: () => routeUser.value.length > 0,
+	retry: false,
+})
+
+const amberiteCurrentProfileQuery = useQuery({
+	queryKey: ['amberite-current-profile'],
+	queryFn: () => social.currentProfile(),
+	enabled: () => !!amberiteProfileQuery.data.value?.viewer.isSelf,
 	retry: false,
 })
 
@@ -236,6 +308,20 @@ const collectionsQuery = useQuery({
 })
 
 const amberiteProfile = computed(() => amberiteProfileQuery.data.value ?? null)
+const amberiteFavoriteProjectIds = computed(
+	() => amberiteProfile.value?.favoriteModpacks?.projectIds ?? [],
+)
+const amberiteFavoriteProjectsQuery = useQuery({
+	queryKey: computed(() => [
+		'amberite-user-profile',
+		routeUser.value,
+		'favorite-modpacks',
+		amberiteFavoriteProjectIds.value,
+	]),
+	queryFn: () => client.labrinth.projects_v2.getMultiple(amberiteFavoriteProjectIds.value),
+	enabled: () => amberiteFavoriteProjectIds.value.length > 0,
+	retry: false,
+})
 const shouldUseAmberiteProfile = computed(
 	() => !userQuery.data.value && !userQuery.isLoading.value && !!amberiteProfile.value,
 )
@@ -247,6 +333,119 @@ const user = computed<ProfileUser | undefined>(
 			: undefined),
 )
 const isAmberiteProfile = computed(() => shouldUseAmberiteProfile.value)
+const amberiteFavoriteProjects = computed(() => {
+	const projectsById = new Map(
+		(amberiteFavoriteProjectsQuery.data.value ?? []).map((project) => [project.id, project]),
+	)
+	return amberiteFavoriteProjectIds.value
+		.map((id) => projectsById.get(id))
+		.filter((project): project is ProfileProject => !!project)
+})
+const amberiteFavoriteProjectsLoading = computed(
+	() => amberiteFavoriteProjectsQuery.isLoading.value,
+)
+const amberiteAchievements = computed(() => amberiteProfile.value?.achievements?.achievementIds ?? [])
+const amberiteFriends = computed(() => amberiteProfile.value?.friends ?? null)
+const amberiteManagement = computed(() => amberiteProfile.value?.management ?? null)
+const amberiteActions = computed<ProfileView['actions']>(() => amberiteProfile.value?.actions ?? {})
+const currentAmberiteProfile = computed<AmberiteProfile | null>(
+	() => amberiteCurrentProfileQuery.data.value ?? null,
+)
+const showAmberiteFavoriteModpacks = computed(
+	() =>
+		amberiteFavoriteProjectIds.value.length > 0 &&
+		(amberiteFavoriteProjectsLoading.value || amberiteFavoriteProjects.value.length > 0),
+)
+const showAmberiteAchievements = computed(() => amberiteAchievements.value.length > 0)
+const showAmberiteFriends = computed(
+	() =>
+		!!amberiteFriends.value &&
+		(amberiteFriends.value.mutual.length > 0 || amberiteFriends.value.items.length > 0),
+)
+const showAmberiteManagement = computed(() => {
+	const management = amberiteManagement.value
+	return !!(
+		management?.canUpdateRole ||
+		management?.canKick ||
+		management?.canBan ||
+		management?.canUnban
+	)
+})
+const hasAmberiteProfileActions = computed(() => {
+	const actions = amberiteActions.value
+	return !!(
+		isAmberiteProfile.value &&
+		amberiteProfile.value &&
+		(actions.editProfile ||
+			actions.editAccount ||
+			actions.addFriend ||
+			actions.cancelFriendRequest ||
+			actions.acceptFriendRequest ||
+			actions.removeFriend ||
+			actions.inviteToFriendGroup ||
+			actions.unblock ||
+			actions.block)
+	)
+})
+const amberiteHeaderStats = computed<AmberiteHeaderStat[]>(() => {
+	const profile = amberiteProfile.value
+	if (!profile) return []
+
+	const items: AmberiteHeaderStat[] = [
+		{
+			id: 'relationship',
+			icon: UserIcon,
+			label: relationshipHeaderLabel(profile),
+			tooltip: profile.viewer.blocked ? 'Private sections unavailable' : undefined,
+		},
+	]
+
+	if (amberiteFriends.value && (amberiteFriends.value.count > 0 || amberiteFriends.value.hasMore)) {
+		items.push({
+			id: 'friends',
+			icon: UsersIcon,
+			label: `Shows ${countLabel(amberiteFriends.value.count, amberiteFriends.value.hasMore)} visible ${
+				amberiteFriends.value.count === 1 && !amberiteFriends.value.hasMore ? 'friend' : 'friends'
+			}`,
+			tooltip:
+				amberiteFriends.value.mutualCount > 0
+					? `${countLabel(amberiteFriends.value.mutualCount, amberiteFriends.value.mutualHasMore)} mutual`
+					: undefined,
+		})
+	}
+
+	if (profile.friendGroup) {
+		items.push({
+			id: 'friend-group',
+			icon: UsersIcon,
+			label: `Member of ${profile.friendGroup.group.name ?? 'a friend group'}`,
+			tooltip: formatMembershipDetail(
+				profile.friendGroup.membership.role,
+				profile.friendGroup.membership.permissionPreset,
+			),
+		})
+	}
+
+	if (profile.corePresence) {
+		items.push({
+			id: 'core-presence',
+			icon: ShieldIcon,
+			label: `Uses ${profile.corePresence.name ?? 'Core'}`,
+			tooltip: formatCorePresenceDetail(profile.corePresence),
+		})
+	}
+
+	const updatedLabel = formatTimestamp(profile.user.profileUpdatedAt)
+	if (updatedLabel) {
+		items.push({
+			id: 'updated',
+			icon: EditIcon,
+			label: `Updated ${updatedLabel}`,
+		})
+	}
+
+	return items
+})
 const projects = computed(() => projectsQuery.data.value ?? [])
 const organizations = computed(() => organizationsQuery.data.value ?? [])
 const collections = computed(() => collectionsQuery.data.value ?? [])
@@ -275,6 +474,17 @@ watch(
 	(value) => {
 		if (value) {
 			breadcrumbs.setName('User', value.username)
+		}
+	},
+	{ immediate: true },
+)
+
+watch(
+	amberiteProfile,
+	(value) => {
+		if (value) {
+			syncProfileForm(value)
+			syncManagementForm(value)
 		}
 	},
 	{ immediate: true },
@@ -423,6 +633,65 @@ const userPermalink = computed(() =>
 
 const overflowOptions = computed(() => [
 	{
+		id: 'edit-profile',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.editProfile,
+		disabled: profileSaving.value,
+		action: openProfileSettings,
+	},
+	{
+		id: 'account',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.editAccount,
+		action: openAccountSettings,
+	},
+	{
+		id: 'add-friend',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.addFriend,
+		disabled: !!profileActionPending.value,
+		action: addFriendFromProfile,
+	},
+	{
+		id: 'cancel-friend-request',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.cancelFriendRequest,
+		disabled: !!profileActionPending.value,
+		action: cancelFriendRequestFromProfile,
+	},
+	{
+		id: 'accept-friend-request',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.acceptFriendRequest,
+		disabled: !!profileActionPending.value,
+		action: acceptFriendRequestFromProfile,
+	},
+	{
+		id: 'remove-friend',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.removeFriend,
+		disabled: !!profileActionPending.value,
+		action: removeFriendFromProfile,
+	},
+	{
+		id: 'invite-to-friend-group',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.inviteToFriendGroup,
+		disabled: !!profileActionPending.value,
+		action: inviteToFriendGroupFromProfile,
+	},
+	{
+		id: 'unblock',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.unblock,
+		disabled: !!profileActionPending.value,
+		action: unblockFromProfile,
+	},
+	{
+		id: 'block-user',
+		shown: isAmberiteProfile.value && !!amberiteActions.value.block && !amberiteActions.value.unblock,
+		color: 'red' as const,
+		hoverFilled: true,
+		disabled: !!profileActionPending.value,
+		action: blockFromProfile,
+	},
+	{
+		divider: true,
+		shown: hasAmberiteProfileActions.value,
+	},
+	{
 		id: 'open-in-browser',
 		shown: !isAmberiteProfile.value,
 		action: () => openExternalUrl(userBrowserUrl.value),
@@ -470,6 +739,269 @@ const showCollectionEmptyState = computed(
 		normalizedRouteProjectType.value === 'collection' &&
 		sortedCollections.value.length === 0,
 )
+
+function syncProfileForm(profile: ProfileView) {
+	const settings = profile.settings ?? {
+		friends: 'friends',
+		friendGroup: 'friend_group',
+		corePresence: 'friend_group',
+		favoriteModpacks: 'everyone',
+		achievements: 'everyone',
+	}
+	profileForm.value = {
+		displayName: profile.user.displayName ?? profile.user.name ?? profile.user.username ?? '',
+		username: profile.user.username ?? '',
+		bio: profile.user.bio ?? '',
+		avatarUrl: profile.user.avatar_url ?? profile.user.image ?? '',
+		favoriteModpackProjectIds: (profile.favoriteModpacks?.projectIds ?? []).join(', '),
+		showcaseAchievementIds: (profile.achievements?.achievementIds ?? []).join(', '),
+		visibility: { ...settings },
+	}
+}
+
+function syncManagementForm(profile: ProfileView) {
+	const management = profile.management
+	if (!management?.roles?.length) {
+		managementRole.value = 'member'
+		managementPreset.value = ''
+		return
+	}
+	managementRole.value = management.roles.includes(management.role as FriendGroupManageRole)
+		? (management.role as FriendGroupManageRole)
+		: management.roles[0]
+	managementPreset.value = management.permissionPreset ?? managementRole.value
+}
+
+function openProfileSettings(event?: MouseEvent) {
+	if (amberiteProfile.value) syncProfileForm(amberiteProfile.value)
+	profileModal.value?.show(event)
+}
+
+function openAccountSettings(event?: MouseEvent) {
+	accountModal.value?.show(event)
+}
+
+async function saveProfileSettings() {
+	if (!amberiteProfile.value || profileSaving.value) return
+	profileSaving.value = true
+	try {
+		const avatarUrl = profileForm.value.avatarUrl.trim()
+		const updated = await social.updateCurrentProfile({
+			displayName: profileForm.value.displayName.trim(),
+			username: profileForm.value.username.trim(),
+			bio: profileForm.value.bio,
+			avatar: avatarUrl ? { url: avatarUrl } : null,
+			profileVisibility: profileForm.value.visibility as ProfileVisibilitySettings,
+			favoriteModpackProjectIds: parseShowcaseInput(profileForm.value.favoriteModpackProjectIds),
+			showcaseAchievementIds: parseShowcaseInput(profileForm.value.showcaseAchievementIds),
+		})
+		await refreshAmberiteProfile()
+		profileModal.value?.hide()
+		notifications.addNotification({
+			type: 'success',
+			title: 'Profile updated',
+			text: 'Your Amberite profile settings were saved.',
+		})
+		if (updated.username && updated.username !== routeUser.value) {
+			void router.replace(`/user/${encodeURIComponent(updated.username)}`)
+		}
+	} catch (error) {
+		notifications.addNotification({
+			type: 'error',
+			title: 'Profile update failed',
+			text: getErrorMessage(error),
+		})
+	} finally {
+		profileSaving.value = false
+	}
+}
+
+function parseShowcaseInput(value: string): string[] {
+	return value
+		.split(/[\n,]/)
+		.map((item) => item.trim())
+		.filter(Boolean)
+}
+
+async function refreshAmberiteProfile() {
+	await queryClient.invalidateQueries({ queryKey: ['amberite-user-profile', routeUser.value] })
+	await queryClient.invalidateQueries({ queryKey: ['amberite-current-profile'] })
+}
+
+async function runProfileAction(
+	id: string,
+	successTitle: string,
+	action: () => Promise<unknown>,
+) {
+	if (profileActionPending.value) return
+	profileActionPending.value = id
+	try {
+		await action()
+		await refreshAmberiteProfile()
+		notifications.addNotification({
+			type: 'success',
+			title: successTitle,
+			text: 'The profile state was updated.',
+		})
+	} catch (error) {
+		notifications.addNotification({
+			type: 'error',
+			title: 'Profile action failed',
+			text: getErrorMessage(error),
+		})
+	} finally {
+		profileActionPending.value = null
+	}
+}
+
+function targetAmberiteUserId(): string | null {
+	return amberiteProfile.value?.user.userId ?? null
+}
+
+async function addFriendFromProfile() {
+	const userId = targetAmberiteUserId()
+	if (!userId) return
+	await runProfileAction('add-friend', 'Friend request sent', () =>
+		social.sendFriendRequest({ targetUserId: userId }),
+	)
+}
+
+async function cancelFriendRequestFromProfile() {
+	const requestId = amberiteActions.value.cancelFriendRequest?.requestId
+	if (!requestId) return
+	await runProfileAction('cancel-friend-request', 'Friend request canceled', () =>
+		social.cancelFriendRequest(requestId),
+	)
+}
+
+async function acceptFriendRequestFromProfile() {
+	const requestId = amberiteActions.value.acceptFriendRequest?.requestId
+	if (!requestId) return
+	await runProfileAction('accept-friend-request', 'Friend request accepted', () =>
+		social.respondFriendRequest(requestId, true),
+	)
+}
+
+async function removeFriendFromProfile() {
+	const userId = targetAmberiteUserId()
+	if (!userId) return
+	await runProfileAction('remove-friend', 'Friend removed', () => social.removeFriend(userId))
+}
+
+async function blockFromProfile() {
+	const userId = targetAmberiteUserId()
+	if (!userId) return
+	await runProfileAction('block-user', 'User blocked', () => social.blockUser(userId))
+}
+
+async function unblockFromProfile() {
+	const userId = targetAmberiteUserId()
+	if (!userId) return
+	await runProfileAction('unblock-user', 'User unblocked', () => social.unblockUser(userId))
+}
+
+async function inviteToFriendGroupFromProfile() {
+	const userId = targetAmberiteUserId()
+	const action = amberiteActions.value.inviteToFriendGroup
+	if (!userId || !action) return
+	await runProfileAction('invite-to-friend-group', 'Friend group invitation sent', () =>
+		social.createFriendGroupInvite({
+			friendGroupId: action.friendGroupId,
+			inviteeUserId: userId,
+		}),
+	)
+}
+
+async function saveManagedMember() {
+	const management = amberiteManagement.value
+	if (!management?.canUpdateRole) return
+	await runProfileAction('update-member-role', 'Member role updated', () =>
+		social.updateMemberRole({
+			friendGroupId: management.friendGroupId,
+			userId: management.userId,
+			role: managementRole.value,
+			permissionPreset: managementPreset.value.trim() || managementRole.value,
+		}),
+	)
+}
+
+async function kickManagedMember() {
+	const management = amberiteManagement.value
+	if (!management?.canKick) return
+	await runProfileAction('kick-member', 'Member removed', () =>
+		social.removeMember(management.friendGroupId, management.userId),
+	)
+}
+
+async function banManagedMember() {
+	const management = amberiteManagement.value
+	if (!management?.canBan) return
+	await runProfileAction('ban-member', 'Member banned', () =>
+		social.banMember(management.friendGroupId, management.userId),
+	)
+}
+
+async function unbanManagedMember() {
+	const management = amberiteManagement.value
+	if (!management?.canUnban) return
+	await runProfileAction('unban-member', 'User unbanned', () =>
+		social.unbanMember(management.friendGroupId, management.userId),
+	)
+}
+
+function visibilityDisplayName(value: ProfileSectionVisibility) {
+	return visibilityLabels[value]
+}
+
+function relationshipHeaderLabel(profile: ProfileView) {
+	if (profile.viewer.viewerBlockedTarget) return 'Blocked'
+	if (profile.viewer.targetBlockedViewer) return 'Unavailable'
+	switch (profile.viewer.relationship) {
+		case 'self':
+			return 'Your profile'
+		case 'group_manager':
+			return 'Managed member'
+		case 'friend_group':
+			return 'Shared group'
+		case 'friend':
+			return 'Direct friend'
+		default:
+			return 'Amberite user'
+	}
+}
+
+function countLabel(count: number, hasMore?: boolean) {
+	return `${formatNumber(count)}${hasMore ? '+' : ''}`
+}
+
+function formatTimestamp(timestamp: number | null | undefined) {
+	if (!timestamp) return null
+	return formatRelativeTime(new Date(timestamp).toISOString())
+}
+
+function formatDisplayLabel(value: string | null | undefined) {
+	const label = value?.replace(/[_-]/g, ' ').trim()
+	if (!label) return null
+	return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+function formatMembershipDetail(role: string, permissionPreset?: string | null) {
+	const roleLabel = formatDisplayLabel(role) ?? 'Member'
+	const presetLabel = formatDisplayLabel(permissionPreset)
+	if (!presetLabel || presetLabel === roleLabel) return roleLabel
+	return `${roleLabel} · ${presetLabel}`
+}
+
+function formatCorePresenceDetail(corePresence: NonNullable<ProfileView['corePresence']>) {
+	const details = [
+		formatDisplayLabel(corePresence.status),
+		corePresence.lastSeenAt
+			? `Last seen ${formatRelativeTime(new Date(corePresence.lastSeenAt).toISOString())}`
+			: null,
+	].filter((detail): detail is string => !!detail)
+
+	return details.join(' · ') || undefined
+}
 
 function getProjectSortValue(project: ProfileProject, sorting: ProjectSorting): number {
 	switch (sorting) {
@@ -577,14 +1109,15 @@ function getErrorMessage(error: unknown) {
 	return formatMessage(messages.loadErrorText)
 }
 
-function amberiteProfileUser(profile: AmberitePublicProfile): ProfileUser {
-	const username = profile.username ?? profile.name ?? profile.displayName ?? profile.userId
+function amberiteProfileUser(profile: ProfileView): ProfileUser {
+	const user = profile.user
+	const username = user.username ?? user.name ?? user.displayName ?? user.userId
 	return {
-		id: profile.userId,
+		id: user.userId,
 		username,
-		avatar_url: profile.avatar_url ?? profile.image ?? undefined,
-		bio: profile.bio ?? undefined,
-		created: profile.created,
+		avatar_url: user.avatar_url ?? user.image ?? undefined,
+		bio: user.bio ?? undefined,
+		created: user.created,
 		role: 'developer',
 		badges: 0,
 		campaigns: {
@@ -611,9 +1144,172 @@ function copyId() {
 function copyPermalink() {
 	void navigator.clipboard.writeText(userPermalink.value)
 }
+
+function copyText(value: string | null | undefined) {
+	if (value) void navigator.clipboard.writeText(value)
+}
 </script>
 
 <template>
+	<ModalWrapper ref="profileModal" header="Profile settings">
+		<div class="profile-settings-modal flex w-[min(42rem,calc(100vw-4rem))] flex-col gap-5">
+			<section class="flex flex-col gap-3">
+				<SettingsLabel title="Identity" description="Profile fields shown on your Amberite page." />
+				<div class="grid gap-3 md:grid-cols-2">
+					<StyledInput
+						v-model="profileForm.displayName"
+						type="text"
+						placeholder="Display name"
+						wrapper-class="w-full"
+					/>
+					<StyledInput
+						v-model="profileForm.username"
+						type="text"
+						placeholder="Username"
+						wrapper-class="w-full"
+					/>
+				</div>
+				<StyledInput
+					v-model="profileForm.avatarUrl"
+					type="text"
+					placeholder="Avatar URL"
+					wrapper-class="w-full"
+				/>
+				<textarea
+					v-model="profileForm.bio"
+					rows="4"
+					class="box-border min-h-28 w-full resize-y rounded-xl border border-solid border-surface-5 bg-surface-3 p-3 text-primary outline-none focus:border-brand"
+					placeholder="Bio"
+				/>
+			</section>
+
+			<section class="flex flex-col gap-3">
+				<SettingsLabel
+					title="Showcase"
+					description="Comma-separated Modrinth project IDs and achievement IDs."
+				/>
+				<StyledInput
+					v-model="profileForm.favoriteModpackProjectIds"
+					type="text"
+					placeholder="Favorite modpack project IDs"
+					wrapper-class="w-full"
+				/>
+				<StyledInput
+					v-model="profileForm.showcaseAchievementIds"
+					type="text"
+					placeholder="Achievement IDs"
+					wrapper-class="w-full"
+				/>
+			</section>
+
+			<section class="flex flex-col gap-3">
+				<SettingsLabel title="Section visibility" />
+				<div class="grid gap-3">
+					<div class="grid items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+						<span class="font-semibold text-primary">Friends</span>
+						<DropdownSelect
+							v-model="profileForm.visibility.friends"
+							name="friends-visibility"
+							:options="visibilityOptions"
+							:display-name="visibilityDisplayName"
+						/>
+					</div>
+					<div class="grid items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+						<span class="font-semibold text-primary">Friend group</span>
+						<DropdownSelect
+							v-model="profileForm.visibility.friendGroup"
+							name="friend-group-visibility"
+							:options="visibilityOptions"
+							:display-name="visibilityDisplayName"
+						/>
+					</div>
+					<div class="grid items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+						<span class="font-semibold text-primary">Core presence</span>
+						<DropdownSelect
+							v-model="profileForm.visibility.corePresence"
+							name="core-presence-visibility"
+							:options="visibilityOptions"
+							:display-name="visibilityDisplayName"
+						/>
+					</div>
+					<div class="grid items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+						<span class="font-semibold text-primary">Favorite modpacks</span>
+						<DropdownSelect
+							v-model="profileForm.visibility.favoriteModpacks"
+							name="favorite-modpacks-visibility"
+							:options="visibilityOptions"
+							:display-name="visibilityDisplayName"
+						/>
+					</div>
+					<div class="grid items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+						<span class="font-semibold text-primary">Achievements</span>
+						<DropdownSelect
+							v-model="profileForm.visibility.achievements"
+							name="achievements-visibility"
+							:options="visibilityOptions"
+							:display-name="visibilityDisplayName"
+						/>
+					</div>
+				</div>
+			</section>
+
+			<div class="flex justify-end">
+				<ButtonStyled color="brand">
+					<button :disabled="profileSaving" @click="saveProfileSettings">
+						<CheckIcon aria-hidden="true" />
+						{{ profileSaving ? 'Saving...' : 'Save profile' }}
+					</button>
+				</ButtonStyled>
+			</div>
+		</div>
+	</ModalWrapper>
+
+	<ModalWrapper ref="accountModal" header="Account settings">
+		<div class="flex w-[min(34rem,calc(100vw-4rem))] flex-col gap-4">
+			<SettingsLabel title="Private account" description="Account-only Amberite fields." />
+			<div class="grid gap-3 text-sm">
+				<div class="grid gap-1">
+					<span class="font-semibold text-secondary">User ID</span>
+					<div class="flex min-w-0 items-center justify-between gap-2 rounded-xl bg-surface-3 p-3">
+						<span class="truncate text-primary">{{ currentAmberiteProfile?.userId ?? user?.id }}</span>
+						<ButtonStyled circular type="transparent">
+							<button aria-label="Copy user ID" @click="copyText(currentAmberiteProfile?.userId ?? user?.id)">
+								<ClipboardCopyIcon aria-hidden="true" />
+							</button>
+						</ButtonStyled>
+					</div>
+				</div>
+				<div class="grid gap-1">
+					<span class="font-semibold text-secondary">Friend code</span>
+					<div class="flex min-w-0 items-center justify-between gap-2 rounded-xl bg-surface-3 p-3">
+						<span class="truncate text-primary">{{ currentAmberiteProfile?.friendCode ?? 'Unavailable' }}</span>
+						<ButtonStyled circular type="transparent">
+							<button
+								:disabled="!currentAmberiteProfile?.friendCode"
+								aria-label="Copy friend code"
+								@click="copyText(currentAmberiteProfile?.friendCode)"
+							>
+								<ClipboardCopyIcon aria-hidden="true" />
+							</button>
+						</ButtonStyled>
+					</div>
+				</div>
+				<div class="grid gap-1">
+					<span class="font-semibold text-secondary">Email</span>
+					<span class="rounded-xl bg-surface-3 p-3 text-primary">
+						{{ currentAmberiteProfile?.email ?? 'No email on account' }}
+					</span>
+				</div>
+				<div class="grid gap-1">
+					<span class="font-semibold text-secondary">Auth providers</span>
+					<span class="rounded-xl bg-surface-3 p-3 text-primary">
+						{{ currentAmberiteProfile?.auth_providers?.join(', ') || 'Minecraft' }}
+					</span>
+				</div>
+			</div>
+		</div>
+	</ModalWrapper>
+
 	<Teleport v-if="user && !isAmberiteProfile" defer to="#sidebar-teleport-target">
 		<div class="flex flex-col gap-4">
 			<Card v-if="sortedOrganizations.length > 0">
@@ -703,12 +1399,34 @@ function copyPermalink() {
 								})
 							}}
 						</div>
+						<div v-tooltip="formatDateTime(user.created)" class="flex items-center gap-2 font-semibold">
+							<CalendarIcon class="h-6 w-6 text-secondary" />
+							{{ formatMessage(messages.profileJoinedLabel) }}
+							{{ formatRelativeTime(user.created) }}
+						</div>
 					</template>
-					<div v-tooltip="formatDateTime(user.created)" class="flex items-center gap-2 font-semibold">
-						<CalendarIcon class="h-6 w-6 text-secondary" />
-						{{ formatMessage(messages.profileJoinedLabel) }}
-						{{ formatRelativeTime(user.created) }}
-					</div>
+					<template v-else>
+						<div
+							v-for="(stat, index) in amberiteHeaderStats"
+							:key="stat.id"
+							v-tooltip="stat.tooltip"
+							class="flex min-w-0 max-w-[15rem] items-center gap-2 font-semibold"
+							:class="{
+								'border-0 border-l border-solid border-divider pl-4': index > 0,
+							}"
+						>
+							<component :is="stat.icon" class="h-6 w-6 shrink-0 text-secondary" aria-hidden="true" />
+							<span class="truncate">{{ stat.label }}</span>
+						</div>
+						<div
+							v-tooltip="formatDateTime(user.created)"
+							class="flex items-center gap-2 border-0 border-l border-solid border-divider pl-4 font-semibold"
+						>
+							<CalendarIcon class="h-6 w-6 text-secondary" />
+							{{ formatMessage(messages.profileJoinedLabel) }}
+							{{ formatRelativeTime(user.created) }}
+						</div>
+					</template>
 				</template>
 				<template #actions>
 					<ButtonStyled size="large" circular type="transparent">
@@ -718,6 +1436,42 @@ function copyPermalink() {
 							aria-label="More options"
 						>
 							<MoreVerticalIcon aria-hidden="true" />
+							<template #edit-profile>
+								<EditIcon aria-hidden="true" />
+								Edit profile
+							</template>
+							<template #account>
+								<SettingsIcon aria-hidden="true" />
+								Account
+							</template>
+							<template #add-friend>
+								<UserPlusIcon aria-hidden="true" />
+								Add friend
+							</template>
+							<template #cancel-friend-request>
+								<XIcon aria-hidden="true" />
+								Cancel request
+							</template>
+							<template #accept-friend-request>
+								<CheckIcon aria-hidden="true" />
+								Accept request
+							</template>
+							<template #remove-friend>
+								<UserXIcon aria-hidden="true" />
+								Remove friend
+							</template>
+							<template #invite-to-friend-group>
+								<SendIcon aria-hidden="true" />
+								Invite to group
+							</template>
+							<template #unblock>
+								<ShieldIcon aria-hidden="true" />
+								Unblock
+							</template>
+							<template #block-user>
+								<BanIcon aria-hidden="true" />
+								Block
+							</template>
 							<template #open-in-browser>
 								<ExternalIcon aria-hidden="true" />
 								{{ formatMessage(messages.openInBrowser) }}
@@ -743,7 +1497,170 @@ function copyPermalink() {
 				<NavTabs :links="navLinks" replace />
 			</div>
 
-			<ProjectCardList v-if="visibleProjects.length > 0" layout="list">
+			<div
+				v-if="
+					isAmberiteProfile &&
+					amberiteProfile &&
+					(showAmberiteFavoriteModpacks ||
+						showAmberiteAchievements ||
+						showAmberiteFriends ||
+						showAmberiteManagement)
+				"
+				class="flex flex-col gap-6"
+			>
+				<section v-if="showAmberiteFavoriteModpacks" class="flex flex-col gap-3">
+					<div class="flex items-center gap-2">
+						<LibraryIcon class="size-5 text-secondary" aria-hidden="true" />
+						<h2 class="m-0 text-base font-semibold text-contrast">Favorite modpacks</h2>
+					</div>
+					<div v-if="amberiteFavoriteProjectsLoading" class="flex min-h-24 items-center justify-center">
+						<LoadingIndicator />
+					</div>
+					<ProjectCardList v-else-if="amberiteFavoriteProjects.length > 0" layout="list">
+						<ProjectCard
+							v-for="project in amberiteFavoriteProjects"
+							:key="project.id"
+							:link="getProjectLink(project)"
+							:title="project.title"
+							:icon-url="project.icon_url"
+							:date-updated="project.updated"
+							:downloads="project.downloads"
+							:summary="project.description"
+							:tags="getProjectCardTags(project)"
+							:all-tags="getProjectCardAllTags(project)"
+							:followers="project.followers"
+							:banner="getProjectBanner(project)"
+							:color="project.color ?? undefined"
+							:environment="{
+								clientSide: project.client_side,
+								serverSide: project.server_side,
+							}"
+							layout="list"
+							:status="project.status"
+						/>
+					</ProjectCardList>
+				</section>
+
+				<section v-if="showAmberiteAchievements" class="flex flex-col gap-3">
+					<div class="flex items-center gap-2">
+						<CrownIcon class="size-5 text-secondary" aria-hidden="true" />
+						<h2 class="m-0 text-base font-semibold text-contrast">Achievements</h2>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<span
+							v-for="achievement in amberiteAchievements"
+							:key="achievement"
+							class="rounded-full bg-surface-3 px-3 py-1 text-sm font-semibold text-primary"
+						>
+							{{ achievement }}
+						</span>
+					</div>
+				</section>
+
+				<section v-if="showAmberiteFriends && amberiteFriends" class="flex flex-col gap-3">
+					<div class="flex items-center gap-2">
+						<UsersIcon class="size-5 text-secondary" aria-hidden="true" />
+						<h2 class="m-0 text-base font-semibold text-contrast">
+							Friends · {{ countLabel(amberiteFriends.count, amberiteFriends.hasMore) }}
+						</h2>
+					</div>
+					<div v-if="amberiteFriends.mutual.length > 0" class="flex flex-col gap-2">
+						<h3 class="m-0 text-sm font-semibold text-primary">
+							Mutual friends ·
+							{{ countLabel(amberiteFriends.mutualCount, amberiteFriends.mutualHasMore) }}
+						</h3>
+						<div class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+							<RouterLink
+								v-for="friend in amberiteFriends.mutual"
+								:key="friend.userId"
+								:to="`/user/${encodeURIComponent(friend.username ?? friend.userId)}`"
+								class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-xl bg-surface-3 p-2 text-primary no-underline"
+							>
+								<Avatar
+									:src="friend.avatar_url ?? friend.image"
+									:alt="friend.username ?? friend.userId"
+									size="32px"
+									circle
+								/>
+								<span class="truncate text-sm font-semibold">
+									{{ friend.displayName ?? friend.username ?? friend.userId }}
+								</span>
+							</RouterLink>
+						</div>
+					</div>
+					<div v-if="amberiteFriends.items.length > 0" class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+						<RouterLink
+							v-for="friend in amberiteFriends.items"
+							:key="friend.userId"
+							:to="`/user/${encodeURIComponent(friend.username ?? friend.userId)}`"
+							class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-xl bg-surface-3 p-2 text-primary no-underline"
+						>
+							<Avatar
+								:src="friend.avatar_url ?? friend.image"
+								:alt="friend.username ?? friend.userId"
+								size="32px"
+								circle
+							/>
+							<span class="truncate text-sm font-semibold">
+								{{ friend.displayName ?? friend.username ?? friend.userId }}
+							</span>
+						</RouterLink>
+					</div>
+				</section>
+
+				<Card v-if="showAmberiteManagement && amberiteManagement">
+					<div class="flex flex-col gap-4">
+						<div class="flex items-center gap-2">
+							<ShieldIcon class="size-5 text-secondary" aria-hidden="true" />
+							<h2 class="m-0 text-base font-semibold text-contrast">Management</h2>
+						</div>
+						<div
+							v-if="amberiteManagement.canUpdateRole"
+							class="profile-management-controls grid gap-3 md:grid-cols-[auto_auto_1fr]"
+						>
+							<DropdownSelect
+								v-model="managementRole"
+								name="managed-member-role"
+								:options="amberiteManagement.roles ?? ['member']"
+							/>
+							<StyledInput
+								v-model="managementPreset"
+								type="text"
+								placeholder="Permission preset"
+								wrapper-class="w-full"
+							/>
+							<ButtonStyled color="brand">
+								<button :disabled="!!profileActionPending" @click="saveManagedMember">
+									<CheckIcon aria-hidden="true" />
+									Save role
+								</button>
+							</ButtonStyled>
+						</div>
+						<div class="flex flex-wrap gap-2">
+							<ButtonStyled v-if="amberiteManagement.canKick" type="outlined">
+								<button :disabled="!!profileActionPending" @click="kickManagedMember">
+									<UserXIcon aria-hidden="true" />
+									Kick
+								</button>
+							</ButtonStyled>
+							<ButtonStyled v-if="amberiteManagement.canBan" type="outlined" color="red">
+								<button :disabled="!!profileActionPending" @click="banManagedMember">
+									<BanIcon aria-hidden="true" />
+									Ban
+								</button>
+							</ButtonStyled>
+							<ButtonStyled v-if="amberiteManagement.canUnban" type="outlined">
+								<button :disabled="!!profileActionPending" @click="unbanManagedMember">
+									<ShieldIcon aria-hidden="true" />
+									Unban
+								</button>
+							</ButtonStyled>
+						</div>
+					</div>
+				</Card>
+			</div>
+
+			<ProjectCardList v-else-if="visibleProjects.length > 0" layout="list">
 				<ProjectCard
 					v-for="project in visibleProjects"
 					:key="project.id"
@@ -848,5 +1765,10 @@ function copyPermalink() {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
 	gap: 1rem;
+}
+
+.profile-settings-modal :deep(.animated-dropdown),
+.profile-management-controls :deep(.animated-dropdown) {
+	width: min(20rem, 100%);
 }
 </style>

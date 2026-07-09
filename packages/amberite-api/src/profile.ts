@@ -1,4 +1,4 @@
-import type { AmberiteProfile, AmberiteUser } from './convex-types'
+import type { AmberiteProfile, AmberiteUser, ProfileVisibilitySettings } from './convex-types'
 import { AuthError } from './errors'
 
 export interface AmberiteAccountUser {
@@ -28,6 +28,9 @@ export interface AmberiteProfilePatch {
 		mimeType?: string
 		sizeBytes?: number
 	}
+	profileVisibility?: Partial<ProfileVisibilitySettings>
+	favoriteModpackProjectIds?: string[]
+	showcaseAchievementIds?: string[]
 }
 
 export function mapAmberiteUserToAccountUser(

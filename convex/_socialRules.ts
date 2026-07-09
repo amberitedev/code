@@ -2,6 +2,50 @@ import { getAuthUserId } from '@convex-dev/auth/server'
 import type { Id } from './_generated/dataModel'
 import type { MutationCtx, QueryCtx } from './_generated/server'
 export type FriendGroupRole = 'owner' | 'admin' | 'member'
+export type ProfileSectionVisibility = 'everyone' | 'friends' | 'friend_group' | 'private'
+export type ProfileRelationshipKind =
+	| 'self'
+	| 'friend'
+	| 'friend_group'
+	| 'group_manager'
+	| 'public'
+	| 'blocked'
+
+export interface ProfileVisibilitySettings {
+	friends: ProfileSectionVisibility
+	friendGroup: ProfileSectionVisibility
+	corePresence: ProfileSectionVisibility
+	favoriteModpacks: ProfileSectionVisibility
+	achievements: ProfileSectionVisibility
+}
+
+export interface ProfileRelationshipContext {
+	kind: ProfileRelationshipKind
+	self: boolean
+	friend: boolean
+	friendGroup: boolean
+	groupManager: boolean
+	blocked: boolean
+	viewerBlockedTarget: boolean
+	targetBlockedViewer: boolean
+	friendship: any | null
+	outgoingRequest: any | null
+	incomingRequest: any | null
+	viewerMembership: any | null
+	viewerManageableMembership: any | null
+	targetMembership: any | null
+	friendGroupDoc: any | null
+	targetBan: any | null
+}
+
+export const DEFAULT_PROFILE_VISIBILITY: ProfileVisibilitySettings = {
+	friends: 'friends',
+	friendGroup: 'friend_group',
+	corePresence: 'friend_group',
+	favoriteModpacks: 'everyone',
+	achievements: 'everyone',
+}
+
 export async function requireUserId(ctx: QueryCtx | MutationCtx): Promise<Id<'users'>> {
 	const userId = await getAuthUserId(ctx)
 	if (userId === null) throw new Error('not authenticated')
@@ -51,6 +95,132 @@ export function banByGroupUser(ctx: QueryCtx | MutationCtx, friendGroupId: strin
  */
 export function roleRank(role: FriendGroupRole): number {
 	return role === 'owner' ? 3 : role === 'admin' ? 2 : 1
+}
+
+export function profileVisibilitySettings(user: any): ProfileVisibilitySettings {
+	return {
+		...DEFAULT_PROFILE_VISIBILITY,
+		...(user.profileVisibility ?? {}),
+	}
+}
+
+export function normalizeProfileVisibilitySettings(
+	patch: Partial<ProfileVisibilitySettings> | undefined,
+	current?: Partial<ProfileVisibilitySettings>,
+): ProfileVisibilitySettings {
+	return {
+		...DEFAULT_PROFILE_VISIBILITY,
+		...(current ?? {}),
+		...(patch ?? {}),
+	}
+}
+
+export function canViewProfileSection(
+	visibility: ProfileSectionVisibility,
+	relationship: ProfileRelationshipContext,
+): boolean {
+	if (relationship.self) return true
+	if (visibility === 'everyone') return true
+	if (relationship.blocked) return false
+	if (visibility === 'friends') return relationship.friend
+	if (visibility === 'friend_group') return relationship.friendGroup || relationship.groupManager
+	return false
+}
+
+export async function profileRelationship(
+	ctx: QueryCtx | MutationCtx,
+	viewerId: string,
+	targetId: string,
+): Promise<ProfileRelationshipContext> {
+	const self = viewerId === targetId
+	const [
+		viewerBlockedTarget,
+		targetBlockedViewer,
+		friendship,
+		outgoingRequest,
+		incomingRequest,
+		viewerMemberships,
+		targetMemberships,
+	] = await Promise.all([
+		blockByPair(ctx, viewerId, targetId),
+		blockByPair(ctx, targetId, viewerId),
+		self ? null : acceptedFriendship(ctx, viewerId, targetId),
+		self ? null : friendRequestByPair(ctx, viewerId, targetId),
+		self ? null : friendRequestByPair(ctx, targetId, viewerId),
+		membershipsByUser(ctx, viewerId),
+		membershipsByUser(ctx, targetId),
+	])
+	const blocked = Boolean(viewerBlockedTarget || targetBlockedViewer)
+	const viewerMembershipByGroup = new Map(
+		viewerMemberships.map((membership) => [membership.friendGroupId, membership]),
+	)
+	const targetMembership =
+		targetMemberships.find((membership) => viewerMembershipByGroup.has(membership.friendGroupId)) ??
+		null
+	const viewerMembership = targetMembership
+		? viewerMembershipByGroup.get(targetMembership.friendGroupId) ?? null
+		: null
+	const friendGroupDoc = targetMembership
+		? await ctx.db.get(targetMembership.friendGroupId as any)
+		: null
+	const viewerManageableMembership =
+		viewerMemberships.find(
+			(membership) => membership.role === 'owner' || membership.role === 'admin',
+		) ?? null
+	const targetBan = await manageableBanForTarget(ctx, viewerMemberships, targetId)
+	const groupManager = Boolean(
+		!blocked &&
+			((viewerMembership &&
+				targetMembership &&
+				(viewerMembership.role === 'owner' || viewerMembership.role === 'admin') &&
+				roleRank(targetMembership.role) < roleRank(viewerMembership.role)) ||
+				targetBan),
+	)
+	const friendGroup = Boolean(!blocked && targetMembership)
+	const friend = Boolean(!blocked && friendship)
+	const kind: ProfileRelationshipKind = self
+		? 'self'
+		: blocked
+			? 'blocked'
+			: groupManager
+				? 'group_manager'
+				: friendGroup
+					? 'friend_group'
+					: friend
+						? 'friend'
+						: 'public'
+
+	return {
+		kind,
+		self,
+		friend,
+		friendGroup,
+		groupManager,
+		blocked,
+		viewerBlockedTarget: Boolean(viewerBlockedTarget),
+		targetBlockedViewer: Boolean(targetBlockedViewer),
+		friendship,
+		outgoingRequest,
+		incomingRequest,
+		viewerMembership,
+		viewerManageableMembership,
+		targetMembership,
+		friendGroupDoc,
+		targetBan,
+	}
+}
+
+async function manageableBanForTarget(
+	ctx: QueryCtx | MutationCtx,
+	viewerMemberships: any[],
+	targetId: string,
+) {
+	for (const membership of viewerMemberships) {
+		if (membership.role !== 'owner' && membership.role !== 'admin') continue
+		const ban = await banByGroupUser(ctx, membership.friendGroupId, targetId)
+		if (ban) return ban
+	}
+	return null
 }
 
 export async function requireFriendGroupRole(
@@ -287,6 +457,21 @@ export function groupByCoreId(ctx: QueryCtx | MutationCtx, coreId: string) {
 		.withIndex('by_core_id', (q) => q.eq('coreId', coreId))
 		.unique()
 }
+export async function groupByIdOrSubdomain(ctx: QueryCtx | MutationCtx, idOrSubdomain: string) {
+	const normalized = idOrSubdomain.trim().toLowerCase()
+	if (!normalized) return null
+
+	const groupId = ctx.db.normalizeId('friendGroups', idOrSubdomain)
+	if (groupId) {
+		const groupById = await ctx.db.get(groupId)
+		if (groupById) return groupById
+	}
+
+	return await ctx.db
+		.query('friendGroups')
+		.withIndex('by_subdomain', (q) => q.eq('subdomain', normalized))
+		.first()
+}
 export function membershipsByUser(ctx: QueryCtx | MutationCtx, userId: string) {
 	return ctx.db
 		.query('friendGroupMembers')
@@ -326,4 +511,41 @@ export function coreListById(ctx: QueryCtx | MutationCtx, coreId: string) {
 		.query('coreList')
 		.withIndex('by_core_id', (q) => q.eq('coreId', coreId))
 		.unique()
+}
+
+export function acceptedFriendship(ctx: QueryCtx | MutationCtx, a: string, b: string) {
+	const [userAId, userBId] = canonicalPair(a, b)
+	return ctx.db
+		.query('friendships')
+		.withIndex('by_pair', (q) => q.eq('userAId', userAId).eq('userBId', userBId))
+		.unique()
+}
+
+export function friendRequestByPair(
+	ctx: QueryCtx | MutationCtx,
+	fromUserId: string,
+	toUserId: string,
+) {
+	return ctx.db
+		.query('friendRequests')
+		.withIndex('by_from_to', (q) => q.eq('fromUserId', fromUserId).eq('toUserId', toUserId))
+		.order('desc')
+		.first()
+}
+
+export function blockByPair(
+	ctx: QueryCtx | MutationCtx,
+	blockerUserId: string,
+	blockedUserId: string,
+) {
+	return ctx.db
+		.query('blockedUsers')
+		.withIndex('by_blocker_blocked', (q) =>
+			q.eq('blockerUserId', blockerUserId).eq('blockedUserId', blockedUserId),
+		)
+		.unique()
+}
+
+export function canonicalPair(a: string, b: string): [string, string] {
+	return a < b ? [a, b] : [b, a]
 }

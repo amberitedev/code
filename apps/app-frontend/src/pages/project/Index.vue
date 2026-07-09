@@ -348,6 +348,18 @@ const messages = defineMessages({
 		id: 'app.project.install-context.install-content-to-instance',
 		defaultMessage: 'Install content to instance',
 	},
+	clientProfileType: {
+		id: 'app.project.install-context.profile-type.client',
+		defaultMessage: 'Client',
+	},
+	serverProfileType: {
+		id: 'app.project.install-context.profile-type.server',
+		defaultMessage: 'Server',
+	},
+	syncedProfileType: {
+		id: 'app.project.install-context.profile-type.synced',
+		defaultMessage: 'Synced',
+	},
 	alreadyInstalled: {
 		id: 'app.project.install-button.already-installed',
 		defaultMessage: 'This project is already installed',
@@ -473,10 +485,20 @@ const projectTabContentVisible = projectTabController.visible
 
 const projectBrowseBackUrl = computed(() => {
 	const browsePath = route.query.b
-	if (typeof browsePath === 'string' && browsePath.startsWith('/browse/')) return browsePath
+	if (typeof browsePath === 'string' && isBrowseBackPath(browsePath)) return browsePath
 	const type = data.value?.project_type ? `${data.value.project_type}` : 'mod'
 	return buildBrowseHref(`/browse/${type}`)
 })
+
+function isBrowseBackPath(path) {
+	return path.startsWith('/browse/') || /^\/instance\/[^/]+\/browse(?:[?#]|$)/.test(path)
+}
+
+function getProfileTypeLabel(profileType) {
+	if (profileType === 'server') return formatMessage(messages.serverProfileType)
+	if (profileType === 'synced') return formatMessage(messages.syncedProfileType)
+	return formatMessage(messages.clientProfileType)
+}
 
 const projectInstallContext = computed(() => {
 	const serverData = serverInstallContent.serverContextServerData.value
@@ -485,6 +507,7 @@ const projectInstallContext = computed(() => {
 			name: serverData.name,
 			loader: serverData.loader ?? '',
 			gameVersion: serverData.mc_version ?? '',
+			profileTypeLabel: formatMessage(messages.serverProfileType),
 			serverId: serverInstallContent.serverIdQuery.value,
 			upstream: serverData.upstream,
 			iconSrc: null,
@@ -508,6 +531,7 @@ const projectInstallContext = computed(() => {
 			name: instance.value.name,
 			loader: instance.value.loader,
 			gameVersion: instance.value.game_version,
+			profileTypeLabel: getProfileTypeLabel(instance.value.profile_type),
 			iconSrc: instance.value.icon_path ? convertFileSrc(instance.value.icon_path) : null,
 			backUrl: projectBrowseBackUrl.value,
 			backLabel: formatMessage(messages.backToBrowse),
