@@ -27,7 +27,7 @@ const content = readFileSync(envPath, 'utf8')
 const required = [
 	{
 		key: 'VITE_CONVEX_URL',
-		hint: 'Set the Convex deployment URL for the active desktop app profile.',
+		hint: 'Set the Convex deployment URL for the desktop app.',
 	},
 ]
 

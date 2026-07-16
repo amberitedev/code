@@ -9,14 +9,18 @@ import tauriConf from '../app/tauri.conf.json'
 const projectRootDir = resolve(__dirname)
 const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
-const devPort = Number(process.env.AMBERITE_APP_DEV_PORT ?? 1420)
+const portArgumentIndex = process.argv.indexOf('--port')
+const devPort = Number(portArgumentIndex === -1 ? 1420 : process.argv[portArgumentIndex + 1])
+
+if (!Number.isInteger(devPort) || devPort < 1 || devPort > 65_535) {
+	throw new Error('Vite --port must be a valid TCP port.')
+}
 
 const requiredEnvironmentVariables = [
 	'MODRINTH_URL',
 	'MODRINTH_API_BASE_URL',
 	'MODRINTH_ARCHON_BASE_URL',
-	'VITE_CONVEX_URL',
-	'VITE_CONVEX_SITE_URL',
+	...(portArgumentIndex === -1 ? ['VITE_CONVEX_URL', 'VITE_CONVEX_SITE_URL'] : []),
 ] as const
 
 function loadEnvFile(envFilePath: string) {
@@ -115,7 +119,13 @@ export default defineConfig({
 					// An additional websocket connect-src is required for Vite dev tools to work
 					if (directive === 'connect-src') {
 						sources = Array.isArray(sources) ? sources : [sources]
-						sources.push(`ws://localhost:${devPort}`)
+						sources.push(
+							`ws://localhost:${devPort}`,
+							'http://localhost:*',
+							'http://127.0.0.1:*',
+							'ws://localhost:*',
+							'ws://127.0.0.1:*',
+						)
 					}
 
 					return Array.isArray(sources)

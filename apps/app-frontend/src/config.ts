@@ -14,3 +14,9 @@ export const config = {
 	/** Optional rollout flag. When unset, the desktop keeps durable Convex state only. */
 	realtimeUrl: import.meta.env.VITE_REALTIME_URL,
 }
+
+export function applyDevAppConfig(devConfig: { convexUrl: string; convexSiteUrl: string }): void {
+	if (!import.meta.env.DEV) return
+	config.convexUrl = devConfig.convexUrl
+	config.convexSiteUrl = devConfig.convexSiteUrl
+}

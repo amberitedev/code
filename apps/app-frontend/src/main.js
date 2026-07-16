@@ -15,52 +15,61 @@ import router from '@/routes'
 
 const pinia = createPinia()
 
-let app = createApp(App)
+void bootstrap()
 
-function isLocalHost() {
-	const { hostname } = window.location
-	return (
-		hostname === 'localhost' ||
-		hostname.endsWith('.localhost') ||
-		hostname === '127.0.0.1' ||
-		hostname === '::1'
-	)
-}
+async function bootstrap() {
+	if (import.meta.env.DEV) {
+		const { initializeDevRuntime } = await import('@/dev/runtime')
+		await initializeDevRuntime()
+	}
 
-function shouldEnableSentry() {
-	if (import.meta.env.VITE_ENABLE_SENTRY === 'true') return true
-	return !import.meta.env.DEV && !isLocalHost()
-}
+	let app = createApp(App)
 
-const sentryDsn = import.meta.env.VITE_SENTRY_DSN?.trim()
-if (sentryDsn && shouldEnableSentry()) {
-	Sentry.init({
-		app,
-		dsn: sentryDsn,
-		integrations: [Sentry.browserTracingIntegration({ router })],
-		tracesSampleRate: Number(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
+	function isLocalHost() {
+		const { hostname } = window.location
+		return (
+			hostname === 'localhost' ||
+			hostname.endsWith('.localhost') ||
+			hostname === '127.0.0.1' ||
+			hostname === '::1'
+		)
+	}
+
+	function shouldEnableSentry() {
+		if (import.meta.env.VITE_ENABLE_SENTRY === 'true') return true
+		return !import.meta.env.DEV && !isLocalHost()
+	}
+
+	const sentryDsn = import.meta.env.VITE_SENTRY_DSN?.trim()
+	if (sentryDsn && shouldEnableSentry()) {
+		Sentry.init({
+			app,
+			dsn: sentryDsn,
+			integrations: [Sentry.browserTracingIntegration({ router })],
+			tracesSampleRate: Number(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
+		})
+	}
+
+	app.use(VueQueryPlugin)
+	app.use(router)
+	app.use(pinia)
+	app.use(FloatingVue, {
+		themes: {
+			'ribbit-popout': {
+				$extend: 'dropdown',
+				placement: 'bottom-end',
+				instantMove: true,
+				distance: 8,
+			},
+			'dismissable-prompt': {
+				$extend: 'dropdown',
+				placement: 'bottom-start',
+			},
+		},
 	})
+	app.use(i18nPlugin)
+	app.use(i18nDebugPlugin)
+	app.directive('overlay-scrollbars', overlayScrollbarsDirective)
+
+	app.mount('#app')
 }
-
-app.use(VueQueryPlugin)
-app.use(router)
-app.use(pinia)
-app.use(FloatingVue, {
-	themes: {
-		'ribbit-popout': {
-			$extend: 'dropdown',
-			placement: 'bottom-end',
-			instantMove: true,
-			distance: 8,
-		},
-		'dismissable-prompt': {
-			$extend: 'dropdown',
-			placement: 'bottom-start',
-		},
-	},
-})
-app.use(i18nPlugin)
-app.use(i18nDebugPlugin)
-app.directive('overlay-scrollbars', overlayScrollbarsDirective)
-
-app.mount('#app')

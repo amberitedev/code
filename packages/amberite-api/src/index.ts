@@ -122,6 +122,7 @@ export { ConvexAmberiteAuthClient } from './auth-client'
 export type {
 	AmberiteAuthClient,
 	AmberiteSession,
+	AmberiteDevAccountSignInRequest,
 	AmberiteMinecraftTokenSignInRequest,
 } from './auth-client'
 export { MockAmberiteAuthClient, defaultMockUser } from './mock-client'

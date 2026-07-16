@@ -16,7 +16,7 @@ services:
       # Copy .env.example → .env.prod and fill in your values before deploying.
       - .env.prod
     environment:
-      AMBERITE_DATA_DIR: /data
+      CORE_DATA_DIR: /data
       PORT: "16662"
       # ALLOWED_ORIGIN: https://amberite.dev   # override if self-hosting
     healthcheck:

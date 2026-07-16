@@ -4,40 +4,18 @@ name = "code"
 
 [setup]
 script = '''
-$source = ((git worktree list --porcelain | Select-String '^worktree ' | Select-Object -First 1).Line -replace '^worktree ', '')
-$environmentDirectories = @($source, (Join-Path $source 'apps'), (Join-Path $source 'packages'), (Join-Path $source 'convex'))
-foreach ($environmentDirectory in $environmentDirectories) {
-	if (-not (Test-Path $environmentDirectory)) {
-		continue
-	}
-
-	Get-ChildItem -Force -File -Path $environmentDirectory -Filter '.env*' | Where-Object { $_.Name -notlike '*.example' } | ForEach-Object {
-		$relativePath = $_.FullName.Substring($source.Length).TrimStart('\')
-		$destination = Join-Path (Get-Location) $relativePath
-		New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
-		Copy-Item -Force $_.FullName $destination
-	}
-
-	if ($environmentDirectory -eq $source) {
-		continue
-	}
-
-	Get-ChildItem -Force -Directory -Path $environmentDirectory | ForEach-Object {
-		Get-ChildItem -Force -File -Path $_.FullName -Filter '.env*' | Where-Object { $_.Name -notlike '*.example' } | ForEach-Object {
-			$relativePath = $_.FullName.Substring($source.Length).TrimStart('\')
-			$destination = Join-Path (Get-Location) $relativePath
-			New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
-			Copy-Item -Force $_.FullName $destination
-		}
-	}
-}
 pnpm install
-'''
+pnpm run setup'''
+
+[setup.linux]
+script = '''
+pnpm install
+pnpm run setup'''
 
 [[actions]]
-name = "App Dev"
+name = "App Owner"
 icon = "run"
-command = "pnpm app:dev"
+command = "pnpm app:dev -- owner"
 platform = "win32"
 
 [[actions]]
@@ -46,10 +24,9 @@ icon = "run"
 command = "pnpm core:dev"
 
 [[actions]]
-name = "App Dev Multi"
+name = "Convex Local Accounts"
 icon = "run"
-command = "pnpm app:devm"
-platform = "win32"
+command = "pnpm convex:dev:local -- accounts"
 
 [[actions]]
 name = "web dev"

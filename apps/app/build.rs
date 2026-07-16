@@ -19,7 +19,6 @@ fn main() {
                         "set_default_user",
                         "get_users",
                         "amberite_login",
-                        "get_amberite_dev_persona_id",
                         "get_amberite_session_jwt",
                         "set_amberite_session_jwt",
                         "get_amberite_session_refresh_token",

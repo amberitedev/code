@@ -124,7 +124,6 @@
 		},
 		"auth:default",
 		"auth:allow-amberite-login",
-		"auth:allow-get-amberite-dev-persona-id",
 		"auth:allow-get-amberite-session-jwt",
 		"auth:allow-set-amberite-session-jwt",
 		"auth:allow-get-amberite-session-refresh-token",

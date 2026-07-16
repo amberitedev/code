@@ -17,13 +17,17 @@ export interface AmberiteSession {
 
 export interface AmberiteMinecraftTokenSignInRequest {
 	minecraftAccessToken: string
-	devPersonaId?: string
+}
+
+export interface AmberiteDevAccountSignInRequest {
+	username: string
 }
 
 export interface AmberiteAuthClient {
 	restoreSession(): Promise<AmberiteSession | null>
 	refreshSession(refreshToken?: string | null): Promise<AmberiteSession | null>
 	signInWithMinecraftToken(request: AmberiteMinecraftTokenSignInRequest): Promise<AmberiteSession>
+	signInWithDevAccount(request: AmberiteDevAccountSignInRequest): Promise<AmberiteSession>
 	currentUser(): Promise<AmberiteAccountUser | null>
 	updateCurrentProfile(patch: AmberiteProfilePatch): Promise<AmberiteAccountUser>
 	deleteCurrentAccount(): Promise<void>
@@ -91,8 +95,19 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 				provider: 'minecraft-token',
 				params: {
 					minecraftAccessToken: request.minecraftAccessToken,
-					...(request.devPersonaId ? { devPersonaId: request.devPersonaId } : {}),
 				},
+			},
+			false,
+		)
+		return await this.requireTokens(response.tokens)
+	}
+
+	async signInWithDevAccount(request: AmberiteDevAccountSignInRequest): Promise<AmberiteSession> {
+		const response = await this.convex.rawAction<{ tokens: unknown }>(
+			'auth:signIn',
+			{
+				provider: 'amberite-dev-account',
+				params: { username: request.username },
 			},
 			false,
 		)

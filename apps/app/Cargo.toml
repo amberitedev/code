@@ -39,7 +39,7 @@ tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 theseus = { workspace = true, features = ["tauri"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tracing = { workspace = true }
 tracing-error = { workspace = true }
 url = { workspace = true }

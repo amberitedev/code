@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Amberite — Current Product Understanding Sheet</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--page: #0c0c0e;
+				--panel: #131316;
+				--panel-strong: #19191d;
+				--line: #303036;
+				--text: #f3f1ef;
+				--soft: #ccc6bf;
+				--muted: #9d9892;
+				--orange: #ff8a3d;
+				--orange-soft: rgba(255, 138, 61, 0.12);
+				--green: #65d690;
+				--yellow: #efc45c;
+				--blue: #83b9ff;
+				--gray: #a4a8ae;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			html {
+				scroll-behavior: smooth;
+			}
+
+			body {
+				margin: 0;
+				background:
+					radial-gradient(circle at 18% 0%, rgba(255, 138, 61, 0.1), transparent 31rem), var(--page);
+				color: var(--text);
+				font-family:
+					Inter,
+					ui-sans-serif,
+					system-ui,
+					-apple-system,
+					BlinkMacSystemFont,
+					'Segoe UI',
+					sans-serif;
+				font-size: 16px;
+				line-height: 1.6;
+			}
+
+			main {
+				width: min(1120px, calc(100% - 32px));
+				margin: 0 auto;
+				padding: 56px 0 72px;
+			}
+
+			h1,
+			h2,
+			h3,
+			p {
+				margin-top: 0;
+			}
+
+			h1 {
+				max-width: 850px;
+				margin-bottom: 14px;
+				font-size: clamp(2.35rem, 6vw, 4.5rem);
+				line-height: 0.98;
+				letter-spacing: -0.055em;
+			}
+
+			h2 {
+				margin-bottom: 18px;
+				font-size: 1.55rem;
+				line-height: 1.2;
+				letter-spacing: -0.025em;
+			}
+
+			h3 {
+				margin-bottom: 7px;
+				font-size: 1rem;
+			}
+
+			a {
+				color: var(--orange);
+				text-underline-offset: 0.18em;
+			}
+
+			.hero {
+				padding: 38px;
+				border: 1px solid var(--line);
+				border-radius: 22px;
+				background: linear-gradient(145deg, rgba(27, 26, 29, 0.98), rgba(16, 16, 18, 0.98));
+				box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+			}
+
+			.eyebrow {
+				margin: 0 0 10px;
+				color: var(--orange);
+				font-size: 0.76rem;
+				font-weight: 760;
+				letter-spacing: 0.13em;
+				text-transform: uppercase;
+			}
+
+			.lede {
+				max-width: 840px;
+				margin-bottom: 0;
+				color: var(--soft);
+				font-size: 1.12rem;
+			}
+
+			.summary {
+				display: grid;
+				grid-template-columns: 1.5fr 1fr;
+				gap: 14px;
+				margin-top: 16px;
+			}
+
+			.summary > div,
+			.card,
+			.map,
+			.flow,
+			.rows,
+			.legend,
+			.callout {
+				border: 1px solid var(--line);
+				border-radius: 16px;
+				background: var(--panel);
+			}
+
+			.summary > div {
+				padding: 22px;
+			}
+
+			.summary strong {
+				display: block;
+				margin-bottom: 7px;
+				color: var(--orange);
+				font-size: 0.77rem;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+			}
+
+			.summary p {
+				margin: 0;
+				color: var(--soft);
+			}
+
+			.legend {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 10px 22px;
+				margin-top: 14px;
+				padding: 14px 18px;
+				color: var(--muted);
+				font-size: 0.86rem;
+			}
+
+			.badge {
+				display: inline-flex;
+				align-items: center;
+				gap: 7px;
+				font-size: 0.72rem;
+				font-weight: 760;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+			}
+
+			.badge::before {
+				width: 8px;
+				height: 8px;
+				border-radius: 999px;
+				background: currentColor;
+				content: '';
+			}
+
+			.inherited {
+				color: var(--blue);
+			}
+			.connected {
+				color: var(--green);
+			}
+			.partial {
+				color: var(--yellow);
+			}
+			.residue {
+				color: var(--gray);
+			}
+
+			section {
+				padding-top: 42px;
+			}
+
+			.section-heading {
+				display: grid;
+				grid-template-columns: 110px 1fr;
+				gap: 18px;
+				align-items: baseline;
+			}
+
+			.section-number {
+				color: var(--muted);
+				font-size: 0.78rem;
+				font-weight: 700;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+			}
+
+			.cards {
+				display: grid;
+				grid-template-columns: repeat(3, 1fr);
+				gap: 12px;
+			}
+
+			.card {
+				padding: 20px;
+			}
+
+			.card p {
+				margin-bottom: 0;
+				color: var(--muted);
+				font-size: 0.94rem;
+			}
+
+			.card .badge {
+				margin-bottom: 9px;
+			}
+
+			.card.wide {
+				grid-column: span 2;
+			}
+
+			.map {
+				display: grid;
+				grid-template-columns: repeat(3, 1fr);
+				overflow: hidden;
+			}
+
+			.map > div {
+				padding: 20px;
+				border-right: 1px solid var(--line);
+				border-bottom: 1px solid var(--line);
+			}
+
+			.map > div:nth-child(3n) {
+				border-right: 0;
+			}
+
+			.map > div:nth-last-child(-n + 3) {
+				border-bottom: 0;
+			}
+
+			.map strong {
+				display: block;
+				margin-bottom: 5px;
+				color: var(--orange);
+			}
+
+			.map span {
+				color: var(--muted);
+				font-size: 0.93rem;
+			}
+
+			.flow {
+				display: grid;
+				grid-template-columns: repeat(6, 1fr);
+				overflow: hidden;
+			}
+
+			.flow > div {
+				padding: 18px 16px;
+				border-right: 1px solid var(--line);
+			}
+
+			.flow > div:last-child {
+				border-right: 0;
+			}
+
+			.flow strong,
+			.flow small {
+				display: block;
+			}
+
+			.flow strong {
+				margin-bottom: 5px;
+			}
+
+			.flow small {
+				color: var(--muted);
+				line-height: 1.45;
+			}
+
+			.rows {
+				overflow: hidden;
+			}
+
+			.row {
+				display: grid;
+				grid-template-columns: 175px 1fr;
+				gap: 22px;
+				padding: 17px 20px;
+				border-bottom: 1px solid var(--line);
+			}
+
+			.row:last-child {
+				border-bottom: 0;
+			}
+
+			.row p {
+				margin: 0;
+				color: var(--soft);
+			}
+
+			.callout {
+				margin-top: 14px;
+				padding: 20px 22px;
+				border-color: rgba(255, 138, 61, 0.3);
+				background: var(--orange-soft);
+				color: var(--soft);
+			}
+
+			.callout strong {
+				color: var(--text);
+			}
+
+			.corrections {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+				gap: 0 28px;
+				margin: 0;
+				padding: 6px 22px;
+				border: 1px solid var(--line);
+				border-radius: 16px;
+				background: var(--panel);
+			}
+
+			.corrections div {
+				display: grid;
+				grid-template-columns: 120px 1fr;
+				gap: 12px;
+				padding: 14px 0;
+				border-bottom: 1px solid var(--line);
+			}
+
+			.corrections div:nth-last-child(-n + 2) {
+				border-bottom: 0;
+			}
+
+			dt {
+				color: var(--muted);
+				font-weight: 700;
+			}
+
+			dd {
+				margin: 0;
+				color: var(--soft);
+			}
+
+			.next-grid {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+				gap: 10px;
+			}
+
+			.next-grid div {
+				padding: 16px 18px;
+				border-left: 3px solid var(--orange);
+				border-radius: 0 12px 12px 0;
+				background: var(--panel);
+				color: var(--soft);
+			}
+
+			.note {
+				margin-top: 30px;
+				color: var(--muted);
+				font-size: 0.88rem;
+			}
+
+			@media (max-width: 860px) {
+				.summary,
+				.cards,
+				.map,
+				.corrections,
+				.next-grid {
+					grid-template-columns: 1fr;
+				}
+
+				.card.wide {
+					grid-column: auto;
+				}
+
+				.map > div,
+				.map > div:nth-child(3n),
+				.map > div:nth-last-child(-n + 3) {
+					border-right: 0;
+					border-bottom: 1px solid var(--line);
+				}
+
+				.map > div:last-child {
+					border-bottom: 0;
+				}
+
+				.flow {
+					grid-template-columns: repeat(2, 1fr);
+				}
+
+				.flow > div {
+					border-bottom: 1px solid var(--line);
+				}
+
+				.flow > div:nth-child(2n) {
+					border-right: 0;
+				}
+
+				.flow > div:nth-last-child(-n + 2) {
+					border-bottom: 0;
+				}
+
+				.corrections div,
+				.corrections div:nth-last-child(-n + 2) {
+					border-bottom: 1px solid var(--line);
+				}
+
+				.corrections div:last-child {
+					border-bottom: 0;
+				}
+			}
+
+			@media (max-width: 580px) {
+				main {
+					width: min(100% - 20px, 1120px);
+					padding-top: 20px;
+				}
+
+				.hero {
+					padding: 24px;
+				}
+
+				.section-heading,
+				.row,
+				.corrections div {
+					grid-template-columns: 1fr;
+					gap: 4px;
+				}
+
+				.flow {
+					grid-template-columns: 1fr;
+				}
+
+				.flow > div,
+				.flow > div:nth-child(2n),
+				.flow > div:nth-last-child(-n + 2) {
+					border-right: 0;
+					border-bottom: 1px solid var(--line);
+				}
+
+				.flow > div:last-child {
+					border-bottom: 0;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<header class="hero">
+				<p class="eyebrow">Repository reality · Human understanding sheet</p>
+				<h1>Amberite today, without the old roadmap.</h1>
+				<p class="lede">
+					Amberite is currently a Modrinth desktop client fork with a strong local client manager, a
+					broad self-hosted server manager, and a real social foundation. The layer joining those
+					parts into one simple multiplayer product is still unfinished.
+				</p>
+			</header>
+
+			<div class="summary">
+				<div>
+					<strong>Most accurate current framing</strong>
+					<p>
+						Working client and Copal server managers joined by real identity and social systems,
+						with onboarding, collaboration authority, synchronization, remote access, and cleanup
+						still in transition.
+					</p>
+				</div>
+				<div>
+					<strong>Assessment boundary</strong>
+					<p>
+						This describes what the repository expresses (not what the old document promises and not
+						what deployed services were proven to run).
+					</p>
+				</div>
+			</div>
+
+			<div class="legend" aria-label="Implementation status legend">
+				<span><span class="badge inherited">Inherited</span> mature Modrinth behavior</span>
+				<span><span class="badge connected">Connected</span> meaningful Amberite flow</span>
+				<span><span class="badge partial">Partial</span> real parts, incomplete promise</span>
+				<span><span class="badge residue">Residue</span> mock, dev, dormant, or old surface</span>
+			</div>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">01 · Shape</span>
+					<h2>Where product truth currently lives</h2>
+				</div>
+				<div class="map">
+					<div>
+						<strong>Amberite App</strong
+						><span
+							>The user-facing shell, local launcher, library, account sidebar, discovery, and
+							direct controller for one selected Core.</span
+						>
+					</div>
+					<div>
+						<strong>Modrinth</strong
+						><span
+							>The external content catalog, project metadata, files, compatibility, and inherited
+							creator/platform behavior.</span
+						>
+					</div>
+					<div>
+						<strong>Local app backend</strong
+						><span
+							>The authority for client installations, Minecraft launching, local worlds, local
+							files, and Minecraft accounts.</span
+						>
+					</div>
+					<div>
+						<strong>Copal Core</strong
+						><span
+							>The authority for self-hosted servers, runtime state, files, backups, server
+							settings, members, roles, access, bans, invitations, and activity.</span
+						>
+					</div>
+					<div>
+						<strong>Convex</strong
+						><span
+							>The durable Amberite account, profiles, friends, blocks, social shell, pairing
+							records, and minimal Core discovery data.</span
+						>
+					</div>
+					<div>
+						<strong>Realtime service</strong
+						><span
+							>An optional online-presence overlay (it does not own friendships, permissions, Core
+							health, or server state).</span
+						>
+					</div>
+				</div>
+				<div class="callout">
+					<strong>Intended boundary:</strong> the App discovers and selects a Core, then controls it
+					directly. Convex should know only enough to connect authorized people; Copal should remain
+					authoritative for the real server and its access rules.
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">02 · Changes</span>
+					<h2>What Amberite has added to Modrinth</h2>
+				</div>
+				<div class="cards">
+					<article class="card">
+						<span class="badge connected">Connected</span>
+						<h3>Amberite identity and friends</h3>
+						<p>
+							Minecraft-backed sign-in, Amberite profiles, friend requests, blocking,
+							relationship-aware visibility, and an online/offline friends sidebar.
+						</p>
+					</article>
+					<article class="card">
+						<span class="badge connected">Connected</span>
+						<h3>Self-hosted server management</h3>
+						<p>
+							Copal instances can be created and operated through status, console, content, files,
+							backups, access, settings, logs, players, and maintenance systems.
+						</p>
+					</article>
+					<article class="card">
+						<span class="badge connected">Connected</span>
+						<h3>Core setup and dashboard</h3>
+						<p>
+							The App can pair with an existing local or remote Core, then show overview, members,
+							invitations, roles, and activity.
+						</p>
+					</article>
+					<article class="card wide">
+						<span class="badge connected">Connected</span>
+						<h3>One library for several installation kinds</h3>
+						<p>
+							The Library combines local client installations, live Copal servers, and shared
+							profiles, then separates them by purpose (modpacks, servers, custom, and shared).
+						</p>
+					</article>
+					<article class="card">
+						<span class="badge partial">Partial</span>
+						<h3>Synced instances</h3>
+						<p>
+							A local client and Copal server can be presented as one dual-sided installation with
+							shared profile and snapshot history, but full synchronization is not complete.
+						</p>
+					</article>
+					<article class="card">
+						<span class="badge partial">Partial</span>
+						<h3>Groups and public profiles</h3>
+						<p>
+							User and group pages, members, roles, invitations, bans, Core association, privacy,
+							and profile actions exist, but old and new authority models overlap.
+						</p>
+					</article>
+					<article class="card wide">
+						<span class="badge inherited">Adapted</span>
+						<h3>Hosting-shaped UX for Copal</h3>
+						<p>
+							Amberite reuses Modrinth’s server-management layouts for self-hosted servers,
+							preserving familiar content, file, backup, access, overview, and settings patterns.
+						</p>
+					</article>
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">03 · Journey</span>
+					<h2>The product path currently visible to a user</h2>
+				</div>
+				<div class="flow" aria-label="Current Amberite user journey">
+					<div>
+						<strong>Sign in</strong><small>Minecraft identity becomes an Amberite account.</small>
+					</div>
+					<div>
+						<strong>Pair Core</strong
+						><small>Connect to an already-running Copal installation.</small>
+					</div>
+					<div>
+						<strong>Create server</strong
+						><small>Choose the Minecraft base and runtime settings.</small>
+					</div>
+					<div>
+						<strong>Add content</strong><small>Use the Modrinth catalog or local files.</small>
+					</div>
+					<div>
+						<strong>Invite people</strong
+						><small>Manage friends, group membership, roles, and access.</small>
+					</div>
+					<div>
+						<strong>Share client</strong
+						><small>Expose a synced profile for members to install (partial).</small>
+					</div>
+				</div>
+				<div class="callout">
+					<strong>The strongest closed loop today:</strong> connect to Copal → create a server →
+					install content → start it → manage its runtime and files. The friend-to-shared-client
+					loop is present but does not yet close automatically.
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">04 · UX</span>
+					<h2>What feels finished and what still feels like an alpha</h2>
+				</div>
+				<div class="rows">
+					<div class="row">
+						<span class="badge inherited">Inherited and strong</span>
+						<p>
+							Content discovery, project pages, compatible installation, local client instances,
+							content management, local files, worlds, logs, skins, account switching, launching,
+							and settings.
+						</p>
+					</div>
+					<div class="row">
+						<span class="badge connected">Amberite and usable</span>
+						<p>
+							Core pairing, Core overview, server creation and power controls, console, Core
+							content/files/backups, per-server access, friends, user profiles, group profiles, and
+							the combined Library.
+						</p>
+					</div>
+					<div class="row">
+						<span class="badge partial">Product seams</span>
+						<p>
+							First-run onboarding, Core installation, linked Modrinth identity, Core/group naming,
+							invitations for new members, permission presentation, durable notifications, remote
+							reachability, and Core online health.
+						</p>
+					</div>
+					<div class="row">
+						<span class="badge partial">Sync promise</span>
+						<p>
+							Pairing a client with a server, publishing profile history, and installing an
+							available shared archive exist; pulling changes, applying history, resolving
+							conflicts, and reliably enforcing UI permissions do not.
+						</p>
+					</div>
+					<div class="row">
+						<span class="badge residue">Visible residue</span>
+						<p>
+							Mock group links, a placeholder top-level Worlds screen, permanent Core development
+							controls, local-only settings that look real, Modrinth-branded copy, and an old
+							Hosting route outside normal navigation.
+						</p>
+					</div>
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">05 · Conflict</span>
+					<h2>The main architectural mismatch</h2>
+				</div>
+				<div class="callout">
+					<strong>Groups and access currently have two live models.</strong> Convex still stores and
+					changes the older friend-group membership, roles, invitations, and bans used by the
+					desktop social UI. Copal separately stores the newer authoritative Core membership, custom
+					roles, access, invitations, bans, and activity. Until one path owns each decision, the two
+					views can disagree.
+				</div>
+				<div class="cards" style="margin-top: 12px">
+					<article class="card">
+						<h3>Convex view (social shell)</h3>
+						<p>
+							Useful for profiles, friends, group discovery, privacy, and a minimal list of Cores a
+							user may reach.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Copal view (real authority)</h3>
+						<p>
+							Useful for actual server membership, instance access, roles, permissions, bans,
+							invitations, and audit records.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Required final decision</h3>
+						<p>
+							Define whether a group is the social representation of one Core, a separate object, or
+							something broader, then give every mutation one owner.
+						</p>
+					</article>
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">06 · Corrections</span>
+					<h2>What the old Markdown gets materially wrong</h2>
+				</div>
+				<dl class="corrections">
+					<div>
+						<dt>Cloud backend</dt>
+						<dd>Convex plus a separate presence service replaced the Supabase direction.</dd>
+					</div>
+					<div>
+						<dt>Shared package</dt>
+						<dd>
+							The active boundary is the TypeScript Amberite API package, not the planned Rust
+							Amberite library.
+						</dd>
+					</div>
+					<div>
+						<dt>Core name</dt>
+						<dd>
+							Copal is the current name and the Core is much broader than the old issue list
+							suggests.
+						</dd>
+					</div>
+					<div>
+						<dt>Local setup</dt>
+						<dd>
+							The App connects to an already-running local Copal; it does not yet install and start
+							Copal for the user.
+						</dd>
+					</div>
+					<div>
+						<dt>Synchronization</dt>
+						<dd>
+							Profiles, manifests, snapshots, and archive engines exist, but they are not one
+							automatic end-to-end system.
+						</dd>
+					</div>
+					<div>
+						<dt>Remote access</dt>
+						<dd>
+							Pairing and a published URL exist; managed server tunneling, domains, and universal
+							remote connectivity do not.
+						</dd>
+					</div>
+					<div>
+						<dt>Groups</dt>
+						<dd>
+							They are not one settled system; the repository is migrating authority from cloud
+							friend groups to Core-owned access.
+						</dd>
+					</div>
+					<div>
+						<dt>Idea systems</dt>
+						<dd>
+							Personal preferences, companion mod behavior, mod voting, failover hosting, and a
+							complete remote dashboard are not current product capabilities.
+						</dd>
+					</div>
+				</dl>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">07 · Next</span>
+					<h2>Product decisions needed before the final Markdown</h2>
+				</div>
+				<div class="next-grid">
+					<div>
+						State the one primary promise Amberite must complete before every secondary feature.
+					</div>
+					<div>
+						Define the relationship between an Amberite user, friend group, Core, server, and synced
+						profile.
+					</div>
+					<div>
+						Define exactly what “sync” guarantees and which side is authoritative for every kind of
+						data.
+					</div>
+					<div>
+						Define the owner and member journeys from first sign-in through playing together.
+					</div>
+					<div>
+						Choose which inherited Modrinth platform, creator, Hosting, social, and server-directory
+						surfaces remain visible.
+					</div>
+					<div>Choose the supported connection promise for local network and remote friends.</div>
+					<div>
+						Choose the permission model users see, then align the UI, Copal, and cloud projection
+						behind it.
+					</div>
+					<div>
+						Draw the first release boundary so incomplete ideas cannot look like current
+						commitments.
+					</div>
+				</div>
+				<p class="note">
+					Prepared from the current repository and recent Amberite commit history. The original
+					project Markdown was read for comparison but was not changed.
+				</p>
+			</section>
+		</main>
+	</body>
+</html>

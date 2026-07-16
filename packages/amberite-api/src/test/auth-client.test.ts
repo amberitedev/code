@@ -76,7 +76,7 @@ describe('ConvexAmberiteAuthClient', () => {
 		})
 	})
 
-	it('routes Minecraft token sign-in through the only Amberite auth provider', async () => {
+	it('routes Minecraft token sign-in through the production auth provider', async () => {
 		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body))
 			if (body.path === 'auth:signIn') {
@@ -99,6 +99,33 @@ describe('ConvexAmberiteAuthClient', () => {
 			args: {
 				provider: 'minecraft-token',
 				params: { minecraftAccessToken: 'minecraft-token' },
+			},
+		})
+	})
+
+	it('routes a development account sign-in by username', async () => {
+		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+			const body = JSON.parse(String(init.body))
+			if (body.path === 'auth:signIn') {
+				return success({ tokens: { token: 'token', refreshToken: 'refresh' } })
+			}
+			return success({
+				id: 'user-1',
+				userId: 'user-1',
+				username: 'owner',
+				created: '2026-01-01T00:00:00.000Z',
+			})
+		})
+		const client = new ConvexAmberiteAuthClient({ adapter: createAdapter(fetchFn) })
+
+		await client.signInWithDevAccount({ username: 'owner' })
+
+		const bodies = await requestBodies(fetchFn)
+		expect(bodies[0]).toMatchObject({
+			path: 'auth:signIn',
+			args: {
+				provider: 'amberite-dev-account',
+				params: { username: 'owner' },
 			},
 		})
 	})

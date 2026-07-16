@@ -1,5 +1,6 @@
 import type {
 	AmberiteAuthClient,
+	AmberiteDevAccountSignInRequest,
 	AmberiteMinecraftTokenSignInRequest,
 	AmberiteSession,
 } from './auth-client'
@@ -33,6 +34,12 @@ export class MockAmberiteAuthClient implements AmberiteAuthClient {
 
 	async signInWithMinecraftToken(
 		_request: AmberiteMinecraftTokenSignInRequest,
+	): Promise<AmberiteSession> {
+		return this.requireSession()
+	}
+
+	async signInWithDevAccount(
+		_request: AmberiteDevAccountSignInRequest,
 	): Promise<AmberiteSession> {
 		return this.requireSession()
 	}

@@ -62,7 +62,7 @@ pub(crate) async fn execute(args: InstallArgs) -> Result<()> {
     }
     let data_dir = data_dir_from_env_file(&env_file).ok_or_else(|| {
         color_eyre::eyre::eyre!(
-            "AMBERITE_DATA_DIR is required in the Core environment file."
+            "CORE_DATA_DIR is required in the Core environment file."
         )
     })?;
     install_systemd_service(&env_file, &unit, &data_dir, args.no_start).await?;
@@ -78,7 +78,7 @@ fn data_dir_from_env_file(path: &std::path::Path) -> Option<PathBuf> {
         .lines()
         .find_map(|line| {
             let (key, value) = line.split_once('=')?;
-            (key.trim() == "AMBERITE_DATA_DIR")
+            (key.trim() == "CORE_DATA_DIR")
                 .then(|| PathBuf::from(value.trim().trim_matches('"')))
         })
 }

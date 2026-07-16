@@ -55,9 +55,19 @@ class LocalStorageQueueStore implements PersistentQueueStore {
 const queueStore = new LocalStorageQueueStore()
 
 export function createDesktopAdapter(): PlatformAdapter {
+	const useBrowserFetchForConvex =
+		config.convexUrl.startsWith('http://localhost:') ||
+		config.convexUrl.startsWith('http://127.0.0.1:')
+	const convexOrigin = new URL(config.convexUrl).origin
+	const fetchFn: typeof fetch = async (input, init) => {
+		const url = input instanceof Request ? input.url : input.toString()
+		if (useBrowserFetchForConvex && new URL(url, window.location.href).origin === convexOrigin) {
+			return await window.fetch(input, init)
+		}
+		return await tauriFetch(input, init)
+	}
 	return {
-		// Tauri HTTP plugin fetch — routes through Rust, bypasses browser CSP.
-		fetchFn: tauriFetch as typeof fetch,
+		fetchFn,
 
 		// Convex relay URL. Empty string disables Convex-relay transport silently.
 		convexUrl: config.convexUrl,

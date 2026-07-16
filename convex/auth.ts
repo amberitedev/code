@@ -3,11 +3,7 @@ import { convexAuth, createAccount, getAuthUserId, retrieveAccount } from '@conv
 import { v } from 'convex/values'
 import { internal } from './_generated/api'
 import { internalMutation, internalQuery, mutation, query } from './_generated/server'
-import {
-	currentAccountFields,
-	publicUser,
-	requireUserId,
-} from './_socialRules'
+import { currentAccountFields, publicUser, requireUserId } from './_socialRules'
 
 interface MinecraftProfile {
 	id: string
@@ -15,8 +11,8 @@ interface MinecraftProfile {
 }
 
 const MINECRAFT_TOKEN_PROVIDER_ID = 'minecraft-token'
+const DEV_ACCOUNT_PROVIDER_ID = 'amberite-dev-account'
 const INVALID_ACCOUNT_ID = 'InvalidAccountId'
-const DEV_PERSONA_ID_PATTERN = /^[a-z0-9_-]{1,32}$/
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,24}$/
 
 function normalizeUuid(raw: string): string {
@@ -39,47 +35,13 @@ async function verifyMinecraftAccessToken(token: string): Promise<MinecraftProfi
 	return (await response.json()) as MinecraftProfile
 }
 
-function devPersonaId(credentials: Record<string, unknown>): string | null {
-	const raw = credentials.devPersonaId
-	if (raw === undefined || raw === null || raw === '') return null
-	if (process.env.AMBERITE_DEV_MODE !== 'true') {
-		throw new Error('devPersonaId is only accepted in Amberite dev mode')
-	}
-	if (typeof raw !== 'string' || !DEV_PERSONA_ID_PATTERN.test(raw)) {
-		throw new Error('devPersonaId must be 1-32 lowercase letters, numbers, underscores, or hyphens')
-	}
-	return raw
-}
-
-function personaAccountId(minecraftUuid: string, personaId: string | null): string {
-	const baseAccountId = `minecraft:${minecraftUuid}`
-	return personaId ? `${baseAccountId}:dev:${personaId}` : baseAccountId
-}
-
-function personaProfile(gamertag: string, accountId: string, personaId: string | null) {
-	if (!personaId) {
-		return {
-			amberiteUserId: accountId,
-			friendCode: createFriendCode(),
-			displayName: gamertag,
-			username: gamertag,
-			normalizedUsername: gamertag.toLowerCase(),
-			onboardedAt: Date.now(),
-		}
-	}
-
-	const label = personaId
-		.split(/[-_]/g)
-		.filter(Boolean)
-		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-		.join(' ')
-	const username = personaId.replace(/-/g, '_')
+function accountProfile(gamertag: string, accountId: string) {
 	return {
 		amberiteUserId: accountId,
 		friendCode: createFriendCode(),
-		displayName: label || gamertag,
-		username,
-		normalizedUsername: username.toLowerCase(),
+		displayName: gamertag,
+		username: gamertag,
+		normalizedUsername: gamertag.toLowerCase(),
 		onboardedAt: Date.now(),
 	}
 }
@@ -105,8 +67,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 
 				const minecraftUuid = normalizeUuid(profile.id)
 				const gamertag = profile.name
-				const personaId = devPersonaId(credentials)
-				const accountId = personaAccountId(minecraftUuid, personaId)
+				const accountId = `minecraft:${minecraftUuid}`
 
 				const existing = await retrieveAccount(ctx, {
 					provider: MINECRAFT_TOKEN_PROVIDER_ID,
@@ -127,15 +88,15 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 					return { userId: existing.user._id }
 				}
 
-				const accountProfile = personaProfile(gamertag, accountId, personaId)
+				const accountDocument = accountProfile(gamertag, accountId)
 				const { user } = await createAccount(ctx, {
 					provider: MINECRAFT_TOKEN_PROVIDER_ID,
 					account: { id: accountId },
-					profile: accountProfile,
+					profile: accountDocument,
 				})
 				await ctx.runMutation(internal.auth.ensureLinkedMinecraftAccount, {
 					userId: user._id,
-					amberiteUserId: accountProfile.amberiteUserId,
+					amberiteUserId: accountDocument.amberiteUserId,
 					accountId,
 					gamertag,
 					minecraftUuid,
@@ -144,7 +105,44 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 				return { userId: user._id }
 			},
 		}),
+		...(process.env.AMBERITE_DEV_MODE === 'true'
+			? [
+					ConvexCredentials({
+						id: DEV_ACCOUNT_PROVIDER_ID,
+						authorize: async (credentials, ctx) => {
+							if (process.env.AMBERITE_DEV_MODE !== 'true') {
+								throw new Error('Amberite development accounts are disabled')
+							}
+							const username = credentials.username
+							if (typeof username !== 'string' || !USERNAME_PATTERN.test(username)) {
+								throw new Error('Invalid Amberite development account username')
+							}
+							const userId = await ctx.runQuery(internal.auth.devAccountUserId, {
+								username,
+							})
+							if (!userId) throw new Error(`Amberite dev user ${username} does not exist`)
+							return { userId }
+						},
+					}),
+				]
+			: []),
 	],
+})
+
+export const devAccountUserId = internalQuery({
+	args: { username: v.string() },
+	handler: async (ctx, args) => {
+		if (process.env.AMBERITE_DEV_MODE !== 'true') {
+			throw new Error('Amberite development accounts are disabled')
+		}
+		const user = await ctx.db
+			.query('users')
+			.withIndex('by_normalized_username', (q) =>
+				q.eq('normalizedUsername', args.username.toLowerCase()),
+			)
+			.unique()
+		return user && !user.deletedAt ? user._id : null
+	},
 })
 
 export const usernameAvailable = internalQuery({
@@ -153,7 +151,9 @@ export const usernameAvailable = internalQuery({
 		const username = normalizeUsername(args.username)
 		const existing = await ctx.db
 			.query('users')
-			.withIndex('by_normalized_username', (q) => q.eq('normalizedUsername', username.toLowerCase()))
+			.withIndex('by_normalized_username', (q) =>
+				q.eq('normalizedUsername', username.toLowerCase()),
+			)
 			.first()
 		return existing === null
 	},

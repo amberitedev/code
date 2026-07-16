@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement"
+  short_description: "Implement an approved Amberite prototype"
+  default_prompt: "Use $implement to turn this approved prototype into a complete production slice and PR."

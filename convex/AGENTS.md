@@ -1,87 +1,55 @@
 # convex
 
-Amberite's durable backend. Convex is auth-required by default and is authoritative for Amberite identity, sessions, profiles, friends, blocks, linked Modrinth accounts, encrypted Modrinth tokens, Core pairing credentials, minimal Core list projection, and cross-device sync metadata. Core remains authoritative for Core roles, permissions, bans, invites, instance access, and audit logs. Convex is not a presence server, a generic message bus, or a timer-driven client cache.
+Amberite's durable cloud backend. It stores accounts, profiles, friends, blocks, linked Modrinth accounts, pairing credentials, the minimal Core projection, and sync metadata.
 
-## Communication architecture
+## Important parts
 
-```text
-Desktop / web dashboard
-  ├─ one ConvexClient subscription for durable social state
-  ├─ user actions as authenticated Convex mutations
-  └─ direct WebSocket to the realtime Worker for ephemeral presence
+| Area | Purpose |
+| --- | --- |
+| `schema.ts` | Tables, validators, and indexes |
+| `auth.ts`, `_socialRules.ts` | Identity resolution, authorization, invariants, and public DTO helpers |
+| `social.ts`, `friends.ts`, `profiles.ts` | The durable social session, relationships, and profiles |
+| `presence.ts`, `coreList.ts`, `coreProjection.ts` | Core pairing credentials and the cloud-side Core projection; `presence.ts` is not live presence |
+| `sync.ts` | Durable sync profiles, snapshots, and events |
+| `bridge.ts`, `realtimeBridge.ts` | Private signed authorization bridge used by the realtime Worker |
+| `dev.ts` | Development baselines and helpers enabled by `AMBERITE_DEV_MODE` |
 
-Core
-  └─ direct HTTP/SSE/WebSocket API for local Core control
+Public DTO changes must be mirrored in `packages/amberite-api`.
 
-Cloudflare Worker
-  └─ authenticated bridge calls to Convex only for startup scope resolution,
-     invalidation, and recipient lookup; normal online/offline transitions
-     do not read or write Convex
-```
+## Development deployments
 
-The normal desktop session uses `social.sessionState` as one authorization-preserving durable subscription. Convex reruns it only when its durable dependencies change. Social mutations change durable state and let that subscription converge; they must not trigger a client-wide refresh chain.
+- **Cloud development = `main`:** the shared remote backend should run the Convex code currently in the primary checkout on `main`. Only the primary checkout pushes updates to it. Worktrees can use it when their change does not modify `convex/`.
+- **Local development = PR/worktree:** a branch that changes `convex/` runs its own local backend. Starting it selects local Convex for that worktree, and `app:dev` automatically connects apps from that worktree to its local URLs.
+- **Production:** separate from this workflow and never selected or deployed by these helpers.
 
-Use narrowly scoped subscriptions only while the relevant screen is open, such as `sync.serverProfilesState` and `sync.profileState`. Keep expensive, action-oriented work such as whitelist resolution on demand. One-shot HTTP requests remain acceptable for auth bootstrap, debounced search, and non-subscription callers, but are not the default state transport.
+Each worktree has its own `.env.local`, `.convex` database, process state, and automatically assigned ports. Multiple worktrees can run local Convex at the same time; one worktree intentionally runs only one local Convex process.
 
-## Non-negotiable rules
+Local baselines:
 
-- Do not add heartbeats, presence tables, client polling, periodic refreshes, or "event then fetch again" flows. Time spent with the app open must not create Convex function calls.
-- Do not use `messaging.ts`, relay tables, receipts, or a generic recipient/sender envelope for new functionality. Durable user actions are mutations; transient desktop online state belongs in the realtime Worker.
-- A client never supplies authority. Every query, mutation, action, bridge request, and returned field must derive authorization from the authenticated identity and the current database state.
-- Return explicit public DTOs. Never return raw user, group, Core, or membership documents when they contain credentials, hashes, private metadata, or internal-only fields.
-- Convex is the only owner of durable social authorization. Cloudflare may cache only connection-lifetime or TTL-bound session data and must ask the bridge for current fan-out recipients.
-- Keep queries bounded and indexed. Do not replace a composed subscription with an N+1 client fan-out.
-- Treat schema changes as migrations. Widen, backfill, switch callers, then remove old fields/tables; do not combine a destructive schema change with an incompatible client release.
+- `accounts`: `owner`, `friend`, and `other`, with no relationships.
+- `group`: the same accounts plus a group containing `owner` and `friend`.
 
-## Realtime bridge
+## Development commands
 
-`realtimeBridge.ts` is a service-only HTTP endpoint. The Worker signs bounded requests with `REALTIME_BRIDGE_HMAC_SECRET`; its request ID and timestamp bound replay risk. It exposes only two operations:
+Run these from the repository root.
 
-- `desktopScope`: resolve a JWT-authenticated user's visible friends and group members.
-- `recipients`: resolve the current authorized audience for an actual desktop lifecycle transition.
+| Command | What it does |
+| --- | --- |
+| `pnpm convex:dev` | Alias for local Convex using the saved baseline or `accounts` |
+| `pnpm convex:dev:local -- accounts` | Select and run this worktree's local backend with the accounts baseline; its apps follow automatically |
+| `pnpm convex:dev:local -- group` | Select and run this worktree's local backend with the group baseline; its apps follow automatically |
+| `pnpm convex:dev:reset -- accounts` | Reset the running local database to accounts |
+| `pnpm convex:dev:reset -- group` | Reset the running local database to group |
+| `pnpm convex:dev:cloud` | Stop this worktree's local backend and point the worktree back to the shared `main` cloud deployment |
+| `pnpm convex:dev:seed-cloud` | From `main`, enable cloud dev mode and ensure `owner`, `friend`, and `other` exist |
+| `pnpm convex:dev:status` | Show the selected deployment and local process, branch, URLs, and baseline |
+| `pnpm convex:dev:stop` | Stop this worktree's local Convex process |
+| `pnpm exec convex dev --configure existing` | One-time cloud development setup for the primary checkout |
+| `pnpm exec convex dev --once --tail-logs disable` | From `main`, push its Convex code once after status confirms cloud is selected |
 
-The bridge is never a public desktop or Core API. Do not add Core presence, general data reads, relay delivery, or regular polling to it. Core credentials are random secrets returned once during pairing; store only their hash here, rotate them on ownership transfer/unpairing, and never return the hash in a public DTO. Core projection sync uses the dedicated HTTP endpoint in `coreProjection.ts`, not generic Convex mutations.
+## Non-obvious rules
 
-## Navigation map
-
-```text
-convex/
-  schema.ts            Durable table definitions, validators, indexes, and bridge replay records
-  auth.ts              Minecraft-backed Convex Auth and first-account social initialization
-  _socialRules.ts      Identity, authorization, invariants, and public DTO helpers
-  profiles.ts          Auth-required Amberite profile reads/search/update
-  social.ts            sessionState subscription and live visibility-scope derivation
-  friends.ts           Friend/profile/search/block mutations and queries
-  coreList.ts          Auth-required minimal Core list and projected member-link reads
-  coreProjection.ts    Credential-authenticated Core projection HTTP endpoint
-  modrinth.ts          Linked Modrinth metadata, token encryption, and reconnect status
-  friendGroups.ts      Deprecated migration table API; Core is the new authority
-  groupInvites.ts      Deprecated migration invite API; Core is the new authority
-  presence.ts          Pairing and Core credential lifecycle; not live presence
-  sync.ts              Scoped durable sync-profile/snapshot/event state
-  bridge.ts            Internal desktop-scope queries used only by the realtime bridge
-  realtimeBridge.ts    HMAC-authenticated Worker HTTP boundary and replay protection
-  crons.ts             Bounded cleanup of bridge replay records
-  http.ts              Registration for external Convex HTTP endpoints
-  messaging.ts         Legacy relay code; do not extend and remove after migration
-  dev.ts               Development-only helpers guarded by AMBERITE_DEV_MODE
-  _generated/          Generated Convex bindings; never hand-edit
-```
-
-## How to change this area
-
-1. Start with `schema.ts`, `_socialRules.ts`, and the affected domain file. Read `social.ts` as well when a change affects a durable entity that appears in the shell.
-2. Add or reuse an indexed, authorization-preserving query; extend `sessionState` only for state every signed-in shell needs. Otherwise add a screen-scoped query with a strict bound.
-3. Make mutations idempotent where retries or double-clicks are possible. Enforce ownership, membership, block, ban, and role invariants on the server.
-4. If a durable authorization change affects desktop live visibility, ensure the next Worker transition resolves recipients through `bridge.ts`; the desktop composer must discard now-unauthorized live entries immediately.
-5. Update the public TypeScript contract in `packages/amberite-api` and test both authorization and subscription convergence.
-
-## Deployment and checks
-
-Do not start a long-running watcher. After every source change under `convex/`, deploy the development target before completing the task:
-
-```powershell
-pnpm exec convex dev --once --tail-logs disable
-```
-
-Confirm the target deployment first with `pnpm exec convex env list`. Never document or commit secrets from `.env.local`. Use the migration component and an expand/migrate/narrow rollout for breaking schema work.
+- Only the primary `main` checkout pushes Convex code to cloud development. A worktree that changes `convex/` uses its local backend and never pushes that branch to the shared cloud deployment.
+- Authorization comes from the authenticated identity and current database state, never client-supplied ownership, roles, audiences, or private fields.
+- Do not add transient presence, heartbeats, polling, or client-wide refresh chains. The live-presence protocol belongs in `apps/realtime`.
+- Breaking schema changes use expand, migrate/backfill, switch callers, then remove the old shape.

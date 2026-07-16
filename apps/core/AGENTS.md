@@ -1,62 +1,44 @@
 # apps/core — Copal
 
-Copal is a Rust/Axum server that manages Minecraft server instances and exposes them to the desktop app.
+Copal is Amberite's Rust/Axum server manager. It manages local Minecraft server instances and exposes authenticated REST, SSE, and console-WebSocket APIs to the desktop app.
 
-Core is authoritative for Core membership, roles, permissions, bans, invites, instance access, and audit logs. Convex receives only a minimal authenticated projection containing Core routing/link state and active member user IDs.
+## Ownership
 
-## Start Here
+Core owns local instances, files, processes, console data, roles, access, and Core-local events. Convex owns durable identity, pairing, friendships, groups, blocks, and social authorization. The Cloudflare realtime Worker owns desktop online presence.
 
-Do not scan, glob, or broad-search the Core tree for orientation. Context is pregenerated in these AGENTS files.
+## Parts
 
-Pick the matching area below, read that AGENTS.md, then read only the source files that are directly relevant to the change. Use search only to find a known symbol, route, table, or type after the relevant area has been selected.
+| Area | Purpose |
+| --- | --- |
+| `src/presentation/` | Axum routes, contracts, authentication, authorization, and protocol handlers |
+| `src/application/` | Workflows and the shared `AppState` |
+| `src/domain/` | Core data types and typed events |
+| `src/ports/` | Storage and process interfaces |
+| `src/infrastructure/` | SQLite, process actors, auth, events, Minecraft installation, Java, Modrinth, and file I/O |
+| `migrations/` | SQLite schema history embedded by SQLx |
 
-## Main Areas
+## Useful facts
 
-- `src/application/` — Core workflows and business behavior.
-- `src/infrastructure/` — concrete adapters: SQLite, process spawning, auth, events, Minecraft install/download code.
-- `src/infrastructure/db/` — SQLite connection and repository implementations.
-- `src/presentation/` — Axum routes, handlers, extractors, HTTP errors.
-- `src/api/` — typed message, envelope, relay, and distribution system.
-- `migrations/` — SQLite schema migrations.
-- `tests/` — integration tests and fixtures.
+1. `src/presentation/router.rs` is the public API map; handlers normally delegate behavior to application services.
+2. SQLite stores durable instance state, while `AppState.instances` stores live process actors during running and transitional states.
+3. Process control is actor-based: start creates a handle, and stop, kill, and command operations communicate through it.
+4. Minecraft installation writes launch metadata that later start operations consume instead of rebuilding launch behavior.
+5. Public Core contracts are mirrored in `packages/amberite-api`; durable social changes belong in Convex, and Core-local changes use the existing SSE or console stream rather than a generic relay.
 
-## Routing
+## Local commands
 
-| Change | Read |
-| ------ | ---- |
-| HTTP route, request, response, status code | `src/presentation/AGENTS.md` |
-| Core behavior or workflow | `src/application/AGENTS.md` |
-| Database query, repository, schema | `src/infrastructure/db/AGENTS.md`, `migrations/AGENTS.md` |
-| Relay, message, envelope, distribution | `src/api/AGENTS.md` |
-| Process start, stop, console lifecycle | `src/infrastructure/AGENTS.md` |
-| Minecraft install, Java, Modrinth, mrpack | `src/infrastructure/AGENTS.md` |
-| Tests | `tests/AGENTS.md` |
+From the repository root, inspect or apply an idempotent Core setup:
 
-## Internal Dependencies
+```bash
+pnpm core:setup -- list
+pnpm core:setup -- offline-instance
+```
 
-- `presentation` calls into `application` and `api`; it should not own durable behavior.
-- `application` coordinates domain data, ports, infrastructure helpers, and `AppState`.
-- `ports` define traits used by application services.
-- `infrastructure` implements ports and performs concrete I/O.
-- `infrastructure/db` owns reusable SQLite repository implementations.
-- `api` owns message vocabulary and relay/distribution concepts; HTTP exposure stays in `presentation`.
-- `migrations` define the database shape that DB repositories and raw SQL expect.
-- `tests` exercise Core through HTTP with test fixtures.
+From `apps/core/`, run the focused checks:
 
-## External Dependencies
+```bash
+cargo check
+cargo run -- check
+```
 
-- Axum/Tower — HTTP server, routing, middleware, WebSocket/SSE handling.
-- SQLx/SQLite — persistence and migrations.
-- Tokio — async runtime and background tasks.
-- Reqwest — outbound HTTP for Modrinth, auth/JWKS, Convex pairing, and other remote APIs.
-- Rustls/jsonwebtoken — JWT validation.
-- DashMap/broadcast channels — shared runtime maps and event fan-out.
-- Minecraft/Modrinth services — server metadata, project/version lookup, mrpack downloads.
-- Tauri/app frontend clients — consume Core HTTP, WebSocket, and relay APIs.
-
-## Core Constraints
-
-- Push minimal projection snapshots to Convex after setup and membership changes. Projection sync failures should log a warning and must not roll back the local SQLite mutation.
-- Keep files around 200 lines. Ask before going substantially beyond that.
-- Run Core commands from `apps/core/`.
-- Do not run dev/build commands unless explicitly asked.
+When a migration changes, `cargo clean -p copal` makes SQLx re-embed it.

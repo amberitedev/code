@@ -1,7 +1,8 @@
 /**
- * Dev-only utilities for inspecting and resetting social state.
+ * Dev-only utilities for account baselines, inspection, and state resets.
  *
- * Functions: devState, clearCoreLink, resetSocial, cleanupLegacyMockUsers.
+ * Functions: ensureAccounts, applyBaseline, devState, clearCoreLink, resetSocial,
+ * cleanupLegacyMockUsers.
  */
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
@@ -33,6 +34,123 @@ const LEGACY_MOCK_USERNAMES = [
 	'opal',
 	'pine',
 ] as const
+
+const BASELINE_ACCOUNTS = [
+	{ username: 'owner', displayName: 'Owner', friendCode: 'AMB-OWNER001' },
+	{ username: 'friend', displayName: 'Friend', friendCode: 'AMB-FRIEND01' },
+	{ username: 'other', displayName: 'Other', friendCode: 'AMB-OTHER001' },
+] as const
+
+const BASELINE_TABLES = [
+	'authRefreshTokens',
+	'authVerificationCodes',
+	'authVerifiers',
+	'authSessions',
+	'authAccounts',
+	'authRateLimits',
+	'linkedMicrosoftAccounts',
+	'linkedModrinthAccounts',
+	'friendGroups',
+	'friendGroupMembers',
+	'friendRequests',
+	'friendships',
+	'blockedUsers',
+	'friendGroupInvites',
+	'friendGroupBans',
+	'coreList',
+	'coreMemberLinks',
+	'cores',
+	'pairingCores',
+	'syncedProfiles',
+	'profileSnapshots',
+	'modSyncEvents',
+	'messages',
+	'receipts',
+	'realtimeBridgeRequests',
+	'users',
+] as const
+
+/** Ensure the shared cloud development deployment has the standard login accounts. */
+export const ensureAccounts = mutation({
+	args: {},
+	handler: async (ctx) => {
+		assertDev()
+		return await ensureBaselineAccounts(ctx)
+	},
+})
+
+/** Replace a local deployment with one of Amberite's two deterministic baselines. */
+export const applyBaseline = mutation({
+	args: { baseline: v.union(v.literal('accounts'), v.literal('group')) },
+	handler: async (ctx, args) => {
+		assertDev()
+		for (const table of BASELINE_TABLES) {
+			const rows = await ctx.db.query(table).collect()
+			for (const row of rows) await ctx.db.delete(row._id)
+		}
+
+		const accounts = await ensureBaselineAccounts(ctx)
+		if (args.baseline === 'accounts') return { baseline: args.baseline, accounts }
+
+		const now = Date.now()
+		const friendGroupId = await ctx.db.insert('friendGroups', {
+			name: 'Development Group',
+			description: 'Disconnected group baseline',
+			ownerUserId: accounts.owner,
+			createdAt: now,
+			updatedAt: now,
+		})
+		await Promise.all([
+			ctx.db.insert('friendGroupMembers', {
+				friendGroupId: friendGroupId.toString(),
+				userId: accounts.owner,
+				role: 'owner',
+				createdAt: now,
+				updatedAt: now,
+			}),
+			ctx.db.insert('friendGroupMembers', {
+				friendGroupId: friendGroupId.toString(),
+				userId: accounts.friend,
+				role: 'member',
+				createdAt: now,
+				updatedAt: now,
+			}),
+		])
+		return { baseline: args.baseline, accounts, friendGroupId }
+	},
+})
+
+async function ensureBaselineAccounts(ctx: MutationCtx) {
+	const accountIds: Record<(typeof BASELINE_ACCOUNTS)[number]['username'], string> = {
+		owner: '',
+		friend: '',
+		other: '',
+	}
+	for (const account of BASELINE_ACCOUNTS) {
+		const existing = await ctx.db
+			.query('users')
+			.withIndex('by_normalized_username', (q) =>
+				q.eq('normalizedUsername', account.username),
+			)
+			.unique()
+		if (existing) {
+			accountIds[account.username] = existing._id.toString()
+			continue
+		}
+		const values = {
+			name: account.displayName,
+			displayName: account.displayName,
+			username: account.username,
+			normalizedUsername: account.username,
+			friendCode: account.friendCode,
+			amberiteUserId: `dev:${account.username}`,
+			onboardedAt: Date.now(),
+		}
+		const userId = await ctx.db.insert('users', values)
+		accountIds[account.username] = userId.toString()
+	}
+	return accountIds
+}
 
 /** Full snapshot of social state — handy for inspecting flows from DevTools. */
 export const devState = query({

@@ -52,7 +52,7 @@ impl Config {
             ));
         }
         Ok(Self {
-            data_dir: PathBuf::from(required_env("AMBERITE_DATA_DIR")?),
+            data_dir: PathBuf::from(required_env("CORE_DATA_DIR")?),
             convex_url: convex_deployment_url(&required_env("CONVEX_URL")?)?,
             public_url: required_env("AMBERITE_PUBLIC_URL")?,
             port: required_env("PORT")?

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Amberite — What's Left</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+				background: #0d0f12;
+				color: #edf0f4;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				margin: 0;
+				background: #0d0f12;
+				color: #edf0f4;
+				font-size: 16px;
+				line-height: 1.6;
+			}
+
+			main {
+				width: min(820px, calc(100% - 40px));
+				margin: 0 auto;
+				padding: 56px 0 80px;
+			}
+
+			h1 {
+				margin: 0 0 48px;
+				font-size: clamp(2rem, 5vw, 3.25rem);
+				font-weight: 500;
+				letter-spacing: -0.04em;
+				line-height: 1.1;
+			}
+
+
+			section {
+				margin-bottom: 48px;
+			}
+
+			h2 {
+				margin: 0;
+				padding-bottom: 12px;
+				border-bottom: 1px solid #30343a;
+				font-size: 1.2rem;
+				font-weight: 500;
+			}
+
+			ul {
+				margin: 0;
+				padding-left: 22px;
+			}
+
+			li {
+				padding: 16px 0 16px 4px;
+				border-bottom: 1px solid #23272d;
+			}
+
+			li::marker {
+				color: #8d96a2;
+			}
+
+			strong {
+				display: block;
+				margin-bottom: 3px;
+				color: #edf0f4;
+				font-size: 1.05rem;
+				font-weight: 500;
+			}
+
+			span {
+				display: block;
+				color: #a6adb7;
+				font-size: 0.9rem;
+			}
+
+
+			@media (max-width: 560px) {
+				main {
+					width: min(100% - 28px, 820px);
+					padding-top: 36px;
+				}
+
+				h1 {
+					margin-bottom: 36px;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>What's left</h1>
+
+			<section>
+				<h2>Accounts and social</h2>
+				<ul>
+					<li>
+						<strong>Account settings</strong>
+						<span>Put profile, privacy, linked accounts, play accounts, notifications, blocked users, sessions, sign-out, and deletion in one working screen.</span>
+					</li>
+					<li>
+						<strong>Secondary Minecraft play accounts</strong>
+						<span>Let users verify, select, and remove additional Minecraft accounts without changing their Amberite identity.</span>
+					</li>
+					<li>
+						<strong>Session management</strong>
+						<span>Show signed-in devices and let users revoke another active session.</span>
+					</li>
+					<li>
+						<strong>Account deletion</strong>
+						<span>Clearly explain what happens to profiles, friendships, groups, play accounts, Core pairing, and server data.</span>
+					</li>
+					<li>
+						<strong>Modrinth account linking</strong>
+						<span>Add the authorization flow, connection state, profile link, unlinking, and clear explanations of which actions require it.</span>
+					</li>
+					<li>
+						<strong>User profiles and privacy</strong>
+						<span>Add the fixed profile layout, section-level visibility, relationship-aware views, privacy previews, and protected group visibility.</span>
+					</li>
+					<li>
+						<strong>Friend relationship states</strong>
+						<span>Complete incoming and outgoing requests, cancellation, resolution, blocking rules, blocked-user management, and durable notifications.</span>
+					</li>
+					<li>
+						<strong>Rich presence</strong>
+						<span>Show online state, session duration, permitted modpack and server activity, privacy controls, and stale activity cleanup.</span>
+					</li>
+					<li>
+						<strong>Play invitations</strong>
+						<span>Let eligible friends send, receive, accept, decline, and dismiss invitations that enter the normal Join flow.</span>
+					</li>
+					<li>
+						<strong>Private groups</strong>
+						<span>Complete group creation, profiles, editing, membership, Core availability, leaving, unpairing, and safe deletion.</span>
+					</li>
+					<li>
+						<strong>Group invitations</strong>
+						<span>Add Owner invitations, member proposals, Owner approval, invite links, join requests, expiry, rotation, revocation, and clear states.</span>
+					</li>
+					<li>
+						<strong>Roles and per-server access</strong>
+						<span>Use only Owner, Admin, and Limited roles and keep navigation, controls, server membership, and authorization synchronized.</span>
+					</li>
+					<li>
+						<strong>Notification inbox</strong>
+						<span>Create one durable inbox for social requests, invitations, approvals, role changes, snapshot updates, server failures, and Core problems.</span>
+					</li>
+				</ul>
+			</section>
+
+			<section>
+				<h2>Onboarding, Copal, and networking</h2>
+				<ul>
+					<li>
+						<strong>First-run onboarding</strong>
+						<span>Support local Core owners, remote Core owners, and members who do not need a Core, with resumable progress and clear recovery.</span>
+					</li>
+					<li>
+						<strong>Automatic local Copal installation</strong>
+						<span>Download, configure, start, and pair Copal from the Windows Desktop App without terminal work or copied codes.</span>
+					</li>
+					<li>
+						<strong>Remote Copal installation</strong>
+						<span>Provide supported Windows and Ubuntu installation paths with pairing codes and understandable failure messages.</span>
+					</li>
+					<li>
+						<strong>Copal recovery and removal</strong>
+						<span>Add reconnection, credential reset, repair, unpairing, safe uninstall, and separate permanent data deletion.</span>
+					</li>
+					<li>
+						<strong>Copal CLI</strong>
+						<span>Provide install, service control, status, pairing, logs, version, update, health checks, repair, uninstall, and automation-friendly output.</span>
+					</li>
+					<li>
+						<strong>Private Core health</strong>
+						<span>Report online, offline, stale, incompatible, unreachable, and locally blocked states without exposing private addresses.</span>
+					</li>
+					<li>
+						<strong>Core authorization</strong>
+						<span>Authenticate every management request and enforce the user's group, server, and action permissions on Core.</span>
+					</li>
+					<li>
+						<strong>Automatic firewall setup</strong>
+						<span>Request elevation when required, add or repair supported Windows firewall rules, and explain blocked automation.</span>
+					</li>
+					<li>
+						<strong>Router mapping and reachability checks</strong>
+						<span>Create supported mappings, verify external Minecraft and management access, retry checks, and remove obsolete mappings.</span>
+					</li>
+					<li>
+						<strong>Layered network diagnosis</strong>
+						<span>Identify Core, firewall, router, carrier-grade NAT, provider, address, and Minecraft configuration failures and show the exact correction.</span>
+					</li>
+				</ul>
+			</section>
+
+			<section>
+				<h2>Home, Library, and discovery</h2>
+				<ul>
+					<li>
+						<strong>Home dashboard</strong>
+						<span>Show Continue Playing, required updates, assigned servers, Core problems, friends online, invitations, approvals, and important events.</span>
+					</li>
+					<li>
+						<strong>Combined Library</strong>
+						<span>Clearly separate local clients, custom clients, synchronized servers, and saved public servers with complete search, filter, sort, and state information.</span>
+					</li>
+					<li>
+						<strong>Instance management</strong>
+						<span>Complete client creation, import, duplication, customization, repair, removal, and the correct Worlds visibility rules.</span>
+					</li>
+					<li>
+						<strong>Modrinth content installation</strong>
+						<span>Complete compatibility filters, dependency explanations, target selection, progress, update behavior, and clear incompatibility errors.</span>
+					</li>
+					<li>
+						<strong>Public Modrinth server flows</strong>
+						<span>Complete saving, required-profile installation and updates, play-account selection, joining, and unavailable-state explanations.</span>
+					</li>
+				</ul>
+			</section>
+
+			<section>
+				<h2>Server management</h2>
+				<ul>
+					<li>
+						<strong>Server creation paths</strong>
+						<span>Add creation from Modrinth modpacks, local client profiles, existing servers, and backups with validation, progress, rollback, roles, and initial snapshots.</span>
+					</li>
+					<li>
+						<strong>Lifecycle states and safety</strong>
+						<span>Complete operation progress, conflicting-action prevention, crash handling, force-stop warnings, rename, and safe deletion choices.</span>
+					</li>
+					<li>
+						<strong>Logs and crash handling</strong>
+						<span>Add persistent console history, search, lifecycle logs, previous Minecraft logs, crash reports, downloads, error separation, and direct repair links.</span>
+					</li>
+					<li>
+						<strong>Player administration</strong>
+						<span>Show connected players and add kick, ban, unban, operator, whitelist, automatic access, and access-disagreement handling.</span>
+					</li>
+					<li>
+						<strong>File-management failure states</strong>
+						<span>Complete upload progress, conflicts, directory export, unsafe live edits, refresh behavior, permissions, locks, size limits, and invalid-file errors.</span>
+					</li>
+					<li>
+						<strong>Settings and Java runtime management</strong>
+						<span>Preserve unknown properties, detect and repair Java, configure memory safely, show restart requirements, validate changes, and restore the last working settings.</span>
+					</li>
+					<li>
+						<strong>Server content management</strong>
+						<span>Complete project identification, dependency handling, updates, replacement, removal, server/client impact explanations, and modpack upgrades.</span>
+					</li>
+					<li>
+						<strong>Backup and restore</strong>
+						<span>Add names, notes, metadata, download, recovery backups before restore, progress, interruption recovery, deletion, and import-as-new-server.</span>
+					</li>
+				</ul>
+			</section>
+
+			<section>
+				<h2>Synchronization and play</h2>
+				<ul>
+					<li>
+						<strong>Snapshot publishing</strong>
+						<span>Create named and versioned client snapshots with authors, notes, change review, history, member notifications, and server-only file exclusion.</span>
+					</li>
+					<li>
+						<strong>Synchronized installation and updates</strong>
+						<span>Show Install or Update when required, display every stage, resume safely, verify the result, preserve local data, and explain failures.</span>
+					</li>
+					<li>
+						<strong>Personal client overrides</strong>
+						<span>Preserve compatible client-only mods, configs, resource packs, and shaders while detecting conflicts with required updates.</span>
+					</li>
+					<li>
+						<strong>Server drift management</strong>
+						<span>Detect mod and config differences and let managers revert, keep a server-only override, publish a new snapshot, or ignore once.</span>
+					</li>
+					<li>
+						<strong>One-click Join</strong>
+						<span>Connect play-account selection, installation, updates, Core health, networking, whitelist, server state, launch, and automatic address supply.</span>
+					</li>
+				</ul>
+			</section>
+
+			<section>
+				<h2>Recovery, Website, and Version 1.0 release</h2>
+				<ul>
+					<li>
+						<strong>Client and server repair</strong>
+						<span>Detect damaged installations, repair deterministic problems, preserve user data, and give precise manual recovery when automatic repair is unsafe.</span>
+					</li>
+					<li>
+						<strong>Copal repair</strong>
+						<span>Detect and repair storage, permission, runtime, database, process, and configuration problems without overwriting server data.</span>
+					</li>
+					<li>
+						<strong>Amberite Website</strong>
+						<span>Deliver product information, downloads, documentation, release notes, service status, account settings, profiles, friends, groups, and invitations.</span>
+					</li>
+					<li>
+						<strong>Component compatibility</strong>
+						<span>Version the Desktop App, Copal, and Platform independently and coordinate compatible, required, automatic, and rollback updates.</span>
+					</li>
+					<li>
+						<strong>Production releases</strong>
+						<span>Publish signed Windows Desktop installers, Windows and Ubuntu Copal downloads, updates, release notes, compatibility information, and production services.</span>
+					</li>
+					<li>
+						<strong>Release failure recovery</strong>
+						<span>Prevent failed releases from appearing available, roll back unhealthy Platform and Website releases, and preserve running Minecraft servers during management failures.</span>
+					</li>
+					<li>
+						<strong>Version 1.0 acceptance journeys</strong>
+						<span>Verify the complete Owner, Admin, and Limited member flows in production with no mock data, dead controls, unfinished routes, or unexplained failures.</span>
+					</li>
+				</ul>
+			</section>
+
+		</main>
+	</body>
+</html>

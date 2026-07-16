@@ -19,6 +19,7 @@ use tauri_plugin_fs::FsExt;
 use theseus::prelude::*;
 
 mod api;
+mod dev;
 mod error;
 
 #[cfg(target_os = "macos")]
@@ -109,6 +110,19 @@ fn restart_app(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn get_amberite_dev_config() -> Option<dev::DevAppConfig> {
+    dev::config().cloned()
+}
+
+#[tauri::command]
+fn complete_amberite_dev_account_switch(
+    request_id: String,
+    error: Option<String>,
+) {
+    dev::complete_account_switch(request_id, error);
+}
+
+#[tauri::command]
 async fn set_restart_after_pending_update(
     should_restart: bool,
 ) -> api::Result<()> {
@@ -122,6 +136,7 @@ async fn set_restart_after_pending_update(
 // if Tauri app is called with arguments, then those arguments will be treated as commands
 // ie: deep links or filepaths for .mrpacks
 fn main() {
+    dev::prepare();
     /*
         tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
             ERROR > WARN > INFO > DEBUG > TRACE
@@ -160,7 +175,7 @@ fn main() {
         );
     }
 
-    if env::var("AMBERITE_DISABLE_SINGLE_INSTANCE").as_deref() != Ok("1") {
+    if dev::config().is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(
             |app, args, _cwd| {
                 if let Some(payload) = args.get(1) {
@@ -242,12 +257,14 @@ fn main() {
                 tracing::warn!("Failed to set window shadow: {e}");
             }
 
-            if let Ok(title) = env::var("AMBERITE_DEVM_NAME")
+            if let Some(title) = dev::config().map(|config| &config.title)
                 && let Some(window) = app.get_window("main")
-                && let Err(e) = window.set_title(&title)
+                && let Err(e) = window.set_title(title)
             {
-                tracing::warn!("Failed to set devm window title: {e}");
+                tracing::warn!("Failed to set dev window title: {e}");
             }
+
+            dev::start_control(app.handle().clone());
 
             Ok(())
         });
@@ -284,6 +301,8 @@ fn main() {
             toggle_decorations,
             show_window,
             restart_app,
+            get_amberite_dev_config,
+            complete_amberite_dev_account_switch,
         ]);
 
     tracing::info!("Initializing app...");

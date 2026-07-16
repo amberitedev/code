@@ -1,0 +1,2545 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Amberite Alpha Readiness Review and Roadmap</title>
+		<style>
+			:root {
+				color-scheme: light;
+				--ink: #17212b;
+				--muted: #5d6875;
+				--line: #d9dee5;
+				--paper: #ffffff;
+				--soft: #f5f7f9;
+				--accent: #c65318;
+				--accent-soft: #fff2e9;
+				--danger: #a82b2b;
+				--danger-soft: #fff0f0;
+				--warning: #8b5a00;
+				--warning-soft: #fff7df;
+				--good: #176b46;
+				--good-soft: #eaf8f1;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			html {
+				scroll-behavior: smooth;
+			}
+
+			body {
+				margin: 0;
+				background: var(--soft);
+				color: var(--ink);
+				font-family:
+					system-ui,
+					-apple-system,
+					BlinkMacSystemFont,
+					'Segoe UI',
+					sans-serif;
+				font-size: 16px;
+				line-height: 1.58;
+			}
+
+			a {
+				color: #8d3b12;
+				text-underline-offset: 0.15em;
+			}
+
+			a:focus-visible {
+				outline: 3px solid #e8844e;
+				outline-offset: 3px;
+			}
+
+			.skip-link {
+				position: absolute;
+				left: 1rem;
+				top: -5rem;
+				z-index: 10;
+				padding: 0.7rem 1rem;
+				background: var(--paper);
+				border: 1px solid var(--line);
+				border-radius: 0.4rem;
+			}
+
+			.skip-link:focus {
+				top: 1rem;
+			}
+
+			header,
+			main,
+			footer {
+				width: min(1180px, calc(100% - 2rem));
+				margin-inline: auto;
+			}
+
+			header {
+				margin-top: 1rem;
+				padding: clamp(1.4rem, 4vw, 3rem);
+				background: #20262d;
+				color: #ffffff;
+				border-radius: 0.7rem;
+			}
+
+			header h1 {
+				max-width: 850px;
+				margin: 0.15rem 0 0.6rem;
+				font-size: clamp(2rem, 5vw, 3.6rem);
+				line-height: 1.06;
+				letter-spacing: -0.035em;
+			}
+
+			header p {
+				max-width: 850px;
+				margin: 0.4rem 0;
+				color: #dfe5eb;
+			}
+
+			.eyebrow {
+				font-size: 0.78rem;
+				font-weight: 750;
+				letter-spacing: 0.12em;
+				text-transform: uppercase;
+				color: #ffb78f;
+			}
+
+			.meta {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.55rem;
+				margin-top: 1.2rem;
+			}
+
+			.meta span {
+				padding: 0.35rem 0.65rem;
+				border: 1px solid #4d5965;
+				border-radius: 999px;
+				font-size: 0.82rem;
+				color: #edf1f5;
+			}
+
+			main {
+				padding-block: 1rem 4rem;
+			}
+
+			section,
+			nav.toc {
+				margin-top: 1rem;
+				padding: clamp(1.1rem, 3vw, 2rem);
+				background: var(--paper);
+				border: 1px solid var(--line);
+				border-radius: 0.7rem;
+			}
+
+			h2,
+			h3,
+			h4 {
+				line-height: 1.22;
+				letter-spacing: -0.018em;
+			}
+
+			h2 {
+				margin: 0 0 1rem;
+				font-size: clamp(1.55rem, 3vw, 2.15rem);
+			}
+
+			h3 {
+				margin: 1.5rem 0 0.55rem;
+				font-size: 1.25rem;
+			}
+
+			h4 {
+				margin: 0.9rem 0 0.35rem;
+				font-size: 1rem;
+			}
+
+			p,
+			ul,
+			ol {
+				margin-top: 0.55rem;
+				margin-bottom: 0.85rem;
+			}
+
+			li + li {
+				margin-top: 0.32rem;
+			}
+
+			code {
+				padding: 0.08rem 0.3rem;
+				background: #eef1f4;
+				border-radius: 0.25rem;
+				font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+				font-size: 0.88em;
+				word-break: break-word;
+			}
+
+			.toc ol {
+				columns: 2 280px;
+				padding-left: 1.25rem;
+			}
+
+			.cards {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+				gap: 0.8rem;
+			}
+
+			.card {
+				padding: 1rem;
+				background: var(--soft);
+				border: 1px solid var(--line);
+				border-top: 4px solid #77818d;
+				border-radius: 0.5rem;
+			}
+
+			.card.danger {
+				background: var(--danger-soft);
+				border-top-color: var(--danger);
+			}
+
+			.card.warning {
+				background: var(--warning-soft);
+				border-top-color: var(--warning);
+			}
+
+			.card.good {
+				background: var(--good-soft);
+				border-top-color: var(--good);
+			}
+
+			.card .label {
+				display: block;
+				font-size: 0.76rem;
+				font-weight: 750;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--muted);
+			}
+
+			.card strong {
+				display: block;
+				margin-top: 0.25rem;
+				font-size: 1.25rem;
+				line-height: 1.25;
+			}
+
+			.card p {
+				margin-bottom: 0;
+				font-size: 0.92rem;
+				color: #46515d;
+			}
+
+			.callout {
+				margin: 1rem 0;
+				padding: 0.85rem 1rem;
+				border-left: 5px solid #77818d;
+				background: var(--soft);
+			}
+
+			.callout.danger {
+				border-left-color: var(--danger);
+				background: var(--danger-soft);
+			}
+
+			.callout.warning {
+				border-left-color: var(--warning);
+				background: var(--warning-soft);
+			}
+
+			.callout.good {
+				border-left-color: var(--good);
+				background: var(--good-soft);
+			}
+
+			.table-wrap {
+				overflow-x: auto;
+				margin: 0.8rem 0 1rem;
+				border: 1px solid var(--line);
+				border-radius: 0.45rem;
+			}
+
+			table {
+				width: 100%;
+				border-collapse: collapse;
+				font-size: 0.92rem;
+			}
+
+			th,
+			td {
+				padding: 0.7rem 0.75rem;
+				text-align: left;
+				vertical-align: top;
+				border-bottom: 1px solid var(--line);
+			}
+
+			th {
+				background: #eef1f4;
+				font-size: 0.78rem;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+			}
+
+			tr:last-child td {
+				border-bottom: 0;
+			}
+
+			.status,
+			.priority {
+				display: inline-block;
+				white-space: nowrap;
+				padding: 0.16rem 0.45rem;
+				border-radius: 999px;
+				font-size: 0.76rem;
+				font-weight: 750;
+			}
+
+			.status.red,
+			.priority.p0 {
+				background: #ffdede;
+				color: #7e1717;
+			}
+
+			.status.amber,
+			.priority.p1 {
+				background: #ffedbd;
+				color: #704600;
+			}
+
+			.status.green {
+				background: #d9f4e7;
+				color: #105c3c;
+			}
+
+			.status.gray,
+			.priority.p2,
+			.priority.p3 {
+				background: #e6e9ed;
+				color: #48515a;
+			}
+
+			.work-item {
+				margin-top: 0.8rem;
+				padding: 1rem;
+				border: 1px solid var(--line);
+				border-left: 5px solid var(--danger);
+				border-radius: 0.45rem;
+			}
+
+			.work-item h3 {
+				margin-top: 0;
+			}
+
+			.work-item .evidence {
+				font-size: 0.88rem;
+				color: var(--muted);
+			}
+
+			.split {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+				gap: 1rem;
+			}
+
+			.timeline {
+				list-style: none;
+				padding: 0;
+				counter-reset: phase;
+			}
+
+			.timeline > li {
+				counter-increment: phase;
+				position: relative;
+				margin: 0 0 0.9rem;
+				padding: 1rem 1rem 1rem 3.5rem;
+				background: var(--soft);
+				border: 1px solid var(--line);
+				border-radius: 0.45rem;
+			}
+
+			.timeline > li::before {
+				content: counter(phase);
+				position: absolute;
+				left: 1rem;
+				top: 1rem;
+				display: grid;
+				place-items: center;
+				width: 1.7rem;
+				height: 1.7rem;
+				border-radius: 50%;
+				background: var(--accent);
+				color: white;
+				font-weight: 750;
+			}
+
+			.timeline h3 {
+				margin: 0;
+			}
+
+			.checklist {
+				list-style: none;
+				padding-left: 0;
+			}
+
+			.checklist li {
+				position: relative;
+				padding-left: 1.65rem;
+			}
+
+			.checklist li::before {
+				content: '□';
+				position: absolute;
+				left: 0;
+				top: -0.08rem;
+				font-size: 1.2rem;
+				font-weight: 700;
+			}
+
+			details {
+				margin-top: 0.75rem;
+				padding: 0.7rem 0.85rem;
+				border: 1px solid var(--line);
+				border-radius: 0.4rem;
+				background: #fafbfc;
+			}
+
+			summary {
+				cursor: pointer;
+				font-weight: 700;
+			}
+
+			.small {
+				font-size: 0.88rem;
+				color: var(--muted);
+			}
+
+			footer {
+				padding: 0 0 3rem;
+				color: var(--muted);
+				font-size: 0.88rem;
+			}
+
+			@media (max-width: 640px) {
+				body {
+					font-size: 15px;
+				}
+
+				header,
+				main,
+				footer {
+					width: min(100% - 1rem, 1180px);
+				}
+
+				th,
+				td {
+					padding: 0.6rem;
+				}
+			}
+
+			@media print {
+				body {
+					background: white;
+					font-size: 10pt;
+				}
+
+				header,
+				main,
+				footer {
+					width: 100%;
+				}
+
+				section,
+				nav.toc,
+				header {
+					break-inside: avoid;
+					box-shadow: none;
+				}
+
+				a {
+					color: inherit;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<a class="skip-link" href="#main">Skip to report</a>
+		<header>
+			<div class="eyebrow">Alpha readiness review</div>
+			<h1>Amberite current-state report and roadmap</h1>
+			<p>
+				A code-, test-, release-, and product-level assessment of what is working, what must be
+				reworked, what can be deferred, and what “ready for alpha” should mean for this project.
+			</p>
+			<div class="meta">
+				<span>Snapshot: 9 July 2026</span>
+				<span>Commit: 7e5e243817ee</span>
+				<span>Branch: main</span>
+				<span>Repository: amberitedev/code</span>
+				<span>Runtime build not started</span>
+			</div>
+		</header>
+
+		<main id="main">
+			<nav class="toc" aria-label="Report contents">
+				<h2>Contents</h2>
+				<ol>
+					<li><a href="#tldr">TL;DR and verdict</a></li>
+					<li><a href="#definition">Recommended alpha definition</a></li>
+					<li><a href="#scorecard">Current scorecard</a></li>
+					<li><a href="#evidence">Verification evidence</a></li>
+					<li><a href="#good">What is already good</a></li>
+					<li><a href="#matrix">Feature/capability matrix</a></li>
+					<li><a href="#blockers">P0 release blockers</a></li>
+					<li><a href="#required">P1 required work</a></li>
+					<li><a href="#decisions">Decisions required</a></li>
+					<li><a href="#roadmap">Recommended roadmap</a></li>
+					<li><a href="#defer">What can be deferred</a></li>
+					<li><a href="#quality">Test and quality strategy</a></li>
+					<li><a href="#exit">Alpha exit checklist</a></li>
+					<li><a href="#changes">Progress since the older audit</a></li>
+					<li><a href="#limitations">Limits and evidence index</a></li>
+				</ol>
+			</nav>
+
+			<section id="tldr">
+				<h2>TL;DR and verdict</h2>
+				<div class="cards">
+					<article class="card danger">
+						<span class="label">Verdict</span>
+						<strong>Not ready for an external alpha</strong>
+						<p>
+							The normal Core build is broken, all remote CI is blocked at checkout, and there are
+							exploitable trust and authorization gaps.
+						</p>
+					</article>
+					<article class="card warning">
+						<span class="label">Evidence-weighted readiness</span>
+						<strong>About 35–45%</strong>
+						<p>
+							This is alpha readiness, not lines-of-code completion. Feature breadth is much higher
+							than release confidence.
+						</p>
+					</article>
+					<article class="card good">
+						<span class="label">Strongest area</span>
+						<strong>Core feature foundation</strong>
+						<p>
+							The direct integration harness passed 130 tests, and the backend covers most server
+							management operations.
+						</p>
+					</article>
+					<article class="card danger">
+						<span class="label">Largest risks</span>
+						<strong>Trust, authority, data, delivery</strong>
+						<p>
+							A malicious Core can receive an account JWT; permissions have split authorities;
+							release and update systems still belong to Modrinth.
+						</p>
+					</article>
+					<article class="card warning">
+						<span class="label">Recommended first alpha</span>
+						<strong>Focused server-manager slice</strong>
+						<p>
+							One owner, one directly connected Core, explicit networking, and a complete
+							server/files/content/backup loop. Hide connected features until safe.
+						</p>
+					</article>
+					<article class="card warning">
+						<span class="label">Rough order of effort</span>
+						<strong>35–70 engineer-days</strong>
+						<p>
+							For the focused slice, after product decisions. A connected sync/social alpha adds
+							roughly 15–30 engineer-days and more security review.
+						</p>
+					</article>
+				</div>
+
+				<div class="callout danger">
+					<strong>The project is not in a “polish-only” state.</strong> It has substantial product
+					code, but current blockers include build failure, credential exposure, privilege
+					escalation, possible destructive traversal, unsafe network exposure, unfinished sync, and
+					a nonfunctional release path. UI polish belongs after those gates.
+				</div>
+
+				<h3>The shortest honest path forward</h3>
+				<ol>
+					<li>Freeze new feature work and decide the alpha scope.</li>
+					<li>Repair checkout, compilation, and required CI checks.</li>
+					<li>Close trust, authorization, data-loss, and development-backdoor risks.</li>
+					<li>Complete one clean-machine product loop on a deliberately narrow platform matrix.</li>
+					<li>Own the Amberite identity, artifacts, configuration, privacy, and documentation.</li>
+					<li>Run the release matrix, restore drill, soak test, and only then polish.</li>
+				</ol>
+			</section>
+
+			<section id="definition">
+				<h2>Recommended alpha definition</h2>
+				<p>
+					For this report, “alpha-ready” means the essential product loop works end to end on the
+					supported platforms; failure and recovery paths are safe; security boundaries are real;
+					installation and updates are honest; remaining work is optional feature breadth or UI
+					refinement. A backend route or visible screen does not count as a finished feature until a
+					user can complete it, receive useful errors, recover, and pass a test.
+				</p>
+
+				<div class="split">
+					<div>
+						<h3>Focused alpha — recommended</h3>
+						<ul>
+							<li>A separately installed, documented Core on the selected host platform.</li>
+							<li>One owner connects and cryptographically verifies that Core.</li>
+							<li>Create, list, start, stop, restart, and delete a server.</li>
+							<li>Console, logs, content/mod management, files, and backup/restore.</li>
+							<li>Reconnect correctly after app/Core restarts and unexpected server exit.</li>
+							<li>Local/LAN or an approved encrypted overlay; no implicit Internet exposure.</li>
+							<li>
+								Signed Amberite artifacts and manual update instructions, or an Amberite-owned
+								updater.
+							</li>
+						</ul>
+					</div>
+					<div>
+						<h3>Connected alpha — larger commitment</h3>
+						<ul>
+							<li>Everything in the focused alpha.</li>
+							<li>Core-authoritative members, roles, invites, bans, and ownership transfer.</li>
+							<li>Secure Convex projections and revoked access convergence.</li>
+							<li>Real synced-profile diff/apply/conflict/recovery behavior.</li>
+							<li>Optional realtime presence with Worker-runtime tests and supported origins.</li>
+							<li>
+								Account deletion, credential rotation, retention, migrations, quotas, and cloud
+								rollback.
+							</li>
+						</ul>
+					</div>
+				</div>
+
+				<div class="callout warning">
+					<strong>Recommendation:</strong> ship the focused slice first. “Deferred” must mean
+					feature-flagged or removed from alpha navigation and copy—not visible controls that
+					silently do less than promised.
+				</div>
+			</section>
+
+			<section id="scorecard">
+				<h2>Current scorecard</h2>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Area</th>
+								<th>Status</th>
+								<th>Current state</th>
+								<th>What moves it to alpha-ready</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Core feature breadth</td>
+								<td><span class="status amber">Substantial</span></td>
+								<td>
+									Broad route and service coverage; 41 library and 130 direct integration tests
+									passed.
+								</td>
+								<td>Compile normally, close P0 safety gaps, certify a loader/platform matrix.</td>
+							</tr>
+							<tr>
+								<td>Build and CI</td>
+								<td><span class="status red">Blocked</span></td>
+								<td>
+									Fresh Linux checkout fails; Core <code>cargo check</code> fails; latest workflows
+									never reach checks.
+								</td>
+								<td>Green required checks from a clean checkout and protected main.</td>
+							</tr>
+							<tr>
+								<td>Desktop integration</td>
+								<td><span class="status amber">Partial</span></td>
+								<td>
+									Frontend typechecks and main server pages exist; no behavioral tests or runtime
+									proof.
+								</td>
+								<td>Complete onboarding/deletion/recovery and pass packaged E2E tests.</td>
+							</tr>
+							<tr>
+								<td>Identity and authorization</td>
+								<td><span class="status red">Unsafe</span></td>
+								<td>
+									Unsigned Core handshake, full account JWT forwarding, split Core/Convex authority,
+									owner escalation.
+								</td>
+								<td>
+									Proof-of-possession Core identity, scoped token, one authority, adversarial tests.
+								</td>
+							</tr>
+							<tr>
+								<td>Data safety and recovery</td>
+								<td><span class="status red">High risk</span></td>
+								<td>
+									Atomic restore improved, but lifecycle races, destructive page migration, probable
+									installation traversal, and incomplete DR remain.
+								</td>
+								<td>
+									Operation state machine, traversal proof, rollback-safe deletion, restore drills.
+								</td>
+							</tr>
+							<tr>
+								<td>Cloud/social/sync</td>
+								<td><span class="status red">Not alpha-safe</span></td>
+								<td>
+									Good primitives, but authority, blocks, deletion, credentials, migrations, tests,
+									and actual sync apply are incomplete.
+								</td>
+								<td>Finish all security invariants or hide the connected surface.</td>
+							</tr>
+							<tr>
+								<td>Distribution and update</td>
+								<td><span class="status red">Nonfunctional</span></td>
+								<td>
+									No tags/releases; Copal packages are unpublished; production env is invalid;
+									updater and filenames point to Modrinth.
+								</td>
+								<td>
+									Amberite-owned artifacts, config, signing, update/manual-upgrade flow, rollback.
+								</td>
+							</tr>
+							<tr>
+								<td>Privacy, legal, branding</td>
+								<td><span class="status red">Blocked</span></td>
+								<td>
+									Modrinth brand assets, latent telemetry integration, support/legal copy, and
+									updater remain; required license files are missing.
+								</td>
+								<td>
+									Remove restricted branding, default telemetry off, publish Amberite
+									policies/licenses.
+								</td>
+							</tr>
+							<tr>
+								<td>Docs and operations</td>
+								<td><span class="status red">Missing</span></td>
+								<td>
+									Root/app READMEs are upstream Modrinth; no trustworthy user install, recovery, or
+									production deployment runbook.
+								</td>
+								<td>
+									Clean-machine docs, operator runbook, known issues, support/security channel.
+								</td>
+							</tr>
+							<tr>
+								<td>UI polish/accessibility</td>
+								<td><span class="status amber">Mixed</span></td>
+								<td>
+									Shared UI reuse and several loading/error states are good; naming, i18n,
+									accessibility, duplicate surfaces, and mock controls remain.
+								</td>
+								<td>Polish after functional gates; run focused accessibility and copy pass.</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section id="evidence">
+				<h2>Verification evidence</h2>
+				<p>
+					Checks were selected to avoid starting development servers or builds. The repository was
+					clean before this report was added. Dynamic cloud services and destructive operations were
+					not exercised.
+				</p>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Check</th>
+								<th>Result</th>
+								<th>Interpretation</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>git diff --check</code></td>
+								<td><span class="status green">Passed</span></td>
+								<td>No whitespace errors in the starting tree.</td>
+							</tr>
+							<tr>
+								<td>Fresh GitHub Actions checkout</td>
+								<td><span class="status red">Failed</span></td>
+								<td>
+									Four AGENTS files are committed as symlinks whose blobs are document text; root
+									and UI targets exceed filename limits.
+								</td>
+							</tr>
+							<tr>
+								<td><code>cargo check</code> in Core</td>
+								<td><span class="status red">Failed</span></td>
+								<td>E0382 moved <code>id</code> in <code>src/cli/admin.rs:275–296</code>.</td>
+							</tr>
+							<tr>
+								<td><code>cargo test --lib</code> in Core</td>
+								<td><span class="status green">41 passed</span></td>
+								<td>Useful unit foundation; does not erase the binary compile failure.</td>
+							</tr>
+							<tr>
+								<td>Direct Core integration artifact</td>
+								<td><span class="status green">130 passed</span></td>
+								<td>
+									One test filtered because it performs a real UPnP mapping; normal
+									<code>cargo test --tests</code> still fails before running.
+								</td>
+							</tr>
+							<tr>
+								<td><code>cargo fmt --check</code> in Core</td>
+								<td><span class="status green">Passed</span></td>
+								<td>Core Rust formatting is clean.</td>
+							</tr>
+							<tr>
+								<td><code>cargo clippy --lib -- -D warnings</code> in Core</td>
+								<td><span class="status red">Failed</span></td>
+								<td>16 errors and one minimum-supported-Rust warning.</td>
+							</tr>
+							<tr>
+								<td>App frontend package test</td>
+								<td><span class="status green">Passed</span></td>
+								<td>
+									This is only <code>vue-tsc --noEmit</code>; no component or E2E behavior is
+									tested.
+								</td>
+							</tr>
+							<tr>
+								<td>Desktop shell lint/test</td>
+								<td><span class="status red">Blocked</span></td>
+								<td>
+									Formatting fails in two files; test needs missing nextest; standalone clippy is
+									blocked by missing Java.
+								</td>
+							</tr>
+							<tr>
+								<td>Amberite API unit tests</td>
+								<td><span class="status green">60 passed</span></td>
+								<td>
+									Ten files pass; 20 live-Core tests are excluded from the normal config and were
+									not run.
+								</td>
+							</tr>
+							<tr>
+								<td>Amberite API lint</td>
+								<td><span class="status red">Failed</span></td>
+								<td>Prettier reported ten files.</td>
+							</tr>
+							<tr>
+								<td>Realtime package test</td>
+								<td><span class="status amber">1 passed, weak</span></td>
+								<td>
+									The test only searches source text for route names; it executes no Worker or
+									Durable Object behavior.
+								</td>
+							</tr>
+							<tr>
+								<td>Realtime binding types</td>
+								<td><span class="status green">Passed</span></td>
+								<td>
+									Generated bindings match the installed Wrangler configuration; the package
+									<code>check</code> script itself is a no-op/help output.
+								</td>
+							</tr>
+							<tr>
+								<td>Convex tests</td>
+								<td><span class="status red">None</span></td>
+								<td>No automated test files or checked-in CI typecheck/deployment validation.</td>
+							</tr>
+							<tr>
+								<td><code>pnpm audit</code> dependency snapshots</td>
+								<td><span class="status red">3 critical / 73 high</span></td>
+								<td>
+									The final full-lock snapshot found 3 critical, 73 high, 86 moderate, and 18 low
+									advisories. An earlier <code>--prod</code> snapshot found 3 critical and 61 high.
+									The app has a critical <code>protobufjs</code> path through PostHog and a high
+									<code>ws</code> path through Convex; final-bundle reachability still needs triage.
+								</td>
+							</tr>
+							<tr>
+								<td>Latest main CI, Copal CI, app build</td>
+								<td><span class="status red">Failed</span></td>
+								<td>All failed at checkout on 9 July 2026; no successful runs were found.</td>
+							</tr>
+							<tr>
+								<td>Runtime UI/Core smoke test</td>
+								<td><span class="status gray">Not run</span></td>
+								<td>
+									Ports 1420 and 16662 were not listening; repository rules prohibit starting dev
+									servers.
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<p class="small">
+					Remote run evidence:
+					<a href="https://github.com/amberitedev/code/actions/runs/29046563205">CI</a>,
+					<a href="https://github.com/amberitedev/code/actions/runs/29046563194">Copal CI</a>, and
+					<a href="https://github.com/amberitedev/code/actions/runs/29046563196">desktop build</a>.
+				</p>
+			</section>
+
+			<section id="good">
+				<h2>What is already good</h2>
+				<div class="split">
+					<div>
+						<h3>Keep and harden</h3>
+						<ul>
+							<li>
+								Core already covers instance CRUD/lifecycle, six loader families, console/RCON,
+								files, content, logs, stats, players, backups, schedules, sync, roles, invites,
+								activity, events, and diagnostics.
+							</li>
+							<li>
+								The Core integration suite meaningfully covers auth, object access, traversal,
+								uploads, backups, and sync; 130 tests passed when the artifact was invoked directly.
+							</li>
+							<li>
+								Recent hardening includes atomic backup restore, SQLite foreign keys/WAL/busy
+								timeout, many path/symlink guards, artifact hash verification, and stream permission
+								rechecks.
+							</li>
+							<li>
+								The shared Amberite API has broad typed operations, central timeouts, safe error
+								classes, and 60 passing pure tests.
+							</li>
+							<li>
+								Pairing/projection primitives use bounded codes, TTLs, random credentials, hash-only
+								storage, constant-time comparison, revisions, and request-size limits.
+							</li>
+							<li>
+								Linked Modrinth tokens are AES-GCM encrypted and public Convex DTOs are generally
+								redacted.
+							</li>
+						</ul>
+					</div>
+					<div>
+						<h3>Product/UI foundation</h3>
+						<ul>
+							<li>
+								The app reuses the established shared UI system and has credible loading, empty,
+								offline, and error states on several main server screens.
+							</li>
+							<li>
+								Server list, runtime controls, console, files, content, backups, access, and
+								activity have real Core-backed implementations—not only visual prototypes.
+							</li>
+							<li>Amberite session tokens are stored in the OS keyring.</li>
+							<li>Native reveal/open helpers canonicalize and constrain paths.</li>
+							<li>Reduced-motion behavior already exists.</li>
+							<li>
+								Most third-party GitHub Actions are commit-pinned; toolchains and lockfiles are
+								pinned, and pnpm enforces a seven-day minimum package age.
+							</li>
+							<li>
+								The Copal workflow already models format/check/test, installer syntax, release
+								version consistency, checksums, and packaging; it needs repair and proof, not
+								replacement.
+							</li>
+							<li>
+								The realtime Worker has a sensible high-level model: short-lived single-use tickets,
+								exact origins, JWT verification, HMAC-signed bridge calls, recent compatibility
+								configuration, Durable Object migration, and observability.
+							</li>
+						</ul>
+					</div>
+				</div>
+
+				<div class="callout good">
+					<strong>Do not rewrite the product from scratch.</strong> Keep the shared UI, Core
+					application/service separation, focused API client, and the documented Core/Convex/Worker
+					authority model. The job is to make those boundaries true in code, delete legacy paths,
+					and prove one loop—not to invent another framework or visual system.
+				</div>
+			</section>
+
+			<section id="matrix">
+				<h2>Feature and capability matrix</h2>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Capability</th>
+								<th>Current state</th>
+								<th>Alpha treatment</th>
+								<th>Main gap</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Account/session</td>
+								<td><span class="status red">Unsafe lifecycle</span></td>
+								<td>Required if connected; otherwise minimize.</td>
+								<td>
+									Delete does not revoke/disable; token acceptance is non-atomic; dev impersonation
+									paths remain.
+								</td>
+							</tr>
+							<tr>
+								<td>Core install/onboarding</td>
+								<td><span class="status red">Promise exceeds code</span></td>
+								<td>Finish honestly.</td>
+								<td>
+									“Create Core” only probes an already-running local service; no sidecar/install
+									lifecycle.
+								</td>
+							</tr>
+							<tr>
+								<td>Core connection/pairing</td>
+								<td><span class="status red">Identity not proven</span></td>
+								<td>Required.</td>
+								<td>Unsigned echo handshake can precede forwarding a full account JWT.</td>
+							</tr>
+							<tr>
+								<td>Server list/create</td>
+								<td><span class="status amber">Implemented, unproven</span></td>
+								<td>Required.</td>
+								<td>Core does not compile; creation defaults/progress/rollback need work.</td>
+							</tr>
+							<tr>
+								<td>Start/stop/restart/delete</td>
+								<td><span class="status red">Incomplete safety</span></td>
+								<td>Required.</td>
+								<td>
+									No desktop delete flow; destructive operations do not share one lifecycle
+									lock/state machine.
+								</td>
+							</tr>
+							<tr>
+								<td>Console/logs/stats</td>
+								<td><span class="status amber">Broad foundation</span></td>
+								<td>Required.</td>
+								<td>
+									Crash state/reasons, startup timeout, process reaping, and player counts are
+									incomplete.
+								</td>
+							</tr>
+							<tr>
+								<td>Files/uploads/archives</td>
+								<td><span class="status red">Normal files can fail</span></td>
+								<td>Required.</td>
+								<td>
+									Default 2 MB multipart limit, buffering, archive expansion limits, pagination,
+									cleanup.
+								</td>
+							</tr>
+							<tr>
+								<td>Mods/modpacks/loaders</td>
+								<td><span class="status amber">Implemented, correctness gaps</span></td>
+								<td>Certify a narrow subset.</td>
+								<td>
+									NeoForge version selection, compatibility, live-file staging, repair rehash, Java
+									provisioning.
+								</td>
+							</tr>
+							<tr>
+								<td>Backups/restore</td>
+								<td><span class="status amber">Improved but incomplete</span></td>
+								<td>Required.</td>
+								<td>
+									No complete Core DB/config/offsite story, download/import flow, disk preflight,
+									RPO/RTO drill; safety backup failure is ignored.
+								</td>
+							</tr>
+							<tr>
+								<td>Settings/network</td>
+								<td><span class="status red">Misleading/unsafe</span></td>
+								<td>Reduce to supported controls.</td>
+								<td>
+									Some pages are localStorage-only; some call Archon; GET status performs UPnP
+									mapping.
+								</td>
+							</tr>
+							<tr>
+								<td>Roles/access/invites</td>
+								<td><span class="status red">Split authority</span></td>
+								<td>Defer or fully fix.</td>
+								<td>
+									UI grants all bits; Convex and Core both mutate authority; outsider invites likely
+									cannot accept.
+								</td>
+							</tr>
+							<tr>
+								<td>Profiles/friends/groups</td>
+								<td><span class="status red">Security invariants broken</span></td>
+								<td>Defer from focused alpha.</td>
+								<td>
+									Owner invite escalation, block bypass, account deletion, ownership and credential
+									problems.
+								</td>
+							</tr>
+							<tr>
+								<td>Synced profiles</td>
+								<td><span class="status red">Not actual sync</span></td>
+								<td>Hide unless completed.</td>
+								<td>
+									Publish/planned metadata exists; no real pull/apply/reconcile/conflict/restore
+									loop.
+								</td>
+							</tr>
+							<tr>
+								<td>Realtime presence</td>
+								<td><span class="status amber">Good design, unproven</span></td>
+								<td>Safely deferrable.</td>
+								<td>Origin/CSP mismatch, one non-runtime test, alarm/cleanup/reconnect issues.</td>
+							</tr>
+							<tr>
+								<td>App/Core distribution</td>
+								<td><span class="status red">Unavailable</span></td>
+								<td>Required.</td>
+								<td>
+									No release; no published Copal package; Docker build/runtime path is broken;
+									production config empty.
+								</td>
+							</tr>
+							<tr>
+								<td>App update/deep links</td>
+								<td><span class="status red">Wrong owner/brand</span></td>
+								<td>Own or disable.</td>
+								<td>Modrinth endpoint/key/files/scheme; group shares a non-public Tauri origin.</td>
+							</tr>
+							<tr>
+								<td>Documentation/support</td>
+								<td><span class="status red">Not Amberite-ready</span></td>
+								<td>Required.</td>
+								<td>
+									READMEs, legal/support links, security contact, installer prerequisites, and
+									recovery docs are stale or absent.
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section id="blockers">
+				<h2>P0 release blockers</h2>
+				<p>
+					These are grouped into workstreams rather than counting every symptom as a separate
+					blocker. All must be closed, disproved by a regression test, or removed from the alpha
+					surface.
+				</p>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-01</span> Make main checkout, compile, and run its real
+						checks
+					</h3>
+					<p>
+						Exactly four AGENTS files are committed with Git mode <code>120000</code> while their
+						blobs contain document contents. Linux checkout fails before every workflow reaches its
+						checks. Locally, Core has a moved-value compile error; Core clippy reports 16 errors;
+						the desktop shell and API formatting checks also fail.
+					</p>
+					<p class="evidence">
+						Evidence: <code>AGENTS.md</code>, <code>apps/frontend/AGENTS.md</code>,
+						<code>packages/api-client/AGENTS.md</code>, <code>packages/ui/AGENTS.md</code>;
+						<code>apps/core/src/cli/admin.rs:275–296</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Every AGENTS document is mode <code>100644</code> and a fresh Linux clone succeeds.
+						</li>
+						<li>
+							Core check, format, clippy, library, and integration commands pass from clean CI.
+						</li>
+						<li>App frontend, shell, API, Worker, and Convex have real required checks.</li>
+						<li>Main is protected only after the checks are green.</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-02</span> Decide the visible alpha contract and hide
+						everything else
+					</h3>
+					<p>
+						Public paths currently expose mock groups, setup teleport controls, permission “view as”
+						overrides, Synced promises, local-only settings, disabled macros, unimplemented
+						networking, and overlapping server-management surfaces. This makes the product look more
+						complete than it is and multiplies the security surface.
+					</p>
+					<p class="evidence">
+						Evidence: <code>apps/app-frontend/src/pages/Index.vue:131</code>,
+						<code>pages/core/Index.vue:202</code>,
+						<code>pages/instance/synced/SyncedIndex.vue:245</code>, Core macros/network status
+						handlers.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>A one-page alpha product contract names supported and excluded features.</li>
+						<li>Excluded routes/actions are feature-gated or absent from production UI.</li>
+						<li>
+							No alpha copy promises installation, sync, networking, or permissions that the code
+							cannot deliver.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-03</span> Cryptographically authenticate Core before
+						sending any credential
+					</h3>
+					<p>
+						The connection check only asks an endpoint to echo a nonce and non-secret Core ID. The
+						client can then retrieve and forward the full Convex account JWT; when the connected
+						Core ID is absent, verification is skipped. A malicious URL can impersonate the Core and
+						receive the token.
+					</p>
+					<p class="evidence">
+						Evidence: <code>packages/amberite-api/src/connection.ts:39–83</code>,
+						<code>packages/amberite-api/src/client.ts:107–151</code>,
+						<code>apps/app-frontend/src/core/connected-core.ts:72–80</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>Pairing pins a Core public key or equivalent proof-of-possession identity.</li>
+						<li>The Core signs the nonce; the client verifies it before loading a token.</li>
+						<li>
+							Core receives a short-lived, audience/Core-scoped token—not the general account JWT.
+						</li>
+						<li>
+							Non-loopback authenticated calls require HTTPS or an approved encrypted overlay.
+						</li>
+						<li>
+							A malicious echo-server regression test proves it receives no Authorization header.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-04</span> Make Core the only authority for roles, access,
+						invites, bans, and ownership
+					</h3>
+					<p>
+						Desktop flows still mutate deprecated Convex friend-group state while Core owns real
+						access. Core removals may not revoke cloud sync access, Convex kicks may not revoke
+						Core, and the server UI currently grants the user <code>0xffff</code> permission bits.
+						Synced permissions derive from a social group role.
+					</p>
+					<p class="evidence">
+						Evidence: <code>apps/app-frontend/src/composables/useSocial.ts:372–390</code>,
+						<code>convex/friendGroups.ts:206–278</code>, <code>convex/sync.ts:55–235</code>,
+						<code
+							>packages/ui/src/layouts/wrapped/hosting/manage/use-core-server-runtime.ts:294</code
+						>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>Every membership/role/invite/ban/ownership action calls Core.</li>
+						<li>Legacy public Convex authority mutations are removed or unreachable.</li>
+						<li>UI capabilities come from an authenticated Core response.</li>
+						<li>Revocation removes Core and cloud access in one explicit E2E test.</li>
+						<li>Outsider invite acceptance uses identity without requiring prior membership.</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-05</span> Repair identity, block, ownership, and credential
+						invariants
+					</h3>
+					<p>
+						Admins can invite a new <code>owner</code>; blocking leaves pending requests that can
+						later recreate friendship; live scope ignores blocks; “delete account” only writes a
+						timestamp; ownership transfer/unlink does not consistently rotate or revoke Core
+						projection credentials.
+					</p>
+					<p class="evidence">
+						Evidence: <code>convex/groupInvites.ts:13–106</code>,
+						<code>convex/friends.ts:185–241</code>, <code>convex/social.ts:180–195</code>,
+						<code>convex/auth.ts:162–171</code>, <code>convex/coreProjection.ts:73–85</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>Only the canonical ownership-transfer flow can create an owner.</li>
+						<li>
+							Block atomically cancels requests/friendship and is rechecked at every interaction.
+						</li>
+						<li>
+							Account deletion revokes sessions, rejects sign-in, handles PII/tokens/ownership, and
+							follows a documented retention policy.
+						</li>
+						<li>Transfer/unpair rotates credentials; old secrets immediately receive 401.</li>
+						<li>Server-side adversarial tests cover direct raw calls, not only UI paths.</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-06</span> Make Core networking explicit, constrained, and
+						encrypted
+					</h3>
+					<p>
+						Core serves plain HTTP, public URL validation is weak, and a GET to
+						<code>/network/status</code> creates a one-hour UPnP mapping for the management API. The
+						desktop accepts arbitrary Core origins while Tauri only permits localhost, Convex, and
+						one personal Tailscale suffix.
+					</p>
+					<p class="evidence">
+						Evidence: <code>apps/core/src/application/network_service.rs:41–101</code>,
+						<code>apps/app/capabilities/plugins.json:24–74</code>,
+						<code>apps/app/tauri.conf.json:116</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Alpha networking matrix is explicit: loopback, LAN, approved overlay, and/or public
+							HTTPS.
+						</li>
+						<li>GET is read-only; UPnP is explicit opt-in, auditable, and cleaned up.</li>
+						<li>
+							Remote management has a supported TLS/proxy/tunnel path and strict URL validation.
+						</li>
+						<li>
+							Tauri capabilities match the supported model without a developer’s private tailnet.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-07</span> Prevent destructive navigation, traversal, and
+						lifecycle races
+					</h3>
+					<p>
+						Opening Library or an instance can silently delete legacy server profiles. Core
+						installation IDs appear to be joined into paths without strict validation and deletion
+						removes the filesystem first. Only start uses the per-instance lock; delete, restore,
+						repair, version change, and sync can race with live operations.
+					</p>
+					<p class="evidence">
+						Evidence: <code>apps/app-frontend/src/pages/library/Index.vue:64</code>,
+						<code>pages/instance/InstanceRouter.vue:37</code>,
+						<code>apps/core/src/application/installation_service.rs</code>, Core
+						lifecycle/backup/sync services.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>Page navigation never performs destructive migration.</li>
+						<li>
+							Legacy migration is explicit, backed up, idempotent, cancellable, and recoverable.
+						</li>
+						<li>
+							Installation IDs reject separators/dot segments and canonical containment tests
+							preserve sentinel data.
+						</li>
+						<li>One operation lock/state machine covers every destructive lifecycle mutation.</li>
+						<li>
+							Deletion is rollback-safe and exposed in the desktop with a clear data-retention
+							choice.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-08</span> Make uploads, archives, and server content safe
+						at real sizes
+					</h3>
+					<p>
+						Core does not configure Axum multipart limits, leaving essential mod/modpack uploads at
+						the 2 MB default. Several paths buffer full files; archive entry count/decompressed size
+						are not bounded. Minecraft jars/mods also run with Core’s OS identity and can access
+						Core secrets and other instances.
+					</p>
+					<p class="evidence">
+						Evidence: Core router/upload/mod/modpack/archive handlers; no
+						<code>DefaultBodyLimit</code> override; Core process spawning model.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>Per-route limits support realistic files and reject oversized bodies with 413.</li>
+						<li>
+							Uploads stream to temporary storage with interruption cleanup and bounded memory.
+						</li>
+						<li>Archive count/expanded-size/ratio limits are tested.</li>
+						<li>
+							Alpha explicitly restricts installs to a trusted owner, or instances are OS/container
+							isolated.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-09</span> Provide one honest, working Core distribution and
+						onboarding path
+					</h3>
+					<p>
+						The UI says it will download/install Copal but only probes localhost. There are no
+						releases, both Copal npm packages return 404, the curl installer cannot find a release,
+						and its generic “latest release” lookup can select an app release. The Docker build
+						context cannot include the Core’s Daedalus path dependency, and its runtime has no Java
+						or Minecraft port plan.
+					</p>
+					<p class="evidence">
+						Evidence: <code>components/core/stages/StartStage.vue</code>,
+						<code>use-core-onboarding-state.ts:158</code>,
+						<code>apps/core/scripts/install.sh:26–40</code>, <code>apps/core/Dockerfile</code>,
+						<code>apps/core/Cargo.toml:140</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Decide managed sidecar versus separately installed Core; make copy and UI match.
+						</li>
+						<li>Publish versioned, checksummed artifacts for a declared Core platform.</li>
+						<li>Installer selects Copal tags explicitly and passes a clean-host smoke test.</li>
+						<li>
+							If Docker is supported, a real container creates, starts, pings, and stops one
+							certified server.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-10</span> Finish Synced end to end or remove it from alpha
+					</h3>
+					<p>
+						The product promises synchronized client/server profiles, but current behavior publishes
+						manifests/snapshots/events as “planned” without a complete
+						pull/apply/reconcile/conflict/ restore path. Creation is non-transactional and can
+						orphan a Core instance; registration failures are suppressed. Synced network controls
+						still call Modrinth Archon.
+					</p>
+					<p class="evidence">
+						Evidence: <code>convex/sync.ts:167–205</code>,
+						<code>pages/instance/synced/SyncedSync.vue:119</code>,
+						<code>providers/setup/creation-modal.ts:171</code>,
+						<code>pages/instance/server/settings/pages/network.vue:222–288</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Focused alpha: all Synced creation/navigation/actions are hidden and data is
+							preserved.
+						</li>
+						<li>
+							Connected alpha: conflict policy, CAS/locking, retry/rollback, quotas, and
+							multi-device convergence pass E2E.
+						</li>
+						<li>No Core page calls an unrelated hosted-server backend.</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-11</span> Own the app identity, production configuration,
+						release, and update path
+					</h3>
+					<p>
+						The app build copies a production env with empty <code>VITE_CONVEX_URL</code>, empty
+						realtime URL, and no required <code>VITE_CONVEX_SITE_URL</code>; Vite hard-fails. Core
+						production <code>CONVEX_URL</code> is empty. App updater key/endpoint, release
+						filenames, bucket URL, workflow names, and deep-link scheme remain Modrinth. The release
+						job lacks content-write permission under current repository defaults. With no tag, the
+						build’s raw commit-hash version fallback is not valid Cargo SemVer, and artifact upload
+						globs match <code>Modrinth App_*</code>
+						even though Tauri now produces Amberite-named bundles.
+					</p>
+					<p class="evidence">
+						Evidence: <code>packages/app-lib/.env.prod:9–11</code>,
+						<code>apps/app-frontend/vite.config.ts:14–49</code>, <code>apps/core/.env.prod:8</code>,
+						<code>apps/app/tauri-release.conf.json:31–35</code>,
+						<code>.github/workflows/theseus-release.yml:24–159</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Permanent reverse-DNS bundle ID, Amberite URL scheme, names, icons, descriptions, and
+							version policy are chosen.
+						</li>
+						<li>
+							Production/staging templates validate all public config without committing secrets.
+						</li>
+						<li>
+							A valid SemVer tag—not the current raw commit-hash fallback—drives package versions.
+						</li>
+						<li>
+							Selected platforms produce signed Amberite artifacts from a tag, and upload globs
+							match Amberite bundle names.
+						</li>
+						<li>
+							Updater is Amberite-owned and upgrade-tested, or disabled with a documented manual
+							path.
+						</li>
+						<li>
+							Release permissions, artifact upload, manifest, rollback, and smoke check are proven
+							in a dry run.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-12</span> Remove restricted upstream branding and make
+						privacy/legal behavior truthful
+					</h3>
+					<p>
+						The repository’s own copying rules require forks to remove Modrinth branding, but app
+						icons, DMG art, covers, UI copy, support/legal/security pages, updater, and deep links
+						remain. The saved telemetry preference defaults on and the app embeds a Modrinth PostHog
+						project/key/host. A normal packaged Tauri hostname likely hits the localhost guard
+						unless explicitly enabled, so actual sending was not proven. Sentry can initialize
+						before the saved telemetry preference is consulted. Core/API/ realtime license coverage
+						is unclear.
+					</p>
+					<p class="evidence">
+						Evidence: <code>COPYING.md:7–21</code>, <code>apps/app/icons</code>,
+						<code>apps/app/dmg/dmg-background.png</code>, <code>helpers/analytics.ts:59–78</code>,
+						<code>packages/app-lib/migrations/20240711194701_init.sql:13</code>,
+						<code>components/ui/settings/PrivacySettings.vue:39–46</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Restricted Modrinth assets/marks and misleading links are removed from the fork and
+							artifacts.
+						</li>
+						<li>
+							Optional telemetry defaults off, is Amberite-owned, is gated before initialization,
+							and has an accurate policy.
+						</li>
+						<li>
+							Privacy, terms, security contact, support, licenses, notices, and data-deletion policy
+							are published.
+						</li>
+						<li>
+							Shipped dependency tree has zero unaccepted critical advisories; the critical
+							PostHog/protobuf path is upgraded or removed.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3>
+						<span class="priority p0">P0-13</span> Remove production development backdoors and
+						disable stale upstream automation
+					</h3>
+					<p>
+						Core debug builds accept predictable <code>dev:&lt;id&gt;</code> ownership and expose an
+						unauthenticated pairing reset. Convex dev mode accepts <code>__actAs</code> and exposes
+						destructive reset/state functions if one environment flag is wrong. The desktop dev
+						persona is not compile-gated. The inherited frontend deployment workflow can target
+						Modrinth domains and Cloudflare/Sentry resources without an Amberite owner guard.
+					</p>
+					<p class="evidence">
+						Evidence: Core auth/setup extractor/config, <code>convex/_socialRules.ts:63–70</code>,
+						<code>convex/dev.ts:37–115</code>, <code>apps/app/src/api/auth.rs:52</code>,
+						<code>.github/workflows/frontend-deploy.yml</code>,
+						<code>apps/frontend/wrangler.jsonc</code>.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							Dev/no-auth requires explicit random local authorization and refuses non-loopback
+							bind.
+						</li>
+						<li>
+							Production cannot activate dev impersonation/reset code; deployment fails closed.
+						</li>
+						<li>All mock/teleport/view-as controls are compile- or feature-gated out.</li>
+						<li>
+							Upstream deploy/release workflows are disabled or rebuilt for Amberite before checkout
+							is repaired.
+						</li>
+					</ul>
+				</article>
+
+				<article class="work-item">
+					<h3><span class="priority p0">P0-14</span> Prove the clean-machine essential loop</h3>
+					<p>
+						There is no behavioral UI/shell suite and no current packaged runtime proof. An alpha
+						cannot be declared from static routes, typechecks, or a manually invoked backend
+						artifact.
+					</p>
+					<h4>Done when</h4>
+					<ul>
+						<li>
+							A clean supported host installs Core and a clean supported desktop installs Amberite.
+						</li>
+						<li>
+							The user connects/pairs, creates a certified server, starts it, joins/pings it, uses
+							console, installs content, edits a file, backs up/restores, stops, and deletes it.
+						</li>
+						<li>
+							App/Core restart, offline Core, failed install, disk pressure, corrupt backup,
+							unauthorized user, and update/rollback cases are exercised.
+						</li>
+						<li>Evidence is recorded in CI artifacts or a signed release checklist.</li>
+					</ul>
+				</article>
+			</section>
+
+			<section id="required">
+				<h2>P1 work required for alpha quality</h2>
+				<p>
+					These should follow the P0 security/scope decisions. A P1 may be explicitly risk-accepted
+					only with a concrete mitigation and owner; it cannot simply disappear from the list.
+				</p>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Workstream</th>
+								<th>Required work</th>
+								<th>Acceptance signal</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Core process recovery</td>
+								<td>
+									Preserve crash/exit reason, reap child/process groups, startup timeout, graceful
+									Core shutdown, orphan reconciliation, optional restart policy.
+								</td>
+								<td>Crash/restart/orphan tests leave no process and report correct state.</td>
+							</tr>
+							<tr>
+								<td>Java and loaders</td>
+								<td>
+									Validate/provision Java, execute version detection, define loader compatibility,
+									respect requested NeoForge version, rehash repair artifacts.
+								</td>
+								<td>Certified matrix such as Vanilla + Paper + Fabric on chosen host.</td>
+							</tr>
+							<tr>
+								<td>Backup/disaster recovery</td>
+								<td>
+									Require successful safety backup, add Core DB/config backup,
+									download/import/offsite story, quota, disk preflight, progress/cancel, RPO/RTO.
+								</td>
+								<td>Documented restore drill on real instance plus corrupted/low-disk cases.</td>
+							</tr>
+							<tr>
+								<td>Database/migrations</td>
+								<td>
+									Historical SQLite upgrade fixtures, integrity recovery; formal Convex
+									expand/backfill/switch/narrow migrations and rollback.
+								</td>
+								<td>Upgrade every supported prior fixture with no data loss.</td>
+							</tr>
+							<tr>
+								<td>Projection/JWKS resilience</td>
+								<td>
+									HTTP timeouts, JWKS refresh behavior, pairing retry, durable projection
+									outbox/retry, transactional setup/reset.
+								</td>
+								<td>Network outage converges after recovery without duplicate or stale access.</td>
+							</tr>
+							<tr>
+								<td>Mods/modpack/sync atomicity</td>
+								<td>
+									Stage and swap live changes, profile locking/CAS, compatibility validation,
+									complete removal/export metadata.
+								</td>
+								<td>Interrupted install/update leaves previous instance usable.</td>
+							</tr>
+							<tr>
+								<td>Quotas and abuse</td>
+								<td>
+									Rate limits, bounded work pools, disk/instance/backup/snapshot limits,
+									invite/request rate/TTL limits, bounded cleanup.
+								</td>
+								<td>Load/abuse tests stay inside declared limits.</td>
+							</tr>
+							<tr>
+								<td>Scheduler/RCON permissions</td>
+								<td>
+									Unique RCON ports; durable task claims/history/retries; require action-specific
+									permissions; add missing unban/inconsistent permission fixes.
+								</td>
+								<td>
+									Concurrent instances do not collide and settings-only users cannot schedule
+									privileged actions.
+								</td>
+							</tr>
+							<tr>
+								<td>DTO/error/version contracts</td>
+								<td>
+									Runtime-validate Core/Convex/SSE/WS frames, machine-readable public errors,
+									API/desktop/Core compatibility policy.
+								</td>
+								<td>
+									Contract tests reject malformed frames and older supported clients interoperate.
+								</td>
+							</tr>
+							<tr>
+								<td>Desktop first run/auth</td>
+								<td>
+									Render clean-install onboarding, centralize session restore/refresh, actionable
+									Core diagnostics, no hidden per-composable rotation.
+								</td>
+								<td>Clean-user E2E reaches the server list without manual state editing.</td>
+							</tr>
+							<tr>
+								<td>Truthful settings/navigation</td>
+								<td>
+									Persist actual Core settings, consolidate duplicate server surfaces, add 404,
+									refresh/reconnect actions, remove wrong backend calls.
+								</td>
+								<td>
+									Every visible control changes the documented authority and displays failure.
+								</td>
+							</tr>
+							<tr>
+								<td>Files/backups UX</td>
+								<td>
+									Pagination beyond 2,000 files, conflict preview, Core backup download, destructive
+									confirmations, progress/cancel/error recovery.
+								</td>
+								<td>Large-directory and large-backup workflows pass without silent truncation.</td>
+							</tr>
+							<tr>
+								<td>Convex security suite</td>
+								<td>
+									Auth, blocks, owner escalation, pairing, credentials, redaction, deletion, sync
+									visibility, and migration tests.
+								</td>
+								<td>Adversarial server-side tests required in CI.</td>
+							</tr>
+							<tr>
+								<td>Realtime if enabled</td>
+								<td>
+									Worker-runtime tests for
+									JWT/origin/tickets/hibernation/alarms/fan-out/invalidation; fix CSP/origin,
+									cleanup, alarm order, reconnect behavior.
+								</td>
+								<td>Cross-platform socket smoke and deployment reconnect pass.</td>
+							</tr>
+							<tr>
+								<td>Production deployment</td>
+								<td>
+									Convex/Worker deploy preflight, domains, secret ownership/rotation, smoke,
+									rollback, environment separation.
+								</td>
+								<td>Staging promotion and rollback runbook executed without printing secrets.</td>
+							</tr>
+							<tr>
+								<td>Observability/support</td>
+								<td>
+									Readiness health, request IDs, structured persistent logs, job health, metrics,
+									safe client errors, crash collection consistent with consent.
+								</td>
+								<td>
+									Operator can diagnose failed install, projection, backup, and crash from a
+									runbook.
+								</td>
+							</tr>
+							<tr>
+								<td>Repository governance</td>
+								<td>
+									Amberite README, licenses, SECURITY, CONTRIBUTING, CODEOWNERS, issue tracker,
+									Dependabot/alerts/scanning, protected branch.
+								</td>
+								<td>
+									Public repository points users to Amberite and has a usable
+									vulnerability-reporting path.
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section id="decisions">
+				<h2>Decisions required before more implementation</h2>
+				<p>
+					Resolve these in writing. Otherwise the team will keep implementing competing assumptions
+					and create more rework.
+				</p>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>ID</th>
+								<th>Decision</th>
+								<th>Recommended alpha choice</th>
+								<th>Why it matters</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>D-01</td>
+								<td>Focused or connected alpha?</td>
+								<td>Focused first.</td>
+								<td>
+									Removes the least mature and most security-sensitive sync/social/presence work
+									from the first external gate.
+								</td>
+							</tr>
+							<tr>
+								<td>D-02</td>
+								<td>Who installs/manages Core?</td>
+								<td>
+									Separately installed Core for the first alpha, unless managed lifecycle is a
+									defining promise.
+								</td>
+								<td>
+									Current UI promises management it does not implement; cross-platform sidecar
+									lifecycle is a separate product.
+								</td>
+							</tr>
+							<tr>
+								<td>D-03</td>
+								<td>Supported platform matrix?</td>
+								<td>One desktop OS/arch plus Linux x64 Core first; expand only after proof.</td>
+								<td>
+									No platform currently has a successful packaged Amberite build, while Copal
+									distribution only targets Linux x64.
+								</td>
+							</tr>
+							<tr>
+								<td>D-04</td>
+								<td>Supported network topology?</td>
+								<td>
+									Loopback/LAN or explicitly approved encrypted overlay; no public plain HTTP or
+									automatic UPnP.
+								</td>
+								<td>
+									Defines Tauri scopes, TLS, identity, threat model, support burden, and copy.
+								</td>
+							</tr>
+							<tr>
+								<td>D-05</td>
+								<td>Authorization owner?</td>
+								<td>Core is sole authority; Convex gets only minimal projection.</td>
+								<td>
+									This is already the documented architecture and avoids contradictory access state.
+								</td>
+							</tr>
+							<tr>
+								<td>D-06</td>
+								<td>Does Synced ship?</td>
+								<td>Hide in focused alpha.</td>
+								<td>
+									Publishing metadata is not synchronization; conflict and rollback semantics are
+									product decisions.
+								</td>
+							</tr>
+							<tr>
+								<td>D-07</td>
+								<td>Does realtime presence ship?</td>
+								<td>Defer; durable social state/direct Core control do not depend on it.</td>
+								<td>
+									The architecture is promising, but runtime tests/origins/cleanup are unfinished.
+								</td>
+							</tr>
+							<tr>
+								<td>D-08</td>
+								<td>Content trust model?</td>
+								<td>Trusted owner-only installs for alpha, clearly documented.</td>
+								<td>
+									Delegated untrusted content requires OS/container isolation to protect Core and
+									other instances.
+								</td>
+							</tr>
+							<tr>
+								<td>D-09</td>
+								<td>Certified loader matrix?</td>
+								<td>Start with a small tested subset such as Vanilla, Paper, and Fabric.</td>
+								<td>
+									Six nominal loaders create a large install/Java/version compatibility matrix.
+								</td>
+							</tr>
+							<tr>
+								<td>D-10</td>
+								<td>Backup guarantee?</td>
+								<td>
+									Define RPO/RTO, local/offsite scope, DB/config coverage, retention, and restore
+									ownership.
+								</td>
+								<td>“Backup exists” is not the same as a tested recovery guarantee.</td>
+							</tr>
+							<tr>
+								<td>D-11</td>
+								<td>Telemetry/support vendors?</td>
+								<td>Default optional telemetry off; use Amberite-owned endpoints/policies only.</td>
+								<td>
+									Current behavior sends to Modrinth and conflicts with the privacy copy and fork
+									obligations.
+								</td>
+							</tr>
+							<tr>
+								<td>D-12</td>
+								<td>Stable identity/version?</td>
+								<td>
+									Choose an owned reverse-DNS bundle ID, <code>amberite://</code>-style scheme, and
+									<code>0.x.y-alpha.n</code> policy before installs.
+								</td>
+								<td>
+									Changing bundle ID/data paths/update keys after testers install creates migration
+									debt.
+								</td>
+							</tr>
+							<tr>
+								<td>D-13</td>
+								<td>Inherited Modrinth surfaces?</td>
+								<td>
+									Keep content API compatibility where licensed/required; hide/remove hosted
+									billing, ads, Plus, support, and upstream deploy surfaces.
+								</td>
+								<td>
+									The inherited app is an implementation base, not automatically part of Amberite’s
+									product promise.
+								</td>
+							</tr>
+							<tr>
+								<td>D-14</td>
+								<td>Minecraft EULA flow?</td>
+								<td>Explicit user acceptance with auditability.</td>
+								<td>
+									Automatic <code>eula=true</code> is a product/legal choice, not an invisible
+									implementation detail.
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section id="roadmap">
+				<h2>Recommended roadmap</h2>
+				<p>
+					The estimates are rough engineering effort, not calendar promises. They exclude external
+					certificate/notarization/account lead time and assume the focused scope. Parallel work is
+					safe only after the authority and network decisions are locked.
+				</p>
+				<ol class="timeline">
+					<li>
+						<h3>Scope freeze and release safety — 2–4 engineer-days</h3>
+						<ul>
+							<li>Resolve D-01 through D-14 and publish the alpha product contract.</li>
+							<li>Disable upstream deploy/release automation before checkout is repaired.</li>
+							<li>
+								Feature-gate Synced, presence, mock/dev controls, macros, auto networking, and
+								unsupported surfaces.
+							</li>
+							<li>Create work items from every P0/P1 with an owner and acceptance test.</li>
+						</ul>
+						<p><strong>Exit:</strong> one agreed alpha scope; no ambiguous visible promise.</p>
+					</li>
+					<li>
+						<h3>Trustworthy repository and CI — 3–6 engineer-days</h3>
+						<ul>
+							<li>Repair Git file modes and Core compile/clippy failures.</li>
+							<li>
+								Add real Convex and Worker checks; make Core integration invocation normal and
+								non-side-effecting.
+							</li>
+							<li>Fix environment templates/tool versions and local prerequisite documentation.</li>
+							<li>
+								Enable protected main, issues, security alerts/scanning, and required checks after
+								green.
+							</li>
+						</ul>
+						<p><strong>Exit:</strong> clean clone + deterministic green required checks.</p>
+					</li>
+					<li>
+						<h3>Security and data-safety gate — 8–15 engineer-days</h3>
+						<ul>
+							<li>Signed/pinned Core identity and scoped Core token.</li>
+							<li>Core-only authority cutover; permission-derived UI.</li>
+							<li>Owner/block/delete/unpair credential invariants and adversarial tests.</li>
+							<li>Remove dev backdoors; explicit secure networking; traversal proof.</li>
+							<li>
+								Global lifecycle state machine; safe deletion; streaming/limited uploads and
+								archives.
+							</li>
+						</ul>
+						<p><strong>Exit:</strong> all P0 security/data issues closed or disproved by tests.</p>
+					</li>
+					<li>
+						<h3>Complete the focused essential loop — 10–20 engineer-days</h3>
+						<ul>
+							<li>Working Core distribution/onboarding on selected host.</li>
+							<li>Certified Java/loader subset; install progress, cancel, retry, rollback.</li>
+							<li>Server CRUD including desktop deletion; lifecycle crash/reconnect/recovery.</li>
+							<li>Files/content/backups at real sizes; restore and restart drills.</li>
+							<li>Consolidate navigation and make settings/errors truthful.</li>
+						</ul>
+						<p><strong>Exit:</strong> automated essential-loop E2E on a clean supported machine.</p>
+					</li>
+					<li>
+						<h3>Amberite-owned release, legal, and operations — 8–15 engineer-days</h3>
+						<ul>
+							<li>
+								Replace restricted branding, identity, deep links, privacy/support/legal content.
+							</li>
+							<li>Remove/rehome telemetry and triage shipped dependency advisories.</li>
+							<li>
+								Signed tagged artifacts, configuration preflight, manual updater or owned updater,
+								rollback.
+							</li>
+							<li>User install/upgrade/recovery docs and operator runbooks.</li>
+							<li>
+								If cloud is in scope, production Convex/Worker deployment, smoke, secret rotation,
+								rollback.
+							</li>
+						</ul>
+						<p>
+							<strong>Exit:</strong> a release candidate can be installed and supported without
+							Modrinth infrastructure ownership.
+						</p>
+					</li>
+					<li>
+						<h3>Release candidate QA and focused polish — 6–10 engineer-days</h3>
+						<ul>
+							<li>Supported OS/host/loader matrix and upgrade-from-prior-alpha test.</li>
+							<li>
+								24–72 hour soak, crash/fault injection, backup restore, disk/network interruption.
+							</li>
+							<li>Security checklist, permission matrix, dependency/license check.</li>
+							<li>
+								Accessibility names/focus, i18n for visible alpha copy, error/empty/loading
+								consistency.
+							</li>
+							<li>Publish known issues and release checklist evidence.</li>
+						</ul>
+						<p><strong>Exit:</strong> every alpha exit checkbox below is true.</p>
+					</li>
+				</ol>
+
+				<div class="callout warning">
+					<strong>If connected features are mandatory:</strong> insert a separate 15–30 engineer-day
+					milestone after the security gate for Core authority cutover, real sync convergence,
+					account/credential lifecycle, formal Convex migrations, quotas, Worker runtime tests,
+					production deployment, and multi-user E2E.
+				</div>
+			</section>
+
+			<section id="defer">
+				<h2>What can be deferred after scope is honest</h2>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Candidate</th>
+								<th>Why it can wait</th>
+								<th>Condition for deferral</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Realtime online presence</td>
+								<td>Durable social state and direct Core control do not require it.</td>
+								<td>
+									Hide online indicators or label unavailable; do not render everyone falsely
+									offline.
+								</td>
+							</tr>
+							<tr>
+								<td>Synced profiles</td>
+								<td>A correct sync engine is a major independent feature.</td>
+								<td>Remove creation/navigation/actions from alpha and preserve existing data.</td>
+							</tr>
+							<tr>
+								<td>Multi-user roles/groups/invites</td>
+								<td>Focused owner-only alpha can prove server management first.</td>
+								<td>Enforce owner-only access; do not leave unsafe partial sharing visible.</td>
+							</tr>
+							<tr>
+								<td>Automatic UPnP/tunnels/Playit</td>
+								<td>Manual secure networking is acceptable for technical alpha testers.</td>
+								<td>No implicit mapping and clear supported-network instructions.</td>
+							</tr>
+							<tr>
+								<td>Macros and generic scheduled console tasks</td>
+								<td>Macros are disabled and generic tasks complicate permissions/reliability.</td>
+								<td>Routes/UI hidden; ordinary lifecycle/backups remain available.</td>
+							</tr>
+							<tr>
+								<td>All six loaders</td>
+								<td>Loader/Java/version combinations multiply test burden.</td>
+								<td>
+									Publish a certified subset and mark all others unsupported, not “probably works.”
+								</td>
+							</tr>
+							<tr>
+								<td>Every desktop OS/architecture</td>
+								<td>Signing/notarization and native behavior need separate proof.</td>
+								<td>Downloads and docs expose only the certified matrix.</td>
+							</tr>
+							<tr>
+								<td>Automatic updater</td>
+								<td>Manual signed upgrades can work for an early technical alpha.</td>
+								<td>
+									The Modrinth updater is disabled and manual upgrade/data compatibility is
+									documented/tested.
+								</td>
+							</tr>
+							<tr>
+								<td>Full localization and animation polish</td>
+								<td>
+									One clear language and accessible, consistent UI are enough for early testers.
+								</td>
+								<td>
+									No broken strings/focus/accessibility on the essential loop; polish stays P2.
+								</td>
+							</tr>
+							<tr>
+								<td>Inherited hosted/billing/ads/Plus/web deployment</td>
+								<td>They are not required for a self-hosted Core manager.</td>
+								<td>Hidden/disabled and unable to call or deploy upstream-owned infrastructure.</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section id="quality">
+				<h2>Test and quality strategy</h2>
+				<p>
+					The target is not maximum coverage. It is reliable evidence around destructive,
+					privileged, and cross-process behavior. Put tests at the authority boundary where a
+					regression can cause credential loss, data loss, or a stranded server.
+				</p>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Layer</th>
+								<th>Minimum alpha suite</th>
+								<th>CI placement</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Core unit/integration</td>
+								<td>
+									Auth/authz, traversal, lifecycle concurrency, upload/archive limits,
+									install/loader, process crash, backup/restore, migration, permissions.
+								</td>
+								<td>Linux required; no real router mutation; explicit fixtures.</td>
+							</tr>
+							<tr>
+								<td>API contract</td>
+								<td>
+									Producer/consumer DTO validation, malformed REST/SSE/WS, timeout/error codes,
+									protocol compatibility, malicious Core handshake.
+								</td>
+								<td>Pure tests plus explicit non-hidden Core fixture job.</td>
+							</tr>
+							<tr>
+								<td>Convex security</td>
+								<td>
+									Direct mutation tests for owner invite, blocks, deletion, credential rotation,
+									projection revocation, redaction, sync visibility, rate limits, migration.
+								</td>
+								<td>Required cloud/backend job.</td>
+							</tr>
+							<tr>
+								<td>Worker runtime</td>
+								<td>
+									Real Vitest Workers pool: JWT, exact origins, single-use ticket, hibernation,
+									alarm order, cleanup pagination, fan-out, invalidation, deployment reconnect.
+								</td>
+								<td>Required only when presence is enabled.</td>
+							</tr>
+							<tr>
+								<td>Desktop component</td>
+								<td>
+									Onboarding, creation, lifecycle pending/errors, destructive confirmation,
+									permission visibility, offline/reconnect, telemetry preference.
+								</td>
+								<td>Fast per-PR behavioral tests.</td>
+							</tr>
+							<tr>
+								<td>Packaged E2E</td>
+								<td>
+									Clean install, Core connect,
+									create/start/join/console/content/files/backup/restore/delete, restart, update.
+								</td>
+								<td>Nightly/release matrix on certified platforms.</td>
+							</tr>
+							<tr>
+								<td>Fault/destructive</td>
+								<td>
+									Disk full, network loss, corrupt archive/backup, process crash, double
+									click/concurrent operations, partial cloud failure, stale credential.
+								</td>
+								<td>Nightly/release; artifacts retained.</td>
+							</tr>
+							<tr>
+								<td>Release/security</td>
+								<td>
+									Fresh checkout, signed artifact verification, dependency/license/secret scan,
+									config preflight, updater/manual migration, rollback.
+								</td>
+								<td>Required tag/release workflow.</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>Manual exploratory pass</h3>
+				<ul>
+					<li>
+						Keyboard-only navigation, visible focus, screen-reader labels on icon/window controls.
+					</li>
+					<li>
+						Smallest supported window, long names, large lists/logs, empty/offline/error states.
+					</li>
+					<li>
+						Fresh account, fresh Core, stale account, revoked member, wrong Core, expired session.
+					</li>
+					<li>Installer/uninstaller behavior and preservation of user server data.</li>
+					<li>
+						Support bundle contains useful diagnostics without tokens, secrets, or personal server
+						data.
+					</li>
+				</ul>
+			</section>
+
+			<section id="exit">
+				<h2>Alpha exit checklist</h2>
+				<div class="split">
+					<div>
+						<h3>Build and release</h3>
+						<ul class="checklist">
+							<li>Fresh Linux checkout succeeds; all required CI checks are green.</li>
+							<li>Main is protected and cannot merge red checks.</li>
+							<li>Versioned signed artifacts exist for every advertised platform.</li>
+							<li>Production config preflight passes without fallback or secret output.</li>
+							<li>Update or manual upgrade and rollback are tested from the prior alpha.</li>
+						</ul>
+					</div>
+					<div>
+						<h3>Security and privacy</h3>
+						<ul class="checklist">
+							<li>
+								Core identity is proof-of-possession verified; account JWT is never forwarded.
+							</li>
+							<li>Core is the sole access authority and permission matrix tests pass.</li>
+							<li>
+								No owner escalation, block bypass, stale credential, or deleted-account access.
+							</li>
+							<li>
+								No implicit management API exposure; remote access is encrypted and documented.
+							</li>
+							<li>No production dev impersonation/reset path.</li>
+							<li>Zero unaccepted critical shipped dependency findings.</li>
+							<li>
+								Telemetry is accurately disclosed, consented, and defaults according to policy.
+							</li>
+						</ul>
+					</div>
+					<div>
+						<h3>Product loop</h3>
+						<ul class="checklist">
+							<li>Clean user can install/connect Core without hidden manual state.</li>
+							<li>Create/install progress, retry, cancel, and failure recovery work.</li>
+							<li>
+								Start/stop/restart/delete, console/logs, content, files, backup/restore pass E2E.
+							</li>
+							<li>Unexpected crash and app/Core restart converge to correct state.</li>
+							<li>All visible controls are real; deferred features are hidden and data-safe.</li>
+							<li>Certified host/desktop/loader matrix is published and tested.</li>
+						</ul>
+					</div>
+					<div>
+						<h3>Data and operations</h3>
+						<ul class="checklist">
+							<li>
+								Traversal/concurrency tests preserve sentinel data and prevent cross-instance
+								access.
+							</li>
+							<li>Backup restore drill meets documented RPO/RTO; DB/config recovery exists.</li>
+							<li>Historical migrations and interrupted upgrades preserve data.</li>
+							<li>Health/readiness, request IDs, logs, and job diagnostics support the runbook.</li>
+							<li>
+								24–72 hour soak and fault-injection pass without orphan processes or unbounded
+								growth.
+							</li>
+							<li>
+								Known issues, install, recovery, privacy, security, and support docs are public.
+							</li>
+						</ul>
+					</div>
+					<div>
+						<h3>UI quality</h3>
+						<ul class="checklist">
+							<li>
+								No Modrinth-only product name, icon, support, survey, legal, or updater copy in
+								alpha.
+							</li>
+							<li>Essential flow works keyboard-only with visible focus and named controls.</li>
+							<li>
+								Loading, empty, offline, unauthorized, error, retry, and destructive states are
+								clear.
+							</li>
+							<li>Alpha-visible strings are coherent and use one terminology guide.</li>
+							<li>No developer/mock/teleport/view-as controls in production.</li>
+						</ul>
+					</div>
+				</div>
+			</section>
+
+			<section id="changes">
+				<h2>Progress since the older repository audit</h2>
+				<p>
+					The existing <code>AMBERITE_AUDIT_REPORT.md</code> is dated 16 May 2026. Several serious
+					items have improved; the current report does not simply repeat it. Some of the largest
+					product/release risks remain, and new connected-feature risks were introduced or exposed.
+				</p>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Area</th>
+								<th>Current assessment</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>Core CI/test inclusion</td>
+								<td>
+									<span class="status green">Improved</span> Core now has package scripts and a
+									dedicated Copal CI workflow, although checkout and compilation currently prevent
+									it from proving the commit.
+								</td>
+							</tr>
+							<tr>
+								<td>Backup restore</td>
+								<td>
+									<span class="status green">Improved</span> Restore uses an atomic staging/swap
+									approach; disaster-recovery scope and ignored safety-backup failure remain.
+								</td>
+							</tr>
+							<tr>
+								<td>SQLite cleanup/integrity</td>
+								<td>
+									<span class="status green">Improved</span> Foreign keys, WAL, and busy timeout are
+									enabled.
+								</td>
+							</tr>
+							<tr>
+								<td>Filesystem/artifact hardening</td>
+								<td>
+									<span class="status green">Improved</span> Many symlink/path guards and
+									Mojang/Modrinth hash checks now exist; installation-ID deletion and archive limits
+									still need proof.
+								</td>
+							</tr>
+							<tr>
+								<td>Generic relay architecture</td>
+								<td>
+									<span class="status amber">Partly improved</span> Core’s generic relay was removed
+									and authority boundaries are documented; deprecated messaging/queue exports and
+									tables remain in the API/Convex layer.
+								</td>
+							</tr>
+							<tr>
+								<td>Lifecycle races</td>
+								<td>
+									<span class="status amber">Partly improved</span> Start uses a per-instance lock;
+									destructive operations do not yet share the same state machine.
+								</td>
+							</tr>
+							<tr>
+								<td>Production pairing/auth</td>
+								<td>
+									<span class="status amber">Broader but unsafe</span> Pairing, projection,
+									sessions, and UI wiring are much richer, but unsigned Core identity and split
+									authority create external-alpha blockers.
+								</td>
+							</tr>
+							<tr>
+								<td>Release/branding/update</td>
+								<td>
+									<span class="status red">Still open</span> The updater, workflows, artifact names,
+									deep links, telemetry, legal/support copy, and assets remain substantially
+									Modrinth-owned.
+								</td>
+							</tr>
+							<tr>
+								<td>Connected social/sync</td>
+								<td>
+									<span class="status red">New/high-risk surface</span>
+									Profiles/groups/presence/sync expanded, but authority, owner, block, deletion,
+									credential, migration, and runtime-test gaps are unresolved.
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section id="limitations">
+				<h2>Limits, confidence, and evidence index</h2>
+				<h3>Confidence</h3>
+				<ul>
+					<li>
+						<strong>High:</strong> build/CI, static authorization, destructive navigation,
+						release/config, branding/privacy, dependency, test-coverage, and repository-governance
+						findings.
+					</li>
+					<li>
+						<strong>Medium:</strong> runtime UX and operational behavior that was inferred from code
+						but not exercised in a packaged app.
+					</li>
+					<li>
+						<strong>Provisional P0:</strong> installation-ID traversal remains P0 until a
+						containment regression test disproves exploitability.
+					</li>
+				</ul>
+
+				<h3>What was not done</h3>
+				<ul>
+					<li>No dev server or production build was started.</li>
+					<li>
+						No real Minecraft server, Java download, Docker/systemd install, public network, or
+						router was mutated.
+					</li>
+					<li>No live Convex/Cloudflare production deployment or secret values were inspected.</li>
+					<li>No code was changed outside this requested HTML report.</li>
+					<li>
+						Dependency advisory presence was measured; exploitability of each advisory was not fully
+						triaged.
+					</li>
+					<li>
+						Effort ranges depend strongly on the platform, network, install, and connected-feature
+						decisions.
+					</li>
+				</ul>
+
+				<details>
+					<summary>Key evidence paths</summary>
+					<ul>
+						<li><code>apps/app-frontend/src/routes.js</code> — visible product route inventory.</li>
+						<li><code>apps/core/src/presentation/router.rs</code> — Core API surface.</li>
+						<li><code>apps/core/src/cli/admin.rs:275–296</code> — current Core compile failure.</li>
+						<li>
+							<code>apps/core/src/application/network_service.rs</code> — GET-triggered UPnP
+							mapping.
+						</li>
+						<li>
+							<code>apps/core/src/application/installation_service.rs</code> — installation deletion
+							risk.
+						</li>
+						<li>
+							<code>packages/amberite-api/src/connection.ts:39–83</code> — unsigned connection
+							handshake.
+						</li>
+						<li>
+							<code>packages/amberite-api/src/client.ts:107–151</code> — token loading/forwarding.
+						</li>
+						<li>
+							<code>apps/app-frontend/src/composables/useSocial.ts:372–390</code> — legacy Convex
+							authority mutations.
+						</li>
+						<li><code>convex/groupInvites.ts:13–106</code> — owner-role invitation escalation.</li>
+						<li><code>convex/friends.ts:185–241</code> — block/request invariant.</li>
+						<li><code>convex/auth.ts:162–171</code> — incomplete account deletion.</li>
+						<li>
+							<code>convex/coreProjection.ts:73–104</code> — credential/member projection lifecycle.
+						</li>
+						<li><code>convex/sync.ts:167–205</code> — planned/deferred sync application.</li>
+						<li><code>apps/realtime/src/index.test.ts:1–16</code> — non-runtime Worker test.</li>
+						<li>
+							<code
+								>packages/ui/src/layouts/wrapped/hosting/manage/use-core-server-runtime.ts:294</code
+							>
+							— all permission bits.
+						</li>
+						<li>
+							<code>apps/app-frontend/src/pages/library/Index.vue:64</code> — navigation-triggered
+							server profile deletion.
+						</li>
+						<li>
+							<code>apps/app-frontend/src/components/core/use-core-onboarding-state.ts:158</code> —
+							Core creation only probes existing service.
+						</li>
+						<li>
+							<code>packages/app-lib/.env.prod:9–11</code> — empty production service configuration.
+						</li>
+						<li>
+							<code>apps/app-frontend/vite.config.ts:14–49</code> — required configuration failure.
+						</li>
+						<li>
+							<code>apps/app/tauri-release.conf.json:31–35</code> — Modrinth updater key/endpoint.
+						</li>
+						<li>
+							<code>.github/workflows/theseus-build.yml</code> and
+							<code>theseus-release.yml</code> — upstream artifact/release flow.
+						</li>
+						<li>
+							<code>.github/workflows/frontend-deploy.yml</code> — stale upstream deployment risk.
+						</li>
+						<li>
+							<code>apps/app/tauri.conf.json</code>, <code>Info.plist</code>,
+							<code>App.entitlements</code> — identity, schemes, CSP, entitlements.
+						</li>
+						<li>
+							<code>apps/app/icons</code> and <code>apps/app/dmg/dmg-background.png</code> —
+							Modrinth release assets.
+						</li>
+						<li><code>COPYING.md:7–21</code> — fork branding obligation.</li>
+						<li>
+							<code>apps/app-frontend/src/helpers/analytics.ts:59–78</code> — Modrinth PostHog
+							project.
+						</li>
+						<li>
+							<code>README.md</code> and <code>apps/app/README.md</code> — upstream user/developer
+							documentation.
+						</li>
+					</ul>
+				</details>
+
+				<details>
+					<summary>Current GitHub/repository operations state</summary>
+					<ul>
+						<li>
+							Public fork; repository description is empty and homepage is
+							<code>https://modrinth.com</code>.
+						</li>
+						<li>No tags, GitHub releases, open PRs, or enabled issue tracker.</li>
+						<li>Main has no branch protection/ruleset.</li>
+						<li>
+							Vulnerability alerts, Dependabot security updates, secret scanning, and push
+							protection are disabled.
+						</li>
+						<li>
+							No repository-level Actions secrets/variables were found; organization-level values
+							were not inspected.
+						</li>
+						<li>
+							No Amberite CODEOWNERS, SECURITY, CONTRIBUTING, Code of Conduct, or Dependabot
+							configuration was found.
+						</li>
+						<li>
+							Local Git has no configured <code>upstream</code> remote despite repository guidance
+							saying one exists.
+						</li>
+					</ul>
+				</details>
+
+				<p class="small">
+					The realtime slice was reviewed against current official Cloudflare Workers and Durable
+					Objects production guidance, including generated bindings, Durable Object lifecycle,
+					WebSocket hibernation, alarms, storage cleanup, observability, and runtime testing
+					expectations.
+				</p>
+			</section>
+		</main>
+
+		<footer>
+			<p>
+				Generated from the repository at commit
+				<code>7e5e243817ee24745a2009bd49749a36e1196716</code>. This is a planning document, not a
+				claim that unexecuted behavior works.
+			</p>
+		</footer>
+	</body>
+</html>

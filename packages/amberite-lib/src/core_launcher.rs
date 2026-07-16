@@ -119,7 +119,7 @@ pub async fn start_core() -> Result<CoreProcess> {
     let core_data = core_data_dir();
 
     let child = Command::new(binary)
-        .env("AMBERITE_DATA_DIR", &core_data)
+        .env("CORE_DATA_DIR", &core_data)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;

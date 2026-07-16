@@ -13,7 +13,6 @@ import {
 	mapAmberiteUserToAccountUser,
 	type AmberiteAccountUser,
 } from '@amberite/amberite-api'
-import { invoke } from '@tauri-apps/api/core'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
@@ -76,13 +75,15 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 		const startedAt = Date.now()
 		try {
 			await withTimeout(async () => {
-				const credential = await amberiteLogin()
-				const devPersonaId = await amberiteDevPersonaId()
-				const params: { minecraftAccessToken: string; devPersonaId?: string } = {
-					minecraftAccessToken: credential.accessToken,
+				const devConfig = await getDevConfig()
+				if (devConfig) {
+					await signInWithDevAccount(devConfig.username)
+					return
 				}
-				if (devPersonaId) params.devPersonaId = devPersonaId
-				await authClient.signInWithMinecraftToken(params)
+				const credential = await amberiteLogin()
+				await authClient.signInWithMinecraftToken({
+					minecraftAccessToken: credential.accessToken,
+				})
 				await social.refresh()
 				if (!social.currentUser.value) throw new Error('Amberite account session was not accepted.')
 			}, SIGN_IN_TIMEOUT_MS)
@@ -107,9 +108,22 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 	}
 
 	void restoreSession()
+	if (import.meta.env.DEV) {
+		void import('@/dev/runtime').then(({ registerDevAccountSwitcher }) => {
+			registerDevAccountSwitcher(async ({ username }) => {
+				await authClient.logOut()
+				await signInWithDevAccount(username)
+			})
+		})
+	}
 
 	async function restoreSession() {
 		try {
+			const devConfig = await getDevConfig()
+			if (devConfig) {
+				await signInWithDevAccount(devConfig.username)
+				return
+			}
 			const refreshToken = await adapter.getCurrentRefreshToken?.()
 			if (!refreshToken) return
 			const session = await authClient.refreshSession(refreshToken)
@@ -126,11 +140,21 @@ export function useAmberiteAuth(): UseAmberiteAuthReturn {
 		}
 	}
 
+	async function signInWithDevAccount(username: string) {
+		await authClient.signInWithDevAccount({ username })
+		await social.refresh()
+		if (social.currentUser.value?.username?.toLowerCase() !== username.toLowerCase()) {
+			throw new Error(`Amberite development account did not resolve user ${username}.`)
+		}
+	}
+
 	return { user, isLoggedIn, isReady, signingIn, error, signIn, logOut }
 }
 
-async function amberiteDevPersonaId(): Promise<string | null> {
-	return await invoke<string | null>('plugin:auth|get_amberite_dev_persona_id')
+async function getDevConfig() {
+	if (!import.meta.env.DEV) return null
+	const { getDevAppConfig } = await import('@/dev/runtime')
+	return getDevAppConfig()
 }
 
 async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<T> {

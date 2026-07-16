@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Modrinth — Product Understanding Sheet</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--page: #0b0d10;
+				--panel: #11151a;
+				--panel-strong: #171c22;
+				--line: #29313a;
+				--text: #eef2f5;
+				--muted: #9ba7b2;
+				--soft: #c5cdd4;
+				--green: #58d68d;
+				--green-soft: rgba(88, 214, 141, 0.12);
+				--blue: #79b8ff;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			html {
+				scroll-behavior: smooth;
+			}
+
+			body {
+				margin: 0;
+				background:
+					radial-gradient(circle at 20% 0%, rgba(88, 214, 141, 0.08), transparent 30rem),
+					var(--page);
+				color: var(--text);
+				font-family:
+					Inter,
+					ui-sans-serif,
+					system-ui,
+					-apple-system,
+					BlinkMacSystemFont,
+					'Segoe UI',
+					sans-serif;
+				font-size: 16px;
+				line-height: 1.6;
+			}
+
+			a {
+				color: var(--green);
+				text-underline-offset: 0.18em;
+			}
+
+			main {
+				width: min(1120px, calc(100% - 32px));
+				margin: 0 auto;
+				padding: 56px 0 72px;
+			}
+
+			.hero {
+				padding: 38px;
+				border: 1px solid var(--line);
+				border-radius: 22px;
+				background: linear-gradient(145deg, rgba(23, 28, 34, 0.98), rgba(14, 18, 22, 0.98));
+				box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+			}
+
+			.eyebrow {
+				margin: 0 0 10px;
+				color: var(--green);
+				font-size: 0.76rem;
+				font-weight: 750;
+				letter-spacing: 0.13em;
+				text-transform: uppercase;
+			}
+
+			h1,
+			h2,
+			h3,
+			p {
+				margin-top: 0;
+			}
+
+			h1 {
+				max-width: 780px;
+				margin-bottom: 14px;
+				font-size: clamp(2.35rem, 6vw, 4.5rem);
+				line-height: 0.98;
+				letter-spacing: -0.055em;
+			}
+
+			h2 {
+				margin-bottom: 18px;
+				font-size: 1.55rem;
+				line-height: 1.2;
+				letter-spacing: -0.025em;
+			}
+
+			h3 {
+				margin-bottom: 7px;
+				font-size: 1rem;
+			}
+
+			.lede {
+				max-width: 790px;
+				margin-bottom: 0;
+				color: var(--soft);
+				font-size: 1.12rem;
+			}
+
+			.thesis {
+				display: grid;
+				grid-template-columns: 1.4fr 1fr;
+				gap: 16px;
+				margin-top: 16px;
+			}
+
+			.thesis > div,
+			.card,
+			.flow,
+			.compact-list,
+			.sources {
+				border: 1px solid var(--line);
+				border-radius: 16px;
+				background: var(--panel);
+			}
+
+			.thesis > div {
+				padding: 22px;
+			}
+
+			.thesis strong {
+				display: block;
+				margin-bottom: 7px;
+				color: var(--green);
+				font-size: 0.77rem;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+			}
+
+			.thesis p {
+				margin: 0;
+				color: var(--soft);
+			}
+
+			section {
+				padding-top: 42px;
+			}
+
+			.section-heading {
+				display: grid;
+				grid-template-columns: 110px 1fr;
+				gap: 18px;
+				align-items: baseline;
+			}
+
+			.section-number {
+				color: var(--muted);
+				font-size: 0.78rem;
+				font-weight: 700;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+			}
+
+			.cards {
+				display: grid;
+				grid-template-columns: repeat(3, 1fr);
+				gap: 12px;
+			}
+
+			.card {
+				padding: 20px;
+			}
+
+			.card p {
+				margin-bottom: 0;
+				color: var(--muted);
+				font-size: 0.94rem;
+			}
+
+			.card.wide {
+				grid-column: span 2;
+			}
+
+			.flow {
+				display: grid;
+				grid-template-columns: repeat(5, 1fr);
+				overflow: hidden;
+			}
+
+			.flow div {
+				position: relative;
+				padding: 20px 18px;
+				border-right: 1px solid var(--line);
+			}
+
+			.flow div:last-child {
+				border-right: 0;
+			}
+
+			.flow span {
+				display: block;
+				margin-bottom: 4px;
+				color: var(--green);
+				font-weight: 750;
+			}
+
+			.flow small {
+				color: var(--muted);
+			}
+
+			.model {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+				gap: 0 30px;
+				margin: 0;
+				padding: 6px 22px;
+				border: 1px solid var(--line);
+				border-radius: 16px;
+				background: var(--panel);
+			}
+
+			.model div {
+				display: grid;
+				grid-template-columns: 135px 1fr;
+				gap: 12px;
+				padding: 14px 0;
+				border-bottom: 1px solid var(--line);
+			}
+
+			.model div:nth-last-child(-n + 2) {
+				border-bottom: 0;
+			}
+
+			dt {
+				color: var(--text);
+				font-weight: 750;
+			}
+
+			dd {
+				margin: 0;
+				color: var(--muted);
+			}
+
+			.compact-list {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+				overflow: hidden;
+			}
+
+			.compact-list div {
+				padding: 16px 20px;
+				border-right: 1px solid var(--line);
+				border-bottom: 1px solid var(--line);
+				color: var(--soft);
+			}
+
+			.compact-list div:nth-child(2n) {
+				border-right: 0;
+			}
+
+			.compact-list div:nth-last-child(-n + 2) {
+				border-bottom: 0;
+			}
+
+			.compact-list strong {
+				color: var(--green);
+			}
+
+			.callout {
+				margin-top: 14px;
+				padding: 20px 22px;
+				border: 1px solid rgba(88, 214, 141, 0.28);
+				border-radius: 16px;
+				background: var(--green-soft);
+				color: var(--soft);
+			}
+
+			.callout strong {
+				color: var(--text);
+			}
+
+			.sources {
+				padding: 20px 22px;
+				color: var(--muted);
+				font-size: 0.9rem;
+			}
+
+			.sources p:last-child {
+				margin-bottom: 0;
+			}
+
+			.source-links {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px 18px;
+			}
+
+			.source-links a {
+				color: var(--blue);
+			}
+
+			@media (max-width: 820px) {
+				.thesis,
+				.cards,
+				.model,
+				.compact-list {
+					grid-template-columns: 1fr;
+				}
+
+				.card.wide {
+					grid-column: auto;
+				}
+
+				.flow {
+					grid-template-columns: 1fr;
+				}
+
+				.flow div,
+				.compact-list div,
+				.compact-list div:nth-child(2n) {
+					border-right: 0;
+					border-bottom: 1px solid var(--line);
+				}
+
+				.flow div:last-child,
+				.compact-list div:last-child {
+					border-bottom: 0;
+				}
+
+				.model div,
+				.model div:nth-last-child(-n + 2) {
+					grid-template-columns: 1fr;
+					gap: 3px;
+					border-bottom: 1px solid var(--line);
+				}
+
+				.model div:last-child {
+					border-bottom: 0;
+				}
+			}
+
+			@media (max-width: 560px) {
+				main {
+					width: min(100% - 20px, 1120px);
+					padding-top: 20px;
+				}
+
+				.hero {
+					padding: 24px;
+				}
+
+				.section-heading {
+					grid-template-columns: 1fr;
+					gap: 3px;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<header class="hero">
+				<p class="eyebrow">Upstream baseline · Human understanding sheet</p>
+				<h1>Modrinth, reduced to its product model.</h1>
+				<p class="lede">
+					Modrinth is a Minecraft: Java Edition content platform joined to a desktop launcher,
+					creator economy, multiplayer directory, and managed hosting product. One catalog and
+					identity system connects all of those surfaces.
+				</p>
+			</header>
+
+			<div class="thesis">
+				<div>
+					<strong>Product promise</strong>
+					<p>
+						Make community-made Minecraft content easy to find, trust, install, play, publish, and
+						maintain.
+					</p>
+				</div>
+				<div>
+					<strong>What this sheet is</strong>
+					<p>
+						A short mental model for deciding what Amberite inherits, changes, or removes (not an
+						implementation specification).
+					</p>
+				</div>
+			</div>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">01 · Surfaces</span>
+					<h2>One platform, several jobs</h2>
+				</div>
+				<div class="cards">
+					<article class="card wide">
+						<h3>Website (catalog and creator platform)</h3>
+						<p>
+							Public discovery, project pages, profiles, collections, publishing, team management,
+							analytics, revenue, account settings, and browser-based server management.
+						</p>
+					</article>
+					<article class="card">
+						<h3>App (launcher and local manager)</h3>
+						<p>
+							Creates isolated Minecraft installations, installs and updates content, manages local
+							play state, launches the game, and exposes Hosting inside the desktop experience.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Hosting (remote runtime)</h3>
+						<p>
+							Runs paid Minecraft servers and provides setup, content, console, files, worlds,
+							backups, networking, settings, and permissioned collaboration.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Server directory (multiplayer discovery)</h3>
+						<p>
+							Turns a live server into a public project with an address and compatibility
+							requirements (separate from buying Hosting).
+						</p>
+					</article>
+					<article class="card">
+						<h3>API and delivery layer (shared infrastructure)</h3>
+						<p>
+							Powers Modrinth surfaces and third-party tools with catalog metadata, authenticated
+							actions, and file delivery.
+						</p>
+					</article>
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">02 · Loop</span>
+					<h2>The main player loop</h2>
+				</div>
+				<div class="flow" aria-label="Modrinth player flow">
+					<div><span>Discover</span><small>Search a shared catalog.</small></div>
+					<div><span>Decide</span><small>Read trust and compatibility data.</small></div>
+					<div>
+						<span>Install</span><small>Resolve the correct content into an instance.</small>
+					</div>
+					<div><span>Play</span><small>Launch locally or join a compatible server.</small></div>
+					<div><span>Maintain</span><small>Update, change, follow, or share.</small></div>
+				</div>
+				<div class="callout">
+					<strong>The creator loop mirrors it:</strong> create a project → publish a compatible
+					release → pass review → gain discovery → read analytics and revenue → publish again.
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">03 · Model</span>
+					<h2>The nouns everything is built around</h2>
+				</div>
+				<dl class="model">
+					<div>
+						<dt>Modrinth account</dt>
+						<dd>
+							Owns platform identity, projects, follows, collections, permissions, purchases, and
+							creator data.
+						</dd>
+					</div>
+					<div>
+						<dt>Minecraft account</dt>
+						<dd>
+							Provides the game entitlement and player identity used when the App launches
+							Minecraft.
+						</dd>
+					</div>
+					<div>
+						<dt>Project</dt>
+						<dd>
+							The stable public identity of a creation across releases, loaders, and game versions.
+						</dd>
+					</div>
+					<div>
+						<dt>Version</dt>
+						<dd>
+							A release with files, compatibility, dependencies, environment rules, and a change
+							description.
+						</dd>
+					</div>
+					<div>
+						<dt>Instance</dt>
+						<dd>
+							An isolated local Minecraft installation containing its own content, configuration,
+							worlds, and logs.
+						</dd>
+					</div>
+					<div>
+						<dt>Collection</dt>
+						<dd>An editable cloud list of project references (not an installable modpack).</dd>
+					</div>
+					<div>
+						<dt>Team or organization</dt>
+						<dd>
+							The ownership and permission layer used to operate one or more creator projects.
+						</dd>
+					</div>
+					<div>
+						<dt>Hosting server</dt>
+						<dd>
+							A cloud-owned running server with operational state and collaborators (not a public
+							server project).
+						</dd>
+					</div>
+				</dl>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">04 · Rules</span>
+					<h2>Decisions that make the system coherent</h2>
+				</div>
+				<div class="compact-list">
+					<div>
+						<strong>Compatibility is behavior.</strong> Game version, loader, dependencies, and
+						client/server environment decide what can be installed.
+					</div>
+					<div>
+						<strong>Project, version, and file stay separate.</strong> Identity, release intent, and
+						downloadable bytes have different lifecycles.
+					</div>
+					<div>
+						<strong>Local and cloud state stay separate.</strong> App instances live on a device;
+						account data and Hosting state live on the platform.
+					</div>
+					<div>
+						<strong>The catalog is shared.</strong> Website, App, Hosting, API users, and creator
+						tooling operate on the same content model.
+					</div>
+					<div>
+						<strong>Public consumption is broad.</strong> Reading and downloading are mostly open;
+						private state, publishing, collaboration, and purchases require identity.
+					</div>
+					<div>
+						<strong>Trust is part of publishing.</strong> Validation, moderation, malware checks,
+						licensing, attribution, reports, and takedowns govern public content.
+					</div>
+					<div>
+						<strong>Linking preserves intent.</strong> A linked instance follows a project or server
+						requirement; unlinking turns it into independent local state.
+					</div>
+					<div>
+						<strong>Similar screens do not merge authority.</strong> Local instances and hosted
+						servers share management patterns while keeping different owners and persistence.
+					</div>
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">05 · People</span>
+					<h2>Who the product is designed for</h2>
+				</div>
+				<div class="cards">
+					<article class="card">
+						<h3>Player</h3>
+						<p>
+							Finds content, keeps local instances healthy, follows projects, manages Minecraft
+							identity, and joins compatible multiplayer servers.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Creator</h3>
+						<p>
+							Publishes projects and releases, works with a team, responds to review, and uses
+							analytics and revenue tools.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Server operator</h3>
+						<p>
+							Provisions and runs a remote server, installs content, manages runtime state, and
+							grants limited operational access.
+						</p>
+					</article>
+					<article class="card">
+						<h3>Moderator</h3>
+						<p>
+							Reviews submissions, resolves reports and rights concerns, communicates required
+							changes, and protects the catalog.
+						</p>
+					</article>
+					<article class="card wide">
+						<h3>API integrator</h3>
+						<p>
+							Builds launchers, publishing tools, or connected services on the public catalog and
+							scoped account actions.
+						</p>
+					</article>
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">06 · Shape</span>
+					<h2>What makes the experience feel like Modrinth</h2>
+				</div>
+				<div class="compact-list">
+					<div>
+						<strong>Project-first navigation.</strong> Search results lead to a durable page, then
+						to compatible releases and actions.
+					</div>
+					<div>
+						<strong>Context-aware actions.</strong> Install choices depend on the current instance,
+						account, platform, and compatibility.
+					</div>
+					<div>
+						<strong>Progressive detail.</strong> Common actions stay simple while versions, files,
+						dependencies, settings, and diagnostics remain reachable.
+					</div>
+					<div>
+						<strong>Cross-surface parity.</strong> Content and server management are intentionally
+						becoming consistent between App and website.
+					</div>
+					<div>
+						<strong>Utility-led community.</strong> Profiles, follows, collections, notifications,
+						teams, organizations, and friends support play and publishing rather than forming a full
+						social network.
+					</div>
+					<div>
+						<strong>Sustainable exchange.</strong> Hosting, subscriptions, and advertising fund the
+						platform while eligible creators receive a share.
+					</div>
+				</div>
+				<div class="callout">
+					<strong>Amberite inherits more than a visual shell.</strong> It inherits Modrinth’s
+					catalog vocabulary, compatibility logic, local-instance model, account boundaries, creator
+					surfaces, and hosting-shaped management UX. The final product document must explicitly
+					keep, replace, or remove each of those domains.
+				</div>
+			</section>
+
+			<section>
+				<div class="section-heading">
+					<span class="section-number">Basis</span>
+					<h2>Official material used for this model</h2>
+				</div>
+				<div class="sources">
+					<p>
+						The wording above is a product model, not Modrinth’s own specification. It was checked
+						against current official product, support, API, and release material.
+					</p>
+					<div class="source-links">
+						<a href="https://support.modrinth.com/en/articles/8800818-about-modrinth"
+							>About Modrinth</a
+						>
+						<a href="https://modrinth.com/app/">Modrinth App</a>
+						<a href="https://modrinth.com/hosting">Modrinth Hosting</a>
+						<a href="https://modrinth.com/news/article/introducing-server-projects/"
+							>Server Projects</a
+						>
+						<a href="https://modrinth.com/news/article/content-management-overhaul"
+							>Content management</a
+						>
+						<a href="https://modrinth.com/news/article/server-access/">Hosting access</a>
+						<a href="https://docs.modrinth.com/api/">API model</a>
+						<a href="https://modrinth.com/legal/rules">Content rules</a>
+					</div>
+				</div>
+			</section>
+		</main>
+	</body>
+</html>

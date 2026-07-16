@@ -16,7 +16,6 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             set_default_user,
             get_users,
             amberite_login,
-            get_amberite_dev_persona_id,
             get_amberite_session_jwt,
             set_amberite_session_jwt,
             get_amberite_session_refresh_token,
@@ -30,9 +29,6 @@ const AMBERITE_KEYRING_SERVICE: &str = "dev.amberite.app";
 const AMBERITE_SESSION_JWT_ACCOUNT: &str = "amberite-session-jwt";
 const AMBERITE_SESSION_REFRESH_TOKEN_ACCOUNT: &str =
     "amberite-session-refresh-token";
-const AMBERITE_DEV_AUTH_SCOPE_ENV: &str = "AMBERITE_DEV_AUTH_SCOPE";
-const AMBERITE_DEV_MODE_ENV: &str = "AMBERITE_DEV_MODE";
-const AMBERITE_DEV_PERSONA_ID_ENV: &str = "AMBERITE_DEV_PERSONA_ID";
 const AMBERITE_LOCAL_CORE_DATA_DIR_ENV: &str = "AMBERITE_LOCAL_CORE_DATA_DIR";
 
 #[derive(Deserialize, Serialize)]
@@ -43,68 +39,31 @@ pub struct MinecraftCredential {
     uuid: String,
 }
 
-fn other_error(error: impl std::fmt::Display) -> crate::api::TheseusSerializableError {
+fn other_error(
+    error: impl std::fmt::Display,
+) -> crate::api::TheseusSerializableError {
     theseus::ErrorKind::OtherError(error.to_string())
         .as_error()
         .into()
 }
 
-fn is_dev_mode() -> bool {
-    env::var(AMBERITE_DEV_MODE_ENV).as_deref() == Ok("true")
-}
-
-fn validate_dev_id(value: &str, label: &str) -> Result<()> {
-    if value.is_empty() || value.len() > 32 {
-        return Err(other_error(format!(
-            "{label} must be 1-32 characters long"
-        )));
-    }
-    if !value.bytes().all(|byte| {
-        byte.is_ascii_lowercase()
-            || byte.is_ascii_digit()
-            || byte == b'_'
-            || byte == b'-'
-    }) {
-        return Err(other_error(format!(
-            "{label} must contain only lowercase letters, numbers, underscores, or hyphens"
-        )));
-    }
-    Ok(())
-}
-
-fn dev_env_value(name: &str, label: &str) -> Result<Option<String>> {
-    if !is_dev_mode() {
-        return Ok(None);
-    }
-    let Ok(value) = env::var(name) else {
-        return Ok(None);
-    };
-    let value = value.trim().to_string();
-    if value.is_empty() {
-        return Ok(None);
-    }
-    validate_dev_id(&value, label)?;
-    Ok(Some(value))
-}
-
 fn amberite_session_jwt_account() -> Result<String> {
-    let Some(scope) =
-        dev_env_value(AMBERITE_DEV_AUTH_SCOPE_ENV, "AMBERITE_DEV_AUTH_SCOPE")?
-    else {
-        return Ok(AMBERITE_SESSION_JWT_ACCOUNT.to_string());
-    };
-    Ok(format!("{AMBERITE_SESSION_JWT_ACCOUNT}:dev:{scope}"))
+    Ok(match crate::dev::config() {
+        Some(config) => {
+            format!("{AMBERITE_SESSION_JWT_ACCOUNT}:dev:{}", config.app_id)
+        }
+        None => AMBERITE_SESSION_JWT_ACCOUNT.to_string(),
+    })
 }
 
 fn amberite_session_refresh_token_account() -> Result<String> {
-    let Some(scope) =
-        dev_env_value(AMBERITE_DEV_AUTH_SCOPE_ENV, "AMBERITE_DEV_AUTH_SCOPE")?
-    else {
-        return Ok(AMBERITE_SESSION_REFRESH_TOKEN_ACCOUNT.to_string());
-    };
-    Ok(format!(
-        "{AMBERITE_SESSION_REFRESH_TOKEN_ACCOUNT}:dev:{scope}"
-    ))
+    Ok(match crate::dev::config() {
+        Some(config) => format!(
+            "{AMBERITE_SESSION_REFRESH_TOKEN_ACCOUNT}:dev:{}",
+            config.app_id
+        ),
+        None => AMBERITE_SESSION_REFRESH_TOKEN_ACCOUNT.to_string(),
+    })
 }
 
 /// Returns the active Minecraft credentials so the frontend can trade them for an
@@ -121,11 +80,6 @@ pub async fn amberite_login() -> Result<MinecraftCredential> {
         username: credentials.offline_profile.name,
         uuid: credentials.offline_profile.id.to_string(),
     })
-}
-
-#[tauri::command]
-pub async fn get_amberite_dev_persona_id() -> Result<Option<String>> {
-    dev_env_value(AMBERITE_DEV_PERSONA_ID_ENV, "AMBERITE_DEV_PERSONA_ID")
 }
 
 #[tauri::command]
