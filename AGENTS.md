@@ -1,5 +1,9 @@
 # Amberite — Monorepo
 
+## Claude instruction files
+
+- Never read any `CLAUDE.md` file for any reason. Do not inspect, search inside, or load its contents.
+
 An open-source project that lets users self-host a Rust-based Core server manager and control it through a desktop app forked from Modrinth.
 
 This repository is a fork of `modrinth/code`. A Git remote named `upstream` is already configured for that upstream repository and can be used when a task involves restoring or reverting code from upstream instead of from local `HEAD`.
