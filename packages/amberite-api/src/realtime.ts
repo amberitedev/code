@@ -173,10 +173,12 @@ function parseFrame(value: unknown): RealtimeFrame | null {
 			frame.type === 'presence.user' &&
 			typeof frame.userId === 'string' &&
 			typeof frame.online === 'boolean'
-		)
-			return frame
-		if (frame.type === 'presence.snapshot' && validUsers(frame.users))
-			return frame
+		) {
+			return { type: frame.type, userId: frame.userId, online: frame.online }
+		}
+		if (frame.type === 'presence.snapshot' && validUsers(frame.users)) {
+			return { type: frame.type, users: frame.users }
+		}
 	} catch {
 		return null
 	}

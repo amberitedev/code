@@ -1,15 +1,12 @@
-import { defineEventHandler, getCookie, getQuery, sendRedirect } from 'h3'
+import { defineEventHandler, getQuery, sendRedirect } from 'h3'
 
 import {
-	MINECRAFT_AUTH_MODE_COOKIE,
-	MINECRAFT_AUTH_REDIRECT_COOKIE,
-	MINECRAFT_AUTH_STATE_COOKIE,
-	MINECRAFT_AUTH_VERIFIER_COOKIE,
 	clearMinecraftAuthCookies,
 	minecraftRedirectUri,
-	normalizeLocalRedirect,
-	normalizeMinecraftAuthMode,
+	normalizeMinecraftUuid,
+	noStore,
 	optionalMinecraftClientSecret,
+	readMinecraftAuthFlow,
 	requiredMinecraftClientId,
 	signInWithMinecraftToken,
 } from '~/server/utils/amberite-minecraft-auth'
@@ -20,11 +17,8 @@ interface MicrosoftTokenResponse {
 
 interface XboxTokenResponse {
 	Token?: string
-	DisplayClaims?: {
-		xui?: Array<{
-			uhs?: string
-		}>
-	}
+	XErr?: number
+	DisplayClaims?: { xui?: Array<{ uhs?: string }> }
 }
 
 interface MinecraftTokenResponse {
@@ -37,48 +31,44 @@ interface MinecraftProfileResponse {
 }
 
 export default defineEventHandler(async (event) => {
-	const clientId = requiredMinecraftClientId(event)
-	const clientSecret = optionalMinecraftClientSecret(event)
-	const redirectUri = minecraftRedirectUri(event)
-	const mode = normalizeMinecraftAuthMode(getCookie(event, MINECRAFT_AUTH_MODE_COOKIE))
-	const redirect = normalizeLocalRedirect(getCookie(event, MINECRAFT_AUTH_REDIRECT_COOKIE))
-
+	noStore(event)
+	let redirect = '/dashboard'
 	try {
+		const flow = await readMinecraftAuthFlow(event)
+		redirect = flow.redirect
 		const query = getQuery(event)
-		if (typeof query.error === 'string') throw new Error('minecraft_auth_cancelled')
-
 		const state = singleQueryValue(query.state)
+		if (!state || state !== flow.state) throw new Error('minecraft_auth_state_invalid')
+		if (singleQueryValue(query.error)) throw new Error('minecraft_auth_cancelled')
 		const code = singleQueryValue(query.code)
-		const expectedState = getCookie(event, MINECRAFT_AUTH_STATE_COOKIE)
-		const verifier = getCookie(event, MINECRAFT_AUTH_VERIFIER_COOKIE)
-		if (!state || !expectedState || state !== expectedState || !code || !verifier) {
-			throw new Error('minecraft_auth_state_invalid')
-		}
+		if (!code) throw new Error('minecraft_auth_state_invalid')
 
 		const microsoftToken = await exchangeMicrosoftCode({
-			clientId,
-			clientSecret,
+			clientId: requiredMinecraftClientId(event),
+			clientSecret: optionalMinecraftClientSecret(event),
 			code,
-			redirectUri,
-			verifier,
+			redirectUri: minecraftRedirectUri(event),
+			verifier: flow.verifier,
 		})
 		const xboxToken = await authenticateXboxLive(microsoftToken)
 		const xstsToken = await authorizeXsts(xboxToken.token)
 		const minecraftToken = await authenticateMinecraft(xstsToken.uhs, xstsToken.token)
-		await requireMinecraftProfile(minecraftToken)
-		await signInWithMinecraftToken(event, minecraftToken)
-		clearMinecraftAuthCookies(event)
-
-		const target =
-			mode === 'signup'
-				? `/auth/almost-there?redirect=${encodeURIComponent(redirect)}`
-				: redirect
-		return sendRedirect(event, target, 302)
+		const profile = await requireMinecraftProfile(minecraftToken)
+		if (flow.expectedMinecraftUuid && profile.id !== flow.expectedMinecraftUuid)
+			throw new Error('minecraft_uuid_mismatch')
+		await signInWithMinecraftToken(event, minecraftToken, flow.expectedMinecraftUuid)
+		return sendRedirect(event, redirect, 302)
 	} catch (error) {
 		if (isServerConfigurationError(error)) throw error
-		console.error('Minecraft sign-in failed:', error)
+		const code = publicErrorCode(error)
+		console.error('Minecraft sign-in failed:', code)
+		return sendRedirect(
+			event,
+			`/auth/sign-in?${new URLSearchParams({ error: code, redirect }).toString()}`,
+			302,
+		)
+	} finally {
 		clearMinecraftAuthCookies(event)
-		return sendRedirect(event, errorRedirectPath(mode, redirect), 302)
 	}
 })
 
@@ -97,7 +87,6 @@ async function exchangeMicrosoftCode(args: {
 		redirect_uri: args.redirectUri,
 	})
 	if (args.clientSecret) body.set('client_secret', args.clientSecret)
-
 	const response = await fetchJson<MicrosoftTokenResponse>(
 		'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
 		{
@@ -107,7 +96,6 @@ async function exchangeMicrosoftCode(args: {
 		},
 		'minecraft_microsoft_token_failed',
 	)
-
 	if (!response.access_token) throw new Error('minecraft_microsoft_token_missing')
 	return response.access_token
 }
@@ -117,10 +105,7 @@ async function authenticateXboxLive(accessToken: string): Promise<{ token: strin
 		'https://user.auth.xboxlive.com/user/authenticate',
 		{
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-			},
+			headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 			body: JSON.stringify({
 				Properties: {
 					AuthMethod: 'RPS',
@@ -131,13 +116,9 @@ async function authenticateXboxLive(accessToken: string): Promise<{ token: strin
 				TokenType: 'JWT',
 			}),
 		},
-		'minecraft_xbox_token_failed',
+		'minecraft_xbox_restricted',
 	)
-
-	const token = response.Token
-	const uhs = response.DisplayClaims?.xui?.[0]?.uhs
-	if (!token || !uhs) throw new Error('minecraft_xbox_token_missing')
-	return { token, uhs }
+	return requireXboxClaims(response)
 }
 
 async function authorizeXsts(userToken: string): Promise<{ token: string; uhs: string }> {
@@ -145,25 +126,22 @@ async function authorizeXsts(userToken: string): Promise<{ token: string; uhs: s
 		'https://xsts.auth.xboxlive.com/xsts/authorize',
 		{
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-			},
+			headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 			body: JSON.stringify({
-				Properties: {
-					SandboxId: 'RETAIL',
-					UserTokens: [userToken],
-				},
+				Properties: { SandboxId: 'RETAIL', UserTokens: [userToken] },
 				RelyingParty: 'rp://api.minecraftservices.com/',
 				TokenType: 'JWT',
 			}),
 		},
-		'minecraft_xsts_token_failed',
+		'minecraft_xbox_restricted',
 	)
+	return requireXboxClaims(response)
+}
 
+function requireXboxClaims(response: XboxTokenResponse): { token: string; uhs: string } {
 	const token = response.Token
 	const uhs = response.DisplayClaims?.xui?.[0]?.uhs
-	if (!token || !uhs) throw new Error('minecraft_xsts_token_missing')
+	if (!token || !uhs) throw new Error('minecraft_xbox_restricted')
 	return { token, uhs }
 }
 
@@ -172,51 +150,50 @@ async function authenticateMinecraft(uhs: string, xstsToken: string): Promise<st
 		'https://api.minecraftservices.com/authentication/login_with_xbox',
 		{
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-			},
-			body: JSON.stringify({
-				identityToken: `XBL3.0 x=${uhs};${xstsToken}`,
-			}),
+			headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+			body: JSON.stringify({ identityToken: `XBL3.0 x=${uhs};${xstsToken}` }),
 		},
 		'minecraft_services_token_failed',
 	)
-
 	if (!response.access_token) throw new Error('minecraft_services_token_missing')
 	return response.access_token
 }
 
-async function requireMinecraftProfile(minecraftAccessToken: string): Promise<void> {
-	const response = await fetchJson<MinecraftProfileResponse>(
-		'https://api.minecraftservices.com/minecraft/profile',
-		{
-			headers: {
-				Authorization: `Bearer ${minecraftAccessToken}`,
-				Accept: 'application/json',
-			},
-		},
-		'minecraft_profile_required',
-	)
-	if (!response.id || !response.name) throw new Error('minecraft_profile_required')
+async function requireMinecraftProfile(
+	minecraftAccessToken: string,
+): Promise<{ id: string; name: string }> {
+	const response = await fetch('https://api.minecraftservices.com/minecraft/profile', {
+		headers: { Authorization: `Bearer ${minecraftAccessToken}`, Accept: 'application/json' },
+	})
+	if (response.status === 404) throw new Error('minecraft_java_profile_required')
+	if (!response.ok) throw new Error('minecraft_profile_failed')
+	const profile = (await response.json()) as MinecraftProfileResponse
+	const id = normalizeMinecraftUuid(profile.id)
+	if (!id || typeof profile.name !== 'string' || !profile.name) {
+		throw new Error('minecraft_java_profile_required')
+	}
+	return { id, name: profile.name }
 }
 
 async function fetchJson<T>(url: string, init: RequestInit, errorCode: string): Promise<T> {
-	const response = await fetch(url, init)
+	let response: Response
+	try {
+		response = await fetch(url, init)
+	} catch {
+		throw new Error('minecraft_provider_unreachable')
+	}
+	if (response.status === 429) throw new Error('minecraft_provider_throttled')
 	if (!response.ok) throw new Error(errorCode)
 	return (await response.json()) as T
 }
 
 function singleQueryValue(value: unknown): string {
-	if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
 	return typeof value === 'string' ? value : ''
 }
 
-function errorRedirectPath(mode: 'signin' | 'signup', redirect: string): string {
-	const path = mode === 'signup' ? '/auth/sign-up' : '/auth/sign-in'
-	const query = new URLSearchParams({ error: 'minecraft_auth_failed' })
-	if (redirect !== '/dashboard') query.set('redirect', redirect)
-	return `${path}?${query.toString()}`
+function publicErrorCode(error: unknown): string {
+	const code = error instanceof Error ? error.message : 'minecraft_auth_failed'
+	return code.startsWith('minecraft_') ? code : 'minecraft_auth_failed'
 }
 
 function isServerConfigurationError(error: unknown): boolean {

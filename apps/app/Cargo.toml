@@ -9,6 +9,7 @@ license = "GPL-3.0-only"
 
 [dependencies]
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
+base64 = { workspace = true }
 chrono = { workspace = true }
 daedalus = { workspace = true }
 dashmap = { workspace = true }
@@ -20,6 +21,7 @@ keyring = { workspace = true }
 native-dialog = { workspace = true }
 paste = { workspace = true }
 path-util = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls-webpki-roots"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }

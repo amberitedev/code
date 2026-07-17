@@ -1,7 +1,17 @@
-/**
- * PlatformAdapter abstracts platform-owned capabilities such as fetch, local
- * Core discovery, auth token storage, and optional local durable queues.
- */
+import type { AmberiteSessionTokens } from './session'
+
+export interface PlatformMinecraftSignInRequest {
+	mode: 'continue' | 'use_another_account'
+	expectedMinecraftUuid?: string
+}
+
+export interface PlatformAuthSession {
+	accessToken: string
+	/** Verified current-user projection returned by native coordinators when already available. */
+	user?: unknown
+}
+
+/** Platform-owned capabilities used by Amberite clients. */
 export interface PlatformAdapter {
 	/** HTTP fetch function. On desktop this is tauriFetch; on web it is native fetch. */
 	fetchFn: typeof fetch
@@ -15,17 +25,28 @@ export interface PlatformAdapter {
 	/** Return the identity the current Core URL is linked to, when the platform has one. */
 	getConnectedCoreId?(): Promise<string | null>
 
-	/** Return the current user's auth JWT, if authenticated. */
+	/** Return the current short-lived Amberite access JWT. */
 	getCurrentJwt(): Promise<string | null>
-
-	/** Persist a refreshed auth JWT when the auth provider returns one. */
 	setCurrentJwt?(jwt: string | null): Promise<void>
 
-	/** Return the Convex Auth refresh token paired with the current session JWT. */
+	/** Legacy split token access. New platforms should implement atomic session methods. */
 	getCurrentRefreshToken?(): Promise<string | null>
-
-	/** Persist the Convex Auth refresh token paired with the current session JWT. */
 	setCurrentRefreshToken?(refreshToken: string | null): Promise<void>
+
+	/** Atomically read, replace, and clear a complete product session. */
+	readAmberiteSession?(): Promise<AmberiteSessionTokens | null>
+	writeAmberiteSession?(tokens: AmberiteSessionTokens): Promise<void>
+	clearAmberiteSession?(): Promise<void>
+
+	/** Refresh the platform-owned product session without exposing its refresh token. */
+	refreshAmberiteSession?(): Promise<PlatformAuthSession | null>
+
+	/** Native Minecraft sign-in. Desktop implements this entirely outside the WebView. */
+	signInWithMinecraft?(request: PlatformMinecraftSignInRequest): Promise<PlatformAuthSession>
+
+	/** Native product-session restoration and sign-out. */
+	restoreMinecraftSession?(): Promise<PlatformAuthSession | null>
+	signOutMinecraftSession?(): Promise<void>
 
 	/** Return the one-time local setup secret for an app-launched Core, if present. */
 	getLocalSetupSecret?(): Promise<string | null>

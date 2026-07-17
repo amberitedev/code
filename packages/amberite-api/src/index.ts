@@ -123,6 +123,7 @@ export type {
 	AmberiteAuthClient,
 	AmberiteSession,
 	AmberiteDevAccountSignInRequest,
+	AmberiteMinecraftSignInRequest,
 	AmberiteMinecraftTokenSignInRequest,
 } from './auth-client'
 export { MockAmberiteAuthClient, defaultMockUser } from './mock-client'
@@ -146,16 +147,25 @@ export type {
 export { CoreWsConnection } from './ws'
 export { RealtimePresenceSession } from './realtime'
 export type { RealtimeFrame, RealtimePresenceSessionOptions, RealtimeSocket } from './realtime'
-export type { PlatformAdapter, PersistentQueueStore, QueuedMessage } from './adapter'
+export type {
+	PlatformAdapter,
+	PlatformAuthSession,
+	PlatformMinecraftSignInRequest,
+	PersistentQueueStore,
+	QueuedMessage,
+} from './adapter'
 export type { CoreCallContext } from './context'
 export {
 	AmberiteApiError,
 	NetworkError,
 	AuthError,
+	ProviderAuthError,
+	ConvexError,
 	CoreOfflineError,
 	RelayTimeoutError,
 	CoreApiError,
 } from './errors'
+export type { AuthFailureCode, RecoveryDisposition } from './errors'
 export { CoreConnectionMonitor, type ConnectionState, type ConnectionStatus } from './monitor'
 export {
 	CONNECTION_PROTOCOL,
@@ -185,7 +195,7 @@ export {
 	waitForCoreRelayReceipt,
 	waitForCoreRelayResult,
 } from './core-relay'
-export { CommunicationPipeline, type CommunicationPipelineOptions } from './pipeline'
+export { CommunicationPipeline } from './pipeline'
 export {
 	defaultCommunicationPolicy,
 	coreEndpointPolicies,

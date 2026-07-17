@@ -7,15 +7,21 @@ import { spawnSync } from 'node:child_process'
 export function commandForPnpm(args) {
 	if (process.platform === 'win32') {
 		return {
-			command: 'cmd.exe',
-			args: ['/d', '/s', '/c', ['corepack', 'pnpm', ...args].map(quoteWindowsArg).join(' ')],
+			command: process.execPath,
+			args: [
+				join(dirname(process.execPath), 'node_modules', 'corepack', 'dist', 'corepack.js'),
+				'pnpm',
+				...args,
+			],
 		}
 	}
 	return { command: 'corepack', args: ['pnpm', ...args] }
 }
 
 export function gitValue(cwd, args) {
-	const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
+	const safeArgs =
+		process.platform === 'win32' ? ['-c', `safe.directory=${resolve(cwd)}`, ...args] : args
+	const result = spawnSync('git', safeArgs, { cwd, encoding: 'utf8', windowsHide: true })
 	if (result.status !== 0) {
 		throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`)
 	}
@@ -99,9 +105,4 @@ export function killProcessTree(pid) {
 			process.kill(pid, 'SIGTERM')
 		} catch {}
 	}
-}
-
-function quoteWindowsArg(value) {
-	if (!/[\s"&|<>^]/.test(value)) return value
-	return `"${value.replace(/([\\]*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`
 }

@@ -12,20 +12,41 @@ function success(value: unknown): Response {
 	})
 }
 
+function profile(username = 'amber') {
+	return {
+		id: 'user-1',
+		userId: 'user-1',
+		username,
+		minecraftUuid: '12345678-1234-1234-1234-123456789abc',
+		verifiedMinecraftHandle: username,
+		name: 'Amber',
+		avatar_url: null,
+		bio: 'hello',
+		created: '2026-01-01T00:00:00.000Z',
+		email: null,
+		email_verified: false,
+		auth_providers: ['minecraft'],
+		has_password: false,
+		has_totp: false,
+	}
+}
+
 function createAdapter(fetchFn: ReturnType<typeof vi.fn>): PlatformAdapter {
-	let token: string | null = 'old-token'
-	let refreshToken: string | null = 'old-refresh'
+	let tokens = { token: 'old-token', refreshToken: 'old-refresh' }
 	return {
 		fetchFn: fetchFn as unknown as typeof fetch,
 		convexUrl: 'https://test.convex.cloud',
 		getCoreUrl: async () => null,
-		getCurrentJwt: async () => token,
-		setCurrentJwt: async (next) => {
-			token = next
+		getCurrentJwt: async () => tokens.token,
+		setCurrentJwt: async (token) => {
+			tokens = { ...tokens, token: token ?? '' }
 		},
-		getCurrentRefreshToken: async () => refreshToken,
-		setCurrentRefreshToken: async (next) => {
-			refreshToken = next
+		readAmberiteSession: async () => tokens,
+		writeAmberiteSession: async (next) => {
+			tokens = next
+		},
+		clearAmberiteSession: async () => {
+			tokens = { token: '', refreshToken: '' }
 		},
 		openExternalAuth: vi.fn(),
 	}
@@ -36,39 +57,20 @@ async function requestBodies(fetchFn: ReturnType<typeof vi.fn>) {
 }
 
 describe('ConvexAmberiteAuthClient', () => {
-	it('refreshes stored sessions and maps the current profile to the compatibility user shape', async () => {
+	it('refreshes stored sessions and maps verified Minecraft identity', async () => {
 		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body))
-			if (body.path === 'auth:signIn') {
-				return success({ tokens: { token: 'new-token', refreshToken: 'new-refresh' } })
-			}
-			return success({
-				id: 'user-1',
-				userId: 'user-1',
-				username: 'amber',
-				name: 'Amber',
-				avatar_url: null,
-				bio: 'hello',
-				created: '2026-01-01T00:00:00.000Z',
-				email: null,
-				email_verified: false,
-				auth_providers: ['minecraft'],
-				has_password: false,
-				has_totp: false,
-			})
+			return body.path === 'auth:signIn'
+				? success({ tokens: { token: 'new-token', refreshToken: 'new-refresh' } })
+				: success(profile())
 		})
 		const adapter = createAdapter(fetchFn)
-		const client = new ConvexAmberiteAuthClient({ adapter })
+		const session = await new ConvexAmberiteAuthClient({ adapter }).restoreSession()
 
-		const session = await client.restoreSession()
-
-		expect(session?.tokens).toEqual({ token: 'new-token', refreshToken: 'new-refresh' })
 		expect(session?.user).toMatchObject({
-			id: 'user-1',
 			username: 'amber',
-			email: null,
-			auth_providers: ['minecraft'],
-			has_password: false,
+			verifiedMinecraftHandle: 'amber',
+			minecraftUuid: '12345678-1234-1234-1234-123456789abc',
 		})
 		expect(await adapterSessionStorage(adapter).read()).toEqual({
 			token: 'new-token',
@@ -76,81 +78,82 @@ describe('ConvexAmberiteAuthClient', () => {
 		})
 	})
 
-	it('routes Minecraft token sign-in through the production auth provider', async () => {
+	it('single-flights concurrent refreshes', async () => {
+		let release!: () => void
+		const pending = new Promise<void>((resolve) => (release = resolve))
 		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body))
 			if (body.path === 'auth:signIn') {
-				return success({ tokens: { token: 'token', refreshToken: 'refresh' } })
+				await pending
+				return success({ tokens: { token: 'new-token', refreshToken: 'new-refresh' } })
 			}
-			return success({
-				id: 'user-1',
-				userId: 'user-1',
-				username: 'amber',
-				created: '2026-01-01T00:00:00.000Z',
-			})
+			return success(profile())
 		})
 		const client = new ConvexAmberiteAuthClient({ adapter: createAdapter(fetchFn) })
+		const first = client.refreshSession()
+		const second = client.refreshSession()
+		release()
+		await Promise.all([first, second])
 
-		await client.signInWithMinecraftToken({ minecraftAccessToken: 'minecraft-token' })
+		const authCalls = (await requestBodies(fetchFn)).filter((body) => body.path === 'auth:signIn')
+		expect(authCalls).toHaveLength(1)
+	})
 
-		const bodies = await requestBodies(fetchFn)
-		expect(bodies[0]).toMatchObject({
-			path: 'auth:signIn',
+	it('passes expected UUID through Minecraft token sign-in', async () => {
+		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+			const body = JSON.parse(String(init.body))
+			return body.path === 'auth:signIn'
+				? success({ tokens: { token: 'token', refreshToken: 'refresh' } })
+				: success(profile())
+		})
+		const client = new ConvexAmberiteAuthClient({ adapter: createAdapter(fetchFn) })
+		await client.signInWithMinecraftToken({
+			minecraftAccessToken: 'minecraft-token',
+			expectedMinecraftUuid: '12345678-1234-1234-1234-123456789abc',
+		})
+
+		expect((await requestBodies(fetchFn))[0]).toMatchObject({
 			args: {
 				provider: 'minecraft-token',
-				params: { minecraftAccessToken: 'minecraft-token' },
+				params: {
+					minecraftAccessToken: 'minecraft-token',
+					expectedMinecraftUuid: '12345678-1234-1234-1234-123456789abc',
+				},
 			},
 		})
 	})
 
-	it('routes a development account sign-in by username', async () => {
-		const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
-			const body = JSON.parse(String(init.body))
-			if (body.path === 'auth:signIn') {
-				return success({ tokens: { token: 'token', refreshToken: 'refresh' } })
-			}
-			return success({
-				id: 'user-1',
-				userId: 'user-1',
-				username: 'owner',
-				created: '2026-01-01T00:00:00.000Z',
-			})
-		})
-		const client = new ConvexAmberiteAuthClient({ adapter: createAdapter(fetchFn) })
-
-		await client.signInWithDevAccount({ username: 'owner' })
-
-		const bodies = await requestBodies(fetchFn)
-		expect(bodies[0]).toMatchObject({
-			path: 'auth:signIn',
-			args: {
-				provider: 'amberite-dev-account',
-				params: { username: 'owner' },
-			},
-		})
-	})
-
-	it('clears local tokens after logout even when the backend rejects the request', async () => {
-		const fetchFn = vi.fn(async () => new Response('nope', { status: 401 }))
+	it('uses the native platform capability without exposing a refresh token', async () => {
+		const fetchFn = vi.fn(async () => success(profile()))
 		const adapter = createAdapter(fetchFn)
-		const client = new ConvexAmberiteAuthClient({ adapter })
+		adapter.signInWithMinecraft = vi.fn(async () => ({
+			accessToken: 'native-access',
+			user: profile(),
+		}))
+		const session = await new ConvexAmberiteAuthClient({ adapter }).signInWithMinecraft({
+			mode: 'continue',
+			expectedMinecraftUuid: '12345678-1234-1234-1234-123456789abc',
+		})
 
-		await client.logOut()
+		expect(session.tokens).toEqual({ token: 'native-access', refreshToken: '' })
+		expect(adapter.signInWithMinecraft).toHaveBeenCalledWith({
+			mode: 'continue',
+			expectedMinecraftUuid: '12345678-1234-1234-1234-123456789abc',
+		})
+		expect(fetchFn).not.toHaveBeenCalled()
+	})
 
-		expect(await adapterSessionStorage(adapter).read()).toBeNull()
+	it('clears local tokens after logout even when remote revocation fails', async () => {
+		const adapter = createAdapter(vi.fn(async () => new Response('nope', { status: 401 })))
+		await new ConvexAmberiteAuthClient({ adapter }).logOut()
+		expect(await adapterSessionStorage(adapter).read()).toEqual({ token: '', refreshToken: '' })
 	})
 })
 
 describe('MockAmberiteAuthClient', () => {
-	it('provides a typed local client without patching fetch', async () => {
+	it('keeps the verified handle immutable while editing display data', async () => {
 		const client = new MockAmberiteAuthClient()
-
-		const session = await client.restoreSession()
-		const updated = await client.updateCurrentProfile({ username: 'local', bio: 'dev' })
-
-		expect(session?.user.username).toBe('devuser')
-		expect(updated).toMatchObject({ username: 'local', bio: 'dev' })
-		await client.logOut()
-		expect(await client.currentUser()).toBeNull()
+		const updated = await client.updateCurrentProfile({ displayName: 'Local', bio: 'dev' })
+		expect(updated).toMatchObject({ username: 'devuser', name: 'Local', bio: 'dev' })
 	})
 })

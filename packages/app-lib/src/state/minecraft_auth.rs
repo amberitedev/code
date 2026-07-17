@@ -1,16 +1,17 @@
 use crate::ErrorKind;
 use crate::util::fetch::INSECURE_REQWEST_CLIENT;
+use aes_gcm::aead::{Aead, Payload};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::Engine;
 use base64::prelude::{BASE64_STANDARD, BASE64_URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use dashmap::DashMap;
-use futures::TryStreamExt;
 use heck::ToTitleCase;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
-use rand::Rng;
 use rand::rngs::OsRng;
+use rand::{Rng, RngCore};
 use reqwest::header::HeaderMap;
 use reqwest::{Response, StatusCode};
 use serde::de::DeserializeOwned;
@@ -18,13 +19,14 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::json;
 use sha2::Digest;
+use sqlx::Row;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::hash::{BuildHasherDefault, DefaultHasher};
 use std::io;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Instant;
 use tokio::runtime::{Handle, RuntimeFlavor};
 use tokio::sync::Mutex;
@@ -85,14 +87,44 @@ pub struct MinecraftLoginFlow {
     pub challenge: String,
     pub session_id: String,
     pub auth_request_uri: String,
+    #[serde(skip)]
+    staged_device: Option<StoredDeviceTokenPair>,
 }
 
 #[tracing::instrument]
 pub async fn login_begin(
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
 ) -> crate::Result<MinecraftLoginFlow> {
-    let (pair, current_date) =
-        DeviceTokenPair::refresh_and_get_device_token(Utc::now(), exec).await?;
+    login_begin_inner(true, true, exec).await
+}
+
+#[tracing::instrument]
+pub async fn login_begin_with_prompt(
+    select_account: bool,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<MinecraftLoginFlow> {
+    login_begin_inner(select_account, true, exec).await
+}
+
+#[tracing::instrument]
+pub async fn login_begin_staged_with_prompt(
+    select_account: bool,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<MinecraftLoginFlow> {
+    login_begin_inner(select_account, false, exec).await
+}
+
+async fn login_begin_inner(
+    select_account: bool,
+    persist_device: bool,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<MinecraftLoginFlow> {
+    let (pair, current_date) = DeviceTokenPair::refresh_and_get_device_token(
+        Utc::now(),
+        exec,
+        persist_device,
+    )
+    .await?;
 
     let verifier = generate_oauth_challenge();
     let result = sha2::Sha256::digest(&verifier);
@@ -103,15 +135,22 @@ pub async fn login_begin(
         &challenge,
         &pair.key,
         current_date,
+        select_account,
     )
     .await
     {
         Ok((session_id, redirect_uri)) => {
+            let staged_device = if persist_device {
+                None
+            } else {
+                Some(StoredDeviceTokenPair::try_from(&pair)?)
+            };
             return Ok(MinecraftLoginFlow {
                 verifier,
                 challenge,
                 session_id,
                 auth_request_uri: redirect_uri.value.msa_oauth_redirect,
+                staged_device,
             });
         }
         Err(err) => return Err(crate::ErrorKind::from(err).into()),
@@ -122,10 +161,40 @@ pub async fn login_begin(
 pub async fn login_finish(
     code: &str,
     flow: MinecraftLoginFlow,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
 ) -> crate::Result<Credentials> {
-    let (pair, _) =
-        DeviceTokenPair::refresh_and_get_device_token(Utc::now(), exec).await?;
+    Ok(login_finish_inner(code, flow, exec, true)
+        .await?
+        .credentials)
+}
+
+#[tracing::instrument]
+pub async fn login_finish_staged(
+    code: &str,
+    flow: MinecraftLoginFlow,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<StagedMinecraftLogin> {
+    login_finish_inner(code, flow, exec, false).await
+}
+
+async fn login_finish_inner(
+    code: &str,
+    flow: MinecraftLoginFlow,
+    exec: &sqlx::Pool<sqlx::Sqlite>,
+    persist: bool,
+) -> crate::Result<StagedMinecraftLogin> {
+    let pair = match flow.staged_device.clone() {
+        Some(stored) => DeviceTokenPair::try_from(stored)?,
+        None => {
+            DeviceTokenPair::refresh_and_get_device_token(
+                Utc::now(),
+                exec,
+                persist,
+            )
+            .await?
+            .0
+        }
+    };
 
     let oauth_token = oauth_token(code, &flow.verifier).await?;
     let sisu_authorize = sisu_authorize(
@@ -172,9 +241,14 @@ pub async fn login_finish(
         ..credentials.offline_profile
     };
 
-    credentials.upsert(exec).await?;
+    if persist {
+        credentials.upsert(exec).await?;
+    }
 
-    Ok(credentials)
+    Ok(StagedMinecraftLogin {
+        credentials,
+        device_token: StoredDeviceTokenPair::try_from(&pair)?,
+    })
 }
 
 #[derive(Deserialize, Debug)]
@@ -190,6 +264,762 @@ pub struct Credentials {
     pub refresh_token: String,
     pub expires: DateTime<Utc>,
     pub active: bool,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct MinecraftAccountSummary {
+    pub profile: MinecraftProfile,
+    pub expires: DateTime<Utc>,
+    pub active: bool,
+}
+
+const PRODUCT_SESSION_VERSION: u32 = 1;
+const PRODUCT_SESSION_KEYRING_SERVICE: &str = "dev.amberite.app";
+const DEFAULT_PRODUCT_SESSION_ACCOUNT: &str = "amberite-product-session";
+static PRODUCT_SESSION_ACCOUNT: OnceLock<RwLock<String>> = OnceLock::new();
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct StoredMinecraftCredential {
+    profile: MinecraftProfile,
+    access_token: String,
+    refresh_token: String,
+    expires: DateTime<Utc>,
+    active: bool,
+}
+
+impl From<&Credentials> for StoredMinecraftCredential {
+    fn from(value: &Credentials) -> Self {
+        Self {
+            profile: value.offline_profile.clone(),
+            access_token: value.access_token.clone(),
+            refresh_token: value.refresh_token.clone(),
+            expires: value.expires,
+            active: value.active,
+        }
+    }
+}
+
+impl From<StoredMinecraftCredential> for Credentials {
+    fn from(value: StoredMinecraftCredential) -> Self {
+        Self {
+            offline_profile: value.profile,
+            access_token: value.access_token,
+            refresh_token: value.refresh_token,
+            expires: value.expires,
+            active: value.active,
+        }
+    }
+}
+
+fn merge_minecraft_credential(
+    bundle: &mut ProductSessionBundle,
+    credentials: &Credentials,
+) {
+    if credentials.active {
+        for credential in &mut bundle.minecraft_credentials {
+            credential.active = false;
+        }
+    }
+    let stored = StoredMinecraftCredential::from(credentials);
+    if let Some(existing) = bundle
+        .minecraft_credentials
+        .iter_mut()
+        .find(|value| value.profile.id == credentials.offline_profile.id)
+    {
+        *existing = stored;
+    } else {
+        bundle.minecraft_credentials.push(stored);
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct StoredDeviceTokenPair {
+    token: DeviceToken,
+    key_id: Uuid,
+    private_key: String,
+    x: String,
+    y: String,
+}
+
+pub struct StagedMinecraftLogin {
+    pub credentials: Credentials,
+    device_token: StoredDeviceTokenPair,
+}
+
+impl TryFrom<&DeviceTokenPair> for StoredDeviceTokenPair {
+    type Error = crate::Error;
+
+    fn try_from(value: &DeviceTokenPair) -> crate::Result<Self> {
+        Ok(Self {
+            token: value.token.clone(),
+            key_id: value.key.id,
+            private_key: value
+                .key
+                .key
+                .to_pkcs8_pem(LineEnding::default())
+                .map_err(MinecraftAuthenticationError::PEMSerialize)?
+                .to_string(),
+            x: value.key.x.clone(),
+            y: value.key.y.clone(),
+        })
+    }
+}
+
+impl TryFrom<StoredDeviceTokenPair> for DeviceTokenPair {
+    type Error = crate::Error;
+
+    fn try_from(value: StoredDeviceTokenPair) -> crate::Result<Self> {
+        Ok(Self {
+            token: value.token,
+            key: DeviceTokenKey {
+                id: value.key_id,
+                key: SigningKey::from_pkcs8_pem(&value.private_key)
+                    .map_err(product_session_error)?,
+                x: value.x,
+                y: value.y,
+            },
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RememberedAmberiteIdentity {
+    pub minecraft_uuid: Uuid,
+    pub verified_minecraft_handle: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub last_successful_sign_in: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AmberiteNativeSession {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub user: serde_json::Value,
+    pub active_identity_uuid: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ProductSessionBundle {
+    version: u32,
+    minecraft_credentials: Vec<StoredMinecraftCredential>,
+    device_token: Option<StoredDeviceTokenPair>,
+    amberite: Option<AmberiteNativeSession>,
+    remembered_identity: Option<RememberedAmberiteIdentity>,
+    signed_out: bool,
+}
+
+impl Default for ProductSessionBundle {
+    fn default() -> Self {
+        Self {
+            version: PRODUCT_SESSION_VERSION,
+            minecraft_credentials: Vec::new(),
+            device_token: None,
+            amberite: None,
+            remembered_identity: None,
+            signed_out: true,
+        }
+    }
+}
+
+pub fn configure_product_session_account(account: impl Into<String>) {
+    let lock = PRODUCT_SESSION_ACCOUNT.get_or_init(|| {
+        RwLock::new(DEFAULT_PRODUCT_SESSION_ACCOUNT.to_string())
+    });
+    if let Ok(mut value) = lock.write() {
+        *value = account.into();
+    }
+}
+
+fn product_session_account() -> String {
+    PRODUCT_SESSION_ACCOUNT
+        .get_or_init(|| {
+            RwLock::new(DEFAULT_PRODUCT_SESSION_ACCOUNT.to_string())
+        })
+        .read()
+        .map(|value| value.clone())
+        .unwrap_or_else(|_| DEFAULT_PRODUCT_SESSION_ACCOUNT.to_string())
+}
+
+fn product_session_error(error: impl std::fmt::Display) -> crate::Error {
+    ErrorKind::OtherError(format!("secure product session failed: {error}"))
+        .as_error()
+}
+
+#[cfg(not(test))]
+fn product_session_key_entry() -> crate::Result<keyring::Entry> {
+    keyring::Entry::new(
+        PRODUCT_SESSION_KEYRING_SERVICE,
+        &format!("{}:encryption-key", product_session_account()),
+    )
+    .map_err(product_session_error)
+}
+
+#[cfg(test)]
+fn test_product_session_keys()
+-> &'static std::sync::Mutex<HashMap<String, [u8; 32]>> {
+    static KEYS: OnceLock<std::sync::Mutex<HashMap<String, [u8; 32]>>> =
+        OnceLock::new();
+    KEYS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(test))]
+fn read_product_session_key() -> crate::Result<Option<[u8; 32]>> {
+    match product_session_key_entry()?.get_password() {
+        Ok(value) => {
+            let Ok(decoded) = BASE64_URL_SAFE_NO_PAD.decode(value) else {
+                tracing::warn!("Secure product-session key is malformed");
+                return Ok(None);
+            };
+            let Ok(key) = decoded.try_into() else {
+                tracing::warn!(
+                    "Secure product-session key has the wrong length"
+                );
+                return Ok(None);
+            };
+            Ok(Some(key))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(product_session_error(error)),
+    }
+}
+
+#[cfg(test)]
+fn read_product_session_key() -> crate::Result<Option<[u8; 32]>> {
+    Ok(test_product_session_keys()
+        .lock()
+        .map_err(product_session_error)?
+        .get(&product_session_account())
+        .copied())
+}
+
+fn get_or_create_product_session_key() -> crate::Result<[u8; 32]> {
+    if let Some(key) = read_product_session_key()? {
+        return Ok(key);
+    }
+    let mut key = [0_u8; 32];
+    OsRng.fill_bytes(&mut key);
+    store_product_session_key(key)?;
+    Ok(key)
+}
+
+#[cfg(not(test))]
+fn store_product_session_key(key: [u8; 32]) -> crate::Result<()> {
+    product_session_key_entry()?
+        .set_password(&BASE64_URL_SAFE_NO_PAD.encode(key))
+        .map_err(product_session_error)
+}
+
+#[cfg(test)]
+fn store_product_session_key(key: [u8; 32]) -> crate::Result<()> {
+    test_product_session_keys()
+        .lock()
+        .map_err(product_session_error)?
+        .insert(product_session_account(), key);
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn clear_product_session_key() {
+    if let Ok(entry) = product_session_key_entry() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(error) => tracing::warn!(
+                "Failed to clear corrupt product-session key: {error}"
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+fn clear_product_session_key() {
+    if let Ok(mut keys) = test_product_session_keys().lock() {
+        keys.remove(&product_session_account());
+    }
+}
+
+fn product_session_aad() -> String {
+    format!(
+        "amberite-product-session:{}:v{PRODUCT_SESSION_VERSION}",
+        product_session_account()
+    )
+}
+
+fn encrypt_product_session(
+    bundle: &ProductSessionBundle,
+    key: &[u8; 32],
+) -> crate::Result<(Vec<u8>, [u8; 12])> {
+    validate_product_session(bundle)?;
+    let plaintext = serde_json::to_vec(bundle)?;
+    let mut nonce = [0_u8; 12];
+    OsRng.fill_bytes(&mut nonce);
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(product_session_error)?;
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &plaintext,
+                aad: product_session_aad().as_bytes(),
+            },
+        )
+        .map_err(|_| product_session_error("bundle encryption failed"))?;
+    Ok((ciphertext, nonce))
+}
+
+fn decrypt_product_session(
+    ciphertext: &[u8],
+    nonce: &[u8],
+    key: &[u8; 32],
+) -> crate::Result<ProductSessionBundle> {
+    if nonce.len() != 12 {
+        return Err(product_session_error("stored nonce has the wrong length"));
+    }
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(product_session_error)?;
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: ciphertext,
+                aad: product_session_aad().as_bytes(),
+            },
+        )
+        .map_err(|_| product_session_error("bundle authentication failed"))?;
+    let bundle: ProductSessionBundle = serde_json::from_slice(&plaintext)?;
+    validate_product_session(&bundle)?;
+    Ok(bundle)
+}
+
+fn validate_product_session(
+    bundle: &ProductSessionBundle,
+) -> crate::Result<()> {
+    if bundle.version != PRODUCT_SESSION_VERSION {
+        return Err(product_session_error("unsupported bundle version"));
+    }
+    if bundle.signed_out && bundle.amberite.is_some() {
+        return Err(product_session_error(
+            "signed-out bundle contains an Amberite session",
+        ));
+    }
+    if !bundle.signed_out && bundle.amberite.is_none() {
+        return Err(product_session_error(
+            "signed-in bundle has no Amberite session",
+        ));
+    }
+    if bundle
+        .minecraft_credentials
+        .iter()
+        .filter(|credential| credential.active)
+        .count()
+        > 1
+    {
+        return Err(product_session_error(
+            "multiple launcher accounts are active",
+        ));
+    }
+    if bundle.minecraft_credentials.iter().any(|credential| {
+        credential.profile.id.is_nil()
+            || credential.access_token.is_empty()
+            || credential.refresh_token.is_empty()
+    }) {
+        return Err(product_session_error(
+            "Minecraft credentials are incomplete",
+        ));
+    }
+    if let Some(device) = &bundle.device_token
+        && (device.key_id.is_nil()
+            || device.private_key.is_empty()
+            || device.token.token.is_empty())
+    {
+        return Err(product_session_error("device credentials are incomplete"));
+    }
+    if let Some(session) = &bundle.amberite {
+        if session.access_token.is_empty()
+            || session.refresh_token.is_empty()
+            || session.active_identity_uuid.is_nil()
+            || session.expires_at <= session.updated_at
+        {
+            return Err(product_session_error(
+                "Amberite session is incomplete",
+            ));
+        }
+        let user_uuid = session
+            .user
+            .get("minecraftUuid")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok());
+        if user_uuid != Some(session.active_identity_uuid) {
+            return Err(product_session_error("Amberite user UUID mismatch"));
+        }
+        if bundle
+            .remembered_identity
+            .as_ref()
+            .map(|identity| identity.minecraft_uuid)
+            != Some(session.active_identity_uuid)
+        {
+            return Err(product_session_error(
+                "remembered identity UUID mismatch",
+            ));
+        }
+        if !bundle.minecraft_credentials.iter().any(|credential| {
+            credential.active
+                && credential.profile.id == session.active_identity_uuid
+        }) {
+            return Err(product_session_error(
+                "active Minecraft credential UUID mismatch",
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn product_session_row_exists(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<bool> {
+    Ok(
+        sqlx::query("SELECT 1 FROM amberite_product_session WHERE id = 0")
+            .fetch_optional(pool)
+            .await?
+            .is_some(),
+    )
+}
+
+async fn load_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<ProductSessionBundle> {
+    let Some(row) = sqlx::query(
+        "SELECT version, encrypted_bundle, nonce, remembered_identity, signed_out FROM amberite_product_session WHERE id = 0",
+    )
+    .fetch_optional(pool)
+    .await?
+    else {
+        return Ok(ProductSessionBundle::default());
+    };
+    let remembered = row
+        .try_get::<Option<String>, _>("remembered_identity")?
+        .and_then(|value| serde_json::from_str(&value).ok());
+    let signed_out = row.try_get::<i64, _>("signed_out")? == 1;
+    let ciphertext = row.try_get::<Option<Vec<u8>>, _>("encrypted_bundle")?;
+    let nonce = row.try_get::<Option<Vec<u8>>, _>("nonce")?;
+    let version = row.try_get::<i64, _>("version")? as u32;
+    let Some(ciphertext) = ciphertext else {
+        if !signed_out {
+            return reset_corrupt_product_session(pool, remembered).await;
+        }
+        return Ok(ProductSessionBundle {
+            version: PRODUCT_SESSION_VERSION,
+            remembered_identity: remembered,
+            signed_out: true,
+            ..ProductSessionBundle::default()
+        });
+    };
+    let Some(nonce) = nonce else {
+        return reset_corrupt_product_session(pool, remembered).await;
+    };
+    let Some(key) = read_product_session_key()? else {
+        return reset_corrupt_product_session(pool, remembered).await;
+    };
+    if version != PRODUCT_SESSION_VERSION {
+        return reset_corrupt_product_session(pool, remembered).await;
+    }
+    match decrypt_product_session(&ciphertext, &nonce, &key) {
+        Ok(bundle) => Ok(bundle),
+        Err(error) => {
+            tracing::warn!("Clearing corrupt secure product session: {error}");
+            reset_corrupt_product_session(pool, remembered).await
+        }
+    }
+}
+
+async fn clear_legacy_secret_columns(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE minecraft_users SET access_token = '', refresh_token = ''",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE minecraft_device_tokens SET private_key = '', token = '', display_claims = json('{}')",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn reset_corrupt_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    remembered_identity: Option<RememberedAmberiteIdentity>,
+) -> crate::Result<ProductSessionBundle> {
+    clear_product_session_key();
+    let bundle = ProductSessionBundle {
+        version: PRODUCT_SESSION_VERSION,
+        remembered_identity,
+        signed_out: true,
+        ..ProductSessionBundle::default()
+    };
+    let remembered = bundle
+        .remembered_identity
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let mut transaction = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO amberite_product_session (id, version, encrypted_bundle, nonce, remembered_identity, signed_out, updated_at) VALUES (0, ?, NULL, NULL, ?, 1, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version, encrypted_bundle = NULL, nonce = NULL, remembered_identity = excluded.remembered_identity, signed_out = 1, updated_at = excluded.updated_at",
+    )
+    .bind(PRODUCT_SESSION_VERSION as i64)
+    .bind(remembered)
+    .bind(Utc::now().timestamp())
+    .execute(&mut *transaction)
+    .await?;
+    clear_legacy_secret_columns(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(bundle)
+}
+
+async fn write_product_session_row(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    bundle: &ProductSessionBundle,
+) -> crate::Result<()> {
+    let key = get_or_create_product_session_key()?;
+    let (ciphertext, nonce) = encrypt_product_session(bundle, &key)?;
+    let remembered = bundle
+        .remembered_identity
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    sqlx::query(
+        "INSERT INTO amberite_product_session (id, version, encrypted_bundle, nonce, remembered_identity, signed_out, updated_at) VALUES (0, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version, encrypted_bundle = excluded.encrypted_bundle, nonce = excluded.nonce, remembered_identity = excluded.remembered_identity, signed_out = excluded.signed_out, updated_at = excluded.updated_at",
+    )
+    .bind(PRODUCT_SESSION_VERSION as i64)
+    .bind(ciphertext)
+    .bind(nonce.to_vec())
+    .bind(remembered)
+    .bind(bundle.signed_out)
+    .bind(Utc::now().timestamp())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn save_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    bundle: &ProductSessionBundle,
+) -> crate::Result<()> {
+    let mut transaction = pool.begin().await?;
+    write_product_session_row(&mut transaction, bundle).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub async fn amberite_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<Option<AmberiteNativeSession>> {
+    Ok(load_product_session(pool).await?.amberite)
+}
+
+pub async fn remembered_amberite_identity(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<Option<RememberedAmberiteIdentity>> {
+    Ok(load_product_session(pool).await?.remembered_identity)
+}
+
+pub async fn commit_amberite_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    staged: StagedMinecraftLogin,
+    expected_minecraft_uuid: Option<Uuid>,
+    session: AmberiteNativeSession,
+    remembered_identity: RememberedAmberiteIdentity,
+) -> crate::Result<()> {
+    let staged_uuid = staged.credentials.offline_profile.id;
+    if expected_minecraft_uuid.is_some_and(|expected| expected != staged_uuid) {
+        return Err(product_session_error("expected Minecraft UUID mismatch"));
+    }
+    if session.active_identity_uuid != staged_uuid
+        || remembered_identity.minecraft_uuid != staged_uuid
+    {
+        return Err(product_session_error("staged identity UUID mismatch"));
+    }
+
+    let mut bundle = load_product_session(pool).await?;
+    bundle.version = PRODUCT_SESSION_VERSION;
+    let credentials = staged.credentials;
+    let uuid = credentials.offline_profile.id;
+    merge_minecraft_credential(&mut bundle, &credentials);
+    bundle.device_token = Some(staged.device_token);
+    bundle.amberite = Some(session);
+    bundle.remembered_identity = Some(remembered_identity);
+    bundle.signed_out = false;
+
+    let mut transaction = pool.begin().await?;
+    write_product_session_row(&mut transaction, &bundle).await?;
+    sqlx::query("UPDATE minecraft_users SET active = FALSE")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO minecraft_users (uuid, active, username, access_token, refresh_token, expires) VALUES (?, TRUE, ?, '', '', ?) ON CONFLICT(uuid) DO UPDATE SET active = TRUE, username = excluded.username, access_token = '', refresh_token = '', expires = excluded.expires",
+    )
+    .bind(uuid.as_hyphenated().to_string())
+    .bind(&credentials.offline_profile.name)
+    .bind(credentials.expires.timestamp())
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub async fn attach_legacy_amberite_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    credentials: Credentials,
+    session: AmberiteNativeSession,
+    remembered_identity: RememberedAmberiteIdentity,
+) -> crate::Result<()> {
+    let mut bundle = load_product_session(pool).await?;
+    bundle.version = PRODUCT_SESSION_VERSION;
+    let uuid = credentials.offline_profile.id;
+    merge_minecraft_credential(&mut bundle, &credentials);
+    bundle.amberite = Some(session);
+    bundle.remembered_identity = Some(remembered_identity);
+    bundle.signed_out = false;
+
+    let mut transaction = pool.begin().await?;
+    write_product_session_row(&mut transaction, &bundle).await?;
+    sqlx::query("UPDATE minecraft_users SET active = FALSE")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO minecraft_users (uuid, active, username, access_token, refresh_token, expires) VALUES (?, TRUE, ?, '', '', ?) ON CONFLICT(uuid) DO UPDATE SET active = TRUE, username = excluded.username, access_token = '', refresh_token = '', expires = excluded.expires",
+    )
+    .bind(uuid.as_hyphenated().to_string())
+    .bind(&credentials.offline_profile.name)
+    .bind(credentials.expires.timestamp())
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub async fn update_amberite_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    session: AmberiteNativeSession,
+) -> crate::Result<()> {
+    let mut bundle = load_product_session(pool).await?;
+    bundle.version = PRODUCT_SESSION_VERSION;
+    if bundle.signed_out {
+        return Err(product_session_error("session is explicitly signed out"));
+    }
+    bundle.amberite = Some(session);
+    save_product_session(pool, &bundle).await
+}
+
+pub async fn clear_product_session_preserving_identity(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<()> {
+    let mut bundle = load_product_session(pool).await?;
+    bundle.version = PRODUCT_SESSION_VERSION;
+    bundle.minecraft_credentials.clear();
+    bundle.device_token = None;
+    bundle.amberite = None;
+    bundle.signed_out = true;
+    let mut transaction = pool.begin().await?;
+    write_product_session_row(&mut transaction, &bundle).await?;
+    clear_legacy_secret_columns(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub async fn migrate_legacy_product_session(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> crate::Result<()> {
+    if product_session_row_exists(pool).await? {
+        let _ = load_product_session(pool).await?;
+        return Ok(());
+    }
+
+    let rows = sqlx::query(
+        "SELECT uuid, active, username, access_token, refresh_token, expires FROM minecraft_users",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut bundle = ProductSessionBundle::default();
+    for row in rows {
+        let access_token: String = row.try_get("access_token")?;
+        let refresh_token: String = row.try_get("refresh_token")?;
+        if access_token.is_empty() && refresh_token.is_empty() {
+            continue;
+        }
+        bundle
+            .minecraft_credentials
+            .push(StoredMinecraftCredential {
+                profile: MinecraftProfile {
+                    id: Uuid::parse_str(
+                        row.try_get::<String, _>("uuid")?.as_str(),
+                    )
+                    .unwrap_or_default(),
+                    name: row.try_get("username")?,
+                    ..MinecraftProfile::default()
+                },
+                access_token,
+                refresh_token,
+                expires: Utc
+                    .timestamp_opt(row.try_get("expires")?, 0)
+                    .single()
+                    .unwrap_or_else(Utc::now),
+                active: row.try_get::<i64, _>("active")? == 1,
+            });
+    }
+
+    if let Some(row) = sqlx::query(
+        "SELECT uuid, private_key, x, y, issue_instant, not_after, token, display_claims FROM minecraft_device_tokens LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?
+    {
+        let private_key: String = row.try_get("private_key")?;
+        let token: String = row.try_get("token")?;
+        if !private_key.is_empty() || !token.is_empty() {
+            bundle.device_token = Some(StoredDeviceTokenPair {
+                token: DeviceToken {
+                    issue_instant: Utc
+                        .timestamp_opt(row.try_get("issue_instant")?, 0)
+                        .single()
+                        .unwrap_or_else(Utc::now),
+                    not_after: Utc
+                        .timestamp_opt(row.try_get("not_after")?, 0)
+                        .single()
+                        .unwrap_or_else(Utc::now),
+                    token,
+                    display_claims: serde_json::from_str(
+                        &row.try_get::<String, _>("display_claims")?,
+                    )
+                    .unwrap_or_default(),
+                },
+                key_id: Uuid::parse_str(row.try_get::<String, _>("uuid")?.as_str())
+                    .unwrap_or_default(),
+                private_key,
+                x: row.try_get("x")?,
+                y: row.try_get("y")?,
+            });
+        }
+    }
+
+    bundle.version = PRODUCT_SESSION_VERSION;
+    bundle.signed_out = true;
+    if let Err(error) = validate_product_session(&bundle) {
+        tracing::warn!(
+            "Clearing incomplete legacy product-session credentials: {error}"
+        );
+        bundle = ProductSessionBundle::default();
+    }
+    let mut transaction = pool.begin().await?;
+    write_product_session_row(&mut transaction, &bundle).await?;
+    clear_legacy_secret_columns(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(())
 }
 
 /// An entry in the player profile cache, keyed by player UUID.
@@ -245,11 +1075,19 @@ impl OnlineProfileCacheIntent {
 }
 
 impl Credentials {
+    pub async fn account_summary(&self) -> MinecraftAccountSummary {
+        MinecraftAccountSummary {
+            profile: self.maybe_online_profile().await.deref().clone(),
+            expires: self.expires,
+            active: self.active,
+        }
+    }
+
     /// Refreshes the authentication tokens for this user if they are expired, or
     /// very close to expiration.
     async fn refresh(
         &mut self,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<()> {
         // Use a margin of 5 minutes to give e.g. Minecraft and potentially
         // other operations that depend on a fresh token 5 minutes to complete
@@ -263,6 +1101,7 @@ impl Credentials {
             DeviceTokenPair::refresh_and_get_device_token(
                 oauth_token.date,
                 exec,
+                true,
             )
             .await?;
 
@@ -445,7 +1284,7 @@ impl Credentials {
     /// successfully refreshed unless the network is unreachable or times out.
     #[tracing::instrument]
     pub async fn get_default_credential(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<Option<Credentials>> {
         let credentials = Self::get_active(exec).await?;
 
@@ -474,143 +1313,83 @@ impl Credentials {
         }
     }
 
-    /// Fetches the currently selected credentials from the database, attempting
-    /// to refresh them if they are expired.
+    /// Fetches the currently selected credentials from secure product storage,
+    /// attempting to refresh them if they are expired.
     pub async fn get_active(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<Option<Self>> {
-        let res = sqlx::query!(
-            "
-            SELECT
-                uuid, active, username, access_token, refresh_token, expires
-            FROM minecraft_users
-            WHERE active = TRUE
-            "
-        )
-        .fetch_optional(exec)
-        .await?;
-
-        Ok(match res {
-            Some(x) => {
-                let mut credentials = Self {
-                    offline_profile: MinecraftProfile {
-                        id: Uuid::parse_str(&x.uuid).unwrap_or_default(),
-                        name: x.username,
-                        ..MinecraftProfile::default()
-                    },
-                    access_token: x.access_token,
-                    refresh_token: x.refresh_token,
-                    expires: Utc
-                        .timestamp_opt(x.expires, 0)
-                        .single()
-                        .unwrap_or_else(Utc::now),
-                    active: x.active == 1,
-                };
-                credentials.refresh(exec).await.ok();
-                Some(credentials)
-            }
-            None => None,
-        })
+        let mut credentials = load_product_session(exec)
+            .await?
+            .minecraft_credentials
+            .into_iter()
+            .find(|value| value.active)
+            .map(Self::from);
+        if let Some(value) = credentials.as_mut() {
+            value.refresh(exec).await.ok();
+        }
+        Ok(credentials)
     }
 
     pub async fn get_all(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<DashMap<Uuid, Self>> {
-        let res = sqlx::query!(
-            "
-            SELECT
-                uuid, active, username, access_token, refresh_token, expires
-            FROM minecraft_users
-            "
-        )
-        .fetch(exec)
-        .try_fold(DashMap::new(), |acc, x| {
-            let uuid = Uuid::parse_str(&x.uuid).unwrap_or_default();
-            let mut credentials = Self {
-                offline_profile: MinecraftProfile {
-                    id: uuid,
-                    name: x.username,
-                    ..MinecraftProfile::default()
-                },
-                access_token: x.access_token,
-                refresh_token: x.refresh_token,
-                expires: Utc
-                    .timestamp_opt(x.expires, 0)
-                    .single()
-                    .unwrap_or_else(Utc::now),
-                active: x.active == 1,
-            };
-
-            async move {
-                credentials.refresh(exec).await.ok();
-                acc.insert(uuid, credentials);
-
-                Ok(acc)
-            }
-        })
-        .await?;
-
-        Ok(res)
+        let result = DashMap::new();
+        for stored in load_product_session(exec).await?.minecraft_credentials {
+            let uuid = stored.profile.id;
+            let mut credentials = Self::from(stored);
+            credentials.refresh(exec).await.ok();
+            result.insert(uuid, credentials);
+        }
+        Ok(result)
     }
 
     pub async fn upsert(
         &self,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<()> {
         let profile = self.maybe_online_profile().await;
         let expires = self.expires.timestamp();
         let uuid = profile.id.as_hyphenated().to_string();
+        let mut bundle = load_product_session(exec).await?;
+        bundle.version = PRODUCT_SESSION_VERSION;
+        merge_minecraft_credential(&mut bundle, self);
 
+        let mut transaction = exec.begin().await?;
+        write_product_session_row(&mut transaction, &bundle).await?;
         if self.active {
-            sqlx::query!(
-                "
-                UPDATE minecraft_users
-                SET active = FALSE
-                ",
-            )
-            .execute(exec)
-            .await?;
+            sqlx::query("UPDATE minecraft_users SET active = FALSE")
+                .execute(&mut *transaction)
+                .await?;
         }
-
-        sqlx::query!(
-            "
-            INSERT INTO minecraft_users (uuid, active, username, access_token, refresh_token, expires)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (uuid) DO UPDATE SET
-                active = $2,
-                username = $3,
-                access_token = $4,
-                refresh_token = $5,
-                expires = $6
-            ",
-            uuid,
-            self.active,
-            profile.name,
-            self.access_token,
-            self.refresh_token,
-            expires,
+        sqlx::query(
+            "INSERT INTO minecraft_users (uuid, active, username, access_token, refresh_token, expires) VALUES (?, ?, ?, '', '', ?) ON CONFLICT(uuid) DO UPDATE SET active = excluded.active, username = excluded.username, access_token = '', refresh_token = '', expires = excluded.expires",
         )
-            .execute(exec)
-            .await?;
-
+        .bind(uuid)
+        .bind(self.active)
+        .bind(&profile.name)
+        .bind(expires)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
     pub async fn remove(
         uuid: Uuid,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<()> {
-        let uuid = uuid.as_hyphenated().to_string();
-
-        sqlx::query!(
-            "
-            DELETE FROM minecraft_users WHERE uuid = $1
-            ",
-            uuid,
-        )
-        .execute(exec)
-        .await?;
-
+        let mut bundle = load_product_session(exec).await?;
+        bundle.version = PRODUCT_SESSION_VERSION;
+        bundle
+            .minecraft_credentials
+            .retain(|value| value.profile.id != uuid);
+        let mut transaction = exec.begin().await?;
+        write_product_session_row(&mut transaction, &bundle).await?;
+        sqlx::query("DELETE FROM minecraft_users WHERE uuid = ?")
+            .bind(uuid.as_hyphenated().to_string())
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
         Ok(())
     }
 }
@@ -645,10 +1424,8 @@ impl Serialize for Credentials {
                 ),
         };
 
-        let mut ser = serializer.serialize_struct("Credentials", 5)?;
+        let mut ser = serializer.serialize_struct("Credentials", 3)?;
         ser.serialize_field("profile", &*profile)?;
-        ser.serialize_field("access_token", &self.access_token)?;
-        ser.serialize_field("refresh_token", &self.refresh_token)?;
         ser.serialize_field("expires", &self.expires)?;
         ser.serialize_field("active", &self.active)?;
         ser.end()
@@ -664,7 +1441,8 @@ impl DeviceTokenPair {
     #[tracing::instrument(skip(exec))]
     async fn refresh_and_get_device_token(
         current_date: DateTime<Utc>,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
+        persist: bool,
     ) -> crate::Result<(Self, DateTime<Utc>)> {
         let pair = Self::get(exec).await?;
 
@@ -675,7 +1453,9 @@ impl DeviceTokenPair {
                 let res = device_token(&pair.key, current_date).await?;
 
                 pair.token = res.value;
-                pair.upsert(exec).await?;
+                if persist {
+                    pair.upsert(exec).await?;
+                }
 
                 Ok((pair, res.date))
             }
@@ -688,101 +1468,60 @@ impl DeviceTokenPair {
                 token: res.value,
             };
 
-            pair.upsert(exec).await?;
+            if persist {
+                pair.upsert(exec).await?;
+            }
 
             Ok((pair, res.date))
         }
     }
 
     async fn get(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<Option<Self>> {
-        let res = sqlx::query!(
-            r#"
-            SELECT
-                uuid, private_key, x, y, issue_instant, not_after, token, json(display_claims) as "display_claims!: serde_json::Value"
-            FROM minecraft_device_tokens
-            "#
-        )
-            .fetch_optional(exec)
-            .await?;
-
-        if let Some(x) = res
-            && let Ok(uuid) = Uuid::parse_str(&x.uuid)
-            && let Ok(private_key) = SigningKey::from_pkcs8_pem(&x.private_key)
-        {
-            return Ok(Some(Self {
-                token: DeviceToken {
-                    issue_instant: Utc
-                        .timestamp_opt(x.issue_instant, 0)
-                        .single()
-                        .unwrap_or_else(Utc::now),
-                    not_after: Utc
-                        .timestamp_opt(x.not_after, 0)
-                        .single()
-                        .unwrap_or_else(Utc::now),
-                    token: x.token,
-                    display_claims: serde_json::from_value(x.display_claims)
-                        .unwrap_or_default(),
-                },
-                key: DeviceTokenKey {
-                    id: uuid,
-                    key: private_key,
-                    x: x.x,
-                    y: x.y,
-                },
-            }));
-        }
-
-        Ok(None)
+        let Some(stored) = load_product_session(exec).await?.device_token
+        else {
+            return Ok(None);
+        };
+        let private_key = SigningKey::from_pkcs8_pem(&stored.private_key)
+            .map_err(product_session_error)?;
+        Ok(Some(Self {
+            token: stored.token,
+            key: DeviceTokenKey {
+                id: stored.key_id,
+                key: private_key,
+                x: stored.x,
+                y: stored.y,
+            },
+        }))
     }
 
     pub async fn upsert(
         &self,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+        exec: &sqlx::Pool<sqlx::Sqlite>,
     ) -> crate::Result<()> {
-        let uuid = self.key.id.as_hyphenated().to_string();
-        let issue_instant = self.token.issue_instant.timestamp();
-        let not_after = self.token.not_after.timestamp();
-        let key = self
-            .key
-            .key
-            .to_pkcs8_pem(LineEnding::default())
-            .map_err(MinecraftAuthenticationError::PEMSerialize)?
-            .to_string();
-        let display_claims = serde_json::to_string(&self.token.display_claims)?;
+        let mut bundle = load_product_session(exec).await?;
+        bundle.version = PRODUCT_SESSION_VERSION;
+        bundle.device_token = Some(StoredDeviceTokenPair::try_from(self)?);
 
-        sqlx::query!(
-            "
-            INSERT INTO minecraft_device_tokens (id, uuid, private_key, x, y, issue_instant, not_after, token, display_claims)
-            VALUES (0, $1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (id) DO UPDATE SET
-                uuid = $1,
-                private_key = $2,
-                x = $3,
-                y = $4,
-                issue_instant = $5,
-                not_after = $6,
-                token = $7,
-                display_claims = jsonb($8)
-            ",
-            uuid,
-            key,
-            self.key.x,
-            self.key.y,
-            issue_instant,
-            not_after,
-            self.token.token,
-            display_claims,
+        let mut transaction = exec.begin().await?;
+        write_product_session_row(&mut transaction, &bundle).await?;
+        sqlx::query(
+            "INSERT INTO minecraft_device_tokens (id, uuid, private_key, x, y, issue_instant, not_after, token, display_claims) VALUES (0, ?, '', ?, ?, ?, ?, '', json('{}')) ON CONFLICT(id) DO UPDATE SET uuid = excluded.uuid, private_key = '', x = excluded.x, y = excluded.y, issue_instant = excluded.issue_instant, not_after = excluded.not_after, token = '', display_claims = json('{}')",
         )
-            .execute(exec)
-            .await?;
-
+        .bind(self.key.id.as_hyphenated().to_string())
+        .bind(&self.key.x)
+        .bind(&self.key.y)
+        .bind(self.token.issue_instant.timestamp())
+        .bind(self.token.not_after.timestamp())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
         Ok(())
     }
 }
 
-const MICROSOFT_CLIENT_ID: &str = "00000000402b5328";
+const MICROSOFT_CLIENT_ID: &str = "9e9c8504-c7f8-4b04-93a9-41a729924249";
 const AUTH_REPLY_URL: &str = "https://login.live.com/oauth20_desktop.srf";
 const REQUESTED_SCOPE: &str = "service::user.auth.xboxlive.com::MBI_SSL";
 pub const MINECRAFT_SERVICES_USER_AGENT: &str =
@@ -855,8 +1594,14 @@ async fn sisu_authenticate(
     challenge: &str,
     key: &DeviceTokenKey,
     current_date: DateTime<Utc>,
+    select_account: bool,
 ) -> Result<(String, RequestWithDate<RedirectUri>), MinecraftAuthenticationError>
 {
+    let prompt = if select_account {
+        "select_account"
+    } else {
+        "login"
+    };
     let res = send_signed_request::<RedirectUri>(
         None,
         "https://sisu.xboxlive.com/authenticate",
@@ -871,7 +1616,7 @@ async fn sisu_authenticate(
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "state": generate_oauth_challenge(),
-            "prompt": "select_account"
+            "prompt": prompt
           },
           "RedirectUri": AUTH_REPLY_URL,
           "Sandbox": "RETAIL",
@@ -1602,4 +2347,291 @@ fn generate_oauth_challenge() -> String {
 
     let bytes: Vec<u8> = (0..64).map(|_| rng.r#gen::<u8>()).collect();
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[cfg(test)]
+mod product_session_tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("product-session test lock")
+    }
+
+    async fn test_pool() -> sqlx::Pool<sqlx::Sqlite> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory SQLite");
+        sqlx::query(
+            "CREATE TABLE minecraft_users (uuid TEXT PRIMARY KEY NOT NULL, active INTEGER NOT NULL, username TEXT NOT NULL, access_token TEXT NOT NULL, refresh_token TEXT NOT NULL, expires INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE minecraft_device_tokens (id INTEGER PRIMARY KEY CHECK (id = 0), uuid TEXT NOT NULL, private_key TEXT NOT NULL, x TEXT NOT NULL, y TEXT NOT NULL, issue_instant INTEGER NOT NULL, not_after INTEGER NOT NULL, token TEXT NOT NULL, display_claims TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE amberite_product_session (id INTEGER PRIMARY KEY CHECK (id = 0), version INTEGER NOT NULL, encrypted_bundle BLOB NULL, nonce BLOB NULL, remembered_identity TEXT NULL, signed_out INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    fn credentials(uuid: Uuid, name: &str, active: bool) -> Credentials {
+        Credentials {
+            offline_profile: MinecraftProfile {
+                id: uuid,
+                name: name.to_string(),
+                ..MinecraftProfile::default()
+            },
+            access_token: format!("minecraft-access-{name}"),
+            refresh_token: format!("minecraft-refresh-{name}"),
+            expires: Utc::now() + Duration::hours(2),
+            active,
+        }
+    }
+
+    fn remembered(uuid: Uuid, name: &str) -> RememberedAmberiteIdentity {
+        RememberedAmberiteIdentity {
+            minecraft_uuid: uuid,
+            verified_minecraft_handle: name.to_string(),
+            display_name: name.to_string(),
+            avatar_url: None,
+            last_successful_sign_in: Utc::now(),
+        }
+    }
+
+    fn amberite_session(uuid: Uuid, suffix: &str) -> AmberiteNativeSession {
+        let updated_at = Utc::now();
+        AmberiteNativeSession {
+            access_token: format!("amberite-access-{suffix}"),
+            refresh_token: format!("amberite-refresh-{suffix}"),
+            user: json!({ "minecraftUuid": uuid.as_hyphenated().to_string() }),
+            active_identity_uuid: uuid,
+            expires_at: updated_at + Duration::hours(1),
+            updated_at,
+        }
+    }
+
+    fn staged(credentials: Credentials) -> StagedMinecraftLogin {
+        StagedMinecraftLogin {
+            credentials,
+            device_token: StoredDeviceTokenPair {
+                token: DeviceToken {
+                    issue_instant: Utc::now(),
+                    not_after: Utc::now() + Duration::hours(1),
+                    token: "device-token".to_string(),
+                    display_claims: HashMap::new(),
+                },
+                key_id: Uuid::new_v4(),
+                private_key: "private-key".to_string(),
+                x: "x".to_string(),
+                y: "y".to_string(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn migrates_plaintext_secrets_and_blanks_legacy_columns() {
+        let _guard = test_guard();
+        configure_product_session_account("test-migration");
+        clear_product_session_key();
+        let pool = test_pool().await;
+        let uuid = Uuid::new_v4();
+        sqlx::query("INSERT INTO minecraft_users VALUES (?, 1, 'Steve', 'legacy-access', 'legacy-refresh', ?)")
+            .bind(uuid.as_hyphenated().to_string())
+            .bind((Utc::now() + Duration::hours(1)).timestamp())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        migrate_legacy_product_session(&pool).await.unwrap();
+
+        let row = sqlx::query("SELECT encrypted_bundle FROM amberite_product_session WHERE id = 0")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let ciphertext: Vec<u8> = row.get("encrypted_bundle");
+        assert!(
+            !ciphertext
+                .windows(b"legacy-access".len())
+                .any(|window| window == b"legacy-access")
+        );
+        let row = sqlx::query("SELECT access_token, refresh_token FROM minecraft_users WHERE uuid = ?")
+            .bind(uuid.as_hyphenated().to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("access_token"), "");
+        assert_eq!(row.get::<String, _>("refresh_token"), "");
+        let bundle = load_product_session(&pool).await.unwrap();
+        assert!(bundle.signed_out);
+        assert_eq!(bundle.minecraft_credentials.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn corruption_clears_secrets_and_preserves_remembered_identity() {
+        let _guard = test_guard();
+        configure_product_session_account("test-corruption");
+        clear_product_session_key();
+        let pool = test_pool().await;
+        let uuid = Uuid::new_v4();
+        let mut bundle = ProductSessionBundle {
+            remembered_identity: Some(remembered(uuid, "Alex")),
+            ..ProductSessionBundle::default()
+        };
+        merge_minecraft_credential(
+            &mut bundle,
+            &credentials(uuid, "Alex", true),
+        );
+        save_product_session(&pool, &bundle).await.unwrap();
+        sqlx::query(
+            "UPDATE amberite_product_session SET encrypted_bundle = x'010203'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let recovered = load_product_session(&pool).await.unwrap();
+
+        assert!(recovered.signed_out);
+        assert!(recovered.minecraft_credentials.is_empty());
+        assert_eq!(recovered.remembered_identity.unwrap().minecraft_uuid, uuid);
+        assert!(read_product_session_key().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn expected_uuid_failure_leaves_previous_session_untouched() {
+        let _guard = test_guard();
+        configure_product_session_account("test-staged-rollback");
+        clear_product_session_key();
+        let pool = test_pool().await;
+        let previous_uuid = Uuid::new_v4();
+        let mut previous = ProductSessionBundle {
+            amberite: Some(amberite_session(previous_uuid, "previous")),
+            remembered_identity: Some(remembered(previous_uuid, "Previous")),
+            signed_out: false,
+            ..ProductSessionBundle::default()
+        };
+        merge_minecraft_credential(
+            &mut previous,
+            &credentials(previous_uuid, "Previous", true),
+        );
+        save_product_session(&pool, &previous).await.unwrap();
+
+        let next_uuid = Uuid::new_v4();
+        let result = commit_amberite_product_session(
+            &pool,
+            staged(credentials(next_uuid, "Next", true)),
+            Some(previous_uuid),
+            amberite_session(next_uuid, "next"),
+            remembered(next_uuid, "Next"),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let unchanged = load_product_session(&pool).await.unwrap();
+        assert_eq!(
+            unchanged.amberite.unwrap().access_token,
+            "amberite-access-previous"
+        );
+        assert_eq!(
+            unchanged.remembered_identity.unwrap().minecraft_uuid,
+            previous_uuid
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_is_atomic_and_preserves_identity_and_metadata() {
+        let _guard = test_guard();
+        configure_product_session_account("test-clear");
+        clear_product_session_key();
+        let pool = test_pool().await;
+        let uuid = Uuid::new_v4();
+        let mut bundle = ProductSessionBundle {
+            amberite: Some(amberite_session(uuid, "active")),
+            remembered_identity: Some(remembered(uuid, "Steve")),
+            signed_out: false,
+            ..ProductSessionBundle::default()
+        };
+        merge_minecraft_credential(
+            &mut bundle,
+            &credentials(uuid, "Steve", true),
+        );
+        save_product_session(&pool, &bundle).await.unwrap();
+        sqlx::query("INSERT INTO minecraft_users VALUES (?, 1, 'Steve', 'plaintext-access', 'plaintext-refresh', ?)")
+            .bind(uuid.as_hyphenated().to_string())
+            .bind((Utc::now() + Duration::hours(1)).timestamp())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        clear_product_session_preserving_identity(&pool)
+            .await
+            .unwrap();
+
+        let cleared = load_product_session(&pool).await.unwrap();
+        assert!(cleared.signed_out);
+        assert!(cleared.minecraft_credentials.is_empty());
+        assert!(cleared.amberite.is_none());
+        assert_eq!(cleared.remembered_identity.unwrap().minecraft_uuid, uuid);
+        let row = sqlx::query("SELECT username, access_token, refresh_token FROM minecraft_users WHERE uuid = ?")
+            .bind(uuid.as_hyphenated().to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("username"), "Steve");
+        assert_eq!(row.get::<String, _>("access_token"), "");
+        assert_eq!(row.get::<String, _>("refresh_token"), "");
+    }
+
+    #[test]
+    fn account_selection_does_not_change_explicit_sign_out() {
+        let mut bundle = ProductSessionBundle {
+            remembered_identity: Some(remembered(Uuid::new_v4(), "Remembered")),
+            ..ProductSessionBundle::default()
+        };
+        merge_minecraft_credential(
+            &mut bundle,
+            &credentials(Uuid::new_v4(), "Launcher", true),
+        );
+
+        assert!(bundle.signed_out);
+        assert!(bundle.amberite.is_none());
+        assert!(bundle.remembered_identity.is_some());
+        validate_product_session(&bundle).unwrap();
+    }
+
+    #[test]
+    fn account_summary_serialization_is_redacted() {
+        let summary = MinecraftAccountSummary {
+            profile: MinecraftProfile {
+                id: Uuid::new_v4(),
+                name: "Steve".to_string(),
+                ..MinecraftProfile::default()
+            },
+            expires: Utc::now() + Duration::hours(1),
+            active: true,
+        };
+
+        let serialized = serde_json::to_value(summary).unwrap();
+        assert!(serialized.get("profile").is_some());
+        assert!(serialized.get("expires").is_some());
+        assert!(serialized.get("active").is_some());
+        assert!(serialized.get("access_token").is_none());
+        assert!(serialized.get("refresh_token").is_none());
+        assert!(serialized.get("device_token").is_none());
+        assert!(serialized.get("private_key").is_none());
+    }
 }

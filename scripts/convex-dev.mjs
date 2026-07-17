@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
+import { generateKeyPairSync } from 'node:crypto'
 import {
 	existsSync,
 	lstatSync,
@@ -106,10 +107,42 @@ async function startLocal(selectedBaseline) {
 
 async function configureLocal(convexUrl, selectedBaseline, initialize) {
 	await waitForUrl(convexUrl, 60_000)
+	configureLocalAuth()
 	runConvex(['env', 'set', 'AMBERITE_DEV_MODE', 'true', '--deployment', 'local'])
 	if (!initialize) return
 	await applyBaseline(selectedBaseline)
 	writeBaseline(selectedBaseline)
+}
+
+function configureLocalAuth() {
+	const privateKeyResult = runConvex(
+		['env', 'get', 'JWT_PRIVATE_KEY', '--deployment', 'local'],
+		'pipe',
+		false,
+	)
+	const jwksResult = runConvex(['env', 'get', 'JWKS', '--deployment', 'local'], 'pipe', false)
+	if (
+		privateKeyResult.status === 0 &&
+		privateKeyResult.stdout.trim() &&
+		!privateKeyResult.stderr.includes('not found') &&
+		jwksResult.status === 0 &&
+		jwksResult.stdout.trim() &&
+		!jwksResult.stderr.includes('not found')
+	) {
+		return
+	}
+
+	console.log('Generating local Convex authentication keys.')
+	const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+	const privateKeyPem = privateKey
+		.export({ type: 'pkcs8', format: 'pem' })
+		.trimEnd()
+		.replace(/\n/g, ' ')
+	const publicJwk = publicKey.export({ format: 'jwk' })
+	const jwks = JSON.stringify({ keys: [{ use: 'sig', ...publicJwk }] })
+	runConvex(['env', 'set', '--deployment', 'local', '--', 'JWT_PRIVATE_KEY', privateKeyPem])
+	runConvex(['env', 'set', '--deployment', 'local', '--', 'JWKS', jwks])
+	console.log('Local Convex authentication keys are ready.')
 }
 
 async function applyBaseline(selectedBaseline) {
@@ -117,7 +150,11 @@ async function applyBaseline(selectedBaseline) {
 	const deadline = Date.now() + 60_000
 	let lastError = ''
 	while (Date.now() < deadline) {
-		const result = runConvex(['run', 'dev:applyBaseline', args, '--deployment', 'local'], 'pipe', false)
+		const result = runConvex(
+			['run', 'dev:applyBaseline', args, '--deployment', 'local'],
+			'pipe',
+			false,
+		)
 		if (result.status === 0) return
 		lastError = result.stderr?.trim() || result.stdout?.trim() || 'unknown Convex error'
 		await delay(1_000)
@@ -131,7 +168,7 @@ function resetLocal(selectedBaseline) {
 	}
 	const state = readState()
 	if (!state || !isProcessRunning(state.pid)) {
-		throw new Error('Start this worktree\'s local Convex deployment before resetting it.')
+		throw new Error("Start this worktree's local Convex deployment before resetting it.")
 	}
 	runConvex([
 		'run',
@@ -174,7 +211,7 @@ async function stopLocal(print = true) {
 	while (isProcessRunning(state.pid) && Date.now() < deadline) await delay(50)
 	if (isProcessRunning(state.pid)) throw new Error('Local Convex did not stop within five seconds.')
 	rmSync(statePath, { force: true })
-	if (print) console.log('Stopped this worktree\'s local Convex deployment.')
+	if (print) console.log("Stopped this worktree's local Convex deployment.")
 }
 
 function printStatus() {
@@ -228,7 +265,8 @@ function runConvex(args, stdio = 'inherit', fail = true) {
 		windowsHide: true,
 		env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
 	})
-	if (fail && result.status !== 0) throw new Error(`Convex command failed: convex ${args.join(' ')}`)
+	if (fail && result.status !== 0)
+		throw new Error(`Convex command failed: convex ${args.join(' ')}`)
 	return result
 }
 

@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 use std::{env, fs};
 
@@ -38,13 +38,16 @@ fn build_java_jars() {
         out_dir.join("java/libs").display()
     );
 
-    let gradle_path = fs::canonicalize(
-        #[cfg(target_os = "windows")]
-        "java\\gradlew.bat",
-        #[cfg(not(target_os = "windows"))]
-        "java/gradlew",
-    )
-    .unwrap();
+    #[cfg(target_os = "windows")]
+    let java_dir = windows_java_dir(&out_dir);
+    #[cfg(not(target_os = "windows"))]
+    let java_dir = dunce::canonicalize("java").unwrap();
+
+    let gradle_path = java_dir.join(if cfg!(target_os = "windows") {
+        "gradlew.bat"
+    } else {
+        "gradlew"
+    });
 
     let mut build_dir_str = OsString::from("-Dorg.gradle.project.buildDir=");
     build_dir_str.push(out_dir.join("java"));
@@ -53,12 +56,44 @@ fn build_java_jars() {
         .arg("build")
         .arg("--no-daemon")
         .arg("--console=rich")
-        .current_dir(dunce::canonicalize("java").unwrap())
+        .current_dir(java_dir)
         .status()
         .expect("Failed to wait on Gradle build");
 
     if !exit_status.success() {
         println!("cargo::error=Gradle build failed with {exit_status}");
         exit(exit_status.code().unwrap_or(1));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_java_dir(out_dir: &Path) -> PathBuf {
+    let source = env::current_dir().unwrap().join("java");
+    if !fs::canonicalize(&source)
+        .unwrap()
+        .to_string_lossy()
+        .starts_with(r"\\")
+    {
+        return source;
+    }
+
+    let destination = out_dir.join("java-source");
+    let _ = fs::remove_dir_all(&destination);
+    copy_dir(&source, &destination);
+    fs::write(out_dir.join(".gitattributes"), "* text=auto eol=lf\n").unwrap();
+    destination
+}
+
+#[cfg(target_os = "windows")]
+fn copy_dir(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let destination = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &destination);
+        } else {
+            fs::copy(entry.path(), destination).unwrap();
+        }
     }
 }

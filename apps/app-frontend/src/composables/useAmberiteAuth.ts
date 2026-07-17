@@ -1,45 +1,239 @@
-/**
- * useAmberiteAuth — reactive auth façade that replaces the Modrinth credentials ref.
- *
- * The sign-in flow runs Microsoft OAuth through the Tauri shell, stores the
- * returned Amberite session JWT, and refreshes the Convex-backed social profile.
- *
- * The mapped user object exposes the Labrinth.Users.v2.User shape so
- * @modrinth/ui components and existing auth-gated pages keep working without
- * churn.
- */
 import {
+	type AmberiteAccountUser,
+	AmberiteApiError,
 	ConvexAmberiteAuthClient,
 	mapAmberiteUserToAccountUser,
-	type AmberiteAccountUser,
 } from '@amberite/amberite-api'
+import { invoke } from '@tauri-apps/api/core'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
-import { login as amberiteLogin } from '@/helpers/amberite_auth'
-
-const MIN_SIGN_IN_VISIBLE_MS = 2500
-const SIGN_IN_TIMEOUT_MS = 30_000
 
 export type AmberiteAuthUser = AmberiteAccountUser
+export type AmberiteAuthGate =
+	| 'restoring'
+	| 'signedOut'
+	| 'verifying'
+	| 'retryableOffline'
+	| 'authenticated'
+
+export interface RememberedAmberiteIdentity {
+	minecraftUuid: string
+	verifiedMinecraftHandle: string
+	displayName: string
+	avatarUrl: string | null
+	lastSuccessfulSignIn: string
+}
 
 export interface UseAmberiteAuthReturn {
 	user: ComputedRef<AmberiteAuthUser | null>
+	rememberedIdentity: Ref<RememberedAmberiteIdentity | null>
+	status: Ref<AmberiteAuthGate>
 	isLoggedIn: ComputedRef<boolean>
 	isReady: ComputedRef<boolean>
-	signingIn: Ref<boolean>
+	signingIn: ComputedRef<boolean>
 	error: Ref<Error | null>
-	signIn: () => Promise<void>
+	signIn: (mode?: 'continue' | 'use_another_account') => Promise<void>
+	retryRestore: () => Promise<void>
 	logOut: () => Promise<void>
 }
 
-function mapToAuthUser(
-	cu: {
+const social = useSocial()
+const authClient = new ConvexAmberiteAuthClient({ adapter: useCoreClient().adapter })
+const status = ref<AmberiteAuthGate>('restoring')
+const error = ref<Error | null>(null)
+const rememberedIdentity = ref<RememberedAmberiteIdentity | null>(null)
+const sessionUser = ref<AmberiteAuthUser | null>(null)
+let restorePromise: Promise<void> | null = null
+let signInPromise: Promise<void> | null = null
+let refreshPromise: Promise<void> | null = null
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let errorTimer: ReturnType<typeof setTimeout> | null = null
+const REFRESH_INTERVAL_MS = 45 * 60 * 1_000
+const OFFLINE_REFRESH_RETRY_MS = 5 * 60 * 1_000
+const ERROR_DISMISS_MS = 2_000
+
+const user = computed<AmberiteAuthUser | null>(
+	() => sessionUser.value ?? mapSocialUser(social.currentUser.value),
+)
+const isLoggedIn = computed(() => status.value === 'authenticated' && Boolean(user.value))
+const isReady = computed(() => status.value !== 'restoring' && status.value !== 'verifying')
+const signingIn = computed(() => status.value === 'verifying')
+
+const coordinator: UseAmberiteAuthReturn = {
+	user,
+	rememberedIdentity,
+	status,
+	isLoggedIn,
+	isReady,
+	signingIn,
+	error,
+	signIn,
+	retryRestore,
+	logOut,
+}
+
+export function useAmberiteAuth(): UseAmberiteAuthReturn {
+	if (!restorePromise) restorePromise = restoreSession()
+	return coordinator
+}
+
+async function restoreSession(): Promise<void> {
+	clearScheduledRefresh()
+	status.value = 'restoring'
+	clearAuthError()
+	await loadRememberedIdentity()
+	try {
+		const devConfig = await getDevConfig()
+		const session = devConfig
+			? await signInWithDevAccount(devConfig.username)
+			: await authClient.restoreSession()
+		if (!session) {
+			sessionUser.value = null
+			status.value = 'signedOut'
+			return
+		}
+		sessionUser.value = session.user
+		await social.refresh()
+		status.value = 'authenticated'
+		scheduleRefresh()
+	} catch (value) {
+		sessionUser.value = null
+		showAuthError(value)
+		status.value = shouldPreserveSession(value) ? 'retryableOffline' : 'signedOut'
+	}
+}
+
+async function retryRestore(): Promise<void> {
+	if (status.value === 'restoring') return await restorePromise
+	restorePromise = restoreSession()
+	await restorePromise
+}
+
+async function signIn(mode: 'continue' | 'use_another_account' = 'continue'): Promise<void> {
+	if (signInPromise) return await signInPromise
+	signInPromise = performSignIn(mode).finally(() => {
+		signInPromise = null
+	})
+	await signInPromise
+}
+
+async function performSignIn(mode: 'continue' | 'use_another_account'): Promise<void> {
+	const previousStatus = status.value
+	const previousUser = sessionUser.value
+	status.value = 'verifying'
+	clearAuthError()
+	try {
+		const devConfig = await getDevConfig()
+		const session = devConfig
+			? await signInWithDevAccount(devConfig.username)
+			: await authClient.signInWithMinecraft({
+					mode,
+					...(mode === 'continue' && rememberedIdentity.value
+						? { expectedMinecraftUuid: rememberedIdentity.value.minecraftUuid }
+						: {}),
+				})
+		sessionUser.value = session.user
+		await social.refresh()
+		await loadRememberedIdentity()
+		status.value = 'authenticated'
+		scheduleRefresh()
+	} catch (value) {
+		showAuthError(value)
+		if (previousStatus === 'authenticated' && previousUser) {
+			sessionUser.value = previousUser
+			status.value = 'authenticated'
+			scheduleRefresh()
+		} else {
+			sessionUser.value = null
+			status.value = 'signedOut'
+			clearScheduledRefresh()
+		}
+	}
+}
+
+async function logOut(): Promise<void> {
+	clearScheduledRefresh()
+	try {
+		await authClient.logOut()
+	} finally {
+		sessionUser.value = null
+		clearAuthError()
+		status.value = 'signedOut'
+		await loadRememberedIdentity()
+		await social.refresh().catch(() => undefined)
+	}
+}
+
+async function signInWithDevAccount(username: string) {
+	const session = await authClient.signInWithDevAccount({ username })
+	if (session.user.username.toLowerCase() !== username.toLowerCase()) {
+		throw new Error(`Amberite development account did not resolve user ${username}.`)
+	}
+	return session
+}
+
+async function loadRememberedIdentity(): Promise<void> {
+	rememberedIdentity.value = await invoke<RememberedAmberiteIdentity | null>(
+		'plugin:auth|get_remembered_amberite_identity',
+	).catch(() => null)
+}
+
+function scheduleRefresh(delay = REFRESH_INTERVAL_MS): void {
+	clearScheduledRefresh()
+	refreshTimer = setTimeout(() => void refreshSession(), delay)
+}
+
+function clearScheduledRefresh(): void {
+	if (refreshTimer) clearTimeout(refreshTimer)
+	refreshTimer = null
+}
+
+async function refreshSession(): Promise<void> {
+	if (status.value !== 'authenticated') return
+	if (refreshPromise) return await refreshPromise
+	refreshPromise = performRefresh().finally(() => {
+		refreshPromise = null
+	})
+	await refreshPromise
+}
+
+async function performRefresh(): Promise<void> {
+	try {
+		const session = await authClient.refreshSession()
+		if (!session) {
+			sessionUser.value = null
+			status.value = 'signedOut'
+			clearScheduledRefresh()
+			return
+		}
+		sessionUser.value = session.user
+		clearAuthError()
+		await social.refresh()
+		scheduleRefresh()
+	} catch (value) {
+		showAuthError(value)
+		if (shouldPreserveSession(value)) {
+			// Keep the authenticated shell and native credentials while offline.
+			scheduleRefresh(OFFLINE_REFRESH_RETRY_MS)
+			return
+		}
+		sessionUser.value = null
+		status.value = 'signedOut'
+		clearScheduledRefresh()
+		await social.refresh().catch(() => undefined)
+	}
+}
+
+function mapSocialUser(
+	current: {
 		id?: string
 		userId: string
 		username?: string
+		minecraftUuid?: string
+		verifiedMinecraftHandle?: string
 		name?: string
 		displayName?: string
 		image?: string
@@ -48,107 +242,77 @@ function mapToAuthUser(
 		createdAt?: number
 	} | null,
 ): AmberiteAuthUser | null {
-	if (!cu) return null
+	if (!current?.minecraftUuid || !current.verifiedMinecraftHandle) return null
 	return mapAmberiteUserToAccountUser({
-		...cu,
-		id: cu.id ?? cu.userId,
-		created: cu.createdAt ? new Date(cu.createdAt).toISOString() : new Date().toISOString(),
+		...current,
+		id: current.id ?? current.userId,
+		created: current.createdAt
+			? new Date(current.createdAt).toISOString()
+			: new Date().toISOString(),
 	})
 }
 
-export function useAmberiteAuth(): UseAmberiteAuthReturn {
-	const social = useSocial()
-	const adapter = useCoreClient().adapter
-	const authClient = new ConvexAmberiteAuthClient({ adapter })
+function shouldPreserveSession(value: unknown): boolean {
+	if (value instanceof AmberiteApiError) return value.recovery === 'preserve_and_retry'
+	const message = String(value).toLowerCase()
+	return (
+		message.includes('network') ||
+		message.includes('connect') ||
+		message.includes('timeout') ||
+		message.includes('offline') ||
+		message.includes('unreachable')
+	)
+}
 
-	const user = computed<AmberiteAuthUser | null>(() => mapToAuthUser(social.currentUser.value))
-	const isLoggedIn = computed(() => !!social.currentUser.value)
-	const restoring = ref(true)
-	const isReady = computed(() => !social.loading.value && !restoring.value)
-	const signingIn = ref(false)
-	const error = ref<Error | null>(null)
-
-	async function signIn() {
-		if (signingIn.value) return
-		signingIn.value = true
+function showAuthError(value: unknown): void {
+	clearAuthError()
+	error.value = new Error(userFacingAuthError(value))
+	errorTimer = setTimeout(() => {
 		error.value = null
-		const startedAt = Date.now()
-		try {
-			await withTimeout(async () => {
-				const devConfig = await getDevConfig()
-				if (devConfig) {
-					await signInWithDevAccount(devConfig.username)
-					return
-				}
-				const credential = await amberiteLogin()
-				await authClient.signInWithMinecraftToken({
-					minecraftAccessToken: credential.accessToken,
-				})
-				await social.refresh()
-				if (!social.currentUser.value) throw new Error('Amberite account session was not accepted.')
-			}, SIGN_IN_TIMEOUT_MS)
-		} catch (e) {
-			console.warn('[amberite] account connection failed', e)
-			const detail = e instanceof Error ? e.message : String(e)
-			error.value = new Error(`Amberite could not connect your account. ${detail}`)
-		} finally {
-			const remaining = MIN_SIGN_IN_VISIBLE_MS - (Date.now() - startedAt)
-			if (remaining > 0) {
-				await new Promise((resolve) => setTimeout(resolve, remaining))
-			}
-			signingIn.value = false
-		}
-	}
+		errorTimer = null
+	}, ERROR_DISMISS_MS)
+}
 
-	async function logOut() {
-		await adapter.setCurrentJwt?.(null)
-		await adapter.setCurrentRefreshToken?.(null)
-		error.value = null
-		await social.refresh()
-	}
+function clearAuthError(): void {
+	if (errorTimer) clearTimeout(errorTimer)
+	errorTimer = null
+	error.value = null
+}
 
-	void restoreSession()
-	if (import.meta.env.DEV) {
-		void import('@/dev/runtime').then(({ registerDevAccountSwitcher }) => {
-			registerDevAccountSwitcher(async ({ username }) => {
-				await authClient.logOut()
-				await signInWithDevAccount(username)
-			})
-		})
+function userFacingAuthError(value: unknown): string {
+	const code =
+		value instanceof AmberiteApiError &&
+		'code' in value &&
+		typeof (value as AmberiteApiError & { code?: unknown }).code === 'string'
+			? (value as AmberiteApiError & { code: string }).code
+			: null
+	switch (code) {
+		case 'cancelled':
+			return 'Sign-in cancelled.'
+		case 'identity_mismatch':
+			return "That Minecraft account doesn't match."
+		case 'java_profile_missing':
+			return 'A Java Edition profile is required.'
+		case 'xbox_restriction':
+			return 'Xbox access is restricted.'
+		case 'throttled':
+			return 'Too many attempts. Try again later.'
+		case 'configuration_failure':
+			return "Sign-in isn't set up yet."
+		case 'invalid_session':
+		case 'expired_session':
+		case 'revoked_session':
+		case 'corrupt_session':
+		case 'refresh_reuse':
+			return 'Your session expired. Sign in again.'
+		case 'offline':
+		case 'timeout':
+		case 'provider_unreachable':
+		case 'amberite_unreachable':
+			return "Can't connect right now."
+		default:
+			return 'Something went wrong. Try again.'
 	}
-
-	async function restoreSession() {
-		try {
-			const devConfig = await getDevConfig()
-			if (devConfig) {
-				await signInWithDevAccount(devConfig.username)
-				return
-			}
-			const refreshToken = await adapter.getCurrentRefreshToken?.()
-			if (!refreshToken) return
-			const session = await authClient.refreshSession(refreshToken)
-			if (!session) {
-				await adapter.setCurrentJwt?.(null)
-				await adapter.setCurrentRefreshToken?.(null)
-				return
-			}
-			await social.refresh()
-		} catch (e) {
-			console.warn('[amberite] session refresh failed', e)
-		} finally {
-			restoring.value = false
-		}
-	}
-
-	async function signInWithDevAccount(username: string) {
-		await authClient.signInWithDevAccount({ username })
-		await social.refresh()
-		if (social.currentUser.value?.username?.toLowerCase() !== username.toLowerCase()) {
-			throw new Error(`Amberite development account did not resolve user ${username}.`)
-		}
-	}
-
-	return { user, isLoggedIn, isReady, signingIn, error, signIn, logOut }
 }
 
 async function getDevConfig() {
@@ -157,19 +321,24 @@ async function getDevConfig() {
 	return getDevAppConfig()
 }
 
-async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<T> {
-	let timeout: ReturnType<typeof setTimeout> | undefined
-	try {
-		return await Promise.race([
-			fn(),
-			new Promise<never>((_, reject) => {
-				timeout = setTimeout(
-					() => reject(new Error('The Amberite connection timed out. Try again.')),
-					timeoutMs,
-				)
-			}),
-		])
-	} finally {
-		if (timeout) clearTimeout(timeout)
-	}
+if (typeof window !== 'undefined') {
+	window.addEventListener('online', () => {
+		if (status.value === 'retryableOffline') void retryRestore()
+		else if (status.value === 'authenticated' && error.value) void refreshSession()
+	})
+}
+
+if (import.meta.env.DEV) {
+	void import('@/dev/runtime').then(({ registerDevAccountSwitcher }) => {
+		registerDevAccountSwitcher(async ({ username }) => {
+			clearScheduledRefresh()
+			await authClient.logOut()
+			const session = await signInWithDevAccount(username)
+			sessionUser.value = session.user
+			await social.refresh()
+			status.value = 'authenticated'
+			clearAuthError()
+			scheduleRefresh()
+		})
+	})
 }

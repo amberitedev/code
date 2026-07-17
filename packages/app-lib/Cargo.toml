@@ -5,6 +5,7 @@ version = "1.0.0-local"
 edition.workspace = true
 
 [dependencies]
+aes-gcm = { workspace = true }
 ariadne = { workspace = true }
 async-compression = { workspace = true, features = ["gzip", "tokio"] }
 async-minecraft-ping = { workspace = true, features = ["srv"] }
@@ -46,6 +47,7 @@ heck = { workspace = true }
 hickory-resolver = { workspace = true }
 indicatif = { workspace = true, optional = true }
 itertools = { workspace = true }
+keyring = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 p256 = { workspace = true, features = ["ecdsa"] }

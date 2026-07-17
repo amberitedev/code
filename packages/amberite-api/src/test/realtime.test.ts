@@ -51,13 +51,14 @@ describe('RealtimePresenceSession', () => {
 
 		await session.connect()
 		expect(url).toBe('wss://realtime.example/v1/connect?ticket=' + 'a'.repeat(32))
-		socket?.open()
-		socket?.receive(JSON.stringify({ type: 'presence.user', userId: 'user-1', online: true }))
-		socket?.receive(JSON.stringify({ type: 'presence.user', userId: 1, online: true }))
+		const activeSocket = socket as FakeSocket | null
+		activeSocket?.open()
+		activeSocket?.receive(JSON.stringify({ type: 'presence.user', userId: 'user-1', online: true }))
+		activeSocket?.receive(JSON.stringify({ type: 'presence.user', userId: 1, online: true }))
 		expect(frames).toEqual([{ type: 'presence.user', userId: 'user-1', online: true }])
 
-		socket?.receive(JSON.stringify({ type: 'authorization.invalidated' }))
+		activeSocket?.receive(JSON.stringify({ type: 'authorization.invalidated' }))
 		expect(invalidated).toBe(true)
-		expect(socket?.closeCode).toBe(1000)
+		expect(activeSocket?.closeCode).toBe(1000)
 	})
 })

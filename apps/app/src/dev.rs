@@ -35,7 +35,7 @@ mod runtime {
         username: Option<String>,
     }
 
-    #[derive(Serialize)]
+    #[derive(Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct AccountSwitchRequest {
         request_id: String,

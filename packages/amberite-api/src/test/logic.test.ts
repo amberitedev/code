@@ -225,9 +225,7 @@ describe('synced install logic helpers', () => {
 
 	it('installs a Core snapshot through injected app callbacks', async () => {
 		const archiveBytes = Uint8Array.from([1, 2, 3])
-		const downloadSyncSnapshot = vi.fn(async () => ({
-			arrayBuffer: async () => archiveBytes.buffer,
-		}))
+		const downloadSyncSnapshot = vi.fn(async () => new Blob([archiveBytes]))
 		const createProfile = vi.fn(async () => 'created-profile')
 		const getProfileFullPath = vi.fn(async () => 'profiles/created-profile')
 		const joinPath = vi.fn(async (...parts: string[]) => parts.join('/'))

@@ -45,6 +45,7 @@ async-tungstenite = { version = "0.31.0", default-features = false, features = [
 ] }
 async-walkdir = "2.1.0"
 async_zip = "0.0.18"
+aes-gcm = "0.10.3"
 aws-sdk-s3 = { version = "=1.122.0", default-features = false, features = [
   "default-https-client",
   "rt-tokio",

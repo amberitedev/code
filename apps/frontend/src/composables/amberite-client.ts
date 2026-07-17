@@ -1,18 +1,14 @@
-import { ConvexAmberiteAuthClient, ConvexApiClient, type PlatformAdapter } from '@amberite/amberite-api'
+import {
+	AuthError,
+	ConvexAmberiteAuthClient,
+	ConvexApiClient,
+	NetworkError,
+	type PlatformAdapter,
+	type PlatformAuthSession,
+} from '@amberite/amberite-api'
 
-import type { CookieOptions } from '#app'
-
-export const AMBERITE_ACCESS_TOKEN_COOKIE = 'auth-token'
-export const AMBERITE_REFRESH_TOKEN_COOKIE = 'amberite-refresh-token'
-
-const amberiteCookieOptions = () =>
-	({
-		maxAge: 60 * 60 * 24 * 365 * 10,
-		sameSite: 'lax',
-		httpOnly: false,
-		path: '/',
-		secure: useRuntimeConfig().public.cookieSecure,
-	}) satisfies CookieOptions<string | null>
+let browserAccessToken: string | null = null
+let refreshPromise: Promise<PlatformAuthSession | null> | null = null
 
 export function useAmberiteAuthClient(): ConvexAmberiteAuthClient {
 	return new ConvexAmberiteAuthClient({ adapter: createAmberiteWebAdapter() })
@@ -22,6 +18,10 @@ export function useAmberiteSocialClient(): ConvexApiClient {
 	return new ConvexApiClient(createAmberiteWebAdapter())
 }
 
+export function clearAmberiteAccessToken(): void {
+	browserAccessToken = null
+}
+
 function createAmberiteWebAdapter(): PlatformAdapter {
 	const config = useRuntimeConfig()
 	const convexUrl = config.public.amberiteConvexUrl
@@ -29,29 +29,63 @@ function createAmberiteWebAdapter(): PlatformAdapter {
 		throw new Error('NUXT_PUBLIC_AMBERITE_CONVEX_URL must be configured for Amberite auth.')
 	}
 
-	const accessToken = useCookie<string | null>(
-		AMBERITE_ACCESS_TOKEN_COOKIE,
-		amberiteCookieOptions(),
-	)
-	const refreshToken = useCookie<string | null>(
-		AMBERITE_REFRESH_TOKEN_COOKIE,
-		amberiteCookieOptions(),
-	)
-
 	return {
 		fetchFn: globalThis.fetch.bind(globalThis) as typeof fetch,
 		convexUrl,
 		getCoreUrl: async () => null,
-		getCurrentJwt: async () => accessToken.value || null,
+		getCurrentJwt: async () => (import.meta.client ? browserAccessToken : null),
 		setCurrentJwt: async (token) => {
-			accessToken.value = token
+			if (import.meta.client) browserAccessToken = token
 		},
-		getCurrentRefreshToken: async () => refreshToken.value || null,
-		setCurrentRefreshToken: async (token) => {
-			refreshToken.value = token
+		restoreMinecraftSession: async () => await requestServerSession('restore'),
+		refreshAmberiteSession: async () => await refreshServerSession(),
+		signOutMinecraftSession: async () => {
+			try {
+				await $fetch('/api/amberite/session/logout', {
+					method: 'POST',
+					credentials: 'same-origin',
+				})
+			} finally {
+				browserAccessToken = null
+			}
 		},
 		openExternalAuth: async (url) => {
 			await navigateTo(url, { external: true })
 		},
+	}
+}
+
+async function refreshServerSession(): Promise<PlatformAuthSession | null> {
+	if (refreshPromise) return await refreshPromise
+	refreshPromise = requestServerSession('refresh').finally(() => {
+		refreshPromise = null
+	})
+	return await refreshPromise
+}
+
+async function requestServerSession(
+	action: 'restore' | 'refresh',
+): Promise<PlatformAuthSession | null> {
+	if (!import.meta.client) return null
+	try {
+		const response = await $fetch<{ accessToken: string } | null>(
+			`/api/amberite/session/${action}`,
+			{
+				method: 'POST',
+				credentials: 'same-origin',
+			},
+		)
+		browserAccessToken = response?.accessToken ?? null
+		return response ? { accessToken: response.accessToken } : null
+	} catch (error) {
+		const status = Number(
+			(error as { statusCode?: unknown; status?: unknown }).statusCode ??
+				(error as { status?: unknown }).status,
+		)
+		if (status === 401) {
+			browserAccessToken = null
+			throw new AuthError('session is invalid or expired', 'invalid_session')
+		}
+		throw new NetworkError('Amberite session service is unreachable', 'amberite_unreachable')
 	}
 }

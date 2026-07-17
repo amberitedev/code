@@ -1,14 +1,12 @@
-/**
- * DesktopAdapter — PlatformAdapter implementation for the Amberite desktop app (Tauri).
- *
- * Uses @tauri-apps/plugin-http fetch (routes through Rust) instead of window.fetch,
- * so requests to Core bypass browser CSP entirely. The http plugin allowlist in
- * capabilities/plugins.json permits the HTTP origins of linked Cores.
- *
- * Core URL: read from the identity-bound connected Core record.
- * JWT: persisted in the OS keychain through the Tauri auth plugin.
- */
-import type { PersistentQueueStore, PlatformAdapter, QueuedMessage } from '@amberite/amberite-api'
+import {
+	type AmberiteSessionTokens,
+	AuthError,
+	NetworkError,
+	type PersistentQueueStore,
+	type PlatformAdapter,
+	ProviderAuthError,
+	type QueuedMessage,
+} from '@amberite/amberite-api'
 import { invoke } from '@tauri-apps/api/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -53,6 +51,8 @@ class LocalStorageQueueStore implements PersistentQueueStore {
 }
 
 const queueStore = new LocalStorageQueueStore()
+let accessToken: string | null = null
+let developmentSession: AmberiteSessionTokens | null = null
 
 export function createDesktopAdapter(): PlatformAdapter {
 	const useBrowserFetchForConvex =
@@ -66,46 +66,156 @@ export function createDesktopAdapter(): PlatformAdapter {
 		}
 		return await tauriFetch(input, init)
 	}
+
 	return {
 		fetchFn,
-
-		// Convex relay URL. Empty string disables Convex-relay transport silently.
 		convexUrl: config.convexUrl,
-
 		queueStore,
-
-		// A Core is only reachable after pairing or restoring an identity-bound link.
-		async getCoreUrl(): Promise<string | null> {
+		async getCoreUrl() {
 			return getConnectedCore()?.url ?? null
 		},
-
-		async getConnectedCoreId(): Promise<string | null> {
+		async getConnectedCoreId() {
 			return getConnectedCore()?.coreId ?? null
 		},
-
-		async getCurrentJwt(): Promise<string | null> {
-			return await invoke<string | null>('plugin:auth|get_amberite_session_jwt')
+		async getCurrentJwt() {
+			return accessToken
 		},
-
-		async setCurrentJwt(jwt: string | null): Promise<void> {
-			await invoke('plugin:auth|set_amberite_session_jwt', { jwt })
+		async setCurrentJwt(token) {
+			accessToken = token
 		},
-
-		async getCurrentRefreshToken(): Promise<string | null> {
-			return await invoke<string | null>('plugin:auth|get_amberite_session_refresh_token')
+		async readAmberiteSession() {
+			return developmentSession
 		},
-
-		async setCurrentRefreshToken(refreshToken: string | null): Promise<void> {
-			await invoke('plugin:auth|set_amberite_session_refresh_token', { refreshToken })
+		async writeAmberiteSession(tokens) {
+			developmentSession = tokens
+			accessToken = tokens.token
 		},
-
-		async getLocalSetupSecret(): Promise<string | null> {
+		async clearAmberiteSession() {
+			developmentSession = null
+			accessToken = null
+		},
+		async signInWithMinecraft(request) {
+			const session = await invokeNativeAuth<{ accessToken: string }>(
+				'plugin:auth|amberite_product_sign_in',
+				{
+					convexUrl: config.convexUrl,
+					mode: request.mode,
+					expectedMinecraftUuid: request.expectedMinecraftUuid ?? null,
+				},
+				'sign_in',
+			)
+			accessToken = session.accessToken
+			return session
+		},
+		async restoreMinecraftSession() {
+			const session = await invokeNativeAuth<{ accessToken: string } | null>(
+				'plugin:auth|restore_amberite_product_session',
+				{ convexUrl: config.convexUrl },
+				'restore',
+			)
+			accessToken = session?.accessToken ?? null
+			return session
+		},
+		async refreshAmberiteSession() {
+			const session = await invokeNativeAuth<{ accessToken: string } | null>(
+				'plugin:auth|refresh_amberite_product_session',
+				{ convexUrl: config.convexUrl },
+				'refresh',
+			)
+			accessToken = session?.accessToken ?? null
+			return session
+		},
+		async signOutMinecraftSession() {
+			try {
+				await invokeNativeAuth(
+					'plugin:auth|sign_out_amberite_product_session',
+					{ convexUrl: config.convexUrl },
+					'sign_out',
+				)
+			} finally {
+				developmentSession = null
+				accessToken = null
+			}
+		},
+		async getLocalSetupSecret() {
 			return await invoke<string | null>('plugin:auth|get_amberite_local_setup_secret')
 		},
-
-		// Opens external URLs (OAuth, docs, etc.) in the system browser.
-		openExternalAuth(url: string): void {
-			openUrl(url).catch((e) => console.error('[DesktopAdapter] openExternalAuth failed:', e))
+		openExternalAuth(url) {
+			openUrl(url).catch((error) =>
+				console.error('[DesktopAdapter] openExternalAuth failed:', error),
+			)
 		},
 	}
+}
+
+type NativeAuthOperation = 'sign_in' | 'restore' | 'refresh' | 'sign_out'
+
+async function invokeNativeAuth<T>(
+	command: string,
+	args: Record<string, unknown>,
+	operation: NativeAuthOperation,
+): Promise<T> {
+	try {
+		return await invoke<T>(command, args)
+	} catch (error) {
+		throw mapNativeAuthError(error, operation)
+	}
+}
+
+function mapNativeAuthError(error: unknown, operation: NativeAuthOperation): Error {
+	const message = nativeErrorMessage(error)
+	const normalized = message.toLowerCase()
+	if (normalized.includes('cancel')) return new ProviderAuthError(message, 'cancelled')
+	if (normalized.includes('state')) return new ProviderAuthError(message, 'state_failure')
+	if (normalized.includes('uuid mismatch')) return new AuthError(message, 'identity_mismatch')
+	if (normalized.includes('java') && normalized.includes('profile'))
+		return new ProviderAuthError(message, 'java_profile_missing')
+	if (normalized.includes('xbox')) return new ProviderAuthError(message, 'xbox_restriction')
+	if (normalized.includes('throttl') || normalized.includes('429'))
+		return new ProviderAuthError(message, 'throttled')
+	if (normalized.includes('configur') || normalized.includes('client id'))
+		return new ProviderAuthError(message, 'configuration_failure')
+	if (
+		normalized.includes('network') ||
+		normalized.includes('connect') ||
+		normalized.includes('timeout') ||
+		normalized.includes('offline') ||
+		normalized.includes('unreachable') ||
+		normalized.includes('error sending request')
+	)
+		return new NetworkError(message, 'amberite_unreachable')
+	if (
+		normalized.includes('corrupt') ||
+		normalized.includes('decrypt') ||
+		normalized.includes('keyring') ||
+		normalized.includes('missing key') ||
+		normalized.includes('incomplete') ||
+		normalized.includes('bundle authentication')
+	)
+		return new AuthError(message, 'corrupt_session')
+	if (normalized.includes('refresh') && normalized.includes('reuse'))
+		return new AuthError(message, 'refresh_reuse')
+	if (normalized.includes('expired')) return new AuthError(message, 'expired_session')
+	if (normalized.includes('revoked')) return new AuthError(message, 'revoked_session')
+	if (
+		normalized.includes('not authenticated') ||
+		normalized.includes('invalid session') ||
+		normalized.includes('invalid refresh') ||
+		normalized.includes('401') ||
+		normalized.includes('403')
+	)
+		return new AuthError(message, 'invalid_session')
+	if (operation === 'sign_in') return new ProviderAuthError(message, 'provider_failure')
+	if (operation === 'restore') return new AuthError(message, 'corrupt_session')
+	return new NetworkError(message, 'amberite_unreachable')
+}
+
+function nativeErrorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message
+	if (typeof error === 'string') return error
+	if (error && typeof error === 'object' && 'message' in error) {
+		const message = (error as { message?: unknown }).message
+		if (typeof message === 'string') return message
+	}
+	return String(error)
 }

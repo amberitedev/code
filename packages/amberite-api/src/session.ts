@@ -20,17 +20,15 @@ export function isAmberiteSessionTokens(value: unknown): value is AmberiteSessio
 
 export function validateAmberiteSessionTokens(value: unknown): AmberiteSessionTokens {
 	if (!isAmberiteSessionTokens(value) || !value.token.trim() || !value.refreshToken.trim()) {
-		throw new AuthError('invalid Amberite session token response')
+		throw new AuthError('invalid Amberite session token response', 'corrupt_session')
 	}
-	return {
-		token: value.token,
-		refreshToken: value.refreshToken,
-	}
+	return { token: value.token, refreshToken: value.refreshToken }
 }
 
 export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSessionStorage {
 	return {
 		async read(): Promise<AmberiteSessionTokens | null> {
+			if (adapter.readAmberiteSession) return await adapter.readAmberiteSession()
 			const token = await adapter.getCurrentJwt()
 			const refreshToken = await adapter.getCurrentRefreshToken?.()
 			if (!token || !refreshToken) return null
@@ -38,14 +36,29 @@ export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSession
 		},
 
 		async write(tokens: AmberiteSessionTokens): Promise<void> {
-			if (!adapter.setCurrentJwt || !adapter.setCurrentRefreshToken) {
-				throw new AuthError('Amberite session storage is not writable')
+			if (adapter.writeAmberiteSession) {
+				await adapter.writeAmberiteSession(tokens)
+				return
 			}
-			await adapter.setCurrentJwt(tokens.token)
-			await adapter.setCurrentRefreshToken(tokens.refreshToken)
+			if (!adapter.setCurrentJwt || !adapter.setCurrentRefreshToken) {
+				throw new AuthError('Amberite session storage is not writable', 'corrupt_session')
+			}
+			const previous = await this.read()
+			try {
+				await adapter.setCurrentJwt(tokens.token)
+				await adapter.setCurrentRefreshToken(tokens.refreshToken)
+			} catch (error) {
+				await adapter.setCurrentJwt(previous?.token ?? null).catch(() => undefined)
+				await adapter.setCurrentRefreshToken(previous?.refreshToken ?? null).catch(() => undefined)
+				throw error
+			}
 		},
 
 		async clear(): Promise<void> {
+			if (adapter.clearAmberiteSession) {
+				await adapter.clearAmberiteSession()
+				return
+			}
 			await adapter.setCurrentJwt?.(null)
 			await adapter.setCurrentRefreshToken?.(null)
 		},

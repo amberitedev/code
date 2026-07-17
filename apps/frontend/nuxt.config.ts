@@ -212,6 +212,7 @@ export default defineNuxtConfig({
 		pyroBaseUrl: process.env.PYRO_BASE_URL,
 		amberiteMinecraftOAuthClientId: getAmberiteMinecraftOAuthClientId(),
 		amberiteMinecraftOAuthClientSecret: getAmberiteMinecraftOAuthClientSecret(),
+		amberiteAuthCookieSecret: process.env.AMBERITE_AUTH_COOKIE_SECRET ?? '',
 		intercomIdentitySecret:
 			process.env.INTERCOM_IDENTITY_SECRET ??
 			// @ts-ignore

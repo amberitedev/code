@@ -5,6 +5,8 @@ export interface AmberiteUser {
 	id?: string
 	userId: string
 	username?: string
+	minecraftUuid?: string
+	verifiedMinecraftHandle?: string
 	name?: string
 	displayName?: string
 	image?: string
@@ -25,6 +27,8 @@ export interface AmberitePublicProfile {
 	id: string
 	userId: string
 	username?: string
+	minecraftUuid?: string
+	verifiedMinecraftHandle?: string
 	name?: string
 	displayName?: string
 	avatar_url: string | null
@@ -52,7 +56,13 @@ export interface AmberiteProfile extends AmberitePublicProfile {
 }
 
 export type ProfileSectionVisibility = 'everyone' | 'friends' | 'friend_group' | 'private'
-export type ProfileRelationship = 'self' | 'friend' | 'friend_group' | 'group_manager' | 'public' | 'blocked'
+export type ProfileRelationship =
+	| 'self'
+	| 'friend'
+	| 'friend_group'
+	| 'group_manager'
+	| 'public'
+	| 'blocked'
 
 export interface ProfileVisibilitySettings {
 	friends: ProfileSectionVisibility

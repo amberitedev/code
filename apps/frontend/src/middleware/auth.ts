@@ -1,21 +1,16 @@
 const whitelistedParams = ['flow', 'error']
 
-export default defineNuxtRouteMiddleware(async (_to, from) => {
-	const config = useRuntimeConfig()
+export default defineNuxtRouteMiddleware(async (to) => {
 	const auth = await useAuth()
+	if (auth.value.status === 'authenticated') return
+	if (auth.value.status === 'restoring' || auth.value.status === 'retryableOffline') return
 
-	if (auth.value.user) return
-
-	const fullPath = from.fullPath
-
-	const url = new URL(fullPath, config.public.apiBaseUrl)
-
+	const url = new URL(to.fullPath, useRuntimeConfig().public.siteUrl)
 	const extractedParams = Object.create(null) as Record<string, string>
-
 	for (const param of whitelistedParams) {
-		const val = url.searchParams.get(param)
-		if (val != null) {
-			extractedParams[param] = val
+		const value = url.searchParams.get(param)
+		if (value != null) {
+			extractedParams[param] = value
 			url.searchParams.delete(param)
 		}
 	}

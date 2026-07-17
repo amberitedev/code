@@ -21,7 +21,6 @@ import {
 	ArrowBigUpDashIcon,
 	ChangeSkinIcon,
 	CompassIcon,
-	ExternalIcon,
 	HomeIcon,
 	LeftArrowIcon,
 	LibraryIcon,
@@ -33,6 +32,7 @@ import {
 	ServerStackIcon,
 	SettingsIcon,
 	ShieldAlertIcon,
+	SpinnerIcon,
 	UserIcon,
 	WorldIcon,
 	XIcon,
@@ -52,9 +52,9 @@ import {
 	NotificationPanel,
 	OverflowMenu,
 	PopupNotificationPanel,
+	provideHostingBackend,
 	provideModalBehavior,
 	provideModrinthClient,
-	provideHostingBackend,
 	provideNotificationManager,
 	providePageContext,
 	providePopupNotificationManager,
@@ -86,12 +86,12 @@ import ModrinthAppLogo from '@/assets/modrinth_app.svg?component'
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
-import ErrorModal from '@/components/ui/ErrorModal.vue'
 import InstanceCreationFlowModal from '@/components/ui/creation-flow/InstanceCreationFlowModal.vue'
-import LibraryInstancePullSurface from '@/components/ui/LibraryInstancePullSurface.vue'
+import ErrorModal from '@/components/ui/ErrorModal.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
 import UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
+import LibraryInstancePullSurface from '@/components/ui/LibraryInstancePullSurface.vue'
 import MinecraftAuthErrorModal from '@/components/ui/minecraft-auth-error-modal/MinecraftAuthErrorModal.vue'
 import AppSettingsModal from '@/components/ui/modal/AppSettingsModal.vue'
 import AuthGrantFlowWaitModal from '@/components/ui/modal/AuthGrantFlowWaitModal.vue'
@@ -132,6 +132,7 @@ import {
 	setRestartAfterPendingUpdate,
 } from '@/helpers/utils.js'
 import i18n from '@/i18n.config'
+import LibraryPage from '@/pages/library/Index.vue'
 import {
 	appUpdateState,
 	downloadAvailableAppUpdate,
@@ -154,7 +155,6 @@ import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
-import LibraryPage from '@/pages/library/Index.vue'
 
 import { generateSkinPreviews } from './helpers/rendering/batch-skin-renderer'
 import { get_available_capes, get_available_skins } from './helpers/skins'
@@ -175,9 +175,6 @@ const socialClient = useSocialClient()
 const modrinthLink = useModrinthLink()
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const hasMinecraftAccounts = ref(false)
-const amberiteAccountMissing = computed(
-	() => hasMinecraftAccounts.value && amberiteAuth.isReady.value && !amberiteAuth.user.value,
-)
 const AMBERITE_ACCOUNT_DISMISS_KEY = 'amberite:account-modal:dismissed'
 const amberiteAccountDismissedForSession = ref(false)
 try {
@@ -187,9 +184,7 @@ try {
 	// sessionStorage can be unavailable in tests.
 }
 const amberiteAccountModalStep = ref('main')
-const showAmberiteAccountModal = computed(
-	() => amberiteAccountMissing.value && !amberiteAccountDismissedForSession.value,
-)
+const showAmberiteAccountModal = computed(() => false)
 const sidebarToggled = ref(true)
 const unsubscribeSidebarToggle = themeStore.$subscribe(() => {
 	sidebarToggled.value = !themeStore.toggleSidebar
@@ -280,9 +275,7 @@ function getLeftNavButtons() {
 }
 
 function clearOptimisticLeftNavSelection() {
-	getLeftNavButtons().forEach((button) =>
-		button.classList.remove(LEFT_NAV_OPTIMISTIC_ACTIVE_CLASS),
-	)
+	getLeftNavButtons().forEach((button) => button.classList.remove(LEFT_NAV_OPTIMISTIC_ACTIVE_CLASS))
 }
 
 function setOptimisticLeftNavSelection(button) {
@@ -1060,10 +1053,8 @@ function beginLibraryInstanceOpenNavigation(target) {
 	const resolved = router.resolve(target)
 	if (!isInstanceRoute(resolved.path)) return
 
-	const targetFullPath = resolved.fullPath || resolved.path
 	const opensInstanceFromLibrary = isLibraryRoute(route.path)
-	const opensInstanceFromMinimized =
-		opensInstanceFromLibrary && !!minimizedInstanceRoutePath.value
+	const opensInstanceFromMinimized = opensInstanceFromLibrary && !!minimizedInstanceRoutePath.value
 
 	if (opensInstanceFromLibrary) {
 		lastLibraryRoutePath.value = route.fullPath || route.path
@@ -1165,7 +1156,9 @@ function syncLibraryInstanceRouteContentObserver() {
 
 	disconnectLibraryInstanceRouteContentObserver()
 	libraryInstanceRouteContentObserverTarget = routeContent
-	libraryInstanceRouteContentObserver = new MutationObserver(scheduleLibraryInstanceRouteContentRefresh)
+	libraryInstanceRouteContentObserver = new MutationObserver(
+		scheduleLibraryInstanceRouteContentRefresh,
+	)
 	libraryInstanceRouteContentObserver.observe(routeContent, {
 		childList: true,
 		subtree: true,
@@ -1703,21 +1696,69 @@ watch(incompatibilityWarningModal, (modal) => {
 	}
 })
 
-setupAuthProvider(amberiteAuth.user, async (_redirectPath) => {
-	await signIn()
+const AMBERITE_DESTINATION_KEY = 'amberite:pending-destination'
+let amberiteDestinationResumePromise = null
+
+setupAuthProvider(amberiteAuth.user, async (redirectPath) => {
+	await signIn('continue', redirectPath)
 })
 
-async function signIn() {
-	await amberiteAuth.signIn()
+async function signIn(mode = 'continue', redirectPath = route.fullPath) {
+	try {
+		window.sessionStorage.setItem(
+			AMBERITE_DESTINATION_KEY,
+			normalizeAmberiteDestination(redirectPath),
+		)
+	} catch {
+		// sessionStorage can be unavailable in tests.
+	}
+	await amberiteAuth.signIn(mode)
+	if (amberiteAuth.isLoggedIn.value) await resumeAmberiteDestination()
 }
 
-async function handleMinecraftAccountChange(hasAccounts) {
-	hasMinecraftAccounts.value = hasAccounts
-	if (hasAccounts) {
-		await signIn()
-	} else {
-		await amberiteAuth.logOut().catch(handleError)
+async function retryAmberiteRestore() {
+	await amberiteAuth.retryRestore()
+	if (amberiteAuth.isLoggedIn.value) await resumeAmberiteDestination()
+}
+
+async function resumeAmberiteDestination() {
+	if (amberiteDestinationResumePromise) return await amberiteDestinationResumePromise
+	amberiteDestinationResumePromise = performAmberiteDestinationResume().finally(() => {
+		amberiteDestinationResumePromise = null
+	})
+	await amberiteDestinationResumePromise
+}
+
+async function performAmberiteDestinationResume() {
+	let destination = null
+	try {
+		const pendingDestination = window.sessionStorage.getItem(AMBERITE_DESTINATION_KEY)
+		window.sessionStorage.removeItem(AMBERITE_DESTINATION_KEY)
+		if (pendingDestination) destination = normalizeAmberiteDestination(pendingDestination)
+	} catch {
+		// Keep the current Desktop route when transient storage is unavailable.
 	}
+	if (destination && destination !== route.fullPath) await router.replace(destination)
+}
+
+function normalizeAmberiteDestination(destination) {
+	return typeof destination === 'string' &&
+		destination.startsWith('/') &&
+		!destination.startsWith('//')
+		? destination
+		: '/'
+}
+
+watch(
+	() => amberiteAuth.status.value,
+	(nextStatus) => {
+		if (nextStatus === 'authenticated') void resumeAmberiteDestination()
+	},
+)
+
+function handleMinecraftAccountChange(hasAccounts) {
+	// Launcher account selection is independent from the signed-in Amberite identity.
+	hasMinecraftAccounts.value = hasAccounts
 }
 
 watch(showAmberiteAccountModal, (shouldShow) => {
@@ -2428,7 +2469,67 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	<SplashScreen v-if="!stateFailed" ref="splashScreen" data-tauri-drag-region />
 	<div id="teleports"></div>
 	<div
-		v-if="stateInitialized"
+		v-if="stateInitialized && amberiteAuth.status.value !== 'authenticated'"
+		class="fixed inset-0 z-[190] grid place-items-center bg-bg px-6 text-center"
+	>
+		<div class="universal-card flex w-full max-w-md flex-col items-center gap-4 !p-6">
+			<SpinnerIcon
+				v-if="['restoring', 'verifying'].includes(amberiteAuth.status.value)"
+				class="size-8 animate-spin text-brand"
+			/>
+			<template v-if="amberiteAuth.status.value === 'restoring'">
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Restoring your session</h1>
+				<p class="m-0 text-secondary">Checking the secure session stored on this device.</p>
+			</template>
+			<template v-else-if="amberiteAuth.status.value === 'verifying'">
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Verifying Minecraft</h1>
+				<p class="m-0 text-secondary">Complete the Microsoft window to continue.</p>
+			</template>
+			<template v-else-if="amberiteAuth.status.value === 'retryableOffline'">
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Amberite is unreachable</h1>
+				<p class="m-0 text-secondary">
+					Your secure local session is preserved. Check your connection and retry.
+				</p>
+				<ButtonStyled color="brand"
+					><button @click="retryAmberiteRestore">Try again</button></ButtonStyled
+				>
+			</template>
+			<template v-else>
+				<Avatar
+					v-if="amberiteAuth.rememberedIdentity.value"
+					:src="amberiteAuth.rememberedIdentity.value.avatarUrl"
+					:alt="amberiteAuth.rememberedIdentity.value.verifiedMinecraftHandle"
+					size="48px"
+					circle
+				/>
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Continue with Minecraft</h1>
+				<p class="m-0 text-secondary">
+					Amberite uses a verified Minecraft: Java Edition UUID as your identity.
+				</p>
+				<ButtonStyled color="brand" class="w-full">
+					<button class="!w-full !justify-center" @click="signIn('continue')">
+						{{
+							amberiteAuth.rememberedIdentity.value
+								? `Continue as ${amberiteAuth.rememberedIdentity.value.verifiedMinecraftHandle}`
+								: 'Continue with Minecraft'
+						}}
+					</button>
+				</ButtonStyled>
+				<ButtonStyled class="w-full">
+					<button class="!w-full !justify-center" @click="signIn('use_another_account')">
+						Use another account
+					</button>
+				</ButtonStyled>
+			</template>
+			<Transition name="fade">
+				<p v-if="amberiteAuth.error.value" class="m-0 text-sm text-red">
+					{{ amberiteAuth.error.value.message }}
+				</p>
+			</Transition>
+		</div>
+	</div>
+	<div
+		v-if="stateInitialized && amberiteAuth.status.value === 'authenticated'"
 		class="app-grid-layout relative"
 		:class="{ 'disable-advanced-rendering': !themeStore.advancedRendering }"
 	>
@@ -2612,7 +2713,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</div>
 	</div>
 	<div
-		v-if="stateInitialized"
+		v-if="stateInitialized && amberiteAuth.status.value === 'authenticated'"
 		class="app-contents"
 		:class="{
 			'sidebar-enabled': sidebarVisible,
@@ -2705,10 +2806,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					<LibraryPage inert-underlay :underlay-path="lastLibraryRoutePath" />
 				</template>
 				<template #content>
-					<div
-						data-library-instance-route-content
-						class="library-instance-route-content"
-					>
+					<div data-library-instance-route-content class="library-instance-route-content">
 						<div class="library-instance-router-content">
 							<RouterView v-slot="{ Component }">
 								<UiMotionTransition
@@ -2851,12 +2949,14 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					</p>
 				</div>
 			</div>
-			<div
-				v-if="amberiteAuth.error.value"
-				class="rounded-lg border border-solid border-surface-5 bg-surface-2 p-3 text-sm text-secondary"
-			>
-				{{ amberiteAuth.error.value.message }}
-			</div>
+			<Transition name="fade">
+				<div
+					v-if="amberiteAuth.error.value"
+					class="rounded-lg border border-solid border-surface-5 bg-surface-2 p-3 text-sm text-secondary"
+				>
+					{{ amberiteAuth.error.value.message }}
+				</div>
+			</Transition>
 			<div class="flex justify-end gap-3">
 				<ButtonStyled color="red" type="outlined">
 					<button

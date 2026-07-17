@@ -7,11 +7,9 @@ import FloatingVue from 'floating-vue'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
-import App from '@/App.vue'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
-import router from '@/routes'
 
 const pinia = createPinia()
 
@@ -23,6 +21,10 @@ async function bootstrap() {
 		await initializeDevRuntime()
 	}
 
+	const [{ default: App }, { default: router }] = await Promise.all([
+		import('@/App.vue'),
+		import('@/routes'),
+	])
 	let app = createApp(App)
 
 	function isLocalHost() {

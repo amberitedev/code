@@ -58,7 +58,7 @@ export class CommunicationPipeline {
 			}
 		}
 
-		const result = this.emit({
+		const result = this.emit<T>({
 			ok: false,
 			key: policy.key,
 			method: policy.methods[0] ?? 'core-direct',
@@ -110,7 +110,7 @@ export class CommunicationPipeline {
 			}
 		}
 
-		const result = this.emit({
+		const result = this.emit<MessageEnvelope<TPayload>>({
 			ok: false,
 			key: policy.key,
 			method: policy.methods[0] ?? 'fire-and-forget',

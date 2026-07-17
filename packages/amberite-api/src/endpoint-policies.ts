@@ -216,5 +216,8 @@ export function mergePolicy(
 	base: CommunicationPolicy = defaultCommunicationPolicy,
 	override: CommunicationPolicyOverride = {},
 ): CommunicationPolicy {
-	return { ...base, ...(coreEndpointPolicies[key] ?? {}), ...override, key: override.key ?? key }
+	const endpointPolicy = (
+		coreEndpointPolicies as Readonly<Record<string, CommunicationPolicyOverride>>
+	)[key]
+	return { ...base, ...(endpointPolicy ?? {}), ...override, key: override.key ?? key }
 }

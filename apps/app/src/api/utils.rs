@@ -152,6 +152,10 @@ pub async fn get_opening_command(
 #[tauri::command]
 #[cfg(not(target_os = "macos"))]
 pub async fn get_opening_command() -> Result<Option<CommandPayload>> {
+    if crate::dev::config().is_some() {
+        return Ok(None);
+    }
+
     // Tauri is not CLI, we use arguments as path to file to call
     let cmd_arg = std::env::args_os().nth(1);
 
@@ -212,7 +216,8 @@ async fn allowed_open_roots() -> Result<Vec<PathBuf>> {
     let Some(directories) = DirectoryInfo::global_handle_if_ready() else {
         return Err(permission_denied("app directories are not initialized"));
     };
-    let mut candidates = vec![directories.profiles_dir(), directories.caches_dir()];
+    let mut candidates =
+        vec![directories.profiles_dir(), directories.caches_dir()];
     if let Some(path) = directories.launcher_logs_dir() {
         candidates.push(path);
     }
@@ -224,7 +229,9 @@ async fn allowed_open_roots() -> Result<Vec<PathBuf>> {
         }
     }
     if roots.is_empty() {
-        return Err(permission_denied("no allowed app directories are available"));
+        return Err(permission_denied(
+            "no allowed app directories are available",
+        ));
     }
     Ok(roots)
 }

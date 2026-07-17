@@ -59,9 +59,9 @@ import * as api from './api'
 import { CoreWsConnection } from './ws'
 import { CoreOfflineError } from './errors'
 import { CoreConnectionMonitor, type ConnectionStatus } from './monitor'
-import { CommunicationPipeline, type CommunicationPipelineOptions } from './pipeline'
+import { CommunicationPipeline } from './pipeline'
 import { resolveCoreEndpointKey } from './endpoint-policies'
-import type { CommunicationPolicyOverride } from './pipeline-types'
+import type { CommunicationPipelineOptions, CommunicationPolicyOverride } from './pipeline-types'
 
 export class CoreApiClient {
 	public monitor: CoreConnectionMonitor | null = null
@@ -1041,9 +1041,7 @@ export class CoreApiClient {
 		return this.direct('core.invitations.create', (ctx) => api.createCoreInvitation(ctx, body))
 	}
 	updateCoreInvitation(id: string, body: UpdateCoreInvitationBody): Promise<CoreInvitation> {
-		return this.direct('core.invitations.update', (ctx) =>
-			api.updateCoreInvitation(ctx, id, body),
-		)
+		return this.direct('core.invitations.update', (ctx) => api.updateCoreInvitation(ctx, id, body))
 	}
 	listCoreInvitations(): Promise<CoreInvitation[]> {
 		return this.direct('core.invitations.list', (ctx) =>
@@ -1061,9 +1059,7 @@ export class CoreApiClient {
 		)
 	}
 	revokeCoreInvitation(id: string): Promise<CoreInvitation> {
-		return this.direct('core.invitations.revoke', (ctx) =>
-			api.revokeCoreInvitation(ctx, id),
-		)
+		return this.direct('core.invitations.revoke', (ctx) => api.revokeCoreInvitation(ctx, id))
 	}
 	respondToCoreInvitation(id: string, accept: boolean): Promise<CoreInvitation> {
 		return this.direct('core.invitations.respond', (ctx) =>
