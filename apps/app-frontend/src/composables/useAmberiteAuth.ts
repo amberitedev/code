@@ -69,8 +69,8 @@ const isReady = computed(() => status.value !== 'restoring' && status.value !== 
 const signingIn = computed(() => status.value === 'verifying')
 const canUseLauncher = computed(
 	() =>
-		status.value === 'authenticated' ||
-		(status.value === 'retryableOffline' && hasMinecraftAccess.value),
+		hasMinecraftAccess.value &&
+		(status.value === 'authenticated' || status.value === 'retryableOffline'),
 )
 
 const coordinator: UseAmberiteAuthReturn = {
@@ -151,17 +151,14 @@ async function performSignIn(mode: 'continue' | 'use_another_account'): Promise<
 	status.value = 'verifying'
 	clearAuthError()
 	try {
-		const devConfig = await getDevConfig()
-		const session = devConfig
-			? await signInWithDevAccount(devConfig.username)
-			: await authClient.signInWithMinecraft({
-					mode,
-					...(mode === 'continue' && rememberedIdentity.value
-						? { expectedMinecraftUuid: rememberedIdentity.value.minecraftUuid }
-						: {}),
-				})
+		const session = await authClient.signInWithMinecraft({
+			mode,
+			...(mode === 'continue' && rememberedIdentity.value
+				? { expectedMinecraftUuid: rememberedIdentity.value.minecraftUuid }
+				: {}),
+		})
 		sessionUser.value = session.user
-		if (!devConfig) hasMinecraftAccess.value = true
+		hasMinecraftAccess.value = true
 		await social.refresh().catch(() => undefined)
 		await loadRememberedIdentity()
 		status.value = 'authenticated'
