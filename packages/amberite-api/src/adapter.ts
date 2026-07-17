@@ -11,6 +11,12 @@ export interface PlatformAuthSession {
 	user?: unknown
 }
 
+export interface PlatformAmberiteSessionStorage {
+	read(): Promise<AmberiteSessionTokens | null>
+	write(tokens: AmberiteSessionTokens): Promise<void>
+	clear(): Promise<void>
+}
+
 /** Platform-owned capabilities used by Amberite clients. */
 export interface PlatformAdapter {
 	/** HTTP fetch function. On desktop this is tauriFetch; on web it is native fetch. */
@@ -34,9 +40,7 @@ export interface PlatformAdapter {
 	setCurrentRefreshToken?(refreshToken: string | null): Promise<void>
 
 	/** Atomically read, replace, and clear a complete product session. */
-	readAmberiteSession?(): Promise<AmberiteSessionTokens | null>
-	writeAmberiteSession?(tokens: AmberiteSessionTokens): Promise<void>
-	clearAmberiteSession?(): Promise<void>
+	amberiteSessionStorage?: PlatformAmberiteSessionStorage
 
 	/** Refresh the platform-owned product session without exposing its refresh token. */
 	refreshAmberiteSession?(): Promise<PlatformAuthSession | null>

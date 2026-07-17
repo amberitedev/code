@@ -48,7 +48,7 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 	private readonly adapter: PlatformAdapter
 	private readonly storage: AmberiteSessionStorage
 	private readonly convex: ConvexApiClient
-	private refreshPromise: Promise<AmberiteSession | null> | null = null
+	private readonly refreshPromises = new Map<string, Promise<AmberiteSession | null>>()
 
 	constructor(options: ConvexAmberiteAuthClientOptions) {
 		this.adapter = options.adapter
@@ -70,17 +70,20 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 			const user = await this.currentUser()
 			return user ? { tokens: { token, refreshToken: '' }, user } : null
 		} catch (error) {
-			if (isTerminalAuthError(error)) await this.storage.clear()
+			if (isTerminalAuthError(error)) await this.clearLocalSession()
 			throw error
 		}
 	}
 
 	async refreshSession(refreshToken?: string | null): Promise<AmberiteSession | null> {
-		if (this.refreshPromise) return await this.refreshPromise
-		this.refreshPromise = this.performRefresh(refreshToken).finally(() => {
-			this.refreshPromise = null
+		const key = refreshToken ? `token:${refreshToken}` : 'platform-or-stored'
+		const pending = this.refreshPromises.get(key)
+		if (pending) return await pending
+		const refresh = this.performRefresh(refreshToken).finally(() => {
+			this.refreshPromises.delete(key)
 		})
-		return await this.refreshPromise
+		this.refreshPromises.set(key, refresh)
+		return await refresh
 	}
 
 	async signInWithMinecraft(request: AmberiteMinecraftSignInRequest): Promise<AmberiteSession> {
@@ -169,12 +172,12 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 				false,
 			)
 			if (!response.tokens) {
-				await this.storage.clear()
+				await this.clearLocalSession()
 				return null
 			}
 			return await this.acceptTokens(response.tokens)
 		} catch (error) {
-			if (isTerminalAuthError(error)) await this.storage.clear()
+			if (isTerminalAuthError(error)) await this.clearLocalSession()
 			throw error
 		}
 	}
@@ -213,17 +216,24 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 	): Promise<AmberiteSession | null> {
 		if (!session?.accessToken) return null
 		await this.adapter.setCurrentJwt?.(session.accessToken)
-		const user =
-			session.user === undefined
-				? await this.currentUser()
-				: normalizeAmberiteAccountUser(session.user)
-		if (!user) throw new AuthError('native product session did not resolve a user')
-		return { tokens: { token: session.accessToken, refreshToken: '' }, user }
+		try {
+			const user =
+				session.user === undefined
+					? await this.currentUser()
+					: normalizeAmberiteAccountUser(session.user)
+			if (!user) throw new AuthError('native product session did not resolve a user')
+			return { tokens: { token: session.accessToken, refreshToken: '' }, user }
+		} catch (error) {
+			if (isTerminalAuthError(error)) {
+				await this.adapter.signOutMinecraftSession?.().catch(() => undefined)
+				await this.clearLocalSession()
+			}
+			throw error
+		}
 	}
 
 	private async clearLocalSession(): Promise<void> {
-		await this.storage.clear()
-		await this.adapter.setCurrentJwt?.(null)
+		await Promise.allSettled([this.storage.clear(), this.adapter.setCurrentJwt?.(null)])
 	}
 }
 

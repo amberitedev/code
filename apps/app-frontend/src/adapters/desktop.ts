@@ -83,16 +83,18 @@ export function createDesktopAdapter(): PlatformAdapter {
 		async setCurrentJwt(token) {
 			accessToken = token
 		},
-		async readAmberiteSession() {
-			return developmentSession
-		},
-		async writeAmberiteSession(tokens) {
-			developmentSession = tokens
-			accessToken = tokens.token
-		},
-		async clearAmberiteSession() {
-			developmentSession = null
-			accessToken = null
+		amberiteSessionStorage: {
+			async read() {
+				return developmentSession
+			},
+			async write(tokens) {
+				developmentSession = tokens
+				accessToken = tokens.token
+			},
+			async clear() {
+				developmentSession = null
+				accessToken = null
+			},
 		},
 		async signInWithMinecraft(request) {
 			const session = await invokeNativeAuth<{ accessToken: string }>(
@@ -166,7 +168,11 @@ function mapNativeAuthError(error: unknown, operation: NativeAuthOperation): Err
 	const message = nativeErrorMessage(error)
 	const normalized = message.toLowerCase()
 	if (normalized.includes('cancel')) return new ProviderAuthError(message, 'cancelled')
-	if (normalized.includes('state')) return new ProviderAuthError(message, 'state_failure')
+	if (
+		operation === 'sign_in' &&
+		(normalized.includes('oauth state') || normalized.includes('state mismatch'))
+	)
+		return new ProviderAuthError(message, 'state_failure')
 	if (normalized.includes('uuid mismatch')) return new AuthError(message, 'identity_mismatch')
 	if (normalized.includes('java') && normalized.includes('profile'))
 		return new ProviderAuthError(message, 'java_profile_missing')

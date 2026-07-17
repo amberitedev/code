@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::{Command, exit};
 use std::{env, fs};
 
@@ -69,11 +69,13 @@ fn build_java_jars() {
 #[cfg(target_os = "windows")]
 fn windows_java_dir(out_dir: &Path) -> PathBuf {
     let source = env::current_dir().unwrap().join("java");
-    if !fs::canonicalize(&source)
-        .unwrap()
-        .to_string_lossy()
-        .starts_with(r"\\")
-    {
+    let canonical_source = fs::canonicalize(&source).unwrap();
+    let is_unc = matches!(
+        canonical_source.components().next(),
+        Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
+    );
+    if !is_unc {
         return source;
     }
 

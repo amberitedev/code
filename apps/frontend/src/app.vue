@@ -42,13 +42,15 @@ import { ButtonStyled, I18nDebugPanel, LoadingBar, NotificationPanel } from '@mo
 
 import { setupProviders } from '~/providers/setup.ts'
 
-import { retryAuthRestore, useAuth } from './composables/auth'
+import { getSignInRouteObj, retryAuthRestore, useAuth } from './composables/auth'
 
 const authState = await useAuth()
 const auth = computed(() => authState.value)
+const route = useRoute()
 setupProviders(authState)
 
 async function retry() {
-	await retryAuthRestore()
+	const restored = await retryAuthRestore()
+	if (restored.value.status === 'signedOut') await navigateTo(getSignInRouteObj(route))
 }
 </script>

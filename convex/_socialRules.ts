@@ -385,8 +385,7 @@ export async function currentAccountFields(
 			linkedMinecraft?.minecraftUuid ??
 			minecraftUuidFromProviderAccount(minecraftAccount?.providerAccountId) ??
 			null,
-		verifiedMinecraftHandle:
-			user?.verifiedMinecraftHandle ?? linkedMinecraft?.gamertag ?? user?.username ?? null,
+		verifiedMinecraftHandle: user?.verifiedMinecraftHandle ?? linkedMinecraft?.gamertag ?? null,
 		email: user?.email ?? null,
 		email_verified: Boolean(user?.emailVerificationTime),
 		auth_providers: minecraftAccount ? ['minecraft'] : [],
@@ -415,12 +414,12 @@ export function publicUser(
 	return {
 		id: user._id,
 		userId: user._id,
-		username: user.verifiedMinecraftHandle ?? user.username,
+		username: accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle,
 		minecraftUuid: accountFields?.minecraftUuid ?? user.minecraftUuid ?? null,
-		verifiedMinecraftHandle:
-			accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle ?? user.username,
+		verifiedMinecraftHandle: accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle,
 		displayName: user.displayName,
-		name: user.displayName ?? user.verifiedMinecraftHandle ?? user.username,
+		name:
+			user.displayName ?? accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle,
 		image: user.image,
 		avatar_url: avatarUrl ?? null,
 		bio: user.bio ?? null,
@@ -434,10 +433,10 @@ export function publicProfile(user: any) {
 	return {
 		id: user._id,
 		userId: user._id,
-		username: user.verifiedMinecraftHandle ?? user.username,
+		username: user.verifiedMinecraftHandle,
 		minecraftUuid: user.minecraftUuid ?? null,
-		verifiedMinecraftHandle: user.verifiedMinecraftHandle ?? user.username,
-		name: user.displayName ?? user.verifiedMinecraftHandle ?? user.username,
+		verifiedMinecraftHandle: user.verifiedMinecraftHandle,
+		name: user.displayName ?? user.verifiedMinecraftHandle,
 		displayName: user.displayName,
 		avatar_url: avatarUrl ?? null,
 		image: user.image,

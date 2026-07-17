@@ -30,11 +30,14 @@ export interface RememberedAmberiteIdentity {
 export interface UseAmberiteAuthReturn {
 	user: ComputedRef<AmberiteAuthUser | null>
 	rememberedIdentity: Ref<RememberedAmberiteIdentity | null>
+	hasMinecraftAccess: Ref<boolean>
+	canUseLauncher: ComputedRef<boolean>
 	status: Ref<AmberiteAuthGate>
 	isLoggedIn: ComputedRef<boolean>
 	isReady: ComputedRef<boolean>
 	signingIn: ComputedRef<boolean>
 	error: Ref<Error | null>
+	initialize: () => Promise<void>
 	signIn: (mode?: 'continue' | 'use_another_account') => Promise<void>
 	retryRestore: () => Promise<void>
 	logOut: () => Promise<void>
@@ -46,6 +49,7 @@ const status = ref<AmberiteAuthGate>('restoring')
 const error = ref<Error | null>(null)
 const rememberedIdentity = ref<RememberedAmberiteIdentity | null>(null)
 const sessionUser = ref<AmberiteAuthUser | null>(null)
+const hasMinecraftAccess = ref(false)
 let restorePromise: Promise<void> | null = null
 let signInPromise: Promise<void> | null = null
 let refreshPromise: Promise<void> | null = null
@@ -55,29 +59,43 @@ const REFRESH_INTERVAL_MS = 45 * 60 * 1_000
 const OFFLINE_REFRESH_RETRY_MS = 5 * 60 * 1_000
 const ERROR_DISMISS_MS = 2_000
 
-const user = computed<AmberiteAuthUser | null>(
-	() => sessionUser.value ?? mapSocialUser(social.currentUser.value),
+const user = computed<AmberiteAuthUser | null>(() =>
+	status.value === 'authenticated'
+		? (sessionUser.value ?? mapSocialUser(social.currentUser.value))
+		: null,
 )
 const isLoggedIn = computed(() => status.value === 'authenticated' && Boolean(user.value))
 const isReady = computed(() => status.value !== 'restoring' && status.value !== 'verifying')
 const signingIn = computed(() => status.value === 'verifying')
+const canUseLauncher = computed(
+	() =>
+		status.value === 'authenticated' ||
+		(status.value === 'retryableOffline' && hasMinecraftAccess.value),
+)
 
 const coordinator: UseAmberiteAuthReturn = {
 	user,
 	rememberedIdentity,
+	hasMinecraftAccess,
+	canUseLauncher,
 	status,
 	isLoggedIn,
 	isReady,
 	signingIn,
 	error,
+	initialize,
 	signIn,
 	retryRestore,
 	logOut,
 }
 
 export function useAmberiteAuth(): UseAmberiteAuthReturn {
-	if (!restorePromise) restorePromise = restoreSession()
 	return coordinator
+}
+
+async function initialize(): Promise<void> {
+	if (!restorePromise) restorePromise = restoreSession()
+	await restorePromise
 }
 
 async function restoreSession(): Promise<void> {
@@ -85,6 +103,7 @@ async function restoreSession(): Promise<void> {
 	status.value = 'restoring'
 	clearAuthError()
 	await loadRememberedIdentity()
+	await refreshMinecraftAccess()
 	try {
 		const devConfig = await getDevConfig()
 		const session = devConfig
@@ -96,7 +115,8 @@ async function restoreSession(): Promise<void> {
 			return
 		}
 		sessionUser.value = session.user
-		await social.refresh()
+		if (!devConfig) hasMinecraftAccess.value = true
+		await social.refresh().catch(() => undefined)
 		status.value = 'authenticated'
 		scheduleRefresh()
 	} catch (value) {
@@ -110,6 +130,11 @@ async function retryRestore(): Promise<void> {
 	if (status.value === 'restoring') return await restorePromise
 	restorePromise = restoreSession()
 	await restorePromise
+}
+
+async function refreshMinecraftAccess(): Promise<void> {
+	const accounts = await invoke<unknown[]>('plugin:auth|get_users').catch(() => [])
+	hasMinecraftAccess.value = accounts.length > 0
 }
 
 async function signIn(mode: 'continue' | 'use_another_account' = 'continue'): Promise<void> {
@@ -136,7 +161,8 @@ async function performSignIn(mode: 'continue' | 'use_another_account'): Promise<
 						: {}),
 				})
 		sessionUser.value = session.user
-		await social.refresh()
+		if (!devConfig) hasMinecraftAccess.value = true
+		await social.refresh().catch(() => undefined)
 		await loadRememberedIdentity()
 		status.value = 'authenticated'
 		scheduleRefresh()
@@ -211,7 +237,7 @@ async function performRefresh(): Promise<void> {
 		}
 		sessionUser.value = session.user
 		clearAuthError()
-		await social.refresh()
+		await social.refresh().catch(() => undefined)
 		scheduleRefresh()
 	} catch (value) {
 		showAuthError(value)
@@ -335,7 +361,7 @@ if (import.meta.env.DEV) {
 			await authClient.logOut()
 			const session = await signInWithDevAccount(username)
 			sessionUser.value = session.user
-			await social.refresh()
+			await social.refresh().catch(() => undefined)
 			status.value = 'authenticated'
 			clearAuthError()
 			scheduleRefresh()

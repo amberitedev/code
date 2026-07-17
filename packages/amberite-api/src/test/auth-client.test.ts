@@ -41,12 +41,14 @@ function createAdapter(fetchFn: ReturnType<typeof vi.fn>): PlatformAdapter {
 		setCurrentJwt: async (token) => {
 			tokens = { ...tokens, token: token ?? '' }
 		},
-		readAmberiteSession: async () => tokens,
-		writeAmberiteSession: async (next) => {
-			tokens = next
-		},
-		clearAmberiteSession: async () => {
-			tokens = { token: '', refreshToken: '' }
+		amberiteSessionStorage: {
+			read: async () => tokens,
+			write: async (next) => {
+				tokens = next
+			},
+			clear: async () => {
+				tokens = { token: '', refreshToken: '' }
+			},
 		},
 		openExternalAuth: vi.fn(),
 	}

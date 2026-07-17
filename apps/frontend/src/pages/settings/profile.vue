@@ -110,6 +110,7 @@ const icon = shallowRef<File | null>(null)
 const previewImage = shallowRef<string | null>(null)
 const pendingAvatarDeletion = ref(false)
 const saving = ref(false)
+let avatarGeneration = 0
 
 const {
 	saved,
@@ -133,21 +134,25 @@ function reset() {
 
 function showPreviewImage(files: File[]) {
 	if (!files[0]) return
+	const generation = ++avatarGeneration
 	icon.value = files[0]
 	const reader = new FileReader()
 	reader.readAsDataURL(files[0])
 	reader.onload = (event) => {
+		if (generation !== avatarGeneration) return
 		previewImage.value = typeof event.target?.result === 'string' ? event.target.result : null
 		pendingAvatarDeletion.value = false
 	}
 }
 
 function removePreviewImage() {
+	avatarGeneration += 1
 	pendingAvatarDeletion.value = true
 	previewImage.value = 'https://cdn.modrinth.com/placeholder.png'
 }
 
 function resetAvatar() {
+	avatarGeneration += 1
 	icon.value = null
 	previewImage.value = null
 	pendingAvatarDeletion.value = false

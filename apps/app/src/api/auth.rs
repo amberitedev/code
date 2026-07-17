@@ -5,6 +5,8 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::env;
+use std::sync::LazyLock;
+use std::time::Duration as StdDuration;
 use tauri::plugin::TauriPlugin;
 use tauri::{Manager, Runtime, UserAttentionType};
 use theseus::prelude::*;
@@ -14,6 +16,13 @@ const AMBERITE_KEYRING_SERVICE: &str = "dev.amberite.app";
 const LEGACY_SESSION_JWT_ACCOUNT: &str = "amberite-session-jwt";
 const LEGACY_REFRESH_TOKEN_ACCOUNT: &str = "amberite-session-refresh-token";
 const AMBERITE_LOCAL_CORE_DATA_DIR_ENV: &str = "AMBERITE_LOCAL_CORE_DATA_DIR";
+static CONVEX_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .connect_timeout(StdDuration::from_secs(10))
+        .timeout(StdDuration::from_secs(30))
+        .build()
+        .expect("valid Convex HTTP client")
+});
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     let account = match crate::dev::config() {
@@ -156,7 +165,15 @@ pub async fn restore_amberite_product_session(
             return refresh_amberite_product_session(convex_url).await;
         }
         match convex_current_user(&convex_url, &session.access_token).await {
-            Ok(user) => return Ok(Some(summary(session.access_token, user))),
+            Ok(user) => {
+                if verified_user_uuid(&user)? != session.active_identity_uuid {
+                    minecraft_auth::clear_product_session_preserving_identity()
+                        .await
+                        .map_err(other_error)?;
+                    return Err(other_error("Amberite identity UUID mismatch"));
+                }
+                return Ok(Some(summary(session.access_token, user)));
+            }
             Err(error) if is_unauthorized(&error) => {
                 return refresh_amberite_product_session(convex_url).await;
             }
@@ -344,8 +361,7 @@ async fn convex_call<T: for<'de> Deserialize<'de>>(
     access_token: Option<&str>,
 ) -> Result<T> {
     let endpoint = convex_endpoint(convex_url, kind)?;
-    let client = reqwest::Client::new();
-    let mut request = client
+    let mut request = CONVEX_CLIENT
         .post(endpoint)
         .header("Content-Type", "application/json")
         .json(&json!({ "path": path, "args": args, "format": "json" }));
@@ -435,23 +451,19 @@ fn summary(access_token: String, user: Value) -> NativeAmberiteSessionSummary {
 }
 
 fn is_unauthorized(error: &crate::api::TheseusSerializableError) -> bool {
-    error
-        .to_string()
-        .to_lowercase()
-        .contains("not authenticated")
-        || error.to_string().contains("401")
+    let message = error.to_string().to_lowercase();
+    message.contains("(401 ") || message.contains("not authenticated")
 }
 
 fn is_terminal_refresh_error(
     error: &crate::api::TheseusSerializableError,
 ) -> bool {
     let message = error.to_string().to_lowercase();
-    message.contains("401")
-        || message.contains("403")
+    message.contains("(401 ")
+        || message.contains("(403 ")
         || message.contains("not authenticated")
         || message.contains("invalid session")
         || message.contains("invalid refresh")
-        || message.contains("expired")
         || message.contains("revoked")
         || (message.contains("refresh") && message.contains("reuse"))
 }

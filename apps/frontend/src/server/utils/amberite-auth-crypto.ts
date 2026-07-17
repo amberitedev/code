@@ -25,9 +25,16 @@ export function normalizeAuthUuid(value: unknown): string | undefined {
 }
 
 export function normalizeAuthRedirect(value: unknown): string {
-	return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
-		? value
-		: '/dashboard'
+	if (typeof value !== 'string') return '/dashboard'
+	try {
+		const base = new URL('https://amberite.local')
+		const redirect = new URL(value, base)
+		return redirect.origin === base.origin
+			? `${redirect.pathname}${redirect.search}${redirect.hash}`
+			: '/dashboard'
+	} catch {
+		return '/dashboard'
+	}
 }
 
 export function requestIsSameOrigin(args: {

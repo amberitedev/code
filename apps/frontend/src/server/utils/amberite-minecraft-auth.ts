@@ -206,14 +206,16 @@ function createServerAuthClient(
 		setCurrentJwt: async (token) => {
 			tokens = tokens ? { ...tokens, token: token ?? '' } : null
 		},
-		readAmberiteSession: async () => tokens,
-		writeAmberiteSession: async (next) => {
-			tokens = next
-			setRefreshCookie(event, next.refreshToken)
-		},
-		clearAmberiteSession: async () => {
-			tokens = null
-			clearBrowserSessionCookies(event)
+		amberiteSessionStorage: {
+			read: async () => tokens,
+			write: async (next) => {
+				tokens = next
+				setRefreshCookie(event, next.refreshToken)
+			},
+			clear: async () => {
+				tokens = null
+				clearBrowserSessionCookies(event)
+			},
 		},
 		openExternalAuth: async () => {},
 	}

@@ -106,7 +106,7 @@ import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
-import { useCoreClient } from '@/composables/useCoreClient'
+import { startCoreMonitor, useCoreClient } from '@/composables/useCoreClient'
 import { preloadDiscoverContentQueries } from '@/composables/useDiscoverContentPreload'
 import { useModrinthLink } from '@/composables/useModrinthLink'
 import { useSocialClient } from '@/composables/useSocialClient'
@@ -175,6 +175,7 @@ const socialClient = useSocialClient()
 const modrinthLink = useModrinthLink()
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const hasMinecraftAccounts = ref(false)
+const canUseAmberiteFeatures = computed(() => amberiteAuth.status.value === 'authenticated')
 const AMBERITE_ACCOUNT_DISMISS_KEY = 'amberite:account-modal:dismissed'
 const amberiteAccountDismissedForSession = ref(false)
 try {
@@ -615,6 +616,7 @@ provideModalBehavior({
 })
 
 const {
+	initializeProviders,
 	installationModal,
 	unknownPackWarningModal,
 	fetchExistingInstanceNames,
@@ -830,7 +832,11 @@ async function setupApp() {
 	themeStore.toggleSidebar = toggle_sidebar
 	themeStore.devMode = developer_mode
 	themeStore.featureFlags = feature_flags
+	await amberiteAuth.initialize()
+	startCoreMonitor()
+	hasMinecraftAccounts.value = amberiteAuth.hasMinecraftAccess.value
 	stateInitialized.value = true
+	void initializeProviders()
 
 	isMaximized.value = await getCurrentWindow().isMaximized()
 
@@ -866,12 +872,14 @@ async function setupApp() {
 	get_opening_command().then(handleCommand)
 	void modrinthLink.refresh()
 
-	try {
-		const skins = (await get_available_skins()) ?? []
-		const capes = (await get_available_capes()) ?? []
-		generateSkinPreviews(skins, capes)
-	} catch (error) {
-		console.warn('Failed to generate skin previews in app setup.', error)
+	if (amberiteAuth.hasMinecraftAccess.value) {
+		try {
+			const skins = (await get_available_skins()) ?? []
+			const capes = (await get_available_capes()) ?? []
+			generateSkinPreviews(skins, capes)
+		} catch {
+			console.warn('Minecraft skin previews are unavailable.')
+		}
 	}
 
 	if (pending_update_toast_for_version !== null) {
@@ -1753,12 +1761,16 @@ watch(
 	() => amberiteAuth.status.value,
 	(nextStatus) => {
 		if (nextStatus === 'authenticated') void resumeAmberiteDestination()
+		else if (nextStatus === 'retryableOffline' && route.path.startsWith('/core')) {
+			void router.replace('/library')
+		}
 	},
 )
 
 function handleMinecraftAccountChange(hasAccounts) {
 	// Launcher account selection is independent from the signed-in Amberite identity.
 	hasMinecraftAccounts.value = hasAccounts
+	amberiteAuth.hasMinecraftAccess.value = hasAccounts
 }
 
 watch(showAmberiteAccountModal, (shouldShow) => {
@@ -2469,7 +2481,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	<SplashScreen v-if="!stateFailed" ref="splashScreen" data-tauri-drag-region />
 	<div id="teleports"></div>
 	<div
-		v-if="stateInitialized && amberiteAuth.status.value !== 'authenticated'"
+		v-if="stateInitialized && !amberiteAuth.canUseLauncher.value"
 		class="fixed inset-0 z-[190] grid place-items-center bg-bg px-6 text-center"
 	>
 		<div class="universal-card flex w-full max-w-md flex-col items-center gap-4 !p-6">
@@ -2529,7 +2541,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</div>
 	</div>
 	<div
-		v-if="stateInitialized && amberiteAuth.status.value === 'authenticated'"
+		v-if="stateInitialized && amberiteAuth.canUseLauncher.value"
 		class="app-grid-layout relative"
 		:class="{ 'disable-advanced-rendering': !themeStore.advancedRendering }"
 	>
@@ -2616,7 +2628,13 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				<LibraryIcon />
 			</NavButton>
-			<NavButton v-tooltip.right="'Core'" to="/core">
+			<NavButton
+				v-tooltip.right="
+					canUseAmberiteFeatures ? 'Core' : 'Core is unavailable while Amberite is offline'
+				"
+				to="/core"
+				:disabled="!canUseAmberiteFeatures"
+			>
 				<ServerStackIcon />
 			</NavButton>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
@@ -2713,7 +2731,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</div>
 	</div>
 	<div
-		v-if="stateInitialized && amberiteAuth.status.value === 'authenticated'"
+		v-if="stateInitialized && amberiteAuth.canUseLauncher.value"
 		class="app-contents"
 		:class="{
 			'sidebar-enabled': sidebarVisible,
@@ -2776,6 +2794,14 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					class="markdown-body text-primary"
 					v-html="renderString(criticalErrorMessage.body ?? '')"
 				></div>
+			</Admonition>
+			<Admonition
+				v-if="amberiteAuth.status.value === 'retryableOffline'"
+				type="warning"
+				header="Amberite is offline"
+				class="m-6 mb-0"
+			>
+				Minecraft features still work. Core, friends, and sync are unavailable.
 			</Admonition>
 			<Admonition
 				v-if="authUnreachable"
@@ -2857,26 +2883,28 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 							<AccountsCard ref="accounts" @change="handleMinecraftAccountChange" />
 						</suspense>
 						<div
-							v-if="!amberiteAuth.user && hasMinecraftAccounts"
+							v-if="!amberiteAuth.user.value && hasMinecraftAccounts"
 							class="mt-2 text-sm text-secondary leading-tight"
 						>
 							<template v-if="amberiteAuth.signingIn">
 								Connecting your Amberite account...
 							</template>
-							<template v-else>
-								Amberite account is not connected yet.
+							<template v-else-if="amberiteAuth.status.value === 'retryableOffline'">
+								Amberite is offline.
 								<button
 									class="p-0 border-0 bg-transparent text-brand cursor-pointer"
-									@click="signIn"
+									@click="retryAmberiteRestore"
 								>
 									Retry
 								</button>
 							</template>
+							<template v-else>Amberite account is not connected yet.</template>
 						</div>
 					</div>
 					<div class="p-4 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid">
 						<suspense>
-							<FriendsList />
+							<FriendsList v-if="canUseAmberiteFeatures" />
+							<p v-else class="m-0 text-sm text-secondary">Friends are unavailable offline.</p>
 						</suspense>
 					</div>
 					<PrideFundraiserBanner

@@ -98,10 +98,12 @@ export const initAuth = async (): Promise<AuthState> => {
 }
 
 export async function retryAuthRestore() {
-	initialization = null
 	const auth = useState<AuthState>('auth')
-	auth.value = emptyAuth('restoring')
-	auth.value = await initAuth()
+	if (auth.value.status !== 'restoring' || !initialization) {
+		auth.value = emptyAuth('restoring')
+		initialization = initAuth()
+	}
+	auth.value = await initialization
 	return auth
 }
 
@@ -227,7 +229,11 @@ function rememberIdentity(user: AmberiteAccountUser): void {
 		verifiedMinecraftHandle: user.verifiedMinecraftHandle,
 		lastSuccessfulSignIn: new Date().toISOString(),
 	}
-	localStorage.setItem(REMEMBERED_AMBERITE_IDENTITY_KEY, JSON.stringify(value))
+	try {
+		localStorage.setItem(REMEMBERED_AMBERITE_IDENTITY_KEY, JSON.stringify(value))
+	} catch {
+		// Remembering the last identity is optional and must not break sign-in.
+	}
 }
 
 function recoveryOf(error: unknown): RecoveryDisposition {
@@ -237,5 +243,13 @@ function recoveryOf(error: unknown): RecoveryDisposition {
 }
 
 function normalizeRedirect(value: string): string {
-	return value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard'
+	try {
+		const base = new URL('https://amberite.local')
+		const redirect = new URL(value, base)
+		return redirect.origin === base.origin
+			? `${redirect.pathname}${redirect.search}${redirect.hash}`
+			: '/dashboard'
+	} catch {
+		return '/dashboard'
+	}
 }

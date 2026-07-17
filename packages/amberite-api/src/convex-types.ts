@@ -5,8 +5,8 @@ export interface AmberiteUser {
 	id?: string
 	userId: string
 	username?: string
-	minecraftUuid?: string
-	verifiedMinecraftHandle?: string
+	minecraftUuid?: string | null
+	verifiedMinecraftHandle?: string | null
 	name?: string
 	displayName?: string
 	image?: string
@@ -27,8 +27,8 @@ export interface AmberitePublicProfile {
 	id: string
 	userId: string
 	username?: string
-	minecraftUuid?: string
-	verifiedMinecraftHandle?: string
+	minecraftUuid?: string | null
+	verifiedMinecraftHandle?: string | null
 	name?: string
 	displayName?: string
 	avatar_url: string | null

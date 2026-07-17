@@ -18,7 +18,11 @@ describe('adapterSessionStorage', () => {
 		const write = vi.fn(async () => undefined)
 		const adapter = {
 			...baseAdapter(),
-			writeAmberiteSession: write,
+			amberiteSessionStorage: {
+				read: async () => null,
+				write,
+				clear: async () => undefined,
+			},
 			setCurrentJwt: vi.fn(async () => undefined),
 			setCurrentRefreshToken: vi.fn(async () => undefined),
 		}

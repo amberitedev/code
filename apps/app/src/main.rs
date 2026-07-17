@@ -123,6 +123,11 @@ fn complete_amberite_dev_account_switch(
 }
 
 #[tauri::command]
+fn mark_amberite_dev_ui_ready() {
+    dev::mark_ui_ready();
+}
+
+#[tauri::command]
 async fn set_restart_after_pending_update(
     should_restart: bool,
 ) -> api::Result<()> {
@@ -303,6 +308,7 @@ fn main() {
             restart_app,
             get_amberite_dev_config,
             complete_amberite_dev_account_switch,
+            mark_amberite_dev_ui_ready,
         ]);
 
     tracing::info!("Initializing app...");

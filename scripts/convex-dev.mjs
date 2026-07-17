@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
-import { generateKeyPairSync } from 'node:crypto'
+import { createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto'
 import {
 	existsSync,
 	lstatSync,
@@ -127,7 +127,8 @@ function configureLocalAuth() {
 		!privateKeyResult.stderr.includes('not found') &&
 		jwksResult.status === 0 &&
 		jwksResult.stdout.trim() &&
-		!jwksResult.stderr.includes('not found')
+		!jwksResult.stderr.includes('not found') &&
+		localAuthKeysMatch(privateKeyResult.stdout.trim(), jwksResult.stdout.trim())
 	) {
 		return
 	}
@@ -143,6 +144,31 @@ function configureLocalAuth() {
 	runConvex(['env', 'set', '--deployment', 'local', '--', 'JWT_PRIVATE_KEY', privateKeyPem])
 	runConvex(['env', 'set', '--deployment', 'local', '--', 'JWKS', jwks])
 	console.log('Local Convex authentication keys are ready.')
+}
+
+function localAuthKeysMatch(privateKeyValue, jwksValue) {
+	try {
+		const privateKey = createPrivateKey(normalizePrivateKey(privateKeyValue))
+		const expected = createPublicKey(privateKey).export({ format: 'jwk' })
+		const jwks = JSON.parse(jwksValue)
+		return jwks.keys?.some(
+			(key) =>
+				key.kty === 'RSA' && key.use === 'sig' && key.n === expected.n && key.e === expected.e,
+		)
+	} catch {
+		return false
+	}
+}
+
+function normalizePrivateKey(value) {
+	const match = value.match(/-----BEGIN PRIVATE KEY-----([\s\S]+?)-----END PRIVATE KEY-----/)
+	if (!match) throw new Error('Invalid local JWT private key.')
+	const body = match[1]
+		.replace(/\s/g, '')
+		.match(/.{1,64}/g)
+		?.join('\n')
+	if (!body) throw new Error('Invalid local JWT private key.')
+	return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`
 }
 
 async function applyBaseline(selectedBaseline) {

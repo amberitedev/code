@@ -40,7 +40,7 @@ export function mapAmberiteUserToAccountUser(
 	const raw = value as unknown as Record<string, unknown>
 	const id = requiredString(raw.id ?? raw.userId, 'id')
 	const verifiedMinecraftHandle = requiredString(
-		raw.verifiedMinecraftHandle ?? raw.username,
+		raw.verifiedMinecraftHandle,
 		'verifiedMinecraftHandle',
 	)
 	const minecraftUuid = requiredString(raw.minecraftUuid, 'minecraftUuid')

@@ -53,7 +53,7 @@ pub async fn begin_login_staged_with_prompt(
         .await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 pub async fn finish_login(
     code: &str,
     flow: MinecraftLoginFlow,
@@ -63,7 +63,7 @@ pub async fn finish_login(
     crate::state::login_finish(code, flow, &state.pool).await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 pub async fn finish_login_staged(
     code: &str,
     flow: MinecraftLoginFlow,

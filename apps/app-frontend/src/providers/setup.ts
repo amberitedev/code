@@ -10,12 +10,13 @@ export function setupProviders(
 	notificationManager: AbstractWebNotificationManager,
 	popupNotificationManager: AbstractPopupNotificationManager,
 ) {
-	setupTagsProvider(notificationManager)
+	const initializeTags = setupTagsProvider()
 	setupFileDropProvider()
 	setupFilePickerProvider()
 	setupInstanceImportProvider(notificationManager)
 
 	return {
+		initializeProviders: initializeTags,
 		...setupCreationModal(notificationManager, popupNotificationManager),
 	}
 }

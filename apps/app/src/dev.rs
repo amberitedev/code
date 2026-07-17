@@ -19,6 +19,7 @@ mod runtime {
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
     use std::env;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{LazyLock, Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use tauri::{Emitter, Manager};
@@ -26,6 +27,7 @@ mod runtime {
     use tokio::net::{TcpListener, TcpStream};
 
     static CONFIG: OnceLock<Option<DevAppConfig>> = OnceLock::new();
+    static UI_READY: AtomicBool = AtomicBool::new(false);
     static ACCOUNT_RESULTS: LazyLock<Mutex<HashMap<String, Option<String>>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -120,6 +122,10 @@ mod runtime {
         ACCOUNT_RESULTS.lock().unwrap().insert(request_id, error);
     }
 
+    pub fn mark_ui_ready() {
+        UI_READY.store(true, Ordering::Release);
+    }
+
     async fn handle_connection(
         app: tauri::AppHandle,
         stream: TcpStream,
@@ -150,20 +156,29 @@ mod runtime {
             .get_webview_window("main")
             .ok_or_else(|| "main window is unavailable".to_string())?;
         match request.action.as_str() {
-            "status" => Ok(()),
+            "status" => UI_READY
+                .load(Ordering::Acquire)
+                .then_some(())
+                .ok_or_else(|| "app UI is not ready".to_string()),
             "focus" => {
                 window.show().map_err(|error| error.to_string())?;
                 window.set_focus().map_err(|error| error.to_string())
             }
             "hide" => window.hide().map_err(|error| error.to_string()),
-            "reload" => window
-                .eval("window.location.reload()")
-                .map_err(|error| error.to_string()),
+            "reload" => {
+                UI_READY.store(false, Ordering::Release);
+                window
+                    .eval("window.location.reload()")
+                    .map_err(|error| error.to_string())
+            }
             "close" => {
                 app.exit(0);
                 Ok(())
             }
             "account" => {
+                if !UI_READY.load(Ordering::Acquire) {
+                    return Err("app UI is not ready".to_string());
+                }
                 let username = request
                     .username
                     .ok_or_else(|| "username is required".to_string())?;
@@ -224,6 +239,10 @@ mod runtime {
         _error: Option<String>,
     ) {
     }
+
+    pub fn mark_ui_ready() {}
 }
 
-pub use runtime::{complete_account_switch, config, prepare, start_control};
+pub use runtime::{
+    complete_account_switch, config, mark_ui_ready, prepare, start_control,
+};

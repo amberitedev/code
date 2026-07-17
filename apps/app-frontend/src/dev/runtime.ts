@@ -51,4 +51,5 @@ export function getDevAppConfig(): DevAppConfig | null {
 
 export function registerDevAccountSwitcher(switcher: AccountSwitcher): void {
 	accountSwitcher ??= switcher
+	void invoke('mark_amberite_dev_ui_ready')
 }

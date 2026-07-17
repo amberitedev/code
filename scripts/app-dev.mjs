@@ -64,15 +64,14 @@ if (action === 'windows-host' && process.platform === 'win32') {
 async function runClient() {
 	const request = requestForCommand()
 	await ensureController()
-	const response = await sendRequest(request)
+	const response = await sendRequest(request, request.action === 'restart' ? 120_000 : 15_000)
 	if (!response.ok) throw new Error(response.error)
 	printResult(action, response.result)
 }
 
 function requestForCommand() {
 	if (action === 'start') {
-		const username = positional[0]
-		if (!username) throw new Error('Usage: pnpm app:dev -- <username>')
+		const username = positional[0] ?? 'owner'
 		return { action, worktree, username: validateDevUsername(username) }
 	}
 	if (action === 'list' || action === 'stop-all') return { action }
@@ -164,6 +163,7 @@ async function serve() {
 	const children = new Map()
 	let operationQueue = Promise.resolve()
 	const server = net.createServer((socket) => {
+		socket.on('error', () => undefined)
 		socket.setEncoding('utf8')
 		let buffer = ''
 		socket.on('data', (chunk) => {
@@ -183,11 +183,13 @@ async function serve() {
 		try {
 			const request = JSON.parse(raw)
 			const result = await handleRequest(request)
-			socket.end(`${JSON.stringify({ ok: true, result })}\n`)
+			if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: true, result })}\n`)
 		} catch (error) {
-			socket.end(
-				`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })}\n`,
-			)
+			if (!socket.destroyed) {
+				socket.end(
+					`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })}\n`,
+				)
+			}
 		}
 	}
 
@@ -589,11 +591,12 @@ function createTauriDevConfig(targetWorktree, vitePort, devConfig) {
 		`${convexUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${convexUrl.host}`,
 		`${convexSiteUrl.protocol}//${convexSiteUrl.host}`,
 	]
+	const wslWorktree = /\s/.test(targetWorktree) ? JSON.stringify(targetWorktree) : targetWorktree
 	return {
 		build: {
 			devUrl: `http://localhost:${vitePort}`,
 			beforeDevCommand: usesWindowsDesktop()
-				? `wsl.exe --cd ${targetWorktree} corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`
+				? `wsl.exe --cd ${wslWorktree} corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`
 				: `corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`,
 		},
 		app: {
@@ -937,7 +940,11 @@ function publicApp(app) {
 	return {
 		id: app.id,
 		pid: app.pid,
-		health: app.ready ? 'running' : isProcessRunning(app.pid) ? 'starting' : 'stopped',
+		health: app.ready
+			? 'running'
+			: isProcessRunning(app.launcherPid ?? app.pid)
+				? 'starting'
+				: 'stopped',
 		username: app.username,
 		branch: app.branch,
 		worktree: app.worktree,

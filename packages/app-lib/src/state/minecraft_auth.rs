@@ -157,7 +157,7 @@ async fn login_begin_inner(
     }
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 pub async fn login_finish(
     code: &str,
     flow: MinecraftLoginFlow,
@@ -168,7 +168,7 @@ pub async fn login_finish(
         .credentials)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 pub async fn login_finish_staged(
     code: &str,
     flow: MinecraftLoginFlow,
@@ -946,20 +946,28 @@ pub async fn migrate_legacy_product_session(
     .fetch_all(pool)
     .await?;
     let mut bundle = ProductSessionBundle::default();
+    let mut has_active_credential = false;
     for row in rows {
         let access_token: String = row.try_get("access_token")?;
         let refresh_token: String = row.try_get("refresh_token")?;
-        if access_token.is_empty() && refresh_token.is_empty() {
+        if access_token.is_empty() || refresh_token.is_empty() {
             continue;
         }
+        let uuid = row.try_get::<String, _>("uuid")?;
+        let Ok(uuid) = Uuid::parse_str(&uuid) else {
+            tracing::warn!(
+                "Skipping legacy Minecraft credentials with an invalid UUID"
+            );
+            continue;
+        };
+        let requested_active = row.try_get::<i64, _>("active")? == 1;
+        let active = requested_active && !has_active_credential;
+        has_active_credential |= active;
         bundle
             .minecraft_credentials
             .push(StoredMinecraftCredential {
                 profile: MinecraftProfile {
-                    id: Uuid::parse_str(
-                        row.try_get::<String, _>("uuid")?.as_str(),
-                    )
-                    .unwrap_or_default(),
+                    id: uuid,
                     name: row.try_get("username")?,
                     ..MinecraftProfile::default()
                 },
@@ -969,7 +977,7 @@ pub async fn migrate_legacy_product_session(
                     .timestamp_opt(row.try_get("expires")?, 0)
                     .single()
                     .unwrap_or_else(Utc::now),
-                active: row.try_get::<i64, _>("active")? == 1,
+                active,
             });
     }
 
@@ -981,7 +989,15 @@ pub async fn migrate_legacy_product_session(
     {
         let private_key: String = row.try_get("private_key")?;
         let token: String = row.try_get("token")?;
-        if !private_key.is_empty() || !token.is_empty() {
+        let x: String = row.try_get("x")?;
+        let y: String = row.try_get("y")?;
+        let key_id = Uuid::parse_str(row.try_get::<String, _>("uuid")?.as_str());
+        if !private_key.is_empty()
+            && !token.is_empty()
+            && !x.is_empty()
+            && !y.is_empty()
+            && let Ok(key_id) = key_id
+        {
             bundle.device_token = Some(StoredDeviceTokenPair {
                 token: DeviceToken {
                     issue_instant: Utc
@@ -998,23 +1014,17 @@ pub async fn migrate_legacy_product_session(
                     )
                     .unwrap_or_default(),
                 },
-                key_id: Uuid::parse_str(row.try_get::<String, _>("uuid")?.as_str())
-                    .unwrap_or_default(),
+                key_id,
                 private_key,
-                x: row.try_get("x")?,
-                y: row.try_get("y")?,
+                x,
+                y,
             });
         }
     }
 
     bundle.version = PRODUCT_SESSION_VERSION;
     bundle.signed_out = true;
-    if let Err(error) = validate_product_session(&bundle) {
-        tracing::warn!(
-            "Clearing incomplete legacy product-session credentials: {error}"
-        );
-        bundle = ProductSessionBundle::default();
-    }
+    validate_product_session(&bundle)?;
     let mut transaction = pool.begin().await?;
     write_product_session_row(&mut transaction, &bundle).await?;
     clear_legacy_secret_columns(&mut transaction).await?;

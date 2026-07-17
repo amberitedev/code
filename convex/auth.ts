@@ -21,15 +21,21 @@ const MINECRAFT_TOKEN_PROVIDER_ID = 'minecraft-token'
 const DEV_ACCOUNT_PROVIDER_ID = 'amberite-dev-account'
 const INVALID_ACCOUNT_ID = 'InvalidAccountId'
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,24}$/
+const MINECRAFT_PROFILE_TIMEOUT_MS = 10_000
 
 async function verifyMinecraftAccessToken(token: string): Promise<MinecraftProfile> {
 	let response: Response
+	const controller = new AbortController()
+	const timeout = setTimeout(() => controller.abort(), MINECRAFT_PROFILE_TIMEOUT_MS)
 	try {
 		response = await fetch('https://api.minecraftservices.com/minecraft/profile', {
 			headers: { Authorization: `Bearer ${token}` },
+			signal: controller.signal,
 		})
 	} catch {
 		throw new Error('MinecraftProviderUnavailable')
+	} finally {
+		clearTimeout(timeout)
 	}
 	if (response.status === 404) throw new Error('MinecraftJavaProfileMissing')
 	if (response.status === 429) throw new Error('MinecraftProviderThrottled')
@@ -203,13 +209,13 @@ export const synchronizeMinecraftIdentity = internalMutation({
 			.collect()
 		if (duplicateUsers.some((candidate) => candidate._id !== args.userId && !candidate.deletedAt))
 			throw new Error('AmbiguousMinecraftIdentity')
-		const handleOwner = await ctx.db
+		const handleOwners = await ctx.db
 			.query('users')
 			.withIndex('by_verified_minecraft_handle', (q) =>
 				q.eq('normalizedVerifiedMinecraftHandle', handle.toLowerCase()),
 			)
-			.first()
-		if (handleOwner && handleOwner._id !== args.userId && !handleOwner.deletedAt)
+			.collect()
+		if (handleOwners.some((owner) => owner._id !== args.userId && !owner.deletedAt))
 			throw new Error('MinecraftHandleConflict')
 
 		const previousHandle = user.verifiedMinecraftHandle ?? user.username

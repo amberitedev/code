@@ -26,9 +26,10 @@ export function validateAmberiteSessionTokens(value: unknown): AmberiteSessionTo
 }
 
 export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSessionStorage {
+	const atomicStorage = adapter.amberiteSessionStorage
 	return {
 		async read(): Promise<AmberiteSessionTokens | null> {
-			if (adapter.readAmberiteSession) return await adapter.readAmberiteSession()
+			if (atomicStorage) return await atomicStorage.read()
 			const token = await adapter.getCurrentJwt()
 			const refreshToken = await adapter.getCurrentRefreshToken?.()
 			if (!token || !refreshToken) return null
@@ -36,8 +37,8 @@ export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSession
 		},
 
 		async write(tokens: AmberiteSessionTokens): Promise<void> {
-			if (adapter.writeAmberiteSession) {
-				await adapter.writeAmberiteSession(tokens)
+			if (atomicStorage) {
+				await atomicStorage.write(tokens)
 				return
 			}
 			if (!adapter.setCurrentJwt || !adapter.setCurrentRefreshToken) {
@@ -55,12 +56,14 @@ export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSession
 		},
 
 		async clear(): Promise<void> {
-			if (adapter.clearAmberiteSession) {
-				await adapter.clearAmberiteSession()
+			if (atomicStorage) {
+				await atomicStorage.clear()
 				return
 			}
-			await adapter.setCurrentJwt?.(null)
-			await adapter.setCurrentRefreshToken?.(null)
+			await Promise.allSettled([
+				adapter.setCurrentJwt?.(null),
+				adapter.setCurrentRefreshToken?.(null),
+			])
 		},
 	}
 }

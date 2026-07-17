@@ -30,6 +30,8 @@ interface MinecraftProfileResponse {
 	name?: string
 }
 
+const PROVIDER_TIMEOUT_MS = 15_000
+
 export default defineEventHandler(async (event) => {
 	noStore(event)
 	let redirect = '/dashboard'
@@ -162,9 +164,15 @@ async function authenticateMinecraft(uhs: string, xstsToken: string): Promise<st
 async function requireMinecraftProfile(
 	minecraftAccessToken: string,
 ): Promise<{ id: string; name: string }> {
-	const response = await fetch('https://api.minecraftservices.com/minecraft/profile', {
-		headers: { Authorization: `Bearer ${minecraftAccessToken}`, Accept: 'application/json' },
-	})
+	let response: Response
+	try {
+		response = await fetch('https://api.minecraftservices.com/minecraft/profile', {
+			headers: { Authorization: `Bearer ${minecraftAccessToken}`, Accept: 'application/json' },
+			signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+		})
+	} catch {
+		throw new Error('minecraft_provider_unreachable')
+	}
 	if (response.status === 404) throw new Error('minecraft_java_profile_required')
 	if (!response.ok) throw new Error('minecraft_profile_failed')
 	const profile = (await response.json()) as MinecraftProfileResponse
@@ -178,7 +186,10 @@ async function requireMinecraftProfile(
 async function fetchJson<T>(url: string, init: RequestInit, errorCode: string): Promise<T> {
 	let response: Response
 	try {
-		response = await fetch(url, init)
+		response = await fetch(url, {
+			...init,
+			signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+		})
 	} catch {
 		throw new Error('minecraft_provider_unreachable')
 	}

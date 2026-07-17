@@ -143,6 +143,11 @@ async function refreshValues() {
 	accounts.value = Array.isArray(userList) ? [...userList] : []
 	accounts.value.sort((a, b) => (a.profile?.name ?? '').localeCompare(b.profile?.name ?? ''))
 
+	if (accounts.value.length === 0) {
+		equippedSkin.value = null
+		return
+	}
+
 	try {
 		const skins = await get_available_skins()
 		equippedSkin.value = skins.find((skin) => skin.is_equipped) ?? null
