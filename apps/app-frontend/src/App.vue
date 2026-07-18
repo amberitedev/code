@@ -1721,6 +1721,7 @@ async function signIn(mode = 'continue', redirectPath = route.fullPath) {
 		// sessionStorage can be unavailable in tests.
 	}
 	await amberiteAuth.signIn(mode)
+	if (amberiteAuth.error.value) handleError(amberiteAuth.error.value)
 	if (amberiteAuth.isLoggedIn.value) await resumeAmberiteDestination()
 }
 
@@ -2486,16 +2487,12 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	>
 		<div class="universal-card flex w-full max-w-md flex-col items-center gap-4 !p-6">
 			<SpinnerIcon
-				v-if="['restoring', 'verifying'].includes(amberiteAuth.status.value)"
+				v-if="amberiteAuth.status.value === 'restoring'"
 				class="size-8 animate-spin text-brand"
 			/>
 			<template v-if="amberiteAuth.status.value === 'restoring'">
 				<h1 class="m-0 text-2xl font-semibold text-contrast">Restoring your session</h1>
 				<p class="m-0 text-secondary">Checking the secure session stored on this device.</p>
-			</template>
-			<template v-else-if="amberiteAuth.status.value === 'verifying'">
-				<h1 class="m-0 text-2xl font-semibold text-contrast">Verifying Minecraft</h1>
-				<p class="m-0 text-secondary">Complete the Microsoft window to continue.</p>
 			</template>
 			<template v-else-if="amberiteAuth.status.value === 'retryableOffline'">
 				<h1 class="m-0 text-2xl font-semibold text-contrast">Amberite is unreachable</h1>
@@ -2514,30 +2511,23 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					size="48px"
 					circle
 				/>
-				<h1 class="m-0 text-2xl font-semibold text-contrast">Continue with Minecraft</h1>
-				<p class="m-0 text-secondary">
-					Amberite uses a verified Minecraft: Java Edition UUID as your identity.
-				</p>
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Sign in to Amberite</h1>
 				<ButtonStyled color="brand" class="w-full">
-					<button class="!w-full !justify-center" @click="signIn('continue')">
-						{{
-							amberiteAuth.rememberedIdentity.value
-								? `Continue as ${amberiteAuth.rememberedIdentity.value.verifiedMinecraftHandle}`
-								: 'Continue with Minecraft'
-						}}
-					</button>
-				</ButtonStyled>
-				<ButtonStyled class="w-full">
-					<button class="!w-full !justify-center" @click="signIn('use_another_account')">
-						Use another account
+					<button
+						class="relative !min-h-12 !w-full !justify-center"
+						:disabled="amberiteAuth.signingIn.value"
+						@click="signIn('continue')"
+					>
+						<SpinnerIcon
+							v-if="amberiteAuth.signingIn.value"
+							class="absolute size-5 animate-spin"
+						/>
+						<span :class="{ 'opacity-0': amberiteAuth.signingIn.value }">
+							Continue with Minecraft
+						</span>
 					</button>
 				</ButtonStyled>
 			</template>
-			<Transition name="fade">
-				<p v-if="amberiteAuth.error.value" class="m-0 text-sm text-red">
-					{{ amberiteAuth.error.value.message }}
-				</p>
-			</Transition>
 		</div>
 	</div>
 	<div

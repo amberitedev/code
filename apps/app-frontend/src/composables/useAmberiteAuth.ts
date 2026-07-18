@@ -164,7 +164,8 @@ async function performSignIn(mode: 'continue' | 'use_another_account'): Promise<
 		status.value = 'authenticated'
 		scheduleRefresh()
 	} catch (value) {
-		showAuthError(value)
+		if (isCancelledAuthError(value)) clearAuthError()
+		else showAuthError(value)
 		if (previousStatus === 'authenticated' && previousUser) {
 			sessionUser.value = previousUser
 			status.value = 'authenticated'
@@ -285,6 +286,10 @@ function shouldPreserveSession(value: unknown): boolean {
 		message.includes('offline') ||
 		message.includes('unreachable')
 	)
+}
+
+function isCancelledAuthError(value: unknown): boolean {
+	return value instanceof AmberiteApiError && value.code === 'cancelled'
 }
 
 function showAuthError(value: unknown): void {
