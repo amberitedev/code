@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from './adapter'
+import type { PlatformAdapter, PlatformAuthSession } from './adapter'
 import { AuthError } from './errors'
 
 export interface AmberiteSessionTokens {
@@ -10,6 +10,21 @@ export interface AmberiteSessionStorage {
 	read(): Promise<AmberiteSessionTokens | null>
 	write(tokens: AmberiteSessionTokens): Promise<void>
 	clear(): Promise<void>
+}
+
+const platformRefreshes = new WeakMap<PlatformAdapter, Promise<PlatformAuthSession | null>>()
+
+export async function refreshPlatformAmberiteSession(
+	adapter: PlatformAdapter,
+): Promise<PlatformAuthSession | null> {
+	if (!adapter.refreshAmberiteSession) return null
+	const pending = platformRefreshes.get(adapter)
+	if (pending) return await pending
+	const refresh = adapter.refreshAmberiteSession().finally(() => {
+		platformRefreshes.delete(adapter)
+	})
+	platformRefreshes.set(adapter, refresh)
+	return await refresh
 }
 
 export function isAmberiteSessionTokens(value: unknown): value is AmberiteSessionTokens {

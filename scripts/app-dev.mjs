@@ -5,8 +5,10 @@ import {
 	closeSync,
 	copyFileSync,
 	existsSync,
+	fstatSync,
 	mkdirSync,
 	openSync,
+	readSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -29,6 +31,7 @@ import {
 } from './dev-shared.mjs'
 
 const action = process.argv[2] ?? 'start'
+const controllerProtocolVersion = 2
 const jsonOutput = process.argv.includes('--json')
 const positional = process.argv.slice(3).filter((value) => value !== '--' && value !== '--json')
 let worktree
@@ -67,12 +70,78 @@ async function runClient() {
 	const response = await sendRequest(request, request.action === 'restart' ? 120_000 : 15_000)
 	if (!response.ok) throw new Error(response.error)
 	printResult(action, response.result)
+	if (action === 'start' || action === 'start-auth') await attachToApp(response.result)
+}
+
+async function attachToApp(app) {
+	let offset = 0
+	let stopping = false
+
+	function flushLogs() {
+		if (!existsSync(app.logPath)) return
+		const log = openSync(app.logPath, 'r')
+		try {
+			const size = fstatSync(log).size
+			if (size < offset) offset = 0
+			if (size === offset) return
+			const output = Buffer.alloc(size - offset)
+			readSync(log, output, 0, output.length, offset)
+			offset = size
+			process.stdout.write(output)
+		} finally {
+			closeSync(log)
+		}
+	}
+
+	console.log(`Attached to app ${app.id}. Press Ctrl+C to stop it.`)
+	flushLogs()
+	await new Promise((resolve) => {
+		const logTimer = setInterval(flushLogs, 100)
+		const statusTimer = setInterval(async () => {
+			try {
+				const response = await sendRequest({ action: 'list' }, 1_000)
+				if (response.ok && !response.result.some((candidate) => candidate.id === app.id)) {
+					finish()
+				}
+			} catch {}
+		}, 1_000)
+
+		function finish() {
+			clearInterval(logTimer)
+			clearInterval(statusTimer)
+			flushLogs()
+			resolve()
+		}
+
+		async function stop() {
+			if (stopping) return
+			stopping = true
+			try {
+				const response = await sendRequest({ action: 'stop', appId: app.id })
+				if (response.ok) console.log(`\n${response.result.message}`)
+			} catch (error) {
+				console.error(`\nFailed to stop app ${app.id}: ${error}`)
+			}
+			finish()
+		}
+
+		process.once('SIGINT', stop)
+		process.once('SIGTERM', stop)
+	})
 }
 
 function requestForCommand() {
-	if (action === 'start') {
+	if (action === 'start' || action === 'start-auth') {
+		if (action === 'start-auth' && positional.length > 0) {
+			throw new Error('Usage: pnpm app:dev:auth')
+		}
 		const username = positional[0] ?? 'owner'
-		return { action, worktree, username: validateDevUsername(username) }
+		return {
+			action: 'start',
+			worktree,
+			authMode: action === 'start-auth' ? 'real' : 'dev',
+			username: action === 'start-auth' ? null : validateDevUsername(username),
+		}
 	}
 	if (action === 'list' || action === 'stop-all') return { action }
 	if (action === 'stop-worktree') return { action, worktree }
@@ -102,10 +171,12 @@ function printResult(command, result) {
 }
 
 async function ensureController() {
+	let response
 	try {
-		const response = await sendRequest({ action: 'ping' }, 300)
-		if (response.ok) return
+		response = await sendRequest({ action: 'ping' }, 300)
 	} catch {}
+	if (response?.ok && response.result.protocolVersion === controllerProtocolVersion) return
+	if (response?.ok) await replaceOutdatedController(response.result.pid)
 
 	const outputPath = join(appRoot, 'controller.log')
 	const output = openSync(outputPath, 'a')
@@ -126,6 +197,27 @@ async function ensureController() {
 		} catch {}
 	}
 	throw new Error(`The app dev controller did not start. See ${outputPath}.`)
+}
+
+async function replaceOutdatedController(pid) {
+	const response = await sendRequest({ action: 'list' }, 1_000)
+	if (!response.ok) throw new Error(response.error)
+	if (response.result.length > 0) {
+		throw new Error(
+			'The app dev controller is outdated. Stop its running apps with "pnpm app:dev:stop-all", then retry.',
+		)
+	}
+	process.kill(pid)
+	const startedAt = Date.now()
+	while (Date.now() - startedAt < 5_000) {
+		await delay(50)
+		try {
+			await sendRequest({ action: 'ping' }, 100)
+		} catch {
+			return
+		}
+	}
+	throw new Error('The outdated app dev controller did not stop.')
 }
 
 function sendRequest(request, timeoutMs = 15_000) {
@@ -195,8 +287,12 @@ async function serve() {
 
 	async function handleRequest(request) {
 		pruneRegistry()
-		if (request.action === 'ping') return { pid: process.pid }
-		if (request.action === 'start') return await startApp(request.worktree, request.username)
+		if (request.action === 'ping') {
+			return { pid: process.pid, protocolVersion: controllerProtocolVersion }
+		}
+		if (request.action === 'start') {
+			return await startApp(request.worktree, request.username, request.authMode)
+		}
 		if (request.action === 'list') return await publicApps()
 		if (request.action === 'account') return await switchAccount(request.appId, request.username)
 		if (request.action === 'reload') {
@@ -223,8 +319,18 @@ async function serve() {
 		throw new Error(`Unknown controller action "${request.action}".`)
 	}
 
-	async function startApp(targetWorktree, username) {
-		validateDevUsername(username)
+	async function startApp(targetWorktree, username, authMode = 'dev') {
+		if (authMode === 'dev') validateDevUsername(username)
+		if (authMode === 'real') {
+			const existing = Object.values(registry.apps).find(
+				(app) => app.worktree === targetWorktree && app.authMode === 'real',
+			)
+			if (existing) {
+				throw new Error(
+					`Auth app ${existing.id} is already running for this worktree. Stop it before starting another.`,
+				)
+			}
+		}
 		const convex = requireConvex(targetWorktree)
 		const ids = new Set(Object.keys(registry.apps))
 		const id = makeShortId(ids)
@@ -232,14 +338,16 @@ async function serve() {
 		const host = registry.hosts[targetWorktree]
 		const vitePort = host?.vitePort ?? (await availablePort(1420))
 		const controlPort = await availablePort(17_000)
-		const dataDir = appDataDir(id)
+		const dataDir = appDataDir(authMode === 'real' ? `auth-${worktreeKey(targetWorktree)}` : id)
 		const logPath = join(appRoot, 'logs', `${id}.log`)
 		mkdirSync(join(appRoot, 'logs'), { recursive: true })
+		const identity = authMode === 'real' ? 'auth' : username
 		const devConfig = {
 			appId: id,
 			username,
+			authMode,
 			branch,
-			title: `${branch} · ${id} · ${username}`,
+			title: `${branch} · ${id} · ${identity}`,
 			dataDir,
 			convexUrl: convex.convexUrl,
 			convexSiteUrl: convex.convexSiteUrl,
@@ -280,6 +388,7 @@ async function serve() {
 			worktree: targetWorktree,
 			branch,
 			username,
+			authMode,
 			dataDir,
 			logPath,
 			startedAt: new Date().toISOString(),
@@ -296,12 +405,19 @@ async function serve() {
 		writeRegistry()
 		return {
 			...publicApp(registry.apps[id]),
-			message: `Started app ${id} as ${username} from ${targetWorktree}.`,
+			logPath,
+			message:
+				authMode === 'real'
+					? `Started auth app ${id} from ${targetWorktree}.`
+					: `Started app ${id} as ${username} from ${targetWorktree}.`,
 		}
 	}
 
 	async function switchAccount(appId, username) {
 		const app = requireApp(appId)
+		if (app.authMode === 'real') {
+			throw new Error(`App ${app.id} uses real authentication; switch accounts in the app.`)
+		}
 		validateDevUsername(username)
 		await control(app, { action: 'account', username }, 30_000)
 		app.username = username
@@ -352,8 +468,9 @@ async function serve() {
 		return {
 			appId: app.id,
 			username: app.username,
+			authMode: app.authMode ?? 'dev',
 			branch: app.branch,
-			title: `${app.branch} · ${app.id} · ${app.username}`,
+			title: `${app.branch} · ${app.id} · ${app.authMode === 'real' ? 'auth' : app.username}`,
 			dataDir: app.dataDir,
 			convexUrl: convex.convexUrl,
 			convexSiteUrl: convex.convexSiteUrl,
@@ -511,7 +628,7 @@ function spawnHost(targetWorktree, vitePort, devConfig, logPath) {
 		'--amberite-dev-config',
 		JSON.stringify(devConfig),
 	]
-	if (usesWindowsDesktop()) {
+	if (usesWindowsDesktop() && process.platform !== 'win32') {
 		ensureWindowsTauriCli()
 		const windowsPidPath = join(appRoot, 'pids', `${devConfig.appId}.pid`)
 		mkdirSync(join(appRoot, 'pids'), { recursive: true })
@@ -530,6 +647,10 @@ function spawnHost(targetWorktree, vitePort, devConfig, logPath) {
 		child.windowsPidPath = windowsPidPath
 		return child
 	}
+	const extraEnv =
+		process.platform === 'win32'
+			? { CARGO_TARGET_DIR: windowsCargoTargetDir(targetWorktree).windows }
+			: {}
 	const { command, args } = commandForPnpm([
 		'--filter',
 		'@modrinth/app',
@@ -537,7 +658,7 @@ function spawnHost(targetWorktree, vitePort, devConfig, logPath) {
 		'tauri',
 		...tauriArgs,
 	])
-	return spawnLogged(command, args, targetWorktree, logPath)
+	return spawnLogged(command, args, targetWorktree, logPath, extraEnv)
 }
 
 function spawnSecondary(targetWorktree, devConfig, logPath) {
@@ -595,7 +716,7 @@ function createTauriDevConfig(targetWorktree, vitePort, devConfig) {
 	return {
 		build: {
 			devUrl: `http://localhost:${vitePort}`,
-			beforeDevCommand: usesWindowsDesktop()
+			beforeDevCommand: usesWindowsDesktop() && process.platform !== 'win32'
 				? `wsl.exe --cd ${wslWorktree} corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`
 				: `corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`,
 		},
@@ -895,6 +1016,7 @@ function appTargetDir(targetWorktree) {
 
 function windowsCargoTargetDir(targetWorktree) {
 	const windows = `${windowsLocalAppData()}\\amberite-dev\\cargo-targets\\${worktreeKey(targetWorktree)}`
+	if (process.platform === 'win32') return { windows, linux: windows }
 	const linux = spawnSync('wslpath', ['-u', windows], { encoding: 'utf8' }).stdout.trim()
 	if (!linux) throw new Error('Could not translate the Windows Cargo target directory.')
 	return { windows, linux }
@@ -946,6 +1068,7 @@ function publicApp(app) {
 				? 'starting'
 				: 'stopped',
 		username: app.username,
+		authMode: app.authMode ?? 'dev',
 		branch: app.branch,
 		worktree: app.worktree,
 		vitePort: app.vitePort,

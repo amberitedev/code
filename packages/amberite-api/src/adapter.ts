@@ -7,6 +7,7 @@ export interface PlatformMinecraftSignInRequest {
 
 export interface PlatformAuthSession {
 	accessToken: string
+	expiresAt?: string
 	/** Verified current-user projection returned by native coordinators when already available. */
 	user?: unknown
 }
@@ -49,8 +50,8 @@ export interface PlatformAdapter {
 	signInWithMinecraft?(request: PlatformMinecraftSignInRequest): Promise<PlatformAuthSession>
 
 	/** Native product-session restoration and sign-out. */
-	restoreMinecraftSession?(): Promise<PlatformAuthSession | null>
-	signOutMinecraftSession?(): Promise<void>
+	restoreAmberiteSession?(): Promise<PlatformAuthSession | null>
+	signOutAmberiteSession?(): Promise<void>
 
 	/** Return the one-time local setup secret for an app-launched Core, if present. */
 	getLocalSetupSecret?(): Promise<string | null>

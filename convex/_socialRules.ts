@@ -50,6 +50,8 @@ export const DEFAULT_PROFILE_VISIBILITY: ProfileVisibilitySettings = {
 export async function requireUserId(ctx: QueryCtx | MutationCtx): Promise<Id<'users'>> {
 	const userId = await getAuthUserId(ctx)
 	if (userId === null) throw new Error('not authenticated')
+	const user = await ctx.db.get(userId)
+	if (!user || user.deletedAt) throw new Error('not authenticated')
 	return userId
 }
 

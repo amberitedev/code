@@ -1,4 +1,12 @@
 <template>
+	<ConfirmModal
+		ref="removeAccountModal"
+		:title="`Remove ${pendingRemoval?.profile.name ?? 'this account'} from this PC?`"
+		:description="`This won’t delete the Amberite or Minecraft account. You can sign in again anytime.`"
+		proceed-label="Remove from this PC"
+		:markdown="false"
+		@proceed="confirmRemoveAccount"
+	/>
 	<div
 		v-if="accounts.length === 0"
 		class="mt-2 flex flex-col gap-3 rounded-xl border border-solid border-surface-5 bg-surface-3 p-3"
@@ -64,7 +72,7 @@
 						<button
 							v-tooltip="formatMessage(messages.removeAccount)"
 							class="mr-2"
-							@click="logout(account.profile.id)"
+							@click="requestRemoveAccount(account)"
 						>
 							<TrashIcon />
 						</button>
@@ -96,6 +104,7 @@ import {
 	Accordion,
 	Avatar,
 	ButtonStyled,
+	ConfirmModal,
 	defineMessages,
 	injectNotificationManager,
 	useVIntl,
@@ -133,6 +142,8 @@ type MinecraftCredential = {
 
 const accounts: Ref<MinecraftCredential[]> = ref([])
 const loginDisabled = ref(false)
+const removeAccountModal = ref<InstanceType<typeof ConfirmModal>>()
+const pendingRemoval = ref<MinecraftCredential | null>(null)
 const defaultUser = ref<string | undefined>()
 const equippedSkin = ref<Skin | null>(null)
 const headUrlCache = ref(new Map<string, string>())
@@ -245,6 +256,18 @@ async function login() {
 
 	trackEvent('AccountLogIn')
 	loginDisabled.value = false
+}
+
+function requestRemoveAccount(account: MinecraftCredential) {
+	pendingRemoval.value = account
+	removeAccountModal.value?.show()
+}
+
+async function confirmRemoveAccount() {
+	const account = pendingRemoval.value
+	if (!account) return
+	pendingRemoval.value = null
+	await logout(account.profile.id)
 }
 
 async function logout(id: string) {

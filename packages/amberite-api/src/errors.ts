@@ -21,6 +21,12 @@ export type AuthFailureCode =
 	| 'configuration_failure'
 	| 'provider_failure'
 
+export interface AuthFailurePayload {
+	code: AuthFailureCode
+	message: string
+	recovery: RecoveryDisposition
+}
+
 export class AmberiteApiError extends Error {
 	constructor(
 		message: string,
@@ -98,6 +104,9 @@ export class CoreApiError extends AmberiteApiError {
 }
 
 export function authErrorFromResponse(message: string, status = 401): AmberiteApiError {
+	const structured = parseAuthFailurePayload(message)
+	if (structured) return authErrorFromPayload(structured)
+
 	const normalized = message.toLowerCase()
 	if (normalized.includes('expired')) return new AuthError(message, 'expired_session')
 	if (normalized.includes('revoked')) return new AuthError(message, 'revoked_session')
@@ -142,3 +151,83 @@ export function authErrorFromResponse(message: string, status = 401): AmberiteAp
 		return new AuthError(message, 'invalid_session')
 	return new ConvexError(message, status)
 }
+
+export function authErrorFromPayload(payload: AuthFailurePayload): AmberiteApiError {
+	if (
+		payload.code === 'offline' ||
+		payload.code === 'timeout' ||
+		payload.code === 'provider_unreachable' ||
+		payload.code === 'amberite_unreachable'
+	) {
+		return new NetworkError(payload.message, payload.code)
+	}
+	if (payload.recovery === 'return_to_provider') {
+		return new ProviderAuthError(payload.message, payload.code)
+	}
+	return new AuthError(payload.message, payload.code, payload.recovery)
+}
+
+export function parseAuthFailurePayload(value: unknown): AuthFailurePayload | null {
+	if (isAuthFailurePayload(value)) return value
+	const message = nativeErrorMessage(value)
+	if (!message) return null
+	for (let start = message.indexOf('{'); start >= 0; start = message.indexOf('{', start + 1)) {
+		for (let end = message.lastIndexOf('}'); end > start; end = message.lastIndexOf('}', end - 1)) {
+			try {
+				const parsed: unknown = JSON.parse(message.slice(start, end + 1))
+				if (isAuthFailurePayload(parsed)) return parsed
+			} catch {
+				// Convex and Tauri can prefix structured payloads with transport context.
+			}
+		}
+	}
+	return null
+}
+
+function isAuthFailurePayload(value: unknown): value is AuthFailurePayload {
+	if (!value || typeof value !== 'object') return false
+	const payload = value as Record<string, unknown>
+	return (
+		typeof payload.code === 'string' &&
+		AUTH_FAILURE_CODES.has(payload.code as AuthFailureCode) &&
+		typeof payload.message === 'string' &&
+		typeof payload.recovery === 'string' &&
+		RECOVERY_DISPOSITIONS.has(payload.recovery as RecoveryDisposition)
+	)
+}
+
+function nativeErrorMessage(value: unknown): string | null {
+	if (typeof value === 'string') return value
+	if (value instanceof Error) return value.message
+	if (value && typeof value === 'object' && 'message' in value) {
+		const message = (value as { message?: unknown }).message
+		if (typeof message === 'string') return message
+	}
+	return null
+}
+
+const AUTH_FAILURE_CODES = new Set<AuthFailureCode>([
+	'offline',
+	'timeout',
+	'provider_unreachable',
+	'amberite_unreachable',
+	'invalid_session',
+	'expired_session',
+	'revoked_session',
+	'corrupt_session',
+	'refresh_reuse',
+	'identity_mismatch',
+	'cancelled',
+	'state_failure',
+	'xbox_restriction',
+	'java_profile_missing',
+	'throttled',
+	'configuration_failure',
+	'provider_failure',
+])
+
+const RECOVERY_DISPOSITIONS = new Set<RecoveryDisposition>([
+	'preserve_and_retry',
+	'clear_session',
+	'return_to_provider',
+])

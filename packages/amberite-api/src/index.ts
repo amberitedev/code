@@ -164,8 +164,14 @@ export {
 	CoreOfflineError,
 	RelayTimeoutError,
 	CoreApiError,
+	authErrorFromPayload,
+	parseAuthFailurePayload,
 } from './errors'
-export type { AuthFailureCode, RecoveryDisposition } from './errors'
+export type {
+	AuthFailureCode,
+	AuthFailurePayload,
+	RecoveryDisposition,
+} from './errors'
 export { CoreConnectionMonitor, type ConnectionState, type ConnectionStatus } from './monitor'
 export {
 	CONNECTION_PROTOCOL,

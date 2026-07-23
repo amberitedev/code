@@ -1,8 +1,8 @@
 import type { PlatformAdapter } from './adapter'
 import { authErrorFromResponse, NetworkError } from './errors'
+import { refreshPlatformAmberiteSession } from './session'
 
 const CONVEX_REQUEST_TIMEOUT_MS = 15_000
-const refreshes = new WeakMap<PlatformAdapter, Promise<{ accessToken: string } | null>>()
 
 export async function convexQuery<T = unknown>(
 	adapter: PlatformAdapter,
@@ -89,11 +89,7 @@ async function request(
 }
 
 async function refreshOnce(adapter: PlatformAdapter): Promise<{ accessToken: string } | null> {
-	const existing = refreshes.get(adapter)
-	if (existing) return await existing
-	const refresh = adapter.refreshAmberiteSession!().finally(() => refreshes.delete(adapter))
-	refreshes.set(adapter, refresh)
-	return await refresh
+	return await refreshPlatformAmberiteSession(adapter)
 }
 
 function isUnauthorized(response: { res: Response; body: any }): boolean {

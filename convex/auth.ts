@@ -23,6 +23,14 @@ const INVALID_ACCOUNT_ID = 'InvalidAccountId'
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,24}$/
 const MINECRAFT_PROFILE_TIMEOUT_MS = 10_000
 
+function authFailure(
+	code: string,
+	message: string,
+	recovery: 'preserve_and_retry' | 'clear_session' | 'return_to_provider',
+): Error {
+	return new Error(JSON.stringify({ code, message, recovery }))
+}
+
 async function verifyMinecraftAccessToken(token: string): Promise<MinecraftProfile> {
 	let response: Response
 	const controller = new AbortController()
@@ -33,15 +41,34 @@ async function verifyMinecraftAccessToken(token: string): Promise<MinecraftProfi
 			signal: controller.signal,
 		})
 	} catch {
-		throw new Error('MinecraftProviderUnavailable')
+		throw authFailure(
+			'provider_unreachable',
+			'Minecraft profile service is unavailable',
+			'preserve_and_retry',
+		)
 	} finally {
 		clearTimeout(timeout)
 	}
-	if (response.status === 404) throw new Error('MinecraftJavaProfileMissing')
-	if (response.status === 429) throw new Error('MinecraftProviderThrottled')
+	if (response.status === 404)
+		throw authFailure(
+			'java_profile_missing',
+			'This Microsoft account has no Minecraft: Java Edition profile',
+			'return_to_provider',
+		)
+	if (response.status === 429)
+		throw authFailure('throttled', 'Minecraft sign-in is temporarily throttled', 'return_to_provider')
 	if (response.status === 401 || response.status === 403)
-		throw new Error('MinecraftAccessTokenInvalid')
-	if (!response.ok) throw new Error('MinecraftProviderUnavailable')
+		throw authFailure(
+			'provider_failure',
+			'Minecraft rejected the Microsoft access token',
+			'return_to_provider',
+		)
+	if (!response.ok)
+		throw authFailure(
+			'provider_unreachable',
+			'Minecraft profile service is unavailable',
+			'preserve_and_retry',
+		)
 	const profile = (await response.json()) as MinecraftProfile
 	return {
 		id: normalizeMinecraftUuid(profile.id),
@@ -91,13 +118,24 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 				const minecraftUuid = profile.id
 				const expected = credentials.expectedMinecraftUuid
 				if (typeof expected === 'string' && normalizeMinecraftUuid(expected) !== minecraftUuid) {
-					throw new Error('MinecraftUuidMismatch')
+					throw authFailure(
+						'identity_mismatch',
+						'The selected Minecraft account does not match this Amberite account',
+						'clear_session',
+					)
 				}
 				const accountId = `minecraft:${minecraftUuid}`
 				const identity = await ctx.runQuery(internal.auth.identityForMinecraftUuid, {
 					minecraftUuid,
 				})
-				if (identity.ambiguous) throw new Error('AmbiguousMinecraftIdentity')
+				if (identity.ambiguous) {
+					// IMPORTANT: Capture ambiguous identity mappings in Sentry once available.
+					throw authFailure(
+						'identity_mismatch',
+						'Multiple Amberite accounts claim this Minecraft identity',
+						'clear_session',
+					)
+				}
 
 				const existing = await retrieveAccount(ctx, {
 					provider: MINECRAFT_TOKEN_PROVIDER_ID,
@@ -108,7 +146,11 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 				})
 				if (existing) {
 					if (identity.userId && identity.userId !== existing.user._id)
-						throw new Error('AmbiguousMinecraftIdentity')
+						throw authFailure(
+							'identity_mismatch',
+							'Multiple Amberite accounts claim this Minecraft identity',
+							'clear_session',
+						)
 					await ctx.runMutation(internal.auth.synchronizeMinecraftIdentity, {
 						userId: existing.user._id,
 						amberiteUserId: existing.user.amberiteUserId ?? accountId,
@@ -119,7 +161,29 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 					return { userId: existing.user._id }
 				}
 
-				if (identity.userId) throw new Error('MinecraftIdentityMigrationRequired')
+				if (identity.userId) {
+					await ctx.runMutation(internal.auth.repairMinecraftProviderAccount, {
+						userId: identity.userId,
+						accountId,
+					})
+					const user = await ctx.runQuery(internal.auth.userForIdentityRepair, {
+						userId: identity.userId,
+					})
+					if (!user)
+						throw authFailure(
+							'identity_mismatch',
+							'This Minecraft identity no longer has a live Amberite account',
+							'clear_session',
+						)
+					await ctx.runMutation(internal.auth.synchronizeMinecraftIdentity, {
+						userId: identity.userId,
+						amberiteUserId: user.amberiteUserId ?? accountId,
+						accountId,
+						handle: profile.name,
+						minecraftUuid,
+					})
+					return { userId: identity.userId }
+				}
 				const document = accountProfile(profile.name, accountId, minecraftUuid)
 				const { user } = await createAccount(ctx, {
 					provider: MINECRAFT_TOKEN_PROVIDER_ID,
@@ -184,8 +248,53 @@ export const identityForMinecraftUuid = internalQuery({
 		}
 		return {
 			userId: usersById.size === 1 ? [...usersById.values()][0] : null,
-			ambiguous: usersById.size > 1 || links.length > 1,
+			ambiguous: usersById.size > 1,
 		}
+	},
+})
+
+export const userForIdentityRepair = internalQuery({
+	args: { userId: v.id('users') },
+	returns: v.any(),
+	handler: async (ctx, args) => {
+		const user = await ctx.db.get(args.userId)
+		return user && !user.deletedAt ? user : null
+	},
+})
+
+export const repairMinecraftProviderAccount = internalMutation({
+	args: { userId: v.id('users'), accountId: v.string() },
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const user = await ctx.db.get(args.userId)
+		if (!user || user.deletedAt)
+			throw authFailure(
+				'identity_mismatch',
+				'This Minecraft identity no longer has a live Amberite account',
+				'clear_session',
+			)
+		const accounts = await ctx.db
+			.query('authAccounts')
+			.withIndex('providerAndAccountId', (q) =>
+				q
+					.eq('provider', MINECRAFT_TOKEN_PROVIDER_ID)
+					.eq('providerAccountId', args.accountId),
+			)
+			.take(2)
+		if (accounts.some((account) => account.userId !== args.userId))
+			throw authFailure(
+				'identity_mismatch',
+				'Multiple Amberite accounts claim this Minecraft identity',
+				'clear_session',
+			)
+		if (accounts.length === 0) {
+			await ctx.db.insert('authAccounts', {
+				userId: args.userId,
+				provider: MINECRAFT_TOKEN_PROVIDER_ID,
+				providerAccountId: args.accountId,
+			})
+		}
+		return null
 	},
 })
 
@@ -208,15 +317,30 @@ export const synchronizeMinecraftIdentity = internalMutation({
 			.withIndex('by_minecraft_uuid', (q) => q.eq('minecraftUuid', minecraftUuid))
 			.collect()
 		if (duplicateUsers.some((candidate) => candidate._id !== args.userId && !candidate.deletedAt))
-			throw new Error('AmbiguousMinecraftIdentity')
+			throw authFailure(
+				'identity_mismatch',
+				'Multiple Amberite accounts claim this Minecraft identity',
+				'clear_session',
+			)
 		const handleOwners = await ctx.db
 			.query('users')
 			.withIndex('by_verified_minecraft_handle', (q) =>
 				q.eq('normalizedVerifiedMinecraftHandle', handle.toLowerCase()),
 			)
 			.collect()
-		if (handleOwners.some((owner) => owner._id !== args.userId && !owner.deletedAt))
-			throw new Error('MinecraftHandleConflict')
+		for (const owner of handleOwners) {
+			if (owner._id === args.userId || owner.deletedAt) continue
+			if (owner.minecraftUuid === minecraftUuid)
+				throw authFailure(
+					'identity_mismatch',
+					'Multiple Amberite accounts claim this Minecraft identity',
+					'clear_session',
+				)
+			await ctx.db.patch(owner._id, {
+				verifiedMinecraftHandle: undefined,
+				normalizedVerifiedMinecraftHandle: undefined,
+			})
+		}
 
 		const previousHandle = user.verifiedMinecraftHandle ?? user.username
 		const syncDisplayName = shouldSyncDefaultMinecraftDisplayName(
@@ -237,19 +361,24 @@ export const synchronizeMinecraftIdentity = internalMutation({
 			...(syncDisplayName ? { displayName: handle, name: handle } : {}),
 		})
 
-		const links = await ctx.db
+		const links = (await ctx.db
 			.query('linkedMicrosoftAccounts')
 			.withIndex('by_amberite_user', (q) => q.eq('amberiteUserId', args.amberiteUserId))
-			.collect()
-		if (links.length > 1) throw new Error('AmbiguousMinecraftIdentity')
+			.collect()).filter(
+				(link) =>
+					link.minecraftUuid === minecraftUuid ||
+					link.microsoftAccountId.startsWith('minecraft:'),
+			)
+		const [canonicalLink, ...duplicateLinks] = links
+		for (const duplicate of duplicateLinks) await ctx.db.delete(duplicate._id)
 		const value = {
 			microsoftAccountId: args.accountId,
 			gamertag: handle,
 			minecraftUuid,
-			verifiedAt: links[0]?.verifiedAt ?? now,
+			verifiedAt: canonicalLink?.verifiedAt ?? now,
 			lastVerifiedAt: now,
 		}
-		if (links[0]) await ctx.db.patch(links[0]._id, value)
+		if (canonicalLink) await ctx.db.patch(canonicalLink._id, value)
 		else
 			await ctx.db.insert('linkedMicrosoftAccounts', {
 				amberiteUserId: args.amberiteUserId,
@@ -281,7 +410,39 @@ export const deleteCurrentAccount = mutation({
 	returns: v.object({ ok: v.boolean() }),
 	handler: async (ctx) => {
 		const userId = await requireUserId(ctx)
-		await ctx.db.patch(userId, { deletedAt: Date.now(), deletedReason: 'user requested deletion' })
+		const user = await ctx.db.get(userId)
+		if (!user) throw new Error('user not found')
+		const sessions = await ctx.db
+			.query('authSessions')
+			.withIndex('userId', (q) => q.eq('userId', userId))
+			.collect()
+		for (const session of sessions) {
+			const refreshTokens = await ctx.db
+				.query('authRefreshTokens')
+				.withIndex('sessionId', (q) => q.eq('sessionId', session._id))
+				.collect()
+			for (const refreshToken of refreshTokens) await ctx.db.delete(refreshToken._id)
+			await ctx.db.delete(session._id)
+		}
+		const accounts = await ctx.db
+			.query('authAccounts')
+			.withIndex('userIdAndProvider', (q) => q.eq('userId', userId))
+			.collect()
+		for (const account of accounts) await ctx.db.delete(account._id)
+		if (user.amberiteUserId) {
+			const links = await ctx.db
+				.query('linkedMicrosoftAccounts')
+				.withIndex('by_amberite_user', (q) => q.eq('amberiteUserId', user.amberiteUserId!))
+				.collect()
+			for (const link of links) await ctx.db.delete(link._id)
+		}
+		await ctx.db.patch(userId, {
+			deletedAt: Date.now(),
+			deletedReason: 'user requested deletion',
+			minecraftUuid: undefined,
+			verifiedMinecraftHandle: undefined,
+			normalizedVerifiedMinecraftHandle: undefined,
+		})
 		return { ok: true }
 	},
 })
@@ -293,7 +454,7 @@ export const currentUser = query({
 		const userId = await getAuthUserId(ctx)
 		if (userId === null) return null
 		const user = await ctx.db.get(userId)
-		return user
+		return user && !user.deletedAt
 			? publicUser({ ...user, _id: userId }, true, await currentAccountFields(ctx, userId))
 			: null
 	},

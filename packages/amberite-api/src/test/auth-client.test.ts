@@ -130,6 +130,7 @@ describe('ConvexAmberiteAuthClient', () => {
 		const adapter = createAdapter(fetchFn)
 		adapter.signInWithMinecraft = vi.fn(async () => ({
 			accessToken: 'native-access',
+			expiresAt: '2026-07-18T12:15:00.000Z',
 			user: profile(),
 		}))
 		const session = await new ConvexAmberiteAuthClient({ adapter }).signInWithMinecraft({
@@ -138,6 +139,7 @@ describe('ConvexAmberiteAuthClient', () => {
 		})
 
 		expect(session.tokens).toEqual({ token: 'native-access', refreshToken: '' })
+		expect(session.expiresAt).toBe('2026-07-18T12:15:00.000Z')
 		expect(adapter.signInWithMinecraft).toHaveBeenCalledWith({
 			mode: 'continue',
 			expectedMinecraftUuid: '12345678-1234-1234-1234-123456789abc',

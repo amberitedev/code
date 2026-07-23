@@ -9,6 +9,7 @@ import {
 	RelayTimeoutError,
 	CoreApiError,
 	authErrorFromResponse,
+	parseAuthFailurePayload,
 } from '../errors'
 
 describe('AmberiteApiError', () => {
@@ -80,6 +81,20 @@ describe('authErrorFromResponse', () => {
 		expect(authErrorFromResponse('MinecraftJavaProfileMissing', 400)).toMatchObject({
 			code: 'java_profile_missing',
 			recovery: 'return_to_provider',
+		})
+	})
+
+	it('prefers a structured failure payload over transport prefixes', () => {
+		const message =
+			'Convex action failed: {"code":"identity_mismatch","message":"Wrong account","recovery":"clear_session"}'
+		expect(parseAuthFailurePayload(message)).toEqual({
+			code: 'identity_mismatch',
+			message: 'Wrong account',
+			recovery: 'clear_session',
+		})
+		expect(authErrorFromResponse(message, 400)).toMatchObject({
+			code: 'identity_mismatch',
+			recovery: 'clear_session',
 		})
 	})
 })

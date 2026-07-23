@@ -39,9 +39,9 @@ function createAmberiteWebAdapter(): PlatformAdapter {
 		setCurrentJwt: async (token) => {
 			if (import.meta.client) browserAccessToken = token
 		},
-		restoreMinecraftSession: async () => await requestServerSession('restore'),
+		restoreAmberiteSession: async () => await requestServerSession('restore'),
 		refreshAmberiteSession: async () => await refreshServerSession(),
-		signOutMinecraftSession: async () => {
+		signOutAmberiteSession: async () => {
 			clearAmberiteAccessToken()
 			try {
 				await $fetch('/api/amberite/session/logout', {

@@ -9,6 +9,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Convex deployment URL.
     pub convex_url: String,
+    /// Convex HTTP actions URL.
+    pub convex_site_url: String,
     /// Public URL clients should use to reach this Core.
     pub public_url: String,
     /// HTTP port for the Core API.
@@ -53,7 +55,14 @@ impl Config {
         }
         Ok(Self {
             data_dir: PathBuf::from(required_env("CORE_DATA_DIR")?),
-            convex_url: convex_deployment_url(&required_env("CONVEX_URL")?)?,
+            convex_url: convex_deployment_url(
+                &required_env("CONVEX_URL")?,
+                dev_mode,
+            )?,
+            convex_site_url: convex_site_url(
+                &required_env("CONVEX_SITE_URL")?,
+                dev_mode,
+            )?,
             public_url: required_env("AMBERITE_PUBLIC_URL")?,
             port: required_env("PORT")?
                 .parse()
@@ -93,11 +102,16 @@ fn optional_bool_env(name: &str) -> Result<bool> {
     }
 }
 
-fn convex_deployment_url(value: &str) -> Result<String> {
+fn convex_deployment_url(
+    value: &str,
+    allow_local_http: bool,
+) -> Result<String> {
     let mut url = url::Url::parse(value.trim())
         .wrap_err("CONVEX_URL must be a valid URL")?;
-    if url.scheme() != "https" {
-        return Err(eyre!("CONVEX_URL must use https"));
+    if !valid_convex_scheme(&url, allow_local_http) {
+        return Err(eyre!(
+            "CONVEX_URL must use HTTPS or local HTTP in debug builds"
+        ));
     }
     if url.host_str() == Some("test.convex.cloud") {
         return Err(eyre!(
@@ -120,6 +134,33 @@ fn convex_deployment_url(value: &str) -> Result<String> {
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
+fn convex_site_url(value: &str, allow_local_http: bool) -> Result<String> {
+    let mut url = url::Url::parse(value.trim())
+        .wrap_err("CONVEX_SITE_URL must be a valid URL")?;
+    if !valid_convex_scheme(&url, allow_local_http) {
+        return Err(eyre!(
+            "CONVEX_SITE_URL must use HTTPS or local HTTP in debug builds"
+        ));
+    }
+    if url.host_str().is_none() {
+        return Err(eyre!("CONVEX_SITE_URL must include a host"));
+    }
+    url.set_path("");
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+fn valid_convex_scheme(url: &url::Url, allow_local_http: bool) -> bool {
+    url.scheme() == "https"
+        || (allow_local_http
+            && url.scheme() == "http"
+            && matches!(
+                url.host_str(),
+                Some("localhost" | "127.0.0.1" | "::1")
+            ))
+}
+
 fn load_environment_profile() -> Result<()> {
     let filename = if cfg!(debug_assertions) {
         ".env.local"
@@ -137,4 +178,17 @@ fn load_environment_profile() -> Result<()> {
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{convex_deployment_url, convex_site_url};
+
+    #[test]
+    fn local_convex_http_is_debug_only() {
+        assert!(convex_deployment_url("http://127.0.0.1:3210", true).is_ok());
+        assert!(convex_site_url("http://127.0.0.1:3211", true).is_ok());
+        assert!(convex_deployment_url("http://127.0.0.1:3210", false).is_err());
+        assert!(convex_site_url("http://example.com:3211", true).is_err());
+    }
 }

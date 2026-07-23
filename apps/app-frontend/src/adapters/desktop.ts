@@ -1,7 +1,9 @@
 import {
 	type AmberiteSessionTokens,
 	AuthError,
+	authErrorFromPayload,
 	NetworkError,
+	parseAuthFailurePayload,
 	type PersistentQueueStore,
 	type PlatformAdapter,
 	ProviderAuthError,
@@ -109,7 +111,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 			accessToken = session.accessToken
 			return session
 		},
-		async restoreMinecraftSession() {
+		async restoreAmberiteSession() {
 			const session = await invokeNativeAuth<{ accessToken: string } | null>(
 				'plugin:auth|restore_amberite_product_session',
 				{ convexUrl: config.convexUrl },
@@ -127,7 +129,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 			accessToken = session?.accessToken ?? null
 			return session
 		},
-		async signOutMinecraftSession() {
+		async signOutAmberiteSession() {
 			try {
 				await invokeNativeAuth(
 					'plugin:auth|sign_out_amberite_product_session',
@@ -165,6 +167,8 @@ async function invokeNativeAuth<T>(
 }
 
 function mapNativeAuthError(error: unknown, operation: NativeAuthOperation): Error {
+	const structured = parseAuthFailurePayload(error)
+	if (structured) return authErrorFromPayload(structured)
 	const message = nativeErrorMessage(error)
 	const normalized = message.toLowerCase()
 	if (normalized.includes('cancel')) return new ProviderAuthError(message, 'cancelled')

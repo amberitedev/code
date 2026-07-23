@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct DevAppConfig {
     pub app_id: String,
-    pub username: String,
+    pub username: Option<String>,
+    pub auth_mode: String,
     pub branch: String,
     pub title: String,
     pub data_dir: String,

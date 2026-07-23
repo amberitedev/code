@@ -71,6 +71,7 @@ const router = createRouter({
 			name: 'Core',
 			component: Pages.Core,
 			meta: {
+				requiresCloud: true,
 				breadcrumb: [{ name: 'Core' }],
 			},
 		},
@@ -79,6 +80,7 @@ const router = createRouter({
 			name: 'Servers',
 			component: Pages.Servers,
 			meta: {
+				requiresCloud: true,
 				breadcrumb: [{ name: 'Servers' }],
 			},
 		},
@@ -86,6 +88,7 @@ const router = createRouter({
 			path: '/hosting/manage/:id',
 			name: 'ServerManage',
 			component: Hosting.Index,
+			meta: { requiresCloud: true },
 			children: [
 				{
 					path: '',
@@ -159,6 +162,7 @@ const router = createRouter({
 			name: 'User',
 			component: Pages.User,
 			meta: {
+				requiresCloud: true,
 				breadcrumb: [{ name: '?User' }],
 			},
 		},
@@ -167,6 +171,7 @@ const router = createRouter({
 			name: 'Group',
 			component: Pages.Group,
 			meta: {
+				requiresCloud: true,
 				breadcrumb: [{ name: '?Group' }],
 			},
 		},

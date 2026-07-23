@@ -5,7 +5,8 @@ import { applyDevAppConfig } from '@/config'
 
 export interface DevAppConfig {
 	appId: string
-	username: string
+	username: string | null
+	authMode: 'dev' | 'real'
 	branch: string
 	title: string
 	dataDir: string

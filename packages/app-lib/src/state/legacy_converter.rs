@@ -21,9 +21,10 @@ use uuid::Uuid;
 
 use super::MinecraftProfile;
 
-pub async fn migrate_legacy_data(
-    exec: &sqlx::Pool<sqlx::Sqlite>,
-) -> crate::Result<()> {
+pub async fn migrate_legacy_data<'a, E>(exec: E) -> crate::Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
+{
     let mut settings = state::Settings::get(exec).await?;
 
     if settings.migrated {

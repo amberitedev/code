@@ -1709,7 +1709,7 @@ let amberiteDestinationResumePromise = null
 
 setupAuthProvider(amberiteAuth.user, async (redirectPath) => {
 	await signIn('continue', redirectPath)
-})
+}, amberiteAuth.isReady)
 
 async function signIn(mode = 'continue', redirectPath = route.fullPath) {
 	try {
@@ -1721,7 +1721,6 @@ async function signIn(mode = 'continue', redirectPath = route.fullPath) {
 		// sessionStorage can be unavailable in tests.
 	}
 	await amberiteAuth.signIn(mode)
-	if (amberiteAuth.error.value) handleError(amberiteAuth.error.value)
 	if (amberiteAuth.isLoggedIn.value) await resumeAmberiteDestination()
 }
 
@@ -1758,11 +1757,22 @@ function normalizeAmberiteDestination(destination) {
 		: '/'
 }
 
+function isCloudOnlyRoute() {
+	return route.matched.some((record) => record.meta.requiresCloud)
+}
+
 watch(
-	() => amberiteAuth.status.value,
-	(nextStatus) => {
+	[() => amberiteAuth.status.value, () => route.path],
+	([nextStatus], [previousStatus]) => {
+		if (previousStatus === 'offlineRetrying' && nextStatus === 'authenticated') {
+			addNotification({
+				title: 'Amberite connected',
+				text: 'Cloud features are available again.',
+				type: 'success',
+			})
+		}
 		if (nextStatus === 'authenticated') void resumeAmberiteDestination()
-		else if (nextStatus === 'retryableOffline' && route.path.startsWith('/core')) {
+		else if (isCloudOnlyRoute()) {
 			void router.replace('/library')
 		}
 	},
@@ -2483,18 +2493,37 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	<div id="teleports"></div>
 	<div
 		v-if="stateInitialized && !amberiteAuth.canUseLauncher.value"
+		data-tauri-drag-region
 		class="fixed inset-0 z-[190] grid place-items-center bg-bg px-6 text-center"
 	>
+		<div class="fixed right-0 top-0 z-[191] pt-1">
+			<WindowControls />
+		</div>
 		<div class="universal-card flex w-full max-w-md flex-col items-center gap-4 !p-6">
 			<SpinnerIcon
-				v-if="amberiteAuth.status.value === 'restoring'"
+				v-if="['restoring', 'connecting'].includes(amberiteAuth.status.value)"
 				class="size-8 animate-spin text-brand"
 			/>
 			<template v-if="amberiteAuth.status.value === 'restoring'">
 				<h1 class="m-0 text-2xl font-semibold text-contrast">Restoring your session</h1>
 				<p class="m-0 text-secondary">Checking the secure session stored on this device.</p>
 			</template>
-			<template v-else-if="amberiteAuth.status.value === 'retryableOffline'">
+			<template v-else-if="amberiteAuth.status.value === 'connecting'">
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Verifying Minecraft</h1>
+				<p class="m-0 text-secondary">Complete the Microsoft window to continue.</p>
+			</template>
+			<template v-else-if="amberiteAuth.status.value === 'reauthRequired'">
+				<h1 class="m-0 text-2xl font-semibold text-contrast">Your Amberite session expired</h1>
+				<p class="m-0 text-secondary">
+					Reconnect to Amberite to continue using this account.
+				</p>
+				<ButtonStyled color="brand" class="w-full">
+					<button class="!w-full !justify-center" @click="signIn('continue')">
+						Continue with Minecraft
+					</button>
+				</ButtonStyled>
+			</template>
+			<template v-else-if="amberiteAuth.status.value === 'offlineRetrying'">
 				<h1 class="m-0 text-2xl font-semibold text-contrast">Amberite is unreachable</h1>
 				<p class="m-0 text-secondary">
 					Your secure local session is preserved. Check your connection and retry.
@@ -2511,7 +2540,30 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					size="48px"
 					circle
 				/>
-				<h1 class="m-0 text-2xl font-semibold text-contrast">Sign in to Amberite</h1>
+				<h1 class="m-0 text-2xl font-semibold text-contrast">
+					{{
+						amberiteAuth.rememberedIdentity.value
+							? 'Signed out — Continue as ' +
+								amberiteAuth.rememberedIdentity.value.verifiedMinecraftHandle
+							: 'Login to Amberite'
+					}}
+				</h1>
+				<div
+					v-if="amberiteAuth.error.value"
+					class="w-full rounded-lg border border-solid border-orange bg-orange-highlight p-3 text-left text-sm text-primary"
+				>
+					<strong class="block text-contrast">
+						{{
+							amberiteAuth.serverUnavailable.value
+								? 'Amberite servers are unavailable'
+								: 'Sign-in failed'
+						}}
+					</strong>
+					{{ amberiteAuth.error.value.message }}
+					<span v-if="amberiteAuth.serverUnavailable.value">
+						Sign-in requires a connection to Amberite.
+					</span>
+				</div>
 				<ButtonStyled color="brand" class="w-full">
 					<button
 						class="relative !min-h-12 !w-full !justify-center"
@@ -2634,7 +2686,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<NavButton
 				v-tooltip.right="'Create new instance'"
 				:to="() => installationModal?.show()"
-				:disabled="offline"
 			>
 				<PlusIcon />
 			</NavButton>
@@ -2786,12 +2837,22 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				></div>
 			</Admonition>
 			<Admonition
-				v-if="amberiteAuth.status.value === 'retryableOffline'"
+				v-if="
+					amberiteAuth.isOffline.value && amberiteAuth.status.value !== 'connectionError'
+				"
 				type="warning"
 				header="Amberite is offline"
 				class="m-6 mb-0"
 			>
 				Minecraft features still work. Core, friends, and sync are unavailable.
+			</Admonition>
+			<Admonition
+				v-if="amberiteAuth.status.value === 'connectionError'"
+				type="critical"
+				header="Amberite could not connect this identity"
+				class="m-6 mb-0"
+			>
+				Local Minecraft features remain available. Retry sign-in or open Help before using cloud features.
 			</Admonition>
 			<Admonition
 				v-if="authUnreachable"
@@ -2879,7 +2940,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 							<template v-if="amberiteAuth.signingIn">
 								Connecting your Amberite account...
 							</template>
-							<template v-else-if="amberiteAuth.status.value === 'retryableOffline'">
+							<template v-else-if="amberiteAuth.isOffline.value">
 								Amberite is offline.
 								<button
 									class="p-0 border-0 bg-transparent text-brand cursor-pointer"
