@@ -1,6 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server'
 import type { Id } from './_generated/dataModel'
 import type { MutationCtx, QueryCtx } from './_generated/server'
+import { normalizeMinecraftUuid } from './minecraftIdentity'
 export type FriendGroupRole = 'owner' | 'admin' | 'member'
 export type ProfileSectionVisibility = 'everyone' | 'friends' | 'friend_group' | 'private'
 export type ProfileRelationshipKind =
@@ -49,6 +50,8 @@ export const DEFAULT_PROFILE_VISIBILITY: ProfileVisibilitySettings = {
 export async function requireUserId(ctx: QueryCtx | MutationCtx): Promise<Id<'users'>> {
 	const userId = await getAuthUserId(ctx)
 	if (userId === null) throw new Error('not authenticated')
+	const user = await ctx.db.get(userId)
+	if (!user || user.deletedAt) throw new Error('not authenticated')
 	return userId
 }
 
@@ -158,7 +161,7 @@ export async function profileRelationship(
 		targetMemberships.find((membership) => viewerMembershipByGroup.has(membership.friendGroupId)) ??
 		null
 	const viewerMembership = targetMembership
-		? viewerMembershipByGroup.get(targetMembership.friendGroupId) ?? null
+		? (viewerMembershipByGroup.get(targetMembership.friendGroupId) ?? null)
 		: null
 	const friendGroupDoc = targetMembership
 		? await ctx.db.get(targetMembership.friendGroupId as any)
@@ -170,11 +173,11 @@ export async function profileRelationship(
 	const targetBan = await manageableBanForTarget(ctx, viewerMemberships, targetId)
 	const groupManager = Boolean(
 		!blocked &&
-			((viewerMembership &&
-				targetMembership &&
-				(viewerMembership.role === 'owner' || viewerMembership.role === 'admin') &&
-				roleRank(targetMembership.role) < roleRank(viewerMembership.role)) ||
-				targetBan),
+		((viewerMembership &&
+			targetMembership &&
+			(viewerMembership.role === 'owner' || viewerMembership.role === 'admin') &&
+			roleRank(targetMembership.role) < roleRank(viewerMembership.role)) ||
+			targetBan),
 	)
 	const friendGroup = Boolean(!blocked && targetMembership)
 	const friend = Boolean(!blocked && friendship)
@@ -257,7 +260,7 @@ export async function ensureFriendGroupCore(
 	coreId: string,
 	now: number,
 ) {
-	const group = await ctx.db.get(friendGroupId as any)
+	const group = await ctx.db.get(friendGroupId as Id<'friendGroups'>)
 	if (!group) throw new Error('friend group not found')
 	if (group.coreId && group.coreId !== coreId) throw new Error('friend group already has a Core')
 	if (!group.coreId) await ctx.db.patch(group._id, { coreId, updatedAt: now })
@@ -352,6 +355,8 @@ export async function upsertCoreForFriendGroup(
 	else await ctx.db.insert('cores', value)
 }
 export interface CurrentAccountFields {
+	minecraftUuid: string | null
+	verifiedMinecraftHandle: string | null
 	email: string | null
 	email_verified: boolean
 	auth_providers: string[]
@@ -369,18 +374,39 @@ export async function currentAccountFields(
 		.query('authAccounts')
 		.withIndex('userIdAndProvider', (q) => q.eq('userId', userId))
 		.collect()
+	const linkedMinecraft = user?.amberiteUserId
+		? await ctx.db
+				.query('linkedMicrosoftAccounts')
+				.withIndex('by_amberite_user', (q) => q.eq('amberiteUserId', user.amberiteUserId!))
+				.first()
+		: null
+	const minecraftAccount = accounts.find((account) => account.provider === 'minecraft-token')
 	return {
+		minecraftUuid:
+			user?.minecraftUuid ??
+			linkedMinecraft?.minecraftUuid ??
+			minecraftUuidFromProviderAccount(minecraftAccount?.providerAccountId) ??
+			null,
+		verifiedMinecraftHandle: user?.verifiedMinecraftHandle ?? linkedMinecraft?.gamertag ?? null,
 		email: user?.email ?? null,
 		email_verified: Boolean(user?.emailVerificationTime),
-		auth_providers: accounts.some((account) => account.provider === 'minecraft-token')
-			? ['minecraft']
-			: [],
+		auth_providers: minecraftAccount ? ['minecraft'] : [],
 		has_password: false,
 		has_totp: false,
 		role: '',
 		badges: 0,
 	}
 }
+
+function minecraftUuidFromProviderAccount(providerAccountId: string | undefined): string | null {
+	if (!providerAccountId?.startsWith('minecraft:')) return null
+	try {
+		return normalizeMinecraftUuid(providerAccountId.slice('minecraft:'.length))
+	} catch {
+		return null
+	}
+}
+
 export function publicUser(
 	user: any,
 	includeFriendCode = false,
@@ -390,9 +416,12 @@ export function publicUser(
 	return {
 		id: user._id,
 		userId: user._id,
-		username: user.username,
+		username: accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle,
+		minecraftUuid: accountFields?.minecraftUuid ?? user.minecraftUuid ?? null,
+		verifiedMinecraftHandle: accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle,
 		displayName: user.displayName,
-		name: user.displayName ?? user.username,
+		name:
+			user.displayName ?? accountFields?.verifiedMinecraftHandle ?? user.verifiedMinecraftHandle,
 		image: user.image,
 		avatar_url: avatarUrl ?? null,
 		bio: user.bio ?? null,
@@ -406,8 +435,10 @@ export function publicProfile(user: any) {
 	return {
 		id: user._id,
 		userId: user._id,
-		username: user.username,
-		name: user.displayName ?? user.username,
+		username: user.verifiedMinecraftHandle,
+		minecraftUuid: user.minecraftUuid ?? null,
+		verifiedMinecraftHandle: user.verifiedMinecraftHandle,
+		name: user.displayName ?? user.verifiedMinecraftHandle,
 		displayName: user.displayName,
 		avatar_url: avatarUrl ?? null,
 		image: user.image,

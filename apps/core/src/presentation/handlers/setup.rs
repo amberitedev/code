@@ -101,8 +101,16 @@ pub async fn complete_setup(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    validate_https_url(&body.convex_url, "convex_url")?;
-    validate_https_url(&body.auth_jwks_url, "auth_jwks_url")?;
+    validate_service_url(
+        &body.convex_url,
+        "convex_url",
+        state.config.dev_mode,
+    )?;
+    validate_service_url(
+        &body.auth_jwks_url,
+        "auth_jwks_url",
+        state.config.dev_mode,
+    )?;
     if let Some(url) = &body.realtime_url {
         validate_https_url(url, "realtime_url")?;
     }
@@ -139,7 +147,7 @@ pub async fn complete_setup(
             })?;
         verify_remote_setup_claim(
             &state,
-            &body.convex_url,
+            &state.config.convex_site_url,
             &state.core_id,
             &body.owner_user_id,
             credential,
@@ -228,17 +236,38 @@ fn validate_https_url(value: &str, field: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn validate_service_url(
+    value: &str,
+    field: &str,
+    allow_local_http: bool,
+) -> Result<(), ApiError> {
+    let parsed = url::Url::parse(value).map_err(|_| {
+        ApiError::BadRequest(format!("{field} must be a valid URL"))
+    })?;
+    let valid_scheme = parsed.scheme() == "https"
+        || (allow_local_http
+            && parsed.scheme() == "http"
+            && matches!(
+                parsed.host_str(),
+                Some("localhost" | "127.0.0.1" | "::1")
+            ));
+    if !valid_scheme || parsed.host_str().is_none() {
+        return Err(ApiError::BadRequest(format!(
+            "{field} must use HTTPS or local HTTP in debug builds"
+        )));
+    }
+    Ok(())
+}
+
 async fn verify_remote_setup_claim(
     state: &Arc<AppState>,
-    convex_url: &str,
+    convex_site_url: &str,
     core_id: &str,
     owner_user_id: &str,
     credential: &str,
 ) -> Result<(), ApiError> {
-    let endpoint = format!(
-        "{}/core/setup-claim",
-        convex_site_url(convex_url).trim_end_matches('/')
-    );
+    let endpoint =
+        format!("{}/core/setup-claim", convex_site_url.trim_end_matches('/'));
     let response = state
         .http
         .post(endpoint)
@@ -271,14 +300,6 @@ async fn verify_remote_setup_claim(
         Err(ApiError::Unauthorized(
             "pairing claim verification failed".into(),
         ))
-    }
-}
-
-fn convex_site_url(value: &str) -> String {
-    if value.contains(".convex.site") {
-        value.to_string()
-    } else {
-        value.replace(".convex.cloud", ".convex.site")
     }
 }
 

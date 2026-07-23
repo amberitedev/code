@@ -5,6 +5,8 @@ export interface AmberiteAccountUser {
 	id: string
 	userId: string
 	username: string
+	minecraftUuid: string
+	verifiedMinecraftHandle: string
 	name: string
 	avatar_url: string | null
 	bio: string | null
@@ -20,7 +22,6 @@ export interface AmberiteAccountUser {
 
 export interface AmberiteProfilePatch {
 	displayName?: string
-	username?: string
 	bio?: string
 	avatar?: null | {
 		url: string
@@ -36,14 +37,20 @@ export interface AmberiteProfilePatch {
 export function mapAmberiteUserToAccountUser(
 	value: AmberiteUser | AmberiteProfile,
 ): AmberiteAccountUser {
-	const raw = value as Record<string, unknown>
+	const raw = value as unknown as Record<string, unknown>
 	const id = requiredString(raw.id ?? raw.userId, 'id')
-	const username = stringValue(raw.username ?? raw.name ?? raw.displayName) ?? 'user'
-	const name = stringValue(raw.name ?? raw.displayName ?? raw.username) ?? username
+	const verifiedMinecraftHandle = requiredString(
+		raw.verifiedMinecraftHandle,
+		'verifiedMinecraftHandle',
+	)
+	const minecraftUuid = requiredString(raw.minecraftUuid, 'minecraftUuid')
+	const name = stringValue(raw.name ?? raw.displayName) ?? verifiedMinecraftHandle
 	return {
 		id,
 		userId: requiredString(raw.userId ?? raw.id, 'userId'),
-		username,
+		username: verifiedMinecraftHandle,
+		minecraftUuid,
+		verifiedMinecraftHandle,
 		name,
 		avatar_url: nullableString(raw.avatar_url ?? raw.image),
 		bio: nullableString(raw.bio),
@@ -87,5 +94,7 @@ function numberValue(value: unknown): number {
 }
 
 function stringArray(value: unknown): string[] {
-	return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+	return Array.isArray(value)
+		? value.filter((item): item is string => typeof item === 'string')
+		: []
 }

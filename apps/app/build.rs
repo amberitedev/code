@@ -18,11 +18,12 @@ fn main() {
                         "get_default_user",
                         "set_default_user",
                         "get_users",
-                        "amberite_login",
-                        "get_amberite_session_jwt",
-                        "set_amberite_session_jwt",
-                        "get_amberite_session_refresh_token",
-                        "set_amberite_session_refresh_token",
+                        "check_amberite_reachable",
+                        "amberite_product_sign_in",
+                        "restore_amberite_product_session",
+                        "refresh_amberite_product_session",
+                        "sign_out_amberite_product_session",
+                        "get_remembered_amberite_identity",
                         "get_amberite_local_setup_secret",
                     ])
                     .default_permission(DefaultPermissionRule::Allow(vec![

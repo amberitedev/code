@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from './adapter'
+import type { PlatformAdapter, PlatformAuthSession } from './adapter'
 import { AuthError } from './errors'
 
 export interface AmberiteSessionTokens {
@@ -12,6 +12,21 @@ export interface AmberiteSessionStorage {
 	clear(): Promise<void>
 }
 
+const platformRefreshes = new WeakMap<PlatformAdapter, Promise<PlatformAuthSession | null>>()
+
+export async function refreshPlatformAmberiteSession(
+	adapter: PlatformAdapter,
+): Promise<PlatformAuthSession | null> {
+	if (!adapter.refreshAmberiteSession) return null
+	const pending = platformRefreshes.get(adapter)
+	if (pending) return await pending
+	const refresh = adapter.refreshAmberiteSession().finally(() => {
+		platformRefreshes.delete(adapter)
+	})
+	platformRefreshes.set(adapter, refresh)
+	return await refresh
+}
+
 export function isAmberiteSessionTokens(value: unknown): value is AmberiteSessionTokens {
 	if (!value || typeof value !== 'object') return false
 	const candidate = value as Record<string, unknown>
@@ -20,17 +35,16 @@ export function isAmberiteSessionTokens(value: unknown): value is AmberiteSessio
 
 export function validateAmberiteSessionTokens(value: unknown): AmberiteSessionTokens {
 	if (!isAmberiteSessionTokens(value) || !value.token.trim() || !value.refreshToken.trim()) {
-		throw new AuthError('invalid Amberite session token response')
+		throw new AuthError('invalid Amberite session token response', 'corrupt_session')
 	}
-	return {
-		token: value.token,
-		refreshToken: value.refreshToken,
-	}
+	return { token: value.token, refreshToken: value.refreshToken }
 }
 
 export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSessionStorage {
+	const atomicStorage = adapter.amberiteSessionStorage
 	return {
 		async read(): Promise<AmberiteSessionTokens | null> {
+			if (atomicStorage) return await atomicStorage.read()
 			const token = await adapter.getCurrentJwt()
 			const refreshToken = await adapter.getCurrentRefreshToken?.()
 			if (!token || !refreshToken) return null
@@ -38,16 +52,33 @@ export function adapterSessionStorage(adapter: PlatformAdapter): AmberiteSession
 		},
 
 		async write(tokens: AmberiteSessionTokens): Promise<void> {
-			if (!adapter.setCurrentJwt || !adapter.setCurrentRefreshToken) {
-				throw new AuthError('Amberite session storage is not writable')
+			if (atomicStorage) {
+				await atomicStorage.write(tokens)
+				return
 			}
-			await adapter.setCurrentJwt(tokens.token)
-			await adapter.setCurrentRefreshToken(tokens.refreshToken)
+			if (!adapter.setCurrentJwt || !adapter.setCurrentRefreshToken) {
+				throw new AuthError('Amberite session storage is not writable', 'corrupt_session')
+			}
+			const previous = await this.read()
+			try {
+				await adapter.setCurrentJwt(tokens.token)
+				await adapter.setCurrentRefreshToken(tokens.refreshToken)
+			} catch (error) {
+				await adapter.setCurrentJwt(previous?.token ?? null).catch(() => undefined)
+				await adapter.setCurrentRefreshToken(previous?.refreshToken ?? null).catch(() => undefined)
+				throw error
+			}
 		},
 
 		async clear(): Promise<void> {
-			await adapter.setCurrentJwt?.(null)
-			await adapter.setCurrentRefreshToken?.(null)
+			if (atomicStorage) {
+				await atomicStorage.clear()
+				return
+			}
+			await Promise.allSettled([
+				adapter.setCurrentJwt?.(null),
+				adapter.setCurrentRefreshToken?.(null),
+			])
 		},
 	}
 }

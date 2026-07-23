@@ -1,22 +1,12 @@
 <template>
-	<SignInView
-		:subtle-launcher-redirect-uri="subtleLauncherRedirectUri"
-		:redirect-target="redirectTarget"
-		:route-query="route.query"
-	/>
+	<SignInView :redirect-target="redirectTarget" :route-query="route.query" />
 </template>
 
 <script setup lang="ts">
-import {
-	commonMessages,
-	defineMessages,
-	injectNotificationManager,
-	useVIntl,
-} from '@modrinth/ui'
+import { commonMessages, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
 import type { LocationQueryValue } from 'vue-router'
 
 import SignInView from '@/components/ui/auth/SignIn.vue'
-import { getLauncherRedirectUrl } from '@/composables/auth.ts'
 
 const getQueryString = (
 	value: LocationQueryValue | LocationQueryValue[] | null | undefined,
@@ -27,65 +17,42 @@ const getQueryString = (
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
+const route = useNativeRoute()
+const redirectTarget = normalizeRedirect(getQueryString(route.query.redirect))
 
 const messages = defineMessages({
-	signInTitle: {
-		id: 'auth.sign-in.title',
-		defaultMessage: 'Sign In',
-	},
-	minecraftSignInFailed: {
-		id: 'auth.sign-in.minecraft.failed',
-		defaultMessage: 'Minecraft sign-in failed. Please try again with a Minecraft account.',
-	},
+	signInTitle: { id: 'auth.sign-in.title', defaultMessage: 'Continue with Minecraft' },
 })
 
-useHead({
-	title() {
-		return `${formatMessage(messages.signInTitle)} - Modrinth`
-	},
-})
-
-const auth = await useAuth()
-const route = useNativeRoute()
-const redirectTarget = getQueryString(route.query.redirect)
-const subtleLauncherRedirectUri = ref<string>()
+useHead({ title: () => `${formatMessage(messages.signInTitle)} - Amberite` })
 
 if (route.query.error) {
 	addNotification({
 		title: formatMessage(commonMessages.errorNotificationTitle),
-		text: formatMessage(messages.minecraftSignInFailed),
+		text: errorMessage(getQueryString(route.query.error)),
 		type: 'error',
 	})
 }
 
-if (auth.value.user) {
-	await finishSignIn()
+const auth = await useAuth()
+if (auth.value.user) await navigateTo(redirectTarget, { replace: true })
+
+function normalizeRedirect(value: string): string {
+	return value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard'
 }
 
-async function finishSignIn() {
-	if (route.query.launcher) {
-		const token = auth.value.token
-		const redirectUrl = `${getLauncherRedirectUrl(route)}/?code=${token}`
-
-		if (redirectUrl.startsWith('https://launcher-files.modrinth.com/')) {
-			await navigateTo(redirectUrl, {
-				external: true,
-			})
-		} else {
-			// Preserve the existing launcher redirect behavior without exposing the token in the visible URL.
-			subtleLauncherRedirectUri.value = redirectUrl
-		}
-
-		return
-	}
-
-	if (route.query.redirect) {
-		const redirect = decodeURIComponent(getQueryString(route.query.redirect))
-		await navigateTo(redirect, {
-			replace: true,
-		})
-	} else {
-		await navigateTo('/dashboard')
-	}
+function errorMessage(code: string): string {
+	if (code === 'minecraft_auth_cancelled') return 'Minecraft sign-in was cancelled.'
+	if (code === 'minecraft_uuid_mismatch')
+		return 'That is not the remembered Minecraft account. Try again or use another account.'
+	if (code === 'minecraft_java_profile_required')
+		return 'This Microsoft account does not own a Minecraft: Java Edition profile.'
+	if (code === 'minecraft_xbox_restricted')
+		return 'Xbox account restrictions prevented Minecraft verification.'
+	if (code === 'minecraft_provider_throttled')
+		return 'Microsoft or Minecraft is temporarily limiting sign-in attempts. Try again shortly.'
+	if (code === 'minecraft_provider_unreachable')
+		return 'Microsoft or Minecraft could not be reached. Check your connection and try again.'
+	return 'Minecraft sign-in failed. Please try again.'
 }
 </script>

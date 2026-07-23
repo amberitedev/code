@@ -1,22 +1,47 @@
 import {
+	AmberiteApiError,
+	type AmberiteSession,
+	type AmberiteSessionTokens,
 	ConvexAmberiteAuthClient,
 	type PlatformAdapter,
-	type AmberiteSession,
 } from '@amberite/amberite-api'
+import {
+	createError,
+	deleteCookie,
+	getCookie,
+	getHeader,
+	type H3Event,
+	setCookie,
+	setResponseHeader,
+} from 'h3'
+
 import { useRuntimeConfig } from '#imports'
-import { createError, deleteCookie, getCookie, setCookie, type H3Event } from 'h3'
 
-export type MinecraftAuthMode = 'signin' | 'signup'
+import {
+	createPkceChallenge,
+	normalizeAuthRedirect,
+	normalizeAuthUuid,
+	randomAuthValue,
+	requestIsSameOrigin,
+	sealAuthFlow,
+	type SealedMinecraftAuthFlow,
+	unsealAuthFlow,
+} from './amberite-auth-crypto'
 
-export const MINECRAFT_AUTH_STATE_COOKIE = 'amberite-minecraft-auth-state'
-export const MINECRAFT_AUTH_VERIFIER_COOKIE = 'amberite-minecraft-auth-verifier'
-export const MINECRAFT_AUTH_MODE_COOKIE = 'amberite-minecraft-auth-mode'
-export const MINECRAFT_AUTH_REDIRECT_COOKIE = 'amberite-minecraft-auth-redirect'
+export type MinecraftAuthIntent = 'continue' | 'use_another_account'
+export type MinecraftAuthFlow = SealedMinecraftAuthFlow
 
-const ACCESS_TOKEN_COOKIE = 'auth-token'
-const REFRESH_TOKEN_COOKIE = 'amberite-refresh-token'
+export interface BrowserAmberiteSession {
+	accessToken: string
+}
+
+export const MINECRAFT_AUTH_FLOW_COOKIE = 'amberite-minecraft-auth-flow'
+export const AMBERITE_REFRESH_TOKEN_COOKIE = 'amberite-refresh-token'
+export const LEGACY_ACCESS_TOKEN_COOKIE = 'auth-token'
+
 const TEMP_COOKIE_MAX_AGE = 60 * 10
-const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10
+const REFRESH_COOKIE_MAX_AGE = 60 * 60 * 24 * 90
+const REFRESH_COOKIE_PATH = '/api/amberite/session'
 
 export function requiredMinecraftClientId(event: H3Event): string {
 	const value = useRuntimeConfig(event).amberiteMinecraftOAuthClientId
@@ -38,15 +63,19 @@ export function minecraftRedirectUri(event: H3Event): string {
 	return `${useRuntimeConfig(event).public.siteUrl}/api/amberite/minecraft/callback`
 }
 
-export function normalizeMinecraftAuthMode(value: unknown): MinecraftAuthMode {
-	return value === 'signup' ? 'signup' : 'signin'
+export function normalizeMinecraftAuthIntent(value: unknown): MinecraftAuthIntent {
+	return value === 'use_another_account' ? 'use_another_account' : 'continue'
 }
 
-export function normalizeLocalRedirect(value: unknown): string {
-	if (typeof value !== 'string') return '/dashboard'
-	if (!value.startsWith('/') || value.startsWith('//')) return '/dashboard'
-	return value
+export function normalizeMinecraftUuid(value: unknown): string | undefined {
+	try {
+		return normalizeAuthUuid(value)
+	} catch {
+		throw createError({ statusCode: 400, message: 'Invalid UUID' })
+	}
 }
+
+export const normalizeLocalRedirect = normalizeAuthRedirect
 
 export function temporaryCookieOptions(event: H3Event) {
 	return {
@@ -58,31 +87,109 @@ export function temporaryCookieOptions(event: H3Event) {
 	}
 }
 
+export async function setMinecraftAuthFlow(event: H3Event, flow: MinecraftAuthFlow) {
+	setCookie(
+		event,
+		MINECRAFT_AUTH_FLOW_COOKIE,
+		await sealAuthFlow(flow, requiredFlowSecret(event)),
+		temporaryCookieOptions(event),
+	)
+}
+
+export async function readMinecraftAuthFlow(event: H3Event): Promise<MinecraftAuthFlow> {
+	const value = getCookie(event, MINECRAFT_AUTH_FLOW_COOKIE)
+	if (!value) throw new Error('minecraft_auth_state_invalid')
+	return await unsealAuthFlow(value, requiredFlowSecret(event))
+}
+
 export function clearMinecraftAuthCookies(event: H3Event): void {
-	for (const cookie of [
-		MINECRAFT_AUTH_STATE_COOKIE,
-		MINECRAFT_AUTH_VERIFIER_COOKIE,
-		MINECRAFT_AUTH_MODE_COOKIE,
-		MINECRAFT_AUTH_REDIRECT_COOKIE,
-	]) {
-		deleteCookie(event, cookie, { path: '/' })
-	}
+	deleteCookie(event, MINECRAFT_AUTH_FLOW_COOKIE, { path: '/' })
 }
 
-export function randomBase64Url(byteLength: number): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(byteLength))
-	return base64Url(bytes)
+export function clearLegacyBrowserAuthCookies(event: H3Event): void {
+	deleteCookie(event, LEGACY_ACCESS_TOKEN_COOKIE, { path: '/' })
 }
 
-export async function pkceChallenge(verifier: string): Promise<string> {
-	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
-	return base64Url(new Uint8Array(digest))
-}
+export const randomBase64Url = randomAuthValue
+export const pkceChallenge = createPkceChallenge
 
 export async function signInWithMinecraftToken(
 	event: H3Event,
 	minecraftAccessToken: string,
+	expectedMinecraftUuid?: string,
 ): Promise<AmberiteSession> {
+	return await createServerAuthClient(event).signInWithMinecraftToken({
+		minecraftAccessToken,
+		expectedMinecraftUuid,
+	})
+}
+
+export async function restoreBrowserSession(
+	event: H3Event,
+): Promise<BrowserAmberiteSession | null> {
+	assertSameOrigin(event)
+	noStore(event)
+	clearLegacyBrowserAuthCookies(event)
+	const refreshToken = getCookie(event, AMBERITE_REFRESH_TOKEN_COOKIE)
+	if (!refreshToken) return null
+	try {
+		const session = await createServerAuthClient(event, { token: '', refreshToken }).refreshSession(
+			refreshToken,
+		)
+		return session ? { accessToken: session.tokens.token } : null
+	} catch (error) {
+		if (error instanceof AmberiteApiError && error.recovery === 'clear_session') {
+			clearBrowserSessionCookies(event)
+			throw createError({ statusCode: 401, message: error.message })
+		}
+		throw createError({
+			statusCode: 503,
+			message: error instanceof Error ? error.message : 'Amberite session restore failed',
+		})
+	}
+}
+
+export async function signOutBrowserSession(event: H3Event): Promise<void> {
+	assertSameOrigin(event)
+	noStore(event)
+	const refreshToken = getCookie(event, AMBERITE_REFRESH_TOKEN_COOKIE)
+	try {
+		if (refreshToken) {
+			const client = createServerAuthClient(event, { token: '', refreshToken })
+			await client.refreshSession(refreshToken)
+			await client.logOut()
+		}
+	} finally {
+		clearBrowserSessionCookies(event)
+	}
+}
+
+export function clearBrowserSessionCookies(event: H3Event): void {
+	deleteCookie(event, LEGACY_ACCESS_TOKEN_COOKIE, { path: '/' })
+	deleteCookie(event, AMBERITE_REFRESH_TOKEN_COOKIE, { path: '/' })
+	deleteCookie(event, AMBERITE_REFRESH_TOKEN_COOKIE, { path: REFRESH_COOKIE_PATH })
+}
+
+export function assertSameOrigin(event: H3Event): void {
+	const sameOrigin = requestIsSameOrigin({
+		expectedOrigin: new URL(useRuntimeConfig(event).public.siteUrl).origin,
+		origin: getHeader(event, 'origin'),
+		referer: getHeader(event, 'referer'),
+		fetchSite: getHeader(event, 'sec-fetch-site'),
+	})
+	if (!sameOrigin)
+		throw createError({ statusCode: 403, message: 'Session request origin rejected' })
+}
+
+export function noStore(event: H3Event): void {
+	setResponseHeader(event, 'Cache-Control', 'no-store, max-age=0')
+	setResponseHeader(event, 'Pragma', 'no-cache')
+}
+
+function createServerAuthClient(
+	event: H3Event,
+	initialTokens: AmberiteSessionTokens | null = null,
+): ConvexAmberiteAuthClient {
 	const convexUrl = useRuntimeConfig(event).public.amberiteConvexUrl
 	if (typeof convexUrl !== 'string' || convexUrl.trim() === '') {
 		throw createError({
@@ -90,49 +197,50 @@ export async function signInWithMinecraftToken(
 			message: 'NUXT_PUBLIC_AMBERITE_CONVEX_URL must be configured for Amberite auth.',
 		})
 	}
-
-	let accessToken = getCookie(event, ACCESS_TOKEN_COOKIE) ?? null
-	let refreshToken = getCookie(event, REFRESH_TOKEN_COOKIE) ?? null
-
+	let tokens = initialTokens
 	const adapter: PlatformAdapter = {
 		fetchFn: globalThis.fetch.bind(globalThis) as typeof fetch,
 		convexUrl,
 		getCoreUrl: async () => null,
-		getCurrentJwt: async () => accessToken,
+		getCurrentJwt: async () => tokens?.token || null,
 		setCurrentJwt: async (token) => {
-			accessToken = token
-			setSessionCookie(event, ACCESS_TOKEN_COOKIE, token)
+			tokens = tokens ? { ...tokens, token: token ?? '' } : null
 		},
-		getCurrentRefreshToken: async () => refreshToken,
-		setCurrentRefreshToken: async (token) => {
-			refreshToken = token
-			setSessionCookie(event, REFRESH_TOKEN_COOKIE, token)
+		amberiteSessionStorage: {
+			read: async () => tokens,
+			write: async (next) => {
+				tokens = next
+				setRefreshCookie(event, next.refreshToken)
+			},
+			clear: async () => {
+				tokens = null
+				clearBrowserSessionCookies(event)
+			},
 		},
 		openExternalAuth: async () => {},
 	}
-
-	return await new ConvexAmberiteAuthClient({ adapter }).signInWithMinecraftToken({
-		minecraftAccessToken,
-	})
+	return new ConvexAmberiteAuthClient({ adapter })
 }
 
-function setSessionCookie(event: H3Event, name: string, value: string | null): void {
-	if (!value) {
-		deleteCookie(event, name, { path: '/' })
-		return
-	}
-
-	setCookie(event, name, value, {
-		httpOnly: false,
-		maxAge: SESSION_COOKIE_MAX_AGE,
-		path: '/',
+function setRefreshCookie(event: H3Event, value: string): void {
+	deleteCookie(event, AMBERITE_REFRESH_TOKEN_COOKIE, { path: '/' })
+	setCookie(event, AMBERITE_REFRESH_TOKEN_COOKIE, value, {
+		httpOnly: true,
+		maxAge: REFRESH_COOKIE_MAX_AGE,
+		path: REFRESH_COOKIE_PATH,
 		sameSite: 'lax',
 		secure: Boolean(useRuntimeConfig(event).public.cookieSecure),
 	})
+	deleteCookie(event, LEGACY_ACCESS_TOKEN_COOKIE, { path: '/' })
 }
 
-function base64Url(bytes: Uint8Array): string {
-	let value = ''
-	for (const byte of bytes) value += String.fromCharCode(byte)
-	return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+function requiredFlowSecret(event: H3Event): string {
+	const secret = useRuntimeConfig(event).amberiteAuthCookieSecret
+	if (typeof secret !== 'string' || secret.length < 32) {
+		throw createError({
+			statusCode: 500,
+			message: 'AMBERITE_AUTH_COOKIE_SECRET must contain at least 32 characters.',
+		})
+	}
+	return secret
 }

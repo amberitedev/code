@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { PlatformAdapter } from '../adapter'
 import { ConvexApiClient } from '../convex-api'
+import { AuthError, ConvexError } from '../errors'
 
 function jsonResponse(value: unknown): Response {
 	return new Response(JSON.stringify({ status: 'success', value }), {
@@ -121,7 +122,7 @@ describe('ConvexApiClient', () => {
 		const fetchFn = vi.fn(async () => jsonResponse(null))
 		const client = new ConvexApiClient(adapter(fetchFn))
 
-		await client.updateCurrentProfile({ username: 'amber', bio: 'hello' })
+		await client.updateCurrentProfile({ displayName: 'Amber', bio: 'hello' })
 		await client.linkedModrinthAccount()
 		await client.disconnectModrinthAccount()
 
@@ -161,4 +162,43 @@ describe('ConvexApiClient', () => {
 		})
 	})
 
+	it('refreshes once and retries one authenticated request after a 401', async () => {
+		let jwt = 'expired'
+		const fetchFn = vi.fn(async () =>
+			jwt === 'expired'
+				? new Response(JSON.stringify({ errorMessage: 'not authenticated' }), { status: 401 })
+				: jsonResponse(null),
+		)
+		const testAdapter = adapter(fetchFn)
+		testAdapter.getCurrentJwt = async () => jwt
+		testAdapter.setCurrentJwt = async (value) => {
+			jwt = value ?? ''
+		}
+		testAdapter.refreshAmberiteSession = vi.fn(async () => ({ accessToken: 'fresh' }))
+
+		await new ConvexApiClient(testAdapter).friendsList()
+		expect(fetchFn).toHaveBeenCalledTimes(2)
+		expect(testAdapter.refreshAmberiteSession).toHaveBeenCalledTimes(1)
+	})
+
+	it('preserves typed Convex and terminal auth failures', async () => {
+		const rejected = (status: number, errorMessage: string) =>
+			new Response(JSON.stringify({ errorMessage }), {
+				status,
+				headers: { 'Content-Type': 'application/json' },
+			})
+		await expect(
+			new ConvexApiClient(
+				adapter(vi.fn(async () => rejected(401, 'session expired'))),
+			).friendsList(),
+		).rejects.toMatchObject({
+			code: 'expired_session',
+			recovery: 'clear_session',
+		} satisfies Partial<AuthError>)
+		await expect(
+			new ConvexApiClient(
+				adapter(vi.fn(async () => rejected(500, 'database failed'))),
+			).friendsList(),
+		).rejects.toBeInstanceOf(ConvexError)
+	})
 })

@@ -36,9 +36,24 @@ const LEGACY_MOCK_USERNAMES = [
 ] as const
 
 const BASELINE_ACCOUNTS = [
-	{ username: 'owner', displayName: 'Owner', friendCode: 'AMB-OWNER001' },
-	{ username: 'friend', displayName: 'Friend', friendCode: 'AMB-FRIEND01' },
-	{ username: 'other', displayName: 'Other', friendCode: 'AMB-OTHER001' },
+	{
+		username: 'owner',
+		displayName: 'Owner',
+		friendCode: 'AMB-OWNER001',
+		minecraftUuid: '00000000-0000-4000-8000-000000000001',
+	},
+	{
+		username: 'friend',
+		displayName: 'Friend',
+		friendCode: 'AMB-FRIEND01',
+		minecraftUuid: '00000000-0000-4000-8000-000000000002',
+	},
+	{
+		username: 'other',
+		displayName: 'Other',
+		friendCode: 'AMB-OTHER001',
+		minecraftUuid: '00000000-0000-4000-8000-000000000003',
+	},
 ] as const
 
 const BASELINE_TABLES = [
@@ -129,11 +144,16 @@ async function ensureBaselineAccounts(ctx: MutationCtx) {
 	for (const account of BASELINE_ACCOUNTS) {
 		const existing = await ctx.db
 			.query('users')
-			.withIndex('by_normalized_username', (q) =>
-				q.eq('normalizedUsername', account.username),
-			)
+			.withIndex('by_normalized_username', (q) => q.eq('normalizedUsername', account.username))
 			.unique()
 		if (existing) {
+			await ctx.db.patch(existing._id, {
+				minecraftUuid: account.minecraftUuid,
+				verifiedMinecraftHandle: account.username,
+				normalizedVerifiedMinecraftHandle: account.username,
+				minecraftVerifiedAt: existing.minecraftVerifiedAt ?? Date.now(),
+				minecraftLastVerifiedAt: Date.now(),
+			})
 			accountIds[account.username] = existing._id.toString()
 			continue
 		}
@@ -144,6 +164,11 @@ async function ensureBaselineAccounts(ctx: MutationCtx) {
 			normalizedUsername: account.username,
 			friendCode: account.friendCode,
 			amberiteUserId: `dev:${account.username}`,
+			minecraftUuid: account.minecraftUuid,
+			verifiedMinecraftHandle: account.username,
+			normalizedVerifiedMinecraftHandle: account.username,
+			minecraftVerifiedAt: Date.now(),
+			minecraftLastVerifiedAt: Date.now(),
 			onboardedAt: Date.now(),
 		}
 		const userId = await ctx.db.insert('users', values)

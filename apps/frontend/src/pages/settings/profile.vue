@@ -1,26 +1,15 @@
 <template>
 	<div>
 		<section class="card">
-			<h2 class="text-2xl">{{ formatMessage(messages.title) }}</h2>
-			<p class="mb-4">
-				<IntlFormatted :message-id="messages.description">
-					<template #docs-link="{ children }">
-						<a href="https://docs.modrinth.com/" target="_blank" class="text-link">
-							<component :is="() => children" />
-						</a>
-					</template>
-				</IntlFormatted>
+			<h2 class="text-2xl">Profile information</h2>
+			<p class="mb-4 text-secondary">
+				Your verified Minecraft handle identifies your Amberite account. Your display name and bio
+				are editable.
 			</p>
-			<label>
-				<span class="label__title">{{ formatMessage(messages.profilePicture) }}</span>
-			</label>
+
+			<label><span class="label__title">Profile picture</span></label>
 			<div class="avatar-changer">
-				<Avatar
-					:src="previewImage ? previewImage : avatarUrl"
-					size="md"
-					circle
-					:alt="auth.user.username"
-				/>
+				<Avatar :src="previewImage || avatarUrl" size="md" circle :alt="auth.user.username" />
 				<div class="flex flex-col gap-2">
 					<ButtonStyled>
 						<FileInput
@@ -34,45 +23,45 @@
 							<UploadIcon />
 						</FileInput>
 					</ButtonStyled>
-					<ButtonStyled v-if="avatarUrl !== null">
+					<ButtonStyled v-if="avatarUrl !== null || previewImage">
 						<button @click="removePreviewImage">
-							<TrashIcon />
-							{{ formatMessage(commonMessages.removeImageButton) }}
+							<TrashIcon />{{ formatMessage(commonMessages.removeImageButton) }}
 						</button>
 					</ButtonStyled>
 					<ButtonStyled v-if="previewImage">
-						<button
-							@click="
-								() => {
-									icon = null
-									previewImage = null
-								}
-							"
-						>
-							<UndoIcon />
-							{{ formatMessage(commonMessages.resetButton) }}
+						<button @click="resetAvatar">
+							<UndoIcon />{{ formatMessage(commonMessages.resetButton) }}
 						</button>
 					</ButtonStyled>
 				</div>
 			</div>
-			<label for="username-field">
-				<span class="label__title">{{ formatMessage(commonMessages.usernameLabel) }}</span>
-				<span class="label__description">
-					{{ formatMessage(messages.usernameDescription) }}
-				</span>
+
+			<label for="minecraft-handle-field">
+				<span class="label__title">Verified Minecraft handle</span>
+				<span class="label__description">Updated only after Minecraft ownership is verified.</span>
 			</label>
-			<StyledInput id="username-field" v-model="current.username" />
+			<StyledInput
+				id="minecraft-handle-field"
+				:model-value="auth.user.verifiedMinecraftHandle"
+				disabled
+			/>
+
+			<label for="display-name-field">
+				<span class="label__title">Display name</span>
+				<span class="label__description">The non-unique name shown on your Amberite profile.</span>
+			</label>
+			<StyledInput id="display-name-field" v-model="current.displayName" />
+
 			<label for="bio-field">
-				<span class="label__title">{{ formatMessage(messages.bioTitle) }}</span>
-				<span class="label__description">
-					{{ formatMessage(messages.bioDescription) }}
-				</span>
+				<span class="label__title">Bio</span>
+				<span class="label__description">A short description to tell people about you.</span>
 			</label>
 			<StyledInput id="bio-field" v-model="current.bio" multiline />
+
 			<div class="input-group mt-4">
 				<ButtonStyled>
 					<NuxtLink :to="`/user/${auth.user.username}`">
-						<UserIcon /> {{ formatMessage(commonMessages.visitYourProfile) }}
+						<UserIcon />{{ formatMessage(commonMessages.visitYourProfile) }}
 					</NuxtLink>
 				</ButtonStyled>
 			</div>
@@ -87,16 +76,15 @@
 	</div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+import type { AmberiteProfilePatch } from '@amberite/amberite-api'
 import { TrashIcon, UndoIcon, UploadIcon, UserIcon } from '@modrinth/assets'
 import {
 	Avatar,
 	ButtonStyled,
 	commonMessages,
-	defineMessages,
 	FileInput,
 	injectNotificationManager,
-	IntlFormatted,
 	StyledInput,
 	UnsavedChangesPopup,
 	useSavable,
@@ -104,152 +92,103 @@ import {
 } from '@modrinth/ui'
 
 import { useAmberiteAuthClient } from '@/composables/amberite-client.ts'
+import { retryAuthRestore } from '@/composables/auth.ts'
+
+definePageMeta({ middleware: 'auth' })
+useHead({ title: 'Profile settings - Amberite' })
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-
-definePageMeta({
-	middleware: 'auth',
-})
-
-const messages = defineMessages({
-	headTitle: {
-		id: 'settings.profile.head-title',
-		defaultMessage: 'Profile settings',
-	},
-	title: {
-		id: 'settings.profile.profile-info',
-		defaultMessage: 'Profile information',
-	},
-	description: {
-		id: 'settings.profile.description',
-		defaultMessage:
-			'Your profile information is publicly viewable on Modrinth and through the <docs-link>Modrinth API</docs-link>.',
-	},
-	profilePicture: {
-		id: 'settings.profile.profile-picture.title',
-		defaultMessage: 'Profile picture',
-	},
-	usernameDescription: {
-		id: 'settings.profile.username.description',
-		defaultMessage: 'A unique case-insensitive name to identify your profile.',
-	},
-	bioTitle: {
-		id: 'settings.profile.bio.title',
-		defaultMessage: 'Bio',
-	},
-	bioDescription: {
-		id: 'settings.profile.bio.description',
-		defaultMessage: 'A short description to tell everyone a little bit about you.',
-	},
-})
-
-useHead({
-	title: () => `${formatMessage(messages.headTitle)} - Modrinth`,
-})
-
-const auth = await useAuth()
+const authState = await useAuth()
+const auth = computed(
+	() =>
+		authState.value as typeof authState.value & { user: NonNullable<typeof authState.value.user> },
+)
 const amberiteAuthClient = useAmberiteAuthClient()
-
-// Avatar state (separate from useSavable)
 const avatarUrl = ref(auth.value.user.avatar_url)
-const icon = shallowRef(null)
-const previewImage = shallowRef(null)
+const icon = shallowRef<File | null>(null)
+const previewImage = shallowRef<string | null>(null)
 const pendingAvatarDeletion = ref(false)
 const saving = ref(false)
+let avatarGeneration = 0
 
 const {
 	saved,
 	current,
 	reset: resetFields,
 } = useSavable(
-	() => ({
-		username: auth.value.user.username,
-		bio: auth.value.user.bio ?? '',
-	}),
-	async () => {}, // Save is handled manually due to complex icon logic
+	() => ({ displayName: auth.value.user.name, bio: auth.value.user.bio ?? '' }),
+	async () => {},
 )
 
-// Combined state for UnsavedChangesPopup
-const originalState = computed(() => ({
-	...saved.value,
-	avatarChanged: false,
-}))
-
+const originalState = computed(() => ({ ...saved.value, avatarChanged: false }))
 const modifiedState = computed(() => ({
 	...current.value,
-	avatarChanged: !!(previewImage.value || pendingAvatarDeletion.value),
+	avatarChanged: Boolean(previewImage.value || pendingAvatarDeletion.value),
 }))
 
-const reset = () => {
+function reset() {
 	resetFields()
+	resetAvatar()
+}
+
+function showPreviewImage(files: File[]) {
+	if (!files[0]) return
+	const generation = ++avatarGeneration
+	icon.value = files[0]
+	const reader = new FileReader()
+	reader.readAsDataURL(files[0])
+	reader.onload = (event) => {
+		if (generation !== avatarGeneration) return
+		previewImage.value = typeof event.target?.result === 'string' ? event.target.result : null
+		pendingAvatarDeletion.value = false
+	}
+}
+
+function removePreviewImage() {
+	avatarGeneration += 1
+	pendingAvatarDeletion.value = true
+	previewImage.value = 'https://cdn.modrinth.com/placeholder.png'
+}
+
+function resetAvatar() {
+	avatarGeneration += 1
 	icon.value = null
 	previewImage.value = null
 	pendingAvatarDeletion.value = false
 }
 
-function showPreviewImage(files) {
-	const reader = new FileReader()
-	icon.value = files[0]
-	reader.readAsDataURL(icon.value)
-	reader.onload = (event) => {
-		previewImage.value = event.target.result
-	}
-}
-
-function removePreviewImage() {
-	pendingAvatarDeletion.value = true
-	previewImage.value = 'https://cdn.modrinth.com/placeholder.png'
-}
-
 async function save() {
 	saving.value = true
 	try {
-		const patch = {}
-
-		if (pendingAvatarDeletion.value) {
-			patch.avatar = null
-			pendingAvatarDeletion.value = false
-			previewImage.value = null
-		}
-
-		if (icon.value && typeof previewImage.value === 'string') {
+		const patch: AmberiteProfilePatch = {}
+		if (current.value.displayName !== auth.value.user.name)
+			patch.displayName = current.value.displayName.trim()
+		if (current.value.bio !== (auth.value.user.bio ?? '')) patch.bio = current.value.bio
+		if (pendingAvatarDeletion.value) patch.avatar = null
+		else if (icon.value && previewImage.value) {
 			patch.avatar = {
 				url: previewImage.value,
 				mimeType: icon.value.type,
 				sizeBytes: icon.value.size,
 			}
-			icon.value = null
-			previewImage.value = null
 		}
-
-		if (auth.value.user.username !== current.value.username) {
-			patch.username = current.value.username
-		}
-
-		if (auth.value.user.bio !== current.value.bio) {
-			patch.bio = current.value.bio
-		}
-
-		if (Object.keys(patch).length > 0) await amberiteAuthClient.updateCurrentProfile(patch)
-		await useAuth(auth.value.token)
+		if (Object.keys(patch).length) await amberiteAuthClient.updateCurrentProfile(patch)
+		await retryAuthRestore()
 		avatarUrl.value = auth.value.user.avatar_url
-	} catch (err) {
+		resetAvatar()
+	} catch (error) {
 		addNotification({
 			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err
-				? err.data
-					? err.data.description
-						? err.data.description
-						: err.data
-					: err
-				: 'aaaaahhh',
+			text: error instanceof Error ? error.message : String(error),
 			type: 'error',
 		})
+	} finally {
+		saving.value = false
 	}
-	saving.value = false
 }
 </script>
+
 <style lang="scss" scoped>
 .avatar-changer {
 	display: flex;

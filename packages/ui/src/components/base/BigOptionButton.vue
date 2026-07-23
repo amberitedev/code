@@ -1,6 +1,8 @@
 <template>
 	<button
 		class="group relative flex w-full isolate overflow-hidden bg-surface-4 hover:cursor-pointer items-center gap-3 rounded-[20px] p-3 text-left transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.98] border-none"
+		:class="{ '!cursor-not-allowed opacity-50 hover:brightness-100 active:scale-100': disabled }"
+		:disabled="disabled"
 		@click="$emit('click')"
 	>
 		<span
@@ -37,6 +39,7 @@ defineProps<{
 	title: string
 	description: string
 	selected?: boolean
+	disabled?: boolean
 }>()
 
 defineEmits<{

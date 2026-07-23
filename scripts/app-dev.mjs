@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
 	chmodSync,
 	closeSync,
 	copyFileSync,
 	existsSync,
+	fstatSync,
 	mkdirSync,
 	openSync,
+	readSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -25,43 +27,121 @@ import {
 	makeShortId,
 	readEnvFile,
 	validateDevUsername,
+	worktreeKey,
 } from './dev-shared.mjs'
 
 const action = process.argv[2] ?? 'start'
+const controllerProtocolVersion = 2
 const jsonOutput = process.argv.includes('--json')
 const positional = process.argv.slice(3).filter((value) => value !== '--' && value !== '--json')
-const worktree = findWorktreeRoot()
-const root = globalDevRoot(worktree)
-const appRoot = join(root, 'apps')
-const registryPath = join(appRoot, 'registry.json')
-const socketPath =
-	process.platform === 'win32'
-		? `\\\\.\\pipe\\amberite-${basename(root)}`
-		: join(appRoot, 'controller.sock')
+let worktree
+let appRoot
+let registryPath
+let socketPath
 
-mkdirSync(appRoot, { recursive: true })
+if (action === 'windows-host' && process.platform === 'win32') {
+	await runWindowsHost()
+} else if (action === 'windows-control' && process.platform === 'win32') {
+	await runWindowsControl()
+} else {
+	worktree = findWorktreeRoot()
+	const root = globalDevRoot(worktree)
+	appRoot = join(root, 'apps')
+	registryPath = join(appRoot, 'registry.json')
+	socketPath =
+		process.platform === 'win32'
+			? `\\\\.\\pipe\\amberite-${basename(root)}`
+			: join(appRoot, 'controller.sock')
 
-try {
-	if (action === 'serve') await serve()
-	else await runClient()
-} catch (error) {
-	console.error(error instanceof Error ? error.message : String(error))
-	process.exitCode = 1
+	mkdirSync(appRoot, { recursive: true })
+
+	try {
+		if (action === 'serve') await serve()
+		else await runClient()
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error))
+		process.exitCode = 1
+	}
 }
 
 async function runClient() {
 	const request = requestForCommand()
 	await ensureController()
-	const response = await sendRequest(request)
+	const response = await sendRequest(request, request.action === 'restart' ? 120_000 : 15_000)
 	if (!response.ok) throw new Error(response.error)
 	printResult(action, response.result)
+	if (action === 'start' || action === 'start-auth') await attachToApp(response.result)
+}
+
+async function attachToApp(app) {
+	let offset = 0
+	let stopping = false
+
+	function flushLogs() {
+		if (!existsSync(app.logPath)) return
+		const log = openSync(app.logPath, 'r')
+		try {
+			const size = fstatSync(log).size
+			if (size < offset) offset = 0
+			if (size === offset) return
+			const output = Buffer.alloc(size - offset)
+			readSync(log, output, 0, output.length, offset)
+			offset = size
+			process.stdout.write(output)
+		} finally {
+			closeSync(log)
+		}
+	}
+
+	console.log(`Attached to app ${app.id}. Press Ctrl+C to stop it.`)
+	flushLogs()
+	await new Promise((resolve) => {
+		const logTimer = setInterval(flushLogs, 100)
+		const statusTimer = setInterval(async () => {
+			try {
+				const response = await sendRequest({ action: 'list' }, 1_000)
+				if (response.ok && !response.result.some((candidate) => candidate.id === app.id)) {
+					finish()
+				}
+			} catch {}
+		}, 1_000)
+
+		function finish() {
+			clearInterval(logTimer)
+			clearInterval(statusTimer)
+			flushLogs()
+			resolve()
+		}
+
+		async function stop() {
+			if (stopping) return
+			stopping = true
+			try {
+				const response = await sendRequest({ action: 'stop', appId: app.id })
+				if (response.ok) console.log(`\n${response.result.message}`)
+			} catch (error) {
+				console.error(`\nFailed to stop app ${app.id}: ${error}`)
+			}
+			finish()
+		}
+
+		process.once('SIGINT', stop)
+		process.once('SIGTERM', stop)
+	})
 }
 
 function requestForCommand() {
-	if (action === 'start') {
-		const username = positional[0]
-		if (!username) throw new Error('Usage: pnpm app:dev -- <username>')
-		return { action, worktree, username: validateDevUsername(username) }
+	if (action === 'start' || action === 'start-auth') {
+		if (action === 'start-auth' && positional.length > 0) {
+			throw new Error('Usage: pnpm app:dev:auth')
+		}
+		const username = positional[0] ?? 'owner'
+		return {
+			action: 'start',
+			worktree,
+			authMode: action === 'start-auth' ? 'real' : 'dev',
+			username: action === 'start-auth' ? null : validateDevUsername(username),
+		}
 	}
 	if (action === 'list' || action === 'stop-all') return { action }
 	if (action === 'stop-worktree') return { action, worktree }
@@ -91,10 +171,12 @@ function printResult(command, result) {
 }
 
 async function ensureController() {
+	let response
 	try {
-		const response = await sendRequest({ action: 'ping' }, 300)
-		if (response.ok) return
+		response = await sendRequest({ action: 'ping' }, 300)
 	} catch {}
+	if (response?.ok && response.result.protocolVersion === controllerProtocolVersion) return
+	if (response?.ok) await replaceOutdatedController(response.result.pid)
 
 	const outputPath = join(appRoot, 'controller.log')
 	const output = openSync(outputPath, 'a')
@@ -115,6 +197,27 @@ async function ensureController() {
 		} catch {}
 	}
 	throw new Error(`The app dev controller did not start. See ${outputPath}.`)
+}
+
+async function replaceOutdatedController(pid) {
+	const response = await sendRequest({ action: 'list' }, 1_000)
+	if (!response.ok) throw new Error(response.error)
+	if (response.result.length > 0) {
+		throw new Error(
+			'The app dev controller is outdated. Stop its running apps with "pnpm app:dev:stop-all", then retry.',
+		)
+	}
+	process.kill(pid)
+	const startedAt = Date.now()
+	while (Date.now() - startedAt < 5_000) {
+		await delay(50)
+		try {
+			await sendRequest({ action: 'ping' }, 100)
+		} catch {
+			return
+		}
+	}
+	throw new Error('The outdated app dev controller did not stop.')
 }
 
 function sendRequest(request, timeoutMs = 15_000) {
@@ -152,6 +255,7 @@ async function serve() {
 	const children = new Map()
 	let operationQueue = Promise.resolve()
 	const server = net.createServer((socket) => {
+		socket.on('error', () => undefined)
 		socket.setEncoding('utf8')
 		let buffer = ''
 		socket.on('data', (chunk) => {
@@ -171,18 +275,24 @@ async function serve() {
 		try {
 			const request = JSON.parse(raw)
 			const result = await handleRequest(request)
-			socket.end(`${JSON.stringify({ ok: true, result })}\n`)
+			if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: true, result })}\n`)
 		} catch (error) {
-			socket.end(
-				`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })}\n`,
-			)
+			if (!socket.destroyed) {
+				socket.end(
+					`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })}\n`,
+				)
+			}
 		}
 	}
 
 	async function handleRequest(request) {
 		pruneRegistry()
-		if (request.action === 'ping') return { pid: process.pid }
-		if (request.action === 'start') return await startApp(request.worktree, request.username)
+		if (request.action === 'ping') {
+			return { pid: process.pid, protocolVersion: controllerProtocolVersion }
+		}
+		if (request.action === 'start') {
+			return await startApp(request.worktree, request.username, request.authMode)
+		}
 		if (request.action === 'list') return await publicApps()
 		if (request.action === 'account') return await switchAccount(request.appId, request.username)
 		if (request.action === 'reload') {
@@ -209,8 +319,18 @@ async function serve() {
 		throw new Error(`Unknown controller action "${request.action}".`)
 	}
 
-	async function startApp(targetWorktree, username) {
-		validateDevUsername(username)
+	async function startApp(targetWorktree, username, authMode = 'dev') {
+		if (authMode === 'dev') validateDevUsername(username)
+		if (authMode === 'real') {
+			const existing = Object.values(registry.apps).find(
+				(app) => app.worktree === targetWorktree && app.authMode === 'real',
+			)
+			if (existing) {
+				throw new Error(
+					`Auth app ${existing.id} is already running for this worktree. Stop it before starting another.`,
+				)
+			}
+		}
 		const convex = requireConvex(targetWorktree)
 		const ids = new Set(Object.keys(registry.apps))
 		const id = makeShortId(ids)
@@ -218,15 +338,16 @@ async function serve() {
 		const host = registry.hosts[targetWorktree]
 		const vitePort = host?.vitePort ?? (await availablePort(1420))
 		const controlPort = await availablePort(17_000)
-		const dataDir = join(appRoot, 'data', id)
+		const dataDir = appDataDir(authMode === 'real' ? `auth-${worktreeKey(targetWorktree)}` : id)
 		const logPath = join(appRoot, 'logs', `${id}.log`)
-		mkdirSync(dataDir, { recursive: true })
 		mkdirSync(join(appRoot, 'logs'), { recursive: true })
+		const identity = authMode === 'real' ? 'auth' : username
 		const devConfig = {
 			appId: id,
 			username,
+			authMode,
 			branch,
-			title: `${branch} · ${id} · ${username}`,
+			title: `${branch} · ${id} · ${identity}`,
 			dataDir,
 			convexUrl: convex.convexUrl,
 			convexSiteUrl: convex.convexSiteUrl,
@@ -238,7 +359,12 @@ async function serve() {
 		if (!host) {
 			child = spawnHost(targetWorktree, vitePort, devConfig, logPath)
 			kind = 'host'
-			registry.hosts[targetWorktree] = { launcherPid: child.pid, vitePort, anchorId: id }
+			registry.hosts[targetWorktree] = {
+				launcherPid: child.pid,
+				windowsPidPath: child.windowsPidPath,
+				vitePort,
+				anchorId: id,
+			}
 		} else {
 			const anchor = host.anchorId ? registry.apps[host.anchorId] : null
 			if (anchor) await waitForControl(anchor, 60_000)
@@ -262,6 +388,7 @@ async function serve() {
 			worktree: targetWorktree,
 			branch,
 			username,
+			authMode,
 			dataDir,
 			logPath,
 			startedAt: new Date().toISOString(),
@@ -278,14 +405,21 @@ async function serve() {
 		writeRegistry()
 		return {
 			...publicApp(registry.apps[id]),
-			message: `Started app ${id} as ${username} from ${targetWorktree}.`,
+			logPath,
+			message:
+				authMode === 'real'
+					? `Started auth app ${id} from ${targetWorktree}.`
+					: `Started app ${id} as ${username} from ${targetWorktree}.`,
 		}
 	}
 
 	async function switchAccount(appId, username) {
 		const app = requireApp(appId)
+		if (app.authMode === 'real') {
+			throw new Error(`App ${app.id} uses real authentication; switch accounts in the app.`)
+		}
 		validateDevUsername(username)
-		await control(app, { action: 'account', username }, 12_000)
+		await control(app, { action: 'account', username }, 30_000)
 		app.username = username
 		writeRegistry()
 		return { message: `App ${app.id} is now signed in as ${username}.`, ...publicApp(app) }
@@ -306,7 +440,8 @@ async function serve() {
 		app.restarting = true
 		await control(app, { action: 'close' }).catch(() => undefined)
 		await delay(200)
-		killProcessTree(app.launcherPid ?? app.pid)
+		if (app.kind === 'host') killHost(registry.hosts[app.worktree])
+		else killProcessTree(app.pid)
 		await waitForAvailablePort(app.controlPort, 5_000)
 		if (app.kind === 'host') await waitForAvailablePort(app.vitePort, 5_000)
 		const config = devConfigForApp(app)
@@ -322,6 +457,7 @@ async function serve() {
 		if (app.kind === 'host') {
 			app.launcherPid = child.pid
 			registry.hosts[app.worktree].launcherPid = child.pid
+			registry.hosts[app.worktree].windowsPidPath = child.windowsPidPath
 		}
 		writeRegistry()
 		return { message: `Restarted app ${app.id}.`, ...publicApp(app) }
@@ -332,8 +468,9 @@ async function serve() {
 		return {
 			appId: app.id,
 			username: app.username,
+			authMode: app.authMode ?? 'dev',
 			branch: app.branch,
-			title: `${app.branch} · ${app.id} · ${app.username}`,
+			title: `${app.branch} · ${app.id} · ${app.authMode === 'real' ? 'auth' : app.username}`,
 			dataDir: app.dataDir,
 			convexUrl: convex.convexUrl,
 			convexSiteUrl: convex.convexSiteUrl,
@@ -355,7 +492,8 @@ async function serve() {
 		}
 		await control(app, { action: 'close' }).catch(() => undefined)
 		await delay(200)
-		killProcessTree(app.launcherPid ?? app.pid)
+		if (app.kind === 'host') killHost(registry.hosts[app.worktree])
+		else killProcessTree(app.pid)
 		delete registry.apps[app.id]
 		if (app.kind === 'host') delete registry.hosts[app.worktree]
 		if (
@@ -363,7 +501,7 @@ async function serve() {
 			!Object.values(registry.apps).some((candidate) => candidate.worktree === app.worktree) &&
 			registry.hosts[app.worktree]?.anchorId === null
 		) {
-			killProcessTree(registry.hosts[app.worktree].launcherPid)
+			killHost(registry.hosts[app.worktree])
 			delete registry.hosts[app.worktree]
 		}
 		writeRegistry()
@@ -382,7 +520,7 @@ async function serve() {
 			delete registry.apps[id]
 		}
 		const host = registry.hosts[targetWorktree]
-		if (host) killProcessTree(host.launcherPid)
+		if (host) killHost(host)
 		delete registry.hosts[targetWorktree]
 		writeRegistry()
 		return { message: `Stopped ${ids.length} app(s) from ${targetWorktree}.` }
@@ -394,7 +532,7 @@ async function serve() {
 			await control(app, { action: 'close' }).catch(() => undefined)
 			if (app.kind === 'secondary') killProcessTree(app.pid)
 		}
-		for (const host of Object.values(registry.hosts)) killProcessTree(host.launcherPid)
+		for (const host of Object.values(registry.hosts)) killHost(host)
 		registry = emptyRegistry()
 		writeRegistry()
 		setTimeout(() => server.close(() => process.exit(0)), 100)
@@ -404,6 +542,7 @@ async function serve() {
 	function pruneRegistry() {
 		for (const [worktreePath, host] of Object.entries(registry.hosts)) {
 			if (isProcessRunning(host.launcherPid)) continue
+			killHost(host)
 			delete registry.hosts[worktreePath]
 			for (const app of Object.values(registry.apps)) {
 				if (app.worktree === worktreePath && app.kind === 'host') delete registry.apps[app.id]
@@ -449,11 +588,15 @@ async function serve() {
 
 		const runtimePath = join(targetWorktree, '.convex', 'amberite-runtime.json')
 		if (!existsSync(runtimePath)) {
-			throw new Error('Local Convex is selected but not running. Start pnpm convex:dev:local first.')
+			throw new Error(
+				'Local Convex is selected but not running. Start pnpm convex:dev:local first.',
+			)
 		}
 		const state = JSON.parse(readFileSync(runtimePath, 'utf8'))
 		if (!isProcessRunning(state.pid)) {
-			throw new Error('Local Convex is selected but not running. Start pnpm convex:dev:local first.')
+			throw new Error(
+				'Local Convex is selected but not running. Start pnpm convex:dev:local first.',
+			)
 		}
 		if (!state.convexUrl || !state.convexSiteUrl) {
 			throw new Error(`Local Convex runtime URLs are missing from ${runtimePath}.`)
@@ -476,11 +619,7 @@ async function serve() {
 
 function spawnHost(targetWorktree, vitePort, devConfig, logPath) {
 	const tauriConfig = createTauriDevConfig(targetWorktree, vitePort, devConfig)
-	const { command, args } = commandForPnpm([
-		'--filter',
-		'@modrinth/app',
-		'exec',
-		'tauri',
+	const tauriArgs = [
 		'dev',
 		'--config',
 		JSON.stringify(tauriConfig),
@@ -488,23 +627,52 @@ function spawnHost(targetWorktree, vitePort, devConfig, logPath) {
 		'--',
 		'--amberite-dev-config',
 		JSON.stringify(devConfig),
+	]
+	if (usesWindowsDesktop() && process.platform !== 'win32') {
+		ensureWindowsTauriCli()
+		const windowsPidPath = join(appRoot, 'pids', `${devConfig.appId}.pid`)
+		mkdirSync(join(appRoot, 'pids'), { recursive: true })
+		const paths = windowsPaths(targetWorktree, windowsPidPath)
+		const cargoTarget = windowsCargoTargetDir(targetWorktree)
+		const child = spawnLogged(
+			'node.exe',
+			[paths.script, 'windows-host', paths.worktree, paths.pid, ...tauriArgs],
+			targetWorktree,
+			logPath,
+			{
+				CARGO_TARGET_DIR: cargoTarget.windows,
+				WSLENV: [...(process.env.WSLENV?.split(':') ?? []), 'CARGO_TARGET_DIR'].join(':'),
+			},
+		)
+		child.windowsPidPath = windowsPidPath
+		return child
+	}
+	const extraEnv =
+		process.platform === 'win32'
+			? { CARGO_TARGET_DIR: windowsCargoTargetDir(targetWorktree).windows }
+			: {}
+	const { command, args } = commandForPnpm([
+		'--filter',
+		'@modrinth/app',
+		'exec',
+		'tauri',
+		...tauriArgs,
 	])
-	return spawnLogged(command, args, targetWorktree, logPath)
+	return spawnLogged(command, args, targetWorktree, logPath, extraEnv)
 }
 
 function spawnSecondary(targetWorktree, devConfig, logPath) {
 	const source = join(
-		targetWorktree,
-		'target',
+		appTargetDir(targetWorktree),
 		'debug',
-		process.platform === 'win32' ? 'theseus_gui.exe' : 'theseus_gui',
+		usesWindowsDesktop() ? 'theseus_gui.exe' : 'theseus_gui',
 	)
 	if (!existsSync(source)) throw new Error(`The dev executable is not ready at ${source}.`)
 	const binDir = join(appRoot, 'bin')
 	mkdirSync(binDir, { recursive: true })
 	const destination = join(
 		binDir,
-		process.platform === 'win32' ? `${devConfig.appId}.exe` : devConfig.appId,
+		usesWindowsDesktop() ? `${devConfig.appId}.exe` : devConfig.appId,
 	)
 	copyFileSync(source, destination)
 	chmodSync(destination, 0o755)
@@ -516,14 +684,14 @@ function spawnSecondary(targetWorktree, devConfig, logPath) {
 	)
 }
 
-function spawnLogged(command, args, cwd, logPath) {
+function spawnLogged(command, args, cwd, logPath, extraEnv = {}) {
 	const log = openSync(logPath, 'a')
 	const child = spawn(command, args, {
 		cwd,
 		stdio: ['ignore', log, log],
 		detached: true,
 		windowsHide: false,
-		env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
+		env: { ...process.env, ...extraEnv, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
 	})
 	closeSync(log)
 	return child
@@ -544,10 +712,13 @@ function createTauriDevConfig(targetWorktree, vitePort, devConfig) {
 		`${convexUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${convexUrl.host}`,
 		`${convexSiteUrl.protocol}//${convexSiteUrl.host}`,
 	]
+	const wslWorktree = /\s/.test(targetWorktree) ? JSON.stringify(targetWorktree) : targetWorktree
 	return {
 		build: {
 			devUrl: `http://localhost:${vitePort}`,
-			beforeDevCommand: `corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`,
+			beforeDevCommand: usesWindowsDesktop() && process.platform !== 'win32'
+				? `wsl.exe --cd ${wslWorktree} corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`
+				: `corepack pnpm --filter @modrinth/app-frontend dev -- --port ${vitePort} --strictPort`,
 		},
 		app: {
 			security: {
@@ -557,7 +728,172 @@ function createTauriDevConfig(targetWorktree, vitePort, devConfig) {
 	}
 }
 
+function windowsPaths(targetWorktree, pidPath) {
+	const distroRoot = spawnSync('wslpath', ['-w', '/'], { encoding: 'utf8' })
+		.stdout.trim()
+		.replace(/[\\/]+$/, '')
+	const windowsScript = spawnSync('wslpath', ['-w', fileURLToPath(import.meta.url)], {
+		encoding: 'utf8',
+	}).stdout.trim()
+	const windowsWorktree = spawnSync('wslpath', ['-w', targetWorktree], {
+		encoding: 'utf8',
+	}).stdout.trim()
+	const windowsPidPath = spawnSync('wslpath', ['-w', pidPath], {
+		encoding: 'utf8',
+	}).stdout.trim()
+	if (!distroRoot || !windowsScript || !windowsWorktree || !windowsPidPath) {
+		throw new Error('Could not translate the WSL app-dev paths for Windows.')
+	}
+
+	const drive = ensureWindowsDrive(distroRoot)
+	const toDrivePath = (value) => `${drive}${value.slice(distroRoot.length)}`
+	return {
+		script: toDrivePath(windowsScript),
+		worktree: toDrivePath(windowsWorktree),
+		pid: toDrivePath(windowsPidPath),
+	}
+}
+
+function ensureWindowsDrive(distroRoot) {
+	const networkRoot = distroRoot.replace(/^\\\\wsl\.localhost\\/i, '\\\\wsl$\\')
+	for (const letter of ['W', 'V', 'U', 'T']) {
+		const drive = `${letter}:`
+		const current = spawnSync('cmd.exe', ['/d', '/s', '/c', `net use ${drive}`], {
+			encoding: 'utf8',
+			windowsHide: true,
+		})
+		if (current.status === 0) {
+			if (
+				current.stdout.toLowerCase().includes(distroRoot.toLowerCase()) ||
+				current.stdout.toLowerCase().includes(networkRoot.toLowerCase())
+			) {
+				return drive
+			}
+			continue
+		}
+		const mapped = spawnSync('net.exe', ['use', drive, networkRoot, '/persistent:no'], {
+			encoding: 'utf8',
+			windowsHide: true,
+		})
+		if (mapped.status === 0) return drive
+	}
+	throw new Error(`Could not map ${distroRoot} to an available Windows drive.`)
+}
+
+function usesWindowsDesktop() {
+	if (process.platform === 'win32') return true
+	return (
+		process.platform === 'linux' &&
+		readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
+	)
+}
+
+function ensureWindowsTauriCli() {
+	const localAppData = windowsLocalAppData()
+	const windowsTauriScript = `${localAppData}\\amberite-tauri-cli\\node_modules\\@tauri-apps\\cli\\tauri.js`
+	const version = spawnSync('node.exe', [windowsTauriScript, '--version'], {
+		windowsHide: true,
+	})
+	if (version.status === 0) return
+
+	const linuxLocalAppData = spawnSync('wslpath', ['-u', localAppData], {
+		encoding: 'utf8',
+	}).stdout.trim()
+	const linuxCliRoot = join(linuxLocalAppData, 'amberite-tauri-cli')
+	mkdirSync(linuxCliRoot, { recursive: true })
+	if (!existsSync(join(linuxCliRoot, 'package.json'))) {
+		spawnSync('cmd.exe', ['/d', '/s', '/c', 'corepack pnpm init --bare'], {
+			cwd: linuxCliRoot,
+			stdio: 'inherit',
+			windowsHide: true,
+		})
+	}
+	const install = spawnSync(
+		'cmd.exe',
+		[
+			'/d',
+			'/s',
+			'/c',
+			'corepack pnpm add @tauri-apps/cli@2.5.0 && corepack pnpm install --config.node-linker=hoisted --force',
+		],
+		{ cwd: linuxCliRoot, stdio: 'inherit', windowsHide: true },
+	)
+	const installedVersion = spawnSync('node.exe', [windowsTauriScript, '--version'], {
+		windowsHide: true,
+	})
+	if (install.status !== 0 || installedVersion.status !== 0) {
+		throw new Error('Could not install the Windows Tauri CLI bridge.')
+	}
+}
+
+async function runWindowsHost() {
+	const targetWorktree = process.argv[3]
+	const pidPath = process.argv[4]
+	if (!targetWorktree) throw new Error('The Windows app host is missing its worktree path.')
+	if (!pidPath) throw new Error('The Windows app host is missing its PID path.')
+	const tauriScript = join(
+		process.env.LOCALAPPDATA,
+		'amberite-tauri-cli',
+		'node_modules',
+		'@tauri-apps',
+		'cli',
+		'tauri.js',
+	)
+	process.chdir(targetWorktree)
+	writeFileSync(pidPath, `${process.pid}\n`)
+	const child = spawn(process.execPath, [tauriScript, ...process.argv.slice(5)], {
+		stdio: 'inherit',
+		env: process.env,
+		windowsHide: false,
+	})
+	const exitCode = await new Promise((resolveExit) => {
+		child.once('error', () => resolveExit(1))
+		child.once('exit', (code) => resolveExit(code ?? 1))
+	})
+	rmSync(pidPath, { force: true })
+	process.exitCode = exitCode
+}
+
+async function runWindowsControl() {
+	const port = Number.parseInt(process.argv[3], 10)
+	const request = process.argv[4]
+	if (!Number.isInteger(port) || port <= 0 || !request) {
+		throw new Error('The Windows app control request is invalid.')
+	}
+	const response = await new Promise((resolveControl, reject) => {
+		const socket = net.createConnection({ host: '127.0.0.1', port })
+		let buffer = ''
+		socket.setEncoding('utf8')
+		socket.once('connect', () => socket.write(`${request}\n`))
+		socket.on('data', (chunk) => {
+			buffer += chunk
+			const newline = buffer.indexOf('\n')
+			if (newline === -1) return
+			socket.end()
+			resolveControl(buffer.slice(0, newline))
+		})
+		socket.once('error', reject)
+	})
+	process.stdout.write(response)
+}
+
+function killHost(host) {
+	if (host?.windowsPidPath && existsSync(host.windowsPidPath)) {
+		const windowsPid = Number.parseInt(readFileSync(host.windowsPidPath, 'utf8').trim(), 10)
+		if (Number.isInteger(windowsPid) && windowsPid > 0) {
+			spawnSync('taskkill.exe', ['/PID', String(windowsPid), '/T', '/F'], {
+				windowsHide: true,
+			})
+		}
+		rmSync(host.windowsPidPath, { force: true })
+	}
+	killProcessTree(host?.launcherPid)
+}
+
 function control(app, request, timeoutMs = 5_000) {
+	if (usesWindowsDesktop() && process.platform !== 'win32') {
+		return controlThroughWindows(app, request, timeoutMs)
+	}
 	return new Promise((resolveControl, reject) => {
 		const socket = net.createConnection({ host: '127.0.0.1', port: app.controlPort })
 		let buffer = ''
@@ -580,6 +916,45 @@ function control(app, request, timeoutMs = 5_000) {
 		socket.once('error', (error) => {
 			clearTimeout(timeout)
 			reject(new Error(`App ${app.id} is not ready: ${error.message}`))
+		})
+	})
+}
+
+function controlThroughWindows(app, request, timeoutMs) {
+	return new Promise((resolveControl, reject) => {
+		const paths = windowsPaths(app.worktree, join(appRoot, 'windows-control.pid'))
+		const child = spawn(
+			'node.exe',
+			[paths.script, 'windows-control', String(app.controlPort), JSON.stringify(request)],
+			{ stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+		)
+		let stdout = ''
+		let stderr = ''
+		const timeout = setTimeout(() => {
+			child.kill()
+			reject(new Error(`App ${app.id} did not respond.`))
+		}, timeoutMs)
+		child.stdout.setEncoding('utf8')
+		child.stderr.setEncoding('utf8')
+		child.stdout.on('data', (chunk) => (stdout += chunk))
+		child.stderr.on('data', (chunk) => (stderr += chunk))
+		child.once('error', (error) => {
+			clearTimeout(timeout)
+			reject(error)
+		})
+		child.once('exit', (code) => {
+			clearTimeout(timeout)
+			if (code !== 0) {
+				reject(new Error(stderr.trim() || `App ${app.id} is not ready.`))
+				return
+			}
+			try {
+				const response = JSON.parse(stdout.trim())
+				if (response.ok) resolveControl(response)
+				else reject(new Error(response.error || `App ${app.id} rejected the command.`))
+			} catch {
+				reject(new Error(`App ${app.id} returned an invalid control response.`))
+			}
 		})
 	})
 }
@@ -620,10 +995,9 @@ async function waitForAvailablePort(port, timeoutMs) {
 
 async function waitForExecutable(targetWorktree, timeoutMs) {
 	const executable = join(
-		targetWorktree,
-		'target',
+		appTargetDir(targetWorktree),
 		'debug',
-		process.platform === 'win32' ? 'theseus_gui.exe' : 'theseus_gui',
+		usesWindowsDesktop() ? 'theseus_gui.exe' : 'theseus_gui',
 	)
 	const startedAt = Date.now()
 	while (Date.now() - startedAt < timeoutMs) {
@@ -631,6 +1005,45 @@ async function waitForExecutable(targetWorktree, timeoutMs) {
 		await delay(250)
 	}
 	throw new Error(`Timed out waiting for the dev executable at ${executable}.`)
+}
+
+function appTargetDir(targetWorktree) {
+	if (usesWindowsDesktop() && process.platform !== 'win32') {
+		return windowsCargoTargetDir(targetWorktree).linux
+	}
+	return join(targetWorktree, 'target', usesWindowsDesktop() ? 'app-dev-windows' : '')
+}
+
+function windowsCargoTargetDir(targetWorktree) {
+	const windows = `${windowsLocalAppData()}\\amberite-dev\\cargo-targets\\${worktreeKey(targetWorktree)}`
+	if (process.platform === 'win32') return { windows, linux: windows }
+	const linux = spawnSync('wslpath', ['-u', windows], { encoding: 'utf8' }).stdout.trim()
+	if (!linux) throw new Error('Could not translate the Windows Cargo target directory.')
+	return { windows, linux }
+}
+
+function windowsLocalAppData() {
+	const value = spawnSync('cmd.exe', ['/d', '/s', '/c', 'echo %LOCALAPPDATA%'], {
+		encoding: 'utf8',
+		windowsHide: true,
+	}).stdout.trim()
+	if (!value) throw new Error('Windows did not report its local application data directory.')
+	return value
+}
+
+function appDataDir(appId) {
+	if (!usesWindowsDesktop() || process.platform === 'win32') {
+		const dataDir = join(appRoot, 'data', appId)
+		mkdirSync(dataDir, { recursive: true })
+		return dataDir
+	}
+
+	const repository = basename(join(appRoot, '..'))
+	const windows = `${windowsLocalAppData()}\\amberite-dev\\${repository}\\apps\\data\\${appId}`
+	const linux = spawnSync('wslpath', ['-u', windows], { encoding: 'utf8' }).stdout.trim()
+	if (!linux) throw new Error('Could not translate the Windows app data directory.')
+	mkdirSync(linux, { recursive: true })
+	return windows
 }
 
 async function waitForControl(app, timeoutMs) {
@@ -649,8 +1062,13 @@ function publicApp(app) {
 	return {
 		id: app.id,
 		pid: app.pid,
-		health: app.ready ? 'running' : isProcessRunning(app.pid) ? 'starting' : 'stopped',
+		health: app.ready
+			? 'running'
+			: isProcessRunning(app.launcherPid ?? app.pid)
+				? 'starting'
+				: 'stopped',
 		username: app.username,
+		authMode: app.authMode ?? 'dev',
 		branch: app.branch,
 		worktree: app.worktree,
 		vitePort: app.vitePort,

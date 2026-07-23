@@ -41,7 +41,6 @@ struct ProjectionMember {
 
 #[derive(Debug, sqlx::FromRow)]
 struct CoreConfigRow {
-    convex_url: String,
     owner_user_id: String,
     realtime_credential: Option<String>,
 }
@@ -66,7 +65,7 @@ pub async fn sync_projection(
     state: &Arc<AppState>,
 ) -> Result<ProjectionSyncResult, ProjectionSyncError> {
     let config = sqlx::query_as::<_, CoreConfigRow>(
-        "SELECT convex_url, owner_user_id, realtime_credential FROM core_config WHERE id = 1",
+        "SELECT owner_user_id, realtime_credential FROM core_config WHERE id = 1",
     )
 	.fetch_optional(&state.pool)
 	.await?
@@ -78,7 +77,7 @@ pub async fn sync_projection(
     let snapshot = projection_snapshot(state, &config).await?;
     let endpoint = format!(
         "{}/core/projection-sync",
-        convex_site_url(&config.convex_url).trim_end_matches('/')
+        state.config.convex_site_url.trim_end_matches('/')
     );
     let response = state
         .http
@@ -142,12 +141,4 @@ async fn projection_snapshot(
         last_seen_at: now,
         synced_at: now,
     })
-}
-
-fn convex_site_url(value: &str) -> String {
-    if value.contains(".convex.site") {
-        value.to_string()
-    } else {
-        value.replace(".convex.cloud", ".convex.site")
-    }
 }

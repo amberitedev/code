@@ -8,6 +8,7 @@
 				:icon="type.icon"
 				:title="formatInstanceTypeLabel(type.id)"
 				:description="formatMessage(type.description)"
+				:disabled="type.requiresCore && (!coreOnline || !canUseCloud)"
 				:selected="
 					ctx.instanceTypeClickBehavior.value === 'select' && ctx.instanceType.value === type.id
 				"
@@ -21,12 +22,18 @@
 import { MonitorIcon, MonitorSmartphoneIcon, ServerIcon } from '@modrinth/assets'
 import { BigOptionButton, defineMessages, useVIntl } from '@modrinth/ui'
 import { injectCreationFlowContext } from '@modrinth/ui/src/components/flows/creation-flow-modal/creation-flow-context'
-import type { Component } from 'vue'
+import { type Component, computed } from 'vue'
+
+import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
+import { useCoreConnection } from '@/composables/useCoreConnection'
 
 import type { InstanceCreationFlowContextValue, InstanceType } from './types'
 
 const ctx = injectCreationFlowContext() as InstanceCreationFlowContextValue
 const { formatMessage } = useVIntl()
+const connection = useCoreConnection()
+const coreOnline = computed(() => connection.status.value?.state === 'connected')
+const { canUseCloud } = useAmberiteAuth()
 
 const messages = defineMessages({
 	label: {
@@ -64,24 +71,33 @@ const instanceTypeCards = [
 		id: 'client',
 		icon: MonitorIcon,
 		description: messages.clientDescription,
+		requiresCore: false,
 	},
 	{
 		id: 'server',
 		icon: ServerIcon,
 		description: messages.serverDescription,
+		requiresCore: true,
 	},
 	{
 		id: 'synced',
 		icon: MonitorSmartphoneIcon,
 		description: messages.syncedDescription,
+		requiresCore: true,
 	},
-] satisfies { id: InstanceType; icon: Component; description: (typeof messages)['clientDescription'] }[]
+] satisfies {
+	id: InstanceType
+	icon: Component
+	description: (typeof messages)['clientDescription']
+	requiresCore: boolean
+}[]
 
 function formatInstanceTypeLabel(type: InstanceType) {
 	return formatMessage(messages[type])
 }
 
 function selectInstanceType(type: InstanceType) {
+	if (type !== 'client' && (!coreOnline.value || !canUseCloud.value)) return
 	ctx.instanceType.value = type
 	if (ctx.instanceTypeClickBehavior.value === 'continue') {
 		ctx.modal.value?.setStage('custom-setup')

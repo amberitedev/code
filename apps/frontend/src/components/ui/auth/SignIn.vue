@@ -1,90 +1,88 @@
 <template>
-	<div v-if="subtleLauncherRedirectUri">
-		<iframe
-			:src="subtleLauncherRedirectUri"
-			class="fixed left-0 top-0 z-[9999] m-0 h-full w-full border-0 p-0"
-		></iframe>
-	</div>
 	<div
-		v-else
 		class="universal-card mx-auto flex w-full max-w-[27rem] flex-col gap-6 border border-solid border-surface-5 !p-6"
 	>
 		<div class="flex flex-col gap-5">
 			<div class="text-center text-2xl font-semibold text-contrast">
-				{{ formatMessage(messages.signInWithMinecraft) }}
+				{{ formatMessage(messages.continueWithMinecraft) }}
 			</div>
 			<p class="m-0 text-center text-secondary">
 				{{ formatMessage(messages.minecraftOnlyDescription) }}
 			</p>
 
+			<div v-if="remembered" class="flex items-center gap-3 rounded-xl bg-surface-2 p-3">
+				<Avatar :src="remembered.avatarUrl" :alt="remembered.verifiedMinecraftHandle" circle />
+				<div class="min-w-0 text-left">
+					<div class="truncate font-semibold text-contrast">{{ remembered.displayName }}</div>
+					<div class="truncate text-sm text-secondary">
+						@{{ remembered.verifiedMinecraftHandle }}
+					</div>
+				</div>
+			</div>
+
 			<ButtonStyled color="brand">
 				<a
 					class="!w-full !justify-center !shadow-none"
-					:href="getMinecraftAuthUrl('signin', redirectTarget)"
+					:href="getMinecraftAuthUrl('continue', redirectTarget)"
+					@click="setAuthVerifying"
 				>
 					<BoxIcon />
-					<span>{{ formatMessage(messages.continueWithMinecraft) }}</span>
+					<span>{{ continueLabel }}</span>
 					<RightArrowIcon />
 				</a>
 			</ButtonStyled>
 
-			<div class="flex flex-wrap items-center justify-center gap-2.5 !text-base">
-				<span>{{ formatMessage(messages.noAccountLabel) }}</span>
-				<NuxtLink
-					class="inline text-link"
-					:to="{
-						path: '/auth/sign-up',
-						query: routeQuery,
-					}"
+			<ButtonStyled>
+				<a
+					class="!w-full !justify-center"
+					:href="getMinecraftAuthUrl('use_another_account', redirectTarget)"
+					@click="setAuthVerifying"
 				>
-					{{ formatMessage(messages.createAccountLabel) }}
-				</NuxtLink>
-			</div>
+					{{ formatMessage(messages.useAnotherAccount) }}
+				</a>
+			</ButtonStyled>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
 import { BoxIcon, RightArrowIcon } from '@modrinth/assets'
-import { ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
+import { Avatar, ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
 import type { LocationQuery } from 'vue-router'
 
-import { getMinecraftAuthUrl } from '@/composables/auth.ts'
+import {
+	getMinecraftAuthUrl,
+	getRememberedAmberiteIdentity,
+	setAuthVerifying,
+} from '@/composables/auth.ts'
 
 interface Props {
-	subtleLauncherRedirectUri?: string
 	redirectTarget?: string
 	routeQuery?: LocationQuery
 }
 
-const {
-	subtleLauncherRedirectUri = '',
-	redirectTarget = '',
-	routeQuery = {},
-} = defineProps<Props>()
-
+const { redirectTarget = '' } = defineProps<Props>()
 const { formatMessage } = useVIntl()
+const remembered = getRememberedAmberiteIdentity()
+const continueLabel = computed(() =>
+	remembered
+		? `Continue as ${remembered.verifiedMinecraftHandle}`
+		: formatMessage(messages.continueWithMinecraft),
+)
 
 const messages = defineMessages({
-	signInWithMinecraft: {
-		id: 'auth.sign-in.sign-in-with-minecraft',
-		defaultMessage: 'Sign in with Minecraft',
-	},
-	minecraftOnlyDescription: {
-		id: 'auth.sign-in.minecraft-only.description',
-		defaultMessage: 'Amberite uses your Minecraft account as your sign-in identity.',
-	},
 	continueWithMinecraft: {
 		id: 'auth.continue-with-minecraft',
 		defaultMessage: 'Continue with Minecraft',
 	},
-	noAccountLabel: {
-		id: 'auth.sign-in.no-account',
-		defaultMessage: "Don't have an account?",
+	minecraftOnlyDescription: {
+		id: 'auth.sign-in.minecraft-only.description',
+		defaultMessage:
+			'Your verified Minecraft: Java Edition account creates or recovers one Amberite identity.',
 	},
-	createAccountLabel: {
-		id: 'auth.sign-in.create-account',
-		defaultMessage: 'Sign up',
+	useAnotherAccount: {
+		id: 'auth.use-another-minecraft-account',
+		defaultMessage: 'Use another account',
 	},
 })
 </script>

@@ -12,7 +12,7 @@
 		<ButtonStyled color="brand">
 			<a
 				class="!w-full !justify-center !shadow-none"
-				:href="getMinecraftAuthUrl('signup', redirectTarget)"
+				:href="getMinecraftAuthUrl('continue', redirectTarget)"
 			>
 				<BoxIcon />
 				<span>{{ formatMessage(messages.continueWithMinecraft) }}</span>
@@ -52,13 +52,7 @@
 
 <script setup lang="ts">
 import { BoxIcon, RightArrowIcon } from '@modrinth/assets'
-import {
-	ButtonStyled,
-	commonMessages,
-	defineMessages,
-	IntlFormatted,
-	useVIntl,
-} from '@modrinth/ui'
+import { ButtonStyled, commonMessages, defineMessages, IntlFormatted, useVIntl } from '@modrinth/ui'
 import type { LocationQuery } from 'vue-router'
 
 import { getMinecraftAuthUrl } from '@/composables/auth.ts'

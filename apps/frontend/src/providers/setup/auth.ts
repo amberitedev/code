@@ -25,7 +25,8 @@ export function setupAuthProvider(auth: Awaited<ReturnType<typeof useAuth>>) {
 	}
 
 	watchEffect(() => {
-		sessionToken.value = auth.value.token || null
+		// Amberite JWTs are accepted only by Amberite/Convex and must never authenticate Labrinth.
+		sessionToken.value = null
 		user.value = (auth.value.user as Labrinth.Users.v3.User | null) ?? null
 	})
 

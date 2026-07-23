@@ -211,7 +211,7 @@ export async function installSyncedProfileFromCore<TProfile>(
 		await options.editProfile(createdProfilePath, {
 			profile_type: 'synced',
 			core_instance_id: profile.coreInstanceId,
-		} as Partial<TProfile>)
+		} as unknown as Partial<TProfile>)
 		options.linkServerId?.(createdProfilePath, profile.coreInstanceId)
 		return createdProfilePath
 	} catch (error) {

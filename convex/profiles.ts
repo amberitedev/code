@@ -1,7 +1,7 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { Id } from './_generated/dataModel'
-import type { MutationCtx, QueryCtx } from './_generated/server'
+import type { QueryCtx } from './_generated/server'
 import {
 	blockByPair,
 	canViewProfileSection,
@@ -16,9 +16,7 @@ import {
 	profileRelationship,
 	profileVisibilitySettings,
 } from './_socialRules'
-import type {
-	ProfileRelationshipContext,
-} from './_socialRules'
+import type { ProfileRelationshipContext } from './_socialRules'
 
 const MAX_BIO_LENGTH = 1_024
 const MAX_SEARCH_LIMIT = 20
@@ -27,7 +25,6 @@ const MAX_FAVORITE_MODPACKS = 6
 const MAX_SHOWCASE_ACHIEVEMENTS = 8
 const MAX_VISIBLE_PROFILE_FRIENDS = 8
 const MAX_PROFILE_FRIEND_SCAN = 64
-const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,24}$/
 const SHOWCASE_ID_PATTERN = /^[a-zA-Z0-9_.:-]{1,128}$/
 
 const avatarInput = v.union(
@@ -110,10 +107,7 @@ export const view = query({
 
 		if (canViewProfileSection(settings.achievements, relationship)) {
 			result.achievements = {
-				achievementIds: boundedExistingList(
-					user.showcaseAchievementIds,
-					MAX_SHOWCASE_ACHIEVEMENTS,
-				),
+				achievementIds: boundedExistingList(user.showcaseAchievementIds, MAX_SHOWCASE_ACHIEVEMENTS),
 			}
 		}
 
@@ -178,14 +172,11 @@ export const updateCurrent = mutation({
 		if (!user) throw new Error('user not found')
 		const patch: any = { profileUpdatedAt: Date.now() }
 
-		if (args.username !== undefined) {
-			const username = normalizeUsername(args.username)
-			const existing = await userByUsername(ctx, username)
-			if (existing && existing._id !== userId) throw new Error('username is already taken')
-			patch.username = username
-			patch.normalizedUsername = username.toLowerCase()
-			patch.onboardedAt = user.onboardedAt ?? Date.now()
-			patch.amberiteUserId = user.amberiteUserId ?? crypto.randomUUID()
+		if (
+			args.username !== undefined &&
+			args.username.trim() !== (user.verifiedMinecraftHandle ?? user.username)
+		) {
+			throw new Error('verified Minecraft handle cannot be edited')
 		}
 
 		if (args.displayName !== undefined) {
@@ -194,9 +185,6 @@ export const updateCurrent = mutation({
 			patch.name = displayName
 			patch.onboardedAt = user.onboardedAt ?? Date.now()
 			patch.amberiteUserId = user.amberiteUserId ?? crypto.randomUUID()
-		} else if (args.username !== undefined && !user.displayName) {
-			patch.displayName = patch.username
-			patch.name = patch.username
 		}
 
 		if (args.bio !== undefined) patch.bio = normalizeBio(args.bio)
@@ -389,10 +377,13 @@ async function profileCoreSection(
 			: null
 
 	if (!coreListEntry && !legacyCore) return null
+	const coreId = coreListEntry?.coreId ?? legacyCore?.coreId
+	const ownerUserId = coreListEntry?.ownerUserId ?? legacyCore?.ownerUserId
+	if (!coreId || !ownerUserId) return null
 
 	return {
-		coreId: coreListEntry?.coreId ?? legacyCore.coreId,
-		ownerUserId: coreListEntry?.ownerUserId ?? legacyCore.ownerUserId,
+		coreId,
+		ownerUserId,
 		linkState: coreListEntry?.linkState ?? null,
 		name: legacyCore?.name ?? null,
 		subdomain: legacyCore?.subdomain ?? null,
@@ -414,7 +405,11 @@ async function profileFriendsSection(ctx: QueryCtx, viewerId: string, targetUser
 	return {
 		count: targetFriends.count,
 		hasMore: targetFriends.hasMore,
-		items: await publicUsersForIds(ctx, viewerId, visibleFriendIds.slice(0, MAX_VISIBLE_PROFILE_FRIENDS)),
+		items: await publicUsersForIds(
+			ctx,
+			viewerId,
+			visibleFriendIds.slice(0, MAX_VISIBLE_PROFILE_FRIENDS),
+		),
 		mutualCount: mutualFriendIds.length,
 		mutualHasMore: mutualFriendIds.length > MAX_VISIBLE_PROFILE_FRIENDS,
 		mutual: await publicUsersForIds(
@@ -486,20 +481,6 @@ function uniqueStrings(values: string[]): string[] {
 	return [...new Set(values.filter((value) => typeof value === 'string' && value.length > 0))]
 }
 
-function userByUsername(ctx: QueryCtx | MutationCtx, username: string) {
-	return ctx.db
-		.query('users')
-		.withIndex('by_normalized_username', (q) => q.eq('normalizedUsername', username.toLowerCase()))
-		.unique()
-}
-
-function normalizeUsername(value: string): string {
-	const username = value.trim()
-	if (!USERNAME_PATTERN.test(username))
-		throw new Error('username must be 3-24 letters, numbers, or underscores')
-	return username
-}
-
 function normalizeDisplayName(value: string): string {
 	const displayName = value.trim()
 	if (displayName.length < 1 || displayName.length > 64)
@@ -509,7 +490,8 @@ function normalizeDisplayName(value: string): string {
 
 function normalizeBio(value: string): string {
 	const bio = value.trim()
-	if (bio.length > MAX_BIO_LENGTH) throw new Error(`bio must be ${MAX_BIO_LENGTH} characters or fewer`)
+	if (bio.length > MAX_BIO_LENGTH)
+		throw new Error(`bio must be ${MAX_BIO_LENGTH} characters or fewer`)
 	return bio
 }
 

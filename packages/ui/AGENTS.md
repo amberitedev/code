@@ -25,6 +25,8 @@ Public exports flow through each area's `index.ts` and the package-root `index.t
 
 `src/providers/` contains injected platform services such as the Modrinth client, notifications, and modal behavior. This lets the website and desktop app supply different implementations to the same shared layout.
 
+The UI package imports `@amberite/amberite-api` for shared Amberite backend contracts used by cross-platform providers and layouts. Keep that workspace dependency declared in `packages/ui/package.json` and use the shared API instead of duplicating backend contracts in UI code.
+
 ## Styling
 
 The package uses the shared Tailwind preset in `packages/tooling-config/tailwind/tailwind-preset.ts`. Theme surfaces, text colors, brand colors, radii, gaps, and shadows come from `packages/assets/styles/variables.scss`, including light, dark, and OLED themes.

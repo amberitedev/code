@@ -3,9 +3,13 @@ import {
 	AmberiteApiError,
 	NetworkError,
 	AuthError,
+	ProviderAuthError,
+	ConvexError,
 	CoreOfflineError,
 	RelayTimeoutError,
 	CoreApiError,
+	authErrorFromResponse,
+	parseAuthFailurePayload,
 } from '../errors'
 
 describe('AmberiteApiError', () => {
@@ -47,6 +51,51 @@ describe('AuthError', () => {
 
 	it('prefixes message with "Auth error:"', () => {
 		expect(new AuthError('token expired').message).toBe('Auth error: token expired')
+	})
+})
+
+describe('recovery dispositions', () => {
+	it('preserves network failures and clears terminal sessions', () => {
+		expect(new NetworkError('offline', 'offline').recovery).toBe('preserve_and_retry')
+		expect(new AuthError('revoked', 'revoked_session').recovery).toBe('clear_session')
+	})
+
+	it('returns provider failures to Minecraft sign-in', () => {
+		expect(new ProviderAuthError('missing Java', 'java_profile_missing').recovery).toBe(
+			'return_to_provider',
+		)
+		expect(new ConvexError('rejected', 500).recovery).toBe('preserve_and_retry')
+	})
+})
+
+describe('authErrorFromResponse', () => {
+	it('classifies provider, identity, and service failures by recovery action', () => {
+		expect(authErrorFromResponse('MinecraftProviderUnavailable', 500)).toMatchObject({
+			code: 'provider_unreachable',
+			recovery: 'preserve_and_retry',
+		})
+		expect(authErrorFromResponse('MinecraftUuidMismatch', 400)).toMatchObject({
+			code: 'identity_mismatch',
+			recovery: 'clear_session',
+		})
+		expect(authErrorFromResponse('MinecraftJavaProfileMissing', 400)).toMatchObject({
+			code: 'java_profile_missing',
+			recovery: 'return_to_provider',
+		})
+	})
+
+	it('prefers a structured failure payload over transport prefixes', () => {
+		const message =
+			'Convex action failed: {"code":"identity_mismatch","message":"Wrong account","recovery":"clear_session"}'
+		expect(parseAuthFailurePayload(message)).toEqual({
+			code: 'identity_mismatch',
+			message: 'Wrong account',
+			recovery: 'clear_session',
+		})
+		expect(authErrorFromResponse(message, 400)).toMatchObject({
+			code: 'identity_mismatch',
+			recovery: 'clear_session',
+		})
 	})
 })
 
