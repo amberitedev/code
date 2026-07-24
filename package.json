@@ -14,6 +14,7 @@
 		"convex:dev:local": "node scripts/convex-dev.mjs local",
 		"convex:dev:reset": "node scripts/convex-dev.mjs reset",
 		"convex:dev:cloud": "node scripts/convex-dev.mjs cloud",
+		"convex:dev:check-cloud": "node scripts/convex-dev.mjs check-cloud",
 		"convex:dev:seed-cloud": "node scripts/convex-dev.mjs seed-cloud",
 		"convex:dev:status": "node scripts/convex-dev.mjs status",
 		"convex:dev:stop": "node scripts/convex-dev.mjs stop",
