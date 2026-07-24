@@ -2,6 +2,7 @@
 pub mod cache;
 pub mod friends;
 pub mod handler;
+pub mod instance;
 pub mod jre;
 pub mod logs;
 pub mod metadata;
@@ -10,10 +11,11 @@ pub mod minecraft_skins;
 pub mod mr_auth;
 pub mod pack;
 pub mod process;
-pub mod profile;
+pub mod reports;
 pub mod server_address;
 pub mod settings;
 pub mod tags;
+pub mod users;
 pub mod worlds;
 
 pub mod data {
@@ -27,6 +29,10 @@ pub mod data {
         TeamMember, Theme, User, UserFriend, Version, WindowSize,
     };
     pub use ariadne::users::UserStatus;
+    pub use modrinth_content_management::{
+        ContentType, ResolutionPreferences, ResolveContentPlan,
+        ResolveContentRequest,
+    };
 }
 
 pub mod prelude {
@@ -34,10 +40,9 @@ pub mod prelude {
         State,
         data::*,
         event::CommandPayload,
-        jre, metadata, minecraft_auth, mr_auth, pack, process,
-        profile::{self, Profile, create},
-        settings,
-        state::ReleaseChannel,
+        install, instance, jre, metadata, minecraft_auth, mr_auth, pack,
+        process, settings,
+        state::{ReleaseChannel, db_backup::app_db_backup_dir},
         util::{
             io::{IOError, canonicalize},
             network::{is_network_metered, tcp_listen_any_loopback},

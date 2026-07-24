@@ -22,7 +22,7 @@ const linkedInstances = computed(() =>
 
 watchEffect(async () => {
 	const projectIds = [
-		...new Set(linkedInstances.value.map((i) => i.linked_data?.project_id).filter(Boolean)),
+		...new Set(linkedInstances.value.map((i) => i.link?.project_id).filter(Boolean)),
 	]
 	if (projectIds.length === 0) {
 		serverProjectIds.value = new Set()

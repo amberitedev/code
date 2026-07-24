@@ -31,6 +31,7 @@
 		<NuxtRouteAnnouncer />
 		<ClientOnly><LoadingBar /></ClientOnly>
 		<NotificationPanel />
+		<AdsConsentNotification />
 		<I18nDebugPanel />
 		<NuxtPage />
 	</NuxtLayout>
@@ -40,6 +41,7 @@
 import { SpinnerIcon } from '@modrinth/assets'
 import { ButtonStyled, I18nDebugPanel, LoadingBar, NotificationPanel } from '@modrinth/ui'
 
+import AdsConsentNotification from '~/components/ui/AdsConsentNotification.vue'
 import { setupProviders } from '~/providers/setup.ts'
 
 import { getSignInRouteObj, retryAuthRestore, useAuth } from './composables/auth'

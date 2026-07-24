@@ -1,6 +1,7 @@
 import type { ModrinthId } from '@modrinth/utils'
 
 export type GameInstance = {
+	id: string
 	path: string
 	install_stage: InstallStage
 	profile_type: ProfileType
@@ -11,13 +12,16 @@ export type GameInstance = {
 	icon_path?: string
 
 	game_version: string
+	protocol_version?: number
 	loader: InstanceLoader
 	loader_version?: string
 
 	groups: string[]
 
-	linked_data?: LinkedData
-	preferred_update_channel: ReleaseChannel
+	link?: InstanceLink | null
+	shared_instance?: SharedInstanceAttachment | null
+	quarantined: boolean
+	update_channel: ReleaseChannel
 
 	created: Date
 	modified: Date
@@ -70,7 +74,17 @@ type ReleaseChannel = 'release' | 'beta' | 'alpha'
 
 export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'
 
+export type ContentSourceKind =
+	| 'local'
+	| 'modrinth_modpack'
+	| 'server_project'
+	| 'modrinth_hosting'
+	| 'imported_modpack'
+	| 'shared_instance'
+
 type ContentFile = {
+	enabled: boolean
+	source_kind?: ContentSourceKind | null
 	metadata?: {
 		project_id: string
 		version_id: string
@@ -106,11 +120,18 @@ type Hooks = {
 
 type Manifest = {
 	gameVersions: ManifestGameVersion[]
+	versionGroups?: ManifestVersionGroup[]
 }
 
 type ManifestGameVersion = {
 	id: string
 	stable: boolean
+	versionGroup?: string
+	loaders: ManifestLoaderVersion[]
+}
+
+type ManifestVersionGroup = {
+	id: string
 	loaders: ManifestLoaderVersion[]
 }
 

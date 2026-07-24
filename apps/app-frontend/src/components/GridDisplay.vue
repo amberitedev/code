@@ -25,7 +25,8 @@ import ContextMenu from '@/components/ui/ContextMenu.vue'
 import FadedInstanceCard from '@/components/ui/FadedInstanceCard.vue'
 import Instance from '@/components/ui/Instance.vue'
 import ConfirmDeleteInstanceModal from '@/components/ui/modal/ConfirmDeleteInstanceModal.vue'
-import { duplicate, remove } from '@/helpers/profile.js'
+import { install_duplicate_instance } from '@/helpers/install'
+import { remove } from '@/helpers/instance'
 
 const { handleError } = injectNotificationManager()
 
@@ -78,7 +79,7 @@ const instanceComponents = ref(null)
 const currentDeleteInstance = ref(null)
 const confirmModal = ref(null)
 
-async function deleteProfile() {
+async function deleteInstance() {
 	if (currentDeleteInstance.value) {
 		if (instanceComponents.value) {
 			instanceComponents.value = instanceComponents.value.filter(
@@ -89,8 +90,8 @@ async function deleteProfile() {
 	}
 }
 
-async function duplicateProfile(p) {
-	await duplicate(p).catch(handleError)
+async function duplicateInstance(p) {
+	await install_duplicate_instance(p).catch(handleError)
 }
 
 const handleRightClick = (event, profilePathId) => {
@@ -98,8 +99,7 @@ const handleRightClick = (event, profilePathId) => {
 	if (!item) return
 
 	const baseOptions = [
-		{ name: 'add_content' },
-		{ type: 'divider' },
+		...(item.instance.quarantined ? [] : [{ name: 'add_content' }, { type: 'divider' }]),
 		{ name: 'edit' },
 		{ name: 'duplicate' },
 		{ name: 'open' },
@@ -123,10 +123,14 @@ const handleRightClick = (event, profilePathId) => {
 					...baseOptions,
 				]
 			: [
-					{
-						name: 'play',
-						color: 'primary',
-					},
+					...(item.instance.quarantined
+						? []
+						: [
+								{
+									name: 'play',
+									color: 'primary',
+								},
+							]),
 					...baseOptions,
 				],
 	)
@@ -148,16 +152,16 @@ const handleOptionsClick = async (args) => {
 			break
 		case 'duplicate':
 			if (args.item.instance.install_stage == 'installed')
-				await duplicateProfile(args.item.instance.path)
+				await duplicateInstance(args.item.instance.id)
 			break
 		case 'open':
 			await args.item.openFolder()
 			break
 		case 'copy':
-			await navigator.clipboard.writeText(args.item.instance.path)
+			await navigator.clipboard.writeText(args.item.instance.id)
 			break
 		case 'delete':
-			currentDeleteInstance.value = args.item.instance.path
+			currentDeleteInstance.value = args.item.instance.id
 			confirmModal.value.show()
 			break
 	}
@@ -446,7 +450,7 @@ const pageContentKey = computed(() =>
 				</div>
 			</Transition>
 		</div>
-		<ConfirmDeleteInstanceModal ref="confirmModal" @delete="deleteProfile" />
+		<ConfirmDeleteInstanceModal ref="confirmModal" @delete="deleteInstance" />
 		<ContextMenu ref="instanceOptions" @option-clicked="handleOptionsClick">
 			<template #play> <PlayIcon /> Play </template>
 			<template #stop> <StopCircleIcon /> Stop </template>
