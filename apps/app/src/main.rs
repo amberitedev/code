@@ -5,10 +5,7 @@
 //! - `show_window` (line 58) reveals the main window after Vue mounts.
 //! - `main` (line 124) wires plugins, commands, lifecycle hooks, deep links, and updater behavior.
 
-#![cfg_attr(
-    all(not(debug_assertions), target_os = "windows"),
-    windows_subsystem = "windows"
-)]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 #![recursion_limit = "256"]
 
 use native_dialog::{DialogBuilder, MessageLevel};
