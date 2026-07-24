@@ -16,9 +16,10 @@ import { useRouter } from 'vue-router'
 
 import { trackEvent } from '@/helpers/analytics'
 import { process_listener } from '@/helpers/events'
-import { get_by_profile_path } from '@/helpers/process'
-import { finish_install, kill, run } from '@/helpers/profile'
-import { showProfileInFolder } from '@/helpers/utils.js'
+import { install_existing_instance, install_pack_to_existing_instance } from '@/helpers/install'
+import { kill, run } from '@/helpers/instance'
+import { get_by_instance_id } from '@/helpers/process'
+import { showInstanceInFolder } from '@/helpers/utils.js'
 import { handleSevereError } from '@/store/error.js'
 
 const { handleError } = injectNotificationManager()
@@ -86,7 +87,7 @@ const seeInstance = async () => {
 }
 
 const checkProcess = async () => {
-	const runningProcesses = await get_by_profile_path(props.instance.path).catch(handleError)
+	const runningProcesses = await get_by_instance_id(props.instance.id).catch(handleError)
 
 	playing.value = runningProcesses.length > 0
 }
@@ -102,9 +103,10 @@ const handleRouteWarmup = () => {
 
 const play = async (e, context) => {
 	e?.stopPropagation()
+	if (props.instance.quarantined) return
 	loading.value = true
-	await run(props.instance.path)
-		.catch((err) => handleSevereError(err, { profilePath: props.instance.path }))
+	await run(props.instance.id)
+		.catch((err) => handleSevereError(err, { instanceId: props.instance.id }))
 		.finally(() => {
 			trackEvent('InstanceStart', {
 				loader: props.instance.loader,
@@ -119,7 +121,7 @@ const stop = async (e, context) => {
 	e?.stopPropagation()
 	playing.value = false
 
-	await kill(props.instance.path).catch(handleError)
+	await kill(props.instance.id).catch(handleError)
 
 	trackEvent('InstanceStop', {
 		loader: props.instance.loader,
@@ -130,18 +132,33 @@ const stop = async (e, context) => {
 
 const repair = async (e) => {
 	e?.stopPropagation()
+	if (props.instance.quarantined) return
 
-	await finish_install(props.instance).catch(handleError)
+	if (
+		props.instance.install_stage !== 'pack_installed' &&
+		(props.instance.link?.type === 'modrinth_modpack' ||
+			props.instance.link?.type === 'server_project_modpack')
+	) {
+		await install_pack_to_existing_instance(props.instance.id, {
+			type: 'fromVersionId',
+			project_id: props.instance.link.project_id ?? props.instance.link.server_project_id ?? '',
+			version_id: props.instance.link.version_id ?? props.instance.link.content_version_id ?? '',
+			title: props.instance.name,
+		}).catch(handleError)
+	} else {
+		await install_existing_instance(props.instance.id, false).catch(handleError)
+	}
 }
 
 const openFolder = async () => {
-	await showProfileInFolder(props.instance.path)
+	await showInstanceInFolder(props.instance.id)
 }
 
 const addContent = async () => {
+	if (props.instance.quarantined) return
 	await router.push({
 		path: `/browse/${props.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`,
-		query: { i: props.instance.path },
+		query: { i: props.instance.id },
 	})
 }
 
@@ -227,7 +244,11 @@ onUnmounted(() => {
 						<SpinnerIcon class="animate-spin" />
 					</button>
 				</ButtonStyled>
-				<ButtonStyled v-else :color="first ? 'brand' : 'standard'" circular>
+				<ButtonStyled
+					v-else-if="!instance.quarantined"
+					:color="first ? 'brand' : 'standard'"
+					circular
+				>
 					<button
 						v-tooltip="'Play'"
 						@click="(e) => play(e, 'InstanceCard')"
@@ -261,7 +282,7 @@ onUnmounted(() => {
 				<Avatar
 					size="48px"
 					:src="instance.icon_path ? convertFileSrc(instance.icon_path) : null"
-					:tint-by="instance.path"
+					:tint-by="instance.id"
 					alt="Mod card"
 					:class="`transition-all ${modLoading || installing ? `brightness-[0.25] scale-[0.85]` : `group-hover:brightness-75`}`"
 				/>
@@ -283,7 +304,12 @@ onUnmounted(() => {
 						class="animate-spin w-8 h-8"
 						tabindex="-1"
 					/>
-					<ButtonStyled v-else-if="!installed" size="large" color="brand" circular>
+					<ButtonStyled
+						v-else-if="!installed && !instance.quarantined"
+						size="large"
+						color="brand"
+						circular
+					>
 						<button
 							v-tooltip="'Repair'"
 							class="transition-all scale-75 group-hover:scale-100 group-focus-within:scale-100 origin-bottom opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 card-shadow"
@@ -292,7 +318,7 @@ onUnmounted(() => {
 							<DownloadIcon />
 						</button>
 					</ButtonStyled>
-					<ButtonStyled v-else size="large" color="brand" circular>
+					<ButtonStyled v-else-if="!instance.quarantined" size="large" color="brand" circular>
 						<button
 							v-tooltip="'Play'"
 							class="transition-all scale-75 group-hover:scale-100 group-focus-within:scale-100 origin-bottom opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 card-shadow"

@@ -19,8 +19,8 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { capitalizeString } from '@modrinth/utils'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { useQueryClient } from '@tanstack/vue-query'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import type { Dayjs } from 'dayjs'
 import { computed, inject, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -29,10 +29,10 @@ import { useCoreClient } from '@/composables/useCoreClient'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project } from '@/helpers/cache'
 import { process_listener } from '@/helpers/events'
-import { get_by_profile_path } from '@/helpers/process'
-import { kill, run } from '@/helpers/profile'
+import { kill, run } from '@/helpers/instance'
+import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
-import { showProfileInFolder } from '@/helpers/utils'
+import { showInstanceInFolder } from '@/helpers/utils'
 import { handleSevereError } from '@/store/error'
 
 const { handleError } = injectNotificationManager()
@@ -60,13 +60,13 @@ const props = defineProps<{
 	last_played: Dayjs
 }>()
 
-const loadingModpack = ref(!!props.instance.linked_data)
+const loadingModpack = ref(!!props.instance.link)
 
 const modpack = ref()
 
-if (props.instance.linked_data) {
+if (props.instance.link) {
 	nextTick().then(async () => {
-		modpack.value = await get_project(props.instance.linked_data?.project_id, 'must_revalidate')
+		modpack.value = await get_project(props.instance.link?.project_id, 'must_revalidate')
 		loadingModpack.value = false
 	})
 }
@@ -102,8 +102,8 @@ const play = async (event: MouseEvent) => {
 		return
 	}
 	loading.value = true
-	await run(props.instance.path)
-		.catch((err) => handleSevereError(err, { profilePath: props.instance.path }))
+	await run(props.instance.id)
+		.catch((err) => handleSevereError(err, { instanceId: props.instance.id }))
 		.finally(() => {
 			trackEvent('InstanceStart', {
 				loader: props.instance.loader,
@@ -127,7 +127,7 @@ function preloadServerDetail() {
 const stop = async (event: MouseEvent) => {
 	event?.stopPropagation()
 	loading.value = true
-	await kill(props.instance.path).catch(handleError)
+	await kill(props.instance.id).catch(handleError)
 	trackEvent('InstanceStop', {
 		loader: props.instance.loader,
 		game_version: props.instance.game_version,
@@ -143,7 +143,7 @@ const unlistenProcesses = await process_listener(async () => {
 
 const checkProcess = async () => {
 	if (props.instance.profile_type === 'server') return
-	const runningProcesses = await get_by_profile_path(props.instance.path).catch(handleError)
+	const runningProcesses = await get_by_instance_id(props.instance.id).catch(handleError)
 
 	playing.value = runningProcesses.length > 0
 }
@@ -172,7 +172,7 @@ onUnmounted(() => {
 		>
 			<Avatar
 				:src="instanceIcon ? convertFileSrc(instanceIcon) : undefined"
-				:tint-by="instance.path"
+				:tint-by="instance.id"
 				size="48px"
 			/>
 			<div class="flex flex-col col-span-2 justify-between h-full">
@@ -226,8 +226,14 @@ onUnmounted(() => {
 				</ButtonStyled>
 				<ButtonStyled v-else>
 					<button
-						v-tooltip="playing ? 'Instance is already open' : null"
-						:disabled="playing || loading"
+						v-tooltip="
+							instance.quarantined
+								? 'This instance has been locked'
+								: playing
+									? 'Instance is already open'
+									: null
+						"
+						:disabled="instance.quarantined || playing || loading"
 						@click="play"
 					>
 						<SpinnerIcon v-if="loading" class="animate-spin" />
@@ -248,7 +254,7 @@ onUnmounted(() => {
 							},
 							{
 								id: 'open-folder',
-								action: () => showProfileInFolder(instance.path),
+								action: () => showInstanceInFolder(instance.id),
 							},
 						]"
 					>

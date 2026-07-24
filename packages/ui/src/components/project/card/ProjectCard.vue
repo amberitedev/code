@@ -82,11 +82,7 @@ Project card.
 								class="smart-clickable:allow-pointer-events"
 							/>
 						</template>
-						<ProjectCardEnvironment
-							v-if="environment"
-							:client-side="environment.clientSide"
-							:server-side="environment.serverSide"
-						/>
+						<ProjectCardEnvironment v-if="environment" :environment="environment" />
 						<ProjectCardTags
 							v-if="tags"
 							:tags="tags"
@@ -183,11 +179,7 @@ Project card.
 								class="smart-clickable:allow-pointer-events"
 							/>
 						</template>
-						<ProjectCardEnvironment
-							v-if="environment"
-							:client-side="environment.clientSide"
-							:server-side="environment.serverSide"
-						/>
+						<ProjectCardEnvironment v-if="environment" :environment="environment" />
 						<ProjectCardTags
 							v-if="tags"
 							:tags="tags"
@@ -227,9 +219,7 @@ import ServerRecentPlays from '../server/ServerRecentPlays.vue'
 import ServerRegion from '../server/ServerRegion.vue'
 import ProjectCardAuthor from './ProjectCardAuthor.vue'
 import ProjectCardDate from './ProjectCardDate.vue'
-import ProjectCardEnvironment, {
-	type ProjectCardEnvironmentProps,
-} from './ProjectCardEnvironment.vue'
+import ProjectCardEnvironment from './ProjectCardEnvironment.vue'
 import ProjectCardStats from './ProjectCardStats.vue'
 import ProjectCardTags from './ProjectCardTags.vue'
 import ProjectCardTitle from './ProjectCardTitle.vue'

@@ -7,6 +7,7 @@ import svgLoader from 'vite-svg-loader'
 import { GenericModrinthClient, type Labrinth } from '../../packages/api-client/src/index.ts'
 
 const STAGING_API_URL = 'https://staging-api.modrinth.com/v2/'
+const STAGING_SHARED_INSTANCES_API_URL = 'https://staging-shared-instances.modrinth.com'
 const API_CLIENT_SOURCE = fileURLToPath(
 	new URL('../../packages/api-client/src/index.ts', import.meta.url),
 )
@@ -220,6 +221,7 @@ export default defineNuxtConfig({
 		public: {
 			apiBaseUrl: getApiUrl(),
 			pyroBaseUrl: process.env.PYRO_BASE_URL,
+			sharedInstancesBaseUrl: getSharedInstancesApiUrl(),
 			siteUrl: getDomain(),
 			intercomAppId:
 				process.env.INTERCOM_APP_ID ||
@@ -361,6 +363,15 @@ function getApiUrl() {
 	return process.env.BROWSER_BASE_URL ?? globalThis.BROWSER_BASE_URL ?? STAGING_API_URL
 }
 
+function getSharedInstancesApiUrl() {
+	return (
+		process.env.SHARED_INSTANCES_API_BASE_URL ??
+		// @ts-ignore
+		globalThis.SHARED_INSTANCES_API_BASE_URL ??
+		STAGING_SHARED_INSTANCES_API_URL
+	)
+}
+
 function isProduction() {
 	return process.env.NODE_ENV === 'production'
 }
@@ -371,11 +382,7 @@ function getFeatureFlagOverrides() {
 
 function getDomain() {
 	if (process.env.NODE_ENV === 'production') {
-		// @ts-ignore
-		if (process.env.CF_PAGES_URL || globalThis.CF_PAGES_URL) {
-			// @ts-ignore
-			return process.env.CF_PAGES_URL ?? globalThis.CF_PAGES_URL
-		} else if (process.env.HEROKU_APP_NAME) {
+		if (process.env.HEROKU_APP_NAME) {
 			return `https://${process.env.HEROKU_APP_NAME}.herokuapp.com`
 		} else if (process.env.VERCEL_URL) {
 			return `https://${process.env.VERCEL_URL}`

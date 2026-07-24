@@ -287,6 +287,15 @@ const router = createRouter({
 					},
 				},
 				{
+					path: 'share',
+					name: 'InstanceShare',
+					component: Instance.Share,
+					meta: {
+						useRootContext: true,
+						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Share' }],
+					},
+				},
+				{
 					path: '',
 					name: 'Mods',
 					component: Instance.Mods,
@@ -357,6 +366,7 @@ const router = createRouter({
 					name: 'Logs',
 					component: Instance.Logs,
 					meta: {
+						renderMode: 'fixed',
 						useRootContext: true,
 						breadcrumb: [{ name: '?Instance', link: '/instance/{id}/' }, { name: 'Logs' }],
 					},

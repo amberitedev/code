@@ -65,15 +65,15 @@ import {
 	get_search_results_v3,
 	get_version_many,
 } from '@/helpers/cache.js'
-import { profile_listener } from '@/helpers/events.js'
-import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
-import { get_profile_from_pack_version } from '@/helpers/pack'
+import { instance_listener } from '@/helpers/events.js'
 import {
 	get as getInstance,
 	get_installed_project_ids as getInstalledProjectIds,
-} from '@/helpers/profile.js'
+} from '@/helpers/instance'
+import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
+import { get_profile_from_pack_version } from '@/helpers/pack'
+import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
-import { get_profile_worlds } from '@/helpers/worlds'
 import { convertToSynced } from '@/pages/instance/synced/synced-conversion'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
@@ -82,6 +82,7 @@ import {
 	provideServerInstallContent,
 } from '@/providers/setup/server-install-content'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
+import { useTheming } from '@/store/state'
 
 defineOptions({
 	name: 'BrowsePage',
@@ -97,6 +98,8 @@ const debugLog = useDebugLogger('Browse')
 
 const router = useRouter()
 const route = useRoute()
+const themeStore = useTheming()
+const browseRouteActive = computed(() => route.path.startsWith('/browse/'))
 const serverSetupModalRef = ref<InstanceType<typeof CreationFlowModal> | null>(null)
 const browseTransitioning = ref(false)
 const browseTransitionDirection = ref<UiMotionDirection>('forward')
@@ -181,10 +184,10 @@ type Instance = {
 	profile_type?: 'client' | 'server' | 'synced'
 	icon_path?: string
 	name: string
-	linked_data?: {
+	link?: {
+		type: string
 		project_id: string
 		version_id: string
-		locked: boolean
 	}
 }
 
@@ -240,7 +243,7 @@ async function refreshInstalledProjectIds() {
 	if (!route.query.i) return
 
 	if (route.query.from === 'worlds') {
-		const worlds = await get_profile_worlds(route.query.i as string).catch(handleError)
+		const worlds = await get_instance_worlds(route.query.i as string).catch(handleError)
 		if (!worlds) return
 
 		const serverProjectIds = worlds
@@ -278,10 +281,10 @@ async function initInstanceContext() {
 
 		await refreshInstalledProjectIds()
 
-		if (instance.value?.linked_data?.project_id) {
-			debugLog('checking linked project for server status', instance.value.linked_data.project_id)
+		if (instance.value?.link?.project_id) {
+			debugLog('checking linked project for server status', instance.value.link.project_id)
 			const projectV3 = await get_project_v3(
-				instance.value.linked_data.project_id,
+				instance.value.link.project_id,
 				'must_revalidate',
 			).catch(handleError)
 			if (projectV3?.minecraft_server != null) {
@@ -456,7 +459,7 @@ const messages = defineMessages({
 	},
 	hideAddedServers: {
 		id: 'app.browse.hide-added-servers',
-		defaultMessage: 'Hide already added servers',
+		defaultMessage: 'Hide servers already added',
 	},
 	installingToServer: {
 		id: 'app.browse.server.installing',
@@ -523,7 +526,7 @@ const browseTitle = computed(() =>
 )
 breadcrumbs.setName('BrowseTitle', browseTitle.value)
 if (instance.value) {
-	const instanceLink = `/instance/${encodeURIComponent(instance.value.path)}`
+	const instanceLink = `/instance/${encodeURIComponent(instance.value.id)}`
 	breadcrumbs.setContext({
 		name: instance.value.name,
 		link: isFromWorlds.value ? `${instanceLink}/worlds` : instanceLink,
@@ -542,9 +545,27 @@ onBeforeRouteLeave(() => {
 
 const projectType = ref<ProjectType>(route.params.projectType as ProjectType)
 
+function resetInstanceContext() {
+	if (!instance.value) return
+
+	debugLog('instance context removed, resetting')
+	instance.value = null
+	installedProjectIds.value = null
+	instanceHideInstalled.value = false
+	newlyInstalled.value = []
+	hiddenInstanceProjectIds.value = new Set()
+	hiddenInstanceProjectIdsInitialized.value = false
+	isServerInstance.value = false
+	breadcrumbs.setName('BrowseTitle', formatMessage(messages.discoverContent))
+	breadcrumbs.setContext(null)
+}
+
 watch(
 	() => route.params.projectType as ProjectType,
 	async (newType) => {
+		if (!browseRouteActive.value) {
+			return
+		}
 		if (isSetupServerContext.value) {
 			enforceSetupModpackRoute(newType)
 			if (newType !== 'modpack') return
@@ -554,16 +575,14 @@ watch(
 
 		debugLog('projectType route param changed', { from: projectType.value, to: newType })
 		projectType.value = newType
+	},
+)
 
-		if (!route.query.i && instance.value) {
-			debugLog('instance context removed, resetting')
-			instance.value = null
-			installedProjectIds.value = null
-			instanceHideInstalled.value = false
-			newlyInstalled.value = []
-			isServerInstance.value = false
-			breadcrumbs.setName('BrowseTitle', formatMessage(messages.discoverContent))
-			breadcrumbs.setContext(null)
+watch(
+	() => route.query.i,
+	(instanceId) => {
+		if (!instanceId && route.path.startsWith('/browse')) {
+			resetInstanceContext()
 		}
 	},
 )
@@ -662,6 +681,7 @@ const installContext = computed(() => {
 			queuedCount: queuedServerInstallCount.value,
 			selectedProjects: selectedServerInstallProjects.value,
 			isInstallingSelected: isInstallingQueuedServerInstalls.value,
+			skipNonEssentialWarnings: themeStore.getFeatureFlag('skip_non_essential_warnings'),
 			installProgress: queuedInstallProgress.value,
 			clearQueued: clearQueuedServerInstalls,
 			clearSelected: clearQueuedServerInstalls,
@@ -677,7 +697,7 @@ const installContext = computed(() => {
 			gameVersion: instance.value.game_version,
 			profileTypeLabel: getProfileTypeLabel(instance.value.profile_type),
 			iconSrc: instance.value.icon_path ? convertFileSrc(instance.value.icon_path) : null,
-			backUrl: `/instance/${encodeURIComponent(instance.value.path)}${isFromWorlds.value ? '/worlds' : ''}`,
+			backUrl: `/instance/${encodeURIComponent(instance.value.id)}${isFromWorlds.value ? '/worlds' : ''}`,
 			backLabel: formatMessage(messages.backToInstance),
 			heading: formatMessage(
 				isFromWorlds.value ? messages.addServersToInstance : commonMessages.installingContentLabel,
@@ -746,7 +766,7 @@ async function getInstallProjectVersions(projectId: string) {
 }
 
 async function chooseInstanceInstallVersion(
-	project: Labrinth.Search.v2.ResultSearchProject & Labrinth.Search.v3.ResultSearchProject,
+	project: Labrinth.Search.v3.ResultSearchProject,
 	projectTypeValue: string,
 ) {
 	const targetInstance = instance.value
@@ -763,7 +783,6 @@ async function chooseInstanceInstallVersion(
 	const selectedVersion = getLatestMatchingInstallVersion(
 		await getInstallProjectVersions(project.project_id),
 		selectedPreferences,
-		projectTypeValue,
 	)
 
 	if (!selectedVersion) {
@@ -917,11 +936,11 @@ type AppCardAction = CardAction & {
 }
 
 function getCardActions(
-	result: Labrinth.Search.v2.ResultSearchProject | Labrinth.Search.v3.ResultSearchProject,
+	result: Labrinth.Search.v3.ResultSearchProject,
 	currentProjectType: string,
 ): AppCardAction[] {
 	if (currentProjectType === 'server') {
-		return getServerCardActions(result as Labrinth.Search.v3.ResultSearchProject)
+		return getServerCardActions(result)
 	}
 
 	// Non-server project actions
@@ -1245,7 +1264,7 @@ function createBrowseSearchResponse(
 	}
 
 	const hits = rawResults.result.hits.map((hit) => {
-		const mapped = {
+		const mapped: Labrinth.Search.v3.ResultSearchProject & { installed?: boolean } = {
 			...hit,
 			title: hit.name,
 			description: hit.summary,
@@ -1348,6 +1367,7 @@ const lockedFilterMessages = computed(() => ({
 const searchState = useBrowseSearch({
 	projectType,
 	tags,
+	active: browseRouteActive,
 	providedFilters: combinedProvidedFilters,
 	search,
 	getCachedSearchResponse,
@@ -1502,15 +1522,11 @@ onMounted(async () => {
 type UnlistenFn = () => void
 
 let isUnmounted = false
-let unlistenProfiles: UnlistenFn | null = null
+let unlistenInstances: UnlistenFn | null = null
 
 onMounted(() => {
-	profile_listener(async (event: { event: string; profile_path_id: string }) => {
-		if (
-			instance.value &&
-			event.profile_path_id === instance.value.path &&
-			event.event === 'synced'
-		) {
+	instance_listener(async (event: { event: string; instance_id: string }) => {
+		if (instance.value && event.instance_id === instance.value.id && event.event === 'synced') {
 			await refreshInstalledProjectIds()
 			await searchState.refreshSearch()
 		}
@@ -1521,7 +1537,7 @@ onMounted(() => {
 				return
 			}
 
-			unlistenProfiles = unlisten
+			unlistenInstances = unlisten
 		})
 		.catch(handleError)
 })
@@ -1529,10 +1545,13 @@ onMounted(() => {
 onUnmounted(() => {
 	isUnmounted = true
 	clearBrowseGhostDelayTimer()
-	unlistenProfiles?.()
+	unlistenInstances?.()
 })
 
 function getProjectBrowseQuery() {
+	if (!browseRouteActive.value) {
+		return undefined
+	}
 	if (!installContext.value) return undefined
 	return {
 		...route.query,
@@ -1540,10 +1559,24 @@ function getProjectBrowseQuery() {
 	}
 }
 
+const advancedFiltersCollapsed = computed({
+	get: () => themeStore.getFeatureFlag('advanced_filters_collapsed'),
+	set: (value) => {
+		themeStore.featureFlags['advanced_filters_collapsed'] = value
+		getSettings()
+			.then((settings) => {
+				settings.feature_flags['advanced_filters_collapsed'] = value
+				return setSettings(settings)
+			})
+			.catch(handleError)
+	},
+})
+
 provideBrowseManager({
 	tags,
 	projectType,
 	...searchState,
+	advancedFiltersCollapsed,
 	transitioning: browseTransitioning,
 	getProjectLink: (result: Labrinth.Search.v2.ResultSearchProject) => ({
 		path: `/project/${result.project_id ?? result.slug}`,

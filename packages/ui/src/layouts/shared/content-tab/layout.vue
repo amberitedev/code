@@ -18,7 +18,7 @@ import {
 	TextCursorInputIcon,
 	TrashIcon,
 } from '@modrinth/assets'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
@@ -33,6 +33,7 @@ import ContentModpackCard from './components/ContentModpackCard.vue'
 import ContentSelectionBar from './components/ContentSelectionBar.vue'
 import ConfirmBulkUpdateModal from './components/modals/ConfirmBulkUpdateModal.vue'
 import ConfirmDeletionModal from './components/modals/ConfirmDeletionModal.vue'
+import ConfirmDisableModal from './components/modals/ConfirmDisableModal.vue'
 import ConfirmUnlinkModal from './components/modals/ConfirmUnlinkModal.vue'
 import ContentDependencyWarningModal from './components/modals/ContentDependencyWarningModal.vue'
 import {
@@ -45,7 +46,12 @@ import {
 	useContentSelection,
 } from './composables'
 import { injectContentManager } from './providers/content-manager'
-import type { ContentCardTableItem, ContentItem } from './types'
+import type {
+	BulkOperationStatus,
+	ContentActionWarning,
+	ContentCardTableItem,
+	ContentItem,
+} from './types'
 
 const { formatMessage } = useVIntl()
 const debug = useDebugLogger('ContentPageLayout')
@@ -151,6 +157,7 @@ const messages = defineMessages({
 })
 
 const ctx = injectContentManager()
+const skipNonEssentialWarnings = computed(() => ctx.skipNonEssentialWarnings?.value ?? false)
 
 function getItemId(item: ContentItem) {
 	return ctx.getItemId?.(item) ?? item.file_path ?? item.file_name ?? item.id
@@ -247,6 +254,8 @@ if (ctx.isBulkOperating) {
 const { isChanging, markChanging, unmarkChanging } = useChangingItems()
 
 const bulkWaiting = ref(false)
+const bulkStatusMessage = ref<string | null>(null)
+const bulkItemCount = ref(0)
 
 const refreshing = ref(false)
 async function handleRefresh() {
@@ -277,13 +286,14 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 			toggleDisabled: ctx.isBusy.value,
 			toggleDisabledTooltip: ctx.isBusy.value ? (ctx.busyMessage?.value ?? null) : null,
 			installing: item.installing === true,
-			hasUpdate: item.has_update,
+			hasUpdate: base.hasUpdate ?? item.has_update,
 			isClientOnly:
 				isClientOnlyEnvironment(item.environment) ||
 				!!item.pack_client_retained ||
 				!!item.pack_client_depends,
 			clientWarning: getClientWarningType(item),
-			hideSwitchVersion: !base.versionLink,
+			hideDelete: base.hideDelete,
+			hideSwitchVersion: base.hideSwitchVersion ?? !base.versionLink,
 			overflowOptions: ctx.getOverflowOptions?.(item),
 		}
 	})
@@ -319,8 +329,12 @@ const hasOutdatedProjects = computed(() => {
 
 //  Deletion
 const pendingDeletionItems = ref<ContentItem[]>([])
+const pendingDeletionWarning = ref<ContentActionWarning | null>(null)
 const confirmDeletionModal = ref<InstanceType<typeof ConfirmDeletionModal>>()
+const confirmDisableModal = ref<InstanceType<typeof ConfirmDisableModal>>()
 const contentDependencyWarningModal = ref<InstanceType<typeof ContentDependencyWarningModal>>()
+const pendingDisableItems = ref<ContentItem[]>([])
+const pendingDisableWarning = ref<ContentActionWarning | null>(null)
 const pendingDependencyWarningItems = ref<ContentCardTableItem[]>([])
 const pendingDependencyWarningDependents = ref<
 	Array<{
@@ -337,17 +351,30 @@ function mapToDisplayItem(item: ContentItem) {
 	}
 }
 
+function canDeleteItem(item: ContentItem) {
+	return ctx.canDeleteItem?.(item) ?? true
+}
+
+function canToggleItem(item: ContentItem) {
+	return ctx.canToggleItem?.(item) ?? true
+}
+
+const deletableSelectedItems = computed(() => selectedItems.value.filter(canDeleteItem))
+const toggleableSelectedItems = computed(() => selectedItems.value.filter(canToggleItem))
+
 async function promptDeleteItems(items: ContentItem[], event?: MouseEvent) {
-	if (items.length === 0) return
-	pendingDeletionItems.value = items
+	const deletableItems = items.filter(canDeleteItem)
+	if (deletableItems.length === 0) return
+	pendingDeletionItems.value = deletableItems
+	pendingDeletionWarning.value = ctx.getDeleteWarning?.(deletableItems) ?? null
 	pendingDependencyWarningItems.value = []
 	pendingDependencyWarningDependents.value = []
 	pendingDependencyWarningDisableTargets.value = []
-	const deletingIds = new Set(items.map(getItemId))
+	const deletingIds = new Set(deletableItems.map(getItemId))
 
 	const warning = ctx.getDeleteDependencyWarning
 		? await Promise.resolve()
-				.then(() => ctx.getDeleteDependencyWarning!(items))
+				.then(() => ctx.getDeleteDependencyWarning!(deletableItems))
 				.catch(() => null)
 		: null
 	if (warning) {
@@ -363,7 +390,7 @@ async function promptDeleteItems(items: ContentItem[], event?: MouseEvent) {
 		const relevantDependencyIds = new Set(
 			remainingDependents.flatMap((dependent) => dependent.dependencies.map(getItemId)),
 		)
-		const warningItems = items.filter((item) => relevantDependencyIds.has(getItemId(item)))
+		const warningItems = deletableItems.filter((item) => relevantDependencyIds.has(getItemId(item)))
 		if (warningItems.length === 0) {
 			showDeletionConfirmation(event)
 			return
@@ -386,10 +413,15 @@ async function promptDeleteItems(items: ContentItem[], event?: MouseEvent) {
 	showDeletionConfirmation(event)
 }
 
-function showDeletionConfirmation(event?: MouseEvent) {
-	if (event?.shiftKey && !ctx.isBusy.value) {
+async function showDeletionConfirmation(event?: MouseEvent) {
+	if (
+		!pendingDeletionWarning.value &&
+		(event?.shiftKey || skipNonEssentialWarnings.value) &&
+		!ctx.isBusy.value
+	) {
 		confirmDelete()
 	} else {
+		await nextTick()
 		confirmDeletionModal.value?.show()
 	}
 }
@@ -415,6 +447,11 @@ async function confirmDependencyWarningDelete(disableDependentsAfterDeleting: bo
 
 	pendingDependencyWarningItems.value = []
 	pendingDependencyWarningDependents.value = []
+	if (pendingDeletionWarning.value) {
+		confirmDeletionModal.value?.show()
+		return
+	}
+
 	await confirmDelete()
 }
 
@@ -423,6 +460,10 @@ async function disablePendingDependencyWarningDependents() {
 	pendingDependencyWarningDisableTargets.value = []
 	if (items.length === 0) return
 
+	await promptDisableItems(items)
+}
+
+async function disableItemsWithoutWarning(items: ContentItem[]) {
 	if (ctx.bulkDisableItems) {
 		await ctx.bulkDisableItems(items)
 		return
@@ -443,11 +484,14 @@ async function confirmDelete() {
 	if (ctx.isBusy.value) return
 	const itemsToDelete = [...pendingDeletionItems.value]
 	pendingDeletionItems.value = []
+	pendingDeletionWarning.value = null
 	if (itemsToDelete.length === 0) return
 
 	if (ctx.bulkDeleteItems && itemsToDelete.length > 1) {
 		isBulkOperating.value = true
 		bulkOperation.value = 'delete'
+		bulkProgress.value = 0
+		bulkTotal.value = itemsToDelete.length
 		bulkWaiting.value = true
 		try {
 			await ctx.bulkDeleteItems(itemsToDelete)
@@ -456,6 +500,8 @@ async function confirmDelete() {
 			clearSelection()
 			isBulkOperating.value = false
 			bulkOperation.value = null
+			bulkProgress.value = 0
+			bulkTotal.value = 0
 			bulkWaiting.value = false
 		}
 		return
@@ -487,10 +533,75 @@ async function confirmDelete() {
 	await disablePendingDependencyWarningDependents()
 }
 
+async function promptDisableItems(items: ContentItem[]) {
+	if (items.length === 0) return
+	pendingDisableItems.value = items
+	const warning = ctx.getDisableWarning?.(items) ?? null
+	if (warning) {
+		pendingDisableWarning.value = warning
+		confirmDisableModal.value?.show()
+		return
+	}
+
+	await confirmDisable()
+}
+
+async function confirmDisable() {
+	if (ctx.isBusy.value) return
+	const itemsToDisable = [...pendingDisableItems.value]
+	pendingDisableItems.value = []
+	pendingDisableWarning.value = null
+	if (itemsToDisable.length === 0) return
+
+	if (ctx.bulkDisableItems && itemsToDisable.length > 1) {
+		isBulkOperating.value = true
+		bulkOperation.value = 'disable'
+		bulkProgress.value = 0
+		bulkTotal.value = itemsToDisable.length
+		bulkWaiting.value = true
+		try {
+			await disableItemsWithoutWarning(itemsToDisable)
+		} finally {
+			clearSelection()
+			isBulkOperating.value = false
+			bulkOperation.value = null
+			bulkProgress.value = 0
+			bulkTotal.value = 0
+			bulkWaiting.value = false
+		}
+		return
+	}
+
+	if (itemsToDisable.length === 1) {
+		const item = itemsToDisable[0]
+		const id = getItemId(item)
+		markChanging(id)
+		try {
+			if (ctx.bulkDisableItems) {
+				await ctx.bulkDisableItems(itemsToDisable)
+			} else {
+				await ctx.toggleEnabled(item)
+			}
+		} finally {
+			unmarkChanging(id)
+		}
+		return
+	}
+
+	await runBulk('disable', itemsToDisable, (item) => disableItemsWithoutWarning([item]), {
+		onComplete: clearSelection,
+	})
+}
+
 async function handleToggleEnabledById(id: string, _value: boolean) {
 	if (ctx.isBusy.value) return
 	const item = ctx.items.value.find((i) => getItemId(i) === id)
 	if (!item) return
+	if (!canToggleItem(item)) return
+	if (!_value) {
+		await promptDisableItems([item])
+		return
+	}
 	markChanging(id)
 	try {
 		await ctx.toggleEnabled(item)
@@ -501,11 +612,13 @@ async function handleToggleEnabledById(id: string, _value: boolean) {
 
 async function bulkEnable() {
 	if (ctx.isBusy.value) return
-	const items = selectedItems.value.filter((item) => !item.enabled)
+	const items = toggleableSelectedItems.value.filter((item) => !item.enabled)
 	if (items.length === 0) return
 	if (ctx.bulkEnableItems) {
 		isBulkOperating.value = true
 		bulkOperation.value = 'enable'
+		bulkProgress.value = 0
+		bulkTotal.value = items.length
 		bulkWaiting.value = true
 		try {
 			await ctx.bulkEnableItems(items)
@@ -513,6 +626,8 @@ async function bulkEnable() {
 			clearSelection()
 			isBulkOperating.value = false
 			bulkOperation.value = null
+			bulkProgress.value = 0
+			bulkTotal.value = 0
 			bulkWaiting.value = false
 		}
 		return
@@ -522,23 +637,9 @@ async function bulkEnable() {
 
 async function bulkDisable() {
 	if (ctx.isBusy.value) return
-	const items = selectedItems.value.filter((item) => item.enabled)
+	const items = toggleableSelectedItems.value.filter((item) => item.enabled)
 	if (items.length === 0) return
-	if (ctx.bulkDisableItems) {
-		isBulkOperating.value = true
-		bulkOperation.value = 'disable'
-		bulkWaiting.value = true
-		try {
-			await ctx.bulkDisableItems(items)
-		} finally {
-			clearSelection()
-			isBulkOperating.value = false
-			bulkOperation.value = null
-			bulkWaiting.value = false
-		}
-		return
-	}
-	await runBulk('disable', items, (item) => ctx.toggleEnabled(item), { onComplete: clearSelection })
+	await promptDisableItems(items)
 }
 
 function handleUpdateById(id: string) {
@@ -555,15 +656,19 @@ function handleSwitchVersionById(id: string) {
 // Bulk updating
 const confirmBulkUpdateModal = ref<InstanceType<typeof ConfirmBulkUpdateModal>>()
 const pendingBulkUpdateItems = ref<ContentItem[]>([])
+const pendingBulkUpdateAll = ref(false)
 
-const hasBulkUpdateSupport = computed(() => !!(ctx.bulkUpdateItem || ctx.bulkUpdateItems))
+const hasBulkUpdateSupport = computed(
+	() => !!(ctx.bulkUpdateAll || ctx.bulkUpdateItem || ctx.bulkUpdateItems),
+)
 
 function promptUpdateAll(event?: MouseEvent) {
 	if (!hasBulkUpdateSupport.value) return
 	const items = ctx.items.value.filter((item) => item.has_update)
 	if (items.length === 0) return
 	pendingBulkUpdateItems.value = items
-	if (event?.shiftKey && !ctx.isBusy.value) {
+	pendingBulkUpdateAll.value = true
+	if ((event?.shiftKey || skipNonEssentialWarnings.value) && !ctx.isBusy.value) {
 		confirmBulkUpdate()
 	} else {
 		confirmBulkUpdateModal.value?.show()
@@ -575,7 +680,8 @@ function promptUpdateSelected(event?: MouseEvent) {
 	const items = selectedItems.value.filter((item) => item.has_update)
 	if (items.length === 0) return
 	pendingBulkUpdateItems.value = items
-	if (event?.shiftKey && !ctx.isBusy.value) {
+	pendingBulkUpdateAll.value = false
+	if ((event?.shiftKey || skipNonEssentialWarnings.value) && !ctx.isBusy.value) {
 		confirmBulkUpdate()
 	} else {
 		confirmBulkUpdateModal.value?.show()
@@ -587,22 +693,61 @@ async function confirmBulkUpdate() {
 	const items = pendingBulkUpdateItems.value
 	if (items.length === 0 || !hasBulkUpdateSupport.value) return
 
-	if (ctx.bulkUpdateItems) {
-		isBulkOperating.value = true
-		bulkOperation.value = 'update'
-		bulkWaiting.value = true
-		try {
-			await ctx.bulkUpdateItems(items)
-		} finally {
-			clearSelection()
-			isBulkOperating.value = false
-			bulkOperation.value = null
-			bulkWaiting.value = false
-		}
-	} else if (ctx.bulkUpdateItem) {
-		await runBulk('update', items, ctx.bulkUpdateItem, { onComplete: clearSelection })
+	const setBulkStatus = (status: BulkOperationStatus) => {
+		bulkStatusMessage.value = status.message ?? null
+		bulkProgress.value = status.progress ?? bulkProgress.value
+		bulkTotal.value = status.total ?? bulkTotal.value
+		bulkWaiting.value = status.waiting ?? false
 	}
-	pendingBulkUpdateItems.value = []
+
+	try {
+		if (pendingBulkUpdateAll.value && ctx.bulkUpdateAll) {
+			isBulkOperating.value = true
+			bulkOperation.value = 'update'
+			bulkProgress.value = 0
+			bulkTotal.value = items.length
+			bulkItemCount.value = items.length
+			bulkStatusMessage.value = null
+			bulkWaiting.value = true
+			try {
+				await ctx.bulkUpdateAll(setBulkStatus)
+			} finally {
+				clearSelection()
+				isBulkOperating.value = false
+				bulkOperation.value = null
+				bulkProgress.value = 0
+				bulkTotal.value = 0
+				bulkItemCount.value = 0
+				bulkStatusMessage.value = null
+				bulkWaiting.value = false
+			}
+		} else if (ctx.bulkUpdateItems) {
+			isBulkOperating.value = true
+			bulkOperation.value = 'update'
+			bulkProgress.value = 0
+			bulkTotal.value = items.length
+			bulkItemCount.value = items.length
+			bulkStatusMessage.value = null
+			bulkWaiting.value = true
+			try {
+				await ctx.bulkUpdateItems(items)
+			} finally {
+				clearSelection()
+				isBulkOperating.value = false
+				bulkOperation.value = null
+				bulkProgress.value = 0
+				bulkTotal.value = 0
+				bulkItemCount.value = 0
+				bulkStatusMessage.value = null
+				bulkWaiting.value = false
+			}
+		} else if (ctx.bulkUpdateItem) {
+			await runBulk('update', items, ctx.bulkUpdateItem, { onComplete: clearSelection })
+		}
+	} finally {
+		pendingBulkUpdateItems.value = []
+		pendingBulkUpdateAll.value = false
+	}
 }
 
 const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
@@ -636,16 +781,12 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 					:has-update="ctx.modpack.value.hasUpdate"
 					:disabled="ctx.modpack.value.disabled"
 					:disabled-text="ctx.modpack.value.disabledText"
-					:show-content-hint="
-						!!(ctx.showContentHint?.value && ctx.modpack.value && ctx.items.value.length === 0)
-					"
 					v-on="{
 						...(ctx.updateModpack ? { update: () => ctx.updateModpack?.() } : {}),
 						...(ctx.viewModpackContent ? { content: () => ctx.viewModpackContent?.() } : {}),
 						...(ctx.unlinkModpack ? { unlink: () => confirmUnlinkModal?.show() } : {}),
 						...(ctx.openSettings ? { settings: () => ctx.openSettings?.() } : {}),
 					}"
-					@dismiss-content-hint="ctx.dismissContentHint?.()"
 				/>
 
 				<template v-if="ctx.items.value.length > 0">
@@ -677,20 +818,6 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							/>
 
 							<div class="flex gap-2">
-								<ButtonStyled color="brand">
-									<button
-										v-tooltip="
-											ctx.busyMessage?.value ??
-											(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
-										"
-										:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
-										class="!h-10 flex items-center gap-2"
-										@click="ctx.browse"
-									>
-										<CompassIcon class="size-5" />
-										<span>{{ formatMessage(messages.browseContent) }}</span>
-									</button>
-								</ButtonStyled>
 								<ButtonStyled type="outlined">
 									<button
 										v-tooltip="
@@ -703,6 +830,20 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									>
 										<FolderOpenIcon class="size-5" />
 										{{ formatMessage(messages.uploadFiles) }}
+									</button>
+								</ButtonStyled>
+								<ButtonStyled color="brand">
+									<button
+										v-tooltip="
+											ctx.busyMessage?.value ??
+											(ctx.disableAddContent?.value ? ctx.disableAddContentTooltip : undefined)
+										"
+										:disabled="ctx.isBusy.value || ctx.disableAddContent?.value"
+										class="!h-10 flex items-center gap-2"
+										@click="ctx.browse"
+									>
+										<CompassIcon class="size-5" />
+										<span>{{ formatMessage(messages.browseContent) }}</span>
 									</button>
 								</ButtonStyled>
 							</div>
@@ -883,8 +1024,11 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			:bulk-progress="bulkProgress"
 			:bulk-total="bulkTotal"
 			:bulk-waiting="bulkWaiting"
+			:bulk-status-message="bulkStatusMessage"
+			:bulk-item-count="bulkItemCount"
 			:aria-label="formatMessage(commonMessages.selectionActionsLabel)"
 			:get-item-id="getItemId"
+			:toggle-items="toggleableSelectedItems"
 			@clear="clearSelection"
 			@enable="bulkEnable"
 			@disable="bulkDisable"
@@ -951,9 +1095,10 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			</template>
 
 			<template #actions-end>
-				<div class="mx-1 h-6 w-px bg-surface-5" />
+				<div v-if="deletableSelectedItems.length > 0" class="mx-1 h-6 w-px bg-surface-5" />
 
 				<ButtonStyled
+					v-if="deletableSelectedItems.length > 0"
 					type="transparent"
 					color="red"
 					color-fill="text"
@@ -974,11 +1119,21 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			ref="confirmDeletionModal"
 			:count="pendingDeletionItems.length"
 			:item-type="ctx.contentTypeLabel.value"
+			:warning="pendingDeletionWarning"
 			:variant="ctx.deletionContext ?? 'instance'"
 			:backup-tip="pendingDeletionItems.map((i) => i.project?.title ?? i.file_name).join(', ')"
 			:action-disabled="ctx.isBusy.value"
 			:action-disabled-tooltip="ctx.busyMessage?.value ?? undefined"
 			@delete="confirmDelete"
+		/>
+		<ConfirmDisableModal
+			ref="confirmDisableModal"
+			:count="pendingDisableItems.length"
+			:item-type="ctx.contentTypeLabel.value"
+			:warning="pendingDisableWarning"
+			:action-disabled="ctx.isBusy.value"
+			:action-disabled-tooltip="ctx.busyMessage?.value ?? undefined"
+			@disable="confirmDisable"
 		/>
 		<ContentDependencyWarningModal
 			ref="contentDependencyWarningModal"

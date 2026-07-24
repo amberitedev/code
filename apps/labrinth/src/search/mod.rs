@@ -1,4 +1,3 @@
-use crate::database::redis::RedisPool;
 use crate::models::exp;
 use crate::models::exp::minecraft::JavaServerPing;
 use crate::models::ids::{ProjectId, VersionId};
@@ -14,6 +13,7 @@ use serde_json::Value;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use thiserror::Error;
 use utoipa::ToSchema;
+use xredis::RedisPool;
 
 pub mod backend;
 pub mod incremental;
@@ -150,14 +150,16 @@ async fn hydrate_search_results(
         HashMap::new()
     } else {
         let mut redis = redis_pool.connect().await?;
+        let ping_keys = project_ids
+            .iter()
+            .map(|project_id| {
+                redis_pool
+                    .key()
+                    .entity(server_ping::REDIS_NAMESPACE, project_id)
+            })
+            .collect::<Vec<_>>();
         let ping_results = redis
-            .get_many_deserialized_from_json::<JavaServerPing>(
-                server_ping::REDIS_NAMESPACE,
-                &project_ids
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-            )
+            .get_many_deserialized::<JavaServerPing>(&ping_keys)
             .await?;
 
         ping_results
@@ -202,6 +204,7 @@ pub enum SearchField {
     Author,
     License,
     ProjectTypes,
+    AllProjectTypes,
     ProjectId,
     OpenSource,
     Environment,
@@ -238,6 +241,8 @@ pub struct UploadSearchProject {
     pub project_id: String,
     //
     pub project_types: Vec<String>,
+    #[serde(default)]
+    pub all_project_types: Vec<String>,
     pub slug: Option<String>,
     pub author: String,
     pub author_id: String,
@@ -285,7 +290,7 @@ pub struct UploadSearchProject {
     pub loader_fields: HashMap<String, Vec<serde_json::Value>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct SearchProjectDependency {
     pub project_id: String,
     pub dependency_type: DependencyType,
@@ -294,7 +299,7 @@ pub struct SearchProjectDependency {
     pub icon_url: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct SearchResults {
     pub hits: Vec<ResultSearchProject>,
     pub page: usize,
@@ -302,11 +307,13 @@ pub struct SearchResults {
     pub total_hits: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct ResultSearchProject {
     pub version_id: String,
     pub project_id: String,
     pub project_types: Vec<String>,
+    #[serde(default)]
+    pub all_project_types: Vec<String>,
     pub slug: Option<String>,
     pub author: String,
     #[serde(default)]
@@ -355,6 +362,7 @@ impl From<UploadSearchProject> for ResultSearchProject {
             version_id: source.version_id,
             project_id: source.project_id,
             project_types: source.project_types,
+            all_project_types: source.all_project_types,
             slug: source.slug,
             author: source.author,
             author_id: Some(source.author_id),

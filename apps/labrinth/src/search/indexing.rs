@@ -18,7 +18,6 @@ use crate::database::models::{
     DBOrganizationId, DBProjectId, DBUserId, DBVersionId, LoaderFieldEnumId,
     LoaderFieldEnumValueId, LoaderFieldId,
 };
-use crate::database::redis::RedisPool;
 use crate::models::exp;
 use crate::models::ids::ProjectId;
 use crate::models::projects::{DependencyType, from_duplicate_version_fields};
@@ -26,6 +25,7 @@ use crate::models::v2::projects::LegacyProject;
 use crate::routes::v2_reroute;
 use crate::search::{SearchProjectDependency, UploadSearchProject};
 use crate::util::error::Context;
+use xredis::RedisPool;
 
 struct PartialProject {
     id: DBProjectId,
@@ -495,6 +495,20 @@ async fn build_search_documents(
                 .flat_map(|x| x.loaders.clone())
                 .collect::<Vec<_>>();
 
+            // all valid project types across every version of the project, so that
+            // filters can exclude projects that have *any* version of a given
+            // project type (unlike the version-specific `project_types` field).
+            let mut all_project_types = versions
+                .iter()
+                .flat_map(|x| x.project_types.clone())
+                .collect::<Vec<_>>();
+            all_project_types.sort();
+            all_project_types.dedup();
+            exp::compat::correct_project_types(
+                &project.components,
+                &mut all_project_types,
+            );
+
             for version in versions {
                 let version_fields = VersionField::from_query_json(
                     version.version_fields,
@@ -609,6 +623,7 @@ async fn build_search_documents(
                     slug: project.slug.clone(),
                     // TODO
                     project_types,
+                    all_project_types: all_project_types.clone(),
                     gallery: gallery.clone(),
                     featured_gallery: featured_gallery.clone(),
                     open_source,

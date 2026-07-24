@@ -73,7 +73,7 @@ export class CoreWsConnection {
 		try {
 			frame = JSON.parse(raw) as CoreWsFrame
 		} catch {
-			// Fallback: treat unparseable messages as plain log lines (backwards compat).
+			// Fallback: treat unparsable messages as plain log lines (backwards compat).
 			this.emit('log', raw)
 			return
 		}

@@ -4,9 +4,9 @@ import {
 	commonMessages,
 	defineMessages,
 	formatLoaderLabel,
+	injectFilePicker,
 	injectNotificationManager,
 	InstallationSettingsLayout,
-	provideAppBackup,
 	provideInstallationSettings,
 	useDebugLogger,
 	useVIntl,
@@ -15,32 +15,45 @@ import type { GameVersionTag, PlatformTag } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 
+import SharedInstanceInstallationSettingsControls from '@/components/ui/shared-instances/SharedInstanceInstallationSettingsControls.vue'
+import { useManagedContentPolicy } from '@/composables/instances/use-managed-content-policy'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_version } from '@/helpers/cache'
-import { get_loader_versions } from '@/helpers/metadata'
 import {
-	duplicate,
+	install_existing_instance,
+	install_pack_to_existing_instance,
+	wait_for_install_job,
+} from '@/helpers/install'
+import {
 	edit,
 	get_linked_modpack_info,
-	install,
-	list,
+	unlink_shared_instance,
 	update_managed_modrinth_version,
 	update_repair_modrinth,
-} from '@/helpers/profile'
+} from '@/helpers/instance'
+import { get_loader_versions } from '@/helpers/metadata'
 import { get_game_versions, get_loaders } from '@/helpers/tags'
+import { provideInstanceBackup } from '@/providers/instance-backup'
 import { injectInstanceSettings } from '@/providers/instance-settings'
+import { useTheming } from '@/store/state'
 
 import type { Manifest } from '../../../helpers/types'
 
 const { handleError } = injectNotificationManager()
+const filePicker = injectFilePicker()
 const { formatMessage } = useVIntl()
 const queryClient = useQueryClient()
 const debug = useDebugLogger('AppInstallationSettings')
+const themeStore = useTheming()
 
 const { instance, offline, isMinecraftServer, onUnlinked, closeModal } = injectInstanceSettings()
+const managedContentPolicy = useManagedContentPolicy(instance)
+const skipNonEssentialWarnings = computed(() =>
+	themeStore.getFeatureFlag('skip_non_essential_warnings'),
+)
 
 debug('metadata load: start', {
-	instancePath: instance.value.path,
+	instanceId: instance.value.id,
 	loader: instance.value.loader,
 	gameVersion: instance.value.game_version,
 	installStage: instance.value.install_stage,
@@ -91,25 +104,68 @@ const metadataLoading = computed(() =>
 )
 
 debug('metadata queries configured', {
-	instancePath: instance.value.path,
+	instanceId: instance.value.id,
 	loader: instance.value.loader,
 	gameVersion: instance.value.game_version,
 })
 
+const isModrinthLinkedModpack = computed(
+	() =>
+		instance.value.link?.type === 'modrinth_modpack' ||
+		instance.value.link?.type === 'server_project_modpack' ||
+		(instance.value.link?.type === 'shared_instance' &&
+			!!instance.value.link.modpack_project_id &&
+			!!instance.value.link.modpack_version_id),
+)
+const isImportedModpack = computed(() => instance.value.link?.type === 'imported_modpack')
+const isSharedInstanceManagedModpack = managedContentPolicy.isManagedModpack
+const canUnlinkSharedInstance = managedContentPolicy.canUnlink
+
 const modpackInfoQuery = useQuery({
-	queryKey: computed(() => ['linkedModpackInfo', instance.value.path]),
-	queryFn: () => get_linked_modpack_info(instance.value.path, 'must_revalidate'),
-	enabled: computed(() => !!instance.value.linked_data?.project_id && !offline),
+	queryKey: computed(() => ['linkedModpackInfo', instance.value.id]),
+	queryFn: () => get_linked_modpack_info(instance.value.id, 'must_revalidate'),
+	enabled: computed(() => isModrinthLinkedModpack.value && !offline),
 })
 const modpackInfo = modpackInfoQuery.data
 
 const repairing = ref(false)
 const reinstalling = ref(false)
+const unlinkingSharedInstance = ref(false)
+const installationSettingsBusy = computed(
+	() =>
+		instance.value.quarantined ||
+		instance.value.install_stage !== 'installed' ||
+		repairing.value ||
+		reinstalling.value ||
+		unlinkingSharedInstance.value ||
+		!!offline,
+)
+const installationSettingsBusyMessage = computed(() =>
+	instance.value.quarantined ? formatMessage(messages.locked) : null,
+)
+
+async function unlinkSharedInstance() {
+	unlinkingSharedInstance.value = true
+	try {
+		await unlink_shared_instance(instance.value.id)
+		await queryClient.invalidateQueries({ queryKey: ['sharedInstanceUsers', instance.value.id] })
+		await queryClient.invalidateQueries({ queryKey: ['linkedModpackInfo', instance.value.id] })
+		onUnlinked()
+	} catch (error) {
+		handleError(error)
+	} finally {
+		unlinkingSharedInstance.value = false
+	}
+}
 
 const messages = defineMessages({
 	loaderVersion: {
 		id: 'instance.settings.tabs.installation.loader-version',
 		defaultMessage: '{loader} version',
+	},
+	locked: {
+		id: 'instance.settings.tabs.installation.locked',
+		defaultMessage: 'Installation settings are unavailable while this instance is locked.',
 	},
 })
 
@@ -129,24 +185,21 @@ function getManifest(loader: string) {
 	return manifest
 }
 
-provideAppBackup({
-	async createBackup() {
-		debug('createBackup: start', {
-			instancePath: instance.value.path,
-			instanceName: instance.value.name,
-		})
-		const allProfiles = await list()
-		const prefix = `${instance.value.name} - Backup #`
-		const existingNums = allProfiles
-			.filter((p) => p.name.startsWith(prefix))
-			.map((p) => parseInt(p.name.slice(prefix.length), 10))
-			.filter((n) => !isNaN(n))
-		const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1
-		const newPath = await duplicate(instance.value.path)
-		await edit(newPath, { name: `${prefix}${nextNum}` })
-		debug('createBackup: done', { newPath, backupName: `${prefix}${nextNum}` })
-	},
-})
+async function installLocalModpackFromPicker() {
+	const picked = await filePicker.pickModpackFile({ readFile: false })
+	if (!picked?.path) return false
+
+	const job = await install_pack_to_existing_instance(instance.value.id, {
+		type: 'fromFile',
+		path: picked.path,
+	}).catch(handleError)
+	if (!job) return false
+
+	const completed = await wait_for_install_job(job.job_id).catch(handleError)
+	return !!completed
+}
+
+provideInstanceBackup(instance)
 
 provideInstallationSettings({
 	closeSettings: closeModal,
@@ -172,15 +225,24 @@ provideInstallationSettings({
 		}
 		return rows
 	}),
-	isLinked: computed(() => !!instance.value.linked_data?.locked),
-	isBusy: computed(
+	isLinked: computed(
 		() =>
-			instance.value.install_stage !== 'installed' ||
-			repairing.value ||
-			reinstalling.value ||
-			!!offline,
+			isModrinthLinkedModpack.value ||
+			isImportedModpack.value ||
+			isSharedInstanceManagedModpack.value,
 	),
+	isBusy: installationSettingsBusy,
+	busyMessage: installationSettingsBusyMessage,
+	skipNonEssentialWarnings,
 	modpack: computed(() => {
+		if (isImportedModpack.value && instance.value.link?.type === 'imported_modpack') {
+			return {
+				iconUrl: instance.value.icon_path,
+				title: instance.value.link.name ?? instance.value.name,
+				versionNumber: instance.value.link.version_number ?? undefined,
+				filename: instance.value.link.filename ?? undefined,
+			}
+		}
 		if (!modpackInfo.value) return null
 		return {
 			iconUrl: modpackInfo.value.project.icon_url,
@@ -224,16 +286,31 @@ provideInstallationSettings({
 			debug('resolveLoaderVersions: no manifest', { loader, gameVersion })
 			return []
 		}
-		if (loader === 'fabric' || loader === 'quilt') {
-			const result = manifest.gameVersions[0]?.loaders ?? []
-			debug('resolveLoaderVersions: fabric/quilt result', {
+		const entry = manifest.gameVersions?.find((item) => item.id === gameVersion)
+		if (entry?.versionGroup) {
+			const result =
+				manifest.versionGroups?.find((group) => group.id === entry.versionGroup)?.loaders ?? []
+			debug('resolveLoaderVersions: version group result', {
+				loader,
+				gameVersion,
+				versionGroup: entry.versionGroup,
+				count: result.length,
+			})
+			return result
+		}
+		const placeholder = manifest.gameVersions?.find((item) => item.id === '${modrinth.gameVersion}')
+		if (placeholder) {
+			const result = manifest.gameVersions?.some((item) => item.id === gameVersion)
+				? placeholder.loaders
+				: []
+			debug('resolveLoaderVersions: placeholder result', {
 				loader,
 				gameVersion,
 				count: result.length,
 			})
 			return result
 		}
-		const result = manifest.gameVersions?.find((item) => item.id === gameVersion)?.loaders ?? []
+		const result = entry?.loaders ?? []
 		debug('resolveLoaderVersions: result', { loader, gameVersion, count: result.length })
 		return result
 	},
@@ -261,25 +338,25 @@ provideInstallationSettings({
 
 	async save(platform, gameVersion, loaderVersionId) {
 		debug('save: called', {
-			instancePath: instance.value.path,
+			instanceId: instance.value.id,
 			platform,
 			gameVersion,
 			loaderVersionId,
 		})
-		const editProfile: Record<string, string | undefined> = {
+		const editInstancePatch: Record<string, string | undefined> = {
 			loader: platform,
 			game_version: gameVersion,
 		}
 		if (platform !== 'vanilla' && loaderVersionId) {
-			editProfile.loader_version = loaderVersionId
+			editInstancePatch.loader_version = loaderVersionId
 		}
-		await edit(instance.value.path, editProfile).catch(handleError)
-		debug('save: edit complete', { editProfile })
+		await edit(instance.value.id, editInstancePatch).catch(handleError)
+		debug('save: edit complete', { editInstancePatch })
 	},
 
 	afterSave: async () => {
-		debug('afterSave: installing', { instancePath: instance.value.path })
-		await install(instance.value.path, false).catch(handleError)
+		debug('afterSave: installing', { instanceId: instance.value.id })
+		await install_existing_instance(instance.value.id, false).catch(handleError)
 		trackEvent('InstanceRepair', {
 			loader: instance.value.loader,
 			game_version: instance.value.game_version,
@@ -288,9 +365,9 @@ provideInstallationSettings({
 	},
 
 	async repair() {
-		debug('repair: called', { instancePath: instance.value.path })
+		debug('repair: called', { instanceId: instance.value.id })
 		repairing.value = true
-		await install(instance.value.path, true).catch(handleError)
+		await install_existing_instance(instance.value.id, true).catch(handleError)
 		repairing.value = false
 		trackEvent('InstanceRepair', {
 			loader: instance.value.loader,
@@ -300,24 +377,52 @@ provideInstallationSettings({
 	},
 
 	async reinstallModpack() {
-		debug('reinstallModpack: called', { instancePath: instance.value.path })
+		debug('reinstallModpack: called', { instanceId: instance.value.id })
 		reinstalling.value = true
-		await update_repair_modrinth(instance.value.path).catch(handleError)
-		reinstalling.value = false
-		trackEvent('InstanceRepair', {
-			loader: instance.value.loader,
-			game_version: instance.value.game_version,
-		})
+		let shouldTrack = false
+		try {
+			if (isImportedModpack.value) {
+				shouldTrack = await installLocalModpackFromPicker()
+			} else {
+				await update_repair_modrinth(instance.value.id).catch(handleError)
+				shouldTrack = true
+			}
+		} finally {
+			reinstalling.value = false
+		}
+		if (shouldTrack) {
+			trackEvent('InstanceRepair', {
+				loader: instance.value.loader,
+				game_version: instance.value.game_version,
+			})
+		}
 		debug('reinstallModpack: done')
 	},
 
+	async swapModpack() {
+		debug('swapModpack: called', { instanceId: instance.value.id })
+		reinstalling.value = true
+		try {
+			const installed = await installLocalModpackFromPicker()
+			if (installed) {
+				trackEvent('InstanceRepair', {
+					loader: instance.value.loader,
+					game_version: instance.value.game_version,
+				})
+			}
+		} finally {
+			reinstalling.value = false
+		}
+		debug('swapModpack: done')
+	},
+
 	async unlinkModpack() {
-		debug('unlinkModpack: called', { instancePath: instance.value.path })
-		await edit(instance.value.path, {
-			linked_data: null as unknown as undefined,
+		debug('unlinkModpack: called', { instanceId: instance.value.id })
+		await edit(instance.value.id, {
+			link: null as unknown as undefined,
 		})
 		await queryClient.invalidateQueries({
-			queryKey: ['linkedModpackInfo', instance.value.path],
+			queryKey: ['linkedModpackInfo', instance.value.id],
 		})
 		onUnlinked()
 		debug('unlinkModpack: done')
@@ -326,11 +431,9 @@ provideInstallationSettings({
 	getCachedModpackVersions: () => null,
 	async fetchModpackVersions() {
 		debug('fetchModpackVersions: called', {
-			projectId: instance.value.linked_data?.project_id,
+			projectId: instance.value.link?.project_id,
 		})
-		const versions = await get_project_versions(instance.value.linked_data!.project_id!).catch(
-			handleError,
-		)
+		const versions = await get_project_versions(instance.value.link!.project_id!).catch(handleError)
 		debug('fetchModpackVersions: done', { count: versions?.length ?? 0 })
 		return (versions ?? []) as Labrinth.Versions.v2.Version[]
 	},
@@ -345,19 +448,18 @@ provideInstallationSettings({
 	async onModpackVersionConfirm(version) {
 		debug('onModpackVersionConfirm: called', {
 			versionId: version.id,
-			instancePath: instance.value.path,
+			instanceId: instance.value.id,
 		})
-		await update_managed_modrinth_version(instance.value.path, version.id)
+		await update_managed_modrinth_version(instance.value.id, version.id)
 		await queryClient.invalidateQueries({
-			queryKey: ['linkedModpackInfo', instance.value.path],
+			queryKey: ['linkedModpackInfo', instance.value.id],
 		})
 		debug('onModpackVersionConfirm: done')
 	},
 
 	updaterModalProps: computed(() => ({
 		isApp: true,
-		currentVersionId:
-			modpackInfo.value?.update_version_id ?? instance.value.linked_data?.version_id ?? '',
+		currentVersionId: modpackInfo.value?.update_version_id ?? instance.value.link?.version_id ?? '',
 		projectIconUrl: modpackInfo.value?.project?.icon_url,
 		projectName: modpackInfo.value?.project?.title ?? 'Modpack',
 		currentGameVersion: instance.value.game_version,
@@ -366,12 +468,29 @@ provideInstallationSettings({
 
 	isServer: false,
 	isApp: true,
-	showModpackVersionActions: !isMinecraftServer.value,
+	showModpackVersionActions: computed(
+		() =>
+			isModrinthLinkedModpack.value &&
+			!isMinecraftServer.value &&
+			!isSharedInstanceManagedModpack.value,
+	),
+	isLocalFile: isImportedModpack,
+	isManagedModpack: isSharedInstanceManagedModpack,
+	managedModpackWarning: managedContentPolicy.managedModpackWarning,
 	repairing,
 	reinstalling,
 })
 </script>
 
 <template>
-	<InstallationSettingsLayout />
+	<InstallationSettingsLayout>
+		<template #extra>
+			<SharedInstanceInstallationSettingsControls
+				:can-unlink="canUnlinkSharedInstance"
+				:busy="installationSettingsBusy"
+				:unlinking="unlinkingSharedInstance"
+				:unlink="unlinkSharedInstance"
+			/>
+		</template>
+	</InstallationSettingsLayout>
 </template>
