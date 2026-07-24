@@ -587,7 +587,11 @@ importers:
         specifier: ^2.4.2
         version: 2.6.1
 
-  packages/copal-cli: {}
+  packages/copal-cli:
+    optionalDependencies:
+      '@amberitedev/copal-linux-x64':
+        specifier: 0.1.0
+        version: link:../copal-linux-x64
 
   packages/copal-linux-x64: {}
 
@@ -6929,7 +6933,7 @@ packages:
     engines: {node: '>=12.0.0'}
 
   highlightjs-mcfunction@https://codeload.github.com/modrinth/better-highlightjs-mcfunction/tar.gz/aa999b763fd792ffb950d28347eeb6811c83ea8e:
-    resolution: {integrity: sha512-pCS2yd9Polaee8CnfjSS41H1Zk4Qr3SwNHl/wjV7qZU4Plc2rsbrIvffcCCKU/QZcwPOuP9bIIefstjMn+zU5g==, tarball: https://codeload.github.com/modrinth/better-highlightjs-mcfunction/tar.gz/aa999b763fd792ffb950d28347eeb6811c83ea8e}
+    resolution: {tarball: https://codeload.github.com/modrinth/better-highlightjs-mcfunction/tar.gz/aa999b763fd792ffb950d28347eeb6811c83ea8e}
     version: 1.0.0
 
   hookable@5.5.3:
