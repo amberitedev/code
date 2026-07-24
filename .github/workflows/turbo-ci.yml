@@ -78,7 +78,7 @@ jobs:
       RUSTFLAGS: -Dwarnings
       # sccache config (only populated for internal branches; secrets aren't
       # available to forked PRs)
-      SCCACHE_DIR: ${{ needs.skip-if-clean.outputs.internal == 'true' && '/mnt/sccache' || '' }}
+      SCCACHE_DIR: ${{ needs.skip-if-clean.outputs.internal == 'true' && format('{0}/sccache', runner.temp) || '' }}
       SCCACHE_CACHE_SIZE: ${{ needs.skip-if-clean.outputs.internal == 'true' && '10G' || '' }}
       RUSTC_WRAPPER: ${{ needs.skip-if-clean.outputs.internal == 'true' && 'sccache' || '' }}
       CARGO_INCREMENTAL: 0

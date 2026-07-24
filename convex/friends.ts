@@ -263,8 +263,11 @@ async function resolveTargetUser(
 }
 
 async function assertNotBlocked(ctx: QueryCtx, a: string, b: string) {
-	const [ab, ba] = await Promise.all([blockByPair(ctx, a, b), blockByPair(ctx, b, a)])
-	if (ab || ba) throw new Error('blocked users cannot interact')
+	const [blockedForward, blockedReverse] = await Promise.all([
+		blockByPair(ctx, a, b),
+		blockByPair(ctx, b, a),
+	])
+	if (blockedForward || blockedReverse) throw new Error('blocked users cannot interact')
 }
 
 async function removeFriendship(ctx: MutationCtx, a: string, b: string) {
