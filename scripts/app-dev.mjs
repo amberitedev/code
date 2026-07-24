@@ -79,7 +79,7 @@ async function checkCloudFreshness() {
 	const child = spawn(command, args, {
 		cwd: worktree,
 		stdio: 'inherit',
-		windowsHide: false,
+		windowsHide: true,
 		env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
 	})
 	const exitCode = await new Promise((resolveExit, reject) => {
@@ -707,7 +707,7 @@ function spawnLogged(command, args, cwd, logPath, extraEnv = {}) {
 	const child = spawn(command, args, {
 		cwd,
 		stdio: ['ignore', log, log],
-		windowsHide: false,
+		windowsHide: true,
 		env: { ...process.env, ...extraEnv, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
 	})
 	closeSync(log)
@@ -861,7 +861,7 @@ async function runWindowsHost() {
 	const child = spawn(process.execPath, [tauriScript, ...process.argv.slice(5)], {
 		stdio: 'inherit',
 		env: process.env,
-		windowsHide: false,
+		windowsHide: true,
 	})
 	const exitCode = await new Promise((resolveExit) => {
 		child.once('error', () => resolveExit(1))

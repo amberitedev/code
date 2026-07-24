@@ -237,10 +237,8 @@ async function checkCloudFreshness() {
 		)
 	}
 	if (ahead > 0) {
-		if (!(await confirmPush(ahead))) {
-			throw new Error('[convex] Push declined; the app was not started.')
-		}
-		runGit(['push', 'origin', 'main'])
+		if (await confirmPush(ahead)) runGit(['push', 'origin', 'main'])
+		else console.log('[convex] Push skipped; starting the app with the current cloud deployment.')
 	}
 
 	const deployed = runConvex(
@@ -258,10 +256,11 @@ async function checkCloudFreshness() {
 	const deployedSha = deployed.stdout.trim()
 	const mainSha = gitValue(worktree, ['rev-parse', 'main'])
 	if (deployedSha !== mainSha) {
-		throw new Error(
-			`[convex] Remote development is at ${shortSha(deployedSha)}, but main is ${shortSha(mainSha)}. ` +
-				'Wait for the cloud deployment to finish, then retry.',
+		console.warn(
+			`[convex] WARNING: Remote development is at ${shortSha(deployedSha)}, ` +
+				`but main is ${shortSha(mainSha)}. Starting the app with the current cloud deployment.`,
 		)
+		return
 	}
 	console.log(`[convex] Remote development is current at ${shortSha(mainSha)}.`)
 }
@@ -375,7 +374,7 @@ function runGit(args) {
 	const result = spawnSync('git', safeArgs, {
 		cwd: worktree,
 		stdio: 'inherit',
-		windowsHide: false,
+		windowsHide: true,
 	})
 	if (result.status !== 0) throw new Error(`Git command failed: git ${args.join(' ')}`)
 }
