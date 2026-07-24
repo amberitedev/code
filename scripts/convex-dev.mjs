@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import net from 'node:net'
 import { dirname, join, resolve, sep } from 'node:path'
+import { createInterface } from 'node:readline/promises'
 
 import {
 	commandForPnpm,
@@ -36,6 +37,7 @@ try {
 	if (action === 'local') await startLocal(baseline)
 	else if (action === 'reset') resetLocal(baseline)
 	else if (action === 'cloud') await selectCloud()
+	else if (action === 'check-cloud') await checkCloudFreshness()
 	else if (action === 'seed-cloud') seedCloudAccounts()
 	else if (action === 'status') printStatus()
 	else if (action === 'stop') await stopLocal()
@@ -219,6 +221,77 @@ async function selectCloud() {
 	console.log('This worktree now uses the cloud development deployment.')
 }
 
+async function checkCloudFreshness() {
+	const env = readEnvFile(join(worktree, '.env.local'))
+	if (env.CONVEX_DEPLOYMENT?.startsWith('local:')) {
+		console.log('[convex] Using this worktree\'s local deployment; cloud freshness check skipped.')
+		return
+	}
+
+	runGit(['fetch', '--quiet', 'origin', 'main'])
+	const ahead = Number(gitValue(worktree, ['rev-list', '--count', 'origin/main..main']))
+	const behind = Number(gitValue(worktree, ['rev-list', '--count', 'main..origin/main']))
+	if (behind > 0) {
+		throw new Error(
+			'[convex] Local main is behind or diverged from origin/main. Sync main before starting the app.',
+		)
+	}
+	if (ahead > 0) {
+		if (!(await confirmPush(ahead))) {
+			throw new Error('[convex] Push declined; the app was not started.')
+		}
+		runGit(['push', 'origin', 'main'])
+	}
+
+	const deployed = runConvex(
+		['env', 'get', 'AMBERITE_DEV_GIT_SHA', '--deployment', 'dev'],
+		'pipe',
+		false,
+	)
+	if (deployed.status !== 0) {
+		const details = deployed.stderr?.trim() || deployed.stdout?.trim()
+		throw new Error(
+			`[convex] Could not verify the remote development deployment.${details ? `\n${details}` : ''}`,
+		)
+	}
+
+	const deployedSha = deployed.stdout.trim()
+	const mainSha = gitValue(worktree, ['rev-parse', 'main'])
+	if (deployedSha !== mainSha) {
+		throw new Error(
+			`[convex] Remote development is at ${shortSha(deployedSha)}, but main is ${shortSha(mainSha)}. ` +
+				'Wait for the cloud deployment to finish, then retry.',
+		)
+	}
+	console.log(`[convex] Remote development is current at ${shortSha(mainSha)}.`)
+}
+
+async function confirmPush(commitCount) {
+	if (!process.stdin.isTTY || !process.stdout.isTTY) {
+		throw new Error(
+			`[convex] Local main has ${commitCount} unpushed commit(s). ` +
+				'Run pnpm app:dev in an interactive terminal to choose whether to push.',
+		)
+	}
+	const prompt = createInterface({ input: process.stdin, output: process.stdout })
+	try {
+		for (;;) {
+			const answer = (
+				await prompt.question(
+					`[convex] Local main has ${commitCount} unpushed commit(s). Push them now? [y/N] `,
+				)
+			)
+				.trim()
+				.toLowerCase()
+			if (answer === 'y' || answer === 'yes') return true
+			if (answer === '' || answer === 'n' || answer === 'no') return false
+			console.log('Please answer yes or no.')
+		}
+	} finally {
+		prompt.close()
+	}
+}
+
 function seedCloudAccounts() {
 	runConvex(['env', 'set', 'AMBERITE_DEV_MODE', 'true', '--deployment', 'dev'])
 	runConvex(['run', 'dev:ensureAccounts', '{}', '--deployment', 'dev'])
@@ -296,6 +369,17 @@ function runConvex(args, stdio = 'inherit', fail = true) {
 	return result
 }
 
+function runGit(args) {
+	const safeArgs =
+		process.platform === 'win32' ? ['-c', `safe.directory=${worktree}`, ...args] : args
+	const result = spawnSync('git', safeArgs, {
+		cwd: worktree,
+		stdio: 'inherit',
+		windowsHide: false,
+	})
+	if (result.status !== 0) throw new Error(`Git command failed: git ${args.join(' ')}`)
+}
+
 function waitForUrl(rawUrl, timeoutMs) {
 	const url = new URL(rawUrl)
 	const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80))
@@ -355,4 +439,8 @@ function delay(ms) {
 
 function validPort(value) {
 	return Number.isInteger(value) && value >= 1 && value <= 65_535
+}
+
+function shortSha(value) {
+	return value ? value.slice(0, 8) : 'unknown'
 }

@@ -66,11 +66,29 @@ if (action === 'windows-host' && process.platform === 'win32') {
 
 async function runClient() {
 	const request = requestForCommand()
+	if (action === 'start' || action === 'start-auth') await checkCloudFreshness()
 	await ensureController()
 	const response = await sendRequest(request, request.action === 'restart' ? 120_000 : 15_000)
 	if (!response.ok) throw new Error(response.error)
 	printResult(action, response.result)
 	if (action === 'start' || action === 'start-auth') await attachToApp(response.result)
+}
+
+async function checkCloudFreshness() {
+	const { command, args } = commandForPnpm(['convex:dev:check-cloud'])
+	const child = spawn(command, args, {
+		cwd: worktree,
+		stdio: 'inherit',
+		windowsHide: false,
+		env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
+	})
+	const exitCode = await new Promise((resolveExit, reject) => {
+		child.once('error', reject)
+		child.once('exit', (code) => resolveExit(code ?? 1))
+	})
+	if (exitCode !== 0) {
+		throw new Error('The Convex cloud check failed; the app was not started.')
+	}
 }
 
 async function attachToApp(app) {
@@ -689,7 +707,6 @@ function spawnLogged(command, args, cwd, logPath, extraEnv = {}) {
 	const child = spawn(command, args, {
 		cwd,
 		stdio: ['ignore', log, log],
-		detached: true,
 		windowsHide: false,
 		env: { ...process.env, ...extraEnv, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
 	})
