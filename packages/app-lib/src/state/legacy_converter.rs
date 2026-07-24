@@ -8,9 +8,9 @@ use crate::state::instances::{
 use crate::state::{
     CacheValue, CachedEntry, CachedFile, CachedFileHash, CachedFileUpdate,
     Credentials, DefaultPage, DependencyType, DeviceToken, DeviceTokenKey,
-    DeviceTokenPair, FileType, Hooks, LauncherFeatureVersion, LinkedData,
-    MemorySettings, ModrinthCredentials, Profile, ProfileInstallStage,
-    ProfileType, ReleaseChannel, TeamMember, Theme, VersionFile, WindowSize,
+    DeviceTokenPair, FileType, Hooks, InstanceInstallStage,
+    LauncherFeatureVersion, MemorySettings, ModrinthCredentials,
+    ReleaseChannel, TeamMember, Theme, VersionFile, WindowSize,
 };
 use crate::util::fetch::{IoSemaphore, read_json};
 use chrono::{DateTime, Utc};
@@ -308,78 +308,47 @@ where
                     }
                 }
 
-                Profile {
-                    path: profile.path,
-                    install_stage: match profile.install_stage {
-                        LegacyProfileInstallStage::Installed => {
-                            ProfileInstallStage::Installed
-                        }
-                        LegacyProfileInstallStage::Installing => {
-                            ProfileInstallStage::MinecraftInstalling
-                        }
-                        LegacyProfileInstallStage::PackInstalling => {
-                            ProfileInstallStage::PackInstalling
-                        }
-                        LegacyProfileInstallStage::NotInstalled => {
-                            ProfileInstallStage::NotInstalled
-                        }
-                    },
-                    launcher_feature_version: LauncherFeatureVersion::None,
-                    profile_type: ProfileType::Client,
-                    core_instance_id: None,
-                    server_manifest_json: None,
-                    name: profile.metadata.name,
-                    icon_path: profile.metadata.icon,
-                    game_version: profile.metadata.game_version,
-                    protocol_version: None,
-                    loader: profile.metadata.loader.into(),
-                    loader_version: profile
-                        .metadata
-                        .loader_version
-                        .map(|x| x.id),
-                    groups: profile.metadata.groups,
-                    linked_data: profile.metadata.linked_data.and_then(|x| {
-                        if let Some(project_id) = x.project_id
-                            && let Some(version_id) = x.version_id
-                            && let Some(locked) = x.locked
-                        {
-                            return Some(LinkedData {
-                                project_id,
-                                version_id,
-                                locked,
-                            });
-                        }
-
-                        None
-                    }),
-                    preferred_update_channel: ReleaseChannel::Release,
-                    created: profile.metadata.date_created,
-                    modified: profile.metadata.date_modified,
-                    last_played: profile.metadata.last_played,
-                    submitted_time_played: profile
-                        .metadata
-                        .submitted_time_played,
-                    recent_time_played: profile.metadata.recent_time_played,
-                    java_path: profile.java.as_ref().and_then(|x| {
-                        x.override_version.clone().map(|x| x.path)
-                    }),
-                    extra_launch_args: profile
-                        .java
-                        .as_ref()
-                        .and_then(|x| x.extra_arguments.clone()),
-                    custom_env_vars: profile
-                        .java
-                        .and_then(|x| x.custom_env_args),
-                    memory: profile
-                        .memory
-                        .map(|x| MemorySettings { maximum: x.maximum }),
-                    force_fullscreen: profile.fullscreen,
-                    game_resolution: profile
-                        .resolution
-                        .map(|x| WindowSize(x.0, x.1)),
-                    hooks: Hooks {
-                        pre_launch: profile
-                            .hooks
+                upsert_legacy_instance(
+                    exec,
+                    LegacyInstanceUpsert {
+                        path: profile.path,
+                        install_stage: match profile.install_stage {
+                            LegacyInstanceInstallStage::Installed => {
+                                InstanceInstallStage::Installed
+                            }
+                            LegacyInstanceInstallStage::Installing => {
+                                InstanceInstallStage::MinecraftInstalling
+                            }
+                            LegacyInstanceInstallStage::PackInstalling => {
+                                InstanceInstallStage::PackInstalling
+                            }
+                            LegacyInstanceInstallStage::NotInstalled => {
+                                InstanceInstallStage::NotInstalled
+                            }
+                        },
+                        launcher_feature_version: LauncherFeatureVersion::None,
+                        name: profile.metadata.name,
+                        icon_path: profile.metadata.icon,
+                        game_version: profile.metadata.game_version,
+                        loader: profile.metadata.loader.into(),
+                        loader_version: profile
+                            .metadata
+                            .loader_version
+                            .map(|x| x.id),
+                        groups: profile.metadata.groups,
+                        linked_data: profile.metadata.linked_data,
+                        created: profile.metadata.date_created,
+                        modified: profile.metadata.date_modified,
+                        last_played: profile.metadata.last_played,
+                        submitted_time_played: profile
+                            .metadata
+                            .submitted_time_played,
+                        recent_time_played: profile.metadata.recent_time_played,
+                        java_path: profile.java.as_ref().and_then(|x| {
+                            x.override_version.clone().map(|x| x.path)
+                        }),
+                        extra_launch_args: profile
+                            .java
                             .as_ref()
                             .and_then(|x| x.extra_arguments.clone()),
                         custom_env_vars: profile
