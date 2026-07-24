@@ -6,17 +6,17 @@ import dayjs from 'dayjs'
 import { inject, onUnmounted, ref } from 'vue'
 
 import NavButton from '@/components/ui/NavButton.vue'
-import { profile_listener } from '@/helpers/events.js'
-import { list } from '@/helpers/profile'
+import { instance_listener } from '@/helpers/events.js'
+import { list } from '@/helpers/instance'
 
 const { handleError } = injectNotificationManager()
 const beginLibraryInstanceOpenNavigation = inject('beginLibraryInstanceOpenNavigation', null)
 
 const recentInstances = ref([])
 const getInstances = async () => {
-	const profiles = await list().catch(handleError)
+	const instances = await list().catch(handleError)
 
-	recentInstances.value = profiles
+	recentInstances.value = instances
 		.sort((a, b) => {
 			const dateACreated = dayjs(a.created)
 			const dateAPlayed = a.last_played ? dayjs(a.last_played) : dayjs(0)
@@ -36,15 +36,15 @@ const getInstances = async () => {
 		.slice(0, 3)
 }
 
-let unlistenProfile = () => {}
+let unlistenInstance = () => {}
 
 onUnmounted(() => {
-	unlistenProfile()
+	unlistenInstance()
 })
 
 await getInstances()
 
-unlistenProfile = await profile_listener(async (event) => {
+unlistenInstance = await instance_listener(async (event) => {
 	if (event.event !== 'synced') {
 		await getInstances()
 	}
@@ -70,7 +70,7 @@ function beginInstanceOpen(instance) {
 			<Avatar
 				:src="instance.icon_path ? convertFileSrc(instance.icon_path) : null"
 				size="28px"
-				:tint-by="instance.path"
+				:tint-by="instance.id"
 				:class="`transition-all ${instance.install_stage !== 'installed' ? `brightness-[0.25] scale-[0.85]` : `group-hover:brightness-75`}`"
 			/>
 			<div

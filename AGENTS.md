@@ -16,7 +16,7 @@ Amberite is in the final push toward its Version 1.0 release. Before doing produ
 - `feature-list.md` — canonical feature and release specification.
 - `TODO.md` — current Version 1.0 release blockers.
 
-do not modify `TODO.md` when finishing a task unless user asks you can only checak off stuff in `TODO.md` if user says that thare done.
+do not modify `TODO.md` when finishing a task unless the user asks; you can only check off items in `TODO.md` if the user says that they are done.
 
 ---
 

@@ -5,17 +5,17 @@
 </template>
 
 <script setup lang="ts">
-import type { ContentItem } from '#ui/layouts/shared/content-tab/types'
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
 import { useReadyState } from '#ui/composables'
-import { injectHostingBackend, injectNotificationManager } from '#ui/providers'
 import ContentPageLayout from '#ui/layouts/shared/content-tab/layout.vue'
 import type { ContentModpackData } from '#ui/layouts/shared/content-tab/providers/content-manager'
 import { provideContentManager } from '#ui/layouts/shared/content-tab/providers/content-manager'
+import type { ContentItem } from '#ui/layouts/shared/content-tab/types'
+import { injectHostingBackend, injectNotificationManager } from '#ui/providers'
 
 import { injectCoreServerContext } from './context'
 import { toContentItem } from './mappers'

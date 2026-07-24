@@ -3,7 +3,7 @@ import { InfoIcon, XIcon } from '@modrinth/assets'
 import { computed, shallowRef, toValue, watch } from 'vue'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
-import Checkbox from '#ui/components/base/Checkbox.vue'
+import Toggle from '#ui/components/base/Toggle.vue'
 import SearchSidebarFilter from '#ui/components/search/SearchSidebarFilter.vue'
 import { useVIntl } from '#ui/composables/i18n'
 import { commonMessages } from '#ui/utils/common-messages'
@@ -22,6 +22,13 @@ const visibleServerFilterTypes = shallowRef(
 	ctx.serverFilterTypes.value.filter((filter) => filter.options.length > 0),
 )
 const visibleIsServerType = computed(() => visibleProjectType.value === 'server')
+const advancedFiltersCollapsed = computed(() => ctx.advancedFiltersCollapsed?.value ?? true)
+
+function setAdvancedFiltersCollapsed(collapsed: boolean) {
+	if (ctx.advancedFiltersCollapsed) {
+		ctx.advancedFiltersCollapsed.value = collapsed
+	}
+}
 
 function syncVisibleSidebarState() {
 	visibleProjectType.value = ctx.visibleProjectType?.value ?? ctx.projectType.value
@@ -52,7 +59,7 @@ const buttonClass = computed(() => {
 	if (isApp.value) {
 		return 'button-animation flex flex-col gap-1 px-3 py-3 w-full bg-transparent cursor-pointer border-none hover:bg-button-bg'
 	}
-	return 'button-animation flex flex-col gap-1 px-6 py-3 w-full bg-transparent cursor-pointer border-none'
+	return 'button-animation flex flex-col gap-1 px-4 py-3 w-full bg-transparent cursor-pointer border-none'
 })
 
 const contentClass = computed(() => (isApp.value ? 'mt-2 mb-3' : 'mb-4 mx-3'))
@@ -63,6 +70,9 @@ function hasProvidedFilter(filterId: string): boolean {
 }
 
 function getFilterOpenByDefault(filterId: string): boolean {
+	if (filterId === 'advanced') {
+		return !advancedFiltersCollapsed.value
+	}
 	if (hasProvidedFilter(filterId)) {
 		return true
 	}
@@ -129,33 +139,53 @@ watch(
 		</div>
 
 		<div
-			v-if="ctx.showHideInstalled?.value || ctx.showHideSelected?.value"
+			v-if="
+				ctx.showHideInstalled?.value || ctx.showHideSelected?.value || ctx.showServerOnly?.value
+			"
 			:class="
 				isApp
 					? 'flex flex-col gap-3 border-0 border-b-[1px] p-4 last:border-b-0 border-[--brand-gradient-border] border-solid'
-					: 'card-shadow flex flex-col gap-3 rounded-2xl bg-bg-raised p-4'
+					: 'card-shadow flex flex-col gap-3 rounded-2xl bg-bg-raised border-solid border-surface-4 border p-4'
 			"
 		>
-			<Checkbox
+			<label
+				v-if="ctx.showServerOnly?.value"
+				class="flex cursor-pointer items-center justify-between gap-3 text-contrast font-medium"
+			>
+				{{ ctx.serverOnlyLabel?.value ?? formatMessage(commonMessages.serverOnlyLabel) }}
+				<Toggle
+					v-model="ctx.serverOnly!.value"
+					small
+					class="shrink-0"
+					@update:model-value="ctx.onFilterChange()"
+				/>
+			</label>
+			<label
 				v-if="ctx.showHideInstalled?.value"
-				v-model="ctx.hideInstalled!.value"
-				:label="
+				class="flex cursor-pointer items-center justify-between gap-3 text-contrast font-medium"
+			>
+				{{
 					ctx.hideInstalledLabel?.value ?? formatMessage(commonMessages.hideInstalledContentLabel)
-				"
-				class="filter-checkbox"
-				@update:model-value="ctx.onFilterChange()"
-				@click.prevent.stop
-			/>
-			<Checkbox
+				}}
+				<Toggle
+					v-model="ctx.hideInstalled!.value"
+					small
+					class="shrink-0"
+					@update:model-value="ctx.onFilterChange()"
+				/>
+			</label>
+			<label
 				v-if="ctx.showHideSelected?.value"
-				v-model="ctx.hideSelected!.value"
-				:label="
-					ctx.hideSelectedLabel?.value ?? formatMessage(commonMessages.hideSelectedContentLabel)
-				"
-				class="filter-checkbox"
-				@update:model-value="ctx.onFilterChange()"
-				@click.prevent.stop
-			/>
+				class="flex cursor-pointer items-center justify-between gap-3 text-contrast font-medium"
+			>
+				{{ ctx.hideSelectedLabel?.value ?? formatMessage(commonMessages.hideSelectedContentLabel) }}
+				<Toggle
+					v-model="ctx.hideSelected!.value"
+					small
+					class="shrink-0"
+					@update:model-value="ctx.onFilterChange()"
+				/>
+			</label>
 		</div>
 
 		<template v-if="visibleIsServerType">
@@ -173,7 +203,7 @@ watch(
 				:open-by-default="getFilterOpenByDefault(filterType.id)"
 			>
 				<template #header>
-					<h3 :class="isApp ? 'text-base m-0' : 'm-0 text-lg font-semibold'">
+					<h3 :class="isApp ? 'text-base m-0' : 'm-0 text-base font-semibold'">
 						{{ filterType.formatted_name }}
 					</h3>
 				</template>
@@ -193,6 +223,8 @@ watch(
 				:content-class="contentClass"
 				:inner-panel-class="innerPanelClass"
 				:open-by-default="getFilterOpenByDefault(filter.id)"
+				@on-open="() => filter.id === 'advanced' && setAdvancedFiltersCollapsed(false)"
+				@on-close="() => filter.id === 'advanced' && setAdvancedFiltersCollapsed(true)"
 			>
 				<template #header>
 					<h3 :class="isApp ? 'text-base m-0' : 'm-0 text-lg font-semibold'">

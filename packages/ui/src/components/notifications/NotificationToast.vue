@@ -4,11 +4,11 @@
 	>
 		<div v-if="isInviteNotification" class="flex w-full items-start gap-3">
 			<Avatar
-				:src="actorAvatarUrl"
-				:alt="actorLabel"
-				:tint-by="actorLabel"
+				:src="inviteAvatarUrl"
+				:alt="inviteAvatarLabel"
+				:tint-by="inviteAvatarLabel"
 				size="44px"
-				circle
+				:circle="inviteAvatarCircle"
 				no-shadow
 				class="border border-solid border-surface-5"
 			/>
@@ -35,20 +35,17 @@
 								>.
 							</template>
 							<template v-else>
-								<span class="inline-flex max-w-full items-center gap-[5px] align-[-4px]">
-									<Avatar
-										:src="entityIconUrl"
-										:alt="entityLabel"
-										size="24px"
-										no-shadow
-										raised
-										:tint-by="entityLabel"
-										class="!rounded-[7px]"
-									/>
-									<span class="min-w-0 truncate font-semibold text-contrast">{{
-										entityLabel
-									}}</span> </span
-								>.
+								<Avatar
+									:src="entityIconUrl"
+									:alt="entityLabel"
+									:tint-by="entityLabel"
+									size="28px"
+									no-shadow
+									raised
+									class="inline-block !rounded-lg align-middle"
+								/>
+								<span class="ml-1 font-semibold text-contrast">{{ entityLabel }}</span>
+								<span> instance.</span>
 							</template>
 						</template>
 					</p>
@@ -65,10 +62,17 @@
 				</div>
 				<div class="flex items-center gap-2">
 					<ButtonStyled color="brand">
-						<button @click="$emit('accept')">Accept</button>
+						<button :disabled="actionLoading != null" @click="$emit('accept')">
+							<SpinnerIcon v-if="actionLoading === 'accept'" class="animate-spin" />
+							<CheckIcon v-else />
+							Accept
+						</button>
 					</ButtonStyled>
 					<ButtonStyled type="outlined">
-						<button @click="$emit('decline')">Decline</button>
+						<button :disabled="actionLoading != null" @click="$emit('decline')">
+							<XIcon />
+							Decline
+						</button>
 					</ButtonStyled>
 				</div>
 			</div>
@@ -83,24 +87,15 @@
 				:tint-by="entityLabel"
 				class="!rounded-xl border border-solid border-surface-5"
 			/>
-			<div class="flex min-w-0 flex-1 flex-col" :class="{ 'gap-2.5': type === 'instance-ready' }">
-				<div class="flex min-w-0 flex-1 items-start gap-1">
-					<div class="flex min-w-0 flex-1 flex-col gap-[3px] text-base leading-5">
-						<p
-							ref="titleRef"
-							v-tooltip="truncatedTooltip(titleRef, entityLabel)"
-							class="m-0 min-w-0 truncate text-lg font-semibold leading-6 text-contrast"
-						>
-							{{ entityLabel }}
-						</p>
-						<p
-							ref="statusRef"
-							v-tooltip="truncatedTooltip(statusRef, statusLine)"
-							class="m-0 min-w-0 truncate font-normal leading-tight text-contrast/85"
-						>
-							{{ statusLine }}
-						</p>
-					</div>
+			<div class="notification-toast-main-grid min-w-0 flex-1 text-base leading-5">
+				<p
+					ref="titleRef"
+					v-tooltip="truncatedTooltip(titleRef, entityLabel)"
+					class="col-start-1 col-end-3 row-start-1 m-0 min-w-0 truncate pr-9 text-lg font-semibold leading-6 text-contrast"
+				>
+					{{ entityLabel }}
+				</p>
+				<div class="col-start-2 row-start-1 justify-self-end">
 					<ButtonStyled size="small" type="transparent" circular>
 						<button
 							type="button"
@@ -112,12 +107,53 @@
 						</button>
 					</ButtonStyled>
 				</div>
-				<div v-if="type === 'instance-ready'" class="flex items-center gap-2">
-					<ButtonStyled color="brand">
-						<button @click="$emit('launch')">Launch game</button>
-					</ButtonStyled>
-					<ButtonStyled type="outlined">
-						<button @click="$emit('open-instance')">Instance</button>
+				<div
+					class="col-start-1 col-end-3 row-start-2 flex min-w-0 items-center justify-between gap-0.5"
+				>
+					<p
+						ref="statusRef"
+						v-tooltip="truncatedTooltip(statusRef, statusLine)"
+						class="m-0 min-w-0 flex-1 font-normal leading-tight text-contrast/85"
+						:class="wrapText ? 'whitespace-normal break-words' : 'truncate'"
+					>
+						{{ statusLine }}
+					</p>
+					<div
+						v-if="type === 'instance-download' && progressLabel"
+						class="notification-inline-progress-label flex-none text-xs"
+					>
+						{{ progressLabel }}
+					</div>
+				</div>
+				<div
+					v-if="type === 'instance-ready'"
+					class="col-start-1 col-end-3 row-start-3 mt-2 flex min-w-0 items-center justify-between gap-2"
+				>
+					<div class="flex min-w-0 items-center gap-2">
+						<ButtonStyled color="brand">
+							<button @click="$emit('launch')">Launch game</button>
+						</ButtonStyled>
+						<ButtonStyled type="outlined">
+							<button @click="$emit('open-instance')">Instance</button>
+						</ButtonStyled>
+					</div>
+					<div v-if="progressLabel" class="notification-inline-progress-label flex-none">
+						{{ progressLabel }}
+					</div>
+				</div>
+				<div
+					v-if="type === 'instance-download' && actions?.length"
+					class="col-start-1 col-end-3 row-start-3 mt-2 flex min-w-0 flex-wrap items-center gap-2"
+				>
+					<ButtonStyled
+						v-for="(action, index) in actions"
+						:key="index"
+						:color="action.color || (index === 0 ? 'brand' : undefined)"
+					>
+						<button class="!shadow-none" @click="$emit('action', index)">
+							<component :is="action.icon" v-if="action.icon" />
+							{{ action.label }}
+						</button>
 					</ButtonStyled>
 				</div>
 			</div>
@@ -143,9 +179,11 @@
 </template>
 
 <script setup lang="ts">
-import { XIcon } from '@modrinth/assets'
+import { CheckIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { computed, ref } from 'vue'
 
+import { useFormatBytes, useFormatNumber } from '../../composables'
+import type { PopupNotificationButton, PopupNotificationProgressType } from '../../providers'
 import { truncatedTooltip } from '../../utils/truncate'
 import Avatar from '../base/Avatar.vue'
 import ButtonStyled from '../base/ButtonStyled.vue'
@@ -156,10 +194,12 @@ type NotificationToastType =
 	| 'instance-invite'
 	| 'instance-download'
 	| 'instance-ready'
+type NotificationToastAction = 'accept'
 
 const props = withDefaults(
 	defineProps<{
 		type: NotificationToastType
+		actionLoading?: NotificationToastAction | null
 		actorName?: string | null
 		actorAvatarUrl?: string | null
 		entityName?: string
@@ -167,13 +207,23 @@ const props = withDefaults(
 		statusText?: string
 		progress?: number
 		waiting?: boolean
+		showProgress?: boolean
+		wrapText?: boolean
+		progressType?: PopupNotificationProgressType
+		progressCurrent?: number
+		progressTotal?: number
+		actions?: PopupNotificationButton[]
 	}>(),
 	{
+		actionLoading: null,
 		actorName: null,
 		actorAvatarUrl: null,
 		entityName: '',
 		entityIconUrl: null,
 		waiting: false,
+		showProgress: true,
+		wrapText: false,
+		progressType: 'percentage',
 	},
 )
 
@@ -181,6 +231,7 @@ defineEmits<{
 	accept: []
 	decline: []
 	dismiss: []
+	action: [index: number]
 	launch: []
 	'open-actor': []
 	'open-instance': []
@@ -195,16 +246,21 @@ const isInviteNotification = computed(
 
 const actorLabel = computed(() => props.actorName || 'Someone')
 const entityLabel = computed(() => props.entityName || '')
+const inviteAvatarUrl = computed(() => props.actorAvatarUrl)
+const inviteAvatarLabel = computed(() => actorLabel.value)
+const inviteAvatarCircle = computed(() => true)
 const progressValue = computed(() => Math.max(0, Math.min(1, props.progress ?? 0)))
 const progressPercent = computed(() => Math.round(progressValue.value * 100))
 const isWaitingProgress = computed(() => props.type === 'instance-download' && props.waiting)
+const formatBytes = useFormatBytes()
+const formatNumber = useFormatNumber()
 
 const inviteActionText = computed(() => {
 	if (props.type === 'server-invite') {
 		return 'invited you to manage the server'
 	}
 
-	return 'invited you to play the instance'
+	return 'invited you to'
 })
 
 const resolvedStatusText = computed(() => {
@@ -216,19 +272,55 @@ const resolvedStatusText = computed(() => {
 })
 
 const statusLine = computed(() => {
-	if (props.type !== 'instance-download' || props.waiting) {
-		return resolvedStatusText.value
-	}
-
-	const status = resolvedStatusText.value.trim()
-	return status ? `${status} ${progressPercent.value}%` : `${progressPercent.value}%`
+	return resolvedStatusText.value
 })
 
 const showsBottomProgress = computed(
 	() =>
-		props.type === 'instance-download' ||
+		(props.type === 'instance-download' && props.showProgress) ||
 		(props.type === 'instance-ready' && props.progress != null),
 )
+
+const progressCurrent = computed(() => {
+	if (props.progressCurrent != null) {
+		return Math.max(0, props.progressCurrent)
+	}
+	if (props.progressTotal != null) {
+		return Math.round(progressValue.value * props.progressTotal)
+	}
+	return progressPercent.value
+})
+
+const progressTotal = computed(() => Math.max(0, props.progressTotal ?? 0))
+
+function formatProgressLabel(
+	type: PopupNotificationProgressType | undefined,
+	current: number,
+	total: number,
+): string {
+	if (type === 'bytes' && total > 0) {
+		return `${formatBytes(Math.min(current, total), 1)} / ${formatBytes(total, 1)}`
+	}
+
+	if (type === 'count' && total > 0) {
+		return `${formatNumber(Math.min(current, total))} / ${formatNumber(total)}`
+	}
+
+	return `${progressPercent.value}%`
+}
+
+const progressLabel = computed(() => {
+	if (!showsBottomProgress.value || isWaitingProgress.value) {
+		return ''
+	}
+
+	const primary = formatProgressLabel(
+		props.progressType,
+		progressCurrent.value,
+		progressTotal.value,
+	)
+	return primary
+})
 
 const titleRef = ref<HTMLElement | null>(null)
 const statusRef = ref<HTMLElement | null>(null)
@@ -237,6 +329,22 @@ const statusRef = ref<HTMLElement | null>(null)
 <style scoped>
 .notification-toast {
 	width: min(420px, calc(100vw - 1.5rem));
+}
+
+.notification-toast-main-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	column-gap: 0.25rem;
+	row-gap: 0.1875rem;
+}
+
+.notification-inline-progress-label {
+	flex: 0 0 auto;
+	color: var(--color-secondary);
+	font-variant-numeric: tabular-nums;
+	pointer-events: none;
+	text-align: right;
+	white-space: nowrap;
 }
 
 .notification-toast-dismiss {

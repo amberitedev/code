@@ -49,8 +49,8 @@
 							:show-debug-info="showAdvancedDebugInfo"
 						/>
 					</div>
-				</template>
-			</ServerManageHeader>
+					</template>
+				</ServerManageHeader>
 
 			<div
 				data-core-navigation
@@ -128,12 +128,12 @@ import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import ErrorInformationCard from '#ui/components/base/ErrorInformationCard.vue'
 import NavTabContentTransition from '#ui/components/base/NavTabContentTransition.vue'
 import NavTabs from '#ui/components/base/NavTabs.vue'
-import { useNavTabContentController } from '#ui/composables/nav-tab-content-controller'
 import {
 	PanelServerActionButton,
 	PanelServerOverflowMenu,
 	ServerManageHeader,
 } from '#ui/components/servers/server-header'
+import { useNavTabContentController } from '#ui/composables/nav-tab-content-controller'
 
 import CoreServerSettingsModal from './settings/CoreServerSettingsModal.vue'
 import { useCoreServerRuntime } from './use-core-server-runtime'

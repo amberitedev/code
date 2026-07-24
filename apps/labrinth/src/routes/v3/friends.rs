@@ -2,7 +2,6 @@ use crate::auth::get_user_from_headers;
 use crate::database::PgPool;
 use crate::database::models::friend_item::DBFriend;
 use crate::database::models::{DBUser, DBUserId};
-use crate::database::redis::RedisPool;
 use crate::models::pats::Scopes;
 use crate::models::users::UserFriend;
 use crate::queue::session::AuthQueue;
@@ -16,14 +15,17 @@ use crate::sync::status::get_user_status;
 use actix_web::{HttpRequest, HttpResponse, delete, get, post, web};
 use ariadne::networking::message::ServerToClientMessage;
 use chrono::Utc;
+use xredis::RedisPool;
 
-pub fn config(cfg: &mut web::ServiceConfig) {
+pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
     cfg.service(add_friend);
     cfg.service(remove_friend);
     cfg.service(friends);
 }
 
-#[post("friend/{id}")]
+/// Add a friend.  
+#[utoipa::path(tag = "friends", responses((status = NO_CONTENT)))]
+#[post("/friend/{id}")]
 pub async fn add_friend(
     req: HttpRequest,
     info: web::Path<(String,)>,
@@ -133,7 +135,9 @@ pub async fn add_friend(
     Ok(HttpResponse::NoContent().body(""))
 }
 
-#[delete("friend/{id}")]
+/// Remove a friend.  
+#[utoipa::path(tag = "friends", responses((status = NO_CONTENT)))]
+#[delete("/friend/{id}")]
 pub async fn remove_friend(
     req: HttpRequest,
     info: web::Path<(String,)>,
@@ -175,7 +179,9 @@ pub async fn remove_friend(
     }
 }
 
-#[get("friends")]
+/// List friends.  
+#[utoipa::path(tag = "friends", responses((status = OK, body = Vec<UserFriend>)))]
+#[get("/friends")]
 pub async fn friends(
     req: HttpRequest,
     pool: web::Data<PgPool>,

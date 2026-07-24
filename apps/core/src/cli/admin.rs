@@ -272,7 +272,9 @@ pub(crate) async fn attach_console(
         .write_all(
             format!(
                 "{}\n",
-                serde_json::to_string(&Request::AttachConsole { id })?
+                serde_json::to_string(&Request::AttachConsole {
+                    id: id.clone()
+                })?
             )
             .as_bytes(),
         )

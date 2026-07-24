@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import {
+	type CoreInstanceSummary,
 	CoreOfflineError,
+	type InstallableSyncedProfile,
 	installSyncedProfileFromCore,
 	NetworkError,
 	resolveInstallableSyncedProfiles,
-	type CoreInstanceSummary,
-	type InstallableSyncedProfile,
 } from '@amberite/amberite-api'
 import { PlusIcon } from '@modrinth/assets'
 import { ButtonStyled, injectNotificationManager, NavTabs } from '@modrinth/ui'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { join } from '@tauri-apps/api/path'
 import { remove as removeFile, writeFile as writeFileBytes } from '@tauri-apps/plugin-fs'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useStorage } from '@vueuse/core'
 import { computed, inject, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
