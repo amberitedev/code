@@ -377,6 +377,9 @@
   "content.confirm-deletion.header": {
     "defaultMessage": "刪除{itemType}"
   },
+  "content.confirm-disable.header": {
+    "defaultMessage": "停用{itemType}"
+  },
   "content.confirm-modpack-update.admonition-body": {
     "defaultMessage": "{action, select, downgrade {降級} other {更新}}可能會導致相容性問題。你額外新增至模組包的模組或內容將保留，但可能與新版本不相容。"
   },
@@ -446,11 +449,17 @@
   "content.diff-modal.added-count": {
     "defaultMessage": "已新增 {count} 個"
   },
+  "content.diff-modal.config-files-updated": {
+    "defaultMessage": "已變更設定檔"
+  },
   "content.diff-modal.diff-type.added": {
     "defaultMessage": "已新增（相依項）"
   },
   "content.diff-modal.diff-type.removed": {
     "defaultMessage": "已停用"
+  },
+  "content.diff-modal.diff-type.removed-disabled": {
+    "defaultMessage": "已移除（停用）"
   },
   "content.diff-modal.diff-type.updated": {
     "defaultMessage": "已更新"
@@ -479,8 +488,23 @@
   "content.diff-modal.loader-updated": {
     "defaultMessage": "載入器"
   },
+  "content.diff-modal.modpack-linked": {
+    "defaultMessage": "已連結模組包"
+  },
+  "content.diff-modal.modpack-unlinked": {
+    "defaultMessage": "已取消連結模組包"
+  },
+  "content.diff-modal.modpack-updated": {
+    "defaultMessage": "已更新模組包"
+  },
+  "content.diff-modal.no-content-changes": {
+    "defaultMessage": "內容無變更"
+  },
   "content.diff-modal.removed-count": {
     "defaultMessage": "已移除 {count} 個"
+  },
+  "content.diff-modal.removed-disabled-count": {
+    "defaultMessage": "已移除 {count} 個（停用）"
   },
   "content.diff-modal.reviewed-files": {
     "defaultMessage": "只有在 Modrinth 上發布的檔案才會經過審查，無論其檔案格式為何（包含 .mrpack）。"
@@ -537,10 +561,13 @@
     "defaultMessage": "按住 Shift 鍵並點選以跳過確認。"
   },
   "content.inline-backup.warning-body": {
-    "defaultMessage": "我們建議您在繼續操作之前建立備份，以便在出現任何問題時可以還原您的{type}。"
+    "defaultMessage": "我們建議在繼續操作前先建立備份，以便在發生問題時還原你的{type}。"
   },
   "content.inline-backup.world-label": {
     "defaultMessage": "世界"
+  },
+  "content.modpack-card.installation-settings": {
+    "defaultMessage": "安裝設定"
   },
   "content.page-layout.additional-content": {
     "defaultMessage": "額外內容"
@@ -1254,10 +1281,10 @@
     "defaultMessage": "刪除檔案"
   },
   "files.delete-modal.warning.file": {
-    "defaultMessage": "此檔案將永久刪除。此操作無法撤銷。"
+    "defaultMessage": "這個檔案將永久刪除，這項動作無法復原。"
   },
   "files.delete-modal.warning.folder": {
-    "defaultMessage": "此資料夾及其所有內容將永久刪除。此操作無法撤銷。"
+    "defaultMessage": "這個資料夾及其所有內容將永久刪除，這項動作無法復原。"
   },
   "files.editor.failed-to-open-text": {
     "defaultMessage": "無法載入檔案內容。"
@@ -1276,9 +1303,6 @@
   },
   "files.editor.file-saved-title": {
     "defaultMessage": "已儲存檔案"
-  },
-  "files.editor.find-close": {
-    "defaultMessage": "關閉"
   },
   "files.editor.find-in-file": {
     "defaultMessage": "尋找"
@@ -2063,6 +2087,12 @@
   "instances.modpack-content-modal.empty-title": {
     "defaultMessage": "找不到內容"
   },
+  "instances.modpack-content-modal.external-content": {
+    "defaultMessage": "外部"
+  },
+  "instances.modpack-content-modal.external-content-description": {
+    "defaultMessage": "這個檔案未在 Modrinth 上發布。"
+  },
   "instances.modpack-content-modal.header": {
     "defaultMessage": "模組包內容"
   },
@@ -2071,6 +2101,9 @@
   },
   "instances.modpack-content-modal.no-results": {
     "defaultMessage": "沒有專案符合你的搜尋字詞。"
+  },
+  "instances.modpack-content-modal.open-in-slicer": {
+    "defaultMessage": "在 Slicer 中開啟"
   },
   "instances.modpack-content-modal.search-placeholder": {
     "defaultMessage": "搜尋 {count, number} {count, plural, other {個專案}}"
@@ -2207,6 +2240,9 @@
   "label.details": {
     "defaultMessage": "詳細資訊"
   },
+  "label.discover-content": {
+    "defaultMessage": "探索內容"
+  },
   "label.done": {
     "defaultMessage": "完成"
   },
@@ -2284,6 +2320,9 @@
   },
   "label.password": {
     "defaultMessage": "密碼"
+  },
+  "label.permissions": {
+    "defaultMessage": "權限"
   },
   "label.plan-custom": {
     "defaultMessage": "自訂"
@@ -2733,7 +2772,7 @@
     "defaultMessage": "由工作人員設為不公開"
   },
   "omorphia.component.copy.action.copy": {
-    "defaultMessage": "將程式碼複製到剪貼簿"
+    "defaultMessage": "將代碼複製到剪貼簿"
   },
   "omorphia.component.environment-indicator.label.client": {
     "defaultMessage": "用戶端"
@@ -2816,8 +2855,176 @@
   "payment-method.visa": {
     "defaultMessage": "Visa"
   },
+  "profile.bio.fallback.creator": {
+    "defaultMessage": "一位 Modrinth 創作者。"
+  },
+  "profile.bio.fallback.user": {
+    "defaultMessage": "一位 Modrinth 使用者。"
+  },
+  "profile.block-user.admonition-body": {
+    "defaultMessage": "{username} 將無法向你傳送好友邀請、邀請你加入共用實例，或邀請你加入 Modrinth Hosting 伺服器。"
+  },
+  "profile.block-user.admonition-title": {
+    "defaultMessage": "確定要封鎖這位使用者嗎？"
+  },
+  "profile.block-user.error-description": {
+    "defaultMessage": "封鎖使用者時發生錯誤，請再試一次。"
+  },
+  "profile.block-user.error-title": {
+    "defaultMessage": "無法封鎖使用者"
+  },
+  "profile.block-user.success-description": {
+    "defaultMessage": "{username} 已被封鎖。"
+  },
+  "profile.block-user.success-title": {
+    "defaultMessage": "使用者已封鎖"
+  },
+  "profile.block-user.title": {
+    "defaultMessage": "封鎖 {username}"
+  },
+  "profile.button.analytics": {
+    "defaultMessage": "檢視使用者數據分析"
+  },
+  "profile.button.billing": {
+    "defaultMessage": "管理使用者帳務"
+  },
+  "profile.button.block": {
+    "defaultMessage": "封鎖"
+  },
+  "profile.button.create-collection": {
+    "defaultMessage": "建立收藏"
+  },
+  "profile.button.create-project": {
+    "defaultMessage": "建立專案"
+  },
+  "profile.button.edit-role": {
+    "defaultMessage": "編輯身分"
+  },
+  "profile.button.info": {
+    "defaultMessage": "檢視使用者詳細資訊"
+  },
+  "profile.button.manage-projects": {
+    "defaultMessage": "管理專案"
+  },
+  "profile.button.remove-affiliate": {
+    "defaultMessage": "移除聯盟行銷夥伴資格"
+  },
+  "profile.button.set-affiliate": {
+    "defaultMessage": "設為聯盟行銷夥伴"
+  },
+  "profile.button.unblock": {
+    "defaultMessage": "解除封鎖"
+  },
+  "profile.collection.projects-count": {
+    "defaultMessage": "{count, plural, other {# 個專案}}"
+  },
+  "profile.details.error.github-popup-blocked": {
+    "defaultMessage": "請允許 Modrinth 的彈出式視窗，然後再試一次。"
+  },
+  "profile.details.error.github-profile-message": {
+    "defaultMessage": "無法擷取 GitHub 個人檔案，請再試一次。"
+  },
+  "profile.details.error.github-profile-title": {
+    "defaultMessage": "無法開啟 GitHub 個人檔案"
+  },
+  "profile.details.label.auth-providers": {
+    "defaultMessage": "驗證提供商"
+  },
+  "profile.details.label.email-verified": {
+    "defaultMessage": "電子郵件已驗證"
+  },
+  "profile.details.label.has-password": {
+    "defaultMessage": "是否有密碼"
+  },
+  "profile.details.label.has-totp": {
+    "defaultMessage": "是否有 TOTP"
+  },
+  "profile.details.label.loading-github-profile": {
+    "defaultMessage": "載入中..."
+  },
+  "profile.details.label.payment-methods": {
+    "defaultMessage": "付款方式"
+  },
+  "profile.details.label.view-github-profile": {
+    "defaultMessage": "查看個人檔案"
+  },
+  "profile.details.title": {
+    "defaultMessage": "使用者詳細資訊"
+  },
+  "profile.details.tooltip.email-not-verified": {
+    "defaultMessage": "電子郵件尚未驗證"
+  },
+  "profile.details.tooltip.email-verified": {
+    "defaultMessage": "電子郵件已驗證"
+  },
+  "profile.error.load-description": {
+    "defaultMessage": "無法載入使用者個人檔案。"
+  },
+  "profile.error.not-found": {
+    "defaultMessage": "找不到使用者"
+  },
+  "profile.label.affiliate": {
+    "defaultMessage": "聯盟行銷"
+  },
   "profile.label.badges": {
     "defaultMessage": "徽章"
+  },
+  "profile.label.collection": {
+    "defaultMessage": "收藏"
+  },
+  "profile.label.download-count": {
+    "defaultMessage": "{count, plural, other {次下載}}"
+  },
+  "profile.label.joined": {
+    "defaultMessage": "加入時間："
+  },
+  "profile.label.no-collections": {
+    "defaultMessage": "這位使用者沒有任何收藏！"
+  },
+  "profile.label.no-collections-auth-description": {
+    "defaultMessage": "你還沒有任何收藏。"
+  },
+  "profile.label.no-projects": {
+    "defaultMessage": "這位使用者沒有任何專案！"
+  },
+  "profile.label.no-projects-auth-description": {
+    "defaultMessage": "你還沒有任何專案。"
+  },
+  "profile.label.organizations": {
+    "defaultMessage": "組織"
+  },
+  "profile.label.project-count": {
+    "defaultMessage": "{count, plural, other {個專案}}"
+  },
+  "profile.label.saving": {
+    "defaultMessage": "正在儲存..."
+  },
+  "profile.official-account": {
+    "defaultMessage": "Modrinth 官方帳號"
+  },
+  "profile.official-account.bio": {
+    "defaultMessage": "Modrinth 的官方使用者帳號。請至 <support-link></support-link> 取得支援，或透過電子郵件 <email></email> 聯絡客服團隊"
+  },
+  "profile.role.select-placeholder": {
+    "defaultMessage": "選擇身分"
+  },
+  "profile.role.update-error-description": {
+    "defaultMessage": "更新使用者身分時發生錯誤，請再試一次。"
+  },
+  "profile.role.update-error-title": {
+    "defaultMessage": "無法更新身分"
+  },
+  "profile.unblock-user.error-description": {
+    "defaultMessage": "解除封鎖使用者時發生錯誤，請再試一次。"
+  },
+  "profile.unblock-user.error-title": {
+    "defaultMessage": "無法解除封鎖使用者"
+  },
+  "profile.unblock-user.success-description": {
+    "defaultMessage": "{username} 已解除封鎖。"
+  },
+  "profile.unblock-user.success-title": {
+    "defaultMessage": "使用者已解除封鎖"
   },
   "project-card.date.published.tooltip": {
     "defaultMessage": "發布時間：{date}"
@@ -2845,6 +3052,9 @@
   },
   "project-type.all": {
     "defaultMessage": "全部"
+  },
+  "project-type.collection.plural": {
+    "defaultMessage": "收藏"
   },
   "project-type.datapack.capital": {
     "defaultMessage": "{count, plural, other {資料包}}"
@@ -3507,7 +3717,7 @@
     "defaultMessage": "成員"
   },
   "project.settings.notice.no-permission.description": {
-    "defaultMessage": "你沒有編輯這個設定的權限。"
+    "defaultMessage": "你沒有編輯這項設定的權限。"
   },
   "project.settings.notice.no-permission.title": {
     "defaultMessage": "沒有權限"
@@ -3528,7 +3738,7 @@
     "defaultMessage": "版本"
   },
   "project.settings.view.title": {
-    "defaultMessage": "檢視"
+    "defaultMessage": "檢視方式"
   },
   "project.stats.downloads-label": {
     "defaultMessage": "{count, plural, other {次下載}}"
@@ -3699,7 +3909,7 @@
     "defaultMessage": "載入器"
   },
   "search.server_content_type.modpack": {
-    "defaultMessage": "模組支援"
+    "defaultMessage": "含模組"
   },
   "search.server_content_type.vanilla": {
     "defaultMessage": "原版"
@@ -3978,7 +4188,7 @@
     "defaultMessage": "{seconds} 秒後可重新傳送"
   },
   "servers.access-table.column.actions": {
-    "defaultMessage": "操作"
+    "defaultMessage": "動作"
   },
   "servers.access-table.column.joined": {
     "defaultMessage": "加入時間"
@@ -5072,23 +5282,140 @@
   "settings.pats.title": {
     "defaultMessage": "個人存取權杖"
   },
-  "settings.profile.title": {
-    "defaultMessage": "公開個人檔案"
+  "settings.profile.bio.description": {
+    "defaultMessage": "簡單介紹一下你自己。"
+  },
+  "settings.profile.bio.title": {
+    "defaultMessage": "關於我"
+  },
+  "settings.profile.navigation-title": {
+    "defaultMessage": "個人檔案"
+  },
+  "settings.profile.profile-picture.title": {
+    "defaultMessage": "個人檔案相片"
+  },
+  "settings.profile.public-information.description": {
+    "defaultMessage": "你的個人檔案資訊會<profile-link>公開顯示在 Modrinth 上</profile-link>，並可透過 <docs-link>Modrinth API</docs-link> 查詢。"
+  },
+  "settings.profile.save-error": {
+    "defaultMessage": "無法更新個人檔案"
+  },
+  "settings.profile.save-error-description": {
+    "defaultMessage": "更新個人檔案時發生錯誤，請再試一次。"
+  },
+  "settings.profile.sign-in-required.description": {
+    "defaultMessage": "登入 Modrinth 帳號即可自訂你的公開個人檔案。"
+  },
+  "settings.profile.sign-in-required.title": {
+    "defaultMessage": "需要 Modrinth 帳號"
+  },
+  "settings.profile.username.description": {
+    "defaultMessage": "獨特且不區分大小寫的名稱，用於識別你的個人檔案。"
   },
   "settings.sessions.title": {
     "defaultMessage": "工作階段"
   },
+  "settings.social.blocked-users.column.actions": {
+    "defaultMessage": "動作"
+  },
+  "settings.social.blocked-users.column.user": {
+    "defaultMessage": "使用者"
+  },
+  "settings.social.blocked-users.description": {
+    "defaultMessage": "以下是你在 Modrinth 上封鎖的使用者。他們無法："
+  },
+  "settings.social.blocked-users.empty": {
+    "defaultMessage": "你沒有封鎖任何使用者。"
+  },
+  "settings.social.blocked-users.load-error": {
+    "defaultMessage": "無法載入已封鎖的使用者。"
+  },
+  "settings.social.blocked-users.loading": {
+    "defaultMessage": "正在載入已封鎖的使用者..."
+  },
+  "settings.social.blocked-users.restriction.friend-requests": {
+    "defaultMessage": "傳送好友邀請給你"
+  },
+  "settings.social.blocked-users.restriction.hosting": {
+    "defaultMessage": "邀請你管理 Modrinth Hosting 伺服器。"
+  },
+  "settings.social.blocked-users.restriction.shared-instances": {
+    "defaultMessage": "邀請你加入共用實例"
+  },
+  "settings.social.blocked-users.title": {
+    "defaultMessage": "封鎖名單"
+  },
+  "settings.social.blocked-users.unblock": {
+    "defaultMessage": "解除封鎖"
+  },
+  "settings.social.blocked-users.unblock-error": {
+    "defaultMessage": "無法解除封鎖使用者"
+  },
+  "settings.social.blocked-users.unblock-error-description": {
+    "defaultMessage": "解除封鎖使用者時發生錯誤，請再試一次。"
+  },
+  "settings.social.blocked-users.unblock-user": {
+    "defaultMessage": "解除封鎖 {username}"
+  },
+  "settings.social.blocked-users.user-avatar": {
+    "defaultMessage": "{username} 的顯示圖片"
+  },
+  "settings.social.friend-requests.description": {
+    "defaultMessage": "控制誰可以在 Modrinth 向你傳送好友邀請。"
+  },
+  "settings.social.friend-requests.title": {
+    "defaultMessage": "好友邀請"
+  },
+  "settings.social.interaction-source.coming-soon": {
+    "defaultMessage": "即將推出！"
+  },
+  "settings.social.interaction-source.everyone": {
+    "defaultMessage": "所有人"
+  },
+  "settings.social.interaction-source.friends": {
+    "defaultMessage": "好友"
+  },
+  "settings.social.interaction-source.friends-of-friends": {
+    "defaultMessage": "好友的好友"
+  },
+  "settings.social.interaction-source.no-one": {
+    "defaultMessage": "沒有人"
+  },
+  "settings.social.shared-instance-invites.description": {
+    "defaultMessage": "控制誰可以向你傳送共用實例和 Modrinth Hosting 面板的邀請。"
+  },
+  "settings.social.shared-instance-invites.title": {
+    "defaultMessage": "邀請"
+  },
+  "settings.social.sign-in-required.description": {
+    "defaultMessage": "你可以透過 Modrinth 帳號控制誰可以與你互動，並管理被封鎖的使用者"
+  },
+  "settings.social.sign-in-required.title": {
+    "defaultMessage": "需要 Modrinth 帳號"
+  },
+  "settings.social.title": {
+    "defaultMessage": "社交"
+  },
+  "sharing.invite-players-modal.add": {
+    "defaultMessage": "新增"
+  },
+  "sharing.invite-players-modal.added": {
+    "defaultMessage": "已加入"
+  },
   "sharing.invite-players-modal.already-invited": {
-    "defaultMessage": "這個使用者已經被邀請。"
+    "defaultMessage": "這位使用者已經被邀請。"
+  },
+  "sharing.invite-players-modal.apply-button": {
+    "defaultMessage": "套用"
   },
   "sharing.invite-players-modal.avatar-alt": {
     "defaultMessage": "{username} 的顯示圖片"
   },
-  "sharing.invite-players-modal.cancel": {
-    "defaultMessage": "取消"
+  "sharing.invite-players-modal.custom-expiry": {
+    "defaultMessage": "自訂..."
   },
-  "sharing.invite-players-modal.cancel-button": {
-    "defaultMessage": "取消"
+  "sharing.invite-players-modal.custom-expiry-value": {
+    "defaultMessage": "自訂：{date}"
   },
   "sharing.invite-players-modal.edit-invite-link": {
     "defaultMessage": "編輯邀請連結。"
@@ -5096,8 +5423,26 @@
   "sharing.invite-players-modal.edit-invite-link-title": {
     "defaultMessage": "編輯邀請連結"
   },
+  "sharing.invite-players-modal.expiry-in-one-day": {
+    "defaultMessage": "1 天"
+  },
+  "sharing.invite-players-modal.expiry-in-one-hour": {
+    "defaultMessage": "1 小時"
+  },
+  "sharing.invite-players-modal.expiry-in-seven-days": {
+    "defaultMessage": "7 天"
+  },
+  "sharing.invite-players-modal.expiry-in-six-hours": {
+    "defaultMessage": "6 小時"
+  },
+  "sharing.invite-players-modal.expiry-in-three-days": {
+    "defaultMessage": "3 天"
+  },
+  "sharing.invite-players-modal.expiry-in-twelve-hours": {
+    "defaultMessage": "12 小時"
+  },
   "sharing.invite-players-modal.expiry-label": {
-    "defaultMessage": "有效期限"
+    "defaultMessage": "有效時間"
   },
   "sharing.invite-players-modal.friends-heading": {
     "defaultMessage": "你的好友 - {count}"
@@ -5109,7 +5454,7 @@
     "defaultMessage": "你的邀請連結會在 {duration} 後過期。"
   },
   "sharing.invite-players-modal.invite-link-heading": {
-    "defaultMessage": "或者使用邀請連結"
+    "defaultMessage": "或者，使用邀請連結"
   },
   "sharing.invite-players-modal.link-copied-text": {
     "defaultMessage": "邀請連結已複製到剪貼簿。"
@@ -5121,7 +5466,7 @@
     "defaultMessage": "無法複製連結"
   },
   "sharing.invite-players-modal.max-uses-label": {
-    "defaultMessage": "最大使用次數"
+    "defaultMessage": "使用次數上限"
   },
   "sharing.invite-players-modal.no-friends": {
     "defaultMessage": "沒有找到好友。"
@@ -5340,7 +5685,7 @@
     "defaultMessage": "生物"
   },
   "tag.category.modded": {
-    "defaultMessage": "模組支援"
+    "defaultMessage": "含模組"
   },
   "tag.category.models": {
     "defaultMessage": "模型"
@@ -5901,4 +6246,3 @@
     "defaultMessage": "類型"
   }
 }
-

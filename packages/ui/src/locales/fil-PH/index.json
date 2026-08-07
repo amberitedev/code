@@ -341,9 +341,6 @@
   "external-project-license-status.yes": {
     "defaultMessage": "Oo"
   },
-  "files.editor.find-close": {
-    "defaultMessage": "Isara"
-  },
   "files.editor.find-in-file": {
     "defaultMessage": "Hahanapin"
   },
@@ -2294,9 +2291,6 @@
   "settings.pats.title": {
     "defaultMessage": "Mga personal na access token"
   },
-  "settings.profile.title": {
-    "defaultMessage": "Pampublikong profile"
-  },
   "settings.sessions.title": {
     "defaultMessage": "Mga sesyon"
   },
@@ -2769,4 +2763,3 @@
     "defaultMessage": "Uri"
   }
 }
-

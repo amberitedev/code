@@ -2,6 +2,7 @@ use thiserror::Error;
 
 pub mod affiliate_code_item;
 pub mod analytics_event_item;
+pub mod blocked_user_item;
 pub mod categories;
 pub mod charge_item;
 pub mod collection_item;
@@ -76,8 +77,6 @@ pub enum DatabaseError {
     SerdeCacheError(#[from] serde_json::Error),
     #[error("error while encoding or decoding the cache: {0}")]
     PostcardCacheError(#[from] postcard::Error),
-    #[error(transparent)]
-    Redis(#[from] xredis::Error),
     #[error("Schema error: {0}")]
     SchemaError(String),
 }

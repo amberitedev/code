@@ -3,16 +3,25 @@
     "message": "İptal"
   },
   "action.continue": {
-    "message": "Devam"
+    "message": "Devam et"
   },
   "admin.billing.error.not-found": {
     "message": "Kullanıcı bulunamadı"
+  },
+  "ads-consent.accept": {
+    "message": "Tümünü kabul et"
+  },
+  "ads-consent.manage": {
+    "message": "Tercihleri yönet"
+  },
+  "ads-consent.reject": {
+    "message": "Tümünü reddet"
   },
   "analytics.action.add": {
     "message": "Ekle"
   },
   "analytics.action.cancel": {
-    "message": "Vazgeç"
+    "message": "İptal"
   },
   "analytics.action.refresh": {
     "message": "Yenile"
@@ -51,7 +60,7 @@
     "message": "Üye"
   },
   "analytics.breakdown.monetization": {
-    "message": "Para Kazanma"
+    "message": "Monetizasyon"
   },
   "analytics.breakdown.none.selected": {
     "message": "Analiz yok"
@@ -75,10 +84,10 @@
     "message": "Sınırlı sayıda göster"
   },
   "analytics.chart.action.show-top-eight": {
-    "message": "Üst 8'i göster"
+    "message": "En yüksek 8'ini göster"
   },
   "analytics.chart.axis.playtime-hours": {
-    "message": "{hours} sa"
+    "message": "{hours} saat"
   },
   "analytics.chart.controls.active-count": {
     "message": "{count} çevrimiçi"
@@ -87,7 +96,7 @@
     "message": "Rahatsız ediciler"
   },
   "analytics.chart.controls.aria": {
-    "message": "Analitik grafik denetimleri: {activeCount}"
+    "message": "Analitik grafik kontrolleri: {activeCount}"
   },
   "analytics.chart.controls.button": {
     "message": "Kontroller"
@@ -932,6 +941,12 @@
   "auth.verify-email.title": {
     "message": "E-postayı Doğrula"
   },
+  "collection.aria-label.upload-icon": {
+    "message": "Simge yükle"
+  },
+  "collection.button.discover-mods": {
+    "message": "Modları keşfedin"
+  },
   "collection.button.edit-icon": {
     "message": "Simgeyi düzenle"
   },
@@ -1106,6 +1121,27 @@
   "create-project-version.create-modal.stage.add-files.admonition": {
     "message": "Ek dosyalar, alternatif sürümler veya varyantlar için değil, kaynak kodu gibi destekleyici kaynaklar içindir."
   },
+  "create-project-version.create-modal.stage.add-files.details-tab": {
+    "message": "Detaylar"
+  },
+  "create-project-version.create-modal.stage.add-files.files-tab": {
+    "message": "Dosyalar"
+  },
+  "create-project-version.create-modal.stage.add-files.upload-secondary-prompt": {
+    "message": "Dosyaları sürükleyip bırakın ya da göz atmak için tıklayın"
+  },
+  "create-project-version.create-modal.stage.details.details-tab": {
+    "message": "Detaylar"
+  },
+  "create-project-version.create-modal.stage.details.files-tab": {
+    "message": "Dosyalar"
+  },
+  "create-project-version.create-modal.stage.metadata.edit-button": {
+    "message": "Düzenle"
+  },
+  "create-project-version.create-modal.stage.metadata.suggested": {
+    "message": "Önerilen"
+  },
   "create.collection.collection-info": {
     "message": "Yeni koleksiyonunuz herkese açık olarak {count, plural, =0 {projesiz hâlde} other {# proje ile}} oluşturulacaktır."
   },
@@ -1202,6 +1238,9 @@
   "create.project.name-placeholder": {
     "message": "Projenin ismini girin..."
   },
+  "create.project.organization-icon-alt": {
+    "message": "{name} İkon"
+  },
   "create.project.owner-description": {
     "message": "Proje sahibini kendin ya da üyesi olduğun bir organizasyon olarak ayarla."
   },
@@ -1231,6 +1270,9 @@
   },
   "create.project.type-server": {
     "message": "Sunucu"
+  },
+  "create.project.unknown-user": {
+    "message": "Bilinmeyen kullanıcı"
   },
   "create.project.url-label": {
     "message": "URL"
@@ -1540,6 +1582,9 @@
   },
   "dashboard.creator-withdraw-modal.tremendous-details.search-amount-label": {
     "message": "Miktar arayın"
+  },
+  "dashboard.creator-withdraw-modal.tremendous-details.select-category-placeholder": {
+    "message": "{category} Seç"
   },
   "dashboard.creator-withdraw-modal.tremendous-details.select-denomination-hint": {
     "message": "Birim seçin:"
@@ -2609,6 +2654,9 @@
   "layout.footer.social.x": {
     "message": "X"
   },
+  "layout.footer.unknown-commit": {
+    "message": "bilinmeyen"
+  },
   "layout.menu-toggle.action": {
     "message": "Menü aç/kapa"
   },
@@ -2629,9 +2677,6 @@
   },
   "layout.nav.discover": {
     "message": "Keşfet"
-  },
-  "layout.nav.discover-content": {
-    "message": "İçerik keşfet"
   },
   "layout.nav.get-modrinth-app": {
     "message": "Modrinth App yükle"
@@ -2722,9 +2767,6 @@
   },
   "modpack-scan-modal.scan-all-files": {
     "message": "Tüm Dosyaları Tara"
-  },
-  "modpack-scan-modal.scan-error": {
-    "message": "Bazı dosyalar taranamadı:{error}"
   },
   "modpack-scan-modal.scanning": {
     "message": "Taranıyor..."
@@ -2999,110 +3041,32 @@
   "muralpay.warning.wallet-address": {
     "message": "Cüzdan adresinizi iki kez kontrol edin. Yanlış adrese gönderilen fonlar kurtarılamaz."
   },
-  "profile.bio.fallback.creator": {
-    "message": "Bir Modrinth içerik üreticisi."
+  "organization.button.manage": {
+    "message": "Yönet"
   },
-  "profile.bio.fallback.user": {
-    "message": "Bir Modrinth kullanıcısı."
-  },
-  "profile.button.analytics": {
-    "message": "Kullanıcı analizlerini görüntüle"
-  },
-  "profile.button.billing": {
-    "message": "Kullanıcı faturasını yönet"
-  },
-  "profile.button.edit-role": {
-    "message": "Rolü düzenle"
-  },
-  "profile.button.info": {
-    "message": "Kullanıcı ayrıntılarını görüntüle"
-  },
-  "profile.button.manage-projects": {
+  "organization.button.manage-projects": {
     "message": "Projeleri yönet"
   },
-  "profile.button.remove-affiliate": {
-    "message": "Ortaklıktan kaldır"
+  "organization.label.downloads": {
+    "message": "indirmeler"
   },
-  "profile.button.set-affiliate": {
-    "message": "Ortak olarak ayarla"
+  "organization.label.members": {
+    "message": "üyeler"
   },
-  "profile.collection.projects-count": {
-    "message": "{count, plural, one {# project} other {# projects}}"
+  "organization.label.organization": {
+    "message": "Organizasyon"
   },
-  "profile.details.label.auth-providers": {
-    "message": "Kimlik doğrulama sağlayıcıları"
+  "organization.label.projects": {
+    "message": "projeler"
   },
-  "profile.details.label.email": {
-    "message": "Eposta"
+  "organization.project-transfer.id-column": {
+    "message": "ID"
   },
-  "profile.details.label.email-verified": {
-    "message": "E-posta doğrulandı"
+  "organization.project-transfer.name-column": {
+    "message": "İsim"
   },
-  "profile.details.label.has-password": {
-    "message": "Parola var"
-  },
-  "profile.details.label.has-totp": {
-    "message": "TOTP var"
-  },
-  "profile.details.label.payment-methods": {
-    "message": "Ödeme yöntemleri"
-  },
-  "profile.details.tooltip.email-not-verified": {
-    "message": "Eposta doğrulanmadı"
-  },
-  "profile.details.tooltip.email-verified": {
-    "message": "Eposta doğrulandı"
-  },
-  "profile.error.not-found": {
-    "message": "Kullanıcı bulunamadı"
-  },
-  "profile.label.affiliate": {
-    "message": "Ortak"
-  },
-  "profile.label.badges": {
-    "message": "Rozetler"
-  },
-  "profile.label.collection": {
-    "message": "Koleksiyon"
-  },
-  "profile.label.joined": {
-    "message": "Katılma:"
-  },
-  "profile.label.no-collections": {
-    "message": "Bu kullanıcının hiç koleksiyonu yok!"
-  },
-  "profile.label.no-collections-auth": {
-    "message": "Hiç koleksiyonun yok.\n<create-link>Oluşturmak</create-link> ister misin?"
-  },
-  "profile.label.no-projects": {
-    "message": "Bu kullanıcının hiç projesi yok!"
-  },
-  "profile.label.no-projects-auth": {
-    "message": "Hiç projen yok.\n<create-link>Oluşturmak</create-link> ister misin?"
-  },
-  "profile.label.organizations": {
-    "message": "Organizasyonlar"
-  },
-  "profile.label.saving": {
-    "message": "Kaydediliyor..."
-  },
-  "profile.meta.description": {
-    "message": "{username} kullanıcısının Modrinth'teki projelerini indir"
-  },
-  "profile.meta.description-with-bio": {
-    "message": "{bio} - {username} kullanıcısının Modrinth'teki projelerini indir"
-  },
-  "profile.official-account": {
-    "message": "Resmi Modrinth hesabı"
-  },
-  "profile.official-account.bio": {
-    "message": "Modrinth'in resmi kullanıcı hesabı Destek için<support-link></support-link> adresinden veya <email></email> e-posta adresinden iletişime geçebilirsiniz"
-  },
-  "profile.stats.projects-followers": {
-    "message": "{count, plural, one {<stat>{count}</stat> proje takipçisi} other {<stat>{count}</stat> proje takipçisi}}"
-  },
-  "profile.user-id": {
-    "message": "Kullanıcı Kimliği: {id}"
+  "organization.project-transfer.type-column": {
+    "message": "Tür"
   },
   "project-member-header.error-decline": {
     "message": "Ekip daveti reddedilemedi"
@@ -3437,9 +3401,6 @@
   "project.moderation.admonition.under-review.body.3": {
     "message": "Projenizi değiştirmeye devam edebilirsiniz, bu kuyruktaki konumunuzu etkilemeyecektir."
   },
-  "project.moderation.admonition.under-review.body.4": {
-    "message": "Gönderileri 24-48 saat içinde incelemeyi amaçlıyoruz, ancak bazı projelerde gecikmeler yaşanabilir. Bu durum gönderinizle ilgili bir sorun olduğu anlamına gelmez."
-  },
   "project.moderation.admonition.under-review.body.5": {
     "message": "<emphasis>Moderatörlerimiz Modrinth'i güvende tutmak için çok çalışırken gösterdiğiniz sabır için teşekkür ediyor ve içeriğinizi paylaşmanıza yardımcı olmayı dört gözle bekliyoruz! 💚</emphasis>"
   },
@@ -3557,6 +3518,21 @@
   "project.settings.permissions.sort.status": {
     "message": "Durum"
   },
+  "project.settings.server.region-label": {
+    "message": "Bölge"
+  },
+  "project.settings.server.select-languages-placeholder": {
+    "message": "Dilleri seç"
+  },
+  "project.settings.server.select-region-placeholder": {
+    "message": "Bölge seç"
+  },
+  "project.settings.server.server-online": {
+    "message": "Sunucu çevrimiçi!"
+  },
+  "project.settings.tags.title": {
+    "message": "Etiketler"
+  },
   "project.settings.title": {
     "message": "Ayarlar"
   },
@@ -3565,6 +3541,15 @@
   },
   "project.status.archived.message": {
     "message": "{title} arşivlenmiş. {title}, yapımcı fikrini değiştirmediği sürece daha fazla güncelleme almayacak."
+  },
+  "project.versions.copy-id-option": {
+    "message": "ID'yi Kopyala"
+  },
+  "project.versions.copy-link-option": {
+    "message": "Bağlantıyı kopyala"
+  },
+  "project.versions.delete-button": {
+    "message": "Sil"
   },
   "project.versions.title": {
     "message": "Sürümler"
@@ -3983,6 +3968,9 @@
   "servers.plan.small.description": {
     "message": "1–5 arkadaş ve birkaç hafif mod için mükemmel."
   },
+  "servers.purchase.step.plan.most-popular": {
+    "message": "En popüler"
+  },
   "settings.account.button.complete-setup": {
     "message": "Kurulumu tamamla"
   },
@@ -4115,6 +4103,15 @@
   "settings.account.security.passkey.add-modal.name.placeholder": {
     "message": "Giriş anahtarım"
   },
+  "settings.account.security.passkey.add-modal.title": {
+    "message": "Geçiş anahtarı ekle"
+  },
+  "settings.account.security.passkey.add.button": {
+    "message": "Geçiş anahtarı ekle"
+  },
+  "settings.account.security.passkey.button": {
+    "message": "Geçiş anahtalarını yönet"
+  },
   "settings.account.security.passkey.description": {
     "message": "Giriş anahtarlarınızı yönetin, veya yeni bir tane ekleyin."
   },
@@ -4129,6 +4126,9 @@
   },
   "settings.account.security.passkey.modal.no-passkeys": {
     "message": "Hiçbir giriş anahtarın kayıtlı değil."
+  },
+  "settings.account.security.passkey.remove.button": {
+    "message": "Geçiş anahtarını sil"
   },
   "settings.account.security.passkey.remove.description": {
     "message": "Bu hesabınızdan \"{name}\" geçiş anahtarını silecek. Artık bu geçiş anahtarı ile giriş yapamayacaksınız."
@@ -4232,23 +4232,14 @@
   "settings.applications.button.add-redirect-uri": {
     "message": "Yönlendirme URI'ları ekle"
   },
-  "settings.applications.button.cancel": {
-    "message": "İptal"
-  },
   "settings.applications.button.create": {
     "message": "Uygulama oluştur"
   },
   "settings.applications.button.delete": {
     "message": "Sil"
   },
-  "settings.applications.button.edit": {
-    "message": "Düzenle"
-  },
   "settings.applications.button.new": {
     "message": "Yeni uygulama"
-  },
-  "settings.applications.button.save-changes": {
-    "message": "Değişiklikleri kaydet"
   },
   "settings.applications.button.upload-icon": {
     "message": "Simge yükle"
@@ -4322,14 +4313,11 @@
   "settings.authorizations.about-this-app": {
     "message": "Bu uygulama hakkında"
   },
-  "settings.authorizations.by": {
-    "message": "tarafından"
+  "settings.authorizations.created-by": {
+    "message": "{user} tarafından oluşturuldu"
   },
   "settings.authorizations.description": {
     "message": "Modrinth hesabınızla bir uygulamayı yetkilendirdiğinizde, ona hesabınıza erişim izni vermiş olursunuz. Hesabınıza verilen erişimi dilediğiniz zaman burada yönetebilir ve gözden geçirebilirsiniz."
-  },
-  "settings.authorizations.empty-state": {
-    "message": "Yetkilendirdiğiniz uygulamalar şu anda görüntülenemiyor, bunu düzeltmek için çalışıyoruz. Lütfen bu sayfayı daha sonra tekrar ziyaret edin."
   },
   "settings.authorizations.head-title": {
     "message": "Yetkiler"
@@ -4688,27 +4676,6 @@
   "settings.pats.token.never-used": {
     "message": "Hiç kullanılmadı"
   },
-  "settings.profile.bio.description": {
-    "message": "Herkese kendinden biraz bahsedebileceğin kısa tanım."
-  },
-  "settings.profile.bio.title": {
-    "message": "Hakkında"
-  },
-  "settings.profile.description": {
-    "message": "Profil bilgin Modrinth'te ve <docs-link>Modrinth API</docs-link> herkese açık görüntülenebilir."
-  },
-  "settings.profile.head-title": {
-    "message": "Profil Ayarları"
-  },
-  "settings.profile.profile-info": {
-    "message": "Profil bilgisi"
-  },
-  "settings.profile.profile-picture.title": {
-    "message": "Profil resmi"
-  },
-  "settings.profile.username.description": {
-    "message": "Profilini tanımlamak için büyük-küçük harf hassasiyetli özel bir ad."
-  },
   "settings.sessions.action.revoke-session": {
     "message": "Oturumu iptal et"
   },
@@ -4738,6 +4705,12 @@
   },
   "settings.sidebar.label.display": {
     "message": "Ekran"
+  },
+  "shared-instance.invite.accept": {
+    "message": "Daveti kabul et"
+  },
+  "shared-instance.invite.inviter.unknown": {
+    "message": "Bir Modrinth kullanıcısı"
   },
   "ui.latest-news-row.latest-news": {
     "message": "Modrinth'ten haberler"

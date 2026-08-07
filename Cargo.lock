@@ -4875,7 +4875,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -5577,6 +5577,7 @@ dependencies = [
  "bytes",
  "censor",
  "chrono",
+ "chumsky",
  "clap 4.5.48",
  "clickhouse",
  "color-eyre",
@@ -5626,10 +5627,12 @@ dependencies = [
  "scalar_api_reference",
  "sentry",
  "serde",
+ "serde-binhum",
  "serde_json",
  "serde_with",
  "sha1 0.10.6",
  "sha2",
+ "smallvec",
  "spdx",
  "sqlx",
  "sqlx-tracing",
@@ -8113,7 +8116,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.32",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -8150,7 +8153,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -9493,6 +9496,16 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-binhum"
+version = "0.1.0"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -11136,6 +11149,7 @@ dependencies = [
  "heck 0.5.0",
  "hickory-resolver 0.25.2",
  "httpdate",
+ "image",
  "indicatif",
  "itertools 0.14.0",
  "modrinth-content-management",
@@ -13618,12 +13632,13 @@ dependencies = [
  "chrono",
  "dashmap",
  "deadpool-redis",
+ "eyre",
  "futures",
  "lz4_flex",
+ "postcard",
  "prometheus",
  "redis",
  "serde",
- "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tracing",

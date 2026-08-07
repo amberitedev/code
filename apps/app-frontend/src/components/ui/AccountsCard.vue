@@ -12,13 +12,11 @@
 		class="mt-2 flex flex-col gap-3 rounded-xl border border-solid border-surface-5 bg-surface-3 p-3"
 	>
 		<span>{{ formatMessage(messages.notSignedIn) }}</span>
-		<ButtonStyled color="brand">
-			<button color="primary" :disabled="loginDisabled" @click="login()">
-				<LogInIcon v-if="!loginDisabled" />
-				<SpinnerIcon v-else class="animate-spin" />
-				{{ formatMessage(messages.signInToMinecraft) }}
-			</button>
-		</ButtonStyled>
+		<Button type="colored" color="brand" :disabled="loginDisabled" @click="login()">
+			<LogInIcon v-if="!loginDisabled" />
+			<SpinnerIcon v-else class="animate-spin" />
+			{{ formatMessage(messages.signInToMinecraft) }}
+		</Button>
 	</div>
 	<Accordion
 		v-else
@@ -68,24 +66,28 @@
 							{{ account.profile.name }}
 						</p>
 					</button>
-					<ButtonStyled circular color="red" color-fill="none" hover-color-fill="background">
-						<button
-							v-tooltip="formatMessage(messages.removeAccount)"
-							class="mr-2"
-							@click="requestRemoveAccount(account)"
-						>
-							<TrashIcon />
-						</button>
-					</ButtonStyled>
+					<IconButton
+						v-tooltip="formatMessage(messages.removeAccount)"
+						type="quiet"
+						color="red"
+						:label="formatMessage(messages.removeAccount)"
+						class="mr-2 !bg-button-bg !text-primary ![box-shadow:var(--shadow-button)] hover:!bg-red focus-visible:!bg-red hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
+						@click="requestRemoveAccount(account)"
+					>
+						<TrashIcon />
+					</IconButton>
 				</div>
 			</template>
 			<div class="flex flex-col gap-2 px-2 pt-2">
-				<ButtonStyled v-if="accounts.length > 0" class="w-full" type="outlined">
-					<button :disabled="loginDisabled" @click="login()">
-						<PlusIcon />
-						{{ formatMessage(messages.addAccount) }}
-					</button>
-				</ButtonStyled>
+				<Button
+					v-if="accounts.length > 0"
+					class="w-full !bg-button-bg !text-primary ![box-shadow:var(--shadow-button)]"
+					:disabled="loginDisabled"
+					@click="login()"
+				>
+					<PlusIcon />
+					{{ formatMessage(messages.addAccount) }}
+				</Button>
 			</div>
 		</div>
 	</Accordion>
@@ -103,9 +105,10 @@ import {
 import {
 	Accordion,
 	Avatar,
-	ButtonStyled,
+	Button,
 	ConfirmModal,
 	defineMessages,
+	IconButton,
 	injectNotificationManager,
 	useVIntl,
 } from '@modrinth/ui'

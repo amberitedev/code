@@ -26,9 +26,9 @@ pub struct ServerPingQueue {
     pub incremental_search_queue: IncrementalSearchQueue,
 }
 
-pub const REDIS_NAMESPACE: &str = "minecraft_java_server_ping:v3";
+pub const REDIS_NAMESPACE: &str = "minecraft_java_server_ping:v4";
 pub const REDIS_FAILURE_NAMESPACE: &str =
-    "minecraft_java_server_ping_failures:v3";
+    "minecraft_java_server_ping_failures:v4";
 pub const CLICKHOUSE_TABLE: &str = "minecraft_java_server_pings";
 
 impl ServerPingQueue {
@@ -178,8 +178,9 @@ impl ServerPingQueue {
                         None,
                         &self.redis,
                     );
-                    let queue_search =
-                        self.incremental_search_queue.push(*project_id);
+                    let queue_search = self
+                        .incremental_search_queue
+                        .push_project_change(*project_id);
 
                     let (clear_cache_result, _) =
                         join(clear_cache, queue_search).await;

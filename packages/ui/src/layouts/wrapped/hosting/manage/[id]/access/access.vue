@@ -110,16 +110,18 @@ import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { type Component, computed, ref } from 'vue'
 
-import AccessTable from '#ui/components/servers/access/AccessTable.vue'
-import AuditLogTable from '#ui/components/servers/access/AuditLogTable.vue'
-import GrantAccessModal from '#ui/components/servers/access/GrantAccessModal.vue'
-import RemoveAccessModal from '#ui/components/servers/access/RemoveAccessModal.vue'
+import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import Combobox, { type ComboboxOption } from '#ui/components/base/Combobox.vue'
+import StyledInput from '#ui/components/base/StyledInput.vue'
 import type {
 	TimeFrameLastUnit,
 	TimeFrameMode,
 	TimeFramePreset,
 } from '#ui/components/base/TimeFramePicker.vue'
+import AccessTable from '#ui/components/servers/access/AccessTable.vue'
+import AuditLogTable from '#ui/components/servers/access/AuditLogTable.vue'
+import GrantAccessModal from '#ui/components/servers/access/GrantAccessModal.vue'
+import RemoveAccessModal from '#ui/components/servers/access/RemoveAccessModal.vue'
 import type {
 	GrantServerAccessPayload,
 	ServerAccessInviteSuggestion,
@@ -127,12 +129,10 @@ import type {
 	ServerAccessUserProfileLink,
 	ServerAuditLogEntry,
 } from '#ui/components/servers/access/types'
-import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
-import StyledInput from '#ui/components/base/StyledInput.vue'
 import { injectHostingBackend } from '#ui/providers'
 
-import CoreActivityEvent from '../../CoreActivityEvent.vue'
 import { injectCoreServerContext } from '../../context'
+import CoreActivityEvent from '../../CoreActivityEvent.vue'
 
 const props = withDefaults(
 	defineProps<{

@@ -151,6 +151,7 @@ import {
 	openAppUpdateChangelog,
 	setAppUpdateActions,
 } from '@/providers/app-update.ts'
+import { createBreadcrumbManager, provideBreadcrumbManager } from '@/providers/breadcrumbs'
 import { createContentInstall, provideContentInstall } from '@/providers/content-install'
 import {
 	provideAppUpdateDownloadProgress,
@@ -173,6 +174,8 @@ const themeStore = useTheming()
 const router = useRouter()
 const route = useRoute()
 const breadcrumbData = useBreadcrumbs()
+const breadcrumbManager = createBreadcrumbManager()
+provideBreadcrumbManager(breadcrumbManager)
 const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
@@ -1068,22 +1071,6 @@ const showLibraryInstanceRestoreNotch = computed(
 		((isLibraryRoute(route.path) && !libraryInstanceOpenStartedForPath.value) ||
 			restoringLibraryInstanceRoute.value ||
 			libraryInstanceOpeningFromMinimized.value),
-)
-const libraryBreadcrumbPreview = Object.freeze([{ name: 'Library' }])
-const libraryInstancePullPreviewBreadcrumbs = computed(() =>
-	libraryInstancePullBreadcrumbMode.value === 'restore'
-		? (minimizedInstanceBreadcrumbs.value ?? undefined)
-		: isInstanceRoute(route.path) ||
-			  libraryInstancePullBreadcrumbMode.value === 'open' ||
-			  libraryInstancePullBreadcrumbMode.value === 'close' ||
-			  libraryInstancePullBreadcrumbProgress.value > 0
-			? libraryBreadcrumbPreview
-			: undefined,
-)
-const libraryInstancePullBreadcrumbPreviewProgress = computed(() =>
-	libraryInstancePullBreadcrumbMode.value === 'restore'
-		? 1 - libraryInstancePullBreadcrumbProgress.value
-		: libraryInstancePullBreadcrumbProgress.value,
 )
 const libraryInstanceLeftNavSelectionFrozen = computed(
 	() =>
@@ -2888,11 +2875,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 						<RightArrowIcon />
 					</button>
 				</div>
-				<Breadcrumbs
-					class="pt-[2px]"
-					:preview-breadcrumbs="libraryInstancePullPreviewBreadcrumbs"
-					:preview-progress="libraryInstancePullBreadcrumbPreviewProgress"
-				/>
+				<Breadcrumbs class="pt-[2px]" />
 			</div>
 			<section data-tauri-drag-region class="flex shrink-0 ml-auto items-center">
 				<ButtonStyled

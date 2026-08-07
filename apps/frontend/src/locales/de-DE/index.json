@@ -191,6 +191,9 @@
   "analytics.chart.tooltip.hide-entry": {
     "message": "{name} im Diagramm ausblenden"
   },
+  "analytics.chart.tooltip.no-data": {
+    "message": "Keine Daten"
+  },
   "analytics.chart.tooltip.pinned": {
     "message": "Infofenster des Diagramms fixiert"
   },
@@ -429,7 +432,7 @@
     "message": "Spielzeit"
   },
   "analytics.stat.playtime-hours": {
-    "message": "{hours} Std."
+    "message": "{hours} Std"
   },
   "analytics.stat.previous-period-comparison": {
     "message": "im Vergleich zum vorherigen Zeitraum"
@@ -756,7 +759,7 @@
     "message": "Erforderliche Abfrageparameter für OAuth fehlen."
   },
   "auth.authorize.error.no-redirect-url": {
-    "message": "Keine Weiterleitungsziel in Antwort gefunden"
+    "message": "Kein Weiterleitungsziel in Antwort gefunden"
   },
   "auth.authorize.errro-title": {
     "message": "Ein Fehler ist aufgetreten"
@@ -1203,7 +1206,7 @@
     "message": "Details"
   },
   "create-project-version.create-modal.stage.metadata.detected-loaders": {
-    "message": "Erkannte Loader"
+    "message": "Erkannte Plattformen"
   },
   "create-project-version.create-modal.stage.metadata.detected-versions": {
     "message": "Erkannte Versionen"
@@ -1218,7 +1221,7 @@
     "message": "Dateien"
   },
   "create-project-version.create-modal.stage.metadata.loaders": {
-    "message": "Loader"
+    "message": "Plattformen"
   },
   "create-project-version.create-modal.stage.metadata.metadata-tab": {
     "message": "Metadaten"
@@ -1230,13 +1233,13 @@
     "message": "Modpack-Versionen können nicht bearbeitet werden"
   },
   "create-project-version.create-modal.stage.metadata.no-dependencies-added": {
-    "message": "Keine Abhängigkeiten hinzugefügt."
+    "message": "Es wurden keine Abhängigkeiten hinzugefügt."
   },
   "create-project-version.create-modal.stage.metadata.no-environment-set": {
-    "message": "Keine Umgebung wurde festgelegt."
+    "message": "Es wurde keine Umgebung festgelegt."
   },
   "create-project-version.create-modal.stage.metadata.no-loaders-selected": {
-    "message": "Keine Loader ausgewählt."
+    "message": "Es wurden keine Plattformen ausgewählt."
   },
   "create-project-version.create-modal.stage.metadata.no-mod-loader": {
     "message": "Kein Modloader"
@@ -1477,9 +1480,6 @@
   },
   "dashboard.collections.sort.recently-updated": {
     "message": "Kürzlich aktualisiert"
-  },
-  "dashboard.creator-tax-form-modal.close-button": {
-    "message": "Schließen"
   },
   "dashboard.creator-tax-form-modal.confirmation.download-button": {
     "message": "Lade {formType} herunter"
@@ -1758,7 +1758,7 @@
     "message": "Niedrigere Gebühren verfügbar"
   },
   "dashboard.creator-withdraw-modal.tremendous-details.usd-paypal-warning-message": {
-    "message": "Du has USD für PayPal International ausgewählt. <direct-paypal-link>Wechsle zu direktem PayPal</direct-paypal-link> für bessere Gebühren (≈2% statt ≈6%)."
+    "message": "Du hast USD für PayPal International ausgewählt. <direct-paypal-link>Wechsle zu direktem PayPal</direct-paypal-link> für bessere Gebühren (≈2% statt ≈6%)."
   },
   "dashboard.creator-withdraw-modal.tremendous-details.withdrawal-amount-min-max": {
     "message": "{min} min, {max} max Auszahlungsbetrag."
@@ -1773,7 +1773,7 @@
     "message": "Auszahlungslimit"
   },
   "dashboard.creator-withdraw-modal.withdraw-limit-used": {
-    "message": "Du hast dein Auszahlungslimit von <b>{withdrawLimit}</b> aufgebraucht. Du musst ein Steuerformular ausfüllen, um merh abzuheben."
+    "message": "Du hast dein Auszahlungslimit von <b>{withdrawLimit}</b> aufgebraucht. Du musst ein Steuerformular ausfüllen, um mehr abzuheben."
   },
   "dashboard.discord-roles.banner.body": {
     "message": "Du bist für {roles} qualifiziert. Verknüpfe dein Discord-Konto über Modrinth, dann synchronisieren wir diese automatisch."
@@ -1968,7 +1968,7 @@
     "message": "In Verarbeitung"
   },
   "dashboard.revenue.processing.tooltip": {
-    "message": "Einnahmen bleiben in bearbeitung bis zum ende des Monats, und werden 60 Tage danach verfügbar."
+    "message": "Die Einnahmen bleiben bis zum Monatsende in Bearbeitung und werden 60 Tage später verfügbar."
   },
   "dashboard.revenue.stats.received": {
     "message": "Erhalten"
@@ -2013,7 +2013,7 @@
     "message": "Deine Auszahlungen sind vorrübergehend gesperrt, da deine TIN oder SSN nicht mit den IRS-Aufzeichnungen übereinstimmt. Bitte kontaktiere den Support um dein Steuerformular zurückzusetzen und erneut einzureichen."
   },
   "dashboard.revenue.withdraw.card.description": {
-    "message": "Hebe von deinem Verfügbaren Guthaben über einen Zahlungsmethode ab."
+    "message": "Hebe von deinem verfügbaren Guthaben über eine Zahlungsmethode ab."
   },
   "dashboard.revenue.withdraw.card.title": {
     "message": "Auszahlen"
@@ -2175,7 +2175,7 @@
     "message": "Durchsuche {projectType}"
   },
   "discover.seo.title-with-query": {
-    "message": "Durchsuche {projectType} {query}"
+    "message": "Durchsuche {projectType} | {query}"
   },
   "error.collection.404.list_item.1": {
     "message": "Eventuell hast du die URL der Kollektion falsch eingegeben."
@@ -2879,9 +2879,6 @@
   "layout.nav.discover": {
     "message": "Entdecken"
   },
-  "layout.nav.discover-content": {
-    "message": "Inhalte entdecken"
-  },
   "layout.nav.get-modrinth-app": {
     "message": "Modrinth App herunterladen"
   },
@@ -2928,13 +2925,13 @@
     "message": "E-Mail-Bestätigung erforderlich"
   },
   "modal.shared-instance.open-in-app.benefit.install": {
-    "message": "Installiere automatisch das erforderliche Spiel und den erforderlichen Loader"
+    "message": "Installiere automatisch alles, was gerade gespielt wird"
   },
   "modal.shared-instance.open-in-app.benefit.join": {
-    "message": "Tritt der geteilten Instanz mit einem Klick bei"
+    "message": "Spiele dieselben Inhalte wie deine Freunde"
   },
   "modal.shared-instance.open-in-app.benefit.update": {
-    "message": "Halte geteilte Inhalte aktuell, wenn sich die Instanz ändert"
+    "message": "Halte gemeinsame Inhalte immer aktuell"
   },
   "modal.shared-instance.open-in-app.get-app": {
     "message": "Modrinth App herunterladen"
@@ -2972,8 +2969,20 @@
   "moderation.page.technicalReview": {
     "message": "Technische Überprüfung"
   },
-  "modpack-scan-modal.clear-all-groups": {
-    "message": "Alle Gruppen entfernen"
+  "modpack-scan-modal.batch.label": {
+    "message": "{amount} pro Stapel"
+  },
+  "modpack-scan-modal.batch.placeholder": {
+    "message": "Stapelanzahl"
+  },
+  "modpack-scan-modal.delete-all-groups-confirmation.description": {
+    "message": "Hierdurch werden alle Zuordnungsgruppen für dieses Projekt und alle darin enthaltenen Dateien dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."
+  },
+  "modpack-scan-modal.delete-all-groups.error": {
+    "message": "Fehler beim Löschen aller Gruppen: {error}"
+  },
+  "modpack-scan-modal.delete-all-groups.success": {
+    "message": "Alle Gruppen wurden gelöscht."
   },
   "modpack-scan-modal.failed": {
     "message": "Fehlgeschlagen"
@@ -3006,7 +3015,7 @@
     "message": "Alle Dateien scannen"
   },
   "modpack-scan-modal.scan-error": {
-    "message": "Einige Dateien konnten nicht gescannt werden: {error}"
+    "message": "Einige Dateien konnten nicht gescannt werden: \n\n{error}"
   },
   "modpack-scan-modal.scanning": {
     "message": "Wird gescannt..."
@@ -3326,117 +3335,6 @@
   "organization.projects.none-with-create-prompt": {
     "message": "Diese Organisation hat noch keine Projekte. Möchtest du <create-link>eins erstellen</create-link>?"
   },
-  "profile.bio.fallback.creator": {
-    "message": "Ein Modrinth-Ersteller."
-  },
-  "profile.bio.fallback.user": {
-    "message": "Ein Modrinth-Benutzer."
-  },
-  "profile.button.analytics": {
-    "message": "Benutzeranalysen anzeigen"
-  },
-  "profile.button.billing": {
-    "message": "Benutzerabrechnungen verwalten"
-  },
-  "profile.button.edit-role": {
-    "message": "Rolle bearbeiten"
-  },
-  "profile.button.info": {
-    "message": "Nutzerdetails ansehen"
-  },
-  "profile.button.manage-projects": {
-    "message": "Projekte verwalten"
-  },
-  "profile.button.remove-affiliate": {
-    "message": "Als Partner entfernen"
-  },
-  "profile.button.set-affiliate": {
-    "message": "Als Partner setzen"
-  },
-  "profile.collection.projects-count": {
-    "message": "{count, plural, one {# Projekt} other {# Projekte}}"
-  },
-  "profile.details.label.auth-providers": {
-    "message": "Authentifizierungsanbieter"
-  },
-  "profile.details.label.email": {
-    "message": "E-Mail"
-  },
-  "profile.details.label.email-verified": {
-    "message": "E-Mail verifiziert"
-  },
-  "profile.details.label.has-password": {
-    "message": "Hat Passwort"
-  },
-  "profile.details.label.has-totp": {
-    "message": "Hat TOTP"
-  },
-  "profile.details.label.payment-methods": {
-    "message": "Zahlungsmethoden"
-  },
-  "profile.details.tooltip.email-not-verified": {
-    "message": "E-Mail nicht verifiziert"
-  },
-  "profile.details.tooltip.email-verified": {
-    "message": "E-Mail verifiziert"
-  },
-  "profile.error.not-found": {
-    "message": "Benutzer nicht gefunden"
-  },
-  "profile.label.affiliate": {
-    "message": "Partner"
-  },
-  "profile.label.badges": {
-    "message": "Abzeichen"
-  },
-  "profile.label.collection": {
-    "message": "Kollektion"
-  },
-  "profile.label.download-count": {
-    "message": "{count, plural, one {Download} other {Downloads}}"
-  },
-  "profile.label.joined": {
-    "message": "Beigetreten"
-  },
-  "profile.label.no-collections": {
-    "message": "Dieser Nutzer hat keine Kollektionen!"
-  },
-  "profile.label.no-collections-auth": {
-    "message": "Du hast keine Kollektionen.\nMöchtest du eine <create-link>erstellen</create-link>?"
-  },
-  "profile.label.no-projects": {
-    "message": "Dieser Nutzer hat keine Projekte!"
-  },
-  "profile.label.no-projects-auth": {
-    "message": "Du hast keine Projekte.\nMöchtest du eins <create-link>erstellen</create-link>?"
-  },
-  "profile.label.organizations": {
-    "message": "Organisationen"
-  },
-  "profile.label.project-count": {
-    "message": "{count, plural, one {Projekt} other {Projekte}}"
-  },
-  "profile.label.saving": {
-    "message": "Speichert..."
-  },
-  "profile.meta.description": {
-    "message": "Lade {username}'s Projekte auf Modrinth herunter"
-  },
-  "profile.meta.description-with-bio": {
-    "message": "{bio} - Lade {username}s Projekte auf Modrinth herunter"
-  },
-  "profile.official-account": {
-    "message": "Offizielles Konto von Modrinth"
-  },
-  "profile.official-account.bio": {
-    "message": "Das offizielle Benutzerkonto von Modrinth. Erhalte Hilfe unter <support-link></support-link> oder per E-Mail unter <email></email>"
-  },
-  "profile.stats.projects-followers": {
-    "message": "{count, plural, one {<stat>{count}</stat>} other {<stat>{count}</stat>}} Projekt-Follower"
-  },
-  "profile.user-id": {
-    "message": "Benutzer ID: {id}"
-  },
   "project-member-header.error-decline": {
     "message": "Teameinladung konnte nicht abgelehnt werden"
   },
@@ -3693,7 +3591,7 @@
     "message": "Spielversion auswählen"
   },
   "project.download.select-platform": {
-    "message": "Platftorm auswählen"
+    "message": "Plattform auswählen"
   },
   "project.download.show-all-versions": {
     "message": "Alle Versionen anzeigen"
@@ -3787,6 +3685,9 @@
   },
   "project.moderation.admonition.under-review.body.4": {
     "message": "Wir bemühen uns, Einsendungen innerhalb von 24 bis 48 Stunden zu überprüfen, doch bei einigen Projekten kann es zu Verzögerungen kommen. Dies bedeutet nicht, dass mit deiner Einreichung etwas nicht in Ordnung ist."
+  },
+  "project.moderation.admonition.under-review.body.4.alt-week": {
+    "message": "Wir bemühen uns, Einsendungen innerhalb von einer Woche zu überprüfen, doch bei einigen Projekten kann es zu Verzögerungen kommen. Dies bedeutet nicht, dass mit deiner Einreichung etwas nicht in Ordnung ist."
   },
   "project.moderation.admonition.under-review.body.5": {
     "message": "<emphasis>Wir danken dir für deine Geduld, während unsere Moderatoren daran arbeiten, Modrinth sicher zu halten, und freuen uns darauf, dir dabei zu helfen, deine Inhalte zu teilen! 💚</emphasis>"
@@ -4802,23 +4703,14 @@
   "settings.applications.button.add-redirect-uri": {
     "message": "Weiterleitungs-URI hinzufügen"
   },
-  "settings.applications.button.cancel": {
-    "message": "Abbrechen"
-  },
   "settings.applications.button.create": {
     "message": "Anwendung erstellen"
   },
   "settings.applications.button.delete": {
     "message": "Löschen"
   },
-  "settings.applications.button.edit": {
-    "message": "Bearbeiten"
-  },
   "settings.applications.button.new": {
     "message": "Neue Anwendung"
-  },
-  "settings.applications.button.save-changes": {
-    "message": "Änderungen speichern"
   },
   "settings.applications.button.upload-icon": {
     "message": "Icon hochladen"
@@ -4842,7 +4734,7 @@
     "message": "Möchtest du diese Anwendung wirklich löschen?"
   },
   "settings.applications.description.intro": {
-    "message": "Anwendungen können verwendet werden, um Modrinth-Benutzer mit deinen Produkten zu authentifizieren. Weitere Informationen findest du in der <docs-link>Modrinth's API-Dokumentation</docs-link>."
+    "message": "Anwendungen können verwendet werden, um Modrinth-Benutzer mit deinen Produkten zu authentifizieren. Weitere Informationen findest du in der <docs-link>API-Dokumentation von Modrinth</docs-link>."
   },
   "settings.applications.field.description": {
     "message": "Beschreibung"
@@ -4892,17 +4784,23 @@
   "settings.authorizations.about-this-app": {
     "message": "Über diese Anwendung"
   },
-  "settings.authorizations.by": {
-    "message": "von"
+  "settings.authorizations.created-by": {
+    "message": "Erstellt von {user}"
   },
   "settings.authorizations.description": {
     "message": "Wenn du eine Anwendung mit deinem Modrinth-Konto autorisierst, gewährst du dieser Zugriff auf dein Konto. Du kannst den Zugriff auf dein Konto hier jederzeit verwalten und überprüfen."
   },
-  "settings.authorizations.empty-state": {
-    "message": "Wir können deine autorisierten Apps derzeit nicht anzeigen, wir arbeiten daran, das zu beheben. Bitte besuche diese Seite zu einem späteren Zeitpunkt erneut!"
+  "settings.authorizations.empty-state.description": {
+    "message": "Von dir autorisierte Anwendungen werden hier angezeigt."
+  },
+  "settings.authorizations.empty-state.heading": {
+    "message": "Keine autorisierten Apps"
   },
   "settings.authorizations.head-title": {
     "message": "Autorisierungen"
+  },
+  "settings.authorizations.official-tooltip": {
+    "message": "Diese App wurde von einem offiziellen Modrinth Konto erstellt."
   },
   "settings.authorizations.revoke.action": {
     "message": "Widerrufen"
@@ -4912,6 +4810,9 @@
   },
   "settings.authorizations.revoke.confirm.title": {
     "message": "Möchtest du diese Anwendung wirklich widerrufen?"
+  },
+  "settings.authorizations.unofficial-disclosure": {
+    "message": "Diese App steht in keiner Verbindung zu Modrinth, trotz ihres Namens."
   },
   "settings.billing.charges.description": {
     "message": "Hier werden alle bisherigen Belastungen deines Modrinth-Kontos aufgeführt:"
@@ -5257,27 +5158,6 @@
   },
   "settings.pats.token.never-used": {
     "message": "Nie verwendet"
-  },
-  "settings.profile.bio.description": {
-    "message": "Eine kurze Beschreibung, um allen ein wenig über dich zu erzählen."
-  },
-  "settings.profile.bio.title": {
-    "message": "Bio"
-  },
-  "settings.profile.description": {
-    "message": "Deine Profilinformationen sind auf Modrinth und über die <docs-link>Modrinth-API</docs-link> öffentlich einsehbar."
-  },
-  "settings.profile.head-title": {
-    "message": "Profileinstellungen"
-  },
-  "settings.profile.profile-info": {
-    "message": "Profilinformationen"
-  },
-  "settings.profile.profile-picture.title": {
-    "message": "Profilbild"
-  },
-  "settings.profile.username.description": {
-    "message": "Ein eindeutiger Name ohne Berücksichtigung der Groß-/Kleinschreibung zur Identifizierung deines Profils."
   },
   "settings.sessions.action.revoke-session": {
     "message": "Sitzung widerrufen"

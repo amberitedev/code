@@ -191,6 +191,9 @@
   "analytics.chart.tooltip.hide-entry": {
     "message": "{name} im Diagramm ausblenden"
   },
+  "analytics.chart.tooltip.no-data": {
+    "message": "Keine Daten"
+  },
   "analytics.chart.tooltip.pinned": {
     "message": "Diagramm-Tooltip angeheftet"
   },
@@ -1203,7 +1206,7 @@
     "message": "Details"
   },
   "create-project-version.create-modal.stage.metadata.detected-loaders": {
-    "message": "Erkannte Loader"
+    "message": "Erkannte Plattformen"
   },
   "create-project-version.create-modal.stage.metadata.detected-versions": {
     "message": "Erkannte Versionen"
@@ -1218,7 +1221,7 @@
     "message": "Dateien"
   },
   "create-project-version.create-modal.stage.metadata.loaders": {
-    "message": "Loader"
+    "message": "Plattformen"
   },
   "create-project-version.create-modal.stage.metadata.metadata-tab": {
     "message": "Metadaten"
@@ -1230,13 +1233,13 @@
     "message": "Modpack-Versionen können nicht bearbeitet werden"
   },
   "create-project-version.create-modal.stage.metadata.no-dependencies-added": {
-    "message": "Keine Abhängigkeiten hinzugefügt."
+    "message": "Es wurden keine Abhängigkeiten hinzugefügt."
   },
   "create-project-version.create-modal.stage.metadata.no-environment-set": {
-    "message": "Keine Umgebung wurde festgelegt."
+    "message": "Es wurde keine Umgebung festgelegt."
   },
   "create-project-version.create-modal.stage.metadata.no-loaders-selected": {
-    "message": "Keine Loader ausgewählt."
+    "message": "Es wurden keine Plattformen ausgewählt."
   },
   "create-project-version.create-modal.stage.metadata.no-mod-loader": {
     "message": "Kein Modloader"
@@ -1477,9 +1480,6 @@
   },
   "dashboard.collections.sort.recently-updated": {
     "message": "Kürzlich aktualisiert"
-  },
-  "dashboard.creator-tax-form-modal.close-button": {
-    "message": "Schließen"
   },
   "dashboard.creator-tax-form-modal.confirmation.download-button": {
     "message": "{formType} herunterladen"
@@ -2879,9 +2879,6 @@
   "layout.nav.discover": {
     "message": "Entdecken"
   },
-  "layout.nav.discover-content": {
-    "message": "Inhalte entdecken"
-  },
   "layout.nav.get-modrinth-app": {
     "message": "Modrinth App herunterladen"
   },
@@ -2928,13 +2925,13 @@
     "message": "E-Mail-Bestätigung erforderlich"
   },
   "modal.shared-instance.open-in-app.benefit.install": {
-    "message": "Installiere automatisch das erforderliche Spiel und den erforderlichen Loader"
+    "message": "Installiere automatisch alles, was gerade gespielt wird"
   },
   "modal.shared-instance.open-in-app.benefit.join": {
-    "message": "Tritt der geteilten Instanz mit einem Klick bei"
+    "message": "Spiele dieselben Inhalte wie deine Freunde"
   },
   "modal.shared-instance.open-in-app.benefit.update": {
-    "message": "Halte geteilte Inhalte aktuell, wenn sich die Instanz ändert"
+    "message": "Halte gemeinsame Inhalte immer aktuell"
   },
   "modal.shared-instance.open-in-app.get-app": {
     "message": "Modrinth App herunterladen"
@@ -2972,8 +2969,20 @@
   "moderation.page.technicalReview": {
     "message": "Technische Überprüfung"
   },
-  "modpack-scan-modal.clear-all-groups": {
-    "message": "Alle Gruppen entfernen"
+  "modpack-scan-modal.batch.label": {
+    "message": "{amount} pro Stapel"
+  },
+  "modpack-scan-modal.batch.placeholder": {
+    "message": "Stapelanzahl"
+  },
+  "modpack-scan-modal.delete-all-groups-confirmation.description": {
+    "message": "Hierdurch werden alle Zuordnungsgruppen für dieses Projekt und alle darin enthaltenen Dateien dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."
+  },
+  "modpack-scan-modal.delete-all-groups.error": {
+    "message": "Fehler beim Löschen aller Gruppen: {error}"
+  },
+  "modpack-scan-modal.delete-all-groups.success": {
+    "message": "Alle Gruppen wurden gelöscht."
   },
   "modpack-scan-modal.failed": {
     "message": "Fehlgeschlagen"
@@ -3006,7 +3015,7 @@
     "message": "Alle Dateien scannen"
   },
   "modpack-scan-modal.scan-error": {
-    "message": "Einige Dateien konnten nicht gescannt werden: {error}"
+    "message": "Einige Dateien konnten nicht gescannt werden: \n\n{error}"
   },
   "modpack-scan-modal.scanning": {
     "message": "Wird gescannt..."
@@ -3325,117 +3334,6 @@
   },
   "organization.projects.none-with-create-prompt": {
     "message": "Diese Organisation hat noch keine Projekte. Möchtest du <create-link>eins erstellen</create-link>?"
-  },
-  "profile.bio.fallback.creator": {
-    "message": "Ein Modrinth Ersteller."
-  },
-  "profile.bio.fallback.user": {
-    "message": "Ein Modrinth Benutzer."
-  },
-  "profile.button.analytics": {
-    "message": "Nutzungsstatistik anzeigen"
-  },
-  "profile.button.billing": {
-    "message": "Nutzer Zahlungen verwalten"
-  },
-  "profile.button.edit-role": {
-    "message": "Rolle bearbeiten"
-  },
-  "profile.button.info": {
-    "message": "Nutzerdetails ansehen"
-  },
-  "profile.button.manage-projects": {
-    "message": "Projekte verwalten"
-  },
-  "profile.button.remove-affiliate": {
-    "message": "Als Partner entfernen"
-  },
-  "profile.button.set-affiliate": {
-    "message": "Als Partner setzen"
-  },
-  "profile.collection.projects-count": {
-    "message": "{count, plural, one {# Projekt} other {# Projekte}}"
-  },
-  "profile.details.label.auth-providers": {
-    "message": "Authentifizierungsanbieter"
-  },
-  "profile.details.label.email": {
-    "message": "E-Mail"
-  },
-  "profile.details.label.email-verified": {
-    "message": "E-Mail verifiziert"
-  },
-  "profile.details.label.has-password": {
-    "message": "Hat Passwort"
-  },
-  "profile.details.label.has-totp": {
-    "message": "Hat TOTP"
-  },
-  "profile.details.label.payment-methods": {
-    "message": "Zahlungsmethoden"
-  },
-  "profile.details.tooltip.email-not-verified": {
-    "message": "E-Mail nicht verifiziert"
-  },
-  "profile.details.tooltip.email-verified": {
-    "message": "E-Mail verifiziert"
-  },
-  "profile.error.not-found": {
-    "message": "Benutzer nicht gefunden"
-  },
-  "profile.label.affiliate": {
-    "message": "Partner"
-  },
-  "profile.label.badges": {
-    "message": "Abzeichen"
-  },
-  "profile.label.collection": {
-    "message": "Kollektion"
-  },
-  "profile.label.download-count": {
-    "message": "{count, plural, one {Download} other {Downloads}}"
-  },
-  "profile.label.joined": {
-    "message": "Beigetreten"
-  },
-  "profile.label.no-collections": {
-    "message": "Dieser Nutzer hat keine Kollektionen!"
-  },
-  "profile.label.no-collections-auth": {
-    "message": "Du hast keine Kollektionen.\nMöchtest du gerne <create-link>eine erstellen</create-link>?"
-  },
-  "profile.label.no-projects": {
-    "message": "Dieser Nutzer hat keine Projekte!"
-  },
-  "profile.label.no-projects-auth": {
-    "message": "Du hast keine Projekte.\nMöchtest du gerne <create-link>eines erstellen</create-link>?"
-  },
-  "profile.label.organizations": {
-    "message": "Organisationen"
-  },
-  "profile.label.project-count": {
-    "message": "{count, plural, one {Projekt} other {Projekte}}"
-  },
-  "profile.label.saving": {
-    "message": "Speichert..."
-  },
-  "profile.meta.description": {
-    "message": "Lade {username}'s Projekte auf Modrinth herunter"
-  },
-  "profile.meta.description-with-bio": {
-    "message": "{bio} - Lade {username}'s Projekte auf Modrinth herunter"
-  },
-  "profile.official-account": {
-    "message": "Offizielles Modrinth-Konto"
-  },
-  "profile.official-account.bio": {
-    "message": "Das offizielle Benutzerkonto von Modrinth. Erhalte Support unter <support-link></support-link> oder per E-Mail an <email></email>"
-  },
-  "profile.stats.projects-followers": {
-    "message": "{count, plural, one {<stat>{count}</stat>} other {<stat>{count}</stat>}} Projekt-Follower"
-  },
-  "profile.user-id": {
-    "message": "Benutzer ID: {id}"
   },
   "project-member-header.error-decline": {
     "message": "Ablehnen der Team-Einladung fehlgeschlagen"
@@ -3786,7 +3684,10 @@
     "message": "Du kannst dein Projekt weiterhin ändern, dies hat keinen Einfluss auf deine Position in der Warteschlange."
   },
   "project.moderation.admonition.under-review.body.4": {
-    "message": "Wir streben an, Einreichungen innerhalb von 24 bis 48 Stunden zu überprüfen, aber bei einigen Projekten kann es zu Verzögerungen kommen. Dies deutet nicht auf ein Problem mit deiner Einreichung hin."
+    "message": "Wir bemühen uns, Einsendungen innerhalb von 24 bis 48 Stunden zu überprüfen, doch bei einigen Projekten kann es zu Verzögerungen kommen. Dies bedeutet nicht, dass mit deiner Einreichung etwas nicht in Ordnung ist."
+  },
+  "project.moderation.admonition.under-review.body.4.alt-week": {
+    "message": "Wir bemühen uns, Einsendungen innerhalb von einer Woche zu überprüfen, doch bei einigen Projekten kann es zu Verzögerungen kommen. Dies bedeutet nicht, dass mit deiner Einreichung etwas nicht in Ordnung ist."
   },
   "project.moderation.admonition.under-review.body.5": {
     "message": "<emphasis>Wir schätzen deine Geduld, während unsere Moderatoren hart daran arbeiten, Modrinth sicher zu halten, und freuen uns darauf, dir dabei zu helfen, deine Inhalte zu teilen! 💚</emphasis>"
@@ -4802,23 +4703,14 @@
   "settings.applications.button.add-redirect-uri": {
     "message": "Weiterleitungs-URI hinzufügen"
   },
-  "settings.applications.button.cancel": {
-    "message": "Abbrechen"
-  },
   "settings.applications.button.create": {
     "message": "App erstellen"
   },
   "settings.applications.button.delete": {
     "message": "Löschen"
   },
-  "settings.applications.button.edit": {
-    "message": "Bearbeiten"
-  },
   "settings.applications.button.new": {
     "message": "Neue Anwendung"
-  },
-  "settings.applications.button.save-changes": {
-    "message": "Änderungen speichern"
   },
   "settings.applications.button.upload-icon": {
     "message": "Icon hochladen"
@@ -4892,17 +4784,23 @@
   "settings.authorizations.about-this-app": {
     "message": "Über diese Anwendung"
   },
-  "settings.authorizations.by": {
-    "message": "von"
+  "settings.authorizations.created-by": {
+    "message": "Erstellt von {user}"
   },
   "settings.authorizations.description": {
     "message": "Wenn du eine Anwendung mit deinem Modrinth-Konto autorisierst, gewährst du dieser Zugriff auf dein Konto. Du kannst den Zugriff auf dein Konto hier jederzeit verwalten und überprüfen."
   },
-  "settings.authorizations.empty-state": {
-    "message": "Wir konnen aktuell deine autorisierten Anwendungen nicht anzeigen und arbeiten an einer lösung dafür. Bitte besuche diese Seite zu einem späteren Zeitpunkt erneut!"
+  "settings.authorizations.empty-state.description": {
+    "message": "Von dir autorisierte Anwendungen werden hier angezeigt."
+  },
+  "settings.authorizations.empty-state.heading": {
+    "message": "Keine autorisierten Apps"
   },
   "settings.authorizations.head-title": {
     "message": "Autorisierungen"
+  },
+  "settings.authorizations.official-tooltip": {
+    "message": "Diese App wurde von einem offiziellen Modrinth Konto erstellt."
   },
   "settings.authorizations.revoke.action": {
     "message": "Widerrufen"
@@ -4912,6 +4810,9 @@
   },
   "settings.authorizations.revoke.confirm.title": {
     "message": "Möchtest du diese Anwendung wirklich widerrufen?"
+  },
+  "settings.authorizations.unofficial-disclosure": {
+    "message": "Diese App steht in keiner Verbindung zu Modrinth, trotz ihres Namens."
   },
   "settings.billing.charges.description": {
     "message": "Hier werden alle bisherigen Belastungen deines Modrinth-Kontos aufgeführt:"
@@ -5257,27 +5158,6 @@
   },
   "settings.pats.token.never-used": {
     "message": "Nie verwendet"
-  },
-  "settings.profile.bio.description": {
-    "message": "Eine kurze Beschreibung um allen etwas über dich zu erzählen."
-  },
-  "settings.profile.bio.title": {
-    "message": "Bio"
-  },
-  "settings.profile.description": {
-    "message": "Deine Profilinformationen sind auf Modrinth und über die <docs-link>Modrinth API</docs-link> öffentlich einsehbar."
-  },
-  "settings.profile.head-title": {
-    "message": "Profileinstellungen"
-  },
-  "settings.profile.profile-info": {
-    "message": "Profilinformationen"
-  },
-  "settings.profile.profile-picture.title": {
-    "message": "Profilbild"
-  },
-  "settings.profile.username.description": {
-    "message": "Ein eindeutiger Name (ohne berücksichtigung der Gross-/Kleinschreibung) zur identifikation deines Profils."
   },
   "settings.sessions.action.revoke-session": {
     "message": "Sitzung widerrufen"

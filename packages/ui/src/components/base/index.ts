@@ -1,3 +1,4 @@
+export type { UiLazyMountMode } from '../../composables/use-lazy-mount'
 export { default as Accordion } from './Accordion.vue'
 export { default as Admonition } from './Admonition.vue'
 export { default as Alert } from './Alert.vue'
@@ -9,7 +10,27 @@ export { default as Badge } from './Badge.vue'
 export { default as BaseTerminal } from './BaseTerminal.vue'
 export { default as BigOptionButton } from './BigOptionButton.vue'
 export { default as BulletDivider } from './BulletDivider.vue'
-export { default as Button } from './Button.vue'
+export { default as Button } from './buttons/Button.vue'
+export { default as ButtonGroup } from './buttons/ButtonGroup.vue'
+export { default as ButtonLink } from './buttons/ButtonLink.vue'
+export { default as FileButton } from './buttons/FileButton.vue'
+export { default as IconButton } from './buttons/IconButton.vue'
+export { default as SplitButton } from './buttons/SplitButton.vue'
+export { default as TeleportOverflowMenu } from './buttons/TeleportOverflowMenu.vue'
+export { default as TeleportPopoutMenu } from './buttons/TeleportPopoutMenu.vue'
+export type {
+	ButtonColor,
+	ButtonInteraction,
+	ButtonNativeType,
+	ButtonSize,
+	ButtonType,
+	ButtonVisualProps,
+	OverflowMenuAction,
+	OverflowMenuDivider,
+	OverflowMenuLink,
+	OverflowMenuOption,
+	TeleportPlacement,
+} from './buttons/types'
 export { default as ButtonStyled } from './ButtonStyled.vue'
 export { default as Card } from './Card.vue'
 export { default as Checkbox } from './Checkbox.vue'
@@ -58,8 +79,6 @@ export { default as HorizontalRule } from './HorizontalRule.vue'
 export { default as I18nDebugPanel } from './I18nDebugPanel.vue'
 export { default as IconSelect } from './IconSelect.vue'
 export { default as IntlFormatted } from './IntlFormatted.vue'
-export type { JoinedButtonAction } from './JoinedButtons.vue'
-export { default as JoinedButtons } from './JoinedButtons.vue'
 export { default as LoadingBar } from './LoadingBar.vue'
 export { default as LoadingIndicator } from './LoadingIndicator.vue'
 export { default as ManySelect } from './ManySelect.vue'
@@ -74,9 +93,7 @@ export type { MaybeCtxFn, StageButtonConfig, StageConfigInput } from './MultiSta
 export { default as MultiStageModal, resolveCtxFn } from './MultiStageModal.vue'
 export { default as NavTabContentTransition } from './NavTabContentTransition.vue'
 export { default as NavTabs } from './NavTabs.vue'
-export { default as UiMotionTransition } from './UiMotionTransition.vue'
 export { default as OptionGroup } from './OptionGroup.vue'
-export type { Option as OverflowMenuOption } from './OverflowMenu.vue'
 export { default as OverflowMenu } from './OverflowMenu.vue'
 export { default as Page } from './Page.vue'
 export { default as PageHeader } from './page-header/index.vue'
@@ -111,16 +128,16 @@ export { default as SettingsLabel } from './SettingsLabel.vue'
 export { default as SimpleBadge } from './SimpleBadge.vue'
 export { default as Slider } from './Slider.vue'
 export { default as SmartClickable } from './SmartClickable.vue'
-export { default as SwipeDismissSurface } from './SwipeDismissSurface.vue'
+export type { StackedAdmonitionItem, StackedAdmonitionType } from './StackedAdmonitions.vue'
+export { default as StackedAdmonitions } from './StackedAdmonitions.vue'
 export type {
 	StageContentTransitionAxis,
 	StageContentTransitionDirection,
 } from './StageContentTransition.vue'
 export { default as StageContentTransition } from './StageContentTransition.vue'
-export type { StackedAdmonitionItem, StackedAdmonitionType } from './StackedAdmonitions.vue'
-export { default as StackedAdmonitions } from './StackedAdmonitions.vue'
 export { default as StatItem } from './StatItem.vue'
 export { default as StyledInput } from './StyledInput.vue'
+export { default as SwipeDismissSurface } from './SwipeDismissSurface.vue'
 export type { SortDirection, TableColumn } from './Table.vue'
 export { default as Table } from './Table.vue'
 export type { TabsTab, TabsValue } from './Tabs.vue'
@@ -129,11 +146,6 @@ export { default as TagItem } from './TagItem.vue'
 export { default as TagTagItem } from './TagTagItem.vue'
 export type { TextMorphTransition, TextMorphVariants } from './TextMorph.vue'
 export { default as TextMorph } from './TextMorph.vue'
-export type {
-	Item as TeleportOverflowMenuItem,
-	Option as TeleportOverflowMenuOption,
-} from './TeleportOverflowMenu.vue'
-export { default as TeleportOverflowMenu } from './TeleportOverflowMenu.vue'
 export type {
 	TimeFrameLastUnit,
 	TimeFrameLastUnitOption,
@@ -144,6 +156,6 @@ export type {
 export { default as TimeFramePicker } from './TimeFramePicker.vue'
 export { default as Timeline } from './Timeline.vue'
 export { default as Toggle } from './Toggle.vue'
-export type { UiLazyMountMode } from '../../composables/use-lazy-mount'
 export { default as UiLazyMount } from './UiLazyMount.vue'
+export { default as UiMotionTransition } from './UiMotionTransition.vue'
 export { default as UnsavedChangesPopup } from './UnsavedChangesPopup.vue'

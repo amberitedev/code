@@ -1,4 +1,229 @@
 {
+  "app.action-bar.downloading-java": {
+    "message": "Instalacija Jave {version}"
+  },
+  "app.action-bar.downloading-update": {
+    "message": "Instaliranje ažuriranja"
+  },
+  "app.action-bar.downloads": {
+    "message": "Instalacije"
+  },
+  "app.action-bar.hide-more-running-instances": {
+    "message": "Sakrij više pokrenutih instanca"
+  },
+  "app.action-bar.install.copied-details": {
+    "message": "Kopirano"
+  },
+  "app.action-bar.install.copy-details": {
+    "message": "Kopiraj detalje"
+  },
+  "app.action-bar.install.dismiss": {
+    "message": "Otpusti"
+  },
+  "app.action-bar.install.open-instance": {
+    "message": "Otvori instancu"
+  },
+  "app.action-bar.install.retry": {
+    "message": "Probaj ponovo"
+  },
+  "app.action-bar.install.summary.app-closing": {
+    "message": "Otkazano zbog zatvaranja aplikacije"
+  },
+  "app.action-bar.install.summary.bad-modpack-file": {
+    "message": "Nije moglo pročitati modpack"
+  },
+  "app.action-bar.install.summary.canceled": {
+    "message": "Otkazano"
+  },
+  "app.action-bar.install.summary.cleanup-incomplete": {
+    "message": "Čišćenje nije završeno"
+  },
+  "app.action-bar.install.summary.content-download-failed": {
+    "message": "Nije bilo moguće instalirati datoteke"
+  },
+  "app.action-bar.install.summary.corrupt-download": {
+    "message": "Preuzeta datoteka je oštećena"
+  },
+  "app.action-bar.install.summary.could-not-save-files": {
+    "message": "Nije bilo moguće spremiti datoteke"
+  },
+  "app.action-bar.install.summary.download-failed": {
+    "message": "Preuzimanje nije završeno"
+  },
+  "app.action-bar.install.summary.instance-not-found": {
+    "message": "Instanca nije pronađena"
+  },
+  "app.action-bar.install.summary.invalid-file-path": {
+    "message": "Put do datoteke nije ispravan"
+  },
+  "app.action-bar.install.summary.invalid-modpack": {
+    "message": "Podaci modpaka su nevažeći"
+  },
+  "app.action-bar.install.summary.invalid-modpack-files": {
+    "message": "Datoteke modpaka sadrže nevažeće metapodatke"
+  },
+  "app.action-bar.install.summary.java-setup-failed": {
+    "message": "Podešavanje Jave nije moglo biti završeno"
+  },
+  "app.action-bar.install.summary.loader-setup-failed": {
+    "message": "Podešavanje učitavača nije uspelo"
+  },
+  "app.action-bar.install.summary.local-data-error": {
+    "message": "Nije bilo moguće ažurirati lokalne podatke"
+  },
+  "app.action-bar.install.summary.minecraft-setup-failed": {
+    "message": "Podešavanje Minecrafta nije uspelo"
+  },
+  "app.action-bar.install.summary.modrinth-unreachable": {
+    "message": "Nije bilo moguće povezati se sa Modrinth-om"
+  },
+  "app.action-bar.install.summary.no-write-permission": {
+    "message": "Nema dozvole za pisanje"
+  },
+  "app.action-bar.install.summary.pack-download-failed": {
+    "message": "Nije bilo moguće instalirati datoteku"
+  },
+  "app.action-bar.install.summary.unexpected-error": {
+    "message": "Nešto je pošlo po zlu"
+  },
+  "app.action-bar.install.unknown-instance": {
+    "message": "Nepoznata instanca"
+  },
+  "app.action-bar.install.updating-shared-content": {
+    "message": "Ažuriranje deljenog sadržaja"
+  },
+  "app.action-bar.installs": {
+    "message": "Instalacije"
+  },
+  "app.action-bar.make-primary-instance": {
+    "message": "Učini primarnom instancom"
+  },
+  "app.action-bar.no-instances-running": {
+    "message": "Nema pokrenutih instanca"
+  },
+  "app.action-bar.offline": {
+    "message": "Oflajn"
+  },
+  "app.action-bar.primary-instance": {
+    "message": "Primarna instanca"
+  },
+  "app.action-bar.reload-to-update": {
+    "message": "Ponovo učitaj da ažuriraš"
+  },
+  "app.action-bar.show-more-running-instances": {
+    "message": "Pokaži više pokrenutih instanca"
+  },
+  "app.action-bar.stop-instance": {
+    "message": "Prekini instancu"
+  },
+  "app.action-bar.update": {
+    "message": "Ažuiraj"
+  },
+  "app.action-bar.view-active-downloads": {
+    "message": "Vidi aktivna preuzimanja"
+  },
+  "app.action-bar.view-instance": {
+    "message": "Vidi instancu"
+  },
+  "app.action-bar.view-logs": {
+    "message": "Pregledaj dnevnike"
+  },
+  "app.ads-consent.accept": {
+    "message": "Prihvati sve"
+  },
+  "app.ads-consent.body": {
+    "message": "Reklame omogućavaju da Modrinth radi i finansiraju isplate kreatorima. Naši partneri mogu da čuvaju i koriste kolačiće u aplikaciji da bi personalizovali reklame i merili performanse."
+  },
+  "app.ads-consent.manage": {
+    "message": "Upravljaj podešavanjima"
+  },
+  "app.ads-consent.reject": {
+    "message": "Odbij sve"
+  },
+  "app.ads-consent.title": {
+    "message": "Tvoja bezbednost i kako reklame pomažu Modrinth-u"
+  },
+  "app.appearance-settings.advanced-rendering.description": {
+    "message": "Uključi vizuelne efekte kao što je blur pozadine. Ovo može da pogorša performanse bez hardverskog ubrzanja."
+  },
+  "app.appearance-settings.advanced-rendering.title": {
+    "message": "Napredno renderovanje"
+  },
+  "app.appearance-settings.color-theme.description": {
+    "message": "Izaberi boju teme koju koristi Modrinth App."
+  },
+  "app.appearance-settings.color-theme.title": {
+    "message": "Tema boje"
+  },
+  "app.appearance-settings.default-landing-page.description": {
+    "message": "Izaberi stranicu prikazanu kada se Modrinth App pokrene."
+  },
+  "app.appearance-settings.default-landing-page.home": {
+    "message": "Početna stranica"
+  },
+  "app.appearance-settings.default-landing-page.library": {
+    "message": "Biblioteka"
+  },
+  "app.appearance-settings.default-landing-page.title": {
+    "message": "Podrazumevana odredišna stranica"
+  },
+  "app.appearance-settings.hide-nametag.description": {
+    "message": "Sakrij svoje korisničko ime iznad pregleda igrača na stranici Skin birača."
+  },
+  "app.appearance-settings.hide-nametag.title": {
+    "message": "Sakrij ime"
+  },
+  "app.appearance-settings.jump-back-into-worlds.description": {
+    "message": "Prikaži skorije igrane svetove na odeljku \"Vrati se u\" na početnoj stranici."
+  },
+  "app.appearance-settings.jump-back-into-worlds.title": {
+    "message": "Vrati se u svetove"
+  },
+  "app.appearance-settings.minimize-launcher.description": {
+    "message": "Smanji Modrinth App kada se Minecraft pokrene."
+  },
+  "app.appearance-settings.minimize-launcher.title": {
+    "message": "Smanji aplikaciju"
+  },
+  "app.appearance-settings.native-decorations.description": {
+    "message": "Koristi naslovnu traku i kontrole prozora tvog operativnog sistema. Restart aplikacije obavezan."
+  },
+  "app.appearance-settings.native-decorations.title": {
+    "message": "Sistemski okvir prozora"
+  },
+  "app.appearance-settings.show-play-time.description": {
+    "message": "Prikaži koliko dugo ste igrali svaku instancu."
+  },
+  "app.appearance-settings.show-play-time.title": {
+    "message": "Pokazivaj vreme igranja"
+  },
+  "app.appearance-settings.skip-non-essential-warnings.description": {
+    "message": "Preskoči potvrde za radnje niskog rizika kao što je dupliranje instalacije, brisanje normalnog sadržaja, grupna ažuriranja, prekid veze i popravke. Upozorenja za opasne radnje se uvek prikazuju."
+  },
+  "app.appearance-settings.skip-non-essential-warnings.title": {
+    "message": "Preskači nebitna upozorenja"
+  },
+  "app.appearance-settings.toggle-sidebar.description": {
+    "message": "Sakrij desnu bočnu traku podrazumevano i dodaj dugme da se prikaže i sakrije."
+  },
+  "app.appearance-settings.toggle-sidebar.title": {
+    "message": "Sakrij desnu bočnu traku"
+  },
+  "app.appearance-settings.unknown-pack-warning.title": {
+    "message": "Upozoti me prije instalacije nepoznatih modpackova"
+  },
+  "app.auth-servers.unreachable.body": {
+    "message": "Minecraft serveri za autentifikaciju su možda trenutno nedostupni. Molimo vas da proverite vašu internet vezu i pokušajte ponovo kasnije."
+  },
+  "app.auth-servers.unreachable.header": {
+    "message": "Serveri za autentifikaciju su nedostupni"
+  },
+  "app.browse.add-servers-to-instance": {
+    "message": "Dodavanje servera na instancu"
+  },
+  "app.browse.add-to-an-instance": {
+    "message": "Dodaj u instancu"
+  },
   "app.browse.add-to-instance": {
     "message": "Dodaj na instancu"
   },
@@ -13,9 +238,6 @@
   },
   "app.browse.back-to-instance": {
     "message": "Nazad na instancu"
-  },
-  "app.browse.discover-content": {
-    "message": "Otkrij sadržaj"
   },
   "app.browse.discover-servers": {
     "message": "Otkrij servere"
@@ -280,9 +502,6 @@
   },
   "app.settings.tabs.appearance": {
     "message": "Izgled"
-  },
-  "app.settings.tabs.default-instance-options": {
-    "message": "Podrazumevane opcije instance"
   },
   "app.settings.tabs.java-installations": {
     "message": "Java instalacije"

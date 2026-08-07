@@ -108,7 +108,7 @@ function getQueuedInstallOwnerFallback(project: InstallableSearchResult) {
 		id: ownerId,
 		name: project.author,
 		type: 'user' as const,
-		link: `https://modrinth.com/user/${ownerId}`,
+		link: `/user/${encodeURIComponent(ownerId)}`,
 	}
 }
 
@@ -144,7 +144,7 @@ async function getQueuedInstallOwner(
 				name: owner.username,
 				type: 'user' as const,
 				avatar_url: owner.avatar_url,
-				link: `https://modrinth.com/user/${owner.username}`,
+				link: `/user/${encodeURIComponent(owner.username)}`,
 			}
 		}
 	} catch {
@@ -222,7 +222,29 @@ export function createServerInstallContent(opts: {
 	const isSetupServerContext = computed(() => !!serverIdQuery.value && !!serverFlowFrom.value)
 
 	const serverContextWorldId = ref<string | null>(worldIdQuery.value)
-	const serverContextServerData = ref<Archon.Servers.v0.Server | null>(null)
+
+	function getCachedServer(serverId: string): Archon.Servers.v0.Server | null {
+		return (
+			queryClient.getQueryData<Archon.Servers.v0.Server>(['servers', 'detail', serverId]) ??
+			queryClient
+				.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
+				?.servers.find((server) => server.server_id === serverId) ??
+			null
+		)
+	}
+
+	async function ensureServer(serverId: string): Promise<Archon.Servers.v0.Server> {
+		return queryClient.ensureQueryData({
+			queryKey: ['servers', 'detail', serverId],
+			queryFn: () => client.archon.servers_v0.get(serverId),
+			staleTime: 30_000,
+		})
+	}
+
+	const initialServerId = serverIdQuery.value
+	const serverContextServerData = ref<Archon.Servers.v0.Server | null>(
+		initialServerId ? getCachedServer(initialServerId) : null,
+	)
 	const serverContentProjectIds = ref<Set<string>>(new Set())
 	const serverContentInstallKeys = ref<Set<string>>(new Set())
 	const queuedServerInstalls = ref<Map<string, BrowseInstallPlan<InstallableSearchResult>>>(
@@ -277,6 +299,9 @@ export function createServerInstallContent(opts: {
 	async function refreshServerInstalledContent(serverId: string, worldId: string) {
 		try {
 			const content = await client.archon.content_v1.getAddons(serverId, worldId)
+			if (serverIdQuery.value !== serverId || effectiveServerWorldId.value !== worldId) {
+				return
+			}
 			const ids = new Set(
 				(content.addons ?? [])
 					.map((addon) => addon.project_id)
@@ -297,14 +322,20 @@ export function createServerInstallContent(opts: {
 		if (!sid) return
 
 		try {
-			serverContextServerData.value = await client.archon.servers_v0.get(sid)
+			const server = await ensureServer(sid)
+			if (serverIdQuery.value === sid) {
+				serverContextServerData.value = server
+			}
 		} catch (err) {
 			handleError(err as Error)
 		}
 
+		if (serverIdQuery.value !== sid) return
+
 		let resolvedWorldId = effectiveServerWorldId.value
 		if (!resolvedWorldId) {
 			resolvedWorldId = await resolveServerContextWorldId(sid)
+			if (serverIdQuery.value !== sid) return
 			if (resolvedWorldId) {
 				serverContextWorldId.value = resolvedWorldId
 			}
@@ -319,6 +350,7 @@ export function createServerInstallContent(opts: {
 	function watchServerContextChanges() {
 		watch([serverIdQuery, effectiveServerWorldId], async ([sid, wid], [prevSid, prevWid]) => {
 			if (!sid) {
+				serverContextWorldId.value = null
 				serverContextServerData.value = null
 				serverContentProjectIds.value = new Set()
 				serverContentInstallKeys.value = new Set()
@@ -330,8 +362,12 @@ export function createServerInstallContent(opts: {
 				serverContentProjectIds.value = new Set()
 				serverContentInstallKeys.value = new Set()
 				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
+				serverContextServerData.value = getCachedServer(sid)
 				try {
-					serverContextServerData.value = await client.archon.servers_v0.get(sid)
+					const server = await ensureServer(sid)
+					if (serverIdQuery.value === sid) {
+						serverContextServerData.value = server
+					}
 				} catch (err) {
 					handleError(err as Error)
 				}
