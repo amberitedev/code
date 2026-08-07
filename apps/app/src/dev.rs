@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct DevAppConfig {
     pub app_id: String,
+    pub credential_namespace: String,
     pub username: Option<String>,
     pub auth_mode: String,
     pub branch: String,
@@ -69,6 +70,10 @@ mod runtime {
             assert!(
                 !parsed.app_id.trim().is_empty(),
                 "dev app ID cannot be empty"
+            );
+            assert!(
+                !parsed.credential_namespace.trim().is_empty(),
+                "dev credential namespace cannot be empty"
             );
             assert!(parsed.control_port > 0, "dev control port cannot be zero");
             unsafe {

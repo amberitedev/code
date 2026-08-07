@@ -31,7 +31,7 @@ import {
 } from './dev-shared.mjs'
 
 const action = process.argv[2] ?? 'start'
-const controllerProtocolVersion = 2
+const controllerProtocolVersion = 3
 const jsonOutput = process.argv.includes('--json')
 const positional = process.argv.slice(3).filter((value) => value !== '--' && value !== '--json')
 let worktree
@@ -356,12 +356,15 @@ async function serve() {
 		const host = registry.hosts[targetWorktree]
 		const vitePort = host?.vitePort ?? (await availablePort(1420))
 		const controlPort = await availablePort(17_000)
-		const dataDir = appDataDir(authMode === 'real' ? `auth-${worktreeKey(targetWorktree)}` : id)
+		const credentialNamespace =
+			authMode === 'real' ? `auth-${worktreeKey(targetWorktree)}` : id
+		const dataDir = appDataDir(credentialNamespace)
 		const logPath = join(appRoot, 'logs', `${id}.log`)
 		mkdirSync(join(appRoot, 'logs'), { recursive: true })
 		const identity = authMode === 'real' ? 'auth' : username
 		const devConfig = {
 			appId: id,
+			credentialNamespace,
 			username,
 			authMode,
 			branch,
@@ -485,6 +488,8 @@ async function serve() {
 		const convex = requireConvex(app.worktree)
 		return {
 			appId: app.id,
+			credentialNamespace:
+				app.authMode === 'real' ? `auth-${worktreeKey(app.worktree)}` : app.id,
 			username: app.username,
 			authMode: app.authMode ?? 'dev',
 			branch: app.branch,

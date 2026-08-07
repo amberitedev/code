@@ -125,7 +125,7 @@ import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { command_listener, notification_listener, warning_listener } from '@/helpers/events.js'
-import { list } from '@/helpers/profile.js'
+import { can_current_user_use_shared_instances, list } from '@/helpers/instance.ts'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
 import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { get_opening_command, initialize_state } from '@/helpers/state'
@@ -609,25 +609,18 @@ useQuery({
 	retry: false,
 })
 useQuery({
-	queryKey: computed(() => ['shared-instance-eligibility', credentials.value?.user?.id]),
+	queryKey: computed(() => ['shared-instance-eligibility', modrinthLink.user.value?.id]),
 	queryFn: can_current_user_use_shared_instances,
-	enabled: () => !!credentials.value?.session && !!credentials.value?.user?.id,
+	enabled: () => !!modrinthLink.credentials.value?.session && !!modrinthLink.user.value?.id,
 	retry: false,
 	staleTime: Infinity,
 	refetchOnMount: false,
 	refetchOnWindowFocus: false,
 	refetchOnReconnect: false,
 })
-const hasPlus = computed(
-	() =>
-		!!credentials.value?.user &&
-		(hasMidasBadge(credentials.value.user) ||
-			hasActivePride26Midas(authenticatedModrinthUser.value?.campaigns?.pride_26)),
-)
-const showAd = computed(
-	() => sidebarVisible.value && !hasPlus.value && credentials.value !== undefined,
-)
-const adConsentAvailable = computed(() => credentials.value !== undefined && !hasPlus.value)
+const hasPlus = computed(() => false)
+const showAd = computed(() => false)
+const adConsentAvailable = computed(() => false)
 providePageContext({
 	hierarchicalSidebarAvailable: ref(true),
 	showAds: showAd,
@@ -1886,7 +1879,7 @@ watch(amberiteAuth.user, (user) => {
 
 async function requestModrinthAuth(flow = 'sign-in') {
 	await signIn(flow)
-	return !!credentials.value?.session
+	return !!modrinthLink.credentials.value?.session
 }
 
 async function logOut() {
@@ -1911,10 +1904,6 @@ function confirmDismissAmberiteAccountModal() {
 	}
 	amberiteAccountModal.value?.hide()
 }
-
-const hasPlus = computed(() => false)
-
-const showAd = computed(() => false)
 
 async function fetchIntercomToken() {
 	if (!amberiteAuth.isLoggedIn.value) {

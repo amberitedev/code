@@ -41,6 +41,7 @@ Run these from the repository root.
 | `pnpm convex:dev:reset -- accounts` | Reset the running local database to accounts |
 | `pnpm convex:dev:reset -- group` | Reset the running local database to group |
 | `pnpm convex:dev:cloud` | Stop this worktree's local backend and point the worktree back to the shared `main` cloud deployment |
+| `pnpm convex:dev:check-cloud` | Warn when the selected cloud development deployment does not match local `main` |
 | `pnpm convex:dev:seed-cloud` | From `main`, enable cloud dev mode and ensure `owner`, `friend`, and `other` exist |
 | `pnpm convex:dev:status` | Show the selected deployment and local process, branch, URLs, and baseline |
 | `pnpm convex:dev:stop` | Stop this worktree's local Convex process |
@@ -50,6 +51,7 @@ Run these from the repository root.
 ## Non-obvious rules
 
 - Only the primary `main` checkout pushes Convex code to cloud development. A worktree that changes `convex/` uses its local backend and never pushes that branch to the shared cloud deployment.
+- Every push to GitHub `main` deploys that exact revision to cloud development and records its commit SHA. `app:dev` checks that marker when cloud development is selected and warns if it differs from local `main`.
 - Authorization comes from the authenticated identity and current database state, never client-supplied ownership, roles, audiences, or private fields.
 - Do not add transient presence, heartbeats, polling, or client-wide refresh chains. The live-presence protocol belongs in `apps/realtime`.
 - Breaking schema changes use expand, migrate/backfill, switch callers, then remove the old shape.

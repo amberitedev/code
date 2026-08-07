@@ -136,7 +136,7 @@ pub async fn show_app_db_backups_folder<R: Runtime>(
 ) -> Result<()> {
     let path = app_db_backup_dir()?;
     tokio::fs::create_dir_all(&path).await?;
-    open_path(app, path).await;
+    open_path(app, path).await?;
     Ok(())
 }
 
@@ -235,7 +235,7 @@ async fn allowed_open_roots() -> Result<Vec<PathBuf>> {
         return Err(permission_denied("app directories are not initialized"));
     };
     let mut candidates =
-        vec![directories.profiles_dir(), directories.caches_dir()];
+        vec![directories.instances_dir(), directories.caches_dir()];
     if let Some(path) = directories.launcher_logs_dir() {
         candidates.push(path);
     }

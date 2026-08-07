@@ -119,7 +119,9 @@ fn auth_error(
 
 fn keyring_account(base: &str) -> String {
     match crate::dev::config() {
-        Some(config) => format!("{base}:dev:{}", config.app_id),
+        Some(config) => {
+            format!("{base}:dev:{}", config.credential_namespace)
+        }
         None => base.to_string(),
     }
 }
