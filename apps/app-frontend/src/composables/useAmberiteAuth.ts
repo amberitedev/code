@@ -429,6 +429,8 @@ function userFacingAuthError(value: unknown): string {
 			return 'Sign-in cancelled.'
 		case 'identity_mismatch':
 			return "That Minecraft account doesn't match."
+		case 'identity_conflict':
+			return 'Your Amberite account data needs repair. Try again later.'
 		case 'java_profile_missing':
 			return 'A Java Edition profile is required.'
 		case 'xbox_restriction':
@@ -436,7 +438,7 @@ function userFacingAuthError(value: unknown): string {
 		case 'throttled':
 			return 'Too many attempts. Try again later.'
 		case 'configuration_failure':
-			return "Sign-in isn't set up yet."
+			return "This Amberite build's sign-in configuration is invalid."
 		case 'invalid_session':
 		case 'expired_session':
 		case 'revoked_session':

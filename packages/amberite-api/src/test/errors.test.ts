@@ -8,6 +8,7 @@ import {
 	CoreOfflineError,
 	RelayTimeoutError,
 	CoreApiError,
+	authErrorFromNative,
 	authErrorFromResponse,
 	parseAuthFailurePayload,
 } from '../errors'
@@ -95,6 +96,33 @@ describe('authErrorFromResponse', () => {
 		expect(authErrorFromResponse(message, 400)).toMatchObject({
 			code: 'identity_mismatch',
 			recovery: 'clear_session',
+		})
+	})
+
+	it('distinguishes corrupt duplicate identity claims from choosing the wrong account', () => {
+		const message =
+			'Convex action failed: {"code":"identity_conflict","message":"Multiple Amberite accounts claim this Minecraft identity","recovery":"clear_session"}'
+		expect(parseAuthFailurePayload(message)).toEqual({
+			code: 'identity_conflict',
+			message: 'Multiple Amberite accounts claim this Minecraft identity',
+			recovery: 'clear_session',
+		})
+		expect(authErrorFromResponse('AmbiguousMinecraftIdentity', 400)).toMatchObject({
+			code: 'identity_conflict',
+			recovery: 'clear_session',
+		})
+	})
+
+	it('does not mistake a provider 500 error page for missing configuration', () => {
+		const message =
+			'Minecraft authentication error during step SisuAuthenticate. Status Code: 500 Internal Server Error. The server encountered an internal error or misconfiguration.'
+		expect(authErrorFromResponse(message, 500)).toMatchObject({
+			code: 'provider_unreachable',
+			recovery: 'preserve_and_retry',
+		})
+		expect(authErrorFromNative(message, 'sign_in')).toMatchObject({
+			code: 'provider_unreachable',
+			recovery: 'preserve_and_retry',
 		})
 	})
 })

@@ -1631,33 +1631,32 @@ async fn auth_retry<F>(
 where
     F: Future<Output = Result<Response, reqwest::Error>>,
 {
-    const RETRY_COUNT: usize = 5; // Does command 9 times
+    const MAX_ATTEMPTS: usize = 5;
     const RETRY_WAIT: std::time::Duration =
         std::time::Duration::from_millis(250);
 
     let mut resp = reqwest_request().await;
-    for i in 0..RETRY_COUNT {
-        match &resp {
-            Ok(_) => {
-                break;
-            }
-            Err(err) => {
-                if err.is_connect() || err.is_timeout() {
-                    if i < RETRY_COUNT - 1 {
-                        tracing::debug!(
-                            "Request failed with connect error, retrying...",
-                        );
-                        tokio::time::sleep(RETRY_WAIT).await;
-                        resp = reqwest_request().await;
-                    } else {
-                        break;
-                    }
-                }
-            }
+    for _ in 1..MAX_ATTEMPTS {
+        let should_retry = match &resp {
+            Ok(response) => should_retry_auth_status(response.status()),
+            Err(error) => error.is_connect() || error.is_timeout(),
+        };
+        if !should_retry {
+            break;
         }
+
+        tracing::debug!(
+            "Minecraft auth request failed transiently, retrying..."
+        );
+        tokio::time::sleep(RETRY_WAIT).await;
+        resp = reqwest_request().await;
     }
 
     resp
+}
+
+fn should_retry_auth_status(status: StatusCode) -> bool {
+    status.is_server_error()
 }
 
 pub struct DeviceTokenKey {
@@ -1911,5 +1910,13 @@ mod persistence_tests {
         ] {
             assert!(value.get(secret).is_none());
         }
+    }
+
+    #[test]
+    fn retries_transient_server_errors_only() {
+        assert!(should_retry_auth_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(should_retry_auth_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!should_retry_auth_status(StatusCode::BAD_REQUEST));
+        assert!(!should_retry_auth_status(StatusCode::TOO_MANY_REQUESTS));
     }
 }

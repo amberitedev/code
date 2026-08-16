@@ -131,7 +131,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 				if (identity.ambiguous) {
 					// IMPORTANT: Capture ambiguous identity mappings in Sentry once available.
 					throw authFailure(
-						'identity_mismatch',
+						'identity_conflict',
 						'Multiple Amberite accounts claim this Minecraft identity',
 						'clear_session',
 					)
@@ -147,7 +147,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 				if (existing) {
 					if (identity.userId && identity.userId !== existing.user._id)
 						throw authFailure(
-							'identity_mismatch',
+							'identity_conflict',
 							'Multiple Amberite accounts claim this Minecraft identity',
 							'clear_session',
 						)
@@ -171,7 +171,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 					})
 					if (!user)
 						throw authFailure(
-							'identity_mismatch',
+							'identity_conflict',
 							'This Minecraft identity no longer has a live Amberite account',
 							'clear_session',
 						)
@@ -269,7 +269,7 @@ export const repairMinecraftProviderAccount = internalMutation({
 		const user = await ctx.db.get(args.userId)
 		if (!user || user.deletedAt)
 			throw authFailure(
-				'identity_mismatch',
+				'identity_conflict',
 				'This Minecraft identity no longer has a live Amberite account',
 				'clear_session',
 			)
@@ -283,7 +283,7 @@ export const repairMinecraftProviderAccount = internalMutation({
 			.take(2)
 		if (accounts.some((account) => account.userId !== args.userId))
 			throw authFailure(
-				'identity_mismatch',
+				'identity_conflict',
 				'Multiple Amberite accounts claim this Minecraft identity',
 				'clear_session',
 			)
@@ -318,7 +318,7 @@ export const synchronizeMinecraftIdentity = internalMutation({
 			.collect()
 		if (duplicateUsers.some((candidate) => candidate._id !== args.userId && !candidate.deletedAt))
 			throw authFailure(
-				'identity_mismatch',
+				'identity_conflict',
 				'Multiple Amberite accounts claim this Minecraft identity',
 				'clear_session',
 			)
@@ -332,7 +332,7 @@ export const synchronizeMinecraftIdentity = internalMutation({
 			if (owner._id === args.userId || owner.deletedAt) continue
 			if (owner.minecraftUuid === minecraftUuid)
 				throw authFailure(
-					'identity_mismatch',
+					'identity_conflict',
 					'Multiple Amberite accounts claim this Minecraft identity',
 					'clear_session',
 				)

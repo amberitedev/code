@@ -164,12 +164,14 @@ export {
 	CoreOfflineError,
 	RelayTimeoutError,
 	CoreApiError,
+	authErrorFromNative,
 	authErrorFromPayload,
 	parseAuthFailurePayload,
 } from './errors'
 export type {
 	AuthFailureCode,
 	AuthFailurePayload,
+	NativeAuthOperation,
 	RecoveryDisposition,
 } from './errors'
 export { CoreConnectionMonitor, type ConnectionState, type ConnectionStatus } from './monitor'

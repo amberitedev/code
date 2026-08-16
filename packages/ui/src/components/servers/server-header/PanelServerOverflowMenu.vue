@@ -21,8 +21,7 @@ import { ClipboardCopyIcon, MoreVerticalIcon, ServerIcon } from '@modrinth/asset
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { ButtonStyled } from '#ui/components'
-import TeleportOverflowMenu from '#ui/components/base/TeleportOverflowMenu.vue'
+import { ButtonStyled, TeleportOverflowMenu } from '#ui/components'
 import { injectModrinthServerContext } from '#ui/providers'
 
 const props = withDefaults(

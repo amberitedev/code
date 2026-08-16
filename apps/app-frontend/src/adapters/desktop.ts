@@ -1,12 +1,9 @@
 import {
 	type AmberiteSessionTokens,
-	AuthError,
-	authErrorFromPayload,
-	NetworkError,
-	parseAuthFailurePayload,
+	authErrorFromNative,
+	type NativeAuthOperation,
 	type PersistentQueueStore,
 	type PlatformAdapter,
-	ProviderAuthError,
 	type QueuedMessage,
 } from '@amberite/amberite-api'
 import { invoke } from '@tauri-apps/api/core'
@@ -152,8 +149,6 @@ export function createDesktopAdapter(): PlatformAdapter {
 	}
 }
 
-type NativeAuthOperation = 'sign_in' | 'restore' | 'refresh' | 'sign_out'
-
 async function invokeNativeAuth<T>(
 	command: string,
 	args: Record<string, unknown>,
@@ -162,70 +157,6 @@ async function invokeNativeAuth<T>(
 	try {
 		return await invoke<T>(command, args)
 	} catch (error) {
-		throw mapNativeAuthError(error, operation)
+		throw authErrorFromNative(error, operation)
 	}
-}
-
-function mapNativeAuthError(error: unknown, operation: NativeAuthOperation): Error {
-	const structured = parseAuthFailurePayload(error)
-	if (structured) return authErrorFromPayload(structured)
-	const message = nativeErrorMessage(error)
-	const normalized = message.toLowerCase()
-	if (normalized.includes('cancel')) return new ProviderAuthError(message, 'cancelled')
-	if (
-		operation === 'sign_in' &&
-		(normalized.includes('oauth state') || normalized.includes('state mismatch'))
-	)
-		return new ProviderAuthError(message, 'state_failure')
-	if (normalized.includes('uuid mismatch')) return new AuthError(message, 'identity_mismatch')
-	if (normalized.includes('java') && normalized.includes('profile'))
-		return new ProviderAuthError(message, 'java_profile_missing')
-	if (normalized.includes('xbox')) return new ProviderAuthError(message, 'xbox_restriction')
-	if (normalized.includes('throttl') || normalized.includes('429'))
-		return new ProviderAuthError(message, 'throttled')
-	if (normalized.includes('configur') || normalized.includes('client id'))
-		return new ProviderAuthError(message, 'configuration_failure')
-	if (
-		normalized.includes('network') ||
-		normalized.includes('connect') ||
-		normalized.includes('timeout') ||
-		normalized.includes('offline') ||
-		normalized.includes('unreachable') ||
-		normalized.includes('error sending request')
-	)
-		return new NetworkError(message, 'amberite_unreachable')
-	if (
-		normalized.includes('corrupt') ||
-		normalized.includes('decrypt') ||
-		normalized.includes('keyring') ||
-		normalized.includes('missing key') ||
-		normalized.includes('incomplete') ||
-		normalized.includes('bundle authentication')
-	)
-		return new AuthError(message, 'corrupt_session')
-	if (normalized.includes('refresh') && normalized.includes('reuse'))
-		return new AuthError(message, 'refresh_reuse')
-	if (normalized.includes('expired')) return new AuthError(message, 'expired_session')
-	if (normalized.includes('revoked')) return new AuthError(message, 'revoked_session')
-	if (
-		normalized.includes('not authenticated') ||
-		normalized.includes('invalid session') ||
-		normalized.includes('invalid refresh') ||
-		normalized.includes('401') ||
-		normalized.includes('403')
-	)
-		return new AuthError(message, 'invalid_session')
-	if (operation === 'sign_in') return new ProviderAuthError(message, 'provider_failure')
-	if (operation === 'restore') return new AuthError(message, 'corrupt_session')
-	return new NetworkError(message, 'amberite_unreachable')
-}
-
-function nativeErrorMessage(error: unknown): string {
-	if (error instanceof Error) return error.message
-	if (typeof error === 'string') return error
-	if (error && typeof error === 'object' && 'message' in error) {
-		const message = (error as { message?: unknown }).message
-		if (typeof message === 'string') return message
-	}
-	return String(error)
 }

@@ -19,7 +19,6 @@ import {
 } from '@modrinth/api-client'
 import {
 	ArrowBigUpDashIcon,
-	ChangeSkinIcon,
 	CompassIcon,
 	HomeIcon,
 	LeftArrowIcon,
@@ -32,6 +31,7 @@ import {
 	ServerStackIcon,
 	SettingsIcon,
 	ShieldAlertIcon,
+	ShirtIcon,
 	SpinnerIcon,
 	UserIcon,
 	WorldIcon,
@@ -2776,7 +2776,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				<CompassIcon />
 			</NavButton>
 			<NavButton v-tooltip.right="'Skin selector'" to="/skins">
-				<ChangeSkinIcon />
+				<ShirtIcon />
 			</NavButton>
 			<NavButton
 				v-tooltip.right="'Library'"
