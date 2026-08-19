@@ -408,7 +408,7 @@ pub(super) async fn shared_attachment_matches_current_user(
         return Ok(false);
     };
 
-    Ok(linked_modrinth_user_id(state)
+    Ok(linked_amberite_user_id(state)
         .await?
         .as_deref()
         .is_some_and(|current_user_id| current_user_id == linked_user_id))
@@ -424,7 +424,7 @@ pub(super) async fn has_shared_instance_recipients(
         return Ok(true);
     }
 
-    let current_user_id = linked_modrinth_user_id(state).await?;
+    let current_user_id = linked_amberite_user_id(state).await?;
 
     Ok(users.user_ids.iter().any(|user_id| {
         Some(user_id.as_str()) != attachment.linked_user_id.as_deref()
@@ -524,7 +524,7 @@ pub(super) async fn shared_instance_install_data(
     }
 
     let name = shared_instance_name(name);
-    let linked_user_id = linked_modrinth_user_id(state).await?;
+    let linked_user_id = linked_amberite_user_id(state).await?;
     let modpack = shared_instance_install_modpack(&version, state).await?;
     let modpack_version_id =
         modpack.as_ref().map(|modpack| modpack.version_id.as_str());
@@ -556,12 +556,8 @@ pub(super) async fn shared_instance_install_data(
     })
 }
 
-pub(super) async fn linked_modrinth_user_id(
-    state: &State,
+pub(super) async fn linked_amberite_user_id(
+    _state: &State,
 ) -> crate::Result<Option<String>> {
-    Ok(
-        ModrinthCredentials::get_and_refresh(&state.pool, &state.api_semaphore)
-            .await?
-            .map(|credentials| credentials.user_id),
-    )
+    Ok(shared_clients_session().and_then(|session| session.user_id))
 }

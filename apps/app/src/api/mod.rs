@@ -54,6 +54,9 @@ pub enum TheseusSerializableError {
     #[error("Tauri error: {0}")]
     Tauri(#[from] tauri::Error),
 
+    #[error("Keyring error: {0}")]
+    Keyring(#[from] keyring::Error),
+
     #[cfg(feature = "updater")]
     #[error("Updater error: {0}")]
     Updater(#[from] tauri_plugin_updater::Error),
@@ -134,12 +137,14 @@ macro_rules! impl_serialize {
 impl_serialize! {
     IO,
     Tauri,
+    Keyring,
 }
 
 #[cfg(feature = "updater")]
 impl_serialize! {
     IO,
     Tauri,
+    Keyring,
     Updater,
     Http,
 }

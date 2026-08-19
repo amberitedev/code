@@ -12,8 +12,8 @@ use crate::install::{
 use crate::state::instances::{InstanceLink, SharedInstanceAttachment};
 use crate::state::{
     AppliedContentSetPatch, CacheBehaviour, CachedEntry, ContentSetSyncStatus,
-    ContentSourceKind, EditInstance, ModLoader, ModrinthCredentials,
-    ProjectType, SharedInstanceRole, State,
+    ContentSourceKind, EditInstance, ModLoader, ProjectType,
+    SharedInstanceRole, State,
 };
 use crate::util::fetch::{INSECURE_REQWEST_CLIENT, REQWEST_CLIENT};
 use chrono::{DateTime, Utc};
@@ -23,6 +23,39 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
+use std::sync::{LazyLock, RwLock};
+
+#[derive(Clone)]
+pub(crate) struct SharedClientsSession {
+    pub base_url: String,
+    pub access_token: Option<String>,
+    pub user_id: Option<String>,
+}
+
+static SHARED_CLIENTS_SESSION: LazyLock<RwLock<Option<SharedClientsSession>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+pub fn set_shared_clients_session(
+    base_url: String,
+    access_token: Option<String>,
+    user_id: Option<String>,
+) {
+    let session = Some(SharedClientsSession {
+        base_url: base_url.trim_end_matches('/').to_string(),
+        access_token: access_token.filter(|token| !token.trim().is_empty()),
+        user_id: user_id.filter(|id| !id.trim().is_empty()),
+    });
+    *SHARED_CLIENTS_SESSION
+        .write()
+        .expect("shared clients session lock poisoned") = session;
+}
+
+pub(crate) fn shared_clients_session() -> Option<SharedClientsSession> {
+    SHARED_CLIENTS_SESSION
+        .read()
+        .expect("shared clients session lock poisoned")
+        .clone()
+}
 
 pub(crate) const CONFIG_BUNDLE_FILE_NAME: &str = "configs.zip";
 pub(crate) const CONFIG_BUNDLE_FILE_TYPE: &str = "configs";
@@ -129,15 +162,6 @@ pub use self::types::{
 };
 
 pub async fn can_active_user_use_shared_instances() -> crate::Result<bool> {
-    let state = State::get().await?;
-    let Some(credentials) =
-        ModrinthCredentials::get_and_refresh(&state.pool, &state.api_semaphore)
-            .await?
-    else {
-        return Ok(true);
-    };
-
-    let status =
-        client::get_user_blacklist_status(&credentials.user_id, &state).await?;
-    Ok(!status.blacklisted)
+    Ok(shared_clients_session()
+        .is_some_and(|session| session.access_token.is_some()))
 }

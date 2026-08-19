@@ -18,10 +18,23 @@ fn main() {
                         "get_default_user",
                         "set_default_user",
                         "get_users",
+                        "check_amberite_reachable",
+                        "amberite_product_sign_in",
+                        "restore_amberite_product_session",
+                        "refresh_amberite_product_session",
+                        "sign_out_amberite_product_session",
+                        "get_remembered_amberite_identity",
+                        "get_amberite_local_setup_secret",
+                        "set_amberite_shared_clients_session",
                     ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
+                    .default_permission(DefaultPermissionRule::Allow(vec![
+                        "allow-check-reachable".into(),
+                        "allow-login".into(),
+                        "allow-remove-user".into(),
+                        "allow-get-default-user".into(),
+                        "allow-set-default-user".into(),
+                        "allow-get-users".into(),
+                    ])),
             )
             .plugin(
                 "cache",
