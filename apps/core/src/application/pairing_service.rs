@@ -12,8 +12,8 @@ use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::application::state::{
-    format_pairing_code, generate_pairing_code, generate_setup_secret,
-    write_local_setup_secret, AppState, PAIRING_WINDOW,
+    AppState, PAIRING_WINDOW, format_pairing_code, generate_pairing_code,
+    generate_setup_secret, write_local_setup_secret,
 };
 
 /// Register this unpaired Core in Convex so a remote dashboard/app can claim its code.
@@ -42,7 +42,7 @@ pub async fn register_pairing_core(state: Arc<AppState>) -> bool {
     });
     args["connectionUrl"] = json!(public_url);
     let body = json!({
-        "path": "presence:registerPairingCore",
+        "path": "corePairing:registerPairingCore",
         "format": "json",
         "args": args,
     });
@@ -63,7 +63,9 @@ pub async fn register_pairing_core(state: Arc<AppState>) -> bool {
                         warn!(%error, "failed to copy Core pairing code to clipboard");
                     }
                 }
-                println!("This code expires in 15 minutes. Restart Core to generate a new code.\n");
+                println!(
+                    "This code expires in 15 minutes. Restart Core to generate a new code.\n"
+                );
                 return true;
             } else {
                 warn!(response = %body, "Convex rejected Core pairing registration");

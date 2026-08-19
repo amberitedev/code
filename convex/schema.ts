@@ -238,8 +238,8 @@ export default defineSchema({
 		createdAt: v.number(),
 		expiresAt: v.number(),
 		claimedAt: v.optional(v.number()),
-		realtimeCredentialHash: v.optional(v.string()),
-		realtimeCredentialIssuedAt: v.optional(v.number()),
+		syncCredentialHash: v.optional(v.string()),
+		syncCredentialIssuedAt: v.optional(v.number()),
 	})
 		.index('by_code', ['code'])
 		.index('by_core_id', ['coreId'])

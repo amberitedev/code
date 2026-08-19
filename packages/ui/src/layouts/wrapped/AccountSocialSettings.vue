@@ -3,8 +3,20 @@
 		v-if="!auth.user.value"
 		type="empty"
 		class="[&>div:last-child]:!mt-6"
-		:heading="formatMessage(messages.signInRequiredTitle)"
-		:description="formatMessage(messages.signInRequiredDescription)"
+		:heading="
+			formatMessage(
+				identityKind === 'amberite'
+					? messages.amberiteSignInRequiredTitle
+					: messages.signInRequiredTitle,
+			)
+		"
+		:description="
+			formatMessage(
+				identityKind === 'amberite'
+					? messages.amberiteSignInRequiredDescription
+					: messages.signInRequiredDescription,
+			)
+		"
 	>
 		<template #illustration>
 			<div class="relative mb-4 h-[200px]">
@@ -38,7 +50,13 @@
 					:aria-label="formatMessage(messages.friendRequestsTitle)"
 				/>
 				<p class="m-0 text-secondary">
-					{{ formatMessage(messages.friendRequestsDescription) }}
+					{{
+						formatMessage(
+							identityKind === 'amberite'
+								? messages.amberiteFriendRequestsDescription
+								: messages.friendRequestsDescription,
+						)
+					}}
 				</p>
 			</div>
 
@@ -56,7 +74,13 @@
 					:aria-label="formatMessage(messages.sharedInstanceInvitesTitle)"
 				/>
 				<p class="m-0 text-secondary">
-					{{ formatMessage(messages.sharedInstanceInvitesDescription) }}
+					{{
+						formatMessage(
+							identityKind === 'amberite'
+								? messages.amberiteSharedInstanceInvitesDescription
+								: messages.sharedInstanceInvitesDescription,
+						)
+					}}
 				</p>
 			</div>
 		</section>
@@ -67,12 +91,20 @@
 					{{ formatMessage(messages.blockedUsersTitle) }}
 				</h2>
 				<p class="m-0 text-secondary">
-					{{ formatMessage(messages.blockedUsersDescription) }}
+					{{
+						formatMessage(
+							identityKind === 'amberite'
+								? messages.amberiteBlockedUsersDescription
+								: messages.blockedUsersDescription,
+						)
+					}}
 				</p>
 				<ul class="m-0 flex list-disc flex-col gap-1 pl-5 text-secondary">
 					<li>{{ formatMessage(messages.friendRequestsRestriction) }}</li>
 					<li>{{ formatMessage(messages.sharedInstancesRestriction) }}</li>
-					<li>{{ formatMessage(messages.hostingRestriction) }}</li>
+					<li v-if="identityKind === 'modrinth'">
+						{{ formatMessage(messages.hostingRestriction) }}
+					</li>
 				</ul>
 			</div>
 
@@ -205,11 +237,15 @@ type BlockedUser = Labrinth.Users.v2.User & Record<BlockedUserTableColumn, unkno
 type FriendRequestSource = 'everyone' | 'mutuals' | 'no-one'
 type SharedInstanceInviteSource = 'everyone' | 'friends' | 'no-one'
 
-const props = defineProps<{
-	getBlockedUsers: () => Promise<Labrinth.BlockedUsers.v3.BlockedUserId[]>
-	getUsers: (userIds: string[]) => Promise<Labrinth.Users.v2.User[]>
-	unblockUser: (userId: string) => Promise<void>
-}>()
+const props = withDefaults(
+	defineProps<{
+		getBlockedUsers: () => Promise<Labrinth.BlockedUsers.v3.BlockedUserId[]>
+		getUsers: (userIds: string[]) => Promise<Labrinth.Users.v2.User[]>
+		unblockUser: (userId: string) => Promise<void>
+		identityKind?: 'modrinth' | 'amberite'
+	}>(),
+	{ identityKind: 'modrinth' },
+)
 
 const auth = injectAuth()
 const notificationManager = injectNotificationManager()
@@ -340,6 +376,10 @@ const messages = defineMessages({
 		id: 'settings.social.friend-requests.description',
 		defaultMessage: 'Control who can send you friend requests on Modrinth.',
 	},
+	amberiteFriendRequestsDescription: {
+		id: 'settings.social.friend-requests.amberite-description',
+		defaultMessage: 'Control who can send you friend requests on Amberite.',
+	},
 	sharedInstanceInvitesTitle: {
 		id: 'settings.social.shared-instance-invites.title',
 		defaultMessage: 'Invitations',
@@ -348,6 +388,10 @@ const messages = defineMessages({
 		id: 'settings.social.shared-instance-invites.description',
 		defaultMessage:
 			'Control who can send you invites to shared instances and Modrinth Hosting panels.',
+	},
+	amberiteSharedInstanceInvitesDescription: {
+		id: 'settings.social.shared-instance-invites.amberite-description',
+		defaultMessage: 'Control who can invite you to shared client instances.',
 	},
 	everyone: {
 		id: 'settings.social.interaction-source.everyone',
@@ -376,6 +420,10 @@ const messages = defineMessages({
 	blockedUsersDescription: {
 		id: 'settings.social.blocked-users.description',
 		defaultMessage: 'These are the users you have blocked on Modrinth. They cannot:',
+	},
+	amberiteBlockedUsersDescription: {
+		id: 'settings.social.blocked-users.amberite-description',
+		defaultMessage: 'These are the users you have blocked on Amberite. They cannot:',
 	},
 	friendRequestsRestriction: {
 		id: 'settings.social.blocked-users.restriction.friend-requests',
@@ -421,6 +469,15 @@ const messages = defineMessages({
 		id: 'settings.social.sign-in-required.description',
 		defaultMessage:
 			'You can control who can interact with you, and manage blocked users with a Modrinth Account',
+	},
+	amberiteSignInRequiredTitle: {
+		id: 'settings.social.sign-in-required.amberite-title',
+		defaultMessage: 'Amberite account required',
+	},
+	amberiteSignInRequiredDescription: {
+		id: 'settings.social.sign-in-required.amberite-description',
+		defaultMessage:
+			'Sign in with Minecraft to control who can interact with you and manage blocked users.',
 	},
 	loadError: {
 		id: 'settings.social.blocked-users.load-error',

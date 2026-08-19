@@ -11,28 +11,20 @@
 			<div class="avatar-changer">
 				<Avatar :src="previewImage || avatarUrl" size="md" circle :alt="auth.user.username" />
 				<div class="flex flex-col gap-2">
-					<ButtonStyled>
-						<FileInput
-							:max-size="262144"
-							:show-icon="true"
-							class="button-like"
-							:prompt="formatMessage(commonMessages.uploadImageButton)"
-							accept="image/png,image/jpeg,image/gif,image/webp"
-							@change="showPreviewImage"
-						>
-							<UploadIcon />
-						</FileInput>
-					</ButtonStyled>
-					<ButtonStyled v-if="avatarUrl !== null || previewImage">
-						<button @click="removePreviewImage">
-							<TrashIcon />{{ formatMessage(commonMessages.removeImageButton) }}
-						</button>
-					</ButtonStyled>
-					<ButtonStyled v-if="previewImage">
-						<button @click="resetAvatar">
-							<UndoIcon />{{ formatMessage(commonMessages.resetButton) }}
-						</button>
-					</ButtonStyled>
+					<FileButton
+						:max-size="262144"
+						:prompt="formatMessage(commonMessages.uploadImageButton)"
+						accept="image/png,image/jpeg,image/gif,image/webp"
+						@change="showPreviewImage"
+					>
+						<UploadIcon />
+					</FileButton>
+					<Button v-if="avatarUrl !== null || previewImage" @click="removePreviewImage">
+						<TrashIcon />{{ formatMessage(commonMessages.removeImageButton) }}
+					</Button>
+					<Button v-if="previewImage" @click="resetAvatar">
+						<UndoIcon />{{ formatMessage(commonMessages.resetButton) }}
+					</Button>
 				</div>
 			</div>
 
@@ -59,11 +51,9 @@
 			<StyledInput id="bio-field" v-model="current.bio" multiline />
 
 			<div class="input-group mt-4">
-				<ButtonStyled>
-					<NuxtLink :to="`/user/${auth.user.username}`">
-						<UserIcon />{{ formatMessage(commonMessages.visitYourProfile) }}
-					</NuxtLink>
-				</ButtonStyled>
+				<ButtonLink :to="`/user/${auth.user.username}`">
+					<UserIcon />{{ formatMessage(commonMessages.visitYourProfile) }}
+				</ButtonLink>
 			</div>
 		</section>
 		<UnsavedChangesPopup
@@ -77,13 +67,14 @@
 </template>
 
 <script setup lang="ts">
-import type { AmberiteProfilePatch } from '@amberite/amberite-api'
+import type { AmberiteProfilePatch } from '@modrinth/api-client'
 import { TrashIcon, UndoIcon, UploadIcon, UserIcon } from '@modrinth/assets'
 import {
 	Avatar,
-	ButtonStyled,
+	Button,
+	ButtonLink,
 	commonMessages,
-	FileInput,
+	FileButton,
 	injectNotificationManager,
 	StyledInput,
 	UnsavedChangesPopup,

@@ -42,7 +42,7 @@ struct ProjectionMember {
 #[derive(Debug, sqlx::FromRow)]
 struct CoreConfigRow {
     owner_user_id: String,
-    realtime_credential: Option<String>,
+    sync_credential: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -65,13 +65,13 @@ pub async fn sync_projection(
     state: &Arc<AppState>,
 ) -> Result<ProjectionSyncResult, ProjectionSyncError> {
     let config = sqlx::query_as::<_, CoreConfigRow>(
-        "SELECT owner_user_id, realtime_credential FROM core_config WHERE id = 1",
+        "SELECT owner_user_id, realtime_credential AS sync_credential FROM core_config WHERE id = 1",
     )
 	.fetch_optional(&state.pool)
 	.await?
 	.ok_or(ProjectionSyncError::MissingCredential)?;
     let credential = config
-        .realtime_credential
+        .sync_credential
         .clone()
         .ok_or(ProjectionSyncError::MissingCredential)?;
     let snapshot = projection_snapshot(state, &config).await?;

@@ -13,6 +13,7 @@ const campaignsValidator = v.object({ pride_26: v.null() })
 const userValidator = v.object({
 	id: v.string(),
 	username: v.string(),
+	user_id: v.string(),
 	display_name: v.string(),
 	name: v.string(),
 	avatar_url: v.optional(v.string()),
@@ -27,6 +28,7 @@ const userValidator = v.object({
 	has_password: v.optional(v.boolean()),
 	has_totp: v.optional(v.boolean()),
 	allow_friend_requests: v.optional(v.boolean()),
+	friendCode: v.optional(v.string()),
 })
 const searchUserValidator = v.object({
 	id: v.string(),
@@ -47,6 +49,7 @@ export const currentUser = query({
 			authProviders: fields.auth_providers.includes('minecraft') ? ['microsoft'] : [],
 			email: fields.email,
 			emailVerified: fields.email_verified,
+			friendCode: user.friendCode,
 		})
 	},
 })
@@ -100,11 +103,13 @@ function compatUser(
 		authProviders: 'microsoft'[]
 		email: string | null
 		emailVerified: boolean
+		friendCode?: string
 	},
 ) {
 	const username = minecraftUsername(user)
 	return {
 		id: minecraftUuid(user),
+		user_id: user._id.toString(),
 		username,
 		display_name: user.displayName ?? user.name ?? username,
 		name: user.displayName ?? user.name ?? username,
@@ -122,6 +127,7 @@ function compatUser(
 					email_verified: privateFields.emailVerified,
 					has_password: false,
 					has_totp: false,
+					friendCode: privateFields.friendCode,
 				}
 			: {}),
 	}

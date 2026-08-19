@@ -1,13 +1,5 @@
 <script setup>
-import {
-	AuthFeature,
-	ModrinthApiError,
-	NodeAuthFeature,
-	nodeAuthState,
-	PanelVersionFeature,
-	TauriModrinthClient,
-	VerboseLoggingFeature,
-} from '@modrinth/api-client'
+import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	ArrowBigUpDashIcon,
 	ChevronLeftIcon,
@@ -55,7 +47,6 @@ import {
 } from '@modrinth/ui'
 import { renderString } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { getVersion } from '@tauri-apps/api/app'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
@@ -95,6 +86,7 @@ import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
 import { config } from '@/config'
+import { getDevAppConfig } from '@/dev/runtime'
 import {
 	hide_ads_window,
 	init_ads_window,
@@ -149,6 +141,9 @@ import { setupAuthProvider } from '@/providers/setup/auth'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
+import { amberite } from '@/services/amberite'
+import { apiClient as tauriApiClient, appVersion } from '@/services/api-client'
+import { startPresence, stopPresence } from '@/services/presence'
 import { appMessages } from '@/utils/app-messages'
 
 import { generateSkinPreviews } from './helpers/rendering/batch-skin-renderer'
@@ -198,6 +193,7 @@ const APP_SIDEBAR_WIDTH = 300
 const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const credentials = ref()
+const modrinthCredentials = ref()
 let credentialsRefreshId = 0
 const sidebarToggled = ref(true)
 watch(
@@ -264,33 +260,11 @@ const { addPopupNotification } = popupNotificationManager
 let adsConsentPopupId = null
 useAppEvent('ads_consent_required', handleAdsConsentRequired, appEvents)
 
-const appVersion = getVersion()
-const tauriApiClient = new TauriModrinthClient({
-	userAgent: async () => `modrinth/theseus/${await appVersion} (support@modrinth.com)`,
-	labrinthBaseUrl: config.labrinthBaseUrl,
-	archonBaseUrl: config.archonBaseUrl,
-	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
-	features: [
-		new NodeAuthFeature({
-			getAuth: () => nodeAuthState.getAuth?.() ?? null,
-			refreshAuth: async () => {
-				if (nodeAuthState.refreshAuth) {
-					await nodeAuthState.refreshAuth()
-				}
-			},
-		}),
-		new AuthFeature({
-			token: async () => (await getCreds())?.session,
-		}),
-		new PanelVersionFeature(),
-		new VerboseLoggingFeature(),
-	],
-})
 provideModrinthClient(tauriApiClient)
 const { data: authenticatedModrinthUser } = useQuery({
 	queryKey: computed(() => ['authenticated-user', 'campaigns', credentials.value?.user?.id]),
 	queryFn: () => tauriApiClient.labrinth.users_v3.getAuthenticated(),
-	enabled: () => !!credentials.value?.session,
+	enabled: () => !!modrinthCredentials.value?.session,
 	retry: false,
 })
 useQuery({
@@ -401,8 +375,10 @@ function onCreationIconSaved(iconPath, config) {
 const news = ref([])
 const displayedServerInviteNotifications = new Set()
 const serverInvitePopupNotificationIds = new Set()
+const displayedSocialNotificationIds = new Set()
 let liveNotificationGeneration = 0
 let liveNotificationsEnabled = true
+let socialNotificationTimer = null
 
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
@@ -527,9 +503,9 @@ const messages = defineMessages({
 		id: 'app.nav.home',
 		defaultMessage: 'Home',
 	},
-	modrinthHosting: {
-		id: 'app.nav.modrinth-hosting',
-		defaultMessage: 'Modrinth Hosting',
+	core: {
+		id: 'app.nav.core',
+		defaultMessage: 'Core',
 	},
 	createNewInstance: {
 		id: 'app.nav.create-new-instance',
@@ -967,49 +943,46 @@ setupAuthProvider(credentials, async (_redirectPath, flow, options) => {
 	}
 })
 
-async function validateSession(sessionToken) {
-	try {
-		const response = await tauriFetch(`${config.labrinthBaseUrl}/v2/user`, {
-			method: 'GET',
-			headers: { Authorization: sessionToken },
-		})
-		if (response.status === 401) return false
-		return true
-	} catch {
-		return true
-	}
-}
-
 async function fetchCredentials() {
 	const hadSession = !!credentials.value?.session
 	const refreshId = ++credentialsRefreshId
 	credentials.value = undefined
-
-	const creds = await getCreds().catch(handleError)
+	const devConfig = getDevAppConfig()
+	const [session, modrinth] = await Promise.all([
+		devConfig?.authMode === 'dev' && devConfig.username
+			? amberite.auth.signInWithDevAccount({ username: devConfig.username })
+			: amberite.auth.restoreSession(),
+		getCreds().catch(() => null),
+	]).catch((error) => {
+		handleError(error)
+		return [null, null]
+	})
 	if (refreshId !== credentialsRefreshId) return
-	if (!creds && hadSession) clearLiveNotifications()
-
-	if (creds && creds.user_id) {
-		if (creds.session && !(await validateSession(creds.session))) {
-			if (refreshId !== credentialsRefreshId) return
-
-			clearLiveNotifications()
-			await logout().catch(handleError)
-			if (refreshId !== credentialsRefreshId) return
-
-			credentials.value = null
-			return
-		}
-		creds.user = await get_user(creds.user_id, 'bypass').catch(handleError)
-		if (refreshId !== credentialsRefreshId) return
+	modrinthCredentials.value = modrinth
+	if (!session && hadSession) clearLiveNotifications()
+	credentials.value = session
+		? { session: session.tokens.token, user_id: session.user.id, user: session.user }
+		: null
+	liveNotificationsEnabled = Boolean(session)
+	if (session) {
+		startPresence()
+		await tauriApiClient.amberite.sessions_v1
+			.registerCurrent({
+				os: type(),
+				platform: navigator.platform,
+				userAgent: `Amberite/${await appVersion}`,
+			})
+			.catch(() => undefined)
+		await syncSocialNotifications(session.user.id)
+		startSocialNotificationPolling(session.user.id)
 	}
-	credentials.value = creds ?? null
-	liveNotificationsEnabled = !!creds?.session
 }
 
 async function signIn(flow = 'sign-in') {
 	try {
-		await login(flow)
+		await amberite.auth.signInWithMinecraft({
+			mode: flow === 'sign-up' ? 'use_another_account' : 'continue',
+		})
 		await fetchCredentials()
 	} catch (error) {
 		if (
@@ -1025,12 +998,13 @@ async function signIn(flow = 'sign-in') {
 }
 
 async function requestSignIn(flow = 'sign-in') {
-	await modrinthLoginModal.value?.showSigningIn(flow)
+	await signIn(flow)
 }
 
 async function requestModrinthAuth(flow = 'sign-in') {
-	await signIn(flow)
-	return !!credentials.value?.session
+	await login(flow)
+	modrinthCredentials.value = await getCreds()
+	return !!modrinthCredentials.value?.session
 }
 
 async function logOut() {
@@ -1041,8 +1015,10 @@ async function performLogOut() {
 	credentialsRefreshId++
 	credentials.value = undefined
 	clearLiveNotifications()
+	stopPresence()
+	stopSocialNotificationPolling()
 
-	await logout().catch(handleError)
+	await amberite.auth.logOut().catch(handleError)
 	await fetchCredentials()
 }
 
@@ -1191,7 +1167,36 @@ async function handleLiveNotification(notification) {
 			onOpenActor: () => openServerInviteInviterProfile(invitedBy?.username ?? null),
 		})
 		serverInvitePopupNotificationIds.add(popupNotification.id)
+		return
 	}
+
+	if (displayedSocialNotificationIds.has(notification.id)) return
+	displayedSocialNotificationIds.add(notification.id)
+	addNotification({
+		id: notification.id,
+		title: notification.title ?? notification.name ?? 'Amberite',
+		text: notification.text ?? '',
+		type: 'info',
+	})
+	await markLiveNotificationRead(notification).catch(() => undefined)
+}
+
+async function syncSocialNotifications(userId) {
+	if (!liveNotificationsEnabled) return
+	const notifications = await tauriApiClient.labrinth.notifications_v2
+		.getUserNotifications(userId)
+		.catch(() => [])
+	for (const notification of notifications) await handleLiveNotification(notification)
+}
+
+function startSocialNotificationPolling(userId) {
+	stopSocialNotificationPolling()
+	socialNotificationTimer = setInterval(() => void syncSocialNotifications(userId), 15_000)
+}
+
+function stopSocialNotificationPolling() {
+	if (socialNotificationTimer) clearInterval(socialNotificationTimer)
+	socialNotificationTimer = null
 }
 
 function clearLiveNotifications() {
@@ -1201,6 +1206,7 @@ function clearLiveNotifications() {
 		popupNotificationManager.removeNotification(id)
 	}
 	displayedServerInviteNotifications.clear()
+	displayedSocialNotificationIds.clear()
 	serverInvitePopupNotificationIds.clear()
 	sharedInstanceInviteHandler.value?.clearNotifications()
 }
@@ -1713,14 +1719,9 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				<ShirtIcon />
 			</NavButton>
 			<NavButton
-				v-tooltip.right="formatMessage(messages.modrinthHosting)"
-				to="/hosting/manage"
-				:is-primary="(r) => r.path === '/hosting/manage' || r.path === '/hosting/manage/'"
-				:is-subpage="
-					(r) =>
-						(r.path.startsWith('/hosting/manage/') && r.path !== '/hosting/manage/') ||
-						((r.path.startsWith('/browse') || r.path.startsWith('/project')) && r.query.sid)
-				"
+				v-tooltip.right="formatMessage(messages.core)"
+				to="/core"
+				:is-primary="(r) => r.path === '/core'"
 			>
 				<ServerStackIcon />
 			</NavButton>

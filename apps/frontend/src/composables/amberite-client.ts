@@ -5,7 +5,7 @@ import {
 	NetworkError,
 	type PlatformAdapter,
 	type PlatformAuthSession,
-} from '@amberite/amberite-api'
+} from '@modrinth/api-client'
 
 let browserAccessToken: string | null = null
 let refreshPromise: Promise<PlatformAuthSession | null> | null = null
@@ -34,7 +34,6 @@ function createAmberiteWebAdapter(): PlatformAdapter {
 	return {
 		fetchFn: globalThis.fetch.bind(globalThis) as typeof fetch,
 		convexUrl,
-		getCoreUrl: async () => null,
 		getCurrentJwt: async () => (import.meta.client ? browserAccessToken : null),
 		setCurrentJwt: async (token) => {
 			if (import.meta.client) browserAccessToken = token
@@ -51,9 +50,6 @@ function createAmberiteWebAdapter(): PlatformAdapter {
 			} finally {
 				browserAccessToken = null
 			}
-		},
-		openExternalAuth: async (url) => {
-			await navigateTo(url, { external: true })
 		},
 	}
 }

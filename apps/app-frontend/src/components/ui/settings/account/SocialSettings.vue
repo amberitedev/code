@@ -3,6 +3,7 @@
 		:get-blocked-users="get_blocked_users"
 		:get-users="getUsers"
 		:unblock-user="unblock_user"
+		identity-kind="amberite"
 	/>
 </template>
 

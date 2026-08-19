@@ -41,12 +41,12 @@ export const verifyClaim = internalMutation({
 			!pairing ||
 			pairing.status !== 'claimed' ||
 			pairing.ownerUserId !== ownerUserId ||
-			!pairing.realtimeCredentialHash ||
+			!pairing.syncCredentialHash ||
 			pairing.expiresAt <= args.now
 		) {
 			return false
 		}
-		return constantTimeEquals(pairing.realtimeCredentialHash, args.credentialHash)
+		return constantTimeEquals(pairing.syncCredentialHash, args.credentialHash)
 	},
 })
 

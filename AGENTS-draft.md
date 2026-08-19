@@ -53,9 +53,9 @@ applied:
   not a finished product feature. Complete the path the affected user actually follows.
 - **Roles.** Owner, Admin, and Limited are different users. Hiding a control is not authorization;
   the backend that performs the operation must enforce the same decision.
-- **Instance types.** Client, server, and synced instances are not interchangeable. Decide which
-  side owns the change and how the other side observes it.
-- **Backend boundary.** Amberite-facing frontend workflows go through `@amberite/amberite-api`.
+- **Instance ownership.** Keep launcher instances local to the App. Shared-instance state describes
+  access and synchronization; it is not another launcher instance type.
+- **Backend boundary.** Amberite-facing frontend workflows go through `@modrinth/api-client`.
   Do not rebuild a multi-step workflow in a Vue component or add another one-off backend path.
 - **States.** Loading, empty, offline, unauthorized, failure, retry, and recovery matter when they
   can occur. If you add a way in, add the applicable way out and a way to see the current state.
@@ -99,7 +99,7 @@ Development setup and state handling belong in `docs/internals/scripts.md`.
 ## How it works
 
 The desktop frontend is a Vue app inside a Tauri shell. Amberite-specific frontend workflows live in
-`@amberite/amberite-api`, which connects the App and Website to Convex, Copal, and the realtime
+`@modrinth/api-client`, which connects the App and Website to Convex, Copal, and the realtime
 Worker. Convex holds durable identity and social state, Copal runs and manages the Minecraft
 servers, and realtime carries short-lived presence.
 
@@ -113,9 +113,8 @@ Architecture overview with source links: `docs/internals/overview.md`
 - `apps/frontend` - Website and inherited Modrinth web surface.
 - `convex` - durable Amberite identity, social, group, and cloud state.
 - `apps/realtime` - short-lived presence through Cloudflare Workers and Durable Objects.
-- `packages/amberite-api` - shared Amberite contracts, clients, and backend-facing workflows.
 - `packages/ui` - shared Modrinth and Amberite UI.
-- `packages/api-client` - typed Modrinth API client.
+- `packages/api-client` - shared Modrinth and Amberite contracts, clients, and backend-facing workflows.
 - `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly
   asked.
 - `apps/labrinth` - inherited Modrinth API service.
@@ -124,7 +123,7 @@ Architecture overview with source links: `docs/internals/overview.md`
 ## Taste
 
 - Complexity belongs at the adapter boundary. Backend-facing workflows stay in
-  `@amberite/amberite-api`; UI stays dumb.
+  `@modrinth/api-client`; UI stays dumb.
 - Preserve upstream behavior until Amberite has a product reason to differ.
 - Use existing Modrinth UI and nearby patterns before creating new components or visual systems.
 - Inferred types over annotations. Never use TypeScript `any`; use `unknown` and narrow it safely.

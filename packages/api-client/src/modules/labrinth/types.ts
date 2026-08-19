@@ -1301,6 +1301,80 @@ export namespace Labrinth {
 				projects: Project[]
 				versions: Labrinth.Versions.v3.Version[]
 			}
+
+			export type TelemetryConsent = 'opt_in' | 'opt_out' | 'always_active'
+
+			export type AiUsage = 'code' | 'assets' | 'text' | 'functionality'
+
+			export type DisclosureLockStatus = 'unlocked' | 'cannot_disable' | 'fully_locked'
+
+			export type DerivativeSource = {
+				label: string
+				link?: string | null
+				note?: string | null
+			}
+
+			export type ProjectDisclosure =
+				| {
+						type: 'ai_content'
+						uses: AiUsage[]
+						note?: string | null
+				  }
+				| {
+						type: 'advertisements'
+						note?: string | null
+				  }
+				| {
+						type: 'epilepsy_triggers'
+						note?: string | null
+				  }
+				| {
+						type: 'system_interactions'
+						interactions: string[]
+						note?: string | null
+				  }
+				| {
+						type: 'telemetry'
+						consent: TelemetryConsent
+						data_collected: string[]
+				  }
+				| {
+						type: 'derivative_work'
+						sources: DerivativeSource[]
+				  }
+				| {
+						type: 'paid_features'
+						features: string[]
+				  }
+				| {
+						type: 'archived'
+						note?: string | null
+				  }
+
+			export type ProjectDisclosureData = ProjectDisclosure & {
+				set_by_moderator: boolean
+				lock_status: DisclosureLockStatus
+				updated_at: string
+				updated_by?: string | null
+				deleted_at?: string | null
+			}
+
+			export type ProjectDisclosureType = ProjectDisclosure['type']
+
+			export type ProjectDisclosureOf<T extends ProjectDisclosureType> = Extract<
+				ProjectDisclosureData,
+				{ type: T }
+			>
+
+			export type GetProjectDisclosures = {
+				disclosures: ProjectDisclosureData[]
+			}
+
+			export type ModifyProjectDisclosures = {
+				set: ProjectDisclosure[]
+				remove: ProjectDisclosureType[]
+				lock_status?: DisclosureLockStatus | null
+			}
 		}
 	}
 
@@ -1615,9 +1689,8 @@ export namespace Labrinth {
 
 			export type User = {
 				id: string
+				user_id?: string
 				username: string
-				/** Amberite's non-unique, user-editable profile name. */
-				display_name?: string
 				name?: string
 				avatar_url?: string
 				bio?: string
@@ -1651,7 +1724,10 @@ export namespace Labrinth {
 
 			export type User = {
 				id: string
+				user_id?: string
 				username: string
+				display_name?: string
+				name?: string
 				avatar_url?: string
 				bio?: string
 				created: string
@@ -1680,7 +1756,6 @@ export namespace Labrinth {
 			}
 
 			export type EditUserRequest = {
-				/** Amberite keeps the verified Minecraft username read-only. */
 				display_name?: string
 				bio?: string | null
 				allow_friend_requests?: boolean
@@ -1835,7 +1910,7 @@ export namespace Labrinth {
 
 		export namespace v3 {
 			export interface ResultSearchProject {
-				version_id: string
+				version_id?: string
 				project_id: string
 				project_types: string[]
 				all_project_types: string[]

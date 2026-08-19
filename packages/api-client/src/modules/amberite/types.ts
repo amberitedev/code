@@ -78,9 +78,9 @@ export namespace Amberite {
 				connectionUrl?: string
 				metadata?: PairingMetadata
 				syncCredential: string
-				/** @deprecated Compatibility alias for Core builds created during the migration. */
-				realtimeCredential: string
 			}
 		}
 	}
 }
+
+export type LinkedModrinthAccount = Amberite.Accounts.v1.LinkedModrinthAccount

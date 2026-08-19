@@ -5,7 +5,7 @@
 			:title="formatMessage(messages.deleteAccountConfirmTitle)"
 			:description="formatMessage(messages.deleteAccountConfirmDescription)"
 			:proceed-label="formatMessage(messages.deleteAccountConfirmProceed)"
-			:confirmation-text="auth.user.username"
+			:confirmation-text="auth.user?.username ?? ''"
 			:has-to-type="true"
 			@proceed="deleteAccount"
 		/>
@@ -36,12 +36,10 @@
 						{{ formatMessage(messages.modrinthLinkedDescription) }}
 					</span>
 				</label>
-				<ButtonStyled color="red">
-					<button @click="disconnectModrinthAccount">
-						<TrashIcon />
-						{{ formatMessage(commonMessages.removeButton) }}
-					</button>
-				</ButtonStyled>
+				<Button type="colored" color="red" @click="disconnectModrinthAccount">
+					<TrashIcon />
+					{{ formatMessage(commonMessages.removeButton) }}
+				</Button>
 			</div>
 			<div v-else class="flex flex-col gap-2.5">
 				<label for="modrinth-token">
@@ -59,55 +57,35 @@
 					:placeholder="formatMessage(messages.modrinthTokenPlaceholder)"
 				/>
 				<div>
-					<ButtonStyled color="brand">
-						<button :disabled="!modrinthToken.trim() || linkingModrinth" @click="linkModrinthAccount">
-							<PlusIcon />
-							{{ formatMessage(messages.modrinthLinkButton) }}
-						</button>
-					</ButtonStyled>
+					<Button
+						type="colored"
+						color="brand"
+						:disabled="!modrinthToken.trim() || linkingModrinth"
+						@click="linkModrinthAccount"
+					>
+						<PlusIcon />
+						{{ formatMessage(messages.modrinthLinkButton) }}
+					</Button>
 				</div>
 			</div>
-		</section>
-
-		<section id="data-export" class="universal-card">
-			<h2>{{ formatMessage(messages.dataExportTitle) }}</h2>
-			<p>{{ formatMessage(messages.dataExportDescription) }}</p>
-			<ButtonStyled v-if="generated">
-				<a :href="generated" download="export.json">
-					<DownloadIcon />
-					{{ formatMessage(messages.downloadExportButton) }}
-				</a>
-			</ButtonStyled>
-			<ButtonStyled v-else>
-				<button :disabled="generatingExport" @click="exportData">
-					<template v-if="generatingExport">
-						<UpdatedIcon /> {{ formatMessage(messages.generatingExportButton) }}
-					</template>
-					<template v-else>
-						<UpdatedIcon /> {{ formatMessage(messages.generateExportButton) }}
-					</template>
-				</button>
-			</ButtonStyled>
 		</section>
 
 		<section id="delete-account" class="universal-card">
 			<h2>{{ formatMessage(messages.deleteAccountSectionTitle) }}</h2>
 			<p>{{ formatMessage(messages.deleteAccountSectionDescription) }}</p>
-			<ButtonStyled color="red">
-				<button type="button" @click="modalConfirm.show()">
-					<TrashIcon />
-					{{ formatMessage(messages.deleteAccountButton) }}
-				</button>
-			</ButtonStyled>
+			<Button type="colored" color="red" @click="modalConfirm.show()">
+				<TrashIcon />
+				{{ formatMessage(messages.deleteAccountButton) }}
+			</Button>
 		</section>
 	</div>
 </template>
 
 <script setup lang="ts">
-import type { LinkedModrinthAccount } from '@amberite/amberite-api'
-import { BoxIcon, DownloadIcon, PlusIcon, TrashIcon, UpdatedIcon } from '@modrinth/assets'
+import type { LinkedModrinthAccount } from '@modrinth/api-client'
+import { BoxIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
 import {
-	ButtonStyled,
+	Button,
 	commonMessages,
 	ConfirmModal,
 	defineMessages,
@@ -116,10 +94,7 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 
-import {
-	useAmberiteAuthClient,
-	useAmberiteSocialClient,
-} from '~/composables/amberite-client.ts'
+import { useAmberiteAuthClient, useAmberiteSocialClient } from '~/composables/amberite-client.ts'
 
 definePageMeta({
 	middleware: 'auth',
@@ -172,8 +147,7 @@ const messages = defineMessages({
 	},
 	modrinthLinkDescription: {
 		id: 'settings.account.modrinth-link.description',
-		defaultMessage:
-			'Link Modrinth for content management. This is separate from Amberite sign-in.',
+		defaultMessage: 'Link Modrinth for content management. This is separate from Amberite sign-in.',
 	},
 	modrinthLinkedDescription: {
 		id: 'settings.account.modrinth-link.linked.description',
@@ -185,7 +159,8 @@ const messages = defineMessages({
 	},
 	modrinthTokenDescription: {
 		id: 'settings.account.modrinth-link.token.description',
-		defaultMessage: 'This token links your Modrinth account; it is not used to sign in to Amberite.',
+		defaultMessage:
+			'This token links your Modrinth account; it is not used to sign in to Amberite.',
 	},
 	modrinthTokenPlaceholder: {
 		id: 'settings.account.modrinth-link.token.placeholder',
@@ -202,26 +177,6 @@ const messages = defineMessages({
 	modrinthDisconnectSuccess: {
 		id: 'settings.account.modrinth-link.notification.disconnected',
 		defaultMessage: 'Modrinth account disconnected.',
-	},
-	dataExportTitle: {
-		id: 'settings.account.data-export.title',
-		defaultMessage: 'Data export',
-	},
-	dataExportDescription: {
-		id: 'settings.account.data-export.description',
-		defaultMessage: 'Request a copy of the personal data associated with your account.',
-	},
-	downloadExportButton: {
-		id: 'settings.account.data-export.action.download',
-		defaultMessage: 'Download export',
-	},
-	generatingExportButton: {
-		id: 'settings.account.data-export.action.generating',
-		defaultMessage: 'Generating export...',
-	},
-	generateExportButton: {
-		id: 'settings.account.data-export.action.generate',
-		defaultMessage: 'Generate export',
 	},
 	deleteAccountSectionTitle: {
 		id: 'settings.account.delete.section.title',
@@ -300,34 +255,12 @@ async function deleteAccount() {
 	stopLoading()
 }
 
-const generatingExport = ref(false)
-const generated = ref<string>()
-
-async function exportData() {
-	startLoading()
-	generatingExport.value = true
-	try {
-		const res = await useBaseFetch('gdpr/export', {
-			method: 'POST',
-			internal: true,
-		})
-
-		const jsonString = JSON.stringify(res, null, 2)
-		const blob = new Blob([jsonString], { type: 'application/json' })
-		generated.value = URL.createObjectURL(blob)
-	} catch (error) {
-		handleErrorNotification(error)
-	} finally {
-		generatingExport.value = false
-		stopLoading()
-	}
-}
-
 function handleErrorNotification(error: unknown) {
 	const maybeApiError = error as { data?: { description?: string } }
 	addNotification({
 		title: formatMessage(commonMessages.errorNotificationTitle),
-		text: maybeApiError?.data?.description ?? (error instanceof Error ? error.message : String(error)),
+		text:
+			maybeApiError?.data?.description ?? (error instanceof Error ? error.message : String(error)),
 		type: 'error',
 	})
 }

@@ -158,8 +158,9 @@ const messages = defineMessages({
 								class="text-sm m-0"
 								:class="friend.online || !friend.accepted ? 'text-contrast' : 'text-primary'"
 							>
-								{{ friend.username }}
+								{{ friend.displayName }}
 							</span>
+							<span class="m-0 truncate text-xs text-secondary">@{{ friend.username }}</span>
 							<span v-if="!friend.accepted" class="m-0 text-xs">
 								{{ formatMessage(messages.friendRequestSent) }}
 							</span>

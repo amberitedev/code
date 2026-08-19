@@ -24,9 +24,8 @@ export interface CoreSetupRequest {
 	owner_display_name?: string
 	/** JWT audience claim to validate. Defaults to "authenticated" if omitted. */
 	auth_audience?: string
-	/** Legacy one-time Core realtime credential retained for setup compatibility. */
-	realtime_credential?: string
-	realtime_url?: string
+	/** One-time secret used to verify setup and authenticate projection sync. */
+	sync_credential?: string
 }
 
 export interface CoreSetupResponse {

@@ -46,12 +46,14 @@ export class LabrinthUsersV3Module extends AbstractModule {
 	 * GET /v3/users/search?query=:query
 	 */
 	public async search(query: string): Promise<Labrinth.Users.v3.SearchUser[]> {
-		return this.client.request<Labrinth.Users.v3.SearchUser[]>('/users/search', {
-			api: 'labrinth',
-			version: 3,
-			method: 'GET',
-			params: { query },
-		})
+		return this.client.request<Labrinth.Users.v3.SearchUser[]>(
+			`/users/search?query=${encodeURIComponent(query)}`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'GET',
+			},
+		)
 	}
 
 	/** Edit the authenticated user's public profile. */
@@ -67,7 +69,6 @@ export class LabrinthUsersV3Module extends AbstractModule {
 		})
 	}
 
-	/** Replace a user's avatar with a Labrinth-compatible binary upload. */
 	public async setAvatar(idOrUsername: string, image: Blob, extension: string): Promise<void> {
 		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}/icon`, {
 			api: 'labrinth',

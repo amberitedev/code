@@ -1,8 +1,8 @@
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{Arc, atomic::Ordering};
 
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     application::{core_projection_service, pairing_service, state::AppState},
@@ -28,10 +28,9 @@ pub struct SetupRequest {
     pub owner_display_name: Option<String>,
     /// JWT audience claim to validate. Defaults to "authenticated" if omitted.
     pub auth_audience: Option<String>,
-    /// One-time Core pairing credential issued by Convex after a successful claim.
-    pub realtime_credential: Option<String>,
-    /// Legacy optional rollout endpoint for Cloudflare presence.
-    pub realtime_url: Option<String>,
+    /// One-time credential used for setup verification and projection sync.
+    #[serde(alias = "realtime_credential")]
+    pub sync_credential: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -111,9 +110,6 @@ pub async fn complete_setup(
         "auth_jwks_url",
         state.config.dev_mode,
     )?;
-    if let Some(url) = &body.realtime_url {
-        validate_https_url(url, "realtime_url")?;
-    }
     let auth_audience = body
         .auth_audience
         .as_deref()
@@ -126,25 +122,23 @@ pub async fn complete_setup(
                 .into(),
         ));
     }
-    if let Some(credential) = &body.realtime_credential {
+    if let Some(credential) = &body.sync_credential {
         if credential.len() != 64
             || !credential
                 .chars()
                 .all(|character| character.is_ascii_hexdigit())
         {
             return Err(ApiError::BadRequest(
-                "realtime_credential must be a 32-byte hexadecimal secret"
-                    .into(),
+                "sync_credential must be a 32-byte hexadecimal secret".into(),
             ));
         }
     }
     if pairing_code_valid {
-        let credential =
-            body.realtime_credential.as_deref().ok_or_else(|| {
-                ApiError::BadRequest(
-                    "realtime_credential is required for remote setup".into(),
-                )
-            })?;
+        let credential = body.sync_credential.as_deref().ok_or_else(|| {
+            ApiError::BadRequest(
+                "sync_credential is required for remote setup".into(),
+            )
+        })?;
         verify_remote_setup_claim(
             &state,
             &state.config.convex_site_url,
@@ -168,8 +162,8 @@ pub async fn complete_setup(
 	.bind(&body.owner_user_id)
     .bind(&now)
     .bind(&state.core_id)
-    .bind(&body.realtime_credential)
-    .bind(&body.realtime_url)
+    .bind(&body.sync_credential)
+    .bind(Option::<String>::None)
     .execute(&state.pool)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -222,18 +216,6 @@ fn normalize_pairing_code(code: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase()
-}
-
-fn validate_https_url(value: &str, field: &str) -> Result<(), ApiError> {
-    let parsed = url::Url::parse(value).map_err(|_| {
-        ApiError::BadRequest(format!("{field} must be a valid URL"))
-    })?;
-    if parsed.scheme() != "https" || parsed.host_str().is_none() {
-        return Err(ApiError::BadRequest(format!(
-            "{field} must be an HTTPS URL with a host"
-        )));
-    }
-    Ok(())
 }
 
 fn validate_service_url(

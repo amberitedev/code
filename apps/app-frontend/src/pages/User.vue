@@ -55,10 +55,7 @@ import {
 	change_user_avatar,
 	delete_user_avatar,
 	get_blocked_users,
-	get_user_collections,
-	get_user_organizations,
 	get_user_profile,
-	get_user_projects,
 	patch_user,
 	unblock_user,
 } from '@/helpers/users'
@@ -111,17 +108,17 @@ async function installProject(project: Labrinth.Projects.v2.Project): Promise<vo
 		)
 	} catch (error) {
 		setProjectInstalling(project.id, false)
-		handleError(error)
+		handleError(error instanceof Error ? error : new Error(String(error)))
 	}
 }
 
 const userProfile = provideUserProfile({
 	getUser: get_user_profile,
-	getProjects: get_user_projects,
-	getOrganizations: get_user_organizations,
-	getCollections: get_user_collections,
+	getProjects: async () => [],
+	getOrganizations: async () => [],
+	getCollections: async () => [],
 	patchUser: patch_user,
-	changeAvatar: async (userId, file, extension) => {
+	changeAvatar: async (userId: string, file: Blob, extension: string) => {
 		await change_user_avatar(userId, new Uint8Array(await file.arrayBuffer()), extension)
 	},
 	deleteAvatar: delete_user_avatar,

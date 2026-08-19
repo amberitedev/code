@@ -5,25 +5,27 @@
 		:change-avatar="changeAvatar"
 		:delete-avatar="deleteAvatar"
 		:get-authenticated-user="getAuthenticatedUser"
+		name-kind="display-name"
+		profile-kind="amberite"
+		:editable-name="editableName"
 		@profile-link-click="handleProfileLinkClick"
 	/>
 </template>
 
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
-import { AccountProfileSettings, injectAuth } from '@modrinth/ui'
-import { inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { AccountProfileSettings, injectAuth, injectModrinthClient } from '@modrinth/ui'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import {
-	change_user_avatar,
-	delete_user_avatar,
-	get_user_profile,
-	patch_user,
-} from '@/helpers/users'
 import { appSettingsModalContextKey } from '@/providers/app-settings-modal'
 
 const settingsModal = inject(appSettingsModalContextKey, null)
 const auth = injectAuth()
+const client = injectModrinthClient()
+const editableName = computed(() => {
+	const user = auth.user.value as Labrinth.Users.v3.User | null
+	return user?.display_name ?? user?.name
+})
 const profileSettings = ref<InstanceType<typeof AccountProfileSettings> | null>(null)
 
 onMounted(() => {
@@ -51,20 +53,20 @@ function patchUser(
 	userId: string,
 	patch: Partial<Pick<Labrinth.Users.v2.User, 'bio' | 'username'>>,
 ): Promise<void> {
-	return patch_user(userId, patch)
+	return client.labrinth.users_v2.patch(userId, patch)
 }
 
 async function changeAvatar(userId: string, file: Blob, extension: string): Promise<void> {
-	await change_user_avatar(userId, new Uint8Array(await file.arrayBuffer()), extension)
+	await client.labrinth.users_v2.changeIcon(userId, file, extension)
 }
 
 function deleteAvatar(userId: string): Promise<void> {
-	return delete_user_avatar(userId)
+	return client.labrinth.users_v2.deleteIcon(userId)
 }
 
 function getAuthenticatedUser(): Promise<Labrinth.Users.v3.User> {
 	const userId = auth.user.value?.id
 	if (!userId) throw new Error('Cannot refresh a signed-out user.')
-	return get_user_profile(userId)
+	return client.labrinth.users_v3.getAuthenticated()
 }
 </script>

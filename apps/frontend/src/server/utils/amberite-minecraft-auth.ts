@@ -4,7 +4,7 @@ import {
 	type AmberiteSessionTokens,
 	ConvexAmberiteAuthClient,
 	type PlatformAdapter,
-} from '@amberite/amberite-api'
+} from '@modrinth/api-client'
 import {
 	createError,
 	deleteCookie,
@@ -201,7 +201,6 @@ function createServerAuthClient(
 	const adapter: PlatformAdapter = {
 		fetchFn: globalThis.fetch.bind(globalThis) as typeof fetch,
 		convexUrl,
-		getCoreUrl: async () => null,
 		getCurrentJwt: async () => tokens?.token || null,
 		setCurrentJwt: async (token) => {
 			tokens = tokens ? { ...tokens, token: token ?? '' } : null
@@ -217,7 +216,6 @@ function createServerAuthClient(
 				clearBrowserSessionCookies(event)
 			},
 		},
-		openExternalAuth: async () => {},
 	}
 	return new ConvexAmberiteAuthClient({ adapter })
 }

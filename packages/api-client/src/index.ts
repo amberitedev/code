@@ -20,10 +20,12 @@ export {
 } from './core/abstract-websocket'
 export { ModrinthApiError, ModrinthServerError } from './core/errors'
 export { type AuthConfig, AuthFeature } from './features/auth'
+export * from './amberite'
 export {
 	AmberiteFeature,
+	AmberiteFeature as AmberiteModrinthCompatFeature,
+	amberiteFeatureConfig,
 	type AmberiteFeatureConfig,
-	type AmberiteTransport,
 } from './features/amberite'
 export {
 	type CircuitBreakerConfig,

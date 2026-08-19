@@ -1,5 +1,5 @@
 <template>
-	<PageHeader :title="user.username" :summary="summary">
+	<PageHeader :title="displayName" :summary="headerSummary">
 		<template #leading>
 			<Avatar
 				:src="user.avatar_url"
@@ -205,6 +205,12 @@ const props = withDefaults(
 		downloads: 0,
 	},
 )
+
+const displayName = computed(() => props.user.display_name ?? props.user.username)
+const headerSummary = computed(() => {
+	if (!props.user.display_name) return props.summary
+	return props.summary ? `@${props.user.username} · ${props.summary}` : `@${props.user.username}`
+})
 
 const emit = defineEmits<{
 	manageProjects: []

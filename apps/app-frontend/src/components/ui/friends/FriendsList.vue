@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Labrinth } from '@modrinth/api-client'
 import { MailIcon, SearchIcon, SendIcon, UserIcon, UserPlusIcon, XIcon } from '@modrinth/assets'
 import {
 	Avatar,
@@ -11,15 +12,16 @@ import {
 	useRelativeTime,
 	useVIntl,
 } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 
 import FriendsSection from '@/components/ui/friends/FriendsSection.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
 import { useFriends } from '@/composables/use-friends'
 import type { FriendWithUserData } from '@/helpers/friends.ts'
-import type { ModrinthCredentials } from '@/helpers/mr_auth'
+import type { SocialCredentials } from '@/helpers/friends.ts'
 import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { useTheming } from '@/store/state'
+import { apiClient } from '@/services/api-client'
 
 const { formatMessage } = useVIntl()
 
@@ -28,7 +30,7 @@ const formatRelativeTime = useRelativeTime()
 const themeStore = useTheming()
 
 const props = defineProps<{
-	credentials: ModrinthCredentials | null
+	credentials: SocialCredentials | null
 	signIn: () => void
 }>()
 
@@ -55,6 +57,7 @@ function setFriendsSectionCollapsed(flag: FriendsSectionCollapsedFlag, collapsed
 const userCredentials = computed(() => props.credentials)
 const {
 	friends: userFriends,
+	query: friendsQuery,
 	loading,
 	requestFriend,
 	acceptFriend,
@@ -68,7 +71,14 @@ const {
 const search = ref('')
 const friendInvitesModal = ref()
 const username = ref('')
+const friendCode = ref('')
+const addingByCode = ref(false)
 const addFriendModal = ref()
+const userResults = ref<Labrinth.Users.v3.SearchUser[]>([])
+const selectedUser = ref<Labrinth.Users.v3.SearchUser | null>(null)
+const searchingUsers = ref(false)
+let searchRequest = 0
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const sortedFriends = computed<FriendWithUserData[]>(() =>
 	userFriends.value.slice().sort((a, b) => {
@@ -86,8 +96,10 @@ const sortedFriends = computed<FriendWithUserData[]>(() =>
 	}),
 )
 const filteredFriends = computed<FriendWithUserData[]>(() =>
-	sortedFriends.value.filter((x) =>
-		x.username.trim().toLowerCase().includes(search.value.trim().toLowerCase()),
+	sortedFriends.value.filter((friend) =>
+		[friend.displayName, friend.username].some((value) =>
+			value.trim().toLowerCase().includes(search.value.trim().toLowerCase()),
+		),
 	),
 )
 
@@ -114,19 +126,72 @@ const incomingRequests = computed(() =>
 )
 
 function addFriendFromModal() {
-	const target = username.value.trim()
-	if (!target) return
+	if (!selectedUser.value) return
 
 	addFriendModal.value.hide()
-	requestFriend({ id: target, username: target })
+	requestFriend({
+		id: selectedUser.value.id,
+		username: selectedUser.value.username,
+		displayName: selectedUser.value.display_name,
+		avatarUrl: selectedUser.value.avatar_url,
+	})
 	username.value = ''
+	selectedUser.value = null
+	userResults.value = []
 }
 
-function addFriend(friend: FriendWithUserData) {
+async function addFriendByCode() {
+	const code = friendCode.value.trim().toUpperCase()
+	if (!/^AMB-[A-Z0-9]{8}$/.test(code)) return
+	addingByCode.value = true
+	try {
+		await apiClient.amberite.friends_v1.addByCode(code)
+		friendCode.value = ''
+		addFriendModal.value.hide()
+		await friendsQuery.refetch()
+	} catch (error) {
+		handleError(error instanceof Error ? error : new Error(String(error)))
+	} finally {
+		addingByCode.value = false
+	}
+}
+
+function searchUsers() {
+	if (searchTimer) clearTimeout(searchTimer)
+	selectedUser.value = null
+	const query = username.value.trim()
+	if (query.length < 2) {
+		userResults.value = []
+		searchingUsers.value = false
+		return
+	}
+	const request = ++searchRequest
+	searchingUsers.value = true
+	searchTimer = setTimeout(async () => {
+		try {
+			const results = await apiClient.labrinth.users_v3.search(query)
+			if (request === searchRequest) userResults.value = results
+		} finally {
+			if (request === searchRequest) searchingUsers.value = false
+		}
+	}, 250)
+}
+
+function selectUser(user: Labrinth.Users.v3.SearchUser) {
+	selectedUser.value = user
+	username.value = `@${user.username}`
+	userResults.value = []
+}
+
+onUnmounted(() => {
+	if (searchTimer) clearTimeout(searchTimer)
+})
+
+async function addFriend(friend: FriendWithUserData) {
 	acceptFriend(friend)
 }
 
-function removeFriend(friend: FriendWithUserData) {
+async function removeFriend(friend: FriendWithUserData) {
 	removeFriendRecord(friend)
 }
 
@@ -141,15 +206,27 @@ const messages = defineMessages({
 	},
 	usernameTitle: {
 		id: 'friends.add-friend.username.title',
-		defaultMessage: "What's your friend's Modrinth username?",
+		defaultMessage: "What's your friend's Minecraft username?",
 	},
 	usernameDescription: {
 		id: 'friends.add-friend.username.description',
-		defaultMessage: 'It may be different from their Minecraft username!',
+		defaultMessage: 'Search by their unique @username, then choose the matching profile.',
 	},
 	usernamePlaceholder: {
 		id: 'friends.add-friend.username.placeholder',
-		defaultMessage: 'Enter Modrinth username...',
+		defaultMessage: 'Search @username...',
+	},
+	friendCodeTitle: {
+		id: 'friends.add-friend.code.title',
+		defaultMessage: 'Or use a friend code',
+	},
+	friendCodeDescription: {
+		id: 'friends.add-friend.code.description',
+		defaultMessage: 'Friend codes work even when you do not know someone’s current username.',
+	},
+	friendCodePlaceholder: {
+		id: 'friends.add-friend.code.placeholder',
+		defaultMessage: 'AMB-XXXXXXXX',
 	},
 	sendFriendRequest: {
 		id: 'friends.add-friend.submit',
@@ -189,8 +266,7 @@ const messages = defineMessages({
 	},
 	signInToAddFriends: {
 		id: 'friends.sign-in-to-add-friends',
-		defaultMessage:
-			"<link>Sign in to a Modrinth account</link> to add friends and see what they're playing!",
+		defaultMessage: "<link>Sign in to Amberite</link> to add friends and see who's online!",
 	},
 	addFriendsToShare: {
 		id: 'friends.add-friends-to-share',
@@ -209,12 +285,14 @@ const messages = defineMessages({
 					<div>
 						<p class="m-0">
 							<template v-if="friend.id === userCredentials?.user_id">
-								<span class="text-contrast">{{ friend.username }}</span> sent you a friend request
+								<span class="text-contrast">{{ friend.displayName }}</span> sent you a friend
+								request
 							</template>
 							<template v-else>
-								You sent <span class="font-bold">{{ friend.username }}</span> a friend request
+								You sent <span class="font-bold">{{ friend.displayName }}</span> a friend request
 							</template>
 						</p>
+						<p class="m-0 text-xs text-secondary">@{{ friend.username }}</p>
 						<p class="m-0 text-sm text-secondary">
 							{{ formatRelativeTime(friend.created.toISOString()) }}
 						</p>
@@ -242,31 +320,102 @@ const messages = defineMessages({
 		</div>
 	</ModalWrapper>
 	<ModalWrapper ref="addFriendModal" :header="formatMessage(messages.addingAFriend)">
-		<div class="min-w-[30rem]">
-			<h2 class="m-0 text-base font-medium text-primary">
-				{{ formatMessage(messages.usernameTitle) }}
-			</h2>
-			<p class="m-0 mt-1 text-sm text-secondary leading-tight">
-				{{ formatMessage(messages.usernameDescription) }}
-			</p>
-			<div class="flex items-center gap-2 mt-4">
-				<StyledInput
-					v-model="username"
-					:icon="UserIcon"
-					type="text"
-					:placeholder="formatMessage(messages.usernamePlaceholder)"
-					wrapper-class="flex-1"
-					@keyup.enter="addFriendFromModal"
-				/>
-				<Button
-					type="colored"
-					color="brand"
-					:disabled="username.length === 0"
-					@click="addFriendFromModal"
+		<div class="min-w-[30rem] flex flex-col gap-5">
+			<div
+				v-if="userCredentials?.user?.friendCode"
+				class="rounded-xl bg-surface-2 px-4 py-3 text-sm text-secondary"
+			>
+				Your friend code:
+				<span class="ml-1 font-mono font-semibold text-contrast">
+					{{ userCredentials.user.friendCode }}
+				</span>
+			</div>
+			<div>
+				<h2 class="m-0 text-base font-medium text-primary">
+					{{ formatMessage(messages.usernameTitle) }}
+				</h2>
+				<p class="m-0 mt-1 text-sm text-secondary leading-tight">
+					{{ formatMessage(messages.usernameDescription) }}
+				</p>
+				<div class="flex items-center gap-2 mt-4">
+					<StyledInput
+						v-model="username"
+						:icon="UserIcon"
+						type="text"
+						:placeholder="formatMessage(messages.usernamePlaceholder)"
+						wrapper-class="flex-1"
+						@update:model-value="searchUsers"
+						@keyup.enter="
+							userResults.length === 1 ? selectUser(userResults[0]) : addFriendFromModal()
+						"
+					/>
+					<Button
+						type="colored"
+						color="brand"
+						:disabled="!selectedUser"
+						@click="addFriendFromModal"
+					>
+						<SendIcon />
+						{{ formatMessage(messages.sendFriendRequest) }}
+					</Button>
+				</div>
+				<div
+					v-if="username.trim().length > 0 && !selectedUser"
+					class="mt-2 max-h-56 overflow-y-auto rounded-xl border border-solid border-surface-5 bg-bg-raised p-1"
 				>
-					<SendIcon />
-					{{ formatMessage(messages.sendFriendRequest) }}
-				</Button>
+					<div v-if="username.trim().length < 2" class="px-3 py-2 text-sm text-secondary">
+						Type at least two characters.
+					</div>
+					<div v-else-if="searchingUsers" class="px-3 py-2 text-sm text-secondary">Searching…</div>
+					<template v-else>
+						<button
+							v-for="user in userResults"
+							:key="user.id"
+							type="button"
+							class="flex w-full items-center gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left hover:bg-button-bg"
+							@click="selectUser(user)"
+						>
+							<Avatar :src="user.avatar_url" size="32px" circle />
+							<span class="min-w-0">
+								<span class="block truncate font-semibold text-contrast">
+									{{ user.display_name ?? user.username }}
+								</span>
+								<span class="block truncate text-xs text-secondary">@{{ user.username }}</span>
+							</span>
+						</button>
+					</template>
+					<div
+						v-if="!searchingUsers && username.trim().length >= 2 && userResults.length === 0"
+						class="px-3 py-2 text-sm text-secondary"
+					>
+						No matching users.
+					</div>
+				</div>
+			</div>
+			<div class="border-0 border-t border-solid border-surface-5 pt-5">
+				<h2 class="m-0 text-base font-medium text-primary">
+					{{ formatMessage(messages.friendCodeTitle) }}
+				</h2>
+				<p class="m-0 mt-1 text-sm text-secondary leading-tight">
+					{{ formatMessage(messages.friendCodeDescription) }}
+				</p>
+				<div class="mt-4 flex items-center gap-2">
+					<StyledInput
+						v-model="friendCode"
+						class="flex-1 font-mono uppercase"
+						:maxlength="12"
+						:placeholder="formatMessage(messages.friendCodePlaceholder)"
+						@keydown.enter="addFriendByCode"
+					/>
+					<Button
+						type="colored"
+						color="brand"
+						:disabled="addingByCode || !/^AMB-[A-Z0-9]{8}$/i.test(friendCode.trim())"
+						@click="addFriendByCode"
+					>
+						<UserPlusIcon /> {{ addingByCode ? 'Adding…' : 'Add' }}
+					</Button>
+				</div>
 			</div>
 		</div>
 	</ModalWrapper>

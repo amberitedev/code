@@ -3,8 +3,20 @@
 		v-if="!auth.user.value"
 		type="empty"
 		class="[&>div:last-child]:!mt-6"
-		:heading="formatMessage(messages.signInRequiredTitle)"
-		:description="formatMessage(messages.signInRequiredDescription)"
+		:heading="
+			formatMessage(
+				profileKind === 'amberite'
+					? messages.amberiteSignInRequiredTitle
+					: messages.signInRequiredTitle,
+			)
+		"
+		:description="
+			formatMessage(
+				profileKind === 'amberite'
+					? messages.amberiteSignInRequiredDescription
+					: messages.signInRequiredDescription,
+			)
+		"
 	>
 		<template #illustration>
 			<div class="relative mb-4 h-[200px]">
@@ -24,7 +36,11 @@
 
 	<div v-else class="flex flex-col gap-4">
 		<p class="m-0 text-secondary" :class="{ 'order-last': disclaimerPosition === 'bottom' }">
-			<IntlFormatted :message-id="messages.description">
+			<IntlFormatted
+				:message-id="
+					profileKind === 'amberite' ? messages.amberiteDescription : messages.description
+				"
+			>
 				<template #profile-link="{ children }">
 					<RouterLink v-slot="{ href, navigate }" :to="profilePath" custom>
 						<a :href="href" class="text-link" @click="handleProfileLinkClick($event, navigate)">
@@ -87,25 +103,35 @@
 
 			<div class="flex flex-col gap-2.5">
 				<h2 class="m-0 text-lg font-semibold text-contrast">
-					{{ formatMessage(commonMessages.usernameLabel) }}
+					{{
+						nameKind === 'display-name'
+							? formatMessage(messages.displayNameTitle)
+							: formatMessage(commonMessages.usernameLabel)
+					}}
 				</h2>
 				<div class="flex items-center gap-2">
 					<StyledInput
 						id="username-field"
 						v-model="current.username"
 						class="w-full max-w-md"
-						:error="current.username.length > 39"
+						:error="current.username.length > nameLengthLimit"
 					/>
 					<span
-						v-if="current.username.length >= 30"
+						v-if="current.username.length >= nameLengthLimit - 9"
 						class="shrink-0 text-secondary"
-						:class="{ 'text-red': current.username.length > 39 }"
+						:class="{ 'text-red': current.username.length > nameLengthLimit }"
 					>
-						{{ current.username.length }}/39
+						{{ current.username.length }}/{{ nameLengthLimit }}
 					</span>
 				</div>
 				<p class="m-0 text-secondary">
-					{{ formatMessage(messages.usernameDescription) }}
+					{{
+						formatMessage(
+							nameKind === 'display-name'
+								? messages.displayNameDescription
+								: messages.usernameDescription,
+						)
+					}}
 				</p>
 			</div>
 
@@ -156,9 +182,14 @@ const props = withDefaults(
 		deleteAvatar: (userId: string) => Promise<void>
 		getAuthenticatedUser: () => Promise<AuthUser>
 		disclaimerPosition?: 'top' | 'bottom'
+		nameKind?: 'username' | 'display-name'
+		profileKind?: 'modrinth' | 'amberite'
+		editableName?: string
 	}>(),
 	{
 		disclaimerPosition: 'top',
+		nameKind: 'username',
+		profileKind: 'modrinth',
 	},
 )
 const emit = defineEmits<{
@@ -183,6 +214,7 @@ const displayedAvatarUrl = computed(() => {
 	if (pendingAvatarDeletion.value) return null
 	return avatarUrl.value
 })
+const nameLengthLimit = computed(() => (props.nameKind === 'display-name' ? 64 : 39))
 const profilePath = computed(
 	() => `/user/${encodeURIComponent(auth.user.value?.username ?? current.value.username)}`,
 )
@@ -215,7 +247,7 @@ function syncFromUser(user: AuthUser | null): void {
 	revokePreviewImage()
 	activeUserId.value = user?.id ?? null
 	original.value = {
-		username: user?.username ?? '',
+		username: props.editableName ?? user?.username ?? '',
 		bio: user?.bio ?? '',
 	}
 	current.value = { ...original.value }
@@ -292,7 +324,8 @@ async function save(): Promise<void> {
 		if (pendingAvatarDeletion.value) {
 			await props.deleteAvatar(user.id)
 		} else if (avatarFile.value) {
-			const extension = avatarFile.value.type.split('/').at(-1)
+			const parts = avatarFile.value.type.split('/')
+			const extension = parts[parts.length - 1]
 			if (!extension) throw new Error('The selected image does not have a valid file type.')
 			await props.changeAvatar(user.id, avatarFile.value, extension)
 		}
@@ -328,6 +361,11 @@ const messages = defineMessages({
 		defaultMessage:
 			'Your profile information is publicly <profile-link>viewable on Modrinth</profile-link> and through the <docs-link>Modrinth API</docs-link>.',
 	},
+	amberiteDescription: {
+		id: 'settings.profile.public-information.amberite-description',
+		defaultMessage:
+			'Your profile information is publicly <profile-link>viewable on Amberite</profile-link>.',
+	},
 	profilePicture: {
 		id: 'settings.profile.profile-picture.title',
 		defaultMessage: 'Profile picture',
@@ -335,6 +373,14 @@ const messages = defineMessages({
 	usernameDescription: {
 		id: 'settings.profile.username.description',
 		defaultMessage: 'A unique case-insensitive name to identify your profile.',
+	},
+	displayNameTitle: {
+		id: 'settings.profile.display-name.title',
+		defaultMessage: 'Display name',
+	},
+	displayNameDescription: {
+		id: 'settings.profile.display-name.description',
+		defaultMessage: 'The non-unique name shown to friends and on your profile.',
 	},
 	bioTitle: {
 		id: 'settings.profile.bio.title',
@@ -348,9 +394,17 @@ const messages = defineMessages({
 		id: 'settings.profile.sign-in-required.title',
 		defaultMessage: 'Modrinth account required',
 	},
+	amberiteSignInRequiredTitle: {
+		id: 'settings.profile.sign-in-required.amberite-title',
+		defaultMessage: 'Amberite account required',
+	},
 	signInRequiredDescription: {
 		id: 'settings.profile.sign-in-required.description',
 		defaultMessage: 'Sign in with a Modrinth account to customize your public profile.',
+	},
+	amberiteSignInRequiredDescription: {
+		id: 'settings.profile.sign-in-required.amberite-description',
+		defaultMessage: 'Sign in with Minecraft to customize your Amberite profile.',
 	},
 	saveError: {
 		id: 'settings.profile.save-error',

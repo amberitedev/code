@@ -1,11 +1,7 @@
 import { AbstractFeature, type FeatureConfig } from '../core/abstract-feature'
+import type { AmberitePlatformAdapter } from '../amberite/platform'
+import type { AmberiteTransport } from '../amberite/transport'
 import type { RequestContext } from '../types/request'
-
-export interface AmberiteTransport {
-	query<T = unknown>(path: string, args?: unknown): Promise<T>
-	mutation<T = unknown>(path: string, args?: unknown): Promise<T>
-	action?<T = unknown>(path: string, args?: unknown): Promise<T>
-}
 
 export interface AmberiteFeatureConfig extends FeatureConfig {
 	transport: AmberiteTransport
@@ -25,6 +21,29 @@ export interface AmberiteFeatureConfig extends FeatureConfig {
 	}
 	social?: boolean
 	sharedInstances?: boolean
+}
+
+export function amberiteFeatureConfig(
+	adapter: AmberitePlatformAdapter,
+	transport: AmberiteTransport,
+): AmberiteFeatureConfig {
+	return {
+		transport,
+		getAccessToken: () => adapter.getCurrentJwt(),
+		fetch: adapter.fetchFn,
+		siteUrl: adapter.convexSiteUrl,
+		refreshSession: adapter.refreshAmberiteSession,
+		nativeAuth:
+			adapter.signInWithMinecraft &&
+			adapter.restoreAmberiteSession &&
+			adapter.signOutAmberiteSession
+				? {
+						signIn: (request) => adapter.signInWithMinecraft!(request),
+						restore: () => adapter.restoreAmberiteSession!(),
+						signOut: () => adapter.signOutAmberiteSession!(),
+					}
+				: undefined,
+	}
 }
 
 /**
@@ -54,7 +73,7 @@ export class AmberiteFeature extends AbstractFeature {
 
 	private async socialRequest(context: RequestContext): Promise<unknown> {
 		const method = context.options.method ?? 'GET'
-		const path = context.path
+		const path = requestPath(context.path)
 		const version = context.options.version
 
 		if (version === 3) {
@@ -89,6 +108,7 @@ export class AmberiteFeature extends AbstractFeature {
 		if (version === 2) {
 			if (path.startsWith('/session/')) return await this.sessionsRequest(context)
 			if (isNotificationsPath(path)) return await this.notificationsRequest(context)
+			if (path.startsWith('/user/') && method !== 'GET') return await this.userRequest(context)
 			if (method === 'GET' && /^\/user\/[^/]+$/.test(path))
 				return await this.getUser(pathPart(path, 2))
 			if (method === 'GET' && path === '/users')
@@ -102,14 +122,18 @@ export class AmberiteFeature extends AbstractFeature {
 
 	private async userRequest(context: RequestContext): Promise<unknown> {
 		const method = context.options.method ?? 'GET'
-		const path = context.path
+		const path = requestPath(context.path)
 		const idOrUsername = pathPart(path, 2)
 		if (method === 'GET' && /^\/user\/[^/]+$/.test(path)) return await this.getUser(idOrUsername)
 		await this.requireCurrentUser(idOrUsername)
 		if (method === 'PATCH' && /^\/user\/[^/]+$/.test(path)) {
 			const body = recordBody(context.options.body)
 			return await this.config.transport.mutation('profiles:updateCurrent', {
-				...(typeof body.display_name === 'string' ? { displayName: body.display_name } : {}),
+				...(typeof body.display_name === 'string'
+					? { displayName: body.display_name }
+					: typeof body.username === 'string'
+						? { displayName: body.username }
+						: {}),
 				...(typeof body.bio === 'string' || body.bio === null ? { bio: body.bio } : {}),
 				...(typeof body.allow_friend_requests === 'boolean'
 					? { allowFriendRequests: body.allow_friend_requests }
@@ -133,7 +157,7 @@ export class AmberiteFeature extends AbstractFeature {
 
 	private async notificationsRequest(context: RequestContext): Promise<unknown> {
 		const method = context.options.method ?? 'GET'
-		const path = context.path
+		const path = requestPath(context.path)
 		if (method === 'GET' && /^\/user\/[^/]+\/notifications$/.test(path))
 			return await this.config.transport.query('socialCompat:listNotifications', {
 				userId: pathPart(path, 2),
@@ -167,13 +191,14 @@ export class AmberiteFeature extends AbstractFeature {
 
 	private async sessionsRequest(context: RequestContext): Promise<unknown> {
 		const method = context.options.method ?? 'GET'
-		if (method === 'GET' && context.path === '/session/list')
+		const path = requestPath(context.path)
+		if (method === 'GET' && path === '/session/list')
 			return await this.config.transport.query('sessions:list', { now: Date.now() })
-		if (method === 'DELETE' && /^\/session\/[^/]+$/.test(context.path))
+		if (method === 'DELETE' && /^\/session\/[^/]+$/.test(path))
 			return await this.config.transport.mutation('sessions:revoke', {
-				id: pathPart(context.path, 2),
+				id: pathPart(path, 2),
 			})
-		if (method === 'POST' && context.path === '/session/refresh') {
+		if (method === 'POST' && path === '/session/refresh') {
 			if (!this.config.refreshSession) throw new Error('Amberite session refresh is not configured')
 			await this.config.refreshSession()
 			const sessions = await this.config.transport.query<Array<{ current: boolean }>>(
@@ -186,12 +211,13 @@ export class AmberiteFeature extends AbstractFeature {
 			if (!current) throw new Error('refreshed session was not registered')
 			return current
 		}
-		throw new Error(`unsupported Amberite session route: ${method} ${context.path}`)
+		throw new Error(`unsupported Amberite session route: ${method} ${path}`)
 	}
 
 	private async amberiteRequest(context: RequestContext): Promise<unknown> {
 		const method = context.options.method ?? 'GET'
-		if (context.path === '/auth/sign-in' && method === 'POST') {
+		const path = requestPath(context.path)
+		if (path === '/auth/sign-in' && method === 'POST') {
 			if (!this.config.nativeAuth) throw new Error('native Minecraft sign-in is not configured')
 			const body = recordBody(context.options.body)
 			const mode = body.mode
@@ -204,56 +230,54 @@ export class AmberiteFeature extends AbstractFeature {
 					: {}),
 			})
 		}
-		if (context.path === '/auth/session' && method === 'GET') {
+		if (path === '/auth/session' && method === 'GET') {
 			if (!this.config.nativeAuth) throw new Error('native session restoration is not configured')
 			return await this.config.nativeAuth.restore()
 		}
-		if (context.path === '/auth/session' && method === 'DELETE') {
+		if (path === '/auth/session' && method === 'DELETE') {
 			if (!this.config.nativeAuth) throw new Error('native sign-out is not configured')
 			return await this.config.nativeAuth.signOut()
 		}
-		if (context.path === '/account/modrinth' && method === 'GET')
+		if (path === '/account/modrinth' && method === 'GET')
 			return await this.config.transport.query('modrinth:current', {})
-		if (context.path === '/account/modrinth' && method === 'PUT') {
-			if (!this.config.transport.action) throw new Error('Amberite actions are not configured')
+		if (path === '/account/modrinth' && method === 'PUT') {
 			return await this.config.transport.action(
 				'modrinth:storeCurrentOAuthTokens',
 				recordBody(context.options.body),
 			)
 		}
-		if (context.path === '/account/modrinth/refresh' && method === 'POST') {
-			if (!this.config.transport.action) throw new Error('Amberite actions are not configured')
+		if (path === '/account/modrinth/refresh' && method === 'POST') {
 			return await this.config.transport.action('modrinth:refreshCurrentStatus', {})
 		}
-		if (context.path === '/account/modrinth' && method === 'DELETE')
+		if (path === '/account/modrinth' && method === 'DELETE')
 			return await this.config.transport.mutation('modrinth:disconnectCurrent', {})
-		if (method === 'POST' && context.path.startsWith('/friends/code/'))
+		if (method === 'POST' && path.startsWith('/friends/code/'))
 			return await this.config.transport.mutation('friends:addByCode', {
-				code: pathPart(context.path, 3),
+				code: pathPart(path, 3),
 			})
-		if (method === 'PUT' && context.path === '/sessions/current')
+		if (method === 'PUT' && path === '/sessions/current')
 			return await this.config.transport.mutation(
 				'sessions:registerCurrent',
 				recordBody(context.options.body),
 			)
-		if (method === 'GET' && context.path === '/cores')
+		if (method === 'GET' && path === '/cores')
 			return await this.config.transport.query('coreList:listLinkedForCurrent', {})
-		if (method === 'POST' && context.path === '/cores/pairing/claim')
+		if (method === 'POST' && path === '/cores/pairing/claim')
 			return await this.config.transport.mutation(
-				'presence:claimPairingCore',
+				'corePairing:claimPairingCore',
 				recordBody(context.options.body),
 			)
-		if (method === 'POST' && context.path === '/cores/pairing/finalize')
+		if (method === 'POST' && path === '/cores/pairing/finalize')
 			return await this.config.transport.mutation(
-				'presence:finalizePairingCore',
+				'corePairing:finalizePairingCore',
 				recordBody(context.options.body),
 			)
-		if (method === 'POST' && context.path === '/cores/pairing/release')
+		if (method === 'POST' && path === '/cores/pairing/release')
 			return await this.config.transport.mutation(
-				'presence:releasePairingCore',
+				'corePairing:releasePairingCore',
 				recordBody(context.options.body),
 			)
-		throw new Error(`unsupported Amberite route: ${method} ${context.path}`)
+		throw new Error(`unsupported Amberite route: ${method} ${path}`)
 	}
 
 	private async getUser(idOrUsername: string) {
@@ -279,19 +303,26 @@ export class AmberiteFeature extends AbstractFeature {
 		const siteUrl = this.config.siteUrl?.replace(/\/$/, '')
 		if (!siteUrl) throw new Error('Amberite siteUrl is required for shared clients')
 		const source = new URL(context.url)
-		const target = new URL(`${siteUrl}/v1${context.path}`)
+		const target = new URL(`${siteUrl}/v1${requestPath(context.path)}`)
 		for (const [key, value] of source.searchParams) target.searchParams.append(key, value)
 		for (const [key, value] of Object.entries(context.options.params ?? {}))
 			if (value !== undefined) target.searchParams.set(key, String(value))
-		const headers = new Headers(context.options.headers)
-		const token = await this.config.getAccessToken()
-		if (token) headers.set('authorization', `Bearer ${token}`)
-		const response = await this.config.fetch(target.toString(), {
-			method: context.options.method ?? 'GET',
-			headers,
-			body: requestBody(context.options.body, headers),
-			signal: context.options.signal,
-		})
+		const send = async () => {
+			const headers = new Headers(context.options.headers)
+			const token = await this.config.getAccessToken()
+			if (token) headers.set('authorization', `Bearer ${token}`)
+			return await this.config.fetch(target.toString(), {
+				method: context.options.method ?? 'GET',
+				headers,
+				body: requestBody(context.options.body, headers),
+				signal: context.options.signal,
+			})
+		}
+		let response = await send()
+		if ((response.status === 401 || response.status === 403) && this.config.refreshSession) {
+			await this.config.refreshSession()
+			response = await send()
+		}
 		if (!response.ok)
 			throw new Error(
 				(await response.text()) || `shared client request failed (${response.status})`,
@@ -302,6 +333,7 @@ export class AmberiteFeature extends AbstractFeature {
 }
 
 function isSocialPath(path: string, version: number | string) {
+	path = requestPath(path)
 	if (version === 3)
 		return (
 			path === '/user' ||
@@ -321,6 +353,10 @@ function isSocialPath(path: string, version: number | string) {
 			path.startsWith('/session/')
 		)
 	return false
+}
+
+function requestPath(path: string) {
+	return path.split('?')[0] ?? path
 }
 
 function isNotificationsPath(path: string) {

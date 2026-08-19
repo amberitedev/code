@@ -41,6 +41,10 @@ export interface AuthConfig extends FeatureConfig {
 export class AuthFeature extends AbstractFeature {
 	declare protected config: AuthConfig
 
+	constructor(config: AuthConfig) {
+		super(config)
+	}
+
 	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
 		const token = await this.getToken()
 

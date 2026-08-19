@@ -2,8 +2,7 @@ import type {
 	AmberiteAccountUser,
 	AmberiteApiError,
 	RecoveryDisposition,
-} from '@amberite/amberite-api'
-import type { Labrinth } from '@modrinth/api-client'
+} from '@modrinth/api-client'
 import { useStorage } from '@vueuse/core'
 import type { LocationQueryValue, RouteLocationNormalizedLoaded } from 'vue-router'
 
@@ -26,7 +25,7 @@ export interface RememberedAmberiteIdentity {
 }
 
 type AuthState = {
-	user: (AmberiteAccountUser & Partial<Labrinth.Users.v2.User>) | null
+	user: AmberiteAccountUser | null
 	token: string
 	status: AmberiteAuthGate
 	error: string | null

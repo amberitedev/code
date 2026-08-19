@@ -21,7 +21,7 @@
 		"devtool:app": "node scripts/app-debug.mjs app",
 		"devtool:core": "node scripts/app-debug.mjs core",
 		"devtool": "node scripts/app-debug.mjs",
-		"app:check": "node scripts/pre-dev.mjs && pnpm --filter @amberite/amberite-api test",
+		"app:check": "node scripts/pre-dev.mjs",
 		"app:build": "vp run --filter @modrinth/app build",
 		"docs:dev": "vp run --filter @modrinth/docs dev",
 		"pages:build": "NITRO_PRESET=cloudflare-pages pnpm --filter frontend run build",
