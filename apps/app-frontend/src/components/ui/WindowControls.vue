@@ -23,9 +23,8 @@
 		</IconButton>
 		<IconButton
 			type="quiet"
-			color="red"
 			label="Close window"
-			class="relative expanded-button close-button hover:!bg-red focus-visible:!bg-red"
+			class="relative expanded-button close-button"
 			@click="handleClose"
 		>
 			<XIcon />
@@ -49,8 +48,6 @@ const themeStore = useTheming()
 const nativeDecorations = ref(true)
 const isMaximized = ref(false)
 const os = ref('')
-let unlistenResize = () => {}
-let unmounted = false
 
 const alwaysShowAppControls = computed(() => themeStore.getFeatureFlag('always_show_app_controls'))
 
@@ -59,11 +56,6 @@ const showControls = computed(
 		alwaysShowAppControls.value ||
 		(!nativeDecorations.value && (os.value === 'Windows' || os.value === 'Linux')),
 )
-
-onUnmounted(() => {
-	unmounted = true
-	unlistenResize()
-})
 
 onMounted(async () => {
 	os.value = await getOS()
@@ -81,11 +73,9 @@ onMounted(async () => {
 		isMaximized.value = await getCurrentWindow().isMaximized()
 	})
 
-	if (unmounted) {
+	onUnmounted(() => {
 		unlisten()
-	} else {
-		unlistenResize = unlisten
-	}
+	})
 })
 
 const handleClose = async () => {

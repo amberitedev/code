@@ -1,23 +1,27 @@
 <script setup lang="ts">
-import { BanIcon, MoreVerticalIcon, PlayIcon, TrashIcon, UserIcon, UserPlusIcon, XIcon } from '@modrinth/assets'
-import { Accordion, Avatar, ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
+import { MoreVerticalIcon, TrashIcon, UserIcon, XIcon } from '@modrinth/assets'
+import {
+	Accordion,
+	Avatar,
+	defineMessages,
+	IconButton,
+	TeleportOverflowMenu,
+	useVIntl,
+} from '@modrinth/ui'
+import { useTemplateRef } from 'vue'
+import { useRouter } from 'vue-router'
 
+import ContextMenu from '@/components/ui/ContextMenu.vue'
 import type { FriendWithUserData } from '@/helpers/friends.ts'
 
-import FriendOverflowMenu from './FriendOverflowMenu.vue'
-
 const { formatMessage } = useVIntl()
+const router = useRouter()
 
 const props = withDefaults(
 	defineProps<{
 		friends: FriendWithUserData[]
 		heading: string
 		removeFriend: (friend: FriendWithUserData) => Promise<void>
-		openProfile?: (friend: FriendWithUserData) => void
-		inviteToGroup?: (friend: FriendWithUserData) => Promise<void>
-		blockFriend?: (friend: FriendWithUserData) => Promise<void>
-		unblockFriend?: (friend: FriendWithUserData) => Promise<void>
-		inviteToPlay?: (friend: FriendWithUserData) => Promise<void>
 		isSearching?: boolean
 		openByDefault?: boolean
 	}>(),
@@ -27,71 +31,48 @@ const props = withDefaults(
 	},
 )
 
-function createOverflowMenuOptions(friend: FriendWithUserData) {
-	if (props.unblockFriend) {
+const emit = defineEmits<{
+	onOpen: []
+	onClose: []
+}>()
+
+function createContextMenuOptions(friend: FriendWithUserData) {
+	if (friend.accepted) {
 		return [
-			...(props.openProfile
-				? [
-						{
-							id: 'view-profile',
-							action: () => props.openProfile?.(friend),
-						},
-					]
-				: []),
 			{
-				id: 'unblock-friend',
-				action: () => props.unblockFriend?.(friend),
+				name: 'view-profile',
+			},
+			{
+				name: 'remove-friend',
+				color: 'danger',
+			},
+		]
+	} else {
+		return [
+			{
+				name: 'view-profile',
+			},
+			{
+				name: 'cancel-request',
 			},
 		]
 	}
-
-	return [
-		...(props.openProfile
-			? [
-					{
-						id: 'view-profile',
-						action: () => props.openProfile?.(friend),
-					},
-				]
-		: []),
-		...(props.inviteToGroup && !friend.friendGroupRole
-			? [
-					{
-						id: 'invite-to-group',
-						action: () => props.inviteToGroup?.(friend),
-					},
-				]
-			: []),
-		...(props.inviteToPlay
-			? [
-					{
-						id: 'invite-to-play',
-						action: () => props.inviteToPlay?.(friend),
-					},
-				]
-			: []),
-		{
-			id: 'remove-friend',
-			action: () => props.removeFriend(friend),
-			color: 'red',
-		},
-		...(props.blockFriend
-			? [
-					{
-						id: 'block-friend',
-						action: () => props.blockFriend?.(friend),
-						color: 'danger' as const,
-						filled: true,
-						hoverInvert: true,
-					},
-				]
-			: []),
-	]
 }
 
-function openFriendOverflowMenu(event: MouseEvent) {
-	if (!(event.currentTarget instanceof HTMLElement)) return
-	event.currentTarget.querySelector<HTMLButtonElement>('[data-friend-overflow]')?.click()
+function openProfile(username: string) {
+	void router.push(`/user/${encodeURIComponent(username)}`)
+}
+
+const friendOptions = useTemplateRef('friendOptions')
+async function handleFriendOptions(args: { item: FriendWithUserData; option: string }) {
+	switch (args.option) {
+		case 'remove-friend':
+		case 'cancel-request':
+			await props.removeFriend(args.item)
+			break
+		case 'view-profile':
+			openProfile(args.item.username)
+	}
 }
 
 const messages = defineMessages({
@@ -115,30 +96,18 @@ const messages = defineMessages({
 		id: 'friends.friend.view-profile',
 		defaultMessage: 'View profile',
 	},
-	inviteToGroup: {
-		id: 'friends.friend.invite-to-group',
-		defaultMessage: 'Invite to friend group',
-	},
-	inviteToPlay: {
-		id: 'friends.friend.invite-to-play',
-		defaultMessage: 'Invite to play',
-	},
-	sameGroup: {
-		id: 'friends.friend.same-group',
-		defaultMessage: 'In your Core',
-	},
-	blockFriend: {
-		id: 'friends.friend.block',
-		defaultMessage: 'Block',
-	},
-	unblockFriend: {
-		id: 'friends.friend.unblock',
-		defaultMessage: 'Unblock',
-	},
 })
 </script>
 
 <template>
+	<ContextMenu ref="friendOptions" @option-clicked="handleFriendOptions">
+		<template #view-profile>
+			<UserIcon />
+			{{ formatMessage(messages.viewProfile) }}
+		</template>
+		<template #remove-friend> <TrashIcon /> {{ formatMessage(messages.removeFriend) }} </template>
+		<template #cancel-request> <XIcon /> {{ formatMessage(messages.cancelRequest) }} </template>
+	</ContextMenu>
 	<Accordion
 		:open-by-default="openByDefault"
 		:force-open="isSearching"
@@ -148,6 +117,8 @@ const messages = defineMessages({
 				? ''
 				: ' cursor-pointer hover:brightness-[--hover-brightness] active:scale-[0.98] transition-all')
 		"
+		@on-open="emit('onOpen')"
+		@on-close="emit('onClose')"
 	>
 		<template #title>
 			<h3 class="text-base text-primary font-medium m-0">
@@ -159,19 +130,14 @@ const messages = defineMessages({
 				<div
 					v-for="friend in friends"
 					:key="friend.username"
-					class="group grid items-center grid-cols-[minmax(0,1fr)_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
-					@contextmenu.prevent.stop="openFriendOverflowMenu"
+					class="group grid items-center grid-cols-[1fr_auto] gap-2 hover:bg-button-bg transition-colors rounded-full mr-1"
+					@contextmenu.prevent.stop="
+						(event) => friendOptions?.showMenu(event, friend, createContextMenuOptions(friend))
+					"
 				>
-					<component
-						:is="openProfile ? 'button' : 'div'"
-						:type="openProfile ? 'button' : undefined"
-						class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent p-0 text-left"
-						:class="
-							openProfile
-								? 'cursor-pointer rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand'
-								: ''
-						"
-						@click="openProfile?.(friend)"
+					<RouterLink
+						:to="`/user/${encodeURIComponent(friend.username)}`"
+						class="grid min-w-0 grid-cols-[auto_1fr] items-center gap-2 text-inherit no-underline"
 					>
 						<div class="relative">
 							<Avatar
@@ -187,66 +153,48 @@ const messages = defineMessages({
 								class="bottom-[2px] right-[-2px] absolute w-3 h-3 bg-brand border-2 border-black border-solid rounded-full"
 							/>
 						</div>
-						<div class="flex min-w-0 flex-col">
+						<div class="flex flex-col">
 							<span
-								class="truncate text-sm m-0"
+								class="text-sm m-0"
 								:class="friend.online || !friend.accepted ? 'text-contrast' : 'text-primary'"
 							>
 								{{ friend.username }}
 							</span>
-							<span v-if="!friend.accepted" class="m-0 truncate text-xs">
+							<span v-if="!friend.accepted" class="m-0 text-xs">
 								{{ formatMessage(messages.friendRequestSent) }}
 							</span>
-							<span
-								v-else-if="friend.status || friend.friendGroupRole"
-								class="m-0 truncate text-xs text-secondary"
-							>
-								<template v-if="friend.status">{{ friend.status }}</template>
-								<template v-if="friend.status && friend.friendGroupRole"> - </template>
-								<template v-if="friend.friendGroupRole">
-									{{ formatMessage(messages.sameGroup) }}
-								</template>
-							</span>
+							<span v-else-if="friend.status" class="m-0 text-xs">{{ friend.status }}</span>
 						</div>
-					</component>
-					<ButtonStyled v-if="friend.accepted" circular type="transparent">
-						<FriendOverflowMenu
-							class="opacity-0 group-hover:opacity-100 transition-opacity"
-							:options="createOverflowMenuOptions(friend)"
-							data-friend-overflow
-						>
-							<MoreVerticalIcon />
-							<template #view-profile>
-								<UserIcon />
-								{{ formatMessage(messages.viewProfile) }}
-							</template>
-							<template #invite-to-group>
-								<UserPlusIcon />
-								{{ formatMessage(messages.inviteToGroup) }}
-							</template>
-							<template #invite-to-play>
-								<PlayIcon />
-								{{ formatMessage(messages.inviteToPlay) }}
-							</template>
-							<template #block-friend>
-								<BanIcon />
-								{{ formatMessage(messages.blockFriend) }}
-							</template>
-							<template #unblock-friend>
-								<BanIcon />
-								{{ formatMessage(messages.unblockFriend) }}
-							</template>
-							<template #remove-friend>
-								<TrashIcon />
-								{{ formatMessage(messages.removeFriend) }}
-							</template>
-						</FriendOverflowMenu>
-					</ButtonStyled>
-					<ButtonStyled v-else type="transparent" circular>
-						<button v-tooltip="formatMessage(messages.cancelRequest)" @click="removeFriend(friend)">
-							<XIcon />
-						</button>
-					</ButtonStyled>
+					</RouterLink>
+					<TeleportOverflowMenu
+						v-if="friend.accepted"
+						type="quiet"
+						label="More options"
+						class="opacity-0 group-hover:opacity-100 transition-opacity"
+						:options="[
+							{
+								id: 'remove-friend',
+								label: formatMessage(messages.removeFriend),
+								action: () => removeFriend(friend),
+								tone: 'red',
+							},
+						]"
+					>
+						<MoreVerticalIcon />
+						<template #remove-friend>
+							<TrashIcon />
+							{{ formatMessage(messages.removeFriend) }}
+						</template>
+					</TeleportOverflowMenu>
+					<IconButton
+						v-else
+						v-tooltip="formatMessage(messages.cancelRequest)"
+						type="quiet"
+						:label="formatMessage(messages.cancelRequest)"
+						@click="removeFriend(friend)"
+					>
+						<XIcon />
+					</IconButton>
 				</div>
 			</div>
 		</template>

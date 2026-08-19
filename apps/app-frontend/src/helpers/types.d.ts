@@ -4,19 +4,18 @@ export type GameInstance = {
 	id: string
 	path: string
 	install_stage: InstallStage
-	profile_type: ProfileType
-	core_instance_id?: string | null
-	server_manifest_json?: ServerManifest | null
+	launcher_feature_version: string
 
 	name: string
 	icon_path?: string
+	icon_config?: InstanceIconConfig | null
 
 	game_version: string
 	protocol_version?: number
 	loader: InstanceLoader
 	loader_version?: string
 
-	groups: string[]
+	group_ids: string[]
 
 	link?: InstanceLink | null
 	shared_instance?: SharedInstanceAttachment | null
@@ -40,6 +39,22 @@ export type GameInstance = {
 	hooks: Hooks
 }
 
+export type IconBackground =
+	| {
+			type: 'color'
+			value: string
+	  }
+	| {
+			type: 'linear-top-down-gradient'
+			top_color: string
+			bottom_color: string
+	  }
+
+export type InstanceIconConfig = {
+	background: IconBackground
+	symbol: string
+}
+
 type InstallStage =
 	| 'installed'
 	| 'minecraft_installing'
@@ -47,28 +62,74 @@ type InstallStage =
 	| 'pack_installing'
 	| 'not_installed'
 
-export type ProfileType = 'client' | 'server' | 'synced'
-
-type LinkedData = {
-	project_id: ModrinthId
-	version_id: ModrinthId
-
-	locked: boolean
+type InstanceLinkIdentity = {
+	project_id?: ModrinthId | null
+	version_id?: ModrinthId | null
+	server_project_id?: ModrinthId | null
+	content_project_id?: ModrinthId | null
+	content_version_id?: ModrinthId | null
 }
 
-export type ServerManifest = {
-	name: string
-	gameVersion: string
-	modloader: string
-	loaderVersion?: string | null
-	port?: number
-	memory?: {
-		min_mb: number
-		max_mb: number
-	}
-	content?: unknown
-	mods?: unknown[]
+export type InstanceLink = InstanceLinkIdentity &
+	(
+		| {
+				type: 'modrinth_modpack'
+				project_id: ModrinthId
+				version_id: ModrinthId
+		  }
+		| {
+				type: 'server_project'
+				project_id: ModrinthId
+		  }
+		| {
+				type: 'server_project_modpack'
+				server_project_id: ModrinthId
+				content_project_id?: ModrinthId | null
+				content_version_id: ModrinthId
+				project_id?: ModrinthId
+				version_id?: ModrinthId
+		  }
+		| {
+				type: 'imported_modpack'
+				project_id?: ModrinthId | null
+				version_id?: ModrinthId | null
+				name?: string | null
+				version_number?: string | null
+				filename?: string | null
+		  }
+		| {
+				type: 'modrinth_hosting'
+				server_id: string
+				instance_ids: string[]
+				active_instance_id?: string | null
+		  }
+		| {
+				type: 'shared_instance'
+				modpack_project_id?: ModrinthId | null
+				modpack_version_id?: ModrinthId | null
+		  }
+	)
+
+export type SharedInstanceAttachment = {
+	id: string
+	role: 'owner' | 'member'
+	manager_id?: string | null
+	server_manager_name?: string | null
+	server_manager_icon_url?: string | null
+	linked_user_id?: string | null
+	status:
+		| 'unknown'
+		| 'up_to_date'
+		| 'update_available'
+		| 'applying'
+		| 'stale'
+		| 'not_ready'
+		| 'error'
+	applied_version?: number | null
+	latest_version?: number | null
 }
+
+export type Instance = GameInstance
 
 type ReleaseChannel = 'release' | 'beta' | 'alpha'
 
@@ -84,6 +145,7 @@ export type ContentSourceKind =
 
 type ContentFile = {
 	enabled: boolean
+	locked: boolean
 	source_kind?: ContentSourceKind | null
 	metadata?: {
 		project_id: string
@@ -156,8 +218,6 @@ type AppSettings = {
 	discord_rpc: boolean
 	developer_mode: boolean
 	personalized_ads: boolean
-
-	onboarded: boolean
 
 	extra_launch_args: string[]
 	custom_env_vars: [string, string][]

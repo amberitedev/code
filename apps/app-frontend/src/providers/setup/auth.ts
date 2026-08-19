@@ -1,31 +1,49 @@
-import { type AuthProvider, provideAuth } from '@modrinth/ui'
-import { type Ref, ref } from 'vue'
+import type { Labrinth } from '@modrinth/api-client'
+import {
+	type AuthFlow,
+	type AuthProvider,
+	type AuthRequestOptions,
+	type AuthUser,
+	provideAuth,
+} from '@modrinth/ui'
+import { computed, type Ref, ref, watch, watchEffect } from 'vue'
 
-export interface AmberiteAuthUser {
-	id: string
-	username: string
-	name: string
-	avatar_url: string
-	role: string
-	badges: number
-	created: string
-	bio?: string
-	email?: string | null
+type AppCredentials = {
+	session?: string | null
+	user?: Labrinth.Users.v2.User | null
 }
 
 export function setupAuthProvider(
-	user: Ref<AmberiteAuthUser | null>,
-	requestSignIn: (redirectPath: string) => void | Promise<void>,
-	isReady: Ref<boolean>,
+	credentials: Ref<AppCredentials | null | undefined>,
+	requestSignIn: (
+		redirectPath: string,
+		flow?: AuthFlow,
+		options?: AuthRequestOptions,
+	) => void | Promise<void>,
 ) {
 	const sessionToken = ref<string | null>(null)
+	const user = ref<AuthUser | null>(null)
+	const isReady = computed(() => credentials.value !== undefined)
 
 	const authProvider: AuthProvider = {
 		session_token: sessionToken,
-		user: user as unknown as AuthProvider['user'],
+		user,
 		isReady,
 		requestSignIn,
 	}
+
+	watchEffect(() => {
+		sessionToken.value = credentials.value?.session ?? null
+		user.value = credentials.value?.user ?? null
+	})
+
+	watch(user, (updatedUser) => {
+		if (!credentials.value || !updatedUser || credentials.value.user === updatedUser) return
+		credentials.value = {
+			...credentials.value,
+			user: updatedUser,
+		}
+	})
 
 	provideAuth(authProvider)
 }

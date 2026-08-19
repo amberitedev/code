@@ -678,7 +678,7 @@ pub(super) async fn publish_current_content(
                 .unwrap_or_default(),
         })),
         state,
-        SharedInstancesRequestAuth::AmberiteSession,
+        SharedInstancesRequestAuth::ModrinthSession,
     )
     .await?;
     let response = match response {
@@ -1099,7 +1099,7 @@ pub(super) async fn shared_instance_for_invites(
                 state,
             )
             .await?;
-            let linked_user_id = linked_amberite_user_id(state).await?;
+            let linked_user_id = linked_modrinth_user_id(state).await?;
             tracing::info!(
                 instance_id,
                 shared_instance_id = %remote.id,

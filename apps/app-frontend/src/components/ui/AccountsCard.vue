@@ -1,15 +1,7 @@
 <template>
-	<ConfirmModal
-		ref="removeAccountModal"
-		:title="`Remove ${pendingRemoval?.profile.name ?? 'this account'} from this PC?`"
-		:description="`This won’t delete the Amberite or Minecraft account. You can sign in again anytime.`"
-		proceed-label="Remove from this PC"
-		:markdown="false"
-		@proceed="confirmRemoveAccount"
-	/>
 	<div
 		v-if="accounts.length === 0"
-		class="mt-2 flex flex-col gap-3 rounded-xl border border-solid border-surface-5 bg-surface-3 p-3"
+		class="flex flex-col gap-3 bg-button-bg border border-solid border-surface-5 rounded-xl p-3 mt-2"
 	>
 		<span>{{ formatMessage(messages.notSignedIn) }}</span>
 		<Button type="colored" color="brand" :disabled="loginDisabled" @click="login()">
@@ -20,8 +12,8 @@
 	</div>
 	<Accordion
 		v-else
-		class="mt-2 w-full overflow-clip rounded-xl border border-solid border-surface-5 bg-surface-3"
-		button-class="button-base w-full bg-transparent px-3 py-2 border-0 cursor-pointer hover:bg-surface-4"
+		class="w-full mt-2 bg-button-bg border border-solid border-surface-5 rounded-xl overflow-clip"
+		button-class="button-base w-full bg-transparent px-3 py-2 border-0 cursor-pointer"
 		:open-by-default="false"
 	>
 		<template #title>
@@ -42,11 +34,11 @@
 				</div>
 			</div>
 		</template>
-		<div class="border-0 border-t border-solid border-surface-5 bg-surface-3 pb-2 pt-1">
+		<div class="bg-button-bg pt-1 pb-2 border border-solid border-surface-5">
 			<template v-if="accounts.length > 0">
 				<div v-for="account in accounts" :key="account.profile.id" class="flex gap-1 items-center">
 					<button
-						class="button-base flex min-w-0 flex-shrink flex-grow cursor-pointer items-center gap-2 overflow-clip rounded-lg border-0 bg-transparent p-2 hover:bg-surface-4"
+						class="flex items-center flex-shrink flex-grow overflow-clip gap-2 p-2 border-0 bg-transparent cursor-pointer button-base min-w-0"
 						@click="setAccount(account)"
 					>
 						<RadioButtonCheckedIcon
@@ -72,7 +64,7 @@
 						color="red"
 						:label="formatMessage(messages.removeAccount)"
 						class="mr-2 !bg-button-bg !text-primary ![box-shadow:var(--shadow-button)] hover:!bg-red focus-visible:!bg-red hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
-						@click="requestRemoveAccount(account)"
+						@click="logout(account.profile.id)"
 					>
 						<TrashIcon />
 					</IconButton>
@@ -106,15 +98,15 @@ import {
 	Accordion,
 	Avatar,
 	Button,
-	ConfirmModal,
 	defineMessages,
 	IconButton,
 	injectNotificationManager,
 	useVIntl,
 } from '@modrinth/ui'
 import type { Ref } from 'vue'
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 
+import { useAppEvent } from '@/composables/use-app-event'
 import { trackEvent } from '@/helpers/analytics'
 import {
 	get_default_user,
@@ -123,7 +115,6 @@ import {
 	set_default_user,
 	users,
 } from '@/helpers/auth'
-import { process_listener } from '@/helpers/events'
 import { getPlayerHeadUrl } from '@/helpers/rendering/batch-skin-renderer.ts'
 import type { Skin } from '@/helpers/skins'
 import { get_available_skins } from '@/helpers/skins'
@@ -133,7 +124,7 @@ const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()
 
 const emit = defineEmits<{
-	change: [hasAccounts: boolean]
+	change: []
 }>()
 
 type MinecraftCredential = {
@@ -145,8 +136,6 @@ type MinecraftCredential = {
 
 const accounts: Ref<MinecraftCredential[]> = ref([])
 const loginDisabled = ref(false)
-const removeAccountModal = ref<InstanceType<typeof ConfirmModal>>()
-const pendingRemoval = ref<MinecraftCredential | null>(null)
 const defaultUser = ref<string | undefined>()
 const equippedSkin = ref<Skin | null>(null)
 const headUrlCache = ref(new Map<string, string>())
@@ -156,11 +145,6 @@ async function refreshValues() {
 	const userList = await users().catch(handleError)
 	accounts.value = Array.isArray(userList) ? [...userList] : []
 	accounts.value.sort((a, b) => (a.profile?.name ?? '').localeCompare(b.profile?.name ?? ''))
-
-	if (accounts.value.length === 0) {
-		equippedSkin.value = null
-		return
-	}
 
 	try {
 		const skins = await get_available_skins()
@@ -182,10 +166,6 @@ async function refreshValues() {
 	}
 }
 
-function emitAccountState() {
-	emit('change', accounts.value.length > 0)
-}
-
 async function setEquippedSkin(skin: Skin) {
 	equippedSkin.value = skin
 
@@ -205,11 +185,11 @@ defineExpose({
 	refreshValues,
 	setEquippedSkin,
 	setLoginDisabled,
+	login,
 	loginDisabled,
 })
 
 await refreshValues()
-emitAccountState()
 
 const selectedAccount = computed(() =>
 	accounts.value.find((account) => account.profile.id === defaultUser.value),
@@ -246,7 +226,7 @@ async function setAccount(account: MinecraftCredential) {
 	defaultUser.value = account.profile.id
 	await set_default_user(account.profile.id).catch(handleError)
 	await refreshValues()
-	emitAccountState()
+	emit('change')
 }
 
 async function login() {
@@ -261,37 +241,21 @@ async function login() {
 	loginDisabled.value = false
 }
 
-function requestRemoveAccount(account: MinecraftCredential) {
-	pendingRemoval.value = account
-	removeAccountModal.value?.show()
-}
-
-async function confirmRemoveAccount() {
-	const account = pendingRemoval.value
-	if (!account) return
-	pendingRemoval.value = null
-	await logout(account.profile.id)
-}
-
 async function logout(id: string) {
 	await remove_user(id).catch(handleError)
 	await refreshValues()
 	if (!selectedAccount.value && accounts.value.length > 0) {
 		await setAccount(accounts.value[0])
 	} else {
-		emitAccountState()
+		emit('change')
 	}
 	trackEvent('AccountLogOut')
 }
 
-const unlisten = await process_listener(async (e) => {
+useAppEvent('process', async (e) => {
 	if (e.event === 'launched') {
 		await refreshValues()
 	}
-})
-
-onUnmounted(() => {
-	unlisten()
 })
 
 const messages = defineMessages({

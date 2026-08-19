@@ -10,47 +10,26 @@ const projectRootDir = resolve(__dirname)
 const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
 const portArgumentIndex = process.argv.indexOf('--port')
-const devPort = Number(portArgumentIndex === -1 ? 1420 : process.argv[portArgumentIndex + 1])
+const devPort = portArgumentIndex === -1 ? 1420 : Number(process.argv[portArgumentIndex + 1])
 
-if (!Number.isInteger(devPort) || devPort < 1 || devPort > 65_535) {
-	throw new Error('Vite --port must be a valid TCP port.')
-}
-
-const requiredEnvironmentVariables = [
-	'MODRINTH_URL',
-	'MODRINTH_API_BASE_URL',
-	'MODRINTH_ARCHON_BASE_URL',
-	...(portArgumentIndex === -1 ? ['VITE_CONVEX_URL', 'VITE_CONVEX_SITE_URL'] : []),
-] as const
-
-function loadEnvFile(envFilePath: string) {
-	if (existsSync(envFilePath)) {
-		for (const line of readFileSync(envFilePath, 'utf-8').split('\n')) {
-			const withoutComment = line.split('#')[0]?.trim()
-			if (!withoutComment) continue
-			const eqIndex = withoutComment.indexOf('=')
-			if (eqIndex === -1) continue
-			const key = withoutComment.slice(0, eqIndex)
-			const value = withoutComment.slice(eqIndex + 1)
-			if (!(key in process.env)) {
-				process.env[key] = value
-			}
-		}
-	}
+if (!Number.isInteger(devPort) || devPort < 1 || devPort > 65535) {
+	throw new Error(`Invalid Vite port: ${process.argv[portArgumentIndex + 1]}`)
 }
 
 // Load .env from app-lib manually instead of using Vite's envDir, which would auto-load .env.local and override values
-loadEnvFile(resolve(appLibEnvDir, '.env'))
-
-const missingEnvironmentVariables = requiredEnvironmentVariables.filter(
-	(key) => !process.env[key]?.trim(),
-)
-
-if (missingEnvironmentVariables.length > 0) {
-	throw new Error(
-		`Missing required environment variables: ${missingEnvironmentVariables.join(', ')}. ` +
-			'Set them in packages/app-lib/.env.',
-	)
+const envFilePath = resolve(appLibEnvDir, '.env')
+if (existsSync(envFilePath)) {
+	for (const line of readFileSync(envFilePath, 'utf-8').split('\n')) {
+		const trimmed = line.trim()
+		if (!trimmed || trimmed.startsWith('#')) continue
+		const eqIndex = trimmed.indexOf('=')
+		if (eqIndex === -1) continue
+		const key = trimmed.slice(0, eqIndex)
+		const value = trimmed.slice(eqIndex + 1)
+		if (!(key in process.env)) {
+			process.env[key] = value
+		}
+	}
 }
 
 // https://vitejs.dev/config/
@@ -76,14 +55,7 @@ export default defineConfig({
 		],
 	},
 	plugins: [
-		vue({
-			template: {
-				compilerOptions: {
-					isCustomElement: (tag) =>
-						(tag.startsWith('Tres') && tag !== 'TresCanvas') || tag === 'primitive',
-				},
-			},
-		}),
+		vue(),
 		svgLoader({
 			svgoConfig: {
 				plugins: [
@@ -102,9 +74,6 @@ export default defineConfig({
 			},
 		}),
 	],
-	optimizeDeps: {
-		exclude: ['@tresjs/core'],
-	},
 
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	// prevent vite from obscuring rust errors
@@ -119,6 +88,7 @@ export default defineConfig({
 					// An additional websocket connect-src is required for Vite dev tools to work
 					if (directive === 'connect-src') {
 						sources = Array.isArray(sources) ? sources : [sources]
+						sources = [...sources]
 						sources.push(
 							`ws://localhost:${devPort}`,
 							'http://localhost:*',

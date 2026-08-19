@@ -1,34 +1,23 @@
 <script setup lang="ts">
-/**
- * Desktop browse route with instance and Core-server installation contexts.
- * - `initInstanceContext` (232) loads the active browse context and installed content.
- * - `selectableProjectTypes` (557) and `installContext` (601) derive the active UI state.
- * - `getCardActions` (870) creates app-specific install actions for each result.
- * - `search` (1171) normalizes results; `preloadProjectType` (1236) warms tab targets.
- * - `provideBrowseManager` (1430) exposes the layout context.
- */
-import { installCoreModpack } from '@amberite/amberite-api'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	CheckIcon,
 	ClipboardCopyIcon,
+	CompassIcon,
 	ExternalIcon,
 	GlobeIcon,
 	PlusIcon,
+	ServerStackIcon,
 	SpinnerIcon,
 } from '@modrinth/assets'
-import type {
-	BrowseInstallContentType,
-	CardAction,
-	ProjectType,
-	Tags,
-	UiMotionDirection,
-} from '@modrinth/ui'
+import type { BrowseInstallContentType, CardAction, ProjectType, Tags } from '@modrinth/ui'
 import {
+	BrowsePageLayout,
 	BrowseSidebar,
 	commonMessages,
 	CreationFlowModal,
 	defineMessages,
+	formatProjectTypeSentence,
 	getLatestMatchingInstallVersion,
 	getSelectedInstallPreferences,
 	getTargetInstallPreferences,
@@ -36,57 +25,45 @@ import {
 	preferencesDiffer,
 	provideBrowseManager,
 	requestInstall,
+	resolveInstallPlan,
+	stripServerRuntimeInstallFilters,
+	stripServerRuntimeInstallOverrides,
 	useBrowseSearch,
 	useDebugLogger,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQueryClient } from '@tanstack/vue-query'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import type { LocationQuery } from 'vue-router'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
-import AppBrowsePageGhost from '@/components/ui/AppBrowsePageGhost.vue'
-import AppBrowsePageLayout from '@/components/ui/AppBrowsePageLayout.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import { useAppServerBrowse } from '@/composables/browse/use-app-server-browse'
-import { useCoreClient } from '@/composables/useCoreClient'
+import { useAppEvent } from '@/composables/use-app-event'
+import { get_project, get_search_results_v3, get_version_many } from '@/helpers/cache.js'
 import {
-	buildDiscoverSearchParams,
-	DISCOVER_METADATA_STALE_MS,
-	DISCOVER_PRELOAD_STALE_MS,
-	getDiscoverProjectTypeFromHref,
-	type RawDiscoverSearchResults,
-} from '@/composables/useDiscoverContentPreload'
-import {
-	get_project,
-	get_project_v3,
-	get_search_results_v3,
-	get_version_many,
-} from '@/helpers/cache.js'
-import { instance_listener } from '@/helpers/events.js'
-import {
-	get as getInstance,
 	get_installed_project_ids as getInstalledProjectIds,
+	getInstanceIconUrl,
+	list as listInstances,
 } from '@/helpers/instance'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
-import { get_profile_from_pack_version } from '@/helpers/pack'
 import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
-import { convertToSynced } from '@/pages/instance/synced/synced-conversion'
+import { get_instance_worlds } from '@/helpers/worlds'
+import {
+	instanceDetailQueryOptions,
+	instanceKeys,
+	instanceLinkedProjectQueryOptions,
+} from '@/pages/instance/query-options'
+import { type BreadcrumbDefinition, injectBreadcrumbManager } from '@/providers/breadcrumbs'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
 import {
 	createServerInstallContent,
 	provideServerInstallContent,
 } from '@/providers/setup/server-install-content'
-import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useTheming } from '@/store/state'
-
-defineOptions({
-	name: 'BrowsePage',
-})
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
@@ -98,11 +75,43 @@ const debugLog = useDebugLogger('Browse')
 
 const router = useRouter()
 const route = useRoute()
+const displayedBrowseRoute = shallowRef(router.currentRoute.value)
+watch(
+	() => router.currentRoute.value,
+	(nextRoute) => {
+		if (nextRoute.path.startsWith('/browse/')) {
+			displayedBrowseRoute.value = nextRoute
+		}
+	},
+	{ immediate: true },
+)
+const breadcrumbMessages = defineMessages({
+	discoverProjectType: {
+		id: 'app.browse.discover-project-type',
+		defaultMessage: 'Discover {projectType}',
+	},
+	discoverServers: {
+		id: 'app.browse.discover-servers',
+		defaultMessage: 'Discover servers',
+	},
+})
+const breadcrumbLabel = computed(() => {
+	const browseRoute = displayedBrowseRoute.value
+	if (browseRoute.query.from === 'worlds' || browseRoute.params.projectType === 'server') {
+		return formatMessage(breadcrumbMessages.discoverServers)
+	}
+
+	return formatMessage(breadcrumbMessages.discoverProjectType, {
+		projectType: formatProjectTypeSentence(
+			formatMessage,
+			String(browseRoute.params.projectType ?? ''),
+			2,
+		),
+	})
+})
 const themeStore = useTheming()
 const browseRouteActive = computed(() => route.path.startsWith('/browse/'))
 const serverSetupModalRef = ref<InstanceType<typeof CreationFlowModal> | null>(null)
-const browseTransitioning = ref(false)
-const browseTransitionDirection = ref<UiMotionDirection>('forward')
 const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
 provideServerInstallContent(serverInstallContent)
 const {
@@ -114,6 +123,7 @@ const {
 	effectiveServerWorldId,
 	serverContextServerData,
 	serverContentProjectIds,
+	queuedServerInstallRootProjectIds,
 	queuedServerInstallProjectIds,
 	queuedServerInstallCount,
 	selectedServerInstallProjects,
@@ -134,70 +144,129 @@ const {
 	enforceSetupModpackRoute,
 	getQueuedServerInstallPlans,
 	setQueuedServerInstallPlans,
+	resolveQueuedServerInstallPlan,
 	openServerModpackInstallFlow,
 	onServerFlowBack,
 	handleServerModpackFlowCreate,
 	markServerProjectInstalled,
 } = serverInstallContent
 
-debugLog('fetching tags (categories, loaders, gameVersions)')
-const TAG_CATEGORIES_QUERY_KEY = ['tags', 'categories'] as const
-const TAG_LOADERS_QUERY_KEY = ['tags', 'loaders'] as const
-const TAG_GAME_VERSIONS_QUERY_KEY = ['tags', 'game-versions'] as const
+const initialInstanceId = computed(() => String(route.query.i ?? ''))
+const instanceQuery = useQuery(
+	computed(() => ({
+		...instanceDetailQueryOptions(initialInstanceId.value),
+		enabled: !!initialInstanceId.value,
+	})),
+)
+const instance = computed(() => instanceQuery.data.value ?? null)
+const linkedInstanceProjectId = computed(() => instance.value?.link?.project_id ?? '')
+const linkedInstanceProjectQuery = useQuery(
+	computed(() => ({
+		...instanceLinkedProjectQueryOptions(linkedInstanceProjectId.value),
+		enabled: !!linkedInstanceProjectId.value,
+	})),
+)
+const installedProjectIds: Ref<string[] | null> = ref(null)
+const instanceHideInstalled = ref(route.query.ai === 'true')
+const newlyInstalled = ref<string[]>([])
+const hiddenInstanceProjectIds = ref<Set<string>>(new Set())
+const hiddenInstanceProjectIdsInitialized = ref(false)
+const isServerInstance = computed(
+	() => linkedInstanceProjectQuery.data.value?.minecraft_server != null,
+)
 
-function getFreshQueryData<T>(queryKey: readonly unknown[], staleTime: number) {
-	const state = queryClient.getQueryState<T>(queryKey)
-	if (!state || state.data === undefined) return undefined
-	if (Date.now() - state.dataUpdatedAt > staleTime) return undefined
-	return state.data
+const breadcrumbManager = injectBreadcrumbManager()
+const instanceBreadcrumbDefinition = {
+	slot: 'instance',
+	id: () => `instance:${String(displayedBrowseRoute.value.query.i ?? '')}`,
+	label: () => instance.value?.name ?? formatMessage(commonMessages.loadingLabel),
+	visual: () => ({
+		type: 'image' as const,
+		src: getInstanceIconUrl(instance.value?.icon_path),
+		alt: instance.value?.name,
+		tintBy: String(displayedBrowseRoute.value.query.i ?? ''),
+	}),
+	to: () => {
+		const instancePath = `/instance/${encodeURIComponent(
+			String(displayedBrowseRoute.value.query.i ?? ''),
+		)}`
+		return displayedBrowseRoute.value.query.from === 'worlds'
+			? `${instancePath}/worlds`
+			: instancePath
+	},
+} satisfies BreadcrumbDefinition
+const serversBreadcrumbDefinition = {
+	slot: 'root',
+	id: 'servers',
+	label: () => formatMessage(commonMessages.serversLabel),
+	to: '/hosting/manage/',
+	visual: { type: 'icon', component: ServerStackIcon },
+} satisfies BreadcrumbDefinition
+const serverBreadcrumbTo = ref(serverBackUrl.value)
+watch(serverBackUrl, (value) => {
+	if (route.path.startsWith('/browse/')) {
+		serverBreadcrumbTo.value = value
+	}
+})
+const serverBreadcrumbDefinition = {
+	slot: 'server',
+	id: () => `server:${String(displayedBrowseRoute.value.query.sid ?? '')}`,
+	label: () => serverContextServerData.value?.name ?? formatMessage(commonMessages.loadingLabel),
+	visual: { type: 'icon', component: ServerStackIcon },
+	to: serverBreadcrumbTo,
+} satisfies BreadcrumbDefinition
+const breadcrumbDefinition = {
+	slot: 'browse',
+	id: () =>
+		`browse:${String(displayedBrowseRoute.value.params.projectType ?? '')}:${String(
+			displayedBrowseRoute.value.query.i ?? '',
+		)}:${String(displayedBrowseRoute.value.query.sid ?? '')}:${String(
+			displayedBrowseRoute.value.query.from ?? '',
+		)}`,
+	label: breadcrumbLabel,
+	to: () => displayedBrowseRoute.value.fullPath,
+	visual: { type: 'icon', component: CompassIcon },
+} satisfies BreadcrumbDefinition
+
+function syncBreadcrumbs() {
+	if (displayedBrowseRoute.value.query.i) {
+		const instanceBreadcrumb = breadcrumbManager.reset(instanceBreadcrumbDefinition)
+		breadcrumbManager.push(breadcrumbDefinition, { parent: instanceBreadcrumb })
+		return
+	}
+
+	if (displayedBrowseRoute.value.query.sid) {
+		const serversBreadcrumb = breadcrumbManager.reset(serversBreadcrumbDefinition)
+		const serverBreadcrumb = breadcrumbManager.push(serverBreadcrumbDefinition, {
+			parent: serversBreadcrumb,
+		})
+		breadcrumbManager.push(breadcrumbDefinition, { parent: serverBreadcrumb })
+		return
+	}
+
+	breadcrumbManager.reset(breadcrumbDefinition)
 }
 
-const cachedCategories = getFreshQueryData<Labrinth.Tags.v2.Category[]>(
-	TAG_CATEGORIES_QUERY_KEY,
-	DISCOVER_METADATA_STALE_MS,
-)
-const cachedLoaders = getFreshQueryData<Labrinth.Tags.v2.Loader[]>(
-	TAG_LOADERS_QUERY_KEY,
-	DISCOVER_METADATA_STALE_MS,
-)
-const cachedGameVersions = getFreshQueryData<Labrinth.Tags.v2.GameVersion[]>(
-	TAG_GAME_VERSIONS_QUERY_KEY,
-	DISCOVER_METADATA_STALE_MS,
-)
+watch(displayedBrowseRoute, syncBreadcrumbs, { immediate: true, flush: 'sync' })
 
-const categories = ref<Labrinth.Tags.v2.Category[]>(cachedCategories ?? [])
-const loaders = ref<Labrinth.Tags.v2.Loader[]>(cachedLoaders ?? [])
-const availableGameVersions = ref<Labrinth.Tags.v2.GameVersion[]>(cachedGameVersions ?? [])
-const tagsLoaded = ref(!!cachedCategories && !!cachedLoaders && !!cachedGameVersions)
+debugLog('fetching tags (categories, loaders, gameVersions)')
+const [categories, loaders, availableGameVersions] = await Promise.all([
+	get_categories()
+		.catch(handleError)
+		.then(ref<Labrinth.Tags.v2.Category[]>),
+	get_loaders()
+		.catch(handleError)
+		.then(ref<Labrinth.Tags.v2.Loader[]>),
+	get_game_versions()
+		.catch(handleError)
+		.then(ref<Labrinth.Tags.v2.GameVersion[]>),
+])
 
 const tags: Ref<Tags> = computed(() => ({
 	gameVersions: availableGameVersions.value ?? [],
 	loaders: loaders.value ?? [],
 	categories: categories.value ?? [],
 }))
-
-type Instance = {
-	game_version: string
-	loader: string
-	path: string
-	install_stage: string
-	profile_type?: 'client' | 'server' | 'synced'
-	icon_path?: string
-	name: string
-	link?: {
-		type: string
-		project_id: string
-		version_id: string
-	}
-}
-
-const instance: Ref<Instance | null> = ref(null)
-const installedProjectIds: Ref<string[] | null> = ref(null)
-const instanceHideInstalled = ref(false)
-const newlyInstalled = ref<string[]>([])
-const hiddenInstanceProjectIds = ref<Set<string>>(new Set())
-const hiddenInstanceProjectIdsInitialized = ref(false)
-const isServerInstance = ref(false)
 
 if (isFromWorlds.value && route.params.projectType !== 'server') {
 	router.replace({
@@ -233,17 +302,36 @@ watch(
 
 watchServerContextChanges()
 
-function hasAsyncBrowseContext() {
-	return !!route.query.i || !!serverIdQuery.value
-}
-
-const contextLoaded = ref(!hasAsyncBrowseContext())
+await initInstanceContext()
 
 async function refreshInstalledProjectIds() {
-	if (!route.query.i) return
+	if (!route.query.i) {
+		const instances = await queryClient
+			.fetchQuery({
+				queryKey: [...instanceKeys.all, 'installed-project-ids'],
+				queryFn: listInstances,
+				staleTime: 0,
+			})
+			.catch(handleError)
+		if (!instances) return
+
+		const ids = instances
+			.map((gameInstance) => gameInstance.link?.project_id)
+			.filter((id): id is string => !!id)
+		debugLog('installedInstanceProjectIds loaded', { count: ids.length })
+		installedProjectIds.value = ids
+		return
+	}
 
 	if (route.query.from === 'worlds') {
-		const worlds = await get_instance_worlds(route.query.i as string).catch(handleError)
+		const targetInstanceId = route.query.i as string
+		const worlds = await queryClient
+			.fetchQuery({
+				queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
+				queryFn: () => get_instance_worlds(targetInstanceId),
+				staleTime: 0,
+			})
+			.catch(handleError)
 		if (!worlds) return
 
 		const serverProjectIds = worlds
@@ -254,7 +342,14 @@ async function refreshInstalledProjectIds() {
 		return
 	}
 
-	const ids = await getInstalledProjectIds(route.query.i as string).catch(handleError)
+	const targetInstanceId = route.query.i as string
+	const ids = await queryClient
+		.fetchQuery({
+			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'content'),
+			queryFn: () => getInstalledProjectIds(targetInstanceId),
+			staleTime: 0,
+		})
+		.catch(handleError)
 	if (!ids) return
 
 	debugLog('installedProjectIds loaded', { count: ids.length })
@@ -269,43 +364,47 @@ async function initInstanceContext() {
 		queryWid: route.query.wid,
 		queryFrom: route.query.from,
 	})
-	await initServerContext()
+	await Promise.all([
+		initServerContext(),
+		refreshInstalledProjectIds(),
+		route.query.i ? instanceQuery.suspense().catch(handleError) : Promise.resolve(),
+	])
 
 	if (route.query.i) {
-		instance.value = (await getInstance(route.query.i as string).catch(handleError)) ?? null
 		debugLog('instance loaded', {
 			name: instance.value?.name,
 			loader: instance.value?.loader,
 			gameVersion: instance.value?.game_version,
 		})
 
-		await refreshInstalledProjectIds()
-
 		if (instance.value?.link?.project_id) {
-			debugLog('checking linked project for server status', instance.value.link.project_id)
-			const projectV3 = await get_project_v3(
-				instance.value.link.project_id,
-				'must_revalidate',
-			).catch(handleError)
-			if (projectV3?.minecraft_server != null) {
-				debugLog('instance is a server instance')
-				isServerInstance.value = true
-			}
+			await linkedInstanceProjectQuery.suspense().catch(handleError)
 		}
 	}
-
-	if (route.query.ai && !(route.params.projectType === 'modpack')) {
-		debugLog('setting instanceHideInstalled from query', route.query.ai)
-		instanceHideInstalled.value = route.query.ai === 'true'
-	}
 }
+
+function setBrowseHideInstalledFlag(flag: 'hide_installed_modpacks', value: boolean) {
+	themeStore.featureFlags[flag] = value
+	getSettings()
+		.then((settings) => {
+			settings.feature_flags[flag] = value
+			return setSettings(settings)
+		})
+		.catch(handleError)
+}
+
+const hideInstalledModpacks = computed({
+	get: () => themeStore.getFeatureFlag('hide_installed_modpacks'),
+	set: (value: boolean) => setBrowseHideInstalledFlag('hide_installed_modpacks', value),
+})
 
 const instanceFilters = computed(() => {
 	const filters = []
 
-	if (instance.value) {
+	if (instance.value && projectType.value !== 'resourcepack') {
+		const isVanillaShader = projectType.value === 'shader' && instance.value.loader === 'vanilla'
 		const gameVersion = instance.value.game_version
-		if (gameVersion) {
+		if (gameVersion && !isVanillaShader) {
 			filters.push({ type: 'game_version', option: gameVersion })
 		}
 
@@ -315,15 +414,22 @@ const instanceFilters = computed(() => {
 		if (platform && projectType.value === 'mod' && supportedModLoaders.includes(platform)) {
 			filters.push({ type: 'mod_loader', option: platform })
 		}
+		if (isVanillaShader) {
+			filters.push({ type: 'shader_loader', option: 'vanilla' })
+		}
 
 		if (isServerInstance.value) {
 			filters.push({ type: 'environment', option: 'client' })
 		}
+	}
 
-		if (instanceHideInstalled.value && hiddenInstanceProjectIds.value.size > 0) {
-			for (const id of hiddenInstanceProjectIds.value) {
-				filters.push({ type: 'project_id', option: `project_id:${id}`, negative: true })
-			}
+	if (
+		(instance.value || projectType.value === 'modpack') &&
+		(projectType.value === 'modpack' ? hideInstalledModpacks.value : instanceHideInstalled.value) &&
+		hiddenInstanceProjectIds.value.size > 0
+	) {
+		for (const id of hiddenInstanceProjectIds.value) {
+			filters.push({ type: 'project_id', option: `project_id:${id}`, negative: true })
 		}
 	}
 
@@ -337,7 +443,6 @@ if (route.query.shi) {
 }
 const hiddenServerContentProjectIds = ref<Set<string>>(new Set())
 const hiddenServerContentProjectIdsInitialized = ref(false)
-const projectEnvironmentById = ref(new Map<string, Labrinth.Projects.v3.Environment[]>())
 
 function syncHiddenServerContentProjectIds() {
 	hiddenServerContentProjectIds.value = new Set(serverContentProjectIds.value)
@@ -383,6 +488,12 @@ const serverContextFilters = computed(() => {
 			{ type: 'environment', option: 'client' },
 			{ type: 'environment', option: 'server' },
 		)
+
+		if (hideInstalledModpacks.value && hiddenInstanceProjectIds.value.size > 0) {
+			for (const id of hiddenInstanceProjectIds.value) {
+				filters.push({ type: 'project_id', option: `project_id:${id}`, negative: true })
+			}
+		}
 	}
 
 	if (serverHideInstalled.value && hiddenServerContentProjectIds.value.size > 0) {
@@ -437,14 +548,6 @@ const messages = defineMessages({
 		id: 'app.browse.add-to-an-instance',
 		defaultMessage: 'Add to an instance',
 	},
-	discoverContent: {
-		id: 'app.browse.discover-content',
-		defaultMessage: 'Discover content',
-	},
-	discoverServers: {
-		id: 'app.browse.discover-servers',
-		defaultMessage: 'Discover servers',
-	},
 	environmentProvidedByServer: {
 		id: 'search.filter.locked.server-environment.title',
 		defaultMessage: 'Only client-side mods can be added to the server instance',
@@ -453,13 +556,13 @@ const messages = defineMessages({
 		id: 'search.filter.locked.instance-game-version.title',
 		defaultMessage: 'Game version is provided by the instance',
 	},
-	gameVersionProvidedByServer: {
-		id: 'search.filter.locked.server-game-version.title',
-		defaultMessage: 'Game version is provided by the server',
-	},
 	hideAddedServers: {
 		id: 'app.browse.hide-added-servers',
 		defaultMessage: 'Hide servers already added',
+	},
+	hideInstalledModpacks: {
+		id: 'app.browse.hide-installed-modpacks',
+		defaultMessage: 'Hide already installed',
 	},
 	installingToServer: {
 		id: 'app.browse.server.installing',
@@ -469,22 +572,10 @@ const messages = defineMessages({
 		id: 'app.browse.back-to-instance',
 		defaultMessage: 'Back to instance',
 	},
-	clientProfileType: {
-		id: 'app.browse.profile-type.client',
-		defaultMessage: 'Client',
-	},
-	serverProfileType: {
-		id: 'app.browse.profile-type.server',
-		defaultMessage: 'Server',
-	},
-	syncedProfileType: {
-		id: 'app.browse.profile-type.synced',
-		defaultMessage: 'Synced',
-	},
 	serverInstanceContentWarning: {
 		id: 'app.browse.server-instance-content-warning',
 		defaultMessage:
-			'Adding content can break compatibility when joining the server. Any added content will also be lost when you update the server instance content.',
+			'Adding content may prevent you from joining this server. Any content you add will be removed when the managed server content is updated.',
 	},
 	modLoaderProvidedByInstance: {
 		id: 'search.filter.locked.instance-loader.title',
@@ -494,70 +585,39 @@ const messages = defineMessages({
 		id: 'app.browse.project-type.modpacks',
 		defaultMessage: 'Modpacks',
 	},
-	modLoaderProvidedByServer: {
-		id: 'search.filter.locked.server-loader.title',
-		defaultMessage: 'Loader is provided by the server',
+	modsProjectType: { id: 'app.browse.project-type.mods', defaultMessage: 'Mods' },
+	resourcePacksProjectType: {
+		id: 'app.browse.project-type.resource-packs',
+		defaultMessage: 'Resource Packs',
 	},
+	dataPacksProjectType: {
+		id: 'app.browse.project-type.data-packs',
+		defaultMessage: 'Data Packs',
+	},
+	shadersProjectType: { id: 'app.browse.project-type.shaders', defaultMessage: 'Shaders' },
+	serversProjectType: { id: 'app.browse.project-type.servers', defaultMessage: 'Servers' },
 	providedByInstance: {
 		id: 'search.filter.locked.instance',
 		defaultMessage: 'Provided by the instance',
-	},
-	providedByServer: {
-		id: 'search.filter.locked.server',
-		defaultMessage: 'Provided by the server',
 	},
 	syncFilterButton: {
 		id: 'search.filter.locked.instance.sync',
 		defaultMessage: 'Sync with instance',
 	},
-	installOnServer: {
-		id: 'app.browse.card-action.install-on-server',
-		defaultMessage: 'Install on server',
-	},
-	installSynced: {
-		id: 'app.browse.card-action.install-synced',
-		defaultMessage: 'Install synced',
-	},
-})
-
-const breadcrumbs = useBreadcrumbs()
-const browseTitle = computed(() =>
-	formatMessage(isFromWorlds.value ? messages.discoverServers : messages.discoverContent),
-)
-breadcrumbs.setName('BrowseTitle', browseTitle.value)
-if (instance.value) {
-	const instanceLink = `/instance/${encodeURIComponent(instance.value.id)}`
-	breadcrumbs.setContext({
-		name: instance.value.name,
-		link: isFromWorlds.value ? `${instanceLink}/worlds` : instanceLink,
-	})
-} else {
-	breadcrumbs.setContext(null)
-}
-
-onBeforeRouteLeave(() => {
-	breadcrumbs.setContext({
-		name: browseTitle.value,
-		link: `/browse/${projectType.value}`,
-		query: route.query,
-	})
 })
 
 const projectType = ref<ProjectType>(route.params.projectType as ProjectType)
 
 function resetInstanceContext() {
-	if (!instance.value) return
-
 	debugLog('instance context removed, resetting')
-	instance.value = null
 	installedProjectIds.value = null
 	instanceHideInstalled.value = false
 	newlyInstalled.value = []
 	hiddenInstanceProjectIds.value = new Set()
 	hiddenInstanceProjectIdsInitialized.value = false
 	isServerInstance.value = false
-	breadcrumbs.setName('BrowseTitle', formatMessage(messages.discoverContent))
-	breadcrumbs.setContext(null)
+	browseBreadcrumb.reset()
+	void refreshInstalledProjectIds()
 }
 
 watch(
@@ -580,39 +640,21 @@ watch(
 
 watch(
 	() => route.query.i,
-	(instanceId) => {
-		if (!instanceId && route.path.startsWith('/browse')) {
+	async (nextInstanceId, previousInstanceId) => {
+		if (!route.path.startsWith('/browse') || nextInstanceId === previousInstanceId) return
+		if (!nextInstanceId) {
 			resetInstanceContext()
+			return
+		}
+
+		installedProjectIds.value = null
+		hiddenInstanceProjectIdsInitialized.value = false
+		await Promise.all([instanceQuery.suspense().catch(handleError), refreshInstalledProjectIds()])
+		if (instance.value?.link?.project_id) {
+			await linkedInstanceProjectQuery.suspense().catch(handleError)
 		}
 	},
 )
-
-function createBrowseTab(
-	type: ProjectType,
-	label: string,
-	suffix: string,
-	shown: boolean | undefined = undefined,
-) {
-	return {
-		label,
-		href: `/browse/${type}${suffix}`,
-		shown,
-		onHover: () => preloadProjectType(type),
-	}
-}
-
-const browseTabSuffix = computed(() => {
-	const params: LocationQuery = {}
-
-	if (route.query.i) params.i = route.query.i
-	if (route.query.ai) params.ai = route.query.ai
-	if (route.query.from) params.from = route.query.from
-	if (route.query.sid) params.sid = route.query.sid
-	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
-
-	const queryString = new URLSearchParams(params as Record<string, string>).toString()
-	return queryString ? `?${queryString}` : ''
-})
 
 const selectableProjectTypes = computed(() => {
 	let dataPacks = false,
@@ -638,31 +680,51 @@ const selectableProjectTypes = computed(() => {
 		modpacks = true
 	}
 
-	const suffix = browseTabSuffix.value
+	const params: LocationQuery = {}
+
+	if (route.query.i) params.i = route.query.i
+	if (route.query.ai) params.ai = route.query.ai
+	if (route.query.from) params.from = route.query.from
+	if (route.query.sid) params.sid = route.query.sid
+	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
+
+	const queryString = new URLSearchParams(params as Record<string, string>).toString()
+	const suffix = queryString ? `?${queryString}` : ''
 
 	if (isSetupServerContext.value) {
-		return [createBrowseTab('modpack', formatMessage(messages.modpacksProjectType), suffix)]
+		return [
+			{ label: formatMessage(messages.modpacksProjectType), href: `/browse/modpack${suffix}` },
+		]
 	}
 
 	if (isFromWorlds.value) {
-		return [createBrowseTab('server', 'Servers', suffix)]
+		return [{ label: formatMessage(messages.serversProjectType), href: `/browse/server${suffix}` }]
 	}
 
 	return [
-		createBrowseTab('modpack', 'Modpacks', suffix, modpacks),
-		createBrowseTab('mod', 'Mods', suffix, mods),
-		createBrowseTab('resourcepack', 'Resource Packs', suffix),
-		createBrowseTab('datapack', 'Data Packs', suffix, dataPacks),
-		createBrowseTab('shader', 'Shaders', suffix),
-		createBrowseTab('server', 'Servers', suffix, !instance.value),
+		{
+			label: formatMessage(messages.modpacksProjectType),
+			href: `/browse/modpack${suffix}`,
+			shown: modpacks,
+		},
+		{ label: formatMessage(messages.modsProjectType), href: `/browse/mod${suffix}`, shown: mods },
+		{
+			label: formatMessage(messages.resourcePacksProjectType),
+			href: `/browse/resourcepack${suffix}`,
+		},
+		{
+			label: formatMessage(messages.dataPacksProjectType),
+			href: `/browse/datapack${suffix}`,
+			shown: dataPacks,
+		},
+		{ label: formatMessage(messages.shadersProjectType), href: `/browse/shader${suffix}` },
+		{
+			label: formatMessage(messages.serversProjectType),
+			href: `/browse/server${suffix}`,
+			shown: !instance.value,
+		},
 	]
 })
-
-function getProfileTypeLabel(profileType: Instance['profile_type']) {
-	if (profileType === 'server') return formatMessage(messages.serverProfileType)
-	if (profileType === 'synced') return formatMessage(messages.syncedProfileType)
-	return formatMessage(messages.clientProfileType)
-}
 
 const installContext = computed(() => {
 	if (isServerContext.value && serverContextServerData.value) {
@@ -670,7 +732,6 @@ const installContext = computed(() => {
 			name: serverContextServerData.value.name,
 			loader: serverContextServerData.value.loader ?? '',
 			gameVersion: serverContextServerData.value.mc_version ?? '',
-			profileTypeLabel: formatMessage(messages.serverProfileType),
 			serverId: serverIdQuery.value,
 			upstream: serverContextServerData.value.upstream,
 			iconSrc: null as string | null,
@@ -695,15 +756,14 @@ const installContext = computed(() => {
 			name: instance.value.name,
 			loader: instance.value.loader,
 			gameVersion: instance.value.game_version,
-			profileTypeLabel: getProfileTypeLabel(instance.value.profile_type),
-			iconSrc: instance.value.icon_path ? convertFileSrc(instance.value.icon_path) : null,
+			iconSrc: getInstanceIconUrl(instance.value.icon_path),
 			backUrl: `/instance/${encodeURIComponent(instance.value.id)}${isFromWorlds.value ? '/worlds' : ''}`,
 			backLabel: formatMessage(messages.backToInstance),
 			heading: formatMessage(
 				isFromWorlds.value ? messages.addServersToInstance : commonMessages.installingContentLabel,
 			),
 			warning:
-				isServerInstance.value && !isFromWorlds.value
+				isServerInstance.value && instance.value.loader !== 'vanilla' && !isFromWorlds.value
 					? formatMessage(messages.serverInstanceContentWarning)
 					: undefined,
 		}
@@ -792,161 +852,36 @@ async function chooseInstanceInstallVersion(
 	return { versionId: selectedVersion.id }
 }
 
-async function getDefaultModpackVersionId(projectId: string) {
-	const project = await get_project(projectId, 'must_revalidate')
-	const versionId = project.versions[project.versions.length - 1]
-	if (!versionId) throw new Error('No installable modpack version found.')
-	return versionId
-}
-
-async function createCoreServerWithModpack(args: {
-	projectId: string
-	versionId: string
-	title: string
-	iconUrl?: string
-}) {
-	const core = useCoreClient()
-	const packProfile = await get_profile_from_pack_version(
-		args.projectId,
-		args.versionId,
-		args.title,
-		args.iconUrl,
-	)
-	const { instance } = await installCoreModpack(core, {
-		projectId: args.projectId,
-		versionId: args.versionId,
-		profile: packProfile,
-	})
-	return instance.id
-}
-
-async function getProjectEnvironment(projectId: string) {
-	const cached = projectEnvironmentById.value.get(projectId)
-	if (cached) return cached
-
-	const project = await get_project_v3(projectId, 'must_revalidate').catch(handleError)
-	const environment = project?.environment ?? []
-	projectEnvironmentById.value = new Map(projectEnvironmentById.value).set(projectId, environment)
-	return environment
-}
-
-function supportsDedicatedServerEnvironment(project: {
-	environment?: Labrinth.Projects.v3.Environment[]
-	server_side?: string
-}) {
-	if (project.environment?.length) {
-		return project.environment.some((environment) =>
-			[
-				'server_only',
-				'dedicated_server_only',
-				'client_and_server',
-				'client_only_server_optional',
-				'server_only_client_optional',
-				'client_or_server',
-				'client_or_server_prefers_both',
-			].includes(environment),
-		)
-	}
-
-	return project.server_side !== 'unsupported'
-}
-
-function runAfterBrowseFrame(callback: () => void) {
-	requestAnimationFrame(() => {
-		const windowWithIdleCallback = window as Window & {
-			requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
-		}
-
-		if (windowWithIdleCallback.requestIdleCallback) {
-			windowWithIdleCallback.requestIdleCallback(() => callback(), { timeout: 750 })
-			return
-		}
-
-		setTimeout(callback, 0)
-	})
-}
-
-type BrowseProjectHit = Labrinth.Search.v2.ResultSearchProject &
-	Labrinth.Search.v3.ResultSearchProject & {
-		environment?: Labrinth.Projects.v3.Environment[]
-		installed?: boolean
-	}
-
-function shouldHydrateProjectEnvironment(
-	project: BrowseProjectHit,
-	searchProjectType: ProjectType,
+async function chooseFilterMatchingInstallVersion(
+	project: Labrinth.Search.v3.ResultSearchProject,
+	projectTypeValue: string,
 ) {
-	return (
-		(searchProjectType === 'modpack' || project.project_types?.includes('modpack')) &&
-		!projectEnvironmentById.value.has(project.project_id)
-	)
-}
-
-function scheduleProjectEnvironmentHydration(
-	hits: BrowseProjectHit[],
-	searchProjectType: ProjectType,
-	requestParams: string,
-) {
-	const projectIds = hits
-		.filter((hit) => shouldHydrateProjectEnvironment(hit, searchProjectType))
-		.map((hit) => hit.project_id)
-
-	if (projectIds.length === 0) return
-
-	runAfterBrowseFrame(() => {
-		void hydrateProjectEnvironments(projectIds, searchProjectType, requestParams)
-	})
-}
-
-async function hydrateProjectEnvironments(
-	projectIds: string[],
-	searchProjectType: ProjectType,
-	requestParams: string,
-) {
-	const updates = new Map<string, Labrinth.Projects.v3.Environment[]>()
-
-	await Promise.all(
-		projectIds.map(async (projectId) => {
-			const environment = await getProjectEnvironment(projectId)
-			updates.set(projectId, environment)
-		}),
-	)
-
-	if (updates.size === 0) return
-	if (searchState.activeResultKey.value !== `${searchProjectType}:${requestParams}`) return
-
-	let changed = false
-	const nextHits = searchState.projectHits.value.map((hit) => {
-		const environment = updates.get(hit.project_id)
-		if (environment === undefined || hit.environment === environment) {
-			return hit
-		}
-
-		changed = true
-		return { ...hit, environment }
+	const plan = await resolveInstallPlan({
+		project: {
+			project_id: project.project_id,
+			title: project.title,
+			icon_url: project.icon_url,
+		},
+		contentType: projectTypeValue as BrowseInstallContentType,
+		selectedFilters: searchState.currentFilters.value,
+		providedFilters: combinedProvidedFilters.value,
+		overriddenProvidedFilterTypes: searchState.overriddenProvidedFilterTypes.value,
+		targetPreferences: {},
+		getProjectVersions: getInstallProjectVersions,
 	})
 
-	if (changed) {
-		searchState.projectHits.value = nextHits
-	}
-}
-
-type AppCardAction = CardAction & {
-	joinedActions?: AppCardAction[]
+	return { versionId: plan.versionId }
 }
 
 function getCardActions(
 	result: Labrinth.Search.v3.ResultSearchProject,
 	currentProjectType: string,
-): AppCardAction[] {
+): CardAction[] {
 	if (currentProjectType === 'server') {
 		return getServerCardActions(result)
 	}
 
-	// Non-server project actions
-	const projectResult = result as (Labrinth.Search.v2.ResultSearchProject &
-		Labrinth.Search.v3.ResultSearchProject) & {
-		environment?: Labrinth.Projects.v3.Environment[]
+	const projectResult = result as Labrinth.Search.v3.ResultSearchProject & {
 		installed?: boolean
 		installing?: boolean
 	}
@@ -956,167 +891,18 @@ function getCardActions(
 		serverContentProjectIds.value.has(projectResult.project_id || '') ||
 		serverContextServerData.value?.upstream?.project_id === projectResult.project_id
 	const isInstalling = installingProjectIds.value.has(projectResult.project_id)
-	const projectTitle = projectResult.title ?? projectResult.name ?? 'Modpack'
-	const projectIconUrl = projectResult.icon_url ?? undefined
-	const isServerInstallSupported = supportsDedicatedServerEnvironment(projectResult)
-
-	async function installModpackOnClient() {
-		const selectedPreferences = getCurrentSelectedInstallPreferences(currentProjectType)
-		return await new Promise<{ profilePath: string; versionId: string }>((resolve, reject) => {
-			let profilePath: string | null = null
-			let versionId: string | null = null
-
-			function finish() {
-				if (profilePath && versionId) {
-					resolve({ profilePath, versionId })
-				}
-			}
-
-			void installVersion(
-				projectResult.project_id,
-				null,
-				null,
-				'SearchCard',
-				(installedVersionId) => {
-					if (!installedVersionId) {
-						reject(new Error('Modpack install was cancelled.'))
-						return
-					}
-					versionId = installedVersionId
-					onSearchResultInstalled(projectResult.project_id)
-					finish()
-				},
-				(createdProfilePath) => {
-					profilePath = createdProfilePath
-					finish()
-				},
-				{
-					preferredLoader: selectedPreferences.loaders?.[0],
-					preferredGameVersion: selectedPreferences.gameVersions?.[0],
-				},
-			).catch(reject)
-		})
-	}
-
-	async function installOnClient() {
-		setProjectInstalling(projectResult.project_id, true)
-		try {
-			const { profilePath } = await installModpackOnClient()
-			await router.push(`/instance/${encodeURIComponent(profilePath)}`)
-		} catch (err) {
-			handleError(err)
-		} finally {
-			setProjectInstalling(projectResult.project_id, false)
-		}
-	}
-
-	async function installSynced() {
-		setProjectInstalling(projectResult.project_id, true)
-		try {
-			const { profilePath, versionId } = await installModpackOnClient()
-			const coreInstanceId = await convertToSynced(profilePath)
-			await useCoreClient().installModpackVersion(
-				coreInstanceId,
-				projectResult.project_id,
-				versionId,
-			)
-			await router.push(`/instance/${encodeURIComponent(profilePath)}`)
-		} catch (err) {
-			handleError(err)
-		} finally {
-			setProjectInstalling(projectResult.project_id, false)
-		}
-	}
-
-	async function installOnServer() {
-		setProjectInstalling(projectResult.project_id, true)
-		try {
-			const versionId = await getDefaultModpackVersionId(projectResult.project_id)
-			const coreInstanceId = await createCoreServerWithModpack({
-				projectId: projectResult.project_id,
-				versionId,
-				title: projectTitle,
-				iconUrl: projectIconUrl,
-			})
-			await router.push(`/instance/${encodeURIComponent(coreInstanceId)}`)
-		} catch (err) {
-			handleError(err)
-		} finally {
-			setProjectInstalling(projectResult.project_id, false)
-		}
-	}
-
-	function getModpackInstallActions() {
-		if (currentProjectType !== 'modpack') return undefined
-		if (!isServerInstallSupported) return undefined
-
-		return [
-			{
-				key: 'install-synced',
-				label: formatMessage(messages.installSynced),
-				icon: PlusIcon,
-				onClick: installSynced,
-			},
-			{
-				key: 'install-on-server',
-				label: formatMessage(messages.installOnServer),
-				icon: PlusIcon,
-				onClick: installOnServer,
-			},
-		]
-	}
+	const showAsInstalled = isInstalled && currentProjectType !== 'modpack'
 
 	if (
 		isServerContext.value &&
 		['modpack', 'mod', 'plugin', 'datapack'].includes(currentProjectType)
 	) {
 		const isQueued = queuedServerInstallProjectIds.value.has(projectResult.project_id)
+		const isQueuedRoot = queuedServerInstallRootProjectIds.value.has(projectResult.project_id)
 		const isInstallingSelection = isInstallingQueuedServerInstalls.value
 		const validatingInstall =
 			isInstalling && currentProjectType !== 'modpack' && !isInstallingSelection
-		async function installServerContextContent() {
-			if (isQueued) {
-				removeQueuedServerInstall(projectResult.project_id)
-				return
-			}
-
-			const contentType = currentProjectType as BrowseInstallContentType
-			const isModpack = contentType === 'modpack'
-			const shouldShowInstalling = isModpack || !isQueued
-			if (shouldShowInstalling) {
-				setProjectInstalling(projectResult.project_id, true)
-			}
-			try {
-				await requestInstall({
-					project: projectResult,
-					contentType,
-					mode: isModpack ? 'immediate' : 'queue',
-					selectedFilters: isModpack ? [] : searchState.currentFilters.value,
-					providedFilters: isModpack ? [] : combinedProvidedFilters.value,
-					overriddenProvidedFilterTypes: isModpack
-						? []
-						: searchState.overriddenProvidedFilterTypes.value,
-					targetPreferences: getServerInstallTargetPreferences(contentType),
-					getProjectVersions: getInstallProjectVersions,
-					queue: serverInstallQueue,
-					install: (plan) =>
-						openServerModpackInstallFlow({
-							projectId: plan.projectId,
-							versionId: plan.versionId,
-							name: plan.project.name,
-							iconUrl: plan.project.icon_url ?? undefined,
-						}),
-				})
-			} catch (err) {
-				handleError(err as Error)
-			} finally {
-				if (shouldShowInstalling) {
-					setProjectInstalling(projectResult.project_id, false)
-				}
-			}
-		}
-		const modpackInstallActions = getModpackInstallActions()
-		const installLabel = isInstalled
+		const installLabel = showAsInstalled
 			? commonMessages.installedLabel
 			: isQueued
 				? isInstalling || isInstallingSelection
@@ -1136,18 +922,62 @@ function getCardActions(
 				icon:
 					isInstalling || isInstallingSelection
 						? SpinnerIcon
-						: isQueued || isInstalled
+						: isQueued || showAsInstalled
 							? CheckIcon
 							: PlusIcon,
 				iconClass: isInstalling || isInstallingSelection ? 'animate-spin' : undefined,
-				disabled: isInstalled || isInstalling || isInstallingSelection,
+				disabled:
+					showAsInstalled || isInstalling || isInstallingSelection || (isQueued && !isQueuedRoot),
 				color: isQueued && !isInstalling && !isInstallingSelection ? 'green' : 'brand',
-				type: 'standard',
-				joinedActions:
-					modpackInstallActions && !isInstalled && !isInstalling && !isInstallingSelection
-						? modpackInstallActions
-						: undefined,
-				onClick: currentProjectType === 'modpack' ? installOnClient : installServerContextContent,
+				type: 'outlined',
+				onClick: async () => {
+					if (isQueuedRoot) {
+						removeQueuedServerInstall(projectResult.project_id)
+						return
+					}
+					if (isQueued) return
+
+					const contentType = currentProjectType as BrowseInstallContentType
+					const isModpack = contentType === 'modpack'
+					const shouldShowInstalling = isModpack || !isQueued
+					if (shouldShowInstalling) {
+						setProjectInstalling(projectResult.project_id, true)
+					}
+					try {
+						const plan = await requestInstall({
+							project: projectResult,
+							contentType,
+							mode: isModpack ? 'immediate' : 'queue',
+							selectedFilters: isModpack
+								? []
+								: stripServerRuntimeInstallFilters(searchState.currentFilters.value),
+							providedFilters: isModpack ? [] : combinedProvidedFilters.value,
+							overriddenProvidedFilterTypes: isModpack
+								? []
+								: stripServerRuntimeInstallOverrides(
+										searchState.overriddenProvidedFilterTypes.value,
+									),
+							targetPreferences: getServerInstallTargetPreferences(contentType),
+							getProjectVersions: getInstallProjectVersions,
+							queue: serverInstallQueue,
+							install: (plan) =>
+								openServerModpackInstallFlow({
+									projectId: plan.projectId,
+									versionId: plan.versionId,
+									name: plan.project.name,
+									iconUrl: plan.project.icon_url ?? undefined,
+								}),
+						})
+						if (!isModpack) await resolveQueuedServerInstallPlan(plan)
+					} catch (err) {
+						if (!isModpack) removeQueuedServerInstall(projectResult.project_id)
+						handleError(err as Error)
+					} finally {
+						if (shouldShowInstalling) {
+							setProjectInstalling(projectResult.project_id, false)
+						}
+					}
+				},
 			},
 		]
 	}
@@ -1161,57 +991,55 @@ function getCardActions(
 			label: formatMessage(
 				isInstalling
 					? messages.installingToServer
-					: isInstalled
+					: showAsInstalled
 						? commonMessages.installedLabel
 						: shouldUseInstallIcon
 							? commonMessages.installButton
 							: messages.addToAnInstance,
 			),
-			icon: isInstalling ? SpinnerIcon : isInstalled ? CheckIcon : PlusIcon,
+			icon: isInstalling ? SpinnerIcon : showAsInstalled ? CheckIcon : PlusIcon,
 			iconClass: isInstalling ? 'animate-spin' : undefined,
-			disabled: isInstalled || isInstalling,
+			disabled: showAsInstalled || isInstalling,
 			color: 'brand',
-			type: 'standard',
-			joinedActions:
-				isModpack && !isInstalled && !isInstalling ? getModpackInstallActions() : undefined,
-			onClick: isModpack
-				? installOnClient
-				: async () => {
-						setProjectInstalling(projectResult.project_id, true)
-						try {
-							const selectedInstall = instance.value
-								? await chooseInstanceInstallVersion(projectResult, currentProjectType)
-								: { versionId: null as string | null }
-							if (selectedInstall === null) {
-								setProjectInstalling(projectResult.project_id, false)
-								return
-							}
-							const selectedPreferences = getCurrentSelectedInstallPreferences(currentProjectType)
-							await installVersion(
-								projectResult.project_id,
-								selectedInstall.versionId,
-								instance.value ? instance.value.path : null,
-								'SearchCard',
-								(versionId, installedProjectIds) => {
-									setProjectInstalling(projectResult.project_id, false)
-									if (versionId) {
-										onSearchResultsInstalled(installedProjectIds ?? [projectResult.project_id])
-									}
-								},
-								(profile) => {
-									router.push(`/instance/${profile}`)
-								},
-								{
-									preferredLoader: instance.value?.loader ?? selectedPreferences.loaders?.[0],
-									preferredGameVersion:
-										instance.value?.game_version ?? selectedPreferences.gameVersions?.[0],
-								},
-							)
-						} catch (err) {
+			type: 'outlined',
+			onClick: async () => {
+				setProjectInstalling(projectResult.project_id, true)
+				try {
+					const selectedInstall = instance.value
+						? await chooseInstanceInstallVersion(projectResult, currentProjectType)
+						: isModpack
+							? await chooseFilterMatchingInstallVersion(projectResult, currentProjectType)
+							: { versionId: null as string | null }
+					if (selectedInstall === null) {
+						setProjectInstalling(projectResult.project_id, false)
+						return
+					}
+					const selectedPreferences = getCurrentSelectedInstallPreferences(currentProjectType)
+					await installVersion(
+						projectResult.project_id,
+						selectedInstall.versionId,
+						instance.value ? instance.value.id : null,
+						'SearchCard',
+						(versionId, installedProjectIds) => {
 							setProjectInstalling(projectResult.project_id, false)
-							handleError(err)
-						}
-					},
+							if (versionId) {
+								onSearchResultsInstalled(installedProjectIds ?? [projectResult.project_id])
+							}
+						},
+						(profile) => {
+							router.push(`/instance/${profile}`)
+						},
+						{
+							preferredLoader: instance.value?.loader ?? selectedPreferences.loaders?.[0],
+							preferredGameVersion:
+								instance.value?.game_version ?? selectedPreferences.gameVersions?.[0],
+						},
+					)
+				} catch (err) {
+					setProjectInstalling(projectResult.project_id, false)
+					handleError(err)
+				}
+			},
 		},
 	]
 }
@@ -1236,12 +1064,20 @@ function onSearchResultsInstalled(ids: string[]) {
 	newlyInstalled.value = Array.from(new Set([...newlyInstalled.value, ...ids]))
 }
 
-function createBrowseSearchResponse(
-	rawResults: RawDiscoverSearchResults,
-	searchProjectType: ProjectType,
-	requestParams: string,
-) {
-	const isServer = searchProjectType === 'server'
+async function search(requestParams: string) {
+	debugLog('searching v3', requestParams)
+	const isServer = projectType.value === 'server'
+
+	const rawResults = await queryClient.fetchQuery({
+		queryKey: ['search', 'v3', requestParams],
+		queryFn: () =>
+			get_search_results_v3(requestParams, 'must_revalidate') as Promise<{
+				result: Labrinth.Search.v3.SearchResults & {
+					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
+				}
+			} | null>,
+		staleTime: 30_000,
+	})
 
 	if (!rawResults) {
 		return {
@@ -1249,6 +1085,14 @@ function createBrowseSearchResponse(
 			serverHits: [],
 			total_hits: 0,
 			per_page: 20,
+		}
+	}
+
+	for (const hit of rawResults.result.hits) {
+		for (const identifier of [hit.project_id, hit.slug]) {
+			if (identifier) {
+				queryClient.setQueryData(['projects', 'summary', identifier], hit)
+			}
 		}
 	}
 
@@ -1266,29 +1110,18 @@ function createBrowseSearchResponse(
 	const hits = rawResults.result.hits.map((hit) => {
 		const mapped: Labrinth.Search.v3.ResultSearchProject & { installed?: boolean } = {
 			...hit,
-			title: hit.name,
-			description: hit.summary,
-		} as unknown as BrowseProjectHit
-
-		const cachedEnvironment = projectEnvironmentById.value.get(hit.project_id)
-		if (
-			cachedEnvironment &&
-			(searchProjectType === 'modpack' || hit.project_types?.includes('modpack'))
-		) {
-			mapped.environment = cachedEnvironment
 		}
 
-		if (instance.value || isServerContext.value) {
-			const installedIds = instance.value
-				? new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
-				: serverContentProjectIds.value
+		if (instance.value || isServerContext.value || projectType.value === 'modpack') {
+			const installedIds =
+				isServerContext.value && projectType.value !== 'modpack'
+					? serverContentProjectIds.value
+					: new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
 			mapped.installed = installedIds.has(hit.project_id)
 		}
 
 		return mapped
 	})
-
-	scheduleProjectEnvironmentHydration(hits, searchProjectType, requestParams)
 
 	return {
 		projectHits: hits,
@@ -1298,70 +1131,12 @@ function createBrowseSearchResponse(
 	}
 }
 
-function getCachedSearchResponse(requestParams: string, searchProjectType: string) {
-	if (!tagsLoaded.value) return undefined
-	if (hasAsyncBrowseContext()) return undefined
-
-	const rawResults = getFreshQueryData<RawDiscoverSearchResults>(
-		['search', 'v3', requestParams],
-		DISCOVER_PRELOAD_STALE_MS,
-	)
-	if (rawResults === undefined) return undefined
-
-	return createBrowseSearchResponse(rawResults, searchProjectType as ProjectType, requestParams)
-}
-
-async function search(requestParams: string, searchProjectType: ProjectType = projectType.value) {
-	debugLog('searching v3', requestParams)
-	const rawResults = await queryClient.fetchQuery({
-		queryKey: ['search', 'v3', requestParams],
-		queryFn: () => get_search_results_v3(requestParams) as Promise<RawDiscoverSearchResults>,
-		staleTime: DISCOVER_PRELOAD_STALE_MS,
-	})
-
-	return createBrowseSearchResponse(rawResults, searchProjectType, requestParams)
-}
-
-function preloadProjectType(type: ProjectType) {
-	if (!tagsLoaded.value || !contextLoaded.value || type === projectType.value) return
-
-	const requestParams = buildDiscoverSearchParams(type, searchState.maxResults.value)
-	void queryClient
-		.prefetchQuery({
-			queryKey: ['search', 'v3', requestParams],
-			queryFn: () => get_search_results_v3(requestParams) as Promise<RawDiscoverSearchResults>,
-			staleTime: DISCOVER_PRELOAD_STALE_MS,
-		})
-		.catch(() => undefined)
-}
-
-function preloadSelectableProjectTypes() {
-	for (const link of selectableProjectTypes.value) {
-		if (link.shown === false) continue
-
-		const type = getDiscoverProjectTypeFromHref(link.href)
-		if (type) preloadProjectType(type)
-	}
-}
-
-const isServerFilterContext = computed(() => isServerContext.value || isServerInstance.value)
-
 const lockedFilterMessages = computed(() => ({
-	gameVersion: formatMessage(
-		isServerFilterContext.value
-			? messages.gameVersionProvidedByServer
-			: messages.gameVersionProvidedByInstance,
-	),
-	modLoader: formatMessage(
-		isServerFilterContext.value
-			? messages.modLoaderProvidedByServer
-			: messages.modLoaderProvidedByInstance,
-	),
+	gameVersion: formatMessage(messages.gameVersionProvidedByInstance),
+	modLoader: formatMessage(messages.modLoaderProvidedByInstance),
 	environment: formatMessage(messages.environmentProvidedByServer),
 	syncButton: formatMessage(messages.syncFilterButton),
-	providedBy: formatMessage(
-		isServerFilterContext.value ? messages.providedByServer : messages.providedByInstance,
-	),
+	providedBy: formatMessage(messages.providedByInstance),
 }))
 
 const searchState = useBrowseSearch({
@@ -1370,8 +1145,6 @@ const searchState = useBrowseSearch({
 	active: browseRouteActive,
 	providedFilters: combinedProvidedFilters,
 	search,
-	getCachedSearchResponse,
-	immediateProjectTypeSearch: true,
 	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
@@ -1384,14 +1157,16 @@ const searchState = useBrowseSearch({
 watch(
 	[
 		() => searchState.query.value,
-		() => searchState.currentFilters.value,
-		() => searchState.serverCurrentFilters.value,
+		() =>
+			searchState.isServerType.value
+				? searchState.serverCurrentFilters.value
+				: searchState.currentFilters.value,
 		() => projectType.value,
 	],
 	() => {
-		if (isServerContext.value) {
+		if (isServerContext.value && projectType.value !== 'modpack') {
 			syncHiddenServerContentProjectIds()
-		} else if (instance.value) {
+		} else if (instance.value || projectType.value === 'modpack') {
 			syncHiddenInstanceProjectIds()
 		}
 	},
@@ -1414,138 +1189,25 @@ if (instance.value?.game_version) {
 	}
 }
 
-const BROWSE_GHOST_DELAY_MS = 80
-const browseInitialPending = computed(
-	() =>
-		!tagsLoaded.value ||
-		!contextLoaded.value ||
-		(searchState.loading.value &&
-			(searchState.isServerType.value
-				? searchState.serverHits.value.length === 0
-				: searchState.projectHits.value.length === 0)),
-)
-const hasBrowseContent = computed(() =>
-	searchState.isServerType.value
-		? searchState.serverHits.value.length > 0
-		: searchState.projectHits.value.length > 0,
-)
-const hasMountedBrowseLayout = ref(false)
-const browseReadyForLayout = computed(() => !browseInitialPending.value || hasBrowseContent.value)
-watch(
-	browseReadyForLayout,
-	(ready) => {
-		if (ready) {
-			hasMountedBrowseLayout.value = true
-		}
-	},
-	{ immediate: true },
-)
-const browseGhostVisible = ref(false)
-let browseGhostDelayTimer: ReturnType<typeof setTimeout> | null = null
-const showBrowseGhost = computed(
-	() => browseGhostVisible.value && !hasMountedBrowseLayout.value && browseInitialPending.value,
-)
-const showBrowseLayout = computed(() => hasMountedBrowseLayout.value)
+void searchState.refreshSearch()
 
-function clearBrowseGhostDelayTimer() {
-	if (browseGhostDelayTimer === null) return
-
-	clearTimeout(browseGhostDelayTimer)
-	browseGhostDelayTimer = null
-}
-
-function scheduleBrowseGhostDelay() {
-	clearBrowseGhostDelayTimer()
-	browseGhostDelayTimer = setTimeout(() => {
-		browseGhostDelayTimer = null
-		if (browseInitialPending.value && !hasMountedBrowseLayout.value) {
-			browseGhostVisible.value = true
-		}
-	}, BROWSE_GHOST_DELAY_MS)
-}
-
-watch(
-	() => [browseInitialPending.value, hasMountedBrowseLayout.value],
-	([pending, mounted]) => {
-		if (pending && !mounted) {
-			scheduleBrowseGhostDelay()
-			return
-		}
-
-		clearBrowseGhostDelayTimer()
-		browseGhostVisible.value = false
-	},
-	{ immediate: true },
-)
-
-onMounted(async () => {
-	contextLoaded.value = !hasAsyncBrowseContext()
-	const canRefreshSearchDuringMetadataLoad =
-		!hasAsyncBrowseContext() && Object.keys(route.query).length === 0
-	const initialSearchRefresh = canRefreshSearchDuringMetadataLoad
-		? searchState.refreshSearch()
-		: null
-
-	const [nextCategories, nextLoaders, nextGameVersions] = await Promise.all([
-		queryClient
-			.fetchQuery({
-				queryKey: TAG_CATEGORIES_QUERY_KEY,
-				queryFn: get_categories,
-				staleTime: DISCOVER_METADATA_STALE_MS,
-			})
-			.catch(handleError),
-		queryClient
-			.fetchQuery({
-				queryKey: TAG_LOADERS_QUERY_KEY,
-				queryFn: get_loaders,
-				staleTime: DISCOVER_METADATA_STALE_MS,
-			})
-			.catch(handleError),
-		queryClient
-			.fetchQuery({
-				queryKey: TAG_GAME_VERSIONS_QUERY_KEY,
-				queryFn: get_game_versions,
-				staleTime: DISCOVER_METADATA_STALE_MS,
-			})
-			.catch(handleError),
-	])
-	categories.value = nextCategories ?? []
-	loaders.value = nextLoaders ?? []
-	availableGameVersions.value = nextGameVersions ?? []
-	tagsLoaded.value = true
-	await initInstanceContext()
-	contextLoaded.value = true
-	await (initialSearchRefresh ?? searchState.refreshSearch())
-	preloadSelectableProjectTypes()
-})
-
-type UnlistenFn = () => void
-
-let isUnmounted = false
-let unlistenInstances: UnlistenFn | null = null
-
-onMounted(() => {
-	instance_listener(async (event: { event: string; instance_id: string }) => {
-		if (instance.value && event.instance_id === instance.value.id && event.event === 'synced') {
+useAppEvent('instance', async (event) => {
+	if (event.event === 'created' || event.event === 'removed') {
+		if (!route.query.i) {
 			await refreshInstalledProjectIds()
-			await searchState.refreshSearch()
-		}
-	})
-		.then((unlisten) => {
-			if (isUnmounted) {
-				unlisten()
-				return
+			if (projectType.value === 'modpack') {
+				if (event.event === 'removed') {
+					syncHiddenInstanceProjectIds()
+				}
+				await searchState.refreshSearch()
 			}
+		}
+	}
 
-			unlistenInstances = unlisten
-		})
-		.catch(handleError)
-})
-
-onUnmounted(() => {
-	isUnmounted = true
-	clearBrowseGhostDelayTimer()
-	unlistenInstances?.()
+	if (instance.value && event.instance_id === instance.value.id && event.event === 'synced') {
+		await refreshInstalledProjectIds()
+		await searchState.refreshSearch()
+	}
 })
 
 function getProjectBrowseQuery() {
@@ -1572,13 +1234,26 @@ const advancedFiltersCollapsed = computed({
 	},
 })
 
+const dismissedPhotosensitivityFilterWarning = computed({
+	get: () => themeStore.getFeatureFlag('dismissed_photosensitivity_filter_warning'),
+	set: (value) => {
+		themeStore.featureFlags['dismissed_photosensitivity_filter_warning'] = value
+		getSettings()
+			.then((settings) => {
+				settings.feature_flags['dismissed_photosensitivity_filter_warning'] = value
+				return setSettings(settings)
+			})
+			.catch(handleError)
+	},
+})
+
 provideBrowseManager({
 	tags,
 	projectType,
 	...searchState,
 	advancedFiltersCollapsed,
-	transitioning: browseTransitioning,
-	getProjectLink: (result: Labrinth.Search.v2.ResultSearchProject) => ({
+	dismissedPhotosensitivityFilterWarning,
+	getProjectLink: (result: Labrinth.Search.v3.ResultSearchProject) => ({
 		path: `/project/${result.project_id ?? result.slug}`,
 		query: getProjectBrowseQuery(),
 	}),
@@ -1593,8 +1268,17 @@ provideBrowseManager({
 	installContext,
 	providedFilters: combinedProvidedFilters,
 	hideInstalled: computed({
-		get: () => (isServerContext.value ? serverHideInstalled.value : instanceHideInstalled.value),
+		get: () => {
+			if (projectType.value === 'modpack') return hideInstalledModpacks.value
+			if (isServerContext.value) return serverHideInstalled.value
+			return instanceHideInstalled.value
+		},
 		set: (val: boolean) => {
+			if (projectType.value === 'modpack') {
+				hideInstalledModpacks.value = val
+				if (val) syncHiddenInstanceProjectIds()
+				return
+			}
 			if (isServerContext.value) {
 				serverHideInstalled.value = val
 				if (val) syncHiddenServerContentProjectIds()
@@ -1605,11 +1289,18 @@ provideBrowseManager({
 		},
 	}),
 	showHideInstalled: computed(
-		() => (isServerContext.value && projectType.value !== 'modpack') || !!instance.value,
+		() =>
+			projectType.value === 'modpack' ||
+			(isServerContext.value && projectType.value !== 'modpack') ||
+			!!instance.value,
 	),
 	hideInstalledLabel: computed(() =>
 		formatMessage(
-			isFromWorlds.value ? messages.hideAddedServers : commonMessages.hideInstalledContentLabel,
+			isFromWorlds.value
+				? messages.hideAddedServers
+				: projectType.value === 'modpack'
+					? messages.hideInstalledModpacks
+					: commonMessages.hideInstalledContentLabel,
 		),
 	),
 	hideSelected: hideSelectedServerInstalls,
@@ -1630,22 +1321,8 @@ provideBrowseManager({
 </script>
 
 <template>
-	<div
-		class="browse-page relative flex flex-col gap-3 p-6"
-		:class="{
-			'browse-page--ghost': showBrowseGhost,
-			'browse-page--transitioning': browseTransitioning,
-		}"
-		:data-browse-transition-direction="browseTransitionDirection"
-	>
-		<AppBrowsePageGhost v-if="showBrowseGhost" class="browse-page-ghost-frame" />
-		<AppBrowsePageLayout
-			v-if="hasMountedBrowseLayout"
-			v-show="showBrowseLayout"
-			v-model:transitioning="browseTransitioning"
-			v-model:transition-direction="browseTransitionDirection"
-			:inert="browseTransitioning ? true : undefined"
-		>
+	<div class="flex flex-col gap-3 p-6">
+		<BrowsePageLayout>
 			<template #after>
 				<ContextMenu ref="contextMenuRef" @option-clicked="handleOptionsClick">
 					<template #open_link>
@@ -1656,8 +1333,7 @@ provideBrowseManager({
 					</template>
 				</ContextMenu>
 			</template>
-		</AppBrowsePageLayout>
-		<div v-if="browseTransitioning" class="browse-page-transition-lock" aria-hidden="true"></div>
+		</BrowsePageLayout>
 		<CreationFlowModal
 			v-if="isServerContext && projectType === 'modpack'"
 			ref="serverSetupModalRef"
@@ -1672,74 +1348,8 @@ provideBrowseManager({
 			@browse-modpacks="() => {}"
 			@create="handleServerModpackFlowCreate"
 		/>
-		<Teleport defer to="#sidebar-teleport-target">
-			<div
-				class="browse-sidebar-transition-frame"
-				:class="{ 'browse-sidebar-transition-frame--transitioning': browseTransitioning }"
-				:data-browse-transition-direction="browseTransitionDirection"
-				:inert="browseTransitioning ? true : undefined"
-			>
-				<div class="browse-sidebar-transition-content">
-					<BrowseSidebar />
-				</div>
-				<div
-					v-if="browseTransitioning"
-					class="browse-sidebar-transition-lock"
-					aria-hidden="true"
-				></div>
-			</div>
+		<Teleport v-if="browseRouteActive" to="#sidebar-teleport-target">
+			<BrowseSidebar />
 		</Teleport>
 	</div>
 </template>
-
-<style scoped>
-.browse-page--ghost {
-	box-sizing: border-box;
-	height: 100%;
-	max-height: calc(100vh - var(--top-bar-height));
-	min-height: 0;
-	overflow: hidden;
-}
-
-.browse-page-ghost-frame {
-	flex: 1 1 auto;
-	height: 100%;
-	min-height: 0;
-}
-
-.browse-page-transition-lock {
-	position: absolute;
-	inset: 0;
-	z-index: 9999;
-	pointer-events: auto;
-	background: transparent;
-}
-
-.browse-sidebar-transition-frame {
-	position: relative;
-	min-height: 100%;
-}
-
-.browse-sidebar-transition-content {
-	min-height: 100%;
-	transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.browse-sidebar-transition-frame--transitioning .browse-sidebar-transition-content {
-	opacity: 0.45;
-}
-
-.browse-sidebar-transition-lock {
-	position: absolute;
-	inset: 0;
-	z-index: 2;
-	pointer-events: auto;
-	background: transparent;
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.browse-sidebar-transition-content {
-		transition-duration: 1ms;
-	}
-}
-</style>

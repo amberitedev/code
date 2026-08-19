@@ -49,40 +49,10 @@
 					"url": "http://127.0.0.1:8000/*"
 				},
 				{
-					"url": "http://localhost:16662/*"
-				},
-				{
-					"url": "http://127.0.0.1:16662/*"
-				},
-				{
-					"url": "ws://localhost:16662/*"
-				},
-				{
-					"url": "ws://127.0.0.1:16662/*"
-				},
-				{
 					"url": "http://*.taila228c5.ts.net/*"
 				},
 				{
 					"url": "https://*.taila228c5.ts.net/*"
-				},
-				{
-					"url": "ws://*.taila228c5.ts.net/*"
-				},
-				{
-					"url": "wss://*.taila228c5.ts.net/*"
-				},
-				{
-					"url": "https://*.convex.cloud/*"
-				},
-				{
-					"url": "https://*.convex.site/*"
-				},
-				{
-					"url": "wss://*.convex.cloud/*"
-				},
-				{
-					"url": "wss://*.convex.site/*"
 				}
 			]
 		},
@@ -123,19 +93,13 @@
 			]
 		},
 		"auth:default",
-		"auth:allow-check-amberite-reachable",
-		"auth:allow-amberite-product-sign-in",
-		"auth:allow-restore-amberite-product-session",
-		"auth:allow-refresh-amberite-product-session",
-		"auth:allow-sign-out-amberite-product-session",
-		"auth:allow-get-remembered-amberite-identity",
-		"auth:allow-get-amberite-local-setup-secret",
 		"import:default",
 		"jre:default",
 		"logs:default",
 		"metadata:default",
 		"minecraft-skins:default",
 		"mr-auth:default",
+		"onboarding-checklist:default",
 		"instance:default",
 		"install:default",
 		"process:default",

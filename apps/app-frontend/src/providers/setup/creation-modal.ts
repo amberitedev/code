@@ -1,42 +1,39 @@
-import { createCoreInstanceFromProfile } from '@amberite/amberite-api'
-import type { AbstractWebNotificationManager } from '@modrinth/ui'
-import { useQueryClient } from '@tanstack/vue-query'
+import type {
+	AbstractWebNotificationManager,
+	CreationFlowContextValue,
+	CreationFlowModal,
+} from '@modrinth/ui'
 import { provide, ref, useTemplateRef } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 import { useRouter } from 'vue-router'
 
-import type InstanceCreationFlowModal from '@/components/ui/creation-flow/InstanceCreationFlowModal.vue'
-import type { InstanceCreationFlowContextValue } from '@/components/ui/creation-flow/types'
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
-import { useCoreClient } from '@/composables/useCoreClient'
-import { upsertCoreInstanceInCache } from '@/composables/useCoreInstances'
 import { trackEvent } from '@/helpers/analytics'
-import { get_project_versions, get_search_results } from '@/helpers/cache.js'
+import { get_search_results } from '@/helpers/cache.js'
 import { import_instance } from '@/helpers/import.js'
 import {
 	type CreatePackLocation,
 	install_create_instance,
 	install_create_modpack_instance,
 	install_get_modpack_preview,
+	installJobInstanceId,
 } from '@/helpers/install'
-import { list as listInstances } from '@/helpers/instance'
+import { list } from '@/helpers/instance'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
-import { create, edit } from '@/helpers/profile.js'
-import type { InstanceLoader } from '@/helpers/types'
-import { registerSyncedProfileBackend } from '@/pages/instance/synced/synced-registration'
-import { setLinkedServerId, setLinkedServerPath } from '@/pages/instance/synced/use-synced-link'
+import type { InstanceIconConfig, InstanceLoader } from '@/helpers/types'
 import { useTheming } from '@/store/state'
 
-export function setupCreationModal(notificationManager: AbstractWebNotificationManager) {
+export function setupCreationModal(
+	notificationManager: AbstractWebNotificationManager,
+	getGeneratedIconConfig?: (iconPath: string) => InstanceIconConfig | null,
+) {
 	const { handleError } = notificationManager
 	const router = useRouter()
-	const queryClient = useQueryClient()
-	const core = useCoreClient()
 	const themeStore = useTheming()
 
 	const installationModal =
-		useTemplateRef<ComponentExposed<typeof InstanceCreationFlowModal>>('installationModal')
+		useTemplateRef<ComponentExposed<typeof CreationFlowModal>>('installationModal')
 	const unknownPackWarningModal =
 		useTemplateRef<InstanceType<typeof UnknownPackWarningModal>>('unknownPackWarningModal')
 	const modpackAlreadyInstalledModal = ref<InstanceType<typeof ModpackAlreadyInstalledModal>>()
@@ -48,21 +45,26 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 	}
 
 	async function fetchExistingInstanceNames(): Promise<string[]> {
-		const [instances, coreInstances] = await Promise.all([
-			listInstances().catch(handleError),
-			core.listInstances().catch(() => []),
-		])
-		return [
-			...(instances ?? [])
-				.filter((instance) => instance.profile_type !== 'server')
-				.map((instance) => instance.name),
-			...coreInstances.map((instance) => instance.name),
-		]
+		const instances = await list().catch(handleError)
+		return instances?.map((i) => i.name) ?? []
 	}
 
 	provide('showCreationModal', () => {
 		installationModal.value?.show()
 	})
+	provide('showImportModal', async () => {
+		await installationModal.value?.show()
+		installationModal.value?.ctx.setImportMode()
+	})
+
+	async function navigateToCreatedInstance(
+		job: Awaited<ReturnType<typeof install_create_instance>>,
+	) {
+		const instanceId = installJobInstanceId(job)
+		if (instanceId) {
+			await router.push(`/instance/${encodeURIComponent(instanceId)}`)
+		}
+	}
 
 	async function proceedWithModpackCreation(
 		projectId: string,
@@ -70,22 +72,29 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 		name: string,
 		iconUrl?: string,
 	) {
-		await install_create_modpack_instance({
+		const job = await install_create_modpack_instance({
 			type: 'fromVersionId',
 			project_id: projectId,
 			version_id: versionId,
 			title: name,
 			icon_url: iconUrl,
-		}).catch(handleError)
+		})
+		await navigateToCreatedInstance(job)
 		trackEvent('InstanceCreate', { source: 'CreationModalModpack' })
 	}
 
-	async function handleCreate(config: InstanceCreationFlowContextValue) {
+	async function proceedWithModpackFileCreation(location: CreatePackLocation) {
+		const job = await install_create_modpack_instance(location)
+		await navigateToCreatedInstance(job)
+		trackEvent('InstanceCreate', { source: 'CreationModalModpackFile' })
+	}
+
+	async function handleCreate(config: CreationFlowContextValue) {
 		try {
 			if (config.modpackSelection.value) {
 				const { projectId, versionId, name, iconUrl } = config.modpackSelection.value
 
-				const instances = await listInstances().catch(handleError)
+				const instances = await list().catch(handleError)
 				const existingInstance = instances?.find((i) => i.link?.project_id === projectId)
 
 				if (existingInstance && !themeStore.getFeatureFlag('skip_non_essential_warnings')) {
@@ -99,16 +108,25 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 			installationModal.value?.hide()
 
 			if (config.isImportMode.value) {
+				let importCount = 0
+				let importedInstanceId: string | null = null
 				for (const [launcherName, instanceSet] of Object.entries(
 					config.importSelectedInstances.value,
 				)) {
 					const launcher = config.importLaunchers.value.find((l) => l.name === launcherName)
 					if (!launcher || instanceSet.size === 0) continue
 					for (const name of instanceSet) {
-						await import_instance(launcher.name, launcher.path, name).catch(handleError)
+						importCount += 1
+						const job = await import_instance(launcher.name, launcher.path, name).catch(handleError)
+						if (job) {
+							importedInstanceId = installJobInstanceId(job)
+						}
 					}
 				}
 				trackEvent('InstanceCreate', { source: 'CreationModalImport' })
+				if (importCount === 1 && importedInstanceId) {
+					await router.push(`/instance/${encodeURIComponent(importedInstanceId)}`)
+				}
 				return
 			}
 
@@ -132,17 +150,16 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 						: config.modpackFilePath.value
 					if (unknownPackWarningModal.value) {
 						unknownPackWarningModal.value?.show(
-							() => install_create_modpack_instance(location).then(() => undefined),
+							() => proceedWithModpackFileCreation(location).catch(handleError),
 							fileName,
 							preview.externalFilesInModpack,
 						)
 					} else {
-						await install_create_modpack_instance(location)
+						await proceedWithModpackFileCreation(location)
 					}
 				} else {
-					await install_create_modpack_instance(location)
+					await proceedWithModpackFileCreation(location)
 				}
-				trackEvent('InstanceCreate', { source: 'CreationModalModpackFile' })
 				return
 			}
 
@@ -156,64 +173,15 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 			const iconPath = config.instanceIconPath.value ?? null
 			const name = config.instanceName.value.trim() || config.autoInstanceName.value
 
-			if (config.instanceType.value === 'server') {
-				const profile = {
-					name,
-					gameVersion: config.selectedGameVersion.value!,
-					modloader: loader,
-					loaderVersion,
-				}
-				const coreInstance = await createCoreInstanceFromProfile(core, {
-					profile,
-				})
-				upsertCoreInstanceInCache(queryClient, coreInstance)
-				await router.push(`/instance/${encodeURIComponent(coreInstance.path)}`)
-			} else if (config.instanceType.value === 'synced') {
-				const coreInstance = await createCoreInstanceFromProfile(core, {
-					profile: {
-						name,
-						gameVersion: config.selectedGameVersion.value!,
-						modloader: loader,
-						loaderVersion,
-					},
-				})
-				upsertCoreInstanceInCache(queryClient, coreInstance)
-				const profilePath = await create(
-					name,
-					config.selectedGameVersion.value!,
-					toProfileLoader(loader),
-					loaderVersion,
-					iconPath,
-					false,
-					null,
-					'synced',
-				)
-				await edit(profilePath, {
-					name,
-					profile_type: 'synced',
-					core_instance_id: coreInstance.id,
-				})
-				setLinkedServerId(profilePath, coreInstance.id)
-				setLinkedServerPath(profilePath, coreInstance.path)
-				await registerSyncedProfileBackend({
-					profilePath,
-					serverInstanceId: coreInstance.id,
-					instance: {
-						name,
-						game_version: config.selectedGameVersion.value!,
-						loader: toProfileLoader(loader),
-					},
-				})
-				await router.push(`/instance/${encodeURIComponent(profilePath)}`)
-			} else {
-				await install_create_instance({
-					name,
-					gameVersion: config.selectedGameVersion.value!,
-					loader: loader as InstanceLoader,
-					loaderVersion,
-					iconPath,
-				}).catch(handleError)
-			}
+			const job = await install_create_instance({
+				name,
+				gameVersion: config.selectedGameVersion.value!,
+				loader: loader as InstanceLoader,
+				loaderVersion,
+				iconPath,
+				iconConfig: iconPath ? getGeneratedIconConfig?.(iconPath) : null,
+			})
+			await navigateToCreatedInstance(job)
 
 			trackEvent('InstanceCreate', {
 				source: 'CreationModal',
@@ -221,11 +189,6 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 		} catch (err) {
 			handleError(err as Error)
 		}
-	}
-
-	function toProfileLoader(loader: string): InstanceLoader {
-		if (loader === 'paper' || loader === 'purpur') return 'vanilla'
-		return loader as InstanceLoader
 	}
 
 	const pendingModpackCreation = ref<{
@@ -239,7 +202,11 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 		if (!pendingModpackCreation.value) return
 		const { projectId, versionId, name, iconUrl } = pendingModpackCreation.value
 		pendingModpackCreation.value = null
-		await proceedWithModpackCreation(projectId, versionId, name, iconUrl)
+		try {
+			await proceedWithModpackCreation(projectId, versionId, name, iconUrl)
+		} catch (error) {
+			handleError(error as Error)
+		}
 	}
 
 	function handleModpackDuplicateGoToInstance(instanceId: string) {
@@ -252,8 +219,10 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 		router.push('/browse/modpack')
 	}
 
-	async function searchModpacks(query: string, limit: number = 10) {
-		const params = [`facets=[["project_type:modpack"]]`, `limit=${limit}`]
+	async function searchProjects(query: string, limit: number = 10) {
+		const projectTypes = ['mod', 'modpack', 'resourcepack', 'shader', 'datapack']
+		const facets = JSON.stringify([projectTypes.map((type) => `project_type:${type}`)])
+		const params = [`facets=${encodeURIComponent(facets)}`, `limit=${limit}`]
 		if (query) {
 			params.push(`query=${encodeURIComponent(query)}`)
 		}
@@ -262,19 +231,13 @@ export function setupCreationModal(notificationManager: AbstractWebNotificationM
 		return { hits: [], offset: 0, limit, total_hits: 0 }
 	}
 
-	async function getProjectVersions(projectId: string) {
-		const versions = await get_project_versions(projectId)
-		return versions ?? []
-	}
-
 	return {
 		installationModal,
 		unknownPackWarningModal,
 		fetchExistingInstanceNames,
 		handleCreate,
 		handleBrowseModpacks,
-		searchModpacks,
-		getProjectVersions,
+		searchProjects,
 		getLoaderManifest,
 		setModpackAlreadyInstalledModal,
 		handleModpackDuplicateCreateAnyway,

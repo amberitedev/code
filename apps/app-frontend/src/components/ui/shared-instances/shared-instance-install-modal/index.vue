@@ -229,46 +229,50 @@
 			</div>
 		</template>
 	</NewModal>
-	<ModpackContentModal
+	<ManagedContentModal
 		ref="contentModal"
 		:header="formatMessage(messages.sharedInstanceContent)"
-		:modpack-name="preview?.name ?? ''"
-		:modpack-icon-url="preview?.iconUrl ?? undefined"
+		:source-name="preview?.name ?? ''"
+		:source-icon-url="preview?.iconUrl ?? undefined"
 	/>
 </template>
 
 <script setup lang="ts">
+import type { Labrinth } from '@modrinth/api-client'
 import { BanIcon, DownloadIcon, ReportIcon, SendIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { Button } from '@modrinth/ui'
 import {
 	Admonition,
 	AutoLink,
 	Avatar,
+	blockedUsersQueryKey,
 	Checkbox,
 	Combobox,
 	type ComboboxOption,
 	commonMessages,
 	defineMessages,
+	formatReportType,
+	injectAuth,
 	injectModrinthClient,
 	injectNotificationManager,
 	IntlFormatted,
+	ManagedContentModal,
 	MarkdownEditor,
-	ModpackContentModal,
 	NewModal,
 	Table,
 	type TableColumn,
 	useScrollIndicator,
 	useVIntl,
 } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, nextTick, ref } from 'vue'
 
-import { useSocial } from '@/composables/useSocial'
 import { config } from '@/config'
-import { hide_ads_window, show_ads_window } from '@/helpers/ads'
 import { toError } from '@/helpers/errors'
 import type { SharedInstanceInstallPreview } from '@/helpers/install'
 import { create_report } from '@/helpers/reports'
+import { block_user } from '@/helpers/users'
 
 import SharedInstanceInstallSummary from './shared-instance-install-summary.vue'
 import { useSharedInstancePreviewContent } from './use-shared-instance-preview-content'
@@ -285,7 +289,7 @@ type SharedInstanceCreator = {
 }
 
 const modal = ref<InstanceType<typeof NewModal>>()
-const contentModal = ref<InstanceType<typeof ModpackContentModal>>()
+const contentModal = ref<InstanceType<typeof ManagedContentModal>>()
 const externalFileTable = ref<HTMLElement | null>(null)
 const preview = ref<SharedInstanceInstallPreview | null>(null)
 const creator = ref<SharedInstanceCreator | null>(null)
@@ -304,8 +308,9 @@ const emit = defineEmits<{
 	reported: [deleteInstance: boolean]
 }>()
 const { formatMessage } = useVIntl()
+const auth = injectAuth()
 const client = injectModrinthClient()
-const social = useSocial()
+const queryClient = useQueryClient()
 const { addNotification, handleError } = injectNotificationManager()
 const { load } = useSharedInstancePreviewContent()
 const {
@@ -324,9 +329,9 @@ const externalFileRows = computed<ExternalFileRow[]>(() =>
 		.sort((left, right) => left.name.localeCompare(right.name)),
 )
 const reportReasonOptions = computed<ComboboxOption<ReportReason>[]>(() => [
-	{ value: 'malicious', label: formatMessage(messages.maliciousReason) },
-	{ value: 'inappropriate', label: formatMessage(messages.inappropriateReason) },
-	{ value: 'spam', label: formatMessage(messages.spamReason) },
+	{ value: 'malicious', label: formatReportType(formatMessage, 'malicious') },
+	{ value: 'inappropriate', label: formatReportType(formatMessage, 'inappropriate') },
+	{ value: 'spam', label: formatReportType(formatMessage, 'spam') },
 ])
 const canSubmitReport = computed(
 	() => Boolean(preview.value && additionalContext.value.trim()) && !submitLoading.value,
@@ -373,12 +378,20 @@ async function submitReport() {
 				body,
 				uploaded_images: uploadedImages,
 			}),
-			blockTarget ? social.blockUser(blockTarget) : Promise.resolve(),
+			blockTarget ? block_user(blockTarget) : Promise.resolve(),
 		])
 
 		if (blockTarget) {
 			if (blockResult.status === 'fulfilled') {
 				blockUser.value = false
+				const authUserId = auth.user.value?.id
+				if (authUserId) {
+					queryClient.setQueryData<Labrinth.BlockedUsers.v3.BlockedUserId[]>(
+						blockedUsersQueryKey(authUserId),
+						(blockedUsers = []) =>
+							blockedUsers.includes(blockTarget) ? blockedUsers : [...blockedUsers, blockTarget],
+					)
+				}
 				addNotification({
 					type: 'success',
 					title: formatMessage(messages.userBlocked),
@@ -435,7 +448,6 @@ function handleCancel() {
 function handleHide() {
 	resetReportState()
 	creator.value = null
-	show_ads_window()
 }
 function resetReportState() {
 	reportMode.value = false
@@ -475,7 +487,6 @@ function showReport(
 }
 function showPreview(previewValue: SharedInstanceInstallPreview, event?: MouseEvent) {
 	preview.value = previewValue
-	hide_ads_window()
 	modal.value?.show(event)
 	void nextTick(() => forceCheckTableScroll())
 }
@@ -530,18 +541,6 @@ const messages = defineMessages({
 		id: 'app.modal.install-to-play.report-reason',
 		defaultMessage: 'Which rule does this instance violate?',
 	},
-	maliciousReason: {
-		id: 'app.modal.install-to-play.report-reason.malicious',
-		defaultMessage: 'Malicious',
-	},
-	inappropriateReason: {
-		id: 'app.modal.install-to-play.report-reason.inappropriate',
-		defaultMessage: 'Inappropriate',
-	},
-	spamReason: {
-		id: 'app.modal.install-to-play.report-reason.spam',
-		defaultMessage: 'Spam',
-	},
 	additionalContext: {
 		id: 'app.modal.install-to-play.additional-context',
 		defaultMessage: 'Additional context',
@@ -585,8 +584,7 @@ const messages = defineMessages({
 	},
 	reviewedFiles: {
 		id: 'app.modal.install-to-play.reviewed-files',
-		defaultMessage:
-			'A file is only reviewed if it’s published to Modrinth, regardless of its file format (including .mrpack).',
+		defaultMessage: "Files that aren't published to Modrinth aren't reviewed.",
 	},
 	installAnyway: {
 		id: 'app.modal.install-to-play.install-anyway',

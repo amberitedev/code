@@ -11,6 +11,7 @@ pub mod logs;
 pub mod metadata;
 pub mod minecraft_skins;
 pub mod mr_auth;
+pub mod onboarding_checklist;
 pub mod process;
 pub mod reports;
 pub mod settings;
@@ -52,9 +53,6 @@ pub enum TheseusSerializableError {
 
     #[error("Tauri error: {0}")]
     Tauri(#[from] tauri::Error),
-
-    #[error("Keyring error: {0}")]
-    Keyring(#[from] keyring::Error),
 
     #[cfg(feature = "updater")]
     #[error("Updater error: {0}")]
@@ -136,14 +134,12 @@ macro_rules! impl_serialize {
 impl_serialize! {
     IO,
     Tauri,
-    Keyring,
 }
 
 #[cfg(feature = "updater")]
 impl_serialize! {
     IO,
     Tauri,
-    Keyring,
     Updater,
     Http,
 }

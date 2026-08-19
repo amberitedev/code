@@ -19,13 +19,11 @@ import {
 	defineMessages,
 	ProgressBar,
 	TabbedModal,
-	Toggle,
 	UnsavedChangesPopup,
 	useVIntl,
 } from '@modrinth/ui'
 import { getVersion } from '@tauri-apps/api/app'
 import { platform as getOsPlatform, version as getOsVersion } from '@tauri-apps/plugin-os'
-import { useStorage } from '@vueuse/core'
 import { computed, provide, ref, watch } from 'vue'
 
 import PrivacySettings from '@/components/ui/settings/account/PrivacySettings.vue'
@@ -52,7 +50,6 @@ const themeStore = useTheming()
 const { formatMessage } = useVIntl()
 
 const devModeCounter = ref(0)
-const settingsTabWireframe = useStorage('app-settings-tab-wireframe', false)
 
 const developerModeEnabled = defineMessage({
 	id: 'app.settings.developer-mode-enabled',
@@ -252,10 +249,6 @@ const messages = defineMessages({
 		id: 'app.settings.downloading',
 		defaultMessage: 'Downloading v{version}',
 	},
-	tabStyleToggle: {
-		id: 'app.settings.tab-style-toggle',
-		defaultMessage: 'Wireframe tabs',
-	},
 	appVersion: {
 		id: 'app.settings.app-version',
 		defaultMessage: 'Modrinth App {version}',
@@ -274,7 +267,6 @@ const messages = defineMessages({
 	<TabbedModal
 		ref="modal"
 		:tabs="availableTabs"
-		:selected-style="settingsTabWireframe ? 'wireframe' : 'filled'"
 		:width="'min(928px, calc(95vw - 10rem))'"
 		:before-hide="canLeaveCurrentTab"
 		:before-tab-change="canLeaveCurrentTab"
@@ -309,12 +301,6 @@ const messages = defineMessages({
 				<p v-if="themeStore.devMode" class="text-brand font-semibold m-0 mb-2">
 					{{ formatMessage(developerModeEnabled) }}
 				</p>
-				<div class="mb-3 flex items-center justify-between gap-3 rounded-xl bg-surface-3 px-3 py-2">
-					<span class="text-xs font-semibold uppercase tracking-[0.08em] text-secondary">
-						{{ formatMessage(messages.tabStyleToggle) }}
-					</span>
-					<Toggle id="app-settings-tab-style-toggle" v-model="settingsTabWireframe" small />
-				</div>
 				<div class="flex items-center gap-3">
 					<button
 						:aria-label="formatMessage(messages.developerModeButtonLabel)"

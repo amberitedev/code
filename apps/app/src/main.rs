@@ -1,16 +1,12 @@
-//! Tauri shell entrypoint.
-//!
-//! Key functions:
-//! - `initialize_state` (line 37) prepares app state and filesystem scopes.
-//! - `show_window` (line 58) reveals the main window after Vue mounts.
-//! - `main` (line 124) wires plugins, commands, lifecycle hooks, deep links, and updater behavior.
-
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 #![recursion_limit = "256"]
 
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use tauri::{Listener, Manager};
 use tauri_plugin_fs::FsExt;
 use theseus::prelude::*;
@@ -27,14 +23,15 @@ mod updater_impl;
 #[cfg(not(feature = "updater"))]
 mod updater_impl_noop;
 
-static MAIN_WINDOW_HAS_BEEN_SHOWN: AtomicBool = AtomicBool::new(false);
-
-/// Should be called in launcher initialization.
+// Should be called in launcher initialization
 #[tracing::instrument(skip_all)]
 #[tauri::command]
-async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
+async fn initialize_state(
+    app: tauri::AppHandle,
+    events: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+) -> api::Result<()> {
     tracing::info!("Initializing app event state...");
-    theseus::EventState::init(app.clone()).await?;
+    theseus::EventState::init(app.clone(), events).await?;
 
     tracing::info!("Initializing app state...");
     State::init(app.config().identifier.clone()).await?;
@@ -50,7 +47,7 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
     Ok(())
 }
 
-/// Should be called once Vue has mounted the app.
+// Should be call once Vue has mounted the app
 #[tracing::instrument(skip_all)]
 #[tauri::command]
 fn show_window(app: tauri::AppHandle) {
@@ -66,9 +63,7 @@ fn show_window(app: tauri::AppHandle) {
             .show()
             .unwrap();
         panic!("cannot display application window")
-    }
-
-    if !MAIN_WINDOW_HAS_BEEN_SHOWN.swap(true, Ordering::Relaxed) {
+    } else {
         let _ = win.set_focus();
     }
 }
@@ -126,6 +121,14 @@ async fn set_restart_after_pending_update(
 // ie: deep links or filepaths for .mrpacks
 fn main() {
     dev::prepare();
+
+    #[cfg(feature = "export-app-events")]
+    theseus::export_app_event_bindings(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../app-frontend/src/generated/app-events"),
+    )
+    .expect("failed to export app event TypeScript bindings");
+
     /*
         tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
             ERROR > WARN > INFO > DEBUG > TRACE
@@ -173,7 +176,7 @@ fn main() {
         builder = builder.plugin(tauri_plugin_single_instance::init(
             |app, args, _cwd| {
                 if let Some(payload) = args.get(1) {
-                    tracing::info!("Handling deep link from arg {payload}");
+                    tracing::info!("Handling command-line deep link");
                     let payload = payload.clone();
                     tauri::async_runtime::spawn(api::utils::handle_command(
                         payload,
@@ -197,6 +200,7 @@ fn main() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_filename("app-window-state.json")
+                .with_denylist(&["signin"])
                 // Use *only* POSITION and SIZE state flags, because saving VISIBLE causes the `visible: false` to not take effect
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::POSITION
@@ -264,6 +268,7 @@ fn main() {
     builder = builder
         .plugin(api::auth::init())
         .plugin(api::mr_auth::init())
+        .plugin(api::onboarding_checklist::init())
         .plugin(api::import::init())
         .plugin(api::install::init())
         .plugin(api::instance::init())

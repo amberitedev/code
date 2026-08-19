@@ -1,12 +1,12 @@
 {
 	"name": "@modrinth/app-frontend",
-	"version": "1.0.0-local",
 	"private": true,
+	"version": "1.0.0-local",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
 		"build": "vue-tsc --noEmit && vite build",
-		"typecheck": "vue-tsc --noEmit",
+		"typecheck": "vue-tsc -p tsconfig.app.json --noEmit",
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",
 		"fix": "eslint . --fix && prettier --write .",
@@ -15,7 +15,7 @@
 		"test": "vue-tsc --noEmit"
 	},
 	"dependencies": {
-		"@amberite/amberite-api": "workspace:*",
+		"@dnd-kit/vue": "^0.5.0",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",
 		"@modrinth/ui": "workspace:*",
@@ -33,7 +33,6 @@
 		"@tauri-apps/plugin-window-state": "^2.2.2",
 		"@types/three": "^0.172.0",
 		"@vueuse/core": "^11.1.0",
-		"convex": "^1.40.0",
 		"dayjs": "^1.11.10",
 		"floating-vue": "^5.2.2",
 		"fuse.js": "^6.6.2",

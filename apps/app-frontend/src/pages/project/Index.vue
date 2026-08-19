@@ -1,6 +1,6 @@
 <template>
 	<div v-if="data">
-		<Teleport defer to="#sidebar-teleport-target">
+		<Teleport to="#sidebar-teleport-target">
 			<ProjectSidebarCompatibility
 				v-if="!isServerProject"
 				:project="data"
@@ -109,7 +109,7 @@
 							<TeleportOverflowMenu
 								type="quiet"
 								size="xl"
-								label="More options"
+								:label="formatMessage(messages.moreOptions)"
 								:options="serverProjectHeaderMoreActions"
 							>
 								<MoreVerticalIcon />
@@ -163,7 +163,7 @@
 							<TeleportOverflowMenu
 								type="quiet"
 								size="xl"
-								label="More options"
+								:label="formatMessage(messages.moreOptions)"
 								:options="projectHeaderMoreActions"
 							>
 								<MoreVerticalIcon />
@@ -172,43 +172,37 @@
 					</template>
 				</ProjectPageHeader>
 				<NavTabs
-					mode="local"
-					:links="projectTabs"
-					:active-index="visibleProjectTabIndex"
-					@tab-click="projectTabController.selectTab"
+					:links="[
+						{
+							label: formatMessage(messages.descriptionTab),
+							href: projectDescriptionHref,
+						},
+						{
+							label: formatMessage(messages.versionsTab),
+							href: versionsHref,
+							subpages: ['version'],
+							shown: projectV3?.minecraft_server == null,
+						},
+						{
+							label: formatMessage(messages.galleryTab),
+							href: projectGalleryHref,
+							shown: data.gallery.length > 0,
+						},
+					]"
 				/>
 				<RouterView
 					v-if="route.path.startsWith('/project')"
-					v-slot="{ Component }"
-				>
-					<NavTabContentTransition
-						v-if="Component"
-						:content-key="projectRouteKey"
-						:direction="projectTabSlideDirection"
-						:visible="projectTabContentVisible"
-						@before-leave="projectTabController.handleBeforeLeave"
-						@after-leave="projectTabController.handleAfterLeave"
-						@after-enter="projectTabController.handleAfterEnter"
-						@enter-cancelled="projectTabController.handleEnterCancelled"
-						@leave-cancelled="projectTabController.handleLeaveCancelled"
-					>
-						<component
-							:is="Component"
-							:project="data"
-							:versions="versions"
-							:members="members"
-							:instance="instance"
-							:install="install"
-							:installed="installed"
-							:installing="installing"
-							:installed-version="installedVersion"
-							:loaders="allLoaders"
-							:game-versions="allGameVersions"
-						/>
-					</NavTabContentTransition>
-				</RouterView>
+					:project="data"
+					:versions="versions"
+					:members="members"
+					:instance="instance"
+					:install="install"
+					:installed="installed"
+					:installing="installing"
+					:installed-version="installedVersion"
+				/>
 			</template>
-			<template v-else> Project data couldn't not be loaded. </template>
+			<template v-else>{{ formatMessage(messages.loadError) }}</template>
 		</div>
 		<SelectedProjectsFloatingBar
 			v-if="projectInstallContext"
@@ -271,7 +265,6 @@ import {
 	getTargetInstallPreferences,
 	IconButton,
 	injectNotificationManager,
-	NavTabContentTransition,
 	NavTabs,
 	ProjectBackgroundGradient,
 	ProjectPageHeader,
@@ -283,15 +276,14 @@ import {
 	ProjectSidebarTags,
 	requestInstall,
 	SelectedProjectsFloatingBar,
-	useNavTabContentController,
+	TeleportOverflowMenu,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons/index.js'
@@ -301,6 +293,7 @@ import {
 	fetchCachedServerStatus,
 	getFreshCachedServerStatus,
 } from '@/composables/instances/use-server-status-query'
+import { useAppEvent } from '@/composables/use-app-event'
 import {
 	get_organization,
 	get_project,
@@ -309,10 +302,10 @@ import {
 	get_version,
 	get_version_many,
 } from '@/helpers/cache.js'
-import { process_listener } from '@/helpers/events'
 import {
 	get as getInstance,
 	get_projects as getInstanceProjects,
+	getInstanceIconUrl,
 	kill,
 	list as listInstances,
 } from '@/helpers/instance'
@@ -359,25 +352,18 @@ const themeStore = useTheming()
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
+	moreOptions: { id: 'app.project.more-options', defaultMessage: 'More options' },
+	descriptionTab: { id: 'app.project.tab.description', defaultMessage: 'Description' },
+	versionsTab: { id: 'app.project.tab.versions', defaultMessage: 'Versions' },
+	galleryTab: { id: 'app.project.tab.gallery', defaultMessage: 'Gallery' },
+	loadError: {
+		id: 'app.project.load-error',
+		defaultMessage: 'Project data could not be loaded.',
+	},
+	comingSoon: { id: 'app.project.coming-soon', defaultMessage: 'Coming soon' },
 	backToBrowse: {
 		id: 'app.project.install-context.back-to-browse',
 		defaultMessage: 'Back to discover',
-	},
-	installContentToInstance: {
-		id: 'app.project.install-context.install-content-to-instance',
-		defaultMessage: 'Install content to instance',
-	},
-	clientProfileType: {
-		id: 'app.project.install-context.profile-type.client',
-		defaultMessage: 'Client',
-	},
-	serverProfileType: {
-		id: 'app.project.install-context.profile-type.server',
-		defaultMessage: 'Server',
-	},
-	syncedProfileType: {
-		id: 'app.project.install-context.profile-type.synced',
-		defaultMessage: 'Synced',
 	},
 	backToInstance: {
 		id: 'app.project.install-context.back-to-instance',
@@ -506,47 +492,10 @@ const versionsHref = computed(() =>
 	buildProjectHref(`/project/${route.params.id}/versions`, instanceFilters.value),
 )
 const projectGalleryHref = computed(() => buildProjectHref(`/project/${route.params.id}/gallery`))
-const projectTabs = computed(() => [
-	{
-		label: 'Description',
-		href: projectDescriptionHref.value,
-		kind: 'description',
-	},
-	{
-		label: 'Versions',
-		href: versionsHref.value,
-		kind: 'versions',
-		shown: projectV3.value?.minecraft_server == null,
-	},
-	{
-		label: 'Gallery',
-		href: projectGalleryHref.value,
-		kind: 'gallery',
-		shown: data.value.gallery.length > 0,
-	},
-])
-const activeProjectTabKind = computed(() => {
-	if (route.path.includes('/versions') || route.path.includes('/version/')) return 'versions'
-	if (route.path.endsWith('/gallery')) return 'gallery'
-	return 'description'
-})
-const activeProjectTabIndex = computed(() =>
-	projectTabs.value
-		.filter((tab) => tab.shown ?? true)
-		.findIndex((tab) => tab.kind === activeProjectTabKind.value),
-)
-const projectRouteKey = computed(() => route.path)
-const projectTabController = useNavTabContentController({
-	activeIndex: activeProjectTabIndex,
-	router,
-})
-const visibleProjectTabIndex = projectTabController.activeIndex
-const projectTabSlideDirection = projectTabController.direction
-const projectTabContentVisible = projectTabController.visible
 
 const projectBrowseBackUrl = computed(() => {
 	const browsePath = route.query.b
-	if (typeof browsePath === 'string' && isBrowseBackPath(browsePath)) return browsePath
+	if (typeof browsePath === 'string' && browsePath.startsWith('/browse/')) return browsePath
 	const instanceId = route.query.i
 	if (typeof instanceId === 'string' && instanceId) {
 		return `/instance/${encodeURIComponent(instanceId)}`
@@ -560,16 +509,6 @@ const projectBackLabel = computed(() =>
 		: formatMessage(messages.backToBrowse),
 )
 
-function isBrowseBackPath(path) {
-	return path.startsWith('/browse/') || /^\/instance\/[^/]+\/browse(?:[?#]|$)/.test(path)
-}
-
-function getProfileTypeLabel(profileType) {
-	if (profileType === 'server') return formatMessage(messages.serverProfileType)
-	if (profileType === 'synced') return formatMessage(messages.syncedProfileType)
-	return formatMessage(messages.clientProfileType)
-}
-
 const projectInstallContext = computed(() => {
 	const serverData = serverInstallContent.serverContextServerData.value
 	if (serverData) {
@@ -577,7 +516,6 @@ const projectInstallContext = computed(() => {
 			name: serverData.name,
 			loader: serverData.loader ?? '',
 			gameVersion: serverData.mc_version ?? '',
-			profileTypeLabel: formatMessage(messages.serverProfileType),
 			serverId: serverInstallContent.serverIdQuery.value,
 			upstream: serverData.upstream,
 			iconSrc: null,
@@ -601,8 +539,7 @@ const projectInstallContext = computed(() => {
 			name: instance.value.name,
 			loader: instance.value.loader,
 			gameVersion: instance.value.game_version,
-			profileTypeLabel: getProfileTypeLabel(instance.value.profile_type),
-			iconSrc: instance.value.icon_path ? convertFileSrc(instance.value.icon_path) : null,
+			iconSrc: getInstanceIconUrl(instance.value.icon_path),
 			backUrl: projectBrowseBackUrl.value,
 			backLabel: projectBackLabel.value,
 			heading: formatMessage(commonMessages.installingContentLabel),
@@ -677,7 +614,7 @@ const projectHeaderMoreActions = computed(() => [
 		label: formatMessage(commonMessages.followButton),
 		icon: HeartIcon,
 		disabled: true,
-		tooltip: 'Coming soon',
+		tooltip: formatMessage(messages.comingSoon),
 		action: () => {},
 	},
 	{
@@ -685,7 +622,7 @@ const projectHeaderMoreActions = computed(() => [
 		label: formatMessage(commonMessages.saveButton),
 		icon: BookmarkIcon,
 		disabled: true,
-		tooltip: 'Coming soon',
+		tooltip: formatMessage(messages.comingSoon),
 		action: () => {},
 	},
 	{
@@ -765,21 +702,6 @@ function reportProject() {
 }
 
 async function fetchProjectData() {
-	data.value = null
-	versions.value = []
-	members.value = []
-	categories.value = []
-	organization.value = null
-	instance.value = null
-	instanceProjects.value = null
-	installed.value = false
-	installedVersion.value = null
-	serverRequiredContent.value = null
-	serverRecommendedVersion.value = null
-	serverSupportedVersions.value = []
-	serverModpackLoaders.value = []
-	serverPing.value = undefined
-	serverStatusOnline.value = false
 	projectBreadcrumbLabel.value = getProjectBreadcrumbLabel(route.params.id)
 	const [project, projectV3Result] = await Promise.all([
 		get_project(route.params.id, 'must_revalidate').catch(handleError),
@@ -901,8 +823,7 @@ function fetchDeferredServerData(project) {
 
 await fetchProjectData()
 
-let unlistenProcesses
-process_listener((e) => {
+useAppEvent('process', (e) => {
 	if (
 		e.event === 'finished' &&
 		serverInstancePath.value &&
@@ -910,12 +831,6 @@ process_listener((e) => {
 	) {
 		serverPlaying.value = false
 	}
-}).then((unlisten) => {
-	unlistenProcesses = unlisten
-})
-
-onUnmounted(() => {
-	unlistenProcesses?.()
 })
 
 watch(
@@ -1192,5 +1107,4 @@ const handleOptionsClick = (args) => {
 .project-sidebar-section {
 	@apply p-4 flex flex-col gap-2 border-0 border-b-[1px] border-[--brand-gradient-border] border-solid;
 }
-
 </style>
