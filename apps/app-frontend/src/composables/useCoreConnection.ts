@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from '@amberite/amberite-api'
+import type { ConnectionStatus } from '@modrinth/api-client'
 import type { Ref } from 'vue'
 import { onBeforeUnmount, ref } from 'vue'
 

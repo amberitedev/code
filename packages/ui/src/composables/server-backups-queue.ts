@@ -1,95 +1,28 @@
-import type { CoreBackup, CoreBackupOperation } from '@amberite/amberite-api'
 import type { Archon } from '@modrinth/api-client'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, type Ref } from 'vue'
+import { computed, reactive, type Ref } from 'vue'
 
-import { type BusyReason, injectHostingBackend } from '#ui/providers'
+import { type BusyReason, injectModrinthClient } from '#ui/providers'
 
 import { defineMessage } from './i18n'
 
-type CoreBackupsQueueResponse = Archon.BackupsQueue.v1.BackupsQueueResponse
+type ProgressKey = `${string}:${'create' | 'restore'}`
 
-function toActiveOperation(
-	operation: CoreBackupOperation,
-	backup: CoreBackup | undefined,
-): Archon.BackupsQueue.v1.ActiveOperation {
-	return {
-		backup_id: operation.backup_id,
-		operation_type: operation.operation_type,
-		operation_id: null,
-		has_parent: false,
-		scheduled_for: backup?.created_at ?? new Date().toISOString(),
-		started_at: backup?.created_at ?? null,
-		synthetic_legacy: true,
-		user_info: null,
-	}
-}
-
-function toBackupQueueBackup(
-	backup: CoreBackup,
-	activeOperation: CoreBackupOperation | undefined,
-): Archon.BackupsQueue.v1.BackupQueueBackup {
-	const activeHistory = activeOperation
-		? [
-				{
-					operation_type: activeOperation.operation_type,
-					operation_id: null,
-					state: 'ongoing' as const,
-					scheduled_for: backup.created_at,
-					started_at: backup.created_at,
-					completed_at: null,
-					has_parent: false,
-					error: null,
-					should_prompt: false,
-					synthetic_legacy: true,
-					user_info: null,
-				},
-			]
-		: []
-
-	return {
-		id: backup.id,
-		name: backup.name,
-		created_at: backup.created_at,
-		status: backup.status === 'done' ? 'done' : 'in_progress',
-		locked: backup.locked,
-		automated: backup.automated,
-		history: activeHistory,
-	}
-}
-
-function toBackupsQueueResponse(response: {
-	backups: CoreBackup[]
-	active_operations: CoreBackupOperation[]
-}): CoreBackupsQueueResponse {
-	const backupById = new Map(response.backups.map((backup) => [backup.id, backup]))
-	const activeByBackupId = new Map(
-		response.active_operations.map((operation) => [operation.backup_id, operation]),
-	)
-
-	return {
-		active_operations: response.active_operations.map((operation) =>
-			toActiveOperation(operation, backupById.get(operation.backup_id)),
-		),
-		backups: response.backups.map((backup) =>
-			toBackupQueueBackup(backup, activeByBackupId.get(backup.id)),
-		),
-	}
-}
-
-export function useServerBackupsQueue(
-	serverId: Ref<string>,
-	_worldId: Ref<string | null>,
-) {
-	const backend = injectHostingBackend()
+export function useServerBackupsQueue(serverId: Ref<string>, worldId: Ref<string | null>) {
+	const client = injectModrinthClient()
 	const queryClient = useQueryClient()
-	const queryKey = computed(() => ['core-backups', 'queue', serverId.value] as const)
+
+	const queryKey = computed(() => ['backups', 'queue', serverId.value] as const)
+
+	const progressOverlay = reactive(new Map<ProgressKey, number>())
+	const lastSeenState = new Map<ProgressKey, Archon.Websocket.v0.BackupState>()
 
 	const query = useQuery({
 		queryKey,
-		queryFn: async () => toBackupsQueueResponse(await backend.core.listBackups(serverId.value)),
+		queryFn: () => client.archon.backups_queue_v1.list(serverId.value, worldId.value!),
+		enabled: computed(() => !!worldId.value),
 		refetchInterval: (q) => {
-			const data = q.state.data as CoreBackupsQueueResponse | undefined
+			const data = q.state.data as Archon.BackupsQueue.v1.BackupsQueueResponse | undefined
 			return data?.active_operations?.length ? 30_000 : false
 		},
 	})
@@ -114,30 +47,46 @@ export function useServerBackupsQueue(
 	})
 
 	const hasActiveCreate = computed(() =>
-		activeOperations.value.some((operation) => operation.operation_type === 'create'),
+		activeOperations.value.some((o) => o.operation_type === 'create' && !o.has_parent),
 	)
 	const hasActiveRestore = computed(() =>
-		activeOperations.value.some((operation) => operation.operation_type === 'restore'),
+		activeOperations.value.some((o) => o.operation_type === 'restore'),
 	)
 	const hasRunningCreate = computed(() =>
 		activeOperations.value.some(
-			(operation) =>
-				operation.operation_type === 'create' &&
-				backupById.value.get(operation.backup_id)?.status === 'in_progress',
+			(o) =>
+				o.operation_type === 'create' &&
+				!o.has_parent &&
+				backupById.value.get(o.backup_id)?.status === 'in_progress',
 		),
 	)
 	const hasRunningRestore = computed(() =>
 		activeOperations.value.some(
-			(operation) =>
-				operation.operation_type === 'restore' &&
-				backupById.value.get(operation.backup_id)?.status === 'in_progress',
+			(o) =>
+				o.operation_type === 'restore' &&
+				backupById.value.get(o.backup_id)?.status === 'in_progress',
 		),
 	)
 
-	function handleWsBackupProgress(_evt: Archon.Websocket.v0.WSBackupProgressEvent) {}
+	function handleWsBackupProgress(evt: Archon.Websocket.v0.WSBackupProgressEvent) {
+		if (evt.task === 'file') return
+		const key = `${evt.id}:${evt.task}` as ProgressKey
 
-	function progressFor(_backupId: string, _kind: 'create' | 'restore'): number | undefined {
-		return undefined
+		if (evt.state === 'ongoing') {
+			progressOverlay.set(key, evt.progress)
+		} else {
+			progressOverlay.delete(key)
+		}
+
+		const prev = lastSeenState.get(key)
+		if (prev !== evt.state) {
+			lastSeenState.set(key, evt.state)
+			queryClient.invalidateQueries({ queryKey: queryKey.value })
+		}
+	}
+
+	function progressFor(backupId: string, kind: 'create' | 'restore'): number | undefined {
+		return progressOverlay.get(`${backupId}:${kind}`)
 	}
 
 	const busyReasons = computed<BusyReason[]>(() => {

@@ -156,9 +156,7 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 	private async performRefresh(refreshToken?: string | null): Promise<AmberiteSession | null> {
 		if (!refreshToken && this.adapter.refreshAmberiteSession) {
 			try {
-				return await this.restorePlatformSession(
-					await refreshPlatformAmberiteSession(this.adapter),
-				)
+				return await this.restorePlatformSession(await refreshPlatformAmberiteSession(this.adapter))
 			} catch (error) {
 				if (isTerminalAuthError(error)) await this.clearLocalSession()
 				throw error
@@ -196,6 +194,7 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 		try {
 			const user = await this.currentUser()
 			if (!user) throw new AuthError('Amberite session did not resolve a user')
+			await this.adapter.setCurrentAmberiteUserId?.(user.userId)
 			return { tokens: validated, user }
 		} catch (error) {
 			if (previous) await this.storage.write(previous)
@@ -225,6 +224,7 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 					? await this.currentUser()
 					: normalizeAmberiteAccountUser(session.user)
 			if (!user) throw new AuthError('native product session did not resolve a user')
+			await this.adapter.setCurrentAmberiteUserId?.(user.userId)
 			return {
 				tokens: { token: session.accessToken, refreshToken: '' },
 				user,
@@ -240,7 +240,11 @@ export class ConvexAmberiteAuthClient implements AmberiteAuthClient {
 	}
 
 	private async clearLocalSession(): Promise<void> {
-		await Promise.allSettled([this.storage.clear(), this.adapter.setCurrentJwt?.(null)])
+		await Promise.allSettled([
+			this.storage.clear(),
+			this.adapter.setCurrentJwt?.(null),
+			this.adapter.setCurrentAmberiteUserId?.(null),
+		])
 	}
 }
 

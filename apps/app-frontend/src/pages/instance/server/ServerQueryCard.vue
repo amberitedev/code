@@ -50,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreServerQuery } from '@amberite/amberite-api'
+import type { CoreServerQuery } from '@modrinth/api-client'
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 

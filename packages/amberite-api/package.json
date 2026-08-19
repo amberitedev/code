@@ -10,9 +10,11 @@
 		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"test:watch": "vitest"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@modrinth/api-client": "workspace:*"
+	},
 	"devDependencies": {
 		"@modrinth/tooling-config": "workspace:*",
-		"vitest": "^3.2.0"
+		"vitest": "4.1.10"
 	}
 }

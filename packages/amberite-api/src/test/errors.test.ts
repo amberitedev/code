@@ -5,9 +5,6 @@ import {
 	AuthError,
 	ProviderAuthError,
 	ConvexError,
-	CoreOfflineError,
-	RelayTimeoutError,
-	CoreApiError,
 	authErrorFromNative,
 	authErrorFromResponse,
 	parseAuthFailurePayload,
@@ -124,49 +121,5 @@ describe('authErrorFromResponse', () => {
 			code: 'provider_unreachable',
 			recovery: 'preserve_and_retry',
 		})
-	})
-})
-
-describe('CoreOfflineError', () => {
-	it('is an instance of AmberiteApiError', () => {
-		expect(new CoreOfflineError() instanceof AmberiteApiError).toBe(true)
-	})
-
-	it('sets name correctly', () => {
-		expect(new CoreOfflineError().name).toBe('CoreOfflineError')
-	})
-
-	it('has fixed "Core is offline" message', () => {
-		expect(new CoreOfflineError().message).toBe('Core is offline')
-	})
-})
-
-describe('RelayTimeoutError', () => {
-	it('is an instance of AmberiteApiError', () => {
-		expect(new RelayTimeoutError() instanceof AmberiteApiError).toBe(true)
-	})
-
-	it('sets name correctly', () => {
-		expect(new RelayTimeoutError().name).toBe('RelayTimeoutError')
-	})
-})
-
-describe('CoreApiError', () => {
-	it('is an instance of AmberiteApiError', () => {
-		expect(new CoreApiError(404, 'not found') instanceof AmberiteApiError).toBe(true)
-	})
-
-	it('sets name correctly', () => {
-		expect(new CoreApiError(404, 'not found').name).toBe('CoreApiError')
-	})
-
-	it('exposes status and coreMessage', () => {
-		const err = new CoreApiError(422, 'invalid body')
-		expect(err.status).toBe(422)
-		expect(err.coreMessage).toBe('invalid body')
-	})
-
-	it('formats message as "Core API <status>: <coreMessage>"', () => {
-		expect(new CoreApiError(404, 'not found').message).toBe('Core API 404: not found')
 	})
 })

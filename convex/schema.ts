@@ -10,6 +10,26 @@ const friendRequestStatus = v.union(
 	v.literal('declined'),
 	v.literal('canceled'),
 )
+const socialNotificationStatus = v.union(
+	v.literal('unread'),
+	v.literal('read'),
+	v.literal('dismissed'),
+)
+const socialNotificationType = v.union(
+	v.literal('friend_request'),
+	v.literal('friend_request_accepted'),
+	v.literal('client_invite'),
+	v.literal('client_access_revoked'),
+	v.literal('client_update'),
+)
+const sharedClientInviteStatus = v.union(
+	v.literal('pending'),
+	v.literal('accepted'),
+	v.literal('declined'),
+	v.literal('revoked'),
+	v.literal('expired'),
+)
+const sharedClientJoinType = v.union(v.literal('owner'), v.literal('invite'), v.literal('link'))
 const groupInviteStatus = v.union(
 	v.literal('pending'),
 	v.literal('accepted'),
@@ -80,6 +100,7 @@ export default defineSchema({
 		),
 		favoriteModpackProjectIds: v.optional(v.array(v.string())),
 		showcaseAchievementIds: v.optional(v.array(v.string())),
+		allowFriendRequests: v.optional(v.boolean()),
 	})
 		.index('email', ['email'])
 		.index('by_amberite_user_id', ['amberiteUserId'])
@@ -169,6 +190,90 @@ export default defineSchema({
 	})
 		.index('by_blocker_blocked', ['blockerUserId', 'blockedUserId'])
 		.index('by_blocker', ['blockerUserId']),
+	socialNotifications: defineTable({
+		userId: v.id('users'),
+		type: socialNotificationType,
+		status: socialNotificationStatus,
+		actorUserId: v.optional(v.id('users')),
+		clientId: v.optional(v.id('sharedClients')),
+		friendRequestId: v.optional(v.id('friendRequests')),
+		dedupeKey: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index('by_user', ['userId'])
+		.index('by_user_status', ['userId', 'status'])
+		.index('by_user_dedupe_key', ['userId', 'dedupeKey']),
+	sharedClients: defineTable({
+		ownerUserId: v.id('users'),
+		name: v.string(),
+		iconStorageId: v.optional(v.id('_storage')),
+		currentVersion: v.optional(v.number()),
+		quarantinedAt: v.optional(v.number()),
+		deletedAt: v.optional(v.number()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index('by_owner', ['ownerUserId'])
+		.index('by_deleted', ['deletedAt']),
+	sharedClientMembers: defineTable({
+		clientId: v.id('sharedClients'),
+		userId: v.id('users'),
+		joinType: sharedClientJoinType,
+		joinedAt: v.number(),
+		lastPlayedAt: v.optional(v.number()),
+	})
+		.index('by_client_user', ['clientId', 'userId'])
+		.index('by_client', ['clientId'])
+		.index('by_user', ['userId']),
+	sharedClientInvites: defineTable({
+		clientId: v.id('sharedClients'),
+		createdByUserId: v.id('users'),
+		inviteeUserId: v.optional(v.id('users')),
+		status: sharedClientInviteStatus,
+		maxUses: v.number(),
+		uses: v.number(),
+		expiresAt: v.number(),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index('by_client_status', ['clientId', 'status'])
+		.index('by_invitee_client_status', ['inviteeUserId', 'clientId', 'status'])
+		.index('by_invitee_status', ['inviteeUserId', 'status'])
+		.index('by_expires_at', ['expiresAt']),
+	sharedClientVersions: defineTable({
+		clientId: v.id('sharedClients'),
+		version: v.number(),
+		createdByUserId: v.id('users'),
+		modrinthIds: v.array(v.string()),
+		externalFiles: v.array(
+			v.object({
+				fileName: v.string(),
+				fileType: v.string(),
+				size: v.number(),
+				sha1: v.optional(v.string()),
+				sha512: v.optional(v.string()),
+				uploadToken: v.string(),
+				storageId: v.optional(v.id('_storage')),
+			}),
+		),
+		modpackId: v.optional(v.string()),
+		gameVersion: v.string(),
+		loader: v.string(),
+		loaderVersion: v.optional(v.string()),
+		ready: v.boolean(),
+		createdAt: v.number(),
+	})
+		.index('by_client_version', ['clientId', 'version'])
+		.index('by_client', ['clientId']),
+	sharedClientUploads: defineTable({
+		versionId: v.id('sharedClientVersions'),
+		uploadToken: v.string(),
+		fileIndex: v.number(),
+		expiresAt: v.number(),
+	})
+		.index('by_upload_token', ['uploadToken'])
+		.index('by_expires_at', ['expiresAt']),
 	friendGroupBans: defineTable({
 		friendGroupId: v.string(),
 		userId: v.string(),

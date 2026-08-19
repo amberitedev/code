@@ -1,17 +1,6 @@
-<script lang="ts">
-import type { CoreActivityLogEntry as CachedCoreActivityLogEntry } from '@amberite/amberite-api'
-
-type ActivityCacheEntry = {
-	entries: CachedCoreActivityLogEntry[]
-	cursor: string | null
-}
-
-const activityCache = new Map<string, ActivityCacheEntry>()
-</script>
-
 <script setup lang="ts">
-import type { CoreActivityLogEntry, CoreActivityLogQuery } from '@amberite/amberite-api'
 import { formatActivityAction } from '@amberite/amberite-api'
+import type { CoreActivityLogEntry, CoreActivityLogQuery } from '@modrinth/api-client'
 import type {
 	EventEntity,
 	ServerAuditLogEntry,
@@ -23,6 +12,7 @@ import { AuditLogTable, DropdownFilterBar, UserAccessEvent } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { type Component, computed, ref, watch } from 'vue'
 
+import { coreActivityCache } from '@/components/core/core-panel-cache'
 import CoreActivityEvent from '@/components/core/CoreActivityEvent.vue'
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
@@ -48,7 +38,7 @@ const core = useCoreClient()
 const social = useSocial()
 const connectedCore = useConnectedCore()
 const activityCacheKey = computed(() => connectedCore.value?.coreId ?? 'core')
-const cachedActivity = activityCache.get(activityCacheKey.value)
+const cachedActivity = coreActivityCache.get(activityCacheKey.value)
 const activityCursor = ref<string | null>(cachedActivity?.cursor ?? null)
 const activityEntries = ref<CoreActivityLogEntry[]>(cachedActivity?.entries ?? [])
 const activityLoadingMore = ref(false)
@@ -88,9 +78,7 @@ const userLookup = computed(() => {
 	for (const friend of social.friends.value?.friends ?? []) addUserLookup(users, friend.user)
 	return users
 })
-const auditEntries = computed<ServerAuditLogEntry[]>(() =>
-	activityEntries.value.map(toAuditEntry),
-)
+const auditEntries = computed<ServerAuditLogEntry[]>(() => activityEntries.value.map(toAuditEntry))
 const activityLoading = computed(
 	() => activityQuery.isLoading.value && activityEntries.value.length === 0,
 )
@@ -164,7 +152,7 @@ async function loadMoreActivity() {
 }
 
 function applyCachedActivity() {
-	const cached = activityCache.get(activityCacheKey.value)
+	const cached = coreActivityCache.get(activityCacheKey.value)
 	activityEntries.value = cached?.entries ?? []
 	activityCursor.value = cached?.cursor ?? null
 }
@@ -174,7 +162,7 @@ function applyInitialActivityPage(
 	entries: CoreActivityLogEntry[],
 	cursor: string | null,
 ) {
-	const cached = activityCache.get(cacheKey)
+	const cached = coreActivityCache.get(cacheKey)
 	if (
 		cached &&
 		cached.entries.length > entries.length &&
@@ -193,9 +181,9 @@ function applyActivitySnapshot(
 	entries: CoreActivityLogEntry[],
 	cursor: string | null,
 ) {
-	const current = activityCache.get(cacheKey)
+	const current = coreActivityCache.get(cacheKey)
 	if (!current || current.cursor !== cursor || !sameSerialized(current.entries, entries)) {
-		activityCache.set(cacheKey, { entries, cursor })
+		coreActivityCache.set(cacheKey, { entries, cursor })
 	}
 	activityEntries.value = entries
 	activityCursor.value = cursor
@@ -307,7 +295,8 @@ function targetUserEntity(userId: string, metadata: Record<string, unknown>): Ev
 		label: username,
 		iconUrl: userLookup.value.get(userId)?.avatarUrl,
 		iconShape: 'circle',
-		to: username === userId ? undefined : `https://modrinth.com/user/${encodeURIComponent(username)}`,
+		to:
+			username === userId ? undefined : `https://modrinth.com/user/${encodeURIComponent(username)}`,
 	}
 }
 

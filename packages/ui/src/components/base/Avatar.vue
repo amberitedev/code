@@ -92,7 +92,8 @@ watch(
 	},
 )
 
-function onError() {
+function onError(e) {
+	console.log('Avatar image failed to load:', props.src, e)
 	failed.value = true
 }
 

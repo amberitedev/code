@@ -3,10 +3,10 @@ import type {
 	CoreEventStream,
 	CoreInstance,
 	CoreInstanceEvent,
-	CoreInstanceSummary,
 	CoreInstanceStatus,
-} from '@amberite/amberite-api'
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/vue-query'
+	CoreInstanceSummary,
+} from '@modrinth/api-client'
+import { type QueryClient, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { ComputedRef } from 'vue'
 import { computed, onMounted, onUnmounted } from 'vue'
 
@@ -96,21 +96,13 @@ export function useCoreInstances(): UseCoreInstancesReturn {
 		error,
 		refresh,
 		start: (pathOrId) =>
-			runStatusAction(queryClient, client, pathOrId, 'starting', (core) =>
-				core.start(pathOrId),
-			),
+			runStatusAction(queryClient, client, pathOrId, 'starting', (core) => core.start(pathOrId)),
 		stop: (pathOrId) =>
-			runStatusAction(queryClient, client, pathOrId, 'stopping', (core) =>
-				core.stop(pathOrId),
-			),
+			runStatusAction(queryClient, client, pathOrId, 'stopping', (core) => core.stop(pathOrId)),
 		restart: (pathOrId) =>
-			runStatusAction(queryClient, client, pathOrId, 'starting', (core) =>
-				core.restart(pathOrId),
-			),
+			runStatusAction(queryClient, client, pathOrId, 'starting', (core) => core.restart(pathOrId)),
 		kill: (pathOrId) =>
-			runStatusAction(queryClient, client, pathOrId, 'offline', (core) =>
-				core.kill(pathOrId),
-			),
+			runStatusAction(queryClient, client, pathOrId, 'offline', (core) => core.kill(pathOrId)),
 	}
 }
 
@@ -183,7 +175,9 @@ export function findCoreInstanceInCache(
 	pathOrId: string,
 ): CoreInstanceSummary | null {
 	const instances = queryClient.getQueryData<CoreInstanceSummary[]>(CORE_INSTANCES_QUERY_KEY) ?? []
-	return instances.find((instance) => instance.id === pathOrId || instance.path === pathOrId) ?? null
+	return (
+		instances.find((instance) => instance.id === pathOrId || instance.path === pathOrId) ?? null
+	)
 }
 
 async function refreshCoreInstances(
@@ -244,10 +238,7 @@ function closeCoreEventStream(): void {
 	openingStream = null
 }
 
-function applyCoreEvent(
-	queryClient: QueryClient,
-	event: CoreInstanceEvent,
-): void {
+function applyCoreEvent(queryClient: QueryClient, event: CoreInstanceEvent): void {
 	switch (event.type) {
 		case 'instance_created':
 		case 'instance_updated':
@@ -309,6 +300,7 @@ function persistCoreInstances(instances: CoreInstanceSummary[]): void {
 		}
 		localStorage.setItem(DISPLAY_CACHE_KEY, JSON.stringify(payload))
 	} catch {
+		// Display caching is best-effort.
 	}
 }
 

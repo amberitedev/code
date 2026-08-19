@@ -2,10 +2,9 @@ import {
 	type AmberiteSessionTokens,
 	authErrorFromNative,
 	type NativeAuthOperation,
-	type PersistentQueueStore,
 	type PlatformAdapter,
-	type QueuedMessage,
 } from '@amberite/amberite-api'
+import type { CoreClientAdapter } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -13,47 +12,15 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { config } from '@/config'
 import { getConnectedCore } from '@/core/connected-core'
 
-class LocalStorageQueueStore implements PersistentQueueStore {
-	async list(queueName: string): Promise<QueuedMessage[]> {
-		return this.read(queueName)
-	}
-
-	async push(queueName: string, message: QueuedMessage): Promise<void> {
-		this.write(queueName, [...this.read(queueName), message])
-	}
-
-	async remove(queueName: string, id: string): Promise<void> {
-		this.write(
-			queueName,
-			this.read(queueName).filter((message) => message.id !== id),
-		)
-	}
-
-	private read(queueName: string): QueuedMessage[] {
-		const raw = window.localStorage.getItem(this.key(queueName))
-		if (!raw) return []
-		try {
-			const parsed = JSON.parse(raw)
-			return Array.isArray(parsed) ? parsed : []
-		} catch {
-			return []
-		}
-	}
-
-	private write(queueName: string, messages: QueuedMessage[]): void {
-		window.localStorage.setItem(this.key(queueName), JSON.stringify(messages))
-	}
-
-	private key(queueName: string): string {
-		return `amberite-api:queue:${queueName}`
-	}
-}
-
-const queueStore = new LocalStorageQueueStore()
 let accessToken: string | null = null
+let amberiteUserId: string | null = null
 let developmentSession: AmberiteSessionTokens | null = null
 
-export function createDesktopAdapter(): PlatformAdapter {
+export function createDesktopCoreAdapter(): CoreClientAdapter & PlatformAdapter {
+	return createDesktopAdapter()
+}
+
+export function createDesktopAdapter(): CoreClientAdapter & PlatformAdapter {
 	const useBrowserFetchForConvex =
 		config.convexUrl.startsWith('http://localhost:') ||
 		config.convexUrl.startsWith('http://127.0.0.1:')
@@ -69,7 +36,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 	return {
 		fetchFn,
 		convexUrl: config.convexUrl,
-		queueStore,
+		convexSiteUrl: config.convexSiteUrl,
 		async getCoreUrl() {
 			return getConnectedCore()?.url ?? null
 		},
@@ -81,6 +48,11 @@ export function createDesktopAdapter(): PlatformAdapter {
 		},
 		async setCurrentJwt(token) {
 			accessToken = token
+			await syncNativeSharedClientsSession(token)
+		},
+		async setCurrentAmberiteUserId(userId) {
+			amberiteUserId = userId
+			await syncNativeSharedClientsSession(accessToken)
 		},
 		amberiteSessionStorage: {
 			async read() {
@@ -89,10 +61,13 @@ export function createDesktopAdapter(): PlatformAdapter {
 			async write(tokens) {
 				developmentSession = tokens
 				accessToken = tokens.token
+				await syncNativeSharedClientsSession(tokens.token)
 			},
 			async clear() {
 				developmentSession = null
 				accessToken = null
+				amberiteUserId = null
+				await syncNativeSharedClientsSession(null)
 			},
 		},
 		async signInWithMinecraft(request) {
@@ -106,6 +81,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 				'sign_in',
 			)
 			accessToken = session.accessToken
+			await syncNativeSharedClientsSession(session.accessToken)
 			return session
 		},
 		async restoreAmberiteSession() {
@@ -115,6 +91,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 				'restore',
 			)
 			accessToken = session?.accessToken ?? null
+			await syncNativeSharedClientsSession(accessToken)
 			return session
 		},
 		async refreshAmberiteSession() {
@@ -124,6 +101,7 @@ export function createDesktopAdapter(): PlatformAdapter {
 				'refresh',
 			)
 			accessToken = session?.accessToken ?? null
+			await syncNativeSharedClientsSession(accessToken)
 			return session
 		},
 		async signOutAmberiteSession() {
@@ -136,6 +114,8 @@ export function createDesktopAdapter(): PlatformAdapter {
 			} finally {
 				developmentSession = null
 				accessToken = null
+				amberiteUserId = null
+				await syncNativeSharedClientsSession(null)
 			}
 		},
 		async getLocalSetupSecret() {
@@ -147,6 +127,16 @@ export function createDesktopAdapter(): PlatformAdapter {
 			)
 		},
 	}
+}
+
+async function syncNativeSharedClientsSession(token: string | null): Promise<void> {
+	if (!config.convexSiteUrl)
+		throw new Error('VITE_CONVEX_SITE_URL must be configured for Amberite client sharing.')
+	await invoke('plugin:auth|set_amberite_shared_clients_session', {
+		convexSiteUrl: config.convexSiteUrl,
+		accessToken: token,
+		userId: amberiteUserId,
+	})
 }
 
 async function invokeNativeAuth<T>(

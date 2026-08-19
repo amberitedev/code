@@ -1,117 +1,149 @@
-# Amberite — Monorepo
+# Amberite
 
-## Claude instruction files
+Amberite is a self-hosted modded Minecraft launcher and server manager for private friend groups. A
+Rust server called Copal runs on a computer controlled by the group, and the desktop app is built on
+top of the Modrinth App.
 
-- Never read any `CLAUDE.md` file for any reason. Do not inspect, search inside, or load its contents.
+You can think of Amberite as Modrinth with private, self-hosted group servers built into it. Owners
+and Admins manage the server; everyone else installs, updates, and plays.
 
-An open-source project that lets users self-host a Rust-based Core server manager and control it through a desktop app forked from Modrinth.
+## What makes Amberite special?
 
-This repository is a fork of `modrinth/code`. A Git remote named `upstream` is already configured for that upstream repository and can be used when a task involves restoring or reverting code from upstream instead of from local `HEAD`.
+This project is very new and has not yet been deployed or tested anywhere, but there are some things we should never compromise on.
 
-## Current release stage
+### 1. Easy to use
 
-Amberite is in the final push toward its Version 1.0 release. Before doing product work, read these files together so implementation decisions match the intended product and current release state:
+Amberite makes everything feel simple and easy. The technical stuff is hidden behind advanced settings. If an average non-technical user can’t do something, it’s too complicated.
 
-- `PROJECT.md` — product definition and boundaries.
-- `feature-list.md` — canonical feature and release specification.
-- `TODO.md` — current Version 1.0 release blockers.
+### 2. Self-hosted Core
 
-do not modify `TODO.md` when finishing a task unless the user asks; you can only check off items in `TODO.md` if the user says that they are done.
+Copal/Core is Amberite’s self-hosted server manager. It is open source and free, runs on hardware controlled by the group, and fully replaces Modrinth Hosting.
 
----
+### 3. Modrinth handles public content
 
-## Repository context — read this first
+Modrinth handles public content (mods, modpacks, resource packs, etc.). Amberite uses that ecosystem and does not intend to replace it.
 
-read the corresponding `AGENTS.md` for the area you're working on
+### 4. The App builds on Modrinth
 
+The App keeps the full Modrinth experience. Users can continue using it as their main launcher (browsing content, managing instances, installing modpacks and mods, etc.), with Amberite’s features added on top.
 
-| Subproject     | AGENTS.md                         | Description                                                        |
-| -------------- | --------------------------------- | ------------------------------------------------------------------ |
-| `frontend`     | `apps/frontend/AGENTS.md`         | Modrinth website (Nuxt 3, upstream not yet modified)               |
-| `app-frontend` | `apps/app-frontend/AGENTS.md`     | Desktop app frontend (Vue 3, Modrinth fork)                        |
-| `app`          | `apps/app/AGENTS.md`              | Desktop app shell (Tauri)                                          |
-| `core`         | `apps/core/AGENTS.md`             | Copal server manager (Rust)                                        |
-| `amberite-api` | `packages/amberite-api/AGENTS.md` | Shared communication library for app, core, and Convex integration |
+Amberite ports Modrinth’s social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to Convex while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over.
 
+### 5. Minecraft-first identity
 
+A verified Minecraft account is the basis of your Amberite identity and is used to sign in. Modrinth accounts are linked only for Modrinth features.
 
+## A note from Ilai
 
-## Architecture
+I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
-- **Monorepo tooling:** Turborepo (`turbo.jsonc`) + pnpm workspaces (`pnpm-workspace.yaml`)
-- **Frontend:** Vue 3, Tailwind CSS v3
-- **App shell:** Tauri (Rust)
-- **Core:** Rust/Axum
-- **Indentation:** Tabs everywhere, never spaces
+Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to honor the dev's intent in both a minimal and realistic fashion.
 
-`.env` files are gitignored. Copy `.env.example` as template before running.
-`packages/app-lib/` needs its own `.env` — copy template before running the app.
+The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
----
+## Hit every surface
 
+The most common frontend defect is a change that works on the side that was tested and is missing
+somewhere else. Before calling frontend work done, check which of these apply:
 
+- **Permissions.** Shared and administrative features need an explicit permission. Add it to the
+  permission model, decide which roles receive it, enforce it outside the UI, and reflect it in the
+  UI. Ask the developer when the intended access is unclear.
+- **Both ends.** Check every side of a feature, not only the side you changed.
+- **API client.** Any communication between clients (app) and backends (core, convex) is typed in
+  `packages/api-client`.
+- **Reverse states.** If you added a way in, add the way out and the way to see it. A one-way door is
+  a bug.
+- **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the one
+  you changed. Check its consumers before treating it as local.
 
-## Dev commands
+## Dev servers
 
-Run from the repo root unless noted. Do not run build or dev commands unless explicitly asked. The `$implement` workflow is an exception: it may run the dev commands needed to implement and test its production slice, but must not run builds unless explicitly asked.
+- `vp i` installs dependencies. Worktrees get this from the `t3.json` setup script, which also copies
+  the primary checkout's `.data/`. If module resolution or development data looks broken, setup
+  probably did not run.
+- `vp run dev` starts Convex, one Core, and the App scenarios selected by `dev.json`. Pass scenario
+  numbers to run several isolated Apps against the same backends: `vp run dev 1 2 3`.
+- The primary checkout uses the cloud Convex development deployment. `vp run dev` watches and pushes
+  Convex changes there. Every linked worktree uses its own local Convex deployment and must never
+  push Convex changes to the cloud; this is determined by the checkout, not the branch name.
+- Worktree state lives in that worktree's gitignored `.data/`. Convex and Core are shared;
+  `scenarios/<number>/` is the complete persistent state of one App installation. Do not point a
+  worktree at another checkout's live state.
+- Ports derive from the worktree path and stay stable across restarts when available. Read the real
+  ports from the `[dev-runner]` output or `.data/runtime.json`, because occupied ports shift.
+- `vp run dev:app`, `vp run dev:core`, and `vp run dev:convex` start only that part of the
+  environment.
+- If you start a process, record its PID and stop exactly that process. Never kill by a broad process
+  name or path; several worktrees may be running at once.
 
-### Main dev servers
+Full command, state, Convex, and port behavior: `docs/internals/scripts.md`.
 
+## Test data
 
-| Command               | What it starts                                              |
-| --------------------- | ----------------------------------------------------------- |
-| `pnpm app:dev`        | Desktop app (Tauri + Vite on port **1420**)                 |
-| `pnpm app:dev:no-hmr` | Same, without HMR (`tauri.no-hmr.conf.json`)                |
-| `pnpm core:dev`       | Copal (`cargo run` in `apps/core/`, default port **16662**) |
-| `pnpm web:dev`        | Modrinth website (`apps/frontend/`)                         |
-| `pnpm docs:dev`       | Docs site (`apps/docs/`)                                    |
+An empty environment is a bad test. Worktrees get an isolated copy of the primary checkout's
+`.data/` instead of pointing at live state:
 
+- `.data/convex` and `.data/core` are shared by every App in the worktree.
+  `.data/scenarios/<number>` contains the complete local state of one App installation.
+- Run `vp run dev 1 2 3` to launch several Apps as different fake accounts against the same Convex and
+  Core. Each scenario keeps its own database, settings, Minecraft instances, credentials, and
+  WebView state.
+- Scenarios `1` through `4` are the default test set. A new positive number creates another isolated
+  App state and fake account when the task needs one.
+- Treat Convex, Core, and the App scenarios as one dataset. Copy them together when replacing the
+  baseline; do not create Core-only scenarios.
+- Stop the affected process before editing or copying SQLite state. A live file copy is not safe
+  unless its `-wal` and `-shm` files are copied with it.
+- Copy data into the worktree, never symlink it to another checkout. Test data flows into the
+  sandbox, never back out.
 
-Convex is standalone in `convex/`. Whenever code under `convex/` changes outside a worktree, push the update with `pnpm exec convex dev --once --tail-logs disable` before calling the task done. Never push or deploy Convex code from a worktree; follow the worktree development-state instructions below instead. Do not start long-running Convex watchers unless explicitly asked or running the `$implement` workflow.
+## Verifying
 
-### Worktree development state
+- Use the smallest proof that the change works: `vp test run <files>` for tests you touched, targeted
+  lint, and typecheck only for the workspace you changed.
+- **Do not run repo-wide checks.** No `vp check`, `vp run -r test`, or `vp run -r typecheck` unless
+  the developer asks. CI owns the full suite.
+- Do not add backend tests by default. Add them when the developer asks or when the behavior is
+  stable enough that a focused regression test is useful.
+- Upon request, user-visible App changes get one integrated pass against the real App and real
+  backends. Use the browser bridge to access the App for normal workflows, and its desktop window
+  only when behavior depends on Tauri or the native shell. The primary agent does this once after
+  integrating. Subagents do not start their own dev servers. Ask permission before computer use or
+  opening a browser.
 
-Use these commands during `$implement` and other explicitly authorized end-to-end testing:
+## Pull requests
 
-- When code under `convex/` changes, run the worktree-local Convex developer deployment so the changed backend executes during testing. Use `pnpm convex:dev:local -- accounts` for account/auth flows or `pnpm convex:dev:local -- group` for group/Core-linked flows. Keep it running through computer-use testing. Never push or deploy it from the worktree.
-- When `convex/` does not change, keep the existing deployment. Do not switch to local Convex merely because a feature calls the backend.
-- Preserve local Convex data while iterating. Reset only when a clean baseline is needed with `pnpm convex:dev:reset -- accounts` or `pnpm convex:dev:reset -- group`. Use `pnpm convex:dev:status` to inspect it and `pnpm convex:dev:stop` when it is no longer needed.
-- Use the `owner`, `friend`, and `other` accounts for distinct permissions and views. List running apps with `pnpm app:dev:list`, switch an app with `pnpm app:dev:account -- <app-id> <username>`, and focus it with `pnpm app:dev:focus -- <app-id>`. Start one with `pnpm app:dev -- <username>` only when the active workflow permits starting dev commands.
-- For Core state, run `pnpm core:setup -- list`, then `pnpm core:setup -- <name>` while the worktree's Core is running. Add an idempotent API-based setup only when repeatedly reaching the required state through the UI is impractical.
-- Use existing fixtures and mocks for isolated automated tests. The final computer-use pass must exercise the real production path implemented by the slice.
+- Never create or publish a pull request unless the developer explicitly asks.
+- Use conventional titles in plain language.
+- Keep one concern per pull request.
+- Start the body with the problem, then explain the solution and focused verification.
+- UI changes need before-and-after images. Motion or timing changes need a short video.
+- Do not include unrelated working-tree changes.
 
+## Where code lives
 
+- `apps/app-frontend` - Vue desktop product UI and inherited Modrinth launcher pages.
+- `apps/app` - Tauri shell, native commands, capabilities, and process integration.
+- `apps/core` - Copal, the Rust server manager.
+- `apps/frontend` - Website and inherited Modrinth web surface.
+- `convex` - durable Amberite identity, social, group, and cloud state.
+- `apps/realtime` - short-lived presence through Cloudflare Workers and Durable Objects.
+- `packages/ui` - shared Modrinth and Amberite UI.
+- `packages/api-client` - typed Modrinth API client.
+- `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly
+  asked.
+- `docs/internals` - architecture, glossary, and focused maintainer documentation.
 
-### Lint, test, build
+## Taste
 
+- Complexity belongs at the adapter boundary. Backend-facing workflows stay in
+  `@modrinth/api-client`; UI stays dumb.
+- Preserve upstream behavior until Amberite has a product reason to differ.
+- Inferred types over annotations. Never use TypeScript `any`; use `unknown` and narrow it safely.
+- Comments describe how a thing is used or why a constraint exists. Do not narrate ordinary code.
+- If a rule here fights the task, say so clearly and get developer approval before breaking it.
 
-| Command                   | Scope                           |
-| ------------------------- | ------------------------------- |
-| `pnpm prepr`              | Format/lint across the monorepo |
-| `pnpm prepr:frontend`     | Frontend + app-frontend only    |
-| `pnpm prepr:frontend:app` | App frontend only               |
-| `pnpm lint` / `pnpm fix`  | Turbo lint/fix                  |
-| `pnpm test`               | Turbo test                      |
-| `pnpm ci`                 | Lint + test                     |
-| `pnpm build`              | Turbo build (all packages)      |
-| `pnpm storybook`          | `@modrinth/ui` Storybook        |
+## Additional tips
 
-
-Pre-PR commands run from the root folder before opening a pull request. Do not run `prepr` commands after each user prompt. Only run them when asked. If the user indicates they are about to create a pull request, ask whether they want the relevant `prepr` command run.
-
-Core Rust checks run from `apps/core/` (isolated Cargo workspace): `cargo check`, `cargo test`, `cargo run -- check`.
-
-`@amberite/amberite-api` tests: `pnpm --filter @amberite/amberite-api test`.
-
----
-
-
-## General rules
-
-Notion plans are user-facing planning documents stored as Notion pages. Create them with the Notion connector, lead with the outcome and next action, keep them short, and place supporting detail in expandable sections.
-
-- Use `@` alias for `src/` in imports.
-- Named exports over default exports.
-- Required config env vars must error clearly if missing or invalid. No fallbacks.
-- Do not modify `packages/app-lib` unless explicitly asked.
-- Do not read plans in `.plan/` for orientation; only read a specific plan if the user explicitly asks.
+- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.

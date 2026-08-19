@@ -238,20 +238,17 @@
 </template>
 
 <script setup lang="ts">
-import type { Labrinth } from '@modrinth/api-client'
 import { BanIcon, DownloadIcon, ReportIcon, SendIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { Button } from '@modrinth/ui'
 import {
 	Admonition,
 	AutoLink,
 	Avatar,
-	blockedUsersQueryKey,
 	Checkbox,
 	Combobox,
 	type ComboboxOption,
 	commonMessages,
 	defineMessages,
-	injectAuth,
 	injectModrinthClient,
 	injectNotificationManager,
 	IntlFormatted,
@@ -263,16 +260,15 @@ import {
 	useScrollIndicator,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQueryClient } from '@tanstack/vue-query'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, nextTick, ref } from 'vue'
 
+import { useSocial } from '@/composables/useSocial'
 import { config } from '@/config'
 import { hide_ads_window, show_ads_window } from '@/helpers/ads'
 import { toError } from '@/helpers/errors'
 import type { SharedInstanceInstallPreview } from '@/helpers/install'
 import { create_report } from '@/helpers/reports'
-import { block_user } from '@/helpers/users'
 
 import SharedInstanceInstallSummary from './shared-instance-install-summary.vue'
 import { useSharedInstancePreviewContent } from './use-shared-instance-preview-content'
@@ -308,9 +304,8 @@ const emit = defineEmits<{
 	reported: [deleteInstance: boolean]
 }>()
 const { formatMessage } = useVIntl()
-const auth = injectAuth()
 const client = injectModrinthClient()
-const queryClient = useQueryClient()
+const social = useSocial()
 const { addNotification, handleError } = injectNotificationManager()
 const { load } = useSharedInstancePreviewContent()
 const {
@@ -378,20 +373,12 @@ async function submitReport() {
 				body,
 				uploaded_images: uploadedImages,
 			}),
-			blockTarget ? block_user(blockTarget) : Promise.resolve(),
+			blockTarget ? social.blockUser(blockTarget) : Promise.resolve(),
 		])
 
 		if (blockTarget) {
 			if (blockResult.status === 'fulfilled') {
 				blockUser.value = false
-				const authUserId = auth.user.value?.id
-				if (authUserId) {
-					queryClient.setQueryData<Labrinth.BlockedUsers.v3.BlockedUserId[]>(
-						blockedUsersQueryKey(authUserId),
-						(blockedUsers = []) =>
-							blockedUsers.includes(blockTarget) ? blockedUsers : [...blockedUsers, blockTarget],
-					)
-				}
 				addNotification({
 					type: 'success',
 					title: formatMessage(messages.userBlocked),

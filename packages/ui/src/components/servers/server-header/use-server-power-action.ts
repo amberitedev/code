@@ -3,7 +3,6 @@ import { computed, type Ref } from 'vue'
 import { useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import {
-	injectHostingBackend,
 	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
@@ -14,21 +13,12 @@ export type PowerAction = 'Start' | 'Stop' | 'Restart' | 'Kill'
 export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 	const { formatMessage } = useVIntl()
 	const client = injectModrinthClient()
-	const hostingBackend = injectHostingBackend(null)
-	const { serverId, server, powerState, isSyncingContent, busyReasons } =
-		injectModrinthServerContext()
+	const { serverId, powerState, busyReasons } = injectModrinthServerContext()
 	const { addNotification } = injectNotificationManager()
 	const { canUsePowerActions, permissionDeniedMessage } = useServerPermissions()
 
-	const isInstalling = computed(
-		() =>
-			server.value.status === 'installing' ||
-			isSyncingContent.value ||
-			busyReasons.value.some(
-				(r) =>
-					r.reason.id === 'servers.busy.installing' ||
-					r.reason.id === 'servers.busy.syncing-content',
-			),
+	const isInstalling = computed(() =>
+		busyReasons.value.some((reason) => reason.reason.id === 'servers.busy.installing'),
 	)
 	const isRunning = computed(() => powerState.value === 'running')
 	const isStopping = computed(() => powerState.value === 'stopping')
@@ -73,47 +63,10 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 		}
 	})
 
-	async function refreshCorePowerState() {
-		if (!hostingBackend) return
-		const instance = await hostingBackend.getServer(serverId)
-		powerState.value = instance.status === 'offline' ? 'stopped' : instance.status
-	}
-
 	async function sendPowerAction(action: PowerAction) {
-		const previousPowerState = powerState.value
-		let usedHostingBackend = false
-
 		try {
-			if (hostingBackend) {
-				usedHostingBackend = true
-				switch (action) {
-					case 'Start':
-						powerState.value = 'starting'
-						await hostingBackend.core.start(serverId)
-						await refreshCorePowerState()
-						return
-					case 'Stop':
-						powerState.value = 'stopping'
-						await hostingBackend.core.stop(serverId)
-						await refreshCorePowerState()
-						return
-					case 'Restart':
-						powerState.value = 'starting'
-						await hostingBackend.core.restart(serverId)
-						await refreshCorePowerState()
-						return
-					case 'Kill':
-						powerState.value = 'stopping'
-						await hostingBackend.core.kill(serverId)
-						await refreshCorePowerState()
-						return
-				}
-			}
 			await client.archon.servers_v0.power(serverId, action)
 		} catch (error) {
-			if (usedHostingBackend) {
-				powerState.value = previousPowerState
-			}
 			console.error(`Error performing ${action} on server:`, error)
 			addNotification({
 				type: 'error',

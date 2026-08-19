@@ -1,7 +1,8 @@
 <template>
 	<div
 		:class="[
-			'relative grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-start gap-x-2 rounded-2xl border border-solid p-4 text-contrast',
+			'relative grid grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-2 rounded-2xl border border-solid p-4 text-contrast',
+			centerContent ? 'items-center' : 'items-start',
 			progress != null ? 'overflow-hidden pb-5' : '',
 			typeClasses[type],
 		]"
@@ -13,7 +14,7 @@
 			class="col-start-2 min-w-0"
 			:class="
 				inlineActions && !showActionsUnderneath && $slots.actions
-					? 'flex flex-wrap items-start gap-x-4 gap-y-3'
+					? ['flex flex-wrap gap-x-4 gap-y-3', centerContent ? 'items-center' : 'items-start']
 					: 'flex flex-1 flex-col gap-2'
 			"
 		>
@@ -39,7 +40,7 @@
 						{{ relativeTimeLabel }}
 					</span>
 				</div>
-				<div class="font-normal text-contrast/85 leading-tight">
+				<div v-if="!!$slots.default || body" class="font-normal text-contrast/85 leading-tight">
 					<slot>{{ body }}</slot>
 				</div>
 			</div>
@@ -119,6 +120,7 @@ const props = withDefaults(
 		waiting?: boolean
 		/** Accepts a Date, an ISO string, or a millisecond Unix timestamp. */
 		timestamp?: Date | string | number
+		centerContent?: boolean
 	}>(),
 	{
 		type: 'info',
@@ -131,6 +133,7 @@ const props = withDefaults(
 		progressColor: undefined,
 		waiting: false,
 		timestamp: undefined,
+		centerContent: false,
 	},
 )
 
@@ -168,8 +171,8 @@ const timestampTooltip = computed(() => {
 
 const typeClasses = {
 	info: 'border-brand-blue bg-bg-blue',
-	warning: 'border-warning-text bg-warning-bg',
-	'circle-warning': 'border-warning-text bg-warning-bg',
+	warning: 'border-brand-orange bg-bg-orange',
+	'circle-warning': 'border-brand-orange bg-bg-orange',
 	critical: 'border-brand-red bg-bg-red',
 	success: 'border-brand-green bg-bg-green',
 	moderation: 'border-brand-orange bg-bg-orange',
@@ -178,8 +181,8 @@ const typeClasses = {
 
 const iconClasses = {
 	info: 'text-brand-blue',
-	warning: 'text-warning-text',
-	'circle-warning': 'text-warning-text',
+	warning: 'text-brand-orange',
+	'circle-warning': 'text-brand-orange',
 	critical: 'text-brand-red',
 	success: 'text-brand-green',
 	moderation: 'text-brand-orange',
@@ -198,8 +201,8 @@ const buttonColors = {
 
 const progressTrackClasses = {
 	info: 'bg-brand-blue/20',
-	warning: 'bg-warning-text/20',
-	'circle-warning': 'bg-warning-text/20',
+	warning: 'bg-brand-orange/20',
+	'circle-warning': 'bg-brand-orange/20',
 	critical: 'bg-brand-red/20',
 	success: 'bg-brand-green/20',
 	moderation: 'bg-brand-orange/20',
@@ -208,8 +211,8 @@ const progressTrackClasses = {
 
 const progressFillClasses = {
 	info: 'bg-brand-blue',
-	warning: 'bg-warning-text',
-	'circle-warning': 'bg-warning-text',
+	warning: 'bg-brand-orange',
+	'circle-warning': 'bg-brand-orange',
 	critical: 'bg-brand-red',
 	success: 'bg-brand-green',
 	blue: 'bg-brand-blue',

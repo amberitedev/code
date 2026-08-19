@@ -8,6 +8,7 @@
  * - Suspense handlers (1078) bridge route component loading into the shared loading state.
  * - RouterView template (2258) renders route content inside the app shell.
  */
+import { AmberiteModrinthCompatFeature } from '@amberite/amberite-api'
 import {
 	AuthFeature,
 	ModrinthApiError,
@@ -572,7 +573,7 @@ const tauriApiClient = new TauriModrinthClient({
 	userAgent: async () => `modrinth/theseus/${await appVersion} (support@modrinth.com)`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	archonBaseUrl: config.archonBaseUrl,
-	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
+	sharedInstancesBaseUrl: config.convexSiteUrl,
 	features: [
 		new NodeAuthFeature({
 			getAuth: () => nodeAuthState.getAuth?.() ?? null,
@@ -587,6 +588,12 @@ const tauriApiClient = new TauriModrinthClient({
 		}),
 		new PanelVersionFeature(),
 		new VerboseLoggingFeature(),
+		new AmberiteModrinthCompatFeature({
+			adapter: socialClient.adapter,
+			client: socialClient,
+			sharedClientsSiteUrl: config.convexSiteUrl,
+			social: false,
+		}),
 	],
 })
 provideModrinthClient(tauriApiClient)
@@ -609,9 +616,9 @@ useQuery({
 	retry: false,
 })
 useQuery({
-	queryKey: computed(() => ['shared-instance-eligibility', modrinthLink.user.value?.id]),
+	queryKey: computed(() => ['shared-instance-eligibility', amberiteAuth.user.value?.userId]),
 	queryFn: can_current_user_use_shared_instances,
-	enabled: () => !!modrinthLink.credentials.value?.session && !!modrinthLink.user.value?.id,
+	enabled: () => canUseAmberiteFeatures.value,
 	retry: false,
 	staleTime: Infinity,
 	refetchOnMount: false,
@@ -1778,9 +1785,13 @@ watch(incompatibilityWarningModal, (modal) => {
 const AMBERITE_DESTINATION_KEY = 'amberite:pending-destination'
 let amberiteDestinationResumePromise = null
 
-setupAuthProvider(amberiteAuth.user, async (redirectPath) => {
-	await signIn('continue', redirectPath)
-}, amberiteAuth.isReady)
+setupAuthProvider(
+	amberiteAuth.user,
+	async (redirectPath) => {
+		await signIn('continue', redirectPath)
+	},
+	amberiteAuth.isReady,
+)
 
 async function signIn(mode = 'continue', redirectPath = route.fullPath) {
 	try {
@@ -1832,22 +1843,19 @@ function isCloudOnlyRoute() {
 	return route.matched.some((record) => record.meta.requiresCloud)
 }
 
-watch(
-	[() => amberiteAuth.status.value, () => route.path],
-	([nextStatus], [previousStatus]) => {
-		if (previousStatus === 'offlineRetrying' && nextStatus === 'authenticated') {
-			addNotification({
-				title: 'Amberite connected',
-				text: 'Cloud features are available again.',
-				type: 'success',
-			})
-		}
-		if (nextStatus === 'authenticated') void resumeAmberiteDestination()
-		else if (isCloudOnlyRoute()) {
-			void router.replace('/library')
-		}
-	},
-)
+watch([() => amberiteAuth.status.value, () => route.path], ([nextStatus], [previousStatus]) => {
+	if (previousStatus === 'offlineRetrying' && nextStatus === 'authenticated') {
+		addNotification({
+			title: 'Amberite connected',
+			text: 'Cloud features are available again.',
+			type: 'success',
+		})
+	}
+	if (nextStatus === 'authenticated') void resumeAmberiteDestination()
+	else if (isCloudOnlyRoute()) {
+		void router.replace('/library')
+	}
+})
 
 function handleMinecraftAccountChange(hasAccounts) {
 	// Launcher account selection is independent from the signed-in Amberite identity.
@@ -2636,9 +2644,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</template>
 			<template v-else-if="amberiteAuth.status.value === 'reauthRequired'">
 				<h1 class="m-0 text-2xl font-semibold text-contrast">Your Amberite session expired</h1>
-				<p class="m-0 text-secondary">
-					Reconnect to Amberite to continue using this account.
-				</p>
+				<p class="m-0 text-secondary">Reconnect to Amberite to continue using this account.</p>
 				<ButtonStyled color="brand" class="w-full">
 					<button class="!w-full !justify-center" @click="signIn('continue')">
 						Continue with Minecraft
@@ -2692,10 +2698,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 						:disabled="amberiteAuth.signingIn.value"
 						@click="signIn('continue')"
 					>
-						<SpinnerIcon
-							v-if="amberiteAuth.signingIn.value"
-							class="absolute size-5 animate-spin"
-						/>
+						<SpinnerIcon v-if="amberiteAuth.signingIn.value" class="absolute size-5 animate-spin" />
 						<span :class="{ 'opacity-0': amberiteAuth.signingIn.value }">
 							Continue with Minecraft
 						</span>
@@ -2805,10 +2808,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<suspense>
 				<QuickInstanceSwitcher />
 			</suspense>
-			<NavButton
-				v-tooltip.right="'Create new instance'"
-				:to="() => installationModal?.show()"
-			>
+			<NavButton v-tooltip.right="'Create new instance'" :to="() => installationModal?.show()">
 				<PlusIcon />
 			</NavButton>
 			<div class="flex flex-grow"></div>
@@ -2955,9 +2955,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				></div>
 			</Admonition>
 			<Admonition
-				v-if="
-					amberiteAuth.isOffline.value && amberiteAuth.status.value !== 'connectionError'
-				"
+				v-if="amberiteAuth.isOffline.value && amberiteAuth.status.value !== 'connectionError'"
 				type="warning"
 				header="Amberite is offline"
 				class="m-6 mb-0"
@@ -2970,7 +2968,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				header="Amberite could not connect this identity"
 				class="m-6 mb-0"
 			>
-				Local Minecraft features remain available. Retry sign-in or open Help before using cloud features.
+				Local Minecraft features remain available. Retry sign-in or open Help before using cloud
+				features.
 			</Admonition>
 			<Admonition
 				v-if="authUnreachable"

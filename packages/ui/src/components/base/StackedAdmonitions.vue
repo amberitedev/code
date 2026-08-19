@@ -442,7 +442,7 @@ onBeforeUnmount(() => {
 
 const placeholderClasses: Record<StackedAdmonitionType, string> = {
 	info: 'border-brand-blue bg-bg-blue',
-	warning: 'border-warning-text bg-warning-bg',
+	warning: 'border-brand-orange bg-bg-orange',
 	critical: 'border-brand-red bg-bg-red',
 	success: 'border-brand-green bg-bg-green',
 }

@@ -88,11 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import type {
-	AmberiteAccessUiRole,
-	CoreActivityLogEntry,
-	CoreActivityLogQuery,
-} from '@amberite/amberite-api'
+import type { AmberiteAccessUiRole } from '@amberite/amberite-api'
 import {
 	amberiteAccessRoleOptions,
 	formatActivityAction,
@@ -100,6 +96,7 @@ import {
 	uiAccessRoleToCore,
 	uiAccessRoleToPreset,
 } from '@amberite/amberite-api'
+import type { CoreActivityLogEntry, CoreActivityLogQuery } from '@modrinth/api-client'
 import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
 import {
 	AccessTable,
@@ -107,8 +104,8 @@ import {
 	ButtonStyled,
 	Combobox,
 	GrantAccessModal,
-	injectNotificationManager,
 	type GrantServerAccessPayload,
+	injectNotificationManager,
 	RemoveAccessModal,
 	type ServerAccessInviteSuggestion,
 	type ServerAccessMember,

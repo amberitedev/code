@@ -38,22 +38,28 @@ const LEGACY_MOCK_USERNAMES = [
 
 const BASELINE_ACCOUNTS = [
 	{
-		username: 'owner',
+		username: 'scenario_1',
 		displayName: 'Owner',
 		friendCode: 'AMB-OWNER001',
 		minecraftUuid: '00000000-0000-4000-8000-000000000001',
 	},
 	{
-		username: 'friend',
-		displayName: 'Friend',
-		friendCode: 'AMB-FRIEND01',
+		username: 'scenario_2',
+		displayName: 'Admin',
+		friendCode: 'AMB-ADMIN001',
 		minecraftUuid: '00000000-0000-4000-8000-000000000002',
 	},
 	{
-		username: 'other',
-		displayName: 'Other',
-		friendCode: 'AMB-OTHER001',
+		username: 'scenario_3',
+		displayName: 'Member',
+		friendCode: 'AMB-MEMBER01',
 		minecraftUuid: '00000000-0000-4000-8000-000000000003',
+	},
+	{
+		username: 'scenario_4',
+		displayName: 'Invited',
+		friendCode: 'AMB-INVITE01',
+		minecraftUuid: '00000000-0000-4000-8000-000000000004',
 	},
 ] as const
 
@@ -95,6 +101,17 @@ export const ensureAccounts = mutation({
 	},
 })
 
+/** Ensure every App scenario has a deterministic fake Amberite account. */
+export const ensureScenarios = mutation({
+	args: { scenarios: v.array(v.number()) },
+	handler: async (ctx, args) => {
+		assertDev()
+		const scenarios = [...new Set(args.scenarios)]
+		for (const scenario of scenarios) assertScenario(scenario)
+		return await ensureDevAccounts(ctx, scenarios.map(accountForScenario))
+	},
+})
+
 /** Replace a local deployment with one of Amberite's two deterministic baselines. */
 export const applyBaseline = mutation({
 	args: { baseline: v.union(v.literal('accounts'), v.literal('group')) },
@@ -112,24 +129,43 @@ export const applyBaseline = mutation({
 		const friendGroupId = await ctx.db.insert('friendGroups', {
 			name: 'Development Group',
 			description: 'Disconnected group baseline',
-			ownerUserId: accounts.owner,
+			ownerUserId: accounts.scenario_1,
 			createdAt: now,
 			updatedAt: now,
 		})
 		await Promise.all([
 			ctx.db.insert('friendGroupMembers', {
 				friendGroupId: friendGroupId.toString(),
-				userId: accounts.owner,
+				userId: accounts.scenario_1,
 				role: 'owner',
+				permissionPreset: 'owner',
 				createdAt: now,
 				updatedAt: now,
 			}),
 			ctx.db.insert('friendGroupMembers', {
 				friendGroupId: friendGroupId.toString(),
-				userId: accounts.friend,
-				role: 'member',
+				userId: accounts.scenario_2,
+				role: 'admin',
+				permissionPreset: 'admin',
 				createdAt: now,
 				updatedAt: now,
+			}),
+			ctx.db.insert('friendGroupMembers', {
+				friendGroupId: friendGroupId.toString(),
+				userId: accounts.scenario_3,
+				role: 'member',
+				permissionPreset: 'member',
+				createdAt: now,
+				updatedAt: now,
+			}),
+			ctx.db.insert('friendGroupInvites', {
+				friendGroupId: friendGroupId.toString(),
+				inviterUserId: accounts.scenario_1,
+				inviteeUserId: accounts.scenario_4,
+				role: 'member',
+				status: 'pending',
+				createdAt: now,
+				expiresAt: now + 7 * 24 * 60 * 60 * 1000,
 			}),
 		])
 		return { baseline: args.baseline, accounts, friendGroupId }
@@ -137,12 +173,19 @@ export const applyBaseline = mutation({
 })
 
 async function ensureBaselineAccounts(ctx: MutationCtx) {
-	const accountIds: Record<(typeof BASELINE_ACCOUNTS)[number]['username'], string> = {
-		owner: '',
-		friend: '',
-		other: '',
-	}
-	for (const account of BASELINE_ACCOUNTS) {
+	return await ensureDevAccounts(ctx, BASELINE_ACCOUNTS)
+}
+
+type DevAccount = {
+	readonly displayName: string
+	readonly friendCode: string
+	readonly minecraftUuid: string
+	readonly username: string
+}
+
+async function ensureDevAccounts(ctx: MutationCtx, accounts: ReadonlyArray<DevAccount>) {
+	const accountIds: Record<string, string> = {}
+	for (const account of accounts) {
 		const existing = await ctx.db
 			.query('users')
 			.withIndex('by_normalized_username', (q) => q.eq('normalizedUsername', account.username))
@@ -176,6 +219,24 @@ async function ensureBaselineAccounts(ctx: MutationCtx) {
 		accountIds[account.username] = userId.toString()
 	}
 	return accountIds
+}
+
+function accountForScenario(scenario: number): DevAccount {
+	const baseline = BASELINE_ACCOUNTS.find((account) => account.username === `scenario_${scenario}`)
+	if (baseline) return baseline
+	const suffix = String(scenario).padStart(12, '0')
+	return {
+		username: `scenario_${scenario}`,
+		displayName: `Scenario ${scenario}`,
+		friendCode: `AMB-DEV-${scenario}`,
+		minecraftUuid: `00000000-0000-4000-8000-${suffix}`,
+	}
+}
+
+function assertScenario(scenario: number): void {
+	if (!Number.isSafeInteger(scenario) || scenario < 1 || scenario > 999_999_999_999) {
+		throw new Error('scenario must be a positive whole number')
+	}
 }
 
 /** Full snapshot of social state — handy for inspecting flows from DevTools. */
@@ -444,9 +505,7 @@ export const repairLegacyMinecraftIdentity = internalMutation({
 		}
 
 		const hasUnsupportedReference =
-			bans.some(
-				(ban) => duplicateIds.has(ban.userId) || duplicateIds.has(ban.bannedByUserId),
-			) ||
+			bans.some((ban) => duplicateIds.has(ban.userId) || duplicateIds.has(ban.bannedByUserId)) ||
 			groups.some((group) => duplicateIds.has(group.ownerUserId)) ||
 			pairingCores.some(
 				(pairing) => pairing.ownerUserId !== undefined && duplicateIds.has(pairing.ownerUserId),
@@ -462,8 +521,7 @@ export const repairLegacyMinecraftIdentity = internalMutation({
 			profileSnapshots.some((snapshot) => duplicateIds.has(snapshot.authorUserId)) ||
 			modSyncEvents.some((event) => duplicateIds.has(event.authorUserId)) ||
 			messages.some(
-				(message) =>
-					duplicateIds.has(message.senderId) || duplicateIds.has(message.recipientId),
+				(message) => duplicateIds.has(message.senderId) || duplicateIds.has(message.recipientId),
 			) ||
 			receipts.some((receipt) => duplicateIds.has(receipt.recipientId))
 		if (hasUnsupportedReference)
@@ -514,9 +572,7 @@ export const repairLegacyMinecraftIdentity = internalMutation({
 			for (const account of authAccounts) await ctx.db.delete(account._id)
 			const duplicateLinks = await ctx.db
 				.query('linkedMicrosoftAccounts')
-				.withIndex('by_amberite_user', (q) =>
-					q.eq('amberiteUserId', duplicateUser.amberiteUserId!),
-				)
+				.withIndex('by_amberite_user', (q) => q.eq('amberiteUserId', duplicateUser.amberiteUserId!))
 				.collect()
 			for (const link of duplicateLinks) await ctx.db.delete(link._id)
 			await ctx.db.patch(duplicateUser._id, {

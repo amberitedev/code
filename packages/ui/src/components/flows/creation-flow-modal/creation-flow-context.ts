@@ -1,11 +1,3 @@
-/**
- * Creation flow state shared by world, server, and app instance setup modals.
- * - createCreationFlowContext (249) wires stage state, initial values, and platform callbacks.
- * - autoInstanceName (313) derives a unique instance name from selected loader/version and known names.
- * - fetchLoaderMetadata/prefetchLoaderMetadata (416/429) cache loader and server-version metadata.
- * - reset (458) clears form state and refreshes duplicate-name data without blocking modal display.
- * - finish/buildProperties (540/555) emit creation config and assemble world property fields.
- */
 import type { Archon, LauncherMeta } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type ComputedRef, type Ref, ref, type ShallowRef, watch } from 'vue'
@@ -288,7 +280,6 @@ export function createCreationFlowContext(
 	const instanceName = ref('')
 	const existingInstanceNames = ref<string[]>([])
 	const fetchExistingInstanceNames = options.fetchExistingInstanceNames ?? null
-	let existingInstanceNamesRequest = 0
 	const instanceIcon = ref<File | null>(null)
 	const instanceIconUrl = ref<string | null>(null)
 	const instanceIconPath = ref<string | null>(null)
@@ -433,29 +424,10 @@ export function createCreationFlowContext(
 		)
 	}
 
-	function refreshExistingInstanceNames() {
-		const request = ++existingInstanceNamesRequest
-		if (!fetchExistingInstanceNames) {
-			existingInstanceNames.value = []
-			return
+	async function reset() {
+		if (fetchExistingInstanceNames) {
+			existingInstanceNames.value = await fetchExistingInstanceNames()
 		}
-
-		void fetchExistingInstanceNames()
-			.then((names) => {
-				if (request === existingInstanceNamesRequest) {
-					existingInstanceNames.value = names
-				}
-			})
-			.catch((error) => {
-				if (request === existingInstanceNamesRequest) {
-					existingInstanceNames.value = []
-				}
-				debug('fetchExistingInstanceNames: failed', error)
-			})
-	}
-
-	function reset(): Promise<void> {
-		existingInstanceNames.value = []
 		setupType.value = null
 		isImportMode.value = false
 		worldCounter++
@@ -497,8 +469,6 @@ export function createCreationFlowContext(
 		loading.value = false
 		isBackingUp.value = false
 		cancelBackup.value = null
-		refreshExistingInstanceNames()
-		return Promise.resolve()
 	}
 
 	function setSetupType(type: SetupType) {

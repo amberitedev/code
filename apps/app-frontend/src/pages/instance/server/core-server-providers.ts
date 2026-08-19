@@ -1,5 +1,10 @@
-import type { CoreChangeVersionBody, CoreInstance, CoreStats } from '@amberite/amberite-api'
-import type { Archon, UploadState } from '@modrinth/api-client'
+import type {
+	Archon,
+	CoreChangeVersionBody,
+	CoreInstance,
+	CoreStats,
+	UploadState,
+} from '@modrinth/api-client'
 import type { LogLine, SharedCoreServerContext } from '@modrinth/ui'
 import {
 	provideModrinthServerContext,

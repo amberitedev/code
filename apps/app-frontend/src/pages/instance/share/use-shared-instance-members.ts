@@ -2,7 +2,7 @@ import type { InvitePlayersUser } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref } from 'vue'
 
-import { get_user_many } from '@/helpers/cache.js'
+import { useSocialClient } from '@/composables/useSocialClient'
 import {
 	get_shared_instance_users,
 	invite_shared_instance_users,
@@ -49,6 +49,7 @@ export function useSharedInstanceMembers(options: {
 	onError: (error: unknown) => void
 }) {
 	const queryClient = useQueryClient()
+	const socialClient = useSocialClient()
 	const queryKey = computed(() => instanceKeys.sharedMembers(options.instance.value.id))
 	const invitingUserIds = new Set<string>()
 	const removingUserIds = new Set<string>()
@@ -109,19 +110,17 @@ export function useSharedInstanceMembers(options: {
 		const usersToDisplay = userEntries(users).filter((user) => !excludedIds.has(user.id))
 		if (usersToDisplay.length === 0) return []
 
-		const profiles = (await get_user_many(usersToDisplay.map((user) => user.id))) as Array<{
-			id: string
-			username?: string
-			avatar_url?: string | null
-		}>
+		const profiles = await Promise.all(
+			usersToDisplay.map(async (user) => await socialClient.getProfile(user.id)),
+		)
 
 		return usersToDisplay.map((user) => {
-			const profile = profiles.find((candidate) => candidate.id === user.id)
+			const profile = profiles.find((candidate) => candidate?.userId === user.id)
 			const joinedAt = parseDate(user.joined_at)
 			return {
 				id: user.id,
-				username: profile?.username ?? user.id,
-				avatarUrl: profile?.avatar_url ?? undefined,
+				username: profile?.username ?? profile?.displayName ?? user.id,
+				avatarUrl: profile?.image ?? undefined,
 				lastPlayedAt: parseDate(user.last_played),
 				joinedAt,
 				method: user.join_type === 'link' ? 'link' : 'direct',

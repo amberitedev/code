@@ -56,7 +56,11 @@ async function verifyMinecraftAccessToken(token: string): Promise<MinecraftProfi
 			'return_to_provider',
 		)
 	if (response.status === 429)
-		throw authFailure('throttled', 'Minecraft sign-in is temporarily throttled', 'return_to_provider')
+		throw authFailure(
+			'throttled',
+			'Minecraft sign-in is temporarily throttled',
+			'return_to_provider',
+		)
 	if (response.status === 401 || response.status === 403)
 		throw authFailure(
 			'provider_failure',
@@ -276,9 +280,7 @@ export const repairMinecraftProviderAccount = internalMutation({
 		const accounts = await ctx.db
 			.query('authAccounts')
 			.withIndex('providerAndAccountId', (q) =>
-				q
-					.eq('provider', MINECRAFT_TOKEN_PROVIDER_ID)
-					.eq('providerAccountId', args.accountId),
+				q.eq('provider', MINECRAFT_TOKEN_PROVIDER_ID).eq('providerAccountId', args.accountId),
 			)
 			.take(2)
 		if (accounts.some((account) => account.userId !== args.userId))
@@ -361,14 +363,15 @@ export const synchronizeMinecraftIdentity = internalMutation({
 			...(syncDisplayName ? { displayName: handle, name: handle } : {}),
 		})
 
-		const links = (await ctx.db
-			.query('linkedMicrosoftAccounts')
-			.withIndex('by_amberite_user', (q) => q.eq('amberiteUserId', args.amberiteUserId))
-			.collect()).filter(
-				(link) =>
-					link.minecraftUuid === minecraftUuid ||
-					link.microsoftAccountId.startsWith('minecraft:'),
-			)
+		const links = (
+			await ctx.db
+				.query('linkedMicrosoftAccounts')
+				.withIndex('by_amberite_user', (q) => q.eq('amberiteUserId', args.amberiteUserId))
+				.collect()
+		).filter(
+			(link) =>
+				link.minecraftUuid === minecraftUuid || link.microsoftAccountId.startsWith('minecraft:'),
+		)
 		const [canonicalLink, ...duplicateLinks] = links
 		for (const duplicate of duplicateLinks) await ctx.db.delete(duplicate._id)
 		const value = {
@@ -412,6 +415,25 @@ export const deleteCurrentAccount = mutation({
 		const userId = await requireUserId(ctx)
 		const user = await ctx.db.get(userId)
 		if (!user) throw new Error('user not found')
+		const [ownedGroup, ownedCore, ownedSharedClient] = await Promise.all([
+			ctx.db
+				.query('friendGroups')
+				.withIndex('by_owner', (q) => q.eq('ownerUserId', userId))
+				.first(),
+			ctx.db
+				.query('coreList')
+				.withIndex('by_owner', (q) => q.eq('ownerUserId', userId))
+				.first(),
+			ctx.db
+				.query('sharedClients')
+				.withIndex('by_owner', (q) => q.eq('ownerUserId', userId))
+				.first(),
+		])
+		// TODO: Define ownership transfer and paid-Core cancellation before account deletion is allowed.
+		if (ownedGroup || ownedCore || ownedSharedClient)
+			throw new Error(
+				'transfer owned groups, Cores, and shared clients before deleting your account',
+			)
 		const sessions = await ctx.db
 			.query('authSessions')
 			.withIndex('userId', (q) => q.eq('userId', userId))

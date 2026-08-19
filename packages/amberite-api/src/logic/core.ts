@@ -1,12 +1,12 @@
-import type { CoreApiClient } from '../client'
 import type {
+	CoreApiClient,
 	CoreCreateInstanceBody,
 	CoreInstance,
 	CoreInstanceSummary,
 	CoreMemory,
 	CoreModLoader,
 	CoreModpackManifest,
-} from '../types'
+} from '@modrinth/api-client'
 
 export interface CoreProvisionProfile {
 	name: string

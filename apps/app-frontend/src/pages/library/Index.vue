@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import {
-	type CoreInstanceSummary,
-	CoreOfflineError,
 	type InstallableSyncedProfile,
 	installSyncedProfileFromCore,
 	NetworkError,
 	resolveInstallableSyncedProfiles,
 } from '@amberite/amberite-api'
+import { type CoreInstanceSummary, CoreNetworkError, CoreOfflineError } from '@modrinth/api-client'
 import { PlusIcon } from '@modrinth/assets'
 import { ButtonStyled, injectNotificationManager, NavTabs } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -287,8 +286,7 @@ const activeLibraryInstallableInstances = computed(() => {
 
 const hasLibraryContent = computed(
 	() =>
-		activeLibraryInstances.value.length > 0 ||
-		activeLibraryInstallableInstances.value.length > 0,
+		activeLibraryInstances.value.length > 0 || activeLibraryInstallableInstances.value.length > 0,
 )
 const initialPending = computed(
 	() =>
@@ -352,7 +350,11 @@ async function installSharedInstance(profile: InstallableSyncedProfile): Promise
 			type: 'success',
 		})
 	} catch (error) {
-		if (error instanceof CoreOfflineError || error instanceof NetworkError) {
+		if (
+			error instanceof CoreOfflineError ||
+			error instanceof CoreNetworkError ||
+			error instanceof NetworkError
+		) {
 			addNotification({
 				title: 'Core unavailable',
 				text: 'Connect to Core to install this shared instance.',

@@ -1,15 +1,57 @@
 <template>
 	<Transition name="fade" mode="out-in">
-		<div v-if="error" key="error" class="rounded-2xl bg-red-highlight p-4 font-semibold text-contrast">
-			Failed to load backups: {{ error.message }}
+		<div
+			v-if="error"
+			key="error"
+			class="flex w-full flex-col items-center justify-center gap-4 p-4"
+		>
+			<div class="flex max-w-lg flex-col items-center rounded-3xl bg-bg-raised p-6 shadow-xl">
+				<div class="flex flex-col items-center text-center">
+					<div class="flex flex-col items-center gap-4">
+						<div class="grid place-content-center rounded-full bg-bg-orange p-4">
+							<IssuesIcon class="size-12 text-orange" />
+						</div>
+						<h1 class="m-0 mb-2 w-fit text-4xl font-bold">Failed to load backups</h1>
+					</div>
+					<p class="text-lg text-secondary">
+						We couldn't load your server's backups. Here's what went wrong:
+					</p>
+					<p>
+						<span class="break-all font-mono">{{ error.message }}</span>
+					</p>
+					<Button type="colored" color="brand" size="xl" class="mt-6 !w-full" @click="refetch"
+						>Retry</Button
+					>
+				</div>
+			</div>
 		</div>
 
 		<div v-else key="content" class="contents">
 			<ReadyTransition :pending="backupsReadyPending">
-				<BackupCreateModal ref="createModal" :backups="backupItems" />
-				<BackupRenameModal ref="renameModal" :backups="backupItems" />
-				<BackupRestoreModal ref="restoreModal" :can-restore="!backupRestoreDisabled" />
-				<BackupDeleteModal ref="deleteModal" @delete="deleteBackup" @bulk-delete="bulkDelete" />
+				<BackupCreateModal
+					ref="createBackupModal"
+					:backups="completedBackups"
+					:can-create="canManageBackups"
+					:permission-denied-message="permissionDeniedMessage"
+				/>
+				<BackupRenameModal
+					ref="renameBackupModal"
+					:backups="completedBackups"
+					:can-rename="canManageBackups"
+					:permission-denied-message="permissionDeniedMessage"
+				/>
+				<BackupRestoreModal
+					ref="restoreBackupModal"
+					:can-restore="canManageBackups"
+					:permission-denied-message="permissionDeniedMessage"
+				/>
+				<BackupDeleteModal
+					ref="deleteBackupModal"
+					:can-delete="canManageBackups"
+					:permission-denied-message="permissionDeniedMessage"
+					@delete="deleteBackup"
+					@bulk-delete="bulkDelete"
+				/>
 
 				<div
 					v-if="completedBackups.length"
@@ -19,22 +61,26 @@
 						<Checkbox
 							:model-value="allSelected"
 							:indeterminate="someSelected"
-							label="Select all"
+							:label="formatMessage(messages.selectAll)"
 							class="shrink-0"
 							label-class="text-secondary font-semibold"
 							@update:model-value="toggleSelectAll"
 						/>
 						<div class="hidden h-6 w-px bg-surface-5 sm:block" />
 						<FilterPills v-model="selectedFilters" :options="filterPillOptions">
-							<template #all>All</template>
+							<template #all>{{ formatMessage(commonMessages.allProjectType) }}</template>
 						</FilterPills>
 					</div>
-					<ButtonStyled color="brand">
-						<button @click="createModal?.show()">
-							<PlusIcon class="size-5" />
-							Create backup
-						</button>
-					</ButtonStyled>
+					<Button
+						v-tooltip="backupCreationDisabled"
+						type="colored"
+						color="brand"
+						:disabled="!!backupCreationDisabled"
+						@click="showCreateModel"
+					>
+						<PlusIcon class="size-5" />
+						{{ formatMessage(messages.createBackup) }}
+					</Button>
 				</div>
 
 				<div class="flex w-full flex-col gap-1.5">
@@ -45,28 +91,33 @@
 						<EmptyState
 							v-if="completedBackups.length === 0"
 							type="empty-inbox"
-							heading="No backups yet"
-							description="Create a backup before changing server files or content."
+							:heading="formatMessage(messages.emptyHeading)"
+							:description="formatMessage(messages.emptyDescription)"
 						>
 							<template #actions>
-								<ButtonStyled color="brand">
-									<button class="mx-auto w-min" @click="createModal?.show()">
-										<PlusIcon class="size-5" />
-										Create backup
-									</button>
-								</ButtonStyled>
+								<Button
+									v-tooltip="backupCreationDisabled"
+									type="colored"
+									color="brand"
+									:disabled="!!backupCreationDisabled"
+									class="mx-auto w-min"
+									@click="showCreateModel"
+								>
+									<PlusIcon class="size-5" />
+									{{ formatMessage(messages.createBackup) }}
+								</Button>
 							</template>
 						</EmptyState>
 						<EmptyState
 							v-else
 							type="empty-inbox"
-							heading="No backups match"
-							description="Try a different filter or clear filters to see all backups."
+							:heading="formatMessage(messages.filteredEmptyHeading)"
+							:description="formatMessage(messages.filteredEmptyDescription)"
 						>
 							<template #actions>
-								<ButtonStyled type="outlined">
-									<button @click="selectedFilters = []">Clear filters</button>
-								</ButtonStyled>
+								<Button type="outlined" @click="clearBackupFilters">
+									{{ formatMessage(messages.clearFilters) }}
+								</Button>
 							</template>
 						</EmptyState>
 					</div>
@@ -75,7 +126,7 @@
 						<template v-for="group in groupedBackups" :key="group.label">
 							<div class="flex items-center gap-2">
 								<div class="flex w-5 shrink-0 items-center justify-center">
-									<CalendarIcon class="size-5" />
+									<component :is="group.icon" v-if="group.icon" class="size-5" />
 								</div>
 								<span class="text-lg font-semibold leading-5 text-contrast">{{ group.label }}</span>
 							</div>
@@ -85,6 +136,7 @@
 									v-for="(backup, backupIndex) in group.backups"
 									:key="`backup-${backup.id}`"
 									class="flex gap-2"
+									:data-backup-id="backup.id"
 								>
 									<div class="flex w-5 flex-col items-center">
 										<div
@@ -93,7 +145,7 @@
 										/>
 										<Checkbox
 											:model-value="selectedIds.has(backup.id)"
-											:description="`Select backup ${backup.name}`"
+											:description="formatMessage(messages.selectBackupAria, { name: backup.name })"
 											class="shrink-0"
 											@update:model-value="toggleSelection(backup.id)"
 										/>
@@ -102,14 +154,23 @@
 									<BackupItem
 										class="my-1.5 min-w-0 flex-1"
 										:backup="backup"
+										:creator="backupCreator(backup)"
 										:selected="selectedIds.has(backup.id)"
-										:restore-disabled="backupRestoreDisabledMessage"
-										:show-copy-id-action="props.showCopyIdAction"
-										:show-debug-info="props.showDebugInfo"
+										:highlighted="highlightedBackupId === backup.id"
+										:restore-disabled="backupRestoreDisabled"
+										:write-disabled="!canManageBackups"
+										:write-disabled-tooltip="permissionDeniedMessage"
+										:kyros-url="server.node?.instance"
+										:jwt="server.node?.token"
+										:show-copy-id-action="showCopyIdAction"
+										:show-debug-info="showDebugInfo"
 										@download="() => triggerDownloadAnimation()"
-										@rename="() => renameModal?.show(backup)"
-										@restore="() => showRestoreModal(backup)"
-										@delete="() => deleteModal?.show(backup)"
+										@rename="() => showRenameBackupModal(backup)"
+										@restore="() => showRestoreBackupModal(backup)"
+										@delete="
+											(skipConfirmation?: boolean) =>
+												skipConfirmation ? deleteBackup(backup) : showDeleteBackupModal(backup)
+										"
 									/>
 								</div>
 							</TransitionGroup>
@@ -120,38 +181,50 @@
 				<FloatingActionBar
 					below-modal
 					:shown="selectedIds.size > 0 || isBulkOperating"
-					:aria-label="`${isBulkOperating ? bulkTotal : selectedIds.size} backups selected`"
+					:aria-label="
+						formatMessage(messages.bulkBarAriaLabel, {
+							count: isBulkOperating ? bulkTotal : selectedIds.size,
+						})
+					"
 				>
 					<div class="flex items-center gap-0.5">
 						<span class="px-4 py-2.5 text-base font-semibold tabular-nums text-contrast">
-							{{ isBulkOperating ? bulkTotal : selectedIds.size }}
-							{{ (isBulkOperating ? bulkTotal : selectedIds.size) === 1 ? 'backup selected' : 'backups selected' }}
+							{{
+								formatMessage(messages.selectedCount, {
+									count: isBulkOperating ? bulkTotal : selectedIds.size,
+								})
+							}}
 						</span>
 						<div class="mx-1 h-6 w-px bg-surface-5" />
-						<ButtonStyled type="transparent">
-							<button
-								type="button"
-								:disabled="isBulkOperating"
-								:class="{ 'pointer-events-none opacity-60': isBulkOperating }"
-								@click="deselectAll"
-							>
-								Clear
-							</button>
-						</ButtonStyled>
+						<Button
+							type="quiet"
+							native-type="button"
+							:disabled="isBulkOperating"
+							:class="{ 'pointer-events-none opacity-60': isBulkOperating }"
+							@click="deselectAll"
+						>
+							{{ formatMessage(commonMessages.clearButton) }}
+						</Button>
 					</div>
 
 					<div v-if="!isBulkOperating" class="ml-auto flex items-center gap-0.5">
-						<ButtonStyled type="transparent" color="red" hover-color-fill="background">
-							<button type="button" @click="confirmBulkDelete">
-								<TrashIcon />
-								<span class="bar-label">Delete</span>
-							</button>
-						</ButtonStyled>
+						<Button
+							v-tooltip="!canManageBackups ? permissionDeniedMessage : undefined"
+							type="quiet"
+							color="red"
+							native-type="button"
+							:disabled="!canManageBackups"
+							class="hover:!bg-red focus-visible:!bg-red hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
+							@click="confirmBulkDelete"
+						>
+							<TrashIcon />
+							<span class="bar-label">{{ formatMessage(commonMessages.deleteLabel) }}</span>
+						</Button>
 					</div>
 
 					<div v-else class="ml-auto flex items-center" aria-live="polite">
 						<span class="px-4 py-2.5 text-base font-semibold tabular-nums text-secondary">
-							Deleting {{ bulkTotal }} {{ bulkTotal === 1 ? 'backup' : 'backups' }}...
+							{{ formatMessage(messages.bulkDeleting, { total: bulkTotal }) }}
 						</span>
 					</div>
 
@@ -159,9 +232,11 @@
 						<div
 							class="animate-indeterminate h-full rounded-l-full bg-brand"
 							role="progressbar"
-							aria-valuemin="0"
+							:aria-valuemin="0"
 							:aria-valuemax="bulkTotal"
-							style="box-shadow: 0px -2px 4px 0px rgba(27, 217, 106, 0.1)"
+							style="
+								box-shadow: 0px -2px 4px 0px color-mix(in srgb, var(--color-brand) 10%, transparent);
+							"
 						/>
 					</div>
 				</FloatingActionBar>
@@ -190,16 +265,18 @@
 </template>
 
 <script setup lang="ts">
-import type { CoreBackup } from '@amberite/amberite-api'
 import type { Archon } from '@modrinth/api-client'
-import { CalendarIcon, DownloadIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
-import { useQuery } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { CalendarIcon, DownloadIcon, IssuesIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import dayjs from 'dayjs'
+import type { Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
-import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
+import { Button } from '#ui/components/base/buttons'
 import Checkbox from '#ui/components/base/Checkbox.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
-import FilterPills from '#ui/components/base/FilterPills.vue'
+import FilterPills, { type FilterPillOption } from '#ui/components/base/FilterPills.vue'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
 import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
 import BackupCreateModal from '#ui/components/servers/backups/BackupCreateModal.vue'
@@ -208,86 +285,301 @@ import BackupItem from '#ui/components/servers/backups/BackupItem.vue'
 import BackupRenameModal from '#ui/components/servers/backups/BackupRenameModal.vue'
 import BackupRestoreModal from '#ui/components/servers/backups/BackupRestoreModal.vue'
 import { useBackupsSelection } from '#ui/composables/hosting/backups-selection'
+import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
+import { useServerPermissions } from '#ui/composables/server-permissions'
 import { useBulkOperation } from '#ui/layouts/shared/content-tab/composables/bulk-operations'
-import { injectHostingBackend, injectNotificationManager } from '#ui/providers'
+import {
+	injectModrinthClient,
+	injectModrinthServerContext,
+	injectNotificationManager,
+} from '#ui/providers'
+import { commonMessages } from '#ui/utils/common-messages'
 
-import { injectCoreServerContext } from './context'
-import { toBackupItem } from './mappers'
+const messages = defineMessages({
+	selectAll: {
+		id: 'servers.backups.toolbar.select-all',
+		defaultMessage: 'Select all',
+	},
+	selectBackupAria: {
+		id: 'servers.backups.select-backup-aria',
+		defaultMessage: 'Select backup {name}',
+	},
+	filterManual: {
+		id: 'servers.backups.toolbar.filter-manual',
+		defaultMessage: 'Manual',
+	},
+	filterAuto: {
+		id: 'servers.backups.toolbar.filter-auto',
+		defaultMessage: 'Auto',
+	},
+	selectedCount: {
+		id: 'servers.backups.bulk-bar.selected-count',
+		defaultMessage: '{count, plural, one {# backup selected} other {# backups selected}}',
+	},
+	bulkBarAriaLabel: {
+		id: 'servers.backups.bulk-bar.aria-label',
+		defaultMessage:
+			'{count, plural, one {Bulk actions for one selected backup} other {Bulk actions for # selected backups}}',
+	},
+	createBackup: {
+		id: 'servers.backups.toolbar.create-backup',
+		defaultMessage: 'Create backup',
+	},
+	emptyHeading: {
+		id: 'servers.backups.empty.heading',
+		defaultMessage: 'No backups yet',
+	},
+	emptyDescription: {
+		id: 'servers.backups.empty.description',
+		defaultMessage: 'Create your first backup',
+	},
+	filteredEmptyHeading: {
+		id: 'servers.backups.filtered-empty.heading',
+		defaultMessage: 'No backups match',
+	},
+	filteredEmptyDescription: {
+		id: 'servers.backups.filtered-empty.description',
+		defaultMessage: 'Try a different filter or clear filters to see all backups.',
+	},
+	clearFilters: {
+		id: 'servers.backups.filtered-empty.clear-filters',
+		defaultMessage: 'Clear filters',
+	},
+	bulkDeleting: {
+		id: 'servers.backups.bulk-bar.deleting',
+		defaultMessage: 'Deleting {total, plural, one {# backup} other {# backups}}...',
+	},
+})
+
+const { addNotification } = injectNotificationManager()
+const { formatMessage } = useVIntl()
+const { canManageBackups, permissionDeniedMessage } = useServerPermissions()
+
+const filterPillOptions = computed<FilterPillOption[]>(() => [
+	{ id: 'manual', label: formatMessage(messages.filterManual) },
+	{ id: 'auto', label: formatMessage(messages.filterAuto) },
+])
+const client = injectModrinthClient()
+const queryClient = useQueryClient()
+const { server, worldId, busyReasons } = injectModrinthServerContext()
 
 const props = defineProps<{
-	isServerRunning?: boolean
+	isServerRunning: boolean
 	showCopyIdAction?: boolean
 	showDebugInfo?: boolean
 }>()
 
-const backend = injectHostingBackend()
-const core = backend.core
-const { handleError } = injectNotificationManager()
-const ctx = injectCoreServerContext()
-const createModal = ref<InstanceType<typeof BackupCreateModal>>()
-const deleteModal = ref<InstanceType<typeof BackupDeleteModal>>()
-const renameModal = ref<InstanceType<typeof BackupRenameModal>>()
-const restoreModal = ref<InstanceType<typeof BackupRestoreModal>>()
-const overTheTopDownloadAnimation = ref(false)
+const route = useRoute()
+const serverId = route.params.id as string
+const BACKUP_HIGHLIGHT_DURATION_MS = 5_000
+
+defineEmits(['onDownload'])
+
+const { backups, invalidate, activeOperationByBackupId, hasActiveCreate, hasActiveRestore, query } =
+	useServerBackupsQueue(
+		computed(() => serverId),
+		worldId,
+	)
+
+const error = computed(() => {
+	const err = query.error.value
+	return err instanceof Error ? err : err ? new Error(String(err)) : null
+})
+const refetch = () => query.refetch()
+
+/** Until world exists we cannot fetch; `isLoading` is false while the query is disabled, which would flash empty state. */
+const backupsReadyPending = computed(
+	() => !worldId.value || (query.data.value === undefined && !query.error.value),
+)
+
 const selectedFilters = ref<string[]>([])
 
-const backupsQuery = useQuery({
-	queryKey: computed(() => ['core-backups', ctx.instanceId.value]),
-	queryFn: () => core.listBackups(ctx.instanceId.value),
-	staleTime: 30_000,
-})
-
-const backups = computed<CoreBackup[]>(() => backupsQuery.data.value?.backups ?? [])
-const activeOperations = computed(() => backupsQuery.data.value?.active_operations ?? [])
-const error = computed(() => (backupsQuery.error.value as Error | null) ?? null)
-const backupsReadyPending = computed(
-	() => backupsQuery.isLoading.value && backupsQuery.data.value === undefined && !error.value,
-)
-
-const completedBackups = computed(() =>
-	backups.value.filter((backup) => backup.status === 'done').map((backup) => toBackupItem(backup)),
-)
+const completedBackups = computed(() => backups.value.filter((backup) => backup.status === 'done'))
 
 const filteredBackups = computed(() => {
-	if (selectedFilters.value.length === 0 || selectedFilters.value.length === 2) {
+	const f = selectedFilters.value
+	if (f.length === 0 || f.length === 2) {
 		return completedBackups.value
 	}
-	const wantAutomated = selectedFilters.value.includes('auto')
-	return completedBackups.value.filter((backup) => backup.automated === wantAutomated)
+	const wantAuto = f.includes('auto')
+	return completedBackups.value.filter((b) => b.automated === wantAuto)
 })
 
-const backupItems = computed(() => filteredBackups.value)
+/** Completed backups with a snapshot: queue API schedules deletion. */
+const deleteQueueMutation = useMutation({
+	mutationFn: (backupId: string) =>
+		client.archon.backups_queue_v1.delete(serverId, worldId.value!, backupId),
+	onSuccess: async () => {
+		await invalidate()
+		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
+	},
+})
 
-const groupedBackups = computed(() => {
-	const now = Date.now()
-	const groups: Array<{ label: string; backups: Archon.BackupsQueue.v1.BackupQueueBackup[] }> = []
+const cancelOperationMutation = useMutation({
+	mutationFn: async (backup: Archon.BackupsQueue.v1.BackupQueueBackup) => {
+		const activeOperation = activeOperationByBackupId.value.get(backup.id)
+		const historyOperation = backup.history.find(
+			(op) => (op.state === 'pending' || op.state === 'ongoing') && op.operation_id != null,
+		)
+		const operation = activeOperation?.operation_id != null ? activeOperation : historyOperation
 
-	for (const backup of filteredBackups.value) {
-		const created = new Date(backup.created_at).getTime()
-		const diffMs = now - created
-		const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-		let label = 'Older'
-
-		if (diffMs < 30 * 60 * 1000) {
-			label = 'Just now'
-		} else if (diffDays === 0) {
-			label = 'Earlier today'
-		} else if (diffDays === 1) {
-			label = 'Yesterday'
-		} else if (diffDays <= 14) {
-			label = 'Last 2 weeks'
+		if (operation?.operation_id == null) {
+			await client.archon.backups_v1.delete(serverId, worldId.value!, backup.id)
+		} else if (operation.operation_type === 'create') {
+			await client.archon.backups_queue_v1.cancelCreate(
+				serverId,
+				worldId.value!,
+				operation.operation_id,
+			)
+		} else {
+			await client.archon.backups_queue_v1.cancelRestore(
+				serverId,
+				worldId.value!,
+				operation.operation_id,
+			)
 		}
+	},
+	onSuccess: async () => {
+		await invalidate()
+		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
+	},
+})
 
-		let group = groups.find((entry) => entry.label === label)
+/** Bulk delete selected backups via queue API. */
+const deleteManyMutation = useMutation({
+	mutationFn: (backupIds: string[]) =>
+		client.archon.backups_queue_v1.deleteMany(serverId, worldId.value!, backupIds),
+	onSuccess: async () => {
+		await invalidate()
+		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })
+	},
+})
+
+type BackupGroup = {
+	label: string
+	icon: Component | null
+	backups: Archon.BackupsQueue.v1.BackupQueueBackup[]
+}
+
+function backupCreator(
+	backup: Archon.BackupsQueue.v1.BackupQueueBackup,
+): Archon.BackupsQueue.v1.UserInfo | null {
+	return (
+		backup.history.find((operation) => operation.operation_type === 'create' && operation.user_info)
+			?.user_info ?? null
+	)
+}
+
+const groupedBackups = computed((): BackupGroup[] => {
+	if (!filteredBackups.value.length) return []
+
+	const now = dayjs()
+	const groups: BackupGroup[] = []
+
+	const addToGroup = (
+		label: string,
+		icon: Component | null,
+		backup: Archon.BackupsQueue.v1.BackupQueueBackup,
+	) => {
+		let group = groups.find((g) => g.label === label)
 		if (!group) {
-			group = { label, backups: [] }
+			group = { label, icon, backups: [] }
 			groups.push(group)
 		}
 		group.backups.push(backup)
 	}
 
+	for (const backup of filteredBackups.value) {
+		const created = dayjs(backup.created_at)
+		const diffMinutes = now.diff(created, 'minute')
+		const isToday = created.isSame(now, 'day')
+		const isYesterday = created.isSame(now.subtract(1, 'day'), 'day')
+		const diffDays = now.diff(created, 'day')
+
+		if (diffMinutes < 30 && isToday) {
+			addToGroup('Just now', CalendarIcon, backup)
+		} else if (isToday) {
+			addToGroup('Earlier today', CalendarIcon, backup)
+		} else if (isYesterday) {
+			addToGroup('Yesterday', CalendarIcon, backup)
+		} else if (diffDays <= 14) {
+			addToGroup('Last 2 weeks', CalendarIcon, backup)
+		} else {
+			addToGroup('Older', CalendarIcon, backup)
+		}
+	}
+
 	return groups
 })
+
+const displayOrderedBackups = computed(() => groupedBackups.value.flatMap((g) => g.backups))
+const focusedBackupId = computed(() =>
+	typeof route.query.backup === 'string' ? route.query.backup : null,
+)
+const highlightedBackupId = ref<string | null>(null)
+let highlightedBackupTimeout: ReturnType<typeof setTimeout> | null = null
+let lastHighlightedFocusedBackupId: string | null = null
+let lastScrolledFocusedBackupId: string | null = null
+
+watch(
+	[focusedBackupId, displayOrderedBackups],
+	async ([backupId]) => {
+		if (!backupId) {
+			lastHighlightedFocusedBackupId = null
+			lastScrolledFocusedBackupId = null
+			clearHighlightedBackup()
+			return
+		}
+		if (!displayOrderedBackups.value.some((backup) => backup.id === backupId)) return
+
+		if (lastHighlightedFocusedBackupId !== backupId) {
+			lastHighlightedFocusedBackupId = backupId
+			highlightBackup(backupId)
+		}
+		if (lastScrolledFocusedBackupId === backupId) return
+		if (typeof document === 'undefined') return
+
+		lastScrolledFocusedBackupId = backupId
+		await nextTick()
+		const escapedBackupId =
+			typeof CSS !== 'undefined' && CSS.escape
+				? CSS.escape(backupId)
+				: backupId.replaceAll('"', '\\"')
+		document
+			.querySelector(`[data-backup-id="${escapedBackupId}"]`)
+			?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+	},
+	{ immediate: true },
+)
+
+onBeforeUnmount(() => {
+	if (highlightedBackupTimeout) {
+		clearTimeout(highlightedBackupTimeout)
+	}
+})
+
+function highlightBackup(backupId: string) {
+	highlightedBackupId.value = backupId
+
+	if (highlightedBackupTimeout) {
+		clearTimeout(highlightedBackupTimeout)
+	}
+
+	highlightedBackupTimeout = setTimeout(() => {
+		highlightedBackupId.value = null
+		highlightedBackupTimeout = null
+	}, BACKUP_HIGHLIGHT_DURATION_MS)
+}
+
+function clearHighlightedBackup() {
+	highlightedBackupId.value = null
+
+	if (highlightedBackupTimeout) {
+		clearTimeout(highlightedBackupTimeout)
+		highlightedBackupTimeout = null
+	}
+}
 
 const {
 	selectedIds,
@@ -297,55 +589,97 @@ const {
 	allSelected,
 	someSelected,
 	selectedBackups,
-} = useBackupsSelection(filteredBackups, filteredBackups)
+} = useBackupsSelection(filteredBackups, displayOrderedBackups)
 
 const { isBulkOperating, bulkTotal } = useBulkOperation()
-const filterPillOptions = computed(() => [
-	{ id: 'manual', label: 'Manual' },
-	{ id: 'auto', label: 'Auto' },
-])
-const backupRestoreDisabled = computed(
-	() =>
-		!!props.isServerRunning ||
-		activeOperations.value.some(
-			(operation) => operation.operation_type === 'create' || operation.operation_type === 'restore',
-		),
-)
-const backupRestoreDisabledMessage = computed(() => {
+
+const overTheTopDownloadAnimation = ref()
+const createBackupModal = ref<InstanceType<typeof BackupCreateModal>>()
+const renameBackupModal = ref<InstanceType<typeof BackupRenameModal>>()
+const restoreBackupModal = ref<InstanceType<typeof BackupRestoreModal>>()
+const deleteBackupModal = ref<InstanceType<typeof BackupDeleteModal>>()
+
+const backupRestoreDisabled = computed(() => {
+	if (!canManageBackups.value) {
+		return permissionDeniedMessage.value
+	}
 	if (props.isServerRunning) {
 		return 'Cannot restore backup while server is running'
 	}
-	if (backupRestoreDisabled.value) {
+	if (busyReasons.value.length > 0) {
+		return formatMessage(busyReasons.value[0].reason)
+	}
+	if (hasActiveCreate.value || hasActiveRestore.value) {
 		return 'A backup operation is already queued or in progress'
 	}
 	return undefined
 })
 
-function showRestoreModal(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+const backupCreationDisabled = computed(() => {
+	if (!canManageBackups.value) {
+		return permissionDeniedMessage.value
+	}
+	const quota = server.value.backup_quota
+	if (quota !== undefined) {
+		const usedCount = backups.value.length ?? server.value.used_backup_quota ?? 0
+		if (usedCount >= quota) {
+			return `All ${quota} of your backup slots are in use`
+		}
+	}
+	if (busyReasons.value.length > 0) {
+		return formatMessage(busyReasons.value[0].reason)
+	}
+	if (hasActiveCreate.value) {
+		return 'A backup is already queued or in progress'
+	}
+	return undefined
+})
+
+const showCreateModel = () => {
+	if (backupCreationDisabled.value) return
+	createBackupModal.value?.show()
+}
+
+function showRenameBackupModal(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+	if (!canManageBackups.value) return
+	renameBackupModal.value?.show(backup)
+}
+
+function showRestoreBackupModal(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
 	if (backupRestoreDisabled.value) return
-	restoreModal.value?.show(backup)
+	restoreBackupModal.value?.show(backup)
 }
 
-async function refresh() {
-	await backupsQuery.refetch()
+function showDeleteBackupModal(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+	if (!canManageBackups.value) return
+	deleteBackupModal.value?.show(backup)
 }
 
-async function deleteBackup(backup: ReturnType<typeof toBackupItem> | undefined) {
-	if (!backup) return
-	await core.deleteBackup(ctx.instanceId.value, backup.id).catch(handleError)
-	await refresh()
+function clearBackupFilters() {
+	selectedFilters.value = []
 }
 
-async function bulkDelete(selected: ReturnType<typeof toBackupItem>[]) {
-	if (!selected.length) return
+function confirmBulkDelete() {
+	if (!canManageBackups.value) return
+	if (!selectedBackups.value.length) return
+	deleteBackupModal.value?.showBulk(selectedBackups.value)
+}
+
+async function bulkDelete(toRemove: Archon.BackupsQueue.v1.BackupQueueBackup[]) {
+	if (!canManageBackups.value) return
+	if (!toRemove.length) return
+
 	isBulkOperating.value = true
-	bulkTotal.value = selected.length
+	bulkTotal.value = toRemove.length
 
 	try {
-		await Promise.all(selected.map((backup) => core.deleteBackup(ctx.instanceId.value, backup.id))).catch(
-			handleError,
-		)
-		await refresh()
+		await deleteManyMutation.mutateAsync(toRemove.map((b) => b.id))
+	} catch (err) {
+		addNotification({
+			type: 'error',
+			title: `Failed to delete ${toRemove.length} backup${toRemove.length === 1 ? '' : 's'}`,
+			text: err instanceof Error ? err.message : String(err),
+		})
 	} finally {
 		deselectAll()
 		isBulkOperating.value = false
@@ -353,16 +687,40 @@ async function bulkDelete(selected: ReturnType<typeof toBackupItem>[]) {
 	}
 }
 
-function confirmBulkDelete() {
-	if (!selectedBackups.value.length) return
-	deleteModal.value?.showBulk(selectedBackups.value)
-}
-
 function triggerDownloadAnimation() {
 	overTheTopDownloadAnimation.value = true
-	setTimeout(() => {
-		overTheTopDownloadAnimation.value = false
-	}, 500)
+	setTimeout(() => (overTheTopDownloadAnimation.value = false), 500)
+}
+
+function useQueueDeleteFor(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+	return backup.status === 'done'
+}
+
+function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
+	if (!canManageBackups.value) return
+	if (!backup) {
+		addNotification({
+			type: 'error',
+			title: 'Error deleting backup',
+			text: 'Backup is null',
+		})
+		return
+	}
+
+	const onError = (err: unknown) => {
+		const message = err instanceof Error ? err.message : String(err)
+		addNotification({
+			type: 'error',
+			title: 'Error deleting backup',
+			text: message,
+		})
+	}
+
+	if (useQueueDeleteFor(backup)) {
+		deleteQueueMutation.mutate(backup.id, { onError })
+	} else {
+		cancelOperationMutation.mutate(backup, { onError })
+	}
 }
 </script>
 

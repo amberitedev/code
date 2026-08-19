@@ -1,8 +1,11 @@
+import { useGLTF } from '@tresjs/cientos'
+import { useTexture } from '@tresjs/core'
 import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
 	type ComputedRef,
 	markRaw,
+	onBeforeMount,
 	onUnmounted,
 	type Ref,
 	ref,
@@ -14,12 +17,11 @@ import {
 	applyCapeTexture,
 	applyTexture,
 	createTransparentTexture,
-	loadModel as loadSkinModel,
 	loadTexture as loadSkinTexture,
 } from '#ui/utils/webgl/skin-rendering.ts'
 
-import type { SkinPreviewTuple } from './types'
-import { applyEarsMod, removeEarsMod } from './use-ears-mod-features'
+import type { SkinPreviewBounds, SkinPreviewTuple } from './types'
+import { applyEarsMod, isEarsModFeature, removeEarsMod } from './use-ears-mod-features'
 
 const SKIN_LAYER_DEPTH_BIAS = -1
 
@@ -75,16 +77,25 @@ function disposeSceneMaterials(root: THREE.Object3D | null) {
 	materials.forEach((material) => material.dispose())
 }
 
-function getVisibleMeshBox(root: THREE.Object3D): THREE.Box3 | null {
+function getVisibleMeshBox(
+	root: THREE.Object3D,
+	includeMesh: (mesh: THREE.Mesh) => boolean = () => true,
+): THREE.Box3 | null {
 	root.updateWorldMatrix(true, true)
 
 	const result = new THREE.Box3()
 	const meshBox = new THREE.Box3()
+	const rootParentInverse = new THREE.Matrix4()
+	const meshToRootParent = new THREE.Matrix4()
 	let found = false
+
+	if (root.parent) {
+		rootParentInverse.copy(root.parent.matrixWorld).invert()
+	}
 
 	root.traverse((object) => {
 		const mesh = object as THREE.Mesh
-		if (!mesh.isMesh || !mesh.geometry || mesh.visible === false) return
+		if (!mesh.isMesh || !mesh.geometry || mesh.visible === false || !includeMesh(mesh)) return
 
 		const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
 		if (materials.length && materials.every((material) => material.visible === false)) return
@@ -95,12 +106,20 @@ function getVisibleMeshBox(root: THREE.Object3D): THREE.Box3 | null {
 
 		if (!mesh.geometry.boundingBox) return
 
-		meshBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld)
+		meshToRootParent.multiplyMatrices(rootParentInverse, mesh.matrixWorld)
+		meshBox.copy(mesh.geometry.boundingBox).applyMatrix4(meshToRootParent)
 		result.union(meshBox)
 		found = true
 	})
 
 	return found && !result.isEmpty() ? result.clone() : null
+}
+
+function isPlayerMesh(mesh: THREE.Mesh) {
+	if (isEarsModFeature(mesh)) return false
+
+	const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+	return materials.some((material) => material.name !== 'cape')
 }
 
 type MaybeReadonlyRef<T> = Ref<T> | ComputedRef<T>
@@ -134,6 +153,10 @@ export function useSkinPreviewScene({
 	const transparentTexture = createTransparentTexture()
 	const modelCenter = ref<SkinPreviewTuple>([0, 1, 0])
 	const modelSize = ref<SkinPreviewTuple>([1, 2, 1])
+	const visibleBounds = ref<SkinPreviewBounds>({
+		min: [-0.5, 0, -0.5],
+		max: [0.5, 2, 0.5],
+	})
 	const isModelLoaded = ref(false)
 	const isTextureLoaded = ref(false)
 	const hasEarsFeatures = ref(false)
@@ -183,7 +206,7 @@ export function useSkinPreviewScene({
 
 		try {
 			isModelLoaded.value = false
-			const { scene: loadedScene, animations } = await loadSkinModel(src)
+			const { scene: loadedScene, animations } = await useGLTF(src)
 			const clonedScene = cloneSceneForRenderer(loadedScene)
 			if (isUnmounted || loadVersion !== modelLoadVersion) {
 				disposeSceneMaterials(clonedScene)
@@ -219,7 +242,16 @@ export function useSkinPreviewScene({
 		if (!src) return null
 
 		try {
-			return await loadSkinTexture(src)
+			try {
+				return await loadSkinTexture(src)
+			} catch {
+				const tex = await useTexture([src])
+				tex.colorSpace = THREE.SRGBColorSpace
+				tex.flipY = false
+				tex.magFilter = THREE.NearestFilter
+				tex.minFilter = THREE.NearestFilter
+				return tex
+			}
 		} catch (error) {
 			console.error('Failed to load texture:', error)
 			return null
@@ -241,6 +273,7 @@ export function useSkinPreviewScene({
 		capeTexture.value = loadedCapeTexture
 		loadedCapeSrc.value = src
 		applyCapeTextureToLoadedModel()
+		updateModelInfo()
 	}
 
 	async function loadAndApplyEarsTexture(src: string | undefined) {
@@ -258,27 +291,49 @@ export function useSkinPreviewScene({
 
 	function updateModelInfo() {
 		const box = scene.value ? getVisibleMeshBox(scene.value) : null
+		const playerBox = scene.value ? getVisibleMeshBox(scene.value, isPlayerMesh) : null
 
 		if (!box) {
 			modelCenter.value = [0, 1, 0]
 			modelSize.value = [1, 2, 1]
+			visibleBounds.value = {
+				min: [-0.5, 0, -0.5],
+				max: [0.5, 2, 0.5],
+			}
 			return
 		}
 
 		const center = new THREE.Vector3()
-		const size = new THREE.Vector3()
+		const playerCenter = new THREE.Vector3()
+		const rotationCenterBox = playerBox ?? box
 
 		box.getCenter(center)
-		box.getSize(size)
+		rotationCenterBox.getCenter(playerCenter)
 
-		modelCenter.value = [center.x, center.y, center.z]
-		modelSize.value = [Math.max(size.x, 0.001), Math.max(size.y, 0.001), Math.max(size.z, 0.001)]
+		const halfWidth = Math.max(
+			Math.abs(box.min.x - playerCenter.x),
+			Math.abs(box.max.x - playerCenter.x),
+		)
+		const halfDepth = Math.max(
+			Math.abs(box.min.z - playerCenter.z),
+			Math.abs(box.max.z - playerCenter.z),
+		)
+
+		modelCenter.value = [playerCenter.x, center.y, playerCenter.z]
+		modelSize.value = [
+			Math.max(halfWidth * 2, 0.001),
+			Math.max(box.max.y - box.min.y, 0.001),
+			Math.max(halfDepth * 2, 0.001),
+		]
+		visibleBounds.value = {
+			min: [box.min.x, box.min.y, box.min.z],
+			max: [box.max.x, box.max.y, box.max.z],
+		}
 	}
 
 	watch(
 		() => selectedModelSrc.value,
 		(src) => loadModel(src),
-		{ immediate: true },
 	)
 	watch(
 		() => textureSrc.value,
@@ -293,9 +348,9 @@ export function useSkinPreviewScene({
 			texture.value = loadedTexture
 			loadedTextureSrc.value = newSrc
 			applyTextureToLoadedModel()
+			updateModelInfo()
 			isTextureLoaded.value = true
 		},
-		{ immediate: true },
 	)
 	watch(
 		() => earsTextureSrc.value,
@@ -315,8 +370,25 @@ export function useSkinPreviewScene({
 		async (newCapeSrc) => {
 			await loadAndApplyCapeTexture(newCapeSrc)
 		},
-		{ immediate: true },
 	)
+
+	onBeforeMount(async () => {
+		try {
+			isTextureLoaded.value = false
+			texture.value = await loadAndApplyTexture(textureSrc.value)
+			loadedTextureSrc.value = textureSrc.value
+			isTextureLoaded.value = true
+
+			await loadAndApplyEarsTexture(earsTextureSrc.value)
+			await loadModel(selectedModelSrc.value)
+
+			if (capeSrc.value) {
+				await loadAndApplyCapeTexture(capeSrc.value)
+			}
+		} catch (error) {
+			console.error('Failed to initialize skin preview:', error)
+		}
+	})
 
 	onUnmounted(() => {
 		isUnmounted = true
@@ -339,5 +411,6 @@ export function useSkinPreviewScene({
 		modelCenter,
 		modelSize,
 		scene,
+		visibleBounds,
 	}
 }

@@ -1,0 +1,11 @@
+{
+	"$schema": "https://t3.codes/schema/t3.json",
+	"scripts": [
+		{
+			"name": "Setup Worktree",
+			"command": "vp i && node scripts/setup-dev-data.ts && ln -sf $T3CODE_PROJECT_ROOT/packages/app-lib/.env packages/app-lib/.env && node apps/app-frontend/scripts/warm-dep-cache.ts",
+			"icon": "configure",
+			"runOnWorktreeCreate": true
+		}
+	]
+}

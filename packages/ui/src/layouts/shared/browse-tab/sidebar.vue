@@ -1,28 +1,30 @@
 <script setup lang="ts">
 import { InfoIcon, XIcon } from '@modrinth/assets'
-import { computed, shallowRef, toValue, watch } from 'vue'
+import { computed, nextTick, toValue, useTemplateRef, watch } from 'vue'
 
 import { IconButton } from '#ui/components/base/buttons'
 import Toggle from '#ui/components/base/Toggle.vue'
+import PhotosensitivityWarningModal from '#ui/components/modal/PhotosensitivityWarningModal.vue'
 import SearchSidebarFilter from '#ui/components/search/SearchSidebarFilter.vue'
 import { useVIntl } from '#ui/composables/i18n'
+import { useAdvancedPrefs } from '#ui/utils/advanced-filter-preferences'
 import { commonMessages } from '#ui/utils/common-messages'
 
+import AdvancedFiltersPersistenceNote from './components/AdvancedFiltersPersistenceNote.vue'
 import { injectBrowseManager } from './providers/browse-manager'
+
+const PHOTOSENSITIVITY_FILTER_OPTION = 'epilepsy_triggers'
 
 const ctx = injectBrowseManager()
 const { formatMessage } = useVIntl()
+const advancedPrefs = useAdvancedPrefs()
 
 const isApp = computed(() => ctx.variant === 'app')
 const lockedMessages = computed(() => toValue(ctx.lockedFilterMessages))
-const isTransitioning = computed(() => ctx.transitioning?.value ?? false)
-const visibleProjectType = shallowRef(ctx.visibleProjectType?.value ?? ctx.projectType.value)
-const visibleFilters = shallowRef(ctx.filters.value.filter((filter) => filter.display !== 'none'))
-const visibleServerFilterTypes = shallowRef(
-	ctx.serverFilterTypes.value.filter((filter) => filter.options.length > 0),
-)
-const visibleIsServerType = computed(() => visibleProjectType.value === 'server')
+const hiddenFilterTypes = computed(() => ctx.hiddenFilterTypes?.value ?? [])
+
 const advancedFiltersCollapsed = computed(() => ctx.advancedFiltersCollapsed?.value ?? true)
+const photosensitivityWarningModal = useTemplateRef('photosensitivityWarningModal')
 
 function setAdvancedFiltersCollapsed(collapsed: boolean) {
 	if (ctx.advancedFiltersCollapsed) {
@@ -30,12 +32,38 @@ function setAdvancedFiltersCollapsed(collapsed: boolean) {
 	}
 }
 
-function syncVisibleSidebarState() {
-	visibleProjectType.value = ctx.visibleProjectType?.value ?? ctx.projectType.value
-	visibleFilters.value = ctx.filters.value.filter((filter) => filter.display !== 'none')
-	visibleServerFilterTypes.value = ctx.serverFilterTypes.value.filter(
-		(filter) => filter.options.length > 0,
+function isPhotosensitivityExclusionSelected(filters: { type: string; option: string }[]) {
+	return filters.some(
+		(filter) => filter.type === 'advanced' && filter.option === PHOTOSENSITIVITY_FILTER_OPTION,
 	)
+}
+
+watch(
+	() => ({
+		selected: isPhotosensitivityExclusionSelected(
+			ctx.isServerType.value ? ctx.serverCurrentFilters.value : ctx.currentFilters.value,
+		),
+		saved: advancedPrefs.value.includes(PHOTOSENSITIVITY_FILTER_OPTION),
+	}),
+	(current, previous) => {
+		if (!previous) {
+			return
+		}
+
+		const selected = current.selected && !previous.selected
+		const alreadySaved = previous.saved
+		const dismissed = ctx.dismissedPhotosensitivityFilterWarning?.value
+
+		if (selected && !alreadySaved && !dismissed) {
+			nextTick(() => photosensitivityWarningModal.value?.show())
+		}
+	},
+)
+
+function onPhotosensitivityWarningDismiss(dontShowAgain: boolean) {
+	if (dontShowAgain && ctx.dismissedPhotosensitivityFilterWarning) {
+		ctx.dismissedPhotosensitivityFilterWarning.value = true
+	}
 }
 
 function closeFiltersMenu() {
@@ -76,7 +104,7 @@ function getFilterOpenByDefault(filterId: string): boolean {
 	if (hasProvidedFilter(filterId)) {
 		return true
 	}
-	if (visibleIsServerType.value) {
+	if (ctx.isServerType.value) {
 		return ![
 			'server_category_minecraft_server_meta',
 			'server_category_minecraft_server_community',
@@ -89,32 +117,22 @@ function getFilterOpenByDefault(filterId: string): boolean {
 	}
 	if (
 		lockedMessages.value?.gameVersionShaderMessage &&
-		visibleProjectType.value === 'shader' &&
+		ctx.projectType.value === 'shader' &&
 		filterId === 'game_version'
 	) {
 		return false
 	}
 	return true
 }
-
-watch(
-	[
-		isTransitioning,
-		() => ctx.visibleProjectType?.value ?? ctx.projectType.value,
-		() => ctx.filters.value,
-		() => ctx.serverFilterTypes.value,
-	],
-	() => {
-		if (isTransitioning.value) return
-
-		syncVisibleSidebarState()
-	},
-	{ immediate: true },
-)
 </script>
 
 <template>
 	<slot name="prepend" />
+
+	<PhotosensitivityWarningModal
+		ref="photosensitivityWarningModal"
+		@dismiss="onPhotosensitivityWarningDismiss"
+	/>
 
 	<div v-if="ctx.filtersMenuOpen?.value" class="fixed inset-0 z-40 bg-bg" />
 
@@ -186,9 +204,11 @@ watch(
 			</label>
 		</div>
 
-		<template v-if="visibleIsServerType">
+		<template v-if="ctx.isServerType.value">
 			<SearchSidebarFilter
-				v-for="filterType in visibleServerFilterTypes"
+				v-for="filterType in ctx.serverFilterTypes.value.filter(
+					(f) => f.options.length > 0 && !hiddenFilterTypes.includes(f.id),
+				)"
 				:key="`server-filter-${filterType.id}`"
 				v-model:selected-filters="ctx.serverCurrentFilters.value"
 				v-model:toggled-groups="ctx.serverToggledGroups.value"
@@ -199,17 +219,24 @@ watch(
 				:content-class="contentClass"
 				:inner-panel-class="innerPanelClass"
 				:open-by-default="getFilterOpenByDefault(filterType.id)"
+				@on-open="() => filterType.id === 'advanced' && setAdvancedFiltersCollapsed(false)"
+				@on-close="() => filterType.id === 'advanced' && setAdvancedFiltersCollapsed(true)"
 			>
 				<template #header>
 					<h3 :class="isApp ? 'text-base m-0' : 'm-0 text-base font-semibold'">
 						{{ filterType.formatted_name }}
 					</h3>
 				</template>
+				<template v-if="filterType.id === 'advanced'" #prefix>
+					<AdvancedFiltersPersistenceNote />
+				</template>
 			</SearchSidebarFilter>
 		</template>
 		<template v-else>
 			<SearchSidebarFilter
-				v-for="filter in visibleFilters"
+				v-for="filter in ctx.filters.value.filter(
+					(f) => f.display !== 'none' && !hiddenFilterTypes.includes(f.id),
+				)"
 				:key="`filter-${filter.id}`"
 				v-model:selected-filters="ctx.currentFilters.value"
 				v-model:toggled-groups="ctx.toggledGroups.value"
@@ -229,23 +256,29 @@ watch(
 						{{ filter.formatted_name }}
 					</h3>
 				</template>
+				<template v-if="filter.id === 'advanced'" #prefix>
+					<AdvancedFiltersPersistenceNote />
+				</template>
 				<template
-					v-if="
+					v-else-if="
 						lockedMessages?.gameVersionShaderMessage &&
-						visibleProjectType === 'shader' &&
+						ctx.projectType.value === 'shader' &&
 						filter.id === 'game_version'
 					"
 					#prefix
 				>
 					<div class="mb-4 grid grid-cols-[auto_1fr] gap-2 px-3 text-sm font-medium text-blue">
 						<InfoIcon class="mt-1 size-4" />
-						<span>{{ lockedMessages.gameVersionShaderMessage }}</span>
+						<span>{{ lockedMessages?.gameVersionShaderMessage }}</span>
 					</div>
 				</template>
 				<template v-if="lockedMessages?.gameVersion" #locked-game_version>
 					{{ lockedMessages.gameVersion }}
 				</template>
 				<template v-if="lockedMessages?.modLoader" #locked-mod_loader>
+					{{ lockedMessages.modLoader }}
+				</template>
+				<template v-if="lockedMessages?.modLoader" #locked-shader_loader>
 					{{ lockedMessages.modLoader }}
 				</template>
 				<template v-if="lockedMessages?.environment" #locked-environment>

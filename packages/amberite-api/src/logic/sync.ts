@@ -1,5 +1,4 @@
-import type { CoreApiClient } from '../client'
-import type { CoreModLoader, CoreSyncProfile } from '../types'
+import type { CoreApiClient, CoreModLoader, CoreSyncProfile } from '@modrinth/api-client'
 import { getNextCoreServerPort, normalizeCoreLoader } from './core'
 
 const CLIENT_SYNC_LOADERS = new Set(['vanilla', 'fabric', 'forge', 'quilt', 'neoforge'])

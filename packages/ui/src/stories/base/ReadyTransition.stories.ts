@@ -1,8 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { onMounted, ref } from 'vue'
 
-import GhostBlock from '../../components/base/GhostBlock.vue'
-import GhostText from '../../components/base/GhostText.vue'
 import LoadingBar from '../../components/base/LoadingBar.vue'
 import ReadyTransition from '../../components/base/ReadyTransition.vue'
 import { createLoadingStateCore } from '../../composables/use-loading-state-core'
@@ -16,20 +14,36 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-function provideStoryLoadingState() {
-	provideLoadingState(createLoadingStateCore())
-}
-
-export const CacheHit: Story = {
+export const Idle: Story = {
 	render: () => ({
 		components: { ReadyTransition, LoadingBar },
 		setup() {
-			provideStoryLoadingState()
+			provideLoadingState(createLoadingStateCore())
 			return { pending: ref(false) }
 		},
 		template: `
 			<div class="relative">
 				<LoadingBar />
+				<ReadyTransition :pending="pending">
+					<div class="rounded bg-bg-raised p-4 text-contrast">Slot content (already ready).</div>
+				</ReadyTransition>
+			</div>
+		`,
+	}),
+}
+
+/** Pending false from mount — no enter fade (cache-hit path). */
+export const CacheHit: Story = {
+	render: () => ({
+		components: { ReadyTransition, LoadingBar },
+		setup() {
+			provideLoadingState(createLoadingStateCore())
+			return { pending: ref(false) }
+		},
+		template: `
+			<div class="relative">
+				<LoadingBar />
+				<p class="text-secondary mb-4">pending stays false — content should appear with no fade-in.</p>
 				<ReadyTransition :pending="pending">
 					<div class="rounded bg-bg-raised p-4 text-contrast">Cached content visible immediately.</div>
 				</ReadyTransition>
@@ -38,112 +52,76 @@ export const CacheHit: Story = {
 	}),
 }
 
-export const GhostDelay: Story = {
+/** Cold load: pending true then false — fade-in runs. */
+export const ColdLoad: Story = {
 	render: () => ({
-		components: { GhostBlock, GhostText, ReadyTransition, LoadingBar },
+		components: { ReadyTransition, LoadingBar },
 		setup() {
-			provideStoryLoadingState()
+			provideLoadingState(createLoadingStateCore())
 			const pending = ref(true)
 			onMounted(() => {
-				setTimeout(() => (pending.value = false), 900)
+				setTimeout(() => (pending.value = false), 600)
 			})
 			return { pending }
 		},
 		template: `
 			<div class="relative">
 				<LoadingBar />
-				<ReadyTransition :pending="pending" :ghost-delay-ms="300">
-					<div class="rounded bg-bg-raised p-4 text-contrast">Content after delayed ghost.</div>
-					<template #ghost="{ state }">
-						<div class="grid gap-3 rounded bg-bg-raised p-4">
-							<GhostText kind="title" width="55%" />
-							<GhostBlock class="h-20 w-full" />
-							<div class="text-secondary text-sm">{{ state }}</div>
-						</div>
-					</template>
+				<p class="text-secondary mb-4">Pending 600ms then ready — content fades in; bar runs while pending.</p>
+				<ReadyTransition :pending="pending">
+					<div class="rounded bg-bg-raised p-4 text-contrast">Content after cold load.</div>
 				</ReadyTransition>
 			</div>
 		`,
 	}),
 }
 
-export const MinimumGhostDuration: Story = {
+export const PendingThenReady: Story = {
 	render: () => ({
-		components: { GhostText, ReadyTransition, LoadingBar },
+		components: { ReadyTransition, LoadingBar },
 		setup() {
-			provideStoryLoadingState()
+			provideLoadingState(createLoadingStateCore())
 			const pending = ref(true)
 			onMounted(() => {
-				setTimeout(() => (pending.value = false), 120)
+				setTimeout(() => (pending.value = false), 2000)
 			})
 			return { pending }
 		},
 		template: `
 			<div class="relative">
 				<LoadingBar />
-				<ReadyTransition :pending="pending" :ghost-delay-ms="0" :minimum-ghost-ms="1000">
-					<div class="rounded bg-bg-raised p-4 text-contrast">Fast result waits for minimum ghost duration.</div>
-					<template #ghost>
-						<div class="grid gap-3 rounded bg-bg-raised p-4">
-							<GhostText kind="title" width="45%" />
-							<GhostText :lines="3" />
-						</div>
-					</template>
+				<p class="text-secondary mb-4">Pending for 2s, then content fades in. Bar runs at top.</p>
+				<ReadyTransition :pending="pending">
+					<div class="rounded bg-bg-raised p-4 text-contrast">Slot content revealed.</div>
 				</ReadyTransition>
 			</div>
 		`,
 	}),
 }
 
-export const Timeout: Story = {
+export const StackedTwoTransitions: Story = {
 	render: () => ({
 		components: { ReadyTransition, LoadingBar },
 		setup() {
-			provideStoryLoadingState()
-			return { pending: ref(true) }
-		},
-		template: `
-			<div class="relative">
-				<LoadingBar />
-				<ReadyTransition :pending="pending" :timeout-ms="900">
-					<div class="rounded bg-bg-raised p-4 text-contrast">Resolved content.</div>
-					<template #timeout="{ timedOut, state }">
-						<div class="rounded bg-bg-raised p-4 text-secondary">
-							Timeout slot. timedOut={{ timedOut }} state={{ state }}
-						</div>
-					</template>
-				</ReadyTransition>
-			</div>
-		`,
-	}),
-}
-
-export const ErrorState: Story = {
-	render: () => ({
-		components: { ReadyTransition, LoadingBar },
-		setup() {
-			provideStoryLoadingState()
-			const pending = ref(true)
-			const error = ref<Error | null>(null)
+			provideLoadingState(createLoadingStateCore())
+			const a = ref(true)
+			const b = ref(true)
 			onMounted(() => {
-				setTimeout(() => (error.value = new Error('Unable to load the panel')), 500)
+				setTimeout(() => (a.value = false), 1500)
+				setTimeout(() => (b.value = false), 3000)
 			})
-			function formatError(value: unknown) {
-				return value instanceof Error ? value.message : String(value ?? '')
-			}
-			return { error, formatError, pending }
+			return { a, b }
 		},
 		template: `
-			<div class="relative">
+			<div class="relative grid gap-4">
 				<LoadingBar />
-				<ReadyTransition :pending="pending" :error="error">
-					<div class="rounded bg-bg-raised p-4 text-contrast">Resolved content.</div>
-					<template #error="{ error, state }">
-						<div class="rounded bg-bg-raised p-4 text-secondary">
-							{{ state }}: {{ formatError(error) }}
-						</div>
-					</template>
+				<ReadyTransition :pending="a">
+					<div class="rounded bg-bg-raised p-4 text-contrast">Panel A (ready at 1.5s).</div>
 				</ReadyTransition>
+				<ReadyTransition :pending="b">
+					<div class="rounded bg-bg-raised p-4 text-contrast">Panel B (ready at 3s).</div>
+				</ReadyTransition>
+				<p class="text-secondary">Bar stays visible until BOTH panels resolve.</p>
 			</div>
 		`,
 	}),
@@ -153,87 +131,19 @@ export const Silent: Story = {
 	render: () => ({
 		components: { ReadyTransition, LoadingBar },
 		setup() {
-			provideStoryLoadingState()
+			provideLoadingState(createLoadingStateCore())
 			const pending = ref(true)
 			onMounted(() => {
-				setTimeout(() => (pending.value = false), 1200)
+				setTimeout(() => (pending.value = false), 1500)
 			})
 			return { pending }
 		},
 		template: `
 			<div class="relative">
 				<LoadingBar />
+				<p class="text-secondary mb-4">silent=true — fades locally but does NOT raise the loading bar.</p>
 				<ReadyTransition :pending="pending" silent>
-					<div class="rounded bg-bg-raised p-4 text-contrast">Silent content reveal without loading-bar token.</div>
-				</ReadyTransition>
-			</div>
-		`,
-	}),
-}
-
-export const ContentKeyChanges: Story = {
-	render: () => ({
-		components: { GhostText, ReadyTransition, LoadingBar },
-		setup() {
-			provideStoryLoadingState()
-			const pending = ref(false)
-			const contentKey = ref('alpha')
-			const label = ref('Alpha content')
-			function loadNext() {
-				contentKey.value = contentKey.value === 'alpha' ? 'beta' : 'alpha'
-				pending.value = true
-				setTimeout(() => {
-					label.value = contentKey.value === 'alpha' ? 'Alpha content' : 'Beta content'
-					pending.value = false
-				}, 700)
-			}
-			return { contentKey, label, loadNext, pending }
-		},
-		template: `
-			<div class="relative grid gap-3">
-				<LoadingBar />
-				<button class="w-fit rounded bg-button-bg px-3 py-2 font-semibold text-button-text" @click="loadNext">
-					Change content key
-				</button>
-				<ReadyTransition :pending="pending" :content-key="contentKey">
-					<div class="rounded bg-bg-raised p-4 text-contrast">{{ label }}</div>
-					<template #ghost>
-						<div class="rounded bg-bg-raised p-4"><GhostText :lines="2" /></div>
-					</template>
-				</ReadyTransition>
-			</div>
-		`,
-	}),
-}
-
-export const KeepPrevious: Story = {
-	render: () => ({
-		components: { GhostText, ReadyTransition, LoadingBar },
-		setup() {
-			provideStoryLoadingState()
-			const pending = ref(false)
-			const contentKey = ref('one')
-			const label = ref('Previous keyed content')
-			onMounted(() => {
-				setTimeout(() => {
-					contentKey.value = 'two'
-					pending.value = true
-				}, 600)
-				setTimeout(() => {
-					label.value = 'Resolved keyed content'
-					pending.value = false
-				}, 1800)
-			})
-			return { contentKey, label, pending }
-		},
-		template: `
-			<div class="relative">
-				<LoadingBar />
-				<ReadyTransition :pending="pending" :content-key="contentKey" keep-previous>
-					<div class="rounded bg-bg-raised p-4 text-contrast">{{ label }}</div>
-					<template #ghost>
-						<div class="rounded bg-bg-raised p-4"><GhostText :lines="2" /></div>
-					</template>
+					<div class="rounded bg-bg-raised p-4 text-contrast">Silent slot content.</div>
 				</ReadyTransition>
 			</div>
 		`,

@@ -1,4 +1,5 @@
-import { type AmberiteUser, verifyCoreConnection } from '@amberite/amberite-api'
+import type { AmberiteUser } from '@amberite/amberite-api'
+import { verifyCoreConnection } from '@modrinth/api-client'
 import type {
 	ServerAccessInviteSuggestion,
 	ServerAccessRole,
@@ -14,6 +15,7 @@ import { useSocialClient } from '@/composables/useSocialClient'
 import { config } from '@/config'
 import { clearConnectedCore, getConnectedCore, setConnectedCore } from '@/core/connected-core'
 
+import type { CoreAccessMember } from './core-access-types'
 import type {
 	CoreInviteLookupStatus,
 	CoreOnboardingContext,
@@ -27,7 +29,6 @@ import {
 	toInviteSuggestion,
 	toPendingInvite,
 } from './core-onboarding-members'
-import type { CoreAccessMember } from './core-access-types'
 
 const LOCAL_CORE_URL = 'http://127.0.0.1:16662'
 
@@ -100,7 +101,8 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 		const suggestions = new Map<string, ServerAccessInviteSuggestion>()
 		if (selectedInviteSuggestion.value)
 			suggestions.set(selectedInviteSuggestion.value.id, selectedInviteSuggestion.value)
-		for (const suggestion of remoteInviteSuggestions.value) suggestions.set(suggestion.id, suggestion)
+		for (const suggestion of remoteInviteSuggestions.value)
+			suggestions.set(suggestion.id, suggestion)
 		return filterUnavailableInviteSuggestions([...suggestions.values()])
 	})
 
@@ -294,9 +296,7 @@ export function useCoreOnboardingState(modal: { readonly value: CoreOnboardingMo
 			!modalOpen.value ||
 			normalizeCoreCode(connectCode.value) !== code
 		) {
-			await socialClient
-				.releasePairingCore({ code, coreId: claim.coreId })
-				.catch(() => undefined)
+			await socialClient.releasePairingCore({ code, coreId: claim.coreId }).catch(() => undefined)
 			throw new Error('Core connection was cancelled.')
 		}
 

@@ -381,6 +381,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "amberite-browser-bridge"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "http-body-util",
+ "hyper 1.7.0",
+ "hyper-tungstenite",
+ "hyper-util",
+ "mime_guess",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-os",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "amberite-lib"
 version = "0.1.0"
 dependencies = [
@@ -394,7 +416,7 @@ dependencies = [
  "tauri",
  "thiserror 2.0.17",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "zip 6.0.0",
 ]
@@ -4855,6 +4877,21 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tower-service",
+]
+
+[[package]]
+name = "hyper-tungstenite"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87ec0b60f8f6371eb04e4b19361b39fa9a1a88bf344d50c31347824599ca150e"
+dependencies = [
+ "http-body-util",
+ "hyper 1.7.0",
+ "hyper-util",
+ "pin-project-lite",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "tungstenite 0.27.0",
 ]
 
 [[package]]
@@ -11199,6 +11236,7 @@ dependencies = [
 name = "theseus_gui"
 version = "1.0.0-local"
 dependencies = [
+ "amberite-browser-bridge",
  "async_zip",
  "base64 0.22.1",
  "chrono",
@@ -11495,6 +11533,18 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tungstenite 0.26.2",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "489a59b6730eda1b0171fcfda8b121f4bee2b35cba8645ca35c5f7ba3eb736c1"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.27.0",
 ]
 
 [[package]]

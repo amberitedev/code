@@ -1,6 +1,5 @@
 <template>
 	<div v-if="!instance.quarantined" class="flex flex-col gap-4">
-		<ModrinthAccountRequiredModal ref="accountRequiredModal" :request-auth="requestAuth" />
 		<InvitePlayersModal
 			ref="invitePlayersModal"
 			:header="formatMessage(messages.shareModalHeader, { name: instance.name })"
@@ -135,7 +134,6 @@ import {
 	Button,
 	ConfirmUnlinkModal,
 	defineMessages,
-	injectAuth,
 	type InvitePlayersInvitePayload,
 	InvitePlayersModal,
 	type InvitePlayersUser,
@@ -144,15 +142,14 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
-import ModrinthAccountRequiredModal from '@/components/ui/modal/ModrinthAccountRequiredModal.vue'
 import SharedInstancePublishModal from '@/components/ui/shared-instances/SharedInstancePublishModal.vue'
+import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
 import {
 	getSharedInstanceUnavailableReason,
 	isSharedInstancesApiError,
 	isSharedInstanceUnavailableError,
 } from '@/helpers/install'
 import { edit } from '@/helpers/instance'
-import type { ModrinthAuthFlow } from '@/helpers/mr_auth.ts'
 import {
 	sharedInstanceErrorMessages,
 	useSharedInstanceErrors,
@@ -170,7 +167,7 @@ import { useSharedInstanceInviteLink } from './use-shared-instance-invite-link'
 import { useSharedInstanceMembers } from './use-shared-instance-members'
 
 const instancePage = injectInstancePage()
-const auth = injectAuth()
+const auth = useAmberiteAuth()
 const queryClient = useQueryClient()
 const { formatMessage } = useVIntl()
 const {
@@ -183,10 +180,9 @@ const instance = computed(() => instancePage.instance.value!)
 const offline = instancePage.offline
 const actionsLocked = sharedInstanceState.shareActionsLocked
 const sharedInstanceActionsLocked = actionsLocked
-const currentUserId = computed(() => auth.user.value?.id ?? null)
-const isSignedIn = computed(() => !!auth.session_token.value)
+const currentUserId = computed(() => auth.user.value?.userId ?? null)
+const isSignedIn = computed(() => auth.status.value === 'authenticated')
 const sharedInstancesApiUnavailable = ref(false)
-const accountRequiredModal = ref<InstanceType<typeof ModrinthAccountRequiredModal>>()
 const invitePlayersModal = ref<InstanceType<typeof InvitePlayersModal>>()
 const unlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 const removeMemberModal = ref<InstanceType<typeof SharedInstanceRemoveMemberModal>>()
@@ -392,14 +388,8 @@ function removeMember(row: ShareRow) {
 function userProfileLink(username: string) {
 	return !username || username.includes('@') ? undefined : `/user/${encodeURIComponent(username)}`
 }
-async function requestAuth(flow: ModrinthAuthFlow) {
-	await auth.requestSignIn(`/instance/${encodeURIComponent(instance.value.id)}/share`, flow, {
-		showModal: false,
-	})
-	return !!auth.session_token.value
-}
-function signInToShare(event?: MouseEvent) {
-	void accountRequiredModal.value?.show(event)
+function signInToShare(_event?: MouseEvent) {
+	void auth.signIn('continue').catch(notifyOperationError)
 }
 
 provideSharedInstanceManagement({
@@ -440,7 +430,7 @@ watch(
 	},
 )
 watch(
-	[() => auth.isReady.value, isSignedIn, actionsLocked],
+	[auth.isReady, isSignedIn, actionsLocked],
 	([ready, signedIn, locked]) => {
 		if (ready && !signedIn && !locked) signInToShare()
 	},

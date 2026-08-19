@@ -18,28 +18,7 @@ function getCallerLocation(): string {
 	}
 }
 
-type DebugLogger = (...args: unknown[]) => void
-
-const noopDebugLogger: DebugLogger = () => {}
-const DEBUG_LOGGING_STORAGE_KEY = 'modrinth:debug-logging'
-
-function isDebugLoggingEnabled() {
-	if (import.meta.env?.VITE_DEBUG_LOGGING === 'true') {
-		return true
-	}
-
-	try {
-		return globalThis.localStorage?.getItem(DEBUG_LOGGING_STORAGE_KEY) === 'true'
-	} catch {
-		return false
-	}
-}
-
-export function useDebugLogger(namespace: string): DebugLogger {
-	if (!isDebugLoggingEnabled()) {
-		return noopDebugLogger
-	}
-
+export function useDebugLogger(namespace: string) {
 	// eslint-disable-next-line
 	return (...args: any[]) => {
 		const location = getCallerLocation()

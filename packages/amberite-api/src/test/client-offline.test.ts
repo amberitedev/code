@@ -1,14 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { CoreApiClient } from '../client'
-import { CoreOfflineError } from '../errors'
-import type { PlatformAdapter } from '../adapter'
+import { CoreApiClient, CoreOfflineError, type CoreClientAdapter } from '@modrinth/api-client'
 
-const offlineAdapter: PlatformAdapter = {
+const offlineAdapter: CoreClientAdapter = {
 	fetchFn: vi.fn() as unknown as typeof fetch,
-	convexUrl: 'https://test.convex.cloud',
 	getCoreUrl: async () => null,
 	getCurrentJwt: async () => null,
-	openExternalAuth: vi.fn(),
 }
 
 const client = new CoreApiClient(offlineAdapter)
@@ -56,33 +52,31 @@ describe('CoreApiClient when Core is offline', () => {
 		await expect(client.openConsole('any-id', 'ticket')).rejects.toThrow(CoreOfflineError)
 	})
 
-	it('listBackups throws CoreOfflineError', async () => {
-		await expect(client.listBackups('any-id')).rejects.toThrow(CoreOfflineError)
-	})
-
-	it('does not expose the account JWT when the linked Core identity does not match', async () => {
-		const getCurrentJwt = vi.fn(async () => 'account-jwt')
+	it('does not expose the JWT when the paired Core identity does not match', async () => {
+		const getCurrentJwt = vi.fn(async () => 'secret-jwt')
 		const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body))
 			return Response.json({
 				nonce: body.nonce,
 				ok: false,
-				core_id: 'unexpected-core',
+				core_id: 'different-core',
 				protocol: 1,
 				version: '0.1.0',
 				reason: 'wrong-core',
 			})
 		}) as unknown as typeof fetch
-		const guardedClient = new CoreApiClient({
+		const mismatchedClient = new CoreApiClient({
 			fetchFn,
-			convexUrl: 'https://test.convex.cloud',
-			getCoreUrl: async () => 'https://core.example.com',
-			getConnectedCoreId: async () => 'expected-core',
+			getCoreUrl: async () => 'http://localhost:16662',
+			getConnectedCoreId: async () => 'paired-core',
 			getCurrentJwt,
-			openExternalAuth: vi.fn(),
 		})
 
-		await expect(guardedClient.listInstances()).rejects.toThrow(CoreOfflineError)
+		await expect(mismatchedClient.listInstances()).rejects.toThrow(CoreOfflineError)
 		expect(getCurrentJwt).not.toHaveBeenCalled()
+	})
+
+	it('listBackups throws CoreOfflineError', async () => {
+		await expect(client.listBackups('any-id')).rejects.toThrow(CoreOfflineError)
 	})
 })

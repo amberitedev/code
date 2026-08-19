@@ -8,14 +8,14 @@
 		<div class="flex flex-col gap-6">
 			<div class="flex flex-col gap-2">
 				<label class="font-semibold text-contrast" for="grant-access-target">
-					{{ targetLabel }}
+					{{ formatMessage(messages.targetLabel) }}
 				</label>
 				<Combobox
 					id="grant-access-target"
 					:model-value="undefined"
 					:options="suggestionOptions"
-					:search-placeholder="targetPlaceholder"
-					:placeholder="targetPlaceholder"
+					:search-placeholder="formatMessage(messages.targetPlaceholder)"
+					:placeholder="formatMessage(messages.targetPlaceholder)"
 					:no-options-message="targetLookupMessage"
 					:min-search-length-to-open="suggestionMinimumLength"
 					:disable-search-filter="usesRemoteLookup"
@@ -55,7 +55,7 @@
 					</template>
 				</Combobox>
 				<span class="m-0 text-base text-primary">
-					{{ targetHelp }}
+					{{ formatMessage(messages.targetHelp) }}
 				</span>
 			</div>
 
@@ -71,7 +71,7 @@
 						class="group flex w-full items-center gap-3 rounded-[20px] border border-solid p-3 text-left transition-all hover:brightness-110 active:scale-[0.98]"
 						:class="
 							selectedRole === role.value
-								? roleSelectionClass(role.value)
+								? 'border-brand bg-brand-highlight'
 								: 'border-transparent bg-surface-4'
 						"
 						@click="selectedRole = role.value"
@@ -80,32 +80,25 @@
 							class="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-solid"
 							:class="
 								selectedRole === role.value
-									? roleIconClass(role.value)
+									? 'border-brand bg-brand-highlight text-brand'
 									: 'border-surface-5 text-secondary'
 							"
 						>
 							<component :is="role.icon" class="size-8" stroke-width="1.5" aria-hidden="true" />
 						</span>
 						<span class="flex min-w-0 flex-1 flex-col gap-1">
-							<span
-								class="text-base font-semibold"
-								:class="selectedRole === role.value ? roleTextClass(role.value) : 'text-contrast'"
-							>
-								{{ role.label }}
-							</span>
+							<span class="text-base font-semibold text-contrast">{{ role.label }}</span>
 							<span class="text-sm font-medium text-primary">{{ role.description }}</span>
 						</span>
 					</button>
 				</div>
 				<p class="m-0 text-base text-primary">
-					<IntlFormatted :message-id="permissionsHelpMessage">
+					<IntlFormatted :message-id="messages.permissionsHelp">
 						<template #link="{ children }">
 							<a
 								class="font-medium text-blue hover:underline"
-								:href="props.permissionsHelpHref"
-								:target="props.permissionsHelpTarget"
-								:rel="props.permissionsHelpTarget === '_blank' ? 'noopener noreferrer' : undefined"
-								@click="handlePermissionsHelpClick"
+								href="/news/article/server-access/"
+								target="_blank"
 							>
 								<component :is="() => children" />
 							</a>
@@ -181,32 +174,17 @@ const props = withDefaults(
 		searchUsers?: (query: string) => Promise<ServerAccessInviteSuggestion[]>
 		canGrant?: boolean
 		permissionDeniedMessage?: string
-		targetLabel?: string
-		targetPlaceholder?: string
-		targetHelp?: string
-		permissionsHelp?: string
-		permissionsHelpHref?: string
-		permissionsHelpTarget?: string
-		friendRequestUnavailableIds?: string[]
 	}>(),
 	{
 		members: () => [],
 		suggestions: () => [],
 		friendIds: () => [],
 		canGrant: true,
-		targetLabel: undefined,
-		targetPlaceholder: undefined,
-		targetHelp: undefined,
-		permissionsHelp: undefined,
-		permissionsHelpHref: '/news/article/server-access/',
-		permissionsHelpTarget: '_blank',
-		friendRequestUnavailableIds: () => [],
 	},
 )
 
 const emit = defineEmits<{
 	grant: [payload: GrantServerAccessPayload]
-	permissionsHelpClick: [event: MouseEvent]
 }>()
 
 const { formatMessage } = useVIntl()
@@ -314,59 +292,14 @@ const grantableRoles = computed(() => [
 	},
 ])
 
-function roleSelectionClass(role: Exclude<ServerAccessRole, 'owner'>): string {
-	switch (role) {
-		case 'editor':
-			return 'border-purple bg-highlight-purple'
-		case 'viewer':
-			return 'border-blue bg-highlight-blue'
-	}
-}
-
-function roleIconClass(role: Exclude<ServerAccessRole, 'owner'>): string {
-	switch (role) {
-		case 'editor':
-			return 'border-purple bg-highlight-purple text-purple'
-		case 'viewer':
-			return 'border-blue bg-highlight-blue text-blue'
-	}
-}
-
-function roleTextClass(role: Exclude<ServerAccessRole, 'owner'>): string {
-	switch (role) {
-		case 'editor':
-			return 'text-purple'
-		case 'viewer':
-			return 'text-blue'
-	}
-}
-
-const targetLabel = computed(() => props.targetLabel ?? formatMessage(messages.targetLabel))
-const targetPlaceholder = computed(
-	() => props.targetPlaceholder ?? formatMessage(messages.targetPlaceholder),
-)
-const targetHelp = computed(() => props.targetHelp ?? formatMessage(messages.targetHelp))
-const permissionsHelpMessage = computed(() =>
-	props.permissionsHelp
-		? {
-				id: `${messages.permissionsHelp.id}.custom`,
-				defaultMessage: props.permissionsHelp,
-			}
-		: messages.permissionsHelp,
-)
 const normalizedTarget = computed(() => target.value.trim())
 const usesRemoteLookup = computed(() => !!props.searchUsers)
 const matchedSuggestion = computed(() => findSuggestion(normalizedTarget.value))
 const selectedTargetUserId = computed(() => matchedSuggestion.value?.id)
-const friendRequestUnavailableIdSet = computed(
-	() =>
-		new Set(
-			[...props.friendIds, ...props.friendRequestUnavailableIds].map((id) => id.toLowerCase()),
-		),
-)
+const friendIdSet = computed(() => new Set(props.friendIds.map((id) => id.toLowerCase())))
 const targetIsFriend = computed(() => {
 	const userId = selectedTargetUserId.value
-	return !!userId && friendRequestUnavailableIdSet.value.has(userId.toLowerCase())
+	return !!userId && friendIdSet.value.has(userId.toLowerCase())
 })
 const hasResolvedTarget = computed(() => {
 	const suggestion = matchedSuggestion.value
@@ -498,10 +431,6 @@ function handleTargetSearch(value: string) {
 function handleTargetSelect(option: ComboboxOption<string>) {
 	target.value = option.value
 	hasSelectedTarget.value = true
-}
-
-function handlePermissionsHelpClick(event: MouseEvent) {
-	emit('permissionsHelpClick', event)
 }
 
 function reset() {

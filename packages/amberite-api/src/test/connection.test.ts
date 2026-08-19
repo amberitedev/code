@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { PlatformAdapter } from '../adapter'
-import { CONNECTION_PROTOCOL, verifyCoreConnection } from '../connection'
+import {
+	CONNECTION_PROTOCOL,
+	verifyCoreConnection,
+	type CoreClientAdapter,
+} from '@modrinth/api-client'
 
-function adapter(fetchFn: typeof fetch): PlatformAdapter {
+function adapter(fetchFn: typeof fetch): CoreClientAdapter {
 	return {
 		fetchFn,
-		convexUrl: '',
 		getCoreUrl: async () => 'http://localhost:16662',
 		getCurrentJwt: async () => null,
-		openExternalAuth: vi.fn(),
 	}
 }
 

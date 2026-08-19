@@ -322,7 +322,7 @@ type InfoProperty =
 
 // Info properties
 const infoProperties = computed<InfoProperty[]>(() => [
-	{ name: 'Server path', value: serverId ?? 'Unknown', type: 'copy' },
+	{ name: 'Server ID', value: serverId ?? 'Unknown', type: 'copy' },
 	{ name: 'Node', value: data.value?.node?.instance ?? 'Unknown', type: 'copy' },
 	{ name: 'Hostname', value: serverHostname.value, type: 'copy' },
 	{

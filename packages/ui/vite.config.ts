@@ -6,14 +6,7 @@ import svgLoader from 'vite-svg-loader'
 
 export default defineConfig({
 	plugins: [
-		vue({
-			template: {
-				compilerOptions: {
-					isCustomElement: (tag) =>
-						(tag.startsWith('Tres') && tag !== 'TresCanvas') || tag === 'primitive',
-				},
-			},
-		}),
+		vue(),
 		svgLoader({
 			svgoConfig: {
 				plugins: [

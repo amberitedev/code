@@ -3,14 +3,14 @@ use super::*;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SharedInstancesRequestAuth {
-    ModrinthSession,
+    AmberiteSession,
     None,
 }
 
 impl SharedInstancesRequestAuth {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::ModrinthSession => "modrinth_session",
+            Self::AmberiteSession => "amberite_session",
             Self::None => "none",
         }
     }
@@ -79,11 +79,6 @@ pub(super) struct InstanceInviteResponse {
     pub(super) expiration: DateTime<Utc>,
     pub(super) max_uses: i32,
     pub(super) uses: i32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct BlacklistStatusResponse {
-    pub(super) blacklisted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -169,20 +164,6 @@ pub(super) async fn create_remote_instance(
     .await
 }
 
-pub(super) async fn get_user_blacklist_status(
-    user_id: &str,
-    state: &State,
-) -> crate::Result<BlacklistStatusResponse> {
-    request_json(
-        "get_user_blacklist_status",
-        Method::GET,
-        &format!("/blacklist/{user_id}"),
-        None,
-        state,
-    )
-    .await
-}
-
 pub(super) async fn delete_remote_instance(
     shared_instance_id: &str,
     state: &State,
@@ -253,7 +234,7 @@ pub(super) async fn get_remote_instance_access(
         SharedInstanceUnavailableReason::from_status(response.status())
     {
         if reason == SharedInstanceUnavailableReason::AccessRevoked
-            && !active_modrinth_session_is_valid(state).await?
+            && !active_amberite_session_is_configured(state).await?
         {
             return Err(crate::ErrorKind::NoCredentialsError.into());
         }
@@ -371,7 +352,7 @@ pub(super) async fn get_latest_remote_version_optional_unavailable(
     get_latest_remote_version_optional_unavailable_with_auth(
         shared_instance_id,
         state,
-        SharedInstancesRequestAuth::ModrinthSession,
+        SharedInstancesRequestAuth::AmberiteSession,
     )
     .await
 }
@@ -460,7 +441,7 @@ pub(super) async fn accept_shared_instance_invite(
         log_path,
         None,
         state,
-        SharedInstancesRequestAuth::ModrinthSession,
+        SharedInstancesRequestAuth::AmberiteSession,
     )
     .await?;
     if response.status().is_success() {
@@ -608,8 +589,8 @@ where
         SharedInstanceUnavailableReason::from_status(response.status())
     {
         if reason == SharedInstanceUnavailableReason::AccessRevoked
-            && matches!(auth, SharedInstancesRequestAuth::ModrinthSession)
-            && !active_modrinth_session_is_valid(state).await?
+            && matches!(auth, SharedInstancesRequestAuth::AmberiteSession)
+            && !active_amberite_session_is_configured(state).await?
         {
             tracing::warn!(
                 operation,
@@ -643,46 +624,11 @@ where
         .map(SharedInstanceRemoteResponse::Available)
 }
 
-pub(super) async fn active_modrinth_session_is_valid(
-    state: &State,
+pub(super) async fn active_amberite_session_is_configured(
+    _state: &State,
 ) -> crate::Result<bool> {
-    let Some(credentials) =
-        ModrinthCredentials::get_and_refresh(&state.pool, &state.api_semaphore)
-            .await?
-    else {
-        return Ok(false);
-    };
-
-    let _permit = state.api_semaphore.0.acquire().await?;
-    let response = INSECURE_REQWEST_CLIENT
-        .get(concat!(env!("MODRINTH_API_URL"), "user"))
-        .header("Authorization", &credentials.session)
-        .send()
-        .await?;
-
-    if response.status() == StatusCode::UNAUTHORIZED {
-        ModrinthCredentials::remove(&credentials.user_id, &state.pool).await?;
-        return Ok(false);
-    }
-
-    if response.status().is_success() {
-        return Ok(true);
-    }
-
-    let status = response.status();
-    let request_id = response_request_id(&response);
-    tracing::warn!(
-        operation = "validate_modrinth_session",
-        method = Method::GET.as_str(),
-        path = "/user",
-        status = status.as_u16(),
-        request_id = request_id.as_deref().unwrap_or("none"),
-        "Modrinth auth validation request failed"
-    );
-    Err(crate::ErrorKind::OtherError(format!(
-        "Modrinth auth validation failed with status {status}"
-    ))
-    .into())
+    Ok(shared_clients_session()
+        .is_some_and(|session| session.access_token.is_some()))
 }
 
 pub(super) async fn decode_json_response<T>(
@@ -770,7 +716,7 @@ async fn request_empty_with_log_path(
         log_path,
         body,
         state,
-        SharedInstancesRequestAuth::ModrinthSession,
+        SharedInstancesRequestAuth::AmberiteSession,
     )
     .await?;
     if response.status().is_success() {
@@ -809,7 +755,7 @@ pub(super) async fn send_request(
         path,
         body,
         state,
-        SharedInstancesRequestAuth::ModrinthSession,
+        SharedInstancesRequestAuth::AmberiteSession,
     )
     .await
 }
@@ -821,8 +767,8 @@ pub(super) async fn send_bytes_request(
     body: Vec<u8>,
     state: &State,
 ) -> crate::Result<reqwest::Response> {
-    let base_url = service_base_url();
-    let url = service_url(base_url, path);
+    let base_url = service_base_url()?;
+    let url = service_url(&base_url, path);
     send_bytes_request_to_url(operation, method, path, &url, body, state).await
 }
 
@@ -834,7 +780,7 @@ pub(super) async fn send_bytes_request_to_url(
     body: Vec<u8>,
     state: &State,
 ) -> crate::Result<reqwest::Response> {
-    let service_origin = url::Url::parse(service_base_url())
+    let service_origin = url::Url::parse(&service_base_url()?)
         .map_err(|error| {
             crate::ErrorKind::OtherError(format!(
                 "Invalid shared instances API base URL: {error}"
@@ -855,10 +801,9 @@ pub(super) async fn send_bytes_request_to_url(
         .into());
     }
 
-    let credentials =
-        ModrinthCredentials::get_and_refresh(&state.pool, &state.api_semaphore)
-            .await?
-            .ok_or(crate::ErrorKind::NoCredentialsError)?;
+    let session = shared_clients_session()
+        .and_then(|session| session.access_token)
+        .ok_or(crate::ErrorKind::NoCredentialsError)?;
     let _permit = state.api_semaphore.0.acquire().await?;
 
     tracing::debug!(
@@ -866,15 +811,14 @@ pub(super) async fn send_bytes_request_to_url(
         method = method.as_str(),
         path,
         url = %url,
-        user_id = credentials.user_id.as_str(),
-        auth = SharedInstancesRequestAuth::ModrinthSession.label(),
+        auth = SharedInstancesRequestAuth::AmberiteSession.label(),
         has_body = true,
         "Sending shared instances API request"
     );
 
     let response = shared_instances_client(url)
         .request(method.clone(), url)
-        .bearer_auth(credentials.session)
+        .bearer_auth(session)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .body(body)
         .send()
@@ -924,33 +868,28 @@ async fn send_request_with_auth_and_log_path(
     state: &State,
     auth: SharedInstancesRequestAuth,
 ) -> crate::Result<reqwest::Response> {
-    let modrinth_credentials =
-        if matches!(auth, SharedInstancesRequestAuth::ModrinthSession) {
+    let amberite_session =
+        if matches!(auth, SharedInstancesRequestAuth::AmberiteSession) {
             Some(
-                ModrinthCredentials::get_and_refresh(
-                    &state.pool,
-                    &state.api_semaphore,
-                )
-                .await?
-                .ok_or(crate::ErrorKind::NoCredentialsError)?,
+                shared_clients_session()
+                    .and_then(|session| session.access_token)
+                    .ok_or(crate::ErrorKind::NoCredentialsError)?,
             )
         } else {
             None
         };
     let _permit = state.api_semaphore.0.acquire().await?;
-    let base_url = service_base_url();
-    let url = service_url(base_url, path);
-    let log_url = service_url(base_url, log_path);
+    let base_url = service_base_url()?;
+    let url = service_url(&base_url, path);
+    let log_url = service_url(&base_url, log_path);
     let mut request =
-        shared_instances_client(base_url).request(method.clone(), &url);
-    let mut user_id = None;
+        shared_instances_client(&base_url).request(method.clone(), &url);
 
     match auth {
-        SharedInstancesRequestAuth::ModrinthSession => {
-            let credentials = modrinth_credentials
-                .expect("Modrinth session credentials were loaded");
-            user_id = Some(credentials.user_id);
-            request = request.bearer_auth(credentials.session);
+        SharedInstancesRequestAuth::AmberiteSession => {
+            let access_token = amberite_session
+                .expect("Amberite session credentials were loaded");
+            request = request.bearer_auth(access_token);
         }
         SharedInstancesRequestAuth::None => {}
     }
@@ -960,7 +899,6 @@ async fn send_request_with_auth_and_log_path(
         method = method.as_str(),
         path = log_path,
         url = %log_url,
-        user_id = user_id.as_deref(),
         auth = auth.label(),
         has_body = body.is_some(),
         "Sending shared instances API request"
@@ -1046,8 +984,15 @@ pub(super) fn service_url(base_url: &str, path: &str) -> String {
     format!("{base_url}/v1{path}")
 }
 
-pub(super) fn service_base_url() -> &'static str {
-    env!("SHARED_INSTANCES_API_BASE_URL").trim_end_matches('/')
+pub(super) fn service_base_url() -> crate::Result<String> {
+    shared_clients_session()
+        .map(|session| session.base_url)
+        .ok_or_else(|| {
+            crate::ErrorKind::OtherError(
+                "Amberite shared clients service is not configured".to_string(),
+            )
+            .into()
+        })
 }
 
 pub(super) fn shared_instances_client(

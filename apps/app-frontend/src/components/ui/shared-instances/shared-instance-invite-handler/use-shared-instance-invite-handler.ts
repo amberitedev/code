@@ -1,6 +1,5 @@
 import { ModrinthApiError } from '@modrinth/api-client'
 import {
-	injectAuth,
 	injectModrinthClient,
 	injectNotificationManager,
 	injectPopupNotificationManager,
@@ -9,7 +8,8 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { type Ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { get_user } from '@/helpers/cache'
+import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
+import { useSocialClientRaw } from '@/composables/useSocialClient'
 import { toError } from '@/helpers/errors'
 import {
 	install_accept_shared_instance_invite,
@@ -37,10 +37,6 @@ type SharedInstanceCreator = {
 	avatarUrl: string | null
 }
 
-type AccountRequiredModal = {
-	show(event?: MouseEvent): Promise<boolean>
-}
-
 type AlreadyInstalledModal = {
 	show(instanceName: string): void
 }
@@ -48,9 +44,9 @@ type AlreadyInstalledModal = {
 export function useSharedInstanceInviteHandler(
 	installModal: Ref<InstallModal | undefined>,
 	alreadyInstalledModal: Ref<AlreadyInstalledModal | undefined>,
-	accountRequiredModal: Ref<AccountRequiredModal | undefined>,
 ) {
-	const auth = injectAuth()
+	const auth = useAmberiteAuth()
+	const socialClient = useSocialClientRaw()
 	const client = injectModrinthClient()
 	const { handleError } = injectNotificationManager()
 	const { notifySharedInstanceConnectionError, notifySharedInstanceError } =
@@ -75,7 +71,9 @@ export function useSharedInstanceInviteHandler(
 
 	async function markNotificationRead(notification: AppNotification) {
 		try {
-			await client.labrinth.notifications_v2.markAsRead(String(notification.id))
+			await socialClient.rawMutation('socialCompat:markNotificationsRead', {
+				ids: [String(notification.id)],
+			})
 		} catch (error) {
 			if (error instanceof ModrinthApiError && error.statusCode === 404) return
 			throw error
@@ -85,7 +83,7 @@ export function useSharedInstanceInviteHandler(
 	async function resolveInvite(invite: SharedInstanceInvite) {
 		const [invitedBy, sharedInstance] = await Promise.all([
 			(!invite.invitedByUsername || !invite.invitedByAvatarUrl) && invite.invitedById
-				? get_user(invite.invitedById, 'bypass').catch(() => null)
+				? socialClient.getProfile(invite.invitedById).catch(() => null)
 				: null,
 			client.sharedinstances.instances_v1.get(invite.sharedInstanceId).catch(() => {
 				notifySharedInstanceConnectionError()
@@ -95,8 +93,9 @@ export function useSharedInstanceInviteHandler(
 
 		return {
 			...invite,
-			invitedByUsername: invite.invitedByUsername ?? invitedBy?.username ?? null,
-			invitedByAvatarUrl: invite.invitedByAvatarUrl ?? invitedBy?.avatar_url ?? null,
+			invitedByUsername:
+				invite.invitedByUsername ?? invitedBy?.username ?? invitedBy?.displayName ?? null,
+			invitedByAvatarUrl: invite.invitedByAvatarUrl ?? invitedBy?.image ?? null,
 			instanceIconUrl: sharedInstance ? sharedInstance.icon : invite.instanceIconUrl,
 		}
 	}
@@ -206,6 +205,7 @@ export function useSharedInstanceInviteHandler(
 	async function handleNotification(notification: AppNotification) {
 		const parsedInvite = parseSharedInstanceInviteNotification(notification)
 		if (!parsedInvite) return false
+		if (notification.read) return true
 		if (displayedNotifications.has(notification.id)) return true
 
 		const generation = notificationGeneration
@@ -259,9 +259,9 @@ export function useSharedInstanceInviteHandler(
 	}
 
 	async function requireAccount() {
-		if (!auth.isReady?.value) {
+		if (!auth.isReady.value) {
 			await new Promise<void>((resolve) => {
-				const stop = watch(auth.isReady!, (ready) => {
+				const stop = watch(auth.isReady, (ready) => {
 					if (ready) {
 						stop()
 						resolve()
@@ -269,8 +269,9 @@ export function useSharedInstanceInviteHandler(
 				})
 			})
 		}
-		if (auth.session_token.value) return true
-		return (await accountRequiredModal.value?.show()) ?? false
+		if (auth.status.value === 'authenticated') return true
+		await auth.signIn('continue')
+		return auth.status.value === 'authenticated'
 	}
 
 	async function installFromInviteId(inviteId: string) {
@@ -278,7 +279,7 @@ export function useSharedInstanceInviteHandler(
 			if (!(await requireAccount())) return
 			const invite = await install_accept_shared_instance_invite(inviteId)
 			const manager = invite.managerId
-				? await get_user(invite.managerId, 'bypass').catch(() => null)
+				? await socialClient.getProfile(invite.managerId).catch(() => null)
 				: null
 			await showInstallOrAlreadyInstalled(
 				invite.sharedInstanceId,
@@ -296,9 +297,9 @@ export function useSharedInstanceInviteHandler(
 				},
 				manager
 					? {
-							id: manager.id,
-							username: manager.username,
-							avatarUrl: manager.avatar_url ?? null,
+							id: manager.userId,
+							username: manager.username ?? manager.displayName ?? manager.userId,
+							avatarUrl: manager.image ?? null,
 						}
 					: undefined,
 			)

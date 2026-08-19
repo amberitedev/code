@@ -12,7 +12,7 @@
 			<div class="flex flex-row items-center gap-1">
 				{{ game[0].toUpperCase() + game.slice(1) }}
 				<span v-if="mcVersion">{{ mcVersion }}</span>
-				<GhostText v-else kind="metadata" width="100%" :style="{ width: '3rem' }" />
+				<span v-else class="inline-block h-3 w-12 animate-pulse rounded bg-button-border"></span>
 			</div>
 		</AutoLink>
 		<div
@@ -22,7 +22,7 @@
 		>
 			{{ game[0].toUpperCase() + game.slice(1) }}
 			<span v-if="mcVersion">{{ mcVersion }}</span>
-			<GhostText v-else kind="metadata" width="100%" :style="{ width: '4rem' }" />
+			<span v-else class="inline-block h-3 w-16 animate-pulse rounded bg-button-border"></span>
 		</div>
 	</div>
 </template>
@@ -34,7 +34,6 @@ import { computed } from 'vue'
 import { injectServerSettingsModal } from '#ui/providers/server-settings-modal'
 
 import AutoLink from '../../base/AutoLink.vue'
-import GhostText from '../../base/GhostText.vue'
 import Separator from './Separator.vue'
 
 defineProps<{

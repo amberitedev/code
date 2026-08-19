@@ -3,17 +3,8 @@ export { default as AccountSocialSettings } from './AccountSocialSettings.vue'
 export { default as ServersManageAccessPage } from './hosting/manage/[id]/access/access.vue'
 export { default as ServerOnboardingPanelPage } from './hosting/manage/[id]/onboarding.vue'
 export { default as ServersManageBackupsPage } from './hosting/manage/backups.vue'
-export { default as ServersManageBrowsePage } from './hosting/manage/browse.vue'
 export { default as ServersManageContentPage } from './hosting/manage/content.vue'
 export { default as ServersManageFilesPage } from './hosting/manage/files.vue'
 export { default as ServersManagePageIndex } from './hosting/manage/index.vue'
 export { default as ServersManageOverviewPage } from './hosting/manage/overview.vue'
 export { default as ServersManageRootLayout } from './hosting/manage/root.vue'
-export {
-	coreServerContextKey as sharedCoreServerContextKey,
-	injectCoreServerContext as injectSharedCoreServerContext,
-} from './hosting/manage/context'
-export type {
-	CoreServerContext as SharedCoreServerContext,
-	CoreServerViewData as SharedCoreServerViewData,
-} from './hosting/manage/context'

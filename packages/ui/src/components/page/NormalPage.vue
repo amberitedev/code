@@ -24,7 +24,7 @@ const { hierarchicalSidebarAvailable } = injectPageContext()
 		</div>
 		<template v-if="sidebar">
 			<template v-if="hierarchicalSidebarAvailable">
-				<Teleport defer to="#sidebar-teleport-target">
+				<Teleport to="#sidebar-teleport-target">
 					<slot name="sidebar" />
 				</Teleport>
 			</template>

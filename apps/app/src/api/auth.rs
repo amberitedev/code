@@ -41,6 +41,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             sign_out_amberite_product_session,
             get_remembered_amberite_identity,
             get_amberite_local_setup_secret,
+            set_amberite_shared_clients_session,
         ])
         .build()
 }
@@ -266,6 +267,27 @@ pub async fn check_amberite_reachable(convex_url: String) -> Result<()> {
     let _: Option<Value> =
         convex_call(&convex_url, "query", "auth:currentUser", json!({}), None)
             .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_amberite_shared_clients_session(
+    convex_site_url: String,
+    access_token: Option<String>,
+    user_id: Option<String>,
+) -> Result<()> {
+    let url = url::Url::parse(&convex_site_url).map_err(other_error)?;
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1"));
+    if url.scheme() != "https" && !(url.scheme() == "http" && local) {
+        return Err(other_error(
+            "Convex site URL must use HTTPS unless it is local",
+        ));
+    }
+    theseus::instance::set_shared_clients_session(
+        convex_site_url,
+        access_token,
+        user_id,
+    );
     Ok(())
 }
 

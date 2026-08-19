@@ -1,6 +1,8 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+overrides:
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.9
 allowBuilds:
   '@parcel/watcher': set this to true or false
   '@sentry/cli': set this to true or false

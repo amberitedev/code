@@ -1,9 +1,8 @@
 <template>
 	<NewModal
 		ref="modal"
-		:scrollable="scrollable"
-		:max-content-height="maxContentHeight"
-		:disable-content-scroll="disableContentScroll"
+		:scrollable="true"
+		max-content-height="72vh"
 		:on-hide="onModalHide"
 		:closable="true"
 		:close-on-click-outside="closeOnClickOutside"
@@ -66,14 +65,7 @@
 			class="w-full h-1 appearance-none border-none absolute top-0 left-0"
 		></progress>
 
-		<StageContentTransition
-			:content-key="currentStage?.id ?? currentStageIndex"
-			:active-index="currentStageIndex"
-			:axis="stageTransitionAxis"
-			:direction="stageTransitionDirection"
-		>
-			<component :is="currentStage?.stageContent" />
-		</StageContentTransition>
+		<component :is="currentStage?.stageContent" />
 
 		<template #actions>
 			<div
@@ -136,11 +128,6 @@ import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { ButtonColor } from '#ui/components/base/buttons'
 import { Button } from '#ui/components/base/buttons'
 
-import StageContentTransition, {
-	type StageContentTransitionAxis,
-	type StageContentTransitionDirection,
-} from './StageContentTransition.vue'
-
 export interface StageButtonConfig {
 	label?: string
 	icon?: Component | null
@@ -187,19 +174,9 @@ const props = withDefaults(
 		fade?: 'standard' | 'warning' | 'danger'
 		disableProgress?: boolean
 		closeOnClickOutside?: boolean
-		scrollable?: boolean
-		disableContentScroll?: boolean
-		maxContentHeight?: string
-		stageTransitionAxis?: StageContentTransitionAxis
-		stageTransitionDirection?: StageContentTransitionDirection
 	}>(),
 	{
 		closeOnClickOutside: true,
-		scrollable: true,
-		disableContentScroll: false,
-		maxContentHeight: '72vh',
-		stageTransitionAxis: 'horizontal',
-		stageTransitionDirection: undefined,
 	},
 )
 

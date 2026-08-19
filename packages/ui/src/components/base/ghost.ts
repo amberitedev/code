@@ -1,5 +1,0 @@
-export type GhostShape = 'square' | 'text' | 'control' | 'surface' | 'pill' | 'circle'
-export type GhostTextKind = 'title' | 'body' | 'metadata'
-export type GhostControlKind = 'input' | 'select' | 'button' | 'icon-button' | 'chip' | 'pagination'
-export type GhostControlSize = 'small' | 'standard' | 'large'
-export type GhostMediaKind = 'square' | 'rounded' | 'circle' | 'banner'

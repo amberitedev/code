@@ -81,30 +81,6 @@ export class ConvexError extends AmberiteApiError {
 	}
 }
 
-export class CoreOfflineError extends AmberiteApiError {
-	constructor() {
-		super('Core is offline', 'preserve_and_retry')
-		this.name = 'CoreOfflineError'
-	}
-}
-
-export class RelayTimeoutError extends AmberiteApiError {
-	constructor() {
-		super('Relay timed out waiting for acknowledgment', 'preserve_and_retry')
-		this.name = 'RelayTimeoutError'
-	}
-}
-
-export class CoreApiError extends AmberiteApiError {
-	constructor(
-		public readonly status: number,
-		public readonly coreMessage: string,
-	) {
-		super(`Core API ${status}: ${coreMessage}`)
-		this.name = 'CoreApiError'
-	}
-}
-
 export function authErrorFromResponse(message: string, status = 401): AmberiteApiError {
 	const structured = parseAuthFailurePayload(message)
 	if (structured) return authErrorFromPayload(structured)

@@ -59,7 +59,7 @@ const containerClasses = {
 
 const iconClasses = {
 	error: 'text-brand-red',
-	warning: 'text-warning-text',
+	warning: 'text-brand-orange',
 	info: 'text-brand-blue',
 }
 </script>

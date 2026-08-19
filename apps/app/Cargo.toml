@@ -47,6 +47,10 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 workspace = true
 features = ["devtools", "macos-private-api", "protocol-asset"]
 
+[dependencies.amberite-browser-bridge]
+path = "../../packages/browser-bridge"
+optional = true
+
 [build-dependencies]
 tauri-build = { workspace = true, features = ["codegen"] }
 
@@ -65,12 +69,12 @@ windows-core.workspace = true
 [target."cfg(windows)".dependencies.windows]
 workspace = true
 features = [
-  "Win32_Foundation",
-  "Win32_Graphics_Dwm",
-  "Win32_Graphics_Gdi",
-  "Win32_System_Com",
-  "Win32_UI_Shell",
-  "Win32_UI_WindowsAndMessaging",
+	"Win32_Foundation",
+	"Win32_Graphics_Dwm",
+	"Win32_Graphics_Gdi",
+	"Win32_System_Com",
+	"Win32_UI_Shell",
+	"Win32_UI_WindowsAndMessaging",
 ]
 
 [features]
@@ -81,6 +85,7 @@ default = ["custom-protocol"]
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
 updater = []
+browser-bridge = ["dep:amberite-browser-bridge"]
 
 [lints]
 workspace = true

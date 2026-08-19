@@ -1,4 +1,5 @@
 import type {
+	Archon,
 	CoreBackup,
 	CoreChangeVersionBody,
 	CoreFsEntry,
@@ -7,8 +8,7 @@ import type {
 	CoreMod,
 	CoreStats,
 	CoreWsConnection,
-} from '@amberite/amberite-api'
-import type { Archon } from '@modrinth/api-client'
+} from '@modrinth/api-client'
 import type { ContentItem, FileItem, LogLine } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import type { ComputedRef, InjectionKey, Ref } from 'vue'

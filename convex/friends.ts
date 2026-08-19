@@ -1,5 +1,6 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import type { Id } from './_generated/dataModel'
 import type { MutationCtx, QueryCtx } from './_generated/server'
 import {
 	acceptedFriendship,
@@ -8,6 +9,7 @@ import {
 	publicUser,
 	resolveActor,
 } from './_socialRules'
+import { dismissNotificationByDedupeKey, upsertSocialNotification } from './_socialNotifications'
 
 /** Optional dev-only acting-user override, honoured only when AMBERITE_DEV_MODE is set. */
 const devActAs = { __actAs: v.optional(v.string()) }
@@ -51,7 +53,8 @@ export const friendsList = query({
 		const friends = await Promise.all(
 			friendships.map(async (friendship) => {
 				const otherId = friendship.userAId === userId ? friendship.userBId : friendship.userAId
-				const user = await ctx.db.get(otherId as any)
+				const normalizedId = normalizeUserId(ctx, otherId)
+				const user = normalizedId ? await ctx.db.get(normalizedId) : null
 				return {
 					friendshipId: friendship._id,
 					user: user ? publicUser(user) : null,
@@ -61,19 +64,22 @@ export const friendsList = query({
 		)
 		const incomingWithUser = await Promise.all(
 			incoming.map(async (request) => {
-				const user = await ctx.db.get(request.fromUserId as any)
+				const normalizedId = normalizeUserId(ctx, request.fromUserId)
+				const user = normalizedId ? await ctx.db.get(normalizedId) : null
 				return { request, user: user ? publicUser(user) : null }
 			}),
 		)
 		const outgoingWithUser = await Promise.all(
 			outgoing.map(async (request) => {
-				const user = await ctx.db.get(request.toUserId as any)
+				const normalizedId = normalizeUserId(ctx, request.toUserId)
+				const user = normalizedId ? await ctx.db.get(normalizedId) : null
 				return { request, user: user ? publicUser(user) : null }
 			}),
 		)
 		const blocksWithUser = await Promise.all(
 			blocks.map(async (block) => {
-				const user = await ctx.db.get(block.blockedUserId as any)
+				const normalizedId = normalizeUserId(ctx, block.blockedUserId)
+				const user = normalizedId ? await ctx.db.get(normalizedId) : null
 				return {
 					blockId: block._id,
 					user: user ? publicUser(user) : null,
@@ -102,6 +108,7 @@ export const sendFriendRequest = mutation({
 		const fromUserId = await resolveActor(ctx, args.__actAs)
 		const target = await resolveTargetUser(ctx, args)
 		if (!target || target._id === fromUserId) throw new Error('friend target not found')
+		if (target.allowFriendRequests === false) throw new Error('user has friend requests disabled')
 		await assertNotBlocked(ctx, fromUserId, target._id)
 		const friendship = await acceptedFriendship(ctx, fromUserId, target._id)
 		if (friendship) return { requestId: null, status: 'already_friends' }
@@ -120,6 +127,13 @@ export const sendFriendRequest = mutation({
 				notificationClaimExpiresAt: undefined,
 				notificationDeliveredAt: undefined,
 			})
+			await upsertSocialNotification(ctx, {
+				userId: target._id,
+				type: 'friend_request',
+				actorUserId: fromUserId,
+				friendRequestId: existing._id,
+				dedupeKey: `friend-request:${existing._id}`,
+			})
 			return { requestId: existing._id, status: 'pending' }
 		}
 		const requestId = await ctx.db.insert('friendRequests', {
@@ -129,6 +143,13 @@ export const sendFriendRequest = mutation({
 			message: args.message,
 			createdAt: now,
 			updatedAt: now,
+		})
+		await upsertSocialNotification(ctx, {
+			userId: target._id,
+			type: 'friend_request',
+			actorUserId: fromUserId,
+			friendRequestId: requestId,
+			dedupeKey: `friend-request:${requestId}`,
 		})
 		return { requestId, status: 'pending' }
 	},
@@ -152,7 +173,8 @@ export const claimFriendRequestNotifications = mutation({
 					notificationClaimedAt: now,
 					notificationClaimExpiresAt: expiresAt,
 				})
-				const user = await ctx.db.get(request.fromUserId as any)
+				const normalizedId = normalizeUserId(ctx, request.fromUserId)
+				const user = normalizedId ? await ctx.db.get(normalizedId) : null
 				return {
 					request: {
 						...request,
@@ -194,10 +216,20 @@ export const respondFriendRequest = mutation({
 			status: args.accept ? 'accepted' : 'declined',
 			updatedAt: now,
 		})
+		await dismissNotificationByDedupeKey(ctx, userId, `friend-request:${request._id}`)
 		if (args.accept) {
 			const [userAId, userBId] = canonicalPair(request.fromUserId, request.toUserId)
 			const existing = await friendshipByPair(ctx, userAId, userBId)
 			if (!existing) await ctx.db.insert('friendships', { userAId, userBId, createdAt: now })
+			const requesterId = normalizeUserId(ctx, request.fromUserId)
+			if (requesterId)
+				await upsertSocialNotification(ctx, {
+					userId: requesterId,
+					type: 'friend_request_accepted',
+					actorUserId: userId,
+					friendRequestId: request._id,
+					dedupeKey: `friend-accepted:${request._id}`,
+				})
 		}
 		return null
 	},
@@ -211,6 +243,9 @@ export const cancelFriendRequest = mutation({
 		if (!request || request.fromUserId !== userId || request.status !== 'pending')
 			throw new Error('friend request not found')
 		await ctx.db.patch(args.requestId, { status: 'canceled', updatedAt: Date.now() })
+		const recipientId = normalizeUserId(ctx, request.toUserId)
+		if (recipientId)
+			await dismissNotificationByDedupeKey(ctx, recipientId, `friend-request:${request._id}`)
 		return null
 	},
 })
@@ -219,8 +254,7 @@ export const removeFriend = mutation({
 	args: { userId: v.string(), ...devActAs },
 	handler: async (ctx, args) => {
 		const userId = await resolveActor(ctx, args.__actAs)
-		const friendship = await acceptedFriendship(ctx, userId, args.userId)
-		if (friendship) await ctx.db.delete(friendship._id)
+		await removeRelationship(ctx, userId, args.userId)
 		return null
 	},
 })
@@ -230,7 +264,7 @@ export const blockUser = mutation({
 	handler: async (ctx, args) => {
 		const blockerUserId = await resolveActor(ctx, args.__actAs)
 		if (blockerUserId === args.userId) throw new Error('cannot block yourself')
-		await removeFriendship(ctx, blockerUserId, args.userId)
+		await removeRelationship(ctx, blockerUserId, args.userId)
 		const existing = await blockByPair(ctx, blockerUserId, args.userId)
 		if (!existing)
 			await ctx.db.insert('blockedUsers', {
@@ -254,9 +288,9 @@ export const unblockUser = mutation({
 
 async function resolveTargetUser(
 	ctx: MutationCtx,
-	args: { targetUserId?: string; friendCode?: string; username?: string },
+	args: { targetUserId?: Id<'users'>; friendCode?: string; username?: string },
 ) {
-	if (args.targetUserId) return await ctx.db.get(args.targetUserId as any)
+	if (args.targetUserId) return await ctx.db.get(args.targetUserId)
 	if (args.friendCode) return await userByFriendCode(ctx, args.friendCode)
 	if (args.username) return await userByUsername(ctx, args.username)
 	return null
@@ -270,9 +304,23 @@ async function assertNotBlocked(ctx: QueryCtx, a: string, b: string) {
 	if (blockedForward || blockedReverse) throw new Error('blocked users cannot interact')
 }
 
-async function removeFriendship(ctx: MutationCtx, a: string, b: string) {
+async function removeRelationship(ctx: MutationCtx, a: string, b: string) {
 	const friendship = await acceptedFriendship(ctx, a, b)
 	if (friendship) await ctx.db.delete(friendship._id)
+	for (const request of await Promise.all([
+		friendRequestByPair(ctx, a, b),
+		friendRequestByPair(ctx, b, a),
+	])) {
+		if (request?.status !== 'pending') continue
+		await ctx.db.patch(request._id, { status: 'canceled', updatedAt: Date.now() })
+		const recipientId = normalizeUserId(ctx, request.toUserId)
+		if (recipientId)
+			await dismissNotificationByDedupeKey(ctx, recipientId, `friend-request:${request._id}`)
+	}
+}
+
+function normalizeUserId(ctx: QueryCtx | MutationCtx, userId: string) {
+	return ctx.db.normalizeId('users', userId)
 }
 
 function userByFriendCode(ctx: QueryCtx | MutationCtx, code: string) {
@@ -293,29 +341,29 @@ function friendshipsByUserA(ctx: QueryCtx, userId: string) {
 	return ctx.db
 		.query('friendships')
 		.withIndex('by_user_a', (q) => q.eq('userAId', userId))
-		.collect()
+		.take(100)
 }
 function friendshipsByUserB(ctx: QueryCtx, userId: string) {
 	return ctx.db
 		.query('friendships')
 		.withIndex('by_user_b', (q) => q.eq('userBId', userId))
-		.collect()
+		.take(100)
 }
 function friendRequestsTo(ctx: QueryCtx, userId: string) {
 	return ctx.db
 		.query('friendRequests')
 		.withIndex('by_to_status', (q) => q.eq('toUserId', userId).eq('status', 'pending'))
-		.collect()
+		.take(100)
 }
 function friendRequestsFrom(ctx: QueryCtx, userId: string) {
 	return ctx.db
 		.query('friendRequests')
 		.withIndex('by_from_status', (q) => q.eq('fromUserId', userId).eq('status', 'pending'))
-		.collect()
+		.take(100)
 }
 function blocksByUser(ctx: QueryCtx, userId: string) {
 	return ctx.db
 		.query('blockedUsers')
 		.withIndex('by_blocker', (q) => q.eq('blockerUserId', userId))
-		.collect()
+		.take(100)
 }

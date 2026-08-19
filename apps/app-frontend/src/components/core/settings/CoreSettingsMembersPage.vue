@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CoreRole } from '@amberite/amberite-api'
+import type { CoreRole } from '@modrinth/api-client'
 import { NavTabs, Table, Toggle, UnsavedChangesPopup } from '@modrinth/ui'
 import { useStorage } from '@vueuse/core'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -28,8 +28,29 @@ const permissions = [
 ]
 
 const defaultRoles: CoreRole[] = [
-	{ id: 'role-member', name: 'Member', description: 'Uses shared Core access.', icon: 'user', grants_json: JSON.stringify(['start-stop-instances', 'restart-instances', 'read-console', 'view-activity']), created_at: '1970-01-01T00:00:00.000Z', updated_at: '1970-01-01T00:00:00.000Z' },
-	{ id: 'role-admin', name: 'Admin', description: 'Manages members and Core settings.', icon: 'shield', grants_json: JSON.stringify(permissions.map((permission) => permission.id)), created_at: '1970-01-01T00:00:00.000Z', updated_at: '1970-01-01T00:00:00.000Z' },
+	{
+		id: 'role-member',
+		name: 'Member',
+		description: 'Uses shared Core access.',
+		icon: 'user',
+		grants_json: JSON.stringify([
+			'start-stop-instances',
+			'restart-instances',
+			'read-console',
+			'view-activity',
+		]),
+		created_at: '1970-01-01T00:00:00.000Z',
+		updated_at: '1970-01-01T00:00:00.000Z',
+	},
+	{
+		id: 'role-admin',
+		name: 'Admin',
+		description: 'Manages members and Core settings.',
+		icon: 'shield',
+		grants_json: JSON.stringify(permissions.map((permission) => permission.id)),
+		created_at: '1970-01-01T00:00:00.000Z',
+		updated_at: '1970-01-01T00:00:00.000Z',
+	},
 ]
 
 const core = useCoreClient()
@@ -46,19 +67,26 @@ const selectedRole = computed(() => roles.value.find((role) => role.id === selec
 const roleTabs = computed(() => roles.value.map((role) => ({ label: role.name, href: role.id })))
 const groupedPermissions = computed(() => {
 	const groups = new Map<string, typeof permissions>()
-	for (const permission of permissions) groups.set(permission.group, [...(groups.get(permission.group) ?? []), permission])
+	for (const permission of permissions)
+		groups.set(permission.group, [...(groups.get(permission.group) ?? []), permission])
 	return [...groups]
 })
 const permissionColumns = [
 	{ key: 'name', label: 'Permission' },
 	{ key: 'enabled', label: 'Allowed', align: 'right' as const, width: '7rem' },
 ]
-const originalDraft = computed(() => ({ grants: parseGrants(selectedRole.value?.grants_json ?? '[]') }))
+const originalDraft = computed(() => ({
+	grants: parseGrants(selectedRole.value?.grants_json ?? '[]'),
+}))
 const modifiedDraft = computed(() => ({ grants: draftGrants.value }))
 
-watch(selectedRole, (role) => {
-	draftGrants.value = parseGrants(role?.grants_json ?? '[]')
-}, { immediate: true })
+watch(
+	selectedRole,
+	(role) => {
+		draftGrants.value = parseGrants(role?.grants_json ?? '[]')
+	},
+	{ immediate: true },
+)
 
 async function load() {
 	isLoading.value = true
@@ -89,7 +117,7 @@ async function saveSelected() {
 			grants: draftGrants.value,
 		}
 		const role = usingLocalRoles.value ? saveLocalRole(input) : await core.saveCoreRole(input)
-		roles.value = roles.value.map((item) => item.id === role.id ? role : item)
+		roles.value = roles.value.map((item) => (item.id === role.id ? role : item))
 		if (usingLocalRoles.value) localRoles.value = cloneRoles(roles.value)
 	} finally {
 		isSaving.value = false
@@ -106,7 +134,9 @@ function loadLocalRoles() {
 }
 
 function toggleGrant(id: string, enabled: boolean) {
-	draftGrants.value = enabled ? [...new Set([...draftGrants.value, id])] : draftGrants.value.filter((grant) => grant !== id)
+	draftGrants.value = enabled
+		? [...new Set([...draftGrants.value, id])]
+		: draftGrants.value.filter((grant) => grant !== id)
 }
 
 function selectRole(tab: { href: string }) {
@@ -114,10 +144,18 @@ function selectRole(tab: { href: string }) {
 }
 
 function fixedRoles(source: CoreRole[]) {
-	return defaultRoles.map((defaultRole) => source.find((role) => role.id === defaultRole.id) ?? defaultRole)
+	return defaultRoles.map(
+		(defaultRole) => source.find((role) => role.id === defaultRole.id) ?? defaultRole,
+	)
 }
 
-function saveLocalRole(input: { id?: string; name: string; description: string; icon: string; grants: string[] }): CoreRole {
+function saveLocalRole(input: {
+	id?: string
+	name: string
+	description: string
+	icon: string
+	grants: string[]
+}): CoreRole {
 	const existing = roles.value.find((role) => role.id === input.id)
 	return {
 		id: input.id ?? `local-role-${crypto.randomUUID()}`,
@@ -131,11 +169,18 @@ function saveLocalRole(input: { id?: string; name: string; description: string; 
 }
 
 function parseGrants(value: string): string[] {
-	try { return JSON.parse(value) as string[] } catch { return [] }
+	try {
+		return JSON.parse(value) as string[]
+	} catch {
+		return []
+	}
 }
 
 function cloneRoles(source: CoreRole[]) {
-	return source.map((role) => ({ ...role, grants_json: JSON.stringify(parseGrants(role.grants_json)) }))
+	return source.map((role) => ({
+		...role,
+		grants_json: JSON.stringify(parseGrants(role.grants_json)),
+	}))
 }
 
 watch(connectedCore, () => void load())
@@ -149,7 +194,12 @@ onMounted(load)
 				mode="local"
 				class="!bg-surface-3"
 				:links="roleTabs"
-				:active-index="Math.max(0, roleTabs.findIndex((role) => role.href === selectedId))"
+				:active-index="
+					Math.max(
+						0,
+						roleTabs.findIndex((role) => role.href === selectedId),
+					)
+				"
 				@tab-click="(_index, tab) => selectRole(tab)"
 			/>
 		</div>
@@ -164,12 +214,23 @@ onMounted(load)
 						<span class="font-semibold text-contrast">{{ value }}</span>
 					</template>
 					<template #cell-enabled="{ row }">
-						<Toggle :model-value="draftGrants.includes(row.id)" @update:model-value="toggleGrant(row.id, $event)" />
+						<Toggle
+							:model-value="draftGrants.includes(row.id)"
+							@update:model-value="toggleGrant(row.id, $event)"
+						/>
 					</template>
 				</Table>
 			</div>
 		</section>
-		<div v-else class="flex flex-1 items-center justify-center text-secondary">{{ isLoading ? 'Loading access defaults…' : 'Access defaults are unavailable.' }}</div>
-		<UnsavedChangesPopup :original="originalDraft" :modified="modifiedDraft" :saving="isSaving" @save="saveSelected" @reset="resetSelected" />
+		<div v-else class="flex flex-1 items-center justify-center text-secondary">
+			{{ isLoading ? 'Loading access defaults…' : 'Access defaults are unavailable.' }}
+		</div>
+		<UnsavedChangesPopup
+			:original="originalDraft"
+			:modified="modifiedDraft"
+			:saving="isSaving"
+			@save="saveSelected"
+			@reset="resetSelected"
+		/>
 	</div>
 </template>

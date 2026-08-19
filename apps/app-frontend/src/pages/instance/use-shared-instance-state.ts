@@ -1,7 +1,8 @@
-import { injectAuth } from '@modrinth/ui'
+import { useQuery } from '@tanstack/vue-query'
 import { computed, inject, type InjectionKey, provide, type Ref, ref, watch } from 'vue'
 
-import { useUserQuery } from '@/composables/users/use-user-query'
+import { useAmberiteAuth } from '@/composables/useAmberiteAuth'
+import { useSocialClient } from '@/composables/useSocialClient'
 import {
 	getSharedInstanceUnavailableReason,
 	install_get_shared_instance_update_preview,
@@ -29,7 +30,8 @@ export function useSharedInstanceState(
 	offline: Ref<boolean>,
 	notifyError: (error: unknown) => void,
 ) {
-	const auth = injectAuth()
+	const auth = useAmberiteAuth()
+	const socialClient = useSocialClient()
 	const updatePreview =
 		ref<Awaited<ReturnType<typeof install_get_shared_instance_update_preview>>>(null)
 	const updatePreviewLoaded = ref(false)
@@ -47,13 +49,13 @@ export function useSharedInstanceState(
 
 	const expectedUserId = computed(() => instance.value?.shared_instance?.linked_user_id ?? null)
 	const wrongAccount = computed(() => {
-		if (auth.isReady && !auth.isReady.value) return false
+		if (!auth.isReady.value) return false
 		if (!expectedUserId.value) return false
-		return auth.user.value?.id !== expectedUserId.value
+		return auth.user.value?.userId !== expectedUserId.value
 	})
 	const actionsLocked = computed(() => wrongAccount.value)
 	const shareActionsLocked = computed(() => actionsLocked.value || unavailableReason.value !== null)
-	const signedOut = computed(() => !auth.session_token.value)
+	const signedOut = computed(() => auth.status.value !== 'authenticated')
 	const managerUserId = computed(() => {
 		const attachment = instance.value?.shared_instance
 		if (!attachment) return null
@@ -62,7 +64,13 @@ export function useSharedInstanceState(
 		}
 		return attachment.manager_id ?? null
 	})
-	const managerUserQuery = useUserQuery(managerUserId)
+	const managerUserQuery = useQuery({
+		queryKey: computed(() => ['amberite-profile', managerUserId.value]),
+		queryFn: async () =>
+			managerUserId.value ? await socialClient.getProfile(managerUserId.value) : null,
+		enabled: () => !!managerUserId.value,
+		staleTime: 30_000,
+	})
 	const manager = computed<SharedInstanceManager | null>(() => {
 		const attachment = instance.value?.shared_instance
 		if (!attachment) return null
@@ -80,9 +88,9 @@ export function useSharedInstanceState(
 		if (!user) return null
 		return {
 			type: 'user',
-			name: user.username,
-			avatarUrl: user.avatar_url ?? undefined,
-			tintBy: user.id,
+			name: user.username ?? user.displayName ?? user.userId,
+			avatarUrl: user.image ?? undefined,
+			tintBy: user.userId,
 		}
 	})
 	const unavailableManager = computed(() => manager.value?.name ?? null)
@@ -150,7 +158,7 @@ export function useSharedInstanceState(
 
 	async function refreshUpdatePreview() {
 		const instanceId = instance.value?.id
-		const userId = auth.user.value?.id
+		const userId = auth.user.value?.userId
 		if (!instanceId || !userId) return null
 
 		const key = `${instanceId}:${userId}`
@@ -173,9 +181,9 @@ export function useSharedInstanceState(
 			role: instance.value?.shared_instance?.role,
 			locked: actionsLocked.value,
 			offline: offline.value,
-			signedIn: !!auth.session_token.value,
-			userId: auth.user.value?.id ?? null,
-			authReady: auth.isReady?.value ?? true,
+			signedIn: auth.status.value === 'authenticated',
+			userId: auth.user.value?.userId ?? null,
+			authReady: auth.isReady.value,
 		}),
 		async ({ instanceId, role, locked, offline, signedIn, userId, authReady }) => {
 			if (!instanceId || !role || locked || offline || !authReady || !signedIn || !userId) {

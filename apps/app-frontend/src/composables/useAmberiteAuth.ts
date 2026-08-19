@@ -8,7 +8,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref } from 'vue'
 
-import { useCoreClient } from '@/composables/useCoreClient'
+import { usePlatformAdapter } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
 
 export type AmberiteAuthUser = AmberiteAccountUser
@@ -56,7 +56,7 @@ export interface UseAmberiteAuthReturn {
 }
 
 const social = useSocial()
-const authClient = new ConvexAmberiteAuthClient({ adapter: useCoreClient().adapter })
+const authClient = new ConvexAmberiteAuthClient({ adapter: usePlatformAdapter() })
 const status = ref<AmberiteAuthGate>('restoring')
 const error = ref<Error | null>(null)
 const serverUnavailable = ref(false)
@@ -97,9 +97,7 @@ const canLaunch = computed(
 )
 const canUseCloud = computed(() => status.value === 'authenticated')
 const needsReauth = computed(() => status.value === 'reauthRequired')
-const isOffline = computed(
-	() => canUseLocalLauncher.value && status.value !== 'authenticated',
-)
+const isOffline = computed(() => canUseLocalLauncher.value && status.value !== 'authenticated')
 const hasPermanentCloudError = computed(() => status.value === 'connectionError')
 
 const coordinator: UseAmberiteAuthReturn = {
@@ -143,9 +141,10 @@ async function restoreSession(): Promise<void> {
 	await refreshMinecraftAccess()
 	try {
 		const devConfig = await getDevConfig()
-		const session = devConfig?.authMode === 'dev'
-			? await signInWithDevAccount(devConfig.username!)
-			: await authClient.restoreSession()
+		const session =
+			devConfig?.authMode === 'dev'
+				? await signInWithDevAccount(devConfig.username!)
+				: await authClient.restoreSession()
 		if (!session) {
 			sessionUser.value = null
 			status.value = hasVerifiedMinecraftAccess.value ? 'reauthRequired' : 'signedOut'
@@ -198,7 +197,7 @@ async function refreshMinecraftAccess(): Promise<void> {
 async function checkSignedOutAvailability(): Promise<void> {
 	try {
 		await invoke('plugin:auth|check_amberite_reachable', {
-			convexUrl: useCoreClient().adapter.convexUrl,
+			convexUrl: usePlatformAdapter().convexUrl,
 		})
 		clearAuthError()
 	} catch (value) {
@@ -466,20 +465,5 @@ if (typeof window !== 'undefined') {
 		if (status.value === 'offlineRetrying') void retryRestore()
 		else if (status.value === 'authenticated' && error.value) void refreshSession()
 		else if (status.value === 'signedOut') void checkSignedOutAvailability()
-	})
-}
-
-if (import.meta.env.DEV) {
-	void import('@/dev/runtime').then(({ registerDevAccountSwitcher }) => {
-		registerDevAccountSwitcher(async ({ username }) => {
-			clearScheduledRefresh()
-			await authClient.logOut()
-			const session = await signInWithDevAccount(username)
-			sessionUser.value = session.user
-			await social.refresh().catch(() => undefined)
-			status.value = 'authenticated'
-			clearAuthError()
-			scheduleRefresh()
-		})
 	})
 }

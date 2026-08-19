@@ -25,6 +25,8 @@ export interface PlatformAdapter {
 
 	/** Convex deployment URL, e.g. https://...convex.cloud. */
 	convexUrl: string
+	/** Convex HTTP Actions origin, e.g. https://...convex.site. */
+	convexSiteUrl?: string
 
 	/** Return the direct Core HTTP URL, e.g. "http://localhost:16662". */
 	getCoreUrl(): Promise<string | null>
@@ -35,6 +37,7 @@ export interface PlatformAdapter {
 	/** Return the current short-lived Amberite access JWT. */
 	getCurrentJwt(): Promise<string | null>
 	setCurrentJwt?(jwt: string | null): Promise<void>
+	setCurrentAmberiteUserId?(userId: string | null): Promise<void>
 
 	/** Legacy split token access. New platforms should implement atomic session methods. */
 	getCurrentRefreshToken?(): Promise<string | null>
@@ -56,21 +59,6 @@ export interface PlatformAdapter {
 	/** Return the one-time local setup secret for an app-launched Core, if present. */
 	getLocalSetupSecret?(): Promise<string | null>
 
-	/** Optional durable queue used by Mode 1a direct queued messages. */
-	queueStore?: PersistentQueueStore
-
 	/** Open an external auth window/redirect. Desktop opens system browser; web redirects page. */
 	openExternalAuth(url: string): void | Promise<void>
-}
-
-export interface PersistentQueueStore {
-	list(queueName: string): Promise<QueuedMessage[]>
-	push(queueName: string, message: QueuedMessage): Promise<void>
-	remove(queueName: string, id: string): Promise<void>
-}
-
-export interface QueuedMessage {
-	id: string
-	createdAt: number
-	payload: unknown
 }

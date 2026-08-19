@@ -26,7 +26,6 @@ const props = withDefaults(
 		maxWidth?: string
 		width?: string
 		closable?: boolean
-		selectedStyle?: 'filled' | 'wireframe'
 		onHide?: () => void
 		onShow?: () => void
 		beforeHide?: () => boolean
@@ -38,7 +37,6 @@ const props = withDefaults(
 		maxWidth: undefined,
 		width: undefined,
 		closable: true,
-		selectedStyle: 'filled',
 		onHide: undefined,
 		onShow: undefined,
 		beforeHide: undefined,

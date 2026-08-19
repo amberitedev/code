@@ -1,31 +1,7 @@
-<script lang="ts">
-import type {
-	CoreAccessMember as CachedCoreAccessMember,
-	CoreInvitation as CachedCoreInvitation,
-	CoreRole as CachedCoreRole,
-} from '@amberite/amberite-api'
-
-type CoreAccessCacheEntry = {
-	roles: CachedCoreRole[]
-	members: CachedCoreAccessMember[]
-	invitations: CachedCoreInvitation[]
-	canManageUsers: boolean
-}
-
-const coreAccessCache = new Map<string, CoreAccessCacheEntry>()
-</script>
-
 <script setup lang="ts">
-import type {
-	AmberiteAccessUiRole,
-	CoreAccessMember,
-	CoreInvitation,
-	CoreRole,
-} from '@amberite/amberite-api'
-import {
-	amberiteAccessRoleOptions,
-	toAmberiteAccessUiMember,
-} from '@amberite/amberite-api'
+import type { AmberiteAccessUiRole } from '@amberite/amberite-api'
+import { amberiteAccessRoleOptions, toAmberiteAccessUiMember } from '@amberite/amberite-api'
+import type { CoreAccessMember, CoreInvitation, CoreRole } from '@modrinth/api-client'
 import { FilterIcon, SearchIcon, UserPlusIcon } from '@modrinth/assets'
 import type {
 	GrantServerAccessPayload,
@@ -42,10 +18,12 @@ import {
 } from '@modrinth/ui'
 import { computed, onMounted, ref, watch } from 'vue'
 
+import { coreAccessCache } from '@/components/core/core-panel-cache'
 import CoreInviteMemberModal from '@/components/core/CoreInviteMemberModal.vue'
 import { useCoreClient } from '@/composables/useCoreClient'
 import { useSocial } from '@/composables/useSocial'
 import { useConnectedCore } from '@/core/connected-core'
+
 import { toInviteSuggestion } from './core-onboarding-members'
 
 type RoleFilter = AmberiteAccessUiRole | 'all'
@@ -226,7 +204,9 @@ async function loadCoreState() {
 
 async function searchInviteUsers(query: string) {
 	const users = await social.searchUsers(query)
-	return users.map(toInviteSuggestion).filter((user) => !unavailableInviteUserIds.value.has(user.id))
+	return users
+		.map(toInviteSuggestion)
+		.filter((user) => !unavailableInviteUserIds.value.has(user.id))
 }
 
 function openPermissionsSettings(event: MouseEvent) {
@@ -262,7 +242,9 @@ function roleIdToAccessRole(roleId: string): AmberiteAccessUiRole {
 function parseRoleGrants(role: CoreRole) {
 	try {
 		const value = JSON.parse(role.grants_json)
-		return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+		return Array.isArray(value)
+			? value.filter((item): item is string => typeof item === 'string')
+			: []
 	} catch {
 		return []
 	}

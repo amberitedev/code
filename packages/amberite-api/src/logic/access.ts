@@ -3,7 +3,7 @@ import type {
 	CoreAccessRole,
 	CoreActivityLogEntry,
 	CorePermissionPreset,
-} from '../types'
+} from '@modrinth/api-client'
 
 export type AmberiteAccessUiRole = 'owner' | 'editor' | 'viewer'
 

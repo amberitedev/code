@@ -1,10 +1,3 @@
-<!--
-Installation settings layout.
-- State snapshots, route guards, and modal orchestration: lines 45-214.
-- Linked modpack actions and destructive operations: lines 216-388.
-- Edit form, save flow, and installation info sections: lines 672-978.
-- Update, repair, reinstall, unlink, and diff modals: lines 980-1070.
--->
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
 import {
@@ -29,7 +22,6 @@ import Avatar from '#ui/components/base/Avatar.vue'
 import { Button } from '#ui/components/base/buttons'
 import Chips from '#ui/components/base/Chips.vue'
 import Combobox from '#ui/components/base/Combobox.vue'
-import GhostText from '#ui/components/base/GhostText.vue'
 import PaperChannelBadge from '#ui/components/base/PaperChannelBadge.vue'
 import ConfirmLeaveModal from '#ui/components/modal/ConfirmLeaveModal.vue'
 import { useDebugLogger } from '#ui/composables/debug-logger'
@@ -602,7 +594,10 @@ const messages = defineMessages({
 					>
 						<span class="text-primary">{{ row.label }}</span>
 						<span v-if="row.value" class="font-semibold text-contrast">{{ row.value }}</span>
-						<GhostText v-else kind="metadata" width="100%" :style="{ width: '4rem' }" />
+						<span
+							v-else
+							class="inline-block h-3 w-16 animate-pulse rounded bg-button-border"
+						></span>
 					</div>
 				</div>
 			</div>

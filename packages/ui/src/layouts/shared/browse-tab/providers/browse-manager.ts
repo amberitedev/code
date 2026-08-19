@@ -34,10 +34,6 @@ export interface BrowseManagerContext {
 	projectHits: ShallowRef<BrowseSearchResponse['projectHits']>
 	serverHits: ShallowRef<BrowseSearchResponse['serverHits']>
 	totalHits: Ref<number>
-	activeResultKey?: ComputedRef<string>
-	visibleResultKey?: Ref<string>
-	visibleProjectType?: Ref<string>
-	transitioning?: Ref<boolean>
 	pageCount: ComputedRef<number>
 	maxResults: Ref<number>
 	currentPage: Ref<number>
@@ -46,14 +42,11 @@ export interface BrowseManagerContext {
 	deprioritizedTags: ComputedRef<string[]>
 	excludeLoaders: ComputedRef<boolean>
 	refreshSearch: () => Promise<void>
-	cacheSearchResponse?: (
-		projectType: string,
-		requestParams: string,
-		response: BrowseSearchResponse,
-	) => void
 	setPage: (page: number) => Promise<void>
 	clearSearch: () => void
 	onFilterChange: () => void
+	linkOverridesAdvancedPrefs: Ref<boolean>
+	applySavedAdvancedPrefs: () => void
 
 	getProjectLink: (result: Labrinth.Search.v3.ResultSearchProject) => string | RouteLocationRaw
 	getServerProjectLink: (
@@ -83,6 +76,7 @@ export interface BrowseManagerContext {
 	serverOnlyLabel?: ComputedRef<string>
 	hiddenFilterTypes?: ComputedRef<string[]>
 	advancedFiltersCollapsed?: Ref<boolean>
+	dismissedPhotosensitivityFilterWarning?: Ref<boolean>
 	onInstalled?: (projectId: string) => void
 
 	displayMode?: Ref<'list' | 'grid' | 'gallery'> | ComputedRef<'list' | 'grid' | 'gallery'>

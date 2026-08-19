@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { expect, test } from 'vite-plus/test'
 
 import {
 	contractFromMessage,
@@ -7,6 +6,15 @@ import {
 	sourceContractChanged,
 	translationCompatibleWithSource,
 } from './i18n-icu-contract'
+
+const assert = {
+	equal(actual: unknown, expected: unknown) {
+		expect(actual).toBe(expected)
+	},
+	throws(callback: () => unknown) {
+		expect(callback).toThrow()
+	},
+}
 
 test('same plain text contract is equal', () => {
 	assert.equal(
@@ -27,7 +35,10 @@ test('variable rename changes contract', () => {
 
 test('variable removal changes contract', () => {
 	assert.equal(
-		contractsEqual(contractFromMessage('Created by {user}', 'a'), contractFromMessage('Created', 'b')),
+		contractsEqual(
+			contractFromMessage('Created by {user}', 'a'),
+			contractFromMessage('Created', 'b'),
+		),
 		false,
 	)
 })

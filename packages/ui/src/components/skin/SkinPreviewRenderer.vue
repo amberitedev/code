@@ -1,10 +1,12 @@
 <template>
+	<!-- eslint-disable vue/no-undef-components -->
 	<div
 		ref="skinPreviewContainer"
 		class="relative w-full h-full overflow-visible cursor-grab"
 		@click="onCanvasClick"
 	>
 		<div
+			data-skin-preview-debug="controls"
 			class="absolute left-0 right-0 z-10 flex items-center justify-center pointer-events-none"
 			:style="previewControlsPositionStyle"
 		>
@@ -17,6 +19,7 @@
 		</div>
 		<div
 			v-if="$slots.subtitle"
+			data-skin-preview-debug="subtitle"
 			class="absolute left-0 right-0 z-10 flex items-center justify-center pointer-events-none"
 			:style="subtitlePositionStyle"
 		>
@@ -26,6 +29,7 @@
 		</div>
 		<div
 			v-if="nametag || $slots['nametag-badge']"
+			data-skin-preview-debug="nametag"
 			class="absolute left-1/2 pointer-events-none z-10"
 			:style="nametagStyle"
 		>
@@ -56,24 +60,28 @@
 			@pointerup="onPointerUp"
 			@pointerleave="onPointerUp"
 		>
-			<TresGroup
-				:rotation="animatedModelGroupRotation"
-				:position="animatedModelGroupPosition"
-				:scale="animatedModelGroupScale"
-			>
-				<TresGroup :position="modelOffset">
-					<primitive v-if="scene" :object="scene" />
-				</TresGroup>
-			</TresGroup>
+			<Suspense>
+				<Group
+					:rotation="animatedModelGroupRotation"
+					:position="animatedModelGroupPosition"
+					:scale="animatedModelGroupScale"
+				>
+					<Group :position="modelOffset">
+						<primitive v-if="scene" :object="scene" />
+					</Group>
+				</Group>
+			</Suspense>
 
-			<TresMesh
-				:position="spotlightPosition"
-				:rotation="[-Math.PI / 2, 0, 0]"
-				:scale="spotlightScale"
-			>
-				<TresCircleGeometry :args="[1, 128]" />
-				<TresShaderMaterial v-bind="radialSpotlightShader" />
-			</TresMesh>
+			<Suspense>
+				<TresMesh
+					:position="spotlightPosition"
+					:rotation="[-Math.PI / 2, 0, 0]"
+					:scale="spotlightScale"
+				>
+					<TresCircleGeometry :args="[1, 128]" />
+					<TresShaderMaterial v-bind="radialSpotlightShader" />
+				</TresMesh>
+			</Suspense>
 
 			<TresPerspectiveCamera
 				:make-default.camel="true"
@@ -262,16 +270,23 @@ const {
 	},
 })
 
-const { hasEarsFeatures, isModelLoaded, isTextureLoaded, modelCenter, modelSize, scene } =
-	useSkinPreviewScene({
-		selectedModelSrc,
-		textureSrc: toRef(props, 'textureSrc'),
-		earsTextureSrc: toRef(props, 'earsTextureSrc'),
-		capeSrc: toRef(props, 'capeSrc'),
-		earsEnabled: toRef(props, 'earsEnabled'),
-		initializeAnimations,
-		cleanupAnimationState,
-	})
+const {
+	hasEarsFeatures,
+	isModelLoaded,
+	isTextureLoaded,
+	modelCenter,
+	modelSize,
+	scene,
+	visibleBounds,
+} = useSkinPreviewScene({
+	selectedModelSrc,
+	textureSrc: toRef(props, 'textureSrc'),
+	earsTextureSrc: toRef(props, 'earsTextureSrc'),
+	capeSrc: toRef(props, 'capeSrc'),
+	earsEnabled: toRef(props, 'earsEnabled'),
+	initializeAnimations,
+	cleanupAnimationState,
+})
 
 function syncDamageFlashShaderMaterials() {
 	syncDamageFlashShader(scene.value, damageFlashIntensity.value)
@@ -305,6 +320,8 @@ const {
 	subtitleWrapped: isSubtitleWrapped,
 	modelCenter,
 	modelSize,
+	scene,
+	visibleBounds,
 	isModelLoaded,
 })
 

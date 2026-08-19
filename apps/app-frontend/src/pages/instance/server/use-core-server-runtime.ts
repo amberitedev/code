@@ -1,13 +1,14 @@
-import type {
-	ConnectionStatus,
-	CoreChangeVersionBody,
-	CoreInstance,
-	CoreInstanceStatus,
-	CoreStats,
-	CoreWsConnection,
-} from '@amberite/amberite-api'
-import { CoreApiError, CoreOfflineError } from '@amberite/amberite-api'
-import type { Archon } from '@modrinth/api-client'
+import {
+	type Archon,
+	type ConnectionStatus,
+	CoreApiError,
+	type CoreChangeVersionBody,
+	type CoreInstance,
+	type CoreInstanceStatus,
+	CoreOfflineError,
+	type CoreStats,
+	type CoreWsConnection,
+} from '@modrinth/api-client'
 import { injectNotificationManager } from '@modrinth/ui'
 import type { Stats } from '@modrinth/utils'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -15,10 +16,7 @@ import { computed, isRef, onMounted, onUnmounted, type Ref, ref, watch } from 'v
 import { useRoute } from 'vue-router'
 
 import { useCoreClient } from '@/composables/useCoreClient'
-import {
-	patchCoreInstanceInCache,
-	upsertCoreInstanceInCache,
-} from '@/composables/useCoreInstances'
+import { patchCoreInstanceInCache, upsertCoreInstanceInCache } from '@/composables/useCoreInstances'
 
 import {
 	appendSocketListeners,
@@ -299,9 +297,7 @@ export function useCoreServerRuntime(
 	}
 
 	function isUuid(value: string): boolean {
-		return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-			value,
-		)
+		return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 	}
 
 	const { settingsController, fsAuth } = provideCoreServerRuntime({
@@ -365,7 +361,11 @@ export function useCoreServerRuntime(
 
 	watch(powerState, (next, prev) => {
 		if (next === prev) return
-		if ((next === 'starting' || next === 'running') && !isConnected.value && isCoreConnected.value) {
+		if (
+			(next === 'starting' || next === 'running') &&
+			!isConnected.value &&
+			isCoreConnected.value
+		) {
 			void connectConsole()
 		}
 	})

@@ -1,9 +1,3 @@
-<!--
-Project card.
-- Grid template (17) renders banner, icon, metadata, actions, tags, and stats.
-- List template (119) renders compact browse/search rows with the same slots and metadata.
-- `autoDisplayDate` (296), `date` (308), `extraTags` (317), and `cssColor` (319) derive display props.
--->
 <template>
 	<SmartClickable class="w-full project-card-container">
 		<template v-if="link" #clickable>
@@ -23,26 +17,18 @@ Project card.
 					v-if="banner"
 					:src="banner"
 					alt=""
-					:loading="imageLoading"
 					class="absolute w-full h-full inset-0 object-cover object-center"
 				/>
 				<img
 					v-else
 					src="https://cdn-raw.modrinth.com/landing-new/landing.webp"
 					alt=""
-					:loading="imageLoading"
 					class="absolute w-full h-full inset-0 object-cover object-center placeholder-banner scale-[200%]"
 				/>
 			</div>
 			<div class="p-4 flex flex-col gap-3 grow">
 				<div class="flex gap-3">
-					<Avatar
-						:src="iconUrl"
-						size="96px"
-						class="project-card__icon ease-brightness"
-						no-shadow
-						:loading="imageLoading"
-					/>
+					<Avatar :src="iconUrl" size="96px" class="project-card__icon ease-brightness" no-shadow />
 					<div class="flex flex-col gap-2 w-full">
 						<div class="grid grid-cols-[1fr_auto] gap-4">
 							<div class="flex flex-col gap-1">
@@ -124,7 +110,6 @@ Project card.
 				size="100px"
 				class="project-card__icon grid-project-card-list__icon ease-brightness"
 				no-shadow
-				:loading="imageLoading"
 			/>
 			<div class="flex flex-col gap-2 grid-project-card-list__info">
 				<div class="flex gap-2 items-center">
@@ -219,7 +204,9 @@ import ServerRecentPlays from '../server/ServerRecentPlays.vue'
 import ServerRegion from '../server/ServerRegion.vue'
 import ProjectCardAuthor from './ProjectCardAuthor.vue'
 import ProjectCardDate from './ProjectCardDate.vue'
-import ProjectCardEnvironment from './ProjectCardEnvironment.vue'
+import ProjectCardEnvironment, {
+	type ProjectCardEnvironmentValue,
+} from './ProjectCardEnvironment.vue'
 import ProjectCardStats from './ProjectCardStats.vue'
 import ProjectCardTags from './ProjectCardTags.vue'
 import ProjectCardTitle from './ProjectCardTitle.vue'
@@ -229,49 +216,43 @@ defineEmits<{
 	mouseleave: []
 }>()
 
-const props = withDefaults(
-	defineProps<{
-		layout: 'list' | 'grid'
-		link?: string | RouteLocationRaw | (() => void)
-		iconUrl?: string
-		title: string
-		author?: {
-			name: string
-			link?: string
-		}
-		summary?: string
-		tags?: string[]
-		allTags?: string[]
-		deprioritizedTags?: string[]
-		excludeLoaders?: boolean
-		downloads?: number
-		followers?: number
-		dateUpdated?: string
-		datePublished?: string
-		displayedDate?: 'updated' | 'published'
-		serverRegion?: string
-		serverOnlinePlayers?: number
-		serverStatusOnline?: boolean
-		serverRecentPlays?: number
-		serverPing?: number
-		serverModpackContent?: {
-			name: string
-			icon?: string
-			onclick?: () => void
-			showCustomModpackTooltip?: boolean
-		}
-		isServerProject?: boolean
-		banner?: string
-		color?: string | number
-		environment?: ProjectCardEnvironmentProps
-		status?: ProjectStatus
-		maxTags?: number
-		imageLoading?: 'eager' | 'lazy'
-	}>(),
-	{
-		imageLoading: 'eager',
-	},
-)
+const props = defineProps<{
+	layout: 'list' | 'grid'
+	link?: string | RouteLocationRaw | (() => void)
+	iconUrl?: string
+	title: string
+	author?: {
+		name: string
+		link?: string
+	}
+	summary?: string
+	tags?: string[]
+	allTags?: string[]
+	deprioritizedTags?: string[]
+	excludeLoaders?: boolean
+	downloads?: number
+	followers?: number
+	dateUpdated?: string
+	datePublished?: string
+	displayedDate?: 'updated' | 'published'
+	serverRegion?: string
+	serverOnlinePlayers?: number
+	serverStatusOnline?: boolean
+	serverRecentPlays?: number
+	serverPing?: number
+	serverModpackContent?: {
+		name: string
+		icon?: string
+		onclick?: () => void
+		showCustomModpackTooltip?: boolean
+	}
+	isServerProject?: boolean
+	banner?: string
+	color?: string | number
+	environment?: ProjectCardEnvironmentValue
+	status?: ProjectStatus
+	maxTags?: number
+}>()
 
 const baseCardStyle =
 	'w-full h-full border-[1px] border-solid border-surface-4 overflow-hidden bg-surface-3 rounded-2xl transition-all smart-clickable:outline-on-focus smart-clickable:highlight-on-hover'
