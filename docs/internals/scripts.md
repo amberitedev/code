@@ -36,8 +36,11 @@ Scenario numbers passed after the task name override `defaultScenarios` in `dev.
 ## Convex
 
 The primary checkout uses the cloud Convex development deployment selected by `.env.local`.
-`vp run dev` runs `convex dev`, which pushes the current Convex functions and watches for further
-changes. The runner refuses production and non-development cloud deployments.
+Before `vp run dev` starts `convex dev`, the runner compares the Convex TypeScript and configuration
+against `origin/main` with whitespace-only changes ignored. If the current checkout would change the
+cloud functions, it prints green additions and red deletions and asks for confirmation. Declining
+stops the run; `vp run dev:app` starts the App without pushing Convex. The runner refuses production
+and non-development cloud deployments.
 
 Linked worktrees always use the local Convex deployment stored in their `.data/`. The runner selects
 that deployment explicitly, even when the worktree has a copied `.env.local` pointing at the cloud.

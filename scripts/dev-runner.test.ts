@@ -4,13 +4,16 @@ import {
 	createProcessSpecs,
 	createRuntimeEnvironment,
 	findFirstAvailableOffset,
+	formatGitDiffSummary,
 	isBrowserAllowedPort,
+	parseGitNumstat,
 	parseInput,
 	portsForOffset,
 	processLabelsForMode,
 	resolveConvexMode,
 	resolveStartOffset,
 	scenarioUsername,
+	shouldPromptForCloudConvexPush,
 } from './dev-runner.ts'
 
 describe('dev runner ports', () => {
@@ -206,6 +209,31 @@ describe('dev runner modes', () => {
 		expect(processLabelsForMode('dev:app')).toEqual(['app-frontend'])
 		expect(processLabelsForMode('dev:core')).toEqual(['core'])
 		expect(processLabelsForMode('dev:convex')).toEqual(['convex'])
+	})
+})
+
+describe('Convex cloud push confirmation', () => {
+	const changes = { additions: 18, deletions: 7, files: 3 }
+
+	it('summarizes Git numstat output', () => {
+		expect(
+			parseGitNumstat('12\t4\tconvex/schema.ts\n6\t3\tconvex/friends.ts\n-\t-\tconvex/icon.png'),
+		).toEqual(changes)
+		expect(formatGitDiffSummary(changes, false)).toBe('+18 -7 in 3 files')
+	})
+
+	it('prompts only when the primary checkout will start Convex with changes', () => {
+		expect(shouldPromptForCloudConvexPush('cloud', 'dev', changes)).toBe(true)
+		expect(shouldPromptForCloudConvexPush('cloud', 'dev:convex', changes)).toBe(true)
+		expect(shouldPromptForCloudConvexPush('cloud', 'dev:app', changes)).toBe(false)
+		expect(shouldPromptForCloudConvexPush('local', 'dev', changes)).toBe(false)
+		expect(
+			shouldPromptForCloudConvexPush('cloud', 'dev', {
+				additions: 0,
+				deletions: 0,
+				files: 0,
+			}),
+		).toBe(false)
 	})
 })
 

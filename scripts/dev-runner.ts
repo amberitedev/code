@@ -52,6 +52,11 @@ type RunnerInput = {
 	readonly mode: DevMode
 	readonly scenarios: ReadonlyArray<number>
 }
+export type GitDiffSummary = {
+	readonly additions: number
+	readonly deletions: number
+	readonly files: number
+}
 export type ProcessSpec = {
 	readonly args: ReadonlyArray<string>
 	readonly cwd: string
@@ -210,6 +215,37 @@ export function processLabelsForMode(mode: DevMode): ReadonlyArray<string> {
 	}
 }
 
+export function parseGitNumstat(output: string): GitDiffSummary {
+	let additions = 0
+	let deletions = 0
+	let files = 0
+	for (const line of output.split(/\r?\n/)) {
+		if (!line.trim()) continue
+		const [added, deleted] = line.split('\t', 3)
+		if (added === undefined || deleted === undefined) continue
+		files += 1
+		if (/^\d+$/.test(added)) additions += Number(added)
+		if (/^\d+$/.test(deleted)) deletions += Number(deleted)
+	}
+	return { additions, deletions, files }
+}
+
+export function shouldPromptForCloudConvexPush(
+	convexMode: ConvexMode,
+	mode: DevMode,
+	diff: GitDiffSummary,
+): boolean {
+	return convexMode === 'cloud' && processLabelsForMode(mode).includes('convex') && diff.files > 0
+}
+
+export function formatGitDiffSummary(diff: GitDiffSummary, color = true): string {
+	const additions = `+${diff.additions}`
+	const deletions = `-${diff.deletions}`
+	const formattedAdditions = color ? `\u001b[32m${additions}\u001b[0m` : additions
+	const formattedDeletions = color ? `\u001b[31m${deletions}\u001b[0m` : deletions
+	return `${formattedAdditions} ${formattedDeletions} in ${diff.files} ${diff.files === 1 ? 'file' : 'files'}`
+}
+
 async function main(): Promise<void> {
 	const paths = resolveWorktreePaths()
 	const convexMode = resolveConvexMode(paths)
@@ -246,6 +282,10 @@ async function main(): Promise<void> {
 		ports,
 		scenarios: input.scenarios,
 	})
+	const convexDiff =
+		convexMode === 'cloud' && processLabelsForMode(input.mode).includes('convex')
+			? readConvexGitDiff(paths.worktree)
+			: null
 
 	printPlan({
 		branch,
@@ -257,8 +297,12 @@ async function main(): Promise<void> {
 		scenarios: input.scenarios,
 		source,
 		specs,
+		convexDiff,
 	})
 	if (input.dryRun) return
+	if (convexDiff && shouldPromptForCloudConvexPush(convexMode, input.mode, convexDiff)) {
+		await confirmCloudConvexPush(convexDiff)
+	}
 
 	ensureDataLayout(paths, input.scenarios)
 	writeRuntimeFile({
@@ -821,6 +865,78 @@ function currentBranch(worktree: string): string {
 	return git(['branch', '--show-current'], worktree) || NodePath.basename(worktree)
 }
 
+const CONVEX_GIT_PATHS = [':(glob)convex/**/*.ts', ':(glob)convex/**/*.js', 'convex.json'] as const
+
+function readConvexGitDiff(worktree: string): GitDiffSummary {
+	git(['rev-parse', '--verify', 'origin/main'], worktree)
+	const tracked = git(
+		[
+			'diff',
+			'--numstat',
+			'--ignore-all-space',
+			'--ignore-blank-lines',
+			'origin/main',
+			'--',
+			...CONVEX_GIT_PATHS,
+		],
+		worktree,
+	)
+	const untracked = git(
+		['ls-files', '--others', '--exclude-standard', '--', ...CONVEX_GIT_PATHS],
+		worktree,
+	)
+	const untrackedDiffs = untracked
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.map((path) => gitUntrackedNumstat(worktree, path))
+	return parseGitNumstat([tracked, ...untrackedDiffs].filter(Boolean).join('\n'))
+}
+
+function gitUntrackedNumstat(worktree: string, path: string): string {
+	const emptyPath = process.platform === 'win32' ? 'NUL' : '/dev/null'
+	const result = NodeChildProcess.spawnSync(
+		'git',
+		[
+			'diff',
+			'--no-index',
+			'--numstat',
+			'--ignore-all-space',
+			'--ignore-blank-lines',
+			'--',
+			emptyPath,
+			path,
+		],
+		{ cwd: worktree, encoding: 'utf8' },
+	)
+	if (result.status !== 0 && result.status !== 1) {
+		throw new DevRunnerError(result.stderr.trim() || `git diff for ${path} failed.`)
+	}
+	return result.stdout.trim()
+}
+
+async function confirmCloudConvexPush(diff: GitDiffSummary): Promise<void> {
+	if (!process.stdin.isTTY || !process.stdout.isTTY) {
+		throw new DevRunnerError(
+			`Convex cloud has ${formatGitDiffSummary(diff, false)}. Run vp run dev in an interactive terminal to approve the push.`,
+		)
+	}
+	const prompt = NodeReadline.createInterface({ input: process.stdin, output: process.stdout })
+	try {
+		const answer = (
+			await new Promise<string>((resolve) =>
+				prompt.question('[dev-runner] Push these changes to Convex cloud? [y/N] ', resolve),
+			)
+		)
+			.trim()
+			.toLowerCase()
+		if (answer !== 'y' && answer !== 'yes') {
+			throw new DevRunnerError('Convex cloud push cancelled. Use vp run dev:app to skip Convex.')
+		}
+	} finally {
+		prompt.close()
+	}
+}
+
 function git(args: ReadonlyArray<string>, cwd: string): string {
 	const result = NodeChildProcess.spawnSync('git', args, { cwd, encoding: 'utf8' })
 	if (result.status !== 0) {
@@ -932,6 +1048,7 @@ function printPlan(input: {
 	readonly scenarios: ReadonlyArray<number>
 	readonly source: string
 	readonly specs: ReadonlyArray<ProcessSpec>
+	readonly convexDiff: GitDiffSummary | null
 }): void {
 	console.log(`[dev-runner] ${input.branch} · ${input.mode}`)
 	console.log(`[dev-runner] data ${input.paths.data}`)
@@ -941,6 +1058,9 @@ function printPlan(input: {
 	console.log(
 		`[dev-runner] Convex ${requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')} (${input.convexMode})`,
 	)
+	if (input.convexDiff?.files) {
+		console.log(`[dev-runner] Convex changes ${formatGitDiffSummary(input.convexDiff)}`)
+	}
 	if (input.scenarios.length > 0) {
 		console.log(`[dev-runner] scenarios ${input.scenarios.join(', ')}`)
 	}
