@@ -1,5 +1,6 @@
 import type { Id } from './_generated/dataModel'
 import type { MutationCtx, QueryCtx } from './_generated/server'
+import { minecraftUuid } from './_socialRules'
 
 export type SocialNotificationType =
 	| 'friend_request'
@@ -73,12 +74,15 @@ export async function notificationToLabrinth(
 	},
 ) {
 	const actor = notification.actorUserId ? await ctx.db.get(notification.actorUserId) : null
+	const recipient = await ctx.db.get(notification.userId)
+	if (!recipient) throw new Error('notification recipient not found')
 	const client = notification.clientId ? await ctx.db.get(notification.clientId) : null
 	const actorName = actor?.displayName ?? actor?.verifiedMinecraftHandle ?? 'Someone'
+	const actorId = actor?.minecraftUuid
 	const clientName = client?.name ?? 'a client profile'
 	const base = {
 		id: notification._id.toString(),
-		user_id: notification.userId.toString(),
+		user_id: minecraftUuid(recipient),
 		read: notification.status !== 'unread',
 		created: new Date(notification.createdAt).toISOString(),
 		actions: [] as { title: string; action_route: [string, string] }[],
@@ -89,6 +93,7 @@ export async function notificationToLabrinth(
 			...base,
 			type: 'shared_instance_invite',
 			title: 'Client profile invite',
+			name: 'Client profile invite',
 			text: `${actorName} invited you to ${clientName}.`,
 			link: '/',
 			body: {
@@ -96,7 +101,7 @@ export async function notificationToLabrinth(
 				shared_instance_id: client._id.toString(),
 				shared_instance_name: client.name,
 				shared_instance_icon: null,
-				invited_by: notification.actorUserId?.toString(),
+				invited_by: actorId,
 			},
 		}
 	}
@@ -106,12 +111,13 @@ export async function notificationToLabrinth(
 		...base,
 		type: 'custom',
 		title: copy.title,
+		name: copy.title,
 		text: copy.text,
 		link: copy.link,
 		body: {
 			type: 'custom',
 			key: `amberite_${notification.type}`,
-			actor_user_id: notification.actorUserId?.toString(),
+			actor_user_id: actorId,
 			shared_instance_id: notification.clientId?.toString(),
 		},
 	}

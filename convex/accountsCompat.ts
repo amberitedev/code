@@ -1,13 +1,20 @@
 import { v } from 'convex/values'
-import type { Doc, Id } from './_generated/dataModel'
+import type { Doc } from './_generated/dataModel'
 import { query } from './_generated/server'
 import type { QueryCtx } from './_generated/server'
-import { currentAccountFields, requireUserId } from './_socialRules'
+import {
+	currentAccountFields,
+	minecraftUsername,
+	minecraftUuid,
+	requireUserId,
+} from './_socialRules'
 
 const campaignsValidator = v.object({ pride_26: v.null() })
 const userValidator = v.object({
 	id: v.string(),
 	username: v.string(),
+	display_name: v.string(),
+	name: v.string(),
 	avatar_url: v.optional(v.string()),
 	bio: v.optional(v.string()),
 	created: v.string(),
@@ -24,6 +31,7 @@ const userValidator = v.object({
 const searchUserValidator = v.object({
 	id: v.string(),
 	username: v.string(),
+	display_name: v.string(),
 	avatar_url: v.union(v.string(), v.null()),
 })
 
@@ -33,7 +41,7 @@ export const currentUser = query({
 	handler: async (ctx) => {
 		const userId = await requireUserId(ctx)
 		const user = await ctx.db.get(userId)
-		if (!user) throw new Error('user not found')
+		if (!user || user.deletedAt) throw new Error('user not found')
 		const fields = await currentAccountFields(ctx, userId)
 		return compatUser(user, {
 			authProviders: fields.auth_providers.includes('minecraft') ? ['microsoft'] : [],
@@ -47,18 +55,16 @@ export const getUser = query({
 	args: { idOrUsername: v.string() },
 	returns: v.union(userValidator, v.null()),
 	handler: async (ctx, args) => {
-		await requireUserId(ctx)
 		const user = await resolveUser(ctx, args.idOrUsername)
 		return user && !user.deletedAt ? compatUser(user) : null
 	},
 })
 
 export const getUsers = query({
-	args: { ids: v.array(v.id('users')) },
+	args: { ids: v.array(v.string()) },
 	returns: v.array(userValidator),
 	handler: async (ctx, args) => {
-		await requireUserId(ctx)
-		const users = await Promise.all(args.ids.slice(0, 100).map((id) => ctx.db.get(id)))
+		const users = await Promise.all(args.ids.slice(0, 100).map((id) => resolveUser(ctx, id)))
 		return users
 			.filter((user): user is Doc<'users'> => Boolean(user && !user.deletedAt))
 			.map((user) => compatUser(user))
@@ -69,24 +75,20 @@ export const searchUsers = query({
 	args: { query: v.string() },
 	returns: v.array(searchUserValidator),
 	handler: async (ctx, args) => {
-		const actorId = await requireUserId(ctx)
-		const normalized = args.query.trim().toLowerCase()
+		const normalized = args.query.trim().replace(/^@/, '').toLowerCase()
 		if (normalized.length < 2) return []
 		const users = await ctx.db
 			.query('users')
-			.withIndex('by_verified_minecraft_handle', (q) =>
-				q
-					.gte('normalizedVerifiedMinecraftHandle', normalized)
-					.lt('normalizedVerifiedMinecraftHandle', `${normalized}\uffff`),
+			.withIndex('by_normalized_username', (index) =>
+				index.gte('normalizedUsername', normalized).lt('normalizedUsername', `${normalized}\uffff`),
 			)
 			.take(20)
 		return users
-			.filter(
-				(user) => user._id !== actorId && !user.deletedAt && Boolean(user.verifiedMinecraftHandle),
-			)
+			.filter((user) => !user.deletedAt && Boolean(user.minecraftUuid && user.username))
 			.map((user) => ({
-				id: user._id.toString(),
-				username: user.verifiedMinecraftHandle!,
+				id: minecraftUuid(user),
+				username: minecraftUsername(user),
+				display_name: user.displayName ?? user.name ?? minecraftUsername(user),
 				avatar_url: user.avatarUrl ?? user.image ?? null,
 			}))
 	},
@@ -100,11 +102,12 @@ function compatUser(
 		emailVerified: boolean
 	},
 ) {
-	const username = user.verifiedMinecraftHandle ?? user.username
-	if (!username) throw new Error('user has no verified Minecraft identity')
+	const username = minecraftUsername(user)
 	return {
-		id: user._id.toString(),
+		id: minecraftUuid(user),
 		username,
+		display_name: user.displayName ?? user.name ?? username,
+		name: user.displayName ?? user.name ?? username,
 		...((user.avatarUrl ?? user.image) ? { avatar_url: user.avatarUrl ?? user.image } : {}),
 		...(user.bio ? { bio: user.bio } : {}),
 		created: new Date(user._creationTime).toISOString(),
@@ -125,12 +128,18 @@ function compatUser(
 }
 
 async function resolveUser(ctx: QueryCtx, idOrUsername: string): Promise<Doc<'users'> | null> {
-	const userId = ctx.db.normalizeId('users', idOrUsername)
-	if (userId) return await ctx.db.get(userId)
+	const input = idOrUsername.trim().replace(/^@/, '')
+	const uuid = input.replace(/-/g, '').toLowerCase()
+	const userByUuid = await ctx.db
+		.query('users')
+		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', uuid))
+		.unique()
+	if (userByUuid) return userByUuid
+	// TODO: When Minecraft rename history exists, optionally resolve previous names after re-verification.
 	return await ctx.db
 		.query('users')
-		.withIndex('by_verified_minecraft_handle', (q) =>
-			q.eq('normalizedVerifiedMinecraftHandle', idOrUsername.trim().toLowerCase()),
+		.withIndex('by_normalized_username', (index) =>
+			index.eq('normalizedUsername', input.toLowerCase()),
 		)
 		.unique()
 }

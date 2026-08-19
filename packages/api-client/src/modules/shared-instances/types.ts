@@ -80,6 +80,22 @@ export namespace SharedInstances {
 				loader: string
 				loader_version: string
 			}
+
+			export type CreateVersionRequest = {
+				modrinth_ids: string[]
+				external_files: Array<{ file_name: string; file_type: string }>
+				modpack_id?: string
+				game_version: string
+				loader: string
+				loader_version?: string
+			}
+
+			export type LinkInvite = {
+				id: string
+				expiration: string
+				max_uses: number
+				uses: number
+			}
 		}
 	}
 

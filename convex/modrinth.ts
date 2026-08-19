@@ -2,7 +2,8 @@ import { getAuthUserId } from '@convex-dev/auth/server'
 import { v } from 'convex/values'
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server'
 import { internal } from './_generated/api'
-import type { Id } from './_generated/dataModel'
+import type { Doc, Id } from './_generated/dataModel'
+import type { ActionCtx } from './_generated/server'
 
 type ModrinthUser = {
 	id: string
@@ -10,8 +11,32 @@ type ModrinthUser = {
 	avatar_url?: string | null
 }
 
+type PublicLinkedAccount = ReturnType<typeof redactedAccount>
+type TokenMaterial = {
+	_id: Id<'linkedModrinthAccounts'>
+	encryptedAccessToken: string
+	expiresAt?: number
+	public: PublicLinkedAccount
+}
+
+const linkedAccountValidator = v.object({
+	id: v.id('linkedModrinthAccounts'),
+	userId: v.id('users'),
+	modrinthUserId: v.string(),
+	username: v.string(),
+	avatar_url: v.union(v.string(), v.null()),
+	scopes: v.array(v.string()),
+	expiresAt: v.union(v.number(), v.null()),
+	status: v.union(v.literal('active'), v.literal('needs_reconnect'), v.literal('revoked')),
+	needsReconnect: v.boolean(),
+	reconnectReason: v.union(v.string(), v.null()),
+	linkedAt: v.number(),
+	updatedAt: v.number(),
+})
+
 export const current = query({
 	args: {},
+	returns: v.union(linkedAccountValidator, v.null()),
 	handler: async (ctx) => {
 		const userId = await getAuthUserId(ctx)
 		if (userId === null) throw new Error('not authenticated')
@@ -45,6 +70,17 @@ export const storeCurrentOAuthTokens = action({
 		scopes: v.array(v.string()),
 		expiresAt: v.optional(v.number()),
 	},
+	returns: v.object({
+		modrinthUserId: v.string(),
+		username: v.string(),
+		avatar_url: v.union(v.string(), v.null()),
+		scopes: v.array(v.string()),
+		expiresAt: v.union(v.number(), v.null()),
+		status: v.literal('active'),
+		needsReconnect: v.literal(false),
+		linkedAt: v.number(),
+		updatedAt: v.number(),
+	}),
 	handler: async (ctx, args) => {
 		const userId = await requireActionUserId(ctx)
 		const modrinthUser = await fetchModrinthUser(args.accessToken)
@@ -69,7 +105,7 @@ export const storeCurrentOAuthTokens = action({
 			scopes: [...new Set(args.scopes)].sort(),
 			expiresAt: args.expiresAt ?? null,
 			status: 'active' as const,
-			needsReconnect: false,
+			needsReconnect: false as const,
 			linkedAt: now,
 			updatedAt: now,
 		}
@@ -78,9 +114,12 @@ export const storeCurrentOAuthTokens = action({
 
 export const refreshCurrentStatus = action({
 	args: {},
-	handler: async (ctx) => {
+	returns: v.union(linkedAccountValidator, v.null()),
+	handler: async (ctx): Promise<PublicLinkedAccount | null> => {
 		const userId = await requireActionUserId(ctx)
-		const account = await ctx.runQuery(internal.modrinth.tokenMaterial, { userId })
+		const account: TokenMaterial | null = await ctx.runQuery(internal.modrinth.tokenMaterial, {
+			userId,
+		})
 		if (!account) return null
 		if (account.expiresAt && account.expiresAt <= Date.now()) {
 			await ctx.runMutation(internal.modrinth.markNeedsReconnect, {
@@ -114,6 +153,15 @@ export const refreshCurrentStatus = action({
 
 export const tokenMaterial = internalQuery({
 	args: { userId: v.id('users') },
+	returns: v.union(
+		v.object({
+			_id: v.id('linkedModrinthAccounts'),
+			encryptedAccessToken: v.string(),
+			expiresAt: v.optional(v.number()),
+			public: linkedAccountValidator,
+		}),
+		v.null(),
+	),
 	handler: async (ctx, args) => {
 		const account = await ctx.db
 			.query('linkedModrinthAccounts')
@@ -142,6 +190,7 @@ export const upsertLinkedAccount = internalMutation({
 		linkedAt: v.number(),
 		updatedAt: v.number(),
 	},
+	returns: v.null(),
 	handler: async (ctx, args) => {
 		const existing = await ctx.db
 			.query('linkedModrinthAccounts')
@@ -161,7 +210,13 @@ export const upsertLinkedAccount = internalMutation({
 			updatedAt: args.updatedAt,
 		}
 		if (existing) await ctx.db.patch(existing._id, value)
-		else await ctx.db.insert('linkedModrinthAccounts', { ...value, userId: args.userId, linkedAt: args.linkedAt })
+		else
+			await ctx.db.insert('linkedModrinthAccounts', {
+				...value,
+				userId: args.userId,
+				linkedAt: args.linkedAt,
+			})
+		return null
 	},
 })
 
@@ -170,6 +225,7 @@ export const markNeedsReconnect = internalMutation({
 		accountId: v.id('linkedModrinthAccounts'),
 		reason: v.string(),
 	},
+	returns: v.null(),
 	handler: async (ctx, args) => {
 		await ctx.db.patch(args.accountId, {
 			status: 'needs_reconnect',
@@ -177,6 +233,7 @@ export const markNeedsReconnect = internalMutation({
 			reconnectReason: args.reason,
 			updatedAt: Date.now(),
 		})
+		return null
 	},
 })
 
@@ -186,6 +243,7 @@ export const updateProfileSnapshot = internalMutation({
 		username: v.string(),
 		avatarUrl: v.optional(v.string()),
 	},
+	returns: v.null(),
 	handler: async (ctx, args) => {
 		await ctx.db.patch(args.accountId, {
 			username: args.username,
@@ -195,10 +253,11 @@ export const updateProfileSnapshot = internalMutation({
 			reconnectReason: undefined,
 			updatedAt: Date.now(),
 		})
+		return null
 	},
 })
 
-async function requireActionUserId(ctx: any): Promise<Id<'users'>> {
+async function requireActionUserId(ctx: ActionCtx): Promise<Id<'users'>> {
 	const userId = await getAuthUserId(ctx)
 	if (userId === null) throw new Error('not authenticated')
 	return userId
@@ -215,7 +274,7 @@ async function fetchModrinthUser(accessToken: string): Promise<ModrinthUser | nu
 	return (await response.json()) as ModrinthUser
 }
 
-function redactedAccount(account: any) {
+function redactedAccount(account: Doc<'linkedModrinthAccounts'>) {
 	return {
 		id: account._id,
 		userId: account.userId,
@@ -235,7 +294,11 @@ function redactedAccount(account: any) {
 async function encryptToken(token: string): Promise<string> {
 	const iv = crypto.getRandomValues(new Uint8Array(12))
 	const encrypted = new Uint8Array(
-		await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await encryptionKey(), new TextEncoder().encode(token)),
+		await crypto.subtle.encrypt(
+			{ name: 'AES-GCM', iv },
+			await encryptionKey(),
+			new TextEncoder().encode(token),
+		),
 	)
 	const bytes = new Uint8Array(iv.length + encrypted.length)
 	bytes.set(iv)
@@ -247,7 +310,11 @@ async function decryptToken(value: string): Promise<string> {
 	const bytes = fromBase64Url(value)
 	const iv = bytes.slice(0, 12)
 	const encrypted = bytes.slice(12)
-	const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await encryptionKey(), encrypted)
+	const decrypted = await crypto.subtle.decrypt(
+		{ name: 'AES-GCM', iv },
+		await encryptionKey(),
+		encrypted,
+	)
 	return new TextDecoder().decode(decrypted)
 }
 
@@ -265,6 +332,7 @@ function base64Url(bytes: Uint8Array): string {
 }
 
 function fromBase64Url(value: string): Uint8Array {
-	const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4)
+	const base64 =
+		value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4)
 	return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
 }

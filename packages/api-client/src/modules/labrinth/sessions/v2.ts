@@ -31,4 +31,16 @@ export class LabrinthSessionsV2Module extends AbstractModule {
 			method: 'DELETE',
 		})
 	}
+
+	/**
+	 * Rotate the current session. Amberite's compatibility feature delegates this
+	 * to its native Minecraft-first refresh flow instead of issuing a Labrinth token.
+	 */
+	public async refresh(): Promise<Labrinth.Sessions.v2.Session> {
+		return this.client.request<Labrinth.Sessions.v2.Session>('/session/refresh', {
+			api: 'labrinth',
+			version: 2,
+			method: 'POST',
+		})
+	}
 }

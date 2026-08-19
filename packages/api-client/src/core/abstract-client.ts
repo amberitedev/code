@@ -33,6 +33,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
 	public readonly labrinth!: InferredClientModules['labrinth']
+	public readonly amberite!: InferredClientModules['amberite']
 	public readonly archon!: ArchonClientModules & {
 		sockets: AbstractWebSocketClient
 		sync: AbstractSyncClient

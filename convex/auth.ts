@@ -12,6 +12,31 @@ import {
 	shouldSyncDefaultMinecraftDisplayName,
 } from './minecraftIdentity'
 
+const currentUserValidator = v.union(
+	v.null(),
+	v.object({
+		id: v.string(),
+		userId: v.string(),
+		username: v.string(),
+		display_name: v.string(),
+		displayName: v.string(),
+		name: v.string(),
+		minecraftUuid: v.string(),
+		verifiedMinecraftHandle: v.string(),
+		avatar_url: v.union(v.string(), v.null()),
+		image: v.optional(v.string()),
+		bio: v.union(v.string(), v.null()),
+		created: v.string(),
+		friendCode: v.optional(v.string()),
+		allow_friend_requests: v.boolean(),
+		email: v.optional(v.string()),
+		email_verified: v.optional(v.boolean()),
+		auth_providers: v.optional(v.array(v.string())),
+		has_password: v.optional(v.boolean()),
+		has_totp: v.optional(v.boolean()),
+	}),
+)
+
 interface MinecraftProfile {
 	id: string
 	name: string
@@ -157,7 +182,10 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 						)
 					await ctx.runMutation(internal.auth.synchronizeMinecraftIdentity, {
 						userId: existing.user._id,
-						amberiteUserId: existing.user.amberiteUserId ?? accountId,
+						amberiteUserId:
+							typeof existing.user.amberiteUserId === 'string'
+								? existing.user.amberiteUserId
+								: accountId,
 						accountId,
 						handle: profile.name,
 						minecraftUuid,
@@ -259,10 +287,10 @@ export const identityForMinecraftUuid = internalQuery({
 
 export const userForIdentityRepair = internalQuery({
 	args: { userId: v.id('users') },
-	returns: v.any(),
+	returns: v.union(v.null(), v.object({ amberiteUserId: v.optional(v.string()) })),
 	handler: async (ctx, args) => {
 		const user = await ctx.db.get(args.userId)
-		return user && !user.deletedAt ? user : null
+		return user && !user.deletedAt ? { amberiteUserId: user.amberiteUserId } : null
 	},
 })
 
@@ -415,11 +443,7 @@ export const deleteCurrentAccount = mutation({
 		const userId = await requireUserId(ctx)
 		const user = await ctx.db.get(userId)
 		if (!user) throw new Error('user not found')
-		const [ownedGroup, ownedCore, ownedSharedClient] = await Promise.all([
-			ctx.db
-				.query('friendGroups')
-				.withIndex('by_owner', (q) => q.eq('ownerUserId', userId))
-				.first(),
+		const [ownedCore, ownedSharedClient] = await Promise.all([
 			ctx.db
 				.query('coreList')
 				.withIndex('by_owner', (q) => q.eq('ownerUserId', userId))
@@ -430,15 +454,18 @@ export const deleteCurrentAccount = mutation({
 				.first(),
 		])
 		// TODO: Define ownership transfer and paid-Core cancellation before account deletion is allowed.
-		if (ownedGroup || ownedCore || ownedSharedClient)
-			throw new Error(
-				'transfer owned groups, Cores, and shared clients before deleting your account',
-			)
+		if (ownedCore || ownedSharedClient)
+			throw new Error('transfer owned Cores and shared clients before deleting your account')
 		const sessions = await ctx.db
 			.query('authSessions')
 			.withIndex('userId', (q) => q.eq('userId', userId))
 			.collect()
 		for (const session of sessions) {
+			const deviceSession = await ctx.db
+				.query('deviceSessions')
+				.withIndex('by_auth_session', (q) => q.eq('authSessionId', session._id))
+				.unique()
+			if (deviceSession) await ctx.db.delete(deviceSession._id)
 			const refreshTokens = await ctx.db
 				.query('authRefreshTokens')
 				.withIndex('sessionId', (q) => q.eq('sessionId', session._id))
@@ -451,6 +478,73 @@ export const deleteCurrentAccount = mutation({
 			.withIndex('userIdAndProvider', (q) => q.eq('userId', userId))
 			.collect()
 		for (const account of accounts) await ctx.db.delete(account._id)
+		const linkedModrinthAccounts = await ctx.db
+			.query('linkedModrinthAccounts')
+			.withIndex('by_user', (q) => q.eq('userId', userId))
+			.collect()
+		for (const account of linkedModrinthAccounts) await ctx.db.delete(account._id)
+		const [
+			leftFriendships,
+			rightFriendships,
+			incomingRequests,
+			outgoingRequests,
+			blocks,
+			blockedBy,
+			notifications,
+			actorNotifications,
+			sharedMemberships,
+			coreLinks,
+		] = await Promise.all([
+			ctx.db
+				.query('friendships')
+				.withIndex('by_user_a', (q) => q.eq('userAId', userId))
+				.collect(),
+			ctx.db
+				.query('friendships')
+				.withIndex('by_user_b', (q) => q.eq('userBId', userId))
+				.collect(),
+			ctx.db
+				.query('friendRequests')
+				.withIndex('by_to', (q) => q.eq('toUserId', userId))
+				.collect(),
+			ctx.db
+				.query('friendRequests')
+				.withIndex('by_from', (q) => q.eq('fromUserId', userId))
+				.collect(),
+			ctx.db
+				.query('blockedUsers')
+				.withIndex('by_blocker', (q) => q.eq('blockerUserId', userId))
+				.collect(),
+			ctx.db
+				.query('blockedUsers')
+				.withIndex('by_blocked', (q) => q.eq('blockedUserId', userId))
+				.collect(),
+			ctx.db
+				.query('socialNotifications')
+				.withIndex('by_user', (q) => q.eq('userId', userId))
+				.collect(),
+			ctx.db
+				.query('socialNotifications')
+				.withIndex('by_actor', (q) => q.eq('actorUserId', userId))
+				.collect(),
+			ctx.db
+				.query('sharedClientMembers')
+				.withIndex('by_user', (q) => q.eq('userId', userId))
+				.collect(),
+			ctx.db
+				.query('coreMemberLinks')
+				.withIndex('by_user', (q) => q.eq('userId', userId))
+				.collect(),
+		])
+		for (const row of [...leftFriendships, ...rightFriendships]) await ctx.db.delete(row._id)
+		for (const row of [...incomingRequests, ...outgoingRequests]) await ctx.db.delete(row._id)
+		for (const row of [...blocks, ...blockedBy]) await ctx.db.delete(row._id)
+		for (const row of new Map(
+			[...notifications, ...actorNotifications].map((row) => [row._id, row]),
+		).values())
+			await ctx.db.delete(row._id)
+		for (const row of sharedMemberships) await ctx.db.delete(row._id)
+		for (const row of coreLinks) await ctx.db.delete(row._id)
 		if (user.amberiteUserId) {
 			const links = await ctx.db
 				.query('linkedMicrosoftAccounts')
@@ -462,6 +556,9 @@ export const deleteCurrentAccount = mutation({
 			deletedAt: Date.now(),
 			deletedReason: 'user requested deletion',
 			minecraftUuid: undefined,
+			username: undefined,
+			normalizedUsername: undefined,
+			friendCode: undefined,
 			verifiedMinecraftHandle: undefined,
 			normalizedVerifiedMinecraftHandle: undefined,
 		})
@@ -471,7 +568,7 @@ export const deleteCurrentAccount = mutation({
 
 export const currentUser = query({
 	args: {},
-	returns: v.any(),
+	returns: currentUserValidator,
 	handler: async (ctx) => {
 		const userId = await getAuthUserId(ctx)
 		if (userId === null) return null

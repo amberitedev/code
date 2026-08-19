@@ -2,7 +2,14 @@ import { v } from 'convex/values'
 import type { Doc, Id } from './_generated/dataModel'
 import { mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
-import { canonicalPair, requireUserId } from './_socialRules'
+import {
+	acceptedFriendship,
+	blockByPair,
+	canonicalPair,
+	friendRequestByPair,
+	minecraftUuid,
+	requireUserId,
+} from './_socialRules'
 import {
 	dismissNotificationByDedupeKey,
 	notificationToLabrinth,
@@ -19,8 +26,9 @@ const friendValidator = v.object({
 const notificationValidator = v.object({
 	id: v.string(),
 	user_id: v.string(),
-	type: v.string(),
+	type: v.union(v.string(), v.null()),
 	title: v.string(),
+	name: v.string(),
 	text: v.string(),
 	link: v.string(),
 	read: v.boolean(),
@@ -42,39 +50,62 @@ export const listFriends = query({
 	returns: v.array(friendValidator),
 	handler: async (ctx) => {
 		const userId = await requireUserId(ctx)
-		const id = userId.toString()
 		const [left, right, incoming, outgoing] = await Promise.all([
 			ctx.db
 				.query('friendships')
-				.withIndex('by_user_a', (q) => q.eq('userAId', id))
+				.withIndex('by_user_a', (index) => index.eq('userAId', userId))
 				.take(100),
 			ctx.db
 				.query('friendships')
-				.withIndex('by_user_b', (q) => q.eq('userBId', id))
+				.withIndex('by_user_b', (index) => index.eq('userBId', userId))
 				.take(100),
 			ctx.db
 				.query('friendRequests')
-				.withIndex('by_to_status', (q) => q.eq('toUserId', id).eq('status', 'pending'))
+				.withIndex('by_to_status', (index) => index.eq('toUserId', userId).eq('status', 'pending'))
 				.take(100),
 			ctx.db
 				.query('friendRequests')
-				.withIndex('by_from_status', (q) => q.eq('fromUserId', id).eq('status', 'pending'))
+				.withIndex('by_from_status', (index) =>
+					index.eq('fromUserId', userId).eq('status', 'pending'),
+				)
 				.take(100),
 		])
-		return [
-			...[...left, ...right].map((friendship) => ({
-				id: friendship.userAId,
-				friend_id: friendship.userBId,
-				accepted: true,
-				created: new Date(friendship.createdAt).toISOString(),
-			})),
-			...[...incoming, ...outgoing].map((request) => ({
-				id: request.toUserId,
-				friend_id: request.fromUserId,
-				accepted: false,
-				created: new Date(request.createdAt).toISOString(),
-			})),
-		]
+		const accepted = await Promise.all(
+			[...left, ...right].map(async (friendship) => {
+				const [userA, userB] = await Promise.all([
+					ctx.db.get(friendship.userAId),
+					ctx.db.get(friendship.userBId),
+				])
+				if (!isActiveUser(userA) || !isActiveUser(userB)) return null
+				const request = await acceptedRequestForPair(ctx, friendship.userAId, friendship.userBId)
+				const requester = request?.fromUserId ?? friendship.userAId
+				const accepter = request?.toUserId ?? friendship.userBId
+				return {
+					id: minecraftUuid(accepter === friendship.userAId ? userA : userB),
+					friend_id: minecraftUuid(requester === friendship.userAId ? userA : userB),
+					accepted: true,
+					created: new Date(friendship.createdAt).toISOString(),
+				}
+			}),
+		)
+		const pending = await Promise.all(
+			[...incoming, ...outgoing].map(async (request) => {
+				const [from, to] = await Promise.all([
+					ctx.db.get(request.fromUserId),
+					ctx.db.get(request.toUserId),
+				])
+				if (!isActiveUser(from) || !isActiveUser(to)) return null
+				return {
+					id: minecraftUuid(to),
+					friend_id: minecraftUuid(from),
+					accepted: false,
+					created: new Date(request.createdAt).toISOString(),
+				}
+			}),
+		)
+		return [...accepted, ...pending].filter(
+			(entry): entry is NonNullable<typeof entry> => entry !== null,
+		)
 	},
 })
 
@@ -85,16 +116,18 @@ export const addFriend = mutation({
 		const actorId = await requireUserId(ctx)
 		const target = await resolveUser(ctx, args.idOrUsername)
 		if (!target || target._id === actorId || target.deletedAt) throw new Error('user not found')
-		if (target.allowFriendRequests === false) throw new Error('user has friend requests disabled')
+		if (target.allowFriendRequests === false)
+			throw new Error('friend requests are disabled for this user')
 		await assertNeitherBlocked(ctx, actorId, target._id)
-		if (await friendship(ctx, actorId, target._id)) return null
+		if (await acceptedFriendship(ctx, actorId, target._id))
+			throw new Error('you are already friends with this user')
 
-		const incoming = await requestByPair(ctx, target._id, actorId)
+		const incoming = await friendRequestByPair(ctx, target._id, actorId)
 		if (incoming?.status === 'pending') {
 			const now = Date.now()
 			const [userAId, userBId] = canonicalPair(actorId, target._id)
 			await ctx.db.patch(incoming._id, { status: 'accepted', updatedAt: now })
-			if (!(await friendship(ctx, actorId, target._id)))
+			if (!(await acceptedFriendship(ctx, actorId, target._id)))
 				await ctx.db.insert('friendships', { userAId, userBId, createdAt: now })
 			await dismissNotificationByDedupeKey(ctx, actorId, `friend-request:${incoming._id}`)
 			await upsertSocialNotification(ctx, {
@@ -107,8 +140,8 @@ export const addFriend = mutation({
 			return null
 		}
 
-		const existing = await requestByPair(ctx, actorId, target._id)
-		if (existing?.status === 'pending') return null
+		const existing = await friendRequestByPair(ctx, actorId, target._id)
+		if (existing?.status === 'pending') throw new Error('you cannot accept your own friend request')
 		const now = Date.now()
 		const requestId = existing
 			? (await ctx.db.patch(existing._id, { status: 'pending', updatedAt: now }), existing._id)
@@ -136,22 +169,8 @@ export const removeFriend = mutation({
 	handler: async (ctx, args) => {
 		const actorId = await requireUserId(ctx)
 		const target = await resolveUser(ctx, args.idOrUsername)
-		if (!target) return null
-		const accepted = await friendship(ctx, actorId, target._id)
-		if (accepted) await ctx.db.delete(accepted._id)
-		for (const request of await Promise.all([
-			requestByPair(ctx, actorId, target._id),
-			requestByPair(ctx, target._id, actorId),
-		])) {
-			if (request?.status === 'pending') {
-				await ctx.db.patch(request._id, { status: 'canceled', updatedAt: Date.now() })
-				await dismissNotificationByDedupeKey(
-					ctx,
-					request.toUserId === actorId ? actorId : target._id,
-					`friend-request:${request._id}`,
-				)
-			}
-		}
+		if (!target) throw new Error('user not found')
+		await removeRelationship(ctx, actorId, target._id)
 		return null
 	},
 })
@@ -161,12 +180,12 @@ export const listBlocks = query({
 	returns: v.array(v.string()),
 	handler: async (ctx) => {
 		const userId = await requireUserId(ctx)
-		return (
-			await ctx.db
-				.query('blockedUsers')
-				.withIndex('by_blocker', (q) => q.eq('blockerUserId', userId))
-				.take(100)
-		).map((block) => block.blockedUserId)
+		const blocks = await ctx.db
+			.query('blockedUsers')
+			.withIndex('by_blocker', (index) => index.eq('blockerUserId', userId))
+			.take(100)
+		const users = await Promise.all(blocks.map((block) => ctx.db.get(block.blockedUserId)))
+		return users.filter(isActiveUser).map(minecraftUuid)
 	},
 })
 
@@ -176,7 +195,7 @@ export const blockUser = mutation({
 	handler: async (ctx, args) => {
 		const actorId = await requireUserId(ctx)
 		const target = await resolveUser(ctx, args.idOrUsername)
-		if (!target || target._id === actorId) throw new Error('user not found')
+		if (!target || target._id === actorId || target.deletedAt) throw new Error('user not found')
 		await removeRelationship(ctx, actorId, target._id)
 		if (!(await blockByPair(ctx, actorId, target._id)))
 			await ctx.db.insert('blockedUsers', {
@@ -207,14 +226,19 @@ export const listNotifications = query({
 	returns: v.array(notificationValidator),
 	handler: async (ctx, args) => {
 		const actorId = await requireUserId(ctx)
-		if (args.userId && args.userId !== actorId) throw new Error('not authorized')
+		const actor = await ctx.db.get(actorId)
+		if (!actor) throw new Error('user not found')
+		if (args.userId && args.userId !== minecraftUuid(actor)) throw new Error('not authorized')
 		const rows = await ctx.db
 			.query('socialNotifications')
-			.withIndex('by_user', (q) => q.eq('userId', actorId))
+			.withIndex('by_user', (index) => index.eq('userId', actorId))
 			.order('desc')
 			.take(100)
-		const active = rows.filter((row) => row.status !== 'dismissed')
-		return await Promise.all(active.map((row) => notificationToLabrinth(ctx, row)))
+		return await Promise.all(
+			rows
+				.filter((row) => row.status !== 'dismissed')
+				.map((row) => notificationToLabrinth(ctx, row)),
+		)
 	},
 })
 
@@ -259,65 +283,56 @@ export const dismissNotifications = mutation({
 	},
 })
 
-async function resolveUser(ctx: QueryCtx | MutationCtx, idOrUsername: string) {
-	const id = ctx.db.normalizeId('users', idOrUsername)
-	if (id) return await ctx.db.get(id)
+async function resolveUser(ctx: QueryCtx | MutationCtx, value: string) {
+	const input = value.trim().replace(/^@/, '')
+	const uuid = input.replace(/-/g, '').toLowerCase()
+	const byUuid = await ctx.db
+		.query('users')
+		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', uuid))
+		.unique()
+	if (byUuid) return byUuid
 	return await ctx.db
 		.query('users')
-		.withIndex('by_verified_minecraft_handle', (q) =>
-			q.eq('normalizedVerifiedMinecraftHandle', idOrUsername.trim().toLowerCase()),
+		.withIndex('by_normalized_username', (index) =>
+			index.eq('normalizedUsername', input.toLowerCase()),
 		)
 		.unique()
 }
 
-function requestByPair(ctx: QueryCtx | MutationCtx, from: Id<'users'>, to: Id<'users'>) {
-	return ctx.db
-		.query('friendRequests')
-		.withIndex('by_from_to', (q) => q.eq('fromUserId', from).eq('toUserId', to))
-		.order('desc')
-		.first()
+function acceptedRequestForPair(ctx: QueryCtx, first: Id<'users'>, second: Id<'users'>) {
+	return Promise.all([
+		friendRequestByPair(ctx, first, second),
+		friendRequestByPair(ctx, second, first),
+	]).then(
+		([forward, reverse]) =>
+			[forward, reverse]
+				.filter((request): request is NonNullable<typeof request> => request?.status === 'accepted')
+				.sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null,
+	)
 }
 
-function blockByPair(ctx: QueryCtx | MutationCtx, blocker: Id<'users'>, blocked: Id<'users'>) {
-	return ctx.db
-		.query('blockedUsers')
-		.withIndex('by_blocker_blocked', (q) =>
-			q.eq('blockerUserId', blocker).eq('blockedUserId', blocked),
-		)
-		.unique()
-}
-
-function friendship(ctx: QueryCtx | MutationCtx, first: Id<'users'>, second: Id<'users'>) {
-	const [userAId, userBId] = canonicalPair(first, second)
-	return ctx.db
-		.query('friendships')
-		.withIndex('by_pair', (q) => q.eq('userAId', userAId).eq('userBId', userBId))
-		.unique()
-}
-
-async function assertNeitherBlocked(
-	ctx: QueryCtx | MutationCtx,
-	first: Id<'users'>,
-	second: Id<'users'>,
-) {
-	if ((await blockByPair(ctx, first, second)) || (await blockByPair(ctx, second, first)))
-		throw new Error('user not found')
+async function assertNeitherBlocked(ctx: QueryCtx, first: Id<'users'>, second: Id<'users'>) {
+	const [forward, reverse] = await Promise.all([
+		blockByPair(ctx, first, second),
+		blockByPair(ctx, second, first),
+	])
+	if (forward) throw new Error("you've blocked the other user")
+	if (reverse) throw new Error("you've been blocked by the other user")
 }
 
 async function removeRelationship(ctx: MutationCtx, first: Id<'users'>, second: Id<'users'>) {
-	const accepted = await friendship(ctx, first, second)
-	if (accepted) await ctx.db.delete(accepted._id)
+	const friendship = await acceptedFriendship(ctx, first, second)
+	if (friendship) await ctx.db.delete(friendship._id)
 	for (const request of await Promise.all([
-		requestByPair(ctx, first, second),
-		requestByPair(ctx, second, first),
+		friendRequestByPair(ctx, first, second),
+		friendRequestByPair(ctx, second, first),
 	])) {
-		if (request?.status === 'pending') {
-			await ctx.db.patch(request._id, { status: 'canceled', updatedAt: Date.now() })
-			await dismissNotificationByDedupeKey(
-				ctx,
-				request.toUserId === first ? first : second,
-				`friend-request:${request._id}`,
-			)
-		}
+		if (request?.status !== 'pending') continue
+		await ctx.db.patch(request._id, { status: 'canceled', updatedAt: Date.now() })
+		await dismissNotificationByDedupeKey(ctx, request.toUserId, `friend-request:${request._id}`)
 	}
+}
+
+function isActiveUser(user: Doc<'users'> | null): user is Doc<'users'> {
+	return Boolean(user && !user.deletedAt && user.minecraftUuid)
 }

@@ -40,27 +40,31 @@ export const applySnapshot = internalMutation({
 			syncedAt: v.optional(v.number()),
 		}),
 	},
+	returns: v.union(
+		v.object({ ok: v.literal(false), status: v.literal('unauthorized') }),
+		v.object({
+			ok: v.literal(true),
+			status: v.union(v.literal('stale'), v.literal('applied')),
+			coreId: v.string(),
+			projectionRevision: v.number(),
+			syncedAt: v.number(),
+		}),
+	),
 	handler: async (ctx, args) => {
 		const { snapshot } = args
-		const [coreList, legacyCore] = await Promise.all([
-			ctx.db
-				.query('coreList')
-				.withIndex('by_core_id', (q) => q.eq('coreId', snapshot.coreId))
-				.unique(),
-			ctx.db
-				.query('cores')
-				.withIndex('by_core_id', (q) => q.eq('coreId', snapshot.coreId))
-				.unique(),
-		])
-		const expectedHash = coreList?.syncCredentialHash ?? legacyCore?.realtimeCredentialHash
+		const coreList = await ctx.db
+			.query('coreList')
+			.withIndex('by_core_id', (q) => q.eq('coreId', snapshot.coreId))
+			.unique()
+		const expectedHash = coreList?.syncCredentialHash
 		if (!expectedHash || !constantTimeEquals(expectedHash, args.credentialHash))
-			return { ok: false, status: 'unauthorized' as const }
-		const expectedOwner = coreList?.ownerUserId ?? legacyCore?.ownerUserId
-		if (expectedOwner && expectedOwner !== snapshot.ownerUserId)
-			return { ok: false, status: 'unauthorized' as const }
+			return { ok: false as const, status: 'unauthorized' as const }
+		const ownerUserId = ctx.db.normalizeId('users', snapshot.ownerUserId)
+		if (!ownerUserId || coreList.ownerUserId !== ownerUserId)
+			return { ok: false as const, status: 'unauthorized' as const }
 		if (coreList && coreList.projectionRevision > snapshot.revision) {
 			return {
-				ok: true,
+				ok: true as const,
 				status: 'stale' as const,
 				coreId: snapshot.coreId,
 				projectionRevision: coreList.projectionRevision,
@@ -72,7 +76,7 @@ export const applySnapshot = internalMutation({
 		const syncedAt = snapshot.syncedAt ?? now
 		const coreValue = {
 			coreId: snapshot.coreId,
-			ownerUserId: snapshot.ownerUserId,
+			ownerUserId,
 			linkState: snapshot.linkState,
 			connectionUrl: snapshot.connectionUrl,
 			setupMode: snapshot.setupMode,
@@ -84,10 +88,13 @@ export const applySnapshot = internalMutation({
 		if (coreList) await ctx.db.patch(coreList._id, coreValue)
 		else await ctx.db.insert('coreList', { ...coreValue, createdAt: now })
 
-		const members = new Map<string, boolean>()
-		members.set(snapshot.ownerUserId, true)
+		const members = new Map<typeof ownerUserId, boolean>()
+		members.set(ownerUserId, true)
 		for (const member of snapshot.members) {
-			members.set(member.userId, member.isOwner === true || member.userId === snapshot.ownerUserId)
+			const userId = ctx.db.normalizeId('users', member.userId)
+			if (!userId || !(await ctx.db.get(userId)))
+				return { ok: false as const, status: 'unauthorized' as const }
+			members.set(userId, member.isOwner === true || userId === ownerUserId)
 		}
 		const existingLinks = await ctx.db
 			.query('coreMemberLinks')
@@ -104,7 +111,7 @@ export const applySnapshot = internalMutation({
 		}
 
 		return {
-			ok: true,
+			ok: true as const,
 			status: 'applied' as const,
 			coreId: snapshot.coreId,
 			projectionRevision: snapshot.revision,
@@ -153,7 +160,10 @@ function parseSnapshot(body: string): ProjectionSnapshot | null {
 	for (const member of value.members) {
 		if (!isRecord(member) || !validId(member.userId)) return null
 		if (member.isOwner !== undefined && typeof member.isOwner !== 'boolean') return null
-		members.push({ userId: member.userId, ...(member.isOwner !== undefined ? { isOwner: member.isOwner } : {}) })
+		members.push({
+			userId: member.userId,
+			...(member.isOwner !== undefined ? { isOwner: member.isOwner } : {}),
+		})
 	}
 	return {
 		coreId: value.coreId,
@@ -169,7 +179,9 @@ function parseSnapshot(body: string): ProjectionSnapshot | null {
 }
 
 async function hashCredential(credential: string): Promise<string> {
-	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credential)))
+	const digest = new Uint8Array(
+		await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credential)),
+	)
 	return base64Url(digest)
 }
 
@@ -184,7 +196,8 @@ function constantTimeEquals(left: string, right: string): boolean {
 	const rightBytes = new TextEncoder().encode(right)
 	if (leftBytes.length !== rightBytes.length) return false
 	let difference = 0
-	for (let index = 0; index < leftBytes.length; index++) difference |= leftBytes[index] ^ rightBytes[index]
+	for (let index = 0; index < leftBytes.length; index++)
+		difference |= leftBytes[index] ^ rightBytes[index]
 	return difference === 0
 }
 
@@ -195,7 +208,8 @@ function bearer(request: Request): string | null {
 
 async function readBoundedBody(request: Request): Promise<string | null> {
 	const contentLength = request.headers.get('content-length')
-	if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES)) return null
+	if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES))
+		return null
 	const reader = request.body?.getReader()
 	if (!reader) return ''
 	const chunks: Uint8Array[] = []

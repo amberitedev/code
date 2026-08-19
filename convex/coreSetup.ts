@@ -31,6 +31,8 @@ export const verifyClaim = internalMutation({
 	},
 	returns: v.boolean(),
 	handler: async (ctx, args) => {
+		const ownerUserId = ctx.db.normalizeId('users', args.ownerUserId)
+		if (!ownerUserId) return false
 		const pairing = await ctx.db
 			.query('pairingCores')
 			.withIndex('by_core_id', (q) => q.eq('coreId', args.coreId))
@@ -38,7 +40,7 @@ export const verifyClaim = internalMutation({
 		if (
 			!pairing ||
 			pairing.status !== 'claimed' ||
-			pairing.ownerUserId !== args.ownerUserId ||
+			pairing.ownerUserId !== ownerUserId ||
 			!pairing.realtimeCredentialHash ||
 			pairing.expiresAt <= args.now
 		) {
@@ -98,7 +100,9 @@ async function readBoundedBody(request: Request): Promise<string | null> {
 }
 
 async function hashCredential(credential: string): Promise<string> {
-	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credential)))
+	const digest = new Uint8Array(
+		await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credential)),
+	)
 	return base64Url(digest)
 }
 
@@ -113,7 +117,8 @@ function constantTimeEquals(left: string, right: string): boolean {
 	const rightBytes = new TextEncoder().encode(right)
 	if (leftBytes.length !== rightBytes.length) return false
 	let difference = 0
-	for (let index = 0; index < leftBytes.length; index++) difference |= leftBytes[index] ^ rightBytes[index]
+	for (let index = 0; index < leftBytes.length; index++)
+		difference |= leftBytes[index] ^ rightBytes[index]
 	return difference === 0
 }
 

@@ -254,7 +254,7 @@ function stringArray(value: JsonRecord, key: string) {
 }
 
 function idArray(value: JsonRecord, key: string) {
-	return stringArray(value, key) as Id<'users'>[]
+	return stringArray(value, key)
 }
 
 function json(value: unknown, status = 200) {

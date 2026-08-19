@@ -46,14 +46,53 @@ export class LabrinthUsersV3Module extends AbstractModule {
 	 * GET /v3/users/search?query=:query
 	 */
 	public async search(query: string): Promise<Labrinth.Users.v3.SearchUser[]> {
-		return this.client.request<Labrinth.Users.v3.SearchUser[]>(
-			`/users/search?query=${encodeURIComponent(query)}`,
-			{
-				api: 'labrinth',
-				version: 3,
-				method: 'GET',
-			},
-		)
+		return this.client.request<Labrinth.Users.v3.SearchUser[]>('/users/search', {
+			api: 'labrinth',
+			version: 3,
+			method: 'GET',
+			params: { query },
+		})
+	}
+
+	/** Edit the authenticated user's public profile. */
+	public async edit(
+		idOrUsername: string,
+		request: Labrinth.Users.v3.EditUserRequest,
+	): Promise<void> {
+		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}`, {
+			api: 'labrinth',
+			version: 3,
+			method: 'PATCH',
+			body: request,
+		})
+	}
+
+	/** Replace a user's avatar with a Labrinth-compatible binary upload. */
+	public async setAvatar(idOrUsername: string, image: Blob, extension: string): Promise<void> {
+		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}/icon`, {
+			api: 'labrinth',
+			version: 3,
+			method: 'PATCH',
+			headers: { 'Content-Type': image.type || 'application/octet-stream' },
+			body: image,
+			params: { ext: extension },
+		})
+	}
+
+	public async deleteAvatar(idOrUsername: string): Promise<void> {
+		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}/icon`, {
+			api: 'labrinth',
+			version: 3,
+			method: 'DELETE',
+		})
+	}
+
+	public async delete(idOrUsername: string): Promise<void> {
+		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}`, {
+			api: 'labrinth',
+			version: 3,
+			method: 'DELETE',
+		})
 	}
 
 	/**

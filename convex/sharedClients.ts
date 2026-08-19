@@ -1,9 +1,9 @@
 import { v } from 'convex/values'
 import { internal } from './_generated/api'
 import type { Doc, Id } from './_generated/dataModel'
-import { action, internalMutation, internalQuery, mutation, query } from './_generated/server'
+import { internalMutation, internalQuery, mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
-import { requireUserId } from './_socialRules'
+import { minecraftUuid, requireUserId } from './_socialRules'
 import { dismissNotificationByDedupeKey, upsertSocialNotification } from './_socialNotifications'
 
 const MAX_CLIENT_USERS = 20
@@ -209,14 +209,10 @@ export const acceptInvite = mutation({
 })
 
 /** Public by design: the random invite ID is the bearer capability, matching the v1 link contract. */
-export const inviteInfo = action({
-	args: { inviteId: v.id('sharedClientInvites') },
+export const inviteInfo = query({
+	args: { inviteId: v.id('sharedClientInvites'), now: v.number() },
 	returns: inviteInfoValidator,
-	handler: async (ctx, args) =>
-		await ctx.runQuery(internal.sharedClients.httpInviteInfo, {
-			inviteId: args.inviteId,
-			now: Date.now(),
-		}),
+	handler: async (ctx, args) => inviteInfoResponse(ctx, args.inviteId, args.now),
 })
 
 export const createVersion = mutation({
@@ -271,20 +267,30 @@ export const httpUsers = internalQuery({
 		usersResponse(ctx, await requireUserId(ctx), args.clientId, args.now),
 })
 export const httpInviteUsers = internalMutation({
-	args: { clientId: v.id('sharedClients'), userIds: v.array(v.id('users')) },
+	args: { clientId: v.id('sharedClients'), userIds: v.array(v.string()) },
 	returns: v.null(),
-	handler: async (ctx, args) => (
-		await inviteClientUsers(ctx, await requireUserId(ctx), args.clientId, args.userIds),
-		null
-	),
+	handler: async (ctx, args) => {
+		await inviteClientUsers(
+			ctx,
+			await requireUserId(ctx),
+			args.clientId,
+			await resolvePublicUserIds(ctx, args.userIds),
+		)
+		return null
+	},
 })
 export const httpRemoveUsers = internalMutation({
-	args: { clientId: v.id('sharedClients'), userIds: v.array(v.id('users')) },
+	args: { clientId: v.id('sharedClients'), userIds: v.array(v.string()) },
 	returns: v.null(),
-	handler: async (ctx, args) => (
-		await removeClientUsers(ctx, await requireUserId(ctx), args.clientId, args.userIds),
-		null
-	),
+	handler: async (ctx, args) => {
+		await removeClientUsers(
+			ctx,
+			await requireUserId(ctx),
+			args.clientId,
+			await resolvePublicUserIds(ctx, args.userIds),
+		)
+		return null
+	},
 })
 export const httpAcceptPending = internalMutation({
 	args: { clientId: v.id('sharedClients') },
@@ -462,16 +468,20 @@ async function usersResponse(
 			invite.expiresAt > now &&
 			!members.some((member) => member.userId === invite.inviteeUserId),
 	)
+	const memberUsers = await Promise.all(members.map((member) => ctx.db.get(member.userId)))
+	const pendingUsers = await Promise.all(pending.map((invite) => ctx.db.get(invite.inviteeUserId!)))
 	return {
 		users: [
-			...members.map((member) => ({
-				id: member.userId.toString(),
+			...members.map((member, index) => ({
+				id: memberUsers[index] ? minecraftUuid(memberUsers[index]!) : member.userId.toString(),
 				joined_at: new Date(member.joinedAt).toISOString(),
 				join_type: member.joinType,
 				last_played: member.lastPlayedAt ? new Date(member.lastPlayedAt).toISOString() : null,
 			})),
-			...pending.map((invite) => ({
-				id: invite.inviteeUserId!.toString(),
+			...pending.map((invite, index) => ({
+				id: pendingUsers[index]
+					? minecraftUuid(pendingUsers[index]!)
+					: invite.inviteeUserId!.toString(),
 				joined_at: null,
 				join_type: 'invite' as const,
 				last_played: null,
@@ -532,6 +542,29 @@ async function inviteClientUsers(
 	}
 }
 
+async function resolvePublicUserIds(ctx: QueryCtx | MutationCtx, values: string[]) {
+	const users: Id<'users'>[] = []
+	for (const value of [...new Set(values)].slice(0, MAX_CLIENT_USERS)) {
+		const input = value.trim().replace(/^@/, '')
+		const uuid = input.replace(/-/g, '').toLowerCase()
+		const byUuid = await ctx.db
+			.query('users')
+			.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', uuid))
+			.unique()
+		const user =
+			byUuid ??
+			(await ctx.db
+				.query('users')
+				.withIndex('by_normalized_username', (index) =>
+					index.eq('normalizedUsername', input.toLowerCase()),
+				)
+				.unique())
+		if (!user || user.deletedAt) throw new Error(`user not found: ${value}`)
+		users.push(user._id)
+	}
+	return users
+}
+
 async function removeClientUsers(
 	ctx: MutationCtx,
 	actorId: Id<'users'>,
@@ -541,8 +574,8 @@ async function removeClientUsers(
 	await requireOwner(ctx, actorId, clientId)
 	for (const userId of userIds) {
 		if (userId === actorId) continue
-		const member = await member(ctx, clientId, userId)
-		if (member) await ctx.db.delete(member._id)
+		const membership = await member(ctx, clientId, userId)
+		if (membership) await ctx.db.delete(membership._id)
 		const invite = await pendingUserInvite(ctx, userId, clientId)
 		if (invite) await ctx.db.patch(invite._id, { status: 'revoked', updatedAt: Date.now() })
 		await upsertSocialNotification(ctx, {
@@ -674,10 +707,10 @@ async function inviteInfoResponse(ctx: QueryCtx, inviteId: Id<'sharedClientInvit
 		instance_name: client.name,
 		instance_icon: client.iconStorageId ? await ctx.storage.getUrl(client.iconStorageId) : null,
 		game_version: latest.gameVersion,
-		loader_version: latest.loaderVersion,
+		loader_version: latest.loaderVersion ?? '',
 		managers: [
 			{
-				id: owner._id.toString(),
+				id: minecraftUuid(owner),
 				name: owner.displayName ?? owner.verifiedMinecraftHandle ?? 'Owner',
 				type: 'user' as const,
 				avatar: owner.avatarUrl ?? owner.image ?? null,
@@ -688,7 +721,7 @@ async function inviteInfoResponse(ctx: QueryCtx, inviteId: Id<'sharedClientInvit
 			.map((user) => {
 				const membership = members.find((row) => row.userId === user._id)
 				return {
-					id: user._id.toString(),
+					id: minecraftUuid(user),
 					name: user.displayName ?? user.verifiedMinecraftHandle ?? 'User',
 					avatar: user.avatarUrl ?? user.image ?? null,
 					joined_at: membership ? new Date(membership.joinedAt).toISOString() : null,
@@ -791,7 +824,7 @@ function versionDocumentResponse(
 		modpack_id: version.modpackId ?? null,
 		game_version: version.gameVersion,
 		loader: version.loader,
-		loader_version: version.loaderVersion,
+		loader_version: version.loaderVersion ?? '',
 	}
 }
 

@@ -21,6 +21,11 @@ export {
 export { ModrinthApiError, ModrinthServerError } from './core/errors'
 export { type AuthConfig, AuthFeature } from './features/auth'
 export {
+	AmberiteFeature,
+	type AmberiteFeatureConfig,
+	type AmberiteTransport,
+} from './features/amberite'
+export {
 	type CircuitBreakerConfig,
 	CircuitBreakerFeature,
 	type CircuitBreakerState,
@@ -32,6 +37,7 @@ export { PANEL_VERSION, PanelVersionFeature } from './features/panel-version'
 export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features/retry'
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
+export * from './modules/amberite'
 export * from './modules/core'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'

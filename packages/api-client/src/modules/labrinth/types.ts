@@ -1616,6 +1616,8 @@ export namespace Labrinth {
 			export type User = {
 				id: string
 				username: string
+				/** Amberite's non-unique, user-editable profile name. */
+				display_name?: string
 				name?: string
 				avatar_url?: string
 				bio?: string
@@ -1673,7 +1675,15 @@ export namespace Labrinth {
 			export type SearchUser = {
 				id: string
 				username: string
+				display_name?: string
 				avatar_url: string | null
+			}
+
+			export type EditUserRequest = {
+				/** Amberite keeps the verified Minecraft username read-only. */
+				display_name?: string
+				bio?: string | null
+				allow_friend_requests?: boolean
 			}
 
 			export type AllProjectsResponse = {
@@ -2084,6 +2094,22 @@ export namespace Labrinth {
 	}
 
 	export namespace Notifications {
+		export namespace v3 {
+			export type NotificationAction = Notifications.v2.NotificationAction
+			export type NotificationBody = Notifications.v2.NotificationBody
+			export type Notification = {
+				id: string
+				user_id: string
+				read: boolean
+				created: string
+				body: NotificationBody
+				name: string
+				text: string
+				link: string
+				actions: NotificationAction[]
+			}
+		}
+
 		export namespace v2 {
 			export type NotificationAction = {
 				title: string

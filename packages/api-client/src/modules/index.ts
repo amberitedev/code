@@ -1,5 +1,10 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { AbstractModule } from '../core/abstract-module'
+import { AmberiteAccountsV1Module } from './amberite/accounts/v1'
+import { AmberiteAuthV1Module } from './amberite/auth/v1'
+import { AmberiteCoresV1Module } from './amberite/cores/v1'
+import { AmberiteFriendsV1Module } from './amberite/friends/v1'
+import { AmberiteSessionsV1Module } from './amberite/sessions/v1'
 import { ArchonActionsV1Module } from './archon/actions/v1'
 import { ArchonBackupsV1Module } from './archon/backups/v1'
 import { ArchonBackupsQueueV1Module } from './archon/backups-queue/v1'
@@ -37,6 +42,7 @@ import { LabrinthImagesV3Module } from './labrinth/images/v3'
 import { LabrinthLimitsV3Module } from './labrinth/limits/v3'
 import { LabrinthModerationInternalModule } from './labrinth/moderation/internal'
 import { LabrinthNotificationsV2Module } from './labrinth/notifications/v2'
+import { LabrinthNotificationsV3Module } from './labrinth/notifications/v3'
 import { LabrinthOAuthInternalModule } from './labrinth/oauth/internal'
 import { LabrinthOrganizationsV3Module } from './labrinth/organizations/v3'
 import { LabrinthPatsV2Module } from './labrinth/pats/v2'
@@ -77,6 +83,11 @@ type ModuleConstructor = new (client: AbstractModrinthClient) => AbstractModule
  * TODO: Better way? Probably not
  */
 export const MODULE_REGISTRY = {
+	amberite_accounts_v1: AmberiteAccountsV1Module,
+	amberite_auth_v1: AmberiteAuthV1Module,
+	amberite_cores_v1: AmberiteCoresV1Module,
+	amberite_friends_v1: AmberiteFriendsV1Module,
+	amberite_sessions_v1: AmberiteSessionsV1Module,
 	archon_actions_v1: ArchonActionsV1Module,
 	archon_backups_queue_v1: ArchonBackupsQueueV1Module,
 	archon_backups_v1: ArchonBackupsV1Module,
@@ -115,6 +126,7 @@ export const MODULE_REGISTRY = {
 	labrinth_images_v3: LabrinthImagesV3Module,
 	labrinth_moderation_internal: LabrinthModerationInternalModule,
 	labrinth_notifications_v2: LabrinthNotificationsV2Module,
+	labrinth_notifications_v3: LabrinthNotificationsV3Module,
 	labrinth_oauth_internal: LabrinthOAuthInternalModule,
 	labrinth_organizations_v3: LabrinthOrganizationsV3Module,
 	labrinth_pats_v2: LabrinthPatsV2Module,
