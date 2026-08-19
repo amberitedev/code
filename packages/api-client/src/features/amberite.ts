@@ -124,6 +124,14 @@ export class AmberiteFeature extends AbstractFeature {
 		const method = context.options.method ?? 'GET'
 		const path = requestPath(context.path)
 		const idOrUsername = pathPart(path, 2)
+		if (/^\/user\/[^/]+\/preferences$/.test(path)) {
+			await this.requireCurrentUser(idOrUsername)
+			if (method === 'GET') return await this.config.transport.query('preferences:getCurrent', {})
+			if (method === 'PATCH')
+				return await this.config.transport.mutation('preferences:editCurrent', {
+					preferences: recordBody(context.options.body),
+				})
+		}
 		if (method === 'GET' && /^\/user\/[^/]+$/.test(path)) return await this.getUser(idOrUsername)
 		await this.requireCurrentUser(idOrUsername)
 		if (method === 'PATCH' && /^\/user\/[^/]+$/.test(path)) {

@@ -1,5 +1,6 @@
 import { v } from 'convex/values'
 import { mutation } from './_generated/server'
+import { canSendFriendRequest } from './_preferences'
 import {
 	acceptedFriendship,
 	blockByPair,
@@ -25,8 +26,6 @@ export const addByCode = mutation({
 			throw new Error('friend code is ambiguous')
 		if (!target || target._id === actorId || target.deletedAt)
 			throw new Error('friend code not found')
-		if (target.allowFriendRequests === false)
-			throw new Error('friend requests are disabled for this user')
 		const [blockedByActor, blockedByTarget] = await Promise.all([
 			blockByPair(ctx, actorId, target._id),
 			blockByPair(ctx, target._id, actorId),
@@ -51,6 +50,8 @@ export const addByCode = mutation({
 			})
 			return null
 		}
+		if (!(await canSendFriendRequest(ctx, actorId, target._id)))
+			throw new Error('friend requests are disabled for this user')
 
 		const existing = await friendRequestByPair(ctx, actorId, target._id)
 		if (existing?.status === 'pending') throw new Error('friend request is already pending')

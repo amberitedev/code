@@ -41,13 +41,14 @@
 					{{ formatMessage(messages.friendRequestsTitle) }}
 				</h2>
 				<Chips
-					v-model="friendRequestSource"
+					:model-value="friendRequestSource"
 					:items="friendRequestSourceOptions"
 					:format-label="formatInteractionSource"
-					:disabled-items="friendRequestSourceOptions"
+					:disabled-items="friendRequestDisabledItems"
 					:disabled-tooltip="formatMessage(messages.comingSoon)"
 					:capitalize="false"
 					:aria-label="formatMessage(messages.friendRequestsTitle)"
+					@update:model-value="updateFriendRequestSource"
 				/>
 				<p class="m-0 text-secondary">
 					{{
@@ -65,13 +66,14 @@
 					{{ formatMessage(messages.sharedInstanceInvitesTitle) }}
 				</h2>
 				<Chips
-					v-model="sharedInstanceInviteSource"
+					:model-value="sharedInstanceInviteSource"
 					:items="sharedInstanceInviteSourceOptions"
 					:format-label="formatInteractionSource"
-					:disabled-items="sharedInstanceInviteSourceOptions"
+					:disabled-items="sharedInstanceInviteDisabledItems"
 					:disabled-tooltip="formatMessage(messages.comingSoon)"
 					:capitalize="false"
 					:aria-label="formatMessage(messages.sharedInstanceInvitesTitle)"
+					@update:model-value="updateSharedInstanceInviteSource"
 				/>
 				<p class="m-0 text-secondary">
 					{{
@@ -219,7 +221,7 @@
 import type { Labrinth } from '@modrinth/api-client'
 import { LogInIcon, SpinnerIcon, ThinkingRinthbot } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import Avatar from '#ui/components/base/Avatar.vue'
 import { Button } from '#ui/components/base/buttons'
@@ -234,14 +236,19 @@ import { blockedUsersQueryKey } from '../shared/user-profile/providers'
 
 type BlockedUserTableColumn = 'user' | 'actions'
 type BlockedUser = Labrinth.Users.v2.User & Record<BlockedUserTableColumn, unknown>
-type FriendRequestSource = 'everyone' | 'mutuals' | 'no-one'
-type SharedInstanceInviteSource = 'everyone' | 'friends' | 'no-one'
+type FriendRequestSource = Labrinth.Users.v3.FriendPrivacy
+type SharedInstanceInviteSource = Labrinth.Users.v3.InvitePrivacy
 
 const props = withDefaults(
 	defineProps<{
 		getBlockedUsers: () => Promise<Labrinth.BlockedUsers.v3.BlockedUserId[]>
 		getUsers: (userIds: string[]) => Promise<Labrinth.Users.v2.User[]>
 		unblockUser: (userId: string) => Promise<void>
+		getPreferences?: (userId: string) => Promise<Labrinth.Users.v3.UserPreferences>
+		editPreferences?: (
+			userId: string,
+			preferences: Labrinth.Users.v3.PartialUserPreferences,
+		) => Promise<Labrinth.Users.v3.UserPreferences>
 		identityKind?: 'modrinth' | 'amberite'
 	}>(),
 	{ identityKind: 'modrinth' },
@@ -255,24 +262,99 @@ const blockedUsersTable = ref<HTMLElement | null>(null)
 const unblockingUserId = ref<string | null>(null)
 const friendRequestSource = ref<FriendRequestSource>('everyone')
 const sharedInstanceInviteSource = ref<SharedInstanceInviteSource>('everyone')
-const friendRequestSourceOptions: FriendRequestSource[] = ['everyone', 'mutuals', 'no-one']
+const savingPreferences = ref(false)
+const friendRequestSourceOptions: FriendRequestSource[] = ['everyone', 'mutual', 'none']
 const sharedInstanceInviteSourceOptions: SharedInstanceInviteSource[] = [
 	'everyone',
 	'friends',
-	'no-one',
+	'none',
 ]
+const friendRequestDisabledItems = computed(() =>
+	props.editPreferences && !savingPreferences.value ? [] : friendRequestSourceOptions,
+)
+const sharedInstanceInviteDisabledItems = computed(() =>
+	props.editPreferences && !savingPreferences.value ? [] : sharedInstanceInviteSourceOptions,
+)
 const { showTopFade, showBottomFade, checkScrollState } = useScrollIndicator(blockedUsersTable)
 
 function formatInteractionSource(source: FriendRequestSource | SharedInstanceInviteSource): string {
 	switch (source) {
 		case 'everyone':
 			return formatMessage(messages.everyone)
-		case 'mutuals':
+		case 'mutual':
 			return formatMessage(messages.friendsOfFriends)
 		case 'friends':
 			return formatMessage(messages.friends)
-		case 'no-one':
+		case 'none':
 			return formatMessage(messages.noOne)
+	}
+}
+
+const preferencesQueryKey = computed(
+	() => ['user-preferences', auth.user.value?.id ?? null] as const,
+)
+const preferencesQuery = useQuery({
+	queryKey: preferencesQueryKey,
+	queryFn: async () => {
+		const userId = auth.user.value?.id
+		if (!userId || !props.getPreferences) throw new Error('user preferences are unavailable')
+		return await props.getPreferences(userId)
+	},
+	enabled: computed(() => Boolean(auth.user.value && props.getPreferences)),
+	staleTime: 30_000,
+})
+watch(
+	() => preferencesQuery.data.value,
+	(preferences) => {
+		if (!preferences) return
+		friendRequestSource.value = preferences.social.friend_privacy
+		sharedInstanceInviteSource.value = preferences.social.shared_instances_privacy
+	},
+	{ immediate: true },
+)
+
+async function updateFriendRequestSource(source: FriendRequestSource | null): Promise<void> {
+	if (!source) return
+	const previous = friendRequestSource.value
+	friendRequestSource.value = source
+	try {
+		await savePreferences({ social: { friend_privacy: source } })
+	} catch {
+		friendRequestSource.value = previous
+	}
+}
+
+async function updateSharedInstanceInviteSource(
+	source: SharedInstanceInviteSource | null,
+): Promise<void> {
+	if (!source) return
+	const previous = sharedInstanceInviteSource.value
+	sharedInstanceInviteSource.value = source
+	try {
+		await savePreferences({ social: { shared_instances_privacy: source } })
+	} catch {
+		sharedInstanceInviteSource.value = previous
+	}
+}
+
+async function savePreferences(patch: Labrinth.Users.v3.PartialUserPreferences): Promise<void> {
+	const userId = auth.user.value?.id
+	if (!userId || !props.editPreferences || savingPreferences.value) return
+	savingPreferences.value = true
+	try {
+		const preferences = await props.editPreferences(userId, patch)
+		friendRequestSource.value = preferences.social.friend_privacy
+		sharedInstanceInviteSource.value = preferences.social.shared_instances_privacy
+		queryClient.setQueryData(preferencesQueryKey.value, preferences)
+	} catch (error) {
+		notificationManager.addNotification({
+			type: 'error',
+			title: formatMessage(messages.preferencesSaveError),
+			text: formatMessage(messages.preferencesSaveErrorDescription),
+		})
+		throw error
+	} finally {
+		savingPreferences.value = false
 	}
 }
 
@@ -412,6 +494,14 @@ const messages = defineMessages({
 	comingSoon: {
 		id: 'settings.social.interaction-source.coming-soon',
 		defaultMessage: 'Coming soon!',
+	},
+	preferencesSaveError: {
+		id: 'settings.social.preferences-save-error',
+		defaultMessage: 'Failed to save social preferences',
+	},
+	preferencesSaveErrorDescription: {
+		id: 'settings.social.preferences-save-error-description',
+		defaultMessage: 'Your social preferences could not be saved. Please try again.',
 	},
 	blockedUsersTitle: {
 		id: 'settings.social.blocked-users.title',

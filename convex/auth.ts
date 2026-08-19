@@ -483,6 +483,11 @@ export const deleteCurrentAccount = mutation({
 			.withIndex('by_user', (q) => q.eq('userId', userId))
 			.collect()
 		for (const account of linkedModrinthAccounts) await ctx.db.delete(account._id)
+		const preferences = await ctx.db
+			.query('userPreferences')
+			.withIndex('by_user', (q) => q.eq('userId', userId))
+			.unique()
+		if (preferences) await ctx.db.delete(preferences._id)
 		const [
 			leftFriendships,
 			rightFriendships,

@@ -1761,6 +1761,40 @@ export namespace Labrinth {
 				allow_friend_requests?: boolean
 			}
 
+			export type Theme = 'light' | 'dark' | 'oled' | 'retro'
+			export type LayoutOption = 'grid' | 'rows'
+			export type FriendPrivacy = 'none' | 'mutual' | 'everyone'
+			export type InvitePrivacy = 'none' | 'friends' | 'everyone'
+
+			export type UserPreferences = {
+				appearance: { auto: boolean; theme: Theme }
+				localization: { locale: string }
+				layouts: {
+					mods: LayoutOption
+					plugins: LayoutOption
+					datapacks: LayoutOption
+					shaders: LayoutOption
+					resourcepacks: LayoutOption
+					modpacks: LayoutOption
+					servers: LayoutOption
+					users: LayoutOption
+				}
+				sidebars: { right_aligned_search: boolean; left_aligned_content: boolean }
+				social: {
+					friend_privacy: FriendPrivacy
+					shared_instances_privacy: InvitePrivacy
+					hosting_access_privacy: InvitePrivacy
+				}
+			}
+
+			export type PartialUserPreferences = {
+				appearance?: Partial<UserPreferences['appearance']>
+				localization?: Partial<UserPreferences['localization']>
+				layouts?: Partial<UserPreferences['layouts']>
+				sidebars?: Partial<UserPreferences['sidebars']>
+				social?: Partial<UserPreferences['social']>
+			}
+
 			export type AllProjectsResponse = {
 				projects: Projects.v3.Project[]
 				organizations: Record<string, Organizations.v3.Organization>

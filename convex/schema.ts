@@ -1,6 +1,7 @@
 import { authTables } from '@convex-dev/auth/server'
 import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
+import { userPreferencesValidator } from './_preferencesModel'
 
 const friendRequestStatus = v.union(
 	v.literal('pending'),
@@ -113,6 +114,10 @@ export default defineSchema({
 	})
 		.index('by_user', ['userId'])
 		.index('by_auth_session', ['authSessionId']),
+	userPreferences: defineTable({
+		userId: v.id('users'),
+		preferences: userPreferencesValidator,
+	}).index('by_user', ['userId']),
 	friendRequests: defineTable({
 		fromUserId: v.id('users'),
 		toUserId: v.id('users'),

@@ -3,6 +3,7 @@ import { internal } from './_generated/api'
 import type { Doc, Id } from './_generated/dataModel'
 import { internalMutation, internalQuery, mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
+import { canSendSharedInstanceInvite } from './_preferences'
 import { minecraftUuid, requireUserId } from './_socialRules'
 import { dismissNotificationByDedupeKey, upsertSocialNotification } from './_socialNotifications'
 
@@ -511,6 +512,7 @@ async function inviteClientUsers(
 			block(ctx, userId, actorId),
 		])
 		if (outgoingBlock || incomingBlock) continue
+		if (!(await canSendSharedInstanceInvite(ctx, actorId, userId))) continue
 		const now = Date.now()
 		const existing = await pendingUserInvite(ctx, userId, clientId)
 		const inviteId =

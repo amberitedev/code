@@ -2,6 +2,7 @@ import { v } from 'convex/values'
 import type { Doc, Id } from './_generated/dataModel'
 import { mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
+import { canSendFriendRequest } from './_preferences'
 import {
 	acceptedFriendship,
 	blockByPair,
@@ -116,8 +117,6 @@ export const addFriend = mutation({
 		const actorId = await requireUserId(ctx)
 		const target = await resolveUser(ctx, args.idOrUsername)
 		if (!target || target._id === actorId || target.deletedAt) throw new Error('user not found')
-		if (target.allowFriendRequests === false)
-			throw new Error('friend requests are disabled for this user')
 		await assertNeitherBlocked(ctx, actorId, target._id)
 		if (await acceptedFriendship(ctx, actorId, target._id))
 			throw new Error('you are already friends with this user')
@@ -139,6 +138,8 @@ export const addFriend = mutation({
 			})
 			return null
 		}
+		if (!(await canSendFriendRequest(ctx, actorId, target._id)))
+			throw new Error('friend requests are disabled for this user')
 
 		const existing = await friendRequestByPair(ctx, actorId, target._id)
 		if (existing?.status === 'pending') throw new Error('you cannot accept your own friend request')

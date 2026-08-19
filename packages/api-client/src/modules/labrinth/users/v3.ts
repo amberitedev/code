@@ -96,6 +96,34 @@ export class LabrinthUsersV3Module extends AbstractModule {
 		})
 	}
 
+	/** Get a user's saved preferences. The caller must own the account. */
+	public async getPreferences(idOrUsername: string): Promise<Labrinth.Users.v3.UserPreferences> {
+		return this.client.request<Labrinth.Users.v3.UserPreferences>(
+			`/user/${encodeURIComponent(idOrUsername)}/preferences`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'GET',
+			},
+		)
+	}
+
+	/** Edit a user's saved preferences. The caller must own the account. */
+	public async editPreferences(
+		idOrUsername: string,
+		request: Labrinth.Users.v3.PartialUserPreferences,
+	): Promise<Labrinth.Users.v3.UserPreferences> {
+		return this.client.request<Labrinth.Users.v3.UserPreferences>(
+			`/user/${encodeURIComponent(idOrUsername)}/preferences`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'PATCH',
+				body: request,
+			},
+		)
+	}
+
 	/**
 	 * Get all projects the authenticated user can access directly or through
 	 * their organizations.

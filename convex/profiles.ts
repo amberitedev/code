@@ -2,6 +2,7 @@ import { v } from 'convex/values'
 import type { Doc } from './_generated/dataModel'
 import { mutation, query } from './_generated/server'
 import type { QueryCtx } from './_generated/server'
+import { updateUserPreferences } from './_preferences'
 import {
 	currentAccountFields,
 	publicCurrentProfileValidator,
@@ -94,7 +95,12 @@ export const updateCurrent = mutation({
 			patch.name = displayName
 		}
 		if (args.bio !== undefined) patch.bio = args.bio === null ? undefined : normalizeBio(args.bio)
-		if (args.allowFriendRequests !== undefined) patch.allowFriendRequests = args.allowFriendRequests
+		if (args.allowFriendRequests !== undefined) {
+			patch.allowFriendRequests = args.allowFriendRequests
+			await updateUserPreferences(ctx, userId, {
+				social: { friend_privacy: args.allowFriendRequests ? 'everyone' : 'none' },
+			})
+		}
 		if (args.avatar !== undefined) {
 			if (args.avatar === null) {
 				patch.avatarUrl = undefined
