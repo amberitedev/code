@@ -10,6 +10,7 @@
 		"dev:core": "node scripts/dev-runner.ts dev:core",
 		"dev:convex": "node scripts/dev-runner.ts dev:convex",
 		"dev:check": "node scripts/dev-runner.ts dev --dry-run",
+		"dev:modrinth": "node scripts/dev-modrinth.ts",
 		"core:dev": "pnpm --filter @amberite/core run dev",
 		"core:dev:na": "pnpm --filter @amberite/core run dev:noauth",
 		"core:dev:noauth": "pnpm --filter @amberite/core run dev:noauth",
