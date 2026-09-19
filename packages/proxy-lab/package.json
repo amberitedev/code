@@ -1,0 +1,27 @@
+{
+	"name": "@modrinth/proxy-lab",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "node src/cli.ts dev",
+		"start": "node src/cli.ts start",
+		"reset": "node src/cli.ts reset",
+		"status": "node src/cli.ts status",
+		"env:prepare": "node src/cli.ts env:prepare",
+		"env:clean": "node src/cli.ts env:clean",
+		"typecheck": "tsc --noEmit",
+		"test": "node --test tests/*.test.ts"
+	},
+	"engines": {
+		"node": ">=24.15.0"
+	},
+	"dependencies": {
+		"ws": "8.19.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.2",
+		"@types/ws": "8.18.1",
+		"typescript": "5.9.3"
+	}
+}

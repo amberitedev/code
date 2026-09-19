@@ -586,6 +586,22 @@ importers:
         specifier: ^5.4.5
         version: 5.9.3
 
+  packages/proxy-lab:
+    dependencies:
+      ws:
+        specifier: 8.19.0
+        version: 8.19.0
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.2
+        version: 24.12.2
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   packages/tooling-config:
     dependencies:
       '@prettier/plugin-xml':
@@ -4766,6 +4782,9 @@ packages:
 
   '@types/webxr@0.5.24':
     resolution: {integrity: sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@types/xml2js@0.4.14':
     resolution: {integrity: sha512-4YnrRemBShWRO2QjvUin8ESA41rH+9nQGLUGZV/1IDhi3SL9OhdpNC/MrulTWuptXKwhx/aDxE7toV0f/ypIXQ==}
@@ -14566,6 +14585,10 @@ snapshots:
   '@types/web-bluetooth@0.0.21': {}
 
   '@types/webxr@0.5.24': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 24.12.2
 
   '@types/xml2js@0.4.14':
     dependencies:

@@ -1,0 +1,2 @@
+# Runtime data lives at the repository root in modrinthclonedata/. The CLI adds
+# that path to Git's local exclude file so no machine state can be committed.
