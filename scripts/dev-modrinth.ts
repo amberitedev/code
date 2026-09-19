@@ -1,6 +1,7 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const root = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
@@ -37,19 +38,8 @@ This command does not reset data, switch branches, or update upstream.`)
 	if (!existsSync(entry)) throw new Error(`Proxy-lab launcher is missing: ${entry}`)
 	console.log(`[dev:modrinth] Upstream checkout: ${labRoot}`)
 	console.log(`[dev:modrinth] Persistent isolated data: ${resolve(labRoot, 'modrinthclonedata')}`)
-	const child = spawn(process.execPath, [entry, 'dev', ...args], {
-		cwd: labRoot,
-		stdio: 'inherit',
-		windowsHide: true,
-	})
-	child.on('error', (error) => {
-		console.error(error.message)
-		process.exitCode = 1
-	})
-	child.on('exit', (code) => {
-		process.exitCode = code ?? 1
-	})
-	// The lab runner owns cleanup of the backend and native app it starts.
-	process.once('SIGINT', () => child.kill('SIGINT'))
-	process.once('SIGTERM', () => child.kill('SIGTERM'))
+	// One orchestrator receives Ctrl+C and cleans up its own backend and app processes.
+	process.chdir(labRoot)
+	process.argv = [process.execPath, entry, 'dev', ...args]
+	await import(pathToFileURL(entry).href)
 }
