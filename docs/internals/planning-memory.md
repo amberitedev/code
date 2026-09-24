@@ -5,10 +5,11 @@ Last updated: 2026-09-24. Source: Ilai's ongoing planning conversation in this t
 This is a planning record, not an implementation authorization or a description of completed code.
 Read this before preparing an implementation handoff. Do not treat every idea below as approved.
 
-Current handoff: [implementation plan](account-sharing-implementation-plan.md).
+Current handoff: [goals and decisions](account-sharing-implementation-plan.md).
 Ilai requested deletion of the separate implementation-thread prompt on 2026-09-24.
-Implementation has not started. The handoff has a short unresolved runtime approval gate;
-Ilai also requested a client-versus-upstream audit before implementation.
+Implementation has not started. The backend runtime remains unapproved. The client audit is complete;
+Ilai subsequently chose an upstream-behavior client baseline, as recorded below. On 2026-09-24 he
+requested that the plan explain goals and decisions rather than prescribe implementation steps.
 
 ## How to maintain this memory
 
@@ -88,7 +89,12 @@ or privileged service credentials. Inventory provider configuration separately f
 - Modrinth's sharing and Hosting internals are private. Public client contracts are evidence of what
   replacements must do, not proof of private implementation details.
 - Production must be real replacement services, not the research mock/proxy.
-- Preserve useful existing work. No blanket client reset or branch rewrite is authorized by this plan.
+- **Updated 2026-09-24:** Ilai chose restoration of `apps/app-frontend` and `apps/app` to upstream
+  behavior on a new branch, keeping dev-environment support and the API-client integration boundary.
+  Other client changes, including ad cleanup, are preserved for later restoration. This supersedes
+  the earlier no-client-reset planning constraint, but does not authorize loss of uncommitted work
+  or rewriting main. After the baseline is established, recreate backend functionality with minimal
+  client changes; Amberite-specific UI/UX comes afterward.
 - User reports that account work was ported into Labrinth. Earlier agent inspection found active
   Convex adapters. Reconcile actual code/branch history before implementation; do not let this disputed
   observation redefine the intended architecture or repeatedly argue it in product planning.
