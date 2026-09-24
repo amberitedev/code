@@ -1,11 +1,11 @@
 {
 	"name": "@modrinth/app-frontend",
-	"private": true,
 	"version": "1.0.0-local",
+	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "vite",
-		"build": "vue-tsc --noEmit && vite build",
+		"dev": "vp dev",
+		"build": "vue-tsc --noEmit && vp build",
 		"typecheck": "vue-tsc -p tsconfig.app.json --noEmit",
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",

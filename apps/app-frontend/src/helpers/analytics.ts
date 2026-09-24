@@ -46,7 +46,7 @@ export type AnalyticsEvent = keyof AnalyticsEventMap
 let initialized = false
 
 export const initAnalytics = () => {
-	if (initialized) return
+	if (initialized || import.meta.env.DEV) return
 	posthog.init('phc_9Iqi6lFs9sr5BSqh9RRNRSJ0mATS9PSgirDiX3iOYJ', {
 		persistence: 'localStorage',
 		api_host: 'https://posthog.modrinth.com',

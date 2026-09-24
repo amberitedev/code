@@ -36,11 +36,9 @@ Scenario numbers passed after the task name override `defaultScenarios` in `dev.
 ## Convex
 
 The primary checkout uses the cloud Convex development deployment selected by `.env.local`.
-Before `vp run dev` starts `convex dev`, the runner compares the Convex TypeScript and configuration
-against `origin/main` with whitespace-only changes ignored. If the current checkout would change the
-cloud functions, it prints green additions and red deletions and asks for confirmation. Declining
-stops the run; `vp run dev:app` starts the App without pushing Convex. The runner refuses production
-and non-development cloud deployments.
+Commands that include Convex start `convex dev` immediately, which pushes the local functions and
+continues watching for changes. Use `vp run dev:app` to start the App without Convex. The runner
+refuses production and non-development cloud deployments.
 
 Linked worktrees always use the local Convex deployment stored in their `.data/`. The runner selects
 that deployment explicitly, even when the worktree has a copied `.env.local` pointing at the cloud.
@@ -98,6 +96,15 @@ The dev runner stops its child processes when it receives Ctrl+C. If you start i
 record its PID when it starts and stop that process only. Never kill by a broad process name, command
 match, or worktree path: several worktrees may be running Node, Convex, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.
+
+Core and crashed App scenarios restart automatically. Closing an App window normally leaves that
+scenario stopped. Enter `rs 1` to start or restart scenario 1, or `rs core` to restart Core. Core's
+development console remains available through `core <command>`. If Windows still has the App
+executable open, the runner waits for it to close before relaunching. Three fast failures pause
+automatic restarts so a broken launch cannot loop indefinitely; `rs 1` or `rs core` retries manually.
+
+The combined terminal removes repetitive watcher and progress output. Vite+ forwards App console
+errors and warnings to the same terminal; error and warning notifications are logged there too.
 
 ## Check, format, and test
 

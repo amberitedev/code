@@ -135,12 +135,25 @@ function compatUser(
 
 async function resolveUser(ctx: QueryCtx, idOrUsername: string): Promise<Doc<'users'> | null> {
 	const input = idOrUsername.trim().replace(/^@/, '')
-	const uuid = input.replace(/-/g, '').toLowerCase()
-	const userByUuid = await ctx.db
+	const userId = ctx.db.normalizeId('users', input)
+	if (userId) {
+		const user = await ctx.db.get(userId)
+		if (user) return user
+	}
+	const exactUuid = input.toLowerCase()
+	const userByExactUuid = await ctx.db
 		.query('users')
-		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', uuid))
+		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', exactUuid))
 		.unique()
-	if (userByUuid) return userByUuid
+	if (userByExactUuid) return userByExactUuid
+	const compactUuid = exactUuid.replace(/-/g, '')
+	if (compactUuid !== exactUuid) {
+		const userByCompactUuid = await ctx.db
+			.query('users')
+			.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', compactUuid))
+			.unique()
+		if (userByCompactUuid) return userByCompactUuid
+	}
 	// TODO: When Minecraft rename history exists, optionally resolve previous names after re-verification.
 	return await ctx.db
 		.query('users')

@@ -124,11 +124,25 @@ export const updateCurrent = mutation({
 
 async function resolvePublicUser(ctx: QueryCtx, value: string): Promise<Doc<'users'> | null> {
 	const input = value.trim().replace(/^@/, '')
+	const userId = ctx.db.normalizeId('users', input)
+	if (userId) {
+		const user = await ctx.db.get(userId)
+		if (user) return user
+	}
+	const exactUuid = input.toLowerCase()
 	const byUuid = await ctx.db
 		.query('users')
-		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', normalizeUuid(input)))
+		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', exactUuid))
 		.unique()
 	if (byUuid) return byUuid
+	const compactUuid = normalizeUuid(exactUuid)
+	if (compactUuid !== exactUuid) {
+		const byCompactUuid = await ctx.db
+			.query('users')
+			.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', compactUuid))
+			.unique()
+		if (byCompactUuid) return byCompactUuid
+	}
 	// Minecraft usernames can change. Until rename history and re-verification are implemented,
 	// only the currently verified username resolves; the stable public ID remains the UUID.
 	return await ctx.db

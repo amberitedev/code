@@ -286,12 +286,25 @@ export const dismissNotifications = mutation({
 
 async function resolveUser(ctx: QueryCtx | MutationCtx, value: string) {
 	const input = value.trim().replace(/^@/, '')
-	const uuid = input.replace(/-/g, '').toLowerCase()
-	const byUuid = await ctx.db
+	const userId = ctx.db.normalizeId('users', input)
+	if (userId) {
+		const user = await ctx.db.get(userId)
+		if (user) return user
+	}
+	const exactUuid = input.toLowerCase()
+	const byExactUuid = await ctx.db
 		.query('users')
-		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', uuid))
+		.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', exactUuid))
 		.unique()
-	if (byUuid) return byUuid
+	if (byExactUuid) return byExactUuid
+	const compactUuid = exactUuid.replace(/-/g, '')
+	if (compactUuid !== exactUuid) {
+		const byCompactUuid = await ctx.db
+			.query('users')
+			.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', compactUuid))
+			.unique()
+		if (byCompactUuid) return byCompactUuid
+	}
 	return await ctx.db
 		.query('users')
 		.withIndex('by_normalized_username', (index) =>

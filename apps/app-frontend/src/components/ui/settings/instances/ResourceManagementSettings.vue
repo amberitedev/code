@@ -228,7 +228,6 @@ async function findLauncherDir() {
 				:description="formatMessage(messages.purgeCacheConfirmDescription)"
 				:has-to-type="false"
 				:proceed-label="formatMessage(messages.purgeCache)"
-				:show-ad-on-close="false"
 				@proceed="purgeCache"
 			/>
 			<h2 class="m-0 text-lg font-semibold text-contrast">

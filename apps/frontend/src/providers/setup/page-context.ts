@@ -9,8 +9,6 @@ export function setupPageContextProvider() {
 
 	providePageContext({
 		hierarchicalSidebarAvailable: ref(false),
-		showAds: ref(false),
-		adConsentAvailable: ref(false),
 		featureFlags: {
 			serverRamAsBytesAlwaysOn: computed(() => featureFlags.value.serverRamAsBytesAlwaysOn),
 		},

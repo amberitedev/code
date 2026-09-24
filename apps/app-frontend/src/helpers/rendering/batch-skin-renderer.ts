@@ -261,7 +261,7 @@ export async function generatePlayerHeadBlob(skinUrl: string, size: number = 64)
 		img.onload = () => {
 			try {
 				const sourceCanvas = document.createElement('canvas')
-				const sourceCtx = sourceCanvas.getContext('2d')
+				const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true })
 
 				if (!sourceCtx) {
 					throw new Error('Could not get 2D context from source canvas')
@@ -490,9 +490,6 @@ async function generateSkinPreviewsForGeneration(
 
 		if (isCurrentGeneration()) {
 			await cleanupUnusedPreviews(skins)
-
-			await skinPreviewStorage.debugCalculateStorage()
-			await headStorage.debugCalculateStorage()
 		}
 	}
 }

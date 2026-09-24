@@ -40,4 +40,16 @@ export class AmberiteCoresV1Module extends AbstractModule {
 			body: { code, coreId },
 		})
 	}
+
+	public async linkLocalDevelopmentCore(
+		coreId: string,
+		connectionUrl: string,
+	): Promise<{ coreId: string }> {
+		return this.client.request('/cores/local-development', {
+			api: 'amberite',
+			version: 1,
+			method: 'POST',
+			body: { coreId, connectionUrl },
+		})
+	}
 }

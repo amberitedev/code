@@ -1,9 +1,5 @@
 <template>
-	<ModalWrapper
-		ref="detectJavaModal"
-		:header="formatMessage(messages.title)"
-		:show-ad-on-close="false"
-	>
+	<ModalWrapper ref="detectJavaModal" :header="formatMessage(messages.title)">
 		<div class="flex flex-col gap-4">
 			<Table :columns="javaInstallColumns" :data="chosenInstallOptions" row-key="path">
 				<template #cell-version="{ value }">

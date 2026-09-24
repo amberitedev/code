@@ -1,5 +1,4 @@
 import { v } from 'convex/values'
-import { internal } from './_generated/api'
 import type { Doc, Id } from './_generated/dataModel'
 import { internalMutation, internalQuery, mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
@@ -505,7 +504,7 @@ async function inviteClientUsers(
 		.take(MAX_CLIENT_USERS)
 	if (new Set([...current.map((row) => row.userId), ...userIds]).size > MAX_CLIENT_USERS)
 		throw new Error('client user limit reached')
-	for (const userId of [...new Set(userIds)]) {
+	for (const userId of new Set(userIds)) {
 		if (userId === actorId || current.some((member) => member.userId === userId)) continue
 		const [outgoingBlock, incomingBlock] = await Promise.all([
 			block(ctx, actorId, userId),
@@ -548,13 +547,25 @@ async function resolvePublicUserIds(ctx: QueryCtx | MutationCtx, values: string[
 	const users: Id<'users'>[] = []
 	for (const value of [...new Set(values)].slice(0, MAX_CLIENT_USERS)) {
 		const input = value.trim().replace(/^@/, '')
-		const uuid = input.replace(/-/g, '').toLowerCase()
-		const byUuid = await ctx.db
+		const userId = ctx.db.normalizeId('users', input)
+		const byId = userId ? await ctx.db.get(userId) : null
+		const exactUuid = input.toLowerCase()
+		const byExactUuid = await ctx.db
 			.query('users')
-			.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', uuid))
+			.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', exactUuid))
 			.unique()
+		const compactUuid = exactUuid.replace(/-/g, '')
+		const byCompactUuid =
+			compactUuid === exactUuid
+				? null
+				: await ctx.db
+						.query('users')
+						.withIndex('by_minecraft_uuid', (index) => index.eq('minecraftUuid', compactUuid))
+						.unique()
 		const user =
-			byUuid ??
+			byId ??
+			byExactUuid ??
+			byCompactUuid ??
 			(await ctx.db
 				.query('users')
 				.withIndex('by_normalized_username', (index) =>

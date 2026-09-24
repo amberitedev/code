@@ -118,9 +118,5 @@ export default new createRouter({
 		if (to.path === from.path) return
 		// Sometimes Vue's scroll behavior is not working as expected, so we need to manually scroll to top (especially on Linux)
 		document.querySelector('.app-viewport')?.scrollTo(0, 0)
-		return {
-			el: '.app-viewport',
-			top: 0,
-		}
 	},
 })

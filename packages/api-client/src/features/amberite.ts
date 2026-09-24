@@ -285,6 +285,11 @@ export class AmberiteFeature extends AbstractFeature {
 				'corePairing:releasePairingCore',
 				recordBody(context.options.body),
 			)
+		if (method === 'POST' && path === '/cores/local-development')
+			return await this.config.transport.mutation(
+				'devCore:linkLocal',
+				recordBody(context.options.body),
+			)
 		throw new Error(`unsupported Amberite route: ${method} ${path}`)
 	}
 

@@ -1,1 +1,2 @@
-model_verbosity = "low"
+model_verbosity = "medium"
+approval_policy = "on-request"

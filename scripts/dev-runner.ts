@@ -17,6 +17,8 @@ const BASE_PORTS = {
 } as const
 const MAX_HASH_OFFSET = 3000
 const MAX_PORT = 65_535
+const RESTART_FAILURE_LIMIT = 3
+const RESTART_FAILURE_WINDOW_MS = 10_000
 const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 const FETCH_BAD_PORTS = new Set([
 	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
@@ -52,11 +54,6 @@ type RunnerInput = {
 	readonly mode: DevMode
 	readonly scenarios: ReadonlyArray<number>
 }
-export type GitDiffSummary = {
-	readonly additions: number
-	readonly deletions: number
-	readonly files: number
-}
 export type ProcessSpec = {
 	readonly args: ReadonlyArray<string>
 	readonly cwd: string
@@ -67,7 +64,9 @@ type RunningProcess = {
 	readonly child: NodeChildProcess.ChildProcess
 	readonly done: Promise<number>
 	readonly label: string
+	readonly recentOutput: string[]
 }
+type LogLevel = 'error' | 'info' | 'warning'
 
 export class DevRunnerError extends Error {
 	constructor(message: string) {
@@ -215,37 +214,6 @@ export function processLabelsForMode(mode: DevMode): ReadonlyArray<string> {
 	}
 }
 
-export function parseGitNumstat(output: string): GitDiffSummary {
-	let additions = 0
-	let deletions = 0
-	let files = 0
-	for (const line of output.split(/\r?\n/)) {
-		if (!line.trim()) continue
-		const [added, deleted] = line.split('\t', 3)
-		if (added === undefined || deleted === undefined) continue
-		files += 1
-		if (/^\d+$/.test(added)) additions += Number(added)
-		if (/^\d+$/.test(deleted)) deletions += Number(deleted)
-	}
-	return { additions, deletions, files }
-}
-
-export function shouldPromptForCloudConvexPush(
-	convexMode: ConvexMode,
-	mode: DevMode,
-	diff: GitDiffSummary,
-): boolean {
-	return convexMode === 'cloud' && processLabelsForMode(mode).includes('convex') && diff.files > 0
-}
-
-export function formatGitDiffSummary(diff: GitDiffSummary, color = true): string {
-	const additions = `+${diff.additions}`
-	const deletions = `-${diff.deletions}`
-	const formattedAdditions = color ? `\u001b[32m${additions}\u001b[0m` : additions
-	const formattedDeletions = color ? `\u001b[31m${deletions}\u001b[0m` : deletions
-	return `${formattedAdditions} ${formattedDeletions} in ${diff.files} ${diff.files === 1 ? 'file' : 'files'}`
-}
-
 async function main(): Promise<void> {
 	const paths = resolveWorktreePaths()
 	const convexMode = resolveConvexMode(paths)
@@ -282,11 +250,6 @@ async function main(): Promise<void> {
 		ports,
 		scenarios: input.scenarios,
 	})
-	const convexDiff =
-		convexMode === 'cloud' && processLabelsForMode(input.mode).includes('convex')
-			? readConvexGitDiff(paths.worktree)
-			: null
-
 	printPlan({
 		branch,
 		convexMode,
@@ -297,12 +260,8 @@ async function main(): Promise<void> {
 		scenarios: input.scenarios,
 		source,
 		specs,
-		convexDiff,
 	})
 	if (input.dryRun) return
-	if (convexDiff && shouldPromptForCloudConvexPush(convexMode, input.mode, convexDiff)) {
-		await confirmCloudConvexPush(convexDiff)
-	}
 
 	ensureDataLayout(paths, input.scenarios)
 	writeRuntimeFile({
@@ -315,36 +274,123 @@ async function main(): Promise<void> {
 		scenarios: input.scenarios,
 		source,
 	})
-	const processes = specs.map((spec) => spawnProcess(paths.worktree, spec))
+	if (convexMode === 'cloud' && processLabelsForMode(input.mode).includes('convex')) {
+		runnerLog('info', 'Pushing Convex changes...')
+	}
+	const specsByLabel = new Map(specs.map((spec) => [spec.label, spec]))
+	const processes = new Map<string, RunningProcess>()
+	const restartFailures = new Map<string, number[]>()
 	let stopping = false
+	let finish: (() => void) | undefined
+	const finished = new Promise<void>((resolve) => {
+		finish = resolve
+	})
 
 	const stop = async (exitCode: number) => {
 		if (stopping) return
 		stopping = true
-		await Promise.all(processes.map(stopProcess))
+		commands.close()
+		await Promise.all([...processes.values()].map(stopProcess))
+		processes.clear()
 		process.exitCode = exitCode
+		finish?.()
 	}
+	const start = (spec: ProcessSpec) => {
+		const running = spawnProcess(paths.worktree, spec)
+		processes.set(spec.label, running)
+		void running.done.then(
+			(code) => handleProcessExit(spec, running, code),
+			(error: unknown) => {
+				runnerLog(
+					'error',
+					`${spec.label} failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				void handleProcessExit(spec, running, 1)
+			},
+		)
+		return running
+	}
+	const restart = async (label: string) => {
+		const spec = specsByLabel.get(label)
+		if (!spec || (label !== 'core' && !label.startsWith('app:'))) {
+			runnerLog('warning', `Unknown restart target ${label}. Use rs <scenario> or rs core.`)
+			return
+		}
+		const current = processes.get(label)
+		if (current) {
+			processes.delete(label)
+			await stopProcess(current)
+		}
+		restartFailures.delete(label)
+		runnerLog('info', `Restarting ${label}...`)
+		start(spec)
+	}
+	const handleProcessExit = async (spec: ProcessSpec, running: RunningProcess, code: number) => {
+		if (processes.get(spec.label) !== running) return
+		processes.delete(spec.label)
+		if (stopping) return
+
+		if (spec.label === 'core' || (spec.label.startsWith('app:') && code !== 0)) {
+			const now = Date.now()
+			const failures = [...(restartFailures.get(spec.label) ?? []), now].filter(
+				(timestamp) => now - timestamp < RESTART_FAILURE_WINDOW_MS,
+			)
+			restartFailures.set(spec.label, failures)
+			if (failures.length >= RESTART_FAILURE_LIMIT) {
+				const command = spec.label === 'core' ? 'rs core' : `rs ${spec.label.slice(4)}`
+				runnerLog(
+					'error',
+					`${spec.label} failed ${RESTART_FAILURE_LIMIT} times in 10 seconds; automatic restarts paused. Use ${command} after fixing it.`,
+				)
+				return
+			}
+			if (appExecutableIsLocked(running)) {
+				runnerLog(
+					'warning',
+					`${spec.label} is waiting for the existing App process to release theseus_gui.exe...`,
+				)
+				for (;;) {
+					if (stopping || processes.has(spec.label) || !isWindowsProcessRunning('theseus_gui.exe'))
+						break
+					await new Promise((resolve) => setTimeout(resolve, 500))
+				}
+				if (!stopping && !processes.has(spec.label)) start(spec)
+				return
+			}
+			runnerLog('warning', `${spec.label} exited with code ${code}; restarting...`)
+			await new Promise((resolve) => setTimeout(resolve, 750))
+			if (!stopping && !processes.has(spec.label)) start(spec)
+			return
+		}
+		if (spec.label.startsWith('app:')) {
+			runnerLog('info', `${spec.label} closed. Use rs ${spec.label.slice(4)} to start it again.`)
+			return
+		}
+
+		runnerLog('error', `${spec.label} exited with code ${code}.`)
+		await stop(code || 1)
+	}
+	const commands = createCommandInput({
+		getCore: () => processes.get('core'),
+		restart: (target) => restart(target === 'core' ? target : `app:${target}`),
+	})
+
+	for (const spec of specs) start(spec)
 
 	process.once('SIGINT', () => void stop(130))
 	process.once('SIGTERM', () => void stop(143))
 
 	try {
-		const firstExit = Promise.race(
-			processes.map(async (running) => ({ code: await running.done, label: running.label })),
-		)
 		if (convexMode === 'local' && processLabelsForMode(input.mode).includes('convex')) {
-			await Promise.race([
-				prepareConvex({ env, paths, ports, processes, scenarios: input.scenarios }),
-				firstExit.then((exited) => {
-					throw new DevRunnerError(`${exited.label} exited with code ${exited.code}.`)
-				}),
-			])
+			await prepareConvex({
+				env,
+				paths,
+				ports,
+				processes: [...processes.values()],
+				scenarios: input.scenarios,
+			})
 		}
-
-		const exited = await firstExit
-		if (!stopping) {
-			throw new DevRunnerError(`${exited.label} exited with code ${exited.code}.`)
-		}
+		await finished
 	} finally {
 		await stop(process.exitCode || 1)
 	}
@@ -553,6 +599,7 @@ export function createProcessSpecs(input: {
 		...input.scenarios.map((scenario) =>
 			createAppProcessSpec({
 				branch: input.branch,
+				coreUrl: `http://127.0.0.1:${input.ports.core}`,
 				convexSiteUrl,
 				convexUrl,
 				env: input.env,
@@ -566,6 +613,7 @@ export function createProcessSpecs(input: {
 
 function createAppProcessSpec(input: {
 	readonly branch: string
+	readonly coreUrl: string
 	readonly convexSiteUrl: string
 	readonly convexUrl: string
 	readonly env: NodeJS.ProcessEnv
@@ -578,6 +626,7 @@ function createAppProcessSpec(input: {
 	const appDevConfig = {
 		authMode: 'dev',
 		branch: input.branch,
+		coreUrl: input.coreUrl,
 		convexSiteUrl: input.convexSiteUrl,
 		convexUrl: input.convexUrl,
 		credentialNamespace: namespace,
@@ -602,6 +651,7 @@ function createAppProcessSpec(input: {
 		cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 		env: {
 			...input.env,
+			RUST_LOG: 'theseus=warn,theseus_gui=warn,webview=off',
 			THESEUS_CONFIG_DIR: dataDir,
 			WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
 		},
@@ -619,23 +669,28 @@ function spawnProcess(worktree: string, spec: ProcessSpec): RunningProcess {
 		cwd: spec.cwd,
 		detached: process.platform !== 'win32',
 		env: spec.env,
-		stdio: ['inherit', 'pipe', 'pipe'],
+		stdio: ['pipe', 'pipe', 'pipe'],
 		windowsHide: true,
 	})
-	pipeOutput(child.stdout, spec.label, process.stdout)
-	pipeOutput(child.stderr, spec.label, process.stderr)
+	const recentOutput: string[] = []
+	const rememberOutput = (line: string) => {
+		recentOutput.push(line)
+		if (recentOutput.length > 20) recentOutput.shift()
+	}
+	pipeOutput(child.stdout, spec.label, process.stdout, rememberOutput)
+	pipeOutput(child.stderr, spec.label, process.stderr, rememberOutput)
 
 	const done = new Promise<number>((resolve, reject) => {
 		child.once('error', (error) =>
 			reject(new DevRunnerError(`Could not start ${spec.label}: ${error.message}`)),
 		)
-		child.once('exit', (code, signal) => {
+		child.once('close', (code, signal) => {
 			if (code !== null) resolve(code)
 			else resolve(signal ? 1 : 0)
 		})
 	})
 
-	return { child, done, label: spec.label }
+	return { child, done, label: spec.label, recentOutput }
 }
 
 async function stopProcess(running: RunningProcess): Promise<void> {
@@ -814,10 +869,110 @@ function pipeOutput(
 	stream: NodeJS.ReadableStream | null,
 	label: string,
 	destination: NodeJS.WritableStream,
+	onLine?: (line: string) => void,
 ): void {
 	if (!stream) return
 	const lines = NodeReadline.createInterface({ input: stream })
-	lines.on('line', (line) => destination.write(`[${label}] ${line}\n`))
+	let previousLine = ''
+	const seenRepeatedNoise = new Set<string>()
+	lines.on('line', (line) => {
+		const plainLine = stripAnsi(line).trimEnd()
+		onLine?.(plainLine)
+		if (
+			!plainLine.trim() ||
+			isNoisyProgressLine(plainLine) ||
+			plainLine === previousLine ||
+			(isRepeatedNoiseLine(plainLine) && seenRepeatedNoise.has(plainLine))
+		)
+			return
+		if (isRepeatedNoiseLine(plainLine)) seenRepeatedNoise.add(plainLine)
+		previousLine = plainLine
+		const displayedLine =
+			plainLine.length > 4_000 ? `${plainLine.slice(0, 4_000)} … truncated` : line.trimEnd()
+		destination.write(`[${label}] ${displayedLine}\n`)
+	})
+}
+
+function appExecutableIsLocked(running: RunningProcess): boolean {
+	return (
+		running.recentOutput.some(
+			(line) => line.includes('failed to remove file') && line.includes('theseus_gui.exe'),
+		) && running.recentOutput.some((line) => line.includes('Access is denied. (os error 5)'))
+	)
+}
+
+function isWindowsProcessRunning(imageName: string): boolean {
+	if (process.platform !== 'win32') return false
+	const result = NodeChildProcess.spawnSync(
+		'tasklist',
+		['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH'],
+		{ encoding: 'utf8', windowsHide: true },
+	)
+	return result.status === 0 && result.stdout.toLowerCase().includes(`"${imageName.toLowerCase()}"`)
+}
+
+function createCommandInput(input: {
+	readonly getCore: () => RunningProcess | undefined
+	readonly restart: (target: string) => Promise<void>
+}): NodeReadline.Interface {
+	const commands = NodeReadline.createInterface({ input: process.stdin })
+	commands.on('line', (line) => {
+		const command = line.trim()
+		if (!command) return
+		const restart = command.match(/^rs\s+(core|\d+)$/i)
+		if (restart) {
+			void input.restart(restart[1].toLowerCase())
+			return
+		}
+		const coreCommand = command.match(/^core\s+(.+)$/i)
+		if (coreCommand) {
+			const core = input.getCore()
+			if (!core?.child.stdin?.writable) {
+				runnerLog('warning', 'Core is not running.')
+				return
+			}
+			core.child.stdin.write(`${coreCommand[1]}\n`)
+			return
+		}
+		if (command === 'help') {
+			runnerLog('info', 'Commands: rs <scenario>, rs core, core <command>')
+			return
+		}
+		runnerLog('warning', `Unknown command ${command}. Type help for available commands.`)
+	})
+	return commands
+}
+
+function isNoisyProgressLine(line: string): boolean {
+	return (
+		/^\s*Info Watching .+ for changes\.\.\.$/.test(line) ||
+		/^\s*Info `(?:tauri|tauri-build)` dependency has workspace inheritance enabled\./.test(line) ||
+		/^\s*Running DevCommand \(`/.test(line) ||
+		/^\s*(?:Finished|Running)\s+/.test(line) ||
+		/^\s*(?:Building|Checking|Fetch)\s+\[[= >-]+\]/.test(line) ||
+		/^Browserslist: browsers data \(caniuse-lite\) is .+ old\./.test(line) ||
+		/^\s*npx update-browserslist-db@latest$/.test(line) ||
+		/^\s*Why you should do it regularly: https:\/\/github\.com\/browserslist\/update-db#readme$/.test(
+			line,
+		) ||
+		/^\s*➜\s+press h \+ enter to show help$/.test(line)
+	)
+}
+
+function isRepeatedNoiseLine(line: string): boolean {
+	return (
+		line.includes('Skipping origin header as it is a forbidden header') ||
+		line.includes('if keeping the header is a desired behavior')
+	)
+}
+
+function stripAnsi(value: string): string {
+	return NodeUtil.stripVTControlCharacters(value)
+}
+
+function runnerLog(level: LogLevel, message: string): void {
+	const destination = level === 'error' ? process.stderr : process.stdout
+	destination.write(`[dev-runner] ${message}\n`)
 }
 
 async function portIsAvailable(port: number, hosts: ReadonlyArray<string>): Promise<boolean> {
@@ -863,78 +1018,6 @@ function samePath(left: string, right: string): boolean {
 
 function currentBranch(worktree: string): string {
 	return git(['branch', '--show-current'], worktree) || NodePath.basename(worktree)
-}
-
-const CONVEX_GIT_PATHS = [':(glob)convex/**/*.ts', ':(glob)convex/**/*.js', 'convex.json'] as const
-
-function readConvexGitDiff(worktree: string): GitDiffSummary {
-	git(['rev-parse', '--verify', 'origin/main'], worktree)
-	const tracked = git(
-		[
-			'diff',
-			'--numstat',
-			'--ignore-all-space',
-			'--ignore-blank-lines',
-			'origin/main',
-			'--',
-			...CONVEX_GIT_PATHS,
-		],
-		worktree,
-	)
-	const untracked = git(
-		['ls-files', '--others', '--exclude-standard', '--', ...CONVEX_GIT_PATHS],
-		worktree,
-	)
-	const untrackedDiffs = untracked
-		.split(/\r?\n/)
-		.filter(Boolean)
-		.map((path) => gitUntrackedNumstat(worktree, path))
-	return parseGitNumstat([tracked, ...untrackedDiffs].filter(Boolean).join('\n'))
-}
-
-function gitUntrackedNumstat(worktree: string, path: string): string {
-	const emptyPath = process.platform === 'win32' ? 'NUL' : '/dev/null'
-	const result = NodeChildProcess.spawnSync(
-		'git',
-		[
-			'diff',
-			'--no-index',
-			'--numstat',
-			'--ignore-all-space',
-			'--ignore-blank-lines',
-			'--',
-			emptyPath,
-			path,
-		],
-		{ cwd: worktree, encoding: 'utf8' },
-	)
-	if (result.status !== 0 && result.status !== 1) {
-		throw new DevRunnerError(result.stderr.trim() || `git diff for ${path} failed.`)
-	}
-	return result.stdout.trim()
-}
-
-async function confirmCloudConvexPush(diff: GitDiffSummary): Promise<void> {
-	if (!process.stdin.isTTY || !process.stdout.isTTY) {
-		throw new DevRunnerError(
-			`Convex cloud has ${formatGitDiffSummary(diff, false)}. Run vp run dev in an interactive terminal to approve the push.`,
-		)
-	}
-	const prompt = NodeReadline.createInterface({ input: process.stdin, output: process.stdout })
-	try {
-		const answer = (
-			await new Promise<string>((resolve) =>
-				prompt.question('[dev-runner] Push these changes to Convex cloud? [y/N] ', resolve),
-			)
-		)
-			.trim()
-			.toLowerCase()
-		if (answer !== 'y' && answer !== 'yes') {
-			throw new DevRunnerError('Convex cloud push cancelled. Use vp run dev:app to skip Convex.')
-		}
-	} finally {
-		prompt.close()
-	}
 }
 
 function git(args: ReadonlyArray<string>, cwd: string): string {
@@ -1048,29 +1131,26 @@ function printPlan(input: {
 	readonly scenarios: ReadonlyArray<number>
 	readonly source: string
 	readonly specs: ReadonlyArray<ProcessSpec>
-	readonly convexDiff: GitDiffSummary | null
 }): void {
-	console.log(`[dev-runner] ${input.branch} · ${input.mode}`)
-	console.log(`[dev-runner] data ${input.paths.data}`)
-	console.log(`[dev-runner] ports from ${input.source}`)
-	console.log(`[dev-runner] App http://localhost:${input.ports.app}`)
-	console.log(`[dev-runner] Core http://127.0.0.1:${input.ports.core}`)
-	console.log(
-		`[dev-runner] Convex ${requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')} (${input.convexMode})`,
+	runnerLog('info', `${input.branch} · ${input.mode}`)
+	runnerLog('info', `data ${input.paths.data}`)
+	runnerLog('info', `ports from ${input.source}`)
+	runnerLog('info', `App http://localhost:${input.ports.app}`)
+	runnerLog('info', `Core http://127.0.0.1:${input.ports.core}`)
+	runnerLog(
+		'info',
+		`Convex ${requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')} (${input.convexMode})`,
 	)
-	if (input.convexDiff?.files) {
-		console.log(`[dev-runner] Convex changes ${formatGitDiffSummary(input.convexDiff)}`)
-	}
 	if (input.scenarios.length > 0) {
-		console.log(`[dev-runner] scenarios ${input.scenarios.join(', ')}`)
+		runnerLog('info', `scenarios ${input.scenarios.join(', ')}`)
 	}
-	console.log(`[dev-runner] processes ${input.specs.map((spec) => spec.label).join(', ')}`)
+	runnerLog('info', `processes ${input.specs.map((spec) => spec.label).join(', ')}`)
 }
 
 const isMain = process.argv[1] && samePath(process.argv[1], NodeURL.fileURLToPath(import.meta.url))
 if (isMain) {
 	main().catch((error: unknown) => {
-		console.error(error instanceof Error ? error.message : String(error))
+		runnerLog('error', error instanceof Error ? error.message : String(error))
 		process.exitCode = 1
 	})
 }

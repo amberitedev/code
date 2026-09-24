@@ -150,67 +150,6 @@ export class SkinPreviewStorage {
 			request.onerror = () => reject(request.error)
 		})
 	}
-
-	async debugCalculateStorage(): Promise<void> {
-		if (!this.db) await this.init()
-
-		const transaction = this.db!.transaction(['previews'], 'readonly')
-		const store = transaction.objectStore('previews')
-
-		let totalSize = 0
-		let count = 0
-		const entries: Array<{ key: string; size: number }> = []
-
-		return new Promise((resolve, reject) => {
-			const request = store.openCursor()
-
-			request.onsuccess = (event) => {
-				const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result
-
-				if (cursor) {
-					const key = cursor.primaryKey as string
-					const value = cursor.value as StoredPreview
-
-					const entrySize = value.forwards.size
-					totalSize += entrySize
-					count++
-
-					entries.push({
-						key,
-						size: entrySize,
-					})
-
-					cursor.continue()
-				} else {
-					console.group('🗄️ Skin Preview Storage Debug Info')
-					console.log(`Total entries: ${count}`)
-					console.log(`Total size: ${(totalSize / 1024 / 1024).toFixed(2)} MB`)
-					console.log(
-						`Average size per entry: ${count > 0 ? (totalSize / count / 1024).toFixed(2) : 0} KB`,
-					)
-
-					if (entries.length > 0) {
-						const sortedEntries = entries.sort((a, b) => b.size - a.size)
-						console.log(
-							'Largest entry:',
-							sortedEntries[0].key,
-							'(' + (sortedEntries[0].size / 1024).toFixed(2) + ' KB)',
-						)
-						console.log(
-							'Smallest entry:',
-							sortedEntries[sortedEntries.length - 1].key,
-							'(' + (sortedEntries[sortedEntries.length - 1].size / 1024).toFixed(2) + ' KB)',
-						)
-					}
-
-					console.groupEnd()
-					resolve()
-				}
-			}
-
-			request.onerror = () => reject(request.error)
-		})
-	}
 }
 
 export const skinPreviewStorage = new SkinPreviewStorage()

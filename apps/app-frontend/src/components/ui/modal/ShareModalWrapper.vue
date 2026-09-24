@@ -1,4 +1,4 @@
-<!-- @deprecated Use ShareModal from @modrinth/ui directly. Ads/noblur now handled by injectModalBehavior. -->
+<!-- @deprecated Use ShareModal from @modrinth/ui directly. -->
 <script setup lang="ts">
 import { ShareModal } from '@modrinth/ui'
 import { ref } from 'vue'

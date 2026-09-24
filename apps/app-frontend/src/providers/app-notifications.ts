@@ -29,6 +29,11 @@ export class AppNotificationManager extends AbstractWebNotificationManager {
 
 	protected addNotificationToStorage(notification: WebNotification): void {
 		this.state.value.push(notification)
+		if (notification.type === 'error') {
+			console.error('[notification]', notification.title, notification.text)
+		} else if (notification.type === 'warning') {
+			console.warn('[notification]', notification.title, notification.text)
+		}
 	}
 
 	protected removeNotificationFromStorage(id: string | number): void {
