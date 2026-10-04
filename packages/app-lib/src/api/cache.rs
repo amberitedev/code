@@ -38,7 +38,6 @@ impl_cache_methods!(
     (Project, Project),
     (ProjectV3, ProjectV3),
     (Version, Version),
-    (User, User),
     (Team, Vec<TeamMember>),
     (Organization, Organization),
     (SearchResults, SearchResults),
@@ -64,6 +63,40 @@ pub async fn get_project_versions(
     let state = crate::State::get().await?;
     CachedEntry::get_project_versions(
         project_id,
+        cache_behaviour,
+        &state.pool,
+        &state.api_semaphore,
+    )
+    .await
+}
+
+// Account summaries use the configured account service; public project authors
+// remain in CachedEntry's public Modrinth user cache.
+pub async fn get_user(
+    id: &str,
+    cache_behaviour: Option<CacheBehaviour>,
+) -> crate::Result<Option<User>> {
+    Ok(get_user_many(&[id], cache_behaviour)
+        .await?
+        .into_iter()
+        .next())
+}
+
+pub async fn get_user_many(
+    ids: &[&str],
+    cache_behaviour: Option<CacheBehaviour>,
+) -> crate::Result<Vec<User>> {
+    let state = crate::State::get().await?;
+    if crate::self_hosted::accounts::enabled() {
+        return crate::self_hosted::accounts::users(
+            ids,
+            &state.api_semaphore,
+            &state.pool,
+        )
+        .await;
+    }
+    CachedEntry::get_user_many(
+        ids,
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,

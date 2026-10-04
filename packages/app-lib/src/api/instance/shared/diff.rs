@@ -13,7 +13,7 @@ pub(super) async fn shared_instance_update_diffs(
     let current_modpack_id = shared_modpack_id(&metadata.link);
     let modpack_unlinked =
         current_modpack_id.is_some() && remote_modpack_id.is_none();
-    let (current_version_ids, current_external_files) =
+    let (current_version_ids, current_external_files, current_external_paths) =
         current_shared_content(metadata, modpack_unlinked, state).await?;
     let (latest_version_ids, latest_external_files) =
         remote_shared_content(version);
@@ -30,6 +30,37 @@ pub(super) async fn shared_instance_update_diffs(
         state,
     )
     .await?;
+    if crate::self_hosted::accounts::enabled() {
+        let instance_path = state
+            .directories
+            .instances_dir()
+            .join(&metadata.instance.path);
+        let mut unchanged_files = HashSet::new();
+        for file in &version.external_files {
+            if !current_external_files.contains(&file.file_name) {
+                continue;
+            }
+            let path = current_external_paths
+                .get(&(file.file_name.clone(), file.file_type.clone()));
+            if !crate::self_hosted::integrity::installed_shared_file_changed(
+                &instance_path,
+                path.map(String::as_str),
+                file.sha256.as_deref(),
+            )
+            .await?
+            {
+                unchanged_files.insert(file.file_name.clone());
+            }
+        }
+        diffs.retain(|diff| {
+            !matches!(diff.type_, SharedInstanceUpdateDiffType::Updated)
+                || diff.project_id.is_some()
+                || !diff
+                    .file_name
+                    .as_ref()
+                    .is_some_and(|name| unchanged_files.contains(name))
+        });
+    }
     let mut configuration_diffs = shared_instance_configuration_diffs(
         current_modpack_id.as_deref(),
         remote_modpack_id,
@@ -95,6 +126,40 @@ pub(super) async fn shared_instance_publish_diffs(
         state,
     )
     .await?;
+    if crate::self_hosted::accounts::enabled() {
+        let instance_path = state
+            .directories
+            .instances_dir()
+            .join(&metadata.instance.path);
+        for file in &snapshot.external_files {
+            let ExternalFileSource::InstanceFile(path) = &file.source else {
+                continue;
+            };
+            let Some(remote) = version.external_files.iter().find(|remote| {
+                remote.file_name == file.file_name
+                    && remote.file_type == file.file_type
+            }) else {
+                continue;
+            };
+            if crate::self_hosted::integrity::shared_file_changed(
+                &instance_path.join(path),
+                remote.sha256.as_deref(),
+            )
+            .await?
+            {
+                diffs.push(SharedInstanceUpdateDiff {
+                    type_: SharedInstanceUpdateDiffType::Updated,
+                    project_id: None,
+                    project_name: None,
+                    file_name: Some(file.file_name.clone()),
+                    current_version_name: None,
+                    new_version_name: None,
+                    config_file_count: None,
+                    disabled: false,
+                });
+            }
+        }
+    }
     let mut configuration_diffs = shared_instance_configuration_diffs(
         remote_modpack_id,
         current_modpack_id.as_deref(),

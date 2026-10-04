@@ -1,0 +1,19 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "amberite-backend-local",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-07-14",
+	"workers_dev": false,
+	"preview_urls": false,
+	"durable_objects": { "bindings": [{ "name": "FRIENDS", "class_name": "FriendsHub" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FriendsHub"] }],
+	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "accounts",
+			"database_id": "00000000-0000-0000-0000-000000000001",
+			"migrations_dir": "migrations",
+		},
+	],
+}

@@ -464,7 +464,7 @@ where
 
 /// Downloads a file with retry and checksum functionality, and a specific
 /// [`reqwest::Client`].
-#[tracing::instrument(skip(json_body, semaphore))]
+#[tracing::instrument(skip(json_body, semaphore, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced(
     method: Method,
@@ -494,7 +494,7 @@ pub async fn fetch_advanced(
     .await
 }
 
-#[tracing::instrument(skip(body, semaphore))]
+#[tracing::instrument(skip(body, semaphore, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced_bytes(
     method: Method,
@@ -523,7 +523,7 @@ pub async fn fetch_advanced_bytes(
     .await
 }
 
-#[tracing::instrument(skip(json_body, semaphore, progress))]
+#[tracing::instrument(skip(json_body, semaphore, progress, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced_with_progress(
     method: Method,
@@ -557,7 +557,7 @@ pub async fn fetch_advanced_with_progress(
 }
 
 /// Downloads a file with retry and checksum functionality
-#[tracing::instrument(skip(json_body, semaphore))]
+#[tracing::instrument(skip(json_body, semaphore, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced_with_client(
     method: Method,
@@ -591,7 +591,7 @@ pub async fn fetch_advanced_with_client(
 }
 
 #[tracing::instrument(skip(
-    json_body, bytes_body, semaphore, client, progress
+    json_body, bytes_body, semaphore, client, progress, header
 ))]
 #[allow(clippy::too_many_arguments)]
 async fn fetch_advanced_with_client_and_progress(
@@ -611,6 +611,12 @@ async fn fetch_advanced_with_client_and_progress(
 ) -> crate::Result<Bytes> {
     let _permit = semaphore.0.acquire().await?;
 
+    let routed_url = crate::self_hosted::accounts::route(url, uri_path);
+    let url = routed_url.as_ref();
+    let header = header.filter(|(name, _)| {
+        !name.eq_ignore_ascii_case("authorization")
+            || crate::self_hosted::accounts::may_send_credentials(url)
+    });
     let is_api_url = url.starts_with(env!("MODRINTH_API_URL"))
         || url.starts_with(env!("MODRINTH_API_URL_V3"));
     let fence_key = if is_api_url { uri_path } else { None };
@@ -618,7 +624,7 @@ async fn fetch_advanced_with_client_and_progress(
     let creds = if header
         .as_ref()
         .is_none_or(|x| &*x.0.to_lowercase() != "authorization")
-        && (url.starts_with("https://cdn.modrinth.com") || is_api_url)
+        && crate::self_hosted::accounts::may_send_credentials(url)
     {
         crate::state::ModrinthCredentials::get_active(exec).await?
     } else {
@@ -873,8 +879,9 @@ pub async fn post_json(
 
     let mut req = INSECURE_REQWEST_CLIENT.post(url).json(&json_body);
 
-    if let Some(creds) =
-        crate::state::ModrinthCredentials::get_active(exec).await?
+    if crate::self_hosted::accounts::may_send_credentials(url)
+        && let Some(creds) =
+            crate::state::ModrinthCredentials::get_active(exec).await?
     {
         req = req.header("Authorization", &creds.session);
     }

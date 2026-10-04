@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
     let state = State::get().await?;
+    let _shared_instance_lock = state.lock_shared_instance(instance_id).await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or_else(|| {
@@ -31,6 +32,7 @@ pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
 #[tracing::instrument]
 pub async fn unlink_shared_instance(instance_id: &str) -> crate::Result<()> {
     let state = State::get().await?;
+    let _shared_instance_lock = state.lock_shared_instance(instance_id).await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or_else(|| {
@@ -271,7 +273,11 @@ pub(super) async fn current_shared_content(
     metadata: &crate::state::InstanceMetadata,
     include_linked_modpack_content: bool,
     state: &State,
-) -> crate::Result<(Vec<String>, HashSet<String>)> {
+) -> crate::Result<(
+    Vec<String>,
+    HashSet<String>,
+    HashMap<(String, String), String>,
+)> {
     let entries =
         crate::state::instances::adapters::sqlite::content_rows::get_content_entries(
             &metadata.applied_content_set.id,
@@ -288,6 +294,7 @@ pub(super) async fn current_shared_content(
     .collect::<HashMap<_, _>>();
     let mut version_ids = Vec::new();
     let mut external_files = HashSet::new();
+    let mut external_file_paths = HashMap::new();
 
     for entry in entries {
         let include_entry = entry.source_kind
@@ -309,6 +316,10 @@ pub(super) async fn current_shared_content(
         };
         if let Some(file) = files.get(&file_id) {
             external_files.insert(file.file_name.clone());
+            external_file_paths.insert(
+                (file.file_name.clone(), file_type(entry.project_type)),
+                file.relative_path.clone(),
+            );
         }
     }
     if include_linked_modpack_content
@@ -319,7 +330,7 @@ pub(super) async fn current_shared_content(
     }
     dedupe_strings(&mut version_ids);
 
-    Ok((version_ids, external_files))
+    Ok((version_ids, external_files, external_file_paths))
 }
 
 pub(super) struct CurrentPublishSnapshot {
@@ -518,6 +529,7 @@ pub(super) async fn publish_shared_instance_inner(
     config_paths: &[String],
     state: &State,
 ) -> crate::Result<()> {
+    let publishing_account = linked_amberite_user_id(state).await?;
     let attachment =
         shared_attachment(instance_id, state)
             .await?
@@ -551,6 +563,18 @@ pub(super) async fn publish_shared_instance_inner(
         state,
     )
     .await;
+
+    if crate::self_hosted::accounts::enabled()
+        && (linked_amberite_user_id(state).await? != publishing_account
+            || shared_attachment(instance_id, state)
+                .await?
+                .is_none_or(|current| current.id != attachment.id))
+    {
+        return Err(crate::ErrorKind::InputError(
+            "The account or shared instance changed while publishing. The saved upload is retained."
+                .into(),
+        ).into());
+    }
 
     match result {
         Ok(version) => {
@@ -661,11 +685,7 @@ pub(super) async fn publish_current_content(
             file_type: file.file_type.clone(),
         })
         .collect::<Vec<_>>();
-    let response = request_json_optional_unavailable::<InstanceVersionResponse>(
-        "create_instance_version",
-        Method::POST,
-        &format!("/instances/{shared_instance_id}/versions"),
-        Some(json!({
+    let version_request = json!({
             "modrinth_ids": modrinth_ids,
             "external_files": external_file_data,
             "modpack_id": modpack_id,
@@ -676,7 +696,29 @@ pub(super) async fn publish_current_content(
                 .loader_version
                 .clone()
                 .unwrap_or_default(),
-        })),
+        });
+    if crate::self_hosted::accounts::enabled() {
+        let mut files = Vec::with_capacity(external_files.len());
+        for file in &external_files {
+            let bytes = match &file.source {
+                ExternalFileSource::InstanceFile(path) => crate::util::io::read(
+                    state.directories.instances_dir().join(&metadata.instance.path).join(path),
+                ).await?,
+                ExternalFileSource::ConfigBundle(bytes) => bytes.clone(),
+            };
+            files.push(crate::self_hosted::sharing::SnapshotFile {
+                name: file.file_name.clone(), kind: file.file_type.clone(), bytes,
+            });
+        }
+        return crate::self_hosted::sharing::publish(
+            instance_id, shared_instance_id, version_request, files, state,
+        ).await;
+    }
+    let response = request_json_optional_unavailable::<InstanceVersionResponse>(
+        "create_instance_version",
+        Method::POST,
+        &format!("/instances/{shared_instance_id}/versions"),
+        Some(version_request),
         state,
         SharedInstancesRequestAuth::AmberiteSession,
     )
@@ -794,7 +836,7 @@ async fn build_config_bundle_candidate(
     if let (Some(_), Some(previous_bundle)) =
         (previous_version, previous_bundle)
     {
-        let response = REQWEST_CLIENT.get(&previous_bundle.url).send().await?;
+        let response = crate::self_hosted::integrity::download(&previous_bundle.url).await?;
         if !response.status().is_success() {
             return Err(crate::ErrorKind::OtherError(format!(
                 "Previous config bundle download failed with status {}",
@@ -803,6 +845,7 @@ async fn build_config_bundle_candidate(
             .into());
         }
         let bytes = response.bytes().await?;
+        crate::self_hosted::integrity::verify_shared_file(&bytes, previous_bundle.sha256.as_deref())?;
         let archived_entries = tokio::task::spawn_blocking(move || {
             read_config_bundle(bytes.as_ref())
         })

@@ -8,11 +8,12 @@ pub struct DevAppConfig {
     pub credential_namespace: String,
     pub auth_mode: String,
     pub branch: String,
-    pub core_url: String,
+    pub core_url: Option<String>,
     pub title: String,
     pub data_dir: String,
-    pub convex_url: String,
-    pub convex_site_url: String,
+    pub backend_url: Option<String>,
+    pub convex_url: Option<String>,
+    pub convex_site_url: Option<String>,
     pub username: Option<String>,
 }
 
@@ -23,6 +24,17 @@ pub fn prepare() {
     let config = parse_config();
     #[cfg(not(debug_assertions))]
     let config = None;
+    let backend_url = config
+        .as_ref()
+        .and_then(|config| config.backend_url.clone())
+        .or_else(|| env::var("ACCOUNT_API_URL").ok());
+    if let Some(backend_url) = backend_url {
+        theseus::self_hosted::accounts::configure(
+            &backend_url,
+            env::var("ACCOUNT_WEB_URL").ok().as_deref(),
+        )
+        .expect("valid account service configuration");
+    }
     let _ = CONFIG.set(config);
 }
 

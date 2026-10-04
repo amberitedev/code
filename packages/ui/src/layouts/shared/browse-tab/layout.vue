@@ -345,7 +345,7 @@ function getProjectCardTags(result: Labrinth.Search.v3.ResultSearchProject, disp
 						name: result.organization == null ? result.author : result.organization,
 						link:
 							result.organization_id == null
-								? `/user/${encodeURIComponent(result.author_id ?? result.author)}`
+								? `/user/${encodeURIComponent(result.author_id ?? result.author)}?source=modrinth`
 								: ctx.variant === 'web'
 									? `/organization/${result.organization_id}`
 									: `https://modrinth.com/organization/${result.organization_id}`,

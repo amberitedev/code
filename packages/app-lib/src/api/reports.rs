@@ -31,6 +31,18 @@ pub struct CreateReportResponse {
 pub async fn create_report(
     request: CreateReportRequest,
 ) -> crate::Result<CreateReportResponse> {
+    if crate::self_hosted::accounts::enabled()
+        && matches!(
+            request.item_type,
+            ReportItemType::User | ReportItemType::SharedInstance
+        )
+    {
+        return Err(crate::ErrorKind::InputError(
+            "Reporting local accounts and shared instances is not supported by this service yet."
+                .to_string(),
+        )
+        .into());
+    }
     let state = State::get().await?;
 
     fetch_json(

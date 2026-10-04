@@ -1,0 +1,23 @@
+{
+	"name": "@amberite/backend",
+	"version": "0.1.0",
+	"private": true,
+	"license": "AGPL-3.0-only",
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev --local --ip 127.0.0.1 --persist-to ../../.data/backend",
+		"migrate": "wrangler d1 migrations apply accounts --local --persist-to ../../.data/backend",
+		"typecheck": "tsc --noEmit",
+		"types": "wrangler types src/worker-configuration.d.ts --include-runtime=false"
+	},
+	"dependencies": {
+		"zxcvbn": "4.4.2"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260612.0",
+		"@types/node": "^24",
+		"@types/zxcvbn": "^4.4.5",
+		"typescript": "^5.9.3",
+		"wrangler": "4.113.0"
+	}
+}

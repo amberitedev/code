@@ -139,6 +139,8 @@ impl State {
             .get_or_try_init(move || Self::initialize_state(app_identifier))
             .await?;
 
+        crate::self_hosted::sharing::start_worker();
+
         if let Err(e) =
             crate::install::recovery::recover_interrupted_jobs(state).await
         {
@@ -214,6 +216,7 @@ impl State {
         let pool = db::connect(&app_identifier).await?;
 
         legacy_converter::migrate_legacy_data(&pool).await?;
+        crate::self_hosted::accounts::bind_origin(&pool).await?;
 
         tracing::info!("Fetching app settings");
         let mut settings = Settings::get(&pool).await?;

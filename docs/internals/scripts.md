@@ -23,22 +23,51 @@ cache. It does not overwrite data already in the worktree.
 
 ## Dev
 
-- `vp run dev`: Starts Convex, Core, and the App scenarios selected by `dev.json`.
-- `vp run dev 1 2 3`: Starts several isolated App installations against the same Convex and Core.
-- `vp run dev:app 1 2`: Starts only those App scenarios. Convex and Core must already be available.
-- `vp run dev:core`: Starts only Core.
-- `vp run dev:convex`: Starts only Convex.
+- `vp run dev`: Starts the local account/sharing Worker, two disk storage processes, the account
+  sign-in website, and the App scenarios selected by `dev.json`.
+- `vp run dev 1 2 3`: Starts several isolated App installations against those same local services.
+- `vp run dev:backend`: Starts the Worker, storage processes, and account website without Apps.
+- `vp run dev:app 1 2`: Starts only those App scenarios and their shared frontend. Start
+  `dev:backend` first. Core, Convex, and Minecraft servers are not needed for account/sharing work.
+- `vp run dev:core`: Starts only the legacy Core service.
+- `vp run dev:convex`: Starts only the legacy Convex service.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
 Scenario numbers passed after the task name override `defaultScenarios` in `dev.json` for that run.
 
-## Convex
+The Worker runs through `wrangler dev --local`; D1 and Durable Objects persist in `.data/backend`.
+The runner applies local migrations first. It generates a persistent secret in
+`.data/backend/dev-secret` and passes it through `.data/backend/.dev.vars`, never command-line
+arguments. Shared files live in `.data/storage-a` and `.data/storage-b`, independently of Core.
+No Cloudflare account, billing, remote D1, or R2 is used.
+The runner builds the Rust storage service once, copies the executable into `.data/backend/bin`,
+and starts both storage processes from that copy so later Cargo builds can replace their own output.
+After rebuilding with `cargo build -p theseus --bin sharing-storage`, enter `rs storage` in the
+runner terminal to stop both storage processes, copy the new executable, and start them again.
+The Worker, account website, and Apps keep running.
+
+Scenario `1` uses username `scenario_1`, email `scenario_1@scenario.invalid`, and password
+`Scenario-scenario_1-Local-only!`. Other numbers follow the same pattern. These are real local
+database accounts with hashed passwords. The native dev login can seed/sign in these accounts through
+a loopback endpoint requiring the runner secret; ordinary email/password login also works. This
+shortcut cannot access accounts created through normal signup. Each scenario retains separate App
+credentials and settings.
+Before starting a scenario, the runner checks that its App is stopped and normalizes copied SQLite
+launcher paths to that scenario's directory. Both current and previous launcher directories change
+together, so native startup cannot move files from the primary checkout. Copied icon, Java, queued
+install, and upload paths follow the new directory; stale copied process records are cleared.
+
+`node apps/backend/tests/accounts.mjs <backend-url>` runs the focused HTTP and native WebSocket
+contract proof against the already-running backend. Its private test credentials stay in
+`.data/backend-proof/accounts.json`; rerunning after a restart verifies the same accounts persist.
+
+## Legacy Convex
 
 The primary checkout uses the cloud Convex development deployment selected by `.env.local`.
 Commands that include Convex start `convex dev` immediately, which pushes the local functions and
-continues watching for changes. Use `vp run dev:app` to start the App without Convex. The runner
-refuses production and non-development cloud deployments.
+continues watching for changes. Only `dev:convex` starts it; the default account/sharing stack does
+not. The runner refuses production and non-development cloud deployments.
 
 Linked worktrees always use the local Convex deployment stored in their `.data/`. The runner selects
 that deployment explicitly, even when the worktree has a copied `.env.local` pointing at the cloud.
@@ -55,6 +84,9 @@ Each checkout owns a gitignored `.data/`:
 
 ```text
 .data/
+├── backend/         persistent local D1, Durable Objects, and dev secrets
+├── storage-a/       first local shared-file copy
+├── storage-b/       second local shared-file copy
 ├── convex/          local Convex state used by linked worktrees
 ├── core/            shared Core state
 ├── scenarios/
@@ -65,17 +97,19 @@ Each checkout owns a gitignored `.data/`:
 ```
 
 Every App scenario has its own local database, settings, Minecraft instances, credentials, WebView
-data, and session state. Scenarios in one checkout share that checkout's Core and Convex backend.
-Treat the whole `.data/` directory as one dataset; do not create Core-only scenarios.
+data, and session state. Scenarios in one checkout share that checkout's account backend and storage.
+Keep backend, storage, and scenarios together when copying the dataset. Legacy Core/Convex data can
+remain in the same directory for later hosting work.
 
 Worktree setup copies missing entries from the primary checkout's `.data/` without overwriting
-existing state. The first dev run also migrates the old root `.convex/` directory into
+existing state. The first `dev:convex` run also migrates the old root `.convex/` directory into
 `.data/convex/` and leaves the compatibility link expected by the Convex CLI.
 
 ## Ports and multiple instances
 
-Base ports are App `1420`, local Convex `3210` and `3211`, and Core `16662`. Linked worktrees derive
-a stable preferred offset from their path and add it to every port.
+Base ports are App `1420`, account website `3100`, Worker `8787`, and storage `17800` and `17801`.
+Legacy local Convex uses `3210` and `3211`, and Core uses `16662`. Linked worktrees derive a stable
+preferred offset from their path and add it to every port.
 
 Offset resolution, in order:
 
@@ -83,16 +117,19 @@ Offset resolution, in order:
 2. `AMBERITE_DEV_INSTANCE`. A number is used directly; any other non-empty value is hashed.
 3. `0` for the primary checkout, or a stable hash of the linked worktree path.
 
-The runner checks only the ports needed by the selected mode. A full local run shifts App, Convex,
-and Core together. A full cloud Convex run checks only App and Core. When a required port is occupied,
-the runner advances the complete applicable set until it finds an available one.
+The runner checks only the ports needed by the selected mode. A full run shifts the App, Worker,
+account website, and both storage ports together. When a required port is occupied, the runner
+advances the complete applicable set until it finds an available one. To start Apps separately from
+an existing backend, use the same `AMBERITE_PORT_OFFSET` if that backend shifted from its preferred
+offset; read the ports in the runner output first.
 
 Treat the `[dev-runner]` output and `.data/runtime.json` as authoritative. The preferred ports are
 stable, but an occupied port can shift the actual run.
 
 ## Process ownership
 
-The dev runner stops its child processes when it receives Ctrl+C. If you start it in the background,
+The dev runner stops its child processes when it receives Ctrl+C or the `quit` input command.
+If you start it in the background,
 record its PID when it starts and stop that process only. Never kill by a broad process name, command
 match, or worktree path: several worktrees may be running Node, Convex, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.

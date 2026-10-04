@@ -209,8 +209,9 @@ pub(crate) async fn list_content(
     )
     .await?;
     let imported_modpack_scope = is_imported_modpack_scope(&link);
+    let shared_instance_scope = matches!(link, InstanceLink::SharedInstance { .. });
     let linked_modpack_source_kind = linked_modpack_source_kind(&link);
-    let modpack_ids = if imported_modpack_scope {
+    let modpack_ids = if imported_modpack_scope || shared_instance_scope {
         None
     } else {
         match linked_modpack_ids(&link) {
@@ -225,7 +226,12 @@ pub(crate) async fn list_content(
             None => None,
         }
     };
-    let filter = if imported_modpack_scope {
+    let filter = if shared_instance_scope {
+        ContentFilter::ExcludeSourceKind {
+            source_kind: ContentSourceKind::SharedInstance,
+            exclude_untracked: false,
+        }
+    } else if imported_modpack_scope {
         ContentFilter::ExcludeSourceKind {
             source_kind: ContentSourceKind::ImportedModpack,
             exclude_untracked: resolved.instance.install_stage
@@ -273,15 +279,21 @@ pub(crate) async fn list_linked_modpack_content(
         &state.pool,
     )
     .await?;
-    if is_imported_modpack_scope(&link) {
+    let shared_instance_scope = matches!(link, InstanceLink::SharedInstance { .. });
+    if shared_instance_scope || is_imported_modpack_scope(&link) {
         let files = content_projects_for_scope(
             &resolved,
             cache_behaviour,
             state,
             ContentFilter::OnlySourceKind {
-                source_kind: ContentSourceKind::ImportedModpack,
-                include_untracked: resolved.instance.install_stage
-                    != crate::state::InstanceInstallStage::Installed,
+                source_kind: if shared_instance_scope {
+                    ContentSourceKind::SharedInstance
+                } else {
+                    ContentSourceKind::ImportedModpack
+                },
+                include_untracked: !shared_instance_scope
+                    && resolved.instance.install_stage
+                        != crate::state::InstanceInstallStage::Installed,
             },
         )
         .await?;

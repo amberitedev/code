@@ -1,189 +1,77 @@
 <template>
-	<div>
-		<section class="card">
-			<h2 class="text-2xl">Profile information</h2>
-			<p class="mb-4 text-secondary">
-				Your verified Minecraft handle identifies your Amberite account. Your display name and bio
-				are editable.
-			</p>
-
-			<label><span class="label__title">Profile picture</span></label>
-			<div class="avatar-changer">
-				<Avatar :src="previewImage || avatarUrl" size="md" circle :alt="auth.user.username" />
-				<div class="flex flex-col gap-2">
-					<FileButton
-						:max-size="262144"
-						:prompt="formatMessage(commonMessages.uploadImageButton)"
-						accept="image/png,image/jpeg,image/gif,image/webp"
-						@change="showPreviewImage"
-					>
-						<UploadIcon />
-					</FileButton>
-					<Button v-if="avatarUrl !== null || previewImage" @click="removePreviewImage">
-						<TrashIcon />{{ formatMessage(commonMessages.removeImageButton) }}
-					</Button>
-					<Button v-if="previewImage" @click="resetAvatar">
-						<UndoIcon />{{ formatMessage(commonMessages.resetButton) }}
-					</Button>
-				</div>
-			</div>
-
-			<label for="minecraft-handle-field">
-				<span class="label__title">Verified Minecraft handle</span>
-				<span class="label__description">Updated only after Minecraft ownership is verified.</span>
-			</label>
-			<StyledInput
-				id="minecraft-handle-field"
-				:model-value="auth.user.verifiedMinecraftHandle"
-				disabled
-			/>
-
-			<label for="display-name-field">
-				<span class="label__title">Display name</span>
-				<span class="label__description">The non-unique name shown on your Amberite profile.</span>
-			</label>
-			<StyledInput id="display-name-field" v-model="current.displayName" />
-
-			<label for="bio-field">
-				<span class="label__title">Bio</span>
-				<span class="label__description">A short description to tell people about you.</span>
-			</label>
-			<StyledInput id="bio-field" v-model="current.bio" multiline />
-
-			<div class="input-group mt-4">
-				<ButtonLink :to="`/user/${auth.user.username}`">
-					<UserIcon />{{ formatMessage(commonMessages.visitYourProfile) }}
-				</ButtonLink>
-			</div>
-		</section>
-		<UnsavedChangesPopup
-			:original="originalState"
-			:modified="modifiedState"
-			:saving="saving"
-			@reset="reset"
-			@save="save"
+	<section v-if="auth.user" class="universal-card">
+		<AccountProfileSettings
+			ref="profileSettings"
+			:patch-user="patchUser"
+			:change-avatar="changeAvatar"
+			:delete-avatar="deleteAvatar"
+			:get-authenticated-user="getAuthenticatedUser"
+			disclaimer-position="bottom"
 		/>
-	</div>
+		<UnsavedChangesPopup
+			:original="profileSettings?.originalState ?? emptyProfileState"
+			:modified="profileSettings?.modifiedState ?? emptyProfileState"
+			:saving="profileSettings?.saving ?? false"
+			@reset="resetProfileSettings"
+			@save="saveProfileSettings"
+		/>
+	</section>
 </template>
 
 <script setup lang="ts">
-import type { AmberiteProfilePatch } from '@modrinth/api-client'
-import { TrashIcon, UndoIcon, UploadIcon, UserIcon } from '@modrinth/assets'
+import type { Labrinth } from '@modrinth/api-client'
 import {
-	Avatar,
-	Button,
-	ButtonLink,
-	commonMessages,
-	FileButton,
-	injectNotificationManager,
-	StyledInput,
+	AccountProfileSettings,
+	commonSettingsMessages,
+	injectModrinthClient,
 	UnsavedChangesPopup,
-	useSavable,
 	useVIntl,
 } from '@modrinth/ui'
 
-import { useAmberiteAuthClient } from '@/composables/amberite-client.ts'
-import { retryAuthRestore } from '@/composables/auth.ts'
+definePageMeta({
+	middleware: 'auth',
+})
 
-definePageMeta({ middleware: 'auth' })
-useHead({ title: 'Profile settings - Amberite' })
-
-const { addNotification } = injectNotificationManager()
+const auth = await useAuth()
+const client = injectModrinthClient()
 const { formatMessage } = useVIntl()
-const authState = await useAuth()
-const auth = computed(
-	() =>
-		authState.value as typeof authState.value & { user: NonNullable<typeof authState.value.user> },
-)
-const amberiteAuthClient = useAmberiteAuthClient()
-const avatarUrl = ref(auth.value.user.avatar_url)
-const icon = shallowRef<File | null>(null)
-const previewImage = shallowRef<string | null>(null)
-const pendingAvatarDeletion = ref(false)
-const saving = ref(false)
-let avatarGeneration = 0
-
-const {
-	saved,
-	current,
-	reset: resetFields,
-} = useSavable(
-	() => ({ displayName: auth.value.user.name, bio: auth.value.user.bio ?? '' }),
-	async () => {},
-)
-
-const originalState = computed(() => ({ ...saved.value, avatarChanged: false }))
-const modifiedState = computed(() => ({
-	...current.value,
-	avatarChanged: Boolean(previewImage.value || pendingAvatarDeletion.value),
-}))
-
-function reset() {
-	resetFields()
-	resetAvatar()
+const profileSettings = ref<InstanceType<typeof AccountProfileSettings> | null>(null)
+const emptyProfileState = {
+	username: '',
+	bio: '',
+	avatarChanged: false,
 }
 
-function showPreviewImage(files: File[]) {
-	if (!files[0]) return
-	const generation = ++avatarGeneration
-	icon.value = files[0]
-	const reader = new FileReader()
-	reader.readAsDataURL(files[0])
-	reader.onload = (event) => {
-		if (generation !== avatarGeneration) return
-		previewImage.value = typeof event.target?.result === 'string' ? event.target.result : null
-		pendingAvatarDeletion.value = false
-	}
+function patchUser(
+	userId: string,
+	patch: Partial<Pick<Labrinth.Users.v2.User, 'bio' | 'username'>>,
+): Promise<void> {
+	return client.labrinth.users_v2.patch(userId, patch)
 }
 
-function removePreviewImage() {
-	avatarGeneration += 1
-	pendingAvatarDeletion.value = true
-	previewImage.value = 'https://cdn.modrinth.com/placeholder.png'
+function changeAvatar(userId: string, file: Blob, extension: string): Promise<void> {
+	return client.labrinth.users_v2.changeIcon(userId, file, extension)
 }
 
-function resetAvatar() {
-	avatarGeneration += 1
-	icon.value = null
-	previewImage.value = null
-	pendingAvatarDeletion.value = false
+function deleteAvatar(userId: string): Promise<void> {
+	return client.labrinth.users_v2.deleteIcon(userId)
 }
 
-async function save() {
-	saving.value = true
-	try {
-		const patch: AmberiteProfilePatch = {}
-		if (current.value.displayName !== auth.value.user.name)
-			patch.displayName = current.value.displayName.trim()
-		if (current.value.bio !== (auth.value.user.bio ?? '')) patch.bio = current.value.bio
-		if (pendingAvatarDeletion.value) patch.avatar = null
-		else if (icon.value && previewImage.value) {
-			patch.avatar = {
-				url: previewImage.value,
-				mimeType: icon.value.type,
-				sizeBytes: icon.value.size,
-			}
-		}
-		if (Object.keys(patch).length) await amberiteAuthClient.updateCurrentProfile(patch)
-		await retryAuthRestore()
-		avatarUrl.value = auth.value.user.avatar_url
-		resetAvatar()
-	} catch (error) {
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: error instanceof Error ? error.message : String(error),
-			type: 'error',
-		})
-	} finally {
-		saving.value = false
-	}
+async function getAuthenticatedUser(): Promise<Labrinth.Users.v3.User> {
+	const user = await client.labrinth.users_v3.getAuthenticated()
+	auth.value.user = user
+	return user
 }
+
+function resetProfileSettings(): void {
+	profileSettings.value?.reset()
+}
+
+function saveProfileSettings(): void {
+	void profileSettings.value?.save()
+}
+
+useHead({
+	title: () => `${formatMessage(commonSettingsMessages.profile)} - Modrinth`,
+})
 </script>
-
-<style lang="scss" scoped>
-.avatar-changer {
-	display: flex;
-	gap: var(--gap-lg);
-	margin-top: var(--gap-md);
-}
-</style>

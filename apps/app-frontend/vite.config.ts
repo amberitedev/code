@@ -32,8 +32,16 @@ if (existsSync(envFilePath)) {
 	}
 }
 
+const accountApiUrl = process.env.VITE_ACCOUNT_API_URL ?? process.env.ACCOUNT_API_URL
+const accountApiOrigin = accountApiUrl ? new URL(accountApiUrl).origin : undefined
+
 // https://vitejs.dev/config/
 export default defineConfig({
+	define: {
+		'import.meta.env.VITE_ACCOUNT_WEB_URL': JSON.stringify(
+			process.env.VITE_ACCOUNT_WEB_URL ?? process.env.ACCOUNT_WEB_URL ?? '',
+		),
+	},
 	css: {
 		preprocessorOptions: {
 			scss: {
@@ -85,6 +93,9 @@ export default defineConfig({
 		headers: {
 			'content-security-policy': Object.entries(tauriConf.app.security.csp)
 				.map(([directive, sources]) => {
+					if (directive === 'img-src' && accountApiOrigin) {
+						sources = [...(Array.isArray(sources) ? sources : [sources]), accountApiOrigin]
+					}
 					// An additional websocket connect-src is required for Vite dev tools to work
 					if (directive === 'connect-src') {
 						sources = Array.isArray(sources) ? sources : [sources]

@@ -38,6 +38,10 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		sockets: AbstractWebSocketClient
 		sync: AbstractSyncClient
 	}
+	public get selfHostedHosting(): boolean {
+		return this.config.selfHostedHosting === true
+	}
+
 	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']

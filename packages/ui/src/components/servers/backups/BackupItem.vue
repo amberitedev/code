@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { type Archon, getBackupDownloadUrl } from '@modrinth/api-client'
 import {
 	ClipboardCopyIcon,
 	DownloadIcon,
@@ -113,7 +113,10 @@ const overflowMenuOptions = computed<OverflowMenuOption[]>(() => {
 		id: 'download',
 		label: formatMessage(commonMessages.downloadButton),
 		type: 'link',
-		href: `https://${props.kyrosUrl}/modrinth/v0/backups/${props.backup.id}/download?auth=${props.jwt}`,
+		href:
+			props.kyrosUrl && props.jwt
+				? getBackupDownloadUrl(props.kyrosUrl, props.backup.id, props.jwt)
+				: undefined,
 		disabled: !props.kyrosUrl || !props.jwt,
 	})
 

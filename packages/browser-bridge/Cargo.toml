@@ -16,7 +16,7 @@ mime_guess = "2"
 reqwest = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-tauri = { workspace = true, features = ["protocol-asset"] }
+tauri = { workspace = true, features = ["protocol-asset", "unstable"] }
 tauri-plugin-os = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "net", "sync"] }

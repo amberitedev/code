@@ -122,6 +122,13 @@ export default defineNuxtConfig({
 		},
 	},
 	hooks: {
+		'vite:extendConfig'(viteConfig, { isServer }) {
+			if (process.env.ACCOUNT_API_URL && !isProduction() && isServer) {
+				// Vite+ separates WebSockets from HMR. Nuxt disables SSR HMR, but
+				// its second socket listener would still upgrade the client socket twice.
+				viteConfig.server = { ...viteConfig.server, ws: false }
+			}
+		},
 		async 'nitro:config'(nitroConfig) {
 			const emailTemplates = Object.keys(
 				await import('./src/templates/emails/index.ts').then((m) => m.default),
@@ -153,6 +160,18 @@ export default defineNuxtConfig({
 			}
 
 			const API_URL = getApiUrl()
+			// Local launcher sign-in can reuse public content metadata between
+			// restarts without waiting for unrelated remote billing/tag endpoints.
+			if (
+				process.env.ACCOUNT_API_URL &&
+				process.env.NODE_ENV !== 'production' &&
+				state.apiUrl === API_URL &&
+				Array.isArray(state.categories) &&
+				Array.isArray(state.loaders)
+			) {
+				console.log('Using cached public content metadata for local account development.')
+				return
+			}
 
 			if (
 				// Skip regeneration if within TTL...
@@ -219,6 +238,7 @@ export default defineNuxtConfig({
 			// @ts-ignore
 			globalThis.INTERCOM_IDENTITY_SECRET,
 		public: {
+			accountApiUrl: process.env.ACCOUNT_API_URL || '',
 			apiBaseUrl: getApiUrl(),
 			pyroBaseUrl: process.env.PYRO_BASE_URL,
 			sharedInstancesBaseUrl: getSharedInstancesApiUrl(),
@@ -305,7 +325,9 @@ export default defineNuxtConfig({
 		},
 	},
 	devtools: {
-		enabled: true,
+		// DevTools' Nitro storage inspector recursively registers file watchers
+		// before startup, which stalls the local Windows account website.
+		enabled: !process.env.ACCOUNT_API_URL,
 	},
 	css: ['~/assets/styles/tailwind.css'],
 	postcss: {

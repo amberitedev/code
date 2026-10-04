@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { createStripeElements } from '@modrinth/utils'
-import { loadStripe, type Stripe as StripsJs, type StripeElements } from '@stripe/stripe-js'
+import type { Stripe as StripsJs, StripeElements } from '@stripe/stripe-js'
+import { loadStripe } from '@stripe/stripe-js/pure'
 import { ref } from 'vue'
 
 import ModalLoadingIndicator from '../modal/ModalLoadingIndicator.vue'

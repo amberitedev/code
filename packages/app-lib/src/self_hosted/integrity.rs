@@ -1,0 +1,197 @@
+//! Optional metadata hashes extend transport integrity without changing upstream file payloads.
+use sha2::{Digest, Sha256};
+
+/// Compare live content with a published snapshot when its backend provides a hash.
+pub(crate) async fn shared_file_changed(
+    path: &std::path::Path,
+    expected: Option<&str>,
+) -> crate::Result<bool> {
+    let Some(expected) = expected else {
+        return Ok(false);
+    };
+    use tokio::io::AsyncReadExt;
+    let mut file = match tokio::fs::File::open(path).await {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(true);
+        }
+        Err(error) => return Err(crate::util::io::IOError::from(error).into()),
+    };
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .await
+            .map_err(crate::util::io::IOError::from)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()) != expected)
+}
+
+/// Only suppress a recipient update after matching its validated installed path.
+pub(crate) async fn installed_shared_file_changed(
+    instance_path: &std::path::Path,
+    relative_path: Option<&str>,
+    expected: Option<&str>,
+) -> crate::Result<bool> {
+    let (Some(relative_path), Some(expected)) = (relative_path, expected)
+    else {
+        return Ok(true);
+    };
+    let Ok(path) = path_util::SafeRelativeUtf8UnixPathBuf::try_from(
+        relative_path.to_string(),
+    ) else {
+        return Ok(true);
+    };
+    shared_file_changed(&instance_path.join(path.as_str()), Some(expected))
+        .await
+}
+
+pub(crate) async fn download(url: &str) -> crate::Result<reqwest::Response> {
+    let parsed = reqwest::Url::parse(url)?;
+    let local = parsed.scheme() == "http"
+        && matches!(
+            parsed.host_str(),
+            Some("127.0.0.1" | "localhost" | "[::1]")
+        )
+        && crate::instance::shared_clients_session().is_some_and(|session| {
+            reqwest::Url::parse(&session.base_url)
+                .is_ok_and(|base| base.origin() == parsed.origin())
+        });
+    if !local {
+        return Ok(crate::util::fetch::REQWEST_CLIENT
+            .get(url)
+            .send()
+            .await
+            .map_err(reqwest::Error::without_url)?);
+    }
+    // HTTP is confined to configured localhost development services. No account
+    // Authorization header is attached; the backend URL is a scoped capability.
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let target = attempt.url();
+            if attempt.previous().len() >= 5 {
+                return attempt.error("Too many storage redirects");
+            }
+            if target.scheme() == "https"
+                || target.scheme() == "http"
+                    && matches!(
+                        target.host_str(),
+                        Some("127.0.0.1" | "localhost" | "[::1]")
+                    )
+            {
+                attempt.follow()
+            } else {
+                attempt.error("Storage redirect must use HTTPS or localhost")
+            }
+        }))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    Ok(client
+        .get(url)
+        .send()
+        .await
+        .map_err(reqwest::Error::without_url)?)
+}
+
+pub(crate) fn verify_shared_file(
+    bytes: &[u8],
+    expected: Option<&str>,
+) -> crate::Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    if expected.len() != 64
+        || format!("{:x}", Sha256::digest(bytes)) != expected
+    {
+        return Err(crate::ErrorKind::OtherError(
+            "Shared file failed its content hash check. Retry the download."
+                .to_string(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn detects_same_name_and_size_replacement_without_changing_legacy_files()
+     {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("resource-pack.zip");
+        let original = b"original";
+        let replacement = b"modified";
+        assert_eq!(original.len(), replacement.len());
+        let digest = format!("{:x}", Sha256::digest(original));
+        tokio::fs::write(&path, original).await.unwrap();
+        assert!(!shared_file_changed(&path, Some(&digest)).await.unwrap());
+        tokio::fs::write(&path, replacement).await.unwrap();
+        assert!(shared_file_changed(&path, Some(&digest)).await.unwrap());
+        assert!(!shared_file_changed(&path, None).await.unwrap());
+    }
+
+    #[test]
+    fn rejects_equal_length_corruption_against_metadata_hash() {
+        let digest = format!("{:x}", Sha256::digest(b"original"));
+        assert!(verify_shared_file(b"original", Some(&digest)).is_ok());
+        assert!(verify_shared_file(b"modified", Some(&digest)).is_err());
+        assert!(verify_shared_file(b"original", None).is_ok());
+    }
+
+    #[tokio::test]
+    async fn recipient_compares_safe_installed_paths_and_keeps_unknown_updates() {
+        let directory = tempfile::tempdir().unwrap();
+        let instance = directory.path().join("instance");
+        tokio::fs::create_dir_all(instance.join("resourcepacks"))
+            .await
+            .unwrap();
+        let relative = "resourcepacks/pack.zip";
+        let path = instance.join(relative);
+        let digest = format!("{:x}", Sha256::digest(b"original"));
+        tokio::fs::write(&path, b"original").await.unwrap();
+        assert!(
+            !installed_shared_file_changed(
+                &instance,
+                Some(relative),
+                Some(&digest),
+            )
+            .await
+            .unwrap()
+        );
+        tokio::fs::write(&path, b"modified").await.unwrap();
+        assert!(
+            installed_shared_file_changed(
+                &instance,
+                Some(relative),
+                Some(&digest),
+            )
+            .await
+            .unwrap()
+        );
+        for (relative_path, expected) in [
+            (Some(relative), None),
+            (None, Some(digest.as_str())),
+            (Some("resourcepacks/missing.zip"), Some(digest.as_str())),
+            (Some("../pack.zip"), Some(digest.as_str())),
+            (Some("C:/pack.zip"), Some(digest.as_str())),
+            (Some("resourcepacks\\pack.zip"), Some(digest.as_str())),
+        ] {
+            assert!(
+                installed_shared_file_changed(
+                    &instance,
+                    relative_path,
+                    expected,
+                )
+                .await
+                .unwrap()
+            );
+        }
+    }
+}

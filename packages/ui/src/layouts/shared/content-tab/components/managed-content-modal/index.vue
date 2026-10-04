@@ -267,7 +267,7 @@ const tableItems = computed<ContentCardTableItem[]>(() =>
 					...item.owner,
 					link:
 						item.owner.type === 'user'
-							? `/user/${encodeURIComponent(item.owner.id)}`
+							? `/user/${encodeURIComponent(item.owner.id)}?source=modrinth`
 							: `https://modrinth.com/organization/${item.owner.id}`,
 				}
 			: undefined,

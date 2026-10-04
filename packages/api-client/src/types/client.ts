@@ -29,6 +29,9 @@ export type RequestHooks = {
  * Client configuration
  */
 export interface ClientConfig {
+	/** Local Core hosting has no commercial purchase or subscription flows. */
+	selfHostedHosting?: boolean
+
 	/**
 	 * User agent string or provider for requests
 	 * Should identify your application (e.g., 'my-app/1.0.0')

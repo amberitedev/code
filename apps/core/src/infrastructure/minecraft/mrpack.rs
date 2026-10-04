@@ -175,14 +175,18 @@ async fn extract_overrides(
             .as_str()
             .map_err(|e| MrpackError::Zip(e.to_string()))?
             .to_string();
-        if !entry_name.starts_with(&format!("{prefix}/")) {
+        let Some(rel) = entry_name.strip_prefix(&format!("{prefix}/")) else {
             continue;
-        }
-        let rel = entry_name.trim_start_matches(&format!("{prefix}/"));
+        };
         if rel.is_empty() {
             continue;
         }
         let out_path = guarded_child_path(dest, rel)?;
+        if entry_name.ends_with('/') {
+            ensure_no_destination_symlink(&out_path)?;
+            tokio::fs::create_dir_all(&out_path).await?;
+            continue;
+        }
         if let Some(parent) = out_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }

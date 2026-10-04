@@ -1453,15 +1453,9 @@ impl CachedEntry {
                 values
             }
             CacheValueType::File => {
-                let mut versions = fetch_json::<HashMap<String, Version>>(
-                    Method::POST,
-                    concat!(env!("MODRINTH_API_URL"), "version_files"),
-                    None,
-                    Some(serde_json::json!({
-                        "algorithm": "sha1",
-                        "hashes": &keys,
-                    })),
-                    Some("/v2/version_files"),
+                let hashes = keys.iter().map(|key| key.to_string()).collect::<Vec<_>>();
+                let mut versions = crate::self_hosted::public_content::versions_by_hash(
+                    &hashes,
                     fetch_semaphore,
                     pool,
                 )

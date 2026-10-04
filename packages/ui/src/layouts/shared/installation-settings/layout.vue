@@ -644,7 +644,7 @@ const messages = defineMessages({
 									:to="
 										ctx.modpack.value.owner.type === 'organization'
 											? `/organization/${ctx.modpack.value.owner.id}`
-											: `/user/${ctx.modpack.value.owner.id}`
+											: `/user/${ctx.modpack.value.owner.id}?source=modrinth`
 									"
 									class="flex items-center gap-1.5 hover:underline"
 								>

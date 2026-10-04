@@ -18,6 +18,8 @@ pub enum InstallerError {
     InstallerFailed(i32),
     #[error("xml parse error: {0}")]
     XmlParse(String),
+    #[error("loader metadata: {0}")]
+    Metadata(#[from] super::shared::meta::MetaError),
 }
 
 /// How the server is launched after installation.
@@ -157,28 +159,20 @@ async fn install_forge(
 async fn install_neoforge(
     http: &reqwest::Client,
     mc_version: &str,
-    _loader_version: Option<&str>,
+    loader_version: Option<&str>,
     data_dir: &Path,
     java_path: &Path,
 ) -> Result<(), InstallerError> {
-    // NeoForge requires MC 1.20.1+
-    let parts: Vec<u32> = mc_version
-        .split('.')
-        .filter_map(|p| p.parse().ok())
-        .collect();
-    let (major, minor) = (
-        parts.get(1).copied().unwrap_or(0),
-        parts.get(2).copied().unwrap_or(0),
-    );
-    if major < 20 || (major == 20 && minor < 1) {
-        return Err(InstallerError::UnsupportedVersion(format!(
-            "NeoForge requires MC 1.20.1+; got {mc_version}"
-        )));
-    }
-    let nf_version = fetch_maven_release(
-        http,
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
-    ).await?;
+    // Use the same supported game/loader pairs as the launcher, including
+    // Minecraft's year-based versions, rather than guessing from version digits.
+    let manifest =
+        super::shared::meta::fetch_loader_manifest(http, "neo").await?;
+    let nf_version = super::shared::meta::resolve_loader_version(
+        &manifest,
+        mc_version,
+        loader_version,
+    )?
+    .id;
     let url = format!(
         "https://maven.neoforged.net/releases/net/neoforged/neoforge/{nf_version}/neoforge-{nf_version}-installer.jar"
     );

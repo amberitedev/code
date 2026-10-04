@@ -1,20 +1,16 @@
-import type { Labrinth } from '@modrinth/api-client'
+import type { User } from '@modrinth/utils'
+import { invoke } from '@tauri-apps/api/core'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 
-import { apiClient } from '@/services/api-client'
-import { onlineUsers } from '@/services/presence'
+import { get_user_many } from '@/helpers/cache'
+import type { ModrinthCredentials } from '@/helpers/mr_auth'
 
 export const friendsQueryKey = (userId?: string | null) => ['friends', userId ?? null] as const
 
-export type SocialCredentials = {
-	user_id: string
-	user?: { friendCode?: string }
-}
-
 export type UserStatus = {
 	user_id: string
-	instance_name: string | null
+	profile_name: string | null
 	last_update: string
 }
 
@@ -26,15 +22,19 @@ export type UserFriend = {
 }
 
 export async function friends(): Promise<UserFriend[]> {
-	return await apiClient.labrinth.friends_v3.list()
+	return await invoke('plugin:friends|friends')
+}
+
+export async function friend_statuses(): Promise<UserStatus[]> {
+	return await invoke('plugin:friends|friend_statuses')
 }
 
 export async function add_friend(userId: string): Promise<void> {
-	return await apiClient.labrinth.friends_v3.add(userId)
+	return await invoke('plugin:friends|add_friend', { userId })
 }
 
 export async function remove_friend(userId: string): Promise<void> {
-	return await apiClient.labrinth.friends_v3.remove(userId)
+	return await invoke('plugin:friends|remove_friend', { userId })
 }
 
 export type FriendWithUserData = {
@@ -44,7 +44,6 @@ export type FriendWithUserData = {
 	last_updated: Dayjs | null
 	created: Dayjs
 	username: string
-	displayName: string
 	accepted: boolean
 	online: boolean
 	avatar: string
@@ -53,12 +52,11 @@ export type FriendWithUserData = {
 export type FriendCacheUser = {
 	id: string
 	username: string
-	displayName?: string
 	avatarUrl?: string | null
 }
 
 export async function getFriendsWithUserData(
-	credentials: SocialCredentials | null,
+	credentials: ModrinthCredentials | null,
 ): Promise<FriendWithUserData[]> {
 	if (!credentials) return []
 
@@ -77,7 +75,6 @@ export function createPendingFriend(
 		last_updated: null,
 		created: dayjs(),
 		username: user.username,
-		displayName: user.displayName ?? user.username,
 		accepted: false,
 		online: false,
 		avatar: user.avatarUrl ?? '',
@@ -158,31 +155,31 @@ export function normalizeFriendKey(value: string) {
 
 export async function transformFriends(
 	friends: UserFriend[],
-	credentials: SocialCredentials | null,
+	credentials: ModrinthCredentials | null,
 ): Promise<FriendWithUserData[]> {
 	if (friends.length === 0 || !credentials) {
 		return []
 	}
 
-	const userIds = friends.map((friend) =>
-		friend.id === credentials.user_id ? friend.friend_id : friend.id,
+	const friendStatuses = await friend_statuses()
+	const users = await get_user_many(
+		friends.map((x) => (x.id === credentials.user_id ? x.friend_id : x.id)),
 	)
-	const users = await apiClient.labrinth.users_v2.getMultiple([...new Set(userIds)])
 
 	return friends.map((friend) => {
-		const user = users.find(
-			(x: Labrinth.Users.v2.User) => x.id === friend.id || x.id === friend.friend_id,
+		const user = users.find((x: User) => x.id === friend.id || x.id === friend.friend_id)
+		const status = friendStatuses.find(
+			(x) => x.user_id === friend.id || x.user_id === friend.friend_id,
 		)
 		return {
 			id: friend.id,
 			friend_id: friend.friend_id,
-			status: null,
-			last_updated: null,
+			status: status?.profile_name ?? null,
+			last_updated: status && status.last_update ? dayjs(status.last_update) : null,
 			created: dayjs(friend.created),
 			avatar: user?.avatar_url ?? '',
 			username: user?.username ?? '',
-			displayName: user?.name ?? user?.username ?? '',
-			online: user?.user_id ? (onlineUsers.value[user.user_id] ?? false) : false,
+			online: !!status,
 			accepted: friend.accepted,
 		}
 	})

@@ -18,23 +18,10 @@ fn main() {
                         "get_default_user",
                         "set_default_user",
                         "get_users",
-                        "check_amberite_reachable",
-                        "amberite_product_sign_in",
-                        "restore_amberite_product_session",
-                        "refresh_amberite_product_session",
-                        "sign_out_amberite_product_session",
-                        "get_remembered_amberite_identity",
-                        "get_amberite_local_setup_secret",
-                        "set_amberite_shared_clients_session",
                     ])
-                    .default_permission(DefaultPermissionRule::Allow(vec![
-                        "allow-check-reachable".into(),
-                        "allow-login".into(),
-                        "allow-remove-user".into(),
-                        "allow-get-default-user".into(),
-                        "allow-set-default-user".into(),
-                        "allow-get-users".into(),
-                    ])),
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
             )
             .plugin(
                 "cache",
@@ -338,6 +325,27 @@ fn main() {
                         "show_app_db_backups_folder",
                         "progress_bars_list",
                         "get_opening_command",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "ads",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "init_ads_window",
+                        "hide_ads_window",
+                        "update_ads_window_hold",
+                        "show_ads_consent_ui",
+                        "expand_ads_consent_webview",
+                        "open_ads_consent_preferences",
+                        "finish_ads_consent_flow",
+                        "should_show_ads_consent_popup",
+                        "perform_ads_consent_action",
+                        "record_ads_click",
+                        "open_link",
+                        "get_ads_personalization",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

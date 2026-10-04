@@ -92,36 +92,41 @@ const isOwner = computed(() => currentUserId.value != null && currentUserId.valu
 const isAdmin = computed(() => currentUserRole.value === 'admin')
 
 const tabs = computed<TabbedModalTab[]>(() =>
-	serverSettingsTabDefinitions.map((tab) => {
-		const ctx = {
-			serverId: currentServerId,
-			ownerId: ownerId.value,
-			serverStatus: server.value?.status,
-			isOwner: isOwner.value,
-			isAdmin: isAdmin.value,
-		}
-		const name = defineMessage({
-			id: `server.settings.tabs.${tab.id}`,
-			defaultMessage: tab.label,
-		})
-		const shown = tab.shown ? tab.shown(ctx) : true
+	serverSettingsTabDefinitions
+		.filter(
+			(tab) => !client.selfHostedHosting || (tab.id !== 'billing' && tab.id !== 'admin-billing'),
+		)
+		.map((tab) => {
+			const ctx = {
+				serverId: currentServerId,
+				ownerId: ownerId.value,
+				serverStatus: server.value?.status,
+				isOwner: isOwner.value,
+				isAdmin: isAdmin.value,
+			}
+			const name = defineMessage({
+				id: `server.settings.tabs.${tab.id}`,
+				defaultMessage: tab.label,
+			})
+			const shown = tab.shown ? tab.shown(ctx) : true
 
-		if (tab.external) {
+			if (tab.external) {
+				return {
+					name,
+					icon: tab.icon,
+					href: tab.href ? `https://modrinth.com${tab.href(ctx)}` : undefined,
+					shown,
+				}
+			}
+
 			return {
 				name,
 				icon: tab.icon,
-				href: tab.href ? `https://modrinth.com${tab.href(ctx)}` : undefined,
+				content:
+					serverSettingsTabComponentMap[tab.id as keyof typeof serverSettingsTabComponentMap],
 				shown,
 			}
-		}
-
-		return {
-			name,
-			icon: tab.icon,
-			content: serverSettingsTabComponentMap[tab.id as keyof typeof serverSettingsTabComponentMap],
-			shown,
-		}
-	}),
+		}),
 )
 
 async function fetchViewer() {

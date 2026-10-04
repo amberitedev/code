@@ -1,5 +1,7 @@
 import { posthog } from 'posthog-js'
 
+import { config } from '@/config'
+
 interface InstanceProperties {
 	loader: string
 	game_version: string
@@ -46,7 +48,7 @@ export type AnalyticsEvent = keyof AnalyticsEventMap
 let initialized = false
 
 export const initAnalytics = () => {
-	if (initialized || import.meta.env.DEV) return
+	if (initialized || config.accountApiUrl) return
 	posthog.init('phc_9Iqi6lFs9sr5BSqh9RRNRSJ0mATS9PSgirDiX3iOYJ', {
 		persistence: 'localStorage',
 		api_host: 'https://posthog.modrinth.com',
@@ -66,6 +68,7 @@ export const optOutAnalytics = () => {
 
 export const optInAnalytics = () => {
 	initAnalytics()
+	if (!initialized || config.accountApiUrl) return
 	posthog.opt_in_capturing()
 }
 
@@ -75,6 +78,6 @@ export const trackEvent = <E extends AnalyticsEvent>(
 	eventName: E,
 	...args: OptionalArgs<AnalyticsEventMap[E]>
 ) => {
-	if (!initialized) return
+	if (!initialized || config.accountApiUrl) return
 	posthog.capture(eventName, args[0])
 }

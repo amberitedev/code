@@ -7,6 +7,7 @@ import FloatingVue from 'floating-vue'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
+import { config } from '@/config'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
@@ -38,6 +39,7 @@ async function bootstrap() {
 	}
 
 	function shouldEnableSentry() {
+		if (config.accountApiUrl) return false
 		if (import.meta.env.VITE_ENABLE_SENTRY === 'true') return true
 		return !import.meta.env.DEV && !isLocalHost()
 	}

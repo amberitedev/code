@@ -1,8 +1,8 @@
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{atomic::Ordering, Arc};
 
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
     application::{core_projection_service, pairing_service, state::AppState},

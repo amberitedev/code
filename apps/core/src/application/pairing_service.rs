@@ -12,8 +12,8 @@ use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::application::state::{
-    AppState, PAIRING_WINDOW, format_pairing_code, generate_pairing_code,
-    generate_setup_secret, write_local_setup_secret,
+    format_pairing_code, generate_pairing_code, generate_setup_secret,
+    write_local_setup_secret, AppState, PAIRING_WINDOW,
 };
 
 /// Register this unpaired Core in Convex so a remote dashboard/app can claim its code.

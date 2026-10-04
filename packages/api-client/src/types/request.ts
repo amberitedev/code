@@ -75,6 +75,9 @@ export type RequestOptions = {
 	 */
 	skipAuth?: boolean
 
+	/** Explicit source for public creator profiles when accounts are self-hosted. */
+	accountSource?: 'modrinth' | 'self-hosted'
+
 	/**
 	 * Use node authentication for this request.
 	 * When true, NodeAuthFeature will handle auth injection and URL building.

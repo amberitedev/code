@@ -88,7 +88,7 @@ impl FriendsSocket {
         if let Some(credentials) = credentials {
             let mut request = format!(
                 "{}_internal/launcher_socket?code={}",
-                env!("MODRINTH_SOCKET_URL"),
+                crate::self_hosted::accounts::socket_base(),
                 credentials.session
             )
             .into_client_request()?;

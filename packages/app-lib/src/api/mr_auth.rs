@@ -9,14 +9,20 @@ pub enum ModrinthAuthFlow {
 }
 
 #[tracing::instrument]
-pub fn authenticate_begin_flow(flow: ModrinthAuthFlow) -> &'static str {
+pub fn authenticate_begin_flow(flow: ModrinthAuthFlow) -> String {
+    if let Some(url) = crate::self_hosted::accounts::login_url(matches!(
+        flow,
+        ModrinthAuthFlow::SignUp
+    )) {
+        return url;
+    }
     match flow {
-        ModrinthAuthFlow::SignIn => crate::state::get_login_url(),
-        ModrinthAuthFlow::SignUp => crate::state::get_signup_url(),
+        ModrinthAuthFlow::SignIn => crate::state::get_login_url().to_owned(),
+        ModrinthAuthFlow::SignUp => crate::state::get_signup_url().to_owned(),
     }
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(code))]
 pub async fn authenticate_finish_flow(
     code: &str,
 ) -> crate::Result<ModrinthCredentials> {
@@ -30,6 +36,7 @@ pub async fn authenticate_finish_flow(
     .await?;
 
     creds.upsert(&state.pool).await?;
+    crate::self_hosted::accounts::sync_sharing(Some(&creds));
 
     if let Err(error) =
         crate::onboarding_checklist::mark_logged_into_modrinth().await
@@ -54,9 +61,19 @@ pub async fn logout() -> crate::Result<()> {
     let current = ModrinthCredentials::get_active(&state.pool).await?;
 
     if let Some(current) = current {
+        if let Err(error) = crate::self_hosted::accounts::revoke(
+            &current,
+            &state.api_semaphore,
+            &state.pool,
+        )
+        .await
+        {
+            tracing::warn!("Could not revoke account session: {error}");
+        }
         ModrinthCredentials::remove(&current.user_id, &state.pool).await?;
     }
     state.friends_socket.disconnect().await?;
+    crate::self_hosted::accounts::sync_sharing(None);
 
     Ok(())
 }
@@ -71,5 +88,6 @@ pub async fn get_credentials() -> crate::Result<Option<ModrinthCredentials>> {
         state.friends_socket.disconnect().await?;
     }
 
+    crate::self_hosted::accounts::sync_sharing(current.as_ref());
     Ok(current)
 }

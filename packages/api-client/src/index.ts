@@ -20,6 +20,11 @@ export {
 } from './core/abstract-websocket'
 export { ModrinthApiError, ModrinthServerError } from './core/errors'
 export { type AuthConfig, AuthFeature } from './features/auth'
+export {
+	type SelfHostedConfig,
+	SelfHostedFeature,
+	routeSelfHostedRequest,
+} from './features/self-hosted'
 export * from './amberite'
 export {
 	AmberiteFeature,
@@ -52,7 +57,7 @@ export { XHRUploadClient } from './platform/xhr-upload-client'
 export { clearNodeAuthState, nodeAuthState, setNodeAuthState } from './state/node-auth'
 export * from './types'
 export { withJWTRetry } from './utils/jwt-retry'
-export { getNodeWebSocketUrl } from './utils/node-url'
+export { getBackupDownloadUrl, getNodeWebSocketUrl } from './utils/node-url'
 export { pingWebSocketUrl, type WebSocketPingOptions } from './utils/pingtest'
 export {
 	type ParsedSseEvent,

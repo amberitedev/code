@@ -25,20 +25,20 @@
 							"
 							:values="{ actor: actorLabel, entity: entityLabel }"
 						>
-							<template #actor="{ children }">
+							<template #actor>
 								<button
 									v-if="actorName && type !== 'friend-request'"
 									type="button"
 									class="m-0 inline border-0 bg-transparent p-0 text-lg font-semibold leading-6 text-contrast hover:underline"
 									@click="$emit('open-actor')"
 								>
-									<component :is="() => children" />
+									{{ actorLabel }}
 								</button>
 								<span v-else class="font-semibold text-contrast">
-									<component :is="() => children" />
+									{{ actorLabel }}
 								</span>
 							</template>
-							<template #entity="{ children }">
+							<template #entity>
 								<template v-if="type === 'instance-invite'">
 									<Avatar
 										:src="entityIconUrl"
@@ -54,7 +54,7 @@
 									:class="{ 'ml-1': type === 'instance-invite' }"
 									class="font-semibold text-contrast"
 								>
-									<component :is="() => children" />
+									{{ entityLabel }}
 								</span>
 							</template>
 						</IntlFormatted>

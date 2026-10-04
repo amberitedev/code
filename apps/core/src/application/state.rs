@@ -144,7 +144,7 @@ impl AppState {
         }
 
         let (pairing_code, pairing_code_expires_at, local_setup_secret) =
-            if is_paired {
+            if is_paired || config.no_auth {
                 (None, None, None)
             } else {
                 let code = generate_pairing_code();

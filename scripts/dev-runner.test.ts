@@ -23,6 +23,10 @@ describe('dev runner ports', () => {
 		).toEqual({ offset: 0, source: 'primary checkout' })
 		expect(portsForOffset(0)).toEqual({
 			app: 1420,
+			backend: 8787,
+			accountWeb: 3100,
+			storageA: 17800,
+			storageB: 17801,
 			convexCloud: 3210,
 			convexSite: 3211,
 			core: 16662,
@@ -86,6 +90,10 @@ describe('dev runner ports', () => {
 		expect(checked).toContain(1420)
 		expect(portsForOffset(offset)).toEqual({
 			app: 1421,
+			backend: 8788,
+			accountWeb: 3101,
+			storageA: 17801,
+			storageB: 17802,
 			convexCloud: 3211,
 			convexSite: 3212,
 			core: 16663,
@@ -199,11 +207,24 @@ describe('dev runner environment', () => {
 
 describe('dev runner modes', () => {
 	it('runs the complete product in dev mode', () => {
-		expect(processLabelsForMode('dev')).toEqual(['convex', 'core', 'app-frontend'])
+		expect(processLabelsForMode('dev')).toEqual([
+			'backend',
+			'storage-a',
+			'storage-b',
+			'account-web',
+			'core',
+			'app-frontend',
+		])
 	})
 
 	it('keeps partial modes focused', () => {
 		expect(processLabelsForMode('dev:app')).toEqual(['app-frontend'])
+		expect(processLabelsForMode('dev:backend')).toEqual([
+			'backend',
+			'storage-a',
+			'storage-b',
+			'account-web',
+		])
 		expect(processLabelsForMode('dev:core')).toEqual(['core'])
 		expect(processLabelsForMode('dev:convex')).toEqual(['convex'])
 	})
@@ -262,13 +283,35 @@ describe('dev runner scenarios', () => {
 		})
 
 		expect(specs.map((spec) => spec.label)).toEqual([
-			'convex',
+			'backend',
+			'storage-a',
+			'storage-b',
+			'account-web',
 			'core',
 			'app-frontend',
 			'app:1',
 			'app:3',
 		])
 		const apps = specs.filter((spec) => spec.label.startsWith('app:'))
+		for (const app of apps) {
+			const config = JSON.parse(app.args[app.args.indexOf('--config') + 1]!)
+			expect(config.app.security.csp['img-src']).toContain('http://127.0.0.1:8787')
+			expect(config.app.security.capabilities).toEqual([
+				'ads',
+				'core',
+				'plugins',
+				{
+					identifier: 'local-account-backend',
+					windows: ['main'],
+					permissions: [
+						{
+							identifier: 'http:default',
+							allow: [{ url: 'http://127.0.0.1:8787/*' }, { url: 'http://127.0.0.1:16662/*' }],
+						},
+					],
+				},
+			])
+		}
 		const cwd = process.cwd().replaceAll('\\', '/')
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
 			`${cwd}/.data/scenarios/1`,

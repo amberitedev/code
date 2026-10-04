@@ -48,10 +48,12 @@ impl ModrinthCredentials {
                     creds.session = value.session;
                     creds.expires = Utc::now() + Duration::weeks(2);
                     creds.upsert(exec).await?;
+                    crate::self_hosted::accounts::sync_sharing(Some(&creds));
 
                     Ok(Some(creds))
                 } else {
                     Self::remove(&creds.user_id, exec).await?;
+                    crate::self_hosted::accounts::sync_sharing(None);
 
                     Ok(None)
                 }
@@ -179,6 +181,15 @@ impl ModrinthCredentials {
 
         let user_ids = all.into_iter().map(|x| x.0).collect::<Vec<_>>();
 
+        if crate::self_hosted::accounts::enabled() {
+            crate::self_hosted::accounts::users(
+                &user_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                &state.fetch_semaphore,
+                &state.pool,
+            )
+            .await?;
+            return Ok(());
+        }
         CachedEntry::get_user_many(
             &user_ids.iter().map(|x| &**x).collect::<Vec<_>>(),
             Some(CacheBehaviour::Bypass),

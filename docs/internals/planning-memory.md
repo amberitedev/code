@@ -7,7 +7,7 @@ Read this before preparing an implementation handoff. Do not treat every idea be
 
 Current handoff: [goals and decisions](account-sharing-implementation-plan.md).
 Ilai requested deletion of the separate implementation-thread prompt on 2026-09-24.
-Implementation has not started. The backend runtime remains unapproved. The client audit is complete;
+Implementation is underway on `restore-account-sharing`. The backend runtime is now approved;
 Ilai subsequently chose an upstream-behavior client baseline, as recorded below. On 2026-09-24 he
 requested that the plan explain goals and decisions rather than prescribe implementation steps.
 
@@ -28,6 +28,19 @@ requested that the plan explain goals and decisions rather than prescribe implem
 - Do not implement from this memory alone. Prepare a bounded plan and obtain Ilai's approval.
 
 ## Current milestone: account and sharing separation
+
+**Accepted implementation clarifications, September 24:** one combined Cloudflare backend with
+local persistent D1, no deployment or billing dependency. Real email/password test accounts in the
+database; external OAuth and outbound email providers deferred. Existing native app-lib workflows
+stay native. Ilai authorized app-lib changes but wants our additions isolated for upstream merges.
+He selected a Rust storage module and runnable entry point inside app-lib, independent of Minecraft
+management. Owner stores every exact upload/update locally. Metadata goes first, then owner uploads
+directly to an available storage node; second node pulls a verified replica. No required R2 or
+temporary hosted byte storage. Later tunneling/port forwarding does not block local proof.
+
+**Encryption clarification:** Core operators must eventually be unable to read contributed files.
+Ilai explicitly deferred all encryption implementation for this milestone. This supersedes the earlier
+requirement to implement encryption now; disk encryption is not the eventual privacy solution.
 
 **Accepted.** Recreate the account/social and private instance-sharing behavior the Modrinth client
 expects, on our services. Keep the fork close to upstream. This milestone does not require a Minecraft
@@ -60,8 +73,8 @@ scope still needs a bounded implementation plan; its eventual behavior is not al
 - **Central backend:** provider-hosted accounts, sessions, friends, and related account functionality.
 - **Sharing backend:** shared-instance metadata, versions, access, storage locations, contributor
   availability, and coordination/processing better performed centrally than on clients.
-- These are logical responsibilities. Ilai is interested in combining them. One deployment with
-  separate modules is an agent recommendation, not a finalized provider/deployment decision.
+- These are logical responsibilities. Ilai selected one combined Cloudflare backend with separate
+  modules and a shared D1 database, developed locally for this milestone.
 - **Core / Copal:** user-hosted Minecraft server-management product. We do not pay to host users' Cores.
 - **Storage service:** separable from Minecraft management. Can run alongside a Core or by itself.
 - **NAS:** Ilai's separately registered storage/overflow service. Not a Core and not a permanent
@@ -101,9 +114,9 @@ or privileged service credentials. Inventory provider configuration separately f
 - One TS API client exists, but native Rust sharing code also performs HTTP. Compatibility work must
   account for native transport/auth/upload checks; a base-URL change is not sufficient by itself.
 
-**Proposed hosting:** Cloudflare Workers + D1 + hibernating Durable Objects for lightweight hosted
-APIs/metadata/presence. Cloud Run + managed Postgres remains an alternative if retaining Rust/SQL
-outweighs adaptation. Neither stack is a finalized implementation approval.
+**Accepted hosting, September 24:** one combined Cloudflare Workers backend with D1 and a
+friends/presence Durable Object. Ilai selected this runtime during implementation and requires local
+development without billing or deployment. This supersedes the earlier Cloud Run/Postgres alternative.
 
 Ilai wants sustainable free-tier operation for an illustrative 1,000-5,000 users. Some small usage-based
 expense is acceptable; subscription minimums are undesirable. These are not measured workload targets.
@@ -125,7 +138,9 @@ He means metadata is inexpensive to operate, not that Postgres software being fr
   not block them. Metadata visibility alone must not falsely imply bytes are retrievable.
 - **Accepted engineering direction:** compression, reuse of unchanged content, integrity checks,
   safe copy-verify-retire repair, and background transfers. Exact algorithms are delegated to the agent.
-- **Accepted:** encrypt contributed content. Key management/recovery design is open engineering work.
+- **Deferred for this milestone, September 24:** encrypt contributed content. The eventual requirement
+  prevents the storage operator from reading contributed files. Ilai explicitly instructed us to leave
+  encryption unimplemented for now. Key management/recovery remains open engineering work.
 - **Deferred:** erasure coding. It was discussed as a possible storage optimization, not selected.
 - Preserve currently supported Modrinth sharing content first. KubeJS/FancyMenu and other custom
   content support is a later extension; no lossless "turn every asset into text" assumption.

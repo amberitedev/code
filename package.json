@@ -7,6 +7,7 @@
 		"prepare": "vp config --no-agent",
 		"dev": "node scripts/dev-runner.ts dev",
 		"dev:app": "node scripts/dev-runner.ts dev:app",
+		"dev:backend": "node scripts/dev-runner.ts dev:backend",
 		"dev:core": "node scripts/dev-runner.ts dev:core",
 		"dev:convex": "node scripts/dev-runner.ts dev:convex",
 		"dev:check": "node scripts/dev-runner.ts dev --dry-run",

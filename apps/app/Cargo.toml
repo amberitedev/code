@@ -9,7 +9,6 @@ license = "GPL-3.0-only"
 
 [dependencies]
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
-base64 = { workspace = true }
 chrono = { workspace = true }
 daedalus = { workspace = true }
 dashmap = { workspace = true }
@@ -17,11 +16,9 @@ either = { workspace = true }
 enumset = { workspace = true, features = ["serde"] }
 hyper = { workspace = true, features = ["server"] }
 hyper-util = { workspace = true }
-keyring = { workspace = true }
 native-dialog = { workspace = true }
 paste = { workspace = true }
 path-util = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls-webpki-roots"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
@@ -36,7 +33,7 @@ tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 theseus = { workspace = true, features = ["tauri"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "time"] }
+tokio = { workspace = true, features = ["time"] }
 tracing = { workspace = true }
 tracing-error = { workspace = true }
 url = { workspace = true }
@@ -57,12 +54,25 @@ tauri-build = { workspace = true, features = ["codegen"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 tauri-plugin-updater = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation.workspace = true
+core-graphics.workspace = true
+objc2-app-kit = { workspace = true, features = ["NSWindow"] }
+
 [target."cfg(windows)".dependencies]
-windows = { workspace = true, features = [
+webview2-com.workspace = true
+windows-core.workspace = true
+
+[target."cfg(windows)".dependencies.windows]
+workspace = true
+features = [
 	"Win32_Foundation",
+	"Win32_Graphics_Dwm",
+	"Win32_Graphics_Gdi",
 	"Win32_System_Com",
 	"Win32_UI_Shell",
-] }
+	"Win32_UI_WindowsAndMessaging",
+]
 
 [features]
 # by default Tauri runs in production mode

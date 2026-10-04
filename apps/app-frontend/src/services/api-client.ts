@@ -1,27 +1,34 @@
 import {
-	AmberiteFeature,
 	AuthFeature,
 	NodeAuthFeature,
 	nodeAuthState,
 	PanelVersionFeature,
 	TauriModrinthClient,
 	VerboseLoggingFeature,
-	amberiteFeatureConfig,
+	SelfHostedFeature,
 } from '@modrinth/api-client'
 import { getVersion } from '@tauri-apps/api/app'
 
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
-import { amberite } from '@/services/amberite'
 
 const appVersion = getVersion()
 
 export const apiClient = new TauriModrinthClient({
-	userAgent: async () => `amberite/${await appVersion}`,
+	userAgent: async () => `modrinth/theseus/${await appVersion}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
-	archonBaseUrl: config.archonBaseUrl,
+	selfHostedHosting: Boolean(config.coreUrl),
+	archonBaseUrl: () => (config.coreUrl ? `${config.coreUrl}/hosting` : config.archonBaseUrl),
 	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
 	features: [
+		...(config.accountApiUrl
+			? [
+					new SelfHostedFeature({
+						baseUrl: config.accountApiUrl,
+						token: async () => (await getModrinthCredentials())?.session,
+					}),
+				]
+			: []),
 		new NodeAuthFeature({
 			getAuth: () => nodeAuthState.getAuth?.() ?? null,
 			refreshAuth: async () => await nodeAuthState.refreshAuth?.(),
@@ -31,7 +38,6 @@ export const apiClient = new TauriModrinthClient({
 		}),
 		new PanelVersionFeature(),
 		new VerboseLoggingFeature(),
-		new AmberiteFeature(amberiteFeatureConfig(amberite.adapter, amberite.transport)),
 	],
 })
 

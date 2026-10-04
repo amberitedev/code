@@ -31,7 +31,7 @@
 				:organization="organization"
 				:members="members"
 				:org-link="(slug) => `https://modrinth.com/organization/${slug}`"
-				:user-link="(username) => `/user/${encodeURIComponent(username)}`"
+				:user-link="(username) => `/user/${encodeURIComponent(username)}?source=modrinth`"
 				link-target="_blank"
 				:user-link-target="null"
 				class="project-sidebar-section"
@@ -728,7 +728,7 @@ async function fetchProjectData() {
 	for (const member of members.value ?? []) {
 		for (const identifier of [member.user.id, member.user.username]) {
 			if (identifier) {
-				queryClient.setQueryData(['users', 'summary', identifier], member.user)
+				queryClient.setQueryData(['users', 'modrinth', 'summary', identifier], member.user)
 			}
 		}
 	}

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import LocalServers from './hosting/LocalServers.vue'
+import { config as appConfig } from '@/config'
+
 import type { Labrinth } from '@modrinth/api-client'
 import { ServerStackIcon } from '@modrinth/assets'
 import { injectModrinthClient, ServersManagePageIndex } from '@modrinth/ui'
@@ -24,13 +27,16 @@ useRootBreadcrumb({
 const { data: products } = useQuery({
 	queryKey: ['billing', 'products'],
 	queryFn: () => client.labrinth.billing_internal.getProducts(),
+	enabled: !client.selfHostedHosting,
 })
 
 const resolvedProducts = computed<Labrinth.Billing.Internal.Product[]>(() => products.value ?? [])
 </script>
 
 <template>
+	<LocalServers v-if="appConfig.coreUrl" />
 	<ServersManagePageIndex
+		v-else
 		:stripe-publishable-key="stripePublishableKey"
 		:products="resolvedProducts"
 	/>

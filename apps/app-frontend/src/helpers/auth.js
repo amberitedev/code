@@ -59,7 +59,7 @@ export async function remove_user(user) {
 
 /**
  * Returns a list of users
- * @returns {Promise<Credential[]>}
+ * @returns {Promise<Array<{profile: {id: string, name: string}, expires: string, active: boolean}>>}
  */
 export async function users() {
 	return await invoke('plugin:auth|get_users')

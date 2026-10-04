@@ -171,7 +171,7 @@ onMounted(() => {
 					</div>
 					<TagItem
 						v-if="newlyAdded"
-						class="!border-brand !bg-brand-highlight !px-2 !font-medium !text-brand"
+						class="!border-green !bg-bg-green !px-2 !font-medium !text-green"
 					>
 						<SparklesIcon aria-hidden="true" />
 						{{ formatMessage(messages.newInstance) }}
@@ -216,7 +216,7 @@ onMounted(() => {
 					"
 					:disabled="instance.quarantined || playing || loading"
 					type="colored"
-					color="brand"
+					color="green"
 					@click="play"
 				>
 					<SpinnerIcon v-if="loading" class="animate-spin" />

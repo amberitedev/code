@@ -50,9 +50,8 @@ The central backend owns accounts, sessions, friends, and related social state. 
 owns shared-instance metadata, membership, versions, storage locations, and coordination. These are
 logical responsibilities, not necessarily separate deployments.
 
-One backend application with separate modules and a shared relational database is the current
-recommendation, not a finalized deployment decision. It avoids unnecessary calls between services
-that need the same users.
+Ilai selected one Cloudflare backend application with separate modules and a shared D1 database.
+Local development uses persistent emulated services without deployment or billing setup.
 
 The storage component holds shared bytes independently of Minecraft management. Core/Copal remains
 the user-hosted server-management product. We do not host users' Cores.
@@ -70,8 +69,9 @@ changing the user experience.
   downloads while the second copy is created.
 - Owner clients retain recovery snapshots. Lost remote content is restored automatically when a
   client holding recovery data becomes available. A mutable installed instance is not a historical backup.
-- Encrypt contributed content. Compression and reuse of unchanged content should reduce storage
-  and traffic without changing client-facing payload semantics. Specific techniques are delegated.
+- Encryption must eventually prevent storage operators from reading contributed content. Ilai
+  explicitly deferred encryption for this milestone. Reuse unchanged content without changing
+  client-facing payload semantics.
 - The agreed retention direction is five recent online versions plus pinned versions, with local
   history governed by user settings. Local retention defaults remain open. New history/pinning UI
   is outside this milestone.
@@ -105,11 +105,25 @@ The existing isolated dev environment supports owner/recipient testing. Official
 needed for reference checks. Ilai accepted testing two accounts on one computer; installation isolation
 and the reported installer-issued sharing credentials still need verification if those checks are needed.
 
-## Open decision: backend runtime
+## Accepted implementation decisions, September 24
 
-Cloudflare Workers + D1 is the current candidate. Retaining relevant Rust/Postgres code on a service
-such as Cloud Run is an alternative. The choice depends on actual code portability and operating cost.
-The implementing agent should recommend a choice to Ilai before committing to a large port.
+Ilai selected one combined Cloudflare backend, developed locally with persistent D1 and no cloud
+deployment or billing dependency. Use real database-backed email/password accounts for local proof.
+External OAuth and outbound email provider setup are deferred.
+
+Preserve native account and sharing paths through app-lib. Put our additions in separate modules,
+with small endpoint and integration hooks into upstream code. Ilai explicitly authorized app-lib edits
+and selected it as the home for a Rust storage module with an independent executable. Storage must
+run without Minecraft management.
+
+The owner keeps immutable copies of every uploaded version and its metadata. Send metadata first,
+then upload directly when a storage node becomes available. No mandatory temporary hosted byte
+storage or R2 staging. Availability requires verified storage receipts; a second node pulls a copy
+directly from the first. Pending work survives app restart and is scoped to its account.
+
+Encryption is deferred for this milestone by explicit instruction. The future privacy requirement is
+that a storage Core operator cannot read someone else's files, which disk encryption alone does not
+satisfy. Do not describe the current storage as private from its operator.
 
 The cost goal is free or inexpensive operation for roughly 1,000 to 5,000 users. Those figures express
 intended scale, not measured capacity. Small usage-based costs are preferable to a required subscription.

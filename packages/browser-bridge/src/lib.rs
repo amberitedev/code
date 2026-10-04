@@ -260,7 +260,7 @@ async fn route_request(
         return Ok(response(
             StatusCode::OK,
             "text/javascript; charset=utf-8",
-            include_str!("browser-bridge.js"),
+            browser_script(),
         ));
     }
     if path == ASSET_PATH {
@@ -268,9 +268,27 @@ async fn route_request(
     }
     if hyper_tungstenite::is_upgrade_request(&request) {
         let target = websocket_target(&state.dev_url, request.uri())?;
-        let (response, websocket) = hyper_tungstenite::upgrade(request, None)?;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut upstream_request = target.as_str().into_client_request()?;
+        if let Some(protocol) = request.headers().get("sec-websocket-protocol")
+        {
+            upstream_request
+                .headers_mut()
+                .insert("sec-websocket-protocol", protocol.clone());
+        }
+        let (upstream, handshake) =
+            tokio_tungstenite::connect_async(upstream_request).await?;
+        let (mut response, websocket) =
+            hyper_tungstenite::upgrade(request, None)?;
+        if let Some(protocol) =
+            handshake.headers().get("sec-websocket-protocol")
+        {
+            response
+                .headers_mut()
+                .insert("sec-websocket-protocol", protocol.clone());
+        }
         tauri::async_runtime::spawn(async move {
-            if let Err(error) = proxy_websocket(websocket, target).await {
+            if let Err(error) = proxy_websocket(websocket, upstream).await {
                 tracing::warn!(%error, "Browser bridge Vite WebSocket proxy failed");
             }
         });
@@ -411,7 +429,9 @@ fn invoke_native(
 }
 
 fn eval_native(app: &AppHandle, script: &str) -> Result<(), BridgeError> {
-    app.get_webview_window("main")
+    // The upstream ad view shares the main window, so it is no longer a
+    // single-webview window. Address the launcher webview directly.
+    app.get_webview("main")
         .ok_or(BridgeError::MissingWebview)?
         .eval(script)?;
     Ok(())
@@ -525,7 +545,7 @@ async fn proxy_http(
     Ok(response.body(Full::new(Bytes::from(body)))?)
 }
 
-fn inject_bridge(html: &str) -> String {
+fn browser_script() -> String {
     let config = json!({
         "assetPath": ASSET_PATH,
         "currentWebviewLabel": "main",
@@ -543,9 +563,16 @@ fn inject_bridge(html: &str) -> String {
         },
         "wsPath": WS_PATH,
     });
-    let injection = format!(
-        "<script>window.__AMBERITE_BROWSER_BRIDGE_CONFIG__={config}</script><script src=\"{SCRIPT_PATH}\"></script>"
-    );
+    // Keep configuration in the same-origin script so the upstream policy can
+    // continue blocking inline scripts in the browser preview.
+    format!(
+        "window.__AMBERITE_BROWSER_BRIDGE_CONFIG__={config};\n{}",
+        include_str!("browser-bridge.js")
+    )
+}
+
+fn inject_bridge(html: &str) -> String {
+    let injection = format!("<script src=\"{SCRIPT_PATH}\"></script>");
     if let Some(index) = html.find("<head>") {
         let insert_at = index + "<head>".len();
         format!("{}{}{}", &html[..insert_at], injection, &html[insert_at..])
@@ -575,11 +602,11 @@ fn websocket_target(
 
 async fn proxy_websocket(
     websocket: HyperWebsocket,
-    target: Url,
+    upstream: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
 ) -> Result<(), BridgeError> {
     let browser = websocket.await?;
-    let (upstream, _) =
-        tokio_tungstenite::connect_async(target.as_str()).await?;
     let (mut browser_sender, mut browser_receiver) = browser.split();
     let (mut upstream_sender, mut upstream_receiver) = upstream.split();
 
@@ -661,8 +688,10 @@ mod tests {
             injected.find(SCRIPT_PATH).unwrap()
                 < injected.find("/src.ts").unwrap()
         );
-        assert!(injected.contains("currentWindowLabel"));
-        assert!(injected.contains(WS_PATH));
+        assert!(!injected.contains("<script>"));
+        let script = browser_script();
+        assert!(script.contains("currentWindowLabel"));
+        assert!(script.contains(WS_PATH));
     }
 
     #[test]

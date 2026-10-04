@@ -1,6 +1,7 @@
 import type { Labrinth } from '@modrinth/api-client'
-import { loadStripe, type Stripe as StripeJs, type StripeElements } from '@stripe/stripe-js'
+import type { Stripe as StripeJs, StripeElements } from '@stripe/stripe-js'
 import type { ContactOption } from '@stripe/stripe-js/dist/stripe-js/elements/address'
+import { loadStripe } from '@stripe/stripe-js/pure'
 import type Stripe from 'stripe'
 import { computed, type Ref, ref } from 'vue'
 

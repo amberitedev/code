@@ -16,3 +16,12 @@ export function getNodeWebSocketUrl(url: string): string {
 
 	return `wss://${url}`
 }
+
+/** Download links accept an explicit local origin while retaining upstream HTTPS defaults. */
+export function getBackupDownloadUrl(nodeUrl: string, backupId: string, token: string): string {
+	const url = new URL(
+		`${getNodeBaseUrl(nodeUrl)}/modrinth/v0/backups/${encodeURIComponent(backupId)}/download`,
+	)
+	url.searchParams.set('auth', token)
+	return url.toString()
+}

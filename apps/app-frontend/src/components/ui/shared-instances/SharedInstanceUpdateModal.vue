@@ -29,6 +29,7 @@ import {
 } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
+import { config } from '@/config'
 import {
 	getSharedInstanceUnavailableReason,
 	install_update_shared_instance,
@@ -60,8 +61,10 @@ const { notifySharedInstanceError } = useSharedInstanceErrors()
 const diffs = computed<ContentDiffItem[]>(
 	() =>
 		preview.value?.diffs
-			// TODO: This is TEMP!!! Hashing needs to be done on backend
-			.filter((diff) => !(diff.type === 'updated' && !diff.projectId && diff.fileName))
+			.filter(
+				(diff) =>
+					config.accountApiUrl || !(diff.type === 'updated' && !diff.projectId && diff.fileName),
+			)
 			.map((diff) => ({
 				type: diff.type,
 				projectName: diff.projectName ?? undefined,

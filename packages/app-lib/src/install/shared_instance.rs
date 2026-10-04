@@ -18,7 +18,7 @@ use crate::state::{
     CachedEntry, ContentSetSyncStatus, ContentSourceKind, InstanceLink,
     ProjectType, SharedInstanceAttachmentInput, SharedInstanceRole, State,
 };
-use crate::util::fetch::{DownloadReason, REQWEST_CLIENT};
+use crate::util::fetch::DownloadReason;
 use futures::StreamExt;
 use path_util::SafeRelativeUtf8UnixPathBuf;
 use std::collections::{HashMap, HashSet};
@@ -803,7 +803,7 @@ async fn install_shared_instance_external_file(
         .into());
     }
 
-    let response = REQWEST_CLIENT.get(&file.url).send().await?;
+    let response = crate::self_hosted::integrity::download(&file.url).await?;
 
     if !response.status().is_success() {
         return Err(crate::ErrorKind::OtherError(format!(
@@ -862,6 +862,7 @@ async fn install_shared_instance_external_file(
         ))
         .into());
     }
+    crate::self_hosted::integrity::verify_shared_file(&bytes, file.sha256.as_deref())?;
     let bytes = bytes::Bytes::from(bytes);
 
     if file.file_type == CONFIG_BUNDLE_FILE_TYPE {

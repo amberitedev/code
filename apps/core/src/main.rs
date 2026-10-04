@@ -34,7 +34,17 @@ pub(crate) fn init_tracing() {
 
 pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
     let config = config::Config::from_env_with_no_auth(no_auth)?;
+    if config.no_auth && !config.bind_host.parse::<IpAddr>()?.is_loopback() {
+        return Err(color_eyre::eyre::eyre!(
+            "No-auth development Core must bind to a loopback address"
+        ));
+    }
 
+    if config.no_auth && config.allowed_origin == "*" {
+        return Err(color_eyre::eyre::eyre!(
+            "No-auth development Core requires an explicit app origin"
+        ));
+    }
     tokio::fs::create_dir_all(&config.data_dir).await?;
 
     let db_path = config.data_dir.join("data.db");
@@ -61,14 +71,16 @@ pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::task_scheduler::run_task_scheduler(Arc::clone(
         &state,
     )));
-    tokio::spawn(application::pairing_service::register_pairing_core(
-        Arc::clone(&state),
-    ));
-    if let Some(expires_at) = *state.pairing_code_expires_at.lock().await {
-        tokio::spawn(application::pairing_service::expire_pairing_window(
+    if !state.config.no_auth {
+        tokio::spawn(application::pairing_service::register_pairing_core(
             Arc::clone(&state),
-            expires_at,
         ));
+        if let Some(expires_at) = *state.pairing_code_expires_at.lock().await {
+            tokio::spawn(application::pairing_service::expire_pairing_window(
+                Arc::clone(&state),
+                expires_at,
+            ));
+        }
     }
     if state.config.dev_mode
         && std::io::IsTerminal::is_terminal(&std::io::stdin())

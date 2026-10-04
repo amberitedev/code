@@ -67,6 +67,7 @@ export namespace SharedInstances {
 				file_type: string
 				url: string
 				file_size?: number
+				sha256?: string
 				metadata?: FileMetadata[]
 			}
 

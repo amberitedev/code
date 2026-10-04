@@ -25,7 +25,7 @@
 				</template>
 				<template #cell-id="{ row }">
 					<CopyCode
-						:text="`${config.siteUrl}/share/${encodeURIComponent(row.id)}`"
+						:text="`${config.accountWebUrl || config.accountApiUrl || config.siteUrl}/share/${encodeURIComponent(row.id)}`"
 						:display-text="`/${row.id}`"
 					/>
 				</template>

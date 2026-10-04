@@ -6,11 +6,12 @@ export interface DevAppConfig {
 	authMode: 'dev' | 'real'
 	username: string | null
 	branch: string
-	coreUrl: string
+	coreUrl?: string
 	title: string
 	dataDir: string
-	convexUrl: string
-	convexSiteUrl: string
+	backendUrl?: string
+	convexUrl?: string
+	convexSiteUrl?: string
 }
 
 let config: DevAppConfig | null = null

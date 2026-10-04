@@ -2,6 +2,7 @@
 	<div class="w-full p-2">
 		<UserProfilePageLayout
 			:user-id="userId"
+			:account-source="isPublicProfile ? 'modrinth' : 'self-hosted'"
 			:project-type="projectType"
 			variant="app"
 			site-url="https://modrinth.com"
@@ -43,6 +44,8 @@ import {
 	defineMessages,
 	injectNotificationManager,
 	provideUserProfile,
+	provideAuth,
+	injectAuth,
 	UserProfilePageLayout,
 	useVIntl,
 } from '@modrinth/ui'
@@ -55,15 +58,38 @@ import {
 	change_user_avatar,
 	delete_user_avatar,
 	get_blocked_users,
+	get_user_collections,
+	get_user_organizations,
 	get_user_profile,
+	get_user_projects,
 	patch_user,
 	unblock_user,
 } from '@/helpers/users'
+import { apiClient } from '@/services/api-client'
+import { config } from '@/config'
+
 import { appSettingsModalOpenProfileKey } from '@/providers/app-settings-modal'
 import { useBreadcrumb } from '@/providers/breadcrumbs'
 import { injectContentInstall } from '@/providers/content-install'
 
 const route = useRoute()
+const isPublicProfile = computed(
+	() => Boolean(config.accountApiUrl) && route.query.source === 'modrinth',
+)
+const inheritedAuth = injectAuth()
+provideAuth({
+	...inheritedAuth,
+	user: computed(() => (isPublicProfile.value ? null : inheritedAuth.user.value)),
+	session_token: computed(() => (isPublicProfile.value ? null : inheritedAuth.session_token.value)),
+})
+function publicProfileRequest<T>(path: string, version = 3) {
+	return apiClient.request<T>(path, {
+		api: 'labrinth',
+		version,
+		accountSource: 'modrinth',
+		skipAuth: true,
+	})
+}
 const router = useRouter()
 const openProfileSettings = inject(appSettingsModalOpenProfileKey, () => {})
 const queryClient = useQueryClient()
@@ -108,17 +134,36 @@ async function installProject(project: Labrinth.Projects.v2.Project): Promise<vo
 		)
 	} catch (error) {
 		setProjectInstalling(project.id, false)
-		handleError(error instanceof Error ? error : new Error(String(error)))
+		handleError(error)
 	}
 }
 
 const userProfile = provideUserProfile({
-	getUser: get_user_profile,
-	getProjects: async () => [],
-	getOrganizations: async () => [],
-	getCollections: async () => [],
+	getUser: (id: string) =>
+		isPublicProfile.value
+			? publicProfileRequest<Labrinth.Users.v3.User>(`/user/${encodeURIComponent(id)}`)
+			: get_user_profile(id),
+	getProjects: (id: string) =>
+		isPublicProfile.value
+			? publicProfileRequest<Labrinth.Projects.v2.Project[]>(
+					`/user/${encodeURIComponent(id)}/projects`,
+					2,
+				)
+			: get_user_projects(id),
+	getOrganizations: (id: string) =>
+		isPublicProfile.value
+			? publicProfileRequest<Labrinth.Organizations.v3.Organization[]>(
+					`/user/${encodeURIComponent(id)}/organizations`,
+				)
+			: get_user_organizations(id),
+	getCollections: (id: string) =>
+		isPublicProfile.value
+			? publicProfileRequest<Labrinth.Collections.Collection[]>(
+					`/user/${encodeURIComponent(id)}/collections`,
+				)
+			: get_user_collections(id),
 	patchUser: patch_user,
-	changeAvatar: async (userId: string, file: Blob, extension: string) => {
+	changeAvatar: async (userId, file, extension) => {
 		await change_user_avatar(userId, new Uint8Array(await file.arrayBuffer()), extension)
 	},
 	deleteAvatar: delete_user_avatar,
@@ -137,11 +182,16 @@ const projectType = computed(() => {
 })
 
 function getCachedUserSummary(id: string) {
-	return queryClient.getQueryData<Labrinth.Users.v3.User>(['users', 'summary', id])
+	return queryClient.getQueryData<Labrinth.Users.v3.User>(
+		isPublicProfile.value ? ['users', 'modrinth', 'summary', id] : ['users', 'summary', id],
+	)
 }
 
+const profileQueryKey = (id: string) =>
+	isPublicProfile.value ? ['user', 'modrinth', id] : ['user', id]
+
 const { data: user } = useQuery({
-	queryKey: computed(() => ['user', userId.value]),
+	queryKey: computed(() => profileQueryKey(userId.value)),
 	queryFn: () => userProfile.getUser(userId.value),
 	enabled: false,
 	staleTime: 30_000,
@@ -180,7 +230,7 @@ async function ensureUserProfileData(id: string): Promise<void> {
 
 	try {
 		await queryClient.ensureQueryData({
-			queryKey: ['user', id],
+			queryKey: profileQueryKey(id),
 			queryFn: () => userProfile.getUser(id),
 			staleTime: 30_000,
 		})
@@ -190,17 +240,17 @@ async function ensureUserProfileData(id: string): Promise<void> {
 
 	await Promise.allSettled([
 		queryClient.ensureQueryData({
-			queryKey: ['user', id, 'projects'],
+			queryKey: [...profileQueryKey(id), 'projects'],
 			queryFn: () => userProfile.getProjects(id),
 			staleTime: 30_000,
 		}),
 		queryClient.ensureQueryData({
-			queryKey: ['user', id, 'organizations'],
+			queryKey: [...profileQueryKey(id), 'organizations'],
 			queryFn: () => userProfile.getOrganizations(id),
 			staleTime: 30_000,
 		}),
 		queryClient.ensureQueryData({
-			queryKey: ['user', id, 'collections'],
+			queryKey: [...profileQueryKey(id), 'collections'],
 			queryFn: () => userProfile.getCollections(id),
 			staleTime: 30_000,
 		}),
@@ -208,6 +258,7 @@ async function ensureUserProfileData(id: string): Promise<void> {
 }
 
 onBeforeRouteUpdate(async (to) => {
+	if (to.query.source !== route.query.source) return
 	const value = to.params.user
 	const id = Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 	await ensureUserProfileData(id)

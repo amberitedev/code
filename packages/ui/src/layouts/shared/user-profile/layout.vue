@@ -490,6 +490,7 @@ type EarlyAdopterProjectType =
 const props = withDefaults(
 	defineProps<{
 		userId: string
+		accountSource?: 'modrinth' | 'self-hosted'
 		projectType?: string
 		displayMode?: DisplayMode
 		sidebarPosition?: 'left' | 'right'
@@ -696,26 +697,30 @@ const messages = defineMessages({
 	},
 })
 
+const userQueryKey = computed(() =>
+	props.accountSource === 'modrinth' ? ['user', 'modrinth', props.userId] : ['user', props.userId],
+)
+
 const userQuery = useQuery({
-	queryKey: computed(() => ['user', props.userId]),
+	queryKey: userQueryKey,
 	queryFn: () => userProfile.getUser(props.userId),
 	enabled: computed(() => Boolean(props.userId)),
 	staleTime: 30_000,
 })
 const projectsQuery = useQuery({
-	queryKey: computed(() => ['user', props.userId, 'projects']),
+	queryKey: computed(() => [...userQueryKey.value, 'projects']),
 	queryFn: () => userProfile.getProjects(props.userId),
 	enabled: computed(() => Boolean(props.userId)),
 	staleTime: 30_000,
 })
 const organizationsQuery = useQuery({
-	queryKey: computed(() => ['user', props.userId, 'organizations']),
+	queryKey: computed(() => [...userQueryKey.value, 'organizations']),
 	queryFn: () => userProfile.getOrganizations(props.userId),
 	enabled: computed(() => Boolean(props.userId)),
 	staleTime: 30_000,
 })
 const collectionsQuery = useQuery({
-	queryKey: computed(() => ['user', props.userId, 'collections']),
+	queryKey: computed(() => [...userQueryKey.value, 'collections']),
 	queryFn: () => userProfile.getCollections(props.userId),
 	enabled: computed(() => Boolean(props.userId)),
 	staleTime: 30_000,
@@ -794,14 +799,14 @@ const navLinks = computed(() => {
 	return [
 		{
 			label: formatMessage(commonMessages.allProjectType),
-			href: profilePath,
+			href: `${profilePath}${props.accountSource === 'modrinth' ? '?source=modrinth' : ''}`,
 		},
 		...projectTypes.value.map((projectType) => ({
 			label:
 				projectType === 'collection'
 					? formatMessage(messages.collectionsLabel)
 					: formatMessage(getProjectTypeTitleMessage(projectType), { count: 2 }),
-			href: `${profilePath}/${projectType}s`,
+			href: `${profilePath}/${projectType}s${props.accountSource === 'modrinth' ? '?source=modrinth' : ''}`,
 		})),
 	]
 })
@@ -1078,6 +1083,6 @@ async function toggleAffiliate(): Promise<void> {
 	await userProfile.patchUser(user.value.id, {
 		badges: user.value.badges ^ UserBadge.AFFILIATE,
 	})
-	await queryClient.invalidateQueries({ queryKey: ['user', props.userId] })
+	await queryClient.invalidateQueries({ queryKey: userQueryKey.value })
 }
 </script>

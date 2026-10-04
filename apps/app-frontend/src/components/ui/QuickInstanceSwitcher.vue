@@ -144,7 +144,8 @@ const getInstances = async () => {
 	})
 }
 
-void getInstances().then(updateMaxAuto).catch(handleError)
+await getInstances()
+updateMaxAuto()
 
 useAppEvent('instance', async (event) => {
 	if (event.event !== 'synced') {

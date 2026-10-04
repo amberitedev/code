@@ -192,6 +192,18 @@ pub async fn create_backup(
     trigger: &str,
     name: Option<String>,
 ) -> Result<BackupRecord, BackupError> {
+    create_backup_with_id(state, instance_id, trigger, name, Uuid::new_v4())
+        .await
+}
+
+/// Hosting reserves the snapshot ID before its asynchronous operation starts.
+pub async fn create_backup_with_id(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    trigger: &str,
+    name: Option<String>,
+    id: Uuid,
+) -> Result<BackupRecord, BackupError> {
     let iid: InstanceId =
         instance_id.parse().map_err(|_| BackupError::NotFound)?;
     let record = state
@@ -204,7 +216,7 @@ pub async fn create_backup(
         || state.instances.contains_key(&iid);
     let trigger = normalize_trigger(trigger);
     let store_dir = storage_dir(state, instance_id);
-    let id = Uuid::new_v4().to_string();
+    let id = id.to_string();
     let zip_path = store_dir.join(format!("{id}.zip"));
     let display_name = name.unwrap_or_else(|| {
         chrono::Utc::now()
@@ -368,9 +380,45 @@ pub async fn restore_backup(
     instance_id: &str,
     backup_id: &str,
 ) -> Result<(), BackupError> {
+    restore_backup_with_safety_name(
+        state,
+        instance_id,
+        backup_id,
+        "pre-restore".into(),
+    )
+    .await
+}
+
+/// Never replace live files unless the requested safety snapshot succeeded.
+pub async fn restore_backup_with_safety_name(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    backup_id: &str,
+    safety_name: String,
+) -> Result<(), BackupError> {
     let iid: InstanceId =
         instance_id.parse().map_err(|_| BackupError::NotFound)?;
+    // Share the start-instance lock through the safety snapshot and filesystem
+    // replacement. A start requested while restore is queued must either finish
+    // first (and fail this stopped check), or wait until restoration is complete.
+    let operation_lock = state
+        .instance_operation_locks
+        .entry(iid.clone())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    let operation_guard = operation_lock.lock_owned().await;
     if state.instances.contains_key(&iid) {
+        return Err(BackupError::MustBeOffline);
+    }
+    let instance = state
+        .instance_store
+        .get(&iid)
+        .await
+        .map_err(|_| BackupError::NotFound)?;
+    if !matches!(
+        instance.status,
+        InstanceStatus::Offline | InstanceStatus::Crashed
+    ) {
         return Err(BackupError::MustBeOffline);
     }
     let backup = get_backup(state, instance_id, backup_id).await?;
@@ -381,15 +429,12 @@ pub async fn restore_backup(
     let data_dir = data_dir_for(state, instance_id).await?;
 
     // Auto-backup the current state before overwriting.
-    let _ = create_backup(
-        state,
-        instance_id,
-        "manual",
-        Some("pre-restore".to_string()),
-    )
-    .await;
+    create_backup(state, instance_id, "manual", Some(safety_name)).await?;
 
     tokio::task::spawn_blocking(move || {
+        // Keep the lock even if the awaiting request is cancelled while this
+        // blocking filesystem operation is still running.
+        let _operation_guard = operation_guard;
         restore_data_dir_atomically(&zip, &data_dir)
     })
     .await

@@ -16,7 +16,7 @@ export function useSharedInstanceInviteLink(
 	const pending = ref(false)
 	const link = computed(() =>
 		details.value
-			? `${config.siteUrl}/share/${encodeURIComponent(details.value.inviteId)}`
+			? `${config.accountWebUrl || config.accountApiUrl || config.siteUrl}/share/${encodeURIComponent(details.value.inviteId)}`
 			: undefined,
 	)
 

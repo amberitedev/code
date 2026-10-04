@@ -1,4 +1,4 @@
-import type { Archon } from '@modrinth/api-client'
+import { type Archon, getBackupDownloadUrl } from '@modrinth/api-client'
 
 import { injectModrinthClient } from '../providers/api-client'
 import { injectNotificationManager } from '../providers/web-notifications'
@@ -36,10 +36,7 @@ export function useServerBackupDownload() {
 					return
 				}
 
-				window.open(
-					`https://${kyrosUrl}/modrinth/v0/backups/${latestBackup.id}/download?auth=${jwt}`,
-					'_blank',
-				)
+				window.open(getBackupDownloadUrl(kyrosUrl, latestBackup.id, jwt), '_blank')
 			} catch {
 				addNotification({
 					title: 'Download failed',

@@ -17,6 +17,8 @@ pub mod install;
 mod launcher;
 mod logger;
 mod state;
+pub mod self_hosted;
+pub mod storage;
 
 pub use api::*;
 pub use error::*;

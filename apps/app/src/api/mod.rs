@@ -20,6 +20,11 @@ pub mod tags;
 pub mod users;
 pub mod utils;
 
+pub mod ads;
+#[cfg(target_os = "macos")]
+mod ads_occlusion_macos;
+#[cfg(windows)]
+mod ads_occlusion_windows;
 pub mod cache;
 pub mod files;
 pub mod friends;
@@ -48,9 +53,6 @@ pub enum TheseusSerializableError {
 
     #[error("Tauri error: {0}")]
     Tauri(#[from] tauri::Error),
-
-    #[error("Keyring error: {0}")]
-    Keyring(#[from] keyring::Error),
 
     #[cfg(feature = "updater")]
     #[error("Updater error: {0}")]
@@ -132,14 +134,12 @@ macro_rules! impl_serialize {
 impl_serialize! {
     IO,
     Tauri,
-    Keyring,
 }
 
 #[cfg(feature = "updater")]
 impl_serialize! {
     IO,
     Tauri,
-    Keyring,
     Updater,
     Http,
 }

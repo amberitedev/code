@@ -8,9 +8,14 @@ import * as NodePath from 'node:path'
 import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
+import { normalizeScenarioDatabase, runningAppCommands } from './scenario-state.ts'
 
 const BASE_PORTS = {
 	app: 1420,
+	backend: 8787,
+	accountWeb: 3100,
+	storageA: 17800,
+	storageB: 17801,
 	convexCloud: 3210,
 	convexSite: 3211,
 	core: 16662,
@@ -28,11 +33,15 @@ const FETCH_BAD_PORTS = new Set([
 	6669, 6679, 6697, 10080,
 ])
 
-export const DEV_MODES = ['dev', 'dev:app', 'dev:core', 'dev:convex'] as const
+export const DEV_MODES = ['dev', 'dev:app', 'dev:backend', 'dev:core', 'dev:convex'] as const
 export type DevMode = (typeof DEV_MODES)[number]
 export type ConvexMode = 'cloud' | 'local'
 export type DevPorts = {
 	readonly app: number
+	readonly backend: number
+	readonly accountWeb: number
+	readonly storageA: number
+	readonly storageB: number
 	readonly convexCloud: number
 	readonly convexSite: number
 	readonly core: number
@@ -55,6 +64,7 @@ type RunnerInput = {
 	readonly scenarios: ReadonlyArray<number>
 }
 export type ProcessSpec = {
+	readonly executable?: string
 	readonly args: ReadonlyArray<string>
 	readonly cwd: string
 	readonly env: NodeJS.ProcessEnv
@@ -86,6 +96,10 @@ export function isBrowserAllowedPort(port: number): boolean {
 export function portsForOffset(offset: number): DevPorts {
 	return {
 		app: BASE_PORTS.app + offset,
+		backend: BASE_PORTS.backend + offset,
+		accountWeb: BASE_PORTS.accountWeb + offset,
+		storageA: BASE_PORTS.storageA + offset,
+		storageB: BASE_PORTS.storageB + offset,
 		convexCloud: BASE_PORTS.convexCloud + offset,
 		convexSite: BASE_PORTS.convexSite + offset,
 		core: BASE_PORTS.core + offset,
@@ -162,6 +176,10 @@ export function createRuntimeEnvironment(input: {
 	const env: NodeJS.ProcessEnv = { ...input.baseEnv }
 	delete env.HOST
 	delete env.PORT
+	env.ACCOUNT_API_URL = `http://127.0.0.1:${input.ports.backend}`
+	env.VITE_ACCOUNT_API_URL = env.ACCOUNT_API_URL
+	env.ACCOUNT_WEB_URL = `http://127.0.0.1:${input.ports.accountWeb}`
+	env.NUXT_PUBLIC_ACCOUNT_API_URL = env.ACCOUNT_API_URL
 
 	if (input.convexMode === 'local') {
 		delete env.CONVEX_SELF_HOSTED_ADMIN_KEY
@@ -204,7 +222,9 @@ export function createRuntimeEnvironment(input: {
 export function processLabelsForMode(mode: DevMode): ReadonlyArray<string> {
 	switch (mode) {
 		case 'dev':
-			return ['convex', 'core', 'app-frontend']
+			return ['backend', 'storage-a', 'storage-b', 'account-web', 'core', 'app-frontend']
+		case 'dev:backend':
+			return ['backend', 'storage-a', 'storage-b', 'account-web']
 		case 'dev:app':
 			return ['app-frontend']
 		case 'dev:core':
@@ -216,11 +236,12 @@ export function processLabelsForMode(mode: DevMode): ReadonlyArray<string> {
 
 async function main(): Promise<void> {
 	const paths = resolveWorktreePaths()
-	const convexMode = resolveConvexMode(paths)
 	const input = parseInput(
 		process.argv.slice(2),
 		readDefaultScenarios(NodePath.join(paths.worktree, 'dev.json')),
 	)
+	const convexMode =
+		input.mode === 'dev:convex' || input.mode === 'dev:core' ? resolveConvexMode(paths) : 'local'
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.AMBERITE_DEV_INSTANCE,
 		explicitOffset: process.env.AMBERITE_PORT_OFFSET,
@@ -235,12 +256,32 @@ async function main(): Promise<void> {
 	const ports = portsForOffset(selectedOffset)
 	const branch = currentBranch(paths.worktree)
 	const sharedEnv = {
+		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env.prod')),
+		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env')),
 		...readEnv(NodePath.join(paths.primary, '.env.local')),
 		...readEnv(NodePath.join(paths.primary, 'apps', 'core', '.env.local')),
 		...readEnv(NodePath.join(paths.worktree, '.env.local')),
 		...process.env,
 	}
-	const env = createRuntimeEnvironment({ baseEnv: sharedEnv, convexMode, paths, ports })
+	const env = createRuntimeEnvironment({
+		baseEnv: sharedEnv,
+		convexMode,
+		paths,
+		ports,
+		...(input.mode !== 'dev:convex' && input.mode !== 'dev:core'
+			? { localDeployment: 'unused' }
+			: {}),
+	})
+	if (!input.dryRun) {
+		const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
+		NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
+		if (!NodeFS.existsSync(secretPath))
+			NodeFS.writeFileSync(secretPath, NodeCrypto.randomBytes(32).toString('hex'), { mode: 0o600 })
+		env.AMBERITE_LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
+		if (processLabelsForMode(input.mode).includes('backend')) {
+			prepareLocalBackend(paths, ports, env)
+		}
+	}
 	const specs = createProcessSpecs({
 		branch,
 		convexMode,
@@ -264,6 +305,7 @@ async function main(): Promise<void> {
 	if (input.dryRun) return
 
 	ensureDataLayout(paths, input.scenarios)
+	if (input.mode === 'dev:convex' && convexMode === 'local') ensureConvexDataLink(paths)
 	writeRuntimeFile({
 		branch,
 		convexMode,
@@ -296,6 +338,11 @@ async function main(): Promise<void> {
 		finish?.()
 	}
 	const start = (spec: ProcessSpec) => {
+		if (spec.label.startsWith('app:')) {
+			const dataDir = spec.env.THESEUS_CONFIG_DIR
+			if (!dataDir) throw new DevRunnerError('App scenario is missing its data directory.')
+			normalizeScenarioDatabase(paths.worktree, dataDir, runningAppCommands())
+		}
 		const running = spawnProcess(paths.worktree, spec)
 		processes.set(spec.label, running)
 		void running.done.then(
@@ -311,6 +358,27 @@ async function main(): Promise<void> {
 		return running
 	}
 	const restart = async (label: string) => {
+		if (label === 'storage') {
+			const storage = ['storage-a', 'storage-b']
+				.map((id) => specsByLabel.get(id))
+				.filter((spec) => spec !== undefined)
+			if (storage.length !== 2) {
+				runnerLog('warning', 'Storage services are not part of this run.')
+				return
+			}
+			for (const spec of storage) {
+				const current = processes.get(spec.label)
+				processes.delete(spec.label)
+				if (current) await stopProcess(current)
+			}
+			try {
+				copyStorageBinary(paths, env)
+			} catch (error) {
+				runnerLog('error', `Storage executable update failed: ${String(error)}`)
+			}
+			for (const spec of storage) start(spec)
+			return
+		}
 		const spec = specsByLabel.get(label)
 		if (!spec || (label !== 'core' && !label.startsWith('app:'))) {
 			runnerLog('warning', `Unknown restart target ${label}. Use rs <scenario> or rs core.`)
@@ -329,6 +397,7 @@ async function main(): Promise<void> {
 		if (processes.get(spec.label) !== running) return
 		processes.delete(spec.label)
 		if (stopping) return
+		if (spec.label === 'storage-build' && code === 0) return
 
 		if (spec.label === 'core' || (spec.label.startsWith('app:') && code !== 0)) {
 			const now = Date.now()
@@ -372,15 +441,31 @@ async function main(): Promise<void> {
 	}
 	const commands = createCommandInput({
 		getCore: () => processes.get('core'),
-		restart: (target) => restart(target === 'core' ? target : `app:${target}`),
+		restart: (target) => restart(['core', 'storage'].includes(target) ? target : `app:${target}`),
+		stop: () => stop(0),
 	})
 
-	for (const spec of specs) start(spec)
+	const storageSpecs = specs.filter((spec) => spec.label.startsWith('storage-'))
 
 	process.once('SIGINT', () => void stop(130))
 	process.once('SIGTERM', () => void stop(143))
 
 	try {
+		for (const spec of specs.filter((spec) => !spec.label.startsWith('storage-'))) start(spec)
+		if (storageSpecs.length > 0) {
+			const build = start({
+				executable: 'cargo',
+				args: ['build', '-p', 'theseus', '--bin', 'sharing-storage'],
+				cwd: paths.worktree,
+				env,
+				label: 'storage-build',
+			})
+			if ((await build.done) !== 0) throw new DevRunnerError('Local storage service build failed.')
+			if (!stopping) {
+				copyStorageBinary(paths, env)
+				for (const spec of storageSpecs) start(spec)
+			}
+		}
 		if (convexMode === 'local' && processLabelsForMode(input.mode).includes('convex')) {
 			await prepareConvex({
 				env,
@@ -472,7 +557,6 @@ function resolveWorktreePaths(): WorktreePaths {
 
 function ensureDataLayout(paths: WorktreePaths, scenarios: ReadonlyArray<number>): void {
 	NodeFS.mkdirSync(paths.data, { recursive: true })
-	ensureConvexDataLink(paths)
 	NodeFS.mkdirSync(paths.coreData, { recursive: true })
 	for (const scenario of new Set([1, 2, 3, 4, ...scenarios])) {
 		NodeFS.mkdirSync(scenarioDataPath(paths, scenario), { recursive: true })
@@ -523,16 +607,37 @@ export function createProcessSpecs(input: {
 			'utf8',
 		),
 	) as {
-		readonly app: { readonly security: { readonly csp: Record<string, string> } }
+		readonly app: {
+			readonly security: {
+				readonly csp: Record<string, string>
+				readonly capabilities: readonly unknown[]
+			}
+		}
 	}
 	const connectSrc = tauri.app.security.csp['connect-src']
 	const convexOrigin = new URL(convexUrl).origin
 	const convexSiteOrigin = new URL(convexSiteUrl).origin
+	const backendUrl = `http://127.0.0.1:${input.ports.backend}`
+	const coreUrl = `http://127.0.0.1:${input.ports.core}`
 	const tauriOverride = {
 		app: {
 			security: {
+				capabilities: [
+					...tauri.app.security.capabilities,
+					{
+						identifier: 'local-account-backend',
+						windows: ['main'],
+						permissions: [
+							{
+								identifier: 'http:default',
+								allow: [{ url: `${backendUrl}/*` }, { url: `${coreUrl}/*` }],
+							},
+						],
+					},
+				],
 				csp: {
-					'connect-src': `${connectSrc} http://localhost:${input.ports.app} ws://localhost:${input.ports.app} ${convexOrigin} ${convexOrigin.replace('http', 'ws')} ${convexSiteOrigin}`,
+					'img-src': `${tauri.app.security.csp['img-src']} ${backendUrl}`,
+					'connect-src': `${connectSrc} http://localhost:${input.ports.app} ws://localhost:${input.ports.app} ${convexOrigin} ${convexOrigin.replace('http', 'ws')} ${convexSiteOrigin} ${backendUrl} ${backendUrl.replace('http', 'ws')} ${coreUrl} ${coreUrl.replace('http', 'ws')}`,
 				},
 			},
 		},
@@ -545,23 +650,48 @@ export function createProcessSpecs(input: {
 		...input.env,
 		ALLOWED_ORIGIN: `http://localhost:${input.ports.app}`,
 		AMBERITE_BIND_HOST: '127.0.0.1',
+		AMBERITE_NO_AUTH: 'true',
 		AMBERITE_PUBLIC_URL: `http://127.0.0.1:${input.ports.core}`,
 		CORE_DATA_DIR: input.paths.coreData,
 		PORT: String(input.ports.core),
 	}
 	const specs: Record<string, ProcessSpec> = {
-		'app-frontend': {
+		backend: {
 			args: [
-				'run',
-				'--filter',
-				'@modrinth/app-frontend',
+				'exec',
+				'wrangler',
 				'dev',
-				'--',
+				'--local',
+				'--ip',
+				'127.0.0.1',
 				'--port',
-				String(input.ports.app),
-				'--strictPort',
+				String(input.ports.backend),
+				'--persist-to',
+				NodePath.join(input.paths.data, 'backend'),
+				'--env-file',
+				NodePath.join(input.paths.data, 'backend', '.dev.vars'),
 			],
-			cwd: input.paths.worktree,
+			cwd: NodePath.join(input.paths.worktree, 'apps', 'backend'),
+			env: input.env,
+			label: 'backend',
+		},
+		'account-web': {
+			args: [
+				'exec',
+				'nuxi',
+				'dev',
+				'--host',
+				'127.0.0.1',
+				'--port',
+				String(input.ports.accountWeb),
+			],
+			cwd: NodePath.join(input.paths.worktree, 'apps', 'frontend'),
+			env: { ...input.env, SITE_URL: input.env.ACCOUNT_WEB_URL },
+			label: 'account-web',
+		},
+		'app-frontend': {
+			args: ['dev', '--port', String(input.ports.app), '--strictPort'],
+			cwd: NodePath.join(input.paths.worktree, 'apps', 'app-frontend'),
 			env: input.env,
 			label: 'app-frontend',
 		},
@@ -591,6 +721,26 @@ export function createProcessSpecs(input: {
 			label: 'core',
 		},
 	}
+	for (const [id, port] of [
+		['a', input.ports.storageA],
+		['b', input.ports.storageB],
+	] as const) {
+		const label = `storage-${id}`
+		specs[label] = {
+			executable: storageBinaryPath(input.paths),
+			args: [],
+			cwd: input.paths.worktree,
+			label,
+			env: {
+				...input.env,
+				SHARING_STORAGE_ID: label,
+				SHARING_STORAGE_ADDR: `127.0.0.1:${port}`,
+				SHARING_STORAGE_DIR: NodePath.join(input.paths.data, label),
+				SHARING_STORAGE_SECRET: storageSecret(input.env, label),
+				SHARING_BACKEND_URL: backendUrl,
+			},
+		}
+	}
 
 	const shared = labels.map((label) => specs[label]!)
 	if (input.mode !== 'dev' && input.mode !== 'dev:app') return shared
@@ -602,6 +752,7 @@ export function createProcessSpecs(input: {
 				coreUrl: `http://127.0.0.1:${input.ports.core}`,
 				convexSiteUrl,
 				convexUrl,
+				backendUrl,
 				env: input.env,
 				paths: input.paths,
 				scenario,
@@ -612,6 +763,7 @@ export function createProcessSpecs(input: {
 }
 
 function createAppProcessSpec(input: {
+	readonly backendUrl: string
 	readonly branch: string
 	readonly coreUrl: string
 	readonly convexSiteUrl: string
@@ -624,6 +776,7 @@ function createAppProcessSpec(input: {
 	const dataDir = scenarioDataPath(input.paths, input.scenario)
 	const namespace = `${input.branch}:scenario:${input.scenario}`
 	const appDevConfig = {
+		backendUrl: input.backendUrl,
 		authMode: 'dev',
 		branch: input.branch,
 		coreUrl: input.coreUrl,
@@ -631,7 +784,7 @@ function createAppProcessSpec(input: {
 		convexUrl: input.convexUrl,
 		credentialNamespace: namespace,
 		dataDir,
-		title: `Amberite ${input.scenario} — ${input.branch}`,
+		title: `Modrinth ${input.scenario} - ${input.branch}`,
 		username: scenarioUsername(input.scenario),
 	}
 	return {
@@ -651,7 +804,7 @@ function createAppProcessSpec(input: {
 		cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 		env: {
 			...input.env,
-			RUST_LOG: 'theseus=warn,theseus_gui=warn,webview=off',
+			RUST_LOG: 'theseus=warn,theseus_gui=warn,amberite_browser_bridge=info,webview=off',
 			THESEUS_CONFIG_DIR: dataDir,
 			WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
 		},
@@ -665,13 +818,18 @@ function scenarioDataPath(paths: WorktreePaths, scenario: number): string {
 
 function spawnProcess(worktree: string, spec: ProcessSpec): RunningProcess {
 	const vpPath = resolveVpPath(worktree)
-	const child = NodeChildProcess.spawn(process.execPath, [vpPath, ...spec.args], {
-		cwd: spec.cwd,
-		detached: process.platform !== 'win32',
-		env: spec.env,
-		stdio: ['pipe', 'pipe', 'pipe'],
-		windowsHide: true,
-	})
+	const child = NodeChildProcess.spawn(
+		spec.executable ?? process.execPath,
+		spec.executable ? [...spec.args] : [vpPath, ...spec.args],
+		{
+			cwd: spec.cwd,
+			detached: process.platform !== 'win32',
+			env: spec.env,
+			stdio: ['pipe', 'pipe', 'pipe'],
+			windowsHide: true,
+		},
+	)
+	runnerLog('info', `${spec.label} PID ${child.pid ?? 'unavailable'}`)
 	const recentOutput: string[] = []
 	const rememberOutput = (line: string) => {
 		recentOutput.push(line)
@@ -914,12 +1072,17 @@ function isWindowsProcessRunning(imageName: string): boolean {
 function createCommandInput(input: {
 	readonly getCore: () => RunningProcess | undefined
 	readonly restart: (target: string) => Promise<void>
+	readonly stop: () => Promise<void>
 }): NodeReadline.Interface {
 	const commands = NodeReadline.createInterface({ input: process.stdin })
 	commands.on('line', (line) => {
 		const command = line.trim()
 		if (!command) return
-		const restart = command.match(/^rs\s+(core|\d+)$/i)
+		if (command === 'quit') {
+			void input.stop()
+			return
+		}
+		const restart = command.match(/^rs\s+(core|storage|\d+)$/i)
 		if (restart) {
 			void input.restart(restart[1].toLowerCase())
 			return
@@ -935,7 +1098,7 @@ function createCommandInput(input: {
 			return
 		}
 		if (command === 'help') {
-			runnerLog('info', 'Commands: rs <scenario>, rs core, core <command>')
+			runnerLog('info', 'Commands: rs <scenario>, rs core, rs storage, core <command>, quit')
 			return
 		}
 		runnerLog('warning', `Unknown command ${command}. Type help for available commands.`)
@@ -994,7 +1157,9 @@ function canListen(port: number, host: string): Promise<boolean> {
 function requiredPortNames(mode: DevMode, convexMode: ConvexMode): ReadonlyArray<PortName> {
 	switch (mode) {
 		case 'dev':
-			return convexMode === 'local' ? ['app', 'convexCloud', 'convexSite', 'core'] : ['app', 'core']
+			return ['app', 'backend', 'accountWeb', 'storageA', 'storageB', 'core']
+		case 'dev:backend':
+			return ['backend', 'accountWeb', 'storageA', 'storageB']
 		case 'dev:app':
 			return ['app']
 		case 'dev:core':
@@ -1081,6 +1246,70 @@ function readLocalConvexDeployment(paths: WorktreePaths): string {
 	return value.deploymentName.trim()
 }
 
+function storageSecret(env: NodeJS.ProcessEnv, id: string): string {
+	return NodeCrypto.createHmac('sha256', env.AMBERITE_LOCAL_DEV_SECRET ?? 'dry-run')
+		.update(id)
+		.digest('hex')
+}
+
+function storageBinaryPath(paths: WorktreePaths): string {
+	return NodePath.join(
+		paths.data,
+		'backend',
+		'bin',
+		process.platform === 'win32' ? 'sharing-storage.exe' : 'sharing-storage',
+	)
+}
+
+function copyStorageBinary(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
+	const destination = storageBinaryPath(paths)
+	const target = NodePath.resolve(paths.worktree, env.CARGO_TARGET_DIR ?? 'target')
+	NodeFS.mkdirSync(NodePath.dirname(destination), { recursive: true })
+	// Running a copied binary keeps later Cargo rebuilds from replacing a locked Windows executable.
+	NodeFS.copyFileSync(NodePath.join(target, 'debug', NodePath.basename(destination)), destination)
+}
+
+function prepareLocalBackend(paths: WorktreePaths, ports: DevPorts, env: NodeJS.ProcessEnv): void {
+	const nodes = [
+		{
+			id: 'storage-a',
+			url: `http://127.0.0.1:${ports.storageA}`,
+			secret: storageSecret(env, 'storage-a'),
+		},
+		{
+			id: 'storage-b',
+			url: `http://127.0.0.1:${ports.storageB}`,
+			secret: storageSecret(env, 'storage-b'),
+		},
+	]
+	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.AMBERITE_LOCAL_DEV_SECRET}\nSTORAGE_NODES='${JSON.stringify(nodes)}'\n`
+	NodeFS.writeFileSync(NodePath.join(paths.data, 'backend', '.dev.vars'), variables, {
+		mode: 0o600,
+	})
+	const result = NodeChildProcess.spawnSync(
+		process.execPath,
+		[
+			resolveVpPath(paths.worktree),
+			'exec',
+			'wrangler',
+			'd1',
+			'migrations',
+			'apply',
+			'accounts',
+			'--local',
+			'--persist-to',
+			NodePath.join(paths.data, 'backend'),
+		],
+		{
+			cwd: NodePath.join(paths.worktree, 'apps', 'backend'),
+			env,
+			stdio: 'inherit',
+			windowsHide: true,
+		},
+	)
+	if (result.status !== 0) throw new DevRunnerError('Local account database migration failed.')
+}
+
 function resolveVpPath(worktree: string): string {
 	const path = NodePath.join(worktree, 'node_modules', 'vite-plus', 'bin', 'vp')
 	if (!NodeFS.existsSync(path)) {
@@ -1112,6 +1341,10 @@ function writeRuntimeFile(input: {
 		})),
 		source: input.source,
 		urls: {
+			backend: `http://127.0.0.1:${input.ports.backend}`,
+			accountWeb: `http://127.0.0.1:${input.ports.accountWeb}`,
+			storageA: `http://127.0.0.1:${input.ports.storageA}`,
+			storageB: `http://127.0.0.1:${input.ports.storageB}`,
 			app: `http://localhost:${input.ports.app}`,
 			convex: requireEnvironmentValue(input.env, 'VITE_CONVEX_URL'),
 			convexSite: requireEnvironmentValue(input.env, 'VITE_CONVEX_SITE_URL'),
@@ -1135,12 +1368,22 @@ function printPlan(input: {
 	runnerLog('info', `${input.branch} · ${input.mode}`)
 	runnerLog('info', `data ${input.paths.data}`)
 	runnerLog('info', `ports from ${input.source}`)
-	runnerLog('info', `App http://localhost:${input.ports.app}`)
-	runnerLog('info', `Core http://127.0.0.1:${input.ports.core}`)
-	runnerLog(
-		'info',
-		`Convex ${requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')} (${input.convexMode})`,
-	)
+	const labels = input.specs.map((spec) => spec.label)
+	if (labels.includes('app-frontend')) runnerLog('info', `App http://localhost:${input.ports.app}`)
+	if (labels.includes('backend')) {
+		runnerLog('info', `Accounts and sharing http://127.0.0.1:${input.ports.backend} (local)`)
+		runnerLog('info', `Account sign-in http://127.0.0.1:${input.ports.accountWeb}`)
+		runnerLog(
+			'info',
+			`Storage http://127.0.0.1:${input.ports.storageA}, http://127.0.0.1:${input.ports.storageB}`,
+		)
+	}
+	if (labels.includes('core')) runnerLog('info', `Core http://127.0.0.1:${input.ports.core}`)
+	if (labels.includes('convex'))
+		runnerLog(
+			'info',
+			`Convex ${requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')} (${input.convexMode})`,
+		)
 	if (input.scenarios.length > 0) {
 		runnerLog('info', `scenarios ${input.scenarios.join(', ')}`)
 	}

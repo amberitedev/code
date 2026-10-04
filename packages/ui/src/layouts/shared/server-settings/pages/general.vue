@@ -27,7 +27,7 @@
 						</div>
 
 						<!-- Hostname -->
-						<div class="flex flex-col gap-2.5">
+						<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
 							<label for="server-subdomain" class="flex flex-col gap-2.5">
 								<span class="text-lg font-semibold text-contrast">Hostname</span>
 								<div
@@ -184,7 +184,9 @@ const isValidLengthSubdomain = computed(() => serverSubdomain.value.length >= 5)
 const isValidCharsSubdomain = computed(
 	() => !serverSubdomain.value || /^[a-zA-Z0-9-]+$/.test(serverSubdomain.value),
 )
-const isValidSubdomain = computed(() => isValidLengthSubdomain.value && isValidCharsSubdomain.value)
+const isValidSubdomain = computed(
+	() => client.selfHostedHosting || (isValidLengthSubdomain.value && isValidCharsSubdomain.value),
+)
 
 const isUpdating = ref(false)
 const isValidServerName = computed(() => (serverName.value?.length ?? 0) > 0)
@@ -252,11 +254,13 @@ const setPreferenceValue = (key: string, value: boolean) => {
 const { data: subscriptions } = useQuery({
 	queryKey: ['billing', 'subscriptions'],
 	queryFn: () => client.labrinth.billing_internal.getSubscriptions(),
+	enabled: !client.selfHostedHosting,
 })
 
 const { data: products } = useQuery({
 	queryKey: ['billing', 'products'],
 	queryFn: () => client.labrinth.billing_internal.getProducts(),
+	enabled: !client.selfHostedHosting,
 })
 
 const serverSubscription = computed(() =>
@@ -297,7 +301,11 @@ const getServerSpecs = (product?: Labrinth.Billing.Internal.Product | null) => {
 }
 
 const serverHostname = computed(() =>
-	serverSubdomain.value ? `${serverSubdomain.value}.modrinth.gg` : 'Unknown',
+	client.selfHostedHosting && data.value?.net
+		? `${data.value.net.ip}:${data.value.net.port}`
+		: serverSubdomain.value
+			? `${serverSubdomain.value}.modrinth.gg`
+			: 'Unknown',
 )
 
 const serverSpecs = computed(() => getServerSpecs(serverProduct.value))
