@@ -1,5 +1,3 @@
-use thiserror::Error;
-
 pub mod affiliate_code_item;
 pub mod analytics_event_item;
 pub mod blocked_user_item;
@@ -30,6 +28,7 @@ pub mod payout_item;
 pub mod payouts_values_notifications;
 pub mod product_item;
 pub mod products_tax_identifier_item;
+pub mod project_disclosure_item;
 pub mod project_item;
 pub mod report_item;
 pub mod session_item;
@@ -37,6 +36,8 @@ pub mod team_item;
 pub mod thread_item;
 pub mod user_item;
 pub mod user_limits;
+pub mod user_lock_item;
+pub mod user_preferences_item;
 pub mod user_subscription_item;
 pub mod users_compliance;
 pub mod users_notifications_preferences_item;
@@ -53,6 +54,7 @@ pub use image_item::DBImage;
 pub use oauth_client_item::DBOAuthClient;
 pub use organization_item::DBOrganization;
 pub use passkey_item::DBPasskey;
+pub use project_disclosure_item::DBProjectDisclosure;
 pub use project_item::DBProject;
 pub use team_item::DBTeam;
 pub use team_item::DBTeamMember;
@@ -62,21 +64,3 @@ pub use version_item::DBVersion;
 
 pub use moderation_lock_item::{DBModerationLock, ModerationLockWithUser};
 pub use moderation_note_item::DBModerationNote;
-
-#[derive(Error, Debug)]
-pub enum DatabaseError {
-    #[error(transparent)]
-    Internal(#[from] eyre::Report),
-    #[error("Error while interacting with the database: {0}")]
-    Database(#[from] sqlx::Error),
-    #[error("Error while trying to generate random ID")]
-    RandomId,
-    #[error("Error while interacting with the cache: {0}")]
-    CacheError(#[from] redis::RedisError),
-    #[error("Error while serializing with the cache: {0}")]
-    SerdeCacheError(#[from] serde_json::Error),
-    #[error("error while encoding or decoding the cache: {0}")]
-    PostcardCacheError(#[from] postcard::Error),
-    #[error("Schema error: {0}")]
-    SchemaError(String),
-}

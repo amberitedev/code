@@ -174,7 +174,12 @@ pub fn server_v0(
     })
 }
 
-pub fn server_v1(r: &InstanceRecord, host: &str, backups: Vec<Value>) -> Value {
+pub fn server_v1(
+    r: &InstanceRecord,
+    host: &str,
+    node_url: &str,
+    backups: Vec<Value>,
+) -> Value {
     let content = if r.game_version.is_empty() {
         Value::Null
     } else {
@@ -190,9 +195,9 @@ pub fn server_v1(r: &InstanceRecord, host: &str, backups: Vec<Value>) -> Value {
             "memory_mb": r.memory.max_mb, "storage_mb": 0, "swap_mb": 0},
         "sftp_username": "", "sftp_password": "", "tags": ["self-hosted"],
         "location": {"status": "assigned", "location_metadata": {"region": "local",
-            "region_should_be_user_displayed": false, "hostname": host, "is_decommissioned_node": false}},
+            "region_should_be_user_displayed": false, "hostname": host, "url_host": node_url, "is_decommissioned_node": false}},
         "worlds": [{"id": r.id, "name": r.name, "created_at": r.created_at,
-            "is_active": true, "backups": backups, "content": content,
+            "is_active": true, "download_method": {"method_type": "unavailable"}, "backups": backups, "content": content,
             "readiness": {"data_synchronized_fetched": true}}],
     })
 }

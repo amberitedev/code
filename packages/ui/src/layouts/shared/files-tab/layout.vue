@@ -2,6 +2,12 @@
 	<slot name="modals" />
 	<FileUnsavedChangesModal ref="unsavedChangesModal" />
 	<FileCreateItemModal ref="createItemModal" :type="newItemType" @create="handleCreateNewItem" />
+	<FileCreateZipModal
+		ref="createZipModal"
+		:parent="ctx.currentPath.value"
+		:stat-file="ctx.statFile"
+		@create="handleZipSelection"
+	/>
 	<FileUploadConflictModal ref="uploadConflictModal" @proceed="handleExtractConfirm" />
 	<FileUploadZipUrlModal
 		v-if="ctx.showInstallFromUrl"
@@ -17,25 +23,7 @@
 		@move="handleMoveItem"
 	/>
 	<FileDeleteItemModal ref="deleteItemModal" :item="selectedItem" @delete="handleDeleteItem" />
-	<FileContextMenu ref="contextMenuRef">
-		<template #extract
-			><PackageOpenIcon class="size-5" />
-			{{ formatMessage(commonMessages.extractButton) }}</template
-		>
-		<template #rename
-			><EditIcon class="size-5" /> {{ formatMessage(commonMessages.renameButton) }}</template
-		>
-		<template #move
-			><RightArrowIcon class="size-5" /> {{ formatMessage(commonMessages.moveButton) }}</template
-		>
-		<template #download
-			><DownloadIcon class="size-5" />
-			{{ ctx.downloadButtonLabel ?? formatMessage(commonMessages.downloadButton) }}</template
-		>
-		<template #delete
-			><TrashIcon class="size-5" /> {{ formatMessage(commonMessages.deleteLabel) }}</template
-		>
-	</FileContextMenu>
+	<ContextMenu ref="contextMenuRef" :label="formatMessage(commonMessages.actionsLabel)" />
 	<div v-if="!(ctx.loading.value && items.length === 0)" class="contents">
 		<div class="relative flex w-full flex-col">
 			<div class="relative isolate flex w-full flex-col gap-4">
@@ -102,18 +90,23 @@
 									:index="visibleRange.start + idx"
 									:is-last="visibleRange.start + idx === filteredItems.length - 1"
 									:selected="selectedItems.has(item.path)"
-									:write-disabled="isBusy"
-									:write-disabled-tooltip="busyTooltip"
+									:write-disabled="isBusy || !!ctx.isReadOnly?.(item.path)"
+									:write-disabled-tooltip="
+										ctx.isReadOnly?.(item.path) ? ctx.readOnlyReason?.value : busyTooltip
+									"
 									@extract="() => handleExtractItem(item)"
 									@delete="() => showDeleteModal(item)"
 									@rename="() => showRenameModal(item)"
 									@download="() => handleDownload(item)"
+									@zip="() => handleZip(item)"
 									@move="() => showMoveModal(item)"
 									@move-direct-to="handleDirectMove"
 									@edit="() => handleEditFile(item)"
 									@navigate="() => handleNavigateToFolder(item)"
 									@hover="() => handleItemHover(item)"
-									@contextmenu="(x, y) => handleContextMenu(item, x, y)"
+									@contextmenu="
+										(event, options) => contextMenuRef?.open(event as MouseEvent, options)
+									"
 									@toggle-select="() => toggleItemSelection(item.path)"
 								/>
 							</div>
@@ -182,12 +175,22 @@
 				</Button>
 			</div>
 			<div class="ml-auto flex items-center gap-0.5">
+				<Button
+					v-if="ctx.zipPaths"
+					v-tooltip="busyTooltip"
+					type="quiet"
+					:disabled="isBusy"
+					@click="createZipModal?.show()"
+				>
+					<FolderArchiveIcon />
+					<span class="bar-label">{{ formatMessage(messages.createZip) }}</span>
+				</Button>
 				<div class="mx-1 h-6 w-px bg-surface-5" />
 				<Button
 					v-tooltip="busyTooltip"
 					type="quiet"
 					color="red"
-					:disabled="isBusy"
+					:disabled="isBusy || selectionReadOnly"
 					class="hover:!bg-red focus-visible:!bg-red hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
 					@click="showBulkDeleteModal"
 				>
@@ -201,19 +204,16 @@
 
 <script setup lang="ts">
 import {
-	DownloadIcon,
-	EditIcon,
+	FolderArchiveIcon,
 	FolderOpenIcon,
 	HistoryIcon,
-	PackageOpenIcon,
-	RightArrowIcon,
 	SaveIcon,
 	TrashIcon,
 } from '@modrinth/assets'
 import type { Component } from 'vue'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
-import { Button } from '#ui/components/base/buttons'
+import { Button, ContextMenu } from '#ui/components/base/buttons'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useStickyObserver } from '#ui/composables/sticky-observer'
@@ -221,15 +221,15 @@ import { useVirtualScroll } from '#ui/composables/virtual-scroll'
 import { injectFilePicker } from '#ui/providers/file-picker'
 import { injectNotificationManager } from '#ui/providers/web-notifications'
 import { commonMessages } from '#ui/utils/common-messages'
-import { canOpenInFileEditor, getFileExtension } from '#ui/utils/file-extensions'
+import { canOpenInFileEditor } from '#ui/utils/file-extensions'
 
 import FileEditor from './components/editor/FileEditor.vue'
-import FileContextMenu from './components/FileContextMenu.vue'
 import FileManagerError from './components/FileManagerError.vue'
 import FileNavbar from './components/FileNavbar.vue'
 import FileTableHeader from './components/FileTableHeader.vue'
 import FileTableRow from './components/FileTableRow.vue'
 import FileCreateItemModal from './components/modals/FileCreateItemModal.vue'
+import FileCreateZipModal from './components/modals/FileCreateZipModal.vue'
 import FileDeleteItemModal from './components/modals/FileDeleteItemModal.vue'
 import FileMoveItemModal from './components/modals/FileMoveItemModal.vue'
 import FileRenameItemModal from './components/modals/FileRenameItemModal.vue'
@@ -242,7 +242,7 @@ import { useFileSelection } from './composables/file-selection'
 import { useFileSorting } from './composables/file-sorting'
 import { useFileUndoRedo } from './composables/file-undo-redo'
 import { injectFileManager } from './providers/file-manager'
-import type { FileContextMenuOption, FileItem } from './types'
+import type { FileItem } from './types'
 
 const { formatMessage } = useVIntl()
 
@@ -283,6 +283,10 @@ const messages = defineMessages({
 		id: 'files.layout.unsaved-changes',
 		defaultMessage: 'You have unsaved changes.',
 	},
+	createZip: {
+		id: 'files.layout.create-zip',
+		defaultMessage: 'Create ZIP',
+	},
 })
 
 defineProps<{
@@ -304,8 +308,12 @@ const baseId = `files-${Math.random().toString(36).slice(2, 9)}`
 
 const items = computed(() => ctx.items.value)
 const isEditing = computed(() => ctx.editingFile.value !== null)
-const isBusy = computed(() => ctx.isBusy?.value ?? false)
-const busyTooltip = computed(() => ctx.busyTooltip?.value)
+const isBusy = computed(
+	() => (ctx.isBusy?.value ?? false) || (ctx.isReadOnly?.(ctx.currentPath.value) ?? false),
+)
+const busyTooltip = computed(() =>
+	ctx.isReadOnly?.(ctx.currentPath.value) ? ctx.readOnlyReason?.value : ctx.busyTooltip?.value,
+)
 
 const breadcrumbSegments = computed(() => {
 	const path = ctx.currentPath.value
@@ -334,6 +342,10 @@ const {
 	someSelected,
 } = useFileSelection(filteredItems)
 
+const selectionReadOnly = computed(() =>
+	[...selectedItems.value].some((path) => ctx.isReadOnly?.(path)),
+)
+
 const { recordOperation, onKeydown } = useFileUndoRedo(
 	(path, newName) => ctx.renameItem(path, newName),
 	(source, dest) => ctx.moveItem(source, dest),
@@ -361,12 +373,13 @@ const { isStuck: isLabelBarStuck } = useStickyObserver(fileUploadEl)
 // Refs
 const fileEditorRef = ref<InstanceType<typeof FileEditor>>()
 const createItemModal = ref<InstanceType<typeof FileCreateItemModal>>()
+const createZipModal = ref<InstanceType<typeof FileCreateZipModal>>()
 const renameItemModal = ref<InstanceType<typeof FileRenameItemModal>>()
 const moveItemModal = ref<InstanceType<typeof FileMoveItemModal>>()
 const deleteItemModal = ref<InstanceType<typeof FileDeleteItemModal>>()
 const uploadConflictModal = ref<InstanceType<typeof FileUploadConflictModal>>()
 const uploadZipUrlModal = ref<InstanceType<typeof FileUploadZipUrlModal>>()
-const contextMenuRef = ref<InstanceType<typeof FileContextMenu>>()
+const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 
 const newItemType = ref<'file' | 'directory'>('file')
 const selectedItem = ref<FileItem | null>(null)
@@ -499,6 +512,20 @@ async function handleDownload(item: FileItem) {
 	}
 }
 
+async function handleZip(item: FileItem) {
+	if (isBusy.value || item.type !== 'directory' || !ctx.zipFolder) return
+	await ctx.zipFolder(item.path)
+}
+
+async function handleZipSelection(target: string) {
+	if (isBusy.value || !ctx.zipPaths || selectedItems.value.size === 0) return
+	const include = items.value
+		.filter((item) => selectedItems.value.has(item.path))
+		.map((item) => item.name)
+	deselectAll()
+	await ctx.zipPaths(ctx.currentPath.value, include, target)
+}
+
 // Extract
 async function handleExtractItem(item: { name: string; type: string; path: string }) {
 	if (isBusy.value || !ctx.extractFile) return
@@ -554,25 +581,25 @@ function showUnzipFromUrlModal(cf: boolean) {
 }
 
 function showRenameModal(item: FileItem) {
-	if (isBusy.value) return
+	if (isBusy.value || ctx.isReadOnly?.(item.path)) return
 	selectedItem.value = item
 	renameItemModal.value?.show(item)
 }
 
 function showMoveModal(item: FileItem) {
-	if (isBusy.value) return
+	if (isBusy.value || ctx.isReadOnly?.(item.path)) return
 	selectedItem.value = item
 	moveItemModal.value?.show()
 }
 
 function showDeleteModal(item: FileItem) {
-	if (isBusy.value) return
+	if (isBusy.value || ctx.isReadOnly?.(item.path)) return
 	selectedItem.value = item
 	deleteItemModal.value?.show()
 }
 
 function showBulkDeleteModal() {
-	if (isBusy.value) return
+	if (isBusy.value || selectionReadOnly.value) return
 	if (selectedItems.value.size === 0) return
 
 	const itemsToDelete = Array.from(selectedItems.value)
@@ -661,50 +688,6 @@ function handlePrefetchHome() {
 	prefetchHomeTimeout = setTimeout(() => {
 		ctx.prefetchDirectory?.('/')
 	}, 150)
-}
-
-// Context menu
-function handleContextMenu(item: FileItem, x: number, y: number) {
-	const wd = isBusy.value
-	const wdTooltip = busyTooltip.value
-	const isZip = getFileExtension(item.name) === 'zip'
-
-	const options: FileContextMenuOption[] = [
-		{
-			id: 'extract',
-			shown: isZip && !!ctx.extractFile,
-			disabled: wd,
-			tooltip: wd ? wdTooltip : undefined,
-			action: () => handleExtractItem(item),
-		},
-		{ divider: true, shown: isZip && !!ctx.extractFile },
-		{
-			id: 'rename',
-			disabled: wd,
-			tooltip: wd ? wdTooltip : undefined,
-			action: () => showRenameModal(item),
-		},
-		{
-			id: 'move',
-			disabled: wd,
-			tooltip: wd ? wdTooltip : undefined,
-			action: () => showMoveModal(item),
-		},
-		{
-			id: 'download',
-			action: () => handleDownload(item),
-			shown: item.type !== 'directory',
-		},
-		{
-			id: 'delete',
-			disabled: wd,
-			tooltip: wd ? wdTooltip : undefined,
-			action: () => showDeleteModal(item),
-			color: 'red',
-		},
-	]
-
-	contextMenuRef.value?.show(item, x, y, options)
 }
 
 // Reset search/sort/selection on path change

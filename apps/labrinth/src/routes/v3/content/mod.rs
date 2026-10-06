@@ -11,6 +11,7 @@ use crate::models::pats::Scopes;
 use crate::models::projects::{DependencyType, Version};
 use crate::models::users::User;
 use crate::queue::session::AuthQueue;
+use crate::util::error::ApiContext as _;
 use actix_web::{HttpRequest, post, web};
 use ariadne::ids::base62_impl::parse_base62;
 use async_trait::async_trait;
@@ -72,7 +73,8 @@ pub async fn resolve_content(
         modrinth_content_management::resolve_content(&mut provider, request)
             .await
     }
-    .map_err(resolve_error_to_api)?;
+    .map_err(resolve_error_to_api)
+    .wrap_api_err("executing `modrinth_content_management::resolve_content`")?;
 
     Ok(web::Json(plan))
 }
@@ -630,6 +632,16 @@ fn resolve_provider_error(error: impl std::fmt::Display) -> ResolveError {
 
 fn resolve_error_to_api(error: ResolveError) -> ApiError {
     match error {
+        ResolveError::UnknownContentType(content_type) => ApiError::Request(
+            eyre::eyre!("unknown content type `{content_type}`"),
+        ),
+        ResolveError::ConflictingProjectVersions {
+            project_id,
+            before,
+            after,
+        } => ApiError::Request(eyre::eyre!(
+            "project `{project_id}` has conflicting versions `{before}` and `{after}`"
+        )),
         ResolveError::Provider(message) => {
             ApiError::Internal(eyre::eyre!(message))
         }

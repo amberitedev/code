@@ -85,12 +85,13 @@ impl EventState {
         Ok(value.loading_bars.clone())
     }
 
+    /// The ads child webview makes the main window a multi-webview window,
+    /// so Tauri's single-webview window lookup no longer returns it.
     #[cfg(feature = "tauri")]
-    pub async fn get_main_window() -> crate::Result<Option<tauri::WebviewWindow>>
-    {
+    pub async fn get_main_window() -> crate::Result<Option<tauri::Window>> {
         use tauri::Manager;
         let value = Self::get();
-        Ok(value.app.get_webview_window("main"))
+        Ok(value.app.get_window("main"))
     }
 }
 
@@ -116,7 +117,6 @@ pub enum AppEvent {
     Instance(InstancePayload),
     InstanceGroupsChanged(InstanceGroupsChangedPayload),
     OnboardingChecklist(crate::state::OnboardingChecklist),
-    InstanceBulkUpdateProgress(InstanceBulkUpdateProgressPayload),
     InstallJob(std::sync::Arc<InstallJobSnapshot>),
     Command(CommandPayload),
     Warning(WarningPayload),
@@ -156,8 +156,6 @@ pub fn export_app_event_bindings(
             LoadingBarType,
             LoadingPayload,
             WarningPayload,
-            InstanceBulkUpdateProgressPayload,
-            InstanceBulkUpdateProgressStage,
             CommandPayload,
             ProcessPayload,
             ProcessPayloadType,
@@ -308,10 +306,6 @@ pub enum LoadingBarType {
         instance_id: String,
         instance_name: String,
     },
-    InstanceUpdate {
-        instance_id: String,
-        instance_name: String,
-    },
     ZipExtract {
         instance_id: String,
         instance_name: String,
@@ -352,31 +346,6 @@ pub struct LoadingPayload {
 )]
 pub struct WarningPayload {
     pub message: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "export-ts",
-    derive(ts_rs::TS, postcard_bindgen::PostcardBindings)
-)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceBulkUpdateProgressPayload {
-    pub instance_id: String,
-    pub stage: InstanceBulkUpdateProgressStage,
-    pub current: usize,
-    pub total: usize,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "export-ts",
-    derive(ts_rs::TS, postcard_bindgen::PostcardBindings)
-)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceBulkUpdateProgressStage {
-    ResolvingVersions,
-    Downloading,
-    Finishing,
 }
 
 #[derive(Clone)]
@@ -472,6 +441,7 @@ pub enum InstancePayloadType {
     Created,
     Synced,
     ServersUpdated,
+    ScreenshotsUpdated,
     WorldUpdated {
         world: String,
     },

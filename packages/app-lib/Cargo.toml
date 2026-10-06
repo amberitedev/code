@@ -4,6 +4,10 @@ name = "theseus"
 version = "1.0.0-local"
 edition.workspace = true
 
+[[bin]]
+name = "export_app_events"
+required-features = ["export-ts"]
+
 [dependencies]
 actix-web = { workspace = true }
 ariadne = { workspace = true }
@@ -57,6 +61,7 @@ p256 = { workspace = true, features = ["ecdsa"] }
 parking_lot = { workspace = true }
 paste = { workspace = true }
 path-util = { workspace = true }
+pathdiff = { workspace = true }
 phf = { workspace = true }
 png = { workspace = true }
 postcard = { workspace = true, optional = true }
@@ -78,6 +83,7 @@ reqwest = { workspace = true, features = [
 	"stream",
 ] }
 rgb = { workspace = true }
+same-file = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde-binhum = { workspace = true }
 serde_ini = { workspace = true }
@@ -113,9 +119,9 @@ tracing = { workspace = true }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["chrono", "env-filter"] }
 ts-rs = { workspace = true, features = [
-	"chrono-impl",
-	"no-serde-warnings",
-	"uuid-impl",
+  "chrono-impl",
+  "no-serde-warnings",
+  "uuid-impl",
 ], optional = true }
 url = { workspace = true, features = ["serde"] }
 urlencoding = { workspace = true }
@@ -132,7 +138,7 @@ dunce = { workspace = true }
 cidre = { workspace = true, features = ["blocks", "nw"] }
 
 [target."cfg(windows)".dependencies]
-windows = { workspace = true, features = ["Networking_Connectivity"] }
+windows = { workspace = true, features = ["Networking_Connectivity", "Win32_Storage_FileSystem"] }
 windows-core = { workspace = true }
 winreg = { workspace = true }
 

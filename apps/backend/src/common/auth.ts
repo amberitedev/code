@@ -30,7 +30,23 @@ export async function requireSession(
 		.first<SessionRow>()
 	if (!session || (refresh ? session.refresh_expires : session.expires) <= new Date().toISOString())
 		unauthorized()
+	await requireUnlocked(env, session.user_id)
 	return session
+}
+
+export async function accountLock(env: Env, userId: string) {
+	return env.DB.prepare('SELECT locked_by,reason,created FROM user_locks WHERE user_id = ?')
+		.bind(userId)
+		.first<{ locked_by: string; reason: string; created: string }>()
+}
+
+export async function requireUnlocked(env: Env, userId: string) {
+	if (await accountLock(env, userId))
+		throw new ApiError(
+			403,
+			'account_locked',
+			'Your account is locked and cannot perform this action',
+		)
 }
 
 export async function requireUser(request: Request, env: Env): Promise<UserRow> {
@@ -47,6 +63,7 @@ export function publicUser(user: UserRow, full = false) {
 		id: user.id,
 		username: user.username,
 		avatar_url: user.avatar_url,
+		raw_avatar_url: user.avatar_url,
 		bio: user.bio,
 		created: user.created,
 		role: user.role,
@@ -90,6 +107,7 @@ export async function issueSession(
 	userId: string,
 	previous?: SessionRow,
 ) {
+	await requireUnlocked(env, userId)
 	const token = `mra_${randomId(60)}`
 	const now = new Date().toISOString()
 	const row: SessionRow = {

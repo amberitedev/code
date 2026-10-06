@@ -1,12 +1,15 @@
 use actix_http::StatusCode;
 use actix_web::test;
 use common::api_v3::ApiV3;
+use common::api_v3::request_data::get_public_project_creation_data;
 use common::database::*;
 use common::dummy_data::DUMMY_CATEGORIES;
 
 use crate::common::api_common::models::CommonProject;
 use crate::common::api_common::request_data::ProjectCreationRequestData;
-use crate::common::api_common::{ApiProject, ApiTeams, ApiVersion};
+use crate::common::api_common::{
+    Api, ApiProject, ApiTags, ApiTeams, ApiVersion, AppendsOptionalPat,
+};
 use crate::common::dummy_data::{
     DummyImage, DummyOrganizationZeta, DummyProjectAlpha, DummyProjectBeta,
     TestFile,
@@ -23,6 +26,7 @@ use labrinth::database::models::project_item::{
     PROJECTS_NAMESPACE, PROJECTS_SLUGS_NAMESPACE, ProjectQueryResult,
 };
 use labrinth::models::ids::ProjectId;
+use labrinth::models::projects::ProjectStatus;
 use labrinth::models::teams::ProjectPermissions;
 use labrinth::util::actix::{MultipartSegment, MultipartSegmentData};
 use serde_json::json;
@@ -354,6 +358,23 @@ pub async fn test_patch_project() {
                 assert_status!(&resp, StatusCode::BAD_REQUEST);
             }
 
+            let resp = api
+                .edit_project(
+                    alpha_project_slug,
+                    json!({
+                        "summary": "",
+                    }),
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&resp, StatusCode::BAD_REQUEST);
+            let body: serde_json::Value = test::read_body_json(resp).await;
+            assert_eq!(
+                body["description"],
+                "field summary failed validation with error: length"
+            );
+            assert!(body.get("details").is_none());
+
             // Failure because these are illegal requested statuses for a normal user.
             for req in ["unknown", "processing", "withheld", "scheduled"] {
                 let resp = api
@@ -496,6 +517,557 @@ pub async fn test_patch_project() {
                 api.get_project_deserialized("newslug", USER_USER_PAT).await;
             assert_eq!(project.link_urls.len(), 3);
             assert!(!project.link_urls.contains_key("issues"));
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_submit_invalid_project_for_review() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "draft" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let project_before = api
+                .get_project_deserialized(project_slug, USER_USER_PAT)
+                .await;
+            assert_eq!(project_before.status, ProjectStatus::Draft);
+            let original_description = project_before.description;
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({
+                        "description": "",
+                        "status": "processing",
+                    }),
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let project_after = api
+                .get_project_deserialized(project_slug, USER_USER_PAT)
+                .await;
+            assert_eq!(project_after.status, ProjectStatus::Draft);
+            assert_eq!(project_after.description, original_description);
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_moderator_can_edit_invalid_project_in_review() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "description": "" }),
+                    MOD_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let project = api
+                .get_project_deserialized(project_slug, MOD_USER_PAT)
+                .await;
+            assert_eq!(project.status, ProjectStatus::Processing);
+            assert!(project.description.is_empty());
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_edit_invalid_project_in_review_rolls_back() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let project_before = api
+                .get_project_deserialized(project_slug, USER_USER_PAT)
+                .await;
+            assert_eq!(project_before.status, ProjectStatus::Processing);
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "description": "" }),
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let project_after = api
+                .get_project_deserialized(project_slug, USER_USER_PAT)
+                .await;
+            assert_eq!(project_after.status, ProjectStatus::Processing);
+            assert_eq!(project_after.description, project_before.description);
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_leaving_review_skips_validation() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+            let original_project = api
+                .get_project_deserialized(project_slug, USER_USER_PAT)
+                .await;
+
+            for (status, expected_status) in [
+                ("draft", ProjectStatus::Draft),
+                ("rejected", ProjectStatus::Rejected),
+            ] {
+                let response = api
+                    .edit_project(
+                        project_slug,
+                        json!({
+                            "description": original_project.description.clone(),
+                            "status": "processing",
+                        }),
+                        ADMIN_USER_PAT,
+                    )
+                    .await;
+                assert_status!(&response, StatusCode::NO_CONTENT);
+
+                let response = api
+                    .edit_project(
+                        project_slug,
+                        json!({
+                            "description": "",
+                            "status": status,
+                        }),
+                        ADMIN_USER_PAT,
+                    )
+                    .await;
+                assert_status!(&response, StatusCode::NO_CONTENT);
+
+                let project = api
+                    .get_project_deserialized(project_slug, USER_USER_PAT)
+                    .await;
+                assert_eq!(project.status, expected_status);
+                assert!(project.description.is_empty());
+            }
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_description_similarity_to_summary() {
+    with_test_environment(
+		None,
+		|test_env: TestEnvironment<ApiV3>| async move {
+			let api = &test_env.api;
+			let project_slug = &test_env.dummy.project_alpha.project_slug;
+			let summary = "Explore new worlds with configurable tools and adventures.";
+			let response = api
+				.edit_project(
+					project_slug,
+					json!({ "status": "draft", "summary": summary }),
+					ADMIN_USER_PAT,
+				)
+				.await;
+			assert_status!(&response, StatusCode::NO_CONTENT);
+
+			for (description, expected_match) in [
+				(summary.to_string(), true),
+				(format!("**{}**\n\n```yaml\nsetting: true\n```", summary.to_uppercase()), true),
+				(format!("{summary} Players can discover custom structures, configure individual features, and follow detailed installation instructions for their preferred loader."), false),
+				(String::new(), false),
+			] {
+				let response = api
+					.edit_project(
+						project_slug,
+						json!({ "description": description }),
+						USER_USER_PAT,
+					)
+					.await;
+				assert_status!(&response, StatusCode::NO_CONTENT);
+
+				let request = test::TestRequest::get()
+					.uri(&format!("/v3/project/{project_slug}/validate"))
+					.append_pat(USER_USER_PAT)
+					.to_request();
+				let response = api.call(request).await;
+				assert_status!(&response, StatusCode::OK);
+				let validation: serde_json::Value = test::read_body_json(response).await;
+				let matching_nag = validation["nags"]
+					.as_array()
+					.unwrap()
+					.iter()
+					.find(|nag| nag["kind"] == "project_description_matches_summary");
+				assert_eq!(matching_nag.is_some(), expected_match, "{description}");
+				if let Some(nag) = matching_nag {
+					assert_eq!(nag["severity"], "required");
+				}
+			}
+		},
+	)
+	.await;
+}
+
+#[actix_rt::test]
+async fn test_plugin_and_datapack_validation_use_mod_tags() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let mod_categories = api
+                .get_categories_deserialized_common()
+                .await
+                .into_iter()
+                .filter(|category| category.project_type == "mod")
+                .map(|category| category.name)
+                .collect::<Vec<_>>();
+            assert!(mod_categories.len() > 3);
+
+            for (project_type, loader, file) in [
+                ("plugin", "bukkit", TestFile::build_random_plugin()),
+                (
+                    "datapack",
+                    "datapack",
+                    TestFile::build_random_datapack(),
+                ),
+            ] {
+                let slug = format!("all-tags-selected-{project_type}");
+                let modify_json = serde_json::from_value(json!([
+                    { "op": "replace", "path": "/is_draft", "value": true },
+                    { "op": "replace", "path": "/categories", "value": mod_categories[..3] },
+                    { "op": "add", "path": "/additional_categories", "value": mod_categories[3..] },
+                    { "op": "replace", "path": "/initial_versions/0/loaders", "value": [loader] },
+                ]))
+                .unwrap();
+                let creation_data = get_public_project_creation_data(
+                    &slug,
+                    Some(file),
+                    Some(modify_json),
+                );
+                let response =
+                    api.create_project(creation_data, USER_USER_PAT).await;
+                assert_status!(&response, StatusCode::OK);
+
+                let request = test::TestRequest::get()
+                    .uri(&format!("/v3/project/{slug}/validate"))
+                    .append_pat(USER_USER_PAT)
+                    .to_request();
+                let response = api.call(request).await;
+                assert_status!(&response, StatusCode::OK);
+                let validation: serde_json::Value =
+                    test::read_body_json(response).await;
+                let all_tags_selected = validation["nags"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|nag| nag["kind"] == "all_tags_selected")
+                    .expect("all shared mod tags should be detected as selected");
+
+                assert_eq!(
+                    all_tags_selected["details"]["total_available_tags"],
+                    mod_categories.len()
+                );
+            }
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_zero_available_tags_are_not_all_selected() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let creation_data = get_public_project_creation_data(
+                "project-without-an-inferred-type",
+                None,
+                None,
+            );
+            let response =
+                api.create_project(creation_data, USER_USER_PAT).await;
+            assert_status!(&response, StatusCode::OK);
+
+            let request = test::TestRequest::get()
+                .uri("/v3/project/project-without-an-inferred-type/validate")
+                .append_pat(USER_USER_PAT)
+                .to_request();
+            let response = api.call(request).await;
+            assert_status!(&response, StatusCode::OK);
+            let validation: serde_json::Value =
+                test::read_body_json(response).await;
+
+            assert!(
+                validation["nags"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|nag| nag["kind"] != "all_tags_selected")
+            );
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_add_invalid_gallery_item_in_review_rolls_back() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let project_before =
+                api.get_project(project_slug, USER_USER_PAT).await;
+            let project_before: serde_json::Value =
+                test::read_body_json(project_before).await;
+
+            let response = api
+                .add_gallery_item(
+                    project_slug,
+                    DummyImage::SmallIcon.get_icon_data(),
+                    false,
+                    None,
+                    Some("%EF%BC%A1".to_string()),
+                    None,
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let project_after =
+                api.get_project(project_slug, USER_USER_PAT).await;
+            let project_after: serde_json::Value =
+                test::read_body_json(project_after).await;
+            assert_eq!(project_after["gallery"], project_before["gallery"]);
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_edit_invalid_gallery_item_in_review_rolls_back() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .add_gallery_item(
+                    project_slug,
+                    DummyImage::SmallIcon.get_icon_data(),
+                    true,
+                    None,
+                    Some("valid-gallery-description".to_string()),
+                    None,
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let project_before =
+                api.get_project(project_slug, USER_USER_PAT).await;
+            let project_before: serde_json::Value =
+                test::read_body_json(project_before).await;
+            let gallery_url =
+                project_before["gallery"][0]["url"].as_str().unwrap();
+
+            let response = api
+                .edit_gallery_item(
+                    project_slug,
+                    gallery_url,
+                    vec![("name".to_string(), "Ａ".to_string())]
+                        .into_iter()
+                        .collect(),
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let project_after =
+                api.get_project(project_slug, USER_USER_PAT).await;
+            let project_after: serde_json::Value =
+                test::read_body_json(project_after).await;
+            assert_eq!(project_after["gallery"], project_before["gallery"]);
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_delete_gallery_item_from_invalid_project_in_review_rolls_back() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .add_gallery_item(
+                    project_slug,
+                    DummyImage::SmallIcon.get_icon_data(),
+                    true,
+                    None,
+                    Some("valid-gallery-description".to_string()),
+                    None,
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({
+                        "description": "",
+                        "status": "draft",
+                    }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let project_before =
+                api.get_project(project_slug, USER_USER_PAT).await;
+            let project_before: serde_json::Value =
+                test::read_body_json(project_before).await;
+            let gallery_url =
+                project_before["gallery"][0]["url"].as_str().unwrap();
+
+            let response = api
+                .remove_gallery_item(project_slug, gallery_url, USER_USER_PAT)
+                .await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let project_after =
+                api.get_project(project_slug, USER_USER_PAT).await;
+            let project_after: serde_json::Value =
+                test::read_body_json(project_after).await;
+            assert_eq!(project_after["gallery"], project_before["gallery"]);
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn test_edit_invalid_disclosures_in_review_rolls_back() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV3>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+            let disclosures_uri =
+                format!("/v3/project/{project_slug}/disclosures");
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let request = test::TestRequest::get()
+                .uri(&disclosures_uri)
+                .append_pat(USER_USER_PAT)
+                .to_request();
+            let response = api.call(request).await;
+            assert_status!(&response, StatusCode::OK);
+            let disclosures_before: serde_json::Value =
+                test::read_body_json(response).await;
+
+            let request = test::TestRequest::patch()
+                .uri(&disclosures_uri)
+                .append_pat(USER_USER_PAT)
+                .set_json(json!({
+                    "set": [{
+                        "type": "advertisements",
+                        "note": "<strong>sponsored</strong>",
+                    }],
+                    "remove": [],
+                }))
+                .to_request();
+            let response = api.call(request).await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let request = test::TestRequest::get()
+                .uri(&disclosures_uri)
+                .append_pat(USER_USER_PAT)
+                .to_request();
+            let response = api.call(request).await;
+            assert_status!(&response, StatusCode::OK);
+            let disclosures_after: serde_json::Value =
+                test::read_body_json(response).await;
+            assert_eq!(disclosures_after, disclosures_before);
         },
     )
     .await;
@@ -1417,3 +1989,32 @@ async fn test_thread_deleted_with_project() {
 // Permissions:
 // TODO: permissions VIEW_PAYOUTS currently is unused. Add tests when it is used.
 // TODO: permissions VIEW_ANALYTICS currently is unused. Add tests when it is used.
+
+#[actix_rt::test]
+async fn test_draft_description_save_allows_required_nags() {
+    with_test_environment(None, |test_env: TestEnvironment<ApiV3>| async move {
+		let api = &test_env.api;
+		let slug = &test_env.dummy.project_alpha.project_slug;
+		let response = api.edit_project(slug, json!({ "status": "draft" }), ADMIN_USER_PAT).await;
+		assert_status!(&response, StatusCode::NO_CONTENT);
+
+		let response = api.edit_project(slug, json!({ "description": "Too short" }), USER_USER_PAT).await;
+		assert_status!(&response, StatusCode::NO_CONTENT);
+		let after = api.get_project_deserialized(slug, USER_USER_PAT).await;
+		assert_eq!(after.description, "Too short");
+
+		let description = "Players can discover custom structures throughout their worlds, configure individual features to suit their play style, and follow the installation instructions to get started with their preferred loader.\n\n![](data:image/png;base64,AA==)";
+		let response = api.edit_project(slug, json!({ "description": description }), USER_USER_PAT).await;
+		assert_status!(&response, StatusCode::NO_CONTENT);
+		let after = api.get_project_deserialized(slug, USER_USER_PAT).await;
+		assert_eq!(after.description, description);
+		let request = test::TestRequest::get()
+			.uri(&format!("/v3/project/{slug}/validate"))
+			.append_pat(USER_USER_PAT)
+			.to_request();
+		let response = api.call(request).await;
+		assert_status!(&response, StatusCode::OK);
+		let validation: serde_json::Value = test::read_body_json(response).await;
+		assert!(validation["nags"].as_array().unwrap().iter().any(|nag| nag["kind"] == "missing_alt_text" && nag["severity"] == "warning"));
+	}).await;
+}

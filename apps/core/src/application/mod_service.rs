@@ -271,10 +271,20 @@ pub async fn update_mod(
     instance_id: &str,
     filename: &str,
 ) -> Result<bool, ModError> {
+    update_mod_version(state, instance_id, filename, None).await
+}
+
+/// Update to a selected compatible version, or the latest when no version is selected.
+pub async fn update_mod_version(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    filename: &str,
+    version_id: Option<&str>,
+) -> Result<bool, ModError> {
     sanitize_filename(filename)?;
     let (data_dir, gv, loader) = instance_info(state, instance_id).await?;
-    let (pid, vid): (String, String) = sqlx::query_as(
-        "SELECT modrinth_project_id, modrinth_version_id FROM mods WHERE instance_id=? AND filename=?"
+    let (pid, vid, enabled): (String, String, bool) = sqlx::query_as(
+        "SELECT modrinth_project_id, modrinth_version_id, enabled FROM mods WHERE instance_id=? AND filename=?"
     ).bind(instance_id).bind(filename).fetch_optional(&state.pool).await?.ok_or(ModError::ModNotFound)?;
     if pid.is_empty() {
         return Err(ModError::NoModrinthId);
@@ -283,7 +293,11 @@ pub async fn update_mod(
     let versions = modrinth
         .list_versions(&pid, Some(&gv), Some(&loader))
         .await?;
-    let latest = versions.first().ok_or(ModError::ModNotFound)?;
+    let latest = match version_id {
+        Some(id) => versions.iter().find(|version| version.id == id),
+        None => versions.first(),
+    }
+    .ok_or(ModError::ModNotFound)?;
     if latest.id == vid {
         return Ok(false);
     }
@@ -311,7 +325,12 @@ pub async fn update_mod(
     let _ =
         tokio::fs::remove_file(mods_dir.join(format!("{filename}.disabled")))
             .await;
-    tokio::fs::rename(&tmp, mods_dir.join(&file.filename)).await?;
+    let destination = if enabled {
+        file.filename.clone()
+    } else {
+        format!("{}.disabled", file.filename)
+    };
+    tokio::fs::rename(&tmp, mods_dir.join(destination)).await?;
     sqlx::query("UPDATE mods SET filename=?,modrinth_version_id=?,version_number=?,sha512=? WHERE instance_id=? AND filename=?")
         .bind(&file.filename).bind(&latest.id).bind(&latest.version_number)
         .bind(&sha512).bind(instance_id).bind(filename).execute(&state.pool).await?;

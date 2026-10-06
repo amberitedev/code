@@ -13,8 +13,17 @@ extend-exclude = [
   "packages/moderation/src/utils.ts",
   # contains payment card IDs like `IY1VMST1MOXS` which are flagged
   "apps/labrinth/src/queue/payouts/mod.rs",
-  # contains domain names with deliberate typos
-  "apps/labrinth/assets/disposable_email_blocklist.txt"
+  "apps/app-frontend/src/components/ui/settings/instances/game-settings-modal/languages.ts"
+]
+
+[default]
+extend-ignore-re = [
+  # Ignore lines that end with `// typos:ignore`
+  "(?Rm)^.*(#|//)\\s*typos:ignore$",
+  # Ignore the line after `// typos:ignore`:
+  "(#|//)\\s*typos:ignore\\n.*",
+  # Ignore blocks between `// typos:off` and `// typos:on`
+  "(?s)(#|//)\\s*typos:off.*?\\n\\s*(#|//)\\s*typos:on",
 ]
 
 [default.extend-words]
@@ -29,6 +38,12 @@ Cpy = "Cpy"
 # prefix used to match configuration-related error messages
 configur = "configur"
 
+ND = "ND"
+
 [default.extend-identifiers]
 # Universal Plug and Play
 UPnP = "UPnP"
+# BTA dependency project name
+HalpLibe = "HalpLibe"
+# Constant from the `zip` crate
+ZIP64_BYTES_THR = "ZIP64_BYTES_THR"

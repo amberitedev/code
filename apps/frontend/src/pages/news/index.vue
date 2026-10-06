@@ -44,25 +44,19 @@ useSeoMeta({
 	<div class="page py-6">
 		<div class="flex flex-wrap items-center justify-between gap-4 px-6">
 			<div>
-				<h1 class="m-0 text-3xl font-extrabold">News</h1>
+				<h1 class="m-0 text-3xl font-semibold">News</h1>
 			</div>
 			<div class="flex gap-2">
 				<NewsletterButton />
 				<ButtonLink
 					v-tooltip="`RSS feed`"
-					aria-label="RSS feed"
 					href="/news/feed/rss.xml"
 					target="_blank"
 					class="!w-9 !rounded-full !px-0"
 				>
 					<RssIcon />
 				</ButtonLink>
-				<ButtonLink
-					v-tooltip="`Changelog`"
-					href="/news/changelog"
-					aria-label="Changelog"
-					class="!w-9 !rounded-full !px-0"
-				>
+				<ButtonLink v-tooltip="`Changelog`" href="/news/changelog" class="!w-9 !rounded-full !px-0">
 					<GitGraphIcon />
 				</ButtonLink>
 			</div>

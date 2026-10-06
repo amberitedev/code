@@ -1,5 +1,6 @@
 use crate::{Error, ErrorKind};
 use bytes::Bytes;
+use daedalus::modded::{LoaderVersion, Manifest};
 use s3::creds::Credentials;
 use s3::{Bucket, Region};
 use serde::de::DeserializeOwned;
@@ -61,6 +62,53 @@ pub static REQWEST_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 
 static DOWNLOADED_FILE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+pub fn retain_manifest_versions(
+    manifest: &mut Manifest,
+    previous: Option<&Manifest>,
+) {
+    let Some(previous) = previous else {
+        return;
+    };
+
+    for old_game_version in &previous.game_versions {
+        if let Some(game_version) = manifest
+            .game_versions
+            .iter_mut()
+            .find(|version| version.id == old_game_version.id)
+        {
+            retain_loader_versions(
+                &mut game_version.loaders,
+                &old_game_version.loaders,
+            );
+        } else {
+            manifest.game_versions.push(old_game_version.clone());
+        }
+    }
+
+    for old_group in &previous.version_groups {
+        if let Some(group) = manifest
+            .version_groups
+            .iter_mut()
+            .find(|group| group.id == old_group.id)
+        {
+            retain_loader_versions(&mut group.loaders, &old_group.loaders);
+        } else {
+            manifest.version_groups.push(old_group.clone());
+        }
+    }
+}
+
+fn retain_loader_versions(
+    loaders: &mut Vec<LoaderVersion>,
+    previous: &[LoaderVersion],
+) {
+    for old_loader in previous {
+        if !loaders.iter().any(|loader| loader.id == old_loader.id) {
+            loaders.push(old_loader.clone());
+        }
+    }
+}
+
 #[tracing::instrument(skip(bytes, semaphore))]
 pub async fn upload_file_to_bucket(
     path: String,
@@ -70,6 +118,16 @@ pub async fn upload_file_to_bucket(
 ) -> Result<(), Error> {
     let _permit = semaphore.acquire().await?;
     let key = path.clone();
+
+    // A single-part upload's ETag is the MD5 of its content
+    let md5 = format!("{:x}", md5::compute(&bytes));
+
+    if let Ok((head, _)) = BUCKET.head_object(&key).await
+        && head.e_tag.is_some_and(|etag| etag.trim_matches('"') == md5)
+    {
+        tracing::trace!("Skipping unchanged file");
+        return Ok(());
+    }
 
     const RETRIES: i32 = 3;
     for attempt in 1..=(RETRIES + 1) {
@@ -110,6 +168,11 @@ pub async fn upload_url_to_bucket_mirrors(
         .into());
     }
 
+    if bucket_file_matches_mirror(&upload_path, &mirrors, semaphore).await? {
+        tracing::trace!(upload_path, "Skipping unchanged mirror file");
+        return Ok(());
+    }
+
     for (index, mirror) in mirrors.iter().enumerate() {
         let result = upload_url_to_bucket(
             upload_path.clone(),
@@ -141,11 +204,91 @@ pub async fn upload_url_to_bucket(
     Ok(())
 }
 
+// Maven repositories publish the MD5 of each artifact as a `.md5` sidecar, which matches the uploaded object's ETag
+async fn bucket_file_matches_mirror(
+    path: &str,
+    mirrors: &[String],
+    semaphore: &Arc<Semaphore>,
+) -> Result<bool, Error> {
+    let _permit = semaphore.acquire().await?;
+
+    let Ok((head, _)) = BUCKET.head_object(path).await else {
+        return Ok(false);
+    };
+    let Some(etag) = head.e_tag else {
+        return Ok(false);
+    };
+    let Some(md5) = fetch_mirror_checksum(mirrors, "md5").await else {
+        return Ok(false);
+    };
+
+    Ok(etag.trim_matches('"') == md5)
+}
+
+async fn local_file_matches_mirror(
+    path: &str,
+    mirrors: &[String],
+    sha1: Option<&str>,
+    semaphore: &Arc<Semaphore>,
+) -> Result<bool, Error> {
+    let _permit = semaphore.acquire().await?;
+
+    let Ok(existing) = tokio::fs::read(local_output_path(path)?).await else {
+        return Ok(false);
+    };
+    let expected_sha1 = match sha1 {
+        Some(sha1) => Some(sha1.to_string()),
+        None => fetch_mirror_checksum(mirrors, "sha1").await,
+    };
+    let Some(expected_sha1) = expected_sha1 else {
+        return Ok(false);
+    };
+
+    Ok(sha1_async(Bytes::from(existing)).await? == expected_sha1)
+}
+
+async fn fetch_mirror_checksum(
+    mirrors: &[String],
+    extension: &str,
+) -> Option<String> {
+    for mirror in mirrors {
+        let response = REQWEST_CLIENT
+            .get(format!(
+                "{}.{extension}",
+                mirror.replace("http://", "https://")
+            ))
+            .send()
+            .await
+            .and_then(|x| x.error_for_status());
+
+        let Ok(response) = response else {
+            continue;
+        };
+        let Ok(body) = response.text().await else {
+            continue;
+        };
+
+        // Some repositories append the file name after the checksum
+        if let Some(checksum) = body.split_whitespace().next() {
+            return Some(checksum.to_ascii_lowercase());
+        }
+    }
+
+    None
+}
+
 pub async fn write_file_to_local_output(
     path: &str,
     bytes: Bytes,
 ) -> Result<(), Error> {
     let output_path = local_output_path(path)?;
+
+    if tokio::fs::read(&output_path)
+        .await
+        .is_ok_and(|existing| existing == bytes)
+    {
+        return Ok(());
+    }
 
     if let Some(parent) = output_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -167,6 +310,17 @@ pub async fn write_url_to_local_output_mirrors(
             "No mirrors provided!".to_string(),
         )
         .into());
+    }
+
+    if local_file_matches_mirror(
+        &output_path,
+        &mirrors,
+        sha1.as_deref(),
+        semaphore,
+    )
+    .await?
+    {
+        return Ok(());
     }
 
     for (index, mirror) in mirrors.iter().enumerate() {
@@ -225,6 +379,17 @@ pub async fn download_file(
     sha1: Option<&str>,
     semaphore: &Arc<Semaphore>,
 ) -> Result<bytes::Bytes, crate::Error> {
+    Ok(download_file_inner(url, sha1, semaphore, false)
+        .await?
+        .expect("required download cannot be absent"))
+}
+
+async fn download_file_inner(
+    url: &str,
+    sha1: Option<&str>,
+    semaphore: &Arc<Semaphore>,
+    allow_not_found: bool,
+) -> Result<Option<bytes::Bytes>, crate::Error> {
     let _permit = semaphore.acquire().await?;
     tracing::trace!("Starting file download");
 
@@ -266,7 +431,7 @@ pub async fn download_file(
                         );
                     }
 
-                    return Ok(bytes);
+                    return Ok(Some(bytes));
                 } else if attempt <= RETRIES {
                     continue;
                 } else if let Err(err) = bytes {
@@ -276,6 +441,13 @@ pub async fn download_file(
                     }
                     .into());
                 }
+            }
+            Err(err)
+                if allow_not_found
+                    && err.status() == Some(reqwest::StatusCode::NOT_FOUND) =>
+            {
+                tracing::warn!(%url, "Previous manifest not found; building a new manifest");
+                return Ok(None);
             }
             Err(_) if attempt <= RETRIES => continue,
             Err(err) => {
@@ -291,6 +463,16 @@ pub async fn download_file(
     unreachable!()
 }
 
+pub async fn fetch_optional_json<T: DeserializeOwned>(
+    url: &str,
+    semaphore: &Arc<Semaphore>,
+) -> Result<Option<T>, Error> {
+    download_file_inner(url, None, semaphore, true)
+        .await?
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
+        .transpose()
+}
+
 pub async fn fetch_json<T: DeserializeOwned>(
     url: &str,
     semaphore: &Arc<Semaphore>,
@@ -304,7 +486,7 @@ pub async fn fetch_xml<T: DeserializeOwned>(
     url: &str,
     semaphore: &Arc<Semaphore>,
 ) -> Result<T, Error> {
-    Ok(serde_xml_rs::from_reader(
+    Ok(quick_xml::de::from_reader(
         &*download_file(url, None, semaphore).await?,
     )?)
 }

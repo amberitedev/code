@@ -1,5 +1,5 @@
 // Port of Labrinth routes/v3/{users,friends,blocked_users,notifications}.rs (AGPL-3.0-only).
-import { findUser, publicUser, requireUser } from '../common/auth'
+import { accountLock, findUser, publicUser, requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, invalid, json, readBytes, readJson, routePath } from '../common/http'
 import { notificationResponse, type NotificationRow } from '../common/notifications'
@@ -48,6 +48,16 @@ async function notify(env: Env, userId: string, message: unknown) {
 	)
 }
 
+async function visibleUser(request: Request, env: Env, target: UserRow) {
+	const viewer = await requireUser(request, env).catch((error: unknown) => {
+		if (error instanceof ApiError && [401, 403].includes(error.status)) return null
+		throw error
+	})
+	const staff = viewer?.role === 'admin' || viewer?.role === 'moderator'
+	const lock = staff ? await accountLock(env, target.id) : null
+	return { ...publicUser(target, viewer?.role === 'admin'), ...(lock ? { lock } : {}) }
+}
+
 export async function handleSocial(request: Request, env: Env): Promise<Response | null> {
 	const path = routePath(request),
 		method = request.method,
@@ -69,7 +79,11 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 	if (path === '/users' && method === 'GET') {
 		const users = await Promise.all(idsQuery(url).map((id) => findUser(env, id)))
 		return json(
-			users.filter((user): user is UserRow => user !== null).map((user) => publicUser(user)),
+			await Promise.all(
+				users
+					.filter((user): user is UserRow => user !== null)
+					.map((user) => visibleUser(request, env, user)),
+			),
 		)
 	}
 	if (path === '/friends' && method === 'GET') {
@@ -199,7 +213,7 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 		const target = await findUser(env, decodeURIComponent(userMatch[1])),
 			action = userMatch[2]
 		if (!target) throw notFound()
-		if (!action && method === 'GET') return json(publicUser(target))
+		if (!action && method === 'GET') return json(await visibleUser(request, env, target))
 		if (
 			['projects', 'organizations', 'collections', 'follows', 'all-projects'].includes(action) &&
 			method === 'GET'
@@ -267,8 +281,8 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 				])
 				return empty()
 			}
-			const bytes = await readBytes(request, 262144)
-			if (!bytes.length || bytes.length > 262144) invalid('Icons must be smaller than 256KiB')
+			const bytes = await readBytes(request, 524288)
+			if (!bytes.length || bytes.length > 524288) invalid('Icons must be smaller than 512KiB')
 			const ext = url.searchParams.get('ext')?.toLowerCase()
 			const types: Record<string, string> = {
 				png: 'image/png',

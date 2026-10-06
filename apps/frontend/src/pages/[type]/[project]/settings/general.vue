@@ -1,23 +1,42 @@
 <script setup lang="ts">
 import {
+	commonProjectSettingsMessages,
 	ConfirmLeaveModal,
 	defineMessages,
 	IconSelect,
 	injectProjectPageContext,
+	Input,
 	type MessageDescriptor,
 	SettingsLabel,
-	StyledInput,
 	UnsavedChangesPopup,
 	usePageLeaveSafety,
 	useSavable,
 	useVIntl,
 } from '@modrinth/ui'
 
+import SlugSuggestions from '~/components/ui/SlugSuggestions.vue'
+import ValidationMessage from '~/components/ValidationMessage.vue'
+import { useProjectNagMessages } from '~/composables/project-nag-validation'
+import { useProjectSaveValidation } from '~/composables/project-save-validation'
+import {
+	useProjectSlugSuggestions,
+	useSlugSuggestionVisibility,
+} from '~/composables/project-slug-suggestions'
+
 const { formatMessage } = useVIntl()
 
-const { projectV2: project, patchProject } = injectProjectPageContext()
+const { allMembers, projectV2: project, patchProject } = injectProjectPageContext()
 
-const { saved, current, saving, hasChanges, reset, save } = useSavable(
+useProjectSettingsHeadTitle(commonProjectSettingsMessages.general)
+
+const {
+	saved,
+	current,
+	saving,
+	hasChanges,
+	reset: resetForm,
+	save: saveForm,
+} = useSavable(
 	() => ({
 		title: project.value.title,
 		tagline: project.value.description,
@@ -25,15 +44,55 @@ const { saved, current, saving, hasChanges, reset, save } = useSavable(
 		icon: project.value.icon_url,
 	}),
 	async ({ title, tagline, url }) => {
-		await patchProject({
-			...(title !== undefined && { title }),
-			...(tagline !== undefined && { description: tagline }),
-			...(url !== undefined && { slug: url }),
-		})
+		await patchProject(
+			{
+				...(title !== undefined && { title }),
+				...(tagline !== undefined && { description: tagline }),
+				...(url !== undefined && { slug: url }),
+			},
+			false,
+			true,
+		)
 	},
 )
 
 const { confirmLeaveModal } = usePageLeaveSafety(hasChanges)
+
+const titleValidation = useProjectNagMessages('name')
+const taglineValidation = useProjectNagMessages('summary')
+const iconValidation = useProjectNagMessages('icon')
+const saveValidation = useProjectSaveValidation(() => current.value)
+const canSave = computed(() => !saveValidation.hasErrors.value)
+const {
+	onFocusIn: onSlugSuggestionFocusIn,
+	onFocusOut: onSlugSuggestionFocusOut,
+	visible: showSlugSuggestions,
+} = useSlugSuggestionVisibility()
+const ownerUsername = computed(
+	() => (allMembers.value.find((member) => member.is_owner) ?? allMembers.value[0])?.user.username,
+)
+const { suggestions: slugSuggestions } = useProjectSlugSuggestions({
+	title: () => current.value.title,
+	username: ownerUsername,
+	currentProjectId: () => project.value.id,
+	enabled: showSlugSuggestions,
+})
+
+async function save() {
+	if (!canSave.value || saving.value) return
+	const submittedState = saveValidation.snapshot()
+	try {
+		await saveForm()
+		saveValidation.clear()
+	} catch (error) {
+		if (!saveValidation.capture(error, submittedState)) throw error
+	}
+}
+
+function reset() {
+	resetForm()
+	saveValidation.clear()
+}
 
 const messages = defineMessages({
 	nameTitle: {
@@ -122,16 +181,28 @@ const placeholder = computed(() => placeholders[placeholderIndex.value] ?? place
 <template>
 	<div>
 		<ConfirmLeaveModal ref="confirmLeaveModal" />
+		<ValidationMessage
+			:check="saveValidation.withoutFields(['name', 'summary', 'icon', 'slug'])"
+			class="my-4"
+		/>
 		<UnsavedChangesPopup
 			:original="saved"
 			:modified="current"
 			:saving="saving"
+			:can-save="canSave"
 			@reset="reset"
 			@save="save"
 		/>
 		<div class="base-card block">
 			<div class="group relative float-end ml-4">
 				<IconSelect v-model="current.icon" />
+				<ValidationMessage
+					:check="iconValidation"
+					:project-field="saved.icon"
+					:current-field="current.icon"
+					class="mt-2"
+				/>
+				<ValidationMessage :check="saveValidation.forField('icon')" class="mt-2" />
 			</div>
 			<div>
 				<SettingsLabel
@@ -140,7 +211,7 @@ const placeholder = computed(() => placeholders[placeholderIndex.value] ?? place
 					:description="messages.nameDescription"
 				/>
 				<div class="flex">
-					<StyledInput
+					<Input
 						id="project-name"
 						v-model="current.title"
 						:placeholder="formatMessage(placeholder.name)"
@@ -149,6 +220,13 @@ const placeholder = computed(() => placeholders[placeholderIndex.value] ?? place
 						wrapper-class="flex-grow"
 					/>
 				</div>
+				<ValidationMessage
+					:check="titleValidation"
+					:project-field="saved.title"
+					:current-field="current.title"
+					class="mt-2"
+				/>
+				<ValidationMessage :check="saveValidation.forField('name')" class="mt-2" />
 			</div>
 			<div class="mt-4">
 				<SettingsLabel
@@ -156,7 +234,7 @@ const placeholder = computed(() => placeholders[placeholderIndex.value] ?? place
 					:title="messages.taglineTitle"
 					:description="messages.taglineDescription"
 				/>
-				<StyledInput
+				<Input
 					id="project-tagline"
 					v-model="current.tagline"
 					:placeholder="formatMessage(placeholder.tagline)"
@@ -164,13 +242,34 @@ const placeholder = computed(() => placeholders[placeholderIndex.value] ?? place
 					:maxlength="120"
 					wrapper-class="w-full"
 				/>
+				<ValidationMessage
+					:check="taglineValidation"
+					:project-field="saved.tagline"
+					:current-field="current.tagline"
+					class="mt-2"
+				/>
+				<ValidationMessage :check="saveValidation.forField('summary')" class="mt-2" />
 			</div>
-			<div class="mt-4">
+			<div class="mt-4" @focusin="onSlugSuggestionFocusIn" @focusout="onSlugSuggestionFocusOut">
 				<SettingsLabel id="project-url" :title="messages.urlTitle" />
-				<div class="text-input-wrapper">
-					<div class="text-input-wrapper__before">https://modrinth.com/project/</div>
-					<StyledInput id="project-url" v-model="current.url" :maxlength="64" autocomplete="off" />
-				</div>
+				<Input
+					id="project-url"
+					v-model="current.url"
+					:maxlength="64"
+					autocomplete="off"
+					wrapper-class="w-full"
+				>
+					<template #prefix>
+						<span class="whitespace-nowrap">https://modrinth.com/project/</span>
+					</template>
+				</Input>
+				<ValidationMessage :check="saveValidation.forField('slug')" class="mt-2" />
+				<SlugSuggestions
+					:selected="current.url"
+					:suggestions="slugSuggestions"
+					:visible="showSlugSuggestions"
+					@select="current.url = $event"
+				/>
 			</div>
 		</div>
 	</div>

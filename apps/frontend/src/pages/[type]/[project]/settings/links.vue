@@ -1,563 +1,560 @@
 <template>
 	<div>
-		<!-- Server Project Links -->
-		<section v-if="isServerProject" class="universal-card">
-			<h2>External links</h2>
-			<div class="adjacent-input">
-				<label id="server-website" title="Your server's website.">
-					<span class="label__title">Website</span>
-					<span class="label__description">Your server's official website.</span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isServerSiteLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="isServerSiteDiscordUrl"
-					v-tooltip="`Discord invites are not appropriate for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<input
-					id="server-website"
-					v-model="siteUrl"
-					type="url"
-					placeholder="Enter a valid URL"
-					maxlength="2048"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="adjacent-input">
-				<label id="server-store" title="Your server's store page.">
-					<span class="label__title">Store</span>
-					<span class="label__description">A link to your server's store or shop.</span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isServerStoreLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="isServerStoreDiscordUrl"
-					v-tooltip="`Discord invites are not appropriate for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<input
-					id="server-store"
-					v-model="storeUrl"
-					type="url"
-					placeholder="Enter a valid URL"
-					maxlength="2048"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="adjacent-input">
-				<label
-					id="server-wiki"
-					title="A page containing information, documentation, and help for the server."
-				>
-					<span class="label__title">Wiki page</span>
-					<span class="label__description"
-						>A page containing information, documentation, and help for the server.</span
+		<ConfirmLeaveModal ref="confirmLeaveModal" />
+		<div class="flex min-w-0 flex-col gap-8">
+			<section v-for="section in linkSections" :key="section.id" class="min-w-0">
+				<div class="mb-2.5 flex flex-wrap items-center justify-between gap-3">
+					<h2 class="m-0 text-2xl font-semibold">{{ section.title }}</h2>
+					<TeleportOverflowMenu
+						v-if="section.id === 'donations' && section.rows.length > 0"
+						:options="donationPlatformOptions"
+						:label="formatMessage(messages.addLink)"
+						:disabled="saving || !hasPermission || donationPlatformOptions.length === 0"
+						:icon-only="false"
+						type="outlined"
+						placement="bottom-end"
 					>
-				</label>
-				<TriangleAlertIcon
-					v-if="isServerWikiLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="isServerWikiDiscordUrl"
-					v-tooltip="`Discord invites are not appropriate for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<input
-					id="server-wiki"
-					v-model="serverWikiUrl"
-					type="url"
-					placeholder="Enter a valid URL"
-					maxlength="2048"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="adjacent-input">
-				<label id="server-discord" title="An invitation link to your Discord server.">
-					<span class="label__title">Discord</span>
-					<span class="label__description">An invitation link to your Discord server.</span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isServerDiscordLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="!isServerDiscordUrlCommon"
-					v-tooltip="`You're using a link which isn't common for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<input
-					id="server-discord"
-					v-model="serverDiscordUrl"
-					type="url"
-					placeholder="Enter a valid URL"
-					maxlength="2048"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="mt-3 flex flex-wrap justify-start gap-2">
-				<Button
-					type="colored"
-					color="brand"
-					:disabled="!hasServerChanges"
-					@click="saveServerChanges()"
+						<PlusIcon aria-hidden="true" />
+						{{ formatMessage(messages.addLink) }}
+					</TeleportOverflowMenu>
+				</div>
+				<Table
+					:columns="section.columns"
+					:data="section.rows"
+					row-key="id"
+					:table-min-width="section.rows.length ? '36rem' : undefined"
 				>
-					<SaveIcon />
-					Save changes
-				</Button>
-			</div>
-		</section>
-
-		<!-- Standard Project Links -->
-		<section v-if="!isServerProject" class="universal-card">
-			<h2>External links</h2>
-			<div class="adjacent-input">
-				<label
-					id="project-issue-tracker"
-					title="A place for users to report bugs, issues, and concerns about your project."
-				>
-					<span class="label__title">Issue tracker </span>
-					<span class="label__description">
-						A place for users to report bugs, issues, and concerns about your project.
-					</span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isIssuesLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="isIssuesDiscordUrl"
-					v-tooltip="`Discord invites are not appropriate for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="!isIssuesUrlCommon"
-					v-tooltip="`Link includes a domain which isn't common for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<StyledInput
-					id="project-issue-tracker"
-					v-model="issuesUrl"
-					type="url"
-					placeholder="Enter a valid URL"
-					:maxlength="2048"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="adjacent-input">
-				<label
-					id="project-source-code"
-					title="A page/repository containing the source code for your project"
-				>
-					<span class="label__title">Source code </span>
-					<span class="label__description">
-						A page/repository containing the source code for your project
-					</span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isSourceLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="isSourceDiscordUrl"
-					v-tooltip="`Discord invites are not appropriate for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="!isSourceUrlCommon"
-					v-tooltip="`Link includes a domain which isn't common for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<StyledInput
-					id="project-source-code"
-					v-model="sourceUrl"
-					type="url"
-					:maxlength="2048"
-					placeholder="Enter a valid URL"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="adjacent-input">
-				<label
-					id="project-wiki-page"
-					title="A page containing information, documentation, and help for the project."
-				>
-					<span class="label__title">Wiki page</span>
-					<span class="label__description">
-						A page containing information, documentation, and help for the project.
-					</span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isWikiLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="isWikiDiscordUrl"
-					v-tooltip="`Discord invites are not appropriate for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<StyledInput
-					id="project-wiki-page"
-					v-model="wikiUrl"
-					type="url"
-					:maxlength="2048"
-					placeholder="Enter a valid URL"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<div class="adjacent-input">
-				<label id="project-discord-invite" title="An invitation link to your Discord server.">
-					<span class="label__title">Discord invite </span>
-					<span class="label__description"> An invitation link to your Discord server. </span>
-				</label>
-				<TriangleAlertIcon
-					v-if="isDiscordLinkShortener"
-					v-tooltip="`Use of link shorteners is prohibited.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<TriangleAlertIcon
-					v-else-if="!isDiscordUrlCommon"
-					v-tooltip="`You're using a link which isn't common for this link type.`"
-					class="size-6 animate-pulse text-orange"
-				/>
-				<StyledInput
-					id="project-discord-invite"
-					v-model="discordUrl"
-					type="url"
-					:maxlength="2048"
-					placeholder="Enter a valid URL"
-					:disabled="!hasPermission"
-				/>
-			</div>
-			<span class="label">
-				<span class="label__title">Donation links</span>
-				<span class="label__description">
-					Add donation links for users to support you directly.
-				</span>
-			</span>
-
-			<div
-				v-for="(donationLink, index) in donationLinks"
-				:key="`donation-link-${index}`"
-				class="input-group donation-link-group"
-			>
-				<StyledInput
-					v-model="donationLink.url"
-					type="url"
-					:maxlength="2048"
-					placeholder="Enter a valid URL"
-					:disabled="!hasPermission"
-					@update:model-value="updateDonationLinks"
-				/>
-				<Combobox
-					v-model="donationLink.id"
-					:options="donationPlatformOptions"
-					placeholder="Select platform"
-					:disabled="!hasPermission"
-					force-direction="up"
-					trigger-type="base"
-					class="platform-selector !w-80"
-					@update:model-value="updateDonationLinks"
-				/>
-			</div>
-			<div class="mt-3 flex flex-wrap justify-start gap-2">
-				<Button type="colored" color="brand" :disabled="!hasChanges" @click="saveChanges()">
-					<SaveIcon />
-					Save changes
-				</Button>
-			</div>
-		</section>
+					<template #header-url="{ column }">
+						<span class="ml-3.5">{{ column.label }}</span>
+					</template>
+					<template #empty-state>
+						<EmptyState :description="formatMessage(messages.donationsDescription)" class="my-4">
+							<template #actions>
+								<TeleportOverflowMenu
+									:options="donationPlatformOptions"
+									:label="formatMessage(messages.addLink)"
+									:disabled="saving || !hasPermission || donationPlatformOptions.length === 0"
+									:icon-only="false"
+									type="outlined"
+									placement="bottom-start"
+									class="-mt-4"
+								>
+									<PlusIcon aria-hidden="true" />
+									{{ formatMessage(messages.addLink) }}
+								</TeleportOverflowMenu>
+							</template>
+						</EmptyState>
+					</template>
+					<template #cell-name="{ row }">
+						<label v-tooltip="row.description" :for="row.inputId" class="font-medium">
+							{{ row.name }}
+						</label>
+					</template>
+					<template #cell-url="{ row }">
+						<div class="flex min-w-0 items-center gap-2">
+							<Input
+								:id="row.inputId"
+								:model-value="row.value"
+								:type="row.donation?.mode === 'username' ? 'text' : 'url'"
+								:placeholder="
+									row.donation
+										? donationPlaceholder(row.donation)
+										: formatMessage(messages.urlPlaceholder)
+								"
+								:maxlength="2048"
+								:disabled="saving || !hasPermission"
+								:aria-describedby="row.inputId + '-help'"
+								autocapitalize="none"
+								autocomplete="off"
+								:spellcheck="false"
+								wrapper-class="min-w-0 flex-1 !bg-surface-3 !border-surface-4 !text-contrast"
+								input-class="!text-contrast"
+								@update:model-value="changeLink(row, $event)"
+							/>
+							<Tabs
+								v-if="row.donation?.id && usernamePrefixes[row.donation.id]"
+								:value="row.donation.mode"
+								:tabs="donationModeTabs"
+								:disabled="saving || !hasPermission"
+								color="gray"
+								class="shrink-0"
+								@update:value="changeDonationMode(row.donation, $event)"
+							/>
+							<IconButton
+								v-tooltip="
+									visitUrl(row.url)
+										? formatMessage(messages.visitLink, { url: visitUrl(row.url) })
+										: null
+								"
+								type="base"
+								class="shrink-0"
+								:label="formatMessage(messages.visitLink, { url: visitUrl(row.url) })"
+								:disabled="!visitUrl(row.url)"
+								@mousedown.stop
+								@click.stop="visitLink(row.url)"
+							>
+								<ExternalIcon />
+							</IconButton>
+							<IconButton
+								v-if="row.donation"
+								v-tooltip="formatMessage(messages.removeDonation)"
+								type="base"
+								class="shrink-0"
+								:label="formatMessage(messages.removeDonation)"
+								:disabled="saving || !hasPermission"
+								@click.stop="removeDonation(row.donation)"
+							>
+								<XIcon />
+							</IconButton>
+						</div>
+						<span :id="row.inputId + '-help'" class="sr-only">{{ row.description }}</span>
+						<div class="mt-2.5 empty:hidden">
+							<template v-if="row.field">
+								<ValidationMessage
+									:check="savedFieldMessages(row.field)"
+									:project-field="saved[row.field]"
+									:current-field="current[row.field]"
+								/>
+								<ValidationMessage :check="saveValidation.forField(row.field)" />
+							</template>
+							<ValidationMessage v-else-if="row.donation" :check="donationMessages(row.donation)" />
+						</div>
+					</template>
+				</Table>
+			</section>
+		</div>
+		<ValidationMessage :check="otherSaveMessages" class="my-4" />
+		<UnsavedChangesPopup
+			:original="original"
+			:modified="modified"
+			:saving="saving"
+			:can-save="canSave"
+			@reset="reset"
+			@save="save"
+		/>
 	</div>
 </template>
 
-<script setup>
-import { SaveIcon, TriangleAlertIcon } from '@modrinth/assets'
-import { commonLinkDomains, isCommonUrl, isDiscordUrl, isLinkShortener } from '@modrinth/moderation'
+<script setup lang="ts">
+import type { Labrinth } from '@modrinth/api-client'
+import { ExternalIcon, PlusIcon, XIcon } from '@modrinth/assets'
 import {
-	Button,
-	Combobox,
-	injectModrinthClient,
+	commonProjectSettingsMessages,
+	ConfirmLeaveModal,
+	defineMessages,
+	EmptyState,
+	IconButton,
 	injectNotificationManager,
 	injectProjectPageContext,
-	StyledInput,
+	Input,
+	Table,
+	type TableColumn,
+	Tabs,
+	type TabsValue,
+	TeleportOverflowMenu,
+	UnsavedChangesPopup,
+	usePageLeaveSafety,
+	useSavable,
+	useVIntl,
 } from '@modrinth/ui'
+import { isAdmin } from '@modrinth/utils'
 
-const tags = useGeneratedState()
+import ValidationMessage from '@/components/ValidationMessage.vue'
+import { useProjectNagMessages } from '~/composables/project-nag-validation'
+import { useProjectSaveValidation } from '~/composables/project-save-validation'
+import {
+	type DonationInput,
+	donationInput,
+	donationUsernamePrefixes as usernamePrefixes,
+	setDonationInput,
+	toggleDonationInput,
+} from '~/helpers/donation-links'
+import { normalizeProjectUrl } from '~/helpers/project-url'
 
-const donationPlatformOptions = computed(() =>
-	tags.value.donationPlatforms.map((platform) => ({
-		value: platform.short,
-		label: platform.name,
-	})),
-)
+type EditableLinkField = 'discord' | 'issues' | 'site' | 'source' | 'store' | 'wiki'
+type EditableLinks = Partial<Record<EditableLinkField, string>>
+type ProjectLinkUrls = Labrinth.Projects.v3.Project['link_urls']
 
-const {
-	projectV2: project,
-	projectV3,
-	currentMember,
-	patchProject,
-	invalidate,
-} = injectProjectPageContext()
-const { labrinth } = injectModrinthClient()
-const { addNotification } = injectNotificationManager()
+interface DonationRow extends DonationInput {
+	key: number
+}
 
-const issuesUrl = ref(project.value.issues_url)
-const sourceUrl = ref(project.value.source_url)
-const wikiUrl = ref(project.value.wiki_url)
-const discordUrl = ref(project.value.discord_url)
+type LinkTableRow = {
+	id: string
+	inputId: string
+	name: string
+	description: string
+	value: string
+	url: string
+	field?: EditableLinkField
+	donation?: DonationRow
+}
 
-// Server project links
-const isServerProject = computed(() => projectV3.value?.minecraft_server != null)
-const siteUrl = ref(projectV3.value?.link_urls?.site?.url ?? '')
-const storeUrl = ref(projectV3.value?.link_urls?.store?.url ?? '')
-const serverWikiUrl = ref(projectV3.value?.link_urls?.wiki?.url ?? '')
-const serverDiscordUrl = ref(projectV3.value?.link_urls?.discord?.url ?? '')
-
-watch(
-	projectV3,
-	(newVal) => {
-		if (newVal) {
-			siteUrl.value = newVal.link_urls?.site?.url ?? ''
-			storeUrl.value = newVal.link_urls?.store?.url ?? ''
-			serverWikiUrl.value = newVal.link_urls?.wiki?.url ?? ''
-			serverDiscordUrl.value = newVal.link_urls?.discord?.url ?? ''
-		}
+const messages = defineMessages({
+	title: { id: 'project.settings.links.title', defaultMessage: 'Links' },
+	issues: { id: 'project.settings.links.issues', defaultMessage: 'Issue tracker' },
+	issuesDescription: {
+		id: 'project.settings.links.issues-description',
+		defaultMessage: 'A place for users to report bugs, issues, and concerns about your project.',
 	},
-	{ immediate: true },
+	source: { id: 'project.settings.links.source', defaultMessage: 'Source code' },
+	sourceDescription: {
+		id: 'project.settings.links.source-description',
+		defaultMessage: 'A page/repository containing the source code for your project',
+	},
+	wiki: { id: 'project.settings.links.wiki', defaultMessage: 'Wiki page' },
+	wikiDescription: {
+		id: 'project.settings.links.wiki-description',
+		defaultMessage: 'A page containing information, documentation, and help for the project.',
+	},
+	discord: { id: 'project.settings.links.discord', defaultMessage: 'Discord invite' },
+	discordDescription: {
+		id: 'project.settings.links.discord-description',
+		defaultMessage: 'An invitation link to your Discord server.',
+	},
+	site: { id: 'project.settings.links.site', defaultMessage: 'Website' },
+	siteDescription: {
+		id: 'project.settings.links.site-description',
+		defaultMessage: "Your server's official website.",
+	},
+	store: { id: 'project.settings.links.store', defaultMessage: 'Store' },
+	storeDescription: {
+		id: 'project.settings.links.store-description',
+		defaultMessage: "A link to your server's store or shop.",
+	},
+	linkType: { id: 'project.settings.links.link-type', defaultMessage: 'Link type' },
+	donationPlatform: { id: 'project.settings.links.donation-platform', defaultMessage: 'Platform' },
+	donationLink: { id: 'project.settings.links.donation-link', defaultMessage: 'Link' },
+	donations: { id: 'project.settings.links.donations', defaultMessage: 'Donation links' },
+	addLink: { id: 'project.settings.links.add-link', defaultMessage: 'Add link' },
+	removeDonation: {
+		id: 'project.settings.links.remove-donation-link',
+		defaultMessage: 'Remove donation link',
+	},
+	donationsDescription: {
+		id: 'project.settings.links.donations-description',
+		defaultMessage: 'Add donation links for users to support you directly.',
+	},
+	urlPlaceholder: {
+		id: 'project.settings.links.url-placeholder',
+		defaultMessage: 'Enter a valid URL',
+	},
+	donationUsernamePlaceholder: {
+		id: 'project.settings.links.donation-username-placeholder',
+		defaultMessage: 'Enter your {platform} username',
+	},
+	visitLink: {
+		id: 'project.settings.links.visit-link',
+		defaultMessage: 'Visit {url}',
+	},
+	donationUrl: {
+		id: 'project.settings.links.donation-url',
+		defaultMessage: 'URL',
+	},
+	donationUsername: {
+		id: 'project.settings.links.donation-username',
+		defaultMessage: 'Username',
+	},
+	updatedTitle: { id: 'project.settings.links.updated-title', defaultMessage: 'Links updated' },
+	updated: {
+		id: 'project.settings.links.updated',
+		defaultMessage: 'Your links have been updated.',
+	},
+	serverDiscord: { id: 'project.settings.links.server-discord', defaultMessage: 'Discord' },
+	serverWikiDescription: {
+		id: 'project.settings.links.server-wiki-description',
+		defaultMessage: 'A page containing information, documentation, and help for the server.',
+	},
+	serverUpdated: {
+		id: 'project.settings.links.server-updated',
+		defaultMessage: 'Your server links have been updated.',
+	},
+})
+
+const fieldMessages = computed(() => ({
+	issues: { title: messages.issues, description: messages.issuesDescription },
+	source: { title: messages.source, description: messages.sourceDescription },
+	wiki: {
+		title: messages.wiki,
+		description: isServerProject.value ? messages.serverWikiDescription : messages.wikiDescription,
+	},
+	discord: {
+		title: isServerProject.value ? messages.serverDiscord : messages.discord,
+		description: messages.discordDescription,
+	},
+	site: { title: messages.site, description: messages.siteDescription },
+	store: { title: messages.store, description: messages.storeDescription },
+}))
+
+const { formatMessage } = useVIntl()
+const tags = useGeneratedState()
+const { projectV3: project, currentMember, patchProjectV3 } = injectProjectPageContext()
+const { addNotification } = injectNotificationManager()
+useProjectSettingsHeadTitle(commonProjectSettingsMessages.links)
+
+const isServerProject = computed(() => project.value.minecraft_server != null)
+const visibleFields = computed<EditableLinkField[]>(() =>
+	isServerProject.value
+		? ['site', 'store', 'wiki', 'discord']
+		: ['issues', 'source', 'wiki', 'discord'],
+)
+const hasPermission = computed(
+	() =>
+		isAdmin(currentMember.value?.user) ||
+		((currentMember.value?.permissions ?? 0) & (1 << 2)) !== 0,
+)
+const {
+	saved,
+	current,
+	reset: resetFields,
+} = useSavable<EditableLinks>(
+	() =>
+		Object.fromEntries(
+			visibleFields.value.map((field) => [field, project.value.link_urls?.[field]?.url ?? '']),
+		),
+	() => {},
 )
 
-const isIssuesUrlCommon = computed(() => {
-	if (!issuesUrl.value || issuesUrl.value.trim().length === 0) return true
-	return isCommonUrl(issuesUrl.value, commonLinkDomains.issues)
-})
+let nextRowKey = 0
 
-const isSourceUrlCommon = computed(() => {
-	if (!sourceUrl.value || sourceUrl.value.trim().length === 0) return true
-	return isCommonUrl(sourceUrl.value, commonLinkDomains.source)
-})
+function makeRow(id?: string, url = ''): DonationRow {
+	return { key: nextRowKey++, ...donationInput(id, url) }
+}
 
-const isDiscordUrlCommon = computed(() => {
-	if (!discordUrl.value || discordUrl.value.trim().length === 0) return true
-	return isCommonUrl(discordUrl.value, commonLinkDomains.discord)
-})
+function donationRowsFromLinks(links?: ProjectLinkUrls): DonationRow[] {
+	return tags.value.donationPlatforms.flatMap((platform) =>
+		links?.[platform.short]?.url ? [makeRow(platform.short, links[platform.short].url)] : [],
+	)
+}
 
-const isIssuesDiscordUrl = computed(() => {
-	return isDiscordUrl(issuesUrl.value)
-})
+const donationLinks = ref(donationRowsFromLinks(project.value.link_urls))
+const donationPlatformOptions = computed(() =>
+	tags.value.donationPlatforms
+		.filter((platform) => !donationLinks.value.some((row) => row.id === platform.short))
+		.map((platform) => ({
+			id: platform.short,
+			label: platform.name,
+			action: () => addDonation(platform.short),
+		})),
+)
+const donationModeTabs = computed(() => [
+	{ value: 'username', label: formatMessage(messages.donationUsername) },
+	{ value: 'url', label: formatMessage(messages.donationUrl) },
+])
+const linkColumns = computed<TableColumn<'name' | 'url'>[]>(() => [
+	{
+		key: 'name',
+		label: formatMessage(messages.linkType),
+		width: '12rem',
+		cellClass: 'pr-3 py-3',
+	},
+	{
+		key: 'url',
+		label: formatMessage(messages.donationUrl),
+		cellClass: 'py-3 pl-1',
+	},
+])
+const linkRows = computed<LinkTableRow[]>(() => [
+	...visibleFields.value.map((field) => ({
+		id: field,
+		inputId: 'project-link-' + field,
+		name: formatMessage(fieldMessages.value[field].title),
+		description: formatMessage(fieldMessages.value[field].description),
+		value: current.value[field] ?? '',
+		url: current.value[field] ?? '',
+		field,
+	})),
+	...(isServerProject.value
+		? []
+		: donationLinks.value.map((donation) => ({
+				id: 'donation-' + donation.key,
+				inputId: 'donation-link-' + donation.key,
+				name: donationPlatformTitle(donation) ?? '',
+				description: formatMessage(messages.donationsDescription),
+				value: donation.input,
+				url: donation.url,
+				donation,
+			}))),
+])
+const linkSections = computed(() => [
+	{
+		id: 'links',
+		title: formatMessage(messages.title),
+		columns: linkColumns.value,
+		rows: linkRows.value.filter((row) => row.field),
+	},
+	...(isServerProject.value
+		? []
+		: [
+				{
+					id: 'donations',
+					title: formatMessage(messages.donations),
+					columns: linkColumns.value.map((column) => ({
+						...column,
+						label: formatMessage(
+							column.key === 'name' ? messages.donationPlatform : messages.donationLink,
+						),
+					})),
+					rows: linkRows.value.filter((row) => row.donation),
+				},
+			]),
+])
+const savedDonations = computed(() =>
+	Object.fromEntries(
+		tags.value.donationPlatforms.flatMap((platform) => {
+			const url = project.value.link_urls?.[platform.short]?.url
+			return url ? [[platform.short, url]] : []
+		}),
+	),
+)
+const currentDonations = computed(() =>
+	Object.fromEntries(
+		donationLinks.value.filter((row) => row.id && row.url).map((row) => [row.id!, row.url]),
+	),
+)
+const original = computed(() => ({
+	...saved.value,
+	donations: JSON.stringify(
+		isServerProject.value ? [] : Object.entries(savedDonations.value).sort(),
+	),
+}))
+const modified = computed(() => ({
+	...current.value,
+	donations: JSON.stringify(
+		isServerProject.value
+			? []
+			: donationLinks.value
+					.filter((row) => row.id && row.url)
+					.map((row) => [row.id ?? '', row.url])
+					.sort(),
+	),
+}))
+const hasChanges = computed(() => JSON.stringify(original.value) !== JSON.stringify(modified.value))
+const { confirmLeaveModal } = usePageLeaveSafety(hasChanges)
+const saveValidation = useProjectSaveValidation(() => modified.value)
+const otherSaveMessages = computed(() =>
+	saveValidation.withoutFields([
+		...visibleFields.value,
+		...donationLinks.value.flatMap((row) => (row.id ? [row.id] : [])),
+	]),
+)
 
-const isSourceDiscordUrl = computed(() => {
-	return isDiscordUrl(sourceUrl.value)
-})
+const fieldValidation = useProjectNagMessages('link-field')
+const sourceRequirement = useProjectNagMessages('source-availability', 'source')
 
-const isWikiDiscordUrl = computed(() => {
-	return isDiscordUrl(wikiUrl.value)
-})
+function savedFieldMessages(field: string) {
+	return [
+		...fieldValidation.value.filter((message) => message.values?.field === field),
+		...(field === 'source' ? sourceRequirement.value : []),
+	]
+}
 
-const isIssuesLinkShortener = computed(() => {
-	return isLinkShortener(issuesUrl.value)
-})
-const isSourceLinkShortener = computed(() => {
-	return isLinkShortener(sourceUrl.value)
-})
-const isWikiLinkShortener = computed(() => {
-	return isLinkShortener(wikiUrl.value)
-})
-const isDiscordLinkShortener = computed(() => {
-	return isLinkShortener(discordUrl.value)
-})
+function donationMessages(row: DonationRow) {
+	const rejected = row.id ? saveValidation.forField(row.id) : []
+	return rejected.length
+		? rejected
+		: row.id && row.url === savedDonations.value[row.id]
+			? savedFieldMessages(row.id)
+			: []
+}
 
-const isServerSiteDiscordUrl = computed(() => {
-	return isDiscordUrl(siteUrl.value)
-})
-const isServerStoreDiscordUrl = computed(() => {
-	return isDiscordUrl(storeUrl.value)
-})
-const isServerWikiDiscordUrl = computed(() => {
-	return isDiscordUrl(serverWikiUrl.value)
-})
-const isServerSiteLinkShortener = computed(() => {
-	return isLinkShortener(siteUrl.value)
-})
-const isServerStoreLinkShortener = computed(() => {
-	return isLinkShortener(storeUrl.value)
-})
-const isServerWikiLinkShortener = computed(() => {
-	return isLinkShortener(serverWikiUrl.value)
-})
-const isServerDiscordLinkShortener = computed(() => {
-	return isLinkShortener(serverDiscordUrl.value)
-})
-const isServerDiscordUrlCommon = computed(() => {
-	if (!serverDiscordUrl.value || serverDiscordUrl.value.trim().length === 0) return true
-	return isCommonUrl(serverDiscordUrl.value, commonLinkDomains.discord)
-})
+function donationPlatformTitle(row: DonationRow) {
+	return tags.value.donationPlatforms.find((platform) => platform.short === row.id)?.name ?? row.id
+}
 
-const rawDonationLinks = JSON.parse(JSON.stringify(project.value.donation_urls))
-rawDonationLinks.push({
-	id: null,
-	platform: null,
-	url: null,
-})
-const donationLinks = ref(rawDonationLinks)
+function donationPlaceholder(row: DonationRow) {
+	if (row.mode !== 'username') return formatMessage(messages.urlPlaceholder)
+	return formatMessage(messages.donationUsernamePlaceholder, {
+		platform:
+			row.id === 'github' ? 'GitHub' : row.id === 'paypal' ? 'PayPal' : donationPlatformTitle(row),
+	})
+}
 
-const hasPermission = computed(() => {
-	const EDIT_DETAILS = 1 << 2
-	return (currentMember.value?.permissions & EDIT_DETAILS) === EDIT_DETAILS
-})
+async function addDonation(platform: string) {
+	if (saving.value || !hasPermission.value) return
+	if (!donationPlatformOptions.value.some((option) => option.id === platform)) return
+	const row = makeRow(platform)
+	donationLinks.value.push(row)
+	await nextTick()
+	document.getElementById('donation-link-' + row.key)?.focus()
+}
 
-const patchData = computed(() => {
-	const data = {}
+function removeDonation(row: DonationRow) {
+	if (saving.value || !hasPermission.value) return
+	donationLinks.value = donationLinks.value.filter((link) => link.key !== row.key)
+}
 
-	if (checkDifference(issuesUrl.value, project.value.issues_url)) {
-		data.issues_url = issuesUrl.value === '' ? null : issuesUrl.value.trim()
-	}
-	if (checkDifference(sourceUrl.value, project.value.source_url)) {
-		data.source_url = sourceUrl.value === '' ? null : sourceUrl.value.trim()
-	}
-	if (checkDifference(wikiUrl.value, project.value.wiki_url)) {
-		data.wiki_url = wikiUrl.value === '' ? null : wikiUrl.value.trim()
-	}
-	if (checkDifference(discordUrl.value, project.value.discord_url)) {
-		data.discord_url = discordUrl.value === '' ? null : discordUrl.value.trim()
-	}
+function changeLink(row: LinkTableRow, value: string | number | undefined) {
+	if (row.donation) setDonationInput(row.donation, value ?? '')
+	else if (row.field) current.value[row.field] = String(value ?? '')
+}
 
-	const validDonationLinks = donationLinks.value.filter((link) => link.url && link.id)
+function changeDonationMode(row: DonationRow, mode: TabsValue) {
+	if (saving.value || !hasPermission.value || row.mode === mode) return
+	if (mode === 'username' || mode === 'url') toggleDonationInput(row)
+}
 
-	if (
-		validDonationLinks !== project.value.donation_urls &&
-		!(
-			project.value.donation_urls &&
-			project.value.donation_urls.length === 0 &&
-			validDonationLinks.length === 0
-		)
-	) {
-		data.donation_urls = validDonationLinks
-	}
-
-	if (data.donation_urls) {
-		data.donation_urls.forEach((link) => {
-			const platform = tags.value.donationPlatforms.find((platform) => platform.short === link.id)
-			link.platform = platform.name
-		})
-	}
-
-	return data
-})
-
-const hasChanges = computed(() => {
-	return Object.keys(patchData.value).length > 0
-})
-
-// Server project links
-const serverPatchData = computed(() => {
-	const data = {}
-	const originalSite = projectV3.value?.link_urls?.site?.url ?? ''
-	const originalStore = projectV3.value?.link_urls?.store?.url ?? ''
-	const originalWiki = projectV3.value?.link_urls?.wiki?.url ?? ''
-	const originalDiscord = projectV3.value?.link_urls?.discord?.url ?? ''
-
-	if (checkDifference(siteUrl.value, originalSite)) {
-		data.site = siteUrl.value === '' ? null : siteUrl.value?.trim()
-	}
-	if (checkDifference(storeUrl.value, originalStore)) {
-		data.store = storeUrl.value === '' ? null : storeUrl.value?.trim()
-	}
-	if (checkDifference(serverWikiUrl.value, originalWiki)) {
-		data.wiki = serverWikiUrl.value === '' ? null : serverWikiUrl.value?.trim()
-	}
-	if (checkDifference(serverDiscordUrl.value, originalDiscord)) {
-		data.discord = serverDiscordUrl.value === '' ? null : serverDiscordUrl.value?.trim()
-	}
-	return data
-})
-
-const hasServerChanges = computed(() => {
-	return Object.keys(serverPatchData.value).length > 0
-})
-
-async function saveServerChanges() {
-	const linkUpdates = serverPatchData.value
-	if (Object.keys(linkUpdates).length === 0) return
-
+function visitUrl(value: string) {
 	try {
-		await labrinth.projects_v3.edit(project.value.id, {
-			link_urls: linkUpdates,
-		})
-		await invalidate()
-		addNotification({
-			title: 'Links updated',
-			text: 'Your server links have been updated.',
-			type: 'success',
-		})
-	} catch (err) {
-		addNotification({
-			title: 'Failed to update links',
-			text: err.data?.description ?? String(err),
-			type: 'error',
-		})
+		const url = new URL(normalizeProjectUrl(value))
+		return ['http:', 'https:'].includes(url.protocol) ? url.href : ''
+	} catch {
+		return ''
 	}
 }
 
-async function saveChanges() {
-	if (patchData.value && (await patchProject(patchData.value))) {
-		donationLinks.value = JSON.parse(JSON.stringify(project.value.donation_urls))
-		donationLinks.value.push({
-			id: null,
-			platform: null,
-			url: null,
-		})
-	}
+function visitLink(value: string) {
+	const url = visitUrl(value)
+	if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-function updateDonationLinks() {
-	const links = donationLinks.value
-	links.forEach((link) => {
-		if (link.url) {
-			const url = link.url.toLowerCase()
-			if (url.includes('patreon.com')) {
-				link.id = 'patreon'
-			} else if (url.includes('ko-fi.com')) {
-				link.id = 'ko-fi'
-			} else if (url.includes('paypal.com') || url.includes('paypal.me')) {
-				link.id = 'paypal'
-			} else if (url.includes('buymeacoffee.com') || url.includes('buymeacoff.ee')) {
-				link.id = 'bmac'
-			} else if (url.includes('github.com/sponsors')) {
-				link.id = 'github'
+function reset() {
+	resetFields()
+	donationLinks.value = donationRowsFromLinks(project.value.link_urls)
+	saveValidation.clear()
+}
+
+const patchData = computed<Record<string, string | null>>(() => {
+	const data: Record<string, string | null> = {}
+	for (const field of visibleFields.value) {
+		const value = current.value[field] ?? ''
+		if (value !== saved.value[field]) data[field] = normalizeProjectUrl(value) || null
+	}
+	if (!isServerProject.value) {
+		for (const platform of tags.value.donationPlatforms) {
+			const url = currentDonations.value[platform.short] ?? ''
+			if (url !== (savedDonations.value[platform.short] ?? '')) {
+				data[platform.short] = normalizeProjectUrl(url) || null
 			}
 		}
-	})
-	if (!links.find((link) => !(link.url && link.id))) {
-		links.push({
-			id: null,
-			platform: null,
-			url: null,
-		})
 	}
-	donationLinks.value = links
-}
+	return data
+})
+const canSave = computed(
+	() =>
+		hasPermission.value &&
+		hasChanges.value &&
+		Object.keys(patchData.value).length > 0 &&
+		!saveValidation.messages.value.some((message) => message.severity === 'error'),
+)
+const saving = ref(false)
 
-function checkDifference(newLink, existingLink) {
-	return newLink != existingLink
+async function save() {
+	if (!canSave.value || saving.value) return
+	const submittedState = saveValidation.snapshot()
+	saving.value = true
+	try {
+		await patchProjectV3({ link_urls: patchData.value }, true, true)
+		reset()
+		addNotification({
+			title: formatMessage(messages.updatedTitle),
+			text: formatMessage(isServerProject.value ? messages.serverUpdated : messages.updated),
+			type: 'success',
+		})
+	} catch (error) {
+		saveValidation.capture(error, submittedState)
+	} finally {
+		saving.value = false
+	}
 }
 </script>
-<style lang="scss" scoped>
-.donation-link-group {
-	input {
-		flex-grow: 2;
-		max-width: 26rem;
-	}
-}
-</style>

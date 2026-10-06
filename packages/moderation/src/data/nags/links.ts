@@ -1,356 +1,191 @@
-import { defineMessage, formatProjectTypeSentence, useVIntl } from '@modrinth/ui'
+import { defineMessages } from '@modrinth/ui'
 
-import type { Nag, NagContext } from '../../types/nags'
-import { licenseRequiresSource, licensesRequiringSource, notSourceAsDistributed } from '../../utils'
-import license from '../stages/license'
+import { licenseLinkMessages } from './license.ts'
+import type { NagDefinitions } from './types.ts'
 
-export const commonLinkDomains = {
-	source: [
-		'github.com',
-		'gitlab.com',
-		'bitbucket.org',
-		'codeberg.org',
-		'git.sr.ht',
-		'tangled.org',
-		'git.gay',
-	],
-	issues: [
-		'github.com',
-		'gitlab.com',
-		'bitbucket.org',
-		'codeberg.org',
-		'docs.google.com',
-		'tangled.org',
-		'git.gay',
-	],
-	discord: ['discord.gg', 'discord.com', 'dsc.gg'],
-	licenseBlocklist: [
-		'youtube.com',
-		'youtu.be',
-		'modrinth.com',
-		'curseforge.com',
-		'twitter.com',
-		'x.com',
-		'discord.gg',
-		'discord.com',
-		'instagram.com',
-		'facebook.com',
-		'tiktok.com',
-		'reddit.com',
-		'twitch.tv',
-		'patreon.com',
-		'ko-fi.com',
-		'paypal.com',
-		'buymeacoffee.com',
-		'google.com',
-		'example.com',
-		't.me',
-	],
-	linkShorteners: ['bit.ly', 'adf.ly', 'tinyurl.com', 'short.io', 'is.gd'],
-}
-
-export function isCommonUrl(url: string | null, commonDomains: string[]): boolean {
-	if (url === null || url === '') return true
-	try {
-		const domain = new URL(url).hostname.toLowerCase()
-		return commonDomains.some((allowed) => domain.includes(allowed))
-	} catch {
-		return false
-	}
-}
-
-export function isCommonUrlOfType(url: string | null, commonDomains: string[]): boolean {
-	if (url === null || url === '') return false
-	return isCommonUrl(url, commonDomains)
-}
-
-export function isDiscordUrl(url: string | null): boolean {
-	return isCommonUrlOfType(url, commonLinkDomains.discord)
-}
-
-export function isLinkShortener(url: string | null): boolean {
-	return isCommonUrlOfType(url, commonLinkDomains.linkShorteners)
-}
-
-export function isUncommonLicenseUrl(url: string | null): boolean {
-	return isCommonUrlOfType(url, commonLinkDomains.licenseBlocklist)
-}
-
-export const linksNags: Nag[] = [
-	{
-		id: 'add-links',
-		title: defineMessage({
-			id: 'nags.add-links.title',
-			defaultMessage: 'Add external links',
-		}),
-		description: defineMessage({
-			id: 'nags.add-links.description',
-			defaultMessage:
-				'Add any relevant links targeted outside of Modrinth, such as source code, an issue tracker, or a Discord invite.',
-		}),
-		status: 'suggestion',
-		shouldShow: (context: NagContext) => {
-			return (
-				!context.projectV3?.minecraft_server &&
-				Object.keys(context.projectV3?.link_urls ?? {}).length === 0
-			)
-		},
-		link: {
-			path: 'settings/links',
-			title: defineMessage({
-				id: 'nags.settings.links.title',
-				defaultMessage: 'Visit links settings',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings-links',
-		},
+const messages = defineMessages({
+	addTitle: { id: 'nags.add-links.title', defaultMessage: 'Add external links' },
+	addServerTitle: { id: 'nags.add-links-server.title', defaultMessage: 'Add external links' },
+	add: {
+		id: 'nags.add-links.description',
+		defaultMessage:
+			'Add any relevant links to external resources, such as source code, an issue tracker, or a permanent Discord invite.',
 	},
-	{
-		id: 'add-links-server',
-		title: defineMessage({
-			id: 'nags.add-links-server.title',
-			defaultMessage: 'Add external links',
-		}),
-		description: defineMessage({
-			id: 'nags.add-links-server.description',
-			defaultMessage:
-				'Add any relevant links targeted outside of Modrinth, such as a website, store, or a Discord invite.',
-		}),
-		status: 'suggestion',
-		shouldShow: (context: NagContext) => {
-			return (
-				!!context.projectV3?.minecraft_server &&
-				Object.keys(context.projectV3?.link_urls ?? {}).length === 0
-			)
-		},
-		link: {
-			path: 'settings/links',
-			title: defineMessage({
-				id: 'nags.settings.links.title',
-				defaultMessage: 'Visit links settings',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings-links',
-		},
+	addServer: {
+		id: 'nags.add-links-server.description',
+		defaultMessage:
+			'Add any relevant links to external resources, such as a website, store, or a permanent Discord invite.',
 	},
-	{
-		id: 'identical-links',
-		title: defineMessage({
-			id: 'nags.identical-links.title',
-			defaultMessage: 'Clean up identical links',
-		}),
-		description: defineMessage({
-			id: 'nags.identical-links.description',
-			defaultMessage:
-				'Some of your external links appear to be identical. Each link should be entered only once and with the appropriate link type.',
-		}),
-		status: 'required',
-		shouldShow: (context: NagContext) =>
-			new Set(Object.values(context.projectV3?.link_urls ?? {}).map((link) => link.url)).size !==
-			Object.values(context.projectV3?.link_urls ?? {}).map((link) => link.url).length,
-		link: {
-			path: 'settings/links',
-			title: defineMessage({
-				id: 'nags.settings.links.title',
-				defaultMessage: 'Visit links settings',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings-links',
-		},
+	gplTitle: { id: 'nags.gpl-license-source-required.title', defaultMessage: 'Provide source code' },
+	gpl: {
+		id: 'nags.gpl-license-source-required.description',
+		defaultMessage: `Your {type}'s license requires source code to be published. Please provide a source code link, add sources files, or change the selected license.`,
 	},
-	{
-		id: 'verify-external-links',
-		title: defineMessage({
-			id: 'nags.verify-external-links.title',
-			defaultMessage: 'Verify external links',
-		}),
-		description: defineMessage({
-			id: 'nags.verify-external-links.description',
-			defaultMessage:
-				'Some of your external links may be using domains that are inappropriate for that type of link.',
-		}),
-		status: 'warning',
-		shouldShow: (context: NagContext) => {
-			return (
-				!isCommonUrl(context.project.source_url ?? null, commonLinkDomains.source) ||
-				!isCommonUrl(context.project.issues_url ?? null, commonLinkDomains.issues) ||
-				!isCommonUrl(context.project.discord_url ?? null, commonLinkDomains.discord)
-			)
-		},
-		link: {
-			path: 'settings/links',
-			title: defineMessage({
-				id: 'nags.visit-links-settings.title',
-				defaultMessage: 'Visit links settings',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings-links',
-		},
+	linkTitle: { id: 'nags.link-validation.title', defaultMessage: 'Review this link' },
+	global_blocklist_matchTitle: {
+		id: 'nags.link-validation.global-blocklist-match.title',
+		defaultMessage: 'Remove prohibited links',
 	},
-	{
-		id: 'misused-discord-link',
-		title: defineMessage({
-			id: 'nags.misused-discord-link.title',
-			defaultMessage: 'Move Discord invite',
-		}),
-		description: defineMessage({
-			id: 'nags.misused-discord-link-description',
-			defaultMessage:
-				'Discord invites can not be used for other link types. Please put your Discord link in the Discord Invite link field only.',
-		}),
-		status: 'required',
-		shouldShow: (context: NagContext) =>
-			isDiscordUrl(context.project.source_url ?? null) ||
-			isDiscordUrl(context.project.issues_url ?? null) ||
-			isDiscordUrl(context.project.wiki_url ?? null) ||
-			isDiscordUrl(context.projectV3?.link_urls?.site?.url ?? null) ||
-			isDiscordUrl(context.projectV3?.link_urls?.store?.url ?? null),
-		link: {
-			path: 'settings/links',
-			title: defineMessage({
-				id: 'nags.visit-links-settings.title',
-				defaultMessage: 'Visit links settings',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings-links',
-		},
+	external_blocklist_matchTitle: {
+		id: 'nags.link-validation.external-blocklist-match.title',
+		defaultMessage: 'Replace incorrect links',
 	},
-	{
-		id: 'link-shortener-usage',
-		title: defineMessage({
-			id: 'nags.link-shortener-usage.title',
-			defaultMessage: "Don't use link shorteners",
-		}),
-		description: defineMessage({
-			id: 'nags.link-shortener-usage.description',
-			defaultMessage:
-				'Use of link shorteners or other methods to obscure where a link may lead in your external links or license link is prohibited, please only use appropriate full length links.',
-		}),
-		status: 'required',
-		shouldShow: (context: NagContext) => {
-			if (context.project.donation_urls) {
-				for (const donation of context.project.donation_urls) {
-					if (isLinkShortener(donation.url ?? null)) {
-						return true
-					}
-				}
+	wrong_fieldTitle: {
+		id: 'nags.link-validation.wrong-field.title',
+		defaultMessage: 'Fix incorrect links',
+	},
+	ip_addressTitle: {
+		id: 'nags.link-validation.ip-address.title',
+		defaultMessage: 'Remove IP Address link',
+	},
+	malformedTitle: {
+		id: 'nags.link-validation.malformed.title',
+		defaultMessage: 'Fix invalid links',
+	},
+	not_in_allowlistTitle: {
+		id: 'nags.link-validation.not-in-allowlist.title',
+		defaultMessage: 'Check link accuracy',
+	},
+	duplicateTitle: {
+		id: 'nags.link-validation.duplicate.title',
+		defaultMessage: 'Remove duplicate links',
+	},
+	unverifiableTitle: {
+		id: 'nags.link-validation.unverifiable.title',
+		defaultMessage: 'Check link availability',
+	},
+	downloadTitle: {
+		id: 'nags.link-validation.download.title',
+		defaultMessage: 'Remove download links',
+	},
+	discord_inviteTitle: {
+		id: 'nags.link-validation.discord-invite.title',
+		defaultMessage: 'Replace invalid Discord invites',
+	},
+	source_repositoryTitle: {
+		id: 'nags.link-validation.source-repository.title',
+		defaultMessage: 'Link to a source repository',
+	},
+	global_blocklist_match: {
+		id: 'nags.link-validation.global-blocklist-match',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link uses a prohibited domain. Remove or replace this link.',
+	},
+	external_blocklist_match: {
+		id: 'nags.link-validation.external-blocklist-match',
+		defaultMessage:
+			'Your {linkField} link is not allowed. Please remove this link, or replace it with something appropriate for the {linkField} link type.',
+	},
+	wrong_field: {
+		id: 'nags.link-validation.wrong-field',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link is not correct for {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} links. Remove or replace it with the correct link.',
+	},
+	ip_address: {
+		id: 'nags.link-validation.ip-address',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link uses an IP address. Use a URL with a domain name.',
+	},
+	malformed: {
+		id: 'nags.link-validation.malformed',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link is invalid. Enter a complete HTTPS URL.',
+	},
+	not_in_allowlist: {
+		id: 'nags.link-validation.not-in-allowlist',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link may not be appropriate for the link type. Please ensure that it is suitable for its intended purpose.',
+	},
+	duplicate: {
+		id: 'nags.link-validation.duplicate',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link is also used in {otherLinkField, select, issues {Issue tracker} source {Source code} wiki {Wiki} discord {Discord invite} site {Website} store {Store} license {License} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {another field}}. Each link should be listed only once.',
+	},
+	unverifiable: {
+		id: 'nags.link-validation.unverifiable',
+		defaultMessage:
+			'Your {linkField, select, issues {issue tracker} source {source code} wiki {wiki} discord {Discord invite} site {website} store {store} license {license} description {description} patreon {Patreon} bmac {Buy Me a Coffee} paypal {PayPal} github {GitHub Sponsors} kofi {Ko-fi} other {donation}} link could not be verified. Check that it is online and accessible.',
+	},
+	download: {
+		id: 'nags.link-validation.download',
+		defaultMessage:
+			'Links that start a download are not allowed. Please remove any such links from your description.',
+	},
+	discord_invite: {
+		id: 'nags.link-validation.discord-invite',
+		defaultMessage:
+			'Your Discord invite is invalid, expired, or does not invite users to a server. Replace it with an active server invite.',
+	},
+	source_repository: {
+		id: 'nags.link-validation.source-repository',
+		defaultMessage:
+			'Your source code link must lead to a repository on a supported host platform, or to a self-hosted Gitea/Forgejo service.',
+	},
+	visitLinks: { id: 'nags.visit-links-settings.title', defaultMessage: 'Visit links settings' },
+})
+
+const linkReasons = {
+	discord_invite: messages.discord_invite,
+	global_blocklist_match: messages.global_blocklist_match,
+	external_blocklist_match: messages.external_blocklist_match,
+	wrong_field: messages.wrong_field,
+	ip_address: messages.ip_address,
+	malformed: messages.malformed,
+	not_in_allowlist: messages.not_in_allowlist,
+	duplicate: messages.duplicate,
+	unverifiable: messages.unverifiable,
+	download: messages.download,
+	source_repository: messages.source_repository,
+}
+
+const linkReasonTitles = {
+	discord_invite: messages.discord_inviteTitle,
+	global_blocklist_match: messages.global_blocklist_matchTitle,
+	external_blocklist_match: messages.external_blocklist_matchTitle,
+	wrong_field: messages.wrong_fieldTitle,
+	ip_address: messages.ip_addressTitle,
+	malformed: messages.malformedTitle,
+	not_in_allowlist: messages.not_in_allowlistTitle,
+	duplicate: messages.duplicateTitle,
+	unverifiable: messages.unverifiableTitle,
+	download: messages.downloadTitle,
+	source_repository: messages.source_repositoryTitle,
+}
+
+export const linkNags = {
+	'link-validation': {
+		title: ({ nag }) => {
+			const reason = nag.details.reason
+			if (nag.details.field === 'license') {
+				if (reason === 'malformed') return licenseLinkMessages.malformedTitle
+				if (reason === 'not_in_allowlist') return licenseLinkMessages.notInAllowlistTitle
 			}
-
-			return (
-				isLinkShortener(context.project.source_url ?? null) ||
-				isLinkShortener(context.project.issues_url ?? null) ||
-				isLinkShortener(context.project.wiki_url ?? null) ||
-				isLinkShortener(context.project.discord_url ?? null) ||
-				isLinkShortener(context.projectV3?.link_urls?.site?.url ?? null) ||
-				isLinkShortener(context.projectV3?.link_urls?.store?.url ?? null) ||
-				Boolean(context.project.license.url && isLinkShortener(context.project.license.url ?? null))
-			)
+			return typeof reason === 'string' && reason in linkReasonTitles
+				? linkReasonTitles[reason as keyof typeof linkReasonTitles]
+				: messages.linkTitle
 		},
+		description: ({ nag }) => {
+			const reason = nag.details.reason
+			if (nag.details.field === 'license') {
+				if (reason === 'malformed') return licenseLinkMessages.malformed
+				if (reason === 'not_in_allowlist') return licenseLinkMessages.notInAllowlist
+			}
+			return typeof reason === 'string' && reason in linkReasons
+				? linkReasons[reason as keyof typeof linkReasons]
+				: messages.unverifiable
+		},
+		destination: 'links',
 	},
-	{
-		id: 'invalid-license-url',
-		title: defineMessage({
-			id: 'nags.invalid-license-url.title',
-			defaultMessage: 'Add a valid license link',
-		}),
-		description: (context: NagContext) => {
-			const { formatMessage } = useVIntl()
-			const licenseUrl = context.project.license.url
-
-			if (!licenseUrl) {
-				return formatMessage(
-					defineMessage({
-						id: 'nags.invalid-license-url.description.default',
-						defaultMessage: 'License URL is invalid.',
-					}),
-				)
-			}
-
-			try {
-				const domain = new URL(licenseUrl).hostname.toLowerCase()
-				return formatMessage(
-					defineMessage({
-						id: 'nags.invalid-license-url.description.domain',
-						defaultMessage:
-							'Your license URL points to {domain}, which is not appropriate for license information. License URLs should link directly to your license file, not social media, gaming platforms, etc.',
-					}),
-					{ domain },
-				)
-			} catch {
-				return formatMessage(
-					defineMessage({
-						id: 'nags.invalid-license-url.description.malformed',
-						defaultMessage:
-							'Your license URL appears to be malformed. Please provide a valid URL to your license text.',
-					}),
-				)
-			}
-		},
-		status: 'required',
-		shouldShow: (context: NagContext) => {
-			const licenseUrl = context.project.license.url
-			if (!licenseUrl) return false
-
-			const isBlocklisted = isUncommonLicenseUrl(licenseUrl)
-
-			try {
-				new URL(licenseUrl)
-				return isBlocklisted
-			} catch {
-				return true
-			}
-		},
-		link: {
-			path: 'settings',
-			title: defineMessage({
-				id: 'nags.edit-license.title',
-				defaultMessage: 'Edit license',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings',
-		},
+	'add-links': { title: messages.addTitle, description: messages.add, destination: 'links' },
+	'add-links-server': {
+		title: messages.addServerTitle,
+		description: messages.addServer,
+		destination: 'links',
 	},
-	{
-		id: 'gpl-license-source-required',
-		title: defineMessage({
-			id: 'nags.gpl-license-source-required.title',
-			defaultMessage: 'Provide source code',
-		}),
-		description: (context: NagContext) => {
-			const { formatMessage } = useVIntl()
-
-			return formatMessage(
-				defineMessage({
-					id: 'nags.gpl-license-source-required.description',
-					defaultMessage:
-						'Your {type} uses a license which requires source code to be available. Please provide a source code link or sources file for each additional version, or consider using a different license.',
-				}),
-				{
-					type: formatProjectTypeSentence(formatMessage, context.project.project_type),
-				},
-			)
-		},
-		status: 'required',
-		shouldShow: (context: NagContext) => {
-			if (context.projectV3.project_types.includes('datapack')) return false
-
-			const hasSourceUrl = !!context.project.source_url
-			const hasAdditionalFiles = (context: NagContext) => {
-				let hasAdditional = true
-				context.versions.forEach((version) => {
-					if (version.files.length < 2) hasAdditional = false
-				})
-				return hasAdditional
-			}
-
-			return (
-				licenseRequiresSource(context.projectV3.license.id) &&
-				notSourceAsDistributed(context.projectV3.project_types) &&
-				!hasSourceUrl &&
-				!hasAdditionalFiles(context)
-			)
-		},
-		link: {
-			path: 'settings/links',
-			title: defineMessage({
-				id: 'nags.visit-links-settings.title',
-				defaultMessage: 'Visit links settings',
-			}),
-			shouldShow: (context: NagContext) => context.currentRoute !== 'type-project-settings-links',
-		},
+	'gpl-license-source-required': {
+		title: messages.gplTitle,
+		description: messages.gpl,
+		destination: 'links',
+		linkTitle: messages.visitLinks,
 	},
-]
+} satisfies NagDefinitions

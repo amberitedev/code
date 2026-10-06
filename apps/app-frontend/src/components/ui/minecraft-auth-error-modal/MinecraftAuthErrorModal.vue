@@ -10,8 +10,8 @@ import {
 import { Admonition, Button, ButtonLink, Collapsible, IconButton, NewModal } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
+import { handleSevereError } from '@/composables/use-error.js'
 import { login as login_flow, set_default_user } from '@/helpers/auth.js'
-import { handleSevereError } from '@/store/error.js'
 
 import { findMinecraftAuthError, type MinecraftAuthError } from './minecraft-auth-errors'
 
@@ -129,15 +129,15 @@ async function copyToClipboard(text: string) {
 			</div>
 
 			<!-- Action buttons -->
-			<div class="flex items-center gap-2">
-				<ButtonLink href="https://support.modrinth.com" class="!w-full" @click="modal?.hide()">
+			<div class="flex items-center gap-1">
+				<ButtonLink href="https://support.modrinth.com" class="flex-1" @click="modal?.hide()">
 					<MessagesSquareIcon /> Contact support
 				</ButtonLink>
 				<Button
 					type="colored"
 					color="brand"
 					:disabled="loadingSignIn"
-					class="!w-full"
+					class="flex-1"
 					@click="signInAgain"
 				>
 					<LogInIcon /> Sign in again

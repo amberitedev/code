@@ -11,6 +11,716 @@ export type VersionEntry = {
 
 const VERSIONS: VersionEntry[] = [
 	{
+		date: `2026-09-27T18:59:10+00:00`,
+		product: 'app',
+		version: '0.21.6',
+		body: `## Added
+- Added a new modal for Update all in the Content tab of your instance. You can now select each version for each project that needs an update, and view the changelogs, all in one place.
+
+## Changed
+- Bulk update operations now go through the download manager, rather than preventing you from leaving the content tab while it installs the updates.
+
+## Fixed
+- Fixed relying on external metadata for already-installed loader verisons.
+- Fixed close button icon in the window controls not turning red on hover.
+- Fixed text overlapping into \`<details>\` in markdown descriptions.`,
+	},
+	{
+		date: `2026-09-27T18:59:10+00:00`,
+		product: 'hosting',
+		body: `## Added
+- Added a new modal for Update all in the Content tab of the server panel. You can now select each version for each project that needs an update, and view the changelogs, all in one place.`,
+	},
+	{
+		date: `2026-09-27T18:59:10+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed text overlapping into \`<details>\` in markdown descriptions.`,
+	},
+	{
+		date: `2026-09-23T09:31:02+00:00`,
+		product: 'app',
+		version: '0.21.5',
+		body: `## Changed
+- Changed how some app settings are stored.
+- Added a setting to refocus Modrinth App when Minecraft closes - this is disabled by default.
+
+## Fixed
+- Fixed some issues where "Database is locked" errors would occur.
+- Fixed an issue where renaming an externally uploaded file in File Explorer or Finder would prevent an instance's linked modpack from being updated.
+- Fixed "Instance not found" issue with super old pre-0.9.0 instances with folder naming that isn't allowed now.
+- Fixed performance issues loading instance pages.
+- Fixed navigation crash issue.
+- Fixed download manager always showing "Needs attention" tooltip when no attention is needed.
+- Fixed issue where if you had any screenshots which were symlinked it would break the app's screenshot pages.
+- Fixed issue with keybind inputs treating Alt Gr as Left Ctrl on Windows.
+- Fixed issue where syncing command history would break instance duplication action.`,
+	},
+	{
+		date: `2026-09-23T09:31:02+00:00`,
+		product: 'web',
+		body: `## Changed
+- Increased icon file size limit from 256KiB to 512KiB`,
+	},
+	{
+		date: `2026-09-16T16:37:03+00:00`,
+		product: 'app',
+		version: '0.21.4',
+		body: `## Fixed
+- Fixes issue for some users not being able to launch the game
+- Fixed some styling and snapping issues with slider inputs.`,
+	},
+	{
+		date: `2026-09-15T17:44:10+00:00`,
+		product: 'app',
+		version: '0.21.3',
+		body: `## Added
+- Added validation of Minecraft libraries on launch.
+
+## Changed
+- Reverted usage of links instead of duplicated content due to issues with a couple mods.`,
+	},
+	{
+		date: `2026-09-15T17:44:10+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Make analytics chart tooltips render crisper on Chromium browsers.`,
+	},
+	{
+		date: `2026-09-14T17:25:37+00:00`,
+		product: 'app',
+		version: '0.21.2',
+		body: `## Fixed
+- Fixed logo on macOS appearing below traffic light buttons.`,
+	},
+	{
+		date: `2026-09-14T16:37:42+00:00`,
+		product: 'app',
+		version: '0.21.1',
+		body: `## Changed
+- Changed resource management icon to microchip.
+
+## Fixed
+- Fixed the alignment of the Modrinth logo on windows and linux
+- Fixed issue with Resource management tab not loading when calculating storage usage.
+- Fixed issue with Sync overrides toggles not showing true state until clicked on.`,
+	},
+	{
+		date: `2026-09-14T15:44:10+00:00`,
+		product: 'hosting',
+		body: `## Fixed
+- Fixed the unsaved changes banner not showing up in Hosting settings.
+- Fixed non-USD currencies appearing broken in pricing for Modrinth Hosting.
+- Fixed issue on the invite modal for the Access tab where the friends list would overflow out of the modal container.`,
+	},
+	{
+		date: `2026-09-14T15:44:10+00:00`,
+		product: 'app',
+		version: '0.21.0',
+		body: `## Added
+- Added a download manager showing installation progress, download speeds, estimated time remaining, and groups for active, completed, and failed tasks.
+- Added controls to pause, resume, and cancel ongoing installations in the download manager.
+- Added a Content storage section in Resource management showing disk usage for unique, shared, and unused content.
+- Added controls to limit or clear unused downloads in Resource management, including mods, packs, Minecraft files, and Java installations.
+- Added automatic cleanup of unused downloads when the cache exceeds its configured limit.
+- Added "Verify and repair" in Content storage to check for missing or damaged files, repair recoverable files, and report remaining problems.
+
+## Changed
+- Consolidated identical mods, resource packs, shader packs, and data packs across new and existing instances to reduce disk usage.
+- Improved repeat modpack installations by reusing cached mrpack downloads.
+- Updated the Files tab to make managed mods and packs read-only, with changes handled through the Content tab. If you are adding custom content you must do it through the Upload button on the Content tab.
+- Improved recovery from interrupted app directory moves to preserve instances and shared content.
+- The "Managed content" card will not be shown for server project linked instances which do not have any content, e.g they are a vanilla server.
+
+## Fixed
+- Fixed issue with shared instances where an installed project which has been deleted from Modrinth would block you from pushing an update. It will now be treated as an external file.
+- Fixed issue with resource pack syncing where resource packs with missing \`pack.mcmeta\` files would completely block syncing from happening for all packs.
+- Fixed issue in the content tab for uploaded resource packs having mc color codes in their names. Now they are removed.
+- Fixed "Minimise on launch" setting not working as intended.
+- Fixed Alt + Tab causing Modrinth App to crash on windows for some users.
+- Fixed spacing on language group headers
+- Fixed failed or interrupted modpack updates leaving instance files partially replaced by restoring the previous content.
+- Fixed duplicated instances losing content update locks.
+- Fixed formatting codes showing in world names.
+- Fixed file size limit for profile pictures not being correctly notified about in the profile settings page.
+- Fixed non-USD currencies appearing broken in pricing for Modrinth Hosting.
+- Fixed issue with Allocated memory setting not saving correctly.
+- Fixed issue on Share modal for shared instances where the friends list would overflow out of the modal container.`,
+	},
+	{
+		date: `2026-09-14T15:44:10+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed spacing on language group headers
+- Fixed non-USD currencies appearing broken in pricing for Modrinth Hosting and Modrinth+.`,
+	},
+	{
+		date: `2026-09-14T02:29:42+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed project 404 errors.`,
+	},
+	{
+		date: `2026-09-14T00:11:58+00:00`,
+		product: 'web',
+		body: `## Changed
+- Updated the images on the Modrinth Hosting landing page.
+- Tooltips now appear only after a delay, no longer re-open when quickly moving to another nearby tooltip, smoothly animate between positions, and have a slight delay before closing to bring them closer to typical tooltip guidelines. Tooltip animations have also been improved to be smoother.
+- Added a slight selection animation to selecting the different tabs of the app.
+
+## Fixed
+- Fixed focus trapping of modal menus.
+- Fixed many screen reader issues. A lot more work still needs to be done here, but certain parts of the app should be much better with screen readers now.`,
+	},
+	{
+		date: `2026-09-14T00:11:58+00:00`,
+		product: 'app',
+		version: '0.20.5',
+		body: `## Changed
+- Tooltips now appear only after a delay, no longer re-open when quickly moving to another nearby tooltip, smoothly animate between positions, and have a slight delay before closing to bring them closer to typical tooltip guidelines. Tooltip animations have also been improved to be smoother.
+
+## Fixed
+- Fixed focus trapping of modal menus.
+- Fixed the action bar in the modpack content modal displaying below the modal.`,
+	},
+	{
+		date: `2026-09-11T19:36:35+00:00`,
+		product: 'web',
+		body: `## Changed
+- The random project carousels on the home page and app landing page now pull from the [Featured projects](https://modrinth.com/collection/YV97U1kk) collection.
+- Updated screenshots on the app landing page.
+- Changed some callouts on app landing page to highlight newer features like the skin manager and settings syncing.
+- Removed claims about RAM usage of Modrinth App on app landing page.
+- Switched some projects out on app landing page to freshen it up.`,
+	},
+	{
+		date: `2026-09-11T19:36:35+00:00`,
+		product: 'app',
+		version: '0.20.4',
+		body: `## Fixed
+- Fixed server projects not showing in Jump In properly.`,
+	},
+	{
+		date: `2026-09-11T16:02:39+00:00`,
+		product: 'app',
+		version: '0.20.3',
+		body: `## Fixed
+- Fixed issues with resource pack syncing causing delays when launching instances or the app.
+- Fixed issue with the "Sync your settings" notification appearing even though it's been dismissed already.`,
+	},
+	{
+		date: `2026-09-11T16:02:39+00:00`,
+		product: 'hosting',
+		body: `## Fixed
+- Fixed "Download files" action not being available for suspended Medal promo servers.`,
+	},
+	{
+		date: `2026-09-10T16:31:31+00:00`,
+		product: 'app',
+		version: '0.20.2',
+		body: `## Changed
+- Fixed slow loading issues when opening the app settings modal.
+- Fixed slow loading of the app on launch.
+- Fixed issue where the "New update" notification would keep showing up even if you've already seen it and dismissed it.
+- Updated design of slider elements`,
+	},
+	{
+		date: `2026-09-10T16:31:31+00:00`,
+		product: 'web',
+		body: `## Changed
+- Updated design of slider elements
+
+## Fixed
+- Fixed sign up page redirecting you to your profile when adding a new account.`,
+	},
+	{
+		date: `2026-09-09T22:47:33+00:00`,
+		product: 'app',
+		version: '0.20.1',
+		body: `## Added
+- Added source mod details beneath recognized keybindings in Game settings, with links to their Modrinth project or highlighted file in the Content tab.
+- Added searching by source mod name or filename in Game settings.
+
+## Changed
+- Updated mod keybindings in Game settings to display translated names from mod jars when available, using the Modrinth App's selected language.
+- Updated the Language option in Game settings to use a searchable dropdown with language names and regions.
+- Updated sync indicators with blue badges for resource packs in the Content tab and multiplayer servers in the Worlds tab.
+- Updated memory allocation sliders to show the minimum as 0MB and maximum in GB.
+- Added moddex.gg to the image proxy bypass to support their badges.
+
+## Fixed
+- Fixed resource pack sync setup failing when one pack contained malformed metadata, allowing the remaining packs to sync.
+- Fixed saved and synced Field of view values applying incorrectly in Minecraft 1.19 and newer.
+- Fixed Mouse sensitivity in Game settings displaying and saving percentages that did not match Minecraft's 0% to 200% range.
+- Fixed some mod keybindings appearing as text fields and being excluded from keybinding conflict warnings in Game settings.
+- Fixed settings slider number fields failing to update after a value was rounded or limited to the allowed range.
+- Fixed large memory allocation values being cut off in global and instance settings.
+- Fixed Quick instances overflowing the sidebar and pushing navigation buttons off-screen in smaller windows.
+- Fixed clipped bottom borders on compact instance cards in the Library.
+- Fixed sync source pickers showing loading or error screens when an instance list was already available.
+- Fixed the Screenshots page breadcrumb icon not matching its sidebar icon.`,
+	},
+	{
+		date: `2026-09-09T22:47:33+00:00`,
+		product: 'web',
+		body: `## Changed
+- Added moddex.gg to the image proxy bypass to support their badges.`,
+	},
+	{
+		date: `2026-09-07T18:59:17+00:00`,
+		product: 'hosting',
+		body: `## Added
+- Added a new download files button on the Manage servers page that let's you download your suspended/cancelled server's files.
+- Added file zipping functionality to the Files tab of the server panel.
+
+## Fixed
+- Fixed issue where the server panel would constantly try to reconnect if the Modrinth Hosting API was unavailable.`,
+	},
+	{
+		date: `2026-09-07T18:59:17+00:00`,
+		product: 'app',
+		version: '0.20.0',
+		body: `## Added
+- Added \`options.txt\` syncing and editing in the Modrinth App, keeping game settings consistent across Minecraft versions.
+- Added optional resource pack syncing, disabled by default, which shares packs, enabled states, and load order across participating instances.
+- Added Sync and Desync actions, status indicators, and cross-instance change warnings for resource packs in the Content tab.
+- Added per-instance sync overrides for game settings and resource packs.
+- Added an update notice explaining the expanded syncing features and letting existing users choose whether to start syncing and select a source instance.
+- Added a Features settings tab for controlling optional parts of the Modrinth App interface.
+- Added Features controls for showing the Skin selector in the sidebar, limiting Quick instances, and syncing feature settings across devices.
+
+## Changed
+- Moved the Files, Worlds, and Screenshots tab controls from individual instance settings to Features settings, where they apply to every instance.
+- Moved "Show all screenshots in sidebar" and "Show Jump in section" from Behavior settings to Features settings.
+- Improved modpack installs and updates to preserve unsynced \`options.txt\` values while reapplying synced game settings.
+- Improved resource pack syncing to skip incompatible instances and show packs whose changes are waiting to be applied.
+- Replaced the native color picker in the screenshots editor with a modrinth-styled one.
+
+## Fixed
+- Reduced excessive memory usage during startup and while idle. **If you are still encountering suspiciously high memory usage (around 500+mb) please make a GitHub issue making note of what you were doing in the app for it to get that high.**
+- Fixed high memory usage when browsing large libraries, skins, screenshots, and instance icons.
+- Fixed memory leaks after leaving the Library page, while preserving search, filters, and scroll position.
+- Fixed excessive memory usage during Minecraft installation, modpack installation, and project updates.
+- Fixed unnecessary memory usage when loading cached project and version details.
+- Fixed memory spikes when saving edited screenshots or sharing instance config files.
+- Fixed instance cards animating from incorrect positions when opening the Library page.
+- Fixed unintentional card animations when scrolling or resizing the Library page.
+- Fixed broken buttons on the "Microsoft sign-in failed" modal.`,
+	},
+	{
+		date: `2026-09-07T18:59:17+00:00`,
+		product: 'web',
+		body: `## Added
+- Tax amount is now shown on the billing page for Modrinth+ and Modrinth Hosting subscriptions
+
+## Changed
+- Polished the 2FA code input stage of the sign in flow.
+
+## Fixed
+- Fixed broken buttons on the oauth2 authorize page.
+- Fixed issue where unfollowing a project could cause the follower count to be set to 4 billion.`,
+	},
+	{
+		date: `2026-09-01T00:51:50+00:00`,
+		product: 'app',
+		version: '0.19.2',
+		body: `## Added
+- Added options to hide Files, Worlds, and Screenshots tabs in instance settings.
+- Added a sync source picker when enabling command history, multiplayer servers, or creative hotbars sync.
+
+## Changed
+- Moved the global Screenshots page toggle from Synced settings into Features settings as "Show all screenshots in sidebar".
+- Screenshots tab on instances is now independent of sync settings.
+- Redesigned the slider control used for settings such as memory allocation.
+- Removed the blur censor tool in the screenshot editor. It did not work properly and was not functional as a censor.
+- Command history, multiplayer servers, and creative hotbars are now disabled by default until you choose a sync source.
+
+## Fixed
+- Fixed issues with java, window, and hooks overrides in instance settings.
+- Fixed remaining lag when scrolling large screenshot libraries.
+- Fixed GIF and WebP images not displaying correctly in the screenshot viewer.
+- Fixed screenshot cards flashing or failing to fade in while the gallery loads.
+- Fixed log spam on event updates.`,
+	},
+	{
+		date: `2026-09-01T00:51:50+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed error page not working.`,
+	},
+	{
+		date: `2026-08-27T18:54:17+00:00`,
+		product: 'app',
+		version: '0.19.1',
+		body: `## Changed
+- Updated style of spoilers in descriptions.
+- Updated style of code formatting and snippets in descriptions.
+- Fourth-level headings in descriptions now have more contrast compared to regular body text.
+
+## Fixed
+- Fixed lag on Screenshots page/tab when you have a lot of screenshots`,
+	},
+	{
+		date: `2026-08-27T18:54:17+00:00`,
+		product: 'web',
+		body: `## Changed
+- Updated style of spoilers in descriptions.
+- Updated style of code formatting and snippets in descriptions.
+- Fourth-level headings in descriptions now have more contrast compared to regular body text.`,
+	},
+	{
+		date: `2026-08-27T17:07:29+00:00`,
+		product: 'app',
+		version: '0.19.0',
+		body: `## Added
+- Added option to switch between multiple signed-in Modrinth accounts.
+- Added the ability to view the app signed out as well even when accounts are added.
+- Added right-click context menu actions for Jump in items.
+- Added "Add a friend" to account menu.
+- Added a new global screenshots page accessible via the sidebar, which shows all screenshots you've taken from all of your instances.
+- Added an option to instances which allows you to opt-out an instance from the global screenshots page, which will enable an instance-local screenshot tab showing screenshots only for that instance.
+- Added a new screenshot editor, allowing you to annotate, doodle and blur out areas of your screenshots.
+- Added syncing between instances for command history, the in-game server list and creative hotbars. You will need to enable this for any existing instances in the Sync override tab of your instance settings.
+
+## Changed
+- Improved the consistency of filter dropdowns on the Versions page.
+- Improved the consistency of context menus, now they look the same as overflow menus.
+- Changed profile button to say "View profile" in account menu.
+- Added "Open backups folder" button from the state initialization error screen.
+- Appearance settings now remember your preferred dark theme when using "Sync with system".
+- Theme changes now happen instantly, disabling any funky transitions while it happens.
+- Splash screen is now responsive to color theme.
+- Made resize handle on "Jump in" section always visible.
+
+## Fixed
+- Non-instance icons with transparent corners are no longer padded, fixing many icons flashing in after a second.
+- Fixed window controls being covered by the splash screen.
+- Fixed "Official Modrinth account" badge on official profiles appearing gray instead of green
+- Fixed newer snapshots since 26.1 not being grouped properly.
+- Fixed settings menu headers being cut off when the window is small.
+- Fixed creating a new group when only one group exists does not show the group.
+- Fixed inconsistencies with text inputs.`,
+	},
+	{
+		date: `2026-08-27T17:07:29+00:00`,
+		product: 'web',
+		body: `## Added
+- Added option to switch between multiple signed-in Modrinth accounts.
+- Added the ability to view the site signed out as well even when accounts are added.
+
+## Changed
+- Improved the consistency of filter dropdowns on the Versions and Changelog pages.
+- When signing into Modrinth App, you're now given the choice of which account you'd like to sign into.
+- When you get a "You don't have access to this page" error, you are given the option to switch to another account.
+- Theme changes now happen instantly, disabling any funky transitions while it happens.
+- Renamed "Source jar" to "Sources jar" and "Javadoc jar" to "Javadocs jar"
+- Changed the icons for publish options to include a plus on them.
+- Redesigned the gallery image viewer to match what we have in Modrinth App for screenshots.
+- Opening an image in a new tab will now open the raw image.
+- Collections by non-creators are no longer indexed.
+- Changed Settings page favicons to have a Settings cog icon in the corner.
+- Removed cog emoji from project settings page titles.
+
+## Fixed
+- Non-instance icons with transparent corners are no longer padded, fixing many icons flashing in after a second.
+- Fixed color theme settings not showing what your preferred dark theme is.
+- Fixed "Official Modrinth account" badge on official profiles appearing gray instead of green
+- Fixed project status badges not visible on your projects in organizations
+- Fixed projects in organizations not being sorted by status.
+- Fixed newer snapshots since 26.1 not being grouped properly.
+- Fixed inconsistencies with text inputs.`,
+	},
+	{
+		date: `2026-08-20T22:10:10+00:00`,
+		product: 'app',
+		version: '0.18.2',
+		body: `## Security
+- Fixed .mrpack exports replacing the original file with the primary file of a version previously detected on hash lookup.`,
+	},
+	{
+		date: `2026-08-20T21:46:49+00:00`,
+		product: 'app',
+		version: '0.18.1',
+		body: `## Added
+- Added ability to click on the ellipses in pagination controls to go to a specific page.
+- Added compact mode for instances in library.
+- Added drag handle to resize the amount of items in the "Jump in" section.
+- Added icon editing actions for instance context menu.
+- Added back sort by loader and game version.
+- Added new loader symbols for icon editor.
+- Depends on search filter, which filters all projects that depends on the project you've selected.
+- Modpack included content filter, which filters projects that includes a set of projects you've selected.
+- Enabled friend request controls in Social settings - you can now limit who can send you friend requests on Modrinth.
+- Enabled shared instance invite controls in Social settings, letting you limit who can send you shared instance invites.
+- Enabled Modrinth Hosting access invite controls in Social settings - you can now limit who can invite you to manage a Modrinth Hosting server.
+- Added a new option to sync your behaviour & appearance settings across Modrinth App sessions on multiple devices.
+- Added language coverage to the Language settings page.
+
+## Changed
+- Expanded quick instance area now that there is more vertical height in the navbar.
+- Tab bars now display with smaller text and without icons on mobile.
+
+## Fixed
+- Fixed issue where projects not installed display as installed.
+- Fixed tab bars displaying weirdly on mobile.
+- Fixed tab bar shadows being cut off.
+- Fixed tab bars showing the highlight as the wrong size or position sometimes.
+- Fixed missing signal icon and players online in "Jump in" cards.
+- Stopped applying conditional icon padding for user avatars.
+- Fixed memory leak on Discover page`,
+	},
+	{
+		date: `2026-08-20T21:46:49+00:00`,
+		product: 'web',
+		body: `## Added
+- Added ability to click on the ellipses in pagination controls to go to a specific page.
+- Depends on search filter, which filters all projects that depends on the project you've selected.
+- Modpack included content filter, which filters projects that includes a set of projects you've selected.
+- Enabled friend request controls in Social settings - you can now limit who can send you friend requests on Modrinth.
+- Enabled shared instance invite controls in Social settings, letting you limit who can send you shared instance invites.
+- Enabled Modrinth Hosting access invite controls in Social settings - you can now limit who can invite you to manage a Modrinth Hosting server.
+- Added a new option to sync your appearance settings across website sessions on multiple devices.
+- Added language coverage to the Language settings page.
+
+## Fixed
+- Fixed server projects not displaying properly in orgs and collections.
+- Fixed tab bars displaying weirdly on mobile.
+- Fixed tab bar shadows being cut off.
+- Fixed tab bars showing the highlight as the wrong size or position sometimes.
+- Stopped applying conditional icon padding for user avatars.`,
+	},
+	{
+		date: `2026-08-18T03:40:19+00:00`,
+		product: 'web',
+		body: `## Changed
+- Improved loader detection logic for Fabric derivatives when uploading versions.`,
+	},
+	{
+		date: `2026-08-18T01:11:08+00:00`,
+		product: 'app',
+		version: '0.18.0',
+		body: `## Added
+- Added new Play page, replacing the old Home and Library pages.
+- Added an icon creator so you can create icons for your instances if you don't have your own art for it.
+- Added a "Getting started" checklist to help you finish setting up the app.
+
+## Changed
+- Improved the create instance menu to make the options clearer and let you search for projects right from the menu.
+- Improved the empty states to help guide you to creating an instance.
+- Improved the sign-in pop-up for when your Minecraft account is required.
+- Skin selector can now be previewed before signing in with your Minecraft account.
+- Reintroduced the modpack icon in the content tab's managed content card.
+- Renamed "Managed content" -> "Provided content"
+
+## Fixed
+- Fixed hooks and environment variables not saving.
+- Fixed hover state on the "Reload to update" button
+- Fixed header alignment issue in the browse content page
+- Fixed instance icon being deleted after a installing a server project's shared content.
+- Fixed flickering on the content tab at specific app window widths.
+- Fixed issue where some instances when unlinking a modpack or shared instance, the newly unlinked content would not have updates checked
+- Fixed broken gallery image viewer on project pages.
+- Attempted to fix bug on macOS that prevented LAN play in some cases.`,
+	},
+	{
+		date: `2026-08-18T01:11:08+00:00`,
+		product: 'web',
+		body: `## Added
+- Added placeholder report reasons for AI images and fully AI-generated content.
+
+## Changed
+- Improved site embeds on content without icons and projects/users that cannot be found.
+
+## Fixed
+- Fixed report page failing to load when user is not logged in.`,
+	},
+	{
+		date: `2026-08-15T02:19:39+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed error page not working`,
+	},
+	{
+		date: `2026-08-14T18:44:06+00:00`,
+		product: 'app',
+		version: '0.17.10',
+		body: `## Changed
+- The server panel will no longer be locked while individual content is being installed when using the Browse content button.
+- Better stability when content is being installed
+
+## Fixed
+- Fixed issue when trying to upgrade a medal server from the manage servers page.`,
+	},
+	{
+		date: `2026-08-14T18:44:06+00:00`,
+		product: 'hosting',
+		body: `## Changed
+- The server panel will no longer be locked while individual content is being installed when using the Browse content button.
+- Better stability when content is being installed
+
+## Fixed
+- Fixed issue when trying to upgrade a medal server from the manage servers page.`,
+	},
+	{
+		date: `2026-08-14T17:47:21+00:00`,
+		product: 'app',
+		version: '0.17.9',
+		body: `## Fixed
+- Reverted server panel change that wasn't meant to go out yet.`,
+	},
+	{
+		date: `2026-08-14T17:47:21+00:00`,
+		product: 'hosting',
+		body: `## Fixed
+- Reverted server panel change that wasn't meant to go out yet.`,
+	},
+	{
+		date: `2026-08-14T17:47:21+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed project pages failing to load when user is not logged in.`,
+	},
+	{
+		date: `2026-08-14T17:04:48+00:00`,
+		product: 'hosting',
+		body: `## Changed
+- The server panel will no longer be locked while individual content is being installed when using the Browse content button.
+- Better stability when content is being installed
+
+## Fixed
+- Fixed issue when trying to upgrade a medal server from the manage servers page.`,
+	},
+	{
+		date: `2026-08-14T17:04:48+00:00`,
+		product: 'app',
+		version: '0.17.8',
+		body: `## Fixed
+- Fixed some issues rendering Ears skins
+- Fixed mrpack exports setting the wrong environment inclusion values.
+- Fixed issue where if your instance was linked to a modpack version that has been deleted from Modrinth the Managed content card on the content tab would not show up`,
+	},
+	{
+		date: `2026-08-13T17:59:06+00:00`,
+		product: 'app',
+		version: '0.17.7',
+		body: `## Added
+- Added a notification to indicate when modpack export is done.
+
+## Changed
+- Improved how disclosures are displayed and added support for basic Markdown functionality.
+
+## Fixed
+- Fixed modpack export appears to work but fails when imported as an instance.
+- Fixed modpack export progress bar.`,
+	},
+	{
+		date: `2026-08-13T17:59:06+00:00`,
+		product: 'web',
+		body: `## Changed
+- Improved how disclosures are displayed and added support for basic Markdown functionality.`,
+	},
+	{
+		date: `2026-08-13T16:01:54+00:00`,
+		product: 'app',
+		version: '0.17.6',
+		body: `## Added
+- Added new content disclosures for projects.
+
+## Changed
+- "Advanced" search filter group is now called "Advanced exclusions" and now contains content disclosure filters
+- Project archiving has been changed from a visibility status to a content disclosure, making it compatible with Unlisted and Private projects.`,
+	},
+	{
+		date: `2026-08-13T16:01:54+00:00`,
+		product: 'web',
+		body: `## Added
+- Added new content disclosures for projects.
+
+## Changed
+- "Advanced" search filter group is now called "Advanced exclusions" and now contains content disclosure filters
+- Project archiving has been changed from a visibility status to a content disclosure, making it compatible with Unlisted and Private projects.
+- Updated parts of "General" settings for projects; moved the Monetization setting into the "Danger zone" with "Delete project"
+- Updated design of project settings header. Now has a dynamic back button to take you back to where you came from.
+
+## Fixed
+- Fixed changing slugs sometimes not redirecting properly.`,
+	},
+	{
+		date: `2026-08-10T18:17:39+00:00`,
+		product: 'web',
+		body: `## Added
+- Added official Modrinth subreddit and YouTube channel to footer, replacing GitHub which is already included below.`,
+	},
+	{
+		date: `2026-08-10T17:34:55+00:00`,
+		product: 'app',
+		version: '0.17.5',
+		body: `## Changed
+- Common config file formats and RPO files are now hidden from the external modpack file warning modal.
+- Updated text in unknown file warning.
+- When viewing an instance's content in the app, content updates will now be checked immediately, rather than waiting for cache to be invalidated. It may take up to 10 minutes for updates to be shown in the content tab.
+- Updated translations. Want to help translate Modrinth App? [Click here](https://translate.modrinth.com)
+
+## Fixed
+- Fixed issue with animated GIFs sometimes not working in project page descriptions.
+- Fixed issue on Windows and Linux where the window close button was incorrectly coloured.
+- Fixed an issue when clicking content in the content tab of an instance it show a "Instance not found" notification
+- Fixed issue with the file information (name + file size) on the download button on project version pages not showing up.
+- Fixed broken buttons on the "Minecraft account required" modal on Windows.
+- Fixed the right sidebar closing when collapsing friend list sections when using the "Hide right sidebar" option.`,
+	},
+	{
+		date: `2026-08-10T17:34:55+00:00`,
+		product: 'web',
+		body: `## Changed
+- Updated translations. Want to help translate the Modrinth website? [Click here](https://translate.modrinth.com)
+
+## Fixed
+- Fixed issue with animated GIFs sometimes not working in project page descriptions.`,
+	},
+	{
+		date: `2026-08-10T17:34:55+00:00`,
+		product: 'hosting',
+		body: `## Changed
+- Updated translations. Want to help translate Modrinth Hosting? [Click here](https://translate.modrinth.com)`,
+	},
+	{
+		date: `2026-08-08T19:10:34+00:00`,
+		product: 'web',
+		body: `## Fixed
+- Fixed action bar becoming very wide on larger displays.
+- Version upload failing to detect mrpack loader.`,
+	},
+	{
+		date: `2026-08-07T20:41:51+00:00`,
+		product: 'app',
+		version: '0.17.4',
+		body: `## Changed
+- Added loading states for project members and server details, to make it feel smoother.
+- Improved popout menu animations.
+- Updated NeoForge icon to be closer to the actual logo and look more like a fox.
+- Updated design of buttons.
+
+## Fixed
+- Fixed "Licensed Unknown" showing up under details on server projects.
+- Fixed project types sometimes appearing in random orders on some pages.`,
+	},
+	{
+		date: `2026-08-07T20:41:51+00:00`,
+		product: 'web',
+		body: `## Changed
+- Added loading states for project members and server details, to make it feel smoother.
+- Improved popout menu animations.
+- Updated project tag settings page to new design.
+- Updated NeoForge icon to be closer to the actual logo and look more like a fox.
+
+## Fixed
+- Fixed "Licensed Unknown" showing up under details on server projects.
+- Fixed tags settings page being broken.
+- Fixed project types sometimes appearing in random orders on some pages.
+- Fixed when the project download UI has two compatible versions and no additional content, it showed as radio buttons.`,
+	},
+	{
 		date: `2026-07-31T06:10:23+00:00`,
 		product: 'web',
 		body: `## Fixed
@@ -3113,7 +3823,7 @@ const VERSIONS: VersionEntry[] = [
 		body: `### Improvements
 - The report form has been updated to walk you through the report process better and clarify some things like that the form is for Modrinth rules and terms violations, not for bug reports or DMCA takedowns.
 
-![A screenshot of the new report form on Modrinth, using Iris Shaders as an example. The title says "Report Iris Shaders to moderators". Below that, it says "Please report violations of Modrinth Rules or Terms of Use. Examples include malicious, spam, offensive, deceptive, misleading, and illegal content. This form is not for bug reports or DMCA takedowns (See our Copyright Policy)." Then, there is a form that asks "Which of Modrinth's rules is this project violating?" with many options: Spam, Reuploaded work, Inappropriate, Malicious, Name-squatting, Poor description, Invalid metadata, Other. Reuploaded work is selected. Below that, is a note in an orange box with a warning icon: "Please note that you are *not* submitting a DMCA takedown request, but rather a report of reuploaded content. If you meant to file a DMCA takedown request (which is a legal action) instead, please see our Copyright Policy." Then, it asks you to provide additional context, including links and images, with a text editor and a submit button at the bottom.](https://cdn-raw.modrinth.com/changelog/web/2025-02-02/reports.jpg)`,
+![A screenshot of the new report form on Modrinth, using Iris Shaders as an example. The title says "Report Iris Shaders to moderators". Below that, it says "Please report violations of Modrinth Rules or Terms of Use. Examples include malicious, spam, offensive, deceptive, misleading, and illegal content. This form is not for bug reports or DMCA takedowns (See our Copyright Policy)." Then, there is a form that asks "Which of Modrinth's rules is this project violating?" with many options: Spam, Reuploaded work, Inappropriate, Malicious, Name-squatting, Poor description, Invalid metadata, Other. Reuploaded work is selected. Below that, is a note in an orange box with a warning icon: "Please note that you are *not* submitting a DMCA takedown request, but rather a report of reuploaded content. If you meant to file a DMCA takedown request (which is a legal action) instead, please see our Copyright Policy." Then, it asks you to provide additional context, including links and images, with a text editor and a submit button at the bottom.](https://cdn.modrinth.com/changelog/web/2025-02-02/reports.jpg)`,
 	},
 	{
 		date: `2025-01-28T19:00:00-08:00`,

@@ -24,7 +24,7 @@ pub(crate) async fn attach_shared_instance(
     let sync_state =
         shared_sync_state(&content_set_id, &attachment, Some(Utc::now()));
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     instance_rows::set_shared_instance_attachment(
         instance_id,
         Some(&attachment),
@@ -82,7 +82,7 @@ async fn detach_shared_instance(
         _ => None,
     };
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     instance_rows::set_shared_instance_attachment(instance_id, None, &mut tx)
         .await?;
     if quarantine {
@@ -131,7 +131,7 @@ pub(crate) async fn set_shared_instance_sync_status(
         &attachment,
         Some(Utc::now()),
     );
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     content_rows::upsert_content_set_sync_state(&sync_state, &mut tx).await?;
     tx.commit().await?;
 
@@ -142,26 +142,36 @@ pub(crate) async fn mark_shared_instance_stale(
     instance_id: &str,
     pool: &SqlitePool,
 ) -> crate::Result<()> {
+    if let Some(sync_state) = stale_sync_state(instance_id, pool).await? {
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        content_rows::upsert_content_set_sync_state(&sync_state, &mut tx)
+            .await?;
+        tx.commit().await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn stale_sync_state(
+    instance_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Option<ContentSetSyncState>> {
     let Some(metadata) =
         instance_rows::get_instance_metadata_by_id(instance_id, pool).await?
     else {
-        return Ok(());
+        return Ok(None);
     };
-    let Some(attachment) = metadata.shared_instance else {
-        return Ok(());
+    let Some(mut attachment) = metadata.shared_instance else {
+        return Ok(None);
     };
     if attachment.role != SharedInstanceRole::Owner {
-        return Ok(());
+        return Ok(None);
     }
-
-    set_shared_instance_sync_status(
-        instance_id,
-        ContentSetSyncStatus::Stale,
-        attachment.applied_version,
-        attachment.latest_version,
-        pool,
-    )
-    .await
+    attachment.status = ContentSetSyncStatus::Stale;
+    Ok(Some(shared_sync_state(
+        &metadata.applied_content_set.id,
+        &attachment,
+        Some(Utc::now()),
+    )))
 }
 
 fn shared_sync_state(

@@ -9,13 +9,13 @@ import { useRouter } from 'vue-router'
 import InstanceCardView from '@/components/ui/library/instance-group/instance-card-view.vue'
 import { getLibraryInstanceSelectionKey, useLibrary } from '@/components/ui/library/use-library'
 import { useAppEvent } from '@/composables/use-app-event'
+import { handleSevereError } from '@/composables/use-error.js'
 import { trackEvent } from '@/helpers/analytics'
 import { install_existing_instance, install_pack_to_existing_instance } from '@/helpers/install'
 import { kill, run } from '@/helpers/instance'
 import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
 import { showInstanceInFolder } from '@/helpers/utils.js'
-import { handleSevereError } from '@/store/error.js'
 
 type ProcessEvent = 'installing' | 'launched' | 'finished'
 
@@ -123,6 +123,7 @@ const { isDragging } = useDraggable({
 const router = useRouter()
 
 const seeInstance = async () => {
+	if (installing.value) return
 	await router.push(`/instance/${encodeURIComponent(props.instance.id)}`)
 }
 
@@ -176,7 +177,7 @@ const checkProcess = async () => {
 
 const play = async (event: MouseEvent | null, context: string) => {
 	event?.stopPropagation()
-	if (props.instance.quarantined) return
+	if (props.instance.quarantined || installing.value || modLoading.value) return
 	loading.value = true
 	await run(props.instance.id)
 		.catch((err) => handleSevereError(err, { instanceId: props.instance.id }))
@@ -205,7 +206,7 @@ const stop = async (event: MouseEvent | null, context: string) => {
 
 const repair = async (event: MouseEvent) => {
 	event.stopPropagation()
-	if (props.instance.quarantined) return
+	if (props.instance.quarantined || installing.value || modLoading.value) return
 
 	if (
 		props.instance.install_stage !== 'pack_installed' &&
@@ -228,7 +229,7 @@ const openFolder = async () => {
 }
 
 const addContent = async () => {
-	if (props.instance.quarantined) return
+	if (props.instance.quarantined || installing.value || modLoading.value) return
 	await router.push({
 		path: `/browse/${props.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`,
 		query: { i: props.instance.id },
@@ -242,6 +243,9 @@ defineExpose({
 	openFolder,
 	addContent,
 	instance: props.instance,
+	get playing() {
+		return playing.value
+	},
 })
 
 useAppEvent('process', (event) => {
@@ -285,7 +289,7 @@ onMounted(() => {
 		@mouseenter="checkProcess"
 		@pointerdown="handlePointerDown"
 	>
-		<template #loading>
+		<template #loading="{ compact }">
 			<div
 				v-if="loadingIndicatorVisible"
 				class="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center"
@@ -293,13 +297,17 @@ onMounted(() => {
 				<div class="absolute inset-0 bg-surface-1 opacity-30" />
 				<SpinnerIcon
 					v-tooltip="formatMessage(modLoading ? messages.loading : messages.installing)"
-					class="relative size-[30%] animate-spin text-contrast"
+					class="relative animate-spin text-contrast"
+					:class="compact ? 'size-5' : 'size-[30%]'"
 					tabindex="-1"
 				/>
 			</div>
 		</template>
-		<template #leading>
-			<div class="relative flex size-12 shrink-0 items-center justify-center">
+		<template #leading="{ compact }">
+			<div
+				class="relative flex shrink-0 items-center justify-center"
+				:class="compact ? 'size-10' : 'size-12'"
+			>
 				<div class="absolute inset-0 flex items-center justify-center">
 					<IconButton
 						v-if="playing"
@@ -307,7 +315,7 @@ onMounted(() => {
 						:label="formatMessage(messages.stop)"
 						type="colored"
 						color="red"
-						size="lg"
+						:size="compact ? 'md' : 'lg'"
 						@click="(e) => stop(e, 'InstanceCard')"
 						@mouseenter="checkProcess"
 					>
@@ -325,7 +333,7 @@ onMounted(() => {
 						:label="formatMessage(messages.repair)"
 						type="colored"
 						color="brand"
-						size="lg"
+						:size="compact ? 'md' : 'lg'"
 						class="origin-bottom scale-75 opacity-0 transition-opacity group-hover/card:scale-100 group-hover/card:opacity-100"
 						@click="(e) => repair(e)"
 					>
@@ -342,7 +350,7 @@ onMounted(() => {
 						:label="formatMessage(messages.play)"
 						type="colored"
 						color="brand"
-						size="lg"
+						:size="compact ? 'md' : 'lg'"
 						class="origin-bottom scale-75 opacity-0 transition-opacity group-hover/card:scale-100 group-hover/card:opacity-100"
 						@click="(e) => play(e, 'InstanceCard')"
 						@mouseenter="checkProcess"
@@ -352,18 +360,21 @@ onMounted(() => {
 				</div>
 			</div>
 		</template>
-		<template #overlay>
+		<template #overlay="{ compact }">
 			<button
 				type="button"
-				class="selection-button group/selection absolute right-2 top-1.5 z-[2] flex size-[50px] cursor-pointer items-start pt-4 justify-center border-0 bg-transparent p-0"
+				class="selection-button group/selection absolute z-[2] flex size-[50px] cursor-pointer items-start pt-4 justify-center border-0 bg-transparent p-0"
+				:class="compact ? '-right-1 -top-1' : 'right-2 top-1.5'"
 				:aria-label="formatMessage(selected ? messages.deselect : messages.select)"
 				:aria-pressed="selected"
 				@click.stop="toggleSelection"
 			>
 				<span
 					v-tooltip="formatMessage(selected ? messages.deselect : messages.select)"
-					class="relative flex size-[24px] items-center justify-center rounded-full opacity-0 transition-opacity duration-200 ease-out group-hover/card:opacity-100 group-hover/selection:brightness-125"
+					class="relative flex items-center justify-center rounded-full opacity-0 transition-opacity duration-200 ease-out group-hover/card:opacity-100 group-hover/selection:brightness-125"
 					:class="{
+						'size-[20px]': compact,
+						'size-[24px]': !compact,
 						'border-0 !opacity-100': selected,
 						'border-2 border-solid border-primary bg-transparent': !selected,
 						'[outline:3px_solid_var(--color-purple)] outline-offset-1':

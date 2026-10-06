@@ -25,6 +25,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             install_get_shared_instance_update_preview,
             install_shared_instance,
             install_update_shared_instance,
+            install_bulk_update_content,
             install_import_instance,
             install_duplicate_instance,
             install_existing_instance,
@@ -32,6 +33,8 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             install_job_list,
             install_job_get,
             install_job_retry,
+            install_job_pause,
+            install_job_resume,
             install_job_cancel,
             install_job_dismiss,
             install_job_support_details,
@@ -174,6 +177,14 @@ pub async fn install_update_shared_instance(
 }
 
 #[tauri::command]
+pub async fn install_bulk_update_content(
+    instance_id: String,
+    updates: Vec<theseus::install::ContentUpdateSelection>,
+) -> Result<InstallJobSnapshot> {
+    Ok(theseus::install::bulk_update_content(instance_id, updates).await?)
+}
+
+#[tauri::command]
 pub async fn install_import_instance(
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
@@ -231,6 +242,16 @@ pub async fn install_job_get(job_id: Uuid) -> Result<InstallJobSnapshot> {
 #[tauri::command]
 pub async fn install_job_retry(job_id: Uuid) -> Result<InstallJobSnapshot> {
     Ok(theseus::install::retry_job(job_id).await?)
+}
+
+#[tauri::command]
+pub async fn install_job_pause(job_id: Uuid) -> Result<InstallJobSnapshot> {
+    Ok(theseus::install::pause_job(job_id).await?)
+}
+
+#[tauri::command]
+pub async fn install_job_resume(job_id: Uuid) -> Result<InstallJobSnapshot> {
+    Ok(theseus::install::resume_job(job_id).await?)
 }
 
 #[tauri::command]

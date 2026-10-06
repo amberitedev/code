@@ -155,7 +155,7 @@ impl SharedInstanceApplyPlan {
             .projects
             .values()
             .filter(|current| {
-                !desired.projects.contains_key(&current.project_id)
+                !desired.projects.contains_key(&current.version_id)
             })
             .cloned()
             .collect();
@@ -172,16 +172,35 @@ impl SharedInstanceApplyPlan {
             ..Default::default()
         };
 
-        for desired in desired.projects.into_values() {
-            match current.projects.get(&desired.project_id) {
-                Some(current) if current.version_id != desired.version_id => {
-                    plan.project_updates.push(SharedInstanceProjectUpdate {
-                        current: current.clone(),
-                        desired,
-                    });
-                }
-                None => plan.project_additions.push(desired),
-                Some(_) => {}
+        let mut additions = desired
+            .projects
+            .into_values()
+            .filter(|desired| {
+                !current.projects.contains_key(&desired.version_id)
+            })
+            .collect::<Vec<_>>();
+        while let Some(desired) = additions.pop() {
+            let replacements = plan
+                .project_removals
+                .iter()
+                .enumerate()
+                .filter(|(_, current)| current.project_id == desired.project_id)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            let unambiguous = !additions
+                .iter()
+                .any(|other| other.project_id == desired.project_id)
+                && !plan
+                    .project_additions
+                    .iter()
+                    .any(|other| other.project_id == desired.project_id);
+            if replacements.len() == 1 && unambiguous {
+                plan.project_updates.push(SharedInstanceProjectUpdate {
+                    current: plan.project_removals.remove(replacements[0]),
+                    desired,
+                });
+            } else {
+                plan.project_additions.push(desired);
             }
         }
 
@@ -225,6 +244,7 @@ pub(super) async fn apply_shared_instance_update(
     let plan = SharedInstanceApplyPlan::build(&metadata, data, state).await?;
 
     if plan.configuration_changed {
+        crate::api::instance::prepare_instance_update(instance_id).await?;
         remove_existing_shared_instance_content(instance_id, state).await?;
         Box::pin(apply_shared_instance_content(
             job_id,
@@ -234,6 +254,23 @@ pub(super) async fn apply_shared_instance_update(
             data,
         ))
         .await?;
+        if data.modpack.is_none() {
+            if let Err(error) =
+                crate::api::instance::capture_game_options_pack_base(
+                    instance_id,
+                    None,
+                )
+                .await
+            {
+                tracing::warn!(
+                    "The shared instance was updated, but its local options.txt could not be restored after removing the previous pack: {error}"
+                );
+            }
+            crate::api::instance::reconcile_instance_after_pack_update(
+                instance_id,
+            )
+            .await?;
+        }
         return Ok(());
     }
 
@@ -456,7 +493,7 @@ async fn current_shared_instance_content(
             };
 
             content.projects.insert(
-                project_id.clone(),
+                version_id.clone(),
                 CurrentSharedInstanceProject {
                     project_id,
                     version_id,
@@ -491,7 +528,7 @@ async fn desired_shared_instance_content(
             ))
         })?;
         content.projects.insert(
-            version.project_id.clone(),
+            version.id.clone(),
             DesiredSharedInstanceProject {
                 project_id: version.project_id.clone(),
                 version_id: version.id.clone(),
@@ -579,6 +616,14 @@ pub(super) async fn apply_shared_instance_content(
     .await?;
 
     if let Some(modpack) = data.modpack.clone() {
+        crate::api::instance::edit(
+            instance_id,
+            crate::state::EditInstance {
+                link: Some(shared_instance_link(Some(&modpack))),
+                ..Default::default()
+            },
+        )
+        .await?;
         let location = shared_instance_pack_location(modpack);
         update_progress(
             job_id,
@@ -704,7 +749,6 @@ pub(super) async fn remove_existing_shared_instance_content(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<()> {
-    let _content_lock = state.lock_instance_content(instance_id).await;
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
         &state.pool,
@@ -718,49 +762,23 @@ pub(super) async fn remove_existing_shared_instance_content(
         &state.pool,
     )
     .await?;
-    let files = content_rows::get_instance_files(instance_id, &state.pool)
-        .await?
+    let managed_ids = entries
         .into_iter()
-        .map(|file| (file.id.clone(), file))
-        .collect::<std::collections::HashMap<_, _>>();
-    let base = state
-        .directories
-        .instances_dir()
-        .join(&metadata.instance.path);
-
-    let mut removed_file_ids = HashSet::new();
-    for entry in entries {
-        if !entry.source_kind.is_shared_instance_managed() {
-            continue;
+        .filter(|entry| entry.source_kind.is_shared_instance_managed())
+        .filter_map(|entry| entry.file_id)
+        .collect::<HashSet<_>>();
+    for file in
+        content_rows::get_instance_files(instance_id, &state.pool).await?
+    {
+        if managed_ids.contains(&file.id) {
+            crate::state::instances::commands::remove_project(
+                instance_id,
+                &file.relative_path,
+                state,
+            )
+            .await?;
         }
-
-        let Some(file_id) = entry.file_id else {
-            continue;
-        };
-        if !removed_file_ids.insert(file_id.clone()) {
-            continue;
-        }
-
-        let Some(file) = files.get(&file_id) else {
-            continue;
-        };
-        crate::util::io::remove_file(base.join(&file.relative_path)).await?;
-        let mut tx = state.pool.begin().await?;
-        content_rows::remove_content_entries_for_file(
-            &metadata.applied_content_set.id,
-            &file.id,
-            &mut tx,
-        )
-        .await?;
-        content_rows::remove_instance_file_by_relative_path(
-            instance_id,
-            &file.relative_path,
-            &mut tx,
-        )
-        .await?;
-        tx.commit().await?;
     }
-
     Ok(())
 }
 

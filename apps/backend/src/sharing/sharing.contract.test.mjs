@@ -36,7 +36,12 @@ test('pending sharing, account isolation, idempotent publish, and immutable uplo
 	})
 	try {
 		const db = await runtime.getD1Database('DB')
-		for (const file of ['0001_accounts.sql', '0002_sharing.sql', '0003_sharing_idempotency.sql']) {
+		for (const file of [
+			'0001_accounts.sql',
+			'0002_sharing.sql',
+			'0003_sharing_idempotency.sql',
+			'0004_account_locks.sql',
+		]) {
 			const migration = await readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8')
 			for (const statement of migration
 				.split(';')

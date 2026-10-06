@@ -38,6 +38,62 @@
 		</NewModal>
 
 		<EditUserModal v-if="variant === 'web'" ref="editUserModal" :user="user" :user-id="userId" />
+		<LockUserModal
+			v-if="variant === 'web' && isAdminViewing"
+			ref="lockUserModal"
+			:user="user"
+			:user-id="userId"
+		/>
+		<ForcePasswordResetModal
+			v-if="variant === 'web' && isAdminViewing"
+			ref="forcePasswordResetModal"
+			:user="user"
+			:user-id="userId"
+		/>
+		<Reset2faModal
+			v-if="variant === 'web' && isAdminViewing"
+			ref="reset2faModal"
+			:user="user"
+			:user-id="userId"
+		/>
+
+		<NewModal
+			v-if="variant === 'web' && isAdminViewing"
+			ref="revokeSessionsModal"
+			:header="formatMessage(messages.revokeSessionsTitle, { username: user.username })"
+			:closable="!isRevokingSessions"
+			fade="danger"
+			max-width="500px"
+		>
+			<Admonition type="critical" :header="formatMessage(messages.revokeSessionsAdmonitionTitle)">
+				{{ formatMessage(messages.revokeSessionsAdmonitionBody, { username: user.username }) }}
+			</Admonition>
+
+			<template #actions>
+				<div class="flex justify-end gap-2">
+					<Button
+						type="outlined"
+						native-type="button"
+						:disabled="isRevokingSessions"
+						@click="revokeSessionsModal?.hide()"
+					>
+						<XIcon />
+						{{ formatMessage(commonMessages.cancelButton) }}
+					</Button>
+					<Button
+						type="colored"
+						color="red"
+						native-type="button"
+						:disabled="isRevokingSessions"
+						@click="confirmRevokeSessions"
+					>
+						<SpinnerIcon v-if="isRevokingSessions" class="animate-spin" />
+						<LogOutIcon v-else />
+						{{ formatMessage(messages.revokeSessionsButton) }}
+					</Button>
+				</div>
+			</template>
+		</NewModal>
 
 		<NewModal
 			v-if="variant === 'web' && isStaffViewing"
@@ -189,10 +245,15 @@
 					@open-billing="openPath(`/admin/billing/${user.id}`)"
 					@toggle-affiliate="toggleAffiliate"
 					@open-info="openUserDetails"
+					@open-shared-instances="openPath(`/admin/shared-instances/${user.id}`)"
 					@open-analytics="
 						openPath(`/dashboard/analytics?user=${encodeURIComponent(user.username)}`)
 					"
 					@edit-user="editUserModal?.show()"
+					@toggle-lock="toggleLock"
+					@revoke-sessions="revokeSessionsModal?.show()"
+					@force-password-reset="forcePasswordResetModal?.show()"
+					@reset2fa="reset2faModal?.show()"
 				>
 					<template v-if="isModrinthUser" #summary>
 						<IntlFormatted :message-id="messages.officialAccountBio">
@@ -221,144 +282,117 @@
 				</UserPageHeader>
 			</template>
 
-			<div class="flex flex-col gap-4">
-				<div v-if="navLinks.length > 2" class="max-w-full overflow-x-auto">
-					<NavTabs :links="navLinks" replace />
-				</div>
+			<NavTabs v-if="navLinks.length > 2" :links="navLinks" replace page-nav />
 
-				<div class="flex flex-col gap-3">
-					<ProjectCardList
-						v-if="selectedProjectType !== 'collection' && filteredProjects.length > 0"
-						:layout="displayMode"
-					>
-						<ProjectCard
-							v-for="project in filteredProjects"
-							:key="project.id"
-							:link="projectLink(project)"
-							:title="project.title"
-							:icon-url="project.icon_url"
-							:date-updated="project.updated"
-							:downloads="project.downloads"
-							:summary="project.description"
-							:tags="[...project.categories, ...project.loaders]"
-							:all-tags="[
-								...project.categories,
-								...project.loaders,
-								...project.additional_categories,
-							]"
-							:followers="project.followers"
-							:banner="project.gallery?.find((image) => image.featured)?.url"
-							:color="project.color"
-							:environment="{
-								clientSide: project.client_side,
-								serverSide: project.server_side,
-							}"
-							:layout="displayMode === 'list' ? 'list' : 'grid'"
-							:status="project.status"
-						>
-							<template v-if="$slots['project-actions']" #actions>
-								<slot name="project-actions" :project="project" />
-							</template>
-						</ProjectCard>
-					</ProjectCardList>
+			<div class="flex flex-col gap-3">
+				<ProjectList
+					v-if="selectedProjectType !== 'collection' && filteredProjects.length > 0"
+					:projects="filteredProjects"
+					:layout="displayMode"
+					:link-mode="projectLinkMode"
+					:show-status="canSeeProjectStatus"
+				>
+					<template v-if="$slots['project-actions']" #actions="{ project }">
+						<slot name="project-actions" :project="project" />
+					</template>
+				</ProjectList>
 
-					<EmptyState
-						v-if="showProjectsEmptyState"
-						type="empty"
-						:heading="formatMessage(messages.profileNoProjectsLabel)"
-						:description="
-							isSelf ? formatMessage(messages.profileNoProjectsAuthDescription) : undefined
-						"
+				<EmptyState
+					v-if="showProjectsEmptyState"
+					type="empty"
+					:heading="formatMessage(messages.profileNoProjectsLabel)"
+					:description="
+						isSelf ? formatMessage(messages.profileNoProjectsAuthDescription) : undefined
+					"
+				>
+					<template v-if="isSelf" #actions>
+						<Button type="colored" color="brand" native-type="button" @click="createProject">
+							{{ formatMessage(messages.createProjectButton) }}
+						</Button>
+					</template>
+				</EmptyState>
+
+				<ProjectCardList
+					v-if="selectedProjectType === null || selectedProjectType === 'collection'"
+					layout="grid"
+				>
+					<SmartClickable
+						v-for="collection in sortedCollections"
+						:key="collection.id"
+						class="h-full w-full"
 					>
-						<template v-if="isSelf" #actions>
-							<Button type="colored" color="brand" native-type="button" @click="createProject">
-								{{ formatMessage(messages.createProjectButton) }}
-							</Button>
+						<template #clickable>
+							<AutoLink
+								:to="collectionLink(collection.id)"
+								class="no-click-animation custom-focus-indicator rounded-xl no-outline"
+							/>
 						</template>
-					</EmptyState>
-
-					<ProjectCardList
-						v-if="selectedProjectType === null || selectedProjectType === 'collection'"
-						layout="grid"
-					>
-						<SmartClickable
-							v-for="collection in sortedCollections"
-							:key="collection.id"
-							class="h-full w-full"
+						<div
+							class="smart-clickable:outline-on-focus smart-clickable:highlight-on-hover flex h-full w-full flex-col gap-4 overflow-hidden rounded-2xl border-[1px] border-solid border-surface-4 bg-surface-3 p-4 text-left transition-all"
 						>
-							<template #clickable>
-								<AutoLink
-									:to="collectionLink(collection.id)"
-									class="no-click-animation custom-focus-indicator rounded-xl no-outline"
-								/>
-							</template>
-							<div
-								class="smart-clickable:outline-on-focus smart-clickable:highlight-on-hover flex h-full w-full flex-col gap-4 overflow-hidden rounded-2xl border-[1px] border-solid border-surface-4 bg-surface-3 p-4 text-left transition-all"
-							>
-								<div class="grid grid-cols-[auto_1fr] gap-4">
-									<Avatar :src="collection.icon_url" size="64px" no-shadow />
-									<div class="flex min-w-0 flex-col gap-2">
-										<h2
-											class="smart-clickable:underline-on-hover m-0 truncate text-lg font-semibold text-contrast"
-										>
-											{{ collection.name }}
-										</h2>
-										<div class="flex items-center gap-1">
-											<LibraryIcon aria-hidden="true" />
-											{{ formatMessage(messages.collectionLabel) }}
-										</div>
-									</div>
-								</div>
-								<div class="grow text-primary">
-									{{ collection.description }}
-								</div>
-								<div class="mt-auto flex flex-wrap items-center gap-4">
+							<div class="grid grid-cols-[auto_1fr] gap-4">
+								<Avatar :src="collection.icon_url" size="64px" no-shadow />
+								<div class="flex min-w-0 flex-col gap-2">
+									<h2
+										class="smart-clickable:underline-on-hover m-0 truncate text-lg font-semibold text-contrast"
+									>
+										{{ collection.name }}
+									</h2>
 									<div class="flex items-center gap-1">
-										<BoxIcon />
-										{{
-											formatMessage(messages.collectionProjectsCount, {
-												count: collection.projects.length,
-											})
-										}}
-									</div>
-									<div class="flex items-center gap-1">
-										<template v-if="collection.status === 'listed'">
-											<GlobeIcon />
-											{{ formatMessage(commonMessages.publicLabel) }}
-										</template>
-										<template v-else-if="collection.status === 'unlisted'">
-											<LinkIcon />
-											{{ formatMessage(commonMessages.unlistedLabel) }}
-										</template>
-										<template v-else-if="collection.status === 'private'">
-											<LockIcon />
-											{{ formatMessage(commonMessages.privateLabel) }}
-										</template>
-										<template v-else-if="collection.status === 'rejected'">
-											<XIcon />
-											{{ formatMessage(commonMessages.rejectedLabel) }}
-										</template>
+										<LibraryIcon aria-hidden="true" />
+										{{ formatMessage(messages.collectionLabel) }}
 									</div>
 								</div>
 							</div>
-						</SmartClickable>
-					</ProjectCardList>
+							<div class="grow text-primary">
+								{{ collection.description }}
+							</div>
+							<div class="mt-auto flex flex-wrap items-center gap-4">
+								<div class="flex items-center gap-1">
+									<BoxIcon />
+									{{
+										formatMessage(messages.collectionProjectsCount, {
+											count: collection.projects.length,
+										})
+									}}
+								</div>
+								<div v-if="canSeeCollectionStatus" class="flex items-center gap-1">
+									<template v-if="collection.status === 'listed'">
+										<GlobeIcon />
+										{{ formatMessage(commonMessages.publicLabel) }}
+									</template>
+									<template v-else-if="collection.status === 'unlisted'">
+										<LinkIcon />
+										{{ formatMessage(commonMessages.unlistedLabel) }}
+									</template>
+									<template v-else-if="collection.status === 'private'">
+										<LockIcon />
+										{{ formatMessage(commonMessages.privateLabel) }}
+									</template>
+									<template v-else-if="collection.status === 'rejected'">
+										<XIcon />
+										{{ formatMessage(commonMessages.rejectedLabel) }}
+									</template>
+								</div>
+							</div>
+						</div>
+					</SmartClickable>
+				</ProjectCardList>
 
-					<EmptyState
-						v-if="showCollectionsEmptyState"
-						type="empty"
-						:heading="formatMessage(messages.profileNoCollectionsLabel)"
-						:description="
-							isSelf ? formatMessage(messages.profileNoCollectionsAuthDescription) : undefined
-						"
-					>
-						<template v-if="isSelf" #actions>
-							<Button type="colored" color="brand" native-type="button" @click="createCollection">
-								{{ formatMessage(messages.createCollectionButton) }}
-							</Button>
-						</template>
-					</EmptyState>
-				</div>
+				<EmptyState
+					v-if="showCollectionsEmptyState"
+					type="empty"
+					:heading="formatMessage(messages.profileNoCollectionsLabel)"
+					:description="
+						isSelf ? formatMessage(messages.profileNoCollectionsAuthDescription) : undefined
+					"
+				>
+					<template v-if="isSelf" #actions>
+						<Button type="colored" color="brand" native-type="button" @click="createCollection">
+							{{ formatMessage(messages.createCollectionButton) }}
+						</Button>
+					</template>
+				</EmptyState>
 			</div>
 
 			<template #sidebar>
@@ -426,10 +460,12 @@ import {
 	LibraryIcon,
 	LinkIcon,
 	LockIcon,
+	LogOutIcon,
 	SpinnerIcon,
 	XIcon,
 } from '@modrinth/assets'
 import {
+	getPrimaryProjectType,
 	isModrinthUser as checkIsModrinthUser,
 	isOfficialAccount as checkIsOfficialAccount,
 	UserBadge,
@@ -448,8 +484,8 @@ import NavTabs from '#ui/components/base/NavTabs.vue'
 import SmartClickable from '#ui/components/base/SmartClickable.vue'
 import NewModal from '#ui/components/modal/NewModal.vue'
 import NormalPage from '#ui/components/page/NormalPage.vue'
-import ProjectCard from '#ui/components/project/card/ProjectCard.vue'
 import ProjectCardList from '#ui/components/project/ProjectCardList.vue'
+import ProjectList from '#ui/components/project/ProjectList.vue'
 import UserBadges from '#ui/components/user/UserBadges.vue'
 import UserPageHeader from '#ui/components/user/UserPageHeader.vue'
 import { defineMessages, useVIntl } from '#ui/composables'
@@ -458,26 +494,27 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	injectPageContext,
-	injectTags,
 } from '#ui/providers'
-import { commonMessages, getProjectTypeTitleMessage, sortProjectTypes } from '#ui/utils'
+import {
+	catalogProjectTypes,
+	commonMessages,
+	filterProjectsByType,
+	getProjectTypeTitleMessage,
+	parseProjectTypeRouteParam,
+	sortProjectTypes,
+} from '#ui/utils'
 
 import EditUserModal from './components/edit-user-modal.vue'
+import ForcePasswordResetModal from './components/force-password-reset-modal.vue'
+import LockUserModal from './components/lock-user-modal.vue'
+import Reset2faModal from './components/reset-2fa-modal.vue'
 import { blockedUsersQueryKey, injectUserProfile } from './providers'
-import {
-	hasActivePride26Midas,
-	hasPride26Badge,
-	projectUserSorting,
-	resolveProjectType,
-} from './utils'
+import { hasActivePride26Midas, hasPride26Badge, projectUserSorting } from './utils'
 
 type DisplayMode = 'list' | 'grid' | 'gallery'
 type ModalRef = {
 	show: () => void
 	hide: () => void
-}
-type ResolvedProject = Labrinth.Projects.v2.Project & {
-	resolvedProjectType: string
 }
 type EarlyAdopterProjectType =
 	| 'modpack'
@@ -518,7 +555,6 @@ const props = withDefaults(
 
 const userProfile = injectUserProfile()
 const auth = injectAuth()
-const tags = injectTags(null)
 const pageContext = injectPageContext()
 const notificationManager = injectNotificationManager()
 const client = injectModrinthClient()
@@ -695,34 +731,88 @@ const messages = defineMessages({
 		id: 'profile.block-user.error-description',
 		defaultMessage: 'An error occurred while blocking this user. Please try again.',
 	},
+	unlockUserSuccessTitle: {
+		id: 'profile.unlock-user.success-title',
+		defaultMessage: 'Account unlocked',
+	},
+	unlockUserSuccessDescription: {
+		id: 'profile.unlock-user.success-description',
+		defaultMessage: "{username}'s account has been unlocked.",
+	},
+	unlockUserErrorTitle: {
+		id: 'profile.unlock-user.error-title',
+		defaultMessage: 'Failed to unlock account',
+	},
+	unlockUserErrorDescription: {
+		id: 'profile.unlock-user.error-description',
+		defaultMessage: 'An error occurred while unlocking this account. Please try again.',
+	},
+	revokeSessionsTitle: {
+		id: 'profile.revoke-sessions.title',
+		defaultMessage: 'Revoke sessions for {username}',
+	},
+	revokeSessionsAdmonitionTitle: {
+		id: 'profile.revoke-sessions.admonition-title',
+		defaultMessage: 'Are you sure you want to revoke all sessions?',
+	},
+	revokeSessionsAdmonitionBody: {
+		id: 'profile.revoke-sessions.admonition-body',
+		defaultMessage:
+			'{username} will be signed out on every device and will need to sign in again. Personal access tokens are not affected.',
+	},
+	revokeSessionsButton: {
+		id: 'profile.revoke-sessions.button',
+		defaultMessage: 'Revoke sessions',
+	},
+	revokeSessionsSuccessTitle: {
+		id: 'profile.revoke-sessions.success-title',
+		defaultMessage: 'Sessions revoked',
+	},
+	revokeSessionsSuccessDescription: {
+		id: 'profile.revoke-sessions.success-description',
+		defaultMessage: '{username} has been signed out everywhere.',
+	},
+	revokeSessionsErrorTitle: {
+		id: 'profile.revoke-sessions.error-title',
+		defaultMessage: 'Failed to revoke sessions',
+	},
+	revokeSessionsErrorDescription: {
+		id: 'profile.revoke-sessions.error-description',
+		defaultMessage: 'An error occurred while revoking sessions. Please try again.',
+	},
 })
 
 const userQueryKey = computed(() =>
 	props.accountSource === 'modrinth' ? ['user', 'modrinth', props.userId] : ['user', props.userId],
 )
 
+const canLoadProfile = computed(() => props.userId.length > 0)
 const userQuery = useQuery({
 	queryKey: userQueryKey,
 	queryFn: () => userProfile.getUser(props.userId),
-	enabled: computed(() => Boolean(props.userId)),
+	enabled: canLoadProfile,
+	placeholderData: (previousData) => previousData,
 	staleTime: 30_000,
 })
 const projectsQuery = useQuery({
 	queryKey: computed(() => [...userQueryKey.value, 'projects']),
 	queryFn: () => userProfile.getProjects(props.userId),
-	enabled: computed(() => Boolean(props.userId)),
+	enabled: canLoadProfile,
+	placeholderData: (previousData) => previousData,
 	staleTime: 30_000,
 })
 const organizationsQuery = useQuery({
 	queryKey: computed(() => [...userQueryKey.value, 'organizations']),
 	queryFn: () => userProfile.getOrganizations(props.userId),
-	enabled: computed(() => Boolean(props.userId)),
+	enabled: canLoadProfile,
+	placeholderData: (previousData) => previousData,
 	staleTime: 30_000,
 })
 const collectionsQuery = useQuery({
 	queryKey: computed(() => [...userQueryKey.value, 'collections']),
 	queryFn: () => userProfile.getCollections(props.userId),
-	enabled: computed(() => Boolean(props.userId)),
+	enabled: canLoadProfile,
+	placeholderData: (previousData) => previousData,
 	staleTime: 30_000,
 })
 const blockedUsersQuery = useQuery({
@@ -731,14 +821,22 @@ const blockedUsersQuery = useQuery({
 	enabled: computed(() => Boolean(auth.user.value)),
 	staleTime: 30_000,
 })
+const viewerProjectsQuery = useQuery({
+	queryKey: computed(() => ['user', auth.user.value?.id, 'projects']),
+	queryFn: () => userProfile.getProjects(auth.user.value!.id),
+	enabled: computed(
+		() =>
+			Boolean(auth.user.value?.id) &&
+			Boolean(userQuery.data.value?.id) &&
+			auth.user.value?.id !== userQuery.data.value?.id &&
+			auth.user.value?.role !== 'admin' &&
+			auth.user.value?.role !== 'moderator',
+	),
+	staleTime: 30_000,
+})
 
 const user = computed(() => userQuery.data.value)
-const projects = computed<ResolvedProject[]>(() =>
-	(projectsQuery.data.value ?? []).map((project) => ({
-		...project,
-		resolvedProjectType: resolveProjectType(project, tags?.loaders.value ?? []),
-	})),
-)
+const projects = computed(() => projectsQuery.data.value ?? [])
 watch(
 	() => projectsQuery.data.value,
 	(projects) => {
@@ -760,20 +858,11 @@ const isBlocked = computed(() =>
 	user.value ? (blockedUsersQuery.data.value ?? []).includes(user.value.id) : false,
 )
 
-const selectedProjectType = computed(() => {
-	const projectType = props.projectType
-	if (!projectType) return null
-	if (projectType === 'collections' || projectType === 'collection') return 'collection'
-	return projectType.endsWith('s') ? projectType.slice(0, -1) : projectType
-})
+const selectedProjectType = computed(() => parseProjectTypeRouteParam(props.projectType))
 
-const filteredProjects = computed(() => {
-	const selected = selectedProjectType.value
-	return projects.value
-		.filter((project) => !selected || project.resolvedProjectType === selected)
-		.slice()
-		.sort(projectUserSorting)
-})
+const filteredProjects = computed(() =>
+	filterProjectsByType(projects.value, selectedProjectType.value).slice().sort(projectUserSorting),
+)
 
 const sortedOrganizations = computed(() =>
 	organizations.value.slice().sort((first, second) => first.name.localeCompare(second.name)),
@@ -787,9 +876,8 @@ const sortedCollections = computed(() =>
 )
 
 const projectTypes = computed(() => {
-	const types = new Set(projects.value.map((project) => project.resolvedProjectType))
-	if (collections.value.length > 0) types.add('collection')
-	types.delete('project')
+	const types = catalogProjectTypes(projects.value)
+	if (collections.value.length > 0) types.push('collection')
 	return sortProjectTypes(types)
 })
 
@@ -824,7 +912,7 @@ const profileHeaderSummary = computed(() => {
 const earliestProjectByType = computed(() => {
 	const earliest = {} as Record<EarlyAdopterProjectType, Date>
 	for (const project of projects.value) {
-		const projectType = project.resolvedProjectType as EarlyAdopterProjectType
+		const projectType = getPrimaryProjectType(project) as EarlyAdopterProjectType
 		const published = new Date(project.published)
 		if (!earliest[projectType] || published < earliest[projectType]) {
 			earliest[projectType] = published
@@ -840,6 +928,16 @@ const isAdminViewing = computed(() => auth.user.value?.role === 'admin')
 const isStaffViewing = computed(
 	() => auth.user.value?.role === 'admin' || auth.user.value?.role === 'moderator',
 )
+const viewerMemberProjectIds = computed(
+	() => new Set((viewerProjectsQuery.data.value ?? []).map((project) => project.id)),
+)
+
+function canSeeProjectStatus(project: Labrinth.Projects.v3.Project) {
+	if (isSelf.value || isStaffViewing.value) return true
+	return viewerMemberProjectIds.value.has(project.id)
+}
+
+const canSeeCollectionStatus = computed(() => isSelf.value || isStaffViewing.value)
 const isAffiliate = computed(() => Boolean((user.value?.badges ?? 0) & UserBadge.AFFILIATE))
 const hasMidas = computed(
 	() => Boolean((user.value?.badges ?? 0) & UserBadge.MIDAS) || hasActivePride26Midas(user.value),
@@ -884,13 +982,6 @@ function openPath(path: string): void {
 	} else {
 		void router.push(target)
 	}
-}
-
-function projectLink(project: ResolvedProject): string | (() => void) {
-	if (props.projectLinkMode === 'app') {
-		return `/project/${project.id}`
-	}
-	return `/${project.resolvedProjectType}/${project.slug || project.id}`
 }
 
 function organizationLink(slug: string): string | (() => void) {
@@ -994,8 +1085,13 @@ async function retryQueries(): Promise<void> {
 
 const userDetailsModal = ref<ModalRef | null>(null)
 const editUserModal = ref<InstanceType<typeof EditUserModal> | null>(null)
+const lockUserModal = ref<InstanceType<typeof LockUserModal> | null>(null)
+const forcePasswordResetModal = ref<InstanceType<typeof ForcePasswordResetModal> | null>(null)
+const reset2faModal = ref<InstanceType<typeof Reset2faModal> | null>(null)
 const blockUserModal = ref<ModalRef | null>(null)
+const revokeSessionsModal = ref<ModalRef | null>(null)
 const isBlockingUser = ref(false)
+const isRevokingSessions = ref(false)
 const isUnblockingUser = ref(false)
 
 function openUserDetails(): void {
@@ -1075,6 +1171,60 @@ async function unblockCurrentUser(): Promise<void> {
 		})
 	} finally {
 		isUnblockingUser.value = false
+	}
+}
+
+async function toggleLock(): Promise<void> {
+	if (!user.value) return
+
+	if (!user.value.lock) {
+		lockUserModal.value?.show()
+		return
+	}
+
+	const lockedUser = user.value
+	try {
+		await client.labrinth.moderation_internal.unlockUser(lockedUser.id)
+		await queryClient.invalidateQueries({ queryKey: ['user', props.userId] })
+		notificationManager.addNotification({
+			type: 'success',
+			title: formatMessage(messages.unlockUserSuccessTitle),
+			text: formatMessage(messages.unlockUserSuccessDescription, {
+				username: lockedUser.username,
+			}),
+		})
+	} catch {
+		notificationManager.addNotification({
+			type: 'error',
+			title: formatMessage(messages.unlockUserErrorTitle),
+			text: formatMessage(messages.unlockUserErrorDescription),
+		})
+	}
+}
+
+async function confirmRevokeSessions(): Promise<void> {
+	if (!user.value || isRevokingSessions.value) return
+
+	const targetUser = user.value
+	isRevokingSessions.value = true
+	try {
+		await client.labrinth.moderation_internal.revokeUserSessions(targetUser.id)
+		revokeSessionsModal.value?.hide()
+		notificationManager.addNotification({
+			type: 'success',
+			title: formatMessage(messages.revokeSessionsSuccessTitle),
+			text: formatMessage(messages.revokeSessionsSuccessDescription, {
+				username: targetUser.username,
+			}),
+		})
+	} catch {
+		notificationManager.addNotification({
+			type: 'error',
+			title: formatMessage(messages.revokeSessionsErrorTitle),
+			text: formatMessage(messages.revokeSessionsErrorDescription),
+		})
+	} finally {
+		isRevokingSessions.value = false
 	}
 }
 

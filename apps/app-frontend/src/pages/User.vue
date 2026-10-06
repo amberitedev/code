@@ -12,19 +12,20 @@
 		>
 			<template #project-actions="{ project }">
 				<Button
+					v-if="project.minecraft_server == null"
 					type="outlined"
 					class="!text-brand [&>svg]:!text-brand !shadow-[inset_0_0_0_1px_var(--color-brand)]"
 					:disabled="isProjectInstalling(project.id)"
 					@click.stop="installProject(project)"
 				>
 					<SpinnerIcon v-if="isProjectInstalling(project.id)" class="animate-spin" />
-					<DownloadIcon v-else-if="project.project_type === 'modpack'" />
+					<DownloadIcon v-else-if="project.project_types.includes('modpack')" />
 					<PlusIcon v-else />
 					{{
 						formatMessage(
 							isProjectInstalling(project.id)
 								? commonMessages.installingLabel
-								: project.project_type === 'modpack'
+								: project.project_types.includes('modpack')
 									? commonMessages.installButton
 									: messages.installToInstance,
 						)
@@ -119,7 +120,7 @@ function setProjectInstalling(projectId: string, installing: boolean): void {
 	installingProjectIds.value = next
 }
 
-async function installProject(project: Labrinth.Projects.v2.Project): Promise<void> {
+async function installProject(project: Labrinth.Projects.v3.Project): Promise<void> {
 	if (isProjectInstalling(project.id)) return
 
 	setProjectInstalling(project.id, true)
@@ -145,9 +146,8 @@ const userProfile = provideUserProfile({
 			: get_user_profile(id),
 	getProjects: (id: string) =>
 		isPublicProfile.value
-			? publicProfileRequest<Labrinth.Projects.v2.Project[]>(
+			? publicProfileRequest<Labrinth.Projects.v3.Project[]>(
 					`/user/${encodeURIComponent(id)}/projects`,
-					2,
 				)
 			: get_user_projects(id),
 	getOrganizations: (id: string) =>
@@ -172,14 +172,19 @@ const userProfile = provideUserProfile({
 	unblockUser: unblock_user,
 })
 
-const userId = computed(() => {
-	const value = route.params.user
-	return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
-})
-const projectType = computed(() => {
-	const value = route.params.projectType
-	return Array.isArray(value) ? value[0] : value
-})
+function readRouteParam(param: unknown): string | undefined {
+	const value = Array.isArray(param) ? param[0] : param
+	return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+const userId = ref(readRouteParam(route.params.user) ?? '')
+watch(
+	() => readRouteParam(route.params.user),
+	(next) => {
+		if (next) userId.value = next
+	},
+)
+const projectType = computed(() => readRouteParam(route.params.projectType))
 
 function getCachedUserSummary(id: string) {
 	return queryClient.getQueryData<Labrinth.Users.v3.User>(

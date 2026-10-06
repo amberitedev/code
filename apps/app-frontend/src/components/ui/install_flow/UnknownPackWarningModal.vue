@@ -13,12 +13,10 @@
 import { UnknownFileWarningModal } from '@modrinth/ui'
 import { ref, useTemplateRef } from 'vue'
 
+import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
-import { useTheming } from '@/store/state'
-import type { FeatureFlag } from '@/store/theme.ts'
 
-const themeStore = useTheming()
-const skipUnknownPackWarningFeatureFlag = 'skip_unknown_pack_warning' as FeatureFlag
+const appSettings = useAppSettings()
 
 const modal = useTemplateRef('modal')
 const onProceed = ref<() => Promise<void>>()
@@ -34,7 +32,7 @@ function show(
 	fileName.value = selectedFileName
 	externalFilesInModpack.value = selectedExternalFiles
 
-	if (themeStore.getFeatureFlag(skipUnknownPackWarningFeatureFlag)) {
+	if (!appSettings.warnOnUnknownModpacks) {
 		void createInstance()
 		return
 	}
@@ -50,9 +48,9 @@ function reset() {
 
 async function proceed(dontShowAgain: boolean) {
 	if (dontShowAgain) {
-		themeStore.featureFlags[skipUnknownPackWarningFeatureFlag] = true
+		appSettings.warnOnUnknownModpacks = false
 		const settings = await getSettings()
-		settings.feature_flags[skipUnknownPackWarningFeatureFlag] = true
+		settings.warn_on_unknown_modpacks = false
 		await setSettings(settings)
 	}
 

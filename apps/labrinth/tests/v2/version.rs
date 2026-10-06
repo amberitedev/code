@@ -7,7 +7,7 @@ use futures::StreamExt;
 use labrinth::{
     models::ids::VersionId,
     models::projects::{Loader, VersionStatus, VersionType},
-    models::v2::projects::LegacySideType,
+    models::v2::projects::{LegacySideType, LegacyVersion},
     routes::v2::version_file::FileUpdateData,
 };
 use serde_json::json;
@@ -16,7 +16,7 @@ use crate::common::api_v2::request_data::get_public_project_creation_data;
 use crate::common::dummy_data::{DummyProjectAlpha, DummyProjectBeta};
 use crate::common::environment::{TestEnvironment, with_test_environment};
 use crate::common::{
-    database::{ENEMY_USER_PAT, USER_USER_PAT},
+    database::{ADMIN_USER_PAT, ENEMY_USER_PAT, MOD_USER_PAT, USER_USER_PAT},
     dummy_data::TestFile,
 };
 
@@ -136,6 +136,59 @@ pub async fn test_patch_version() {
                 vec!["1.20.1", "1.20.2", "1.20.4"]
             ); // From last patch
             assert_eq!(version.loaders, vec![Loader("fabric".to_string())]);
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
+async fn update_files_respects_processing_project_visibility() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV2>| async move {
+            let api = &test_env.api;
+            let project = &test_env.dummy.project_alpha;
+
+            let response = api
+                .edit_project(
+                    &project.project_slug,
+                    json!({ "status": "processing" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            for pat in [USER_USER_PAT, MOD_USER_PAT] {
+                let versions = api
+                    .update_files_deserialized_common(
+                        "sha1",
+                        vec![project.file_hash.clone()],
+                        None,
+                        None,
+                        None,
+                        pat,
+                    )
+                    .await;
+                assert_eq!(versions.len(), 1);
+                assert_eq!(
+                    versions[&project.file_hash].id.to_string(),
+                    project.version_id
+                );
+            }
+
+            for pat in [ENEMY_USER_PAT, None] {
+                let versions = api
+                    .update_files_deserialized_common(
+                        "sha1",
+                        vec![project.file_hash.clone()],
+                        None,
+                        None,
+                        None,
+                        pat,
+                    )
+                    .await;
+                assert!(versions.is_empty());
+            }
         },
     )
     .await;
@@ -550,6 +603,8 @@ async fn add_version_accepts_environment_v2() {
                 )
                 .await;
             assert_status!(&resp, StatusCode::OK);
+            let version: LegacyVersion = test::read_body_json(resp).await;
+            assert_eq!(version.environment, "server_only_client_optional");
 
             let project = api
                 .get_project_deserialized(
@@ -559,6 +614,10 @@ async fn add_version_accepts_environment_v2() {
                 .await;
             assert_eq!(project.client_side, LegacySideType::Optional);
             assert_eq!(project.server_side, LegacySideType::Required);
+            assert_eq!(
+                project.environment,
+                vec!["server_only_client_optional".to_string()]
+            );
         },
     )
     .await;
@@ -589,6 +648,10 @@ async fn create_project_initial_version_accepts_environment_v2() {
                 api.get_project_deserialized(slug, USER_USER_PAT).await;
             assert_eq!(project.client_side, LegacySideType::Required);
             assert_eq!(project.server_side, LegacySideType::Optional);
+            assert_eq!(
+                project.environment,
+                vec!["client_only_server_optional".to_string()]
+            );
         },
     )
     .await;

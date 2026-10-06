@@ -1,3 +1,5 @@
+use crate::util::error::ApiContext as _;
+use crate::util::error::Context as _;
 use xredis::RedisPool;
 mod fixed;
 
@@ -57,7 +59,7 @@ pub struct ProjectPlaytimeFacets {
     pub country: Vec<String>,
 }
 
-/// Get analytics facets.  
+/// Get analytics facets.
 #[utoipa::path(
 	context_path = "/analytics",
 	tag = "analytics",
@@ -78,9 +80,12 @@ pub async fn fetch_facets(
         &session_queue,
         Scopes::ANALYTICS,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
-    let facets = fixed::fetch(&pool, &redis).await?;
+    let facets = fixed::fetch(&pool, &redis)
+        .await
+        .wrap_api_err("executing `fixed::fetch`")?;
 
     Ok(web::Json(FacetsResponse { facets }))
 }

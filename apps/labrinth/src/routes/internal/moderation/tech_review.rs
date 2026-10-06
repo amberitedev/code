@@ -1,31 +1,35 @@
+use crate::util::error::ApiContext as _;
 use std::{collections::HashMap, fmt};
 use xredis::RedisPool;
 
 use crate::database::PgPool;
-use actix_web::{HttpRequest, get, patch, post, put, web};
+use actix_web::{HttpRequest, get, patch, post, web};
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ownership::get_projects_ownership;
+use crate::database::models::{DBOrganization, DBOrganizationId};
+use crate::models::ids::OrganizationId;
+use crate::routes::v3::organizations::OrganizationIds;
+use crate::routes::v3::users::UserIds;
 use crate::{
     auth::check_is_moderator_from_headers,
     database::{
         DBProject,
         models::{
-            DBFileId, DBProjectId, DBThread, DBThreadId, DBUser, DBVersion,
-            DBVersionId, DelphiReportId, DelphiReportIssueDetailsId,
+            DBFileId, DBProjectId, DBThread, DBThreadId, DBUser, DBUserId,
+            DBVersion, DBVersionId, DelphiReportId, DelphiReportIssueDetailsId,
             DelphiReportIssueId,
             delphi_report_item::{
-                DBDelphiReport, DelphiSeverity, DelphiStatus, DelphiVerdict,
-                ReportIssueDetail,
+                DelphiSeverity, DelphiStatus, DelphiVerdict, ReportIssueDetail,
             },
             thread_item::ThreadMessageBuilder,
             version_item::VersionQueryResult,
         },
     },
     models::{
-        ids::{FileId, ProjectId, ThreadId, VersionId},
+        ids::{FileId, ProjectId, ThreadId, ThreadMessageId, VersionId},
         pats::Scopes,
         projects::{Project, ProjectStatus},
         threads::{MessageBody, Thread},
@@ -33,28 +37,34 @@ use crate::{
     queue::session::AuthQueue,
     routes::{
         ApiError,
-        internal::{
-            delphi::tech_review_sync::{self, TechReviewExitReason},
-            moderation::Ownership,
-        },
+        internal::{delphi::tech_review_queue, moderation::Ownership},
     },
     search::SearchState,
     util::error::Context,
 };
+use ariadne::ids::UserId;
 use eyre::eyre;
+use futures_util::future::try_join_all;
 
 pub mod global;
+pub mod rules;
+pub mod rules_scan;
 
 pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
     cfg.service(search_projects)
         .configure(global::config)
+        .configure(rules::config)
+        .configure(rules_scan::config)
         .service(get_project_report)
         .service(get_report)
         .service(get_issue)
         .service(submit_report)
         .service(update_issue_details)
         .service(update_global_issue_details)
-        .service(add_report);
+        .service(get_user_flagged_projects)
+        .service(get_users_flagged_projects)
+        .service(get_organization_flagged_projects)
+        .service(get_organizations_flagged_projects);
 }
 
 /// Arguments for searching project technical reviews.
@@ -203,11 +213,18 @@ pub enum FlagReason {
     Delphi,
 }
 
-/// Get a Delphi report issue.  
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct GetIssue {
+    #[serde(default)]
+    pub include_hidden: bool,
+}
+
+/// Get a Delphi report issue.
 #[utoipa::path(
 	context_path = "/moderation/tech-review",
 	tag = "moderation",
     security(("bearer_auth" = [])),
+    params(GetIssue),
     responses((status = OK, body = inline(FileIssue)))
 )]
 #[get("/issue/{issue_id}")]
@@ -217,6 +234,7 @@ pub async fn get_issue(
     redis: web::Data<RedisPool>,
     session_queue: web::Data<AuthQueue>,
     path: web::Path<(DelphiReportIssueId,)>,
+    query: web::Query<GetIssue>,
 ) -> Result<web::Json<FileIssue>, ApiError> {
     check_is_moderator_from_headers(
         &req,
@@ -225,7 +243,8 @@ pub async fn get_issue(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let (issue_id,) = path.into_inner();
     let row = sqlx::query!(
@@ -250,23 +269,26 @@ pub async fn get_issue(
                         )
                     ), '[]'::jsonb)
                     FROM delphi_issue_details_with_statuses didws
-                    WHERE didws.issue_id = dri.id
+                    WHERE
+                        didws.issue_id = dri.id
+                        AND ($2 OR didws.severity != 'hidden')
                 )
             ) AS "data!: sqlx::types::Json<FileIssue>"
         FROM delphi_report_issues dri
         WHERE dri.id = $1
         "#,
         issue_id as DelphiReportIssueId,
+        query.include_hidden,
     )
     .fetch_optional(&**pool)
     .await
     .wrap_internal_err("failed to fetch issue from database")?
-    .ok_or(ApiError::NotFound)?;
+    .wrap_not_found_err("resource not found")?;
 
     Ok(web::Json(row.data.0))
 }
 
-/// Get a project technical report.  
+/// Get a project technical report.
 #[utoipa::path(
 	context_path = "/moderation/tech-review",
 	tag = "moderation",
@@ -288,7 +310,8 @@ pub async fn get_report(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let (report_id,) = path.into_inner();
 
@@ -305,6 +328,15 @@ pub async fn get_report(
                 'file_size', f.size,
                 'flag_reason', 'delphi',
                 'download_url', f.url,
+                'severity', COALESCE((
+                    SELECT MAX(didws.severity)
+                    FROM delphi_report_issues severity_issue
+                    INNER JOIN delphi_issue_details_with_statuses didws
+                        ON didws.issue_id = severity_issue.id
+                    WHERE
+                        severity_issue.report_id = dr.id
+                        AND didws.severity != 'hidden'
+                ), 'low'::delphi_severity),
                 -- TODO: replace with `json_array` in Postgres 16
 				'issues', (
 					SELECT coalesce(json_agg(
@@ -327,15 +359,22 @@ pub async fn get_report(
                                     )
                                 ), '[]'::jsonb)
                                 FROM delphi_issue_details_with_statuses didws
-                                WHERE didws.issue_id = dri.id
+                                WHERE
+                                    didws.issue_id = dri.id
+                                    AND didws.severity != 'hidden'
                             )
 						)
 					), '[]'::json)
 					FROM delphi_report_issues dri
 					WHERE
-						dri.report_id = dr.id
-                        -- see delphi.rs todo comment
-                        AND dri.issue_type != '__dummy'
+                        dri.report_id = dr.id
+                        AND EXISTS (
+                            SELECT 1
+                            FROM delphi_issue_details_with_statuses visible_detail
+                            WHERE
+                                visible_detail.issue_id = dri.id
+                                AND visible_detail.severity != 'hidden'
+                        )
                 )
             ) AS "data!: sqlx::types::Json<FileReport>"
         FROM delphi_reports dr
@@ -348,7 +387,7 @@ pub async fn get_report(
     .fetch_optional(&**pool)
     .await
     .wrap_internal_err("failed to fetch report from database")?
-    .ok_or(ApiError::NotFound)?;
+    .wrap_not_found_err("resource not found")?;
 
     Ok(web::Json(row.data.0))
 }
@@ -393,6 +432,8 @@ pub struct ProjectReport {
 pub struct VersionReport {
     /// ID of the project version this report is for.
     pub version_id: VersionId,
+    /// Version number of the project version this report is for.
+    pub version_number: String,
     /// Reports for this version's files.
     #[serde(default)]
     pub files: Vec<FileReport>,
@@ -420,6 +461,7 @@ async fn fetch_project_reports(
     project_ids: &[DBProjectId],
     pool: &PgPool,
     redis: &RedisPool,
+    include_hidden: bool,
 ) -> Result<Vec<ProjectReport>, ApiError> {
     struct FileRow {
         file_id: DBFileId,
@@ -479,14 +521,16 @@ async fn fetch_project_reports(
 
     let report_rows = sqlx::query!(
         r#"
-        SELECT
+        SELECT DISTINCT ON (file_id)
             id AS "report_id!: DelphiReportId",
             file_id AS "file_id!: DBFileId",
             created,
             severity AS "severity!: DelphiSeverity"
         FROM delphi_reports
-        WHERE file_id = ANY($1::bigint[])
-        ORDER BY file_id, created, id
+        WHERE
+            file_id IS NOT NULL
+            AND file_id = ANY($1::bigint[])
+        ORDER BY file_id, delphi_version DESC
         "#,
         &file_rows.iter().map(|f| f.file_id.0).collect::<Vec<_>>()
     )
@@ -530,10 +574,13 @@ async fn fetch_project_reports(
             didws.global_status AS "global_status?: DelphiStatus",
             didws.status AS "status!: DelphiStatus"
         FROM delphi_issue_details_with_statuses didws
-        WHERE didws.issue_id = ANY($1::bigint[])
+        WHERE
+            didws.issue_id = ANY($1::bigint[])
+            AND ($2 OR didws.severity != 'hidden')
         ORDER BY didws.issue_id, didws.id
         "#,
-        &issue_ids.iter().map(|i| i.0).collect::<Vec<_>>()
+        &issue_ids.iter().map(|i| i.0).collect::<Vec<_>>(),
+        include_hidden
     )
     .fetch_all(pool)
     .await
@@ -628,13 +675,13 @@ async fn fetch_project_reports(
                     let mut file_issues = Vec::new();
 
                     for issue_row in report_issues {
-                        if issue_row.issue_type == "__dummy" {
-                            continue;
-                        }
-
                         let issue_details = details_by_issue
                             .get(&issue_row.id)
                             .unwrap_or(&empty_details);
+
+                        if issue_details.is_empty() {
+                            continue;
+                        }
 
                         file_issues.push(FileIssue {
                             id: issue_row.id,
@@ -644,12 +691,23 @@ async fn fetch_project_reports(
                         });
                     }
 
+                    if file_issues.is_empty() {
+                        continue;
+                    }
+
+                    let severity = file_issues
+                        .iter()
+                        .flat_map(|issue| issue.details.iter())
+                        .map(|detail| detail.severity)
+                        .max()
+                        .unwrap_or(report_row.severity);
+
                     file_reports.push(FileReport {
                         report_id: report_row.report_id,
                         file_id: FileId::from(file_row.file_id),
                         created: report_row.created,
                         flag_reason: FlagReason::Delphi,
-                        severity: report_row.severity,
+                        severity,
                         file_name: file_row.filename.clone(),
                         file_size: file_row.size,
                         download_url: file_row.url.clone(),
@@ -660,6 +718,7 @@ async fn fetch_project_reports(
 
             version_reports.push(VersionReport {
                 version_id: VersionId::from(version_query.inner.id),
+                version_number: version_query.inner.version_number.clone(),
                 files: file_reports,
             });
         }
@@ -681,7 +740,7 @@ async fn fetch_project_reports(
     Ok(project_reports)
 }
 
-/// Search projects awaiting technical review.  
+/// Search projects awaiting technical review.
 #[utoipa::path(
 	context_path = "/moderation/tech-review",
 	tag = "moderation",
@@ -703,7 +762,8 @@ pub async fn search_projects(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let sort_by = search_req.sort_by.to_string();
     let limit = search_req.limit.max(50);
@@ -728,13 +788,23 @@ pub async fn search_projects(
             m.id AS "project_id: DBProjectId",
             MIN(t.id) AS "thread_id!: DBThreadId"
         FROM mods m
+        INNER JOIN delphi_tech_review_queue trq ON trq.project_id = m.id
         INNER JOIN threads t ON t.mod_id = m.id
-        INNER JOIN versions v ON v.mod_id = m.id
-        INNER JOIN files f ON f.version_id = v.id
-        INNER JOIN delphi_reports dr ON dr.file_id = f.id
-        INNER JOIN delphi_report_issues dri ON dri.report_id = dr.id
-        INNER JOIN delphi_issue_details_with_statuses didws
+        LEFT JOIN versions v ON v.mod_id = m.id
+        LEFT JOIN files f ON f.version_id = v.id
+        LEFT JOIN delphi_reports dr
+            ON dr.file_id = f.id
+            AND NOT EXISTS (
+                SELECT 1
+                FROM delphi_reports newer_dr
+                WHERE
+                    newer_dr.file_id = dr.file_id
+                    AND newer_dr.delphi_version > dr.delphi_version
+            )
+        LEFT JOIN delphi_report_issues dri ON dri.report_id = dr.id
+        LEFT JOIN delphi_issue_details_with_statuses didws
             ON didws.issue_id = dri.id
+            AND didws.severity != 'hidden'
         LEFT JOIN threads_messages tm_last
             ON tm_last.thread_id = t.id
             AND tm_last.id = (
@@ -778,8 +848,32 @@ pub async fn search_projects(
             )
             AND m.status NOT IN ('draft', 'rejected', 'withheld')
             AND (cardinality($6::text[]) = 0 OR m.status = ANY($6::text[]))
-            AND (cardinality($7::text[]) = 0 OR dri.issue_type = ANY($7::text[]))
-            AND didws.status = 'pending'
+            AND (
+                cardinality($7::text[]) = 0
+                OR EXISTS (
+                    SELECT 1
+                    FROM versions issue_version
+                    INNER JOIN files issue_file
+                        ON issue_file.version_id = issue_version.id
+                    INNER JOIN delphi_reports issue_report
+                        ON issue_report.file_id = issue_file.id
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM delphi_reports newer_issue_report
+                            WHERE
+                                newer_issue_report.file_id = issue_report.file_id
+                                AND newer_issue_report.delphi_version > issue_report.delphi_version
+                        )
+                    INNER JOIN delphi_report_issues issue
+                        ON issue.report_id = issue_report.id
+                    INNER JOIN delphi_issue_details_with_statuses detail
+                        ON detail.issue_id = issue.id
+                    WHERE
+                        issue_version.mod_id = m.id
+                        AND issue.issue_type = ANY($7::text[])
+                        AND detail.severity != 'hidden'
+                )
+            )
             AND (
                 $5::text IS NULL
                 OR ($5::text = 'unreplied' AND (tm_last.id IS NULL OR u_last.role IS NULL OR u_last.role NOT IN ('moderator', 'admin')))
@@ -789,8 +883,8 @@ pub async fn search_projects(
         ORDER BY
             CASE WHEN $3 = 'created_asc'   THEN MIN(dr.created)  ELSE TO_TIMESTAMP(0)        END ASC,
             CASE WHEN $3 = 'created_desc'  THEN MIN(dr.created)  ELSE TO_TIMESTAMP(0)        END DESC,
-            CASE WHEN $3 = 'severity_asc'  THEN MAX(dr.severity) ELSE 'low'::delphi_severity END ASC,
-            CASE WHEN $3 = 'severity_desc' THEN MAX(dr.severity) ELSE 'low'::delphi_severity END DESC,
+            CASE WHEN $3 = 'severity_asc'  THEN COALESCE(MAX(didws.severity), 'low'::delphi_severity) ELSE 'low'::delphi_severity END ASC,
+            CASE WHEN $3 = 'severity_desc' THEN COALESCE(MAX(didws.severity), 'low'::delphi_severity) ELSE 'low'::delphi_severity END DESC,
             -- tie-breaker: oldest reports
             MIN(dr.created) ASC
         LIMIT $1 OFFSET $2
@@ -820,7 +914,9 @@ pub async fn search_projects(
     }
 
     let project_reports =
-        fetch_project_reports(&project_ids, &pool, &redis).await?;
+        fetch_project_reports(&project_ids, &pool, &redis, false)
+            .await
+            .wrap_api_err("fetching project reports")?;
 
     let projects = DBProject::get_many_ids(&project_ids, &**pool, &redis)
         .await
@@ -891,7 +987,7 @@ pub async fn search_projects(
     }))
 }
 
-/// Get a project technical review report.  
+/// Get a project technical review report.
 #[utoipa::path(
 	context_path = "/moderation/tech-review",
 	tag = "moderation",
@@ -913,7 +1009,8 @@ pub async fn get_project_report(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let (project_id,) = path.into_inner();
     let db_project_id = DBProjectId::from(project_id);
@@ -929,10 +1026,12 @@ pub async fn get_project_report(
     .fetch_optional(&**pool)
     .await
     .wrap_internal_err("failed to fetch thread")?
-    .ok_or(ApiError::NotFound)?;
+    .wrap_not_found_err("resource not found")?;
 
     let project_reports =
-        fetch_project_reports(&[db_project_id], &pool, &redis).await?;
+        fetch_project_reports(&[db_project_id], &pool, &redis, true)
+            .await
+            .wrap_api_err("fetching project reports")?;
 
     let project_report = project_reports.into_iter().next();
 
@@ -966,7 +1065,7 @@ pub async fn get_project_report(
     let thread = threads
         .get(&row.thread_id.into())
         .cloned()
-        .ok_or(ApiError::NotFound)?;
+        .wrap_not_found_err("resource not found")?;
 
     Ok(web::Json(ProjectReportResponse {
         project_report,
@@ -984,12 +1083,12 @@ pub struct SubmitReport {
     pub message: Option<String>,
 }
 
-/// Submit a technical review verdict.  
+/// Submit a technical review verdict.
 ///
 /// Before this is called, all issues for this project's reports must have been
 /// marked as either safe or unsafe. Otherwise, this will error with
-/// [`ApiError::TechReviewIssuesWithNoVerdict`], providing the issue IDs which
-/// are still unmarked.
+/// A request error is returned with the issue detail IDs which are still
+/// unmarked.
 #[utoipa::path(
 	context_path = "/moderation/tech-review",
 	tag = "moderation",
@@ -1013,7 +1112,8 @@ pub async fn submit_report(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
     let (project_id,) = path.into_inner();
     let project_id = DBProjectId::from(project_id);
 
@@ -1029,14 +1129,21 @@ pub async fn submit_report(
         FROM mods m
         INNER JOIN versions v ON v.mod_id = m.id
         INNER JOIN files f ON f.version_id = v.id
-        INNER JOIN delphi_reports dr ON dr.file_id = f.id
+        INNER JOIN delphi_reports dr
+            ON dr.file_id = f.id
+            AND NOT EXISTS (
+                SELECT 1
+                FROM delphi_reports newer_dr
+                WHERE
+                    newer_dr.file_id = dr.file_id
+                    AND newer_dr.delphi_version > dr.delphi_version
+            )
         INNER JOIN delphi_report_issues dri ON dri.report_id = dr.id
         INNER JOIN delphi_issue_details_with_statuses didws ON didws.issue_id = dri.id
         WHERE
             m.id = $1
             AND didws.status = 'pending'
-            -- see delphi.rs todo comment
-            AND dri.issue_type != '__dummy'
+            AND didws.severity != 'hidden'
         "#,
         project_id as _,
     )
@@ -1045,34 +1152,27 @@ pub async fn submit_report(
     .wrap_internal_err("failed to fetch pending issues")?;
 
     if !pending_issue_details.is_empty() {
-        return Err(ApiError::TechReviewDetailsWithNoVerdict {
-            details: pending_issue_details
-                .into_iter()
-                .map(|record| {
-                    DelphiReportIssueDetailsId(record.issue_detail_id)
-                })
-                .collect(),
-        });
+        let details = pending_issue_details
+            .into_iter()
+            .map(|record| DelphiReportIssueDetailsId(record.issue_detail_id))
+            .collect_vec();
+        return Err(ApiError::Request(eyre::eyre!(
+            "report still has issue details with no verdict: {details:?}"
+        )));
     }
 
     sqlx::query!(
-        "
-        DELETE FROM delphi_report_issue_details drid
-        WHERE issue_id IN (
-            SELECT dri.id
-            FROM mods m
-            INNER JOIN versions v ON v.mod_id = m.id
-            INNER JOIN files f ON f.version_id = v.id
-            INNER JOIN delphi_reports dr ON dr.file_id = f.id
-            INNER JOIN delphi_report_issues dri ON dri.report_id = dr.id
-            WHERE m.id = $1 AND dri.issue_type = '__dummy'
-        )
-        ",
-        project_id as _,
+        r#"
+        DELETE FROM delphi_tech_review_queue
+        WHERE project_id = $1
+        "#,
+        project_id as DBProjectId,
     )
     .execute(&mut txn)
     .await
-    .wrap_internal_err("failed to delete dummy issue")?;
+    .wrap_internal_err(
+        "failed to remove project from technical review queue",
+    )?;
 
     let record = sqlx::query!(
         r#"
@@ -1171,7 +1271,10 @@ pub async fn submit_report(
             None,
             None,
         )
-        .await?;
+        .await
+        .wrap_api_err(
+            "executing `projects::clear_project_cache_and_queue_search`",
+        )?;
     }
 
     Ok(())
@@ -1199,7 +1302,7 @@ pub struct UpdateGlobalIssue {
     pub verdict: DelphiStatus,
 }
 
-/// Update technical review issue details.  
+/// Update technical review issue details.
 ///
 /// This will not automatically reject the project for malware, but just flag
 /// this issue with a verdict.
@@ -1224,7 +1327,8 @@ pub async fn update_issue_details(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?;
+    .await
+    .wrap_auth_err("updating database records for `update_issue_details`")?;
 
     let mut txn = pool
         .begin()
@@ -1257,10 +1361,6 @@ pub async fn update_issue_details(
                 i.verdict
             FROM incoming i
             INNER JOIN delphi_issue_details_with_statuses didws ON didws.id = i.detail_id
-            INNER JOIN delphi_report_issues dri ON dri.id = didws.issue_id
-            WHERE
-                -- see delphi.rs todo comment
-                dri.issue_type != '__dummy'
         ),
         validated AS (
             SELECT
@@ -1324,10 +1424,7 @@ pub async fn update_issue_details(
         r#"
         SELECT DISTINCT didws.project_id AS "project_id!: DBProjectId"
         FROM delphi_issue_details_with_statuses didws
-        INNER JOIN delphi_report_issues dri ON dri.id = didws.issue_id
-        WHERE
-            didws.id = ANY($1::bigint[])
-            AND dri.issue_type != '__dummy'
+        WHERE didws.id = ANY($1::bigint[])
         "#,
         &detail_ids,
     )
@@ -1342,12 +1439,13 @@ pub async fn update_issue_details(
         .map(|row| row.project_id)
         .collect::<Vec<_>>();
 
-    tech_review_sync::sync_project_tech_review_state(
+    tech_review_queue::sync_projects(
         &affected_project_ids,
-        TechReviewExitReason::Resolved,
+        tech_review_queue::TechReviewRemovalReason::RulesChanged,
         &mut txn,
     )
-    .await?;
+    .await
+    .wrap_api_err("executing `tech_review_queue::sync_projects`")?;
 
     txn.commit()
         .await
@@ -1366,7 +1464,7 @@ pub async fn update_issue_details(
     security(("bearer_auth" = [])),
     responses((status = NO_CONTENT))
 )]
-#[post("/global-issue-detail")]
+#[post("/global-traces")]
 pub async fn update_global_issue_details(
     req: HttpRequest,
     pool: web::Data<PgPool>,
@@ -1381,7 +1479,10 @@ pub async fn update_global_issue_details(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?;
+    .await
+    .wrap_auth_err(
+        "updating database records for `update_global_issue_details`",
+    )?;
 
     let updates = update_reqs.into_inner();
 
@@ -1456,12 +1557,30 @@ pub async fn update_global_issue_details(
     .await
     .wrap_internal_err("failed to update global issue details")?;
 
-    tech_review_sync::sync_detail_key_tech_review_state(
+    let affected_projects = sqlx::query!(
+        r#"
+        SELECT DISTINCT detail.project_id AS "project_id!: DBProjectId"
+        FROM delphi_issue_details_with_statuses detail
+        WHERE detail.key = ANY($1::text[])
+        "#,
         &detail_keys,
-        TechReviewExitReason::Resolved,
+    )
+    .fetch_all(&mut txn)
+    .await
+    .wrap_internal_err(
+        "failed to fetch projects affected by global detail updates",
+    )?;
+
+    tech_review_queue::sync_projects(
+        &affected_projects
+            .into_iter()
+            .map(|row| row.project_id)
+            .collect::<Vec<_>>(),
+        tech_review_queue::TechReviewRemovalReason::RulesChanged,
         &mut txn,
     )
-    .await?;
+    .await
+    .wrap_api_err("executing `tech_review_queue::sync_projects`")?;
 
     txn.commit()
         .await
@@ -1470,77 +1589,330 @@ pub async fn update_global_issue_details(
     Ok(())
 }
 
-/// See [`add_report`].
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct AddReport {
-    pub file_id: FileId,
+/// A user's project that is stuck in `processing` or `rejected` because the
+/// most recent technical review verdict posted to its thread was `unsafe`.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct FlaggedProject {
+    pub project_id: ProjectId,
+    pub thread_id: ThreadId,
+    pub status: ProjectStatus,
+    /// The `tech_review` message that carried the `unsafe` verdict.
+    pub message_id: ThreadMessageId,
+    /// When that verdict was posted.
+    pub reviewed: DateTime<Utc>,
 }
 
-/// Add a technical review report.  
-/// does not already exist for it.
+/// Get all of a user's `processing`/`rejected` projects whose most recent
+/// `tech_review` thread message was an `unsafe` verdict.
 #[utoipa::path(
-	context_path = "/moderation/tech-review",
-	tag = "moderation",
-	responses((status = OK, body = DelphiReportId))
+    context_path = "/moderation/tech-review",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    responses((status = OK, body = Vec<FlaggedProject>))
 )]
-#[put("/report")]
-pub async fn add_report(
+#[get("/user/{user_id}/flagged-projects")]
+pub async fn get_user_flagged_projects(
     req: HttpRequest,
+    info: web::Path<(String,)>,
     pool: web::Data<PgPool>,
     redis: web::Data<RedisPool>,
     session_queue: web::Data<AuthQueue>,
-    web::Json(add_report): web::Json<AddReport>,
-) -> Result<web::Json<DelphiReportId>, ApiError> {
+) -> Result<web::Json<Vec<FlaggedProject>>, ApiError> {
     check_is_moderator_from_headers(
         &req,
         &**pool,
         &redis,
         &session_queue,
-        Scopes::PROJECT_WRITE,
+        Scopes::PROJECT_READ,
     )
-    .await?;
-    let file_id = add_report.file_id;
-
-    let mut txn = pool
-        .begin()
-        .await
-        .wrap_internal_err("failed to begin transaction")?;
-
-    let record = sqlx::query!(
-        r#"
-        SELECT
-            f.url,
-            COUNT(dr.id) AS "report_count!"
-        FROM files f
-        LEFT JOIN delphi_reports dr ON dr.file_id = f.id
-        WHERE f.id = $1
-        GROUP BY f.url
-        "#,
-        DBFileId::from(file_id) as _,
-    )
-    .fetch_one(&mut txn)
     .await
-    .wrap_internal_err("failed to fetch file")?;
+    .wrap_auth_err("authenticating API request")?;
 
-    if record.report_count > 0 {
-        return Err(ApiError::Request(eyre!("file already has reports")));
+    let target_user = DBUser::get(&info.into_inner().0, &**pool, &redis)
+        .await
+        .wrap_internal_err("fetching user from database")?
+        .wrap_not_found_err("resource not found")?;
+
+    let flagged =
+        user_flagged_projects(target_user.id, &**pool, &redis).await?;
+
+    Ok(web::Json(flagged))
+}
+
+/// Get all of multiple users' `processing`/`rejected` projects whose most
+/// recent `tech_review` thread message was an `unsafe` verdict. Users that
+/// don't exist are silently omitted from the response; users that exist
+/// but have no matching projects are included with an empty list.
+#[utoipa::path(
+    context_path = "/moderation/tech-review",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    params(("ids" = String, Query)),
+    responses((status = OK, body = HashMap<UserId, Vec<FlaggedProject>>))
+)]
+#[get("/users/flagged-projects")]
+pub async fn get_users_flagged_projects(
+    req: HttpRequest,
+    ids: web::Query<UserIds>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<web::Json<HashMap<UserId, Vec<FlaggedProject>>>, ApiError> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let user_ids = serde_json::from_str::<Vec<String>>(&ids.ids)
+        .wrap_request_err("deserializing JSON data")?;
+
+    if user_ids.is_empty() {
+        return Ok(web::Json(HashMap::new()));
     }
 
-    let report_id = DBDelphiReport {
-        id: DelphiReportId(0),
-        file_id: Some(file_id.into()),
-        delphi_version: -1, // TODO
-        artifact_url: record.url,
-        created: Utc::now(),
-        severity: DelphiSeverity::Low, // TODO
-    }
-    .upsert(&mut txn)
-    .await
-    .wrap_internal_err("failed to insert report")?;
-
-    txn.commit()
+    let target_users = DBUser::get_many(&user_ids, &**pool, &redis)
         .await
-        .wrap_internal_err("failed to commit transaction")?;
+        .wrap_internal_err("fetching users from database")?;
 
-    Ok(web::Json(report_id))
+    let pool_ref = &**pool;
+    let redis_ref = &*redis;
+
+    let flagged_by_user =
+        try_join_all(target_users.into_iter().map(|target_user| async move {
+            let flagged =
+                user_flagged_projects(target_user.id, pool_ref, redis_ref)
+                    .await?;
+
+            Ok::<_, ApiError>((UserId::from(target_user.id), flagged))
+        }))
+        .await?
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    Ok(web::Json(flagged_by_user))
+}
+
+/// Get all of an organization's `processing`/`rejected` projects whose most
+/// recent `tech_review` thread message was an `unsafe` verdict.
+#[utoipa::path(
+    context_path = "/moderation/tech-review",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    responses((status = OK, body = Vec<FlaggedProject>))
+)]
+#[get("/organization/{organization_id}/flagged-projects")]
+pub async fn get_organization_flagged_projects(
+    req: HttpRequest,
+    info: web::Path<(String,)>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<web::Json<Vec<FlaggedProject>>, ApiError> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let target_org = DBOrganization::get(&info.into_inner().0, &**pool, &redis)
+        .await
+        .wrap_internal_err("fetching organization from database")?
+        .wrap_not_found_err("resource not found")?;
+
+    let flagged =
+        organization_flagged_projects(target_org.id, &**pool, &redis).await?;
+
+    Ok(web::Json(flagged))
+}
+
+/// Get all of multiple organizations' `processing`/`rejected` projects
+/// whose most recent `tech_review` thread message was an `unsafe` verdict.
+/// Organizations that don't exist are silently omitted from the response;
+/// organizations that exist but have no matching projects are included
+/// with an empty list.
+#[utoipa::path(
+    context_path = "/moderation/tech-review",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    params(("ids" = String, Query)),
+    responses((status = OK, body = HashMap<OrganizationId, Vec<FlaggedProject>>))
+)]
+#[get("/organizations/flagged-projects")]
+pub async fn get_organizations_flagged_projects(
+    req: HttpRequest,
+    ids: web::Query<OrganizationIds>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<web::Json<HashMap<OrganizationId, Vec<FlaggedProject>>>, ApiError> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let organization_ids = serde_json::from_str::<Vec<String>>(&ids.ids)
+        .wrap_request_err("deserializing JSON data")?;
+
+    if organization_ids.is_empty() {
+        return Ok(web::Json(HashMap::new()));
+    }
+
+    let target_orgs =
+        DBOrganization::get_many(&organization_ids, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching organizations from database")?;
+
+    let pool_ref = &**pool;
+    let redis_ref = &*redis;
+
+    let flagged_by_org =
+        try_join_all(target_orgs.into_iter().map(|target_org| async move {
+            let flagged = organization_flagged_projects(
+                target_org.id,
+                pool_ref,
+                redis_ref,
+            )
+            .await?;
+
+            Ok::<_, ApiError>((OrganizationId::from(target_org.id), flagged))
+        }))
+        .await?
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    Ok(web::Json(flagged_by_org))
+}
+
+/// Finds a single user's `processing`/`rejected` projects whose most recent
+/// `tech_review` thread message was an `unsafe` verdict. Shared by the
+/// single- and multi-user flagged-projects endpoints.
+async fn user_flagged_projects<'a, E>(
+    user_id: DBUserId,
+    pool: E,
+    redis: &RedisPool,
+) -> Result<Vec<FlaggedProject>, ApiError>
+where
+    E: crate::database::Executor<'a, Database = sqlx::Postgres>
+        + crate::database::Acquire<'a, Database = sqlx::Postgres>
+        + Copy,
+{
+    let project_ids = DBUser::get_projects(user_id, pool, redis)
+        .await
+        .wrap_internal_err("fetching user's projects from database")?;
+
+    flagged_projects_among(&project_ids, pool, redis).await
+}
+
+/// Finds a single organization's `processing`/`rejected` projects whose
+/// most recent `tech_review` thread message was an `unsafe` verdict.
+/// Shared by the single- and multi-organization flagged-projects
+/// endpoints.
+async fn organization_flagged_projects<'a, E>(
+    organization_id: DBOrganizationId,
+    pool: E,
+    redis: &RedisPool,
+) -> Result<Vec<FlaggedProject>, ApiError>
+where
+    E: crate::database::Executor<'a, Database = sqlx::Postgres>
+        + crate::database::Acquire<'a, Database = sqlx::Postgres>
+        + Copy,
+{
+    let project_ids = DBOrganization::get_projects(organization_id, pool)
+        .await
+        .wrap_internal_err("fetching project IDs from database")?;
+
+    flagged_projects_among(&project_ids, pool, redis).await
+}
+
+/// Finds `processing`/`rejected` projects (from the given ids) whose most
+/// recent `tech_review` thread message was an `unsafe` verdict. Shared by
+/// the user- and organization-scoped flagged-projects helpers above.
+async fn flagged_projects_among<'a, E>(
+    project_ids: &[DBProjectId],
+    pool: E,
+    redis: &RedisPool,
+) -> Result<Vec<FlaggedProject>, ApiError>
+where
+    E: crate::database::Executor<'a, Database = sqlx::Postgres>
+        + crate::database::Acquire<'a, Database = sqlx::Postgres>
+        + Copy,
+{
+    if project_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Only `processing`/`rejected` projects are relevant, so narrow down
+    // before pulling any thread data.
+    let candidate_projects = DBProject::get_many_ids(project_ids, pool, redis)
+        .await
+        .wrap_internal_err("fetching projects from database")?
+        .into_iter()
+        .filter(|project| {
+            matches!(
+                project.inner.status,
+                ProjectStatus::Processing | ProjectStatus::Rejected
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if candidate_projects.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let thread_ids = candidate_projects
+        .iter()
+        .map(|project| project.thread_id)
+        .collect::<Vec<_>>();
+
+    let threads = DBThread::get_many(&thread_ids, pool)
+        .await
+        .wrap_internal_err("fetching threads from database")?
+        .into_iter()
+        .map(|thread| (thread.id, thread))
+        .collect::<HashMap<_, _>>();
+
+    Ok(candidate_projects
+        .into_iter()
+        .filter_map(|project| {
+            let thread = threads.get(&project.thread_id)?;
+
+            // `DBThread::get_many` returns messages sorted oldest-first, so
+            // walking backwards finds the most recent `tech_review` entry
+            // regardless of what (if anything) was posted after it.
+            let last_review = thread.messages.iter().rev().find(|message| {
+                matches!(message.body, MessageBody::TechReview { .. })
+            })?;
+
+            let verdict = match &last_review.body {
+                MessageBody::TechReview { verdict } => *verdict,
+                _ => return None,
+            };
+
+            if verdict != DelphiVerdict::Unsafe {
+                return None;
+            }
+
+            Some(FlaggedProject {
+                project_id: project.inner.id.into(),
+                thread_id: project.thread_id.into(),
+                status: project.inner.status,
+                message_id: last_review.id.into(),
+                reviewed: last_review.created,
+            })
+        })
+        .collect())
 }

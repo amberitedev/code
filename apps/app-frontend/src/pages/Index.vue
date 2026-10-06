@@ -1,31 +1,34 @@
 <script setup lang="ts">
-import { HomeIcon, PlusIcon } from '@modrinth/assets'
-import { defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
+import { PlayIcon, PlusIcon } from '@modrinth/assets'
+import { ContextMenu, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
+import { useQuery } from '@tanstack/vue-query'
 import dayjs from 'dayjs'
-import { computed, inject, onActivated, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 
-import ContextMenu from '@/components/ui/ContextMenu.vue'
 import LibrarySection from '@/components/ui/library/index.vue'
+import { libraryScrollTop } from '@/components/ui/library/view-state'
 import WelcomeScreen from '@/components/ui/WelcomeScreen.vue'
 import RecentWorldsList from '@/components/ui/world/RecentWorldsList.vue'
-import { useAppEvent } from '@/composables/use-app-event'
-import { toError } from '@/helpers/errors'
-import { list } from '@/helpers/instance'
-import type { GameInstance } from '@/helpers/types'
+import { useAppSettings } from '@/composables/use-app-settings.ts'
+import { traceStartupStep } from '@/helpers/startup-debug'
+import { instanceListQueryOptions } from '@/pages/instance/query-options'
 import { useRootBreadcrumb } from '@/providers/breadcrumbs'
 import { injectOnboardingChecklist } from '@/providers/onboarding-checklist'
-import { useTheming } from '@/store/theme.ts'
 
 defineOptions({
 	name: 'LibraryPage',
 })
 
-const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
+const { handleError } = injectNotificationManager()
 const { hasCreatedInstance, isReady } = injectOnboardingChecklist()
 const showCreationModal = inject<() => void>('showCreationModal')
 const pageOptions = ref<InstanceType<typeof ContextMenu>>()
-const themeStore = useTheming()
+const appSettings = useAppSettings()
+onBeforeRouteLeave(() => {
+	libraryScrollTop.value = document.querySelector('.app-viewport')?.scrollTop ?? 0
+})
 
 const messages = defineMessages({
 	home: {
@@ -36,46 +39,33 @@ const messages = defineMessages({
 		id: 'app.library.context-menu.create-instance',
 		defaultMessage: 'New instance',
 	},
+	libraryActionsLabel: {
+		id: 'app.library.actions.label',
+		defaultMessage: 'Library actions',
+	},
 })
 
-const homeBreadcrumb = useRootBreadcrumb({
+useRootBreadcrumb({
 	slot: 'root',
 	id: 'home',
 	label: formatMessage(messages.home),
 	to: '/',
-	visual: { type: 'icon', component: HomeIcon },
+	visual: { type: 'icon', component: PlayIcon },
 })
-onActivated(homeBreadcrumb.reset)
 
-const instances = ref<GameInstance[]>([])
-let latestInstanceFetch = 0
+const instancesQuery = useQuery(instanceListQueryOptions())
+const instances = computed(() => instancesQuery.data.value ?? [])
+if (hasCreatedInstance.value) {
+	await traceStartupStep('Load library instances', () => instancesQuery.suspense()).catch(
+		handleError,
+	)
+}
 
 const recentInstances = computed(() =>
 	instances.value
 		.slice()
 		.sort((a, b) => dayjs(b.last_played ?? b.created).diff(dayjs(a.last_played ?? a.created))),
 )
-
-async function fetchInstances() {
-	const fetchId = ++latestInstanceFetch
-	try {
-		const nextInstances = await list()
-		if (fetchId === latestInstanceFetch) {
-			instances.value = nextInstances
-		}
-	} catch (error: unknown) {
-		if (fetchId === latestInstanceFetch) {
-			handleError(toError(error))
-		}
-	}
-}
-
-if (hasCreatedInstance.value) {
-	await fetchInstances()
-}
-
-useAppEvent('instance', fetchInstances)
-useAppEvent('instance_groups_changed', fetchInstances)
 
 function openPageContextMenu(event: MouseEvent) {
 	if (
@@ -87,13 +77,14 @@ function openPageContextMenu(event: MouseEvent) {
 
 	event.preventDefault()
 	event.stopPropagation()
-	pageOptions.value?.showMenu(event, {}, [{ name: 'new_instance' }])
-}
-
-function handlePageOption({ option }: { option: string }) {
-	if (option === 'new_instance') {
-		showCreationModal?.()
-	}
+	pageOptions.value?.open(event, [
+		{
+			id: 'new_instance',
+			label: formatMessage(messages.newInstance),
+			icon: PlusIcon,
+			action: () => showCreationModal?.(),
+		},
+	])
 }
 </script>
 
@@ -102,16 +93,14 @@ function handlePageOption({ option }: { option: string }) {
 	<div
 		v-else-if="isReady"
 		data-library-page-background
-		class="flex flex-col gap-6 p-6"
+		class="flex flex-col gap-3 p-6"
 		@contextmenu="openPageContextMenu"
 	>
 		<RecentWorldsList
-			v-if="recentInstances?.length > 0 && themeStore.getFeatureFlag('worlds_in_home')"
+			v-if="recentInstances?.length > 0 && appSettings.showJumpIn"
 			:recent-instances="recentInstances"
 		/>
 		<LibrarySection :instances="instances" />
-		<ContextMenu ref="pageOptions" @option-clicked="handlePageOption">
-			<template #new_instance> <PlusIcon /> {{ formatMessage(messages.newInstance) }} </template>
-		</ContextMenu>
+		<ContextMenu ref="pageOptions" :label="formatMessage(messages.libraryActionsLabel)" />
 	</div>
 </template>

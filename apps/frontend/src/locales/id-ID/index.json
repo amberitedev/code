@@ -5,8 +5,17 @@
   "action.continue": {
     "message": "Lanjutkan"
   },
-  "admin.billing.error.not-found": {
-    "message": "Pengguna tidak ditemukan"
+  "ads-consent.accept": {
+    "message": "Terima semua"
+  },
+  "ads-consent.manage": {
+    "message": "Kelola preferensi"
+  },
+  "ads-consent.reject": {
+    "message": "Tolak semua"
+  },
+  "ads-consent.title": {
+    "message": "Privasi Anda dan bagaimana iklan-iklan mendukung Modrinth"
   },
   "analytics.action.add": {
     "message": "Tambah"
@@ -23,6 +32,15 @@
   "analytics.breakdown.country": {
     "message": "Negara"
   },
+  "analytics.breakdown.dependent-on": {
+    "message": "Terikat pada"
+  },
+  "analytics.breakdown.dependent-project-download": {
+    "message": "Proyek terikat"
+  },
+  "analytics.breakdown.dependent-project-type": {
+    "message": "Jenis proyek terikat"
+  },
   "analytics.breakdown.download-reason": {
     "message": "Alasan pengunduhan"
   },
@@ -37,6 +55,9 @@
   },
   "analytics.breakdown.loader": {
     "message": "Pemuat"
+  },
+  "analytics.breakdown.members": {
+    "message": "Anggota"
   },
   "analytics.breakdown.monetization": {
     "message": "Monetisasi"
@@ -133,6 +154,9 @@
   },
   "analytics.chart.tooltip.hide-entry": {
     "message": "Sembunyikan {name} di grafik"
+  },
+  "analytics.chart.tooltip.no-data": {
+    "message": "Tidak ada data"
   },
   "analytics.chart.tooltip.pinned-aria": {
     "message": "Disematkan"
@@ -266,23 +290,11 @@
   "app-marketing.download.windows": {
     "message": "Windows"
   },
-  "app-marketing.features.follow.description": {
-    "message": "Simpan konten yang Anda suka dan dapatkan pembaruan dengan satu klik saja."
-  },
-  "app-marketing.features.follow.title": {
-    "message": "Ikuti proyek"
-  },
-  "app-marketing.features.importing.description": {
-    "message": "Impor semua profil favorit Anda dari launcher yang telah Anda gunakan sebelumnya, dan mulai menggunakan Modrinth App dalam hitungan detik!"
-  },
   "app-marketing.features.importing.gdlauncher-alt": {
     "message": "GDLauncher"
   },
   "app-marketing.features.importing.multimc-alt": {
     "message": "MultiMC"
-  },
-  "app-marketing.features.importing.title": {
-    "message": "Pengimporan profil"
   },
   "app-marketing.features.mod-management.actions": {
     "message": "Tindakan"
@@ -308,15 +320,6 @@
   "app-marketing.features.mod-management.version": {
     "message": "Versi"
   },
-  "app-marketing.features.offline.description": {
-    "message": "Mainkan mod Anda, baik saat daring maupun luring."
-  },
-  "app-marketing.features.offline.title": {
-    "message": "Mode luring"
-  },
-  "app-marketing.features.open-source.description": {
-    "message": "Peluncur Modrinth sepenuhnya bersumber terbuka. Anda dapat melihat kode sumber pada <github-link>GitHub</github-link> kami!"
-  },
   "app-marketing.features.open-source.title": {
     "message": "Sumber terbuka"
   },
@@ -326,9 +329,6 @@
   "app-marketing.features.performance.cpu-percent": {
     "message": "% CPU"
   },
-  "app-marketing.features.performance.description": {
-    "message": "Modrinth App bekerja lebih baik daripada pengelola mod ternama lainnya, dengan menggunakan hanya 150 MB RAM!"
-  },
   "app-marketing.features.performance.discord": {
     "message": "Discord"
   },
@@ -337,12 +337,6 @@
   },
   "app-marketing.features.performance.google-chrome": {
     "message": "Google Chrome"
-  },
-  "app-marketing.features.performance.infinite-mb": {
-    "message": "∞ MB"
-  },
-  "app-marketing.features.performance.less-than-150mb": {
-    "message": "< 150 MB"
   },
   "app-marketing.features.performance.modrinth-app": {
     "message": "Modrinth App"
@@ -472,9 +466,6 @@
   },
   "auth.reset-password.title.long": {
     "message": "Atur ulang kata sandi Anda"
-  },
-  "auth.sign-in.2fa.placeholder": {
-    "message": "Masukkan kode..."
   },
   "auth.sign-in.title": {
     "message": "Masuk"
@@ -897,19 +888,19 @@
     "message": "Nomor identitas penduduk"
   },
   "dashboard.creator-withdraw-modal.muralpay-details.document-number-resident-id-placeholder": {
-    "message": "Masukan nomor identitas penduduk"
+    "message": "Masukkan nomor identitas penduduk"
   },
   "dashboard.creator-withdraw-modal.muralpay-details.document-number-ruc": {
     "message": "Nomor RUC"
   },
   "dashboard.creator-withdraw-modal.muralpay-details.document-number-ruc-placeholder": {
-    "message": "Masukan nomor RUC"
+    "message": "Masukkan nomor RUC"
   },
   "dashboard.creator-withdraw-modal.muralpay-details.document-number-tax-id": {
     "message": "Nomor identitas pajak"
   },
   "dashboard.creator-withdraw-modal.muralpay-details.document-number-tax-id-placeholder": {
-    "message": "Masukan nomor identitas pajak"
+    "message": "Masukkan nomor identitas pajak"
   },
   "dashboard.creator-withdraw-modal.muralpay-details.network": {
     "message": "Jaringan"
@@ -1322,9 +1313,6 @@
   "hosting-marketing.faq.cpu-kind": {
     "message": "Jenis CPU apa yang digunakan oleh server Modrinth Hosting untuk berjalan?"
   },
-  "hosting-marketing.faq.cpu-kind.answer": {
-    "message": "Server Modrinth Hosting didukung oleh CPU AMD Ryzen 7900 dan CPU setara 7950X3D berkecepatan 5+ GHz, dipasangkan dengan memori DDR5."
-  },
   "hosting-marketing.faq.currency": {
     "message": "Dalam mata uang apa harga-harga tersebut?"
   },
@@ -1640,9 +1628,6 @@
   "layout.action.file-lookup": {
     "message": "Pencarian berkas"
   },
-  "layout.action.lookup-by-email": {
-    "message": "Cari dengan sur-el"
-  },
   "layout.action.manage-affiliates": {
     "message": "Kelola tautan afiliasi"
   },
@@ -1657,9 +1642,6 @@
   },
   "layout.action.new-project": {
     "message": "Proyek baru"
-  },
-  "layout.action.new-server-project": {
-    "message": "Server baru"
   },
   "layout.action.publish": {
     "message": "Terbitkan"
@@ -1810,9 +1792,6 @@
   },
   "layout.footer.social.discord": {
     "message": "Discord"
-  },
-  "layout.footer.social.github": {
-    "message": "GitHub"
   },
   "layout.footer.social.mastodon": {
     "message": "Mastodon"
@@ -2413,15 +2392,6 @@
   },
   "project.settings.general.url.title": {
     "message": "URL"
-  },
-  "project.settings.title": {
-    "message": "Pengaturan"
-  },
-  "project.settings.visit-dashboard": {
-    "message": "Kunjungi dasbor proyek"
-  },
-  "project.status.archived.message": {
-    "message": "{title} telah diarsip. {title} tidak akan menerima pembaruan di masa mendatang kecuali pembuat memutuskan untuk membuka arsip proyek ini."
   },
   "project.versions.title": {
     "message": "Versi"
@@ -3049,81 +3019,6 @@
   },
   "settings.display.banner.developer-mode.description": {
     "message": "<strong>Mode pengembang</strong> aktif. Ini akan memungkinkan Anda untuk melihat pengenal internal dari berbagai hal di seluruh Modrinth yang dapat berguna bila Anda adalah seorang pengembang yang menggunakan API Modrinth. Klik logo Modrinth di bagian bawah halaman lima kali untuk menghidupkan mode pengembang."
-  },
-  "settings.display.flags.description": {
-    "message": "Hidupkan atau matikan fitur tertentu di perangkat ini."
-  },
-  "settings.display.flags.title": {
-    "message": "Hidup/Matikan fitur"
-  },
-  "settings.display.project-list-layouts.datapack": {
-    "message": "Halaman Paket Data"
-  },
-  "settings.display.project-list-layouts.description": {
-    "message": "Pilih tata letak pilihan Anda untuk setiap halaman yang menampilkan daftar proyek di perangkat ini."
-  },
-  "settings.display.project-list-layouts.mod": {
-    "message": "Halaman Mod"
-  },
-  "settings.display.project-list-layouts.modpack": {
-    "message": "Halaman Paket Mod"
-  },
-  "settings.display.project-list-layouts.plugin": {
-    "message": "Halaman Pasang-masuk (Plug-in)"
-  },
-  "settings.display.project-list-layouts.resourcepack": {
-    "message": "Halaman Paket Sumber"
-  },
-  "settings.display.project-list-layouts.server": {
-    "message": "Halaman Server"
-  },
-  "settings.display.project-list-layouts.shader": {
-    "message": "Halaman Efek Gambar"
-  },
-  "settings.display.project-list-layouts.title": {
-    "message": "Tata letak daftar proyek"
-  },
-  "settings.display.project-list-layouts.user": {
-    "message": "Halaman profil pengguna"
-  },
-  "settings.display.project-list.layouts.collection": {
-    "message": "Koleksi"
-  },
-  "settings.display.sidebar.advanced-rendering.description": {
-    "message": "Menghidupkan renderasi tingkat lanjut seperti efek buram yang dapat menyebabkan masalah kinerja tanpa renderasi yang dipercepat perangkat keras."
-  },
-  "settings.display.sidebar.advanced-rendering.title": {
-    "message": "Renderasi tingkat lanjut"
-  },
-  "settings.display.sidebar.external-links-new-tab.description": {
-    "message": "Tautan yang mengarahkan Anda ke luar Modrinth akan dibuka di tab baru. Terlepas dari pengaturan ini, tautan pada domain yang sama dan di keterangan berformat Markdown akan dibuka di tab yang sama, dan tautan pada iklan dan halaman penyuntingan akan dibuka di tab baru."
-  },
-  "settings.display.sidebar.external-links-new-tab.title": {
-    "message": "Buka tautan eksternal di tab baru"
-  },
-  "settings.display.sidebar.hide-app-promos.description": {
-    "message": "Sembunyikan tombol \"Dapatkan Modrinth App\" dari navigasi utama. Halaman Modrinth App masih dapat ditemukan di halaman landas atau di bagian bawah halaman."
-  },
-  "settings.display.sidebar.hide-app-promos.title": {
-    "message": "Sembunyikan promosi Aplikasi Modrinth"
-  },
-  "settings.display.sidebar.left-aligned-content-sidebar.title": {
-    "message": "Bilah sisi rata kiri pada halaman konten"
-  },
-  "settings.display.sidebar.right-aligned-content-sidebar.description": {
-    "message": "Meratakan bilah sisi ke sebelah kiri konten halaman."
-  },
-  "settings.display.sidebar.right-aligned-filters-sidebar.description": {
-    "message": "Meratakan bilah sisi penyaringan ke sebelah kanan hasil pencarian."
-  },
-  "settings.display.sidebar.right-aligned-filters-sidebar.title": {
-    "message": "Bilah sisi rata kanan pada halaman pencarian"
-  },
-  "settings.display.theme.description": {
-    "message": "Pilih tema warna pilihan Anda untuk Modrinth di perangkat ini."
-  },
-  "settings.display.theme.title": {
-    "message": "Tema warna"
   },
   "settings.pats.action.create": {
     "message": "Buat PAT"

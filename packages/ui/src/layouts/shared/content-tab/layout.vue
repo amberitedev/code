@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Labrinth } from '@modrinth/api-client'
 import {
 	ArrowDownAZIcon,
 	ArrowUpZAIcon,
@@ -19,22 +20,32 @@ import {
 	TrashIcon,
 	UserIcon,
 } from '@modrinth/assets'
+import { useQueryClient } from '@tanstack/vue-query'
+import { useSessionStorage } from '@vueuse/core'
+import { chunk } from 'es-toolkit'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import Avatar from '#ui/components/base/Avatar.vue'
-import { Button, type OverflowMenuOption, TeleportOverflowMenu } from '#ui/components/base/buttons'
+import { Button, type ButtonMenuOption, TeleportOverflowMenu } from '#ui/components/base/buttons'
 import DropdownFilterBar from '#ui/components/base/DropdownFilterBar.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
 import FilterPills from '#ui/components/base/FilterPills.vue'
-import StyledInput from '#ui/components/base/StyledInput.vue'
+import Input from '#ui/components/base/inputs/Input.vue'
+import UpdateAllModal from '#ui/components/modal/update-all-modal/index.vue'
+import type {
+	UpdateAllItem,
+	UpdateAllSelection,
+} from '#ui/components/modal/update-all-modal/update-all-modal-types'
 import { useDebugLogger } from '#ui/composables/debug-logger'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { injectModrinthClient } from '#ui/providers/api-client'
+import { injectNotificationManager } from '#ui/providers/web-notifications'
 import { commonMessages, formatContentTypeSentence } from '#ui/utils/common-messages'
+import { versionMatchesCompatibilityTarget } from '#ui/utils/version-compatibility'
 
 import ContentCardTable from './components/ContentCardTable.vue'
 import ContentSelectionBar from './components/ContentSelectionBar.vue'
 import ManagedContentCard from './components/managed-content-card/index.vue'
-import ConfirmBulkUpdateModal from './components/modals/ConfirmBulkUpdateModal.vue'
 import ConfirmDeletionModal from './components/modals/ConfirmDeletionModal.vue'
 import ConfirmDisableModal from './components/modals/ConfirmDisableModal.vue'
 import ConfirmUnlinkModal from './components/modals/ConfirmUnlinkModal.vue'
@@ -49,12 +60,7 @@ import {
 	useContentSelection,
 } from './composables'
 import { injectContentManager } from './providers/content-manager'
-import type {
-	BulkOperationStatus,
-	ContentActionWarning,
-	ContentCardTableItem,
-	ContentItem,
-} from './types'
+import type { ContentActionWarning, ContentCardTableItem, ContentItem } from './types'
 
 const { formatMessage } = useVIntl()
 const debug = useDebugLogger('ContentPageLayout')
@@ -62,6 +68,7 @@ const debug = useDebugLogger('ContentPageLayout')
 const props = withDefaults(
 	defineProps<{
 		bottomPadding?: boolean
+		highlightedItemId?: string
 	}>(),
 	{
 		bottomPadding: true,
@@ -169,6 +176,14 @@ const messages = defineMessages({
 		id: 'content.page-layout.please-wait',
 		defaultMessage: 'Please wait',
 	},
+	failedToLoadUpdates: {
+		id: 'content.page-layout.failed-to-load-updates',
+		defaultMessage: 'Failed to load available updates',
+	},
+	failedToLoadChangelog: {
+		id: 'content.page-layout.failed-to-load-changelog',
+		defaultMessage: 'Failed to load changelog',
+	},
 })
 
 const ctx = injectContentManager()
@@ -179,7 +194,9 @@ function getItemId(item: ContentItem) {
 }
 
 type SortMode = 'alphabetical-asc' | 'alphabetical-desc' | 'date-added-newest' | 'date-added-oldest'
-const sortMode = ref<SortMode>('alphabetical-asc')
+const sortMode = ctx.filterPersistKey
+	? useSessionStorage<SortMode>(`content-sort:${ctx.filterPersistKey}`, 'alphabetical-asc')
+	: ref<SortMode>('alphabetical-asc')
 
 const sortLabels: Record<SortMode, () => string> = {
 	'alphabetical-asc': () => formatMessage(messages.sortAlphabeticalAscending),
@@ -188,7 +205,7 @@ const sortLabels: Record<SortMode, () => string> = {
 	'date-added-oldest': () => formatMessage(messages.sortDateAddedOldest),
 }
 
-const sortOptions = computed<OverflowMenuOption[]>(() => [
+const sortOptions = computed<ButtonMenuOption[]>(() => [
 	{
 		id: 'alphabetical-asc',
 		label: formatMessage(messages.sortAlphabeticalAscending),
@@ -275,6 +292,17 @@ const { selectedMetadataFilters, metadataFilterCategories, applyMetadataFilters 
 		showSharedContent: ctx.showSharedContentFilter,
 		showEnvironmentWarnings: ctx.showEnvironmentWarnings,
 	})
+
+watch(
+	() => props.highlightedItemId,
+	(id) => {
+		if (!id) return
+		searchQuery.value = ''
+		selectedFilters.value = []
+		selectedMetadataFilters.value = {}
+	},
+	{ immediate: true },
+)
 
 const metadataFilterAuthors = computed(() => {
 	const authors = new Map<string, NonNullable<ContentItem['owner']>>()
@@ -399,6 +427,7 @@ const { isChanging, markChanging, unmarkChanging } = useChangingItems()
 const bulkWaiting = ref(false)
 const bulkStatusMessage = ref<string | null>(null)
 const bulkItemCount = ref(0)
+const bulkUpdateItems = ref<ContentItem[]>([])
 
 const refreshing = ref(false)
 async function handleRefresh() {
@@ -560,6 +589,16 @@ async function promptDeleteItems(items: ContentItem[], event?: MouseEvent) {
 }
 
 async function showDeletionConfirmation(event?: MouseEvent) {
+	const confirmed = await ctx.confirmDeleteItems?.(pendingDeletionItems.value)
+	if (confirmed !== undefined) {
+		if (!confirmed) return
+		if (pendingDeletionWarning.value) {
+			confirmDeletionModal.value?.show()
+		} else {
+			await confirmDelete()
+		}
+		return
+	}
 	if (
 		!pendingDeletionWarning.value &&
 		(event?.shiftKey || skipNonEssentialWarnings.value) &&
@@ -593,6 +632,7 @@ async function confirmDependencyWarningDelete(disableDependentsAfterDeleting: bo
 
 	pendingDependencyWarningItems.value = []
 	pendingDependencyWarningDependents.value = []
+	if ((await ctx.confirmDeleteItems?.(pendingDeletionItems.value)) === false) return
 	if (pendingDeletionWarning.value) {
 		confirmDeletionModal.value?.show()
 		return
@@ -682,6 +722,7 @@ async function confirmDelete() {
 async function promptDisableItems(items: ContentItem[]) {
 	const toggleableItems = items.filter(canToggleItem)
 	if (toggleableItems.length === 0) return
+	if (ctx.confirmAction && !(await ctx.confirmAction('disable', toggleableItems))) return
 	pendingDisableItems.value = toggleableItems
 	const warning = ctx.getDisableWarning?.(toggleableItems) ?? null
 	if (warning) {
@@ -749,6 +790,7 @@ async function handleToggleEnabledById(id: string, _value: boolean) {
 		await promptDisableItems([item])
 		return
 	}
+	if (ctx.confirmAction && !(await ctx.confirmAction('enable', [item]))) return
 	markChanging(id)
 	try {
 		await ctx.toggleEnabled(item)
@@ -761,6 +803,7 @@ async function bulkEnable() {
 	if (ctx.isBusy.value) return
 	const items = toggleableSelectedItems.value.filter((item) => !item.enabled)
 	if (items.length === 0) return
+	if (ctx.confirmAction && !(await ctx.confirmAction('enable', items))) return
 	if (ctx.bulkEnableItems) {
 		isBulkOperating.value = true
 		bulkOperation.value = 'enable'
@@ -791,7 +834,7 @@ async function bulkDisable() {
 
 function handleUpdateById(id: string) {
 	const item = ctx.items.value.find((item) => getItemId(item) === id)
-	if (item?.locked) return
+	if (!item || item.locked) return
 	ctx.updateItem?.(id)
 }
 
@@ -802,101 +845,237 @@ function handleSwitchVersionById(id: string) {
 	}
 }
 
-// Bulk updating
-const confirmBulkUpdateModal = ref<InstanceType<typeof ConfirmBulkUpdateModal>>()
-const pendingBulkUpdateItems = ref<ContentItem[]>([])
-const pendingBulkUpdateAll = ref(false)
+const queryClient = useQueryClient()
+const client = injectModrinthClient()
+const { addNotification } = injectNotificationManager()
+const updateAllModal = ref<InstanceType<typeof UpdateAllModal>>()
+const updateAllItems = ref<UpdateAllItem[]>([])
+const loadingUpdateAll = ref(false)
+const loadingUpdateAllChangelog = ref(false)
+let updateAllRequestId = 0
 
-const hasBulkUpdateSupport = computed(
-	() => !!(ctx.bulkUpdateAll || ctx.bulkUpdateItem || ctx.bulkUpdateItems),
-)
+const hasBulkUpdateSupport = computed(() => !!ctx.bulkUpdateSelections)
 
-function promptUpdateAll(event?: MouseEvent) {
-	if (!hasBulkUpdateSupport.value) return
-	const items = ctx.items.value.filter((item) => item.has_update && !item.locked)
-	if (items.length === 0) return
-	pendingBulkUpdateItems.value = items
-	pendingBulkUpdateAll.value = true
-	if ((event?.shiftKey || skipNonEssentialWarnings.value) && !ctx.isBusy.value) {
-		confirmBulkUpdate()
-	} else {
-		confirmBulkUpdateModal.value?.show()
-	}
+function getUpdateAllCandidates(items: ContentItem[]) {
+	return items.filter(
+		(item) =>
+			item.has_update &&
+			!item.locked &&
+			item.project?.id &&
+			item.version?.id &&
+			item.update_version_id,
+	)
 }
 
-function promptUpdateSelected(event?: MouseEvent) {
-	if (!hasBulkUpdateSupport.value) return
-	const items = selectedItems.value.filter((item) => item.has_update && !item.locked)
-	if (items.length === 0) return
-	pendingBulkUpdateItems.value = items
-	pendingBulkUpdateAll.value = false
-	if ((event?.shiftKey || skipNonEssentialWarnings.value) && !ctx.isBusy.value) {
-		confirmBulkUpdate()
-	} else {
-		confirmBulkUpdateModal.value?.show()
-	}
+async function loadRecommendedUpdateVersions(items: ContentItem[]) {
+	const ids = [...new Set(items.map((item) => item.update_version_id!))].sort()
+	const batches = await Promise.all(
+		chunk(ids, 100).map(async (batch) => {
+			try {
+				const versions = await queryClient.fetchQuery({
+					queryKey: ['labrinth', 'versions', 'v2', 'recommended', batch],
+					queryFn: () =>
+						client.labrinth.versions_v2.getVersions(batch, { include_changelog: false }),
+					staleTime: 5 * 60_000,
+				})
+				for (const version of versions) {
+					queryClient.setQueryData(['labrinth', 'version', 'v2', 'summary', version.id], version)
+				}
+				return versions
+			} catch {
+				return []
+			}
+		}),
+	)
+	return new Map(batches.flat().map((version) => [version.id, version]))
 }
 
-async function confirmBulkUpdate() {
-	if (ctx.isBusy.value) return
-	const items = pendingBulkUpdateItems.value
-	if (items.length === 0 || !hasBulkUpdateSupport.value) return
+async function openUpdateAll(items: ContentItem[]) {
+	if (
+		!ctx.bulkUpdateSelections ||
+		ctx.isBusy.value ||
+		isBulkOperating.value ||
+		loadingUpdateAll.value
+	)
+		return
+	const candidates = getUpdateAllCandidates(items)
+	if (candidates.length === 0) return
 
-	const setBulkStatus = (status: BulkOperationStatus) => {
-		bulkStatusMessage.value = status.message ?? null
-		bulkProgress.value = status.progress ?? bulkProgress.value
-		bulkTotal.value = status.total ?? bulkTotal.value
-		bulkWaiting.value = status.waiting ?? false
+	const requestId = ++updateAllRequestId
+	updateAllItems.value = []
+	loadingUpdateAll.value = true
+	loadingUpdateAllChangelog.value = false
+	await nextTick()
+	if (requestId !== updateAllRequestId) return
+	updateAllModal.value?.show()
+
+	const recommendedPromise = loadRecommendedUpdateVersions(candidates)
+	const projectVersions = new Map<string, Labrinth.Versions.v2.Version[]>()
+	let failedToLoadVersions = false
+	const projectIds = [...new Set(candidates.map((item) => item.project!.id))]
+	for (const batch of chunk(projectIds, 8)) {
+		await Promise.all(
+			batch.map(async (projectId) => {
+				try {
+					const versions = await queryClient.fetchQuery({
+						queryKey: ['labrinth', 'versions', 'v2', projectId],
+						queryFn: () =>
+							client.labrinth.versions_v2.getProjectVersions(projectId, {
+								include_changelog: false,
+							}),
+						staleTime: 5 * 60_000,
+					})
+					projectVersions.set(projectId, versions)
+				} catch {
+					failedToLoadVersions = true
+				}
+			}),
+		)
+		if (requestId !== updateAllRequestId) return
 	}
+	const recommended = await recommendedPromise
+	if (requestId !== updateAllRequestId) return
 
-	try {
-		if (pendingBulkUpdateAll.value && ctx.bulkUpdateAll) {
-			isBulkOperating.value = true
-			bulkOperation.value = 'update'
-			bulkProgress.value = 0
-			bulkTotal.value = items.length
-			bulkItemCount.value = items.length
-			bulkStatusMessage.value = null
-			bulkWaiting.value = true
-			try {
-				await ctx.bulkUpdateAll(setBulkStatus)
-			} finally {
-				clearSelection()
-				isBulkOperating.value = false
-				bulkOperation.value = null
-				bulkProgress.value = 0
-				bulkTotal.value = 0
-				bulkItemCount.value = 0
-				bulkStatusMessage.value = null
-				bulkWaiting.value = false
-			}
-		} else if (ctx.bulkUpdateItems) {
-			isBulkOperating.value = true
-			bulkOperation.value = 'update'
-			bulkProgress.value = 0
-			bulkTotal.value = items.length
-			bulkItemCount.value = items.length
-			bulkStatusMessage.value = null
-			bulkWaiting.value = true
-			try {
-				await ctx.bulkUpdateItems(items)
-			} finally {
-				clearSelection()
-				isBulkOperating.value = false
-				bulkOperation.value = null
-				bulkProgress.value = 0
-				bulkTotal.value = 0
-				bulkItemCount.value = 0
-				bulkStatusMessage.value = null
-				bulkWaiting.value = false
-			}
-		} else if (ctx.bulkUpdateItem) {
-			await runBulk('update', items, ctx.bulkUpdateItem, { onComplete: clearSelection })
+	updateAllItems.value = candidates.map((item) => {
+		const preferredVersionId = item.update_version_id!
+		const versions = projectVersions.get(item.project!.id) ?? []
+		const preferredVersion =
+			queryClient.getQueryData<Labrinth.Versions.v2.Version>([
+				'labrinth',
+				'version',
+				'v2',
+				preferredVersionId,
+			]) ??
+			recommended.get(preferredVersionId) ??
+			versions.find((version) => version.id === preferredVersionId)
+		const sorted = [
+			...versions,
+			...(preferredVersion && !versions.some((version) => version.id === preferredVersion.id)
+				? [preferredVersion]
+				: []),
+		].sort((a, b) => Date.parse(b.date_published) - Date.parse(a.date_published))
+		const currentIndex = sorted.findIndex((version) => version.id === item.version!.id)
+		const newer = currentIndex < 0 ? sorted : sorted.slice(0, currentIndex)
+		if (preferredVersion && !newer.some((version) => version.id === preferredVersion.id)) {
+			newer.unshift(preferredVersion)
 		}
-	} finally {
-		pendingBulkUpdateItems.value = []
-		pendingBulkUpdateAll.value = false
+		const compatible = newer.filter(
+			(version) =>
+				version.id === preferredVersionId ||
+				versionMatchesCompatibilityTarget(version, {
+					gameVersion: ctx.currentGameVersion?.value ?? '',
+					loader: ctx.currentLoader?.value ?? '',
+					projectType: item.project_type,
+				}),
+		)
+		return {
+			id: getItemId(item),
+			project: item.project!,
+			currentVersion: item.version!,
+			versions:
+				compatible.length > 0
+					? compatible
+					: [
+							preferredVersion ?? {
+								id: preferredVersionId,
+								version_number: formatMessage(commonMessages.updateAvailableLabel),
+							},
+						],
+			initialVersionId: preferredVersionId,
+		}
+	})
+	loadingUpdateAll.value = false
+	if (failedToLoadVersions) {
+		addNotification({ type: 'error', title: formatMessage(messages.failedToLoadUpdates) })
 	}
+}
+
+function preloadUpdateAllChangelog(selection: UpdateAllSelection) {
+	if (selection.version.changelog != null) return
+	void queryClient.prefetchQuery({
+		queryKey: ['labrinth', 'version', 'v2', selection.version.id],
+		queryFn: () => client.labrinth.versions_v2.getVersion(selection.version.id),
+		staleTime: 5 * 60_000,
+	})
+}
+
+async function loadUpdateAllChangelog(selection: UpdateAllSelection) {
+	if (selection.version.changelog != null) return
+	const requestId = updateAllRequestId
+	loadingUpdateAllChangelog.value = true
+	try {
+		const version = await queryClient.fetchQuery({
+			queryKey: ['labrinth', 'version', 'v2', selection.version.id],
+			queryFn: () => client.labrinth.versions_v2.getVersion(selection.version.id),
+			staleTime: 5 * 60_000,
+		})
+		if (requestId !== updateAllRequestId) return
+		updateAllItems.value = updateAllItems.value.map((item) => ({
+			...item,
+			versions: item.versions.map((candidate) =>
+				candidate.id === version.id ? version : candidate,
+			),
+		}))
+	} catch (error) {
+		addNotification({
+			type: 'error',
+			title: formatMessage(messages.failedToLoadChangelog),
+			text: error instanceof Error ? error.message : undefined,
+		})
+	} finally {
+		if (requestId === updateAllRequestId) loadingUpdateAllChangelog.value = false
+	}
+}
+
+async function updateAllSelected(selections: UpdateAllSelection[]) {
+	if (
+		!ctx.bulkUpdateSelections ||
+		ctx.isBusy.value ||
+		isBulkOperating.value ||
+		selections.length === 0
+	)
+		return
+	++updateAllRequestId
+	isBulkOperating.value = true
+	bulkOperation.value = 'update'
+	bulkItemCount.value = selections.length
+	bulkTotal.value = selections.length
+	bulkProgress.value = 0
+	bulkUpdateItems.value = selections.flatMap((selection) => {
+		const item = ctx.items.value.find((item) => getItemId(item) === selection.id)
+		return item ? [item] : []
+	})
+	bulkWaiting.value = true
+	try {
+		await ctx.bulkUpdateSelections(selections, (completed) => {
+			bulkWaiting.value = false
+			bulkProgress.value = completed
+		})
+		clearSelection()
+	} catch {
+		return
+	} finally {
+		isBulkOperating.value = false
+		bulkOperation.value = null
+		bulkItemCount.value = 0
+		bulkTotal.value = 0
+		bulkProgress.value = 0
+		bulkUpdateItems.value = []
+		bulkWaiting.value = false
+	}
+}
+
+function promptUpdateAll() {
+	void openUpdateAll(ctx.items.value)
+}
+
+function cancelUpdateAll() {
+	++updateAllRequestId
+	loadingUpdateAll.value = false
+}
+
+function promptUpdateSelected() {
+	void openUpdateAll(selectedItems.value)
 }
 
 const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
@@ -933,19 +1112,19 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 				/>
 
 				<template v-if="ctx.items.value.length > 0">
-					<div class="flex flex-col gap-4">
-						<span v-if="ctx.managedContent.value" class="text-xl font-semibold text-contrast">
+					<div class="flex flex-col gap-2">
+						<span v-if="ctx.managedContent.value" class="mb-2 text-xl font-semibold text-contrast">
 							{{ formatMessage(messages.additionalContent) }}
 						</span>
 
 						<div class="flex flex-wrap items-center gap-2">
-							<StyledInput
+							<Input
 								v-model="searchQuery"
 								:icon="SearchIcon"
 								type="text"
 								autocomplete="off"
 								:spellcheck="false"
-								input-class="!h-10"
+								size="medium"
 								wrapper-class="flex-1 min-w-0"
 								clearable
 								:placeholder="
@@ -1192,7 +1371,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									v-tooltip="formatMessage(messages.updateAll)"
 									type="quiet"
 									color="green"
-									:disabled="isBulkOperating"
+									:disabled="isBulkOperating || loadingUpdateAll"
 									class="!text-sm !font-medium hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
 									@click="promptUpdateAll"
 								>
@@ -1214,7 +1393,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 
 						<ContentCardTable
 							v-model:selected-ids="selectedIds"
+							class="mt-2"
 							:items="tableItems"
+							:highlighted-item-id="highlightedItemId"
 							:show-selection="true"
 							@update:enabled="handleToggleEnabledById"
 							@delete="handleDeleteById"
@@ -1286,7 +1467,8 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 		</template>
 
 		<ContentSelectionBar
-			:selected-items="selectedItems"
+			v-if="!ctx.bulkUpdatesInBackground || bulkOperation !== 'update'"
+			:selected-items="bulkOperation === 'update' ? bulkUpdateItems : selectedItems"
 			:content-type-label="ctx.contentTypeLabel.value"
 			:is-busy="ctx.isBusy.value"
 			:busy-tooltip="ctx.busyMessage?.value"
@@ -1310,6 +1492,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 					v-tooltip="formatMessage(commonMessages.updateButton)"
 					type="quiet"
 					color="green"
+					:disabled="loadingUpdateAll"
 					class="hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
 					@click="promptUpdateSelected"
 				>
@@ -1415,14 +1598,18 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			:action-disabled-tooltip="ctx.busyMessage?.value ?? undefined"
 			@delete="confirmDependencyWarningDelete"
 		/>
-		<ConfirmBulkUpdateModal
+		<UpdateAllModal
 			v-if="hasBulkUpdateSupport"
-			ref="confirmBulkUpdateModal"
-			:count="pendingBulkUpdateItems.length"
+			ref="updateAllModal"
+			:items="updateAllItems"
 			:server="ctx.deletionContext === 'server'"
+			:loading="loadingUpdateAll"
+			:loading-changelog="loadingUpdateAllChangelog"
 			:action-disabled="ctx.isBusy.value"
-			:action-disabled-tooltip="ctx.busyMessage?.value ?? undefined"
-			@update="confirmBulkUpdate"
+			@changelog="loadUpdateAllChangelog"
+			@preload-changelog="preloadUpdateAllChangelog"
+			@cancel="cancelUpdateAll"
+			@update="updateAllSelected"
 		/>
 		<ConfirmUnlinkModal
 			v-if="ctx.unlinkModpack"

@@ -98,7 +98,7 @@
 								<label class="hidden" for="search">{{
 									formatMessage(commonMessages.searchLabel)
 								}}</label>
-								<StyledInput
+								<Input
 									id="search"
 									v-model="searchQuery"
 									:icon="SearchIcon"
@@ -151,6 +151,9 @@
 									:color="result.color"
 									layout="list"
 								/>
+								<p v-if="searchProjects.length === 0" class="offline text-center">
+									{{ formatMessage(messages.noResults) }}
+								</p>
 							</div>
 						</div>
 					</div>
@@ -453,9 +456,9 @@ import {
 	defineMessages,
 	DropdownSelect,
 	injectModrinthClient,
+	Input,
 	IntlFormatted,
 	ProjectCard,
-	StyledInput,
 	useRelativeTime,
 	useVIntl,
 } from '@modrinth/ui'
@@ -537,6 +540,10 @@ const messages = defineMessages({
 	failedToLoadRandomProjects: {
 		id: 'landing.error.failedToLoadRandomProjects',
 		defaultMessage: 'Failed to load random projects :(',
+	},
+	noResults: {
+		id: 'messages.noResults',
+		defaultMessage: 'No results found for your query!',
 	},
 	forPlayersLabel: {
 		id: 'landing.section.for-players.label',

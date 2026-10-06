@@ -406,6 +406,45 @@ async fn permissions_upload_version() {
 }
 
 #[actix_rt::test]
+async fn invalid_review_submission_returns_validation_error() {
+    with_test_environment(
+        None,
+        |test_env: TestEnvironment<ApiV2>| async move {
+            let api = &test_env.api;
+            let project_slug = &test_env.dummy.project_alpha.project_slug;
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({ "status": "draft" }),
+                    ADMIN_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::NO_CONTENT);
+
+            let response = api
+                .edit_project(
+                    project_slug,
+                    json!({
+                        "body": "",
+                        "status": "processing",
+                    }),
+                    USER_USER_PAT,
+                )
+                .await;
+            assert_status!(&response, StatusCode::BAD_REQUEST);
+
+            let error: serde_json::Value = test::read_body_json(response).await;
+            assert_eq!(
+                error["description"],
+                "resolve required project validation messages before saving"
+            );
+        },
+    )
+    .await;
+}
+
+#[actix_rt::test]
 pub async fn test_patch_v2() {
     // Hits V3-specific patchable fields
     // Other fields are tested in test_patch_project (the v2 version of that test)
@@ -493,7 +532,7 @@ async fn permissions_patch_project_v2() {
                                 req_gen,
                             )
                             .await
-                            .into_iter();
+                            .unwrap();
                     }
                 })
                 .buffer_unordered(4)
@@ -536,7 +575,7 @@ pub async fn test_bulk_edit_links() {
                 .edit_project_bulk(
                     &[alpha_project_id, beta_project_id],
                     json!({
-                        "issues_url": "https://github.com",
+                        "issues_url": "https://github.com/modrinth/code/issues",
                         "donation_urls": [
                             {
                                 "id": "patreon",
@@ -558,7 +597,7 @@ pub async fn test_bulk_edit_links() {
             assert_eq!(donation_urls[0].url, "https://www.patreon.com/my_user");
             assert_eq!(
                 alpha_body.issues_url,
-                Some("https://github.com".to_string())
+                Some("https://github.com/modrinth/code/issues".to_string())
             );
             assert_eq!(alpha_body.discord_url, None);
 
@@ -570,7 +609,7 @@ pub async fn test_bulk_edit_links() {
             assert_eq!(donation_urls[0].url, "https://www.patreon.com/my_user");
             assert_eq!(
                 beta_body.issues_url,
-                Some("https://github.com".to_string())
+                Some("https://github.com/modrinth/code/issues".to_string())
             );
             assert_eq!(beta_body.discord_url, None);
 
@@ -578,7 +617,7 @@ pub async fn test_bulk_edit_links() {
                 .edit_project_bulk(
                     &[alpha_project_id, beta_project_id],
                     json!({
-                        "discord_url": "https://discord.gg",
+                        "discord_url": "https://discord.gg/modrinth",
                         "issues_url": null,
                         "add_donation_urls": [
                             {
@@ -611,7 +650,7 @@ pub async fn test_bulk_edit_links() {
             assert_eq!(alpha_body.issues_url, None);
             assert_eq!(
                 alpha_body.discord_url,
-                Some("https://discord.gg".to_string())
+                Some("https://discord.gg/modrinth".to_string())
             );
 
             let beta_body = api
@@ -629,10 +668,10 @@ pub async fn test_bulk_edit_links() {
                 "https://www.buymeacoffee.com/my_user"
             );
             assert_eq!(donation_urls[1].url, "https://www.patreon.com/my_user");
-            assert_eq!(alpha_body.issues_url, None);
+            assert_eq!(beta_body.issues_url, None);
             assert_eq!(
-                alpha_body.discord_url,
-                Some("https://discord.gg".to_string())
+                beta_body.discord_url,
+                Some("https://discord.gg/modrinth".to_string())
             );
 
             let resp = api

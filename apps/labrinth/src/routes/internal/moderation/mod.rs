@@ -2,12 +2,17 @@ use super::ApiError;
 use crate::auth::get_user_from_headers;
 use crate::database;
 use crate::database::PgPool;
-use crate::database::models::DBModerationLock;
 use crate::database::models::moderation_external_item;
+use crate::database::models::{
+    DBModerationLock, DBOrganization, DBOrganizationId, DBProject, DBProjectId,
+};
 use crate::models::ids::{OrganizationId, ProjectId};
 use crate::models::projects::{ProjectStatus, VersionStatus};
 use crate::queue::moderation::{ApprovalType, IdentifiedFile, MissingMetadata};
 use crate::queue::session::AuthQueue;
+use crate::routes::v3::organizations::OrganizationIds;
+use crate::routes::v3::users::UserIds;
+use crate::util::error::ApiContext as _;
 use crate::util::error::Context;
 use crate::{
     auth::{check_is_moderator_from_headers, get_user_from_bearer_token},
@@ -17,6 +22,7 @@ use actix_web::{HttpRequest, delete, get, post, web};
 use ariadne::ids::{UserId, random_base62};
 use chrono::{DateTime, Utc};
 use eyre::eyre;
+use futures_util::future::try_join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xredis::RedisPool;
@@ -36,6 +42,10 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
         .service(release_lock)
         .service(release_lock_beacon)
         .service(delete_all_locks)
+        .service(get_user_project_by_status)
+        .service(get_users_project_by_status)
+        .service(get_organization_project_by_status)
+        .service(get_organizations_project_by_status)
         .service(web::scope("/tech-review").configure(tech_review::config))
         .service(
             web::scope("/external-license").configure(external_license::config),
@@ -214,7 +224,7 @@ pub struct DeleteAllLocksResponse {
     pub deleted_count: u64,
 }
 
-/// List projects in the moderation queue.  
+/// List projects in the moderation queue.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -254,7 +264,8 @@ pub async fn get_projects_internal(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let request_opts = request_opts.into_inner();
     let query = normalize_optional_string(request_opts.query.as_deref());
@@ -292,9 +303,8 @@ pub async fn get_projects_internal(
                         $9::boolean = false
                         OR NOT EXISTS (
                             SELECT 1
-                            FROM delphi_issue_details_with_statuses didws
-                            WHERE didws.project_id = m.id
-                                AND didws.status = 'pending'
+                            FROM delphi_tech_review_queue trq
+                            WHERE trq.project_id = m.id
                         )
                     )
             ),
@@ -518,7 +528,9 @@ pub async fn get_projects_internal(
                 row.owner_icon_url,
                 row.project_types,
                 row.external_dependencies_count,
-            )? {
+            )
+            .wrap_api_err("executing `row_to_queue_project`")?
+            {
                 projects.push(project);
             }
         }
@@ -539,9 +551,8 @@ pub async fn get_projects_internal(
                         $6::boolean = false
                         OR NOT EXISTS (
                             SELECT 1
-                            FROM delphi_issue_details_with_statuses didws
-                            WHERE didws.project_id = m.id
-                                AND didws.status = 'pending'
+                            FROM delphi_tech_review_queue trq
+                            WHERE trq.project_id = m.id
                         )
                     )
             ),
@@ -693,7 +704,9 @@ pub async fn get_projects_internal(
                 row.owner_icon_url,
                 row.project_types,
                 row.external_dependencies_count,
-            )? {
+            )
+            .wrap_api_err("executing `row_to_queue_project`")?
+            {
                 projects.push(project);
             }
         }
@@ -731,7 +744,8 @@ pub async fn get_project_ids(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let request_opts = request_opts.into_inner();
     let query = normalize_optional_string(request_opts.query.as_deref());
@@ -767,9 +781,8 @@ pub async fn get_project_ids(
                         $7::boolean = false
                         OR NOT EXISTS (
                             SELECT 1
-                            FROM delphi_issue_details_with_statuses didws
-                            WHERE didws.project_id = m.id
-                                AND didws.status = 'pending'
+                            FROM delphi_tech_review_queue trq
+                            WHERE trq.project_id = m.id
                         )
                     )
             ),
@@ -895,9 +908,8 @@ pub async fn get_project_ids(
                     $3::boolean = false
                     OR NOT EXISTS (
                         SELECT 1
-                        FROM delphi_issue_details_with_statuses didws
-                        WHERE didws.project_id = mods.id
-                            AND didws.status = 'pending'
+                        FROM delphi_tech_review_queue trq
+                        WHERE trq.project_id = mods.id
                     )
                 )
             ORDER BY
@@ -978,7 +990,8 @@ fn row_to_queue_project(
         owner_id,
         owner_name,
         owner_icon_url,
-    )?;
+    )
+    .wrap_api_err("executing `row_to_ownership`")?;
 
     Ok(Some(ModerationQueueProject {
         id: project_id,
@@ -1055,7 +1068,7 @@ fn row_to_ownership(
     })
 }
 
-/// Get project moderation metadata.  
+/// Get project moderation metadata.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -1076,11 +1089,14 @@ pub async fn get_project_meta(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let project_id = info.into_inner().0;
     let project =
-        database::models::DBProject::get(&project_id, &**pool, &redis).await?;
+        database::models::DBProject::get(&project_id, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching project from database")?;
 
     if let Some(project) = project {
         let rows = sqlx::query!(
@@ -1094,7 +1110,8 @@ pub async fn get_project_meta(
             project.inner.id.0
         )
         .fetch_all(&**pool)
-        .await?;
+        .await
+        .wrap_internal_err("querying database for `get_project_meta`")?;
 
         let mut merged = MissingMetadata {
             identified: HashMap::new(),
@@ -1134,7 +1151,7 @@ pub async fn get_project_meta(
                 .collect::<Vec<_>>()
         )
         .fetch_all(&**pool)
-        .await?;
+        .await.wrap_internal_err("querying database for `get_project_meta`")?;
 
         for row in rows {
             if let Some(sha1) = row.sha1 {
@@ -1169,7 +1186,8 @@ pub async fn get_project_meta(
             &check_flames,
         )
         .fetch_all(&**pool)
-        .await?;
+        .await
+        .wrap_internal_err("querying database for `get_project_meta`")?;
 
         for row in rows {
             if let Some(sha1) = merged
@@ -1192,7 +1210,7 @@ pub async fn get_project_meta(
 
         Ok(web::Json(merged))
     } else {
-        Err(ApiError::NotFound)
+        Err(ApiError::NotFound(eyre::eyre!("resource not found")))
     }
 }
 
@@ -1213,7 +1231,7 @@ pub enum Judgement {
     },
 }
 
-/// Update project moderation judgements.  
+/// Update project moderation judgements.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -1234,9 +1252,13 @@ pub async fn set_project_meta(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .wrap_internal_err("starting database transaction")?;
 
     let mut licenses = Vec::new();
     let mut file_hashes = Vec::new();
@@ -1287,7 +1309,8 @@ pub async fn set_project_meta(
         &licenses,
         user_id,
     )
-    .await?;
+    .await
+    .wrap_internal_err("inserting database records for `set_project_meta`")?;
 
     moderation_external_item::ExternalLicense::insert_files(
         &mut transaction,
@@ -1299,14 +1322,18 @@ pub async fn set_project_meta(
         &file_license_ids,
         user_id,
     )
-    .await?;
+    .await
+    .wrap_internal_err("inserting database records for `set_project_meta`")?;
 
-    transaction.commit().await?;
+    transaction
+        .commit()
+        .await
+        .wrap_internal_err("committing database transaction")?;
 
     Ok(())
 }
 
-/// Acquire a moderation lock.  
+/// Acquire a moderation lock.
 /// Returns success if acquired, or info about who holds the lock if blocked.
 #[utoipa::path(
 	context_path = "/moderation",
@@ -1331,18 +1358,23 @@ pub async fn acquire_lock(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let project_id_str = path.into_inner().0;
     let project =
         database::models::DBProject::get(&project_id_str, &**pool, &redis)
-            .await?
-            .ok_or(ApiError::NotFound)?;
+            .await
+            .wrap_internal_err("fetching project from database")?
+            .wrap_not_found_err("resource not found")?;
 
     let db_project_id = project.inner.id;
     let db_user_id = database::models::DBUserId::from(user.id);
 
-    match DBModerationLock::acquire(db_project_id, db_user_id, &pool).await? {
+    match DBModerationLock::acquire(db_project_id, db_user_id, &pool)
+        .await
+        .wrap_internal_err("executing `DBModerationLock::acquire`")?
+    {
         Ok(()) => Ok(web::Json(LockAcquireResponse {
             success: true,
             is_own_lock: true,
@@ -1366,7 +1398,7 @@ pub async fn acquire_lock(
     }
 }
 
-/// Override a moderation lock.  
+/// Override a moderation lock.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -1390,18 +1422,22 @@ pub async fn override_lock(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let project_id_str = path.into_inner().0;
     let project =
         database::models::DBProject::get(&project_id_str, &**pool, &redis)
-            .await?
-            .ok_or(ApiError::NotFound)?;
+            .await
+            .wrap_internal_err("fetching project from database")?
+            .wrap_not_found_err("resource not found")?;
 
     let db_project_id = project.inner.id;
     let db_user_id = database::models::DBUserId::from(user.id);
 
-    DBModerationLock::force_acquire(db_project_id, db_user_id, &pool).await?;
+    DBModerationLock::force_acquire(db_project_id, db_user_id, &pool)
+        .await
+        .wrap_internal_err("executing `DBModerationLock::force_acquire`")?;
 
     Ok(web::Json(LockAcquireResponse {
         success: true,
@@ -1413,7 +1449,7 @@ pub async fn override_lock(
     }))
 }
 
-/// Get moderation lock status.  
+/// Get moderation lock status.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -1437,18 +1473,23 @@ pub async fn get_lock_status(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let project_id_str = path.into_inner().0;
     let project =
         database::models::DBProject::get(&project_id_str, &**pool, &redis)
-            .await?
-            .ok_or(ApiError::NotFound)?;
+            .await
+            .wrap_internal_err("fetching project from database")?
+            .wrap_not_found_err("resource not found")?;
 
     let db_project_id = project.inner.id;
     let db_user_id = database::models::DBUserId::from(user.id);
 
-    match DBModerationLock::get_with_user(db_project_id, &pool).await? {
+    match DBModerationLock::get_with_user(db_project_id, &pool)
+        .await
+        .wrap_internal_err("fetching moderation lock from database")?
+    {
         Some(lock) => {
             let is_own_lock = lock.moderator_id == db_user_id;
             Ok(web::Json(LockStatusResponse {
@@ -1475,7 +1516,7 @@ pub async fn get_lock_status(
     }
 }
 
-/// Release a moderation lock.  
+/// Release a moderation lock.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -1499,26 +1540,29 @@ pub async fn release_lock(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     let project_id_str = path.into_inner().0;
     let project =
         database::models::DBProject::get(&project_id_str, &**pool, &redis)
-            .await?
-            .ok_or(ApiError::NotFound)?;
+            .await
+            .wrap_internal_err("fetching project from database")?
+            .wrap_not_found_err("resource not found")?;
 
     let db_project_id = project.inner.id;
     let db_user_id = database::models::DBUserId::from(user.id);
 
-    let released =
-        DBModerationLock::release(db_project_id, db_user_id, &pool).await?;
+    let released = DBModerationLock::release(db_project_id, db_user_id, &pool)
+        .await
+        .wrap_internal_err("executing `DBModerationLock::release`")?;
 
     let _ = DBModerationLock::cleanup_expired(&pool).await;
 
     Ok(web::Json(LockReleaseResponse { success: released }))
 }
 
-/// Release a moderation lock by beacon.  
+/// Release a moderation lock by beacon.
 ///
 /// For use with `navigator.sendBeacon`, which cannot set `Authorization` or send `DELETE`.
 /// The body must be `text/plain` containing the same token value as the `Authorization` header
@@ -1547,9 +1591,9 @@ pub async fn release_lock_beacon(
 ) -> Result<web::Json<LockReleaseResponse>, ApiError> {
     let token = body.trim();
     if token.is_empty() {
-        return Err(ApiError::InvalidInput(
-            "missing token in request body".to_string(),
-        ));
+        return Err(ApiError::Request(eyre::eyre!(
+            "missing token in request body",
+        )));
     }
     let token = token.strip_prefix("Bearer ").unwrap_or(token).trim();
 
@@ -1561,37 +1605,40 @@ pub async fn release_lock_beacon(
         &session_queue,
         false,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating API request")?;
 
     if !scopes.contains(Scopes::PROJECT_WRITE) {
-        return Err(ApiError::CustomAuthentication(
-            "token is missing required scopes".to_string(),
-        ));
+        return Err(ApiError::Auth(eyre::eyre!(
+            "token is missing required scopes",
+        )));
     }
     if !user.role.is_mod() {
-        return Err(ApiError::CustomAuthentication(
-            "only moderators may release moderation locks".to_string(),
-        ));
+        return Err(ApiError::Auth(eyre::eyre!(
+            "only moderators may release moderation locks",
+        )));
     }
 
     let project_id_str = path.into_inner().0;
     let project =
         database::models::DBProject::get(&project_id_str, &**pool, &redis)
-            .await?
-            .ok_or(ApiError::NotFound)?;
+            .await
+            .wrap_internal_err("fetching project from database")?
+            .wrap_not_found_err("resource not found")?;
 
     let db_project_id = project.inner.id;
     let db_user_id = database::models::DBUserId::from(user.id);
 
-    let released =
-        DBModerationLock::release(db_project_id, db_user_id, &pool).await?;
+    let released = DBModerationLock::release(db_project_id, db_user_id, &pool)
+        .await
+        .wrap_internal_err("executing `DBModerationLock::release`")?;
 
     let _ = DBModerationLock::cleanup_expired(&pool).await;
 
     Ok(web::Json(LockReleaseResponse { success: released }))
 }
 
-/// Delete all moderation locks.  
+/// Delete all moderation locks.
 #[utoipa::path(
 	context_path = "/moderation",
 	tag = "moderation",
@@ -1614,16 +1661,299 @@ pub async fn delete_all_locks(
         &session_queue,
         Scopes::PROJECT_WRITE,
     )
-    .await?
+    .await
+    .wrap_auth_err("authenticating API request")?
     .1;
 
     if !user.role.is_admin() {
-        return Err(ApiError::CustomAuthentication(
-            "You must be an admin to delete all locks".to_string(),
-        ));
+        return Err(ApiError::Auth(eyre::eyre!(
+            "You must be an admin to delete all locks",
+        )));
     }
 
-    let deleted_count = DBModerationLock::delete_all(&pool).await?;
+    let deleted_count = DBModerationLock::delete_all(&pool)
+        .await
+        .wrap_internal_err("deleting moderation locks from database")?;
 
     Ok(web::Json(DeleteAllLocksResponse { deleted_count }))
+}
+
+/// Get project id's for a given user with them grouped by their `ProjectStatus`.
+///
+/// Only statuses with at least one project are present in the map.
+#[utoipa::path(
+    context_path = "/moderation",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    responses((status = OK, body = HashMap<ProjectStatus, Vec<ProjectId>>))
+)]
+#[get("/user/{user_id}/all-projects-by-status")]
+pub async fn get_user_project_by_status(
+    req: HttpRequest,
+    info: web::Path<(String,)>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<web::Json<HashMap<ProjectStatus, Vec<ProjectId>>>, ApiError> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let target_user =
+        database::models::DBUser::get(&info.into_inner().0, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching user from database")?
+            .wrap_not_found_err("resource not found")?;
+
+    let counts =
+        user_projects_by_status(target_user.id, &**pool, &redis).await?;
+
+    Ok(web::Json(counts))
+}
+
+/// Get project id's for a list of user's with them grouped by their `ProjectStatus`.
+///
+/// Users that don't exist are silently omitted from the response; users
+/// that exist but have no projects are included with an empty map.
+#[utoipa::path(
+    context_path = "/moderation",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    params(("ids" = String, Query)),
+    responses((status = OK, body = HashMap<UserId, HashMap<ProjectStatus, Vec<ProjectId>>>))
+)]
+#[get("/users/all-projects-by-status")]
+pub async fn get_users_project_by_status(
+    req: HttpRequest,
+    ids: web::Query<UserIds>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<
+    web::Json<HashMap<UserId, HashMap<ProjectStatus, Vec<ProjectId>>>>,
+    ApiError,
+> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let user_ids = serde_json::from_str::<Vec<String>>(&ids.ids)
+        .wrap_request_err("deserializing JSON data")?;
+
+    if user_ids.is_empty() {
+        return Ok(web::Json(HashMap::new()));
+    }
+
+    let target_users =
+        database::models::DBUser::get_many(&user_ids, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching users from database")?;
+
+    let pool_ref = &**pool;
+    let redis_ref = &*redis;
+
+    let grouped_projects_by_user =
+        try_join_all(target_users.into_iter().map(|target_user| async move {
+            let counts =
+                user_projects_by_status(target_user.id, pool_ref, redis_ref)
+                    .await?;
+
+            Ok::<_, ApiError>((UserId::from(target_user.id), counts))
+        }))
+        .await?
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    Ok(web::Json(grouped_projects_by_user))
+}
+
+/// Get project id's for a given organization with them grouped by their `ProjectStatus`.
+///
+/// Only statuses with at least one project are present in the map.
+#[utoipa::path(
+    context_path = "/moderation",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    responses((status = OK, body = HashMap<ProjectStatus, Vec<ProjectId>>))
+)]
+#[get("/organization/{organization_id}/all-projects-by-status")]
+pub async fn get_organization_project_by_status(
+    req: HttpRequest,
+    info: web::Path<(String,)>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<web::Json<HashMap<ProjectStatus, Vec<ProjectId>>>, ApiError> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let target_org = database::models::DBOrganization::get(
+        &info.into_inner().0,
+        &**pool,
+        &redis,
+    )
+    .await
+    .wrap_internal_err("fetching organization from database")?
+    .wrap_not_found_err("resource not found")?;
+
+    let grouped_projects =
+        organization_projects_by_status(target_org.id, &**pool, &redis).await?;
+
+    Ok(web::Json(grouped_projects))
+}
+
+/// Get project id's for a list of organization's with them grouped by their `ProjectStatus`.
+///
+/// Organizations that don't exist are silently omitted from the
+/// response; organizations that exist but have no projects are included
+/// with an empty map.
+#[utoipa::path(
+    context_path = "/moderation",
+    tag = "moderation",
+    security(("bearer_auth" = [])),
+    params(("ids" = String, Query)),
+    responses((status = OK, body = HashMap<OrganizationId, HashMap<ProjectStatus, Vec<ProjectId>>>))
+)]
+#[get("/organizations/all-projects-by-status")]
+pub async fn get_organizations_project_by_status(
+    req: HttpRequest,
+    ids: web::Query<OrganizationIds>,
+    pool: web::Data<PgPool>,
+    redis: web::Data<RedisPool>,
+    session_queue: web::Data<AuthQueue>,
+) -> Result<
+    web::Json<HashMap<OrganizationId, HashMap<ProjectStatus, Vec<ProjectId>>>>,
+    ApiError,
+> {
+    check_is_moderator_from_headers(
+        &req,
+        &**pool,
+        &redis,
+        &session_queue,
+        Scopes::PROJECT_READ,
+    )
+    .await
+    .wrap_auth_err("authenticating API request")?;
+
+    let organization_ids = serde_json::from_str::<Vec<String>>(&ids.ids)
+        .wrap_request_err("deserializing JSON data")?;
+
+    if organization_ids.is_empty() {
+        return Ok(web::Json(HashMap::new()));
+    }
+
+    let target_orgs = database::models::DBOrganization::get_many(
+        &organization_ids,
+        &**pool,
+        &redis,
+    )
+    .await
+    .wrap_internal_err("fetching organizations from database")?;
+
+    let pool_ref = &**pool;
+    let redis_ref = &*redis;
+
+    let grouped_projects_by_org =
+        try_join_all(target_orgs.into_iter().map(|target_org| async move {
+            let counts = organization_projects_by_status(
+                target_org.id,
+                pool_ref,
+                redis_ref,
+            )
+            .await?;
+
+            Ok::<_, ApiError>((OrganizationId::from(target_org.id), counts))
+        }))
+        .await?
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    Ok(web::Json(grouped_projects_by_org))
+}
+
+/// Groups the given User projects by their `ProjectStatus`.
+async fn user_projects_by_status<'a, E>(
+    user_id: database::models::DBUserId,
+    pool: E,
+    redis: &RedisPool,
+) -> Result<HashMap<ProjectStatus, Vec<ProjectId>>, ApiError>
+where
+    E: database::Executor<'a, Database = sqlx::Postgres>
+        + database::Acquire<'a, Database = sqlx::Postgres>
+        + Copy,
+{
+    let project_ids =
+        database::models::DBUser::get_projects(user_id, pool, redis)
+            .await
+            .wrap_internal_err("fetching user's projects from database")?;
+
+    group_projects_by_status(&project_ids, pool, redis).await
+}
+
+/// Groups the given Organization projects by their `ProjectStatus`.
+async fn organization_projects_by_status<'a, E>(
+    organization_id: DBOrganizationId,
+    pool: E,
+    redis: &RedisPool,
+) -> Result<HashMap<ProjectStatus, Vec<ProjectId>>, ApiError>
+where
+    E: database::Executor<'a, Database = sqlx::Postgres>
+        + database::Acquire<'a, Database = sqlx::Postgres>
+        + Copy,
+{
+    let project_ids = DBOrganization::get_projects(organization_id, pool)
+        .await
+        .wrap_internal_err("fetching project IDs from database")?;
+
+    group_projects_by_status(&project_ids, pool, redis).await
+}
+
+/// Groups the given input Projects by their `ProjectStatus`.
+async fn group_projects_by_status<'a, E>(
+    project_ids: &[DBProjectId],
+    pool: E,
+    redis: &RedisPool,
+) -> Result<HashMap<ProjectStatus, Vec<ProjectId>>, ApiError>
+where
+    E: database::Executor<'a, Database = sqlx::Postgres>
+        + database::Acquire<'a, Database = sqlx::Postgres>
+        + Copy,
+{
+    if project_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let projects = DBProject::get_many_ids(project_ids, pool, redis)
+        .await
+        .wrap_internal_err("fetching projects from database")?;
+
+    let mut grouped_projects: HashMap<ProjectStatus, Vec<ProjectId>> =
+        HashMap::new();
+    for project in &projects {
+        grouped_projects
+            .entry(project.inner.status)
+            .or_default()
+            .push(project.inner.id.into());
+    }
+
+    Ok(grouped_projects)
 }

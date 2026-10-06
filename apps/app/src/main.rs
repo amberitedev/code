@@ -13,7 +13,6 @@ use theseus::prelude::*;
 
 mod api;
 mod dev;
-mod error;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -41,6 +40,8 @@ async fn initialize_state(
         .allow_directory(state.directories.caches_dir(), true)?;
     app.asset_protocol_scope()
         .allow_directory(state.directories.caches_dir().join("icons"), true)?;
+    app.asset_protocol_scope()
+        .allow_directory(state.directories.icon_dir(), true)?;
     app.fs_scope()
         .allow_directory(state.directories.instances_dir(), true)?;
 
@@ -157,6 +158,13 @@ fn main() {
         builder = builder.plugin(amberite_browser_bridge::init());
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .menu(macos::menu::create)
+            .on_menu_event(macos::menu::handle_event);
+    }
+
     #[cfg(feature = "updater")]
     {
         use tauri_plugin_http::reqwest::header::{HeaderValue, USER_AGENT};
@@ -196,17 +204,67 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_NOZORDER, SetWindowPos,
+        };
+
+        // Refresh the hidden window's frame before window-state measures its client area.
+        builder = builder.plugin(
+            tauri::plugin::Builder::<_, ()>::new("window-frame")
+                .on_window_ready(|window| {
+                    if window.label() != "main" {
+                        return;
+                    }
+
+                    let hwnd = match window.hwnd() {
+                        Ok(hwnd) => hwnd,
+                        Err(e) => {
+                            tracing::warn!("Failed to get window handle: {e}");
+                            return;
+                        }
+                    };
+
+                    if let Err(e) = unsafe {
+                        SetWindowPos(
+                            hwnd,
+                            None,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_FRAMECHANGED
+                                | SWP_NOACTIVATE
+                                | SWP_NOMOVE
+                                | SWP_NOSIZE
+                                | SWP_NOZORDER,
+                        )
+                    } {
+                        tracing::warn!("Failed to refresh window frame: {e}");
+                    }
+                })
+                .build(),
+        );
+    }
+
+    let window_state_flags = tauri_plugin_window_state::StateFlags::POSITION
+        | tauri_plugin_window_state::StateFlags::SIZE
+        | tauri_plugin_window_state::StateFlags::MAXIMIZED;
+    #[cfg(target_os = "windows")]
+    let window_state_flags =
+        window_state_flags | tauri_plugin_window_state::StateFlags::DECORATIONS;
+
+    builder = builder
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_filename("app-window-state.json")
                 .with_denylist(&["signin"])
-                // Use *only* POSITION and SIZE state flags, because saving VISIBLE causes the `visible: false` to not take effect
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::POSITION
-                        | tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
+                // Restoring VISIBLE would override the hidden startup window.
+                .with_state_flags(window_state_flags)
                 .build(),
         )
         .setup(|app| {
@@ -346,7 +404,14 @@ fn main() {
                             }
                         }
 
-                        set_changelog_toast(Some(update.version.clone()));
+						let current_version = &app.package_info().version;
+						let mut version_parts = update.version.split('.');
+						let major = version_parts.next().and_then(|part| part.parse::<u64>().ok());
+						let minor = version_parts.next().and_then(|part| part.parse::<u64>().ok());
+						let is_major_update = major.zip(minor).is_some_and(|version| {
+							version > (current_version.major, current_version.minor)
+						});
+						set_changelog_toast(is_major_update.then(|| update.version.clone()));
                         let update = if should_restart {
                             (**update).clone()
                         } else {

@@ -1,8 +1,6 @@
 use crate::state::{CacheBehaviour, CachedEntry};
 use crate::util::fetch::{FetchSemaphore, fetch_advanced};
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use dashmap::DashMap;
-use futures::TryStreamExt;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
@@ -92,34 +90,26 @@ impl ModrinthCredentials {
 
     pub async fn get_all(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<DashMap<String, Self>> {
-        let res = sqlx::query!(
-            "
-            SELECT
-                id, active, session_id, expires
-            FROM modrinth_users
-            "
+    ) -> crate::Result<Vec<Self>> {
+        let res: Vec<(String, i64, String, i64)> = sqlx::query_as(
+            "SELECT users.id, users.active, users.session_id, users.expires FROM modrinth_users users JOIN self_hosted_account_origins origins ON origins.user_id = users.id WHERE origins.origin = ? ORDER BY users.rowid",
         )
-        .fetch(exec)
-        .try_fold(DashMap::new(), |acc, x| {
-            acc.insert(
-                x.id.clone(),
-                Self {
-                    session: x.session_id,
-                    expires: Utc
-                        .timestamp_opt(x.expires, 0)
-                        .single()
-                        .unwrap_or_else(Utc::now),
-                    user_id: x.id,
-                    active: x.active == 1,
-                },
-            );
-
-            async move { Ok(acc) }
-        })
+        .bind(crate::self_hosted::accounts::origin())
+        .fetch_all(exec)
         .await?;
 
-        Ok(res)
+        Ok(res
+            .into_iter()
+            .map(|(user_id, active, session, expires)| Self {
+                session,
+                expires: Utc
+                    .timestamp_opt(expires, 0)
+                    .single()
+                    .unwrap_or_else(Utc::now),
+                user_id,
+                active: active == 1,
+            })
+            .collect())
     }
 
     pub async fn upsert(
@@ -129,14 +119,7 @@ impl ModrinthCredentials {
         let expires = self.expires.timestamp();
 
         if self.active {
-            sqlx::query!(
-                "
-                UPDATE modrinth_users
-                SET active = FALSE
-                "
-            )
-            .execute(exec)
-            .await?;
+            Self::deactivate_all(exec).await?;
         }
 
         sqlx::query!(
@@ -152,6 +135,21 @@ impl ModrinthCredentials {
             self.active,
             self.session,
             expires,
+        )
+        .execute(exec)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn deactivate_all(
+        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    ) -> crate::Result<()> {
+        sqlx::query!(
+            "
+                UPDATE modrinth_users
+                SET active = FALSE
+                "
         )
         .execute(exec)
         .await?;
@@ -179,7 +177,7 @@ impl ModrinthCredentials {
         let state = crate::State::get().await?;
         let all = Self::get_all(&state.pool).await?;
 
-        let user_ids = all.into_iter().map(|x| x.0).collect::<Vec<_>>();
+        let user_ids = all.into_iter().map(|x| x.user_id).collect::<Vec<_>>();
 
         if crate::self_hosted::accounts::enabled() {
             crate::self_hosted::accounts::users(

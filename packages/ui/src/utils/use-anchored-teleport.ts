@@ -1,6 +1,8 @@
 import type { CSSProperties, Ref } from 'vue'
 import { nextTick, onUnmounted, ref, watch } from 'vue'
 
+import { dismissTooltip } from '../providers/tooltip'
+
 export type AnchoredTeleportPlacement =
 	| 'bottom-start'
 	| 'bottom-end'
@@ -14,15 +16,26 @@ export type AnchoredTeleportPlacement =
 	| 'left-end'
 export type AnchoredTeleportSide = 'top' | 'right' | 'bottom' | 'left'
 
+export interface AnchoredTeleportAnchor {
+	getBoundingClientRect(): DOMRect
+}
+
 const viewportPadding = 8
 const anchorPadding = 18
 const defaultDistance = ref(8)
+const defaultAlignOffset = ref(0)
+
+export function pointAnchor(x: number, y: number): AnchoredTeleportAnchor {
+	const rect = new DOMRect(x, y, 0, 0)
+	return { getBoundingClientRect: () => rect }
+}
 
 export function useAnchoredTeleport(
-	trigger: Readonly<Ref<HTMLElement | null>>,
+	trigger: Readonly<Ref<AnchoredTeleportAnchor | null>>,
 	panel: Readonly<Ref<HTMLElement | null>>,
 	placement: Readonly<Ref<AnchoredTeleportPlacement>>,
 	distance: Readonly<Ref<number>> = defaultDistance,
+	alignOffset: Readonly<Ref<number>> = defaultAlignOffset,
 ) {
 	const isOpen = ref(false)
 	const panelStyle = ref<CSSProperties>({
@@ -32,6 +45,7 @@ export function useAnchoredTeleport(
 	})
 	const anchorStyle = ref<CSSProperties>({})
 	const resolvedSide = ref<AnchoredTeleportSide>('bottom')
+	const expandOrigin = ref('top center')
 
 	let resizeObserver: ResizeObserver | undefined
 
@@ -59,7 +73,8 @@ export function useAnchoredTeleport(
 				: panelRect.width + offset > spaceLeft && spaceRight > spaceLeft
 
 			resolvedSide.value = opensRight ? 'right' : 'left'
-			idealTop = alignsEnd ? triggerRect.bottom - panelRect.height : triggerRect.top
+			idealTop =
+				(alignsEnd ? triggerRect.bottom - panelRect.height : triggerRect.top) + alignOffset.value
 			idealLeft = opensRight
 				? triggerRect.right + offset
 				: triggerRect.left - panelRect.width - offset
@@ -89,7 +104,8 @@ export function useAnchoredTeleport(
 					idealLeft = centered
 				}
 			} else {
-				idealLeft = alignsEnd ? triggerRect.right - panelRect.width : triggerRect.left
+				idealLeft =
+					(alignsEnd ? triggerRect.right - panelRect.width : triggerRect.left) + alignOffset.value
 			}
 		}
 
@@ -98,6 +114,11 @@ export function useAnchoredTeleport(
 		const maxLeft = Math.max(viewportPadding, window.innerWidth - panelRect.width - viewportPadding)
 		const panelTop = Math.min(Math.max(idealTop, viewportPadding), maxTop)
 		const panelLeft = Math.min(Math.max(idealLeft, viewportPadding), maxLeft)
+		const originY = triggerRect.top + triggerRect.height / 2 - panelTop
+		const originX = isHorizontal
+			? (resolvedSide.value === 'right' ? triggerRect.right : triggerRect.left) - panelLeft
+			: triggerRect.left + triggerRect.width / 2 - panelLeft
+		expandOrigin.value = `${originX}px ${originY}px`
 
 		panelStyle.value = {
 			top: `${panelTop}px`,
@@ -120,9 +141,14 @@ export function useAnchoredTeleport(
 				}
 	}
 
+	function triggerElement() {
+		return trigger.value instanceof HTMLElement ? trigger.value : null
+	}
+
 	function handlePointerDown(event: PointerEvent) {
 		const target = event.target as Node | null
-		if (!target || trigger.value?.contains(target) || panel.value?.contains(target)) return
+		if (!target || triggerElement()?.contains(target) || panel.value?.contains(target)) return
+		if (document.getElementById('teleports')?.contains(target)) return
 		close()
 	}
 
@@ -132,7 +158,8 @@ export function useAnchoredTeleport(
 		window.addEventListener('scroll', updatePosition, true)
 
 		resizeObserver = new ResizeObserver(updatePosition)
-		if (trigger.value) resizeObserver.observe(trigger.value)
+		const element = triggerElement()
+		if (element) resizeObserver.observe(element)
 		if (panel.value) resizeObserver.observe(panel.value)
 	}
 
@@ -146,6 +173,7 @@ export function useAnchoredTeleport(
 
 	async function open() {
 		if (isOpen.value) return
+		dismissTooltip()
 		panelStyle.value = { top: '0px', left: '0px', visibility: 'hidden' }
 		isOpen.value = true
 		await nextTick()
@@ -157,14 +185,15 @@ export function useAnchoredTeleport(
 		if (!isOpen.value) return
 		isOpen.value = false
 		removeListeners()
-		if (restoreFocus) nextTick(() => trigger.value?.focus())
+		if (restoreFocus) nextTick(() => triggerElement()?.focus())
 	}
 
-	watch([placement, distance], updatePosition)
+	watch([placement, distance, alignOffset, trigger], updatePosition)
 	watch(panel, () => {
 		if (!isOpen.value) return
 		resizeObserver?.disconnect()
-		if (trigger.value) resizeObserver?.observe(trigger.value)
+		const element = triggerElement()
+		if (element) resizeObserver?.observe(element)
 		if (panel.value) resizeObserver?.observe(panel.value)
 		updatePosition()
 	})
@@ -176,7 +205,9 @@ export function useAnchoredTeleport(
 		panelStyle,
 		anchorStyle,
 		resolvedSide,
+		expandOrigin,
 		open,
 		close,
+		updatePosition,
 	}
 }

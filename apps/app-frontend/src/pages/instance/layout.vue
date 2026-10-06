@@ -82,16 +82,7 @@
 				</template>
 			</RouterView>
 		</div>
-		<ContextMenu ref="options" @option-clicked="handleOptionsClick">
-			<template #play> <PlayIcon /> {{ formatMessage(messages.play) }} </template>
-			<template #stop> <StopCircleIcon /> {{ formatMessage(messages.stop) }} </template>
-			<template #add_content> <PlusIcon /> {{ formatMessage(messages.addContent) }} </template>
-			<template #edit> <EditIcon /> {{ formatMessage(messages.edit) }} </template>
-			<template #copy_path> <ClipboardCopyIcon /> {{ formatMessage(messages.copyPath) }} </template>
-			<template #open_folder>
-				<FolderOpenIcon /> {{ formatMessage(messages.openFolder) }}
-			</template>
-		</ContextMenu>
+		<ContextMenu ref="options" :label="formatMessage(messages.instanceActionsLabel)" />
 	</div>
 </template>
 <script setup lang="ts">
@@ -101,6 +92,7 @@ import {
 	EditIcon,
 	FolderOpenIcon,
 	GlobeIcon,
+	ImageIcon,
 	PlayIcon,
 	PlusIcon,
 	StopCircleIcon,
@@ -109,6 +101,7 @@ import {
 } from '@modrinth/assets'
 import {
 	commonMessages,
+	ContextMenu,
 	defineMessages,
 	injectNotificationManager,
 	NavTabs,
@@ -122,7 +115,6 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, type ComputedRef, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 
-import ContextMenu from '@/components/ui/ContextMenu.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import ConfirmDeleteInstanceModal from '@/components/ui/modal/ConfirmDeleteInstanceModal.vue'
 import UpdateToPlayModal from '@/components/ui/modal/UpdateToPlayModal.vue'
@@ -133,6 +125,8 @@ import {
 	getFreshCachedServerStatus,
 } from '@/composables/instances/use-server-status-query'
 import { useAppEvent } from '@/composables/use-app-event'
+import { useAppSettings } from '@/composables/use-app-settings.ts'
+import { handleSevereError } from '@/composables/use-error.js'
 import { useInstanceConsole } from '@/composables/useInstanceConsole'
 import { trackEvent } from '@/helpers/analytics'
 import { toError } from '@/helpers/errors'
@@ -151,6 +145,7 @@ import {
 	refresh_content_updates,
 	remove,
 	run,
+	sync_content_files,
 } from '@/helpers/instance'
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
@@ -159,8 +154,6 @@ import type { ServerStatus } from '@/helpers/worlds'
 import { useRootBreadcrumb } from '@/providers/breadcrumbs'
 import { provideInstanceBackup } from '@/providers/instance-backup'
 import { injectServerInstall } from '@/providers/server-install'
-import { handleSevereError } from '@/store/error.js'
-import { useTheming } from '@/store/state'
 
 import InstanceAdmonitions from './components/admonitions/index.vue'
 import InstancePageHeader from './components/page-header/index.vue'
@@ -190,8 +183,13 @@ const messages = defineMessages({
 	edit: { id: 'app.instance.action.edit', defaultMessage: 'Edit' },
 	copyPath: { id: 'app.instance.action.copy-path', defaultMessage: 'Copy path' },
 	openFolder: { id: 'app.instance.action.open-folder', defaultMessage: 'Open folder' },
+	instanceActionsLabel: {
+		id: 'app.instance.actions.label',
+		defaultMessage: 'Instance actions',
+	},
 	contentTab: { id: 'app.instance.tab.content', defaultMessage: 'Content' },
 	filesTab: { id: 'app.instance.tab.files', defaultMessage: 'Files' },
+	screenshotsTab: { id: 'app.instance.tab.screenshots', defaultMessage: 'Screenshots' },
 	worldsTab: { id: 'app.instance.tab.worlds', defaultMessage: 'Worlds' },
 	logsTab: { id: 'app.instance.tab.logs', defaultMessage: 'Logs' },
 	shareTab: { id: 'app.instance.tab.share', defaultMessage: 'Share' },
@@ -216,8 +214,8 @@ watch(
 	},
 	{ immediate: true },
 )
-const themeStore = useTheming()
-const showInstancePlayTime = computed(() => themeStore.getFeatureFlag('show_instance_play_time'))
+const appSettings = useAppSettings()
+const showInstancePlayTime = computed(() => appSettings.showPlayTime)
 
 const online = useOnline()
 const offline = computed(() => !online.value)
@@ -235,18 +233,54 @@ useQuery(
 	})),
 )
 const instance = computed(() => instanceQuery.data.value)
+async function invalidateContent(targetInstanceId: string) {
+	await Promise.all([
+		queryClient.invalidateQueries({ queryKey: instanceKeys.content(targetInstanceId) }),
+		queryClient.invalidateQueries({ queryKey: instanceKeys.linkedContent(targetInstanceId) }),
+	])
+}
+
+const contentSyncQuery = useQuery(
+	computed(() => {
+		const targetInstanceId = instanceId.value
+		return {
+			queryKey: instanceKeys.contentSync(targetInstanceId),
+			queryFn: async () => {
+				try {
+					await sync_content_files(targetInstanceId)
+					await invalidateContent(targetInstanceId)
+					return targetInstanceId
+				} catch (error) {
+					handleError(toError(error))
+					throw error
+				}
+			},
+			enabled: !!targetInstanceId && instance.value?.install_stage === 'installed',
+			networkMode: 'always' as const,
+			staleTime: 0,
+			gcTime: 0,
+			refetchOnWindowFocus: false,
+			refetchOnReconnect: false,
+			retry: false,
+		}
+	}),
+)
 useQuery(
 	computed(() => ({
 		queryKey: instanceKeys.contentUpdateCheck(instanceId.value),
 		queryFn: async () => {
 			const targetInstanceId = instanceId.value
 			await refresh_content_updates(targetInstanceId)
-			await queryClient.invalidateQueries({
-				queryKey: instanceKeys.content(targetInstanceId),
-			})
+			await invalidateContent(targetInstanceId)
 			return targetInstanceId
 		},
-		enabled: !!instanceId.value && !offline.value && instance.value?.install_stage === 'installed',
+		enabled:
+			!!instanceId.value &&
+			!offline.value &&
+			instance.value?.install_stage === 'installed' &&
+			contentSyncQuery.isSuccess.value &&
+			!contentSyncQuery.isFetching.value &&
+			contentSyncQuery.data.value === instanceId.value,
 		staleTime: 10 * 60_000,
 		gcTime: 30 * 60_000,
 		retry: false,
@@ -483,22 +517,37 @@ const tabs = computed(() => {
 			href: `${basePath.value}`,
 			icon: BoxesIcon,
 		},
-		{
+	]
+
+	if (appSettings.showFilesTabInInstances) {
+		instanceTabs.push({
 			label: formatMessage(messages.filesTab),
 			href: `${basePath.value}/files`,
 			icon: FolderOpenIcon,
-		},
-		{
+		})
+	}
+
+	if (appSettings.showScreenshotsTabInInstances) {
+		instanceTabs.push({
+			label: formatMessage(messages.screenshotsTab),
+			href: `${basePath.value}/screenshots`,
+			icon: ImageIcon,
+		})
+	}
+
+	if (appSettings.showWorldsTabInInstances) {
+		instanceTabs.push({
 			label: formatMessage(messages.worldsTab),
 			href: `${basePath.value}/worlds`,
 			icon: GlobeIcon,
-		},
-		{
-			label: formatMessage(messages.logsTab),
-			href: `${basePath.value}/logs`,
-			icon: TerminalSquareIcon,
-		},
-	]
+		})
+	}
+
+	instanceTabs.push({
+		label: formatMessage(messages.logsTab),
+		href: `${basePath.value}/logs`,
+		icon: TerminalSquareIcon,
+	})
 
 	if (showShareTab.value) {
 		instanceTabs.push({
@@ -765,63 +814,60 @@ async function deleteSelectedInstance() {
 }
 
 const handleRightClick = (event: MouseEvent) => {
-	const baseOptions = [
-		...(instance.value?.quarantined ? [] : [{ name: 'add_content' }, { type: 'divider' }]),
-		{ name: 'edit' },
-		{ name: 'open_folder' },
-		{ name: 'copy_path' },
-	]
+	const canAddContent = !instance.value?.quarantined
 
-	options.value?.showMenu(
-		event,
-		instance.value,
-		playing.value
-			? [
-					{
-						name: 'stop',
-						color: 'danger',
-					},
-					...baseOptions,
-				]
-			: [
-					...(instance.value?.quarantined
-						? []
-						: [
-								{
-									name: 'play',
-									color: 'primary',
-								},
-							]),
-					...baseOptions,
-				],
-	)
+	options.value?.open(event, [
+		{
+			id: 'stop',
+			label: formatMessage(messages.stop),
+			icon: StopCircleIcon,
+			shown: playing.value,
+			tone: 'red',
+			action: () => void stopInstance('InstancePageContextMenu'),
+		},
+		{
+			id: 'play',
+			label: formatMessage(messages.play),
+			icon: PlayIcon,
+			shown: !playing.value && canAddContent,
+			tone: 'brand',
+			action: () => void startInstance('InstancePageContextMenu'),
+		},
+		{
+			id: 'add_content',
+			label: formatMessage(messages.addContent),
+			icon: PlusIcon,
+			shown: canAddContent,
+			action: () => void browseContent(instance.value?.loader === 'vanilla' ? 'datapack' : 'mod'),
+		},
+		{ type: 'divider', shown: canAddContent },
+		{
+			id: 'edit',
+			label: formatMessage(messages.edit),
+			icon: EditIcon,
+			action: openSettings,
+		},
+		{
+			id: 'open_folder',
+			label: formatMessage(messages.openFolder),
+			icon: FolderOpenIcon,
+			action: () => {
+				if (instance.value) void showInstanceInFolder(instance.value.id)
+			},
+		},
+		{
+			id: 'copy_path',
+			label: formatMessage(messages.copyPath),
+			icon: ClipboardCopyIcon,
+			action: () => void copyInstancePath(),
+		},
+	])
 }
 
-const handleOptionsClick = async (args: { option: string; item: unknown }) => {
-	switch (args.option) {
-		case 'play':
-			await startInstance('InstancePageContextMenu')
-			break
-		case 'stop':
-			await stopInstance('InstancePageContextMenu')
-			break
-		case 'add_content':
-			await browseContent(instance.value?.loader === 'vanilla' ? 'datapack' : 'mod')
-			break
-		case 'edit':
-			openSettings()
-			break
-		case 'open_folder':
-			if (instance.value) await showInstanceInFolder(instance.value.id)
-			break
-		case 'copy_path': {
-			if (instance.value) {
-				const fullPath = await get_full_path(instance.value.id)
-				await navigator.clipboard.writeText(fullPath)
-			}
-			break
-		}
-	}
+const copyInstancePath = async () => {
+	if (!instance.value) return
+	const fullPath = await get_full_path(instance.value.id)
+	await navigator.clipboard.writeText(fullPath)
 }
 
 provideInstancePage({
@@ -857,15 +903,8 @@ watch(instanceId, (currentInstanceId, previousInstanceId) => {
 })
 
 useAppEvent('instance', async (event) => {
-	if (event.instance_id !== instanceId.value) return
-	if (event.event === 'removed' || route.path === '/') {
-		if (route.path !== '/') await router.push({ path: '/' })
-		return
-	}
-	await queryClient.invalidateQueries({
-		queryKey: instanceKeys.detail(event.instance_id),
-		exact: true,
-	})
+	if (event.instance_id !== instanceId.value || event.event !== 'removed') return
+	if (route.path !== '/') await router.push({ path: '/' })
 })
 
 useAppEvent('process', (event) => {

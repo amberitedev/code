@@ -12,7 +12,10 @@
 			<span class="text-2xl font-semibold text-contrast">
 				{{
 					formatMessage(messages.title, {
-						groupName: groupInstancesModalGroup?.name ?? '',
+						groupName:
+							groupInstancesModalGroup?.id === 'group:none'
+								? formatMessage(messages.ungrouped)
+								: (groupInstancesModalGroup?.name ?? ''),
 					})
 				}}
 			</span>
@@ -20,7 +23,7 @@
 
 		<div class="flex h-[400px] flex-col gap-3 overflow-y-auto bg-surface-2 py-4">
 			<div class="px-6">
-				<StyledInput
+				<Input
 					v-model="groupInstancesSearch"
 					:icon="SearchIcon"
 					:placeholder="formatMessage(messages.searchPlaceholder)"
@@ -48,11 +51,16 @@
 							:alt="instance.name"
 							size="2rem"
 							rounded="md"
+							pad-transparent-corners
 						/>
 						<span class="truncate font-semibold text-contrast">{{ instance.name }}</span>
 					</div>
 					<Button
 						:type="selectedGroupInstanceIds.has(instance.id) ? 'outlined' : 'base'"
+						:disabled="
+							groupInstancesModalGroup?.id === 'group:none' &&
+							selectedGroupInstanceIds.has(instance.id)
+						"
 						@click="toggleGroupInstance(instance.id)"
 					>
 						<CheckIcon v-if="selectedGroupInstanceIds.has(instance.id)" />
@@ -89,8 +97,8 @@ import {
 	Button,
 	commonMessages,
 	defineMessages,
+	Input,
 	NewModal,
-	StyledInput,
 	useVIntl,
 } from '@modrinth/ui'
 import { ref, watch } from 'vue'
@@ -100,6 +108,10 @@ import { getInstanceIconUrl } from '@/helpers/instance'
 
 const { formatMessage } = useVIntl()
 const messages = defineMessages({
+	ungrouped: {
+		id: 'app.library.group.ungrouped',
+		defaultMessage: 'Ungrouped',
+	},
 	title: {
 		id: 'app.library.group.instances-modal.title',
 		defaultMessage: 'Add instances to "{groupName}"',

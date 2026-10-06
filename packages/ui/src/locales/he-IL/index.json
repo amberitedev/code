@@ -1,4 +1,7 @@
 {
+  "action.no-permission": {
+    "defaultMessage": "אין לך רשות."
+  },
   "affiliate.create.button": {
     "defaultMessage": "צור קישור שותפות"
   },
@@ -32,8 +35,14 @@
   "affiliate.viewAnalytics": {
     "defaultMessage": "צפה ניתוחים"
   },
+  "app.appearance-settings.native-decorations.description": {
+    "defaultMessage": ""
+  },
   "app.server-settings.failed-to-load-server": {
     "defaultMessage": "טעינת הגרסה נכשלה"
+  },
+  "badge.alpha": {
+    "defaultMessage": "שקיפות"
   },
   "badge.beta": {
     "defaultMessage": "בטא"
@@ -44,6 +53,27 @@
   "badge.new": {
     "defaultMessage": "חדש"
   },
+  "badge.release": {
+    "defaultMessage": "שחרר"
+  },
+  "billing.resubscribe-modal.cancel": {
+    "defaultMessage": "בטל"
+  },
+  "billing.resubscribe-modal.error.title": {
+    "defaultMessage": "שגיאה"
+  },
+  "billing.resubscribe-modal.failed-load": {
+    "defaultMessage": "טעינת פרטי המנוי נכשלה."
+  },
+  "billing.resubscribe-modal.plan-label": {
+    "defaultMessage": "תוכנית"
+  },
+  "browse.no-results": {
+    "defaultMessage": "לא נמצאו תוצאות עבור החיפוש!"
+  },
+  "browse.selected-projects-leave-modal.discard": {
+    "defaultMessage": "בטל"
+  },
   "browse.selected-projects-leave-modal.header": {
     "defaultMessage": "הפרויקטים שנבחרו עוד לא הותקנו"
   },
@@ -52,6 +82,12 @@
   },
   "button.accept": {
     "defaultMessage": "קבל"
+  },
+  "button.add-another": {
+    "defaultMessage": "הוסף עוד"
+  },
+  "button.add-server-to-instance": {
+    "defaultMessage": "הוסף שרת להתקנה"
   },
   "button.affiliate-links": {
     "defaultMessage": "קישורי שותפות"
@@ -77,8 +113,20 @@
   "button.continue": {
     "defaultMessage": "המשך"
   },
+  "button.copied-to-clipboard": {
+    "defaultMessage": "הועתק ללוח"
+  },
+  "button.copy-filename": {
+    "defaultMessage": "העתק את שם הקובץ"
+  },
+  "button.copy-full-path": {
+    "defaultMessage": "העתק נתיב מלא"
+  },
   "button.copy-id": {
     "defaultMessage": "העתק מזהה"
+  },
+  "button.copy-link": {
+    "defaultMessage": "העתק קישור"
   },
   "button.copy-permalink": {
     "defaultMessage": "העתק קישור קבוע"
@@ -94,6 +142,9 @@
   },
   "button.download": {
     "defaultMessage": "הורדה"
+  },
+  "button.download-files": {
+    "defaultMessage": "הורד קבצים"
   },
   "button.downloading": {
     "defaultMessage": "מוריד"
@@ -113,6 +164,12 @@
   "button.hide-snapshots": {
     "defaultMessage": "הסתר סנאפשוטים"
   },
+  "button.i-understand": {
+    "defaultMessage": "אני מבין"
+  },
+  "button.install": {
+    "defaultMessage": "התקן"
+  },
   "button.max": {
     "defaultMessage": "מקסימום"
   },
@@ -128,8 +185,14 @@
   "button.open-folder": {
     "defaultMessage": "פתח תיקיה"
   },
+  "button.open-in-browser": {
+    "defaultMessage": "פתח בדפדפן"
+  },
   "button.open-in-folder": {
     "defaultMessage": "פתח בתקייה"
+  },
+  "button.open-in-modrinth": {
+    "defaultMessage": "פתח בModrinth"
   },
   "button.play": {
     "defaultMessage": "שחק"
@@ -139,6 +202,9 @@
   },
   "button.reinstall-modpack": {
     "defaultMessage": "התקן מחדש חבילת מודים"
+  },
+  "button.remove": {
+    "defaultMessage": "מחק"
   },
   "button.remove-image": {
     "defaultMessage": "מחק תמונה"
@@ -191,6 +257,9 @@
   "button.stop": {
     "defaultMessage": "עצור"
   },
+  "button.switch-to-version": {
+    "defaultMessage": "החלף גרסה"
+  },
   "button.switch-version": {
     "defaultMessage": "החלף גרסה"
   },
@@ -218,8 +287,32 @@
   "changelog.product.web": {
     "defaultMessage": "פלטפורמה"
   },
+  "collection-widget.empty-collection": {
+    "defaultMessage": "האוסף הזה ריק."
+  },
+  "collection-widget.loading-projects": {
+    "defaultMessage": "טוען פרופיל..."
+  },
+  "collection-widget.search-placeholder": {
+    "defaultMessage": "חפש פרוייקטים"
+  },
   "collections.label.private": {
     "defaultMessage": "פרטי"
+  },
+  "console.actions.collapse": {
+    "defaultMessage": "סגור"
+  },
+  "console.actions.expand": {
+    "defaultMessage": "הרחב"
+  },
+  "console.actions.share": {
+    "defaultMessage": "שתף"
+  },
+  "content-type.content.lowercase": {
+    "defaultMessage": "תוכן"
+  },
+  "content.card.select-project": {
+    "defaultMessage": "בחר {project}"
   },
   "content.confirm-bulk-update.admonition-body": {
     "defaultMessage": "אתה בטוח שאתה רוצה לעדכן {count, plural, one {# פרויקט} other {# פרויקטים}} לגרסה המתאימה האחרונה שלהם? מומלץ לעדכן תוכן אחד־אחד."
@@ -1096,9 +1189,6 @@
   },
   "settings.display.theme.dark": {
     "defaultMessage": "כהה"
-  },
-  "settings.display.theme.description": {
-    "defaultMessage": "בחר את ערכת הצבעים המועדפת עליך עבור Modrinth במכשיר זה."
   },
   "settings.display.theme.light": {
     "defaultMessage": "בהיר"

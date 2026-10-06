@@ -4,6 +4,7 @@
 //! This keeps version filters correlated without duplicating every version
 //! into its project document.
 
+use crate::util::error::ApiContext as _;
 use async_trait::async_trait;
 use eyre::{Result, eyre};
 use itertools::Itertools;
@@ -388,7 +389,7 @@ impl Elasticsearch {
             .wrap_internal_err("failed to execute Elasticsearch search")?;
         let mut body = response_json(response, "execute Elasticsearch search")
             .await
-            .map_err(ApiError::Internal)?;
+            .wrap_internal_err("parsing Elasticsearch search response")?;
         if sort_only && !body["hits"]["hits"].is_array() {
             body["hits"]["hits"] = Value::Array(Vec::new());
         }
@@ -410,12 +411,15 @@ impl Elasticsearch {
             .wrap_internal_err("failed to open Elasticsearch point in time")?;
         let body = response_json(response, "open Elasticsearch point in time")
             .await
-            .map_err(ApiError::Internal)?;
-        body["id"].as_str().map(ToOwned::to_owned).ok_or_else(|| {
-            ApiError::Internal(eyre!(
-                "Elasticsearch point in time response did not contain an ID"
-            ))
-        })
+            .wrap_internal_err(
+                "parsing Elasticsearch point-in-time response",
+            )?;
+        body["id"]
+            .as_str()
+            .map(ToOwned::to_owned)
+            .wrap_internal_err(
+                "finding ID in Elasticsearch point-in-time response",
+            )
     }
 
     async fn close_point_in_time(&self, id: &str) -> Result<(), ApiError> {
@@ -428,7 +432,9 @@ impl Elasticsearch {
             .wrap_internal_err("failed to close Elasticsearch point in time")?;
         response_json(response, "close Elasticsearch point in time")
             .await
-            .map_err(ApiError::Internal)?;
+            .wrap_internal_err(
+                "parsing Elasticsearch point-in-time response",
+            )?;
         Ok(())
     }
 
@@ -456,7 +462,9 @@ impl Elasticsearch {
             "execute Elasticsearch point in time search",
         )
         .await
-        .map_err(ApiError::Internal)?;
+        .wrap_internal_err(
+            "parsing Elasticsearch point-in-time search response",
+        )?;
         if sort_only && !body["hits"]["hits"].is_array() {
             body["hits"]["hits"] = Value::Array(Vec::new());
         }
@@ -472,7 +480,10 @@ impl Elasticsearch {
         offset: usize,
         size: usize,
     ) -> Result<Value, ApiError> {
-        let mut point_in_time_id = self.open_point_in_time(alias).await?;
+        let mut point_in_time_id = self
+            .open_point_in_time(alias)
+            .await
+            .wrap_api_err("executing `open_point_in_time`")?;
         let result = self
             .execute_deep_search_with_point_in_time(
                 query,
@@ -517,7 +528,10 @@ impl Elasticsearch {
                 "id": point_in_time_id,
                 "keep_alive": "1m"
             });
-            let body = self.execute_point_in_time_search(&body, true).await?;
+            let body = self
+                .execute_point_in_time_search(&body, true)
+                .await
+                .wrap_api_err("executing `execute_point_in_time_search`")?;
             if let Some(id) = body["pit_id"].as_str() {
                 *point_in_time_id = id.to_string();
             }
@@ -579,7 +593,10 @@ impl Elasticsearch {
             "id": point_in_time_id,
             "keep_alive": "1m"
         });
-        let body = self.execute_point_in_time_search(&body, false).await?;
+        let body = self
+            .execute_point_in_time_search(&body, false)
+            .await
+            .wrap_api_err("executing `execute_point_in_time_search`")?;
         if let Some(id) = body["pit_id"].as_str() {
             *point_in_time_id = id.to_string();
         }
@@ -671,6 +688,11 @@ impl Elasticsearch {
                     "compatible_dependency_project_ids": {
                         "type": "keyword"
                     },
+                    "disclosure_types": {"type": "keyword"},
+                    "required_dependency_project_ids": {"type": "keyword"},
+                    "optional_dependency_project_ids": {"type": "keyword"},
+                    "embedded_dependency_project_ids": {"type": "keyword"},
+                    "incompatible_dependency_project_ids": {"type": "keyword"},
                     "project_loader_fields": {
                         "type": "object",
                         "enabled": false
@@ -795,6 +817,7 @@ impl Elasticsearch {
         json!({
             "dis_max": {
                 "queries": [
+                    Self::exact_title_tier(query, 5),
                     Self::prefix_tier(query, &["name"], 4),
                     Self::prefix_tier(
                         query,
@@ -808,6 +831,22 @@ impl Elasticsearch {
                     ),
                     Self::prefix_tier(query, &["summary"], 1),
                 ]
+            }
+        })
+    }
+
+    fn exact_title_tier(query: &str, boost: u8) -> Value {
+        json!({
+            "constant_score": {
+                "filter": {
+                    "term": {
+                        "name.keyword": {
+                            "value": query.trim(),
+                            "case_insensitive": true
+                        }
+                    }
+                },
+                "boost": boost
             }
         })
     }
@@ -832,10 +871,13 @@ impl Elasticsearch {
         &self,
         info: &SearchRequest,
     ) -> Result<SearchResults, ApiError> {
-        let parsed = parse_search_request(info)?;
+        let parsed = parse_search_request(info)
+            .wrap_api_err("executing `parse_search_request`")?;
         let search_sort =
-            parse_search_index(parsed.index, info.new_filters.as_deref())?;
-        let filter = Self::build_filter(info)?;
+            parse_search_index(parsed.index, info.new_filters.as_deref())
+                .wrap_api_err("executing `parse_search_index`")?;
+        let filter = Self::build_filter(info)
+            .wrap_api_err("executing `Self::build_filter`")?;
         let mut filters = vec![json!({"term": {"document_type": "project"}})];
         if let Some(filter) = &filter {
             filters.push(filter.query.clone());
@@ -858,7 +900,8 @@ impl Elasticsearch {
                 parsed.offset,
                 parsed.hits_per_page,
             )
-            .await?
+            .await
+            .wrap_api_err("executing `execute_deep_search`")?
         } else {
             let body = Self::search_body(
                 &query,
@@ -869,7 +912,9 @@ impl Elasticsearch {
                 None,
                 true,
             );
-            self.execute_search(&alias, &body, false).await?
+            self.execute_search(&alias, &body, false)
+                .await
+                .wrap_api_err("executing `execute_search`")?
         };
         let total_hits = body["hits"]["total"]["value"]
             .as_u64()
@@ -882,6 +927,7 @@ impl Elasticsearch {
                 let mut document = hit["_source"].clone();
                 let object = document.as_object_mut()?;
                 object.remove("document_type");
+                object.remove("_search_tokens");
                 if filter
                     .as_ref()
                     .is_some_and(|filter| filter.has_version_filter)
@@ -1199,4 +1245,36 @@ fn push_json_line<T: Serialize>(output: &mut String, value: &T) -> Result<()> {
     output.push_str(&serde_json::to_string(value)?);
     output.push('\n');
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_title_tier_preserves_special_characters() {
+        let query = Elasticsearch::text_query("end+");
+        let exact_title = &query["dis_max"]["queries"][0]["constant_score"];
+
+        assert_eq!(exact_title["boost"], 5);
+        assert_eq!(
+            exact_title["filter"]["term"]["name.keyword"]["value"],
+            "end+"
+        );
+        assert_eq!(
+            exact_title["filter"]["term"]["name.keyword"]["case_insensitive"],
+            true
+        );
+    }
+
+    #[test]
+    fn exact_title_tier_trims_query_whitespace() {
+        let query = Elasticsearch::text_query("  End+  ");
+
+        assert_eq!(
+            query["dis_max"]["queries"][0]["constant_score"]["filter"]["term"]
+                ["name.keyword"]["value"],
+            "End+"
+        );
+    }
 }

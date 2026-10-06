@@ -1,6 +1,6 @@
 use crate::state::instances::{
     ContentSourceKind, Instance, InstanceIconConfig, InstanceLaunchOverrides,
-    InstanceLink,
+    InstanceLink, InstanceTabVisibility,
     adapters::sqlite::{content_rows, instance_rows},
 };
 use crate::state::{
@@ -82,6 +82,7 @@ pub struct InstanceLaunchOverridesPatch {
     )]
     pub game_resolution: Option<Option<WindowSize>>,
     pub hooks: Option<Hooks>,
+    pub visible_tabs: Option<InstanceTabVisibility>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -109,6 +110,19 @@ pub(crate) async fn edit_instance(
     patch: EditInstance,
     pool: &SqlitePool,
 ) -> crate::Result<Instance> {
+    let state = crate::State::get_if_initialized();
+    let _runtime_lease = if patch.launch_overrides.is_some()
+        || patch.content_set_patch.is_some()
+    {
+        match state.as_ref() {
+            Some(state) => {
+                Some(state.content_store.runtime_cache_lock.read().await)
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
     let modifies_content =
         patch.link.is_some() || patch.content_set_patch.is_some();
     let should_mark_shared_instance_stale = patch.link.is_some()
@@ -169,7 +183,7 @@ pub(crate) async fn edit_instance(
         None => None,
     };
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     instance_rows::update_instance(&instance, &mut tx).await?;
 
     if let Some(content_set) = content_set.as_mut() {
@@ -298,6 +312,9 @@ fn apply_launch_overrides_patch(
     }
     if let Some(hooks) = patch.hooks {
         overrides.hooks = hooks;
+    }
+    if let Some(visible_tabs) = patch.visible_tabs {
+        overrides.visible_tabs = visible_tabs;
     }
 
     overrides

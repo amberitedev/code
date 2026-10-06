@@ -133,7 +133,7 @@ pub struct GlobalIssueDetailTrace {
     security(("bearer_auth" = [])),
 	responses((status = OK, body = SearchGlobalIssueDetailsResponse))
 )]
-#[post("/global-issue-detail/search")]
+#[post("/global-traces/search")]
 pub async fn search_global_issue_details(
     req: HttpRequest,
     pool: web::Data<PgPool>,
@@ -148,7 +148,8 @@ pub async fn search_global_issue_details(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating global issue search")?;
 
     let query = search_req
         .query
@@ -198,9 +199,9 @@ pub async fn search_global_issue_details(
         FROM delphi_global_detail_verdicts dgdv
         LEFT JOIN delphi_issue_details_with_statuses didws
             ON didws.key = dgdv.detail_key
+            AND didws.severity != 'hidden'
         LEFT JOIN delphi_report_issues dri
             ON dri.id = didws.issue_id
-            AND dri.issue_type != '__dummy'
         WHERE (
             $1::text IS NULL
             OR dgdv.detail_key ILIKE '%' || $1 || '%'
@@ -268,6 +269,7 @@ pub async fn search_global_issue_details(
                 AND didv.detail_key = didws.key
             WHERE
                 didws.key = ANY($1::text[])
+                AND didws.severity != 'hidden'
                 AND dri.issue_type != '__dummy'
                 AND (
                     $3::text IS NULL
@@ -355,7 +357,7 @@ pub async fn search_global_issue_details(
     security(("bearer_auth" = [])),
 	responses((status = OK, body = GetGlobalIssueDetailResponse))
 )]
-#[post("/global-issue-detail/local-traces")]
+#[post("/global-traces/local-traces")]
 pub async fn get_global_issue_detail(
     req: HttpRequest,
     pool: web::Data<PgPool>,
@@ -370,7 +372,8 @@ pub async fn get_global_issue_detail(
         &session_queue,
         Scopes::PROJECT_READ,
     )
-    .await?;
+    .await
+    .wrap_auth_err("authenticating global issue detail request")?;
 
     let detail_key = get_req.detail_key.trim();
     if detail_key.is_empty() {
@@ -393,9 +396,9 @@ pub async fn get_global_issue_detail(
         FROM delphi_global_detail_verdicts dgdv
         LEFT JOIN delphi_issue_details_with_statuses didws
             ON didws.key = dgdv.detail_key
+            AND didws.severity != 'hidden'
         LEFT JOIN delphi_report_issues dri
             ON dri.id = didws.issue_id
-            AND dri.issue_type != '__dummy'
         WHERE dgdv.detail_key = $1
         GROUP BY dgdv.detail_key, dgdv.verdict
         "#,
@@ -404,7 +407,7 @@ pub async fn get_global_issue_detail(
     .fetch_optional(&**pool)
     .await
     .wrap_internal_err("failed to fetch global issue detail")?
-    .ok_or(ApiError::NotFound)?;
+    .wrap_not_found_err("resource not found")?;
 
     let local_rows = sqlx::query!(
         r#"
@@ -438,7 +441,7 @@ pub async fn get_global_issue_detail(
         WHERE
             didws.key = $1
             AND ($2::bigint IS NULL OR didws.id > $2)
-            AND dri.issue_type != '__dummy'
+            AND didws.severity != 'hidden'
         ORDER BY didws.id
         LIMIT $3
         "#,

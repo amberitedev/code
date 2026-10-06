@@ -1,15 +1,20 @@
-use crate::database::models::DelphiReportIssueDetailsId;
+use crate::auth::AuthenticationError;
+use crate::database::PgPool;
+use crate::database::models::DBProjectId;
 use crate::env::ENV;
-use crate::file_hosting::FileHostingError;
+use crate::models::ids::ProjectId;
 use crate::util::cors::default_cors;
+use crate::util::error::Context;
 use actix_cors::Cors;
 use actix_files::Files;
-use actix_web::http::StatusCode;
-use actix_web::{HttpResponse, web};
+use actix_web::http::{StatusCode, header};
+use actix_web::{HttpRequest, HttpResponse, web};
+use ariadne::ids::base62_impl::parse_base62;
 use futures::FutureExt;
-use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use utoipa::openapi::extensions::ExtensionsBuilder;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use xredis::RedisPool;
 
 pub mod debug;
 pub mod internal;
@@ -24,6 +29,207 @@ mod not_found;
 mod updates;
 
 pub use self::not_found::not_found;
+
+const PROJECT_REDIRECTS_NAMESPACE: &str = "project_redirects:v1";
+const PROJECT_REDIRECT_CACHE_TTL_SECONDS: i64 = 300;
+
+pub async fn resolve_ref(
+    project_ref: &str,
+    pool: &PgPool,
+    redis: &RedisPool,
+) -> Result<Option<ProjectId>, ApiError> {
+    let project_refs = [project_ref.to_string()];
+    Ok(resolve_refs(&project_refs, pool, redis)
+        .await?
+        .into_iter()
+        .next()
+        .flatten())
+}
+
+pub async fn resolve_refs(
+    project_refs: &[String],
+    pool: &PgPool,
+    redis: &RedisPool,
+) -> Result<Vec<Option<ProjectId>>, ApiError> {
+    if project_refs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut redis = redis
+        .connect()
+        .await
+        .wrap_internal_err("connecting to Redis for project redirects")?;
+    let keys = project_refs
+        .iter()
+        .map(|project_ref| {
+            redis.key().entity(PROJECT_REDIRECTS_NAMESPACE, project_ref)
+        })
+        .collect::<Vec<_>>();
+    let cached_targets = redis
+        .get_many_deserialized::<Option<i64>>(&keys)
+        .await
+        .wrap_internal_err("reading cached project redirects")?;
+
+    let missing_refs = project_refs
+        .iter()
+        .zip(&cached_targets)
+        .filter_map(|(project_ref, cached_target)| {
+            cached_target.is_none().then_some(project_ref.clone())
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let parsed_project_ids = missing_refs
+        .iter()
+        .map(|project_ref| {
+            parse_base62(project_ref)
+                .ok()
+                .map(|project_id| project_id as i64)
+        })
+        .collect::<Vec<_>>();
+    let redirects = if missing_refs.is_empty() {
+        HashMap::new()
+    } else {
+        sqlx::query!(
+            r#"
+            SELECT
+                refs.project_ref AS "project_ref!",
+                redirect.target_project_id AS "target_project_id: DBProjectId"
+            FROM UNNEST($1::text[], $2::bigint[])
+                AS refs(project_ref, project_id)
+            INNER JOIN project_redirects redirect
+                ON redirect.slug = LOWER(refs.project_ref)
+            LEFT JOIN mods id_project
+                ON id_project.id = refs.project_id
+            LEFT JOIN mods slug_project
+                ON slug_project.slug = LOWER(refs.project_ref)
+            WHERE id_project.id IS NULL AND slug_project.id IS NULL
+            "#,
+            &missing_refs,
+            &parsed_project_ids as &[Option<i64>],
+        )
+        .fetch_all(pool)
+        .await
+        .wrap_internal_err("looking up project redirects")?
+        .into_iter()
+        .map(|redirect| (redirect.project_ref, redirect.target_project_id))
+        .collect::<HashMap<_, _>>()
+    };
+
+    let mut resolved = Vec::with_capacity(project_refs.len());
+    for ((project_ref, key), cached_target) in
+        project_refs.iter().zip(&keys).zip(cached_targets)
+    {
+        let target_project_id = if let Some(cached_target) = cached_target {
+            cached_target.map(DBProjectId)
+        } else {
+            let target_project_id = redirects.get(project_ref).copied();
+            redis
+                .set_serialized(
+                    key,
+                    &target_project_id.map(|project_id| project_id.0),
+                    Some(PROJECT_REDIRECT_CACHE_TTL_SECONDS),
+                )
+                .await
+                .wrap_internal_err("caching project redirect")?;
+            target_project_id
+        };
+        resolved.push(target_project_id.map(ProjectId::from));
+    }
+
+    Ok(resolved)
+}
+
+pub async fn redirect_query_refs(
+    req: &HttpRequest,
+    parameter_name: &str,
+    project_refs: &[String],
+    pool: &PgPool,
+    redis: &RedisPool,
+) -> Result<Option<HttpResponse>, ApiError> {
+    let resolved_refs = resolve_refs(project_refs, pool, redis).await?;
+    if resolved_refs.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+
+    let canonical_refs = project_refs
+        .iter()
+        .zip(resolved_refs)
+        .map(|(project_ref, resolved_ref)| {
+            resolved_ref.map_or_else(
+                || project_ref.clone(),
+                |project_id| project_id.to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let canonical_refs = serde_json::to_string(&canonical_refs)
+        .wrap_internal_err("serializing redirected project references")?;
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    for (name, value) in
+        url::form_urlencoded::parse(req.query_string().as_bytes())
+    {
+        if name == parameter_name {
+            query.append_pair(&name, &canonical_refs);
+        } else {
+            query.append_pair(&name, &value);
+        }
+    }
+    let location = format!("{}?{}", req.path(), query.finish());
+
+    Ok(Some(
+        HttpResponse::PermanentRedirect()
+            .append_header((header::LOCATION, location))
+            .finish(),
+    ))
+}
+
+pub async fn redirect_ref(
+    req: &HttpRequest,
+    parameter_name: &str,
+    pool: &PgPool,
+    redis: &RedisPool,
+) -> Result<Option<HttpResponse>, ApiError> {
+    let Some(project_ref) = req.match_info().get(parameter_name) else {
+        return Ok(None);
+    };
+    let Some(target_project_id) = resolve_ref(project_ref, pool, redis).await?
+    else {
+        return Ok(None);
+    };
+
+    let Some(route_pattern) = req.match_pattern() else {
+        return Ok(None);
+    };
+    let parameter = format!("{{{parameter_name}}}");
+    let constrained_parameter = format!("{{{parameter_name}:");
+    let Some(parameter_index) = route_pattern.split('/').position(|segment| {
+        segment == parameter || segment.starts_with(&constrained_parameter)
+    }) else {
+        return Ok(None);
+    };
+    let mut path_segments = req
+        .uri()
+        .path()
+        .split('/')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let Some(path_segment) = path_segments.get_mut(parameter_index) else {
+        return Ok(None);
+    };
+    *path_segment = target_project_id.to_string();
+
+    let mut location = path_segments.join("/");
+    if let Some(query) = req.uri().query() {
+        location.push('?');
+        location.push_str(query);
+    }
+
+    Ok(Some(
+        HttpResponse::PermanentRedirect()
+            .append_header((header::LOCATION, location))
+            .finish(),
+    ))
+}
 
 // utoipa-specific struct to use a value_type for docs.
 /// A sha1 or sha512 hash.
@@ -139,7 +345,10 @@ pub fn root_config(cfg: &mut web::ServiceConfig) {
             .wrap(default_cors())
             .service(index::index_get)
             .service(index::build_get)
-            .service(Files::new("/", "assets/")),
+            .service(Files::new(
+                "/",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/assets"),
+            )),
     );
 }
 
@@ -192,146 +401,107 @@ pub enum ApiError {
     /// Caller attempted a request which they are not allowed to make.
     #[error(transparent)]
     Auth(eyre::Report),
-    #[error("Invalid input: {0}")]
-    InvalidInput(String),
-    #[error("Error while uploading file: {0}")]
-    FileHosting(#[from] FileHostingError),
-    #[error("database error")]
-    Database(#[from] crate::database::models::DatabaseError),
-    // todo: remove this variant
-    #[error("Postgres database error: {0}")]
-    SqlxDatabase(#[from] sqlx::Error),
-    #[error("redis database error")]
-    RedisDatabase(#[from] redis::RedisError),
-    #[error("Clickhouse error: {0}")]
-    Clickhouse(#[from] clickhouse::error::Error),
-    #[error("XML error: {0}")]
-    Xml(String),
-    #[error("Deserialization error: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("Authentication error: {0}")]
-    Authentication(#[from] crate::auth::AuthenticationError),
-    #[error("Authentication error: {0}")]
-    CustomAuthentication(String),
-    #[error("Error while validating input: {0}")]
-    Validation(String),
-    #[error("Search error: {0}")]
-    Search(#[from] meilisearch_sdk::errors::Error),
-    #[error("Payments error: {0}")]
-    Payments(String),
-    #[error("Discord error: {0}")]
-    Discord(String),
-    #[error("Slack webhook error: {0}")]
-    Slack(String),
-    #[error("Captcha error. Try resubmitting the form.")]
-    Turnstile,
-    #[error("Error while decoding Base62: {0}")]
-    Decoding(#[from] ariadne::ids::DecodingError),
-    #[error("Image parsing error: {0}")]
-    ImageParse(#[from] image::ImageError),
-    #[error("Password hashing error: {0}")]
-    PasswordHashing(#[from] argon2::password_hash::Error),
-    #[error("{0}")]
-    Mail(#[from] crate::queue::email::MailError),
-    #[error("Error while rerouting request: {0:?}")]
-    Reroute(#[from] reqwest::Error),
-    #[error("Unable to read zip archive: {0}")]
-    Zip(#[from] zip::result::ZipError),
-    #[error("IO Error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Resource not found")]
-    NotFound,
-    #[error("Conflict: {0}")]
-    Conflict(String),
-    #[error("precondition required: {0}")]
-    PreconditionRequired(String),
-    #[error("precondition failed: {0}")]
-    PreconditionFailed(String),
-    #[error("External tax compliance API error")]
-    TaxComplianceApi,
+    /// The requested resource does not exist.
     #[error(transparent)]
-    TaxProcessor(#[from] crate::util::anrok::AnrokError),
-    #[error(
-        "You are being rate-limited. Please wait {0} milliseconds. 0/{1} remaining."
-    )]
-    RateLimitError(u128, u32),
-    #[error("Error while interacting with payment processor: {0}")]
-    Stripe(#[from] stripe::StripeError),
-    #[error("Error while interacting with Delphi: {0:?}")]
-    Delphi(eyre::Error),
+    NotFound(eyre::Report),
+    /// The request conflicts with the current state of the resource.
     #[error(transparent)]
-    Mural(#[from] Box<muralpay::ApiError>),
-    #[error("report still has {} issue details with no verdict", details.len())]
-    TechReviewDetailsWithNoVerdict {
-        details: Vec<DelphiReportIssueDetailsId>,
-    },
+    Conflict(eyre::Report),
+    /// A service dependency failed to complete the request.
+    #[error(transparent)]
+    FailedDependency(eyre::Report),
+    /// The request requires a precondition.
+    #[error(transparent)]
+    PreconditionRequired(eyre::Report),
+    /// A request precondition was not met.
+    #[error(transparent)]
+    PreconditionFailed(eyre::Report),
+    /// The caller exceeded a request rate limit.
+    #[error(transparent)]
+    RateLimit(eyre::Report),
 }
 
 impl ApiError {
-    pub fn delphi(err: impl Into<eyre::Error>) -> Self {
-        Self::Delphi(err.into())
+    /// Adds context to the contained report while preserving the HTTP status.
+    pub(crate) fn wrap_err<D>(self, msg: D) -> Self
+    where
+        D: Send + Sync + std::fmt::Debug + std::fmt::Display + 'static,
+    {
+        match self {
+            Self::Internal(report) => Self::Internal(report.wrap_err(msg)),
+            Self::Request(report) => Self::Request(report.wrap_err(msg)),
+            Self::Auth(report) => Self::Auth(report.wrap_err(msg)),
+            Self::NotFound(report) => Self::NotFound(report.wrap_err(msg)),
+            Self::Conflict(report) => Self::Conflict(report.wrap_err(msg)),
+            Self::FailedDependency(report) => {
+                Self::FailedDependency(report.wrap_err(msg))
+            }
+            Self::PreconditionRequired(report) => {
+                Self::PreconditionRequired(report.wrap_err(msg))
+            }
+            Self::PreconditionFailed(report) => {
+                Self::PreconditionFailed(report.wrap_err(msg))
+            }
+            Self::RateLimit(report) => Self::RateLimit(report.wrap_err(msg)),
+        }
+    }
+
+    pub fn is_account_locked(&self) -> bool {
+        matches!(
+            self,
+            Self::Auth(report) if matches!(
+                report.downcast_ref::<AuthenticationError>(),
+                Some(AuthenticationError::AccountLocked)
+            )
+        )
     }
 
     pub fn as_api_error<'a>(&self) -> crate::models::error::ApiError<'a> {
+        let report = match self {
+            Self::Internal(report)
+            | Self::Request(report)
+            | Self::Auth(report)
+            | Self::NotFound(report)
+            | Self::Conflict(report)
+            | Self::FailedDependency(report)
+            | Self::PreconditionRequired(report)
+            | Self::PreconditionFailed(report)
+            | Self::RateLimit(report) => report,
+        };
+        let details = report
+            .chain()
+            .skip(1)
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        let validation = report
+            .downcast_ref::<v3::projects::validate::ProjectValidationError>();
+
+        let account_locked = self.is_account_locked();
+
         crate::models::error::ApiError {
             error: match self {
+                _ if account_locked => "account_locked",
                 Self::Internal(..) => "internal_error",
                 Self::Request(..) => "request_error",
                 Self::Auth(..) => "auth_error",
-                Self::Database(..) => "database_error",
-                Self::SqlxDatabase(..) => "database_error",
-                Self::RedisDatabase(..) => "database_error",
-                Self::Authentication(..) => "unauthorized",
-                Self::CustomAuthentication(..) => "unauthorized",
-                Self::Xml(..) => "xml_error",
-                Self::Json(..) => "json_error",
-                Self::Search(..) => "search_error",
-                Self::FileHosting(..) => "file_hosting_error",
-                Self::InvalidInput(..) => "invalid_input",
-                Self::Validation(..) => "invalid_input",
-                Self::Payments(..) => "payments_error",
-                Self::Discord(..) => "discord_error",
-                Self::Turnstile => "turnstile_error",
-                Self::Decoding(..) => "decoding_error",
-                Self::ImageParse(..) => "invalid_image",
-                Self::PasswordHashing(..) => "password_hashing_error",
-                Self::Mail(..) => "mail_error",
-                Self::Clickhouse(..) => "clickhouse_error",
-                Self::Reroute(..) => "reroute_error",
-                Self::NotFound => "not_found",
+                Self::NotFound(..) => "not_found",
                 Self::Conflict(..) => "conflict",
+                Self::FailedDependency(..) => "failed_dependency",
                 Self::PreconditionRequired(..) => "precondition_required",
                 Self::PreconditionFailed(..) => "precondition_failed",
-                Self::TaxComplianceApi => "tax_compliance_api_error",
-                Self::Zip(..) => "zip_error",
-                Self::Io(..) => "io_error",
-                Self::RateLimitError(..) => "ratelimit_error",
-                Self::Stripe(..) => "stripe_error",
-                Self::TaxProcessor(..) => "tax_processor_error",
-                Self::Slack(..) => "slack_error",
-                Self::Delphi(..) => "delphi_error",
-                Self::Mural(..) => "mural_error",
-                Self::TechReviewDetailsWithNoVerdict { .. } => {
-                    "tech_review_issues_with_no_verdict"
-                }
+                Self::RateLimit(..) => "ratelimit_error",
             },
-            description: match self {
-                Self::Internal(e) => format!("{e:#}"),
-                Self::Request(e) => format!("{e:#}"),
-                Self::Auth(e) => format!("{e:#}"),
-                _ => self.to_string(),
+            description: if account_locked {
+                AuthenticationError::AccountLocked.to_string()
+            } else {
+                report.to_string()
             },
-            details: match self {
-                Self::Mural(err) => serde_json::to_value(err.clone()).ok(),
-                Self::TechReviewDetailsWithNoVerdict { details } => {
-                    let details = serde_json::to_value(details)
-                        .expect("details should never fail to serialize");
-                    Some(json!({
-                        "issue_details": details
-                    }))
-                }
-                _ => None,
-            },
+            details: validation
+                .map(|error| serde_json::json!({ "nags": error.0 }))
+                .or_else(|| {
+                    (!details.is_empty()).then(|| serde_json::json!(details))
+                }),
         }
     }
 }
@@ -341,47 +511,54 @@ impl actix_web::ResponseError for ApiError {
         match self {
             Self::Internal(..) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Request(..) => StatusCode::BAD_REQUEST,
+            Self::Auth(..) if self.is_account_locked() => StatusCode::FORBIDDEN,
             Self::Auth(..) => StatusCode::UNAUTHORIZED,
-            Self::InvalidInput(..) => StatusCode::BAD_REQUEST,
-            Self::Database(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::SqlxDatabase(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::RedisDatabase(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Clickhouse(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Authentication(..) => StatusCode::UNAUTHORIZED,
-            Self::CustomAuthentication(..) => StatusCode::UNAUTHORIZED,
-            Self::Xml(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Json(..) => StatusCode::BAD_REQUEST,
-            Self::Search(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::FileHosting(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Validation(..) => StatusCode::BAD_REQUEST,
-            Self::Payments(..) => StatusCode::FAILED_DEPENDENCY,
-            Self::Discord(..) => StatusCode::FAILED_DEPENDENCY,
-            Self::Turnstile => StatusCode::BAD_REQUEST,
-            Self::Decoding(..) => StatusCode::BAD_REQUEST,
-            Self::ImageParse(..) => StatusCode::BAD_REQUEST,
-            Self::PasswordHashing(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Mail(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Reroute(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::NotFound(..) => StatusCode::NOT_FOUND,
             Self::Conflict(..) => StatusCode::CONFLICT,
+            Self::FailedDependency(..) => StatusCode::FAILED_DEPENDENCY,
             Self::PreconditionRequired(..) => StatusCode::PRECONDITION_REQUIRED,
             Self::PreconditionFailed(..) => StatusCode::PRECONDITION_FAILED,
-            Self::TaxComplianceApi => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Zip(..) => StatusCode::BAD_REQUEST,
-            Self::Io(..) => StatusCode::BAD_REQUEST,
-            Self::RateLimitError(..) => StatusCode::TOO_MANY_REQUESTS,
-            Self::Stripe(..) => StatusCode::FAILED_DEPENDENCY,
-            Self::TaxProcessor(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Slack(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Delphi(..) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Mural(..) => StatusCode::BAD_REQUEST,
-            Self::TechReviewDetailsWithNoVerdict { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::RateLimit(..) => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 
     fn error_response(&self) -> HttpResponse {
         HttpResponse::build(self.status_code()).json(self.as_api_error())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiError;
+    use crate::auth::AuthenticationError;
+    use actix_web::ResponseError;
+    use actix_web::http::StatusCode;
+
+    #[test]
+    fn api_error_reports_locked_account_as_forbidden() {
+        let error = ApiError::Auth(
+            eyre::Report::new(AuthenticationError::AccountLocked)
+                .wrap_err("authenticating API request"),
+        );
+
+        assert_eq!(error.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(error.as_api_error().error, "account_locked");
+    }
+
+    #[test]
+    fn api_error_serializes_source_chain_as_details() {
+        let error = ApiError::Request(
+            eyre::eyre!("root cause")
+                .wrap_err("intermediate context")
+                .wrap_err("request failed"),
+        );
+
+        let response = error.as_api_error();
+
+        assert_eq!(response.description, "request failed");
+        assert_eq!(
+            response.details,
+            Some(serde_json::json!(["intermediate context", "root cause"])),
+        );
     }
 }

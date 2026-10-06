@@ -1,3 +1,5 @@
+import { forgetStoredAccount } from '@/composables/accounts.ts'
+import { useAuthCookie } from '@/composables/auth-cookie.ts'
 import { useAppQueryClient } from '@/composables/query-client'
 
 export const useUser = async (force = false) => {
@@ -149,8 +151,22 @@ export const resendVerifyEmail = async () => {
 
 export const logout = async () => {
 	startLoading()
+	const auth = await useAuth()
+	const userId = auth.value.user?.id
+	try {
+		await useBaseFetch(`session/${auth.value.token}`, {
+			method: 'DELETE',
+		})
+	} catch {
+		/* empty */
+	}
+
+	if (userId) {
+		forgetStoredAccount(userId)
+	}
+
 	await useAuth('none')
-	useCookie('auth-token').value = null
+	useAuthCookie().value = null
 	useAppQueryClient().clear()
 	stopLoading()
 }

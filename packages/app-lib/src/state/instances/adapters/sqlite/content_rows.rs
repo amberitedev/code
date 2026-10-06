@@ -780,7 +780,7 @@ pub(crate) async fn restore_instance_content_snapshot(
     entries: &[ContentEntry],
     pool: &SqlitePool,
 ) -> crate::Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(
         "
 		DELETE FROM instance_content_entries
@@ -946,6 +946,14 @@ pub(crate) async fn rename_instance_file(
         (source_id.as_deref(), target_id.as_deref())
         && source_id != target_id
     {
+        sqlx::query!(
+			"INSERT INTO instance_content_locks (file_id) SELECT ? WHERE EXISTS (SELECT 1 FROM instance_content_locks WHERE file_id = ?) ON CONFLICT (file_id) DO NOTHING",
+			source_id,
+			target_id,
+		)
+		.execute(&mut **tx)
+		.await?;
+
         sqlx::query!(
             "
 				DELETE FROM instance_content_entries

@@ -1,20 +1,48 @@
 <script setup lang="ts">
-import { defineMessages, Toggle, useVIntl } from '@modrinth/ui'
-import { ref, watch } from 'vue'
+import {
+	defineMessages,
+	injectAuth,
+	injectNotificationManager,
+	injectUserPreferences,
+	Toggle,
+	useSavable,
+	useVIntl,
+} from '@modrinth/ui'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { inject, onBeforeUnmount, onMounted } from 'vue'
 
-import { get, set } from '@/helpers/settings.ts'
-import { useTheming } from '@/store/state'
-import type { FeatureFlag } from '@/store/theme.ts'
+import { useAppSettings } from '@/composables/use-app-settings.ts'
+import {
+	type AppSettings,
+	appSettingsKeys,
+	appSettingsQueryOptions,
+	get,
+	set,
+} from '@/helpers/settings.ts'
+import { appSettingsModalContextKey } from '@/providers/app-settings-modal'
 
-const themeStore = useTheming()
+const appSettings = useAppSettings()
 const { formatMessage } = useVIntl()
-
-const worldsInHomeFlag: FeatureFlag = 'worlds_in_home'
-const skipNonEssentialWarningsFlag: FeatureFlag = 'skip_non_essential_warnings'
-const skipUnknownPackWarningFlag: FeatureFlag = 'skip_unknown_pack_warning'
-const showPlayTimeFlag: FeatureFlag = 'show_instance_play_time'
+const auth = injectAuth()
+const { handleError } = injectNotificationManager()
+const { updatePreferences } = injectUserPreferences()
+const settingsModal = inject(appSettingsModalContextKey, null)
+const queryClient = useQueryClient()
 
 const messages = defineMessages({
+	syncAcrossDevicesTitle: {
+		id: 'app.behavior-settings.sync-across-devices.title',
+		defaultMessage: 'Sync behavior across devices',
+	},
+	syncAcrossDevicesDescription: {
+		id: 'app.behavior-settings.sync-across-devices.description',
+		defaultMessage:
+			"Use these behavior settings everywhere you're signed in. Turn this off to keep separate settings on this device.",
+	},
+	syncAcrossDevicesSignedOutTooltip: {
+		id: 'app.behavior-settings.sync-across-devices.signed-out-tooltip',
+		defaultMessage: 'Sign into a Modrinth account to sync settings.',
+	},
 	startupAndNavigationTitle: {
 		id: 'app.behavior-settings.startup-and-navigation.title',
 		defaultMessage: 'Startup and navigation',
@@ -35,6 +63,14 @@ const messages = defineMessages({
 		id: 'app.appearance-settings.minimize-launcher.description',
 		defaultMessage: 'Minimize Modrinth App when Minecraft starts.',
 	},
+	refocusOnGameCloseTitle: {
+		id: 'app.behavior-settings.refocus-on-game-close.title',
+		defaultMessage: 'Refocus app when Minecraft closes',
+	},
+	refocusOnGameCloseDescription: {
+		id: 'app.behavior-settings.refocus-on-game-close.description',
+		defaultMessage: 'Bring Modrinth App to the foreground when Minecraft exits.',
+	},
 	defaultLandingPageHome: {
 		id: 'app.appearance-settings.default-landing-page.home',
 		defaultMessage: 'Home',
@@ -51,14 +87,13 @@ const messages = defineMessages({
 		id: 'app.appearance-settings.toggle-sidebar.description',
 		defaultMessage: 'Hide the right sidebar by default and add a button to show or hide it.',
 	},
-	jumpBackIntoWorldsTitle: {
-		id: 'app.appearance-settings.jump-back-into-worlds.title',
-		defaultMessage: 'Jump into worlds or instances',
+	compactModeTitle: {
+		id: 'app.appearance-settings.compact-mode.title',
+		defaultMessage: 'Compact mode',
 	},
-	jumpBackIntoWorldsDescription: {
-		id: 'app.appearance-settings.jump-back-into-worlds.description',
-		defaultMessage:
-			'Show recently played worlds or instances in the "Jump in" section on the Home page.',
+	compactModeDescription: {
+		id: 'app.appearance-settings.compact-mode.description',
+		defaultMessage: 'Display library instances in a compact row layout.',
 	},
 	showPlayTimeTitle: {
 		id: 'app.appearance-settings.show-play-time.title',
@@ -96,18 +131,141 @@ const messages = defineMessages({
 	},
 })
 
-const settings = ref(await get())
+type BehaviorSettingsState = {
+	syncBehaviorAcrossDevices: boolean
+	minimizeApp: boolean
+	refocusOnGameClose: boolean
+	hideRightSidebar: boolean
+	compactInstanceCards: boolean
+	showPlayTime: boolean
+	hideNametag: boolean
+	warnOnUnknownModpacks: boolean
+	skipNonEssentialWarnings: boolean
+}
 
-watch(
-	settings,
-	async () => {
-		await set(settings.value)
+const settingsQuery = useQuery(appSettingsQueryOptions())
+await settingsQuery.suspense()
+
+function getBehaviorSettingsState(settings: AppSettings): BehaviorSettingsState {
+	return {
+		syncBehaviorAcrossDevices: settings.sync_behavior_across_devices,
+		minimizeApp: settings.hide_on_process_start,
+		refocusOnGameClose: settings.refocus_on_game_close,
+		compactInstanceCards: settings.compact_instance_cards,
+		showPlayTime: settings.show_play_time,
+		warnOnUnknownModpacks: settings.warn_on_unknown_modpacks,
+		skipNonEssentialWarnings: settings.skip_non_essential_warnings,
+		hideRightSidebar: settings.toggle_sidebar,
+		hideNametag: settings.hide_nametag_skins_page,
+	}
+}
+
+const settingsMutation = useMutation({
+	mutationKey: appSettingsKeys.update,
+	scope: { id: 'app-settings' },
+	mutationFn: async (value: BehaviorSettingsState) => {
+		if (value.syncBehaviorAcrossDevices && auth.user.value) {
+			await updatePreferences({
+				behavior: {
+					minimize_app: value.minimizeApp,
+					refocus_on_game_close: value.refocusOnGameClose,
+					hide_right_sidebar: value.hideRightSidebar,
+					compact_instance_cards: value.compactInstanceCards,
+					show_play_time: value.showPlayTime,
+					hide_nametag: value.hideNametag,
+					warn_on_unknown_modpacks: value.warnOnUnknownModpacks,
+					skip_non_essential_warnings: value.skipNonEssentialWarnings,
+				},
+			})
+		}
+
+		const latestSettings = await get()
+		const nextSettings: AppSettings = {
+			...latestSettings,
+			sync_behavior_across_devices: value.syncBehaviorAcrossDevices,
+			hide_on_process_start: value.minimizeApp,
+			toggle_sidebar: value.hideRightSidebar,
+			hide_nametag_skins_page: value.hideNametag,
+			refocus_on_game_close: value.refocusOnGameClose,
+			compact_instance_cards: value.compactInstanceCards,
+			show_play_time: value.showPlayTime,
+			warn_on_unknown_modpacks: value.warnOnUnknownModpacks,
+			skip_non_essential_warnings: value.skipNonEssentialWarnings,
+		}
+
+		await set(nextSettings)
+		queryClient.setQueryData(appSettingsKeys.all, nextSettings)
+		appSettings.setBehaviorSyncAcrossDevices(value.syncBehaviorAcrossDevices)
+		appSettings.refocusOnGameClose = value.refocusOnGameClose
+		appSettings.compactInstanceCards = value.compactInstanceCards
+		appSettings.showPlayTime = value.showPlayTime
+		appSettings.warnOnUnknownModpacks = value.warnOnUnknownModpacks
+		appSettings.skipNonEssentialWarnings = value.skipNonEssentialWarnings
+		appSettings.toggleSidebar = value.hideRightSidebar
+		appSettings.hideNametagSkinsPage = value.hideNametag
 	},
-	{ deep: true },
+	onMutate: () => queryClient.cancelQueries({ queryKey: appSettingsKeys.all }),
+	onError: handleError,
+	onSettled: () => queryClient.invalidateQueries({ queryKey: appSettingsKeys.all }),
+})
+
+const { saved, current, changes, saving, hasChanges, reset, save } = useSavable(
+	() => getBehaviorSettingsState(settingsQuery.data.value!),
+	() => settingsMutation.mutateAsync({ ...current.value }),
 )
+
+async function saveBehaviorSettings(): Promise<void> {
+	try {
+		await save()
+	} catch {
+		return
+	}
+}
+
+onMounted(() => {
+	settingsModal?.registerUnsavedChangesController({
+		hasChanges: () => hasChanges.value,
+		getOriginal: () => saved.value,
+		getModified: () => changes.value,
+		isSaving: () => saving.value,
+		reset,
+		save: saveBehaviorSettings,
+	})
+})
+
+onBeforeUnmount(() => {
+	settingsModal?.registerUnsavedChangesController(null)
+})
 </script>
 <template>
-	<section>
+	<section class="border-0 border-b border-solid border-divider pb-6">
+		<div class="flex items-center justify-between gap-4">
+			<div>
+				<h2 id="sync-behavior-across-devices-label" class="m-0 text-lg font-semibold text-contrast">
+					{{ formatMessage(messages.syncAcrossDevicesTitle) }}
+				</h2>
+				<p class="m-0 mt-1 text-secondary">
+					{{ formatMessage(messages.syncAcrossDevicesDescription) }}
+				</p>
+			</div>
+			<span
+				v-tooltip="
+					!auth.user.value ? formatMessage(messages.syncAcrossDevicesSignedOutTooltip) : undefined
+				"
+				class="inline-flex shrink-0"
+			>
+				<Toggle
+					id="sync-behavior-across-devices"
+					:model-value="Boolean(auth.user.value) && current.syncBehaviorAcrossDevices"
+					:disabled="!auth.user.value"
+					aria-labelledby="sync-behavior-across-devices-label"
+					@update:model-value="current.syncBehaviorAcrossDevices = $event"
+				/>
+			</span>
+		</div>
+	</section>
+
+	<section class="mt-6">
 		<h2 class="m-0 text-xl font-semibold text-contrast">
 			{{ formatMessage(messages.startupAndNavigationTitle) }}
 		</h2>
@@ -121,7 +279,24 @@ watch(
 						{{ formatMessage(messages.minimizeLauncherDescription) }}
 					</p>
 				</div>
-				<Toggle id="minimize-launcher" v-model="settings.hide_on_process_start" />
+				<Toggle id="minimize-launcher" v-model="current.minimizeApp" />
+			</div>
+
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<h3 id="refocus-on-game-close-label" class="m-0 text-lg font-semibold text-contrast">
+						{{ formatMessage(messages.refocusOnGameCloseTitle) }}
+					</h3>
+					<p id="refocus-on-game-close-description" class="m-0 mt-1">
+						{{ formatMessage(messages.refocusOnGameCloseDescription) }}
+					</p>
+				</div>
+				<Toggle
+					id="refocus-on-game-close"
+					v-model="current.refocusOnGameClose"
+					aria-labelledby="refocus-on-game-close-label"
+					aria-describedby="refocus-on-game-close-description"
+				/>
 			</div>
 
 			<div class="flex items-center justify-between gap-4">
@@ -131,16 +306,7 @@ watch(
 					</h3>
 					<p class="m-0 mt-1">{{ formatMessage(messages.toggleSidebarDescription) }}</p>
 				</div>
-				<Toggle
-					id="toggle-sidebar"
-					:model-value="settings.toggle_sidebar"
-					@update:model-value="
-						(e) => {
-							settings.toggle_sidebar = !!e
-							themeStore.toggleSidebar = settings.toggle_sidebar
-						}
-					"
-				/>
+				<Toggle id="toggle-sidebar" v-model="current.hideRightSidebar" />
 			</div>
 		</div>
 	</section>
@@ -153,23 +319,11 @@ watch(
 			<div class="flex items-center justify-between gap-4">
 				<div>
 					<h3 class="m-0 text-lg font-semibold text-contrast">
-						{{ formatMessage(messages.jumpBackIntoWorldsTitle) }}
+						{{ formatMessage(messages.compactModeTitle) }}
 					</h3>
-					<p class="m-0 mt-1">
-						{{ formatMessage(messages.jumpBackIntoWorldsDescription) }}
-					</p>
+					<p class="m-0 mt-1">{{ formatMessage(messages.compactModeDescription) }}</p>
 				</div>
-				<Toggle
-					id="jump-back-into-worlds"
-					:model-value="themeStore.getFeatureFlag(worldsInHomeFlag)"
-					@update:model-value="
-						() => {
-							const newValue = !themeStore.getFeatureFlag(worldsInHomeFlag)
-							themeStore.featureFlags[worldsInHomeFlag] = newValue
-							settings.feature_flags[worldsInHomeFlag] = newValue
-						}
-					"
-				/>
+				<Toggle id="compact-mode" v-model="current.compactInstanceCards" />
 			</div>
 
 			<div class="flex items-center justify-between gap-4">
@@ -179,17 +333,7 @@ watch(
 					</h3>
 					<p class="m-0 mt-1">{{ formatMessage(messages.showPlayTimeDescription) }}</p>
 				</div>
-				<Toggle
-					id="show-play-time"
-					:model-value="themeStore.getFeatureFlag(showPlayTimeFlag)"
-					@update:model-value="
-						() => {
-							const newValue = !themeStore.getFeatureFlag(showPlayTimeFlag)
-							themeStore.featureFlags[showPlayTimeFlag] = newValue
-							settings.feature_flags[showPlayTimeFlag] = newValue
-						}
-					"
-				/>
+				<Toggle id="show-play-time" v-model="current.showPlayTime" />
 			</div>
 
 			<div class="flex items-center justify-between gap-4">
@@ -199,16 +343,7 @@ watch(
 					</h3>
 					<p class="m-0 mt-1">{{ formatMessage(messages.hideNametagDescription) }}</p>
 				</div>
-				<Toggle
-					id="hide-nametag-skins-page"
-					:model-value="themeStore.hideNametagSkinsPage"
-					@update:model-value="
-						(e) => {
-							themeStore.hideNametagSkinsPage = !!e
-							settings.hide_nametag_skins_page = themeStore.hideNametagSkinsPage
-						}
-					"
-				/>
+				<Toggle id="hide-nametag-skins-page" v-model="current.hideNametag" />
 			</div>
 		</div>
 	</section>
@@ -229,15 +364,7 @@ watch(
 				</div>
 				<Toggle
 					id="warn-before-installing-unknown-modpacks"
-					:model-value="!themeStore.getFeatureFlag(skipUnknownPackWarningFlag)"
-					@update:model-value="
-						(e) => {
-							const warnBeforeUnknownPackInstall = !!e
-							const skipUnknownPackWarning = !warnBeforeUnknownPackInstall
-							themeStore.featureFlags[skipUnknownPackWarningFlag] = skipUnknownPackWarning
-							settings.feature_flags[skipUnknownPackWarningFlag] = skipUnknownPackWarning
-						}
-					"
+					v-model="current.warnOnUnknownModpacks"
 				/>
 			</div>
 
@@ -250,17 +377,7 @@ watch(
 						{{ formatMessage(messages.skipNonEssentialWarningsDescription) }}
 					</p>
 				</div>
-				<Toggle
-					id="skip-non-essential-warnings"
-					:model-value="themeStore.getFeatureFlag(skipNonEssentialWarningsFlag)"
-					@update:model-value="
-						() => {
-							const newValue = !themeStore.getFeatureFlag(skipNonEssentialWarningsFlag)
-							themeStore.featureFlags[skipNonEssentialWarningsFlag] = newValue
-							settings.feature_flags[skipNonEssentialWarningsFlag] = newValue
-						}
-					"
-				/>
+				<Toggle id="skip-non-essential-warnings" v-model="current.skipNonEssentialWarnings" />
 			</div>
 		</div>
 	</section>

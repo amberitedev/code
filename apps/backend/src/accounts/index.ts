@@ -1,12 +1,14 @@
 // Port of apps/labrinth/src/routes/internal/{flows,session}.rs, AGPL-3.0-only.
 import zxcvbn from 'zxcvbn'
 import {
+	accountLock,
 	findUser,
 	issueSession,
 	publicUser,
 	requireLocal,
 	requireSession,
 	requireUser,
+	requireUnlocked,
 	sessionResponse,
 	type SessionRow,
 } from '../common/auth'
@@ -41,9 +43,13 @@ function validateEmail(email: string) {
 	if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
 		invalid('Invalid email address!')
 }
-function validatePassword(password: string, username: string, email: string) {
+function validatePassword(password: string, username: string, email: string, signup = false) {
 	if (password.length < 8 || password.length > 256 || zxcvbn(password, [username, email]).score < 3)
-		invalid('Specified password is too weak! Please improve its strength.')
+		throw new ApiError(
+			400,
+			signup ? 'weak_password' : 'invalid_input',
+			'Specified password is too weak! Please improve its strength.',
+		)
 }
 
 async function createFlow(
@@ -82,13 +88,7 @@ async function queueEmail(env: Env, user: UserRow, kind: 'verify_email' | 'reset
 	// The local outbox is durable and readable only with the dev-runner secret.
 	if (env.LOCAL_DEV !== 'true')
 		throw new ApiError(503, 'mail_error', 'Email delivery is not configured')
-	const flow = await createFlow(
-		env,
-		kind,
-		user.id,
-		kind === 'verify_email' ? user.email : null,
-		1440,
-	)
+	const flow = await createFlow(env, kind, user.id, user.email, 1440)
 	await env.DB.prepare(
 		'INSERT INTO email_outbox (id,recipient,kind,flow,created) VALUES (?,?,?,?,?)',
 	)
@@ -155,6 +155,102 @@ async function validateCode(
 export async function handleAccounts(request: Request, env: Env): Promise<Response | null> {
 	const path = routePath(request),
 		method = request.method
+	const adminMatch = path.match(
+		/^\/(?:_internal\/)?admin\/user\/([^/]+)\/(lock|sessions|password-reset|2fa)$/,
+	)
+	if (adminMatch) {
+		const actor = await requireUser(request, env)
+		if (actor.role !== 'admin')
+			throw new ApiError(401, 'invalid_credentials', 'You must be an admin to manage user access')
+		const target = await findUser(env, decodeURIComponent(adminMatch[1]))
+		if (!target) throw new ApiError(404, 'not_found', 'User not found')
+		const action = adminMatch[2]
+		if (action === 'lock' && method === 'DELETE') {
+			const deleted = await env.DB.prepare('DELETE FROM user_locks WHERE user_id = ?')
+				.bind(target.id)
+				.run()
+			if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'User is not locked')
+			return noContent()
+		}
+		if (action === 'sessions' && method === 'DELETE') {
+			// This backend only issues sessions; personal access tokens are not supported.
+			await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(target.id).run()
+			await env.FRIENDS.getByName(target.id).revalidateSessions()
+			return noContent()
+		}
+		if (target.role === 'admin' || target.role === 'moderator')
+			throw new ApiError(
+				401,
+				'invalid_credentials',
+				'Cannot lock or reset credentials of a staff account',
+			)
+		if (action === 'lock' && method === 'PUT') {
+			const reason = stringField(await readJson(request), 'reason', 65536).trim()
+			if (!reason) invalid('Lock reason must not be empty')
+			await env.DB.batch([
+				env.DB.prepare(
+					'INSERT INTO user_locks (user_id,locked_by,reason,created) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET locked_by=excluded.locked_by,reason=excluded.reason,created=excluded.created',
+				).bind(target.id, actor.id, reason, new Date().toISOString()),
+				env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(target.id),
+			])
+			await env.FRIENDS.getByName(target.id).revalidateSessions()
+			return noContent()
+		}
+		if (action === 'password-reset' && method === 'POST') {
+			const body = await readJson(request)
+			if (body.email !== undefined && body.email !== null && typeof body.email !== 'string')
+				invalid('Invalid email address')
+			const email = (typeof body.email === 'string' ? body.email.trim() : '') || target.email
+			validateEmail(email)
+			if (
+				await env.DB.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE AND id != ?')
+					.bind(email, target.id)
+					.first()
+			)
+				invalid('Email address is already registered to another account')
+			if (env.LOCAL_DEV !== 'true')
+				throw new ApiError(503, 'mail_error', 'Email delivery is not configured')
+			const flow = randomId(48),
+				now = new Date().toISOString()
+			// Commit the credential reset and recovery email together so delivery failures cannot strand an account.
+			await env.DB.batch([
+				env.DB.prepare(
+					'UPDATE users SET password_hash = NULL, email_verified = email_verified AND LOWER(email) = LOWER(?), email = ? WHERE id = ?',
+				).bind(email, email, target.id),
+				env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(target.id),
+				env.DB.prepare(
+					'INSERT INTO auth_flows (id,kind,user_id,payload,expires) VALUES (?,?,?,?,?)',
+				).bind(
+					flow,
+					'forced_password_reset',
+					target.id,
+					email,
+					new Date(Date.now() + 86400000).toISOString(),
+				),
+				env.DB.prepare(
+					'INSERT INTO email_outbox (id,recipient,kind,flow,created) VALUES (?,?,?,?,?)',
+				).bind(randomId(), email, 'reset_password', flow, now),
+			])
+			await env.FRIENDS.getByName(target.id).revalidateSessions()
+			return noContent()
+		}
+		if (action === '2fa' && method === 'DELETE') {
+			if (!target.totp_secret) invalid('User does not have 2FA enabled')
+			await env.DB.batch([
+				env.DB.prepare('UPDATE users SET totp_secret = NULL WHERE id = ?').bind(target.id),
+				env.DB.prepare('DELETE FROM backup_codes WHERE user_id = ?').bind(target.id),
+				env.DB.prepare('DELETE FROM used_totp WHERE user_id = ?').bind(target.id),
+				env.DB.prepare('INSERT INTO notifications (id,user_id,body,created) VALUES (?,?,?,?)').bind(
+					randomId(),
+					target.id,
+					JSON.stringify({ type: 'two_factor_removed' }),
+					new Date().toISOString(),
+				),
+			])
+			return noContent()
+		}
+		return null
+	}
 	if (['/_internal/globals', '/globals'].includes(path) && method === 'GET') {
 		return json({
 			captcha_enabled: env.LOCAL_DEV !== 'true',
@@ -199,7 +295,7 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 			email = stringField(body, 'email', 254)
 		validateUsername(username)
 		validateEmail(email)
-		validatePassword(password, username, email)
+		validatePassword(password, username, email, true)
 		if (await findUser(env, username))
 			throw new ApiError(400, 'username_taken', 'Username is already taken on Modrinth.')
 		if (
@@ -252,6 +348,7 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 			.bind(username, username)
 			.first<UserRow>()
 		if (!(await checkPassword(password, user?.password_hash ?? null)) || !user) unauthorized()
+		await requireUnlocked(env, user.id)
 		if (user.totp_secret)
 			return json({
 				error: '2fa_required',
@@ -300,16 +397,25 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 		)
 			.bind(username, username)
 			.first<UserRow>()
-		if (user) await queueEmail(env, user, 'reset_password')
+		if (user && !(await accountLock(env, user.id))) await queueEmail(env, user, 'reset_password')
 		return noContent()
 	}
 	if (path === '/auth/password' && method === 'PATCH') {
 		await throttle(request, env)
 		const body = await readJson(request)
 		const flow =
-			typeof body.flow === 'string' ? await getFlow(env, body.flow, 'reset_password') : null
+			typeof body.flow === 'string'
+				? await env.DB.prepare(
+						"SELECT * FROM auth_flows WHERE id = ? AND kind IN ('reset_password','forced_password_reset') AND expires > ?",
+					)
+						.bind(body.flow, new Date().toISOString())
+						.first<Flow>()
+				: null
+		if (typeof body.flow === 'string' && !flow) unauthorized()
 		const user = flow ? await findUser(env, flow.user_id) : await requireUser(request, env)
 		if (!user) unauthorized()
+		if (flow && flow.payload !== user.email) unauthorized()
+		if (flow?.kind !== 'forced_password_reset') await requireUnlocked(env, user.id)
 		if (!flow && !(await checkPassword(stringField(body, 'old_password', 256), user.password_hash)))
 			unauthorized()
 		if (typeof body.new_password !== 'string')

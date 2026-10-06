@@ -314,8 +314,14 @@ vars! {
     SENDY_LIST_ID: String = "none";
     SENDY_API_KEY: String = "none";
 
+    SKIP_EMAIL_CHECK_DOMAINS: StringCsv = StringCsv(vec![]);
+
     NEVERBOUNCE_API_KEY: String = "";
     NEVERBOUNCE_BASE_URL: String = neverbounce::DEFAULT_API_URL;
+
+    USERCHECK_API_KEY: String = "";
+    USERCHECK_GATE_ID: String = "";
+    USERCHECK_BASE_URL: String = crate::util::usercheck::DEFAULT_API_URL;
 
     EMAIL_DOMAIN_BLACKLIST: StringCsv = StringCsv(vec![]);
 
@@ -342,6 +348,7 @@ vars! {
     BREX_API_KEY: String = "none";
 
     DELPHI_URL: String = "";
+    DELPHI_SCAN_TIMEOUT: u64 = 60u64;
 
     SHARED_INSTANCES_URL: String = "";
     SHARED_INSTANCES_KEY: String = "";

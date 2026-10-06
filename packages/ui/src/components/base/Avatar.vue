@@ -1,18 +1,19 @@
 <template>
-	<img
+	<FullImage
 		v-if="src && !failed"
-		ref="img"
+		ref="imgComponent"
 		class="avatar shrink-0"
 		:style="`--_size: ${cssSize}`"
 		:class="{
 			circle: circle,
-			detecting: !hasDetectedCorners,
+			detecting: padTransparentCorners && !hasDetectedCorners,
 			'no-shadow': noShadow,
-			padded: hasTransparentCorners,
+			padded: padTransparentCorners && hasTransparentCorners,
 			raised: raised,
 			pixelated: pixelated,
 		}"
 		:src="src"
+		:raw-src="rawSrc"
 		:alt="alt"
 		:loading="loading"
 		@load="onLoad"
@@ -50,10 +51,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 
+import { useDebugLogger } from '../../composables'
+import FullImage from './FullImage.vue'
+
+const debug = useDebugLogger('Avatar')
+
 const pixelated = ref(false)
 const hasTransparentCorners = ref(false)
 const hasDetectedCorners = ref(false)
-const img = useTemplateRef<HTMLImageElement>('img')
+const imgComponent = useTemplateRef<InstanceType<typeof FullImage>>('imgComponent')
+const img = computed(() => imgComponent.value?.img ?? null)
 const failed = ref(false)
 let detectionTimeout: number | undefined
 let detectingSource: string | undefined
@@ -68,20 +75,24 @@ defineExpose({
 const props = withDefaults(
 	defineProps<{
 		src?: string | null
+		rawSrc?: string | null
 		alt?: string
 		size?: string
 		circle?: boolean
 		noShadow?: boolean
+		padTransparentCorners?: boolean
 		loading?: 'eager' | 'lazy'
 		raised?: boolean
 		tintBy?: string | null
 	}>(),
 	{
 		src: null,
+		rawSrc: null,
 		alt: '',
 		size: '2rem',
 		circle: false,
 		noShadow: false,
+		padTransparentCorners: false,
 		loading: 'eager',
 		raised: false,
 		tintBy: null,
@@ -132,7 +143,7 @@ function clearDetectionTimeout() {
 function onError(e) {
 	clearDetectionTimeout()
 	detectingSource = undefined
-	console.log('Avatar image failed to load:', props.src, e)
+	debug('Avatar image failed to load:', props.src, e)
 	failed.value = true
 }
 
@@ -141,14 +152,19 @@ function onLoad() {
 	if (!image) return
 	const source = image.currentSrc
 	if (detectingSource === source) return
-	detectingSource = source
-	clearDetectionTimeout()
 
 	if (image.naturalWidth && image.naturalWidth < 32) {
 		pixelated.value = true
 	} else {
 		pixelated.value = false
 	}
+
+	if (!props.padTransparentCorners) {
+		return
+	}
+
+	detectingSource = source
+	clearDetectionTimeout()
 
 	if (canReadImagePixels(source)) {
 		const transparentCorners = detectTransparentCorners(image)

@@ -6,12 +6,12 @@ import {
 	LinkIcon,
 	UnknownIcon,
 } from '@modrinth/assets'
-import { Menu } from 'floating-vue'
 import { computed } from 'vue'
 
-import { CopyCode } from '#ui/components'
 import { IconButton } from '#ui/components/base/buttons'
 
+import CopyCode from '../base/CopyCode.vue'
+import FloatingMenu from '../floating/FloatingMenu.vue'
 import ExternalProjectLicenseStateTag from './ExternalProjectLicenseStateTag.vue'
 import type { ExternalLicenseStatus } from './types.ts'
 
@@ -43,7 +43,9 @@ async function copyProjectLink() {
 </script>
 
 <template>
-	<div class="bg-surface-3 p-4 rounded-2xl flex flex-col gap-3">
+	<div
+		class="bg-surface-3 p-4 rounded-2xl flex flex-col gap-3 border border-solid border-surface-4"
+	>
 		<div class="flex gap-4 justify-between">
 			<div class="flex flex-col gap-2">
 				<span class="text-contrast font-semibold">{{ title }}</span>
@@ -88,13 +90,15 @@ async function copyProjectLink() {
 			<div class="font-medium">Notes:</div>
 			<div>{{ notes ?? 'N/A' }}</div>
 		</div>
-		<div class="bg-surface-2 p-4 rounded-2xl flex flex-col gap-3">
+		<div
+			class="bg-surface-2 p-4 rounded-2xl flex flex-col gap-3 border border-solid border-surface-4"
+		>
 			<span class="text-contrast font-semibold">Files</span>
 			<span v-if="!(files?.length > 0)" class="text-secondary">
 				No files available for external project.
 			</span>
 			<div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-				<Menu v-for="file in files" :key="file.sha1" :delay="{ hide: 50, show: 0 }">
+				<FloatingMenu v-for="file in files" :key="file.sha1" trigger="hover" placement="top">
 					<div
 						class="line-clamp-1 truncate px-2 py-1 flex gap-2 rounded-xl items-center border-solid border-2 border-surface-5 text-sm font-medium text-secondary"
 					>
@@ -113,7 +117,7 @@ async function copyProjectLink() {
 							<div class="text-sm"><CopyCode :text="file.sha1" /></div>
 						</div>
 					</template>
-				</Menu>
+				</FloatingMenu>
 			</div>
 		</div>
 		<div v-if="last_updated" class="pt-4 border-t-[1px] border-solid border-surface-5">

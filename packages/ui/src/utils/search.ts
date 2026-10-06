@@ -1,14 +1,15 @@
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	ArchiveIcon,
+	BrainCogIcon,
 	CircleDollarSignIcon,
-	CircuitBoardIcon,
 	ClientIcon,
 	EyeIcon,
 	getCategoryIcon,
 	getLoaderIcon,
 	GitForkIcon,
 	MegaphoneIcon,
+	MonitorCogIcon,
 	RadioTowerIcon,
 	ServerIcon,
 	SparklesIcon,
@@ -105,10 +106,11 @@ export type FilterType = {
 	}[]
 	searchable: boolean
 	allows_custom_options?: 'and' | 'or'
+	custom_option_field?: string
 	ordering?: number
 } & (
 	| {
-			display: 'all' | 'scrollable' | 'none'
+			display: 'all' | 'scrollable' | 'none' | 'depends-on-project'
 	  }
 	| {
 			display: 'expandable'
@@ -120,6 +122,45 @@ export type FilterValue = {
 	type: string
 	option: string
 	negative?: boolean
+}
+
+export type DependencyType = 'required' | 'optional' | 'embedded'
+
+const DEPENDENCY_TYPE_FIELDS: Record<DependencyType, string> = {
+	required: 'required_dependency_project_ids',
+	optional: 'optional_dependency_project_ids',
+	embedded: 'embedded_dependency_project_ids',
+}
+
+const DEPENDENCY_TYPES = Object.keys(DEPENDENCY_TYPE_FIELDS) as DependencyType[]
+
+export function formatDependencyProjectFilterOption(
+	projectId: string,
+	dependencyTypes: readonly DependencyType[],
+): string {
+	return `${dependencyTypes.join(',')}:${projectId}`
+}
+
+export function parseDependencyProjectFilterOption(option: string): {
+	projectId: string
+	dependencyTypes: DependencyType[]
+} {
+	const separatorIndex = option.indexOf(':')
+	if (separatorIndex === -1) {
+		return { projectId: option, dependencyTypes: ['required'] }
+	}
+
+	const dependencyTypes = option
+		.slice(0, separatorIndex)
+		.split(',')
+		.filter((type): type is DependencyType => DEPENDENCY_TYPES.includes(type as DependencyType))
+	const projectId = option.slice(separatorIndex + 1)
+
+	if (dependencyTypes.length === 0 || !projectId) {
+		return { projectId: option, dependencyTypes: ['required'] }
+	}
+
+	return { projectId, dependencyTypes }
 }
 
 export type EnvironmentSearchOverride =
@@ -184,9 +225,10 @@ export type DisclosureTypeFilter = Labrinth.Projects.v3.ProjectDisclosureType
 
 const DISCLOSURE_TYPE_ICONS: Record<DisclosureTypeFilter, Component> = {
 	ai_content: SparklesIcon,
+	ai_functionality: BrainCogIcon,
 	advertisements: MegaphoneIcon,
 	epilepsy_triggers: EyeIcon,
-	system_interactions: CircuitBoardIcon,
+	system_interactions: MonitorCogIcon,
 	telemetry: RadioTowerIcon,
 	derivative_work: GitForkIcon,
 	paid_features: CircleDollarSignIcon,
@@ -212,6 +254,13 @@ export function formatDisclosureTypeLabel(
 				defineMessage({
 					id: 'search.filter_type.advanced.disclosure.ai_content',
 					defaultMessage: 'AI-generated content',
+				}),
+			)
+		case 'ai_functionality':
+			return formatMessage(
+				defineMessage({
+					id: 'search.filter_type.advanced.disclosure.ai_functionality',
+					defaultMessage: 'Generative AI functionality',
 				}),
 			)
 		case 'advertisements':
@@ -314,8 +363,10 @@ export function createDisclosureFilterOptions(
 	formatMessage: FormatMessage,
 	projectTypes: readonly ProjectType[],
 ): FilterOption[] {
-	return PROJECT_DISCLOSURE_TYPES.filter((disclosureType) =>
-		isDisclosureCompatibleWithProjectTypes(disclosureType, projectTypes),
+	return PROJECT_DISCLOSURE_TYPES.filter(
+		(disclosureType) =>
+			disclosureType !== 'derivative_work' &&
+			isDisclosureCompatibleWithProjectTypes(disclosureType, projectTypes),
 	).map((disclosureType) => ({
 		id: disclosureType,
 		formatted_name: formatDisclosureTypeLabel(formatMessage, disclosureType),
@@ -353,6 +404,14 @@ export function useSearch(
 	const overriddenProvidedFilterTypes = ref<string[]>([])
 
 	const { formatMessage, locale } = useVIntl()
+	const dependsOnFilterName = defineMessage({
+		id: 'search.filter_type.compatible_dependency_project_ids',
+		defaultMessage: 'Depends on',
+	})
+	const includedContentFilterName = defineMessage({
+		id: 'search.filter_type.included_content',
+		defaultMessage: 'Included content',
+	})
 	const formatCategoryName = (categoryName: string) => {
 		return formatCategory(formatMessage, categoryName)
 	}
@@ -396,6 +455,21 @@ export function useSearch(
 
 		const filterTypes: FilterType[] = [
 			...Object.values(categoryFilters),
+			{
+				id: 'compatible_dependency_project_ids',
+				formatted_name: formatMessage(
+					projectTypes.value.includes('modpack') ? includedContentFilterName : dependsOnFilterName,
+				),
+				supported_project_types: ALL_PROJECT_TYPES,
+				query_param: 'dep',
+				supports: ['include'],
+				display: 'depends-on-project',
+				searchable: false,
+				options: [],
+				allows_custom_options: 'and',
+				custom_option_field: 'compatible_dependency_project_ids',
+				ordering: projectTypes.value.includes('modpack') ? undefined : -999,
+			},
 			{
 				id: 'environment',
 				formatted_name: formatMessage(
@@ -704,6 +778,26 @@ export function useSearch(
 		const negativeByType: Record<string, string[]> = {}
 
 		for (const filterValue of filterValues) {
+			if (filterValue.type === 'compatible_dependency_project_ids') {
+				const { projectId, dependencyTypes } = parseDependencyProjectFilterOption(
+					filterValue.option,
+				)
+				const fields = projectTypes.value.includes('modpack')
+					? ['compatible_dependency_project_ids']
+					: dependencyTypes.map((type) => DEPENDENCY_TYPE_FIELDS[type])
+				const operator = filterValue.negative ? '!=' : '='
+				const conditions = fields.map(
+					(field) => `${field} ${operator} ${formatSearchFilterValue(projectId)}`,
+				)
+
+				if (conditions.length === 1) {
+					parts.push(conditions[0])
+				} else {
+					parts.push(`(${conditions.join(filterValue.negative ? ' AND ' : ' OR ')})`)
+				}
+				continue
+			}
+
 			const type = filters.value.find((type) => type.id === filterValue.type)
 			if (!type) {
 				console.error(`Filter type ${filterValue.type} not found`)
@@ -719,7 +813,9 @@ export function useSearch(
 					formatted_name: filterValue.option,
 					icon: undefined,
 					method: type.allows_custom_options,
-					value: filterValue.option,
+					value: type.custom_option_field
+						? `${type.custom_option_field}:${filterValue.option}`
+						: filterValue.option,
 				}
 			} else if (!option) {
 				console.error(`Filter option ${filterValue.option} not found`)
@@ -962,8 +1058,8 @@ export function useSearch(
 		currentFilters.value.forEach((filterValue) => {
 			const type = filters.value.find((type) => type.id === filterValue.type)
 			const option = type ? findFilterOption(type.options, filterValue.option) : undefined
-			if (type && option) {
-				const value = getOptionValue(option, filterValue.negative)
+			if (type && (option || type.allows_custom_options)) {
+				const value = option ? getOptionValue(option, filterValue.negative) : filterValue.option
 				if (items[type.query_param]) {
 					items[type.query_param].push(value)
 				} else {

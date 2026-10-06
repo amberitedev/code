@@ -131,17 +131,27 @@ pub(crate) async fn users(
     .await
 }
 
+pub(crate) fn origin() -> &'static str {
+    ENDPOINTS
+        .get()
+        .map_or(env!("MODRINTH_API_URL"), |config| config.api.as_str())
+}
+
 /// Copied development data may contain credentials for a different service.
 /// Deactivate them before any requests; preserve the rows for the original app.
 pub(crate) async fn bind_origin(pool: &sqlx::SqlitePool) -> crate::Result<()> {
-    let origin = ENDPOINTS
-        .get()
-        .map_or(env!("MODRINTH_API_URL"), |config| config.api.as_str());
+    let origin = origin();
     let previous: Option<String> = sqlx::query_scalar(
         "SELECT value FROM app_metadata WHERE key = 'account_origin'",
     )
     .fetch_optional(pool)
     .await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS self_hosted_account_origins (user_id TEXT PRIMARY KEY REFERENCES modrinth_users(id) ON DELETE CASCADE, origin TEXT NOT NULL)")
+        .execute(pool).await?;
+    // Existing saved accounts belong to the service recorded before this startup.
+    sqlx::query("INSERT OR IGNORE INTO self_hosted_account_origins (user_id,origin) SELECT id,? FROM modrinth_users")
+        .bind(previous.as_deref().unwrap_or(env!("MODRINTH_API_URL")))
+        .execute(pool).await?;
     if previous.as_deref().unwrap_or(env!("MODRINTH_API_URL")) != origin {
         sqlx::query("UPDATE modrinth_users SET active = FALSE")
             .execute(pool)
@@ -165,9 +175,12 @@ pub(crate) async fn revoke(
         id: String,
         current: bool,
     }
-    let sessions: Vec<Session> = fetch_json(
+    let response = crate::util::fetch::fetch_advanced(
         Method::GET,
         concat!(env!("MODRINTH_API_URL"), "session/list"),
+        None,
+        None,
+        Some(("Authorization", &credentials.session)),
         None,
         None,
         Some("/v2/session/list"),
@@ -175,6 +188,7 @@ pub(crate) async fn revoke(
         pool,
     )
     .await?;
+    let sessions: Vec<Session> = serde_json::from_slice(&response)?;
     if let Some(session) = sessions.into_iter().find(|session| session.current)
     {
         crate::util::fetch::fetch_advanced(
@@ -192,4 +206,55 @@ pub(crate) async fn revoke(
         .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn imported_accounts_cannot_be_reactivated_on_another_service() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let credentials = ModrinthCredentials {
+            session: "imported-session".into(),
+            expires: chrono::Utc::now() + chrono::Duration::days(1),
+            user_id: "imported-user".into(),
+            active: true,
+        };
+        credentials.upsert(&pool).await.unwrap();
+        sqlx::query("INSERT INTO app_metadata(key,value,updated_at) VALUES ('account_origin','https://another-service.example/',unixepoch())")
+            .execute(&pool).await.unwrap();
+        bind_origin(&pool).await.unwrap();
+        assert!(
+            ModrinthCredentials::get_active(&pool)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            ModrinthCredentials::get_all(&pool)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM modrinth_users")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 1);
+        // A restart must not relabel foreign credentials as belonging to this service.
+        bind_origin(&pool).await.unwrap();
+        assert!(
+            ModrinthCredentials::get_all(&pool)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

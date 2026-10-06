@@ -14,12 +14,14 @@ import { ArchonNoticesV0Module } from './archon/notices/v0'
 import { ArchonOptionsV1Module } from './archon/options/v1'
 import { ArchonPropertiesV1Module } from './archon/properties/v1'
 import { ArchonServerUsersV1Module } from './archon/server-users/v1'
+import { ArchonServersInternalModule } from './archon/servers/internal'
 import { ArchonServersV0Module } from './archon/servers/v0'
 import { ArchonServersV1Module } from './archon/servers/v1'
 import { ArchonTransfersInternalModule } from './archon/transfers/internal'
 import { ISO3166Module } from './iso3166'
 import { KyrosContentV1Module } from './kyros/content/v1'
 import { KyrosFilesV0Module } from './kyros/files/v0'
+import { KyrosFilesV1Module } from './kyros/files/v1'
 import { KyrosLogsV1Module } from './kyros/logs/v1'
 import { KyrosUploadSessionsV1Module } from './kyros/upload-sessions/v1'
 import { LabrinthVersionsV2Module, LabrinthVersionsV3Module } from './labrinth'
@@ -98,6 +100,7 @@ export const MODULE_REGISTRY = {
 	archon_options_v1: ArchonOptionsV1Module,
 	archon_properties_v1: ArchonPropertiesV1Module,
 	archon_server_users_v1: ArchonServerUsersV1Module,
+	archon_servers_internal: ArchonServersInternalModule,
 	archon_servers_v0: ArchonServersV0Module,
 	archon_servers_v1: ArchonServersV1Module,
 	archon_transfers_internal: ArchonTransfersInternalModule,
@@ -107,6 +110,7 @@ export const MODULE_REGISTRY = {
 	launchermeta_manifest_v0: LauncherMetaManifestV0Module,
 	kyros_content_v1: KyrosContentV1Module,
 	kyros_files_v0: KyrosFilesV0Module,
+	kyros_files_v1: KyrosFilesV1Module,
 	kyros_logs_v1: KyrosLogsV1Module,
 	kyros_upload_sessions_v1: KyrosUploadSessionsV1Module,
 	labrinth_affiliate_internal: LabrinthAffiliateInternalModule,

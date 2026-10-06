@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { PlusIcon, SearchIcon } from '@modrinth/assets'
-import { Button, ServerListing, StyledInput, injectModrinthClient } from '@modrinth/ui'
+import { Button, ServerListing, Input, injectModrinthClient } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -43,7 +43,7 @@ async function createServer() {
 		<div class="flex w-full flex-row items-center justify-between gap-2 mb-4">
 			<h1 class="text-2xl m-0 font-extrabold text-contrast">Servers</h1>
 			<div class="flex items-center gap-2">
-				<StyledInput v-model="searchInput" :icon="SearchIcon" placeholder="Search servers" />
+				<Input v-model="searchInput" :icon="SearchIcon" placeholder="Search servers" />
 				<Button type="colored" color="brand" :disabled="creating" @click="createServer">
 					<PlusIcon /> New server
 				</Button>

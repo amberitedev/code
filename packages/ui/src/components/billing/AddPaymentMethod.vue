@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { createStripeElements } from '@modrinth/utils'
 import type { Stripe as StripsJs, StripeElements } from '@stripe/stripe-js'
-import { loadStripe } from '@stripe/stripe-js/pure'
 import { ref } from 'vue'
 
+import { useDebugLogger } from '../../composables/debug-logger'
 import ModalLoadingIndicator from '../modal/ModalLoadingIndicator.vue'
+
+const debug = useDebugLogger('AddPaymentMethod')
 
 const emit = defineEmits<{
 	(e: 'startLoading' | 'stopLoading'): void
@@ -40,6 +42,7 @@ async function reload(paymentMethods: Stripe.PaymentMethod[]) {
 
 		const result = await props.createSetupIntent()
 
+		const { loadStripe } = await import('@stripe/stripe-js/pure')
 		stripe.value = await loadStripe(props.publishableKey)
 		const {
 			elements: newElements,
@@ -71,7 +74,7 @@ async function submit(): Promise<boolean> {
 		},
 	})
 
-	console.log(result)
+	debug(result)
 
 	const { error } = result
 

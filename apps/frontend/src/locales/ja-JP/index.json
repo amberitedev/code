@@ -5,14 +5,11 @@
   "action.continue": {
     "message": "続ける"
   },
-  "admin.billing.error.not-found": {
-    "message": "ユーザーが見つかりませんでした"
-  },
   "ads-consent.accept": {
-    "message": "すべて受け入れる"
+    "message": "すべて同意"
   },
   "ads-consent.body": {
-    "message": "Modrinthは広告収益によって運営され、クリエイターへの報酬も広告収益から支払われています。当社のパートナーは、広告のパーソナライズや効果測定のために、サイト内でCookieを保存・利用する場合があります。"
+    "message": "Modrinthは広告収益によって運営され、クリエイターへの報酬もその収益から支払われています。当社のパートナーは、広告のパーソナライズや効果測定のために、サイト内でCookieを保存・利用する場合があります。"
   },
   "ads-consent.manage": {
     "message": "設定の管理"
@@ -36,7 +33,10 @@
     "message": "リセット"
   },
   "analytics.breakdown.country": {
-    "message": "国 / 地域"
+    "message": "国・地域"
+  },
+  "analytics.breakdown.dependent-on": {
+    "message": "次に依存"
   },
   "analytics.breakdown.dependent-project-download": {
     "message": "依存プロジェクト"
@@ -45,13 +45,13 @@
     "message": "依存プロジェクトのタイプ"
   },
   "analytics.breakdown.download-reason": {
-    "message": "ダウンロードの理由"
+    "message": "ダウンロード理由"
   },
   "analytics.breakdown.download-source": {
-    "message": "ソース"
+    "message": "ダウンロード元"
   },
   "analytics.breakdown.game-version": {
-    "message": "ゲームのバージョン"
+    "message": "ゲームバージョン"
   },
   "analytics.breakdown.generic": {
     "message": "内訳"
@@ -63,7 +63,7 @@
     "message": "メンバー"
   },
   "analytics.breakdown.monetization": {
-    "message": "マネタイズ"
+    "message": "収益状況"
   },
   "analytics.breakdown.none.selected": {
     "message": "分析 - デフォルト"
@@ -75,7 +75,7 @@
     "message": "ステータス"
   },
   "analytics.breakdown.project-version": {
-    "message": "プロジェクトのバージョン"
+    "message": "プロジェクトバージョン"
   },
   "analytics.breakdown.selected": {
     "message": "分析 - {breakdown}"
@@ -131,14 +131,77 @@
   "analytics.chart.empty.select-table-items": {
     "message": "以下の表から項目を選択して、データを可視化してください。"
   },
+  "analytics.chart.events.count-aria": {
+    "message": "{count, plural, one {# 件のイベント} other {# 件のイベント}}"
+  },
+  "analytics.chart.events.project-title": {
+    "message": "<project>{projectName}</project>：{title}"
+  },
+  "analytics.chart.events.see-announcement": {
+    "message": "お知らせを見る"
+  },
+  "analytics.chart.legend.monetization-details.aria": {
+    "message": "収益に関する分析の詳細を表示"
+  },
+  "analytics.chart.legend.monetization-details.description": {
+    "message": "収益化に向けてModrinthを介して行われたビューとダウンロードのみが表示され、ダウンロードにはログインが必要です。"
+  },
+  "analytics.chart.legend.monetization-details.title": {
+    "message": "収益の詳細"
+  },
+  "analytics.chart.legend.previous-period-suffix": {
+    "message": "{name}（前期）"
+  },
+  "analytics.chart.render-limit.description": {
+    "message": "全てのグラフを表示するとページのパフォーマンスが低下する恐れがあります。"
+  },
+  "analytics.chart.render-limit.header": {
+    "message": "{count}線全てのグラフを表示しますか？"
+  },
+  "analytics.chart.table-selection.all": {
+    "message": "テーブルから{itemType, select, project {{count, plural, other {プロジェクト}}} country {{count, plural, other {国・地域}}} monetization {{count, plural, other {収益状況}}} downloadSource {{count, plural, other {ダウンロード元}}} downloadReason {{count, plural, other {ダウンロード理由}}} member {{count, plural, other {メンバー}}} projectVersion {{count, plural, other {プロジェクトバージョン}}} loader {{count, plural, other {ローダー}}} gameVersion {{count, plural,other {ゲームバージョン}}} other {{count, plural, other {項目}}}}をすべて表示しています"
+  },
+  "analytics.chart.table-selection.count": {
+    "message": "テーブルから{count}件の{itemType, select, project {{count, plural, other {プロジェクト}}} country {{count, plural, other {国・地域}}} monetization {{count, plural, other {収益状況}}} downloadSource {{count, plural, other {ダウンロード元}}} downloadReason {{count, plural, other {ダウンロード理由}}} member {{count, plural, other {メンバー}}} projectVersion {{count, plural, other {プロジェクトバージョン}}} loader {{count, plural, other {ローダー}}} gameVersion {{count, plural,other {ゲームバージョン}}} other {{count, plural, other {項目}}}}を表示しています"
+  },
+  "analytics.chart.table-selection.limited": {
+    "message": "テーブルから{limit}件の{itemType, select, project {{limit, plural, other {プロジェクト}}} country {{limit, plural, other {国・地域}}} monetization {{limit, plural, other {収益状況}}} downloadSource {{limit, plural, other {ダウンロード元}}} downloadReason {{limit, plural, other {ダウンロード理由}}} member {{limit, plural, other {メンバー}}} projectVersion {{limit, plural, other {プロジェクトバージョン}}} loader {{limit, plural, other {ローダー}}} gameVersion {{limit, plural,other {ゲームバージョン}}} other {{limit, plural, other {項目}}}}を表示しています"
+  },
   "analytics.chart.table-selection.top": {
-    "message": "テーブル内の{itemType, select, project {{count, plural, other {プロジェクト}}} country {{count, plural, other {国}}} monetization {{count, plural, other {収益}}} downloadSource {{count, plural, other {ダウンロード元}}} downloadReason {{count, plural, other {ダウンロード理由}}} member {{count, plural, other {メンバー}}} projectVersion {{count, plural, other {プロジェクトバージョン}}} loader {{count, plural, other {ローダー}}} gameVersion {{count, plural, other {ゲームバージョン}}} other {{count, plural, other {項目}}}}上位 {count} 件を表示"
+    "message": "テーブルから上位{count}件の{itemType, select, project {{count, plural, other {プロジェクト}}} country {{count, plural, other {国・地域}}} monetization {{count, plural, other {収益状況}}} downloadSource {{count, plural, other {ダウンロード元}}} downloadReason {{count, plural, other {ダウンロード理由}}} member {{count, plural, other {メンバー}}} projectVersion {{count, plural, other {プロジェクトバージョン}}} loader {{count, plural, other {ローダー}}} gameVersion {{count, plural,other {ゲームバージョン}}} other {{count, plural, other {項目}}}}を表示しています"
   },
   "analytics.chart.tooltip.dependent-on-project": {
     "message": "{project} に依存"
   },
   "analytics.chart.tooltip.dependent-project-version": {
     "message": "{dependentProject} は {dependencyProject} の {version} に依存しています"
+  },
+  "analytics.chart.tooltip.duration.days": {
+    "message": "{count, plural, other {# 日}}"
+  },
+  "analytics.chart.tooltip.duration.hours": {
+    "message": "{count, plural, other {# 時間}}"
+  },
+  "analytics.chart.tooltip.duration.minutes": {
+    "message": "{count, plural, other {# 分}}"
+  },
+  "analytics.chart.tooltip.hide-entry": {
+    "message": "グラフから {name} を非表示にする"
+  },
+  "analytics.chart.tooltip.no-data": {
+    "message": "データなし"
+  },
+  "analytics.chart.tooltip.pinned": {
+    "message": "チャートのツールチップを固定しました"
+  },
+  "analytics.chart.tooltip.pinned-aria": {
+    "message": "ピン留め"
+  },
+  "analytics.chart.tooltip.previous-period-short": {
+    "message": "（前期）"
+  },
+  "analytics.chart.tooltip.show-entry": {
+    "message": "{name}をグラフで表示"
   },
   "analytics.chart.tooltip.total": {
     "message": "合計"
@@ -182,6 +245,15 @@
   "analytics.empty.no-projects": {
     "message": "利用可能なプロジェクトがありません"
   },
+  "analytics.empty.no-projects-for-analytics": {
+    "message": "分析対象のプロジェクトがありません"
+  },
+  "analytics.empty.select-project": {
+    "message": "データを表示するには、プロジェクトを1つ以上選択してください"
+  },
+  "analytics.filter.dependent-project-search-failed-title": {
+    "message": "依存プロジェクトの読み込みに失敗しました"
+  },
   "analytics.filter.game-version-type": {
     "message": "ゲームバージョンタイプ"
   },
@@ -219,7 +291,7 @@
     "message": "収益の推移"
   },
   "analytics.graph.title.views": {
-    "message": "表示の推移"
+    "message": "閲覧回数の推移"
   },
   "analytics.group-by.1h": {
     "message": "1 時間"
@@ -269,8 +341,26 @@
   "analytics.project-event.project-approved": {
     "message": "承認済み"
   },
+  "analytics.project-event.project-private": {
+    "message": "プロジェクトを非公開に設定"
+  },
+  "analytics.project-event.project-status-changed": {
+    "message": "プロジェクトの状態が変更"
+  },
+  "analytics.project-event.project-unlisted": {
+    "message": "プロジェクトはリストにありません"
+  },
+  "analytics.project-event.version-released": {
+    "message": "{version} がリリースされました"
+  },
+  "analytics.project-event.version-uploaded": {
+    "message": "バージョンがアップロードされました"
+  },
   "analytics.project-status.approved": {
     "message": "承認済み"
+  },
+  "analytics.project-status.archived": {
+    "message": "アーカイブ済み"
   },
   "analytics.project-status.draft": {
     "message": "ドラフト"
@@ -281,11 +371,20 @@
   "analytics.project-status.private": {
     "message": "非公開"
   },
+  "analytics.project-status.rejected": {
+    "message": "却下"
+  },
   "analytics.project-status.unlisted": {
     "message": "限定公開"
   },
+  "analytics.project-status.withheld": {
+    "message": "非公開"
+  },
   "analytics.project.all": {
     "message": "全てのプロジェクト"
+  },
+  "analytics.project.count": {
+    "message": "{count, plural, one {# プロジェクト} other {# プロジェクト}}"
   },
   "analytics.project.icon-alt": {
     "message": "{name}のアイコン"
@@ -351,13 +450,19 @@
     "message": "現在のクエリでは利用不可"
   },
   "analytics.stat.views": {
-    "message": "表示"
+    "message": "閲覧数"
   },
   "analytics.table.csv.date-range": {
     "message": "{start}から{end}"
   },
+  "analytics.table.csv.filename": {
+    "message": "Modrinth アナリティクス {breakdown} 内訳 - {dateRange}"
+  },
   "analytics.table.csv.header.playtime-seconds": {
     "message": "プレイ時間 (秒)"
+  },
+  "analytics.table.csv.selected-range": {
+    "message": "選択範囲"
   },
   "analytics.table.duration.days": {
     "message": "{count, number}日"
@@ -368,8 +473,17 @@
   "analytics.table.duration.minutes": {
     "message": "{count, number}分"
   },
+  "analytics.table.empty.no-matching-rows": {
+    "message": "該当するアナリティクスデータがありません"
+  },
   "analytics.table.export-csv": {
     "message": "CSVをエクスポート"
+  },
+  "analytics.table.export.cumulative": {
+    "message": "累積"
+  },
+  "analytics.table.export.grouped": {
+    "message": "{groupBy} でグループ化"
   },
   "analytics.table.pagination.summary": {
     "message": "{start}～{end}件目を表示中 (全{total}件)"
@@ -377,14 +491,41 @@
   "analytics.table.search.placeholder": {
     "message": "検索…"
   },
+  "analytics.threshold.countries-above": {
+    "message": "上記の国々"
+  },
+  "analytics.threshold.country-downloads-aria": {
+    "message": "国別ダウンロード数のしきい値"
+  },
+  "analytics.threshold.game-version-downloads-aria": {
+    "message": "ゲームバージョンのダウンロードしきい値"
+  },
+  "analytics.threshold.game-versions-above": {
+    "message": "上記のゲームバージョン"
+  },
+  "analytics.threshold.project-downloads-aria": {
+    "message": "プロジェクトのダウンロード数のしきい値"
+  },
+  "analytics.threshold.project-version-downloads-aria": {
+    "message": "プロジェクトのバージョンダウンロード数の閾値"
+  },
+  "analytics.threshold.project-versions-above": {
+    "message": "上記のプロジェクトバージョン"
+  },
+  "analytics.threshold.projects-above": {
+    "message": "上記のプロジェクト"
+  },
   "analytics.title": {
     "message": "アナリティクス"
   },
   "analytics.value.monetized": {
-    "message": "収益の対象"
+    "message": "収益発生済み"
   },
   "analytics.value.no-dependent": {
     "message": "なし"
+  },
+  "analytics.value.no-dependent-tooltip": {
+    "message": "依存関係以外の理由でダウンロードされました"
   },
   "analytics.value.none": {
     "message": "デフォルト"
@@ -395,8 +536,11 @@
   "analytics.value.unknown": {
     "message": "不明"
   },
+  "analytics.value.unknown-dependent-tooltip": {
+    "message": "このダウンロードがどの依存プロジェクトに帰属するのかを特定するためのメタデータがありません。"
+  },
   "analytics.value.unmonetized": {
-    "message": "収益の対象外"
+    "message": "収益未発生"
   },
   "app-marketing.download.description": {
     "message": "我々のデスクトップアプリはすべてのプラットフォームでご利用いただけますので、ご希望のバージョンをお選びください。"
@@ -437,14 +581,8 @@
   "app-marketing.download.windows": {
     "message": "Windows"
   },
-  "app-marketing.features.follow.description": {
-    "message": "お気に入りのコンテンツを保存し、ワンクリックで更新情報を受け取ります。"
-  },
-  "app-marketing.features.follow.title": {
-    "message": "プロジェクトをフォローする"
-  },
   "app-marketing.features.importing.description": {
-    "message": "以前使用していたランチャーからお気に入りのプロファイルをすべてインポートし、Modrinth Appをすぐに使い始めましょう！"
+    "message": "以前に使用していたランチャーから既存のゲームインスタンスをすべてインポートし、数秒でModrinth Appを開始しましょう！"
   },
   "app-marketing.features.importing.gdlauncher-alt": {
     "message": "GDLauncher"
@@ -453,7 +591,13 @@
     "message": "MultiMC"
   },
   "app-marketing.features.importing.title": {
-    "message": "プロファイルのインポート"
+    "message": "インスタンスのインポート"
+  },
+  "app-marketing.features.manage-skins.description": {
+    "message": "アプリから Minecraft のスキンをすべて切り替えます。"
+  },
+  "app-marketing.features.manage-skins.title": {
+    "message": "スキンセレクター"
   },
   "app-marketing.features.mod-management.actions": {
     "message": "アクション"
@@ -479,14 +623,8 @@
   "app-marketing.features.mod-management.version": {
     "message": "バージョン"
   },
-  "app-marketing.features.offline.description": {
-    "message": "インターネットに接続しているかどうかに関係なく、Modをプレイできます。"
-  },
-  "app-marketing.features.offline.title": {
-    "message": "オフラインモード"
-  },
   "app-marketing.features.open-source.description": {
-    "message": "Modrinthのランチャーは完全にオープンソースです。ソースコードは<github-link>GitHub</github-link>にてご覧いただけます！"
+    "message": "Modrinth Appは完全にオープンソースです。ソースコードは<github-link>GitHub</github-link>にてご覧いただけます！"
   },
   "app-marketing.features.open-source.title": {
     "message": "オープンソース"
@@ -498,7 +636,7 @@
     "message": "% CPU"
   },
   "app-marketing.features.performance.description": {
-    "message": "Modrinth AppのRAM使用量は、わずか150MB。多くの主要なModマネージャーよりも効率的です！"
+    "message": "Modrinth Appは多くの主要なModマネージャーよりも効率的です！"
   },
   "app-marketing.features.performance.discord": {
     "message": "Discord"
@@ -508,15 +646,6 @@
   },
   "app-marketing.features.performance.google-chrome": {
     "message": "Google Chrome"
-  },
-  "app-marketing.features.performance.infinite-mb": {
-    "message": "∞ MB"
-  },
-  "app-marketing.features.performance.infinite-times-infinite-mb": {
-    "message": "∞ × ∞ MB"
-  },
-  "app-marketing.features.performance.less-than-150mb": {
-    "message": "< 150 MB"
   },
   "app-marketing.features.performance.modrinth-app": {
     "message": "Modrinth App"
@@ -541,6 +670,12 @@
   },
   "app-marketing.features.play.title": {
     "message": "お気に入りのModで遊ぶ"
+  },
+  "app-marketing.features.settings-sync.description": {
+    "message": "すべてのインスタンスで同じオプション、リソースパックなどを使用できます。"
+  },
+  "app-marketing.features.settings-sync.title": {
+    "message": "設定の同期"
   },
   "app-marketing.features.sharing.description": {
     "message": "Modrinthでホストされている何千ものModやModパックのいずれかを使用して、Modパックを構築、共有、プレイできます。"
@@ -608,11 +743,20 @@
   "auth.authorize.authorize-app-name": {
     "message": "{appName} を承認する"
   },
+  "auth.authorize.error.missing-parameters": {
+    "message": "必要な OAuth クエリパラメータが不足しています。"
+  },
   "auth.authorize.error.no-redirect-url": {
     "message": "応答にリダイレクト先が見つかりません"
   },
+  "auth.authorize.errro-title": {
+    "message": "エラーが発生しました"
+  },
   "auth.authorize.redirect-url": {
     "message": "<redirect-url>{url}</redirect-url> に自動的に転送されます"
+  },
+  "auth.continue-with-provider": {
+    "message": "{provider} で続行"
   },
   "auth.create-account.age-requirement.warning-title": {
     "message": "年齢制限"
@@ -620,11 +764,17 @@
   "auth.create-account.complete-sign-up": {
     "message": "サインアップを完了する"
   },
+  "auth.create-account.date-of-birth.invalid.text": {
+    "message": "有効な生年月日を入力してください。年は0000年にできません。"
+  },
   "auth.create-account.date-of-birth.invalid.title": {
     "message": "入力された生年月日が無効です"
   },
   "auth.create-account.date-of-birth.label": {
     "message": "生年月日"
+  },
+  "auth.create-account.date-of-birth.not-meet-age-requirement": {
+    "message": "Modrinthアカウントを作成するための年齢を満たしていません。"
   },
   "auth.create-account.date-of-birth.placeholder": {
     "message": "生年月日を選んでください"
@@ -636,7 +786,10 @@
     "message": "生年月日が必要です"
   },
   "auth.create-account.date-of-birth.under13-helper": {
-    "message": "Modrinthアカウントを作成するための年齢を満たしていません。"
+    "message": "あなたが13歳以上でない限り、Modrinthでアカウントを作成することはできません。"
+  },
+  "auth.create-account.info-panel.source-code-link": {
+    "message": "関連するソースコード"
   },
   "auth.create-account.info-panel.text": {
     "message": "入力された生年月日は保存されません。登録時にCOPPA（児童オンラインプライバシー保護法）への準拠を確認するためにのみ使用いたします。"
@@ -647,6 +800,9 @@
   "auth.create-account.security-check.label": {
     "message": "セキュリティチェック"
   },
+  "auth.create-account.subscribe.label": {
+    "message": "Modrinthが進めている面白いプロジェクトについて、メールで最新情報を教えてください"
+  },
   "auth.create-account.title": {
     "message": "アカウントを作成"
   },
@@ -655,6 +811,30 @@
   },
   "auth.create-account.username.placeholder": {
     "message": "ユーザー名を入れてください"
+  },
+  "auth.reauthenticate.2fa.description": {
+    "message": "認証アプリから6桁のコードを入力するか、バックアップコードのいずれかを入力してください。"
+  },
+  "auth.reauthenticate.2fa.label": {
+    "message": "二要素認証"
+  },
+  "auth.reauthenticate.continue-with-passkey": {
+    "message": "パスキーで続ける"
+  },
+  "auth.reauthenticate.last-signed-in-with": {
+    "message": "前回は{method, select, password {パスワード} passkey {パスキー} github {GitHub} discord {Discord} google {Google} microsoft {Microsoft} gitlab {GitLab} steam {Steam} paypal {PayPal} other {{method}} }でログインしました。"
+  },
+  "auth.reauthenticate.page-title": {
+    "message": "再認証"
+  },
+  "auth.reauthenticate.sign-in-another-way": {
+    "message": "別の方法でサインイン"
+  },
+  "auth.reauthenticate.sign-in-with-provider": {
+    "message": "{provider} でサインイン"
+  },
+  "auth.reauthenticate.title": {
+    "message": "{name} は再認証する必要があります。"
   },
   "auth.reset-password.method-choice.action": {
     "message": "再設定用メールを送信"
@@ -689,8 +869,17 @@
   "auth.reset-password.title.long": {
     "message": "パスワードを再設定する"
   },
-  "auth.sign-in.2fa.placeholder": {
-    "message": "コードを入力…"
+  "auth.sign-in.2fa.description": {
+    "message": "認証アプリから6桁のコードを入力するか、バックアップコードのいずれかを入力してください。"
+  },
+  "auth.sign-in.2fa.label": {
+    "message": "二要素認証"
+  },
+  "auth.sign-in.add-account": {
+    "message": "アカウントを追加"
+  },
+  "auth.sign-in.choose-account": {
+    "message": "Modrinth Appで使用するアカウントを選択"
   },
   "auth.sign-in.continue-with-email": {
     "message": "メールアドレスで続ける"
@@ -706,6 +895,21 @@
   },
   "auth.sign-in.last-sign-in": {
     "message": "最後に使用"
+  },
+  "auth.sign-in.launcher.complete.description": {
+    "message": "Modrinth Appに戻ります。何も起こらない場合は、以下のボタンを使用してください。"
+  },
+  "auth.sign-in.launcher.complete.go-to-website": {
+    "message": "Modrinth.comへ移動"
+  },
+  "auth.sign-in.launcher.complete.return-button": {
+    "message": "Modrinth Appを開く"
+  },
+  "auth.sign-in.launcher.complete.title": {
+    "message": "サインインしています"
+  },
+  "auth.sign-in.launcher.opening.description": {
+    "message": "アプリが開かない場合は、下のボタンを使用してサインインしてください。"
   },
   "auth.sign-in.no-account": {
     "message": "アカウントを持っていませんか？"
@@ -725,6 +929,9 @@
   "auth.sign-up.legal-dislaimer": {
     "message": "アカウントを作成すると、Modrinthの <terms-link>利用規約</terms-link> および <privacy-policy-link>プライバシーポリシー</privacy-policy-link>に同意したものとみなされます。"
   },
+  "auth.sign-up.show-fewer-options": {
+    "message": "表示する選択肢を減らす"
+  },
   "auth.sign-up.show-other-options": {
     "message": "さらに表示"
   },
@@ -737,11 +944,14 @@
   "auth.sign-up.title.sign-up-with": {
     "message": "アカウントの作成"
   },
+  "auth.two-factor.incorrect-code": {
+    "message": "二段階認証コードが正しくありません。もう一度試すか、バックアップコードを使用してください。"
+  },
   "auth.verify-email.action.account-settings": {
     "message": "アカウント設定"
   },
   "auth.verify-email.action.discover-mods": {
-    "message": "早速Modを探す"
+    "message": "Modを探す"
   },
   "auth.verify-email.already-verified.description": {
     "message": "メールアドレスはすでに承認されています！"
@@ -761,8 +971,14 @@
   "auth.verify-email.failed-verification.title": {
     "message": "メールアドレスの確認に失敗しました"
   },
+  "auth.verify-email.notification.email-sent.description": {
+    "message": "アカウントを認証するためのリンク付きのメールを {email} 宛てに送信しました。"
+  },
   "auth.verify-email.notification.email-sent.title": {
     "message": "メールが送られました"
+  },
+  "auth.verify-email.notification.error-occurred.title": {
+    "message": "エラーが発生しました"
   },
   "auth.verify-email.post-verification.description": {
     "message": "メールアドレスが正常に確認されました！"
@@ -839,32 +1055,152 @@
   "collection.title": {
     "message": "{name} - コレクション"
   },
+  "conversation-thread.action.add-private-note": {
+    "message": "プライベートメモを追加"
+  },
   "conversation-thread.action.approve": {
     "message": "承認"
   },
   "conversation-thread.action.approve-with-reply": {
     "message": "送信して承認"
   },
+  "conversation-thread.action.close-report": {
+    "message": "レポートを閉じる"
+  },
+  "conversation-thread.action.close-with-reply": {
+    "message": "返信して閉じる"
+  },
+  "conversation-thread.action.reject": {
+    "message": "却下済み"
+  },
+  "conversation-thread.action.reject-with-reply": {
+    "message": "返信して拒否する"
+  },
+  "conversation-thread.action.reopen-thread": {
+    "message": "スレッドを再開する\n"
+  },
   "conversation-thread.action.reply": {
     "message": "返信"
+  },
+  "conversation-thread.action.reply-to-thread": {
+    "message": "スレッドに返信する\n"
+  },
+  "conversation-thread.action.resubmit-for-review": {
+    "message": "再審査を申請する\n"
+  },
+  "conversation-thread.action.resubmit-for-review-with-reply": {
+    "message": "返信付きで再審査を申請する\n"
   },
   "conversation-thread.action.send": {
     "message": "送信"
   },
+  "conversation-thread.action.send-to-review": {
+    "message": "審査に送信する\n"
+  },
+  "conversation-thread.action.send-to-review-with-reply": {
+    "message": "返信付きで審査に送信する\n"
+  },
   "conversation-thread.action.set-to-draft": {
     "message": "下書きとして保存"
+  },
+  "conversation-thread.action.set-to-draft-with-reply": {
+    "message": "返信付きで下書きに戻す\n"
+  },
+  "conversation-thread.action.withhold": {
+    "message": "保留にする\n"
+  },
+  "conversation-thread.action.withhold-with-reply": {
+    "message": "返信付きで保留にする\n"
+  },
+  "conversation-thread.closed-thread.description": {
+    "message": "このスレッドは閉じられているため、新しいメッセージを送信できません。\n"
+  },
+  "conversation-thread.error.closing-report": {
+    "message": "報告を閉じる際にエラーが発生しました。\n"
+  },
+  "conversation-thread.error.reopening-report": {
+    "message": "報告を再開する際にエラーが発生しました。\n"
+  },
+  "conversation-thread.error.sending-message": {
+    "message": "メッセージの送信中にエラーが発生しました。\n"
+  },
+  "conversation-thread.reply-editor.placeholder.reply": {
+    "message": "スレッドに返信…\n"
   },
   "conversation-thread.reply-editor.placeholder.send": {
     "message": "メッセージを送る…"
   },
+  "conversation-thread.reply-modal.confirmation.description": {
+    "message": "モデレーターが積極的に監視していないことを確認する\n"
+  },
+  "conversation-thread.reply-modal.confirmation.label": {
+    "message": "モデレーターがこのスレッドを積極的に監視していないことを理解しました。\n"
+  },
+  "conversation-thread.reply-modal.description": {
+    "message": "あなたのプロジェクトはすでに承認されています。そのため、モデレーションチームはこのスレッドを積極的に監視していません。ただし、プロジェクトに問題がある場合は、メッセージを確認することがあります。\n"
+  },
+  "conversation-thread.reply-modal.header": {
+    "message": "スレッドに返信する\n"
+  },
+  "conversation-thread.reply-modal.help-center-note": {
+    "message": "モデレーションチームに連絡する必要がある場合は、<help-center-link>Modrinthヘルプセンター</help-center-link>を利用し、右下の青い吹き出しをクリックしてサポートにお問い合わせください。\n"
+  },
+  "conversation-thread.resubmit-modal.confirmation.description": {
+    "message": "モデレーターからのメッセージに対応したことを確認する\n"
+  },
+  "conversation-thread.resubmit-modal.confirmation.label": {
+    "message": "モデレーターからのコメントに適切に対応したことを確認します。\n"
+  },
+  "conversation-thread.resubmit-modal.description": {
+    "message": "<project-title>{projectTitle}</project-title>をモデレーターによる再審査に提出します。\n"
+  },
+  "conversation-thread.resubmit-modal.header.resubmitting": {
+    "message": "再審査に再提出しています…\n"
+  },
+  "conversation-thread.resubmit-modal.header.submitting": {
+    "message": "審査に提出しています…\n"
+  },
+  "conversation-thread.resubmit-modal.reminder": {
+    "message": "モデレーションチームからのすべてのコメントに対応したことを確認してください。\n"
+  },
+  "conversation-thread.resubmit-modal.warning": {
+    "message": "モデレーターのコメントに対応せずに繰り返し再提出すると、アカウントが停止される場合があります。\n"
+  },
   "create-project-version.create-modal.stage.add-files.admonition": {
     "message": "補足ファイルはソースコードなどの支援用リソースのためのものであり、別バージョンや派生版を配布するためのものではありません。"
+  },
+  "create-project-version.create-modal.stage.add-files.details-tab": {
+    "message": "詳細\n"
   },
   "create-project-version.create-modal.stage.add-files.files-tab": {
     "message": "ファイル"
   },
   "create-project-version.create-modal.stage.add-files.metadata-tab": {
     "message": "メタデータ"
+  },
+  "create-project-version.create-modal.stage.add-files.primary-file-description": {
+    "message": "プライマリファイルは、プロジェクトをインストールする際にユーザーがデフォルトでダウンロードするファイルです。\n"
+  },
+  "create-project-version.create-modal.stage.add-files.primary-file-label": {
+    "message": "プライマリファイル\n"
+  },
+  "create-project-version.create-modal.stage.add-files.supplementary-files-description": {
+    "message": "ソースコード、ドキュメント、必須のリソースパックなどの補足ファイルを任意で追加できます。\n"
+  },
+  "create-project-version.create-modal.stage.add-files.supplementary-files-label": {
+    "message": "補足ファイル\n"
+  },
+  "create-project-version.create-modal.stage.add-files.upload-additional-file-aria-label": {
+    "message": "追加ファイルをアップロードする\n"
+  },
+  "create-project-version.create-modal.stage.add-files.upload-file-aria-label": {
+    "message": "ファイルをアップロードする\n"
+  },
+  "create-project-version.create-modal.stage.add-files.upload-primary-prompt": {
+    "message": "プライマリファイルと補足ファイルをアップロードする\n"
+  },
+  "create-project-version.create-modal.stage.add-files.upload-secondary-prompt": {
+    "message": "ファイルをドラッグ＆ドロップ、またはクリックして選択"
   },
   "create-project-version.create-modal.stage.details.details-tab": {
     "message": "詳細"
@@ -878,14 +1214,80 @@
   "create-project-version.create-modal.stage.details.version-changelog": {
     "message": "バージョン履歴"
   },
+  "create-project-version.create-modal.stage.details.version-number": {
+    "message": "バージョン番号"
+  },
+  "create-project-version.create-modal.stage.details.version-number-description": {
+    "message": "​バージョン番号は、このバージョンを他のバージョンと区別するためのものです。"
+  },
+  "create-project-version.create-modal.stage.details.version-number-placeholder": {
+    "message": "​バージョン番号を入力（例: 1.2.3-alpha.1）"
+  },
+  "create-project-version.create-modal.stage.details.version-subtitle": {
+    "message": "バージョンサブタイトル"
+  },
+  "create-project-version.create-modal.stage.details.version-subtitle-placeholder": {
+    "message": "サブタイトルを入力…"
+  },
+  "create-project-version.create-modal.stage.details.version-type": {
+    "message": "バージョンタイプ"
+  },
+  "create-project-version.create-modal.stage.metadata.add-dependency": {
+    "message": "依存関係を追加"
+  },
+  "create-project-version.create-modal.stage.metadata.dependencies": {
+    "message": "依存関係"
+  },
   "create-project-version.create-modal.stage.metadata.details-tab": {
     "message": "詳細"
+  },
+  "create-project-version.create-modal.stage.metadata.detected-loaders": {
+    "message": "検出されたローダー"
+  },
+  "create-project-version.create-modal.stage.metadata.detected-versions": {
+    "message": "検出されたバージョン"
   },
   "create-project-version.create-modal.stage.metadata.edit-button": {
     "message": "編集"
   },
+  "create-project-version.create-modal.stage.metadata.environment": {
+    "message": "動作環境"
+  },
   "create-project-version.create-modal.stage.metadata.files-tab": {
     "message": "ファイル"
+  },
+  "create-project-version.create-modal.stage.metadata.loaders": {
+    "message": "ローダー"
+  },
+  "create-project-version.create-modal.stage.metadata.metadata-tab": {
+    "message": "メタデータ"
+  },
+  "create-project-version.create-modal.stage.metadata.modpack-loaders-tooltip": {
+    "message": "Modパックのローダーは編集できません"
+  },
+  "create-project-version.create-modal.stage.metadata.modpack-versions-tooltip": {
+    "message": "Modパックのバージョンは編集できません"
+  },
+  "create-project-version.create-modal.stage.metadata.no-dependencies-added": {
+    "message": "依存関係は追加されていません。"
+  },
+  "create-project-version.create-modal.stage.metadata.no-environment-set": {
+    "message": "動作環境が設定されてません。"
+  },
+  "create-project-version.create-modal.stage.metadata.no-loaders-selected": {
+    "message": "ローダーが選択されていません。"
+  },
+  "create-project-version.create-modal.stage.metadata.no-mod-loader": {
+    "message": "Modローダーなし"
+  },
+  "create-project-version.create-modal.stage.metadata.no-versions-selected": {
+    "message": "バージョンが選択されていません。"
+  },
+  "create-project-version.create-modal.stage.metadata.prefilled-environment-tooltip": {
+    "message": "以前の類似バージョンから入力済み"
+  },
+  "create-project-version.create-modal.stage.metadata.suggested": {
+    "message": "おすすめ"
   },
   "create-project-version.create-modal.stage.metadata.uploaded-files": {
     "message": "アップロードされたファイル"
@@ -1028,6 +1430,9 @@
   "create.project.url-label": {
     "message": "URL"
   },
+  "create.project.user-avatar-alt": {
+    "message": "ユーザーのアバター"
+  },
   "create.project.visibility-description": {
     "message": "プロジェクトが承認された後の公開範囲"
   },
@@ -1136,6 +1541,12 @@
   "dashboard.creator-tax-form-modal.header": {
     "message": "納税申告書"
   },
+  "dashboard.creator-tax-form-modal.incomplete.text": {
+    "message": "税務申告書が未記入です。もう一度お試しください。"
+  },
+  "dashboard.creator-tax-form-modal.incomplete.title": {
+    "message": "税務申告書が未記入"
+  },
   "dashboard.creator-tax-form-modal.security.description": {
     "message": "Modrinthでは、納税申告書類を安全に収集・保管するため、サードパーティプロバイダーの「Track1099」を利用しています。詳細については<security-link>こちらをご覧ください。</security-link>"
   },
@@ -1175,6 +1586,9 @@
   "dashboard.creator-withdraw-modal.kyc.business-entity": {
     "message": "事業体"
   },
+  "dashboard.creator-withdraw-modal.kyc.date-of-birth-placeholder": {
+    "message": "生年月日を選択"
+  },
   "dashboard.creator-withdraw-modal.kyc.entity-description": {
     "message": "「事業体（Business entity）」とは、株式会社、パートナーシップ、LLC（合同会社）などの登録された組織を指します。"
   },
@@ -1183,6 +1597,12 @@
   },
   "dashboard.creator-withdraw-modal.kyc.private-individual": {
     "message": "個人事業主"
+  },
+  "dashboard.creator-withdraw-modal.kyc.search-countries-placeholder": {
+    "message": "国を選択…"
+  },
+  "dashboard.creator-withdraw-modal.kyc.search-subdivisions-placeholder": {
+    "message": "行政区画を検索…"
   },
   "dashboard.creator-withdraw-modal.method-selection.country-placeholder": {
     "message": "国を選択"
@@ -1319,6 +1739,9 @@
   "dashboard.creator-withdraw-modal.tremendous-details.enter-denomination-placeholder": {
     "message": "金額を入力してください"
   },
+  "dashboard.creator-withdraw-modal.tremendous-details.need-at-least-gift-card": {
+    "message": "このギフトカードを使用するには少なくとも {min} が必要です。"
+  },
   "dashboard.creator-withdraw-modal.tremendous-details.payment-method": {
     "message": "支払い方法"
   },
@@ -1333,6 +1756,12 @@
   },
   "dashboard.creator-withdraw-modal.tremendous-details.search-amount-label": {
     "message": "検索金額"
+  },
+  "dashboard.creator-withdraw-modal.tremendous-details.search-category-placeholder": {
+    "message": "{category}を検索…"
+  },
+  "dashboard.creator-withdraw-modal.tremendous-details.select-category-placeholder": {
+    "message": "{category}を選択"
   },
   "dashboard.creator-withdraw-modal.tremendous-details.select-denomination-hint": {
     "message": "額面を選択してください："
@@ -1367,8 +1796,14 @@
   "dashboard.discord-roles.banner.title": {
     "message": "Discordのロールを獲得"
   },
+  "dashboard.discord-roles.role.big-creator": {
+    "message": "ダウンロード数100万超え"
+  },
   "dashboard.discord-roles.role.creator": {
     "message": "クリエイター"
+  },
+  "dashboard.discord-roles.role.pride": {
+    "message": "プライド2026"
   },
   "dashboard.head-title": {
     "message": "ダッシュボード"
@@ -1715,6 +2150,12 @@
   "discover.install.back-to-setup": {
     "message": "セットアップに戻る"
   },
+  "discover.seo.title": {
+    "message": "{projectType}を検索"
+  },
+  "discover.seo.title-with-query": {
+    "message": "{projectType}を検索 | {query}"
+  },
   "error.collection.404.list_item.1": {
     "message": "コレクションのURLを誤って入力した可能性があります。"
   },
@@ -1732,6 +2173,9 @@
   },
   "error.generic.401.signed-in-as": {
     "message": "現在サインイン中のアカウント："
+  },
+  "error.generic.401.switch-account": {
+    "message": "またはアカウントを変更："
   },
   "error.generic.401.title": {
     "message": "このページにアクセスする権限がありません"
@@ -1844,9 +2288,6 @@
   "hosting-marketing.faq.cpu-kind": {
     "message": "Modrinth Hostingのサーバーはどのような種類のCPUを使用していますか？"
   },
-  "hosting-marketing.faq.cpu-kind.answer": {
-    "message": "Modrinth Hostingのサーバーは、5GHz以上のクロック速度を持つ、AMD Ryzen 7900および7950X3D相当のCPUとDDR5メモリを搭載しています。"
-  },
   "hosting-marketing.faq.currency": {
     "message": "価格はどの通貨で表示されていますか？"
   },
@@ -1857,7 +2298,7 @@
     "message": "Modrinth HostingのサーバーにはDDoS攻撃対策が施されていますか？"
   },
   "hosting-marketing.faq.ddos-protection.answer": {
-    "message": "はい。すべてのModrinth HostingサーバーにはDDoS攻撃対策が付属しており、さらに一部の地域では最大17Tbpsの容量を備えています。"
+    "message": "はい。Modrinth HostingのすべてのサーバーにはDDoS対策が施されており、一部のロケーションでは最大17Tbpsの防御容量に対応しています。"
   },
   "hosting-marketing.faq.heading": {
     "message": "よくある質問"
@@ -2022,7 +2463,7 @@
     "message": "プランを選択"
   },
   "landing.button.discover-mods": {
-    "message": "Modを探索する"
+    "message": "Modを探す"
   },
   "landing.button.go-to-dashboard": {
     "message": "ダッシュボードへ移動"
@@ -2043,7 +2484,7 @@
     "message": "検索結果やホームページ、Discordサーバー、そして今後追加される様々なルートを通じて、数千人ものユーザーにあなたのプロジェクトを見つけてもらいましょう！"
   },
   "landing.creator.feature.discovery.title": {
-    "message": "探索"
+    "message": "発見"
   },
   "landing.creator.feature.diverse-ecosystem.description": {
     "message": "Minotaurを使ってビルドツールと連携すれば、新バージョンのリリースと同時に自動アップロードが可能です。"
@@ -2165,9 +2606,6 @@
   "layout.action.file-lookup": {
     "message": "ファイル検索"
   },
-  "layout.action.lookup-by-email": {
-    "message": "メールで探す"
-  },
   "layout.action.manage-affiliates": {
     "message": "アフィリエイトリンクを管理"
   },
@@ -2184,7 +2622,7 @@
     "message": "新規プロジェクト"
   },
   "layout.action.new-server-project": {
-    "message": "新規サーバー"
+    "message": "新規サーバープロジェクト"
   },
   "layout.action.publish": {
     "message": "公開する"
@@ -2212,6 +2650,9 @@
   },
   "layout.banner.build-fail.description": {
     "message": "Modrinthのフロントエンドのデプロイで、APIからのステート生成に失敗しました。APIの障害、または設定エラーの可能性があります。APIが利用可能になったら再ビルドしてください。エラーコード: {errors}; 現在のAPI URL: {url}"
+  },
+  "layout.banner.build-fail.ignore": {
+    "message": "無視"
   },
   "layout.banner.build-fail.title": {
     "message": "ビルド時にAPIからステートを生成できませんでした。"
@@ -2336,14 +2777,17 @@
   "layout.footer.social.discord": {
     "message": "Discord"
   },
-  "layout.footer.social.github": {
-    "message": "Github"
-  },
   "layout.footer.social.mastodon": {
     "message": "Mastodon"
   },
+  "layout.footer.social.reddit": {
+    "message": "Reddit"
+  },
   "layout.footer.social.x": {
     "message": "X"
+  },
+  "layout.footer.social.youtube": {
+    "message": "YouTube"
   },
   "layout.footer.unknown-commit": {
     "message": "不明"
@@ -2365,6 +2809,9 @@
   },
   "layout.nav.active-reports": {
     "message": "有効なレポート"
+  },
+  "layout.nav.add-account": {
+    "message": "アカウントを追加"
   },
   "layout.nav.discover": {
     "message": "探索"
@@ -2405,6 +2852,9 @@
   "layout.nav.search": {
     "message": "検索"
   },
+  "layout.nav.switch-account": {
+    "message": "アカウント切り替え"
+  },
   "layout.nav.upgrade-to-modrinth-plus": {
     "message": "Modrinth+にアップグレード"
   },
@@ -2434,6 +2884,12 @@
   },
   "modpack-scan-modal.loading-versions": {
     "message": "バージョンを読み込んでいます…"
+  },
+  "modpack-scan-modal.scan-error": {
+    "message": "一部のファイルのスキャンに失敗しました：\n\n{error}"
+  },
+  "modpack-scan-modal.scanning": {
+    "message": "スキャン中…"
   },
   "muralpay.account-type.checking": {
     "message": "チェック中"
@@ -2613,37 +3069,37 @@
     "message": "CBUまたはCVU"
   },
   "muralpay.placeholder.cci": {
-    "message": "20桁のCCIを入力"
+    "message": "20桁のCCIを入力してください"
   },
   "muralpay.placeholder.cuit-cuil": {
-    "message": "CUITまたはCUILを入力"
+    "message": "CUITまたはCUILを入力してください"
   },
   "muralpay.placeholder.enter-account-number": {
-    "message": "口座番号を入力"
+    "message": "口座番号を入力してください"
   },
   "muralpay.placeholder.enter-clabe": {
-    "message": "18桁のCLABEを入力"
+    "message": "18桁のCLABEを入力してください"
   },
   "muralpay.placeholder.enter-cpf-cnpj": {
-    "message": "CPFまたはCNPJを入力"
+    "message": "CPFまたはCNPJを入力してください"
   },
   "muralpay.placeholder.enter-iban": {
     "message": "IBANを入力"
   },
   "muralpay.placeholder.enter-pix-email": {
-    "message": "PIXメールを入力"
+    "message": "PIXメールを入力してください"
   },
   "muralpay.placeholder.enter-random-key": {
-    "message": "ランダムキーを入力"
+    "message": "ランダムキーを入力してください"
   },
   "muralpay.placeholder.enter-routing-number": {
-    "message": "9桁のルーティングナンバーを入力"
+    "message": "9桁のルーティング番号を入力してください"
   },
   "muralpay.placeholder.enter-swift-bic": {
-    "message": "SWIFT / BICコードを入力"
+    "message": "SWIFT / BICコードを入力してください"
   },
   "muralpay.placeholder.iban-crc": {
-    "message": "コスタリカのIBANを入力"
+    "message": "コスタリカのIBANを入力してください"
   },
   "muralpay.placeholder.phone-cop": {
     "message": "+57…"
@@ -2714,6 +3170,9 @@
   "organization.label.members": {
     "message": "メンバー"
   },
+  "organization.label.organization": {
+    "message": "組織"
+  },
   "organization.label.projects": {
     "message": "プロジェクト"
   },
@@ -2722,6 +3181,9 @@
   },
   "organization.project-transfer.name-column": {
     "message": "名前"
+  },
+  "organization.project-transfer.project-icon-alt": {
+    "message": "{name}のアイコン"
   },
   "organization.project-transfer.type-column": {
     "message": "タイプ"
@@ -2849,6 +3311,15 @@
   "project.actions.dont-show-again": {
     "message": "再度表示しない"
   },
+  "project.actions.edit-project": {
+    "message": "プロジェクトを編集"
+  },
+  "project.actions.project-page": {
+    "message": "プロジェクトページ"
+  },
+  "project.actions.rescan-modpack": {
+    "message": "Modパックリスキャン"
+  },
   "project.actions.review-project": {
     "message": "プロジェクトを評価"
   },
@@ -2861,6 +3332,12 @@
   "project.actions.servers-promo.title": {
     "message": "サーバーを作成"
   },
+  "project.actions.view-modpacks": {
+    "message": "Modパックを見る"
+  },
+  "project.ai-image-warning-modal.title": {
+    "message": "AI生成画像の使用は禁止されています"
+  },
   "project.collections.create-new": {
     "message": "新規コレクションを作成"
   },
@@ -2870,17 +3347,32 @@
   "project.description.title": {
     "message": "説明"
   },
+  "project.download.dependencies-title": {
+    "message": "依存関係"
+  },
   "project.download.download": {
     "message": "ダウンロード"
   },
   "project.download.game-version-unsupported-tooltip": {
     "message": "{title}は{platform}の{gameVersion}に対応していません"
   },
+  "project.download.install-with-app": {
+    "message": "Modrinth Appでインストール"
+  },
   "project.download.no-app": {
     "message": "Modrinth Appをお持ちでないですか？"
   },
+  "project.download.no-game-versions-found": {
+    "message": "バージョンが見当たりません"
+  },
   "project.download.platform-unsupported-tooltip": {
     "message": "{title}は{gameVersion}の{platform}に対応していません"
+  },
+  "project.download.required-resource-pack-short": {
+    "message": "リソースパック"
+  },
+  "project.download.search-game-versions": {
+    "message": "バージョンを選択"
   },
   "project.download.select-game-version": {
     "message": "ゲームバージョンを選択"
@@ -2893,6 +3385,15 @@
   },
   "project.download.title": {
     "message": "{title}をダウンロード"
+  },
+  "project.download.unknown-loader": {
+    "message": "不明なローダー"
+  },
+  "project.download.zip-failed-text": {
+    "message": "ファイルをダウンロードするのに失敗しました。もう一度やってみてください。"
+  },
+  "project.download.zip-failed-title": {
+    "message": "ダウンロードに失敗しました"
   },
   "project.environment.migration-no-permission.message": {
     "message": "Modrinthの環境システムを全面的に見直し、新たなオプションが利用可能になりました。これらの設定を変更する権限はありませんが、環境メタデータの検証が必要であることをプロジェクトの他のメンバーにお知らせください。"
@@ -2924,6 +3425,12 @@
   "project.gallery.title": {
     "message": "ギャラリー"
   },
+  "project.moderation.admonition.approved.body.private": {
+    "message": "あなたのプロジェクトは非公開です。あなたと招待した人のみ閲覧することができます。"
+  },
+  "project.moderation.admonition.approved.body.public": {
+    "message": "あなたのプロジェクトはModrinthに公開され、閲覧できるようになりました。"
+  },
   "project.moderation.admonition.approved.header": {
     "message": "プロジェクトが承認されました"
   },
@@ -2932,6 +3439,27 @@
   },
   "project.moderation.admonition.draft.header": {
     "message": "ドラフト"
+  },
+  "project.moderation.admonition.under-review.body.1": {
+    "message": "あなたのプロジェクトはモデレーターによる審査待ちとなっております。"
+  },
+  "project.moderation.admonition.under-review.body.2": {
+    "message": "あなたのプロジェクトはスキャンされ、その後、人間のモデレーターによって審査され、Modrinth の <rules-link>コンテンツルール</rules-link> および <terms-link>利用規約</terms-link> に準拠しているかどうかが確認されます。"
+  },
+  "project.moderation.admonition.under-review.body.3": {
+    "message": "審査を待っている間もプロジェクトを編集することができます。編集をしても審査の順番が変わるわけではございません。"
+  },
+  "project.moderation.admonition.under-review.body.4": {
+    "message": "提出されたプロジェクトは24～48時間以内に審査することを目指していますが、プロジェクトによっては遅れが発生してしまう場合があります。プロジェクトに問題があることを意味するというわけではありません。"
+  },
+  "project.moderation.admonition.under-review.body.4.alt-week": {
+    "message": "プロジェクトの審査は1週間以内に行うことを目標としていますが、遅れが発生する場合があります。審査の遅れは、プロジェクトに問題があることを意味するものではありません。"
+  },
+  "project.moderation.admonition.under-review.body.5": {
+    "message": "<emphasis>モデレーターがModrinthの安全を守るために尽くしております。ご協力お願いします。皆様のプロジェクト審査をサポートできることを楽しみにしております💚</emphasis>"
+  },
+  "project.moderation.admonition.under-review.header": {
+    "message": "プロジェクトは審査中です"
   },
   "project.moderation.title": {
     "message": "管理"
@@ -2950,6 +3478,12 @@
   },
   "project.notification.updated.title": {
     "message": "プロジェクトが更新されました"
+  },
+  "project.settings.disclosures.ai.title": {
+    "message": "AI生成コンテンツが含まれています"
+  },
+  "project.settings.disclosures.derivative.link-placeholder": {
+    "message": "https://example.com"
   },
   "project.settings.general.name.description": {
     "message": "接頭辞、接尾辞、括弧書き、追加の説明は避けてください。プロジェクトの実際の名称のみを記載してください。"
@@ -2973,7 +3507,7 @@
     "message": "名前"
   },
   "project.settings.general.tagline.description": {
-    "message": "。"
+    "message": "プロジェクトの概要を一文以内で記載してください。"
   },
   "project.settings.general.tagline.placeholder.1": {
     "message": "例: ゲームの進行システムをネザーを中心に据えるように大幅に変更する。"
@@ -2996,26 +3530,47 @@
   "project.settings.general.url.title": {
     "message": "URL"
   },
+  "project.settings.monetization.title": {
+    "message": "収益化"
+  },
+  "project.settings.permissions.empty-state.heading": {
+    "message": "準備完了です！"
+  },
   "project.settings.permissions.learn-more": {
     "message": "もっと詳しく"
   },
   "project.settings.permissions.sort.status": {
     "message": "ステータス"
   },
-  "project.settings.title": {
-    "message": "設定"
+  "project.settings.tags.group-title.categories": {
+    "message": "{showType, select, yes {{types}のカテゴリ} other {カテゴリ}}"
   },
-  "project.settings.visit-dashboard": {
-    "message": "プロジェクトダッシュボードを見る"
+  "project.settings.tags.group-title.features": {
+    "message": "{showType, select, yes {{types}の機能} other {機能}}"
   },
-  "project.status.archived.message": {
-    "message": "{title} はアーカイブされました。作者がプロジェクトのアーカイブを解除しない限り、今後 {title} に更新はありません。"
+  "project.settings.tags.group-title.performance-impact": {
+    "message": "{showType, select, yes {{types}のパフォーマンスへの影響} other {パフォーマンスへの影響}}"
+  },
+  "project.settings.tags.group-title.resolutions": {
+    "message": "{showType, select, yes {{types}の解像度} other {解像度}}"
+  },
+  "project.settings.tags.title": {
+    "message": "タグ"
+  },
+  "project.versions.copy-id-option": {
+    "message": "IDをコピー"
+  },
+  "project.versions.copy-link-option": {
+    "message": "リンクをコピー"
   },
   "project.versions.title": {
     "message": "バージョン"
   },
   "report.already-reported": {
     "message": "既に {title} をレポートしています"
+  },
+  "report.already-reported-description": {
+    "message": "この{item}について、すでに報告が提出されています。追加の情報がある場合は、報告に詳細を追加できます。"
   },
   "report.back-to-item": {
     "message": "{item}に戻る"
@@ -3025,6 +3580,12 @@
   },
   "report.body.title": {
     "message": "報告に関する追加情報をご提供ください"
+  },
+  "report.checking": {
+    "message": "{item}を確認しています…\n"
+  },
+  "report.could-not-find": {
+    "message": "{item}が見つかりませんでした\n"
   },
   "report.for.violation": {
     "message": "Modrinthの<rules-link>ルール</rules-link>または<terms-link>利用規約</terms-link>に違反している"
@@ -3050,11 +3611,20 @@
   "report.not-for.dmca.description": {
     "message": "<policy-link>著作権ポリシー</policy-link>をご覧ください。"
   },
+  "report.note.ai-images.1": {
+    "message": "ルールを更新し、アイコン、ギャラリー、説明文へのAI生成画像の使用を禁止しました。クリエイターがプロジェクトからAI生成画像を削除するための一定の猶予期間を設けています。そのため、猶予期間が終了するまで、AI生成画像に関する報告は受け付けません。"
+  },
+  "report.note.check-back-later": {
+    "message": "猶予期間が終了した後に、もう一度ご確認ください。現在、この種の報告は受け付けていません。"
+  },
   "report.note.copyright.1": {
     "message": "ご注意ください：これはDMCA削除要請ではなく、再アップロードされたコンテンツへの報告です。"
   },
   "report.note.copyright.2": {
     "message": "DMCAに基づく削除要請 (法的措置) を提出する意図であった場合は、当社の<copyright-policy-link>著作権ポリシー</copyright-policy-link>をご参照ください。"
+  },
+  "report.note.fully-ai-generated.1": {
+    "message": "ルールを更新し、AIによって完全に生成されたプロジェクトを禁止しました。クリエイターが完全にAIで生成されたプロジェクトを更新または削除するための一定の猶予期間を設けています。そのため、猶予期間が終了するまで、完全にAIで生成されたプロジェクトに関する報告は受け付けません。"
   },
   "report.note.malicious.1": {
     "message": "悪意のあるコンテンツまたは虚偽的なコンテンツに関する報告には、コードサンプルなど、当該行為を裏付ける十分な証拠を含める必要があります。"
@@ -3062,17 +3632,29 @@
   "report.note.malicious.2": {
     "message": "Microsoft Defender、VirusTotal、またはAIマルウェア検出による要約は、十分な証拠形式とはみなされず、受理されません。"
   },
+  "report.note.missing-disclosure.1": {
+    "message": "コンテンツ開示は、最近追加された新機能です。開示内容が最新の状態になるまで、クリエイターに一定の猶予期間を設けています。そのため、開示が記載されていない、または誤っていることに関する報告の受け付けは、猶予期間終了後に開始します。\n"
+  },
   "report.please-report": {
     "message": "是非報告ください："
   },
+  "report.question.content-id": {
+    "message": "この{item}のIDは何ですか？\n"
+  },
   "report.question.content-type": {
     "message": "どの種類のコンテンツに関する報告ですか？"
+  },
+  "report.question.report-reason": {
+    "message": "この{item}は、Modrinthのどのルールに違反していますか？\n"
   },
   "report.report-content": {
     "message": "コンテンツをモデレーターに報告する"
   },
   "report.report-item": {
     "message": "{title} をモデレーターに報告する"
+  },
+  "report.reported-for": {
+    "message": "{type}として報告済みです\n"
   },
   "report.submit": {
     "message": "レポートを提出する"
@@ -3179,14 +3761,26 @@
   "scopes.organizationWrite.label": {
     "message": "組織の書き込み"
   },
+  "scopes.patCreate.description": {
+    "message": "アクセストークンを作成する"
+  },
   "scopes.patCreate.label": {
     "message": "PATを作成する"
+  },
+  "scopes.patDelete.description": {
+    "message": "アクセストークンを削除する\n"
   },
   "scopes.patDelete.label": {
     "message": "PATを削除する"
   },
+  "scopes.patRead.description": {
+    "message": "作成したアクセストークンを表示する\n"
+  },
   "scopes.patRead.label": {
     "message": "PATを読み取る"
+  },
+  "scopes.patWrite.description": {
+    "message": "アクセストークンを編集する\n"
   },
   "scopes.patWrite.label": {
     "message": "PATの書き込み"
@@ -3342,7 +3936,7 @@
     "message": "バージョンを書き込む"
   },
   "search.filter.game-version-shader-message": {
-    "message": "古いバージョン用のシェーダパックは新しいバージョンでも軽微な問題のみで動作するでしょう。"
+    "message": "古いバージョンのシェーダーパックでも、新しいバージョンでおおむね問題なく動作し、ちょっとした不具合が起きる程度でしょう。"
   },
   "search.filter.locked.server": {
     "message": "サーバーによる条件"
@@ -3387,13 +3981,19 @@
     "message": "お知らせはありません"
   },
   "servers.plan.large.description": {
-    "message": "15〜25人、Modパックや重いModを導入するのに最適。"
+    "message": "15〜25人のプレイヤー、Modパック、または大規模なMod導入に最適です。"
   },
   "servers.plan.medium.description": {
-    "message": "6〜15人のプレイヤーと複数のModに最適。"
+    "message": "6〜15人のプレイヤーと複数のモードに対応しており、とてもおすすめです。"
   },
   "servers.plan.small.description": {
-    "message": "いくつかの軽量なModで1〜5人に最適。"
+    "message": "ちょっとした軽めのMODを入れれば、友達1〜5人にぴったりです。"
+  },
+  "servers.purchase.step.plan.most-popular": {
+    "message": "最も人気のプラン\n"
+  },
+  "servers.purchase.step.plan.per-month-billing": {
+    "message": "/ 月{interval, select, monthly {} quarterly {（四半期払い）} yearly {（年払い）} other {（{interval}払い）}}"
   },
   "settings.account.button.complete-setup": {
     "message": "セットアップを完了"
@@ -3518,11 +4118,20 @@
   "settings.account.security.email.title": {
     "message": "メールドレス"
   },
+  "settings.account.security.passkey.add-modal.name.description": {
+    "message": "後でこのパスキーを識別できるように、覚えやすい名前を付けてください。"
+  },
   "settings.account.security.passkey.add-modal.name.label": {
     "message": "名前"
   },
   "settings.account.security.passkey.add-modal.name.placeholder": {
     "message": "私のパスキー"
+  },
+  "settings.account.security.passkey.add-modal.title": {
+    "message": "パスキーを追加"
+  },
+  "settings.account.security.passkey.add.button": {
+    "message": "パスキーを追加する"
   },
   "settings.account.security.passkey.button": {
     "message": "パスキーを管理"
@@ -3530,8 +4139,32 @@
   "settings.account.security.passkey.description": {
     "message": "パスキーを追加するか、パスキーを管理できます。"
   },
+  "settings.account.security.passkey.modal.added": {
+    "message": "{ago}に追加しました"
+  },
+  "settings.account.security.passkey.modal.last-used": {
+    "message": "最後に使用したのは{ago}です"
+  },
+  "settings.account.security.passkey.modal.loading": {
+    "message": "パスキーを読み込んでいます…"
+  },
+  "settings.account.security.passkey.modal.never-used": {
+    "message": "未使用です"
+  },
+  "settings.account.security.passkey.modal.no-passkeys": {
+    "message": "登録されているパスキーはありません。"
+  },
   "settings.account.security.passkey.remove.button": {
     "message": "パスキーを削除"
+  },
+  "settings.account.security.passkey.remove.description": {
+    "message": "この操作を行うと、パスキー「{name}」が完全に削除されます。このパスキーを使用してサインインできなくなります。"
+  },
+  "settings.account.security.passkey.remove.title": {
+    "message": "このパスキーを削除してもよろしいですか？"
+  },
+  "settings.account.security.passkey.rename-modal.header": {
+    "message": "パスキーの名前を変更する"
   },
   "settings.account.security.passkey.title": {
     "message": "パスキーを管理"
@@ -3575,6 +4208,12 @@
   "settings.account.security.two-factor.description": {
     "message": "ログイン時のアカウントのセキュリティをさらに強化します。"
   },
+  "settings.account.security.two-factor.modal.remove.header": {
+    "message": "2段階認証を解除する"
+  },
+  "settings.account.security.two-factor.modal.setup.header": {
+    "message": "2段階認証を設定する"
+  },
   "settings.account.security.two-factor.title": {
     "message": "2段階認証"
   },
@@ -3585,16 +4224,10 @@
     "message": "バックアップコードは1回のみ使用可能です。"
   },
   "settings.account.two-factor.error.incorrect-code": {
-    "message": "入力されたコードが正しくありません。"
-  },
-  "settings.account.two-factor.field.code.description": {
-    "message": "続行するには二要素認証コードを入力してください。"
+    "message": "入力されたコードが間違っています！"
   },
   "settings.account.two-factor.field.code.label": {
     "message": "二要素認証コードを入力"
-  },
-  "settings.account.two-factor.field.code.placeholder": {
-    "message": "コードを入力…"
   },
   "settings.account.two-factor.setup.intro": {
     "message": "2段階認証では、サインイン時にあなたの別のデバイスへのアクセスを求めることで、アカウントの安全性を高めます。"
@@ -3701,11 +4334,23 @@
   "settings.authorizations.about-this-app": {
     "message": "このアプリについて"
   },
+  "settings.authorizations.created-by": {
+    "message": "{user}によって作成されました\n"
+  },
   "settings.authorizations.description": {
-    "message": "Modrinthアカウントでアプリケーションを承認することにより、アプリケーションがあなたのアカウントにアクセスできるようになります。 アクセス権はいつでも確認でき、変更可能です。"
+    "message": "Modrinthアカウントでアプリケーションを認証すると、そのアプリケーションにアカウントへのアクセス権を付与したことになります。アカウントへのアクセス権は、いつでもこちらから管理・確認できます。"
+  },
+  "settings.authorizations.empty-state.description": {
+    "message": "認証したアプリがここに表示されます。"
+  },
+  "settings.authorizations.empty-state.heading": {
+    "message": "認証済みアプリはありません\n"
   },
   "settings.authorizations.head-title": {
     "message": "承認"
+  },
+  "settings.authorizations.official-tooltip": {
+    "message": "このアプリは、Modrinth公式アカウントによって作成されています。\n"
   },
   "settings.authorizations.revoke.action": {
     "message": "取り消す"
@@ -3715,6 +4360,9 @@
   },
   "settings.authorizations.revoke.confirm.title": {
     "message": "アプリケーションのアクセス権を取り消してもよろしいですか？"
+  },
+  "settings.authorizations.unofficial-disclosure": {
+    "message": "このアプリは、その名前に反して、Modrinthとは一切関係ありません。\n"
   },
   "settings.billing.charges.description": {
     "message": "Modrinthアカウントでの過去の支払い履歴は、こちらに表示されます："
@@ -3744,7 +4392,7 @@
     "message": "年"
   },
   "settings.billing.midas.benefits.ad-free": {
-    "message": "modrinth.comとModrinth Appを広告なしでブラウジング"
+    "message": "modrinth.comおよびModrinthアプリでの広告なしのブラウジング"
   },
   "settings.billing.midas.benefits.badge": {
     "message": "Modrinth+バッジをプロフィールに表示"
@@ -3831,7 +4479,7 @@
     "message": "{shared}個の共有されたCPU ({bursts}個のCPUに増加)"
   },
   "settings.billing.pyro.linked-server.not-found": {
-    "message": "このサブスクリプションに対応するサーバーが見つかりませんでした。これにはいくつか説明があります。あなたがサーバーを購入してすぐの場合、これは通常であり、サーバーが提供されるまで長くて1時間かかります。しばらく前にサーバーを購入していた場合はおそらくそれ以来サーバーが停止されています。これが期待したものではない場合は、以下の情報と共にModrinth Supportにお問い合わせください："
+    "message": "このサブスクリプションに紐づくサーバーが見つかりませんでした。これにはいくつかの理由が考えられます。サーバーを購入したばかりの場合は、これは正常な動作です。サーバーのプロビジョニング（構築）に最大1時間かかることがあります。それ以外の場合で、サーバーをしばらく前に購入していた場合は、その後停止（サスペンド）された可能性が高いです。お心当たりがない場合は、以下の情報とともにModrinthサポートまでお問い合わせください:"
   },
   "settings.billing.pyro.linked-server.server-id": {
     "message": "サーバーID: {id}"
@@ -3849,7 +4497,7 @@
     "message": "再登録エラー"
   },
   "settings.billing.pyro.resubscribe.request-submitted.text": {
-    "message": "サーバーが現在キャンセルされている場合、サーバーの設定に10~15分かかる場合があります"
+    "message": "サーバーがキャンセルされている場合、再構築に10〜15分程度お時間をいただく場合がございます。"
   },
   "settings.billing.pyro.resubscribe.request-submitted.title": {
     "message": "再加入申請を受け付けました"
@@ -3908,95 +4556,11 @@
   "settings.display.banner.developer-mode.description": {
     "message": "<strong>開発者モード</strong> が有効です。これにより、Modrinth全体の様々な内部IDを表示することができ、Modrinth APIを使用する開発に役立ちます。ページの下部にあるModrinthロゴを5回クリックすると、開発者モードが切り替わります。"
   },
-  "settings.display.flags.description": {
-    "message": "このデバイスで特定の機能を有効または無効にします。"
-  },
-  "settings.display.flags.title": {
-    "message": "機能の切り替え"
-  },
   "settings.display.notification.developer-mode-deactivated.text": {
     "message": "開発者モードが無効になりました"
   },
   "settings.display.notification.developer-mode-deactivated.title": {
     "message": "開発者モード無効"
-  },
-  "settings.display.project-list-layouts.datapack": {
-    "message": "データパックページ"
-  },
-  "settings.display.project-list-layouts.description": {
-    "message": "このデバイスでプロジェクト一覧を表示する各ページのレイアウトをお選びください。"
-  },
-  "settings.display.project-list-layouts.mod": {
-    "message": "Modページ"
-  },
-  "settings.display.project-list-layouts.mode.gallery": {
-    "message": "ギャラリー"
-  },
-  "settings.display.project-list-layouts.mode.grid": {
-    "message": "グリッド表示"
-  },
-  "settings.display.project-list-layouts.mode.rows": {
-    "message": "行表示"
-  },
-  "settings.display.project-list-layouts.modpack": {
-    "message": "Modパックページ"
-  },
-  "settings.display.project-list-layouts.plugin": {
-    "message": "プラグインページ"
-  },
-  "settings.display.project-list-layouts.resourcepack": {
-    "message": "リソースパックページ"
-  },
-  "settings.display.project-list-layouts.server": {
-    "message": "サーバーページ"
-  },
-  "settings.display.project-list-layouts.shader": {
-    "message": "シェーダーページ"
-  },
-  "settings.display.project-list-layouts.title": {
-    "message": "プロジェクト一覧のレイアウト"
-  },
-  "settings.display.project-list-layouts.user": {
-    "message": "ユーザープロフィールページ"
-  },
-  "settings.display.project-list.layouts.collection": {
-    "message": "コレクション"
-  },
-  "settings.display.sidebar.advanced-rendering.description": {
-    "message": "ぼかし効果などの高度なレンダリングを有効にします。グラフィックアクセラレーションが使用できない場合は、パフォーマンスが低下する可能性があります。"
-  },
-  "settings.display.sidebar.advanced-rendering.title": {
-    "message": "高度なレンダリング"
-  },
-  "settings.display.sidebar.external-links-new-tab.description": {
-    "message": "Modrinth外のリンクを新しいタブで開くように設定します。この設定にかかわらず、同一ドメイン上のリンクとMarkdownの概要欄のリンクは同じタブで開かれ、広告ページと編集ページ上のリンクは新しいタブで開かれます。"
-  },
-  "settings.display.sidebar.external-links-new-tab.title": {
-    "message": "外部リンクを新しいタブで開く"
-  },
-  "settings.display.sidebar.hide-app-promos.description": {
-    "message": "「Modrinth Appを入手」ボタンをプライマリナビゲーションから非表示にします。Modrinth Appのページは、ランディングページまたはフッターに表示されます。"
-  },
-  "settings.display.sidebar.hide-app-promos.title": {
-    "message": "Modrinth Appのプロモーションを非表示"
-  },
-  "settings.display.sidebar.left-aligned-content-sidebar.title": {
-    "message": "コンテンツの左寄せサイドバー"
-  },
-  "settings.display.sidebar.right-aligned-content-sidebar.description": {
-    "message": "コンテンツのサイドバーをページの左側に揃えます。"
-  },
-  "settings.display.sidebar.right-aligned-filters-sidebar.description": {
-    "message": "検索フィルターのサイドバーを検索結果の右側に揃えます。"
-  },
-  "settings.display.sidebar.right-aligned-filters-sidebar.title": {
-    "message": "検索フィルターの右寄せサイドバー"
-  },
-  "settings.display.theme.description": {
-    "message": "このデバイスでのお好みのテーマを選択してください。"
-  },
-  "settings.display.theme.title": {
-    "message": "テーマ"
   },
   "settings.head-title": {
     "message": "表示設定"
@@ -4082,6 +4646,33 @@
   "settings.sidebar.label.display": {
     "message": "表示"
   },
+  "shared-instance.invite.accept": {
+    "message": "招待を受け入れる\n"
+  },
+  "shared-instance.invite.inviter.unknown": {
+    "message": "Modrinthユーザー\n"
+  },
+  "shared-instance.invite.joined-count": {
+    "message": "すでに {count, plural, other {# 人}}が参加しています"
+  },
+  "shared-instance.invite.loading": {
+    "message": "招待を読み込んでいます…\n"
+  },
+  "shared-instance.invite.title": {
+    "message": "{name}さんからゲームへの招待が届いています\n"
+  },
+  "shared-instance.invite.trust.description": {
+    "message": "この招待はModrinthではなく、別のModrinthユーザーによって作成されたものです。信頼できる人からの招待のみ受け入れてください。\n"
+  },
+  "shared-instance.invite.trust.heading": {
+    "message": "このユーザーを知っていますか？\n"
+  },
+  "shared-instance.invite.unavailable.description": {
+    "message": "招待の有効期限が切れているか、使用回数の上限に達したか、共有したユーザーによって削除された可能性があります。\n"
+  },
+  "shared-instance.invite.unavailable.title": {
+    "message": "この招待は利用できません。\n"
+  },
   "ui.latest-news-row.latest-news": {
     "message": "Modrinthの最新ニュース"
   },
@@ -4092,7 +4683,7 @@
     "message": "登録"
   },
   "ui.newsletter-button.subscribed": {
-    "message": "登録しました！"
+    "message": "チャンネル登録したよ！"
   },
   "ui.newsletter-button.tooltip": {
     "message": "Modrinthのニュースレターに登録する"
@@ -4100,11 +4691,35 @@
   "version.all-versions": {
     "message": "全てのバージョン"
   },
+  "version.confirm-delete.description": {
+    "message": "このバージョンは完全に削除されます。この操作は取り消せません。\n"
+  },
+  "version.confirm-delete.proceed": {
+    "message": "バージョンを削除する\n"
+  },
+  "version.confirm-delete.title": {
+    "message": "このバージョンを削除してもよろしいですか？\n"
+  },
   "version.dependency.view-project": {
     "message": "プロジェクトを見る"
   },
   "version.dependency.view-version": {
     "message": "バージョンを見る"
+  },
+  "version.download.download-dependency": {
+    "message": "ダウンロードするバージョンを選択してください\n"
+  },
+  "version.download.no-primary-file": {
+    "message": "エラー：メインファイルが見つかりません"
+  },
+  "version.download.optional-resource-pack": {
+    "message": "任意のリソースパック"
+  },
+  "version.download.required-resource-pack": {
+    "message": "必須のリソースパック"
+  },
+  "version.download.version": {
+    "message": "ダウンロード{version}{size}"
   },
   "version.edit.button": {
     "message": "編集"
@@ -4125,12 +4740,66 @@
     "message": "環境設定が指定されていません"
   },
   "version.environment.unknown.description": {
-    "message": "環境: 「{environment}」が認識されていません。"
+    "message": "環境「{environment}」は認識されません。"
   },
   "version.environment.unknown.title": {
     "message": "不明な環境"
   },
+  "version.notification.deleted-text": {
+    "message": "バージョンを正常に削除しました。"
+  },
+  "version.notification.deleted-title": {
+    "message": "バージョンを削除しました"
+  },
+  "version.notification.packaging-success-text": {
+    "message": "データパックを正常にMODとしてパッケージ化しました！エラーがないか確認するため、必ず動作テストを行ってください。"
+  },
+  "version.notification.packaging-success-title": {
+    "message": "パッケージ化に成功しました"
+  },
+  "version.package-as-mod.button": {
+    "message": "MODとしてパッケージ化"
+  },
+  "version.package-as-mod.description": {
+    "message": "選択したMODローダーに対応した新しいバージョンを作成します。作成後は新しいバージョンに移動し、自由に編集できます。"
+  },
+  "version.package-as-mod.header": {
+    "message": "データパックをMODとしてパッケージ化"
+  },
+  "version.package-as-mod.mod-loaders": {
+    "message": "MODローダー"
+  },
+  "version.package-as-mod.mod-loaders.description": {
+    "message": "データパックを対応させたいMODローダー。\n"
+  },
+  "version.package-as-mod.mod-loaders.placeholder": {
+    "message": "MODローダーを選択…\n"
+  },
+  "version.package-as-mod.submit-button": {
+    "message": "データパックをパッケージ化する\n"
+  },
+  "version.section.content.dev-info": {
+    "message": "開発者情報\n"
+  },
+  "version.section.content.dev-info.maven-description": {
+    "message": "Modrinthのプロジェクトは、<gradle-link>Gradle</gradle-link>などのJVMビルドツールで利用できるMavenリポジトリから自動的に取得できます。Modrinth Maven APIの詳細については、<article-link>こちら</article-link>をご覧ください。"
+  },
+  "version.section.content.dev-info.maven-note": {
+    "message": "注: 利用可能な場合は、Modrinth Maven APIではなく、クリエイターのMavenリポジトリを使用することをおすすめします。クリエイターのMavenリポジトリには、Modrinth Maven APIでは提供されない推移的依存関係の情報が含まれているためです。また、Modrinthとそれ以外のMavenリポジトリを組み合わせて依存関係を指定すると、重複した依存関係が発生する場合があります。これは、Modrinth Maven APIを介して提供される場合、グループ識別子が異なるためです。\n"
+  },
   "version.section.content.dev-info.version-id": {
     "message": "バージョンID："
+  },
+  "version.supplementary-resources.copy-hash-sha1": {
+    "message": "SHA-1をコピー"
+  },
+  "version.supplementary-resources.copy-hash-sha512": {
+    "message": "SHA-512をコピー"
+  },
+  "version.unknown-embedded-content.description": {
+    "message": "このバージョンは現在保留されており、一般公開されていません。含まれている特定のファイルを再配布する許可を得ていることを証明する資料を提出してください。\n"
+  },
+  "version.unknown-embedded-content.title": {
+    "message": "不明な埋め込みコンテンツが含まれているため保留中"
   }
 }

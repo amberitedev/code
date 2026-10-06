@@ -1,3 +1,4 @@
+use crate::util::error::ApiContext as _;
 use std::collections::HashMap;
 
 use super::ApiError;
@@ -35,7 +36,7 @@ pub struct CategoryData {
     pub header: String,
 }
 
-/// List project categories.  
+/// List project categories.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -54,7 +55,9 @@ pub async fn category_list(
     pool: web::Data<PgPool>,
     redis: web::Data<RedisPool>,
 ) -> Result<HttpResponse, ApiError> {
-    let response = v3::tags::category_list(pool, redis).await?;
+    let response = v3::tags::category_list(pool, redis)
+        .await
+        .wrap_api_err("executing `tags::category_list`")?;
 
     // Convert to V2 format
     match v2_reroute::extract_ok_json::<Vec<v3::tags::CategoryData>>(response)
@@ -83,7 +86,7 @@ pub struct LoaderData {
     pub supported_project_types: Vec<String>,
 }
 
-/// List loaders.  
+/// List loaders.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -102,7 +105,9 @@ pub async fn loader_list(
     pool: web::Data<PgPool>,
     redis: web::Data<RedisPool>,
 ) -> Result<HttpResponse, ApiError> {
-    let response = v3::tags::loader_list(pool, redis).await?;
+    let response = v3::tags::loader_list(pool, redis)
+        .await
+        .wrap_api_err("executing `tags::loader_list`")?;
 
     // Convert to V2 format
     match v2_reroute::extract_ok_json::<Vec<v3::tags::LoaderData>>(response)
@@ -159,7 +164,7 @@ pub struct GameVersionQuery {
     major: Option<bool>,
 }
 
-/// List game versions.  
+/// List game versions.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -198,7 +203,8 @@ pub async fn game_version_list(
         }),
         redis,
     )
-    .await?;
+    .await
+    .wrap_api_err("fetching game versions")?;
 
     // Convert to V2 format
     Ok(
@@ -228,7 +234,7 @@ pub struct License {
     pub name: String,
 }
 
-/// List SPDX license identifiers and names.  
+/// List SPDX license identifiers and names.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -269,7 +275,7 @@ pub struct LicenseText {
     pub body: String,
 }
 
-/// Get full license text by SPDX ID.  
+/// Get full license text by SPDX ID.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -293,7 +299,8 @@ pub async fn license_text(
 ) -> Result<HttpResponse, ApiError> {
     let license = v3::tags::license_text(params)
         .await
-        .or_else(v2_reroute::flatten_404_error)?;
+        .or_else(v2_reroute::flatten_404_error)
+        .wrap_api_err("flattening v2 not-found response")?;
 
     // Convert to V2 format
     Ok(
@@ -320,7 +327,7 @@ pub struct DonationPlatformQueryData {
     pub name: String,
 }
 
-/// List donation platforms.  
+/// List donation platforms.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -339,7 +346,9 @@ pub async fn donation_platform_list(
     pool: web::Data<PgPool>,
     redis: web::Data<RedisPool>,
 ) -> Result<HttpResponse, ApiError> {
-    let response = v3::tags::link_platform_list(pool, redis).await?;
+    let response = v3::tags::link_platform_list(pool, redis)
+        .await
+        .wrap_api_err("executing `tags::link_platform_list`")?;
 
     // Convert to V2 format
     Ok(
@@ -380,7 +389,7 @@ pub async fn donation_platform_list(
     .or_else(v2_reroute::flatten_404_error)
 }
 
-/// List valid report types.  
+/// List valid report types.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -405,7 +414,7 @@ pub async fn report_type_list(
         .or_else(v2_reroute::flatten_404_error)
 }
 
-/// List valid project types.  
+/// List valid project types.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",
@@ -430,7 +439,7 @@ pub async fn project_type_list(
         .or_else(v2_reroute::flatten_404_error)
 }
 
-/// List valid side-type values.  
+/// List valid side-type values.
 #[utoipa::path(
 	context_path = "/tag",
 	tag = "tags",

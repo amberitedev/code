@@ -176,9 +176,8 @@
 							<PanelServerActionButton />
 							<Tooltip
 								theme="dismissable-prompt"
-								:triggers="[]"
-								:shown="showSettingsHint"
-								:auto-hide="false"
+								:open="showSettingsHint"
+								:disabled="!showSettingsHint"
 								placement="bottom-end"
 							>
 								<IconButton
@@ -228,13 +227,15 @@
 			<ServerOnboardingPanelPage v-if="isOnboarding" :browse-modpacks="handleBrowseModpacks" />
 
 			<template v-else>
-				<div
-					data-pyro-navigation
-					class="server-stagger-item isolate flex w-full select-none flex-col justify-between gap-4 overflow-auto md:flex-row md:items-center"
-					:class="containedLayout ? 'shrink-0' : ''"
-					:style="{ '--si': 1 }"
-				>
-					<NavTabs :links="navLinks" replace />
+				<div class="server-stagger-item -mb-3">
+					<NavTabs
+						:links="navLinks"
+						replace
+						page-nav
+						data-pyro-navigation
+						:class="containedLayout ? 'shrink-0' : ''"
+						:style="{ '--si': 1 }"
+					/>
 				</div>
 
 				<div
@@ -328,7 +329,6 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useStorage } from '@vueuse/core'
 import DOMPurify from 'dompurify'
-import { Tooltip } from 'floating-vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
@@ -342,6 +342,7 @@ import PageHeaderMetadataItem from '#ui/components/base/page-header/metadata/pag
 import PageHeaderActions from '#ui/components/base/page-header/page-header-actions.vue'
 import ServerNotice from '#ui/components/base/ServerNotice.vue'
 import TagIcon from '#ui/components/base/TagIcon.vue'
+import { Tooltip } from '#ui/components/floating'
 import ConfirmLeaveModal from '#ui/components/modal/ConfirmLeaveModal.vue'
 import ServerPanelAdmonitions from '#ui/components/servers/admonitions/ServerPanelAdmonitions.vue'
 import ServerIcon from '#ui/components/servers/icons/ServerIcon.vue'
@@ -591,7 +592,7 @@ const {
 })
 
 const serverHeaderImage = computed(() =>
-	serverData.value?.is_medal ? 'https://cdn-raw.modrinth.com/medal_icon.webp' : serverImage.value,
+	serverData.value?.is_medal ? 'https://cdn.modrinth.com/medal_icon.webp' : serverImage.value,
 )
 
 const showServerUptime = computed(() => props.showUptime && serverPowerState.value === 'running')
@@ -877,10 +878,10 @@ const popupOptions = computed(
 				modpack_id: serverProject.value?.id,
 				modpack_name: serverProject.value?.title,
 			},
-			onOpen: () => console.log(`Opened survey notice: ${surveyNotice.value?.id}`),
+			onOpen: () => debug(`Opened survey notice: ${surveyNotice.value?.id}`),
 			onClose: async () => await dismissSurvey(),
 			onSubmit: (payload: unknown) => {
-				console.log('Form submitted:', payload)
+				debug('Form submitted:', payload)
 			},
 		}) satisfies TallyPopupOptions,
 )

@@ -12,6 +12,8 @@
 				ref="create-project-version-modal"
 			></CreateProjectVersionModal>
 
+			<ProjectC2paScanModal ref="project-c2pa-scan-modal"></ProjectC2paScanModal>
+
 			<ConfirmModal
 				v-if="currentMember"
 				ref="deleteVersionModal"
@@ -52,6 +54,20 @@
 						@click="emit('onDownload')"
 					>
 						<DownloadIcon aria-hidden="true" />
+					</ButtonLink>
+					<ButtonLink
+						v-if="
+							!!getPrimaryFile(version) &&
+							isStaff(auth.user) &&
+							modSettings.get(moderationSettings.General.SlicerButtonInVersions)
+						"
+						v-tooltip="`Open in Slicer`"
+						type="quiet"
+						target="_blank"
+						:href="`https://slicer.run/?url=${encodeURIComponent(createDownloadUrl(version))}`"
+						class="!w-9 !rounded-full !px-0 hover:!bg-button-bg"
+					>
+						<ExternalIcon aria-hidden="true" />
 					</ButtonLink>
 					<TeleportOverflowMenu
 						v-if="currentMember"
@@ -141,6 +157,14 @@
 									auth.user ? reportVersion(version.id) : navigateTo(getSignInRouteObj(route)),
 								shown: !currentMember,
 							},
+							{ type: 'divider', shown: isStaff(auth.user) },
+							{
+								id: 'view-c2pa-info',
+								label: 'View C2PA info',
+								tone: 'orange',
+								action: () => projectC2paScanModal.openC2paModal(createDownloadUrl(version)),
+								shown: isStaff(auth.user),
+							},
 							{ type: 'divider', shown: currentMember || flags.developerMode },
 							{
 								id: 'copy-id',
@@ -228,6 +252,10 @@
 							<TrashIcon aria-hidden="true" />
 							Delete
 						</template>
+						<template #view-c2pa-info>
+							<ScanEyeIcon aria-hidden="true" />
+							View C2PA Info
+						</template>
 						<template #copy-id>
 							<ClipboardCopyIcon aria-hidden="true" />
 							Copy ID
@@ -264,10 +292,12 @@ import {
 	LinkIcon,
 	MoreVerticalIcon,
 	ReportIcon,
+	ScanEyeIcon,
 	ShareIcon,
 	SpinnerIcon,
 	TrashIcon,
 } from '@modrinth/assets'
+import { moderationSettings } from '@modrinth/moderation'
 import {
 	ButtonLink,
 	ConfirmModal,
@@ -277,9 +307,11 @@ import {
 	ProjectPageVersions,
 	TeleportOverflowMenu,
 } from '@modrinth/ui'
+import { isStaff } from '@modrinth/utils'
 import { onMounted, useTemplateRef, watch } from 'vue'
 
 import CreateProjectVersionModal from '~/components/ui/create-project-version/CreateProjectVersionModal.vue'
+import ProjectC2paScanModal from '~/components/ui/moderation/ProjectC2paScanModal.vue'
 import { getSignInRouteObj } from '~/composables/auth.ts'
 import { reportVersion } from '~/utils/report-helpers.ts'
 
@@ -289,6 +321,7 @@ const { createProjectDownloadUrl, updateVersionsFilterContext } = useCdnDownload
 
 const tags = useGeneratedState()
 const flags = useFeatureFlags()
+const modSettings = useModerationSettings()
 const auth = await useAuth()
 
 const client = injectModrinthClient()
@@ -319,6 +352,7 @@ onMounted(() => {
 const deleteVersionModal = ref()
 const selectedVersion = ref(null)
 const createProjectVersionModal = useTemplateRef('create-project-version-modal')
+const projectC2paScanModal = useTemplateRef('project-c2pa-scan-modal')
 
 const handleOpenCreateVersionModal = () => {
 	if (!currentMember.value) return

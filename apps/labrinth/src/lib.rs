@@ -20,7 +20,7 @@ use crate::background_task::update_versions;
 use crate::database::{PgPool, ReadOnlyPgPool};
 use crate::env::ENV;
 use crate::queue::billing::{index_billing, index_subscriptions};
-use crate::routes::internal::delphi::rescan::rescan_projects_in_queue;
+use crate::routes::internal::delphi::rescan::enqueue_tech_review_files_for_new_delphi_version;
 use crate::util::anrok;
 use crate::util::archon::ArchonClient;
 use crate::util::http::HttpClient;
@@ -114,13 +114,16 @@ pub fn app_setup(
         });
     }
     {
-        let pool_ref = pool.clone();
-        let http_ref = http_client.clone();
+        let pool = pool.clone();
+        let kafka_client = kafka_client.clone();
         actix_rt::spawn(async move {
-            if let Err(err) =
-                rescan_projects_in_queue(&pool_ref, &http_ref).await
+            if let Err(err) = enqueue_tech_review_files_for_new_delphi_version(
+                &pool,
+                &kafka_client,
+            )
+            .await
             {
-                warn!("Delphi rescan failed: {err:#}");
+                warn!("Delphi tech review rescan enqueue failed: {err:#}");
             }
         });
     }
@@ -265,11 +268,11 @@ pub fn app_setup(
     let active_sockets = web::Data::new(ActiveSockets::default());
 
     {
-        let pool = pool.clone();
+        let ro_pool = ro_pool.clone();
         let pubsub_messages = redis_pool.subscribe(FRIENDS_CHANNEL_NAME);
         let sockets = active_sockets.clone();
         actix_rt::spawn(async move {
-            handle_pubsub(pubsub_messages, pool, sockets).await;
+            handle_pubsub(pubsub_messages, ro_pool, sockets).await;
         });
     }
 
@@ -328,16 +331,16 @@ pub fn app_data_config(
     labrinth_config: LabrinthConfig,
 ) {
     cfg.app_data(web::FormConfig::default().error_handler(|err, _req| {
-        routes::ApiError::Validation(err.to_string()).into()
+        routes::ApiError::Request(eyre::eyre!("{err}")).into()
     }))
     .app_data(web::PathConfig::default().error_handler(|err, _req| {
-        routes::ApiError::Validation(err.to_string()).into()
+        routes::ApiError::Request(eyre::eyre!("{err}")).into()
     }))
     .app_data(web::QueryConfig::default().error_handler(|err, _req| {
-        routes::ApiError::Validation(err.to_string()).into()
+        routes::ApiError::Request(eyre::eyre!("{err}")).into()
     }))
     .app_data(web::JsonConfig::default().error_handler(|err, _req| {
-        routes::ApiError::Validation(err.to_string()).into()
+        routes::ApiError::Request(eyre::eyre!("{err}")).into()
     }))
     .app_data(web::Data::new(labrinth_config.redis_pool.clone()))
     .app_data(web::Data::new(labrinth_config.pool.clone()))

@@ -124,6 +124,10 @@ export const commonMessages = defineMessages({
 		id: 'button.download',
 		defaultMessage: 'Download',
 	},
+	downloadFilesButton: {
+		id: 'button.download-files',
+		defaultMessage: 'Download files',
+	},
 	downloadingButton: {
 		id: 'button.downloading',
 		defaultMessage: 'Downloading',
@@ -828,6 +832,7 @@ export const financialMessages = defineMessages({
 
 const PROJECT_TYPE_ALIASES: Record<string, string> = {
 	shaderpack: 'shader',
+	minecraft_java_server: 'server',
 }
 
 export function normalizeProjectType(type: string): string {
@@ -1239,10 +1244,6 @@ export const disclosureAiUsageMessages = defineMessages({
 		id: 'project.settings.disclosures.ai.types-text',
 		defaultMessage: 'Text',
 	},
-	functionality: {
-		id: 'project.settings.disclosures.ai.types-functionality',
-		defaultMessage: 'Functionality',
-	},
 })
 
 export const disclosureTelemetryConsentMessages = defineMessages({
@@ -1465,7 +1466,7 @@ export const fileTypeMessages: Record<
 	}),
 	'sources-jar': defineMessage({
 		id: 'version.file-type.sources-jar',
-		defaultMessage: 'Source jar',
+		defaultMessage: 'Sources jar',
 	}),
 	'dev-jar': defineMessage({
 		id: 'version.file-type.dev-jar',
@@ -1473,7 +1474,7 @@ export const fileTypeMessages: Record<
 	}),
 	'javadoc-jar': defineMessage({
 		id: 'version.file-type.javadoc-jar',
-		defaultMessage: 'Javadoc jar',
+		defaultMessage: 'Javadocs jar',
 	}),
 	signature: defineMessage({
 		id: 'version.file-type.signature',

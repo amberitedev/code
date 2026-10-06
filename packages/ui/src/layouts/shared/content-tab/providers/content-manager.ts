@@ -1,10 +1,10 @@
 import type { ComputedRef, Ref } from 'vue'
 
-import type { OverflowMenuOption } from '#ui/components/base/buttons'
+import type { ButtonMenuOption } from '#ui/components/base/buttons'
+import type { UpdateAllSelection } from '#ui/components/modal/update-all-modal/update-all-modal-types'
 import { createContext } from '#ui/providers/create-context'
 
 import type {
-	BulkOperationStatus,
 	ContentActionWarning,
 	ContentCardTableItem,
 	ContentItem,
@@ -44,6 +44,8 @@ export interface ContentManagerContext {
 
 	// Labelling
 	contentTypeLabel: Ref<string> | ComputedRef<string>
+	currentGameVersion?: Ref<string> | ComputedRef<string>
+	currentLoader?: Ref<string> | ComputedRef<string>
 
 	// Core actions
 	toggleEnabled: (item: ContentItem) => Promise<void>
@@ -60,16 +62,20 @@ export interface ContentManagerContext {
 	canToggleItem?: (item: ContentItem) => boolean
 	getDeleteWarning?: (items: ContentItem[]) => ContentActionWarning | null
 	getDisableWarning?: (items: ContentItem[]) => ContentActionWarning | null
+	confirmAction?: (action: 'enable' | 'disable', items: ContentItem[]) => Promise<boolean>
+	confirmDeleteItems?: (items: ContentItem[]) => Promise<boolean | undefined>
 	getDeleteDependencyWarning?: (
 		items: ContentItem[],
 	) => ContentDependencyWarning | null | Promise<ContentDependencyWarning | null>
 
 	// Update support (optional per-platform)
 	hasUpdateSupport: boolean
+	bulkUpdatesInBackground?: boolean
 	updateItem?: (id: string) => void
-	bulkUpdateAll?: (onProgress?: (status: BulkOperationStatus) => void) => Promise<void>
-	bulkUpdateItem?: (item: ContentItem) => Promise<void>
-	bulkUpdateItems?: (items: ContentItem[]) => Promise<void>
+	bulkUpdateSelections?: (
+		selections: UpdateAllSelection[],
+		onProgress?: (completed: number) => void,
+	) => Promise<void>
 
 	// Managed-content actions (optional)
 	runManagedContentPrimaryAction?: (event?: MouseEvent) => void
@@ -81,7 +87,7 @@ export interface ContentManagerContext {
 	switchVersion?: (item: ContentItem) => void
 
 	// Per-item overflow menu (optional)
-	getOverflowOptions?: (item: ContentItem) => OverflowMenuOption[]
+	getOverflowOptions?: (item: ContentItem) => ButtonMenuOption[]
 
 	// Share support (optional — when undefined, share button becomes hidden entirely)
 	shareItems?: (items: ContentItem[], format: 'names' | 'file-names' | 'urls' | 'markdown') => void
@@ -99,7 +105,7 @@ export interface ContentManagerContext {
 	// Table item mapping (link generation differs per platform)
 	mapToTableItem: (item: ContentItem) => ContentCardTableItem
 
-	// Filter persistence key — when set, selected filters are saved/restored via sessionStorage
+	// Filter persistence key — when set, filter and sort settings are saved/restored via sessionStorage
 	filterPersistKey?: string
 	showSharedContentFilter?: Ref<boolean> | ComputedRef<boolean>
 }

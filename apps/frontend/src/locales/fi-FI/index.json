@@ -5,9 +5,6 @@
   "action.continue": {
     "message": "Jatka"
   },
-  "admin.billing.error.not-found": {
-    "message": "Käyttäjää ei löydetty"
-  },
   "analytics.action.add": {
     "message": "Lisää"
   },
@@ -65,23 +62,11 @@
   "app-marketing.download.windows": {
     "message": "Windows"
   },
-  "app-marketing.features.follow.description": {
-    "message": "Tallenna sisältöä jota rakastat ja vastaanota päivityksiä yhdellä klikkauksella."
-  },
-  "app-marketing.features.follow.title": {
-    "message": "Seuraa projekteja"
-  },
-  "app-marketing.features.importing.description": {
-    "message": "Tuo kaikki lempi profiilisi launcherista jota käytit ennen, ja aloita Modrinth Appin käyttö sekunneissa!"
-  },
   "app-marketing.features.importing.gdlauncher-alt": {
     "message": "GDLauncher"
   },
   "app-marketing.features.importing.multimc-alt": {
     "message": "MultiMC"
-  },
-  "app-marketing.features.importing.title": {
-    "message": "Profiilien tuonti"
   },
   "app-marketing.features.mod-management.actions": {
     "message": "Toiminnot"
@@ -107,15 +92,6 @@
   "app-marketing.features.mod-management.version": {
     "message": "Versio"
   },
-  "app-marketing.features.offline.description": {
-    "message": "Pelaa modeillasi, olit sitten yhdistettynä internettiin tai et."
-  },
-  "app-marketing.features.offline.title": {
-    "message": "Offline tila"
-  },
-  "app-marketing.features.open-source.description": {
-    "message": "Modrinth launcherin lähdekoodi on täysin avointa. Voit lukea lähdekoodia meidän <github-link>Githubissa</github-link>!"
-  },
   "app-marketing.features.open-source.title": {
     "message": "Avoin lähdekoodi"
   },
@@ -125,9 +101,6 @@
   "app-marketing.features.performance.cpu-percent": {
     "message": "% CPU"
   },
-  "app-marketing.features.performance.description": {
-    "message": "Modrinth App toimii paremmin kuin monet johtavat modinhallintaohjelmat ja käyttää vain 150 MT RAM-muistia!"
-  },
   "app-marketing.features.performance.discord": {
     "message": "Discord"
   },
@@ -136,12 +109,6 @@
   },
   "app-marketing.features.performance.google-chrome": {
     "message": "Google Chrome"
-  },
-  "app-marketing.features.performance.infinite-mb": {
-    "message": "∞ MT"
-  },
-  "app-marketing.features.performance.less-than-150mb": {
-    "message": "< 150 MT"
   },
   "app-marketing.features.performance.modrinth-app": {
     "message": "Modrinth App"
@@ -272,9 +239,6 @@
   "auth.reset-password.title.long": {
     "message": "Palauta salasanasi"
   },
-  "auth.sign-in.2fa.placeholder": {
-    "message": "Anna koodi..."
-  },
   "auth.sign-in.title": {
     "message": "Kirjaudu sisään"
   },
@@ -385,9 +349,6 @@
   },
   "conversation-thread.action.approve-with-reply": {
     "message": "Hyväksy vastauksella"
-  },
-  "conversation-thread.action.close-thread": {
-    "message": "Sulje keskustelu"
   },
   "conversation-thread.action.close-with-reply": {
     "message": "Sulje vastauksella"
@@ -863,9 +824,6 @@
   "layout.footer.social.discord": {
     "message": "Discord"
   },
-  "layout.footer.social.github": {
-    "message": "GitHub"
-  },
   "layout.footer.social.mastodon": {
     "message": "Mastodon"
   },
@@ -980,9 +938,6 @@
   "project.settings.general.url.title": {
     "message": "URL"
   },
-  "project.settings.title": {
-    "message": "Asetukset"
-  },
   "project.versions.title": {
     "message": "Versiot"
   },
@@ -1030,21 +985,6 @@
   },
   "settings.billing.payment_method.primary": {
     "message": "Ensisijainen"
-  },
-  "settings.display.project-list-layouts.mod": {
-    "message": "Mods -sivu"
-  },
-  "settings.display.project-list-layouts.plugin": {
-    "message": "Plugins -sivu"
-  },
-  "settings.display.project-list-layouts.shader": {
-    "message": "Shaders -sivu"
-  },
-  "settings.display.project-list.layouts.collection": {
-    "message": "Kokoelma"
-  },
-  "settings.display.theme.title": {
-    "message": "Väri teema"
   },
   "settings.pats.modal.create.expires.label": {
     "message": "Vanhenee"

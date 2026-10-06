@@ -11,6 +11,8 @@ use crate::models::pats::Scopes;
 use crate::models::projects::FileType;
 use crate::queue::session::AuthQueue;
 use crate::routes::ApiError;
+use crate::util::error::ApiContext as _;
+use crate::util::error::Context;
 use crate::{auth::get_user_from_headers, database};
 use actix_web::{HttpRequest, HttpResponse, get, route, web};
 use quick_xml::escape::escape;
@@ -23,6 +25,86 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
     cfg.service(version_file_sha512);
     cfg.service(version_file_sha1);
     cfg.service(version_file);
+}
+
+async fn redirect_maven_ref(
+    req: &HttpRequest,
+    pool: &PgPool,
+    redis: &RedisPool,
+) -> Result<Option<HttpResponse>, ApiError> {
+    let Some(project_ref) = req.match_info().get("id") else {
+        return Ok(None);
+    };
+    let Some(target_project_id) =
+        crate::routes::resolve_ref(project_ref, pool, redis).await?
+    else {
+        return Ok(None);
+    };
+
+    let Some(route_pattern) = req.match_pattern() else {
+        return Ok(None);
+    };
+    let route_segments = route_pattern.split('/').collect::<Vec<_>>();
+    let Some(project_ref_index) =
+        route_segments.iter().position(|segment| *segment == "{id}")
+    else {
+        return Ok(None);
+    };
+    let mut path_segments = req
+        .uri()
+        .path()
+        .split('/')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let Some(project_ref_segment) = path_segments.get_mut(project_ref_index)
+    else {
+        return Ok(None);
+    };
+    let target_project_ref = target_project_id.to_string();
+    *project_ref_segment = target_project_ref.clone();
+
+    if let (Some(version), Some(filename)) = (
+        req.match_info().get("versionnum"),
+        req.match_info().get("file"),
+    ) {
+        let source_prefix = format!("{project_ref}-{version}");
+        if filename
+            .get(..source_prefix.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&source_prefix))
+        {
+            let target_prefix = format!("{target_project_ref}-{version}");
+            let rewritten_filename =
+                format!("{target_prefix}{}", &filename[source_prefix.len()..]);
+            if let Some(filename_index) = route_segments
+                .iter()
+                .position(|segment| segment.starts_with("{file}"))
+            {
+                let route_suffix = route_segments[filename_index]
+                    .strip_prefix("{file}")
+                    .unwrap_or_default();
+                if let Some(filename_segment) =
+                    path_segments.get_mut(filename_index)
+                {
+                    *filename_segment = format!(
+                        "{}{route_suffix}",
+                        urlencoding::encode(&rewritten_filename)
+                    );
+                }
+            }
+        }
+    }
+
+    let mut location = path_segments.join("/");
+    if let Some(query) = req.uri().query() {
+        location.push('?');
+        location.push_str(query);
+    }
+
+    Ok(Some(
+        HttpResponse::PermanentRedirect()
+            .append_header((actix_web::http::header::LOCATION, location))
+            .finish(),
+    ))
 }
 
 #[derive(Default, Debug, Clone, YaSerialize)]
@@ -83,11 +165,19 @@ pub async fn maven_metadata(
     redis: web::Data<RedisPool>,
     session_queue: web::Data<AuthQueue>,
 ) -> Result<HttpResponse, ApiError> {
+    if let Some(response) =
+        redirect_maven_ref(&req, pool.as_ref(), redis.as_ref()).await?
+    {
+        return Ok(response);
+    }
+
     let project_id = params.into_inner().0;
     let Some(project) =
-        database::models::DBProject::get(&project_id, &**pool, &redis).await?
+        database::models::DBProject::get(&project_id, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching Maven project")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
     let user_option = get_user_from_headers(
@@ -101,8 +191,11 @@ pub async fn maven_metadata(
     .map(|x| x.1)
     .ok();
 
-    if !is_visible_project(&project.inner, &user_option, &pool, false).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_project(&project.inner, &user_option, &pool, false)
+        .await
+        .wrap_api_err("checking project visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
     let version_names = sqlx::query!(
@@ -119,7 +212,8 @@ pub async fn maven_metadata(
             .collect::<Vec<String>>(),
     )
     .fetch_all(&**pool)
-    .await?;
+    .await
+    .wrap_internal_err("fetching version names from database")?;
 
     let mut new_versions = Vec::new();
     let mut vals = HashSet::new();
@@ -162,9 +256,11 @@ pub async fn maven_metadata(
         },
     };
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/xml")
-        .body(yaserde::ser::to_string(&respdata).map_err(ApiError::Xml)?))
+    Ok(HttpResponse::Ok().content_type("text/xml").body(
+        yaserde::ser::to_string(&respdata)
+            .map_err(eyre::Report::msg)
+            .wrap_internal_err("serializing Maven metadata as XML")?,
+    ))
 }
 
 async fn find_version(
@@ -179,7 +275,8 @@ async fn find_version(
 
     let all_versions =
         database::models::DBVersion::get_many(&project.versions, pool, redis)
-            .await?;
+            .await
+            .wrap_internal_err("fetching versions from database")?;
 
     let exact_matches = all_versions
         .iter()
@@ -199,7 +296,8 @@ async fn find_version(
     };
 
     let db_loaders: HashSet<String> = Loader::list(pool, redis)
-        .await?
+        .await
+        .wrap_internal_err("fetching loader from Redis")?
         .into_iter()
         .map(|x| x.loader)
         .collect();
@@ -265,8 +363,11 @@ fn find_file<'a>(
 
         if file_name.eq_ignore_ascii_case(&formatted_name) {
             return filtered_files
-                .find(|x| x.primary)
-                .or_else(|| filtered_files.next_back());
+                .try_fold(
+                    None,
+                    |_, x| if x.primary { Err(x) } else { Ok(Some(x)) },
+                )
+                .unwrap_or_else(Some);
         } else if file_name.len() > formatted_name.len()
             && file_name.as_bytes()[..formatted_name.len()]
                 .eq_ignore_ascii_case(formatted_name.as_bytes())
@@ -308,11 +409,19 @@ pub async fn version_file(
     redis: web::Data<RedisPool>,
     session_queue: web::Data<AuthQueue>,
 ) -> Result<HttpResponse, ApiError> {
+    if let Some(response) =
+        redirect_maven_ref(&req, pool.as_ref(), redis.as_ref()).await?
+    {
+        return Ok(response);
+    }
+
     let (project_id, vnum, file) = params.into_inner();
     let Some(project) =
-        database::models::DBProject::get(&project_id, &**pool, &redis).await?
+        database::models::DBProject::get(&project_id, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching Maven project")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
     let user_option = get_user_from_headers(
@@ -326,17 +435,25 @@ pub async fn version_file(
     .map(|x| x.1)
     .ok();
 
-    if !is_visible_project(&project.inner, &user_option, &pool, false).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_project(&project.inner, &user_option, &pool, false)
+        .await
+        .wrap_api_err("checking project visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
-    let Some(version) = find_version(&project, &vnum, &pool, &redis).await?
+    let Some(version) = find_version(&project, &vnum, &pool, &redis)
+        .await
+        .wrap_api_err("fetching Maven version")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
-    if !is_visible_version(&version.inner, &user_option, &pool, &redis).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_version(&version.inner, &user_option, &pool, &redis)
+        .await
+        .wrap_api_err("checking version visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
     if file.eq_ignore_ascii_case(&format!("{}-{}.pom", &project_id, &vnum)) {
@@ -352,9 +469,11 @@ pub async fn version_file(
             name: project.inner.name,
             description: escape(project.inner.summary).into_owned(),
         };
-        return Ok(HttpResponse::Ok()
-            .content_type("text/xml")
-            .body(yaserde::ser::to_string(&respdata).map_err(ApiError::Xml)?));
+        return Ok(HttpResponse::Ok().content_type("text/xml").body(
+            yaserde::ser::to_string(&respdata)
+                .map_err(eyre::Report::msg)
+                .wrap_internal_err("serializing Maven project as XML")?,
+        ));
     } else if let Some(selected_file) =
         find_file(&project_id, &vnum, &version, &file)
     {
@@ -363,7 +482,7 @@ pub async fn version_file(
             .body(""));
     }
 
-    Err(ApiError::NotFound)
+    Err(ApiError::NotFound(eyre::eyre!("resource not found")))
 }
 
 #[utoipa::path(
@@ -383,11 +502,19 @@ pub async fn version_file_sha1(
     redis: web::Data<RedisPool>,
     session_queue: web::Data<AuthQueue>,
 ) -> Result<HttpResponse, ApiError> {
+    if let Some(response) =
+        redirect_maven_ref(&req, pool.as_ref(), redis.as_ref()).await?
+    {
+        return Ok(response);
+    }
+
     let (project_id, vnum, file) = params.into_inner();
     let Some(project) =
-        database::models::DBProject::get(&project_id, &**pool, &redis).await?
+        database::models::DBProject::get(&project_id, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching Maven project")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
     let user_option = get_user_from_headers(
@@ -401,17 +528,25 @@ pub async fn version_file_sha1(
     .map(|x| x.1)
     .ok();
 
-    if !is_visible_project(&project.inner, &user_option, &pool, false).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_project(&project.inner, &user_option, &pool, false)
+        .await
+        .wrap_api_err("checking project visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
-    let Some(version) = find_version(&project, &vnum, &pool, &redis).await?
+    let Some(version) = find_version(&project, &vnum, &pool, &redis)
+        .await
+        .wrap_api_err("fetching Maven version")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
-    if !is_visible_version(&version.inner, &user_option, &pool, &redis).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_version(&version.inner, &user_option, &pool, &redis)
+        .await
+        .wrap_api_err("checking version visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
     Ok(find_file(&project_id, &vnum, &version, &file)
@@ -439,11 +574,19 @@ pub async fn version_file_sha512(
     redis: web::Data<RedisPool>,
     session_queue: web::Data<AuthQueue>,
 ) -> Result<HttpResponse, ApiError> {
+    if let Some(response) =
+        redirect_maven_ref(&req, pool.as_ref(), redis.as_ref()).await?
+    {
+        return Ok(response);
+    }
+
     let (project_id, vnum, file) = params.into_inner();
     let Some(project) =
-        database::models::DBProject::get(&project_id, &**pool, &redis).await?
+        database::models::DBProject::get(&project_id, &**pool, &redis)
+            .await
+            .wrap_internal_err("fetching Maven project")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
     let user_option = get_user_from_headers(
@@ -457,17 +600,25 @@ pub async fn version_file_sha512(
     .map(|x| x.1)
     .ok();
 
-    if !is_visible_project(&project.inner, &user_option, &pool, false).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_project(&project.inner, &user_option, &pool, false)
+        .await
+        .wrap_api_err("checking project visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
-    let Some(version) = find_version(&project, &vnum, &pool, &redis).await?
+    let Some(version) = find_version(&project, &vnum, &pool, &redis)
+        .await
+        .wrap_api_err("fetching Maven version")?
     else {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     };
 
-    if !is_visible_version(&version.inner, &user_option, &pool, &redis).await? {
-        return Err(ApiError::NotFound);
+    if !is_visible_version(&version.inner, &user_option, &pool, &redis)
+        .await
+        .wrap_api_err("checking version visibility")?
+    {
+        return Err(ApiError::NotFound(eyre::eyre!("resource not found")));
     }
 
     Ok(find_file(&project_id, &vnum, &version, &file)

@@ -15,7 +15,10 @@ import { computed, nextTick, ref } from 'vue'
 import { ButtonLink, IconButton } from '#ui/components/base/buttons'
 import { injectNotificationManager } from '#ui/providers'
 
-import { NewModal, StyledInput } from '../index'
+import { useDebugLogger } from '../../composables/debug-logger'
+import { NewModal, Textarea } from '../index'
+
+const debug = useDebugLogger('ShareModal')
 
 const props = defineProps({
 	header: {
@@ -83,11 +86,11 @@ const show = async (passedContent) => {
 	if (props.link) {
 		url.value = passedContent
 		nextTick(() => {
-			console.log(qrCode.value)
+			debug(qrCode.value)
 			fetch(qrCode.value.getElementsByTagName('canvas')[0].toDataURL('image/png'))
 				.then((res) => res.blob())
 				.then((blob) => {
-					console.log(blob)
+					debug(blob)
 					qrImage.value = blob
 				})
 		})
@@ -167,13 +170,7 @@ defineExpose({
 						<ClipboardCopyIcon class="h-5 w-5" aria-hidden="true" />
 					</IconButton>
 				</div>
-				<StyledInput
-					v-else
-					v-model="content"
-					multiline
-					resize="vertical"
-					wrapper-class="h-full w-[30rem]"
-				>
+				<Textarea v-else v-model="content" resize="vertical" wrapper-class="h-full w-[30rem]">
 					<template #right>
 						<IconButton
 							v-tooltip="'Copy Text'"
@@ -186,7 +183,7 @@ defineExpose({
 							<ClipboardCopyIcon class="h-5 w-5" aria-hidden="true" />
 						</IconButton>
 					</template>
-				</StyledInput>
+				</Textarea>
 				<div
 					v-if="link || socialButtons"
 					:class="['flex flex-col justify-center gap-2', link ? 'w-64 max-w-full' : 'flex-grow']"
@@ -195,7 +192,6 @@ defineExpose({
 						v-if="link"
 						v-tooltip="'Copy Link'"
 						type="button"
-						aria-label="Copy Link"
 						class="flex h-10 w-full cursor-pointer items-center justify-between gap-2 rounded-xl border-none bg-button-bg px-3 pr-1.5 text-primary transition-all hover:bg-button-bg-hover hover:brightness-125 active:scale-95"
 						@click="copyText"
 					>
@@ -225,7 +221,6 @@ defineExpose({
 							v-tooltip="'Send as an email'"
 							:href="sendEmail"
 							:target="targetParameter"
-							aria-label="Send as an email"
 							class="!w-9 !px-0 !rounded-full"
 						>
 							<MailIcon aria-hidden="true" />
@@ -235,7 +230,6 @@ defineExpose({
 							v-tooltip="'Open link in browser'"
 							:target="targetParameter"
 							:href="url"
-							aria-label="Open link in browser"
 							class="!w-9 !px-0 !rounded-full"
 						>
 							<GlobeIcon aria-hidden="true" />
@@ -244,7 +238,6 @@ defineExpose({
 							v-tooltip="'Toot about it'"
 							:target="targetParameter"
 							:href="sendToot"
-							aria-label="Toot about it"
 							class="!w-9 !px-0 !rounded-full"
 						>
 							<MastodonIcon aria-hidden="true" />
@@ -253,7 +246,6 @@ defineExpose({
 							v-tooltip="'Tweet about it'"
 							:target="targetParameter"
 							:href="sendTweet"
-							aria-label="Tweet about it"
 							class="!w-9 !px-0 !rounded-full"
 						>
 							<TwitterIcon aria-hidden="true" />
@@ -262,7 +254,6 @@ defineExpose({
 							v-tooltip="'Share on Reddit'"
 							:target="targetParameter"
 							:href="postOnReddit"
-							aria-label="Share on Reddit"
 							class="!w-9 !px-0 !rounded-full"
 						>
 							<RedditIcon aria-hidden="true" />

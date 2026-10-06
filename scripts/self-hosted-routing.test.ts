@@ -57,6 +57,17 @@ describe('self-hosted account routing through the complete client chain', () => 
 			'newly-signed-in-session',
 		)
 	})
+	it('routes account administration to the private backend with private credentials', async () => {
+		for (const action of ['lock', 'sessions', 'password-reset', '2fa']) {
+			const request = await prepared(`/admin/user/private-id/${action}`, { version: 'internal' })
+			expect(request.url).toBe(`http://127.0.0.1:8787/_internal/admin/user/private-id/${action}`)
+			expect(new Headers(request.options.headers).get('authorization')).toBe('Bearer local-session')
+		}
+		for (const path of ['/user_email', '/user_discord']) {
+			const request = await prepared(path)
+			expect(new URL(request.url).origin).toBe('http://127.0.0.1:8787')
+		}
+	})
 	it('keeps anonymous login anonymous', async () => {
 		const request = await prepared('/auth/login', { method: 'POST', skipAuth: true })
 		expect(new Headers(request.options.headers).has('authorization')).toBe(false)

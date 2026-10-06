@@ -16,7 +16,7 @@ static TRANSFER: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 pub(crate) struct SnapshotFile {
     pub name: String,
     pub kind: String,
-    pub bytes: Vec<u8>,
+    pub path: std::path::PathBuf,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -151,6 +151,14 @@ fn client() -> crate::Result<reqwest::Client> {
         .build()?)
 }
 
+fn upload_client() -> crate::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(30))
+        .build()?)
+}
+
 /// Persist the complete upload before creating the remote version. The request
 /// ID allows a restart to recover even if the server reply was never received.
 pub(crate) async fn publish(
@@ -166,15 +174,68 @@ pub(crate) async fn publish(
     let account = session
         .user_id
         .ok_or_else(|| error("Sign in before sharing"))?;
-    let mut saved: Vec<_> = files
-        .iter()
-        .map(|file| SavedFile {
-            name: file.name.clone(),
-            kind: file.kind.clone(),
-            sha256: format!("{:x}", Sha256::digest(&file.bytes)),
-            size: file.bytes.len() as u64,
-        })
-        .collect();
+    let id = uuid::Uuid::new_v4().to_string();
+    let directory = state
+        .directories
+        .settings_dir
+        .join("sharing-uploads")
+        .join(&id);
+    crate::util::io::create_dir_all(&directory).await?;
+    let mut saved = Vec::with_capacity(files.len());
+    let mut written = std::collections::HashSet::new();
+    for (index, file) in files.into_iter().enumerate() {
+        // Hash the same bytes we persist so edits to live files cannot invalidate the journal.
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let temporary = directory.join(format!("{index}.partial"));
+        let mut source = tokio::fs::File::open(&file.path)
+            .await
+            .map_err(crate::util::io::IOError::from)?;
+        let mut target = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .await
+            .map_err(crate::util::io::IOError::from)?;
+        let mut digest = Sha256::new();
+        let mut size = 0;
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            let count = source
+                .read(&mut buffer)
+                .await
+                .map_err(crate::util::io::IOError::from)?;
+            if count == 0 {
+                break;
+            }
+            target
+                .write_all(&buffer[..count])
+                .await
+                .map_err(crate::util::io::IOError::from)?;
+            digest.update(&buffer[..count]);
+            size += count as u64;
+        }
+        target
+            .sync_all()
+            .await
+            .map_err(crate::util::io::IOError::from)?;
+        drop(target);
+        let sha256 = format!("{:x}", digest.finalize());
+        if written.insert(sha256.clone()) {
+            tokio::fs::rename(&temporary, directory.join(&sha256))
+                .await
+                .map_err(crate::util::io::IOError::from)?;
+        } else {
+            tokio::fs::remove_file(&temporary)
+                .await
+                .map_err(crate::util::io::IOError::from)?;
+        }
+        saved.push(SavedFile {
+            name: file.name,
+            kind: file.kind,
+            sha256,
+            size,
+        });
+    }
     saved.sort();
     let pending: Vec<String> = sqlx::query_scalar("SELECT manifest FROM self_hosted_uploads WHERE account=? AND origin=? AND instance=? AND uploaded=0 ORDER BY rowid")
         .bind(&account).bind(&session.base_url).bind(instance).fetch_all(&state.pool).await?;
@@ -186,38 +247,12 @@ pub(crate) async fn publish(
             break;
         }
     }
-    let id = if let Some(id) = existing {
-        id
+    let id = if let Some(existing_id) = existing {
+        tokio::fs::remove_dir_all(&directory)
+            .await
+            .map_err(crate::util::io::IOError::from)?;
+        existing_id
     } else {
-        let id = uuid::Uuid::new_v4().to_string();
-        let directory = state
-            .directories
-            .settings_dir
-            .join("sharing-uploads")
-            .join(&id);
-        crate::util::io::create_dir_all(&directory).await?;
-        let mut written = std::collections::HashSet::new();
-        for file in files {
-            let sha256 = format!("{:x}", Sha256::digest(&file.bytes));
-            let path = directory.join(&sha256);
-            if written.insert(sha256.clone()) {
-                let mut target = tokio::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .await
-                    .map_err(crate::util::io::IOError::from)?;
-                use tokio::io::AsyncWriteExt;
-                target
-                    .write_all(&file.bytes)
-                    .await
-                    .map_err(crate::util::io::IOError::from)?;
-                target
-                    .sync_all()
-                    .await
-                    .map_err(crate::util::io::IOError::from)?;
-            }
-        }
         let journal = Journal {
             id: id.clone(),
             account: account.clone(),
@@ -268,6 +303,7 @@ async fn transfer(id: &str, state: &State) -> crate::Result<Option<i32>> {
     .execute(&state.pool)
     .await?;
     let client = client()?;
+    let upload_client = upload_client()?;
     if journal.response.is_none() {
         // Assign version numbers in snapshot order even if the backend was
         // offline when an earlier snapshot was saved. This does not wait for
@@ -343,24 +379,35 @@ async fn transfer(id: &str, state: &State) -> crate::Result<Option<i32>> {
         {
             return Err(error("Unsafe storage URL"));
         }
-        let bytes = crate::util::io::read(
-            state
-                .directories
-                .settings_dir
-                .join("sharing-uploads")
-                .join(id)
-                .join(&file.sha256),
-        )
-        .await?;
-        if bytes.len() as u64 != file.size
-            || format!("{:x}", Sha256::digest(&bytes)) != file.sha256
+        let path = state
+            .directories
+            .settings_dir
+            .join("sharing-uploads")
+            .join(id)
+            .join(&file.sha256);
+        if tokio::fs::metadata(&path)
+            .await
+            .map_err(crate::util::io::IOError::from)?
+            .len()
+            != file.size
+            || crate::self_hosted::integrity::shared_file_changed(
+                &path,
+                Some(&file.sha256),
+            )
+            .await?
         {
             return Err(error("Saved upload failed its integrity check"));
         }
+        let source = tokio::fs::File::open(&path)
+            .await
+            .map_err(crate::util::io::IOError::from)?;
         // No account Authorization header is attached to this capability URL.
-        let result = client
+        let result = upload_client
             .put(target)
-            .body(bytes)
+            .header(reqwest::header::CONTENT_LENGTH, file.size)
+            .body(reqwest::Body::wrap_stream(
+                tokio_util::io::ReaderStream::new(source),
+            ))
             .send()
             .await
             .map_err(reqwest::Error::without_url)?;

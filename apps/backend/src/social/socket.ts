@@ -115,6 +115,13 @@ export class FriendsHub extends DurableObject<Env> {
 		await this.scheduleExpiry()
 	}
 
+	/** Close revoked installations immediately, including idle hibernating sockets. */
+	async revalidateSessions(): Promise<void> {
+		const userId = await this.ctx.storage.get<string>('userId')
+		if (userId && !(await this.status()))
+			await this.broadcast(userId, { type: 'user_offline', id: userId })
+	}
+
 	private async valid(connection: Connection): Promise<boolean> {
 		if (Date.parse(connection.expires) <= Date.now()) return false
 		return Boolean(

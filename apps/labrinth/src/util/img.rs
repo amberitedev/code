@@ -4,7 +4,9 @@ use crate::env::ENV;
 use crate::file_hosting::{FileHost, FileHostPublicity};
 use crate::models::images::ImageContext;
 use crate::routes::ApiError;
+use crate::util::error::Context as _;
 use color_thief::ColorFormat;
+use eyre::{Result, eyre};
 use hex::ToHex;
 use image::imageops::FilterType;
 use image::{
@@ -54,10 +56,8 @@ pub async fn upload_image_optimized(
     file_host: &dyn FileHost,
 ) -> Result<UploadImageResult, ApiError> {
     let content_type = crate::util::ext::get_image_content_type(file_extension)
-        .ok_or_else(|| {
-            ApiError::InvalidInput(format!(
-                "Invalid format for image: {file_extension}"
-            ))
+        .wrap_request_err_with(|| {
+            format!("invalid format for image: {file_extension}")
         })?;
 
     let cdn_url = &ENV.CDN_URL;
@@ -68,8 +68,10 @@ pub async fn upload_image_optimized(
         content_type,
         target_width,
         min_aspect_ratio,
-    )?;
-    let color = get_color_from_img(&bytes)?;
+    )
+    .wrap_request_err("processing uploaded image")?;
+    let color = get_color_from_img(&bytes)
+        .wrap_request_err("extracting color from uploaded image")?;
 
     // Only upload the processed image if it's smaller than the original
     let processed_upload_data = if processed_image.len() < bytes.len() {
@@ -87,7 +89,8 @@ pub async fn upload_image_optimized(
                     publicity,
                     processed_image,
                 )
-                .await?,
+                .await
+                .wrap_internal_err("uploading file to file host")?,
         )
     } else {
         None
@@ -100,7 +103,8 @@ pub async fn upload_image_optimized(
             publicity,
             bytes,
         )
-        .await?;
+        .await
+        .wrap_internal_err("uploading file to file host")?;
 
     let url = format!("{}/{}", cdn_url, upload_data.file_name);
     Ok(UploadImageResult {
@@ -125,15 +129,17 @@ fn process_image(
     content_type: &str,
     target_width: Option<u32>,
     min_aspect_ratio: Option<f32>,
-) -> Result<(bytes::Bytes, String), ImageError> {
+) -> Result<(bytes::Bytes, String)> {
     if content_type.to_lowercase() == "image/gif" {
         return Ok((image_bytes, "gif".to_string()));
     }
 
-    let mut img = image::load_from_memory(&image_bytes)?;
+    let mut img = image::load_from_memory(&image_bytes)
+        .wrap_err("loading image from memory")?;
 
-    let webp_bytes = convert_to_webp(&img)?;
-    img = image::load_from_memory(&webp_bytes)?;
+    let webp_bytes = convert_to_webp(&img).wrap_err("converting to WebP")?;
+    img = image::load_from_memory(&webp_bytes)
+        .wrap_err("loading WebP image from memory")?;
 
     // Resize the image
     let (orig_width, orig_height) = img.dimensions();
@@ -158,15 +164,19 @@ fn process_image(
 
     // Optimize and compress
     let mut output = Vec::new();
-    img.write_to(&mut Cursor::new(&mut output), ImageFormat::WebP)?;
+    img.write_to(&mut Cursor::new(&mut output), ImageFormat::WebP)
+        .wrap_err("writing image")?;
 
     Ok((bytes::Bytes::from(output), "webp".to_string()))
 }
 
-fn convert_to_webp(img: &DynamicImage) -> Result<Vec<u8>, ImageError> {
+fn convert_to_webp(img: &DynamicImage) -> Result<Vec<u8>> {
     let rgba = img.to_rgba8();
     let encoder = Encoder::from_rgba(&rgba, img.width(), img.height());
-    let webp = encoder.encode(75.0); // Quality factor: 0-100, 75 is a good balance
+    // Quality factor: 0-100, 75 is a good balance
+    let webp = encoder
+        .encode_simple(false, 75.0)
+        .map_err(|_| eyre!("encoding image"))?;
     Ok(webp.to_vec())
 }
 
@@ -182,7 +192,10 @@ pub async fn delete_old_images(
         let name = image_url.split(&cdn_url_start).nth(1);
 
         if let Some(icon_path) = name {
-            file_host.delete_file(icon_path, publicity).await?;
+            file_host
+                .delete_file(icon_path, publicity)
+                .await
+                .wrap_internal_err("deleting file from file host")?;
         }
     }
 
@@ -190,7 +203,10 @@ pub async fn delete_old_images(
         let name = raw_image_url.split(&cdn_url_start).nth(1);
 
         if let Some(icon_path) = name {
-            file_host.delete_file(icon_path, publicity).await?;
+            file_host
+                .delete_file(icon_path, publicity)
+                .await
+                .wrap_internal_err("deleting file from file host")?;
         }
     }
 
@@ -208,7 +224,8 @@ pub async fn delete_unused_images(
 ) -> Result<(), ApiError> {
     let uploaded_images =
         database::models::DBImage::get_many_contexted(context, transaction)
-            .await?;
+            .await
+            .wrap_internal_err("fetching images from database")?;
 
     for image in uploaded_images {
         let mut should_delete = true;
@@ -220,8 +237,12 @@ pub async fn delete_unused_images(
         }
 
         if should_delete {
-            image_item::DBImage::remove(image.id, transaction, redis).await?;
-            image_item::DBImage::clear_cache(image.id, redis).await?;
+            image_item::DBImage::remove(image.id, transaction, redis)
+                .await
+                .wrap_internal_err("deleting image from database")?;
+            image_item::DBImage::clear_cache(image.id, redis)
+                .await
+                .wrap_internal_err("clearing cached data from Redis")?;
         }
     }
 

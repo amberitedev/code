@@ -43,6 +43,18 @@ export const WithSelectedOption: Story = {
 	},
 }
 
+export const WithoutDropdownAnimation: Story = {
+	args: {
+		modelValue: '2',
+		options: [
+			{ value: '1', label: 'Option 1' },
+			{ value: '2', label: 'Option 2' },
+			{ value: '3', label: 'Option 3' },
+		],
+		animateDropdown: false,
+	},
+}
+
 export const Searchable: Story = {
 	args: {
 		options: [
@@ -55,6 +67,38 @@ export const Searchable: Story = {
 		searchable: true,
 		searchPlaceholder: 'Search loaders...',
 		selectSearchTextOnFocus: true,
+	},
+}
+
+export const SearchableWithMoreResults: Story = {
+	args: {
+		modelValue: 'quilt',
+		options: [
+			{ value: 'fabric', label: 'Fabric' },
+			{ value: 'forge', label: 'Forge' },
+		],
+		searchOptions: [
+			{ value: 'fabric', label: 'Fabric' },
+			{ value: 'forge', label: 'Forge' },
+			{ value: 'quilt', label: 'Quilt' },
+		],
+		searchable: true,
+		searchPlaceholder: 'Search loaders...',
+		syncWithSelection: true,
+		selectSearchTextOnFocus: true,
+	},
+}
+
+export const SearchableButtonVariant: Story = {
+	args: {
+		options: [
+			{ value: '1', label: 'Minecraft' },
+			{ value: '2', label: 'Fabric' },
+			{ value: '3', label: 'Forge' },
+		],
+		searchable: true,
+		searchInputVariant: 'button',
+		searchPlaceholder: 'Search projects...',
 	},
 }
 

@@ -70,6 +70,7 @@
 				size="xs"
 				no-shadow
 				:raised="raised"
+				pad-transparent-corners
 			/>
 			<div v-else class="backed-svg" :class="{ raised: raised }">
 				<BoxesIcon />
@@ -90,7 +91,14 @@
 		</div>
 		<div class="report-type">
 			<Badge v-if="report.closed" type="closed" />
-			<Badge :type="`Reported for ${report.report_type}`" color="orange" />
+			<Badge
+				:type="
+					formatMessage(messages.reportedFor, {
+						type: formatReportType(formatMessage, report.report_type),
+					})
+				"
+				color="orange"
+			/>
 		</div>
 		<div v-if="showMessage" class="markdown-body" v-html="renderHighlightedString(report.body)" />
 		<ThreadSummary
@@ -125,12 +133,22 @@
 
 <script setup>
 import { BoxesIcon, ReportIcon, UnknownIcon, VersionIcon } from '@modrinth/assets'
-import { Avatar, Badge, CopyCode, useFormatDateTime, useRelativeTime } from '@modrinth/ui'
+import {
+	Avatar,
+	Badge,
+	CopyCode,
+	defineMessages,
+	formatReportType,
+	useFormatDateTime,
+	useRelativeTime,
+	useVIntl,
+} from '@modrinth/ui'
 import { formatProjectType, renderHighlightedString } from '@modrinth/utils'
 
 import ThreadSummary from '~/components/ui/thread/ThreadSummary.vue'
 import { getProjectTypeForUrl } from '~/helpers/projects.js'
 
+const { formatMessage } = useVIntl()
 const formatRelativeTime = useRelativeTime()
 const formatDateTime = useFormatDateTime({
 	timeStyle: 'short',
@@ -165,6 +183,13 @@ defineProps({
 })
 
 const flags = useFeatureFlags()
+
+const messages = defineMessages({
+	reportedFor: {
+		id: 'report.reported-for',
+		defaultMessage: 'Reported for {type}',
+	},
+})
 </script>
 
 <style lang="scss" scoped>

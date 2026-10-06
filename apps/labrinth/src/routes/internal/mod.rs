@@ -15,6 +15,7 @@ pub mod medal;
 pub mod moderation;
 pub mod mural;
 pub mod pats;
+pub mod privacy;
 pub mod search;
 pub mod server_ping;
 pub mod session;
@@ -32,6 +33,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             .wrap(default_cors())
             .configure(admin::config)
             .configure(blocked_users::config)
+            .configure(privacy::config)
             .configure(session::config)
             .configure(flows::config)
             .configure(pats::config)
@@ -68,6 +70,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 	paths(
 		admin::count_download,
 		blocked_users::block_status,
+		privacy::invite_privacy_status,
 		admin::force_reindex,
 		admin::force_reindex_project,
 		session::list,
@@ -118,11 +121,19 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 		moderation::tech_review::search_projects,
 		moderation::tech_review::global::search_global_issue_details,
 		moderation::tech_review::global::get_global_issue_detail,
+		moderation::tech_review::rules::get_rules,
+		moderation::tech_review::rules::test_rule,
+		moderation::tech_review::rules::get_rule_affected_details,
+		moderation::tech_review::rules::create_rule,
+		moderation::tech_review::rules::update_rule,
+		moderation::tech_review::rules::delete_rule,
+		moderation::tech_review::rules_scan::get_rule_schema,
+		moderation::tech_review::rules_scan::get_detail_rule_input,
+		moderation::tech_review::rules_scan::scan_rules,
 		moderation::tech_review::get_project_report,
 		moderation::tech_review::submit_report,
 		moderation::tech_review::update_issue_details,
 		moderation::tech_review::update_global_issue_details,
-		moderation::tech_review::add_report,
 		moderation::external_license::search,
 		moderation::external_license::lookup,
 		moderation::external_license::get_by_sha1,
@@ -130,6 +141,11 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 		moderation::external_license::add_file,
 		moderation::external_license::reassign_file,
 		moderation::external_license::update_license,
+		admin::user_credentials::force_password_reset,
+		admin::user_credentials::reset_2fa,
+		admin::user_lock::lock_user,
+		admin::user_lock::unlock_user,
+		admin::user_sessions::revoke_user_sessions,
 		affiliate::ingest_click,
 		affiliate::get_all,
 		affiliate::create,
@@ -167,6 +183,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 		billing::credit,
 		delphi::ingest_report,
 		delphi::_run,
+		delphi::get_file,
 		delphi::version,
 		delphi::issue_type_schema,
 		external_notifications::create,

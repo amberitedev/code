@@ -99,6 +99,51 @@ pub(crate) async fn download(url: &str) -> crate::Result<reqwest::Response> {
         .map_err(reqwest::Error::without_url)?)
 }
 
+/// Stream capability downloads into a temporary file and verify before extracting.
+pub(crate) async fn download_to_file(
+    url: &str,
+    expected: Option<&str>,
+) -> crate::Result<tempfile::TempPath> {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    let response = download(url).await?;
+    if !response.status().is_success() {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "Previous config bundle download failed with status {}",
+            response.status(),
+        ))
+        .into());
+    }
+    let temporary = tempfile::NamedTempFile::new()?.into_temp_path();
+    let mut target = tokio::fs::File::create(&temporary)
+        .await
+        .map_err(crate::util::io::IOError::from)?;
+    let mut digest = Sha256::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(reqwest::Error::without_url)?;
+        digest.update(&chunk);
+        target
+            .write_all(&chunk)
+            .await
+            .map_err(crate::util::io::IOError::from)?;
+    }
+    target
+        .flush()
+        .await
+        .map_err(crate::util::io::IOError::from)?;
+    if expected.is_some_and(|expected| {
+        expected.len() != 64 || format!("{:x}", digest.finalize()) != expected
+    }) {
+        return Err(crate::ErrorKind::OtherError(
+            "Shared file failed its content hash check. Retry the download."
+                .to_string(),
+        )
+        .into());
+    }
+    Ok(temporary)
+}
+
 pub(crate) fn verify_shared_file(
     bytes: &[u8],
     expected: Option<&str>,
@@ -146,7 +191,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recipient_compares_safe_installed_paths_and_keeps_unknown_updates() {
+    async fn recipient_compares_safe_installed_paths_and_keeps_unknown_updates()
+    {
         let directory = tempfile::tempdir().unwrap();
         let instance = directory.path().join("instance");
         tokio::fs::create_dir_all(instance.join("resourcepacks"))

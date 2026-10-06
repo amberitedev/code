@@ -1,32 +1,69 @@
-import type { EnumSettingDefinition, ToggleSettingDefinition } from '../types/settings.ts'
+import { setting } from '../types/settings.ts'
 
 const settings = {
 	General: {
-		ChecklistPosition: {
+		PrivateMessageHighlight: setting.asToggle({
+			type: 'toggle',
+			id: 'private-message-highlight',
+			title: 'Highlight private messages',
+			description: 'Whether private messages should be highlighted in the chat.',
+			default: true,
+		}),
+		SlicerButtonInVersions: setting.asToggle({
+			type: 'toggle',
+			id: 'slicer-button-in-versions',
+			title: 'Show Slicer button in versions table and page',
+			description: 'Whether the slicer button should be shown in the versions table and page.',
+			default: false,
+		}),
+		AdjustPageAlignment: setting.asEnum({
+			type: 'enum',
+			id: 'adjust-page-alignment',
+			title: 'Adjust page alignment',
+			description:
+				'Whether the main page elements should be centered or offset opposite to the Checklist Position.',
+			entries: [
+				{ value: 'never', label: 'Never' },
+				{ value: 'checklist-present', label: 'Checklist Needed' },
+				{ value: 'always', label: 'Always' },
+			],
+			default: 'never',
+		}),
+		AlternativeHostname: setting.asString({
+			type: 'string',
+			id: 'alternative-hostname',
+			title: 'Alternative hostname',
+			description:
+				'When Open production/staging is used on an official host, open this hostname instead. Example: localhost:3000',
+			default: null,
+		}),
+	},
+	Checklist: {
+		Position: setting.asEnum({
 			type: 'enum',
 			id: 'checklist-position',
-			title: 'Checklist Position',
+			title: 'Position',
 			description: 'Where the checklist should be displayed on the page',
 			entries: [
 				{ value: 'left', label: 'Left' },
 				{ value: 'right', label: 'Right' },
 			],
 			default: 'right',
-		} as EnumSettingDefinition,
-		ProjectKeybinds: {
+		}),
+		AlwaysAllowKeybinds: setting.asToggle({
 			type: 'toggle',
-			id: 'project-keybinds',
-			title: 'Enable Project Keybinds',
-			description: 'Weather certain keybinds should work without the checklist visible.',
+			id: 'checklist-always-allow-keybinds',
+			title: 'Always allow project keybinds',
+			description: 'Whether certain keybinds should work without the checklist visible.',
 			default: false,
-		} as ToggleSettingDefinition,
-		PrivateMessageHighlight: {
+		}),
+		IgnoreConditions: setting.asToggle({
 			type: 'toggle',
-			id: 'private-message-highlight',
-			title: 'Highlight Private Messages',
-			description: 'Whether private messages should be highlighted in the chat.',
-			default: true,
-		} as ToggleSettingDefinition,
+			id: 'checklist-ignore-conditions',
+			title: 'Ignore checklist conditions',
+			description: 'Allow moderating projects the checklist normally auto skips.',
+			default: false,
+		}),
 	},
 } as const
 

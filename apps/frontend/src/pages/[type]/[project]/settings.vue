@@ -6,6 +6,7 @@ import {
 	GlobeIcon,
 	ImageIcon,
 	InfoIcon,
+	IssuesIcon,
 	LinkIcon,
 	ServerIcon,
 	SignatureIcon,
@@ -35,6 +36,9 @@ const {
 	versions,
 	currentMember,
 	setProcessing,
+	projectValidation,
+	projectValidationLoading,
+	projectLinksNetworkValidationLoading,
 } = injectProjectPageContext()
 
 const flags = useFeatureFlags()
@@ -70,6 +74,11 @@ const navItems = computed(() => {
 			link: `/${base}/settings/server`,
 			label: formatMessage(commonProjectSettingsMessages.server),
 			icon: ServerIcon,
+		},
+		{
+			link: `/${base}/settings/disclosures`,
+			label: formatMessage(commonProjectSettingsMessages.disclosures),
+			icon: IssuesIcon,
 		},
 		{
 			link: `/${base}/settings/tags`,
@@ -160,7 +169,7 @@ const moderatorSeeUserUi = computed<boolean>({
 		<ModerationProjectNags
 			v-if="
 				projectV3 &&
-				((currentMember && project.status === 'draft') ||
+				((currentMember && (project.status === 'draft' || project.status === 'processing')) ||
 					tags.rejectedStatuses.includes(project.status))
 			"
 			:project="project"
@@ -170,10 +179,13 @@ const moderatorSeeUserUi = computed<boolean>({
 			:collapsed="collapsedChecklist"
 			:route-name="route.name as string"
 			:tags="tags"
+			:validation-nags="projectValidation?.nags ?? []"
+			:validation-loading="projectValidationLoading || projectLinksNetworkValidationLoading"
+			:validation-available="projectValidation !== null"
+			:submit-project="setProcessing"
 			@toggle-collapsed="() => (collapsedChecklist = !collapsedChecklist)"
-			@set-processing="setProcessing"
 		/>
-		<div class="grid gap-4 lg:grid-cols-[1fr_3fr]">
+		<div class="grid gap-6 lg:grid-cols-[1fr_3fr]">
 			<div>
 				<NavStack :items="navItems" />
 				<div v-if="isStaff(currentMember?.user)" class="mt-4 flex items-center gap-2">

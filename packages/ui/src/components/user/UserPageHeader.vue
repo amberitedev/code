@@ -3,6 +3,7 @@
 		<template #leading>
 			<Avatar
 				:src="user.avatar_url"
+				:raw-src="user.raw_avatar_url"
 				:alt="user.username"
 				:size="isModrinthUser ? '64px' : '96px'"
 				:tint-by="user.username"
@@ -10,13 +11,13 @@
 			/>
 		</template>
 
-		<template v-if="isOfficialAccount || showAffiliateBadge" #badges>
+		<template v-if="isOfficialAccount || showAffiliateBadge || user.lock" #badges>
 			<PageHeaderBadgeItem
 				v-if="isOfficialAccount"
 				:icon="BadgeCheckIcon"
 				:icon-props="{ fill: 'var(--color-brand-highlight)' }"
 				:tooltip="formatMessage(messages.officialAccount)"
-				class="border-brand-highlight bg-brand-highlight text-brand"
+				class="border-brand-highlight bg-brand-highlight !text-brand"
 			>
 				{{ formatMessage(messages.officialAccount) }}
 			</PageHeaderBadgeItem>
@@ -26,6 +27,14 @@
 				class="border-brand-highlight bg-brand-highlight text-brand"
 			>
 				{{ formatMessage(messages.affiliateLabel) }}
+			</PageHeaderBadgeItem>
+			<PageHeaderBadgeItem
+				v-if="user.lock"
+				:icon="LockIcon"
+				:tooltip="user.lock.reason"
+				class="border-highlight-red bg-highlight-red !text-red"
+			>
+				{{ formatMessage(messages.lockedLabel) }}
 			</PageHeaderBadgeItem>
 		</template>
 
@@ -89,6 +98,7 @@ import {
 	AffiliateIcon,
 	BadgeCheckIcon,
 	BanIcon,
+	BoxesIcon,
 	BoxIcon,
 	CalendarIcon,
 	ChartIcon,
@@ -97,13 +107,18 @@ import {
 	DownloadIcon,
 	EditIcon,
 	InfoIcon,
+	KeyIcon,
+	LockIcon,
+	LockOpenIcon,
+	LogOutIcon,
 	MoreVerticalIcon,
 	ReportIcon,
+	ShieldAlertIcon,
 } from '@modrinth/assets'
 import { computed } from 'vue'
 
 import Avatar from '#ui/components/base/Avatar.vue'
-import type { OverflowMenuOption } from '#ui/components/base/buttons'
+import type { ButtonMenuOption } from '#ui/components/base/buttons'
 import { Button, ButtonLink, TeleportOverflowMenu } from '#ui/components/base/buttons'
 import PageHeader from '#ui/components/base/page-header/index.vue'
 import PageHeaderMetadata from '#ui/components/base/page-header/metadata/index.vue'
@@ -140,6 +155,10 @@ const messages = defineMessages({
 		id: 'profile.button.info',
 		defaultMessage: 'View user details',
 	},
+	sharedInstancesButton: {
+		id: 'profile.button.shared-instances',
+		defaultMessage: 'View shared instances',
+	},
 	officialAccount: {
 		id: 'profile.official-account',
 		defaultMessage: 'Official Modrinth account',
@@ -167,6 +186,30 @@ const messages = defineMessages({
 	setAffiliateButton: {
 		id: 'profile.button.set-affiliate',
 		defaultMessage: 'Set as affiliate',
+	},
+	lockedLabel: {
+		id: 'profile.label.locked',
+		defaultMessage: 'Locked',
+	},
+	lockButton: {
+		id: 'profile.button.lock',
+		defaultMessage: 'Lock account',
+	},
+	unlockButton: {
+		id: 'profile.button.unlock',
+		defaultMessage: 'Unlock account',
+	},
+	revokeSessionsButton: {
+		id: 'profile.button.revoke-sessions',
+		defaultMessage: 'Revoke all sessions',
+	},
+	forcePasswordResetButton: {
+		id: 'profile.button.force-password-reset',
+		defaultMessage: 'Force password reset',
+	},
+	reset2faButton: {
+		id: 'profile.button.reset-2fa',
+		defaultMessage: 'Reset two-factor authentication',
 	},
 })
 
@@ -215,8 +258,13 @@ const emit = defineEmits<{
 	openBilling: []
 	toggleAffiliate: []
 	openInfo: []
+	openSharedInstances: []
 	openAnalytics: []
 	editUser: []
+	toggleLock: []
+	revokeSessions: []
+	forcePasswordReset: []
+	reset2fa: []
 }>()
 
 const { formatMessage } = useVIntl()
@@ -228,7 +276,7 @@ const formatDateTime = useFormatDateTime({
 const downloadsTooltip = computed(() => formatNumber(props.downloads))
 const joinedTooltip = computed(() => formatDateTime(props.user.created))
 
-const moreActions = computed<OverflowMenuOption[]>(() => [
+const moreActions = computed<ButtonMenuOption[]>(() => [
 	{
 		id: 'manage-projects',
 		label: formatMessage(messages.profileManageProjectsButton),
@@ -290,6 +338,50 @@ const moreActions = computed<OverflowMenuOption[]>(() => [
 		label: formatMessage(messages.infoButton),
 		icon: InfoIcon,
 		action: () => emit('openInfo'),
+		tone: 'orange',
+		shown: props.showStaffActions && props.isStaff,
+	},
+	{
+		id: 'toggle-lock',
+		label: formatMessage(props.user.lock ? messages.unlockButton : messages.lockButton),
+		icon: props.user.lock ? LockOpenIcon : LockIcon,
+		action: () => emit('toggleLock'),
+		tone: 'red',
+		shown: props.showStaffActions && props.isAdmin && props.user.role === 'developer',
+	},
+	{
+		id: 'revoke-sessions',
+		label: formatMessage(messages.revokeSessionsButton),
+		icon: LogOutIcon,
+		action: () => emit('revokeSessions'),
+		tone: 'red',
+		shown: props.showStaffActions && props.isAdmin && !props.isSelf,
+	},
+	{
+		id: 'force-password-reset',
+		label: formatMessage(messages.forcePasswordResetButton),
+		icon: KeyIcon,
+		action: () => emit('forcePasswordReset'),
+		tone: 'red',
+		shown: props.showStaffActions && props.isAdmin && props.user.role === 'developer',
+	},
+	{
+		id: 'reset-2fa',
+		label: formatMessage(messages.reset2faButton),
+		icon: ShieldAlertIcon,
+		action: () => emit('reset2fa'),
+		tone: 'red',
+		shown:
+			props.showStaffActions &&
+			props.isAdmin &&
+			props.user.role === 'developer' &&
+			Boolean(props.user.has_totp),
+	},
+	{
+		id: 'open-shared-instances',
+		label: formatMessage(messages.sharedInstancesButton),
+		icon: BoxesIcon,
+		action: () => emit('openSharedInstances'),
 		tone: 'orange',
 		shown: props.showStaffActions && props.isStaff,
 	},

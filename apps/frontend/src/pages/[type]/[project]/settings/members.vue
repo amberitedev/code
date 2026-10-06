@@ -33,7 +33,7 @@
 				</span>
 			</span>
 			<div class="input-group">
-				<StyledInput
+				<Input
 					id="username"
 					v-model="currentUsername"
 					placeholder="Username"
@@ -105,27 +105,30 @@
 			</div>
 			<div class="content">
 				<div class="adjacent-input">
-					<label :for="`member-${allTeamMembers[index].user.username}-role`">
+					<label :for="`member-${allTeamMembers[index].user.username}-role`" class="w-fit">
 						<span class="label__title">Role</span>
 						<span class="label__description">
 							The title of the role that this member plays for this project.
 						</span>
 					</label>
-					<StyledInput
+					<Input
 						:id="`member-${allTeamMembers[index].user.username}-role`"
 						v-model="allTeamMembers[index].role"
 						:disabled="(currentMember?.permissions & EDIT_MEMBER) !== EDIT_MEMBER"
 					/>
 				</div>
 				<div class="adjacent-input">
-					<label :for="`member-${allTeamMembers[index].user.username}-monetization-weight`">
+					<label
+						:for="`member-${allTeamMembers[index].user.username}-monetization-weight`"
+						class="w-fit"
+					>
 						<span class="label__title">Monetization weight</span>
 						<span class="label__description">
 							Relative to all other members' monetization weights, this determines what portion of
 							this project's revenue goes to this member.
 						</span>
 					</label>
-					<StyledInput
+					<Input
 						:id="`member-${allTeamMembers[index].user.username}-monetization-weight`"
 						v-model="allTeamMembers[index].payouts_split"
 						type="number"
@@ -361,7 +364,7 @@
 			</div>
 			<div class="content">
 				<div class="adjacent-input">
-					<label :for="`member-${allOrgMembers[index].user.username}-override-perms`">
+					<label :for="`member-${allOrgMembers[index].user.username}-override-perms`" class="w-fit">
 						<span class="label__title">Override values</span>
 						<span class="label__description">
 							Override organization default values and assign custom permissions, roles, and
@@ -375,13 +378,13 @@
 					/>
 				</div>
 				<div class="adjacent-input">
-					<label :for="`member-${allOrgMembers[index].user.username}-role`">
+					<label :for="`member-${allOrgMembers[index].user.username}-role`" class="w-fit">
 						<span class="label__title">Role</span>
 						<span class="label__description">
 							The title of the role that this member plays for this project.
 						</span>
 					</label>
-					<StyledInput
+					<Input
 						:id="`member-${allOrgMembers[index].user.username}-role`"
 						v-model="allOrgMembers[index].role"
 						:disabled="
@@ -391,14 +394,17 @@
 					/>
 				</div>
 				<div class="adjacent-input">
-					<label :for="`member-${allOrgMembers[index].user.username}-monetization-weight`">
+					<label
+						:for="`member-${allOrgMembers[index].user.username}-monetization-weight`"
+						class="w-fit"
+					>
 						<span class="label__title">Monetization weight</span>
 						<span class="label__description">
 							Relative to all other members' monetization weights, this determines what portion of
 							this project's revenue goes to this member.
 						</span>
 					</label>
-					<StyledInput
+					<Input
 						:id="`member-${allOrgMembers[index].user.username}-monetization-weight`"
 						v-model="allOrgMembers[index].payouts_split"
 						type="number"
@@ -568,12 +574,13 @@ import {
 	Card,
 	Checkbox,
 	Combobox,
+	commonProjectSettingsMessages,
 	ConfirmModal,
 	IconButton,
 	injectModrinthClient,
 	injectNotificationManager,
 	injectProjectPageContext,
-	StyledInput,
+	Input,
 	Toggle,
 } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
@@ -591,6 +598,8 @@ const {
 	currentMember,
 	invalidate,
 } = injectProjectPageContext()
+
+useProjectSettingsHeadTitle(commonProjectSettingsMessages.members)
 
 const isServerProject = computed(() => projectV3.value?.minecraft_server != null)
 

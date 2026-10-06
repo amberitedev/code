@@ -119,31 +119,25 @@ onMounted(() => {
 			class="flex flex-wrap items-center justify-between gap-4 border-0 border-b-[1px] border-solid border-divider px-6 pb-6"
 		>
 			<nuxt-link :to="`/news`">
-				<h1 class="m-0 text-3xl font-extrabold hover:underline">News</h1>
+				<h1 class="m-0 text-3xl font-semibold hover:underline">News</h1>
 			</nuxt-link>
 			<div class="flex gap-2">
 				<NewsletterButton />
 				<ButtonLink
 					v-tooltip="`RSS feed`"
-					aria-label="RSS feed"
 					href="/news/feed/rss.xml"
 					target="_blank"
 					class="!w-9 !rounded-full !px-0"
 				>
 					<RssIcon />
 				</ButtonLink>
-				<ButtonLink
-					v-tooltip="`Changelog`"
-					href="/news/changelog"
-					aria-label="Changelog"
-					class="!w-9 !rounded-full !px-0"
-				>
+				<ButtonLink v-tooltip="`Changelog`" href="/news/changelog" class="!w-9 !rounded-full !px-0">
 					<GitGraphIcon />
 				</ButtonLink>
 			</div>
 		</div>
 		<article class="mt-6 flex flex-col gap-4 px-6">
-			<h2 class="m-0 text-2xl font-extrabold leading-tight sm:text-4xl">
+			<h2 class="m-0 text-2xl font-semibold leading-tight sm:text-4xl">
 				{{ article.title }}
 			</h2>
 			<p class="m-0 text-base leading-tight sm:text-lg">{{ article.summary }}</p>
@@ -166,7 +160,7 @@ onMounted(() => {
 						to="/organization/modrinth"
 						class="inline-flex items-center gap-1 font-semibold hover:underline hover:brightness-[--hover-brightness]"
 					>
-						<Avatar src="https://cdn-raw.modrinth.com/modrinth-icon-96.webp" size="24px" />
+						<Avatar src="https://cdn.modrinth.com/modrinth-icon-96.webp" size="24px" />
 						Modrinth Team
 					</nuxt-link>
 				</template>
@@ -225,9 +219,19 @@ onMounted(() => {
 		padding: 0;
 	}
 
+	ul,
+	ol {
+		margin-bottom: 0.5rem;
+
+		ul,
+		ol {
+			margin-top: 0.25rem;
+		}
+	}
+
 	ul > li:not(:last-child),
 	ol > li:not(:last-child) {
-		margin-bottom: 0.5rem;
+		margin-bottom: 0.25rem;
 	}
 
 	ul,
@@ -302,8 +306,10 @@ onMounted(() => {
 
 	h1,
 	h2 {
+		font-weight: 600;
+
 		a {
-			font-weight: 800;
+			font-weight: 600;
 		}
 	}
 

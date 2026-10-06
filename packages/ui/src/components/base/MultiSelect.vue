@@ -50,12 +50,11 @@
 						{{ tag.label }}
 						<XIcon class="size-3.5 shrink-0 text-secondary" />
 					</span>
-					<Menu
+					<FloatingMenu
 						v-show="overflowCount > 0"
-						:delay="{ hide: 50, show: 0 }"
-						no-auto-focus
-						:auto-hide="false"
-						@apply-show="popperOverflowTags = [...overflowTags]"
+						trigger="hover"
+						placement="top"
+						@open="popperOverflowTags = [...overflowTags]"
 					>
 						<span
 							class="inline-flex cursor-default select-none items-center rounded-full border border-solid border-surface-5 bg-surface-4 px-2 py-1 text-sm font-medium text-secondary"
@@ -76,7 +75,7 @@
 								</span>
 							</div>
 						</template>
-					</Menu>
+					</FloatingMenu>
 					<span
 						v-if="selectedOptions.length === 0"
 						class="text-primary opacity-50 text-base font-medium"
@@ -107,7 +106,7 @@
 			</template>
 		</component>
 
-		<Teleport to="#teleports">
+		<Teleport v-if="isClient" to="#teleports">
 			<Transition name="floating-expand">
 				<div
 					v-if="isOpen"
@@ -119,22 +118,22 @@
 					:style="dropdownStyle"
 					role="listbox"
 					aria-multiselectable="true"
+					@pointerdown.stop
 					@mousedown.stop
 					@keydown="handleDropdownKeydown"
 				>
 					<div class="empty:hidden">
 						<div
 							v-if="searchable"
-							class="px-0 py-1.5 border-0 border-solid border-b border-b-surface-5 flex"
+							class="px-0 border-0 border-solid border-b border-b-surface-5 flex"
 						>
-							<StyledInput
+							<Input
 								ref="searchInputRef"
 								v-model="searchQuery"
 								:icon="SearchIcon"
 								type="text"
 								:placeholder="searchPlaceholder"
-								wrapper-class="grow bg-surface-4 mx-0"
-								input-class="ps-9 mx-1.5"
+								wrapper-class="grow m-2"
 								@input="handleSearchInput"
 								@keydown="handleSearchKeydown"
 							/>
@@ -399,7 +398,6 @@ import 'overlayscrollbars/overlayscrollbars.css'
 
 import { CheckIcon, ChevronLeftIcon, MinusIcon, SearchIcon, XIcon } from '@modrinth/assets'
 import { onClickOutside } from '@vueuse/core'
-import { Menu } from 'floating-vue'
 import Fuse from 'fuse.js'
 import { OverlayScrollbars, type PartialOptions } from 'overlayscrollbars'
 import {
@@ -415,6 +413,8 @@ import {
 } from 'vue'
 
 import { useVirtualScroll } from '../../composables/virtual-scroll'
+import { dismissTooltip } from '../../providers/tooltip'
+import FloatingMenu from '../floating/FloatingMenu.vue'
 import ButtonFrame from './buttons/ButtonFrame.vue'
 import type {
 	ButtonElementHandle,
@@ -422,7 +422,7 @@ import type {
 	ButtonSize,
 	ButtonType,
 } from './buttons/types'
-import StyledInput from './StyledInput.vue'
+import Input from './inputs/Input.vue'
 
 export interface MultiSelectOption<T> {
 	value: T
@@ -578,7 +578,7 @@ const dropdownRef = ref<HTMLElement>()
 const optionsScrollbarRef = ref<HTMLElement>()
 const optionsContainerRef = ref<HTMLElement>()
 const selectionActionsRef = ref<HTMLElement>()
-const searchInputRef = ref<InstanceType<typeof StyledInput>>()
+const searchInputRef = ref<InstanceType<typeof Input>>()
 const rafId = ref<number | null>(null)
 const tagsContainerRef = ref<HTMLElement>()
 const optionsOverlayScrollbars = ref<OverlayScrollbarsInstance | null>(null)
@@ -1070,6 +1070,7 @@ function shouldAutoFocusSearch() {
 async function openDropdown() {
 	if (props.disabled || isOpen.value) return
 
+	dismissTooltip()
 	isOpen.value = true
 	emit('open')
 
@@ -1238,6 +1239,7 @@ function handleDropdownKeydown(event: KeyboardEvent) {
 	switch (event.key) {
 		case 'Escape':
 			event.preventDefault()
+			event.stopPropagation()
 			closeDropdown()
 			break
 		case 'ArrowDown':
@@ -1391,7 +1393,10 @@ onClickOutside(
 	{ ignore: [triggerElement, containerRef, '.v-popper__popper'] },
 )
 
+const isClient = ref(false)
+
 onMounted(() => {
+	isClient.value = true
 	window.addEventListener('resize', handleWindowResize)
 	calculateVisibleTags()
 })

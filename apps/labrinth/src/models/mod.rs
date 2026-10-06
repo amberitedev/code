@@ -1,11 +1,13 @@
 pub mod error;
 pub mod exp;
+pub mod link_platform;
 pub mod v2;
 pub mod v3;
 
 pub use v3::analytics;
 pub use v3::billing;
 pub use v3::collections;
+pub use v3::disclosures;
 pub use v3::ids;
 pub use v3::images;
 pub use v3::moderation_notes;

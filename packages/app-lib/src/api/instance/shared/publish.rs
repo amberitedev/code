@@ -4,9 +4,11 @@ use super::install::*;
 use super::types::*;
 use super::*;
 use async_walkdir::WalkDir;
-use async_zip::{Compression, ZipEntryBuilder};
 use futures::StreamExt;
+use sha2::Digest;
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
@@ -172,7 +174,7 @@ pub(super) async fn remote_publish_content(
     version: &InstanceVersionResponse,
     include_modpack_dependencies: bool,
     state: &State,
-) -> crate::Result<(Vec<String>, HashSet<String>)> {
+) -> crate::Result<(Vec<String>, BTreeSet<ExternalFileKey>)> {
     let mut version_ids = version.modrinth_ids.clone();
     if let Some(modpack_id) =
         version.modpack_id.as_deref().filter(|id| !id.is_empty())
@@ -180,9 +182,12 @@ pub(super) async fn remote_publish_content(
         version_ids.retain(|id| id != modpack_id);
 
         if include_modpack_dependencies {
-            version_ids.extend(
-                modpack_dependency_version_ids(modpack_id, state).await?,
-            );
+            extend_shared_modpack_dependencies(
+                &mut version_ids,
+                modpack_id,
+                state,
+            )
+            .await?;
         }
     }
     dedupe_strings(&mut version_ids);
@@ -193,8 +198,10 @@ pub(super) async fn remote_publish_content(
             .external_files
             .iter()
             .filter(|file| file.file_type != CONFIG_BUNDLE_FILE_TYPE)
-            .map(|file| file.file_name.clone())
-            .collect(),
+            .map(|file| {
+                shared_external_file_key(&file.file_type, &file.file_name)
+            })
+            .collect::<crate::Result<_>>()?,
     ))
 }
 
@@ -220,6 +227,32 @@ pub(super) async fn modpack_dependency_version_ids(
         .into_iter()
         .filter_map(|dependency| dependency.version_id)
         .collect())
+}
+
+/// Adds the modpack's dependencies to the list. If a project is already in the
+/// list, keep that version instead of the one bundled with the modpack.
+async fn extend_shared_modpack_dependencies(
+    version_ids: &mut Vec<String>,
+    modpack_id: &str,
+    state: &State,
+) -> crate::Result<()> {
+    let dependency_ids =
+        modpack_dependency_version_ids(modpack_id, state).await?;
+    let (explicit, inherited) = tokio::try_join!(
+        shared_versions_by_id(version_ids, false, state),
+        shared_versions_by_id(&dependency_ids, false, state),
+    )?;
+    version_ids.extend(
+        inherited
+            .into_values()
+            .filter(|version| {
+                !explicit
+                    .values()
+                    .any(|installed| installed.project_id == version.project_id)
+            })
+            .map(|version| version.id),
+    );
+    Ok(())
 }
 
 pub(super) async fn shared_instance_install_modpack(
@@ -259,7 +292,7 @@ pub(super) async fn shared_instance_install_modpack(
             .as_ref()
             .map(|project| project.title.clone())
             .unwrap_or(modpack_version.name),
-        icon_url: project.and_then(|project| project.icon_url),
+        icon_url: project.and_then(|project| project.raw_icon_url),
     }))
 }
 
@@ -275,7 +308,7 @@ pub(super) async fn current_shared_content(
     state: &State,
 ) -> crate::Result<(
     Vec<String>,
-    HashSet<String>,
+    BTreeSet<ExternalFileKey>,
     HashMap<(String, String), String>,
 )> {
     let entries =
@@ -293,7 +326,7 @@ pub(super) async fn current_shared_content(
     .map(|file| (file.id.clone(), file))
     .collect::<HashMap<_, _>>();
     let mut version_ids = Vec::new();
-    let mut external_files = HashSet::new();
+    let mut external_files = BTreeSet::new();
     let mut external_file_paths = HashMap::new();
 
     for entry in entries {
@@ -315,7 +348,10 @@ pub(super) async fn current_shared_content(
             continue;
         };
         if let Some(file) = files.get(&file_id) {
-            external_files.insert(file.file_name.clone());
+            external_files.insert(ExternalFileKey {
+                content_type: entry.project_type.into(),
+                path: file.file_name.clone(),
+            });
             external_file_paths.insert(
                 (file.file_name.clone(), file_type(entry.project_type)),
                 file.relative_path.clone(),
@@ -325,8 +361,12 @@ pub(super) async fn current_shared_content(
     if include_linked_modpack_content
         && let Some(modpack_id) = shared_modpack_id(&metadata.link)
     {
-        version_ids
-            .extend(modpack_dependency_version_ids(&modpack_id, state).await?);
+        extend_shared_modpack_dependencies(
+            &mut version_ids,
+            &modpack_id,
+            state,
+        )
+        .await?;
     }
     dedupe_strings(&mut version_ids);
 
@@ -338,10 +378,12 @@ pub(super) struct CurrentPublishSnapshot {
     pub(super) external_files: Vec<ExternalFileCandidate>,
     pub(super) disabled_project_ids: HashSet<String>,
     pub(super) disabled_version_ids: Vec<String>,
-    pub(super) disabled_external_files: HashSet<String>,
+    pub(super) disabled_external_files: BTreeSet<ExternalFileKey>,
     pub(super) config_files: Vec<ConfigFile>,
 }
 
+/// Cached metadata can outlive a deleted or hidden version. Only publish version
+/// IDs that other members can resolve; retain installed files as uploads.
 pub(super) async fn collect_publish_snapshot(
     metadata: &crate::state::InstanceMetadata,
     state: &State,
@@ -372,6 +414,23 @@ pub(super) async fn collect_publish_snapshot(
             Vec::new(),
         )
     };
+    let installed_version_ids = items
+        .iter()
+        .filter(|item| item.enabled)
+        .filter_map(|item| {
+            item.version.as_ref().map(|version| version.id.as_str())
+        })
+        .collect::<Vec<_>>();
+    let available_version_ids = CachedEntry::get_version_many(
+        &installed_version_ids,
+        Some(CacheBehaviour::Bypass),
+        &state.pool,
+        &state.api_semaphore,
+    )
+    .await?
+    .into_iter()
+    .map(|version| version.id)
+    .collect::<HashSet<_>>();
     let modpack_id = shared_modpack_id(&metadata.link);
     let mut version_ids = Vec::new();
     let mut seen_version_ids = HashSet::new();
@@ -380,13 +439,15 @@ pub(super) async fn collect_publish_snapshot(
     let mut disabled_project_ids = HashSet::new();
     let mut disabled_version_ids = Vec::new();
     let mut seen_disabled_version_ids = HashSet::new();
-    let mut disabled_external_files = HashSet::new();
+    let mut disabled_external_files = BTreeSet::new();
 
     for item in items {
         if item.enabled {
-            if let Some(version) = item.version {
+            if let Some(version) = item.version.as_ref()
+                && available_version_ids.contains(&version.id)
+            {
                 if seen_version_ids.insert(version.id.clone()) {
-                    version_ids.push(version.id);
+                    version_ids.push(version.id.clone());
                 }
                 continue;
             }
@@ -414,7 +475,9 @@ pub(super) async fn collect_publish_snapshot(
             continue;
         }
 
-        if let Some(project) = item.project.as_ref() {
+        if item.version.is_none()
+            && let Some(project) = item.project.as_ref()
+        {
             disabled_project_ids.insert(project.id.clone());
         }
 
@@ -429,7 +492,10 @@ pub(super) async fn collect_publish_snapshot(
             continue;
         }
 
-        disabled_external_files.insert(enabled_file_name(&item.file_name));
+        disabled_external_files.insert(ExternalFileKey {
+            content_type: item.project_type.into(),
+            path: enabled_file_name(&item.file_name),
+        });
     }
 
     Ok(CurrentPublishSnapshot {
@@ -442,8 +508,9 @@ pub(super) async fn collect_publish_snapshot(
     })
 }
 
-pub(super) async fn shared_versions_by_project(
+pub(super) async fn shared_versions_by_id(
     version_ids: &[String],
+    allow_missing: bool,
     state: &State,
 ) -> crate::Result<HashMap<String, crate::state::Version>> {
     let version_id_refs =
@@ -456,9 +523,23 @@ pub(super) async fn shared_versions_by_project(
     )
     .await?;
 
+    let fetched_ids = versions
+        .iter()
+        .map(|version| version.id.as_str())
+        .collect::<HashSet<_>>();
+    if !allow_missing
+        && let Some(missing) = version_ids
+            .iter()
+            .find(|id| !fetched_ids.contains(id.as_str()))
+    {
+        return Err(crate::ErrorKind::InputError(format!(
+            "Shared content version {missing} was not found"
+        ))
+        .into());
+    }
     Ok(versions
         .into_iter()
-        .map(|version| (version.project_id.clone(), version))
+        .map(|version| (version.id.clone(), version))
         .collect())
 }
 
@@ -620,6 +701,7 @@ pub(super) async fn publish_current_content(
     config_paths: &[String],
     state: &State,
 ) -> crate::Result<i32> {
+    let _store_lease = state.content_store.lease().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or_else(|| {
@@ -686,43 +768,53 @@ pub(super) async fn publish_current_content(
         })
         .collect::<Vec<_>>();
     let version_request = json!({
-            "modrinth_ids": modrinth_ids,
-            "external_files": external_file_data,
-            "modpack_id": modpack_id,
-            "game_version": metadata.applied_content_set.game_version.clone(),
-            "loader": metadata.applied_content_set.loader.as_str(),
-            "loader_version": metadata
-                .applied_content_set
-                .loader_version
-                .clone()
-                .unwrap_or_default(),
-        });
+        "modrinth_ids": modrinth_ids,
+        "external_files": external_file_data,
+        "modpack_id": modpack_id,
+        "game_version": metadata.applied_content_set.game_version.clone(),
+        "loader": metadata.applied_content_set.loader.as_str(),
+        "loader_version": metadata
+            .applied_content_set
+            .loader_version
+            .clone()
+            .unwrap_or_default(),
+    });
     if crate::self_hosted::accounts::enabled() {
         let mut files = Vec::with_capacity(external_files.len());
         for file in &external_files {
-            let bytes = match &file.source {
-                ExternalFileSource::InstanceFile(path) => crate::util::io::read(
-                    state.directories.instances_dir().join(&metadata.instance.path).join(path),
-                ).await?,
-                ExternalFileSource::ConfigBundle(bytes) => bytes.clone(),
+            let path = match &file.source {
+                ExternalFileSource::InstanceFile(path) => state
+                    .directories
+                    .instances_dir()
+                    .join(&metadata.instance.path)
+                    .join(path),
+                ExternalFileSource::ConfigBundle(path) => path.to_path_buf(),
             };
             files.push(crate::self_hosted::sharing::SnapshotFile {
-                name: file.file_name.clone(), kind: file.file_type.clone(), bytes,
+                name: file.file_name.clone(),
+                kind: file.file_type.clone(),
+                path,
             });
         }
         return crate::self_hosted::sharing::publish(
-            instance_id, shared_instance_id, version_request, files, state,
-        ).await;
+            instance_id,
+            shared_instance_id,
+            version_request,
+            files,
+            state,
+        )
+        .await;
     }
-    let response = request_json_optional_unavailable::<InstanceVersionResponse>(
-        "create_instance_version",
-        Method::POST,
-        &format!("/instances/{shared_instance_id}/versions"),
-        Some(version_request),
-        state,
-        SharedInstancesRequestAuth::AmberiteSession,
-    )
-    .await?;
+    let response =
+        request_json_optional_unavailable::<InstanceVersionResponse>(
+            "create_instance_version",
+            Method::POST,
+            &format!("/instances/{shared_instance_id}/versions"),
+            Some(version_request),
+            state,
+            SharedInstancesRequestAuth::AmberiteSession,
+        )
+        .await?;
     let response = match response {
         SharedInstanceRemoteResponse::Available(response) => response,
         SharedInstanceRemoteResponse::Unavailable(reason) => {
@@ -832,52 +924,62 @@ async fn build_config_bundle_candidate(
         return Ok(None);
     }
 
-    let mut entries = BTreeMap::new();
-    if let (Some(_), Some(previous_bundle)) =
-        (previous_version, previous_bundle)
-    {
-        let response = crate::self_hosted::integrity::download(&previous_bundle.url).await?;
-        if !response.status().is_success() {
-            return Err(crate::ErrorKind::OtherError(format!(
-                "Previous config bundle download failed with status {}",
-                response.status()
-            ))
-            .into());
-        }
-        let bytes = response.bytes().await?;
-        crate::self_hosted::integrity::verify_shared_file(&bytes, previous_bundle.sha256.as_deref())?;
-        let archived_entries = tokio::task::spawn_blocking(move || {
-            read_config_bundle(bytes.as_ref())
+    let previous_bundle = if let Some(previous_bundle) = previous_bundle {
+        Some(if crate::self_hosted::accounts::enabled() {
+            crate::self_hosted::integrity::download_to_file(
+                &previous_bundle.url,
+                previous_bundle.sha256.as_deref(),
+            )
+            .await?
+        } else {
+            crate::util::fetch::fetch_file_mirrors(
+                &[&previous_bundle.url],
+                None,
+                None,
+                None,
+                &state.fetch_semaphore,
+                &state.pool,
+                None,
+            )
+            .await?
+            .into_staged()?
+            .path
         })
-        .await??;
-        entries.extend(archived_entries);
-    }
-
+    } else {
+        None
+    };
     let config_path = state
         .directories
         .instances_dir()
         .join(instance_path)
         .join(CONFIG_DIRECTORY);
-    for selected_path in selected_paths {
-        let file = local_files_by_path
-            .get(selected_path)
-            .expect("selected config paths were validated");
-        let bytes = crate::util::io::read(config_path.join(&file.path)).await?;
-        entries.insert(file.path.clone(), bytes);
-    }
-
-    let bytes = config_bundle_bytes(&entries).await?;
+    let selected_files = selected_paths
+        .into_iter()
+        .map(|path| (path.to_string(), config_path.join(path)))
+        .collect::<BTreeMap<_, _>>();
+    let bundle = tokio::task::spawn_blocking(move || {
+        let directory = tempfile::tempdir()?;
+        let mut entries = match &previous_bundle {
+            Some(bundle) => {
+                read_config_bundle(bundle.as_ref(), directory.path())?
+            }
+            None => BTreeMap::new(),
+        };
+        entries.extend(selected_files);
+        config_bundle_file(&entries)
+    })
+    .await??;
 
     Ok(Some(ExternalFileCandidate {
         file_name: CONFIG_BUNDLE_FILE_NAME.to_string(),
         file_type: CONFIG_BUNDLE_FILE_TYPE.to_string(),
-        source: ExternalFileSource::ConfigBundle(bytes),
+        source: ExternalFileSource::ConfigBundle(Arc::new(bundle)),
     }))
 }
 
-async fn config_bundle_bytes(
-    entries: &BTreeMap<String, Vec<u8>>,
-) -> crate::Result<Vec<u8>> {
+fn config_bundle_file(
+    entries: &BTreeMap<String, PathBuf>,
+) -> crate::Result<tempfile::TempPath> {
     if entries.len() > MAX_CONFIG_BUNDLE_ENTRIES {
         let mut folder_entry_counts = HashMap::new();
         for path in entries.keys() {
@@ -903,47 +1005,62 @@ async fn config_bundle_bytes(
 		))
 		.into());
     }
-    let mut total_size = 0_u64;
-    for bytes in entries.values() {
-        let size = bytes.len() as u64;
-        if size > MAX_CONFIG_BUNDLE_FILE_SIZE {
-            return Err(crate::ErrorKind::InputError(
-                "Shared instance config bundle contains a file that is too large"
-                    .to_string(),
-            )
-            .into());
-        }
-        total_size = total_size.checked_add(size).ok_or_else(|| {
-            crate::ErrorKind::InputError(
-                "Shared instance config bundle size overflowed".to_string(),
-            )
-        })?;
-        if total_size > MAX_CONFIG_BUNDLE_TOTAL_SIZE {
-            return Err(crate::ErrorKind::InputError(
-                "Shared instance config bundle exceeds the uncompressed size limit"
-                    .to_string(),
-            )
-            .into());
-        }
-    }
-
-    let mut writer = async_zip::base::write::ZipFileWriter::new(Vec::new());
-    for (path, bytes) in entries {
+    let temporary = tempfile::NamedTempFile::new()?;
+    let mut writer = zip::ZipWriter::new(temporary);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut total_size = 0;
+    for (path, source) in entries {
+        let file = std::fs::File::open(source)?;
+        let declared_size = file.metadata()?.len();
         writer
-            .write_entry_whole(
-                ZipEntryBuilder::new(path.clone().into(), Compression::Deflate),
-                bytes,
-            )
-            .await?;
+            .start_file(path, options)
+            .map_err(std::io::Error::from)?;
+        copy_config_bundle_entry(
+            file,
+            declared_size,
+            &mut total_size,
+            &mut writer,
+        )?;
     }
+    Ok(writer
+        .finish()
+        .map_err(std::io::Error::from)?
+        .into_temp_path())
+}
 
-    Ok(writer.close().await?)
+fn copy_config_bundle_entry(
+    reader: impl std::io::Read,
+    declared_size: u64,
+    total_size: &mut u64,
+    writer: &mut impl std::io::Write,
+) -> crate::Result<()> {
+    let limit = MAX_CONFIG_BUNDLE_FILE_SIZE
+        .min(MAX_CONFIG_BUNDLE_TOTAL_SIZE.saturating_sub(*total_size));
+    if declared_size > limit {
+        return Err(crate::ErrorKind::InputError(
+            "Shared instance config bundle exceeds the uncompressed size limit"
+                .to_string(),
+        )
+        .into());
+    }
+    let size = std::io::copy(&mut reader.take(limit + 1), writer)?;
+    if size > limit {
+        return Err(crate::ErrorKind::InputError(
+            "Shared instance config bundle exceeds the uncompressed size limit"
+                .to_string(),
+        )
+        .into());
+    }
+    *total_size += size;
+    Ok(())
 }
 
 fn read_config_bundle(
-    bytes: &[u8],
-) -> crate::Result<BTreeMap<String, Vec<u8>>> {
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+    path: &Path,
+    directory: &Path,
+) -> crate::Result<BTreeMap<String, PathBuf>> {
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(path)?)
         .map_err(|error| {
             crate::ErrorKind::InputError(format!(
                 "Invalid shared instance config bundle: {error}"
@@ -983,12 +1100,15 @@ fn read_config_bundle(
         }
         let path = path.to_string_lossy().replace('\\', "/");
         let declared_size = file.size();
-        let bytes = read_bounded_config_bundle_entry(
+        let destination = directory.join(index.to_string());
+        let mut output = std::fs::File::create(&destination)?;
+        copy_config_bundle_entry(
             file,
             declared_size,
             &mut total_size,
+            &mut output,
         )?;
-        if entries.insert(path.clone(), bytes).is_some() {
+        if entries.insert(path.clone(), destination).is_some() {
             return Err(crate::ErrorKind::InputError(format!(
                 "Shared instance config bundle contains duplicate file {path}"
             ))
@@ -1045,32 +1165,54 @@ pub(super) async fn upload_external_files(
                     upload.file_name
                 ))
             })?;
-        let bytes = match &candidate.source {
+        let path = match &candidate.source {
             ExternalFileSource::InstanceFile(file_path) => {
-                let path = state
-                    .directories
-                    .instances_dir()
-                    .join(instance_path)
-                    .join(file_path);
-                crate::util::io::read(path).await?
+                let instance = crate::state::instances::adapters::sqlite::instance_rows::get_instance_by_path(instance_path, &state.pool).await?
+					.ok_or_else(|| crate::state::content_store::input("Unknown instance"))?;
+                let file = crate::state::instances::adapters::sqlite::content_rows::get_instance_file_by_relative_path(&instance.id, file_path, &state.pool).await?
+					.ok_or_else(|| crate::state::content_store::input("Shared content file is not registered"))?;
+                state.content_store.read_path(&file, instance_path).await?
             }
-            ExternalFileSource::ConfigBundle(bytes) => bytes.clone(),
+            ExternalFileSource::ConfigBundle(path) => {
+                crate::state::content_store::ReadableContent::Local(
+                    path.as_ref().to_path_buf(),
+                )
+            }
         };
         let upload_url = url::Url::parse(&upload.url).map_err(|error| {
             crate::ErrorKind::OtherError(format!(
                 "Invalid shared instance external file upload URL: {error}"
             ))
         })?;
-        let response = send_bytes_request_to_url(
+        let mut file = tokio::fs::File::open(path.path()).await?;
+        let mut hasher = sha2::Sha512::new();
+        let mut buffer = vec![0_u8; 64 * 1024];
+        let mut size = 0_u64;
+        loop {
+            use tokio::io::AsyncReadExt;
+            let read = file.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+            size += read as u64;
+        }
+        let file_sha512 = format!("{:x}", hasher.finalize());
+        use tokio::io::AsyncSeekExt;
+        file.rewind().await?;
+        let body =
+            reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+        let response = send_body_request_to_url(
             "upload_external_file",
             Method::PUT,
             upload_url.path(),
             &upload.url,
-            bytes,
+            body,
+            Some(size),
+            Some(&file_sha512),
             state,
         )
         .await?;
-
         if !response.status().is_success() {
             return shared_instances_request_error(
                 "upload_external_file",

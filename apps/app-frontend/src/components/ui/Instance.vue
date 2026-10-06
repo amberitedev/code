@@ -20,12 +20,12 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAppEvent } from '@/composables/use-app-event'
+import { handleSevereError } from '@/composables/use-error.js'
 import { trackEvent } from '@/helpers/analytics'
 import { install_existing_instance, install_pack_to_existing_instance } from '@/helpers/install'
 import { getInstanceIconUrl, kill, run } from '@/helpers/instance'
 import { get_by_instance_id } from '@/helpers/process'
 import { showInstanceInFolder } from '@/helpers/utils.js'
-import { handleSevereError } from '@/store/error.js'
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
@@ -72,6 +72,7 @@ const installed = computed(() => props.instance.install_stage === 'installed')
 const router = useRouter()
 
 const seeInstance = async () => {
+	if (installing.value) return
 	await router.push(`/instance/${encodeURIComponent(props.instance.id)}`)
 }
 
@@ -83,7 +84,7 @@ const checkProcess = async () => {
 
 const play = async (e, context) => {
 	e?.stopPropagation()
-	if (props.instance.quarantined) return
+	if (props.instance.quarantined || installing.value || modLoading.value) return
 	loading.value = true
 	await run(props.instance.id)
 		.catch((err) => handleSevereError(err, { instanceId: props.instance.id }))
@@ -112,7 +113,7 @@ const stop = async (e, context) => {
 
 const repair = async (e) => {
 	e?.stopPropagation()
-	if (props.instance.quarantined) return
+	if (props.instance.quarantined || installing.value || modLoading.value) return
 
 	if (
 		props.instance.install_stage !== 'pack_installed' &&
@@ -135,7 +136,7 @@ const openFolder = async () => {
 }
 
 const addContent = async () => {
-	if (props.instance.quarantined) return
+	if (props.instance.quarantined || installing.value || modLoading.value) return
 	await router.push({
 		path: `/browse/${props.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`,
 		query: { i: props.instance.id },
@@ -179,6 +180,7 @@ onMounted(() => {
 				:src="getInstanceIconUrl(instance.icon_path)"
 				:tint-by="instance.id"
 				:alt="formatMessage(messages.instanceIcon)"
+				pad-transparent-corners
 			/>
 			<div class="h-full flex items-center font-bold text-contrast leading-normal">
 				<span class="line-clamp-2">{{ instance.name }}</span>
@@ -244,6 +246,7 @@ onMounted(() => {
 					:tint-by="instance.id"
 					:alt="formatMessage(messages.instanceIcon)"
 					:class="`transition-all ${modLoading || installing ? `brightness-[0.25] scale-[0.85]` : `group-hover:brightness-75`}`"
+					pad-transparent-corners
 				/>
 				<div class="absolute inset-0 flex items-center justify-center">
 					<IconButton

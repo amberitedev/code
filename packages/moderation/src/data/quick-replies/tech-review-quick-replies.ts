@@ -16,6 +16,12 @@ export default [
 		private: false,
 	},
 	{
+		label: '🦺 Unsafe Functionality',
+		message: async () =>
+			(await import('../messages/quick-replies/tech-review/unsafe-functionality.md?raw')).default,
+		private: false,
+	},
+	{
 		label: '📝 Request Source',
 		message: async () =>
 			(await import('../messages/quick-replies/tech-review/request-source.md?raw')).default,
@@ -31,6 +37,20 @@ export default [
 		label: '📦 Request Source (Bin)',
 		message: async () =>
 			(await import('../messages/quick-replies/tech-review/request-source-bin.md?raw')).default,
+		private: false,
+	},
+	{
+		label: '🔒 Request Source (Obf) - MODPACK',
+		message: async () =>
+			(await import('../messages/quick-replies/tech-review/request-source-obf-modpack.md?raw'))
+				.default,
+		private: false,
+	},
+	{
+		label: '📦 Request Source (Bin) - MODPACK',
+		message: async () =>
+			(await import('../messages/quick-replies/tech-review/request-source-bin-modpack.md?raw'))
+				.default,
 		private: false,
 	},
 	{

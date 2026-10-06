@@ -1,5 +1,7 @@
 use crate::State;
 use crate::api::instance::CONFIG_FILE_EXTENSIONS;
+use crate::api::instance::GameOptionsPackSource;
+use crate::api::instance::synced_servers::MODPACK_SERVER_PATHS;
 use crate::event::emit::loading_try_for_each_concurrent;
 use crate::install::{
     InstallErrorContext, InstallJobEventKind, InstallPhaseDetails,
@@ -10,13 +12,14 @@ use crate::pack::install_from::{
     EnvType, PackFile, PackFileHash, set_instance_information,
 };
 use crate::state::instances::ContentSourceKind;
+use crate::state::instances::commands::{
+    ContentOrigin, InstallContent, install_stored_file,
+};
 use crate::state::{
     CachedEntry, CachedFile, EditInstance, InstanceInstallStage, SideType,
-    cache_file_hash,
 };
 use crate::util::fetch::{
-    DownloadMeta, DownloadReason, FetchProgressFn, fetch_mirrors_with_progress,
-    write,
+    DownloadMeta, DownloadReason, FetchProgressFn, fetch_content_file,
 };
 use crate::util::io;
 use async_zip::base::read::seek::ZipFileReader as SeekZipFileReader;
@@ -142,6 +145,9 @@ impl MrpackZipReader {
                         ))
                     })?,
             )),
+            CreatePackFile::Downloaded(file) => {
+                Ok(Self::File(FsZipFileReader::new(file.path()).await?))
+            }
             CreatePackFile::Path(path) => Ok(Self::File(
                 FsZipFileReader::new(path).await.map_err(|_| {
                     crate::Error::from(crate::ErrorKind::InputError(
@@ -276,6 +282,48 @@ pub(crate) async fn get_external_files_from_mrpack(
 
     let manifest = zip_reader.read_entry_to_string(manifest_idx).await?;
     let pack: PackFormat = serde_json::from_str(&manifest)?;
+    let mut destinations = HashMap::<String, String>::new();
+    for file in &pack.files {
+        if file.env.as_ref().is_some_and(|env| {
+            env.get(&EnvType::Client) == Some(&SideType::Unsupported)
+        }) {
+            continue;
+        }
+        let path = file.path.as_str();
+        if crate::state::content_store::is_managed_content_path(path) {
+            let canonical = path.trim_end_matches(".disabled").to_string();
+            if let Some(previous) =
+                destinations.insert(canonical, path.to_string())
+            {
+                return Err(crate::state::content_store::input(format!(
+                    "Modpack content paths {previous} and {path} refer to the same file"
+                )));
+            }
+        }
+    }
+    for entry in zip_reader.file().entries() {
+        let name = entry.filename().as_str()?;
+        let Some(path) = name
+            .strip_prefix("overrides/")
+            .or_else(|| name.strip_prefix("client-overrides/"))
+        else {
+            continue;
+        };
+        if crate::state::content_store::is_managed_content_path(path) {
+            let canonical = path.trim_end_matches(".disabled").to_string();
+            if let Some(previous) =
+                destinations.insert(canonical, path.to_string())
+            {
+                // Overrides may replace the same physical path, but must not change its enabled form.
+                if previous != path {
+                    return Err(crate::state::content_store::input(format!(
+                        "Modpack content paths {previous} and {path} refer to the same file"
+                    )));
+                }
+            }
+        }
+    }
+
     let mut candidates = pack
         .files
         .into_iter()
@@ -783,7 +831,9 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                 let mut last_reported_downloaded = 0_u64;
                 let mut report_download_progress = move |downloaded: u64,
                                                          _total_size: u64|
-                      -> Pin<Box<dyn Future<Output = crate::Result<()>> + Send>> {
+                      -> Pin<
+                    Box<dyn Future<Output = crate::Result<()>> + Send>,
+                > {
                     if downloaded < project_size
                         && downloaded.saturating_sub(last_reported_downloaded)
                             < min_download_progress_delta
@@ -815,11 +865,11 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                                     secondary: (progress_context
                                         .content_total_bytes
                                         > 0)
-                                        .then_some(InstallProgressSecondary {
-                                            current: current_bytes,
-                                            total: progress_context
-                                                .content_total_bytes,
-                                        }),
+                                    .then_some(InstallProgressSecondary {
+                                        current: current_bytes,
+                                        total: progress_context
+                                            .content_total_bytes,
+                                    }),
                                 }),
                                 progress_context.modpack_details.clone(),
                             )
@@ -829,17 +879,19 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                 };
                 let progress =
                     &mut report_download_progress as &mut FetchProgressFn<'_>;
-                let file = match fetch_mirrors_with_progress(
+                let file = match fetch_content_file(
+                    state,
                     &project
                         .downloads
                         .iter()
                         .map(|x| &**x)
                         .collect::<Vec<&str>>(),
-                    project.hashes.get(&PackFileHash::Sha1).map(|x| &**x),
+                    project
+                        .hashes
+                        .get(&PackFileHash::Sha512)
+                        .map(String::as_str),
+                    Some(project_size),
                     Some(&content_context.download_meta),
-                    None,
-                    &state.fetch_semaphore,
-                    &state.pool,
                     Some(progress),
                 )
                 .await
@@ -861,83 +913,68 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                         return Err(error);
                     }
                 };
-                let downloaded_bytes = file.len() as u64;
+                let downloaded_bytes = if file.reused { 0 } else { file.size };
 
-                let path = target_path;
-				content_context
-					.reporter
-					.preserve_failure_context(
-						context.clone(),
-						write(&path, &file, &state.io_semaphore).await,
-					)
-					.await?;
-				let modified_at_ns = crate::state::file_modified_at_ns(
-					&io::metadata(&path).await?,
-				)?;
-
-                {
-                    let _permit = state.install_db_semaphore.acquire().await?;
+                if crate::state::content_store::is_managed_content_path(
+                    &project_path,
+                ) {
+                    let project_type =
+                        ProjectType::get_from_parent_folder(&project_path)
+                            .ok_or_else(|| {
+                                crate::state::content_store::input(
+                                    "Unsupported content path",
+                                )
+                            })?;
+                    let file_info =
+                        project.hashes.get(&PackFileHash::Sha1).and_then(
+                            |hash| content_context.file_infos_by_hash.get(hash),
+                        );
+                    let stored_file = file.store_file(state).await?;
                     content_context
                         .reporter
                         .preserve_failure_context(
                             context.clone(),
-                            cache_file_hash(
-                                file.clone(),
-                                &content_context.instance_path,
-                                project.path.as_str(),
-								modified_at_ns,
-                                project
-                                    .hashes
-                                    .get(&PackFileHash::Sha1)
-                                    .map(|x| &**x),
-                                ProjectType::get_from_parent_folder(&path),
-                                None,
-                                &state.pool,
-                            )
-                            .await,
-                        )
-                        .await?;
-                }
-
-                if let Some(project_type) =
-                    ProjectType::get_from_parent_folder(project.path.as_str())
-                {
-                    let hash =
-                        project.hashes.get(&PackFileHash::Sha1).map(|x| &**x);
-                    let file_info =
-                        hash.and_then(|hash| {
-                            content_context.file_infos_by_hash.get(hash)
-                        });
-                    if let Some(hash) = hash {
-                        let _permit =
-                            state.install_db_semaphore.acquire().await?;
-                        content_context
-                            .reporter
-                            .preserve_failure_context(
-                                context.clone(),
-                                crate::state::instances::commands::record_project_file(
-                                    &content_context.instance_id,
-                                    project.path.as_str(),
-                                    hash,
-                                    project.file_size as u64,
+                            install_stored_file(
+                                &content_context.instance_id,
+                                InstallContent {
+                                    requested_path: &project_path,
+                                    stored_file: &stored_file,
                                     project_type,
-                                    modpack_source_kind(
+                                    source_kind: modpack_source_kind(
                                         content_context
                                             .pack_version_id
                                             .as_deref(),
                                     ),
-                                    file_info.map(|file| {
-                                        file.project_id.as_str()
+                                    origin: file_info.map(|file| {
+                                        ContentOrigin {
+                                            project_id: &file.project_id,
+                                            version_id: &file.version_id,
+                                        }
                                     }),
-                                    file_info.map(|file| {
-                                        file.version_id.as_str()
-                                    }),
-                                    state,
-                                )
-                                .await,
+                                    enabled_override: None,
+                                    previous_path: None,
+                                },
+                                state,
                             )
-                            .await?;
-                    }
+                            .await,
+                        )
+                        .await?;
+                } else {
+                    let destination = state
+                        .content_store
+                        .instance_path(
+                            &content_context.instance_path,
+                            &project_path,
+                        )
+                        .await?;
+                    content_context
+                        .reporter
+                        .preserve_failure_context(
+                            context.clone(),
+                            file.copy_to(&destination, &state.io_semaphore)
+                                .await,
+                        )
+                        .await?;
                 }
 
                 content_context
@@ -946,6 +983,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                         InstallJobEventKind::ContentFileCompleted {
                             path: project_path,
                             bytes: downloaded_bytes,
+                            reused: file.reused,
                         },
                     )
                     .await?;
@@ -955,6 +993,27 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
     )
     .await?;
 
+    let has_override =
+        |path: &str| {
+            zip_reader.file().entries().iter().any(|file| {
+                file.filename().as_str().unwrap_or_default() == path
+            })
+        };
+    let has_client_options_override =
+        has_override("client-overrides/options.txt");
+    let has_options_override = has_override("overrides/options.txt");
+    let has_client_yosbr_options_override =
+        has_override("client-overrides/config/yosbr/options.txt");
+    let has_yosbr_options_override =
+        has_override("overrides/config/yosbr/options.txt");
+    let has_client_default_options_override =
+        has_override("client-overrides/config/defaultoptions/options.txt")
+            || has_override(
+                "client-overrides/config/defaultoptions/keybindings.txt",
+            );
+    let has_default_options_override =
+        has_override("overrides/config/defaultoptions/options.txt")
+            || has_override("overrides/config/defaultoptions/keybindings.txt");
     let override_file_entries = zip_reader
         .file()
         .entries()
@@ -962,16 +1021,48 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
         .enumerate()
         .filter_map(|(index, file)| {
             let filename = file.filename().as_str().unwrap_or_default();
-            ((filename.starts_with("overrides/")
+            let is_override = (filename.starts_with("overrides/")
                 || filename.starts_with("client-overrides/"))
-                && !filename.ends_with('/'))
-            .then(|| (index, file.clone()))
+                && !filename.ends_with('/');
+            let shadowed_sync_override =
+                filename.strip_prefix("overrides/").is_some_and(|path| {
+                    (MODPACK_SERVER_PATHS.contains(&path)
+                        || matches!(
+                            path,
+                            "options.txt"
+                                | "config/yosbr/options.txt"
+                                | "config/defaultoptions/options.txt"
+                                | "config/defaultoptions/keybindings.txt"
+                        ))
+                        && has_override(&format!("client-overrides/{path}"))
+                });
+            (is_override && !shadowed_sync_override)
+                .then(|| (index, file.clone()))
         })
         .collect::<Vec<_>>();
     let override_total_bytes = override_file_entries
         .iter()
         .map(|(_, file)| file.uncompressed_size())
         .sum::<u64>();
+    let servers_override_path = MODPACK_SERVER_PATHS.into_iter().find(|path| {
+        has_override(&format!("client-overrides/{path}"))
+            || has_override(&format!("overrides/{path}"))
+    });
+    let game_options_override_source = if has_client_options_override {
+        Some(GameOptionsPackSource::ClientOverrides)
+    } else if has_options_override {
+        Some(GameOptionsPackSource::Overrides)
+    } else if has_client_yosbr_options_override {
+        Some(GameOptionsPackSource::ClientOverridesYosbr)
+    } else if has_yosbr_options_override {
+        Some(GameOptionsPackSource::OverridesYosbr)
+    } else if has_client_default_options_override {
+        Some(GameOptionsPackSource::ClientOverridesDefaultOptions)
+    } else if has_default_options_override {
+        Some(GameOptionsPackSource::OverridesDefaultOptions)
+    } else {
+        None
+    };
     let progress = (override_total_bytes > 0).then_some(InstallProgress {
         current: 0,
         total: override_total_bytes,
@@ -1027,16 +1118,36 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                 file.filename().as_str().unwrap().to_string(),
             )?;
         let relative_override_file_path = relative_override_file_path
-            .strip_prefix("overrides")
-            .or_else(|_| relative_override_file_path.strip_prefix("client-overrides"))
+			.strip_prefix("overrides")
+			.or_else(|_| relative_override_file_path.strip_prefix("client-overrides"))
             .map_err(|_| {
                 crate::Error::from(crate::ErrorKind::OtherError(
                     format!("Failed to strip override prefix from override file path: {relative_override_file_path}")
                 ))
             })?;
 
-        let path =
-            instance_full_path.join(relative_override_file_path.as_str());
+        let managed = crate::state::content_store::is_managed_content_path(
+            relative_override_file_path.as_str(),
+        );
+        let temporary = if managed {
+            let (file, path) = state.content_store.temporary().await?;
+            drop(file);
+            Some(path)
+        } else {
+            None
+        };
+        let path = match &temporary {
+            Some(path) => path.to_path_buf(),
+            None => {
+                state
+                    .content_store
+                    .instance_path(
+                        &instance_path,
+                        relative_override_file_path.as_str(),
+                    )
+                    .await?
+            }
+        };
         let override_context =
             InstallErrorContext::new("extract modpack override")
                 .maybe_project_id(project_id.clone())
@@ -1099,21 +1210,29 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                 )
                 .await?;
 
-            if let Some(project_type) = ProjectType::get_from_parent_folder(
-                relative_override_file_path.as_str(),
-            ) {
+            if managed
+                && let Some(project_type) = ProjectType::get_from_parent_folder(
+                    relative_override_file_path.as_str(),
+                )
+            {
+                let stored_file = state.content_store.store_file(&path).await?;
                 reporter
                     .preserve_failure_context(
                         record_context,
-                        crate::state::instances::commands::record_project_file(
+                        install_stored_file(
                             &instance_id,
-                            relative_override_file_path.as_str(),
-                            &hash,
-                            size,
-                            project_type,
-                            modpack_source_kind(version_id.as_deref()),
-                            None,
-                            None,
+                            InstallContent {
+                                requested_path: relative_override_file_path
+                                    .as_str(),
+                                stored_file: &stored_file,
+                                project_type,
+                                source_kind: modpack_source_kind(
+                                    version_id.as_deref(),
+                                ),
+                                origin: None,
+                                enabled_override: None,
+                                previous_path: None,
+                            },
                             state,
                         )
                         .await,
@@ -1122,6 +1241,24 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             }
         }
     }
+
+    crate::api::instance::synced_servers::capture_modpack_server_override(
+        &instance_id,
+        servers_override_path,
+    )
+    .await?;
+    if let Err(error) = crate::api::instance::capture_game_options_pack_base(
+        &instance_id,
+        game_options_override_source,
+    )
+    .await
+    {
+        tracing::warn!(
+            "The modpack was installed, but its options.txt could not be captured for game-settings sync: {error}"
+        );
+    }
+    crate::api::instance::reconcile_instance_after_pack_update(&instance_id)
+        .await?;
 
     // If the icon doesn't exist, we expect icon.png to be a potential icon.
     // If it doesn't exist, and an override to icon.png exists, cache and use that
@@ -1145,6 +1282,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
 fn pack_source_path(file: &CreatePackFile) -> String {
     match file {
         CreatePackFile::Bytes(_) => "downloaded mrpack bytes".to_string(),
+        CreatePackFile::Downloaded(_) => "downloaded mrpack file".to_string(),
         CreatePackFile::Path(path) => path.display().to_string(),
     }
 }
@@ -1250,6 +1388,17 @@ pub async fn remove_all_related_files(
     // Iterate over all Modrinth project file paths in the json, and remove them
     // (There should be few, but this removes any files the .mrpack intended as Modrinth projects but were unrecognized)
     for file in pack.files {
+        if crate::state::content_store::is_managed_content_path(
+            file.path.as_str(),
+        ) {
+            crate::state::instances::commands::remove_project(
+                &instance_id,
+                file.path.as_str(),
+                &state,
+            )
+            .await?;
+            continue;
+        }
         match io::remove_file(instance_full_path.join(file.path.as_str())).await
         {
             Ok(_) => (),
@@ -1278,8 +1427,22 @@ pub async fn remove_all_related_files(
             .map_err(|_| {
                 crate::Error::from(crate::ErrorKind::OtherError(
                     format!("Failed to strip override prefix from override file path: {relative_override_file_path}")
-                ))
-            })?;
+				))
+			})?;
+        if relative_override_file_path.as_str() == "options.txt" {
+            continue;
+        }
+        if crate::state::content_store::is_managed_content_path(
+            relative_override_file_path.as_str(),
+        ) {
+            crate::state::instances::commands::remove_project(
+                &instance_id,
+                relative_override_file_path.as_str(),
+                &state,
+            )
+            .await?;
+            continue;
+        }
 
         // Remove this file if a corresponding one exists in the filesystem
         match io::remove_file(

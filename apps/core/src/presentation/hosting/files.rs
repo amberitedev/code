@@ -47,6 +47,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/servers/:id/modrinth/v0/fs/delete", delete(remove))
         .route("/servers/:id/modrinth/v0/fs/copy", post(copy))
         .route("/servers/:id/modrinth/v0/fs/zip", post(zip))
+        .route("/servers/:id/v1/worlds/:world/files/stat", post(stat))
+        .route("/servers/:id/v1/worlds/:world/files/zip", post(zip_world_paths))
         .route("/servers/:id/v1/fs/unarchive", post(unarchive))
         .route("/servers/:id/v1/fs/ops/:action", post(modify_operation))
         .route("/servers/:id/v1/worlds/:world/:scope/upload-session", post(create_session).get(get_session))
@@ -439,6 +441,121 @@ async fn zip(
     .await
     .map_err(fs_error)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "target_type")]
+enum ZipRequest {
+    Directory {
+        path: String,
+    },
+    ManyPaths {
+        parent: String,
+        include: Vec<String>,
+        target: String,
+    },
+}
+
+async fn stat(
+    user: AuthUser,
+    Path((id, world)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<FileQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let record = instance(&state, &user.0.sub, &id).await?;
+    if world != record.id.to_string() {
+        return Err(ApiError::NotFound("world not found".into()));
+    }
+    let path = checked_path(&record, &body.path, true)?;
+    let metadata = tokio::fs::metadata(&path).await.map_err(io_error)?;
+    let root = std::fs::canonicalize(&record.data_dir).map_err(io_error)?;
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| ApiError::BadRequest("path traversal rejected".into()))?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
+    let created = metadata.created().unwrap_or(modified);
+    Ok(Json(json!({
+        "name": path.file_name().unwrap_or_default().to_string_lossy(),
+        "full_path": format!("/{relative}"),
+        "size_bytes": metadata.len(),
+        "type": if metadata.is_dir() { "directory" } else if metadata.is_file() { "regular" } else { "other" },
+        "mtime": chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339(),
+        "ctime": chrono::DateTime::<chrono::Utc>::from(created).to_rfc3339(),
+    })))
+}
+
+async fn zip_world_paths(
+    user: AuthUser,
+    Path((id, world)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ZipRequest>,
+) -> Result<Response, ApiError> {
+    let record = instance(&state, &user.0.sub, &id).await?;
+    if world != record.id.to_string() {
+        return Err(ApiError::NotFound("world not found".into()));
+    }
+    let (sources, destination) = match body {
+        ZipRequest::Directory { path } => {
+            let source = checked_path(&record, &path, false)?;
+            if !tokio::fs::metadata(source)
+                .await
+                .map_err(io_error)?
+                .is_dir()
+            {
+                return Err(ApiError::BadRequest(
+                    "ZIP source must be a directory".into(),
+                ));
+            }
+            let destination = format!("{}.zip", path.trim_end_matches('/'));
+            (vec![path], destination)
+        }
+        ZipRequest::ManyPaths {
+            parent,
+            include,
+            target,
+        } => {
+            // These are child names, not paths relative to some other directory.
+            if include.is_empty()
+                || include.iter().chain(std::iter::once(&target)).any(|name| {
+                    name.is_empty()
+                        || name == "."
+                        || name == ".."
+                        || name.contains('/')
+                        || name.contains('\\')
+                })
+            {
+                return Err(ApiError::BadRequest(
+                    "ZIP entries must be child filenames".into(),
+                ));
+            }
+            let parent = parent.trim_end_matches('/');
+            let sources = include
+                .into_iter()
+                .map(|name| format!("{parent}/{name}"))
+                .collect();
+            (sources, format!("{parent}/{target}"))
+        }
+    };
+    if checked_path(&record, &destination, false)?.exists() {
+        return Err(ApiError::Conflict("file already exists".into()));
+    }
+    zip(
+        user,
+        Path(id),
+        State(state),
+        Json(CopyBody {
+            sources,
+            destination,
+        }),
+    )
+    .await?;
+    // The existing ZIP service reports completion, not byte-level progress.
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json-seq")
+        .body(Body::from("\u{001e}{\"progress\":100,\"done\":true}\n"))
+        .map_err(|error| ApiError::Internal(error.to_string()))
 }
 
 #[derive(Deserialize)]

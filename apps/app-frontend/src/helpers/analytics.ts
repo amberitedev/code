@@ -1,4 +1,4 @@
-import { posthog } from 'posthog-js'
+import type { PostHog } from 'posthog-js'
 
 import { config } from '@/config'
 
@@ -14,7 +14,7 @@ interface ProjectProperties extends InstanceProperties {
 
 type AnalyticsEventMap = {
 	Launched: { version: string; dev: boolean }
-	PageView: { path: string; fromPath: string; failed: unknown }
+	PageView: { path: string; fromPath: string; failed: boolean }
 	InstanceCreate: { source: string }
 	InstanceCreateStart: { source: string }
 	InstanceStart: InstanceProperties & { source: string }
@@ -23,7 +23,6 @@ type AnalyticsEventMap = {
 	InstanceRepair: InstanceProperties
 	InstanceSetIcon: Record<string, never>
 	InstanceRemoveIcon: Record<string, never>
-	InstanceUpdateAll: InstanceProperties & { count: number; selected: boolean }
 	InstanceProjectUpdate: InstanceProperties & { id: string; name: string; project_type: string }
 	InstanceProjectDisable: InstanceProperties & {
 		id: string
@@ -45,31 +44,71 @@ type AnalyticsEventMap = {
 
 export type AnalyticsEvent = keyof AnalyticsEventMap
 
-let initialized = false
+let analytics: PostHog | undefined
+let pending: Promise<void> | undefined
+let enabled = false
+let activated = false
+let debug = false
+let explicitlyOptedIn = false
+const events: Array<{ name: AnalyticsEvent; properties: Record<string, unknown> | undefined }> = []
+const allowed = import.meta.env.PROD || import.meta.env.VITE_ENABLE_ANALYTICS === 'true'
+
+function removeActivationListeners() {
+	window.removeEventListener('pointerdown', activate)
+	window.removeEventListener('keydown', activate)
+}
+
+function activate() {
+	activated = true
+	removeActivationListeners()
+	if (!enabled || pending || analytics) return
+	pending = import('posthog-js')
+		.then(({ posthog }) => {
+			if (!enabled || config.accountApiUrl) return
+			posthog.init('phc_9Iqi6lFs9sr5BSqh9RRNRSJ0mATS9PSgirDiX3iOYJ', {
+				persistence: 'localStorage',
+				api_host: 'https://posthog.modrinth.com',
+			})
+			analytics = posthog
+			if (explicitlyOptedIn) posthog.opt_in_capturing()
+			if (debug) posthog.debug()
+			for (const event of events.splice(0)) posthog.capture(event.name, event.properties)
+		})
+		.catch(() => {
+			events.length = 0
+		})
+		.finally(() => {
+			pending = undefined
+		})
+}
 
 export const initAnalytics = () => {
-	if (initialized || config.accountApiUrl) return
-	posthog.init('phc_9Iqi6lFs9sr5BSqh9RRNRSJ0mATS9PSgirDiX3iOYJ', {
-		persistence: 'localStorage',
-		api_host: 'https://posthog.modrinth.com',
-	})
-	initialized = true
+	if (!allowed || enabled || config.accountApiUrl) return
+	enabled = true
+	if (activated) activate()
+	else {
+		window.addEventListener('pointerdown', activate, { once: true, passive: true })
+		window.addEventListener('keydown', activate, { once: true })
+	}
 }
 
 export const debugAnalytics = () => {
-	if (!initialized) return
-	posthog.debug()
+	debug = true
+	analytics?.debug()
 }
 
 export const optOutAnalytics = () => {
-	if (!initialized) return
-	posthog.opt_out_capturing()
+	explicitlyOptedIn = false
+	enabled = false
+	events.length = 0
+	removeActivationListeners()
+	analytics?.opt_out_capturing()
 }
 
 export const optInAnalytics = () => {
+	explicitlyOptedIn = true
 	initAnalytics()
-	if (!initialized || config.accountApiUrl) return
-	posthog.opt_in_capturing()
+	analytics?.opt_in_capturing()
 }
 
 type OptionalArgs<T> = Record<string, never> extends T ? [properties?: T] : [properties: T]
@@ -78,6 +117,10 @@ export const trackEvent = <E extends AnalyticsEvent>(
 	eventName: E,
 	...args: OptionalArgs<AnalyticsEventMap[E]>
 ) => {
-	if (!initialized || config.accountApiUrl) return
-	posthog.capture(eventName, args[0])
+	if (!enabled || config.accountApiUrl) return
+	if (analytics) analytics.capture(eventName, args[0])
+	else {
+		if (events.length >= 100) events.shift()
+		events.push({ name: eventName, properties: args[0] })
+	}
 }

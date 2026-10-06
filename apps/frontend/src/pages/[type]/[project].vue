@@ -4,28 +4,53 @@
 			<ProjectBackgroundGradient :project="project" />
 		</Teleport>
 		<template v-if="isSettings">
-			<div v-if="canAccessSettings" class="normal-page no-sidebar">
-				<div class="normal-page__header">
-					<div
-						class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-3 border-0 border-b-[1px] border-solid border-divider pb-4 text-lg font-semibold"
-					>
-						<nuxt-link
-							:to="`/${project.project_type}/${project.slug ? project.slug : project.id}`"
-							class="flex items-center gap-2 hover:underline hover:brightness-[--hover-brightness]"
-						>
-							<Avatar :src="project.icon_url" size="32px" />
-							{{ project.title }}
-						</nuxt-link>
-						<ChevronRightIcon />
-						<span class="flex grow font-extrabold text-contrast">{{
-							formatMessage(messages.settingsTitle)
-						}}</span>
-						<div class="flex gap-2">
-							<ButtonLink to="/dashboard/projects"
-								><ListIcon /> {{ formatMessage(messages.visitProjectsDashboard) }}
+			<div v-if="canAccessSettings" class="normal-page no-sidebar" :class="`align-${marginTarget}`">
+				<div class="normal-page__header mb-6">
+					<PageHeader :title="project.title" :row-class="'items-center'">
+						<template #leading>
+							<ButtonLink
+								v-if="settingsBackDestination"
+								v-tooltip="settingsBackDestination.label"
+								:to="settingsBackDestination.to"
+								size="lg"
+								class="!w-10 !rounded-full !px-0"
+							>
+								<LeftArrowIcon />
 							</ButtonLink>
-						</div>
-					</div>
+							<Avatar
+								:src="project.icon_url"
+								:raw-src="project.raw_icon_url"
+								:tint-by="project.id"
+								size="64px"
+							/>
+						</template>
+						<template #metadata>
+							<PageHeaderMetadata>
+								<PageHeaderMetadataItem>
+									{{
+										formatMessage(messages.editingProject, {
+											projectType: projectTypeDisplay.toLowerCase(),
+										})
+									}}
+								</PageHeaderMetadataItem>
+								<PageHeaderMetadataItem>
+									{{
+										formatMessage(commonMessages.projectCreated, {
+											date: formatRelativeTime(project.published),
+										})
+									}}
+								</PageHeaderMetadataItem>
+							</PageHeaderMetadata>
+						</template>
+						<template #actions>
+							<PageHeaderActions>
+								<ButtonLink :to="`${projectPath}`">
+									<CompassIcon />
+									{{ formatMessage(messages.projectPage) }}
+								</ButtonLink>
+							</PageHeaderActions>
+						</template>
+					</PageHeader>
 					<ProjectMemberHeader
 						v-if="currentMember && false"
 						:project="project"
@@ -69,7 +94,7 @@
 			</div>
 			<ProjectDownloadModal
 				ref="downloadModal"
-				:project-id="routeProjectId"
+				:project-id="projectId"
 				:download-reason="downloadReason"
 				@download="triggerDownloadAnimation"
 			/>
@@ -94,17 +119,20 @@
 			/>
 			<div
 				class="new-page sidebar"
-				:class="{
-					'alt-layout': cosmetics.leftContentLayout,
-					'checklist-open':
-						showModerationChecklist &&
-						!collapsedModerationChecklist &&
-						!flags.alwaysShowChecklistAsPopup,
-					'checklist-collapsed':
-						showModerationChecklist &&
-						collapsedModerationChecklist &&
-						!flags.alwaysShowChecklistAsPopup,
-				}"
+				:class="[
+					{
+						'alt-layout': cosmetics.leftContentLayout,
+						'checklist-open':
+							showModerationChecklist &&
+							!collapsedModerationChecklist &&
+							!flags.alwaysShowChecklistAsPopup,
+						'checklist-collapsed':
+							showModerationChecklist &&
+							collapsedModerationChecklist &&
+							!flags.alwaysShowChecklistAsPopup,
+					},
+					`align-${marginTarget}`,
+				]"
 			>
 				<div
 					class="normal-page__header relative mb-4"
@@ -115,7 +143,9 @@
 							v-if="
 								projectV3 &&
 								currentMember &&
-								(project.status === 'draft' || tags.rejectedStatuses.includes(project.status))
+								(projectV3.status === 'draft' ||
+									projectV3.status === 'processing' ||
+									tags.rejectedStatuses.includes(projectV3.status))
 							"
 							:project="project"
 							:project-v3="projectV3"
@@ -124,15 +154,18 @@
 							:collapsed="collapsedChecklist"
 							:route-name="route.name"
 							:tags="tags"
+							:validation-nags="projectValidation?.nags ?? []"
+							:validation-loading="reviewSubmissionLoading"
+							:validation-available="projectValidation !== null"
+							:submit-project="setProcessing"
 							@toggle-collapsed="() => (collapsedChecklist = !collapsedChecklist)"
-							@set-processing="setProcessing"
 						/>
 					</div>
 					<ProjectPageHeader
 						v-if="projectV3Loaded"
 						:project="project"
 						:project-v3="projectV3"
-						:show-status-badge="!!currentMember || project.status !== 'approved'"
+						:show-status-badge="!!currentMember || projectV3.status !== 'approved'"
 						@category="(category) => router.push(`${projectSearchUrl}?f=categories:${category}`)"
 					>
 						<template #actions>
@@ -235,9 +268,7 @@
 								"
 								theme="dismissable-prompt"
 								class="inline-flex"
-								:triggers="[]"
-								:shown="flags.showProjectPageCreateServersTooltip"
-								:auto-hide="false"
+								open
 								placement="bottom-start"
 							>
 								<ButtonLink
@@ -324,7 +355,6 @@
 									v-tooltip="formatMessage(commonMessages.followButton)"
 									size="xl"
 									:to="signInRouteObj"
-									:aria-label="formatMessage(commonMessages.followButton)"
 									class="!w-12 !rounded-full !px-0"
 								>
 									<HeartIcon aria-hidden="true" />
@@ -334,7 +364,6 @@
 										v-tooltip="formatMessage(commonMessages.followButton)"
 										size="xl"
 										:to="signInRouteObj"
-										:aria-label="formatMessage(commonMessages.followButton)"
 										class="!w-12 !rounded-full !px-0"
 									>
 										<HeartIcon aria-hidden="true" />
@@ -383,6 +412,36 @@
 					/>
 					<Admonition
 						v-if="
+							auth.user &&
+							tags.staffRoles.includes(auth.user.role) &&
+							project.actualProjectType === 'modpack' &&
+							hasModpackArchiveInWarningWindow
+						"
+						type="warning"
+						:header="formatMessage(messages.modpackArchiveWarningTitle)"
+						class="mt-3"
+					>
+						{{ formatMessage(messages.modpackArchiveWarningDescription) }}
+						<template #actions>
+							<Button
+								type="colored"
+								color="orange"
+								:loading="isCheckingModpackArchives"
+								@click="checkModpackArchives"
+							>
+								<FileArchiveIcon />
+								{{
+									formatMessage(
+										isCheckingModpackArchives
+											? messages.checkingModpackArchives
+											: messages.checkModpackArchives,
+									)
+								}}
+							</Button>
+						</template>
+					</Admonition>
+					<Admonition
+						v-if="
 							currentMember &&
 							projectV3?.side_types_migration_review_status === 'pending' &&
 							projectV3?.environment?.length === 1 &&
@@ -422,14 +481,18 @@
 							<SettingsIcon /> {{ formatMessage(messages.reviewEnvironmentSettings) }}
 						</Button>
 					</Admonition>
-					<MessageBanner v-if="project.status === 'archived'" message-type="warning" class="my-4">
-						{{ formatMessage(messages.archivedMessage, { title: project.title }) }}
-					</MessageBanner>
+					<ArchivedProjectBanner
+						v-if="isArchived"
+						:title="project.title"
+						:reason="archivedDisclosure?.note"
+						class="mt-4"
+					/>
 				</div>
 
 				<div class="normal-page__sidebar">
 					<ProjectSidebarServerInfo
-						v-if="isServerProject && serverDataLoaded"
+						v-if="isServerProject"
+						:loading="!serverDataLoaded"
 						:project-v3="projectV3"
 						:tags="tags"
 						:required-content="serverRequiredContent"
@@ -458,6 +521,7 @@
 					<ProjectSidebarCreators
 						:organization="organization"
 						:members="members"
+						:loading="creatorsLoading"
 						:org-link="(slug) => `/organization/${slug}`"
 						:user-link="(username) => `/user/${username}`"
 						class="card flex-card"
@@ -465,13 +529,14 @@
 					<ProjectSidebarDetails
 						:project="project"
 						:link-target="$external()"
+						:hide-license="isServerProject"
 						:show-followers="isServerProject"
 						class="card flex-card"
 					/>
 				</div>
 
 				<div class="normal-page__content">
-					<div class="mb-3 overflow-x-auto"><NavTabs :links="navLinks" replace class="mb-1" /></div>
+					<NavTabs :links="navLinks" replace page-nav />
 					<NuxtPage @on-download="triggerDownloadAnimation" @delete-version="deleteVersion" />
 				</div>
 			</div>
@@ -495,36 +560,47 @@
 <script setup>
 import {
 	ChartIcon,
-	ChevronRightIcon,
 	ClipboardCopyIcon,
+	CompassIcon,
 	DownloadIcon,
+	FileArchiveIcon,
 	FolderSearchIcon,
 	HeartIcon,
-	ListIcon,
+	LeftArrowIcon,
 	MoreVerticalIcon,
+	PackageSearchIcon,
 	PlayIcon,
 	ReportIcon,
 	ScaleIcon,
 	ScanEyeIcon,
+	SearchIcon,
 	ServerPlusIcon,
 	SettingsIcon,
 	XIcon,
 } from '@modrinth/assets'
-import { moderationSettings } from '@modrinth/moderation'
+import { getMarginTarget, moderationSettings } from '@modrinth/moderation'
 import {
 	Admonition,
+	ArchivedProjectBanner,
 	Avatar,
 	BrowseInstallHeader,
 	Button,
 	ButtonLink,
 	commonMessages,
 	defineMessages,
+	formatDependencyProjectFilterOption,
+	formatProjectTypeSentence,
+	getActiveDisclosures,
 	IconButton,
 	injectModrinthClient,
 	injectNotificationManager,
 	IntlFormatted,
 	NavTabs,
 	OpenInAppModal,
+	PageHeader,
+	PageHeaderActions,
+	PageHeaderMetadata,
+	PageHeaderMetadataItem,
 	PROJECT_DEP_MARKER_QUERY,
 	ProjectBackgroundGradient,
 	ProjectEnvironmentModal,
@@ -538,20 +614,20 @@ import {
 	provideProjectPageContext,
 	SelectedProjectsFloatingBar,
 	TeleportOverflowMenu,
+	Tooltip,
 	useDebugLogger,
 	useFormatPrice,
+	useRelativeTime,
 	useStickyObserver,
 	useVIntl,
 } from '@modrinth/ui'
 import { formatProjectType, isStaff } from '@modrinth/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useLocalStorage } from '@vueuse/core'
-import { Tooltip } from 'floating-vue'
-import { onScopeDispose, readonly, ref, useTemplateRef, watch, watchEffect } from 'vue'
+import { nextTick, onScopeDispose, readonly, ref, useTemplateRef, watch, watchEffect } from 'vue'
 
 import { navigateTo } from '#app'
 import CollectionCreateModal from '~/components/ui/create/CollectionCreateModal.vue'
-import MessageBanner from '~/components/ui/MessageBanner.vue'
 import ModerationChecklist from '~/components/ui/moderation/checklist/ModerationChecklist.vue'
 import ModerationProjectNags from '~/components/ui/moderation/ModerationProjectNags.vue'
 import ModpackScanModal from '~/components/ui/moderation/ModpackScanModal.vue'
@@ -560,13 +636,19 @@ import ProjectDownloadModal from '~/components/ui/ProjectDownloadModal/index.vue
 import ProjectMemberHeader from '~/components/ui/ProjectMemberHeader.vue'
 import { getSignInRouteObj } from '~/composables/auth.ts'
 import { saveFeatureFlags } from '~/composables/featureFlags.ts'
-import { STALE_TIME, STALE_TIME_LONG } from '~/composables/queries/project'
+import { useProjectLinkValidation } from '~/composables/link-network-validation'
+import {
+	canSubmitProjectForReview,
+	PROJECT_REVIEW_VALIDATION_ERROR,
+} from '~/composables/link-network-validation/submission'
+import { notifyCopied } from '~/composables/moderation.ts'
+import { STALE_TIME, STALE_TIME_LONG, warmProjectCheckCaches } from '~/composables/queries/project'
 import { versionQueryOptions } from '~/composables/queries/version'
 import { useServerInstallContent } from '~/composables/use-server-install-content'
 import { userCollectProject, userFollowProject } from '~/composables/user.js'
 import { injectCurrentProjectId } from '~/providers/current-project.ts'
-import { loadChecklistState } from '~/services/moderation-checklist-storage.ts'
-import { useModerationQueue } from '~/services/moderation-queue.ts'
+import { loadChecklistState } from '~/services/moderation/checklist-storage.ts'
+import { useModerationQueue } from '~/services/moderation/queue.ts'
 import { getReportPath, reportProject } from '~/utils/report-helpers.ts'
 
 definePageMeta({
@@ -581,14 +663,18 @@ const config = useRuntimeConfig()
 const moderationQueue = useModerationQueue()
 const keybinds = useModerationKeybinds()
 const modSettings = useModerationSettings()
+const marginTarget = computed(() => getMarginTarget(modSettings.value))
 const notifications = injectNotificationManager()
 const { addNotification } = notifications
 
 const auth = await useAuth()
 const user = await useUser()
 
-// Route param for initial lookup (middleware caches by both slug and ID)
-const routeProjectId = ref(useRouteId('project'))
+// Route slug or ID — resolve to canonical ID before fetching project data
+const routeParam = computed(() => {
+	const param = route.params.project
+	return Array.isArray(param) ? param[0] : param
+})
 
 const { createProjectDownloadUrl } = useCdnDownloadContext()
 
@@ -610,6 +696,7 @@ watch(() => route.query.dep, absorbDepQuery, { immediate: true })
 const tags = useGeneratedState()
 const flags = useFeatureFlags()
 const cosmetics = useCosmetics()
+const formatRelativeTime = useRelativeTime()
 
 const { formatMessage } = useVIntl()
 const formatPrice = useFormatPrice()
@@ -620,6 +707,7 @@ const downloadModal = ref()
 const openInAppModal = ref()
 const overTheTopDownloadAnimation = ref()
 const scanModal = ref()
+const isCheckingModpackArchives = ref(false)
 
 const projectV3Loaded = computed(() => !projectV3Pending.value || projectV3.value != null)
 const isServerProject = computed(() => projectV3.value?.minecraft_server != null)
@@ -633,14 +721,19 @@ const projectEnvironmentModal = useTemplateRef('projectEnvironmentModal')
 
 const baseId = useId()
 
-const serverProject = computed(() => ({
-	name: project.value.title,
-	slug: project.value.slug || project.value.id,
-	numPlayers: projectV3.value?.minecraft_java_server?.ping?.data?.players_online,
-	icon: project.value.icon_url,
-	statusOnline: !!projectV3.value?.minecraft_java_server?.ping?.data,
-	region: projectV3.value?.minecraft_server?.region,
-}))
+const serverProject = computed(() => {
+	if (!project.value) {
+		return undefined
+	}
+	return {
+		name: project.value.title,
+		slug: project.value.slug || project.value.id,
+		numPlayers: projectV3.value?.minecraft_java_server?.ping?.data?.players_online,
+		icon: project.value.icon_url,
+		statusOnline: !!projectV3.value?.minecraft_java_server?.ping?.data,
+		region: projectV3.value?.minecraft_server?.region,
+	}
+})
 
 function handlePlayServerProject() {
 	openInAppModal.value?.show({
@@ -649,14 +742,17 @@ function handlePlayServerProject() {
 }
 
 const messages = defineMessages({
-	archivedMessage: {
-		id: 'project.status.archived.message',
-		defaultMessage:
-			'{title} has been archived. {title} will not receive any further updates unless the author decides to unarchive the project.',
+	backToAllProjects: {
+		id: 'project.settings.back-to-all-projects',
+		defaultMessage: 'Back to all projects',
 	},
 	backToDiscover: {
 		id: 'project.install-context.back-to-discover',
 		defaultMessage: 'Back to discover',
+	},
+	backToProjectPage: {
+		id: 'project.settings.back-to-project-page',
+		defaultMessage: 'Back to project page',
 	},
 	changelogTab: {
 		id: 'project.navigation.changelog',
@@ -748,17 +844,70 @@ const messages = defineMessages({
 		id: 'project.notification.updated.message',
 		defaultMessage: 'Your project has been updated.',
 	},
+	projectReviewSaveFailed: {
+		id: 'project.notification.review-save-failed.title',
+		defaultMessage: 'Failed to save project in review',
+	},
+	projectReviewSaveFailedDescription: {
+		id: 'project.notification.review-save-failed.description',
+		defaultMessage: 'You cannot save edits to your project which result in failing validation.',
+	},
 	reviewEnvironmentSettings: {
 		id: 'project.environment.migration.review-button',
 		defaultMessage: 'Review environment settings',
+	},
+	projectPage: {
+		id: 'project.actions.project-page',
+		defaultMessage: 'Project page',
 	},
 	reviewProject: {
 		id: 'project.actions.review-project',
 		defaultMessage: 'Review project',
 	},
+	viewDependents: {
+		id: 'project.actions.view-dependents',
+		defaultMessage: 'View dependents',
+	},
+	viewProjectTypeDependents: {
+		id: 'project.actions.view-project-type-dependents',
+		defaultMessage: 'View {projectType} dependents',
+	},
+	viewModpacks: {
+		id: 'project.actions.view-modpacks',
+		defaultMessage: 'View modpacks',
+	},
 	rescanModpack: {
 		id: 'project.actions.rescan-modpack',
 		defaultMessage: 'Rescan modpack',
+	},
+	checkModpackArchives: {
+		id: 'project.actions.check-modpack-archives',
+		defaultMessage: 'Check modpack unzip',
+	},
+	checkingModpackArchives: {
+		id: 'project.actions.checking-modpack-archives',
+		defaultMessage: 'Checking...',
+	},
+	checkModpackArchivesSuccess: {
+		id: 'project.notification.check-modpack-archives.success',
+		defaultMessage:
+			'{count, plural, one {The modpack file can be unzipped.} other {All # modpack files can be unzipped.}}',
+	},
+	checkModpackArchivesFailed: {
+		id: 'project.notification.check-modpack-archives.failed',
+		defaultMessage: 'Some modpack files could not be unzipped',
+	},
+	checkModpackArchivesNoFiles: {
+		id: 'project.notification.check-modpack-archives.no-files',
+		defaultMessage: 'No .mrpack files were found for this project.',
+	},
+	modpackArchiveWarningTitle: {
+		id: 'project.modpack-archive-warning.title',
+		defaultMessage: 'This modpack was published during export bug',
+	},
+	modpackArchiveWarningDescription: {
+		id: 'project.modpack-archive-warning.description',
+		defaultMessage: 'Importing this .mrpack might be broken.',
 	},
 	serversPromoDescription: {
 		id: 'project.actions.servers-promo.description',
@@ -772,17 +921,13 @@ const messages = defineMessages({
 		id: 'project.actions.servers-promo.title',
 		defaultMessage: 'Create a server',
 	},
-	settingsTitle: {
-		id: 'project.settings.title',
-		defaultMessage: 'Settings',
-	},
 	versionsTab: {
 		id: 'project.versions.title',
 		defaultMessage: 'Versions',
 	},
-	visitProjectsDashboard: {
-		id: 'project.settings.visit-dashboard',
-		defaultMessage: 'Visit projects dashboard',
+	editingProject: {
+		id: 'project.settings.editing-project',
+		defaultMessage: 'Editing {projectType} project',
 	},
 })
 
@@ -793,7 +938,7 @@ const collections = computed(() =>
 )
 
 if (
-	!routeProjectId.value ||
+	!routeParam.value ||
 	!(
 		tags.value.projectTypes.find((x) => x.id === route.params.type) ||
 		route.params.type === 'project'
@@ -810,30 +955,53 @@ if (
 const client = injectModrinthClient()
 const queryClient = useQueryClient()
 
-// V2 Project - hits middleware cache (uses route param for lookup)
-const { data: projectRaw, error: projectV2Error } = useQuery({
-	queryKey: computed(() => ['project', 'v2', routeProjectId.value]),
-	queryFn: () => client.labrinth.projects_v2.get(routeProjectId.value),
+// Resolve route slug/ID to the canonical project ID (middleware warms this cache)
+const { data: projectCheck, error: projectCheckError } = useQuery({
+	queryKey: computed(() => ['project', 'check', routeParam.value]),
+	queryFn: () => client.labrinth.projects_v2.check(routeParam.value),
 	staleTime: STALE_TIME,
+	enabled: computed(() => !!routeParam.value),
 })
 
-// Handle project not found - use showError since watch runs outside Nuxt context
+const projectId = computed(() => projectCheck.value?.id)
+
+function showProjectLoadError(error) {
+	const status = error.statusCode ?? error.status ?? 500
+	showError({
+		fatal: true,
+		statusCode: status,
+		message:
+			status === 404
+				? formatMessage(messages.projectNotFound)
+				: formatMessage(messages.errorLoadingProject, {
+						message: error.message ? `: ${error.message}` : '',
+					}),
+	})
+}
+
+watch(
+	projectCheckError,
+	(error) => {
+		if (error) {
+			showProjectLoadError(error)
+		}
+	},
+	{ immediate: true },
+)
+
+// V2 Project — keyed by canonical ID
+const { data: projectRaw, error: projectV2Error } = useQuery({
+	queryKey: computed(() => ['project', 'v2', projectId.value]),
+	queryFn: () => client.labrinth.projects_v2.get(projectId.value),
+	staleTime: STALE_TIME,
+	enabled: computed(() => !!projectId.value),
+})
+
 watch(
 	projectV2Error,
 	(error) => {
 		if (error) {
-			// error.statusCode from ModrinthApiError, error.status as fallback
-			const status = error.statusCode ?? error.status ?? 500
-			showError({
-				fatal: true,
-				statusCode: status,
-				message:
-					status === 404
-						? formatMessage(messages.projectNotFound)
-						: formatMessage(messages.errorLoadingProject, {
-								message: error.message ? `: ${error.message}` : '',
-							}),
-			})
+			showProjectLoadError(error)
 		}
 	},
 	{ immediate: true },
@@ -898,9 +1066,6 @@ const projectHeaderInstallContext = computed(() => {
 	}
 })
 
-// Use actual project ID for dependent queries (ensures cache consistency)
-const projectId = computed(() => projectRaw.value?.id)
-
 const sharedProjectId = injectCurrentProjectId(null)
 if (sharedProjectId) {
 	watchEffect(() => {
@@ -917,9 +1082,10 @@ const {
 	error: _projectV3Error,
 	isPending: projectV3Pending,
 } = useQuery({
-	queryKey: computed(() => ['project', 'v3', routeProjectId.value]),
-	queryFn: () => client.labrinth.projects_v3.get(routeProjectId.value),
+	queryKey: computed(() => ['project', 'v3', projectId.value]),
+	queryFn: () => client.labrinth.projects_v3.get(projectId.value),
 	staleTime: STALE_TIME,
+	enabled: computed(() => !!projectId.value),
 })
 
 // Server sidebar: modpack version + project for required content
@@ -1016,7 +1182,11 @@ watch(serverModpackVersionId, (versionId) => {
 })
 
 // Members
-const { data: allMembersRaw, error: _membersError } = useQuery({
+const {
+	data: allMembersRaw,
+	error: _membersError,
+	isPending: membersPending,
+} = useQuery({
 	queryKey: computed(() => ['project', projectId.value, 'members']),
 	queryFn: () => client.labrinth.projects_v3.getMembers(projectId.value),
 	staleTime: STALE_TIME,
@@ -1048,7 +1218,7 @@ const {
 
 const dependencies = computed(() => dependenciesRaw.value ?? null)
 
-// V3 Versions - lazy loaded client-side only
+// V3 Versions - lazy loaded client-side only (except for staff, who need v3 versions for moderation)
 const versionsEnabled = ref(false)
 const {
 	data: versionsV3,
@@ -1062,12 +1232,12 @@ const {
 			apiVersion: 3,
 		}),
 	staleTime: STALE_TIME_LONG,
-	enabled: computed(() => !!projectId.value && versionsEnabled.value),
+	enabled: computed(() => !!projectId.value && (versionsEnabled.value || isStaff(auth.value.user))),
 })
 
 // Organization
 // Only fetch organization if project belongs to one
-const { data: organizationRaw } = useQuery({
+const { data: organizationRaw, isPending: organizationPending } = useQuery({
 	queryKey: computed(() => ['project', projectId.value, 'organization']),
 	queryFn: () => client.labrinth.projects_v3.getOrganization(projectId.value),
 	staleTime: STALE_TIME,
@@ -1078,6 +1248,28 @@ const { data: organizationRaw } = useQuery({
 // Return null when the project no longer belongs to an organization.
 const organization = computed(() => (projectRaw.value?.organization ? organizationRaw.value : null))
 
+const DISCLOSURE_STALE_TIME = 1000 * 60 * 5
+const { data: disclosuresResponse } = useQuery({
+	queryKey: computed(() => ['project', 'disclosures', 'v3', projectId.value]),
+	queryFn: () => client.labrinth.projects_v3.getDisclosures(projectId.value),
+	staleTime: DISCLOSURE_STALE_TIME,
+	enabled: computed(() => !!projectId.value),
+})
+
+const archivedDisclosure = computed(() =>
+	getActiveDisclosures(disclosuresResponse.value?.disclosures).find(
+		(disclosure) => disclosure.type === 'archived',
+	),
+)
+const isArchived = computed(() => !!archivedDisclosure.value)
+
+const creatorsLoading = computed(
+	() =>
+		!projectRaw.value ||
+		membersPending.value ||
+		(!!projectRaw.value.organization && organizationPending.value),
+)
+
 const { data: thread } = useQuery({
 	queryKey: computed(() => ['thread', projectRaw.value?.thread_id]),
 	queryFn: () => client.labrinth.threads_v3.getThread(projectRaw.value.thread_id),
@@ -1085,8 +1277,9 @@ const { data: thread } = useQuery({
 })
 
 const isSettings = computed(() => route.name.startsWith('type-project-settings'))
+useFavicon(() => (isSettings.value ? 'settings' : 'default'))
 
-// Transform versionsV3 to be same shape as versionsV2 for compatibility in project pages
+// Jank modpack loaders fix
 const versionsRaw = computed(() => {
 	return (versionsV3.value ?? []).map((version) => {
 		const files = Array.isArray(version.files) ? version.files : []
@@ -1133,68 +1326,128 @@ function loadDependencies() {
 const hasVersions = computed(() => (project.value?.versions?.length ?? 0) > 0)
 
 async function invalidateProject() {
-	await queryClient.invalidateQueries({ queryKey: ['project', 'v2', routeProjectId.value] })
-	await queryClient.invalidateQueries({ queryKey: ['project', 'v3', routeProjectId.value] })
-	if (routeProjectId.value !== projectId.value) {
-		await queryClient.invalidateQueries({ queryKey: ['project', 'v2', projectId.value] })
-		await queryClient.invalidateQueries({ queryKey: ['project', 'v3', projectId.value] })
+	const id = projectId.value
+	if (!id) {
+		return
 	}
+	await queryClient.invalidateQueries({ queryKey: ['project', 'v2', id] })
+	await queryClient.invalidateQueries({ queryKey: ['project', 'v3', id] })
 	// Prefix match — invalidates members, versions, dependencies, organization
-	await queryClient.invalidateQueries({ queryKey: ['project', projectId.value] })
+	await queryClient.invalidateQueries({ queryKey: ['project', id] })
+}
+
+async function redirectIfNewSlug(newSlug, id) {
+	if (newSlug === undefined || newSlug === route.params.project) {
+		return
+	}
+
+	warmProjectCheckCaches(queryClient, { id, slug: newSlug })
+
+	await navigateTo(
+		{
+			name: route.name,
+			params: {
+				type: route.params.type,
+				project: newSlug,
+			},
+			query: route.query,
+			hash: route.hash,
+		},
+		{ replace: true },
+	)
+}
+
+function mergeV3ProjectPatch(old, data) {
+	if (!old) {
+		return old
+	}
+	const merged = { ...old }
+	for (const [key, value] of Object.entries(data)) {
+		if (
+			value &&
+			typeof value === 'object' &&
+			!Array.isArray(value) &&
+			merged[key] &&
+			typeof merged[key] === 'object' &&
+			!Array.isArray(merged[key])
+		) {
+			merged[key] = { ...merged[key], ...value }
+		} else {
+			merged[key] = value
+		}
+	}
+	return merged
+}
+
+function addProjectMutationErrorNotification(error) {
+	const description =
+		error?.v1Error?.description ??
+		error?.responseData?.description ??
+		error?.data?.description ??
+		error?.message
+	const response = error?.responseData ?? error?.data ?? error?.v1Error
+	const isProjectValidationError =
+		Array.isArray(response?.details?.nags) || description === PROJECT_REVIEW_VALIDATION_ERROR
+
+	addNotification({
+		title: formatMessage(
+			isProjectValidationError && project.value.status === 'processing'
+				? messages.projectReviewSaveFailed
+				: commonMessages.errorNotificationTitle,
+		),
+		text: isProjectValidationError
+			? formatMessage(messages.projectReviewSaveFailedDescription)
+			: description,
+		type: 'error',
+	})
 }
 
 // Mutation for patching project data
 const patchProjectMutation = useMutation({
 	mutationFn: async ({ projectId, data }) => {
 		await client.labrinth.projects_v2.edit(projectId, data)
-		if (data.slug !== undefined && data.slug !== route.params.project) {
-			routeProjectId.value = data.slug
-			await navigateTo(
-				{
-					name: route.name,
-					params: {
-						type: route.params.type,
-						project: data.slug,
-					},
-					query: route.query,
-					hash: route.hash,
-				},
-				{ replace: true },
-			)
-		}
+		await redirectIfNewSlug(data.slug, projectId)
 		return data
 	},
 
-	onMutate: async ({ projectId, data }) => {
-		// Cancel outgoing refetches for both slug-based and ID-based cache keys
-		// The query may be keyed by slug (routeProjectId.value) but we also have the actual UUID (projectId)
-		await queryClient.cancelQueries({ queryKey: ['project', 'v2', routeProjectId.value] })
-		if (routeProjectId.value !== projectId) {
-			await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
-		}
+	onMutate: async ({ projectId, data, optimistic = true }) => {
+		await linkValidation.validateSave({
+			description: data.body,
+			license_url: data.license_url,
+			link_urls: Object.fromEntries(
+				['issues', 'source', 'wiki', 'discord']
+					.filter((field) => data[`${field}_url`] !== undefined)
+					.map((field) => [field, data[`${field}_url`]]),
+			),
+		})
+		if (!optimistic) return
+		await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
+		await queryClient.cancelQueries({ queryKey: ['project', 'v3', projectId] })
 
-		// Snapshot previous value from the active query (uses route param as key)
-		const previousProject = queryClient.getQueryData(['project', 'v2', routeProjectId.value])
+		const previousV2 = queryClient.getQueryData(['project', 'v2', projectId])
+		const previousV3 = queryClient.getQueryData(['project', 'v3', projectId])
 
-		// Optimistic update on the active query key
-		queryClient.setQueryData(['project', 'v2', routeProjectId.value], (old) => {
+		queryClient.setQueryData(['project', 'v2', projectId], (old) => {
 			if (!old) return old
 			return { ...old, ...data }
 		})
+		if (data.slug !== undefined) {
+			queryClient.setQueryData(['project', 'v3', projectId], (old) =>
+				old ? { ...old, slug: data.slug } : old,
+			)
+		}
 
-		return { previousProject }
+		return { previousV2, previousV3, projectId }
 	},
 
 	onError: (err, _variables, context) => {
-		// Rollback on error using the active query key
-		if (context?.previousProject) {
-			queryClient.setQueryData(['project', 'v2', routeProjectId.value], context.previousProject)
+		if (context?.previousV2) {
+			queryClient.setQueryData(['project', 'v2', context.projectId], context.previousV2)
 		}
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		if (context?.previousV3) {
+			queryClient.setQueryData(['project', 'v3', context.projectId], context.previousV3)
+		}
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1204,39 +1457,34 @@ const patchProjectMutation = useMutation({
 
 // Mutation for changing project status (setProcessing)
 const patchStatusMutation = useMutation({
-	mutationFn: async ({ projectId, status }) => {
-		await client.labrinth.projects_v2.edit(projectId, { status })
+	mutationFn: async (variables) => {
+		await client.labrinth.projects_v2.edit(variables.projectId, { status: variables.status })
 	},
 
 	onMutate: async ({ projectId, status }) => {
-		// Cancel outgoing refetches for both slug-based and ID-based cache keys
-		await queryClient.cancelQueries({ queryKey: ['project', 'v2', routeProjectId.value] })
-		if (routeProjectId.value !== projectId) {
-			await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
-		}
+		await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
 
-		// Snapshot previous value from the active query (uses route param as key)
-		const previousProject = queryClient.getQueryData(['project', 'v2', routeProjectId.value])
+		const previousProject = queryClient.getQueryData(['project', 'v2', projectId])
 
-		// Optimistic update on the active query key
-		queryClient.setQueryData(['project', 'v2', routeProjectId.value], (old) => {
+		queryClient.setQueryData(['project', 'v2', projectId], (old) => {
 			if (!old) return old
 			return { ...old, status }
 		})
 
-		return { previousProject }
+		return { previousProject, projectId }
+	},
+
+	onSuccess: async (_data, { threadId }) => {
+		if (threadId) {
+			await queryClient.invalidateQueries({ queryKey: ['thread', threadId] })
+		}
 	},
 
 	onError: (err, _variables, context) => {
-		// Rollback on error using the active query key
 		if (context?.previousProject) {
-			queryClient.setQueryData(['project', 'v2', routeProjectId.value], context.previousProject)
+			queryClient.setQueryData(['project', 'v2', context.projectId], context.previousProject)
 		}
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1248,46 +1496,37 @@ const patchStatusMutation = useMutation({
 const patchProjectV3Mutation = useMutation({
 	mutationFn: async ({ projectId, data }) => {
 		await client.labrinth.projects_v3.edit(projectId, data)
+		await redirectIfNewSlug(data.slug, projectId)
 		return data
 	},
 
-	onMutate: async ({ projectId, data }) => {
+	onMutate: async ({ projectId, data, optimistic = true }) => {
+		await linkValidation.validateSave(data)
+		if (!optimistic) return
 		await queryClient.cancelQueries({ queryKey: ['project', 'v3', projectId] })
+		await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
 
-		const previousProject = queryClient.getQueryData(['project', 'v3', projectId])
+		const previousV3 = queryClient.getQueryData(['project', 'v3', projectId])
+		const previousV2 = queryClient.getQueryData(['project', 'v2', projectId])
 
-		queryClient.setQueryData(['project', 'v3', projectId], (old) => {
-			if (!old) return old
-			const merged = { ...old }
-			for (const [key, value] of Object.entries(data)) {
-				if (
-					value &&
-					typeof value === 'object' &&
-					!Array.isArray(value) &&
-					merged[key] &&
-					typeof merged[key] === 'object' &&
-					!Array.isArray(merged[key])
-				) {
-					merged[key] = { ...merged[key], ...value }
-				} else {
-					merged[key] = value
-				}
-			}
-			return merged
-		})
+		queryClient.setQueryData(['project', 'v3', projectId], (old) => mergeV3ProjectPatch(old, data))
+		if (data.slug !== undefined) {
+			queryClient.setQueryData(['project', 'v2', projectId], (old) =>
+				old ? { ...old, slug: data.slug } : old,
+			)
+		}
 
-		return { previousProject, projectId }
+		return { previousV3, previousV2, projectId }
 	},
 
 	onError: (err, _variables, context) => {
-		if (context?.previousProject) {
-			queryClient.setQueryData(['project', 'v3', context.projectId], context.previousProject)
+		if (context?.previousV3) {
+			queryClient.setQueryData(['project', 'v3', context.projectId], context.previousV3)
 		}
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		if (context?.previousV2) {
+			queryClient.setQueryData(['project', 'v2', context.projectId], context.previousV2)
+		}
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1311,11 +1550,7 @@ const patchIconMutation = useMutation({
 	},
 
 	onError: (err) => {
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1335,12 +1570,12 @@ const createGalleryItemMutation = useMutation({
 		})
 	},
 
-	onMutate: async ({ title, description, featured, ordering }) => {
-		await queryClient.cancelQueries({ queryKey: ['project', 'v2', routeProjectId.value] })
+	onMutate: async ({ projectId, title, description, featured, ordering }) => {
+		await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
 
-		const previousProject = queryClient.getQueryData(['project', 'v2', routeProjectId.value])
+		const previousProject = queryClient.getQueryData(['project', 'v2', projectId])
 
-		queryClient.setQueryData(['project', 'v2', routeProjectId.value], (old) => {
+		queryClient.setQueryData(['project', 'v2', projectId], (old) => {
 			if (!old) return old
 			const newItem = {
 				url: '',
@@ -1357,18 +1592,14 @@ const createGalleryItemMutation = useMutation({
 			}
 		})
 
-		return { previousProject }
+		return { previousProject, projectId }
 	},
 
 	onError: (err, _variables, context) => {
 		if (context?.previousProject) {
-			queryClient.setQueryData(['project', 'v2', routeProjectId.value], context.previousProject)
+			queryClient.setQueryData(['project', 'v2', context.projectId], context.previousProject)
 		}
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1386,12 +1617,12 @@ const editGalleryItemMutation = useMutation({
 		})
 	},
 
-	onMutate: async ({ imageUrl, title, description, featured, ordering }) => {
-		await queryClient.cancelQueries({ queryKey: ['project', 'v2', routeProjectId.value] })
+	onMutate: async ({ projectId, imageUrl, title, description, featured, ordering }) => {
+		await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
 
-		const previousProject = queryClient.getQueryData(['project', 'v2', routeProjectId.value])
+		const previousProject = queryClient.getQueryData(['project', 'v2', projectId])
 
-		queryClient.setQueryData(['project', 'v2', routeProjectId.value], (old) => {
+		queryClient.setQueryData(['project', 'v2', projectId], (old) => {
 			if (!old) return old
 			return {
 				...old,
@@ -1410,18 +1641,14 @@ const editGalleryItemMutation = useMutation({
 			}
 		})
 
-		return { previousProject }
+		return { previousProject, projectId }
 	},
 
 	onError: (err, _variables, context) => {
 		if (context?.previousProject) {
-			queryClient.setQueryData(['project', 'v2', routeProjectId.value], context.previousProject)
+			queryClient.setQueryData(['project', 'v2', context.projectId], context.previousProject)
 		}
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1434,12 +1661,12 @@ const deleteGalleryItemMutation = useMutation({
 		await client.labrinth.projects_v2.deleteGalleryImage(projectId, imageUrl)
 	},
 
-	onMutate: async ({ imageUrl }) => {
-		await queryClient.cancelQueries({ queryKey: ['project', 'v2', routeProjectId.value] })
+	onMutate: async ({ projectId, imageUrl }) => {
+		await queryClient.cancelQueries({ queryKey: ['project', 'v2', projectId] })
 
-		const previousProject = queryClient.getQueryData(['project', 'v2', routeProjectId.value])
+		const previousProject = queryClient.getQueryData(['project', 'v2', projectId])
 
-		queryClient.setQueryData(['project', 'v2', routeProjectId.value], (old) => {
+		queryClient.setQueryData(['project', 'v2', projectId], (old) => {
 			if (!old) return old
 			return {
 				...old,
@@ -1447,18 +1674,14 @@ const deleteGalleryItemMutation = useMutation({
 			}
 		})
 
-		return { previousProject }
+		return { previousProject, projectId }
 	},
 
 	onError: (err, _variables, context) => {
 		if (context?.previousProject) {
-			queryClient.setQueryData(['project', 'v2', routeProjectId.value], context.previousProject)
+			queryClient.setQueryData(['project', 'v2', context.projectId], context.previousProject)
 		}
-		addNotification({
-			title: formatMessage(commonMessages.errorNotificationTitle),
-			text: err.data ? err.data.description : err.message,
-			type: 'error',
-		})
+		addProjectMutationErrorNotification(err)
 	},
 
 	onSettled: async () => {
@@ -1524,6 +1747,56 @@ const currentMember = computed(() => {
 	return val
 })
 
+const {
+	data: projectValidationResponse,
+	isFetching: projectValidationLoading,
+	isError: backendValidationError,
+	refetch: refetchProjectValidation,
+} = useQuery({
+	queryKey: computed(() => ['project', projectId.value, 'validation', 'v3']),
+	queryFn: () => client.labrinth.projects_v3.validate(projectId.value),
+	staleTime: 0,
+	enabled: computed(() => !!projectId.value && !!currentMember.value?.accepted),
+})
+
+const linkValidation = useProjectLinkValidation(
+	projectId,
+	projectV3,
+	() => !!currentMember.value?.accepted,
+)
+const projectLinksNetworkValidationLoading = linkValidation.isChecking
+const reviewSubmissionPending = ref(false)
+const reviewSubmissionLoading = computed(
+	() =>
+		projectValidationLoading.value ||
+		projectLinksNetworkValidationLoading.value ||
+		reviewSubmissionPending.value,
+)
+const projectValidation = computed(() => {
+	const validation = projectValidationResponse.value
+	if (!validation || backendValidationError.value || linkValidation.isError.value) return null
+	return { ...validation, nags: [...validation.nags, ...linkValidation.nags.value] }
+})
+
+async function refreshProjectValidation() {
+	const projectIdAtStart = projectId.value
+	const [result, network] = await Promise.all([
+		refetchProjectValidation({ cancelRefetch: false }),
+		linkValidation.refresh(),
+	])
+	await nextTick()
+	if (
+		!result.isSuccess ||
+		!network.isSuccess ||
+		projectId.value !== projectIdAtStart ||
+		projectValidationLoading.value ||
+		projectLinksNetworkValidationLoading.value
+	) {
+		return null
+	}
+	return projectValidation.value
+}
+
 const canAccessSettings = computed(() => !!currentMember.value?.accepted)
 
 const hasEditDetailsPermission = computed(() => {
@@ -1558,16 +1831,24 @@ const following = computed(() => {
 	return !!user.value.follows.find((x) => x.id === project.value.id)
 })
 
+const PROJECT_NOT_FOUND_DESCRIPTION =
+	"There's no project here, check that you have the right link! It may still be under review or no longer publicly available on Modrinth."
+
 const title = computed(() =>
-	project.value ? `${project.value.title} - Minecraft ${projectTypeDisplay.value}` : '',
-)
-const description = computed(() =>
 	project.value
-		? `${project.value.description} - Download the Minecraft ${projectTypeDisplay.value} ${
-				project.value.title
-			} by ${members.value.find((x) => x.is_owner)?.user?.username || 'a creator'} on Modrinth`
-		: '',
+		? `${project.value.title} - Minecraft ${projectTypeDisplay.value}`
+		: 'Project not found',
 )
+const description = computed(() => {
+	if (!project.value) {
+		return PROJECT_NOT_FOUND_DESCRIPTION
+	}
+
+	const creator = organization.value?.name || members.value.find((x) => x.is_owner)?.user?.username
+	const byLine = creator ? ` by ${creator}` : ''
+
+	return `${project.value.description} - Download the Minecraft ${projectTypeDisplay.value} ${project.value.title}${byLine} on Modrinth`
+})
 
 const canCreateServerFrom = computed(() => {
 	if (!project.value) return false
@@ -1582,6 +1863,38 @@ const projectPath = computed(() =>
 		? `/${project.value.project_type}/${project.value.slug ? project.value.slug : project.value.id}`
 		: '',
 )
+
+const settingsEntryRouteName = ref()
+
+function setSettingsEntryRoute() {
+	const backPath = window.history.state?.back
+	if (!isSettings.value || typeof backPath !== 'string') {
+		settingsEntryRouteName.value = undefined
+		return
+	}
+	settingsEntryRouteName.value = router.resolve(backPath).name?.toString()
+}
+
+onMounted(setSettingsEntryRoute)
+watch(isSettings, setSettingsEntryRoute)
+
+const settingsBackDestination = computed(() => {
+	switch (settingsEntryRouteName.value) {
+		case 'dashboard-projects':
+			return {
+				label: formatMessage(messages.backToAllProjects),
+				to: '/dashboard/projects',
+			}
+		case 'type-project':
+			return {
+				label: formatMessage(messages.backToProjectPage),
+				to: projectPath.value,
+			}
+		default:
+			return undefined
+	}
+})
+
 const projectHeaderPrimaryColor = computed(() =>
 	currentMember.value || route.name === 'type-project-version-version' ? 'standard' : 'brand',
 )
@@ -1591,8 +1904,116 @@ const showProjectHeaderCreateServerAction = computed(
 const projectHeaderCreateServerTo = computed(() =>
 	project.value ? `/hosting?project=${project.value.id}#plan` : '/hosting',
 )
+
+const MRPACK_ARCHIVE_WARNING_START = new Date('2026-08-10T17:00:00.000Z').getTime()
+const MRPACK_ARCHIVE_WARNING_END = new Date('2026-08-13T20:00:00.000Z').getTime()
+const hasModpackArchiveInWarningWindow = computed(() =>
+	(versionsV3.value ?? []).some((version) => {
+		const publishedAt = new Date(version.date_published).getTime()
+		return (
+			version.files.some((file) => file.filename.toLowerCase().endsWith('.mrpack')) &&
+			publishedAt >= MRPACK_ARCHIVE_WARNING_START &&
+			publishedAt <= MRPACK_ARCHIVE_WARNING_END
+		)
+	}),
+)
+
+async function checkModpackArchives() {
+	if (!project.value || isCheckingModpackArchives.value) return
+
+	isCheckingModpackArchives.value = true
+	startLoading()
+
+	try {
+		const versions = await client.labrinth.versions_v2.getProjectVersions(project.value.id)
+		const filesByUrl = new Map(
+			versions
+				.flatMap((version) => version.files)
+				.filter((file) => file.filename.toLowerCase().endsWith('.mrpack'))
+				.map((file) => [file.url, file]),
+		)
+		const files = [...filesByUrl.values()]
+
+		if (files.length === 0) {
+			addNotification({
+				title: formatMessage(commonMessages.errorNotificationTitle),
+				text: formatMessage(messages.checkModpackArchivesNoFiles),
+				type: 'error',
+			})
+			return
+		}
+
+		const { default: JSZip } = await import('jszip')
+		const failures = []
+
+		for (const file of files) {
+			try {
+				const response = await fetch(file.url)
+				if (!response.ok) {
+					throw new Error(`Download failed (${response.status} ${response.statusText})`)
+				}
+
+				await JSZip.loadAsync(await response.blob(), { checkCRC32: true })
+			} catch (error) {
+				failures.push({
+					filename: file.filename,
+					error: error?.message ?? String(error),
+				})
+			}
+		}
+
+		if (failures.length > 0) {
+			addNotification({
+				title: formatMessage(messages.checkModpackArchivesFailed),
+				text: failures.map((failure) => `${failure.filename}: ${failure.error}`).join('\n'),
+				type: 'error',
+			})
+			return
+		}
+
+		addNotification({
+			title: formatMessage(commonMessages.successLabel),
+			text: formatMessage(messages.checkModpackArchivesSuccess, { count: files.length }),
+			type: 'success',
+		})
+	} catch (error) {
+		addNotification({
+			title: formatMessage(commonMessages.errorNotificationTitle),
+			text: error?.data?.description ?? error?.message ?? String(error),
+			type: 'error',
+		})
+	} finally {
+		isCheckingModpackArchives.value = false
+		stopLoading()
+	}
+}
+
 const projectHeaderMoreActions = computed(() => {
 	const isStaff = !!(auth.value.user && tags.value.staffRoles.includes(auth.value.user.role))
+	const projectId = project.value?.id
+	const dependentSearchTypes = getDependentSearchTypes()
+	const dependentSearchActions = dependentSearchTypes
+		.filter((projectType) => projectType !== 'modpack')
+		.map((projectType) => ({
+			id: `view-${projectType}-dependents`,
+			label: formatMessage(
+				dependentSearchTypes.length === 1
+					? messages.viewDependents
+					: messages.viewProjectTypeDependents,
+				{
+					projectType: formatProjectTypeSentence(formatMessage, projectType),
+				},
+			),
+			icon: SearchIcon,
+			type: 'link',
+			to: {
+				path: `/discover/${projectType}s`,
+				query: {
+					dep: formatDependencyProjectFilterOption(projectId, ['required']),
+				},
+			},
+		}))
+	const isPluginOnly = dependentSearchTypes.length === 1 && dependentSearchTypes[0] === 'plugin'
 
 	return [
 		{
@@ -1603,7 +2024,21 @@ const projectHeaderMoreActions = computed(() => {
 			to: `${projectPath.value}/settings/analytics`,
 			shown: !!auth.value.user && !!currentMember.value,
 		},
-		{ type: 'divider', shown: !!auth.value.user && !!currentMember.value },
+		...dependentSearchActions,
+		{
+			id: 'view-modpacks',
+			label: formatMessage(messages.viewModpacks),
+			icon: PackageSearchIcon,
+			type: 'link',
+			to: {
+				path: '/discover/modpacks',
+				query: {
+					dep: formatDependencyProjectFilterOption(projectId, ['required']),
+				},
+			},
+			shown: !isPluginOnly && project.value?.actualProjectType !== 'modpack',
+		},
+		{ type: 'divider' },
 		{
 			id: 'moderation-checklist',
 			label: formatMessage(messages.reviewProject),
@@ -1627,6 +2062,19 @@ const projectHeaderMoreActions = computed(() => {
 			icon: FolderSearchIcon,
 			action: () => scanModal.value?.show(),
 			tone: 'orange',
+			shown: !!auth.value.user && isStaff && project.value?.actualProjectType === 'modpack',
+		},
+		{
+			id: 'moderation-modpack-check-archives',
+			label: formatMessage(
+				isCheckingModpackArchives.value
+					? messages.checkingModpackArchives
+					: messages.checkModpackArchives,
+			),
+			icon: FileArchiveIcon,
+			action: checkModpackArchives,
+			tone: 'orange',
+			disabled: isCheckingModpackArchives.value,
 			shown: !!auth.value.user && isStaff && project.value?.actualProjectType === 'modpack',
 		},
 		{ type: 'divider', shown: !!auth.value.user && isStaff },
@@ -1653,6 +2101,29 @@ const projectHeaderMoreActions = computed(() => {
 	]
 })
 
+function getDependentSearchTypes() {
+	if (!project.value) return []
+
+	if (project.value.actualProjectType !== 'mod') {
+		return [isServerProject.value ? 'server' : project.value.actualProjectType]
+	}
+
+	const loaders = project.value.loaders ?? []
+	const projectTypes = []
+
+	if (loaders.some((loader) => tags.value.loaderData.modLoaders.includes(loader))) {
+		projectTypes.push('mod')
+	}
+	if (loaders.some((loader) => tags.value.loaderData.allPluginLoaders.includes(loader))) {
+		projectTypes.push('plugin')
+	}
+	if (loaders.some((loader) => tags.value.loaderData.dataPackLoaders.includes(loader))) {
+		projectTypes.push('datapack')
+	}
+
+	return projectTypes.length > 0 ? projectTypes : ['mod']
+}
+
 const createCanonicalUrl = () =>
 	project.value ? `https://modrinth.com/project/${project.value.id}` : undefined
 
@@ -1670,13 +2141,13 @@ if (!route.name.startsWith('type-project-settings')) {
 		title: () => title.value,
 		description: () => description.value,
 		ogTitle: () => title.value,
-		ogDescription: () => project.value?.description ?? '',
-		ogImage: () => project.value?.icon_url ?? 'https://cdn.modrinth.com/placeholder.png',
+		ogDescription: () => project.value?.description ?? PROJECT_NOT_FOUND_DESCRIPTION,
+		ogImage: () =>
+			project.value
+				? (project.value?.icon_url ?? 'https://cdn.modrinth.com/placeholder-square.png')
+				: 'https://cdn.modrinth.com/not-found.png',
 		ogUrl: createCanonicalUrl,
-		robots: () =>
-			project.value?.status === 'approved' || project.value?.status === 'archived'
-				? 'all'
-				: 'noindex',
+		robots: () => (project.value?.status === 'approved' ? 'all' : 'noindex'),
 	})
 } else {
 	useSeoMeta({
@@ -1728,22 +2199,37 @@ watch(
 )
 
 async function setProcessing() {
-	// Guard against multiple submissions while mutation is pending
-	if (patchStatusMutation.isPending.value) return
-
+	if (
+		patchStatusMutation.isPending.value ||
+		!canSubmitProjectForReview(projectValidation.value, reviewSubmissionLoading.value)
+	) {
+		return false
+	}
+	reviewSubmissionPending.value = true
 	startLoading()
-	patchStatusMutation.mutate(
-		{ projectId: project.value.id, status: 'processing' },
-		{ onSettled: () => stopLoading() },
-	)
+	try {
+		const validation = await refreshProjectValidation()
+		if (!canSubmitProjectForReview(validation, false)) return false
+		await patchStatusMutation.mutateAsync({
+			projectId: project.value.id,
+			status: 'processing',
+			threadId: project.value.thread_id,
+		})
+		return true
+	} catch {
+		return false
+	} finally {
+		reviewSubmissionPending.value = false
+		stopLoading()
+	}
 }
 
-async function patchProject(resData, quiet = false) {
+async function patchProject(resData, quiet = false, throwOnError = false) {
 	startLoading()
 
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		patchProjectMutation.mutate(
-			{ projectId: project.value.id, data: resData },
+			{ projectId: project.value.id, data: resData, optimistic: !throwOnError },
 			{
 				onSuccess: async () => {
 					if (!quiet) {
@@ -1755,19 +2241,19 @@ async function patchProject(resData, quiet = false) {
 					}
 					resolve(true)
 				},
-				onError: () => resolve(false),
+				onError: (error) => (throwOnError ? reject(error) : resolve(false)),
 				onSettled: () => stopLoading(),
 			},
 		)
 	})
 }
 
-async function patchProjectV3(resData, quiet = false) {
+async function patchProjectV3(resData, quiet = false, throwOnError = false) {
 	startLoading()
 
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		patchProjectV3Mutation.mutate(
-			{ projectId: project.value.id, data: resData },
+			{ projectId: project.value.id, data: resData, optimistic: !throwOnError },
 			{
 				onSuccess: async () => {
 					if (!quiet) {
@@ -1779,7 +2265,7 @@ async function patchProjectV3(resData, quiet = false) {
 					}
 					resolve(true)
 				},
-				onError: () => resolve(false),
+				onError: (error) => (throwOnError ? reject(error) : resolve(false)),
 				onSettled: () => stopLoading(),
 			},
 		)
@@ -1801,30 +2287,58 @@ async function patchIcon(icon) {
 	})
 }
 
-async function createGalleryItem(file, title, description, featured, ordering) {
+async function createGalleryItem(
+	file,
+	title,
+	description,
+	featured,
+	ordering,
+	throwOnError = false,
+) {
 	startLoading()
 
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		createGalleryItemMutation.mutate(
-			{ projectId: project.value.id, file, title, description, featured, ordering },
+			{
+				projectId: project.value.id,
+				file,
+				title,
+				description,
+				featured,
+				ordering,
+			},
 			{
 				onSuccess: () => resolve(true),
-				onError: () => resolve(false),
+				onError: (error) => (throwOnError ? reject(error) : resolve(false)),
 				onSettled: () => stopLoading(),
 			},
 		)
 	})
 }
 
-async function editGalleryItem(imageUrl, title, description, featured, ordering) {
+async function editGalleryItem(
+	imageUrl,
+	title,
+	description,
+	featured,
+	ordering,
+	throwOnError = false,
+) {
 	startLoading()
 
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		editGalleryItemMutation.mutate(
-			{ projectId: project.value.id, imageUrl, title, description, featured, ordering },
+			{
+				projectId: project.value.id,
+				imageUrl,
+				title,
+				description,
+				featured,
+				ordering,
+			},
 			{
 				onSuccess: () => resolve(true),
-				onError: () => resolve(false),
+				onError: (error) => (throwOnError ? reject(error) : resolve(false)),
 				onSettled: () => stopLoading(),
 			},
 		)
@@ -1854,7 +2368,10 @@ async function copyPermalink() {
 	await navigator.clipboard.writeText(`${config.public.siteUrl}/project/${project.value.id}`)
 }
 
-const collapsedChecklist = ref(false)
+const collapsedChecklist = useLocalStorage(
+	computed(() => `project-checklist-collapsed-${projectId.value ?? ''}`),
+	false,
+)
 
 const showModerationChecklist = ref(false)
 const collapsedModerationChecklist = useLocalStorage('collapsed-moderation-checklist', false)
@@ -1873,23 +2390,11 @@ function setModerationChecklistOpen(open) {
 	showModerationChecklist.value = open
 }
 
-function isProjectInActiveModerationQueue(projectId = project.value?.id) {
-	return (
-		!!projectId &&
-		moderationQueue.isQueueMode &&
-		moderationQueue.currentQueue.items.includes(projectId)
-	)
-}
-
 async function openModerationChecklistFromMenu() {
 	const projectId = project.value?.id
 	if (!projectId) return
 
 	await moderationQueue.ready
-	if (!isProjectInActiveModerationQueue(projectId)) {
-		await moderationQueue.setSingleProject(projectId)
-	}
-
 	setModerationChecklistOpen(true)
 }
 
@@ -1979,17 +2484,20 @@ function handleKeybinds(event) {
 	if (!isStaff(auth.value.user)) return
 	if (
 		!showModerationChecklist.value &&
-		!modSettings.value.get(moderationSettings.General.ProjectKeybinds)
+		!modSettings.value.get(moderationSettings.Checklist.AlwaysAllowKeybinds)
 	)
 		return
 
 	keybinds.value.handle(event, {
 		project: projectRaw.value,
 		scope: 'project',
+		notifyCopied,
 	})
 }
 
 const navLinks = computed(() => {
+	if (!project.value) return []
+
 	const routeType = route.params.type || project.value.project_type
 	const projectUrl = `/${routeType}/${project.value.slug ? project.value.slug : project.value.id}`
 
@@ -2040,6 +2548,9 @@ provideProjectPageContext({
 	currentMember,
 	allMembers,
 	organization,
+	projectValidation,
+	projectValidationLoading,
+	projectLinksNetworkValidationLoading,
 	// Lazy version loading
 	versions,
 	versionsLoading,
@@ -2053,6 +2564,7 @@ provideProjectPageContext({
 
 	// Invalidate all project queries (auto-refetches active ones)
 	invalidate: invalidateProject,
+	refreshProjectValidation,
 
 	// Lazy loading
 	loadVersions,

@@ -1,8 +1,15 @@
 <template>
 	<Teleport to="body">
-		<div v-if="open" class="modal-root">
+		<div
+			v-if="open"
+			class="modal-root"
+			data-modal-root
+			:data-modal-id="modalId"
+			:data-modal-depth="stackDepth"
+		>
 			<div
 				:class="{ shown: visible }"
+				:style="{ zIndex: stackTauriZ }"
 				class="tauri-overlay"
 				data-tauri-drag-region
 				@pointerdown="onTauriOverlayPointerDown"
@@ -17,26 +24,27 @@
 					},
 					computedFade,
 				]"
+				:style="{ zIndex: stackOverlayZ }"
 				@click="() => (closeOnClickOutside && closable ? hide() : {})"
 			/>
-			<div class="modal-container" :class="{ shown: visible }">
+			<div class="modal-container" :class="{ shown: visible }" :style="{ zIndex: stackContainerZ }">
 				<div
 					ref="modalBodyRef"
 					role="dialog"
 					aria-modal="true"
+					tabindex="-1"
 					:aria-labelledby="headerId"
-					class="modal-body flex flex-col bg-bg-raised rounded-2xl border border-solid border-surface-5"
+					class="modal-body flex flex-col bg-bg-raised rounded-2xl border border-solid border-surface-5 outline-none"
 					v-bind="$attrs"
-					@keydown="handleKeyDown"
 				>
 					<div
 						v-if="!hideHeader"
 						data-tauri-drag-region
 						class="grid grid-cols-[1fr_auto] items-center gap-4 p-6 border-solid border-0 border-b-[1px] border-surface-5 max-w-full"
 					>
-						<div class="flex text-wrap break-words items-center gap-3 min-w-0">
+						<div :id="headerId" class="flex text-wrap break-words items-center gap-3 min-w-0">
 							<slot name="title">
-								<span v-if="header" :id="headerId" class="text-2xl font-semibold text-contrast">
+								<span v-if="header" class="text-2xl font-semibold text-contrast">
 									{{ header }}
 								</span>
 							</slot>
@@ -137,12 +145,19 @@
 
 <script setup lang="ts">
 import { XIcon } from '@modrinth/assets'
-import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { useMediaQuery, useResizeObserver } from '@vueuse/core'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 import { IconButton } from '#ui/components/base/buttons'
 
 import { useVIntl } from '../../composables/i18n'
-import { useModalStack } from '../../composables/modal-stack'
+import {
+	getModalStackZBase,
+	MODAL_CONTAINER_Z_OFFSET,
+	MODAL_OVERLAY_Z_OFFSET,
+	MODAL_TAURI_Z_OFFSET,
+	useModalStack,
+} from '../../composables/modal-stack'
 import { useScrollIndicator } from '../../composables/scroll-indicator'
 import { injectModalBehavior } from '../../providers'
 import { commonMessages } from '../../utils/common-messages'
@@ -173,6 +188,7 @@ const props = withDefaults(
 		onAfterHide?: () => void
 		onShow?: () => void
 		beforeHide?: () => boolean
+		initialFocus?: () => HTMLElement | null
 		mergeHeader?: boolean
 		scrollable?: boolean
 		maxContentHeight?: string
@@ -182,6 +198,7 @@ const props = withDefaults(
 		maxWidth?: string
 		/** Width for the modal body (e.g., '460px', '600px'). */
 		width?: string
+		animateResize?: boolean
 		/** Disables all close actions (close button, ESC key, click outside). */
 		disableClose?: boolean
 		actionsDivider?: boolean
@@ -201,6 +218,7 @@ const props = withDefaults(
 		onAfterHide: () => {},
 		onShow: () => {},
 		beforeHide: undefined,
+		initialFocus: undefined,
 		mergeHeader: false,
 		// TODO: migrate all modals to use scrollable and remove this prop
 		scrollable: false,
@@ -208,6 +226,7 @@ const props = withDefaults(
 		noPadding: false,
 		maxWidth: undefined,
 		width: undefined,
+		animateResize: true,
 		disableClose: false,
 		actionsDivider: false,
 	},
@@ -240,8 +259,12 @@ function onTauriOverlayClick(event: MouseEvent) {
 }
 
 const computedFade = computed(() => {
-	if (props.fade) return props.fade
-	if (props.danger) return 'danger'
+	if (props.fade) {
+		return props.fade
+	}
+	if (props.danger) {
+		return 'danger'
+	}
 	return 'standard'
 })
 
@@ -253,6 +276,50 @@ const open = ref(false)
 const visible = ref(false)
 const stackDepth = ref(0)
 const modalBodyRef = ref<HTMLElement | null>(null)
+const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+let previousHeight: number | undefined
+let resizeAnimation: Animation | undefined
+
+function resetResizeAnimation() {
+	resizeAnimation?.cancel()
+	resizeAnimation = undefined
+	previousHeight = undefined
+}
+
+watch([modalBodyRef, visible, () => props.animateResize, prefersReducedMotion], () => {
+	if (!modalBodyRef.value || !visible.value || !props.animateResize || prefersReducedMotion.value) {
+		resetResizeAnimation()
+	}
+})
+
+useResizeObserver(modalBodyRef, ([entry]) => {
+	if (!entry || resizeAnimation) return
+
+	const height = entry.borderBoxSize[0]?.blockSize ?? modalBodyRef.value?.offsetHeight
+	if (height === undefined) return
+
+	const fromHeight = previousHeight
+	previousHeight = height
+	if (
+		!visible.value ||
+		!props.animateResize ||
+		prefersReducedMotion.value ||
+		fromHeight === undefined ||
+		Math.abs(height - fromHeight) < 1
+	) {
+		return
+	}
+
+	const animation = entry.target.animate(
+		[{ height: `${fromHeight}px` }, { height: `${height}px` }],
+		{ duration: 200, easing: 'ease-in-out' },
+	)
+	resizeAnimation = animation
+	animation.onfinish = () => {
+		if (resizeAnimation === animation) resizeAnimation = undefined
+	}
+})
+
 let previousFocusEl: Element | null = null
 let hideTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -262,9 +329,97 @@ const { showTopFade, showBottomFade, checkScrollState } = useScrollIndicator(scr
 const FOCUSABLE_SELECTOR =
 	'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
+const inputModality = { keyboard: false }
+if (typeof window !== 'undefined') {
+	window.addEventListener(
+		'keydown',
+		(event) => {
+			if (event.metaKey || event.altKey || event.ctrlKey) {
+				return
+			}
+			inputModality.keyboard = true
+		},
+		true,
+	)
+	window.addEventListener(
+		'pointerdown',
+		() => {
+			inputModality.keyboard = false
+		},
+		true,
+	)
+}
+
 function getFocusableElements(): HTMLElement[] {
-	if (!modalBodyRef.value) return []
-	return Array.from(modalBodyRef.value.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+	if (!modalBodyRef.value) {
+		return []
+	}
+	return Array.from(modalBodyRef.value.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+		(el) =>
+			!el.closest('[inert]') &&
+			(el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0),
+	)
+}
+
+function isFocusInsideModal() {
+	return !!modalBodyRef.value?.contains(document.activeElement)
+}
+
+function focusElement(el: HTMLElement) {
+	el.focus({ preventScroll: true, focusVisible: inputModality.keyboard })
+}
+
+function focusModal() {
+	const dialog = modalBodyRef.value
+	if (!dialog) {
+		return false
+	}
+	const initialFocus = props.initialFocus?.()
+	if (initialFocus && dialog.contains(initialFocus)) {
+		focusElement(initialFocus)
+		if (isFocusInsideModal()) {
+			return true
+		}
+	}
+
+	if (inputModality.keyboard) {
+		for (const el of getFocusableElements()) {
+			focusElement(el)
+			if (isFocusInsideModal()) {
+				return true
+			}
+		}
+	}
+
+	focusElement(dialog)
+	if (isFocusInsideModal()) {
+		return true
+	}
+
+	for (const el of getFocusableElements()) {
+		focusElement(el)
+		if (isFocusInsideModal()) {
+			return true
+		}
+	}
+
+	return false
+}
+
+function scheduleFocus(attempt = 0) {
+	if (focusModal() || attempt >= 10) {
+		return
+	}
+	requestAnimationFrame(() => scheduleFocus(attempt + 1))
+}
+
+function nextRenderedModalDepth(): number {
+	return Array.from(document.querySelectorAll<HTMLElement>('[data-modal-root]'))
+		.filter((root) => root.dataset.modalId !== modalId)
+		.reduce((nextDepth, root) => {
+			const depth = Number(root.dataset.modalDepth)
+			return Number.isFinite(depth) ? Math.max(nextDepth, depth + 1) : nextDepth + 1
+		}, 0)
 }
 
 function show(event?: MouseEvent) {
@@ -274,11 +429,13 @@ function show(event?: MouseEvent) {
 	}
 	props.onShow?.()
 	const wasEmpty = modalStackSize() === 0
-	stackDepth.value = modalStackSize()
+	stackDepth.value = Math.max(modalStackSize(), nextRenderedModalDepth())
 	open.value = true
 	previousFocusEl = document.activeElement
 	pushModal()
-	if (wasEmpty) modalBehavior?.onShow?.()
+	if (wasEmpty) {
+		modalBehavior?.onShow?.()
+	}
 
 	document.body.style.overflow = 'hidden'
 	window.addEventListener('keydown', handleWindowKeyDown)
@@ -292,12 +449,7 @@ function show(event?: MouseEvent) {
 	setTimeout(() => {
 		visible.value = true
 		nextTick(() => {
-			const focusable = getFocusableElements()
-			if (focusable.length > 0) {
-				focusable[0].focus()
-			} else {
-				modalBodyRef.value?.focus()
-			}
+			scheduleFocus()
 		})
 	}, 50)
 }
@@ -333,7 +485,9 @@ function hide(): boolean {
 
 async function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
 	await nextTick()
-	if (!scrollContainer.value) return
+	if (!scrollContainer.value) {
+		return
+	}
 
 	scrollContainer.value.scrollTo({
 		top: scrollContainer.value.scrollHeight,
@@ -352,11 +506,10 @@ defineExpose({
 const mouseX = ref(0)
 const mouseY = ref(0)
 
-const MODAL_STACK_BASE_Z = 100
-const stackZBase = computed(() => MODAL_STACK_BASE_Z + stackDepth.value * 10)
-const stackOverlayZ = computed(() => stackZBase.value + 19)
-const stackTauriZ = computed(() => stackZBase.value + 20)
-const stackContainerZ = computed(() => stackZBase.value + 21)
+const stackZBase = computed(() => getModalStackZBase(stackDepth.value))
+const stackOverlayZ = computed(() => stackZBase.value + MODAL_OVERLAY_Z_OFFSET)
+const stackTauriZ = computed(() => stackZBase.value + MODAL_TAURI_Z_OFFSET)
+const stackContainerZ = computed(() => stackZBase.value + MODAL_CONTAINER_Z_OFFSET)
 const resolvedMaxWidth = computed(() => props.maxWidth ?? '60rem')
 const resolvedWidth = computed(() => props.width ?? 'fit-content')
 const mouseXOffset = computed(() => `calc((-50vw + ${mouseX.value}px) / 16)`)
@@ -373,6 +526,7 @@ function resetMousePosition() {
 }
 
 onUnmounted(() => {
+	resetResizeAnimation()
 	if (hideTimeout) {
 		clearTimeout(hideTimeout)
 		hideTimeout = null
@@ -389,31 +543,52 @@ onUnmounted(() => {
 })
 
 function handleWindowKeyDown(event: KeyboardEvent) {
+	if (!isTopmostModal() || event.defaultPrevented) {
+		return
+	}
+
+	if (event.key === 'Tab') {
+		trapFocus(event)
+		return
+	}
+
 	if (props.closeOnEsc && event.key === 'Escape' && props.closable) {
-		if (!isTopmostModal()) return
 		hide()
 	}
 }
 
-function handleKeyDown(event: KeyboardEvent) {
-	if (event.key === 'Tab') {
-		const focusable = getFocusableElements()
-		if (focusable.length === 0) return
+function trapFocus(event: KeyboardEvent) {
+	const dialog = modalBodyRef.value
+	if (!dialog) {
+		return
+	}
 
-		const first = focusable[0]
-		const last = focusable[focusable.length - 1]
+	const focusable = getFocusableElements()
+	if (focusable.length === 0) {
+		event.preventDefault()
+		focusElement(dialog)
+		return
+	}
 
-		if (event.shiftKey) {
-			if (document.activeElement === first) {
-				event.preventDefault()
-				last.focus()
-			}
-		} else {
-			if (document.activeElement === last) {
-				event.preventDefault()
-				first.focus()
-			}
-		}
+	const first = focusable[0]
+	const last = focusable[focusable.length - 1]
+	const active = document.activeElement
+	const inside = dialog.contains(active)
+	const beforeFirst = !!(active?.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
+	const afterLast = !!(active?.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_PRECEDING)
+
+	if (!inside) {
+		event.preventDefault()
+		focusElement(event.shiftKey ? last : first)
+		return
+	}
+
+	if (event.shiftKey && (active === first || active === dialog || beforeFirst)) {
+		event.preventDefault()
+		focusElement(last)
+	} else if (!event.shiftKey && (active === last || afterLast)) {
+		event.preventDefault()
+		focusElement(first)
 	}
 }
 
@@ -430,7 +605,6 @@ defineOptions({
 	left: 0;
 	width: 100%;
 	height: 100px;
-	z-index: v-bind(stackTauriZ);
 
 	&.shown {
 		opacity: 1;
@@ -441,7 +615,6 @@ defineOptions({
 .modal-overlay {
 	position: fixed;
 	inset: -5rem;
-	z-index: v-bind(stackOverlayZ);
 	opacity: 0;
 	visibility: hidden;
 	pointer-events: none;
@@ -499,7 +672,6 @@ defineOptions({
 	display: flex;
 	justify-content: center;
 	align-items: center;
-	z-index: v-bind(stackContainerZ);
 	visibility: hidden;
 	pointer-events: none;
 	transform: translate(v-bind(mouseXOffset), v-bind(mouseYOffset));

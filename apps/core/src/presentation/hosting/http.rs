@@ -86,6 +86,10 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/v1/servers", get(list_v1))
         .route("/v1/servers/:id", get(get_v1))
+        .route(
+            "/v1/servers/:id/worlds/:wid/select-download",
+            get(select_download),
+        )
         .route("/v1/servers/:id/flows/intro", delete(end_intro))
         .route("/v1/servers/:id/worlds/:wid/onboard", post(unsupported))
         .route(
@@ -261,8 +265,23 @@ async fn v1(
     Ok(server_v1(
         r,
         &host(state),
+        &format!(
+            "{}/hosting/servers/{}",
+            state.config.public_url.trim_end_matches('/'),
+            r.id
+        ),
         rows.iter().map(backup).collect(),
     ))
+}
+
+async fn select_download(
+    user: AuthUser,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+) -> ApiResult {
+    let id = world(id, wid)?;
+    record(&state, &user, &id, "server:files").await?;
+    Ok(Json(json!({"method_type": "unavailable"})))
 }
 
 async fn list_v0(
@@ -1066,18 +1085,16 @@ async fn update_addon(
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<UpdateAddon>,
 ) -> ApiResult {
-    if body.version_id.is_some() {
-        return Err(ApiError::UnprocessableEntity(
-            "Selecting an addon update version is not yet supported by Core"
-                .into(),
-        ));
-    }
-    mods::update_mod_handler(
-        user,
-        Path((world(id, wid)?, body.filename)),
-        State(state),
+    let id = world(id, wid)?;
+    let r = record(&state, &user, &id, "server:content").await?;
+    let updated = mod_service::update_mod_version(
+        &state,
+        &r.id.to_string(),
+        &body.filename,
+        body.version_id.as_deref(),
     )
-    .await
+    .await?;
+    Ok(Json(json!({"updated": updated})))
 }
 
 async fn update_addons(
@@ -1086,12 +1103,6 @@ async fn update_addons(
     Path(pair): Path<(String, String)>,
     Json(body): Json<UpdateAddons>,
 ) -> ApiResult {
-    if body.addons.iter().any(|a| a.version_id.is_some()) {
-        return Err(ApiError::UnprocessableEntity(
-            "Selecting an addon update version is not yet supported by Core"
-                .into(),
-        ));
-    }
     for item in body.addons {
         let _ = update_addon(
             AuthUser(user.0.clone()),

@@ -56,12 +56,40 @@ async fn open_app_db_pool(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
         .create_if_missing(true);
 
     Ok(SqlitePoolOptions::new()
-        .max_connections(100)
+        .max_connections(10)
+        .min_connections(1)
+        .idle_timeout(Duration::from_secs(120))
         .connect_with(conn_options)
         .await?)
 }
 
 async fn record_current_app_version(pool: &Pool<Sqlite>) -> crate::Result<()> {
+    let previous_version = sqlx::query_scalar!(
+        "SELECT value FROM app_metadata WHERE key = 'app_version'"
+    )
+    .fetch_optional(pool)
+    .await?;
+    let already_used_sync_update = previous_version
+        .as_deref()
+        .and_then(|version| {
+            let mut parts = version.split('.');
+            Some((
+                parts.next()?.parse::<u64>().ok()?,
+                parts.next()?.parse::<u64>().ok()?,
+            ))
+        })
+        .is_some_and(|version| version >= (0, 20));
+
+    if env!("CARGO_PKG_VERSION").starts_with("0.20.")
+        && already_used_sync_update
+    {
+        let mut settings = super::Settings::get(pool).await?;
+        if settings.pending_update_toast_for_version.is_some() {
+            settings.pending_update_toast_for_version = None;
+            settings.update(pool).await?;
+        }
+    }
+
     sqlx::query!(
         "
 		INSERT INTO app_metadata (key, value, updated_at)
@@ -82,7 +110,7 @@ async fn record_current_app_version(pool: &Pool<Sqlite>) -> crate::Result<()> {
 /// kept around for a little while to allow users to recover from accidental
 /// deletions.
 async fn stale_data_cleanup(pool: &Pool<Sqlite>) -> crate::Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
     let has_skin_tables = sqlx::query!(
 		"SELECT COUNT(*) AS \"count!: i64\" FROM sqlite_master WHERE type = 'table' AND name IN ('custom_minecraft_skins', 'minecraft_users')",

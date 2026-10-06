@@ -9,8 +9,9 @@ import { useRouter } from 'vue-router'
 
 import type UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import type ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
+import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { trackEvent } from '@/helpers/analytics'
-import { get_search_results } from '@/helpers/cache.js'
+import { get_project, get_search_results } from '@/helpers/cache.js'
 import { import_instance } from '@/helpers/import.js'
 import {
 	type CreatePackLocation,
@@ -22,7 +23,6 @@ import {
 import { list } from '@/helpers/instance'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata.js'
 import type { InstanceIconConfig, InstanceLoader } from '@/helpers/types'
-import { useTheming } from '@/store/state'
 
 export function setupCreationModal(
 	notificationManager: AbstractWebNotificationManager,
@@ -30,7 +30,7 @@ export function setupCreationModal(
 ) {
 	const { handleError } = notificationManager
 	const router = useRouter()
-	const themeStore = useTheming()
+	const appSettings = useAppSettings()
 
 	const installationModal =
 		useTemplateRef<ComponentExposed<typeof CreationFlowModal>>('installationModal')
@@ -66,18 +66,14 @@ export function setupCreationModal(
 		}
 	}
 
-	async function proceedWithModpackCreation(
-		projectId: string,
-		versionId: string,
-		name: string,
-		iconUrl?: string,
-	) {
+	async function proceedWithModpackCreation(projectId: string, versionId: string, name: string) {
+		const project = await get_project(projectId, 'bypass')
 		const job = await install_create_modpack_instance({
 			type: 'fromVersionId',
 			project_id: projectId,
 			version_id: versionId,
 			title: name,
-			icon_url: iconUrl,
+			icon_url: project.raw_icon_url,
 		})
 		await navigateToCreatedInstance(job)
 		trackEvent('InstanceCreate', { source: 'CreationModalModpack' })
@@ -92,13 +88,13 @@ export function setupCreationModal(
 	async function handleCreate(config: CreationFlowContextValue) {
 		try {
 			if (config.modpackSelection.value) {
-				const { projectId, versionId, name, iconUrl } = config.modpackSelection.value
+				const { projectId, versionId, name } = config.modpackSelection.value
 
 				const instances = await list().catch(handleError)
 				const existingInstance = instances?.find((i) => i.link?.project_id === projectId)
 
-				if (existingInstance && !themeStore.getFeatureFlag('skip_non_essential_warnings')) {
-					pendingModpackCreation.value = { projectId, versionId, name, iconUrl }
+				if (existingInstance && !appSettings.skipNonEssentialWarnings) {
+					pendingModpackCreation.value = { projectId, versionId, name }
 					installationModal.value?.hide()
 					modpackAlreadyInstalledModal.value?.show(existingInstance.name, existingInstance.id)
 					return
@@ -131,8 +127,8 @@ export function setupCreationModal(
 			}
 
 			if (config.modpackSelection.value) {
-				const { projectId, versionId, name, iconUrl } = config.modpackSelection.value
-				await proceedWithModpackCreation(projectId, versionId, name, iconUrl)
+				const { projectId, versionId, name } = config.modpackSelection.value
+				await proceedWithModpackCreation(projectId, versionId, name)
 				return
 			}
 
@@ -195,15 +191,14 @@ export function setupCreationModal(
 		projectId: string
 		versionId: string
 		name: string
-		iconUrl?: string
 	} | null>(null)
 
 	async function handleModpackDuplicateCreateAnyway() {
 		if (!pendingModpackCreation.value) return
-		const { projectId, versionId, name, iconUrl } = pendingModpackCreation.value
+		const { projectId, versionId, name } = pendingModpackCreation.value
 		pendingModpackCreation.value = null
 		try {
-			await proceedWithModpackCreation(projectId, versionId, name, iconUrl)
+			await proceedWithModpackCreation(projectId, versionId, name)
 		} catch (error) {
 			handleError(error as Error)
 		}

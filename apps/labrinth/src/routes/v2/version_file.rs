@@ -7,6 +7,8 @@ use crate::queue::session::AuthQueue;
 use crate::routes::HashAlgorithm;
 use crate::routes::v3::version_file::{DownloadRedirect, HashQuery};
 use crate::routes::{FileHash, v2_reroute, v3};
+use crate::util::error::ApiContext as _;
+use crate::util::error::Context as _;
 use actix_web::{HttpRequest, HttpResponse, delete, get, post, web};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,7 +71,8 @@ pub async fn get_version_from_hash(
         session_queue,
     )
     .await
-    .or_else(v2_reroute::flatten_404_error)?;
+    .or_else(v2_reroute::flatten_404_error)
+    .wrap_api_err("flattening v2 not-found response")?;
 
     // Convert response to V2 format
     match v2_reroute::extract_ok_json::<Version>(response).await {
@@ -233,7 +236,8 @@ pub async fn get_update_from_hash(
         session_queue,
     )
     .await
-    .or_else(v2_reroute::flatten_404_error)?;
+    .or_else(v2_reroute::flatten_404_error)
+    .wrap_api_err("flattening v2 not-found response")?;
 
     // Convert response to V2 format
     match v2_reroute::extract_ok_json::<Version>(response).await {
@@ -289,7 +293,8 @@ pub async fn get_versions_from_hashes(
         session_queue,
     )
     .await
-    .or_else(v2_reroute::flatten_404_error)?;
+    .or_else(v2_reroute::flatten_404_error)
+    .wrap_api_err("flattening v2 not-found response")?;
 
     // Convert to V2
     match v2_reroute::extract_ok_json::<HashMap<String, Version>>(response)
@@ -342,7 +347,8 @@ pub async fn get_projects_from_hashes(
         session_queue,
     )
     .await
-    .or_else(v2_reroute::flatten_404_error)?;
+    .or_else(v2_reroute::flatten_404_error)
+    .wrap_api_err("flattening v2 not-found response")?;
 
     // Convert to V2
     match v2_reroute::extract_ok_json::<HashMap<String, Project>>(response)
@@ -358,10 +364,11 @@ pub async fn get_projects_from_hashes(
                 .collect::<HashMap<_, _>>();
             let legacy_projects = LegacyProject::from_many(
                 projects_hashes.into_values().collect(),
-                &**pool,
+                &pool,
                 &redis,
             )
-            .await?;
+            .await
+            .wrap_internal_err("converting projects to legacy responses")?;
             let legacy_projects_hashes = hash_to_project_id
                 .into_iter()
                 .filter_map(|(hash, project_id)| {
@@ -405,9 +412,11 @@ pub struct ManyUpdateData {
 )]
 #[post("/update")]
 pub async fn update_files(
+    req: HttpRequest,
     pool: web::Data<ReadOnlyPgPool>,
     redis: web::Data<RedisPool>,
     update_data: web::Json<ManyUpdateData>,
+    session_queue: web::Data<AuthQueue>,
 ) -> Result<HttpResponse, ApiError> {
     let update_data = update_data.into_inner();
     let update_data = v3::version_file::ManyUpdateData {
@@ -419,14 +428,18 @@ pub async fn update_files(
     };
 
     let returned_versions = match v3::version_file::update_files(
+        req,
         pool,
         redis,
         web::Json(update_data),
+        session_queue,
     )
     .await
     {
         Ok(resp) => resp,
-        Err(ApiError::NotFound) => return Ok(HttpResponse::NotFound().body("")),
+        Err(ApiError::NotFound(_)) => {
+            return Ok(HttpResponse::NotFound().body(""));
+        }
         Err(err) => return Err(err),
     };
 
@@ -456,9 +469,11 @@ pub async fn update_files(
 )]
 #[post("/update_many")]
 pub async fn update_files_many(
+    req: HttpRequest,
     pool: web::Data<ReadOnlyPgPool>,
     redis: web::Data<RedisPool>,
     update_data: web::Json<ManyUpdateData>,
+    session_queue: web::Data<AuthQueue>,
 ) -> Result<HttpResponse, ApiError> {
     let update_data = update_data.into_inner();
     let update_data = v3::version_file::ManyUpdateData {
@@ -470,14 +485,18 @@ pub async fn update_files_many(
     };
 
     let returned_versions = match v3::version_file::update_files_many(
+        req,
         pool,
         redis,
         web::Json(update_data),
+        session_queue,
     )
     .await
     {
         Ok(resp) => resp,
-        Err(ApiError::NotFound) => return Ok(HttpResponse::NotFound().body("")),
+        Err(ApiError::NotFound(_)) => {
+            return Ok(HttpResponse::NotFound().body(""));
+        }
         Err(err) => return Err(err),
     };
 
@@ -565,7 +584,8 @@ pub async fn update_individual_files(
         session_queue,
     )
     .await
-    .or_else(v2_reroute::flatten_404_error)?;
+    .or_else(v2_reroute::flatten_404_error)
+    .wrap_api_err("flattening v2 not-found response")?;
 
     // Convert response to V2 format
     match v2_reroute::extract_ok_json::<HashMap<String, Version>>(response)

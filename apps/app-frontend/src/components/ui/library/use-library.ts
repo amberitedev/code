@@ -1,11 +1,34 @@
 import type { Labrinth } from '@modrinth/api-client'
-import { formatLoader, injectNotificationManager, useVIntl } from '@modrinth/ui'
+import {
+	ClipboardCopyIcon,
+	EditIcon,
+	EyeIcon,
+	FolderOpenIcon,
+	MinusIcon,
+	PaletteIcon,
+	PlayIcon,
+	PlusIcon,
+	StarIcon,
+	StopCircleIcon,
+	TrashIcon,
+	UploadIcon,
+} from '@modrinth/assets'
+import {
+	type ButtonMenuLeafOption,
+	type ButtonMenuOption,
+	defineMessages,
+	formatLoader,
+	injectNotificationManager,
+	useVIntl,
+} from '@modrinth/ui'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useEventListener, useStorage } from '@vueuse/core'
 import dayjs from 'dayjs'
 import {
 	computed,
 	inject,
 	type InjectionKey,
+	nextTick,
 	provide,
 	type Ref,
 	ref,
@@ -13,10 +36,11 @@ import {
 	watchEffect,
 } from 'vue'
 
+import { trackEvent } from '@/helpers/analytics'
 import { get_project_v3_many } from '@/helpers/cache.js'
 import { toError } from '@/helpers/errors'
 import { install_duplicate_instance } from '@/helpers/install'
-import { edit, remove } from '@/helpers/instance'
+import { edit, edit_icon, remove } from '@/helpers/instance'
 import {
 	create_group as createInstanceGroup,
 	delete_group as deleteInstanceGroup,
@@ -28,7 +52,9 @@ import {
 	set_group_memberships as setInstanceGroupMemberships,
 	set_group_order as setInstanceGroupOrder,
 } from '@/helpers/instance-groups'
-import type { GameInstance } from '@/helpers/types'
+import type { GameInstance, InstanceIconConfig } from '@/helpers/types'
+
+import { librarySearch } from './view-state'
 
 export const librarySortOptions = [
 	'Name',
@@ -36,6 +62,8 @@ export const librarySortOptions = [
 	'Hours played',
 	'Date created',
 	'Date modified',
+	'Loader',
+	'Game version',
 ] as const
 
 export const libraryGroupOptions = [
@@ -93,23 +121,75 @@ export type InstanceCard = {
 }
 
 type InstanceContextMenu = {
-	showMenu: (event: MouseEvent, item: InstanceCard, options: unknown[]) => void
+	open: (event: MouseEvent, options: ButtonMenuOption[]) => void
 }
 
 type ConfirmDeleteModal = {
 	show: () => void
 }
 
-type ContextMenuSelection = {
-	option: string
-	item: InstanceCard
+type IconEditorModal = {
+	show: () => void
 }
+
+const instanceActionMessages = defineMessages({
+	play: { id: 'app.library.instance.action.play', defaultMessage: 'Play' },
+	stop: { id: 'app.library.instance.action.stop', defaultMessage: 'Stop' },
+	addToFavorites: {
+		id: 'app.library.instance.action.add-to-favorites',
+		defaultMessage: 'Add to favorites',
+	},
+	removeFromFavorites: {
+		id: 'app.library.instance.action.remove-from-favorites',
+		defaultMessage: 'Remove from favorites',
+	},
+	addContent: { id: 'app.library.instance.action.add-content', defaultMessage: 'Add content' },
+	viewInstance: {
+		id: 'app.library.instance.action.view-instance',
+		defaultMessage: 'View instance',
+	},
+	editIcon: {
+		id: 'instance.settings.tabs.general.edit-icon',
+		defaultMessage: 'Edit icon',
+	},
+	selectIcon: {
+		id: 'instance.settings.tabs.general.edit-icon.select',
+		defaultMessage: 'Select icon',
+	},
+	replaceIcon: {
+		id: 'instance.settings.tabs.general.edit-icon.replace',
+		defaultMessage: 'Replace icon',
+	},
+	createIcon: {
+		id: 'instance.settings.tabs.general.edit-icon.create',
+		defaultMessage: 'Create an icon',
+	},
+	editCreatedIcon: {
+		id: 'instance.settings.tabs.general.edit-icon.edit-created',
+		defaultMessage: 'Edit icon',
+	},
+	removeIcon: {
+		id: 'instance.settings.tabs.general.edit-icon.remove',
+		defaultMessage: 'Remove icon',
+	},
+	duplicateInstance: {
+		id: 'app.library.instance.action.duplicate',
+		defaultMessage: 'Duplicate instance',
+	},
+	delete: { id: 'app.library.instance.action.delete', defaultMessage: 'Delete' },
+	openFolder: { id: 'app.library.instance.action.open-folder', defaultMessage: 'Open folder' },
+	copyPath: { id: 'app.library.instance.action.copy-path', defaultMessage: 'Copy path' },
+	removeFromGroup: {
+		id: 'app.library.instance.action.remove-from-group',
+		defaultMessage: 'Remove from group',
+	},
+})
 
 function createLibraryState(instances: Ref<GameInstance[]>) {
 	const { handleError } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
 
-	const search = ref('')
+	const search = librarySearch
 	const filters = useStorage<LibraryFilters>(
 		'Instances-grid-filters',
 		{
@@ -151,19 +231,26 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 	const currentDeleteInstances = computed(() =>
 		instances.value.filter((instance) => instance.id === currentDeleteInstanceId.value),
 	)
-	const currentContextGroupId = ref<string | null>(null)
 	const confirmDeleteModal = ref<ConfirmDeleteModal | null>(null)
+	const iconEditorModal = ref<IconEditorModal | null>(null)
+	const currentIconEditorInstanceId = ref<string | null>(null)
+	const currentIconEditorInstance = computed(
+		() =>
+			instances.value.find((instance) => instance.id === currentIconEditorInstanceId.value) ?? null,
+	)
 
 	const displayState = useStorage<{
 		group: LibraryGroupBy
 		sortBy: LibrarySort
 		collapsedGroups: string[]
+		ungroupedGroupPosition: number
 	}>(
 		'Instances-grid-display-state',
 		{
 			group: 'Group',
 			sortBy: 'Last played',
 			collapsedGroups: [],
+			ungroupedGroupPosition: Number.MAX_SAFE_INTEGER,
 		},
 		localStorage,
 		{ mergeDefaults: true },
@@ -209,10 +296,15 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 				return a.name.localeCompare(b.name)
 			})
 	})
-	const groupInstancesModalGroup = computed(
-		() =>
-			libraryGroups.value.find((group) => group.id === groupInstancesModalGroupId.value) ?? null,
-	)
+	const groupInstancesModalGroup = computed(() => {
+		if (groupInstancesModalGroupId.value === 'group:none') {
+			return { id: 'group:none', name: 'None' }
+		}
+
+		return (
+			libraryGroups.value.find((group) => group.id === groupInstancesModalGroupId.value) ?? null
+		)
+	})
 	const groupInstances = computed(() => {
 		const query = groupInstancesSearch.value.trim().toLowerCase()
 
@@ -227,8 +319,23 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 	const customLibraryGroups = computed(() =>
 		libraryGroups.value.filter((group) => group.id !== FAVORITES_GROUP_ID),
 	)
-	const customGroupOrder = computed(
-		() => new Map(customLibraryGroups.value.map((group, index) => [group.id, index])),
+	const orderedLibraryGroupIds = computed(() => {
+		const groupIds = customLibraryGroups.value.map((group) => group.id)
+		const storedUngroupedGroupPosition = displayState.value.ungroupedGroupPosition
+		const ungroupedGroupPosition = Math.min(
+			Math.max(
+				Number.isFinite(storedUngroupedGroupPosition)
+					? Math.trunc(storedUngroupedGroupPosition)
+					: Number.MAX_SAFE_INTEGER,
+				0,
+			),
+			groupIds.length,
+		)
+		groupIds.splice(ungroupedGroupPosition, 0, 'group:none')
+		return groupIds
+	})
+	const libraryGroupOrder = computed(
+		() => new Map(orderedLibraryGroupIds.value.map((groupId, index) => [groupId, index])),
 	)
 
 	const refreshGroups = async () => {
@@ -327,6 +434,18 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		switch (displayState.value.sortBy) {
 			case 'Name':
 				visibleInstances.sort((a, b) => a.name.localeCompare(b.name))
+				break
+			case 'Loader':
+				visibleInstances.sort((a, b) =>
+					formatLoader(formatMessage, a.loader).localeCompare(
+						formatLoader(formatMessage, b.loader),
+					),
+				)
+				break
+			case 'Game version':
+				visibleInstances.sort((a, b) =>
+					a.game_version.localeCompare(b.game_version, undefined, { numeric: true }),
+				)
 				break
 			case 'Last played':
 				visibleInstances.sort((a, b) => dayjs(b.last_played ?? 0).diff(dayjs(a.last_played ?? 0)))
@@ -436,11 +555,9 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 				if (a.id === b.id) return 0
 				if (a.id === FAVORITES_GROUP_ID) return -1
 				if (b.id === FAVORITES_GROUP_ID) return 1
-				if (a.id === 'group:none') return 1
-				if (b.id === 'group:none') return -1
 
-				const aOrder = customGroupOrder.value.get(a.id) ?? Number.MAX_SAFE_INTEGER
-				const bOrder = customGroupOrder.value.get(b.id) ?? Number.MAX_SAFE_INTEGER
+				const aOrder = libraryGroupOrder.value.get(a.id) ?? Number.MAX_SAFE_INTEGER
+				const bOrder = libraryGroupOrder.value.get(b.id) ?? Number.MAX_SAFE_INTEGER
 				return aOrder - bOrder || a.key.localeCompare(b.key) || a.id.localeCompare(b.id)
 			})
 		}
@@ -701,13 +818,17 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 
 	const openGroupInstancesModal = (groupId: string) => {
 		const group = libraryGroups.value.find((candidate) => candidate.id === groupId)
-		if (!group) return
+		if (!group && groupId !== 'group:none') return
 
 		groupInstancesModalGroupId.value = groupId
 		groupInstancesSearch.value = ''
 		selectedGroupInstanceIds.value = new Set(
 			instances.value
-				.filter((instance) => instance.group_ids.includes(groupId))
+				.filter((instance) =>
+					groupId === 'group:none'
+						? instance.group_ids.length === 0
+						: instance.group_ids.includes(groupId),
+				)
 				.map((instance) => instance.id),
 		)
 		isGroupInstancesModalOpen.value = true
@@ -722,6 +843,7 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		const selectedIds = new Set(selectedGroupInstanceIds.value)
 
 		if (selectedIds.has(instanceId)) {
+			if (groupInstancesModalGroupId.value === 'group:none') return
 			selectedIds.delete(instanceId)
 		} else {
 			selectedIds.add(instanceId)
@@ -734,15 +856,20 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		const groupId = groupInstancesModalGroupId.value
 		if (!groupId || savingGroupInstances.value) return false
 
-		const changedInstances = instances.value.filter(
-			(instance) =>
-				instance.group_ids.includes(groupId) !== selectedGroupInstanceIds.value.has(instance.id),
-		)
+		const isUngrouped = groupId === 'group:none'
+		const changedInstances = instances.value.filter((instance) => {
+			const isSelected = selectedGroupInstanceIds.value.has(instance.id)
+			return isUngrouped
+				? isSelected && instance.group_ids.length > 0
+				: instance.group_ids.includes(groupId) !== isSelected
+		})
 		const operations = changedInstances.map((instance) => {
 			const shouldIncludeGroup = selectedGroupInstanceIds.value.has(instance.id)
-			const nextGroupIds = shouldIncludeGroup
-				? [...instance.group_ids, groupId]
-				: instance.group_ids.filter((instanceGroupId) => instanceGroupId !== groupId)
+			const nextGroupIds = isUngrouped
+				? []
+				: shouldIncludeGroup
+					? [...instance.group_ids, groupId]
+					: instance.group_ids.filter((instanceGroupId) => instanceGroupId !== groupId)
 
 			return {
 				instance,
@@ -964,14 +1091,16 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 
 	const canMoveGroupUp = (groupId: string) =>
 		!reorderingGroups.value &&
-		customLibraryGroups.value.findIndex((group) => group.id === groupId) > 0
+		orderedLibraryGroupIds.value.findIndex((orderedGroupId) => orderedGroupId === groupId) > 0
 
 	const canMoveGroupDown = (groupId: string) => {
-		const groupIndex = customLibraryGroups.value.findIndex((group) => group.id === groupId)
+		const groupIndex = orderedLibraryGroupIds.value.findIndex(
+			(orderedGroupId) => orderedGroupId === groupId,
+		)
 		return (
 			!reorderingGroups.value &&
 			groupIndex >= 0 &&
-			groupIndex < customLibraryGroups.value.length - 1
+			groupIndex < orderedLibraryGroupIds.value.length - 1
 		)
 	}
 
@@ -979,35 +1108,48 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		if (reorderingGroups.value) return false
 
 		const previousGroups = libraryGroups.value
+		const previousUngroupedGroupPosition = displayState.value.ungroupedGroupPosition
 		const customGroupsById = new Map(customLibraryGroups.value.map((group) => [group.id, group]))
+		const reorderableGroupIds = new Set([...customGroupsById.keys(), 'group:none'])
 		const orderedGroupIdSet = new Set(orderedGroupIds)
 
 		if (
 			orderedGroupIdSet.size !== orderedGroupIds.length ||
-			orderedGroupIds.some((groupId) => !customGroupsById.has(groupId))
+			orderedGroupIds.some((groupId) => !reorderableGroupIds.has(groupId))
 		) {
 			return false
 		}
 
-		const orderedGroups = orderedGroupIds.map((groupId) => customGroupsById.get(groupId)!)
 		let orderedGroupIndex = 0
-		const reorderedCustomGroups = customLibraryGroups.value.map((group) =>
-			orderedGroupIdSet.has(group.id) ? orderedGroups[orderedGroupIndex++] : group,
+		const reorderedGroupIds = orderedLibraryGroupIds.value.map((groupId) =>
+			orderedGroupIdSet.has(groupId) ? orderedGroupIds[orderedGroupIndex++] : groupId,
 		)
 
-		if (reorderedCustomGroups.every((group, index) => group === customLibraryGroups.value[index])) {
+		if (
+			reorderedGroupIds.every((groupId, index) => groupId === orderedLibraryGroupIds.value[index])
+		) {
 			return false
 		}
 
+		const reorderedCustomGroups = reorderedGroupIds
+			.filter((groupId) => groupId !== 'group:none')
+			.map((groupId) => customGroupsById.get(groupId)!)
+		const customGroupOrderChanged = reorderedCustomGroups.some(
+			(group, index) => group !== customLibraryGroups.value[index],
+		)
 		const favoriteGroups = previousGroups.filter((group) => group.id === FAVORITES_GROUP_ID)
 		libraryGroups.value = [...favoriteGroups, ...reorderedCustomGroups]
+		displayState.value.ungroupedGroupPosition = reorderedGroupIds.indexOf('group:none')
 		reorderingGroups.value = true
 
 		try {
-			await setInstanceGroupOrder(reorderedCustomGroups.map((group) => group.id))
+			if (customGroupOrderChanged) {
+				await setInstanceGroupOrder(reorderedCustomGroups.map((group) => group.id))
+			}
 			return true
 		} catch (error) {
 			libraryGroups.value = previousGroups
+			displayState.value.ungroupedGroupPosition = previousUngroupedGroupPosition
 			handleError(toError(error))
 			await refreshGroups()
 			return false
@@ -1017,7 +1159,7 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 	}
 
 	const moveGroup = async (groupId: string, direction: -1 | 1) => {
-		const orderedGroupIds = customLibraryGroups.value.map((group) => group.id)
+		const orderedGroupIds = [...orderedLibraryGroupIds.value]
 		const groupIndex = orderedGroupIds.indexOf(groupId)
 		const targetIndex = groupIndex + direction
 
@@ -1043,102 +1185,197 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		await install_duplicate_instance(instanceId).catch((error) => handleError(toError(error)))
 	}
 
+	const selectInstanceIcon = async (item: InstanceCard) => {
+		const iconPath = await openDialog({
+			multiple: false,
+			filters: [
+				{
+					name: 'Image',
+					extensions: ['png', 'jpeg', 'svg', 'webp', 'gif', 'jpg'],
+				},
+			],
+		})
+
+		if (!iconPath) return
+
+		try {
+			await edit_icon(item.instance.id, iconPath)
+			trackEvent('InstanceSetIcon')
+		} catch (error) {
+			handleError(toError(error))
+		}
+	}
+
+	const removeInstanceIcon = async (item: InstanceCard) => {
+		try {
+			await edit_icon(item.instance.id, null)
+			trackEvent('InstanceRemoveIcon')
+		} catch (error) {
+			handleError(toError(error))
+		}
+	}
+
+	const openInstanceIconEditor = async (item: InstanceCard) => {
+		currentIconEditorInstanceId.value = item.instance.id
+		await nextTick()
+		iconEditorModal.value?.show()
+		trackEvent(item.instance.icon_config ? 'InstanceEditCreatedIcon' : 'InstanceCreateIcon')
+	}
+
+	const handleInstanceIconSaved = (_iconPath: string, _config: InstanceIconConfig) => {
+		trackEvent('InstanceSaveCreatedIcon')
+	}
+
+	const setInstanceGroups = async (item: InstanceCard, groupIds: string[]) =>
+		await edit(item.instance.id, { group_ids: groupIds }).catch((error) =>
+			handleError(toError(error)),
+		)
+
+	const buildInstanceIconOptions = (item: InstanceCard): ButtonMenuLeafOption[] => [
+		{
+			id: item.instance.icon_path ? 'replace_icon' : 'select_icon',
+			label: formatMessage(
+				item.instance.icon_path
+					? instanceActionMessages.replaceIcon
+					: instanceActionMessages.selectIcon,
+			),
+			icon: UploadIcon,
+			action: () => void selectInstanceIcon(item),
+		},
+		{
+			id: item.instance.icon_config ? 'edit_created_icon' : 'create_icon',
+			label: formatMessage(
+				item.instance.icon_config
+					? instanceActionMessages.editCreatedIcon
+					: instanceActionMessages.createIcon,
+			),
+			icon: PaletteIcon,
+			action: () => void openInstanceIconEditor(item),
+		},
+		{
+			id: 'remove_icon',
+			label: formatMessage(instanceActionMessages.removeIcon),
+			icon: TrashIcon,
+			shown: !!item.instance.icon_path,
+			action: () => void removeInstanceIcon(item),
+		},
+	]
+
 	const handleInstanceContextMenu = (
 		event: MouseEvent,
 		item: InstanceCard,
 		instanceGroupId: string,
 	) => {
-		currentContextGroupId.value =
+		const removableGroupId =
 			displayState.value.group === 'Group' &&
 			instanceGroupId !== 'group:none' &&
 			instanceGroupId !== FAVORITES_GROUP_ID
 				? instanceGroupId
 				: null
+		const isFavorite = item.instance.group_ids.includes(FAVORITES_GROUP_ID)
+		const installing = item.instance.install_stage.includes('installing')
+		const canAddContent = !item.instance.quarantined && !item.instance.link && !installing
 
-		const baseOptions = [
+		instanceOptions.value?.open(event, [
 			{
-				name: item.instance.group_ids.includes(FAVORITES_GROUP_ID)
-					? 'remove_from_favorites'
-					: 'add_to_favorites',
+				id: 'stop',
+				label: formatMessage(instanceActionMessages.stop),
+				icon: StopCircleIcon,
+				shown: item.playing,
+				tone: 'red',
+				action: () => void item.stop(null, 'InstanceGridContextMenu'),
+			},
+			{
+				id: 'play',
+				label: formatMessage(instanceActionMessages.play),
+				icon: PlayIcon,
+				shown: !item.playing && !item.instance.quarantined,
+				disabled: installing,
+				tone: 'brand',
+				action: () => void item.play(null, 'InstanceGridContextMenu'),
+			},
+			{
+				id: isFavorite ? 'remove_from_favorites' : 'add_to_favorites',
+				label: formatMessage(
+					isFavorite
+						? instanceActionMessages.removeFromFavorites
+						: instanceActionMessages.addToFavorites,
+				),
+				icon: StarIcon,
+				action: () =>
+					void setInstanceGroups(
+						item,
+						isFavorite
+							? item.instance.group_ids.filter((groupId) => groupId !== FAVORITES_GROUP_ID)
+							: [...new Set([...item.instance.group_ids, FAVORITES_GROUP_ID])],
+					),
 			},
 			{ type: 'divider' },
-			...(!item.instance.quarantined && !item.instance.link
-				? [{ name: 'add_content' }, { type: 'divider' }]
-				: []),
-			{ name: 'edit' },
-			{ name: 'duplicate' },
-			{ name: 'open' },
-			{ name: 'copy' },
-			...(currentContextGroupId.value
-				? [{ name: 'remove_from_group' }, { type: 'divider' }]
-				: [{ type: 'divider' }]),
-			{ name: 'delete', color: 'danger' },
-		]
-
-		instanceOptions.value?.showMenu(
-			event,
-			item,
-			item.playing
-				? [{ name: 'stop', color: 'danger' }, ...baseOptions]
-				: [
-						...(item.instance.quarantined ? [] : [{ name: 'play', color: 'primary' }]),
-						...baseOptions,
-					],
-		)
-	}
-
-	const handleInstanceOption = async ({ option, item }: ContextMenuSelection) => {
-		switch (option) {
-			case 'play':
-				await item.play(null, 'InstanceGridContextMenu')
-				break
-			case 'stop':
-				await item.stop(null, 'InstanceGridContextMenu')
-				break
-			case 'add_content':
-				await item.addContent()
-				break
-			case 'add_to_favorites':
-				await edit(item.instance.id, {
-					group_ids: [...new Set([...item.instance.group_ids, FAVORITES_GROUP_ID])],
-				}).catch((error) => handleError(toError(error)))
-				break
-			case 'remove_from_favorites':
-				await edit(item.instance.id, {
-					group_ids: item.instance.group_ids.filter(
-						(instanceGroupId) => instanceGroupId !== FAVORITES_GROUP_ID,
+			{
+				id: 'add_content',
+				label: formatMessage(instanceActionMessages.addContent),
+				icon: PlusIcon,
+				shown: canAddContent,
+				action: () => void item.addContent(),
+			},
+			{ type: 'divider', shown: canAddContent },
+			{
+				id: 'edit',
+				label: formatMessage(instanceActionMessages.viewInstance),
+				icon: EyeIcon,
+				disabled: installing,
+				action: () => void item.seeInstance(),
+			},
+			{
+				id: 'duplicate',
+				label: formatMessage(instanceActionMessages.duplicateInstance),
+				icon: ClipboardCopyIcon,
+				disabled: item.instance.install_stage !== 'installed',
+				action: () => void duplicateInstance(item.instance.id),
+			},
+			{
+				id: 'open',
+				label: formatMessage(instanceActionMessages.openFolder),
+				icon: FolderOpenIcon,
+				action: () => void item.openFolder(),
+			},
+			{
+				id: 'copy',
+				label: formatMessage(instanceActionMessages.copyPath),
+				icon: ClipboardCopyIcon,
+				action: () => void navigator.clipboard.writeText(item.instance.id),
+			},
+			{
+				type: 'submenu',
+				id: 'edit_icon',
+				label: formatMessage(instanceActionMessages.editIcon),
+				icon: EditIcon,
+				options: buildInstanceIconOptions(item),
+			},
+			{
+				id: 'remove_from_group',
+				label: formatMessage(instanceActionMessages.removeFromGroup),
+				icon: MinusIcon,
+				shown: !!removableGroupId,
+				action: () =>
+					void setInstanceGroups(
+						item,
+						item.instance.group_ids.filter((groupId) => groupId !== removableGroupId),
 					),
-				}).catch((error) => handleError(toError(error)))
-				break
-			case 'edit':
-				await item.seeInstance()
-				break
-			case 'duplicate':
-				if (item.instance.install_stage === 'installed') {
-					await duplicateInstance(item.instance.id)
-				}
-				break
-			case 'open':
-				await item.openFolder()
-				break
-			case 'copy':
-				await navigator.clipboard.writeText(item.instance.id)
-				break
-			case 'remove_from_group':
-				if (currentContextGroupId.value) {
-					const groupId = currentContextGroupId.value
-					await edit(item.instance.id, {
-						group_ids: item.instance.group_ids.filter(
-							(instanceGroupId) => instanceGroupId !== groupId,
-						),
-					}).catch((error) => handleError(toError(error)))
-				}
-				break
-			case 'delete':
-				currentDeleteInstanceId.value = item.instance.id
-				confirmDeleteModal.value?.show()
-				break
-		}
+			},
+			{ type: 'divider' },
+			{
+				id: 'delete',
+				label: formatMessage(instanceActionMessages.delete),
+				icon: TrashIcon,
+				tone: 'red',
+				hoverFilledOnly: true,
+				action: () => {
+					currentDeleteInstanceId.value = item.instance.id
+					confirmDeleteModal.value?.show()
+				},
+			},
+		])
 	}
 
 	return {
@@ -1175,6 +1412,8 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		canCreateGroup,
 		instanceOptions,
 		confirmDeleteModal,
+		iconEditorModal,
+		currentIconEditorInstance,
 		currentDeleteInstances,
 		isSectionCollapsed,
 		setSectionCollapsed,
@@ -1205,7 +1444,7 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		moveGroup,
 		deleteInstance,
 		handleInstanceContextMenu,
-		handleInstanceOption,
+		handleInstanceIconSaved,
 	}
 }
 

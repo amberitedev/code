@@ -4,14 +4,15 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 
 use crate::database::{
     PgTransaction,
     models::{
-        DBFileId, DBProjectId, DatabaseError, DelphiReportId,
-        DelphiReportIssueDetailsId, DelphiReportIssueId,
+        DBFileId, DBProjectId, DelphiReportId, DelphiReportIssueDetailsId,
+        DelphiReportIssueId,
     },
 };
 
@@ -36,13 +37,13 @@ impl DBDelphiReport {
     pub async fn upsert(
         &self,
         transaction: &mut PgTransaction<'_>,
-    ) -> Result<DelphiReportId, DatabaseError> {
+    ) -> Result<DelphiReportId> {
         Ok(DelphiReportId(sqlx::query_scalar!(
             "
             INSERT INTO delphi_reports (file_id, delphi_version, artifact_url, severity)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (file_id, delphi_version) DO UPDATE SET
-                delphi_version = $2, artifact_url = $3, created = CURRENT_TIMESTAMP, severity = $4
+                artifact_url = $3, created = CURRENT_TIMESTAMP, severity = $4
             RETURNING id
             ",
             self.file_id as Option<DBFileId>,
@@ -51,11 +52,12 @@ impl DBDelphiReport {
             self.severity as DelphiSeverity,
         )
         .fetch_one(&mut *transaction)
-        .await?))
+        .await
+        .wrap_err("upserting delphi report")?))
     }
 }
 
-/// A severity level reported by Delphi.
+/// A severity level for a Delphi report or transformed issue detail.
 #[derive(
     Deserialize,
     Serialize,
@@ -76,6 +78,8 @@ impl DBDelphiReport {
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "delphi_severity", rename_all = "snake_case")]
 pub enum DelphiSeverity {
+    #[serde(alias = "HIDDEN")]
+    Hidden,
     #[serde(alias = "LOW")]
     Low,
     #[serde(alias = "MEDIUM")]
@@ -84,6 +88,8 @@ pub enum DelphiSeverity {
     High,
     #[serde(alias = "SEVERE")]
     Severe,
+    #[serde(alias = "MALWARE")]
+    Malware,
 }
 
 /// An issue found in a Delphi report. Every issue belongs to a report,
@@ -185,7 +191,7 @@ impl DBDelphiReportIssue {
     pub async fn upsert(
         &self,
         transaction: &mut PgTransaction<'_>,
-    ) -> Result<DelphiReportIssueId, DatabaseError> {
+    ) -> Result<DelphiReportIssueId> {
         Ok(DelphiReportIssueId(
             sqlx::query_scalar!(
                 "
@@ -199,14 +205,15 @@ impl DBDelphiReportIssue {
                 self.issue_type,
             )
             .fetch_one(&mut *transaction)
-            .await?,
+            .await
+            .wrap_err("upserting delphi report issue")?,
         ))
     }
 
     pub async fn insert(
         &self,
         transaction: &mut PgTransaction<'_>,
-    ) -> Result<DelphiReportIssueId, DatabaseError> {
+    ) -> Result<DelphiReportIssueId> {
         Ok(DelphiReportIssueId(
             sqlx::query_scalar!(
                 "
@@ -218,7 +225,8 @@ impl DBDelphiReportIssue {
                 self.issue_type,
             )
             .fetch_one(&mut *transaction)
-            .await?,
+            .await
+            .wrap_err("inserting delphi report issue")?,
         ))
     }
 }
@@ -266,7 +274,7 @@ impl ReportIssueDetail {
     pub async fn insert(
         &self,
         transaction: &mut PgTransaction<'_>,
-    ) -> Result<DelphiReportIssueDetailsId, DatabaseError> {
+    ) -> Result<DelphiReportIssueDetailsId> {
         Ok(DelphiReportIssueDetailsId(sqlx::query_scalar!(
             "
             INSERT INTO delphi_report_issue_details (issue_id, key, jar, file_path, decompiled_source, data, severity)
@@ -282,19 +290,21 @@ impl ReportIssueDetail {
             self.severity as DelphiSeverity,
         )
         .fetch_one(&mut *transaction)
-        .await?))
+        .await
+        .wrap_err("inserting delphi report issue detail")?))
     }
 
     pub async fn remove_all_by_issue_id(
         issue_id: DelphiReportIssueId,
         transaction: &mut PgTransaction<'_>,
-    ) -> Result<u64, DatabaseError> {
+    ) -> Result<u64> {
         Ok(sqlx::query!(
             "DELETE FROM delphi_report_issue_details WHERE issue_id = $1",
             issue_id as DelphiReportIssueId,
         )
         .execute(&mut *transaction)
-        .await?
+        .await
+        .wrap_err("removing delphi report issue details")?
         .rows_affected())
     }
 }

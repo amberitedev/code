@@ -32,14 +32,11 @@ import EarsModIcon from '@/assets/skins/ears-mod.png'
 import type AccountsCard from '@/components/ui/AccountsCard.vue'
 import EditSkinModal from '@/components/ui/skin/EditSkinModal.vue'
 import VirtualSkinSectionList from '@/components/ui/skin/VirtualSkinSectionList.vue'
+import { useAppSettings } from '@/composables/use-app-settings.ts'
+import { handleSevereError } from '@/composables/use-error.js'
 import { trackEvent } from '@/helpers/analytics'
 import { check_reachable, get_default_user, login as login_flow, users } from '@/helpers/auth'
-import type { RenderResult } from '@/helpers/rendering/batch-skin-renderer.ts'
-import {
-	generateSkinPreviews,
-	getSkinPreviewKey,
-	skinBlobUrlMap,
-} from '@/helpers/rendering/batch-skin-renderer.ts'
+import { cleanupUnusedPreviews } from '@/helpers/rendering/skin-previews'
 import type { Cape, Skin, SkinTextureUrl } from '@/helpers/skins.ts'
 import {
 	equip_skin,
@@ -58,8 +55,6 @@ import {
 } from '@/helpers/skins.ts'
 import { hasPride26Badge } from '@/helpers/user-campaigns.ts'
 import { useRootBreadcrumb } from '@/providers/breadcrumbs'
-import { handleSevereError } from '@/store/error'
-import { useTheming } from '@/store/state'
 import { appMessages } from '@/utils/app-messages'
 
 useRootBreadcrumb({
@@ -131,6 +126,18 @@ const messages = defineMessages({
 	chaosCubedSection: {
 		id: 'app.skins.section.chaos-cubed',
 		defaultMessage: 'Chaos Cubed',
+	},
+	dungeonsHeroSection: {
+		id: 'app.skins.section.dungeons-hero',
+		defaultMessage: 'Dungeons Hero',
+	},
+	dungeonsIIHeroSection: {
+		id: 'app.skins.section.dungeons-ii-hero',
+		defaultMessage: 'Dungeons II Hero',
+	},
+	wildernessBoundSection: {
+		id: 'app.skins.section.wilderness-bound',
+		defaultMessage: 'Wilderness Bound',
 	},
 	rateLimitTitle: {
 		id: 'app.skins.rate-limit.title',
@@ -217,7 +224,7 @@ const { addNotification, handleError } = notifications
 const auth = injectAuth()
 const client = injectModrinthClient()
 
-const themeStore = useTheming()
+const appSettings = useAppSettings()
 const skins = ref<Skin[]>([])
 const capes = ref<Cape[]>([])
 const offline = ref(!navigator.onLine)
@@ -339,7 +346,7 @@ const skinTexture = computedAsync(async () => {
 })
 const capeTexture = computed(() => currentCape.value?.texture)
 const skinVariant = computed(() => selectedSkin.value?.variant)
-const skinNametag = computed(() => (themeStore.hideNametagSkinsPage ? undefined : username.value))
+const skinNametag = computed(() => (appSettings.hideNametagSkinsPage ? undefined : username.value))
 const isSkinManagementReadOnly = computed(
 	() =>
 		!!currentUser.value &&
@@ -412,7 +419,9 @@ async function loadSkins() {
 			shouldPreserveKnownEquippedSkin && locallyKnownEquippedSkin
 				? mergeEquippedSkin(loadedSkins, locallyKnownEquippedSkin)
 				: loadedSkins
-		generateSkinPreviews(skins.value, capes.value)
+		void cleanupUnusedPreviews(skins.value).catch((error) =>
+			console.warn('Could not clean skin previews', error),
+		)
 		selectedSkin.value = skins.value.find((s) => s.is_equipped) ?? null
 		originalSelectedSkin.value = selectedSkin.value
 	} catch (error) {
@@ -502,6 +511,12 @@ function getDefaultSkinSectionTitle(section?: string) {
 			return formatMessage(messages.tinyTakeoverSection)
 		case 'Chaos Cubed':
 			return formatMessage(messages.chaosCubedSection)
+		case 'Dungeons Hero':
+			return formatMessage(messages.dungeonsHeroSection)
+		case 'Dungeons II Hero':
+			return formatMessage(messages.dungeonsIIHeroSection)
+		case 'Wilderness Bound':
+			return formatMessage(messages.wildernessBoundSection)
 		case 'Default skins':
 			return formatMessage(messages.defaultSkinsSection)
 		default:
@@ -550,7 +565,9 @@ function removeLocalSkin(deletedSkin: Skin) {
 		originalSelectedSkin.value = nextSkins.find((skin) => skin.is_equipped) ?? null
 	}
 
-	generateSkinPreviews(skins.value, capes.value)
+	void cleanupUnusedPreviews(skins.value).catch((error) =>
+		console.warn('Could not clean skin previews', error),
+	)
 }
 
 function setLocallyEquippedSkin(skinToApply: Skin) {
@@ -631,7 +648,9 @@ function updateLocalSkin(savedSkin: Skin, applied: boolean, previousSkin?: Skin)
 		}
 	}
 
-	generateSkinPreviews(skins.value, capes.value)
+	void cleanupUnusedPreviews(skins.value).catch((error) =>
+		console.warn('Could not clean skin previews', error),
+	)
 }
 
 async function reorderSavedSkins(orderedSkins: Skin[]) {
@@ -647,14 +666,18 @@ async function reorderSavedSkins(orderedSkins: Skin[]) {
 	const nextSavedSkins = [...orderedSkins, ...remainingSavedSkins]
 
 	skins.value = [...nextSavedSkins, ...defaultSkins]
-	generateSkinPreviews(skins.value, capes.value)
+	void cleanupUnusedPreviews(skins.value).catch((error) =>
+		console.warn('Could not clean skin previews', error),
+	)
 
 	try {
 		const persistedSavedSkins = await preserveExternalSkins(nextSavedSkins)
 
 		if (persistedSavedSkins.some((skin, index) => skin !== nextSavedSkins[index])) {
 			skins.value = [...persistedSavedSkins, ...defaultSkins]
-			generateSkinPreviews(skins.value, capes.value)
+			void cleanupUnusedPreviews(skins.value).catch((error) =>
+				console.warn('Could not clean skin previews', error),
+			)
 		}
 
 		await set_custom_skin_order(
@@ -666,7 +689,9 @@ async function reorderSavedSkins(orderedSkins: Skin[]) {
 		skins.value = previousSkins
 		selectedSkin.value = previousSelectedSkin
 		originalSelectedSkin.value = previousOriginalSelectedSkin
-		generateSkinPreviews(skins.value, capes.value)
+		void cleanupUnusedPreviews(skins.value).catch((error) =>
+			console.warn('Could not clean skin previews', error),
+		)
 		addNotification({
 			type: 'error',
 			title: formatMessage(messages.reorderSkinErrorTitle),
@@ -802,10 +827,6 @@ async function loadCurrentUser() {
 		currentUser.value = undefined
 		currentUserId.value = undefined
 	}
-}
-
-function getBakedSkinTextures(skin: Skin): RenderResult | undefined {
-	return skinBlobUrlMap.get(getSkinPreviewKey(skin))
 }
 
 async function login() {
@@ -1227,13 +1248,6 @@ await loadSkins()
 									"
 									small
 									class="ears-feature-toggle-switch"
-									:aria-label="
-										formatMessage(
-											earsFeaturesEnabled
-												? messages.toggleEarsFeaturesOff
-												: messages.toggleEarsFeaturesOn,
-										)
-									"
 								/>
 							</div>
 						</div>
@@ -1247,7 +1261,7 @@ await loadSkins()
 				ref="skinSectionList"
 				:saved-skins="savedSkins"
 				:default-skin-sections="defaultSkinSections"
-				:get-baked-skin-textures="getBakedSkinTextures"
+				:capes="capes"
 				:is-skin-selected="isSkinSelected"
 				:is-skin-active="isSkinActive"
 				:is-add-skin-button-drag-active="isAddSkinButtonDragActive"

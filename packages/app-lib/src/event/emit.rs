@@ -5,8 +5,8 @@ use crate::event::{
     ProcessPayload, WarningPayload,
 };
 use crate::event::{
-    CommandPayload, EventError, InstanceBulkUpdateProgressPayload,
-    InstancePayloadType, LoadingBar, LoadingBarType, ProcessPayloadType,
+    CommandPayload, EventError, InstancePayloadType, LoadingBar,
+    LoadingBarType, ProcessPayloadType,
 };
 use crate::state::OnboardingChecklist;
 use futures::prelude::*;
@@ -164,18 +164,6 @@ pub async fn emit_warning(message: &str) -> crate::Result<()> {
         }))?;
     }
     tracing::warn!("{}", message);
-    Ok(())
-}
-
-#[allow(unused_variables)]
-pub async fn emit_instance_bulk_update_progress(
-    payload: InstanceBulkUpdateProgressPayload,
-) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::InstanceBulkUpdateProgress(payload))?;
-    }
     Ok(())
 }
 
@@ -361,6 +349,49 @@ where
     T: Send,
 {
     let mut f = f;
+    if let Ok(control) =
+        crate::install::control::CURRENT_INSTALL.try_with(Clone::clone)
+    {
+        let mut operations = futures::stream::FuturesUnordered::new();
+        futures::pin_mut!(stream);
+        let limit = limit.filter(|limit| *limit > 0).unwrap_or(usize::MAX);
+        let mut stream_done = false;
+        let mut error = None;
+        while !stream_done || !operations.is_empty() {
+            tokio::select! {
+                biased;
+                Some(result) = operations.next(), if !operations.is_empty() => {
+                    if let Err(next_error) = result {
+                        error.get_or_insert(next_error);
+                        stream_done = true;
+                    }
+                }
+                item = futures::future::poll_fn(|cx| stream.as_mut().try_poll_next(cx)),
+                    if !stream_done && operations.len() < limit => {
+                    match item {
+                        Some(Ok(item)) => {
+                            let operation = f(item);
+                            let control = control.clone();
+                            operations.push(async move {
+                                control.checkpoint().await?;
+                                operation.await?;
+                                if let Some(key) = key {
+                                    emit_loading(key, total / (num_futs as f64), message)?;
+                                }
+                                Ok::<(), crate::Error>(())
+                            });
+                        }
+                        None => stream_done = true,
+                        Some(Err(next_error)) => {
+                            error.get_or_insert(next_error);
+                            stream_done = true;
+                        }
+                    }
+                }
+            }
+        }
+        return error.map_or(Ok(()), Err);
+    }
     stream
         .try_for_each_concurrent(limit, |item| {
             let f = f(item);

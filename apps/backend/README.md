@@ -24,6 +24,15 @@ Argon2 implementation. Password strength uses zxcvbn. No legacy passwords are im
 
 Password sign-up/login, TOTP with backup codes, session listing/revocation/rotation, profile and
 avatar changes, friends, blocking, preferences, and notifications have local implementations.
+The upstream admin account endpoints under `/_internal/admin/user/:id` support locks, session
+revocation, forced password recovery, and 2FA removal. Only admins may call them; moderators and
+admins cannot be locked or have their credentials reset. Lock details are only exposed to staff.
+Locked accounts cannot authenticate, and a forced recovery flow can change their password without
+unlocking them. Reset links are tied to the account's email address. Forced recovery and its local
+outbox entry commit together. Revocation closes native friends sockets as well as HTTP sessions.
+The `/sessions` admin operation revokes all supported sessions; this backend does not issue PATs.
+Upstream's Discord-ID account lookup still depends on the unimplemented OAuth provider links.
+Preferences include the upstream launcher behavior settings, and avatars accept up to 512 KiB.
 Email verification and password resets write a local outbox, accessible only through the
 dev-runner secret. OAuth providers, outbound email, passkey authentication, newsletter delivery,
 PATs, and third-party OAuth authorization are not implemented. The corresponding auth methods

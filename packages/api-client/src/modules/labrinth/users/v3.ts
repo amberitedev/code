@@ -38,6 +38,43 @@ export class LabrinthUsersV3Module extends AbstractModule {
 	}
 
 	/**
+	 * Get a user's account preferences. The authenticated user may access their
+	 * own preferences, while moderators may access another user's preferences.
+	 *
+	 * GET /v3/user/{id}/preferences
+	 */
+	public async getPreferences(idOrUsername: string): Promise<Labrinth.Users.v3.UserPreferences> {
+		return this.client.request<Labrinth.Users.v3.UserPreferences>(
+			`/user/${encodeURIComponent(idOrUsername)}/preferences`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'GET',
+			},
+		)
+	}
+
+	/**
+	 * Update a user's account preferences and return the fully resolved result.
+	 *
+	 * PATCH /v3/user/{id}/preferences
+	 */
+	public async patchPreferences(
+		idOrUsername: string,
+		preferences: Labrinth.Users.v3.PartialUserPreferences,
+	): Promise<Labrinth.Users.v3.UserPreferences> {
+		return this.client.request<Labrinth.Users.v3.UserPreferences>(
+			`/user/${encodeURIComponent(idOrUsername)}/preferences`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'PATCH',
+				body: preferences,
+			},
+		)
+	}
+
+	/**
 	 * Search users by username prefix.
 	 *
 	 * @param query - Username search query
@@ -96,18 +133,6 @@ export class LabrinthUsersV3Module extends AbstractModule {
 		})
 	}
 
-	/** Get a user's saved preferences. The caller must own the account. */
-	public async getPreferences(idOrUsername: string): Promise<Labrinth.Users.v3.UserPreferences> {
-		return this.client.request<Labrinth.Users.v3.UserPreferences>(
-			`/user/${encodeURIComponent(idOrUsername)}/preferences`,
-			{
-				api: 'labrinth',
-				version: 3,
-				method: 'GET',
-			},
-		)
-	}
-
 	/** Edit a user's saved preferences. The caller must own the account. */
 	public async editPreferences(
 		idOrUsername: string,
@@ -120,6 +145,54 @@ export class LabrinthUsersV3Module extends AbstractModule {
 				version: 3,
 				method: 'PATCH',
 				body: request,
+			},
+		)
+	}
+
+	/**
+	 * Get a user's projects.
+	 *
+	 * @param idOrUsername - The user's ID or username
+	 * @returns Promise resolving to an array of the user's projects
+	 *
+	 * GET /v3/user/{id}/projects
+	 *
+	 * @example
+	 * ```typescript
+	 * const projects = await client.labrinth.users_v3.getProjects('my_user')
+	 * ```
+	 */
+	public async getProjects(idOrUsername: string): Promise<Labrinth.Projects.v3.Project[]> {
+		return this.client.request<Labrinth.Projects.v3.Project[]>(
+			`/user/${encodeURIComponent(idOrUsername)}/projects`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'GET',
+			},
+		)
+	}
+
+	/**
+	 * Get projects a user follows.
+	 *
+	 * @param idOrUsername - The user's ID or username
+	 * @returns Promise resolving to an array of followed projects
+	 *
+	 * GET /v3/user/{id}/follows
+	 *
+	 * @example
+	 * ```typescript
+	 * const projects = await client.labrinth.users_v3.getFollowedProjects('my_user')
+	 * ```
+	 */
+	public async getFollowedProjects(idOrUsername: string): Promise<Labrinth.Projects.v3.Project[]> {
+		return this.client.request<Labrinth.Projects.v3.Project[]>(
+			`/user/${encodeURIComponent(idOrUsername)}/follows`,
+			{
+				api: 'labrinth',
+				version: 3,
+				method: 'GET',
 			},
 		)
 	}

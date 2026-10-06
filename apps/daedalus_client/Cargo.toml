@@ -20,15 +20,12 @@ dotenvy = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
-reqwest = { workspace = true, features = [
-  "json",
-  "rustls-tls-native-roots",
-  "stream",
-] }
+md5 = { workspace = true }
+quick-xml = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls-native-roots", "stream"] }
 rust-s3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-serde-xml-rs = { workspace = true }
 sha1_smol = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }

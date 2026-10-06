@@ -5,8 +5,8 @@ import {
 	defineMessages,
 	IconButton,
 	injectNotificationManager,
+	Input,
 	Slider,
-	StyledInput,
 	Toggle,
 	useVIntl,
 } from '@modrinth/ui'
@@ -14,17 +14,17 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { ref, watch } from 'vue'
 
 import ConfirmModalWrapper from '@/components/ui/modal/ConfirmModalWrapper.vue'
+import ContentStorageSettings from '@/components/ui/settings/instances/ContentStorageSettings.vue'
+import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { purge_cache_types } from '@/helpers/cache.js'
 import { get, set } from '@/helpers/settings.ts'
 import { showAppDbBackupsFolder } from '@/helpers/utils.js'
-import { useTheming } from '@/store/state'
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-const themeStore = useTheming()
+const appSettings = useAppSettings()
 const settings = ref(await get())
 const purgeCacheConfirmModal = ref(null)
-const alwaysShowCopyDetailsFlag = 'always_show_copy_details'
 
 const messages = defineMessages({
 	appDirectoryTitle: {
@@ -145,7 +145,7 @@ async function purgeCache() {
 }
 
 function handlePurgeCacheClick() {
-	if (themeStore.getFeatureFlag('skip_non_essential_warnings')) {
+	if (appSettings.skipNonEssentialWarnings) {
 		void purgeCache()
 		return
 	}
@@ -172,11 +172,12 @@ async function findLauncherDir() {
 
 <template>
 	<div class="flex flex-col gap-6">
+		<ContentStorageSettings />
 		<div class="flex flex-col gap-2.5">
 			<h2 class="m-0 text-lg font-semibold text-contrast">
 				{{ formatMessage(messages.appDirectoryTitle) }}
 			</h2>
-			<StyledInput
+			<Input
 				id="appDir"
 				v-model="settings.custom_dir"
 				:icon="BoxIcon"
@@ -193,7 +194,7 @@ async function findLauncherDir() {
 						<FolderSearchIcon aria-hidden="true" />
 					</IconButton>
 				</template>
-			</StyledInput>
+			</Input>
 			<p class="m-0 leading-tight text-secondary">
 				{{ formatMessage(messages.appDirectoryDescription) }}
 			</p>
@@ -210,12 +211,12 @@ async function findLauncherDir() {
 			</div>
 			<Toggle
 				id="always-show-copy-details"
-				:model-value="themeStore.getFeatureFlag(alwaysShowCopyDetailsFlag)"
+				:model-value="appSettings.alwaysShowCopyDetails"
 				@update:model-value="
 					() => {
-						const newValue = !themeStore.getFeatureFlag(alwaysShowCopyDetailsFlag)
-						themeStore.featureFlags[alwaysShowCopyDetailsFlag] = newValue
-						settings.feature_flags[alwaysShowCopyDetailsFlag] = newValue
+						const newValue = !appSettings.alwaysShowCopyDetails
+						appSettings.alwaysShowCopyDetails = newValue
+						settings.always_show_copy_details = newValue
 					}
 				"
 			/>

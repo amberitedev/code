@@ -41,7 +41,7 @@
 					<Button
 						type="colored"
 						color="orange"
-						:disabled="!submissionConfirmation || isLoading"
+						:disabled="!submissionConfirmation || isLoading || reviewSubmissionDisabled"
 						@click="runBlockingAction('resubmit-modal', resubmit)"
 					>
 						<SpinnerIcon
@@ -95,7 +95,7 @@
 				</div>
 			</div>
 		</NewModal>
-		<div v-if="flags.developerMode" class="mx-4 mb-3 font-semibold">
+		<div v-if="flags.showThreadIds" class="mx-4 mb-3 font-semibold">
 			Thread ID:
 			<CopyCode :text="thread.id" />
 		</div>
@@ -113,18 +113,19 @@
 					@update-thread="() => updateThreadLocal()"
 				/>
 			</div>
-			<template v-if="report && report.closed">
-				<p>{{ formatMessage(messages.closedThreadDescription) }}</p>
+			<div v-if="report && report.closed" class="m-4 mt-2 flex flex-col gap-4">
+				<p class="m-0">{{ formatMessage(messages.closedThreadDescription) }}</p>
 				<Button
 					v-if="isStaff(auth.user)"
 					:disabled="isLoading"
+					class="w-fit"
 					@click="runBlockingAction('reopen', () => reopenReport())"
 				>
 					<SpinnerIcon v-if="loadingAction === 'reopen'" class="animate-spin" aria-hidden="true" />
 					<CheckCircleIcon v-else aria-hidden="true" />
 					{{ formatMessage(messages.actionReopenThread) }}
 				</Button>
-			</template>
+			</div>
 			<template v-else-if="!report || !report.closed">
 				<div class="mx-4 mb-2 mt-2">
 					<MarkdownEditor
@@ -187,7 +188,7 @@
 								class="animate-spin"
 								aria-hidden="true"
 							/>
-							<ScaleIcon v-else aria-hidden="true" />
+							<StickyNotePlusIcon v-else aria-hidden="true" />
 							{{ formatMessage(messages.actionAddPrivateNote) }}
 						</Button>
 						<template v-if="currentMember && !currentMember.staffOnly">
@@ -196,13 +197,17 @@
 									v-if="replyBody"
 									type="colored"
 									color="orange"
-									:disabled="isLoading"
+									:disabled="isLoading || reviewSubmissionDisabled"
 									@click="openResubmitModal(true)"
 								>
 									<ScaleIcon aria-hidden="true" />
 									{{ formatMessage(messages.actionResubmitForReviewWithReply) }}
 								</Button>
-								<Button v-else :disabled="isLoading" @click="openResubmitModal(false)">
+								<Button
+									v-else
+									:disabled="isLoading || reviewSubmissionDisabled"
+									@click="openResubmitModal(false)"
+								>
 									<ScaleIcon aria-hidden="true" />
 									{{ formatMessage(messages.actionResubmitForReview) }}
 								</Button>
@@ -211,36 +216,34 @@
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
 						<template v-if="report">
-							<template v-if="isStaff(auth.user)">
-								<Button
-									v-if="replyBody"
-									type="colored"
-									color="red"
-									:disabled="isLoading"
-									@click="runBlockingAction('close-with-reply', () => closeReport(true))"
-								>
-									<SpinnerIcon
-										v-if="loadingAction === 'close-with-reply'"
-										class="animate-spin"
-										aria-hidden="true"
-									/>
-									<CheckCircleIcon v-else aria-hidden="true" />
-									{{ formatMessage(messages.actionCloseWithReply) }}
-								</Button>
-								<Button
-									v-else
-									:disabled="isLoading"
-									@click="runBlockingAction('close', () => closeReport())"
-								>
-									<SpinnerIcon
-										v-if="loadingAction === 'close'"
-										class="animate-spin"
-										aria-hidden="true"
-									/>
-									<CheckCircleIcon v-else aria-hidden="true" />
-									{{ formatMessage(messages.actionCloseThread) }}
-								</Button>
-							</template>
+							<Button
+								v-if="isStaff(auth.user) && replyBody"
+								type="colored"
+								color="red"
+								:disabled="isLoading"
+								@click="runBlockingAction('close-with-reply', () => closeReport(true))"
+							>
+								<SpinnerIcon
+									v-if="loadingAction === 'close-with-reply'"
+									class="animate-spin"
+									aria-hidden="true"
+								/>
+								<CheckCircleIcon v-else aria-hidden="true" />
+								{{ formatMessage(messages.actionCloseWithReply) }}
+							</Button>
+							<Button
+								v-else
+								:disabled="isLoading"
+								@click="runBlockingAction('close', () => closeReport())"
+							>
+								<SpinnerIcon
+									v-if="loadingAction === 'close'"
+									class="animate-spin"
+									aria-hidden="true"
+								/>
+								<CheckCircleIcon v-else aria-hidden="true" />
+								{{ formatMessage(messages.actionCloseThread) }}
+							</Button>
 						</template>
 						<template v-if="project">
 							<template v-if="isStaff(auth.user)">
@@ -310,7 +313,10 @@
 															runBlockingAction('send-to-review-reply', () =>
 																sendReply('processing', true),
 															),
-														disabled: project.status === 'processing' || isLoading,
+														disabled:
+															project.status === 'processing' ||
+															isLoading ||
+															reviewSubmissionDisabled,
 													},
 												]
 											: [
@@ -339,7 +345,10 @@
 														hoverFilled: true,
 														action: () =>
 															runBlockingAction('send-to-review', () => setStatus('processing')),
-														disabled: project.status === 'processing' || isLoading,
+														disabled:
+															project.status === 'processing' ||
+															isLoading ||
+															reviewSubmissionDisabled,
 													},
 												]
 									"
@@ -404,6 +413,7 @@ import {
 	ScaleIcon,
 	SendIcon,
 	SpinnerIcon,
+	StickyNotePlusIcon,
 	XIcon,
 } from '@modrinth/assets'
 import {
@@ -526,8 +536,8 @@ const messages = defineMessages({
 		defaultMessage: 'Close with reply',
 	},
 	actionCloseThread: {
-		id: 'conversation-thread.action.close-thread',
-		defaultMessage: 'Close thread',
+		id: 'conversation-thread.action.close-report',
+		defaultMessage: 'Close report',
 	},
 	actionApproveWithReply: {
 		id: 'conversation-thread.action.approve-with-reply',
@@ -584,6 +594,10 @@ const messages = defineMessages({
 })
 
 const props = defineProps({
+	reviewSubmissionDisabled: {
+		type: Boolean,
+		default: false,
+	},
 	thread: {
 		type: Object,
 		required: true,
@@ -689,6 +703,7 @@ async function sendReplyFromModal(status = null, privateMessage = false) {
 }
 
 async function sendReply(status = null, privateMessage = false) {
+	if (status === 'processing' && props.reviewSubmissionDisabled) return
 	try {
 		const body = {
 			body: {
@@ -781,6 +796,7 @@ function openReplyModal() {
 }
 
 async function resubmit() {
+	if (props.reviewSubmissionDisabled) return
 	if (replyWithSubmission.value) {
 		await sendReply('processing')
 	} else {

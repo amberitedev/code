@@ -4,9 +4,10 @@ export interface FileItem {
 	path: string
 	modified: number
 	created: number
-	size?: number
-	count?: number
+	size?: number | null
+	count?: number | null
 	target?: string
+	readOnly?: boolean
 }
 
 export interface EditingFile {
@@ -18,17 +19,6 @@ export type FileSortField = 'name' | 'size' | 'created' | 'modified'
 
 export type FileViewFilter = 'all' | 'filesOnly' | 'foldersOnly'
 
-export type FileContextMenuOption =
-	| {
-			id: string
-			action?: () => void
-			disabled?: boolean
-			tooltip?: string
-			color?: 'standard' | 'brand' | 'red' | 'orange' | 'green' | 'blue' | 'purple' | 'medal-promo'
-			shown?: boolean
-	  }
-	| { divider: true; shown?: boolean }
-
 export interface FileOperation {
 	id?: string
 	op: string
@@ -38,6 +28,8 @@ export interface FileOperation {
 	bytes_processed?: number
 	files_processed?: number
 	current_file?: string
+	cancellable?: boolean
+	error?: string
 }
 
 export interface UndoableOperation {

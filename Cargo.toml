@@ -1,24 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-	"apps/app",
-	"apps/app-playground",
-	"apps/daedalus_client",
-	"apps/labrinth",
-	"packages/amberite-lib",
-	"packages/browser-bridge",
-	"packages/app-lib",
-	"packages/ariadne",
-	"packages/daedalus",
-	"packages/labrinth-derive",
-	"packages/modrinth-content-management",
-	"packages/modrinth-log",
-	"packages/modrinth-maxmind",
-	"packages/modrinth-util",
-	"packages/neverbounce",
-	"packages/path-util",
-	"packages/serde-binhum",
-	"packages/xredis",
+  "apps/app",
+  "apps/app-playground",
+  "apps/daedalus_client",
+  "apps/labrinth",
+  "packages/amberite-lib",
+  "packages/browser-bridge",
+  "packages/app-lib",
+  "packages/ariadne",
+  "packages/component-derive",
+  "packages/daedalus",
+  "packages/modrinth-content-management",
+  "packages/modrinth-log",
+  "packages/modrinth-maxmind",
+  "packages/modrinth-util",
+  "packages/neverbounce",
+  "packages/path-util",
+  "packages/serde-binhum",
+  "packages/xredis",
 ]
 
 [workspace.package]
@@ -54,9 +54,11 @@ aws-sdk-s3 = { version = "=1.122.0", default-features = false, features = [
 ] }
 base64 = "0.22.1"
 bitflags = "2.9.4"
+blocklist = { version = "1.0.0" }
 bon = "3.9.3"
 bytemuck = "1.24.0"
 bytes = "1.10.1"
+cel = { version = "0.14.0", default-features = false, features = ["json", "regex"] }
 censor = "0.3.0"
 chardetng = "0.1.17"
 chrono = "0.4.42"
@@ -66,6 +68,7 @@ clap = "4.5.48"
 clickhouse = "0.14.0"
 color-eyre = "0.6.5"
 color-thief = "0.2.2"
+component-derive = { path = "packages/component-derive" }
 const_format = "0.2.34"
 core-foundation = "0.10.1"
 core-graphics = "0.24.0"
@@ -75,6 +78,7 @@ dashmap = "6.1.0"
 data-url = "0.3.2"
 deadpool-redis = { git = "https://github.com/modrinth/deadpool", rev = "c7209b086829572f368f1194aba54bdea8dc540b", version = "0.23.0" }
 derive_more = "2.1.1"
+dioxus-devtools = "0.7.10"
 directories = "6.0.0"
 dirs = "6.0.0"
 discord-rich-presence = "1.0.0"
@@ -124,6 +128,8 @@ lettre = { version = "0.11.19", default-features = false, features = [
 	"tokio1",
 	"tokio1-rustls",
 ] }
+lingua = "=1.8.0"
+linkify = "0.11.0"
 lz4_flex = { version = "0.11.5", default-features = false, features = [
 	"checked-decode",
 	"safe-decode",
@@ -131,7 +137,7 @@ lz4_flex = { version = "0.11.5", default-features = false, features = [
 	"std",
 ] }
 maxminddb = "0.26.0"
-meilisearch-sdk = { version = "0.30.0", default-features = false }
+md5 = "0.8.0"
 modrinth-content-management = { path = "packages/modrinth-content-management" }
 modrinth-log = { path = "packages/modrinth-log" }
 modrinth-util = { path = "packages/modrinth-util" }
@@ -146,12 +152,15 @@ p256 = "0.13.2"
 parking_lot = "0.12.5"
 paste = "1.0.15"
 path-util = { path = "packages/path-util" }
+pathdiff = "0.2.3"
 phf = { version = "0.13.1", features = ["macros"] }
 png = "0.18.0"
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 postcard-bindgen = "0.8.0"
 proc-macro2 = { version = "1.0" }
 prometheus = "0.14.0"
+psl = "2.1.145"
+pulldown-cmark = { version = "0.13.4", default-features = false }
 quartz_nbt = "0.2.9"
 quick-xml = "0.38.3"
 quote = { version = "1.0" }
@@ -170,7 +179,9 @@ rust-s3 = { version = "0.37.0", default-features = false, features = [
 	"tokio-rustls-tls",
 ] }
 rustls = "0.23.32"
+rustrict = { version = "0.7.39", default-features = false, features = ["censor"] }
 rusty-money = "0.4.1"
+same-file = "1.0.6"
 scalar_api_reference = { version = "0.2.2", default-features = false }
 secrecy = "0.10.3"
 sentry = { version = "0.45.0", default-features = false, features = [
@@ -188,7 +199,6 @@ serde_cbor = "0.11.2"
 serde_ini = "0.2.0"
 serde_json = "1.0.145"
 serde_with = "3.15.0"
-serde-xml-rs = "0.8.1" # Also an XML (de)serializer, consider dropping yaserde in favor of this
 sha1 = "0.10.6"
 sha1_smol = { version = "1.0.1", features = ["std"] }
 sha2 = "0.10.9"
@@ -201,8 +211,8 @@ strum = "0.27.2"
 syn = { version = "2.0" }
 sysinfo = { version = "0.37.2", default-features = false }
 tar = "0.4.44"
-tauri = "2.8.5"
-tauri-build = "2.4.1"
+tauri = "2.11.5"
+tauri-build = "2.6.3"
 tauri-plugin-deep-link = "2.4.3"
 tauri-plugin-dialog = "2.4.0"
 tauri-plugin-fs = "2.4.5"
@@ -232,6 +242,8 @@ tracing-error = "0.2.1"
 tracing-subscriber = "0.3.20"
 ts-rs = "12.0.1"
 typed-path = "0.12.0"
+unicode-normalization = "0.1.24"
+unicode-segmentation = "1.12.0"
 url = "2.5.7"
 urlencoding = "2.1.3"
 utoipa = { version = "5.4.0", features = ["actix_extras", "chrono", "decimal"] }
@@ -295,6 +307,17 @@ uninlined_format_args = "warn"
 unnested_or_patterns = "warn"
 wildcard_dependencies = "warn"
 
+# Pin the upstream Tao 0.36 upgrade until a Tauri release includes the Windows input deadlock fix.
+# https://github.com/tauri-apps/tauri/pull/15307
+[patch.crates-io]
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+tauri-codegen = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+tauri-macros = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+tauri-runtime = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+tauri-runtime-wry = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+tauri-utils = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff6981f5c50a52a67d56c5eb2d227188" }
+
 [profile.dev.package.sqlx-macros]
 opt-level = 3
 
@@ -305,10 +328,15 @@ strip = true # Remove debug symbols
 lto = true # Enables link to optimizations
 panic = "abort" # Strip expensive panic clean-up logic
 
+[profile.test]
+inherits = "dev"
+debug = "line-tables-only"
+
 # Specific profile for labrinth production builds
 [profile.release-labrinth]
 inherits = "release"
 opt-level = 2
-strip = false # Keep debug symbols for Sentry
-lto = "thin" # Enable LTO but keep compile times reasonable
-panic = "unwind" # Don't exit the whole app on panic in production
+debug = "line-tables-only"  # Minimal debug info
+strip = false  # Keep debug symbols for Sentry
+lto = "thin"  # Enable LTO but keep compile times reasonable
+panic = "unwind"  # Don't exit the whole app on panic in production

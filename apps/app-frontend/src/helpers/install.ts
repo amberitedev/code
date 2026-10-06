@@ -264,6 +264,16 @@ export async function install_pack_to_existing_instance(
 	})
 }
 
+export async function install_bulk_update_content(
+	instanceId: string,
+	updates: { project_path: string; version_id: string }[],
+) {
+	return await invoke<InstallJobSnapshot>('plugin:install|install_bulk_update_content', {
+		instanceId,
+		updates,
+	})
+}
+
 export async function install_job_list(includeFinished: boolean) {
 	return await invoke<InstallJobSnapshot[]>('plugin:install|install_job_list', { includeFinished })
 }
@@ -278,6 +288,14 @@ export async function install_job_retry(jobId: string) {
 
 export async function install_job_cancel(jobId: string) {
 	return await invoke<InstallJobSnapshot>('plugin:install|install_job_cancel', { jobId })
+}
+
+export async function install_job_pause(jobId: string) {
+	return await invoke<InstallJobSnapshot>('plugin:install|install_job_pause', { jobId })
+}
+
+export async function install_job_resume(jobId: string) {
+	return await invoke<InstallJobSnapshot>('plugin:install|install_job_resume', { jobId })
 }
 
 export async function install_job_dismiss(jobId: string) {

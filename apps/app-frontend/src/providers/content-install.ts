@@ -1,6 +1,8 @@
 import type { Labrinth } from '@modrinth/api-client'
-import type { ContentInstallInstance, ContentInstallProjectInfo, ContentItem } from '@modrinth/ui'
 import {
+	type ContentInstallInstance,
+	type ContentInstallProjectInfo,
+	type ContentItem,
 	createContext,
 	defineMessage,
 	getLatestMatchingInstallVersion,
@@ -11,6 +13,7 @@ import dayjs from 'dayjs'
 import { nextTick, type Ref, ref } from 'vue'
 import type { Router } from 'vue-router'
 
+import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { trackEvent } from '@/helpers/analytics'
 import {
 	get_organization,
@@ -23,6 +26,7 @@ import {
 	install_create_instance,
 	install_create_modpack_instance,
 	installJobInstanceId,
+	wait_for_install_job,
 } from '@/helpers/install'
 import {
 	add_project_from_version,
@@ -38,7 +42,6 @@ import {
 import { get_game_versions } from '@/helpers/tags'
 import type { GameInstance, InstanceLoader } from '@/helpers/types'
 import type { AppEvents } from '@/providers/app-events'
-import { useTheming } from '@/store/state'
 interface ModalRef {
 	show: (initialVersionId?: string) => void
 	hide: () => void
@@ -188,7 +191,7 @@ export function createContentInstall(opts: {
 	appEvents: AppEvents
 }): ContentInstallContext {
 	const { formatMessage } = useVIntl()
-	const themeStore = useTheming()
+	const appSettings = useAppSettings()
 	const instances = ref<ContentInstallInstance[]>([])
 	const compatibleLoaders = ref<string[]>([])
 	const gameVersions = ref<string[]>([])
@@ -779,6 +782,7 @@ export function createContentInstall(opts: {
 			const id = installJobInstanceId(job)
 			if (!id) return
 			createdInstanceId = id
+			await wait_for_install_job(opts.appEvents, job.job_id)
 			addInstallingItem(id, currentProject!, version)
 
 			const plan = await install_project_with_dependencies(id, {
@@ -858,7 +862,7 @@ export function createContentInstall(opts: {
 			const packs = await list()
 			const existingPack = packs.find((pack) => pack.link?.project_id === project.id)
 
-			if (existingPack && !themeStore.getFeatureFlag('skip_non_essential_warnings')) {
+			if (existingPack && !appSettings.skipNonEssentialWarnings) {
 				pendingModpackInstall = { project, version, source, callback, createInstanceCallback }
 				modpackAlreadyInstalledModalRef?.show(existingPack.name, existingPack.id)
 				return
@@ -869,7 +873,7 @@ export function createContentInstall(opts: {
 				project_id: project.id,
 				version_id: version,
 				title: project.title,
-				icon_url: project.icon_url,
+				icon_url: project.raw_icon_url,
 			})
 			const instanceId = installJobInstanceId(job)
 			if (instanceId) {
@@ -985,7 +989,7 @@ export function createContentInstall(opts: {
 				project_id: project.id,
 				version_id: version,
 				title: project.title,
-				icon_url: project.icon_url,
+				icon_url: project.raw_icon_url,
 			})
 			const instanceId = installJobInstanceId(job)
 			if (instanceId) {

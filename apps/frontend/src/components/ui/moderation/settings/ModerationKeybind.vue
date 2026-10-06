@@ -1,9 +1,17 @@
 <template>
 	<div>
 		<span class="flex flex-row items-center gap-2 text-sm text-secondary">
-			<GlobeIcon
-				v-if="props.global"
+			<BoxIcon
+				v-if="props.scope === 'project'"
 				v-tooltip="'Can be used without the checklist open if setting enabled.'"
+			/>
+			<GlobeIcon
+				v-if="props.scope === 'global'"
+				v-tooltip="'Can be used anywhere on the website.'"
+			/>
+			<ShieldCheckIcon
+				v-if="props.scope === 'tech-review'"
+				v-tooltip="'Used within the tech review pages'"
 			/>
 			{{ props.title }}
 			<IconButton
@@ -45,14 +53,14 @@
 </template>
 
 <script setup lang="ts">
-import { GlobeIcon, RotateCounterClockwiseIcon } from '@modrinth/assets'
+import { BoxIcon, GlobeIcon, RotateCounterClockwiseIcon, ShieldCheckIcon } from '@modrinth/assets'
 import { type KeybindDefinition, toKeybindDefinition } from '@modrinth/moderation'
 import { IconButton } from '@modrinth/ui'
 import { onUnmounted } from 'vue'
 
 const props = defineProps<{
 	title: string
-	global: boolean
+	scope: string
 	definitions: KeybindDefinition[]
 	default: KeybindDefinition[]
 	onChange: (definitions: KeybindDefinition[]) => void
