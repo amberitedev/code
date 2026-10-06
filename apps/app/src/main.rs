@@ -123,6 +123,12 @@ async fn set_restart_after_pending_update(
 fn main() {
     dev::prepare();
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create app async runtime");
+    tauri::async_runtime::set(runtime.handle().clone());
+
     #[cfg(feature = "export-app-events")]
     theseus::export_app_event_bindings(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -169,7 +169,7 @@ pub fn server_v0(
         "loader_version": r.loader_version, "mc_version": if configured { Some(&r.game_version) } else { None },
         "upstream": upstream, "sftp_username": "", "sftp_password": "", "sftp_host": "",
         "datacenter": "local", "notices": [], "node": {"instance": node_url, "token": "local-dev"},
-        "flows": {"intro": !configured}, "is_medal": false,
+        "flows": {"intro": !configured}, "is_medal": false, "locked_since": null,
         "current_user_permissions": permissions,
     })
 }
