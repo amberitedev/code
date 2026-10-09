@@ -7,7 +7,7 @@ mod backup_queue;
 use super::models::*;
 use crate::{
     application::{
-        backup_service, mod_service, modpack_service,
+        backup_service, mod_service, modpack_service, server_source_service,
         state::{AppState, WsTicket},
     },
     domain::{
@@ -858,26 +858,29 @@ async fn install_modrinth_pack(
             "Stop the server before installing a modpack".into(),
         ));
     }
-    let manifest = modpack_service::install_modrinth_version(
-        state,
-        &r.id.to_string(),
-        project,
-        version,
-    )
-    .await?;
-    if manifest.game_version.is_empty() {
-        return Err(ApiError::BadRequest(
-            "Modpack has no Minecraft version".into(),
-        ));
+    // Installs through the linked-source engine: the first pack links the server, later packs
+    // update it, removing files the previous pack provided.
+    let id = r.id.to_string();
+    let linked = server_source_service::get_status(state, &id).await?;
+    if linked.is_some() {
+        server_source_service::request_source_update(state, &id, version, false)
+            .await?;
+    } else {
+        server_source_service::link(
+            state,
+            &id,
+            server_source_service::LinkRequest {
+                source: crate::domain::server_source::ServerSource::Modrinth {
+                    project_id: project.to_string(),
+                    version_id: version.to_string(),
+                },
+                version: version.to_string(),
+                sharing: None,
+                properties: Default::default(),
+            },
+        )
+        .await?;
     }
-    crate::application::instance_service::change_version(
-        state,
-        &r.id,
-        Some(manifest.game_version),
-        Some(loader(&manifest.loader)?),
-        Some(manifest.loader_version),
-    )
-    .await?;
     Ok(())
 }
 

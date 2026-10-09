@@ -65,6 +65,12 @@ pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::instance_service::restore_instances(
         Arc::clone(&state),
     ));
+    tokio::spawn(application::server_source_service::resume(Arc::clone(
+        &state,
+    )));
+    tokio::spawn(application::source_reconcile_service::run(Arc::clone(
+        &state,
+    )));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
     tokio::spawn(gc_fs_download_tokens(Arc::clone(&state)));
     tokio::spawn(gc_fs_upload_sessions(Arc::clone(&state)));

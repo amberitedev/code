@@ -19,7 +19,7 @@ use crate::{
         access, backups, console, diagnostics, events, fs, installations,
         instance_control, instances, invites, logs, macros, modpack, mods,
         players, projection, properties, query, rcon, roles, setup, social,
-        stats, sync, tasks, uploads,
+        source, stats, sync, tasks, uploads,
     },
 };
 
@@ -168,6 +168,15 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/instances/:id/modpack/export",
             get(modpack::export_modpack_handler),
         )
+        // Linked server source
+        .route(
+            "/instances/:id/source",
+            get(source::get_source)
+                .post(source::link_source)
+                .delete(source::unlink_source),
+        )
+        .route("/instances/:id/source/update", post(source::update_source))
+        .route("/instances/:id/content", get(source::get_content))
         // Macros
         .route("/instances/:id/macros", get(macros::list_macros_handler))
         .route("/instances/:id/macros", post(macros::spawn_macro_handler))

@@ -10,7 +10,8 @@ use crate::{
         export_service::ExportError, instance_service::InstanceError,
         log_service::LogError, macro_service::MacroError,
         mod_service::ModError, modpack_service::ModpackError,
-        query_service::QueryServiceError, rcon_service::RconServiceError,
+        query_service::QueryServiceError,
+        server_source_service::SourceError, rcon_service::RconServiceError,
         social_models::SocialError, stats_service::StatsError,
         task_service::TaskError,
     },
@@ -259,6 +260,21 @@ impl From<StoreError> for ApiError {
             }
             StoreError::Database(e) => Self::Internal(e.to_string()),
             StoreError::Parse(e) => Self::Internal(format!("parse error: {e}")),
+        }
+    }
+}
+
+impl From<SourceError> for ApiError {
+    fn from(e: SourceError) -> Self {
+        match e {
+            SourceError::NotFound => Self::NotFound("instance not found".into()),
+            SourceError::NotLinked => {
+                Self::NotFound("server is not linked to a source".into())
+            }
+            SourceError::AlreadyLinked => Self::Conflict(e.to_string()),
+            SourceError::Invalid(message) => Self::BadRequest(message),
+            SourceError::Instance(e) => e.into(),
+            e => Self::Internal(e.to_string()),
         }
     }
 }

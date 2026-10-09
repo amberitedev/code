@@ -19,6 +19,7 @@ pub mod query;
 pub mod rcon;
 pub mod roles;
 pub mod setup;
+pub mod source;
 pub mod social;
 pub mod stats;
 pub mod sync;

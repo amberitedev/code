@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::{
     application::{
-        fs_service, instance_service, modpack_service, state::AppState,
+        fs_service, state::AppState,
     },
     domain::{
         event::{Event, FsOperationKind},
@@ -1206,19 +1206,12 @@ async fn upload_modpack(
         }
     }
     drop(archive);
-    let manifest =
-        modpack_service::install(&state, &record.id.to_string(), pack.path())
-            .await?;
-    let loader = manifest
-        .loader
-        .parse::<ModLoader>()
-        .map_err(ApiError::BadRequest)?;
-    instance_service::change_version(
+    drop(_operation_guard);
+    crate::application::server_source_service::link_mrpack(
         &state,
-        &record.id,
-        Some(manifest.game_version),
-        Some(loader),
-        Some(manifest.loader_version),
+        &record.id.to_string(),
+        pack.path(),
+        "modpack.mrpack",
     )
     .await?;
     if !updates.is_empty() {

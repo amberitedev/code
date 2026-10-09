@@ -135,6 +135,7 @@ async fn run_actor<H: ProcessHandle>(
     }
 
     state.instances.remove(&instance_id);
+    crate::application::server_source_service::on_stopped(&state, &instance_id);
     info!("Actor exited for instance {instance_id}");
 }
 
