@@ -16,8 +16,7 @@ from engineering recommendations. It does not claim that the features below are 
 - Show delivery and installed-version differences, including pending and failed updates.
 - Receive and verify updates immediately, but apply installation/content changes only while the
   Minecraft server is stopped. Enforce this in Core, including start/update races.
-- Push UI will offer "Push Update" and "Push Update and Restart". A "Restart Server" setting
-  will control the default choice; its scope and default value are still open.
+- Push UI offers "Push update" and "Push and restart" (see Decided 2026-10-09).
 - Normal pushes do not force a running server to restart. The explicit restart choice stops it,
   applies the verified update while stopped, and starts it again.
 - The sharing client transfers update bytes directly to a Core/storage service. The sharing
@@ -140,11 +139,17 @@ These observations describe this checkout. They do not establish Modrinth's priv
 
 ## Open product choices
 
-- What scope/default should the Restart Server preference have? For several linked servers,
-  which ones does "Push Update and Restart" target?
-- The final access roles and who may create/link a server need selection before integration.
-- Client update prompts for versions changing only server content need an explicit compatibility rule.
 - Full history for all local instances, branches, and merging remain deferred.
+
+## Decided 2026-10-09
+
+- Push buttons: the primary button is "Push update", which never restarts; running servers apply it
+  when they next stop. The secondary outline button is "Push and restart", which restarts every
+  linked server that is running. No Restart Server preference.
+- Anyone with access to an instance who has it installed can create a linked server from it on a
+  Core they control. Creating a server on someone else's Core is deferred.
+- Players are not prompted for versions that only change server content. Their clients stay on
+  their current version and jump straight to the latest one when a version changes client content.
 
 ## Clarification ledger
 
