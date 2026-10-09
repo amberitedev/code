@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-24. Source: Ilai's ongoing planning conversation in this thread.
 
+Server/content planning added 2026-10-04: [server content and instance updates](server-content-plan.md).
+That record captures the newer linked-server direction, automatic delivery after an instance push,
+public/private visibility within instance access, and the correction to retain the Access page.
+It separates accepted intent from proposed delivery behavior and open decisions. Earlier milestone
+boundaries below remain historical context; server integration is now the next work being planned.
+
 This is a planning record, not an implementation authorization or a description of completed code.
 Read this before preparing an implementation handoff. Do not treat every idea below as approved.
 
