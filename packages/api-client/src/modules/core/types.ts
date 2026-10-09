@@ -1,3 +1,5 @@
+import type { Archon } from '../archon/types'
+
 export type CoreInstanceStatus = 'offline' | 'starting' | 'running' | 'stopping' | 'crashed'
 
 export type CoreInstanceInstallStatus = 'installing' | 'ready' | 'failed'
@@ -787,7 +789,15 @@ export interface CoreServerContent {
 
 /** POST /instances/:id/source. Links an unlinked server and installs the source. */
 export type CoreLinkSourceBody =
-	| { type: 'instance'; shared_instance_id: string; version: number }
+	| {
+			type: 'instance'
+			shared_instance_id: string
+			version: number
+			sharing_url: string
+			server_token: string
+			/** server.properties written on first install only. */
+			properties?: Archon.Content.v1.PropertiesFields
+	  }
 	| { type: 'modrinth'; project_id: string; version_id: string }
 
 /**
