@@ -165,3 +165,30 @@ delivery paths. Mods and datapacks are in scope; forced resource packs, new conf
 and disabling inherited shared content are excluded. Unknown custom mods install. Known client-only
 content is excluded from installation but remains listed. Apply the latest full version only.
 Failure handling is delegated to the agent; Tasks/Notifications integration is explicitly requested.
+
+## Contract (2026-10-09)
+
+Types live at the end of `packages/api-client/src/modules/core/types.ts` under "Linked servers".
+All three implementation branches build against them; change them only by agreement.
+
+Core endpoints, all requiring `server:content`:
+
+- `GET /instances/:id/source` returns `CoreServerSourceStatus | null`.
+- `POST /instances/:id/source` with `CoreLinkSourceBody` links an unlinked server and installs it.
+- `DELETE /instances/:id/source` unlinks. Inherited files stay on disk and become server content.
+- `POST /instances/:id/source/update` with `CoreSourceUpdateBody` records a newer desired version.
+- `GET /instances/:id/content` returns `CoreServerContent`.
+- Events `source_status_changed` and `source_apply_progress` on the existing Core event stream.
+
+Ownership:
+
+- **Core apply** (`core-apply`): the apply engine in `apps/core`, the endpoints above, Core
+  migrations, and `packages/api-client/src/modules/core/api.ts` and `client.ts` methods for them.
+  Retires the direct-pack and legacy-sync install logic into the one engine. Exposes a Rust
+  function that delivery calls to request an update.
+- **Delivery** (`server-delivery`): which servers are linked to which shared instance (sharing
+  backend in `apps/backend`), pushing updates to them from the App, Core reconnect reconciliation
+  that polls the sharing backend for newer versions, and the Tasks panel rows.
+- **UI** (`server-ui`): mocks first, then the From instance flow, Worlds listing, linked-server
+  Content page, and the push buttons with the players-online warning, against a mock of the
+  contract until the other branches land.

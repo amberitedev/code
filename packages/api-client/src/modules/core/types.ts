@@ -133,6 +133,8 @@ export type CoreInstanceEvent =
 			snapshot_id: string
 			instance_id: string | null
 	  }
+	| { type: 'source_status_changed'; instance_id: string; status: CoreServerSourceStatus | null }
+	| ({ type: 'source_apply_progress' } & CoreSourceApplyProgress)
 	| {
 			type: 'sync_event_status_changed'
 			profile_id: string
@@ -730,4 +732,87 @@ export interface CoreSyncVersionStatus {
 	profile_id: string
 	current_snapshot_id?: string | null
 	current_snapshot_created_at?: string | null
+}
+
+// ── Linked servers ────────────────────────────────────────────────────────────
+// Contract for servers whose installation and content come from a source (an Amberite instance,
+// a Modrinth pack, or an uploaded .mrpack). See docs/internals/server-content-plan.md.
+
+/** Where a linked server's base setup comes from. */
+export type CoreServerSource =
+	| { type: 'instance'; shared_instance_id: string; name: string; icon: string | null }
+	| { type: 'modrinth'; project_id: string; version_id: string }
+	| { type: 'mrpack'; filename: string; name: string }
+
+/**
+ * Lifecycle of the source's latest version on this server. `pending` means a newer version was
+ * received and verified and will apply when the server next stops.
+ */
+export type CoreSourceApplyState = 'up_to_date' | 'downloading' | 'pending' | 'applying' | 'failed'
+
+/** GET /instances/:id/source. `null` body means the server is unlinked. */
+export interface CoreServerSourceStatus {
+	source: CoreServerSource
+	/** Source version the server should be on. Instance version number, or Modrinth version id. */
+	desired_version: string
+	/** Source version fully applied to disk, or null before the first successful install. */
+	installed_version: string | null
+	state: CoreSourceApplyState
+	error: string | null
+	updated_at: string
+}
+
+/** Who provides a content item on a linked server. */
+export type CoreContentOrigin = 'source' | 'server'
+
+/** One mod or datapack on a server, for the Content page. */
+export interface CoreServerContentItem {
+	kind: 'mod' | 'datapack'
+	filename: string
+	origin: CoreContentOrigin
+	/** Source content that is client-only and therefore not installed on the server. */
+	client_only: boolean
+	disabled: boolean
+	project_id: string | null
+	version_id: string | null
+	name: string | null
+	icon_url: string | null
+}
+
+/** GET /instances/:id/content */
+export interface CoreServerContent {
+	source: CoreServerSourceStatus | null
+	items: CoreServerContentItem[]
+}
+
+/** POST /instances/:id/source. Links an unlinked server and installs the source. */
+export type CoreLinkSourceBody =
+	| { type: 'instance'; shared_instance_id: string; version: number }
+	| { type: 'modrinth'; project_id: string; version_id: string }
+
+/**
+ * POST /instances/:id/source/update. Tells a linked server that a newer source version exists.
+ * Core downloads and verifies it immediately and applies it when stopped. With `restart`, Core
+ * stops a running server, applies, and starts it again.
+ */
+export interface CoreSourceUpdateBody {
+	version: string
+	restart: boolean
+}
+
+export type CoreSourceApplyPhase =
+	| 'downloading'
+	| 'verifying'
+	| 'waiting_for_stop'
+	| 'stopping'
+	| 'applying'
+	| 'starting'
+
+/** Progress for one server's source update, streamed on the Core event stream. */
+export interface CoreSourceApplyProgress {
+	instance_id: string
+	version: string
+	phase: CoreSourceApplyPhase
+	/** 0 to 1, or null when the phase has no measurable progress. */
+	progress: number | null
 }
