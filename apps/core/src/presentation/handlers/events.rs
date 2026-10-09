@@ -46,7 +46,9 @@ pub async fn stream_events(
                     | event @ Event::CreationProgress { .. }
                     | event @ Event::InstallStatusChanged { .. }
                     | event @ Event::FsChanged { .. }
-                    | event @ Event::SyncProfileUpdated { .. } => {
+                    | event @ Event::SyncProfileUpdated { .. }
+                    | event @ Event::SourceStatusChanged { .. }
+                    | event @ Event::SourceApplyProgress { .. } => {
                         let instance_id = match &event {
                             Event::InstanceCreated { instance }
                             | Event::InstanceUpdated { instance } => {
@@ -58,9 +60,13 @@ pub async fn stream_events(
                             | Event::InstallStatusChanged {
                                 instance_id, ..
                             }
-                            | Event::FsChanged { instance_id, .. } => {
-                                Some(instance_id.to_string())
+                            | Event::FsChanged { instance_id, .. }
+                            | Event::SourceStatusChanged {
+                                instance_id, ..
                             }
+                            | Event::SourceApplyProgress {
+                                instance_id, ..
+                            } => Some(instance_id.to_string()),
                             Event::SyncProfileUpdated {
                                 instance_id, ..
                             } => instance_id.clone(),
@@ -146,6 +152,10 @@ pub async fn stream_events(
                         "snapshot_id": snapshot_id,
                         "instance_id": instance_id,
                     }),
+                    event @ (Event::SourceStatusChanged { .. }
+                    | Event::SourceApplyProgress { .. }) => {
+                        serde_json::to_value(&event).ok()?
+                    }
                     Event::InstallationStatusChanged { .. }
                     | Event::SyncEventStatusChanged { .. }
                     | Event::InstanceOutput { .. }
