@@ -143,9 +143,11 @@ These observations describe this checkout. They do not establish Modrinth's priv
 
 ## Decided 2026-10-09
 
-- Push buttons: the primary button is "Push update", which never restarts; running servers apply it
-  when they next stop. The secondary outline button is "Push and restart", which restarts every
-  linked server that is running. No Restart Server preference.
+- Push buttons: the primary button is "Push and restart", which restarts every linked server that
+  is running. If players are online on any of them, a warning names those servers and offers
+  "Restart now", "Apply on next stop" (the same as Push update), or cancel. The secondary outline
+  button is "Push update", which never restarts; running servers apply it when they next stop.
+  No Restart Server preference.
 - Anyone with access to an instance who has it installed can create a linked server from it on a
   Core they control. Creating a server on someone else's Core is deferred.
 - Players are not prompted for versions that only change server content. Their clients stay on
