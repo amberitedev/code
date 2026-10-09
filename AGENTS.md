@@ -102,6 +102,8 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 
 - Use the smallest proof that the change works: `vp test run <files>` for tests you touched, targeted
   lint, and typecheck only for the workspace you changed.
+- **Do not build unless the developer asks.** No `cargo build`, `cargo check`, `vp build`, or app
+  bundles. Amberite is dev-only; `vp run dev` compiles what it runs.
 - **Do not run repo-wide checks.** No `vp check`, `vp run -r test`, or `vp run -r typecheck` unless
   the developer asks. CI owns the full suite.
 - Do not add backend tests by default. Add them when the developer asks or when the behavior is
