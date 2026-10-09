@@ -36,10 +36,7 @@ node_modules
 /.sass-cache
 /connect.lock
 /coverage
-/libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
+*.log
 /typings
 
 # System Files
@@ -90,7 +87,6 @@ CLAUDE.md
 # labrinth demo fixtures
 apps/labrinth/fixtures/demo
 
-*storybook.log
 storybook-static
 
 .wrangler/

@@ -21,7 +21,7 @@ export default defineConfig({
 		testTimeout: 60_000,
 	},
 	staged: {
-		'*': 'vp fmt',
+		'*': 'vp fmt --no-error-on-unmatched-pattern',
 	},
 	fmt: {
 		semi: false,
