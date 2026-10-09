@@ -11,7 +11,10 @@ use crate::{
 
 #[derive(Debug, Serialize)]
 pub struct StatsResponse {
+    /// Share of the host's logical CPU capacity, from 0 to 100.
     pub cpu_percent: Option<f32>,
+    /// Process resident memory as a share of the host's RAM, from 0 to 100.
+    pub memory_percent: Option<f64>,
     pub memory_mb: Option<u64>,
     pub ram_total_mb: Option<u64>,
     pub player_count: Option<u32>,
@@ -55,6 +58,7 @@ pub async fn get_stats(
             // BEH-05: distinguish "not in DB" (→ 404) from "offline" (→ 200 with nulls)
             return Ok(StatsResponse {
                 cpu_percent: None,
+                memory_percent: None,
                 memory_mb: None,
                 ram_total_mb: None,
                 player_count: None,
@@ -72,33 +76,36 @@ pub async fn get_stats(
     let cmd_tx = handle.cmd_tx.clone();
     drop(handle); // release DashMap guard before any await
 
-    let (cpu_percent, memory_mb, ram_total_mb) = if let Some(pid_val) = pid {
-        tokio::task::spawn_blocking(move || {
-            let p = Pid::from(pid_val as usize);
-            let mut sys = System::new_all();
-            std::thread::sleep(Duration::from_millis(200));
-            sys.refresh_all();
-            if let Some(proc) = sys.process(p) {
-                let core_count = sys.cpus().len().max(1) as f32;
-                (
-                    Some(proc.cpu_usage() / core_count),
-                    Some(proc.memory() / 1_048_576),
-                    Some(sys.total_memory() / 1_048_576),
-                )
-            } else {
-                (None, None, None)
-            }
-        })
-        .await
-        .unwrap_or((None, None, None))
-    } else {
-        (None, None, None)
-    };
+    let (cpu_percent, memory_percent, memory_mb, ram_total_mb) =
+        if let Some(pid_val) = pid {
+            tokio::task::spawn_blocking(move || {
+                let p = Pid::from(pid_val as usize);
+                let mut sys = System::new_all();
+                std::thread::sleep(Duration::from_millis(200));
+                sys.refresh_all();
+                if let Some(proc) = sys.process(p) {
+                    let core_count = sys.cpus().len().max(1) as f32;
+                    (
+                        Some(host_cpu_percent(proc.cpu_usage(), core_count)),
+                        host_memory_percent(proc.memory(), sys.total_memory()),
+                        Some(proc.memory() / 1_048_576),
+                        Some(sys.total_memory() / 1_048_576),
+                    )
+                } else {
+                    (None, None, None, None)
+                }
+            })
+            .await
+            .unwrap_or((None, None, None, None))
+        } else {
+            (None, None, None, None)
+        };
 
     let player_count = get_player_count(state, &iid, cmd_tx).await;
 
     Ok(StatsResponse {
         cpu_percent,
+        memory_percent,
         memory_mb,
         ram_total_mb,
         player_count,
@@ -106,6 +113,21 @@ pub async fn get_stats(
         total_uptime_seconds,
         storage_bytes,
     })
+}
+
+/// sysinfo reports 100% per logical CPU; Core reports a share of the whole host.
+pub(crate) fn host_cpu_percent(process_cpu: f32, cpu_count: f32) -> f32 {
+    (process_cpu / cpu_count.max(1.0)).clamp(0.0, 100.0)
+}
+
+pub(crate) fn host_memory_percent(
+    process_bytes: u64,
+    host_bytes: u64,
+) -> Option<f64> {
+    if host_bytes == 0 {
+        return None;
+    }
+    Some((process_bytes as f64 / host_bytes as f64 * 100.0).clamp(0.0, 100.0))
 }
 
 /// Recursively sum the byte size of all files under `dir`. Returns `None` on error
@@ -179,7 +201,21 @@ fn parse_player_count(line: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_player_count;
+    use super::{host_cpu_percent, host_memory_percent, parse_player_count};
+
+    #[test]
+    fn resource_percentages_use_total_host_capacity() {
+        assert_eq!(host_cpu_percent(200.0, 8.0), 25.0);
+        assert_eq!(host_memory_percent(512, 2048), Some(25.0));
+    }
+
+    #[test]
+    fn resource_percentages_handle_limits_and_missing_capacity() {
+        assert_eq!(host_cpu_percent(900.0, 8.0), 100.0);
+        assert_eq!(host_cpu_percent(-1.0, 8.0), 0.0);
+        assert_eq!(host_memory_percent(4096, 2048), Some(100.0));
+        assert_eq!(host_memory_percent(512, 0), None);
+    }
 
     #[test]
     fn parse_normal_count() {

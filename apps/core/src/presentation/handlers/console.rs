@@ -25,6 +25,7 @@ use crate::{
     application::{
         instance_status_service::send_command,
         state::{AppState, WsTicket},
+        stats_service::{host_cpu_percent, host_memory_percent},
     },
     domain::{event::Event, instance::InstanceId},
     presentation::{
@@ -147,7 +148,7 @@ async fn collect_stats_for_ws(
     let (uptime_seconds, pid) = match state.instances.get(iid) {
         Some(h) => (Some(h.started_at.elapsed().as_secs()), h.pid),
         None => {
-            return json!({ "cpu_percent": null, "memory_mb": null, "ram_total_mb": null, "player_count": null, "uptime_seconds": null, "total_uptime_seconds": null })
+            return json!({ "cpu_percent": null, "memory_percent": null, "memory_mb": null, "ram_total_mb": null, "player_count": null, "uptime_seconds": null, "total_uptime_seconds": null })
         }
     };
 
@@ -160,31 +161,40 @@ async fn collect_stats_for_ws(
         .unwrap_or(0);
     let total_uptime_seconds = db_total + uptime_seconds.unwrap_or(0);
 
-    let (cpu_percent, memory_mb, ram_total_mb) = if let Some(pid_val) = pid {
-        tokio::task::spawn_blocking(move || {
-            let p = Pid::from(pid_val as usize);
-            let mut sys = System::new_all();
-            std::thread::sleep(Duration::from_millis(200));
-            sys.refresh_all();
-            sys.process(p)
-                .map(|proc| {
-                    let core_count = sys.cpus().len().max(1) as f32;
-                    (
-                        Some(proc.cpu_usage() / core_count),
-                        Some(proc.memory() / 1_048_576),
-                        Some(sys.total_memory() / 1_048_576),
-                    )
-                })
-                .unwrap_or((None, None, None))
-        })
-        .await
-        .unwrap_or((None, None, None))
-    } else {
-        (None, None, None)
-    };
+    let (cpu_percent, memory_percent, memory_mb, ram_total_mb) =
+        if let Some(pid_val) = pid {
+            tokio::task::spawn_blocking(move || {
+                let p = Pid::from(pid_val as usize);
+                let mut sys = System::new_all();
+                std::thread::sleep(Duration::from_millis(200));
+                sys.refresh_all();
+                sys.process(p)
+                    .map(|proc| {
+                        let core_count = sys.cpus().len().max(1) as f32;
+                        (
+                            Some(host_cpu_percent(
+                                proc.cpu_usage(),
+                                core_count,
+                            )),
+                            host_memory_percent(
+                                proc.memory(),
+                                sys.total_memory(),
+                            ),
+                            Some(proc.memory() / 1_048_576),
+                            Some(sys.total_memory() / 1_048_576),
+                        )
+                    })
+                    .unwrap_or((None, None, None, None))
+            })
+            .await
+            .unwrap_or((None, None, None, None))
+        } else {
+            (None, None, None, None)
+        };
 
     json!({
         "cpu_percent": cpu_percent,
+        "memory_percent": memory_percent,
         "memory_mb": memory_mb,
         "ram_total_mb": ram_total_mb,
         "player_count": null,

@@ -1188,6 +1188,8 @@ export namespace Archon {
 			export type WSStatsEvent = {
 				event: 'stats'
 				cpu_percent: number
+				/** Core supplies process memory as a percentage of total host RAM. */
+				memory_percent?: number | null
 				ram_usage_bytes: number
 				ram_total_bytes: number
 				storage_usage_bytes: number

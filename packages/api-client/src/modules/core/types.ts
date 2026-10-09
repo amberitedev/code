@@ -143,7 +143,10 @@ export type CoreInstanceEvent =
 
 /** GET /instances/:id/stats */
 export interface CoreStats {
+	/** Percentage of the host's total logical CPU capacity, from 0 to 100. */
 	cpu_percent: number | null
+	/** Process resident memory as a percentage of the host's total RAM, from 0 to 100. */
+	memory_percent: number | null
 	memory_mb: number | null
 	ram_total_mb: number | null
 	player_count: number | null

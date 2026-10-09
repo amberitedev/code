@@ -30,7 +30,11 @@ use tokio::{
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
-    application::{instance_status_service::send_command, state::AppState},
+    application::{
+        instance_status_service::send_command,
+        state::AppState,
+        stats_service::{host_cpu_percent, host_memory_percent},
+    },
     domain::{
         event::Event,
         instance::{
@@ -183,6 +187,7 @@ async fn serve(
     let mut tick = tokio::time::interval(Duration::from_secs(3));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut system = System::new();
+    system.refresh_cpu_usage();
     let mut disk_sample = None;
     let mut disk_sampled_at = None;
     let mut progress = None;
@@ -197,10 +202,11 @@ async fn serve(
                 let dir = record.data_dir.clone();
                 let refresh_disk = disk_sampled_at.is_none_or(|at: Instant| at.elapsed() >= Duration::from_secs(30));
                 let sampled = tokio::task::spawn_blocking(move || {
+                    system.refresh_memory();
                     let process = pid.and_then(|pid| {
                         let pid = Pid::from(pid as usize);
                         system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-                        system.process(pid).map(|process| (process.cpu_usage(), process.memory()))
+                        system.process(pid).map(|process| (host_cpu_percent(process.cpu_usage(), system.cpus().len() as f32), process.memory()))
                     });
                     let disk = if refresh_disk { sample_disk(&dir) } else { None };
                     (system, process, disk)
@@ -217,7 +223,8 @@ async fn serve(
                 if let (Some((cpu, memory)), Some((used, total))) = (process, disk_sample) {
                     if !send(&mut socket, json!({
                         "event": "stats", "cpu_percent": cpu,
-                        "ram_usage_bytes": memory, "ram_total_bytes": u64::from(record.memory.max_mb) * 1_048_576,
+                        "memory_percent": host_memory_percent(memory, system.total_memory()),
+                        "ram_usage_bytes": memory, "ram_total_bytes": system.total_memory(),
                         "storage_usage_bytes": used, "storage_total_bytes": total,
                     })).await { break; }
                 }
