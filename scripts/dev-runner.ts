@@ -358,7 +358,6 @@ async function main(): Promise<void> {
 
 	try {
 		for (const spec of specs) start(spec)
-		}
 		await finished
 	} finally {
 		await stop(process.exitCode || 1)
