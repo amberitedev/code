@@ -18,7 +18,9 @@ pub(crate) async fn shared_file_changed(
         Err(error) => return Err(crate::util::io::IOError::from(error).into()),
     };
     let mut digest = Sha256::new();
-    let mut buffer = [0; 64 * 1024];
+    // Heap-allocated: an array here would sit inside every caller's future and
+    // overflow the async runtime's worker stack in debug builds.
+    let mut buffer = vec![0; 64 * 1024];
     loop {
         let count = file
             .read(&mut buffer)
