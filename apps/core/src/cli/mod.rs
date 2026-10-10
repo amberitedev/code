@@ -23,9 +23,6 @@ pub(crate) struct Cli {
     /// Include diagnostic detail in failures.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
-    /// Disable HTTP auth and permission checks. Debug builds only.
-    #[arg(short = 'n', long = "no-auth", alias = "noauth", global = true)]
-    no_auth: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -194,7 +191,7 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
     match cli.command.unwrap_or(Command::Run) {
         Command::Run => {
             crate::init_tracing();
-            crate::run_server(cli.no_auth).await
+            crate::run_server().await
         }
         Command::Check => check().await,
         Command::Migrate => migrate().await,

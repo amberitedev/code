@@ -650,7 +650,6 @@ export function createProcessSpecs(input: {
 		...input.env,
 		ALLOWED_ORIGIN: `http://localhost:${input.ports.app}`,
 		AMBERITE_BIND_HOST: '127.0.0.1',
-		AMBERITE_NO_AUTH: 'true',
 		AMBERITE_PUBLIC_URL: `http://127.0.0.1:${input.ports.core}`,
 		CORE_DATA_DIR: input.paths.coreData,
 		PORT: String(input.ports.core),

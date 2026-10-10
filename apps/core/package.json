@@ -5,7 +5,6 @@
 	"type": "module",
 	"scripts": {
 		"dev": "cargo run",
-		"dev:noauth": "cargo run -- --no-auth",
 		"setup": "node scripts/core_setup.ts",
 		"build": "cargo build --release",
 		"check": "cargo check",

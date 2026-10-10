@@ -19,6 +19,7 @@ use crate::{
         events::EventBroadcaster,
         process::{instance_actor::InstanceHandle, std_spawner::StdSpawner},
     },
+    presentation::extractors::Account,
     ports::{
         installation_store::InstallationStore, instance_store::InstanceStore,
         java_store::JavaStore, modpack_store::ModpackStore,
@@ -67,8 +68,8 @@ pub struct AppState {
         DashMap<InstanceId, Arc<tokio::sync::Mutex<()>>>,
     /// Broadcast channel for all instance events.
     pub broadcaster: EventBroadcaster,
-    /// Verified account tokens: token -> (user id, expiry). See `AuthUser`.
-    pub account_tokens: DashMap<String, (String, Instant)>,
+    /// Verified account tokens: token -> (account, expiry). See `AuthUser`.
+    pub account_tokens: DashMap<String, (Account, Instant)>,
     /// In-memory short-lived WebSocket tickets.
     pub ws_tickets: DashMap<String, WsTicket>,
     /// In-memory short-lived file download tokens (issued by GET /instances/:id/fs/url).

@@ -203,9 +203,6 @@ pub async fn require_any_member(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> Result<EffectiveAccessViewer, SocialError> {
-    if state.config.no_auth {
-        return Ok(viewer(user_id, "owner", "owner"));
-    }
     reject_banned(state, user_id).await?;
     match effective_viewer(state, user_id, None).await {
         Ok(viewer) => Ok(viewer),
@@ -280,9 +277,6 @@ async fn effective_viewer(
     user_id: &str,
     instance_id: Option<&str>,
 ) -> Result<EffectiveAccessViewer, SocialError> {
-    if state.config.no_auth {
-        return Ok(viewer(user_id, "owner", "owner"));
-    }
     reject_banned(state, user_id).await?;
     if state.config.dev_mode && user_id == "dev-owner" {
         return Ok(viewer(user_id, "owner", "owner"));

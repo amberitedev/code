@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::Parser;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod application;
@@ -32,19 +32,8 @@ pub(crate) fn init_tracing() {
         .init();
 }
 
-pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
-    let config = config::Config::from_env_with_no_auth(no_auth)?;
-    if config.no_auth && !config.bind_host.parse::<IpAddr>()?.is_loopback() {
-        return Err(color_eyre::eyre::eyre!(
-            "No-auth development Core must bind to a loopback address"
-        ));
-    }
-
-    if config.no_auth && config.allowed_origin == "*" {
-        return Err(color_eyre::eyre::eyre!(
-            "No-auth development Core requires an explicit app origin"
-        ));
-    }
+pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
+    let config = config::Config::from_env()?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
 
     let db_path = config.data_dir.join("data.db");
@@ -54,9 +43,6 @@ pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
 
     let port = config.port;
     let bind_host = config.bind_host.clone();
-    if config.no_auth {
-        warn!("Core no-auth mode is enabled. Do not expose this server.");
-    }
     let state = application::state::AppState::new(config, pool).await?;
 
     #[cfg(unix)]

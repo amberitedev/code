@@ -14,8 +14,6 @@ use serde::Deserialize;
 
 use crate::{application::state::AppState, presentation::error::ApiError};
 
-const NO_AUTH_USER_ID: &str = "local-noauth-owner";
-
 /// How long the backend's answer for an account token is reused.
 const TOKEN_CACHE: Duration = Duration::from_secs(60);
 
@@ -23,6 +21,7 @@ const TOKEN_CACHE: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub struct Claims {
     pub sub: String,
+    pub username: String,
 }
 
 /// Axum extractor that accepts only the Core owner's account token.
@@ -36,46 +35,44 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        if state.config.no_auth {
-            return Ok(Self(Claims {
-                sub: NO_AUTH_USER_ID.to_string(),
-            }));
-        }
-
         let token = bearer_token(&parts.headers)
             .filter(|token| !token.is_empty())
             .ok_or_else(|| {
                 ApiError::Unauthorized("missing Authorization header".into())
             })?;
-        let user_id = account_id(state, token).await?;
+        let account = account(state, token).await?;
 
         // Temporary until pairing exists: the first account to connect owns this Core.
         let owner = state
-            .claim_owner(&user_id)
+            .claim_owner(&account.id)
             .await
             .map_err(|error| ApiError::Internal(error.to_string()))?;
-        if owner != user_id {
+        if owner != account.id {
             return Err(ApiError::Forbidden(
                 "this Core belongs to another account".into(),
             ));
         }
 
-        Ok(Self(Claims { sub: user_id }))
+        Ok(Self(Claims {
+            sub: account.id,
+            username: account.username,
+        }))
     }
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let val = headers.get("authorization")?.to_str().ok()?;
     val.strip_prefix("Bearer ")
 }
 
-#[derive(Deserialize)]
-struct Account {
-    id: String,
+#[derive(Clone, Deserialize)]
+pub struct Account {
+    pub id: String,
+    pub username: String,
 }
 
-/// Resolve an account token to its user id by asking the backend (`GET /user`).
-async fn account_id(state: &AppState, token: &str) -> Result<String, ApiError> {
+/// Resolve an account token to its account by asking the backend (`GET /user`).
+async fn account(state: &AppState, token: &str) -> Result<Account, ApiError> {
     let now = Instant::now();
     if let Some(cached) = state.account_tokens.get(token) {
         if cached.1 > now {
@@ -108,8 +105,8 @@ async fn account_id(state: &AppState, token: &str) -> Result<String, ApiError> {
     state.account_tokens.retain(|_, cached| cached.1 > now);
     state
         .account_tokens
-        .insert(token.to_string(), (account.id.clone(), now + TOKEN_CACHE));
-    Ok(account.id)
+        .insert(token.to_string(), (account.clone(), now + TOKEN_CACHE));
+    Ok(account)
 }
 
 #[cfg(test)]

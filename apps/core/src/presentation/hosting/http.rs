@@ -1,5 +1,4 @@
 //! Archon HTTP contracts backed by Core's existing management services.
-//! Mounted only in loopback development mode; account pairing is separate work.
 
 #[path = "backup_queue.rs"]
 mod backup_queue;
@@ -24,7 +23,7 @@ use crate::{
             require_instance_permission,
         },
         error::ApiError,
-        extractors::AuthUser,
+        extractors::{bearer_token, AuthUser},
         handlers::{
             backups, instance_control, instances, modpack, mods, properties,
         },
@@ -34,7 +33,7 @@ use crate::{
 use axum::{
     body::Body,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::Response,
     routing::{delete, get, post},
     Json, Router,
@@ -233,6 +232,7 @@ async fn visible(
 
 async fn v0(
     state: &Arc<AppState>,
+    user: &AuthUser,
     r: &InstanceRecord,
 ) -> Result<Value, ApiError> {
     let pack = modpack_service::get_manifest(state, &r.id.to_string()).await?;
@@ -240,7 +240,7 @@ async fn v0(
     let count = backup_service::list_backups(state, &r.id.to_string())
         .await?
         .len();
-    // All Hosting routes are restricted to the local development owner.
+    // Only the Core's owner reaches the hosting API, so the caller is the owner.
     let node_url = format!(
         "{}/hosting/servers/{}",
         state.config.public_url.trim_end_matches('/'),
@@ -248,7 +248,7 @@ async fn v0(
     );
     Ok(server_v0(
         r,
-        "local-noauth-owner",
+        &user.0.sub,
         -32768,
         count,
         &host(state),
@@ -295,10 +295,10 @@ async fn list_v0(
     let offset = q.offset.unwrap_or(0);
     let mut servers = Vec::new();
     for r in records.into_iter().skip(offset).take(limit) {
-        servers.push(v0(&state, &r).await?);
+        servers.push(v0(&state, &user, &r).await?);
     }
     Ok(Json(
-        json!({"servers": servers, "users": {"local-noauth-owner": {"id": "local-noauth-owner", "username": "Local developer", "avatar_url": null}},
+        json!({"servers": servers, "users": {&user.0.sub: {"id": user.0.sub, "username": user.0.username, "avatar_url": null}},
         "pagination": {"current_page": offset / limit + 1, "page_size": limit, "total_pages": count.div_ceil(limit), "total_items": count}}),
     ))
 }
@@ -309,7 +309,7 @@ async fn get_v0(
     Path(id): Path<String>,
 ) -> ApiResult {
     let r = record(&state, &user, &id, "server:view").await?;
-    Ok(Json(v0(&state, &r).await?))
+    Ok(Json(v0(&state, &user, &r).await?))
 }
 
 async fn list_v1(
@@ -470,14 +470,17 @@ async fn allocations(
     Ok(Json(json!([{"port": r.port, "name": "Minecraft"}])))
 }
 
+/// File routes take the same account token as the rest of the hosting API, so
+/// the caller's own token is handed back as the node token.
 async fn filesystem_auth(
     user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult {
     let r = record(&state, &user, &id, "server:files").await?;
     Ok(Json(
-        json!({"url": format!("{}/hosting/servers/{}/modrinth/v0/fs", state.config.public_url.trim_end_matches('/'), r.id), "token": ""}),
+        json!({"url": format!("{}/hosting/servers/{}/modrinth/v0/fs", state.config.public_url.trim_end_matches('/'), r.id), "token": bearer_token(&headers)}),
     ))
 }
 

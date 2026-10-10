@@ -70,7 +70,6 @@ async fn clear_logs(
     Path(id): Path<String>,
     Extension(cursors): Extension<LogCursors>,
 ) -> Result<StatusCode, ApiError> {
-    require_dev(&state)?;
     let record =
         resolve_authorized_instance(&state, &claims.sub, &id, "server:logs")
             .await?;
@@ -95,21 +94,12 @@ async fn clear_logs(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn require_dev(state: &AppState) -> Result<(), ApiError> {
-    if state.config.no_auth && state.config.dev_mode {
-        Ok(())
-    } else {
-        Err(ApiError::NotFound("development hosting is disabled".into()))
-    }
-}
-
 async fn upgrade(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Extension(cursors): Extension<LogCursors>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    require_dev(&state)?;
     let iid: InstanceId = id
         .parse()
         .map_err(|_| ApiError::NotFound("server not found".into()))?;
@@ -432,6 +422,7 @@ struct SyncQuery {
 }
 
 async fn sync(
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Query(query): Query<SyncQuery>,
     headers: HeaderMap,
@@ -439,7 +430,6 @@ async fn sync(
     Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>,
     ApiError,
 > {
-    require_dev(&state)?;
     let id = query.scope.strip_prefix("server:").ok_or_else(|| {
         ApiError::BadRequest("scope must be server:<id>".into())
     })?;

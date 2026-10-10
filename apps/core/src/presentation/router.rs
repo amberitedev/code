@@ -27,14 +27,8 @@ use crate::{
 pub fn create_router(state: Arc<AppState>) -> Router {
     let cors = cors_layer(&state);
 
-    let hosting = if state.config.dev_mode && state.config.no_auth {
-        Router::new().nest("/hosting", crate::presentation::hosting::router())
-    } else {
-        Router::new()
-    };
-
     Router::new()
-        .merge(hosting)
+        .nest("/hosting", crate::presentation::hosting::router())
         // System
         .route("/health", get(diagnostics::health))
         .route(
@@ -339,9 +333,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 }
 
 fn cors_layer(state: &AppState) -> CorsLayer {
-    if !state.config.no_auth
-        && (state.config.dev_mode || state.config.allowed_origin == "*")
-    {
+    if state.config.dev_mode || state.config.allowed_origin == "*" {
         return CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)

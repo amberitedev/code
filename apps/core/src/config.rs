@@ -21,20 +21,14 @@ pub struct Config {
     pub bind_host: String,
     /// Allowed CORS origin.
     pub allowed_origin: String,
-    /// Enables local development conveniences that do not bypass route auth.
+    /// Debug build: relaxes CORS for local development.
     pub dev_mode: bool,
-    /// Disables HTTP auth and permission checks for local dashboard development.
-    pub no_auth: bool,
     /// Number of sync snapshot archives retained per profile.
     pub sync_retain_count: usize,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        Self::from_env_with_no_auth(false)
-    }
-
-    pub fn from_env_with_no_auth(no_auth_override: bool) -> Result<Self> {
         load_environment_profile()?;
         let sync_retain_count: usize =
             required_env("AMBERITE_SYNC_RETAIN_COUNT")?
@@ -48,13 +42,6 @@ impl Config {
             ));
         }
         let dev_mode = cfg!(debug_assertions);
-        let no_auth =
-            no_auth_override || optional_bool_env("AMBERITE_NO_AUTH")?;
-        if no_auth && !dev_mode {
-            return Err(eyre!(
-                "No-auth Core mode is only available in debug builds"
-            ));
-        }
         Ok(Self {
             data_dir: PathBuf::from(required_env("CORE_DATA_DIR")?),
             convex_url: convex_deployment_url(
@@ -75,7 +62,6 @@ impl Config {
             bind_host: required_env("AMBERITE_BIND_HOST")?,
             allowed_origin: required_env("ALLOWED_ORIGIN")?,
             dev_mode,
-            no_auth,
             sync_retain_count,
         })
     }
@@ -88,23 +74,6 @@ fn required_env(name: &str) -> Result<String> {
         return Err(eyre!("Required environment variable is empty: {name}"));
     }
     Ok(value)
-}
-
-fn optional_bool_env(name: &str) -> Result<bool> {
-    let value = match std::env::var(name) {
-        Ok(value) => value,
-        Err(std::env::VarError::NotPresent) => return Ok(false),
-        Err(error) => {
-            return Err(eyre!("Unable to read {name}: {error}"));
-        }
-    };
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => Err(eyre!(
-            "{name} must be one of true/false, yes/no, on/off, or 1/0"
-        )),
-    }
 }
 
 fn convex_deployment_url(
