@@ -23,8 +23,13 @@ Who talks to whom:
 
 - App to backend and App to Core hosting: through `packages/api-client`, with Modrinth-shaped
   endpoints wherever that makes sense.
-- App to Core for hosting screens: Core's hosting API at `/hosting`, shaped like Modrinth's Archon.
-  This is the only API Core exposes to the App.
+- App to Core is direct. The backend is never in that path. Core has two separate APIs:
+  - **Hosting API** at `/hosting`, shaped like Modrinth's Archon. Only the Core's owner can use it.
+    Nobody else can access a server for now; sharing a server with friends is a later overhaul.
+  - **Sharing API**, for storing and fetching shared files. Who may use it comes from the
+    backend's metadata: the owner of a shared instance may send its files to a Core, and its
+    members may fetch them. The App sends files to whichever Core will store them, which is not
+    necessarily a Core the sender is linked to.
 - Sharing uploads and downloads: the existing native path in app-lib. app-lib may be edited for
   this. Keep our additions in separate modules with small hooks into upstream code.
 
@@ -84,6 +89,9 @@ server-only additions (mods and datapacks).
   installed. Inherited content cannot be disabled yet.
 - Server-only changes are stored on that server's own Core and do not prompt players to update.
 - Having control of a server does not give control of the instance's content.
+- Linked servers use the hosting API's existing content and modpack routes (install content,
+  unlink, update, the content list with its linked pack and from-pack flags). An instance is one
+  more kind of pack source. There are no separate linked-server endpoints.
 - Update progress and failures show in the App's Tasks panel and notifications.
 - Worlds lists linked servers with their state, a Linked tag, and Manage. The server Content page
   shows the instance's content read-only, named as coming from the instance, with the server's
@@ -103,8 +111,8 @@ server-only additions (mods and datapacks).
 - Accounts, friends, presence, and sharing between two Apps work locally.
 - The hosting screens work against a local Core with authentication off.
 - Branch `core-apply`, not merged: the Core engine that installs and updates a linked server from
-  a pack or an instance version, with unit tests. Its endpoints sit on Core's second API and need
-  to move under hosting. It has not run against real downloads.
+  a pack or an instance version, with unit tests. It added its own endpoints on Core's second API;
+  those go away and the engine is driven by the hosting routes instead. It has not run against real downloads.
 - Branches `server-delivery` and `server-ui` hold a migration and a mock data file. They will not
   be continued.
 
