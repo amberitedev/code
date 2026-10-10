@@ -652,9 +652,9 @@ pub(super) async fn publish_shared_instance_inner(
                 .is_none_or(|current| current.id != attachment.id))
     {
         return Err(crate::ErrorKind::InputError(
-            "The account or shared instance changed while publishing."
-                .into(),
-        ).into());
+            "The account or shared instance changed while publishing.".into(),
+        )
+        .into());
     }
 
     match result {

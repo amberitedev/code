@@ -57,11 +57,10 @@ pub(crate) async fn installed_shared_file_changed(
 /// the configured sharing service, which serves files to members.
 pub(crate) async fn download(url: &str) -> crate::Result<reqwest::Response> {
     let parsed = reqwest::Url::parse(url)?;
-    let session =
-        crate::instance::shared_clients_session().filter(|session| {
-            reqwest::Url::parse(&session.base_url)
-                .is_ok_and(|base| base.origin() == parsed.origin())
-        });
+    let session = crate::instance::shared_clients_session().filter(|session| {
+        reqwest::Url::parse(&session.base_url)
+            .is_ok_and(|base| base.origin() == parsed.origin())
+    });
     let client = if session.is_some() && parsed.scheme() == "http" {
         &crate::util::fetch::INSECURE_REQWEST_CLIENT
     } else {
