@@ -71,33 +71,49 @@ can be opted out of.
 
 A server is a hosted world of an instance. One instance can have many. A linked server takes its
 loader, game version, and content from the instance and keeps its own world, files, backups, and
-server-only additions (mods and datapacks).
+its own additions (mods and datapacks added on the server itself).
 
-- Create a server from Instance > Worlds, which skips to world settings, or pick "From instance"
-  in server setup. Anyone who has the instance installed can create one on a Core they control.
-  Creating one on someone else's Core is later.
-- Pushing an instance update delivers it to every linked server. Core downloads and verifies at
-  once and applies only while the server is stopped. Only the latest version is applied.
-- Push buttons: "Push and restart" is the primary action. If players are online it asks: restart
-  now, apply on next stop, or cancel. "Push update" is secondary and never restarts.
+How it works: the App talks to the Core directly, and the backend is never involved. The App
+exports the instance as a `.mrpack` and uploads it to the Core through the hosting API. Core's
+engine installs it, and on a later upload applies only what changed. This works for instances
+that are not shared with anyone and uses none of our storage.
+
+- Create a server from Instance > Worlds, which opens server setup at its last step (world
+  settings), or pick "From instance" in server setup. Only on a Core you own.
+- Push: an instance with a linked server has the push buttons. "Push and restart" is the primary
+  action. If players are online it asks: restart now, apply on next stop, or cancel. "Push update"
+  is secondary and never restarts. If the instance is also shared, the same push also publishes to
+  friends. An instance with no friends and no server has no push button.
+- Core applies an update only while the server is stopped. A push to a running server waits and
+  applies when it stops. Only the latest pushed state is applied.
+- If the Core is unreachable when pushing, the server is not updated; the App says so, and the
+  server's Content page has "Update from instance" to do it later.
 - Client-only content is not installed on the server but is still listed. Unknown custom mods are
   installed. Inherited content cannot be disabled yet.
-- Server-only changes are stored on that server's own Core and do not prompt players to update.
-- Having control of a server does not give control of the instance's content.
-- Linked servers use the hosting API's existing content and modpack routes (install content,
-  unlink, update, the content list with its linked pack and from-pack flags). An instance is one
-  more kind of pack source. There are no separate linked-server endpoints.
-- Update progress and failures show in the App's Tasks panel and notifications.
-- Worlds lists linked servers with their state, a Linked tag, and Manage. The server Content page
-  shows the instance's content read-only, named as coming from the instance, with the server's
-  additions in a separate list. The exact layout is not final.
-- Keep the Access page. History views, overrides, branches, and forced resource packs are later.
+- An update removes only files the instance provided before. Additions made on the server are
+  never touched.
+- Core reports the instance through the hosting API's existing content and modpack routes
+  (install content, unlink, update, the content list with its linked pack and from-pack flags), so
+  an instance is one more kind of pack source. There are no separate linked-server endpoints.
+- Worlds lists linked servers with a Linked tag, their state (running, offline, updating), and
+  Manage. The server Content page shows the instance's content read-only in Modrinth's modpack
+  card, titled with the instance's name, with the server's additions in a separate list. Unlink
+  is in the card's menu. A server can be deleted.
+
+Later:
+
+- Skip publishing to friends when a change only matters to the server (only server-side mods
+  changed), so server-only changes use no backend storage and prompt nobody.
+- Friends see an instance's servers in Worlds, from a small list of name and address kept with
+  the shared instance.
+- Update progress in the Tasks panel. History views, overrides, branches, forced resource packs,
+  and creating a server on someone else's Core.
 
 ## Accounts, Core auth, pairing
 
 - Accounts work like Modrinth's, served by the backend.
-- Core gets basic authentication against that same account system now. The hosting API must work
-  with authentication on; today it only mounts in dev with authentication off.
+- Core checks account tokens against that same account system. The hosting API is always on and
+  requires login.
 - For now, the first account to connect to a fresh Core becomes its owner. This is temporary
   until pairing exists.
 - Pairing is later. The intent: a Core is linked to an account directly, and several Cores under
@@ -105,24 +121,14 @@ server-only additions (mods and datapacks).
 
 ## Current state, 2026-10-10
 
-- Accounts, friends, presence, and sharing between two Apps work locally.
-- The hosting screens work against a local Core with authentication off.
-- Branch `core-apply`, not merged: the Core engine that installs and updates a linked server from
-  a pack or an instance version, with unit tests. It added its own endpoints on Core's second API;
-  those go away and the engine is driven by the hosting routes instead. It has not run against real downloads.
-- Branches `server-delivery` and `server-ui` hold a migration and a mock data file. They will not
-  be continued.
-
-## Cleanup
-
-- Remove Convex: `convex/`, the Convex client inside `packages/api-client`, its tooling, and
-  Core's dependency on it. `packages/api-client` itself stays. The last commit where everything
-  worked on Convex is `762843d41`.
-- Remove Core's second API (`/instances`, `/sync`, `/core`, and the rest) and `CoreApiClient`.
-- Remove Core's legacy sync profiles.
-- Remove `apps/realtime`. Presence is in the backend.
-- Reset the website (`apps/frontend`) to upstream Modrinth. It is only used as the local sign-in
-  page, pointed at our backend.
+- Accounts, friends, presence, and sharing on R2 between two Apps work locally.
+- Core has login against our accounts, one API (hosting), and the engine that installs and updates
+  a server from a pack. Convex, Core's second API, the legacy sync, and `apps/realtime` are gone.
+  The last commit where everything worked on Convex is `762843d41`.
+- The website is upstream Modrinth, used only as the local sign-in page.
+- Not yet checked on screen by anyone: the merged result of the sharing and Core work together.
+- Known gaps: no way to delete a server; an over-limit push shows a generic error; the App only
+  knows a Core's address from a dev setting.
 
 ## Open questions
 
