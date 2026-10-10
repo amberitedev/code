@@ -5,18 +5,13 @@ import { notificationResponse } from '../common/notifications'
 import type { Env } from '../common/types'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
-import {
-	acceptStorageReceipt,
-	downloadBlob,
-	onlineNodes,
-	prepareUpload,
-	storageHeartbeat,
-	uploadUrl,
-	validHash,
-	validSize,
-	verifiedReplica,
-	type StoredBlob,
-} from './storage'
+
+// Limits are deliberately tight and easy to change.
+const MAX_FILE_SIZE = 25 * 1024 * 1024
+const MAX_CONFIG_BUNDLE_SIZE = 5 * 1024 * 1024
+const MAX_VERSION_FILES = 20
+const MAX_INSTANCE_SIZE = 100 * 1024 * 1024
+const KEPT_VERSIONS = 5
 
 type Instance = {
 	id: string
@@ -30,7 +25,6 @@ type Version = {
 	version: number
 	manifest: string
 	ready: number
-	request_hash: string
 }
 type File = {
 	id: string
@@ -38,7 +32,9 @@ type File = {
 	version: number
 	file_name: string
 	file_type: string
-	blob_id: string | null
+	// Set once the file is uploaded. The R2 object is `<instance id>/<sha256>`.
+	sha256: string | null
+	size: number | null
 }
 type Link = { id: string; instance_id: string; expiration: string; max_uses: number; uses: number }
 type Manifest = {
@@ -50,6 +46,9 @@ type Manifest = {
 }
 const empty = () => new Response(null, { status: 204 })
 const now = () => new Date().toISOString()
+const objectKey = (instanceId: string, sha256: string) => `${instanceId}/${sha256}`
+const hex = (bytes: ArrayBuffer) =>
+	Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
 
 function string(value: unknown, field: string, max = 256): string {
 	if (typeof value !== 'string' || value.length > max || !value.trim())
@@ -115,50 +114,30 @@ async function files(env: Env, item: Version): Promise<File[]> {
 	).results
 }
 
-async function blob(env: Env, id: string): Promise<StoredBlob> {
-	const result = await env.DB.prepare('SELECT * FROM shared_blobs WHERE id = ?')
-		.bind(id)
-		.first<StoredBlob>()
-	if (!result) throw new ApiError(503, 'storage_unavailable', 'Shared content is unavailable')
-	return result
-}
-
-async function versionResponse(
-	env: Env,
-	request: Request,
-	item: Version,
-	userId: string,
-	uploading = false,
-) {
+async function versionResponse(env: Env, request: Request, item: Version) {
 	const origin = new URL(request.url).origin
-	const external = []
-	for (const file of await files(env, item)) {
-		const stored = file.blob_id ? await blob(env, file.blob_id) : null
-		let url = `${origin}/v1/uploads/${file.id}`
-		if (!uploading && stored) {
-			const token = crypto.randomUUID()
-			await env.DB.prepare(
-				'INSERT INTO shared_downloads (token,file_id,user_id,expires) VALUES (?,?,?,?)',
-			)
-				.bind(token, file.id, userId, Date.now() + 24 * 60 * 60 * 1000)
-				.run()
-			url = `${origin}/v1/downloads/${token}/${encodeURIComponent(file.file_name)}`
-		}
-		external.push({
+	const manifest = JSON.parse(item.manifest) as Manifest
+	return {
+		...manifest,
+		version: item.version,
+		ready: item.ready === 1,
+		// An uploaded file points at its download; one still missing points at its upload.
+		external_files: (await files(env, item)).map((file) => ({
 			file_name: file.file_name,
 			file_type: file.file_type,
-			url,
-			file_size: stored?.size,
-			sha256: stored?.sha256,
-		})
+			url: file.sha256
+				? `${origin}/v1/instances/${item.instance_id}/files/${file.sha256}/${encodeURIComponent(file.file_name)}`
+				: `${origin}/v1/uploads/${file.id}`,
+			file_size: file.size ?? undefined,
+			sha256: file.sha256 ?? undefined,
+		})),
 	}
-	const manifest = JSON.parse(item.manifest) as Manifest
-	return { ...manifest, version: item.version, ready: item.ready === 1, external_files: external }
 }
 
+/** The newest complete version, or the one being uploaded when none is complete yet. */
 async function latestVersion(env: Env, id: string): Promise<Version> {
 	const result = await env.DB.prepare(
-		'SELECT * FROM shared_versions WHERE instance_id = ? ORDER BY version DESC LIMIT 1',
+		'SELECT * FROM shared_versions WHERE instance_id = ? ORDER BY ready DESC, version DESC LIMIT 1',
 	)
 		.bind(id)
 		.first<Version>()
@@ -166,14 +145,32 @@ async function latestVersion(env: Env, id: string): Promise<Version> {
 	return result
 }
 
+/** Deletes the instance's R2 objects that no remaining version uses. */
+async function sweepFiles(env: Env, id: string): Promise<void> {
+	const used = new Set(
+		(
+			await env.DB.prepare(
+				'SELECT DISTINCT sha256 FROM shared_files WHERE instance_id = ? AND sha256 IS NOT NULL',
+			)
+				.bind(id)
+				.all<{ sha256: string }>()
+		).results.map((row) => objectKey(id, row.sha256)),
+	)
+	const stored = await env.FILES.list({ prefix: `${id}/` })
+	const unused = stored.objects.map((object) => object.key).filter((key) => !used.has(key))
+	if (unused.length) await env.FILES.delete(unused)
+}
+
+/** Keeps the latest complete versions and drops uploads abandoned before the newest one. */
 async function pruneVersions(env: Env, id: string): Promise<void> {
 	await env.DB.prepare(
-		'DELETE FROM shared_versions WHERE instance_id = ? AND ready = 1 AND pinned = 0 AND version NOT IN (SELECT version FROM shared_versions WHERE instance_id = ? AND ready = 1 ORDER BY version DESC LIMIT 5)',
+		`DELETE FROM shared_versions WHERE instance_id = ?1 AND (
+			version < (SELECT MIN(version) FROM (SELECT version FROM shared_versions WHERE instance_id = ?1 AND ready = 1 ORDER BY version DESC LIMIT ?2))
+			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_versions WHERE instance_id = ?1 AND ready = 1)))`,
 	)
-		.bind(id, id)
+		.bind(id, KEPT_VERSIONS)
 		.run()
-	// Nodes retain bytes until a later coordinated garbage-collection pass; no deletion during outages.
-	await env.DB.prepare('DELETE FROM shared_downloads WHERE expires < ?').bind(Date.now()).run()
+	await sweepFiles(env, id)
 }
 
 async function notifyReadyInvites(env: Env, id: string): Promise<void> {
@@ -226,20 +223,18 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 	}
 }
 
-async function finalizeVersion(env: Env, fileId: string): Promise<void> {
-	const file = await env.DB.prepare('SELECT instance_id,version FROM shared_files WHERE id = ?')
-		.bind(fileId)
-		.first<File>()
-	if (!file) return
-	await env.DB.prepare(
-		`UPDATE shared_versions SET ready = 1 WHERE instance_id = ? AND version = ?
-		AND NOT EXISTS (SELECT 1 FROM shared_files f WHERE f.instance_id = ? AND f.version = ?
-		AND (f.blob_id IS NULL OR NOT EXISTS (SELECT 1 FROM shared_replicas r WHERE r.blob_id = f.blob_id)))`,
+/** Marks a version ready once every file it lists is uploaded. */
+async function finalizeVersion(env: Env, id: string, version: number): Promise<boolean> {
+	const result = await env.DB.prepare(
+		`UPDATE shared_versions SET ready = 1 WHERE instance_id = ?1 AND version = ?2 AND ready = 0
+		AND NOT EXISTS (SELECT 1 FROM shared_files WHERE instance_id = ?1 AND version = ?2 AND sha256 IS NULL)`,
 	)
-		.bind(file.instance_id, file.version, file.instance_id, file.version)
+		.bind(id, version)
 		.run()
-	await notifyReadyInvites(env, file.instance_id)
-	await pruneVersions(env, file.instance_id)
+	if (!result.meta.changes) return false
+	await notifyReadyInvites(env, id)
+	await pruneVersions(env, id)
+	return true
 }
 
 async function createVersion(
@@ -262,8 +257,14 @@ async function createVersion(
 	}
 	if (!['vanilla', 'fabric', 'forge', 'quilt', 'neoforge'].includes(manifest.loader))
 		throw new ApiError(400, 'invalid_input', 'Invalid loader')
-	if (!Array.isArray(body.external_files) || body.external_files.length > 250)
+	if (!Array.isArray(body.external_files))
 		throw new ApiError(400, 'invalid_input', 'Invalid external_files')
+	if (body.external_files.length > MAX_VERSION_FILES)
+		throw new ApiError(
+			413,
+			'invalid_input',
+			`A version can upload at most ${MAX_VERSION_FILES} files`,
+		)
 	const seen = new Set<string>()
 	const external = body.external_files.map((value) => {
 		const file = object(value)
@@ -278,173 +279,83 @@ async function createVersion(
 		seen.add(name)
 		return { id: crypto.randomUUID(), file_name, file_type }
 	})
-	const encoded = JSON.stringify(manifest)
-	const requestKey = request.headers.get('idempotency-key') ?? crypto.randomUUID()
-	if (!/^[a-zA-Z0-9_-]{1,128}$/.test(requestKey))
-		throw new ApiError(400, 'invalid_input', 'Invalid idempotency key')
-	const requestHash = Array.from(
-		new Uint8Array(
-			await crypto.subtle.digest(
-				'SHA-256',
-				new TextEncoder().encode(
-					JSON.stringify({
-						manifest,
-						external_files: external.map(({ file_name, file_type }) => ({ file_name, file_type })),
-					}),
-				),
-			),
-		),
-		(byte) => byte.toString(16).padStart(2, '0'),
-	).join('')
 	// One D1 batch allocates the monotonic version and all file rows atomically.
-	const statements = [
+	const result = await env.DB.batch<Version>([
 		env.DB.prepare(
-			'INSERT OR IGNORE INTO shared_versions (instance_id,version,manifest,ready,created,request_key,request_hash) SELECT ?,COALESCE(MAX(version),0)+1,?,?,?,?,? FROM shared_versions WHERE instance_id = ?',
-		).bind(
-			item.id,
-			encoded,
-			external.length === 0 ? 1 : 0,
-			now(),
-			requestKey,
-			requestHash,
-			item.id,
-		),
-	]
-	for (const file of external)
-		statements.push(
+			'INSERT INTO shared_versions (instance_id,version,manifest,created) SELECT ?1,COALESCE(MAX(version),0)+1,?2,?3 FROM shared_versions WHERE instance_id = ?1',
+		).bind(item.id, JSON.stringify(manifest), now()),
+		...external.map((file) =>
 			env.DB.prepare(
-				'INSERT OR IGNORE INTO shared_files (id,instance_id,version,file_name,file_type) SELECT ?,?,version,?,? FROM shared_versions WHERE instance_id = ? AND request_key = ? AND request_hash = ?',
-			).bind(file.id, item.id, file.file_name, file.file_type, item.id, requestKey, requestHash),
-		)
-	statements.push(
-		env.DB.prepare('SELECT * FROM shared_versions WHERE instance_id = ? AND request_key = ?').bind(
-			item.id,
-			requestKey,
+				'INSERT INTO shared_files (id,instance_id,version,file_name,file_type) SELECT ?1,?2,MAX(version),?3,?4 FROM shared_versions WHERE instance_id = ?2',
+			).bind(file.id, item.id, file.file_name, file.file_type),
 		),
-	)
-	const result = await env.DB.batch<Version>(statements)
+		env.DB.prepare(
+			'SELECT * FROM shared_versions WHERE instance_id = ? ORDER BY version DESC LIMIT 1',
+		).bind(item.id),
+	])
 	const version = result[result.length - 1]?.results[0]
 	if (!version) throw new ApiError(500, 'database_error', 'Could not create shared version')
-	if (version.request_hash !== requestHash)
-		throw new ApiError(409, 'conflict', 'Idempotency key was already used for a different version')
-	if (version.ready) {
-		await notifyReadyInvites(env, item.id)
-		await pruneVersions(env, item.id)
-	}
-	return json(await versionResponse(env, request, version, userId, true))
+	const ready = await finalizeVersion(env, item.id, version.version)
+	return json(await versionResponse(env, request, { ...version, ready: ready ? 1 : 0 }))
 }
 
-async function upload(
-	request: Request,
-	env: Env,
-	token: string,
-	operation?: string,
-): Promise<Response> {
+/** Stores one file of a version. A hash the instance already holds is not stored again. */
+async function upload(request: Request, env: Env, fileId: string): Promise<Response> {
 	const user = await requireUser(request, env)
+	if (request.method !== 'PUT')
+		throw new ApiError(405, 'method_not_allowed', 'Unsupported upload operation')
 	const file = await env.DB.prepare('SELECT * FROM shared_files WHERE id = ?')
-		.bind(token)
+		.bind(fileId)
 		.first<File>()
 	if (!file) throw new ApiError(404, 'not_found', 'Upload was not found')
 	const item = await instance(env, file.instance_id)
 	owner(item, user.id)
-	let stored = file.blob_id ? await blob(env, file.blob_id) : null
-	const identity = {
-		instance_id: item.id,
-		version: file.version,
-		file_name: file.file_name,
-		file_type: file.file_type,
-	}
-	if (operation === 'status' && request.method === 'GET') {
-		const available = stored && (await verifiedReplica(env, stored, file.id))
-		return json({
-			...identity,
-			status: available ? 'available' : 'pending',
-			sha256: stored?.sha256 ?? null,
-			size: stored?.size ?? null,
-		})
-	}
-	if (operation === 'prepare' && request.method === 'POST') {
-		const body = await readJson(request)
-		const sha256 = validHash(body.sha256)
-		const size = validSize(body.size)
-		if (stored && (stored.sha256 !== sha256 || stored.size !== size))
-			throw new ApiError(
-				409,
-				'integrity_error',
-				'A version cannot be changed after preparing its upload',
-			)
-		if (!stored) {
-			await env.DB.batch([
-				env.DB.prepare(
-					'INSERT OR IGNORE INTO shared_blobs (id,instance_id,sha256,size,created) VALUES (?,?,?,?,?)',
-				).bind(crypto.randomUUID(), item.id, sha256, size, now()),
-				env.DB.prepare(
-					'UPDATE shared_files SET blob_id = (SELECT id FROM shared_blobs WHERE instance_id = ? AND sha256 = ?) WHERE id = ? AND blob_id IS NULL',
-				).bind(item.id, sha256, file.id),
-			])
-			stored = await env.DB.prepare(
-				'SELECT b.* FROM shared_blobs b JOIN shared_files f ON f.blob_id = b.id WHERE f.id = ?',
-			)
-				.bind(file.id)
-				.first<StoredBlob>()
-			if (!stored || stored.sha256 !== sha256 || stored.size !== size)
-				throw new ApiError(409, 'integrity_error', 'Concurrent upload has different bytes')
-		}
-		const placement = await prepareUpload(env, new URL(request.url).origin, file.id, stored)
-		if (placement.status === 'available') await finalizeVersion(env, file.id)
-		return json({ ...identity, ...placement })
-	}
-	if (request.method !== 'PUT' || operation)
-		throw new ApiError(405, 'method_not_allowed', 'Unsupported upload operation')
-	const node = (await onlineNodes(env))[0]
-	if (!node)
-		throw new ApiError(
-			503,
-			'storage_unavailable',
-			'No storage node is online; the owner snapshot can retry later',
-		)
-	const size = validSize(Number(request.headers.get('content-length')))
-	if (stored && stored.size !== size)
-		throw new ApiError(409, 'integrity_error', 'Upload size does not match the version')
-	const destination = await uploadUrl(
-		node,
-		new URL(request.url).origin,
-		file.id,
-		stored?.sha256 ?? null,
-		size,
+	if (file.sha256) throw new ApiError(409, 'conflict', 'This file was already uploaded')
+	const bytes = await readBytes(
+		request,
+		file.file_type === 'configs' ? MAX_CONFIG_BUNDLE_SIZE : MAX_FILE_SIZE,
 	)
-	const response = await fetch(destination, {
-		method: 'PUT',
-		body: request.body,
-		headers: { 'content-length': String(size) },
-	})
-	if (!response.ok)
-		throw new ApiError(
-			response.status,
-			'upload_failed',
-			'Storage did not commit the complete upload',
-		)
-	await response.body?.cancel()
-	await finalizeVersion(env, file.id)
+	const expected = request.headers.get('x-file-sha512')
+	if (expected && expected !== hex(await crypto.subtle.digest('SHA-512', bytes)))
+		throw new ApiError(400, 'upload_failed', 'Upload does not match its hash')
+	const sha256 = hex(await crypto.subtle.digest('SHA-256', bytes))
+	const stored = await env.DB.prepare(
+		'SELECT COALESCE(SUM(size),0) AS size, COALESCE(MAX(sha256 = ?1),0) AS present FROM (SELECT DISTINCT sha256,size FROM shared_files WHERE instance_id = ?2 AND sha256 IS NOT NULL)',
+	)
+		.bind(sha256, item.id)
+		.first<{ size: number; present: number }>()
+	if (!stored?.present) {
+		if ((stored?.size ?? 0) + bytes.byteLength > MAX_INSTANCE_SIZE)
+			throw new ApiError(413, 'invalid_input', 'Shared instance storage is full')
+		await env.FILES.put(objectKey(item.id, sha256), bytes)
+	}
+	await env.DB.prepare('UPDATE shared_files SET sha256 = ?, size = ? WHERE id = ?')
+		.bind(sha256, bytes.byteLength, file.id)
+		.run()
+	await finalizeVersion(env, item.id, file.version)
 	return empty()
 }
 
-async function download(request: Request, env: Env, token: string): Promise<Response> {
-	const access = await env.DB.prepare(
-		'SELECT file_id,user_id FROM shared_downloads WHERE token = ? AND expires > ?',
-	)
-		.bind(token, Date.now())
-		.first<{ file_id: string; user_id: string }>()
-	if (!access)
-		throw new ApiError(401, 'unauthorized', 'Download authorization expired; retry the install')
-	const file = await env.DB.prepare('SELECT * FROM shared_files WHERE id = ?')
-		.bind(access.file_id)
-		.first<File>()
-	if (!file?.blob_id) throw new ApiError(404, 'not_found', 'Shared file was not found')
-	const item = await instance(env, file.instance_id)
-	await member(env, item, access.user_id)
+/** Serves an uploaded file to a member, who authenticates like any other sharing request. */
+async function download(
+	request: Request,
+	env: Env,
+	item: Instance,
+	sha256: string,
+): Promise<Response> {
 	if (item.quarantine) throw new ApiError(403, 'forbidden', 'Shared instance is quarantined')
-	return downloadBlob(request, env, await blob(env, file.blob_id), file.id)
+	if (!/^[a-f0-9]{64}$/.test(sha256))
+		throw new ApiError(404, 'not_found', 'Shared file was not found')
+	const key = objectKey(item.id, sha256)
+	const object = await env.FILES.get(key)
+	if (!object) throw new ApiError(404, 'not_found', 'Shared file was not found')
+	return new Response(request.method === 'HEAD' ? null : object.body, {
+		headers: {
+			'Content-Type': 'application/octet-stream',
+			'Content-Length': String(object.size),
+			'Cache-Control': 'private, no-store',
+		},
+	})
 }
 
 async function usableLink(env: Env, id: string): Promise<Link> {
@@ -630,31 +541,14 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
 	if (
 		parts[0] !== 'v1' ||
-		![
-			'instances',
-			'invites',
-			'uploads',
-			'downloads',
-			'blacklist',
-			'moderation',
-			'storage',
-			'icons',
-		].includes(parts[1] ?? '')
+		!['instances', 'invites', 'uploads', 'blacklist', 'moderation', 'icons'].includes(
+			parts[1] ?? '',
+		)
 	)
 		return null
 	const [, route, id, section, child] = parts
 	if (route === 'invites' && id && request.method === 'GET') return previewInvite(env, id)
-	if (route === 'downloads' && id && ['GET', 'HEAD'].includes(request.method))
-		return download(request, env, id)
-	if (route === 'uploads' && id) return upload(request, env, id, section)
-	if (route === 'storage' && request.method === 'POST') {
-		if (id === 'receipt') {
-			const receipt = await acceptStorageReceipt(request, env)
-			await finalizeVersion(env, receipt.fileId)
-			return empty()
-		}
-		if (id && section === 'heartbeat') return storageHeartbeat(request, env, id)
-	}
+	if (route === 'uploads' && id && !section) return upload(request, env, id)
 	if (route === 'icons' && id && request.method === 'GET') {
 		const row = await env.DB.prepare(
 			'SELECT icon_data,icon_type FROM shared_instances WHERE icon = ?',
@@ -714,7 +608,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			)
 				.bind(section, Number(parts[5]), parts[7])
 				.run()
-			await pruneVersions(env, section)
+			await sweepFiles(env, section)
 			return empty()
 		}
 	}
@@ -768,6 +662,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		}
 		if (request.method === 'DELETE') {
 			await env.DB.prepare('DELETE FROM shared_instances WHERE id = ?').bind(id).run()
+			await sweepFiles(env, id)
 			return empty()
 		}
 	}
@@ -783,33 +678,11 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 						.first<Version>()
 				: await latestVersion(env, id)
 			if (!version) throw new ApiError(404, 'not_found', 'Shared version was not found')
-			return json(await versionResponse(env, request, version, user.id))
+			return json(await versionResponse(env, request, version))
 		}
 	}
-	if (section === 'recovery' && request.method === 'GET') {
-		owner(item, user.id)
-		const rows = (
-			await env.DB.prepare(
-				'SELECT * FROM shared_files WHERE instance_id = ? AND blob_id IS NOT NULL ORDER BY version DESC',
-			)
-				.bind(id)
-				.all<File>()
-		).results
-		const recovery = []
-		for (const file of rows) {
-			const stored = await blob(env, file.blob_id!)
-			recovery.push({
-				version: file.version,
-				file_name: file.file_name,
-				file_type: file.file_type,
-				sha256: stored.sha256,
-				file_size: stored.size,
-				url: `${url.origin}/v1/uploads/${file.id}`,
-				missing: !(await verifiedReplica(env, stored, file.id)),
-			})
-		}
-		return json({ files: recovery })
-	}
+	if (section === 'files' && child && ['GET', 'HEAD'].includes(request.method))
+		return download(request, env, item, child)
 	if (section === 'icon') {
 		owner(item, user.id)
 		if (request.method === 'PUT') {

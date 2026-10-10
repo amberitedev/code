@@ -1,8 +1,9 @@
 # Local accounts and sharing backend
 
-One Cloudflare Worker owns account, social, and sharing metadata in D1. Bulk shared files live in
-separate local storage processes. There are no remote bindings or deployment scripts. The root
-development runner supplies local secrets and keeps persistent state under the worktree's `.data/`.
+One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files are objects in
+an R2 bucket, keyed by shared instance and SHA-256, which wrangler emulates locally. There are no
+remote bindings or deployment scripts. The root development runner supplies local secrets and keeps
+persistent state under the worktree's `.data/`.
 
 Wrangler is pinned to 4.113.0 to avoid the local ProxyWorker connection-loss regression observed
 with 4.115.0. See the [upstream report](https://github.com/cloudflare/workers-sdk/issues/15002).
@@ -52,3 +53,6 @@ API-client boundary. The local service does not proxy account session tokens to 
 `node apps/backend/tests/accounts.mjs <backend-url>` exercises real password accounts against the
 running local backend. Its private account data persists in `.data/backend-proof/accounts.json` so
 running it again after a backend restart also proves persistence. It does not start a server.
+
+`pnpm test` in `apps/backend` runs the contract tests in wrangler's local runtime. The sharing test
+sends every request the App's sharing client sends and checks the files in R2.

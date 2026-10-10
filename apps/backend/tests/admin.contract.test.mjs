@@ -1,67 +1,12 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-const require = createRequire(import.meta.url)
-const wranglerRequire = createRequire(require.resolve('wrangler'))
-const { Miniflare } = wranglerRequire('miniflare')
-const { build } = wranglerRequire('esbuild')
+import { startBackend } from './worker.mjs'
 
 test('admin permissions, locked accounts, and forced recovery preserve upstream behavior', async () => {
-	const bundle = await build({
-		entryPoints: [fileURLToPath(new URL('../src/index.ts', import.meta.url))],
-		bundle: true,
-		write: false,
-		format: 'esm',
-		platform: 'browser',
-		target: 'es2022',
-		external: ['cloudflare:workers'],
-	})
-	const runtime = new Miniflare({
-		modules: true,
-		script: bundle.outputFiles[0].text,
-		compatibilityDate: '2026-07-22',
-		compatibilityFlags: ['nodejs_compat'],
-		d1Databases: { DB: 'admin-contract' },
-		durableObjects: { FRIENDS: { className: 'FriendsHub', useSQLite: true } },
-		bindings: { LOCAL_DEV: 'true' },
-	})
+	const backend = await startBackend('admin-contract')
 	try {
-		const db = await runtime.getD1Database('DB')
-		for (const file of [
-			'0001_accounts.sql',
-			'0002_sharing.sql',
-			'0003_sharing_idempotency.sql',
-			'0004_account_locks.sql',
-		]) {
-			const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8')
-			for (const statement of sql
-				.split(';')
-				.map((value) => value.trim())
-				.filter(Boolean))
-				await db.prepare(statement).run()
-		}
-		async function session(user) {
-			await db
-				.prepare(
-					'INSERT INTO sessions (id,token_hash,user_id,created,last_login,expires,refresh_expires,user_agent,ip) VALUES (?,?,?,?,?,?,?,?,?)',
-				)
-				.bind(
-					user,
-					createHash('sha256').update(`mra_${user}`).digest('hex'),
-					user,
-					'2026-01-01',
-					'2026-01-01',
-					'2099-01-01',
-					'2099-01-01',
-					'test',
-					'127.0.0.1',
-				)
-				.run()
-		}
+		const { db, session } = backend
 		for (const [id, role] of [
 			['admin', 'admin'],
 			['moderator', 'moderator'],
@@ -76,7 +21,7 @@ test('admin permissions, locked accounts, and forced recovery preserve upstream 
 			await session(id)
 		}
 		async function call(path, method = 'GET', body, user = 'admin', expected = 204) {
-			const response = await runtime.dispatchFetch(`http://localhost/v3${path}`, {
+			const response = await backend.fetch(`http://localhost/v3${path}`, {
 				method,
 				headers: { authorization: `Bearer mra_${user}`, 'content-type': 'application/json' },
 				...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -128,6 +73,6 @@ test('admin permissions, locked accounts, and forced recovery preserve upstream 
 		await call(`${adminPath}/sessions`, 'DELETE')
 		await call('/user', 'GET', undefined, 'member', 401)
 	} finally {
-		await runtime.dispose()
+		await backend.dispose()
 	}
 })

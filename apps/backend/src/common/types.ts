@@ -1,5 +1,4 @@
 export interface Env extends Cloudflare.Env {
-	STORAGE_NODES?: string
 	LOCAL_DEV?: string
 	LOCAL_DEV_SECRET?: string
 	CORS_ORIGINS?: string
