@@ -1,8 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 
 use dashmap::DashMap;
 use sqlx::SqlitePool;
@@ -19,35 +15,17 @@ use crate::{
         events::EventBroadcaster,
         process::{instance_actor::InstanceHandle, std_spawner::StdSpawner},
     },
-    presentation::extractors::Account,
     ports::{
         installation_store::InstallationStore, instance_store::InstanceStore,
         java_store::JavaStore, modpack_store::ModpackStore,
         process_spawner::AnySpawner,
     },
+    presentation::extractors::Account,
 };
 
-/// Short-lived ticket for WebSocket auth.
+/// Short-lived, single-use ticket that opens one server's WebSocket.
 pub struct WsTicket {
-    pub user_id: String,
-    pub expires_at: Instant,
-}
-
-/// Short-lived token for one-time file downloads (issued by GET /instances/:id/fs/url).
-pub struct FsDownloadToken {
-    pub path: PathBuf,
-    pub expires_at: Instant,
-}
-
-/// In-progress resumable upload tracked by Core.
-#[derive(Clone)]
-pub struct FsUploadSession {
-    pub instance_id: String,
-    pub destination: PathBuf,
-    pub partial_path: PathBuf,
-    pub length: u64,
-    pub offset: u64,
-    pub sha256: Option<String>,
+    pub instance_id: InstanceId,
     pub expires_at: Instant,
 }
 
@@ -72,10 +50,6 @@ pub struct AppState {
     pub account_tokens: DashMap<String, (Account, Instant)>,
     /// In-memory short-lived WebSocket tickets.
     pub ws_tickets: DashMap<String, WsTicket>,
-    /// In-memory short-lived file download tokens (issued by GET /instances/:id/fs/url).
-    pub fs_download_tokens: DashMap<String, FsDownloadToken>,
-    /// In-memory resumable upload sessions.
-    pub fs_upload_sessions: DashMap<String, FsUploadSession>,
     /// Instance data store.
     pub instance_store: Arc<dyn InstanceStore>,
     /// Shared server installation store.
@@ -123,23 +97,12 @@ impl AppState {
             broadcaster,
             account_tokens: DashMap::new(),
             ws_tickets: DashMap::new(),
-            fs_download_tokens: DashMap::new(),
-            fs_upload_sessions: DashMap::new(),
             instance_store,
             installation_store,
             java_store,
             modpack_store,
             spawner,
         }))
-    }
-
-    /// The account that owns this Core, if one has connected yet.
-    pub async fn owner_user_id(&self) -> Option<String> {
-        sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten()
     }
 
     /// Make `user_id` the owner if this Core has none, then return the owner.

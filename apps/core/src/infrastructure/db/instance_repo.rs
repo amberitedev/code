@@ -337,17 +337,6 @@ impl InstanceStore for InstanceRepo {
         Ok(())
     }
 
-    async fn delete(&self, id: &InstanceId) -> Result<(), StoreError> {
-        let result = sqlx::query("DELETE FROM instances WHERE id = ?")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
-        if result.rows_affected() == 0 {
-            return Err(StoreError::NotFound(id.to_string()));
-        }
-        Ok(())
-    }
-
     async fn list_by_status(
         &self,
         status: InstanceStatus,

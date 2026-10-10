@@ -22,16 +22,14 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::{
-    application::{
-        fs_service, state::AppState,
-    },
+    application::{fs_service, state::AppState},
     domain::{
         event::{Event, FsOperationKind},
         instance::{InstanceRecord, ModLoader},
     },
     presentation::{
         error::ApiError, extractors::AuthUser, handlers::properties,
-        instance_path::resolve_authorized_instance,
+        instance_path::resolve_instance_path,
     },
 };
 
@@ -63,10 +61,9 @@ pub fn router() -> Router<Arc<AppState>> {
 
 async fn instance(
     state: &Arc<AppState>,
-    user: &str,
     id: &str,
 ) -> Result<InstanceRecord, ApiError> {
-    resolve_authorized_instance(state, user, id, "server:files").await
+    resolve_instance_path(state, id).await
 }
 
 /// Check existing ancestors before a service creates directories. Refuse symlinks,
@@ -189,12 +186,12 @@ fn timestamp(value: std::io::Result<SystemTime>) -> u64 {
 }
 
 async fn list(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     let directory = checked_path(&record, &query.path, true)?;
     let root = std::fs::canonicalize(&record.data_dir).map_err(io_error)?;
     let page = query.page.unwrap_or(1);
@@ -250,12 +247,12 @@ async fn list(
 }
 
 async fn download(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<FileQuery>,
 ) -> Result<Response, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     checked_path(&record, &query.path, false)?;
     let (file, _) =
         fs_service::download_file(&state, &record.id.to_string(), &query.path)
@@ -270,13 +267,13 @@ async fn download(
 }
 
 async fn create(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<CreateQuery>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     checked_path(&record, &query.path, false)?;
     match query.r#type.as_str() {
         "file" => fs_service::write_file(
@@ -302,13 +299,13 @@ async fn create(
 }
 
 async fn write(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<FileQuery>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     checked_path(&record, &query.path, false)?;
     fs_service::write_file(&state, &record.id.to_string(), &query.path, body)
         .await
@@ -317,12 +314,12 @@ async fn write(
 }
 
 async fn move_file(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<MoveBody>,
 ) -> Result<StatusCode, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     checked_path(&record, &body.source, false)?;
     checked_path(&record, &body.destination, false)?;
     fs_service::move_entry(
@@ -337,12 +334,12 @@ async fn move_file(
 }
 
 async fn remove(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<StatusCode, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     checked_path(&record, &query.path, false)?;
     fs_service::delete_entry(
         &state,
@@ -370,12 +367,12 @@ fn check_tree(record: &InstanceRecord, path: &str) -> Result<(), ApiError> {
 }
 
 async fn copy(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CopyBody>,
 ) -> Result<StatusCode, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     let destination = checked_path(&record, &body.destination, true)?;
     for source in &body.sources {
         check_tree(&record, source)?;
@@ -417,12 +414,12 @@ async fn copy(
 }
 
 async fn zip(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CopyBody>,
 ) -> Result<StatusCode, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     let destination = checked_path(&record, &body.destination, false)?;
     for source in &body.sources {
         check_tree(&record, source)?;
@@ -457,12 +454,12 @@ enum ZipRequest {
 }
 
 async fn stat(
-    user: AuthUser,
+    _user: AuthUser,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<FileQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let record = instance(&state, &user.0.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     if world != record.id.to_string() {
         return Err(ApiError::NotFound("world not found".into()));
     }
@@ -492,7 +489,7 @@ async fn zip_world_paths(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ZipRequest>,
 ) -> Result<Response, ApiError> {
-    let record = instance(&state, &user.0.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     if world != record.id.to_string() {
         return Err(ApiError::NotFound("world not found".into()));
     }
@@ -570,12 +567,12 @@ struct ArchiveQuery {
 }
 
 async fn unarchive(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ArchiveQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let record = instance(&state, &claims.sub, &id).await?;
+    let record = instance(&state, &id).await?;
     let source = checked_path(&record, &query.src, false)?;
     checked_path(&record, &query.trg, true)?;
     let event_id = record.id.clone();
@@ -653,11 +650,11 @@ async fn unarchive(
 }
 
 async fn modify_operation(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     Path((id, _action)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<StatusCode, ApiError> {
-    instance(&state, &claims.sub, &id).await?;
+    instance(&state, &id).await?;
     Err(ApiError::NotFound("filesystem operation not found; local operations finish in their request".into()))
 }
 
@@ -692,10 +689,9 @@ struct SessionPath {
 
 async fn session_instance(
     state: &Arc<AppState>,
-    user: &str,
     path: &SessionPath,
 ) -> Result<InstanceRecord, ApiError> {
-    let record = instance(state, user, &path.id).await?;
+    let record = instance(state, &path.id).await?;
     if path.world != record.id.to_string() {
         return Err(ApiError::NotFound("world not found".into()));
     }
@@ -747,12 +743,12 @@ fn check_session(
 }
 
 async fn create_session(
-    AuthUser(claims): AuthUser,
+    AuthUser(account): AuthUser,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &claims.sub, &path).await?;
+    let record = session_instance(&state, &path).await?;
     let now = chrono::Utc::now().timestamp();
     // Dropping expired sessions also removes their temporary directories.
     sessions.retain(|_, value| {
@@ -772,7 +768,7 @@ async fn create_session(
     };
     let session = UploadSession {
         instance_id: record.id.to_string(),
-        user_id: claims.sub,
+        user_id: account.id,
         scope: path.scope,
         response: response.clone(),
         staging: Some(tempfile::tempdir().map_err(io_error)?),
@@ -786,24 +782,24 @@ async fn create_session(
 }
 
 async fn get_session(
-    AuthUser(claims): AuthUser,
+    AuthUser(account): AuthUser,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<Value>, ApiError> {
-    let record = session_instance(&state, &claims.sub, &path).await?;
+    let record = session_instance(&state, &path).await?;
     let candidates: Vec<_> =
         sessions.iter().map(|entry| entry.value().clone()).collect();
     let mut latest: Option<SessionResponse> = None;
     for candidate in candidates {
         let mut session = candidate.lock().await;
         if session.instance_id != record.id.to_string()
-            || session.user_id != claims.sub
+            || session.user_id != account.id
             || session.scope != path.scope
         {
             continue;
         }
-        check_session(&mut session, &record, &claims.sub, &path.scope, false)?;
+        check_session(&mut session, &record, &account.id, &path.scope, false)?;
         if session.response.status == "active"
             && latest.as_ref().is_none_or(|last| {
                 last.created_at < session.response.created_at
@@ -904,16 +900,16 @@ async fn stage_files(
 }
 
 async fn upload_session_files(
-    AuthUser(claims): AuthUser,
+    AuthUser(account): AuthUser,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
     mut multipart: Multipart,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &claims.sub, &path).await?;
+    let record = session_instance(&state, &path).await?;
     let session = find_session(&sessions, &path)?;
     let mut session = session.lock().await;
-    check_session(&mut session, &record, &claims.sub, &path.scope, true)?;
+    check_session(&mut session, &record, &account.id, &path.scope, true)?;
     stage_files(&mut session, &record, &mut multipart).await?;
     Ok(Json(session.response.clone()))
 }
@@ -956,33 +952,33 @@ async fn commit_files(
 }
 
 async fn finalize_session(
-    AuthUser(claims): AuthUser,
+    AuthUser(account): AuthUser,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &claims.sub, &path).await?;
+    let record = session_instance(&state, &path).await?;
     let session = find_session(&sessions, &path)?;
     let mut session = session.lock().await;
-    check_session(&mut session, &record, &claims.sub, &path.scope, false)?;
+    check_session(&mut session, &record, &account.id, &path.scope, false)?;
     if session.response.status == "finalized" {
         return Ok(Json(session.response.clone()));
     }
-    check_session(&mut session, &record, &claims.sub, &path.scope, true)?;
+    check_session(&mut session, &record, &account.id, &path.scope, true)?;
     commit_files(&state, &record, &mut session).await?;
     Ok(Json(session.response.clone()))
 }
 
 async fn cancel_session(
-    AuthUser(claims): AuthUser,
+    AuthUser(account): AuthUser,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &claims.sub, &path).await?;
+    let record = session_instance(&state, &path).await?;
     let session = find_session(&sessions, &path)?;
     let mut session = session.lock().await;
-    check_session(&mut session, &record, &claims.sub, &path.scope, false)?;
+    check_session(&mut session, &record, &account.id, &path.scope, false)?;
     if session.response.status == "finalized" {
         return Err(ApiError::Conflict(
             "upload session is already finalized".into(),
@@ -996,7 +992,7 @@ async fn cancel_session(
 }
 
 async fn upload_addons(
-    AuthUser(claims): AuthUser,
+    AuthUser(account): AuthUser,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
@@ -1007,11 +1003,11 @@ async fn upload_addons(
         scope: "content".into(),
         upload: None,
     };
-    let record = session_instance(&state, &claims.sub, &path).await?;
+    let record = session_instance(&state, &path).await?;
     let now = chrono::Utc::now().timestamp();
     let mut session = UploadSession {
         instance_id: record.id.to_string(),
-        user_id: claims.sub,
+        user_id: account.id,
         scope: path.scope,
         response: SessionResponse {
             upload_id: Uuid::new_v4().to_string(),
@@ -1038,15 +1034,13 @@ struct ModpackUploadQuery {
 }
 
 async fn upload_modpack(
-    user: AuthUser,
+    _user: AuthUser,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModpackUploadQuery>,
     mut multipart: Multipart,
 ) -> Result<StatusCode, ApiError> {
-    let record =
-        resolve_authorized_instance(&state, &user.0.sub, &id, "server:content")
-            .await?;
+    let record = resolve_instance_path(&state, &id).await?;
     if world != record.id.to_string() {
         return Err(ApiError::NotFound("world not found".into()));
     }
@@ -1151,13 +1145,7 @@ async fn upload_modpack(
         ApiError::BadRequest("missing properties field".into())
     })?;
     if !updates.is_empty() {
-        resolve_authorized_instance(
-            &state,
-            &user.0.sub,
-            &id,
-            "server:settings",
-        )
-        .await?;
+        resolve_instance_path(&state, &id).await?;
         checked_path(&record, "server.properties", false)?;
     }
     let metadata =
@@ -1216,7 +1204,6 @@ async fn upload_modpack(
     .await?;
     if !updates.is_empty() {
         let _ = properties::patch_properties_handler(
-            user,
             Path(id),
             State(state),
             Json(updates),

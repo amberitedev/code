@@ -1,29 +1,126 @@
--- Create users table
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
-    hashed_password TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'standard'
+-- Core's schema. Written with IF NOT EXISTS so a database created by the older, longer
+-- migration history can adopt it after its `_sqlx_migrations` rows are cleared.
+
+CREATE TABLE IF NOT EXISTS core_identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    core_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
 );
 
--- Create instances table
+-- Temporary until pairing exists: the first account to connect owns this Core.
+CREATE TABLE IF NOT EXISTS core_owner (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS java_installations (
+    version INTEGER PRIMARY KEY,
+    path TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS server_installations (
+    id TEXT PRIMARY KEY,
+    game_version TEXT NOT NULL,
+    loader TEXT NOT NULL,
+    loader_version TEXT,
+    status TEXT NOT NULL DEFAULT 'installing',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS instances (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    game_version TEXT,
+    loader TEXT,
+    port INTEGER,
+    memory_min INTEGER,
+    memory_max INTEGER,
+    status TEXT DEFAULT 'offline',
+    data_dir TEXT,
+    loader_version TEXT,
+    java_version INTEGER,
+    updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00',
+    install_status TEXT NOT NULL DEFAULT 'ready',
+    jvm_args TEXT,
+    server_args TEXT,
+    total_uptime_seconds INTEGER NOT NULL DEFAULT 0,
+    installation_id TEXT,
+    path TEXT
 );
 
--- Create paseto_key table
-CREATE TABLE IF NOT EXISTS paseto_key (
-    id INTEGER PRIMARY KEY,
-    key BLOB NOT NULL
+CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_path ON instances(path);
+
+CREATE TABLE IF NOT EXISTS mods (
+    id TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    display_name TEXT,
+    modrinth_project_id TEXT,
+    modrinth_version_id TEXT,
+    version_number TEXT,
+    client_side TEXT,
+    server_side TEXT,
+    sha512 TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    installed_at TEXT NOT NULL,
+    UNIQUE(instance_id, filename)
 );
 
--- Create events table
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    instance_id TEXT,
-    event_type TEXT NOT NULL,
-    data TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS modpack_manifests (
+    id TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+    pack_name TEXT NOT NULL,
+    pack_version TEXT NOT NULL,
+    game_version TEXT NOT NULL,
+    loader TEXT NOT NULL,
+    loader_version TEXT,
+    modrinth_project_id TEXT,
+    modrinth_version_id TEXT,
+    installed_at TEXT NOT NULL,
+    UNIQUE(instance_id)
+);
+
+CREATE TABLE IF NOT EXISTS backups (
+    id TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    locked INTEGER NOT NULL DEFAULT 0,
+    trigger TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL,
+    hot INTEGER NOT NULL DEFAULT 0,
+    consistency TEXT NOT NULL DEFAULT 'offline'
+);
+
+CREATE TABLE IF NOT EXISTS server_sources (
+    instance_id TEXT PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    -- CoreServerSource JSON.
+    source_json TEXT NOT NULL,
+    -- Instance sources only: sharing backend base URL and the read-only server token.
+    sharing_url TEXT,
+    server_token TEXT,
+    desired_version TEXT NOT NULL,
+    installed_version TEXT,
+    -- Version whose files are downloaded and verified in Core's staging directory.
+    staged_version TEXT,
+    state TEXT NOT NULL,
+    error TEXT,
+    -- Stop a running server, apply, and start it again.
+    restart_requested INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS server_source_files (
+    instance_id TEXT NOT NULL REFERENCES server_sources(instance_id) ON DELETE CASCADE,
+    -- Path relative to the instance data dir, e.g. `mods/a.jar` or `world/datapacks/b.zip`.
+    path TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sha1 TEXT NOT NULL,
+    client_only INTEGER NOT NULL,
+    project_id TEXT,
+    version_id TEXT,
+    PRIMARY KEY (instance_id, path)
 );

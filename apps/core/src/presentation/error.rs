@@ -7,13 +7,9 @@ use serde_json::json;
 
 use crate::{
     application::{
-        export_service::ExportError, instance_service::InstanceError,
-        log_service::LogError, macro_service::MacroError,
+        fs_service::FsError, instance_service::InstanceError,
         mod_service::ModError, modpack_service::ModpackError,
-        query_service::QueryServiceError,
-        server_source_service::SourceError, rcon_service::RconServiceError,
-        social_models::SocialError, stats_service::StatsError,
-        task_service::TaskError,
+        server_source_service::SourceError,
     },
     ports::instance_store::StoreError,
 };
@@ -60,9 +56,6 @@ impl From<InstanceError> for ApiError {
             InstanceError::AlreadyRunning => {
                 Self::Conflict("instance already running".into())
             }
-            InstanceError::MustBeOffline => {
-                Self::Conflict("stop the instance before deleting".into())
-            }
             InstanceError::NotRunning => {
                 Self::Conflict("instance not running".into())
             }
@@ -80,37 +73,7 @@ impl From<InstanceError> for ApiError {
 
 impl From<ModpackError> for ApiError {
     fn from(e: ModpackError) -> Self {
-        match e {
-            ModpackError::InstanceNotFound => {
-                Self::NotFound("instance not found".into())
-            }
-            ModpackError::MissingFile => {
-                Self::BadRequest("version has no downloadable file".into())
-            }
-            e => Self::Internal(e.to_string()),
-        }
-    }
-}
-
-impl From<MacroError> for ApiError {
-    fn from(e: MacroError) -> Self {
-        match e {
-            MacroError::InstanceNotFound(id) => {
-                Self::NotFound(format!("instance {id} not found"))
-            }
-            MacroError::FileNotFound(name) => {
-                Self::NotFound(format!("macro '{name}' not found"))
-            }
-            MacroError::MacroNotFound(pid) => {
-                Self::NotFound(format!("macro pid {pid} not found"))
-            }
-            MacroError::InvalidName => {
-                Self::BadRequest("invalid macro name".into())
-            }
-            MacroError::Disabled => {
-                Self::ServiceUnavailable("macro runtime is disabled".into())
-            }
-        }
+        Self::Internal(e.to_string())
     }
 }
 
@@ -131,116 +94,6 @@ impl From<ModError> for ApiError {
                 Self::BadRequest("invalid filename".into())
             }
             ModError::HashMismatch { .. } => Self::BadRequest(e.to_string()),
-            e => Self::Internal(e.to_string()),
-        }
-    }
-}
-
-impl From<LogError> for ApiError {
-    fn from(e: LogError) -> Self {
-        match e {
-            LogError::NotFound => Self::NotFound("not found".into()),
-            LogError::InvalidPath => {
-                Self::BadRequest("invalid filename".into())
-            }
-            e => Self::Internal(e.to_string()),
-        }
-    }
-}
-
-impl From<StatsError> for ApiError {
-    fn from(e: StatsError) -> Self {
-        match e {
-            StatsError::NotFound => Self::NotFound("instance not found".into()),
-            e => Self::Internal(e.to_string()),
-        }
-    }
-}
-
-impl From<ExportError> for ApiError {
-    fn from(e: ExportError) -> Self {
-        match e {
-            ExportError::InstanceNotFound => {
-                Self::NotFound("instance not found".into())
-            }
-            e => Self::Internal(e.to_string()),
-        }
-    }
-}
-
-impl From<SocialError> for ApiError {
-    fn from(e: SocialError) -> Self {
-        match e {
-            SocialError::NotFound => Self::NotFound("not found".into()),
-            SocialError::Invalid(message)
-                if message.starts_with("not authorized") =>
-            {
-                Self::Forbidden(message)
-            }
-            SocialError::Invalid(message) => Self::BadRequest(message),
-            SocialError::Database(e) => Self::Internal(e.to_string()),
-            SocialError::Io(e) => Self::Internal(e.to_string()),
-            SocialError::Mrpack(e) => Self::BadRequest(e.to_string()),
-        }
-    }
-}
-
-impl From<RconServiceError> for ApiError {
-    fn from(e: RconServiceError) -> Self {
-        match e {
-            RconServiceError::NotFound => {
-                Self::NotFound("instance not found".into())
-            }
-            RconServiceError::NotEnabled => {
-                Self::Conflict("rcon is not enabled for this instance".into())
-            }
-            RconServiceError::NotRunning => {
-                Self::Conflict("instance is not running".into())
-            }
-            RconServiceError::Rcon(inner) => match inner {
-                crate::infrastructure::minecraft::rcon::RconError::AuthFailed => {
-                    Self::BadRequest(inner.to_string())
-                }
-                crate::infrastructure::minecraft::rcon::RconError::Timeout => {
-                    Self::ServiceUnavailable(
-                        "rcon connection timed out".into(),
-                    )
-                }
-                _ => Self::ServiceUnavailable(inner.to_string()),
-            },
-            RconServiceError::Properties(inner) => {
-                Self::Internal(inner.to_string())
-            }
-        }
-    }
-}
-
-impl From<QueryServiceError> for ApiError {
-    fn from(e: QueryServiceError) -> Self {
-        match e {
-            QueryServiceError::NotFound => {
-                Self::NotFound("instance not found".into())
-            }
-            QueryServiceError::NotRunning => {
-                Self::Conflict("instance is not running".into())
-            }
-            QueryServiceError::Ping(inner) => {
-                Self::ServiceUnavailable(inner.to_string())
-            }
-        }
-    }
-}
-
-impl From<TaskError> for ApiError {
-    fn from(e: TaskError) -> Self {
-        match e {
-            TaskError::NotFound => Self::NotFound("task not found".into()),
-            TaskError::InvalidType => {
-                Self::BadRequest("invalid task type".into())
-            }
-            TaskError::InvalidCron => {
-                Self::BadRequest("invalid cron expression".into())
-            }
             e => Self::Internal(e.to_string()),
         }
     }
@@ -267,7 +120,9 @@ impl From<StoreError> for ApiError {
 impl From<SourceError> for ApiError {
     fn from(e: SourceError) -> Self {
         match e {
-            SourceError::NotFound => Self::NotFound("instance not found".into()),
+            SourceError::NotFound => {
+                Self::NotFound("instance not found".into())
+            }
             SourceError::NotLinked => {
                 Self::NotFound("server is not linked to a source".into())
             }
@@ -275,6 +130,23 @@ impl From<SourceError> for ApiError {
             SourceError::Invalid(message) => Self::BadRequest(message),
             SourceError::Instance(e) => e.into(),
             e => Self::Internal(e.to_string()),
+        }
+    }
+}
+
+impl From<FsError> for ApiError {
+    fn from(e: FsError) -> Self {
+        match e {
+            FsError::NotFound => {
+                ApiError::NotFound("instance not found".into())
+            }
+            FsError::PathTraversal => {
+                ApiError::Unauthorized("path traversal rejected".into())
+            }
+            FsError::NotAFile => {
+                ApiError::BadRequest("path is a directory, not a file".into())
+            }
+            e => ApiError::Internal(e.to_string()),
         }
     }
 }

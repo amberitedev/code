@@ -13,7 +13,6 @@
 		"dev:check": "node scripts/dev-runner.ts dev --dry-run",
 		"dev:modrinth": "node scripts/dev-modrinth.ts",
 		"core:dev": "pnpm --filter @amberite/core run dev",
-		"core:setup": "pnpm --filter @amberite/core run setup",
 		"web:dev": "vp run --filter @modrinth/frontend dev",
 		"web:build": "vp run --filter @modrinth/frontend build",
 		"app:dev": "pnpm dev:app",

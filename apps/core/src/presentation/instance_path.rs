@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    application::{
-        access_service, instance_service::sanitize_instance_path,
-        state::AppState,
-    },
+    application::{instance_service::sanitize_instance_path, state::AppState},
     domain::instance::{InstanceId, InstanceRecord},
     ports::instance_store::StoreError,
     presentation::error::ApiError,
@@ -41,35 +38,4 @@ pub async fn resolve_instance_id(
     path: &str,
 ) -> Result<InstanceId, ApiError> {
     Ok(resolve_instance_path(state, path).await?.id)
-}
-
-pub async fn resolve_authorized_instance(
-    state: &Arc<AppState>,
-    user_id: &str,
-    path: &str,
-    permission: &str,
-) -> Result<InstanceRecord, ApiError> {
-    let record = resolve_instance_path(state, path).await?;
-    access_service::require_instance_permission(
-        state,
-        user_id,
-        &record.id.to_string(),
-        permission,
-    )
-    .await
-    .map(|_| record)
-    .map_err(|error| ApiError::Forbidden(error.to_string()))
-}
-
-pub async fn resolve_authorized_instance_id(
-    state: &Arc<AppState>,
-    user_id: &str,
-    path: &str,
-    permission: &str,
-) -> Result<InstanceId, ApiError> {
-    Ok(
-        resolve_authorized_instance(state, user_id, path, permission)
-            .await?
-            .id,
-    )
 }

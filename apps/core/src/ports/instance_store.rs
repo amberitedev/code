@@ -78,7 +78,6 @@ pub trait InstanceStore: Send + Sync + 'static {
         id: &InstanceId,
         installation_id: Option<&str>,
     ) -> Result<(), StoreError>;
-    async fn delete(&self, id: &InstanceId) -> Result<(), StoreError>;
     async fn list_by_status(
         &self,
         status: InstanceStatus,

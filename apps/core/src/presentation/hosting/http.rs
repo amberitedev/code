@@ -18,10 +18,6 @@ use crate::{
     },
     infrastructure::minecraft::server_properties,
     presentation::{
-        authz::{
-            can_access_instance, require_core_manager,
-            require_instance_permission,
-        },
         error::ApiError,
         extractors::{bearer_token, AuthUser},
         handlers::{
@@ -195,39 +191,9 @@ fn world(id: String, wid: String) -> Result<String, ApiError> {
 
 async fn record(
     state: &Arc<AppState>,
-    user: &AuthUser,
     id: &str,
-    permission: &str,
 ) -> Result<InstanceRecord, ApiError> {
-    let record = resolve_instance_path(state, id).await?;
-    require_instance_permission(
-        state,
-        &user.0.sub,
-        &record.id.to_string(),
-        permission,
-    )
-    .await?;
-    Ok(record)
-}
-
-async fn visible(
-    state: &Arc<AppState>,
-    user: &AuthUser,
-) -> Result<Vec<InstanceRecord>, ApiError> {
-    let mut visible = Vec::new();
-    for r in state.instance_store.list().await? {
-        if can_access_instance(
-            state,
-            &user.0.sub,
-            &r.id.to_string(),
-            "server:view",
-        )
-        .await
-        {
-            visible.push(r);
-        }
-    }
-    Ok(visible)
+    resolve_instance_path(state, id).await
 }
 
 async fn v0(
@@ -248,7 +214,7 @@ async fn v0(
     );
     Ok(server_v0(
         r,
-        &user.0.sub,
+        &user.0.id,
         -32768,
         count,
         &host(state),
@@ -275,12 +241,12 @@ async fn v1(
 }
 
 async fn select_download(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    record(&state, &user, &id, "server:files").await?;
+    record(&state, &id).await?;
     Ok(Json(json!({"method_type": "unavailable"})))
 }
 
@@ -289,7 +255,7 @@ async fn list_v0(
     State(state): State<Arc<AppState>>,
     Query(q): Query<Pagination>,
 ) -> ApiResult {
-    let records = visible(&state, &user).await?;
+    let records = state.instance_store.list().await?;
     let count = records.len();
     let limit = q.limit.unwrap_or(100).clamp(1, 1000);
     let offset = q.offset.unwrap_or(0);
@@ -298,7 +264,7 @@ async fn list_v0(
         servers.push(v0(&state, &user, &r).await?);
     }
     Ok(Json(
-        json!({"servers": servers, "users": {&user.0.sub: {"id": user.0.sub, "username": user.0.username, "avatar_url": null}},
+        json!({"servers": servers, "users": {&user.0.id: {"id": user.0.id, "username": user.0.username, "avatar_url": null}},
         "pagination": {"current_page": offset / limit + 1, "page_size": limit, "total_pages": count.div_ceil(limit), "total_items": count}}),
     ))
 }
@@ -308,36 +274,35 @@ async fn get_v0(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
-    let r = record(&state, &user, &id, "server:view").await?;
+    let r = record(&state, &id).await?;
     Ok(Json(v0(&state, &user, &r).await?))
 }
 
 async fn list_v1(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
 ) -> ApiResult {
     let mut servers = Vec::new();
-    for r in visible(&state, &user).await? {
+    for r in state.instance_store.list().await? {
         servers.push(v1(&state, &r).await?);
     }
     Ok(Json(json!(servers)))
 }
 
 async fn get_v1(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
-    let r = record(&state, &user, &id, "server:view").await?;
+    let r = record(&state, &id).await?;
     Ok(Json(v1(&state, &r).await?))
 }
 
 async fn create_server(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateServer>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    require_core_manager(&state, &user.0.sub).await?;
     let name = body.name.trim();
     if name.is_empty() || name.len() > 100 {
         return Err(ApiError::BadRequest(
@@ -405,35 +370,34 @@ async fn create_server(
 }
 
 async fn power(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<Power>,
 ) -> ApiResult {
     match body.action {
         PowerAction::Start => {
-            instance_control::start(user, Path(id), State(state)).await
+            instance_control::start(Path(id), State(state)).await
         }
         PowerAction::Stop => {
-            instance_control::stop(user, Path(id), State(state)).await
+            instance_control::stop(Path(id), State(state)).await
         }
         PowerAction::Restart => {
-            instance_control::restart(user, Path(id), State(state)).await
+            instance_control::restart(Path(id), State(state)).await
         }
         PowerAction::Kill => {
-            instance_control::kill(user, Path(id), State(state)).await
+            instance_control::kill(Path(id), State(state)).await
         }
     }
 }
 
 async fn rename(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<Name>,
 ) -> ApiResult {
     instances::patch_instance(
-        user,
         Path(id),
         State(state),
         Json(instances::PatchBody {
@@ -448,11 +412,11 @@ async fn rename(
 }
 
 async fn end_intro(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let r = record(&state, &user, &id, "server:settings").await?;
+    let r = record(&state, &id).await?;
     if r.game_version.is_empty() {
         return Err(ApiError::Conflict(
             "Choose server content before finishing setup".into(),
@@ -462,34 +426,34 @@ async fn end_intro(
 }
 
 async fn allocations(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
-    let r = record(&state, &user, &id, "server:view").await?;
+    let r = record(&state, &id).await?;
     Ok(Json(json!([{"port": r.port, "name": "Minecraft"}])))
 }
 
 /// File routes take the same account token as the rest of the hosting API, so
 /// the caller's own token is handed back as the node token.
 async fn filesystem_auth(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult {
-    let r = record(&state, &user, &id, "server:files").await?;
+    let r = record(&state, &id).await?;
     Ok(Json(
         json!({"url": format!("{}/hosting/servers/{}/modrinth/v0/fs", state.config.public_url.trim_end_matches('/'), r.id), "token": bearer_token(&headers)}),
     ))
 }
 
 async fn websocket_auth(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
-    let r = record(&state, &user, &id, "server:view").await?;
+    let r = record(&state, &id).await?;
     let token = uuid::Uuid::new_v4().to_string();
     state
         .ws_tickets
@@ -497,7 +461,7 @@ async fn websocket_auth(
     state.ws_tickets.insert(
         token.clone(),
         WsTicket {
-            user_id: format!("dev:{}", r.id),
+            instance_id: r.id.clone(),
             expires_at: Instant::now() + Duration::from_secs(60),
         },
     );
@@ -512,7 +476,7 @@ async fn websocket_auth(
 }
 
 async fn reinstall(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(q): Query<ReinstallQuery>,
@@ -530,7 +494,6 @@ async fn reinstall(
             game_version,
         } => {
             instance_control::change_version_handler(
-                user,
                 Path(id),
                 State(state),
                 Json(instance_control::ChangeVersionBody {
@@ -550,7 +513,7 @@ async fn reinstall(
                     "version_id is required for a modpack installation".into(),
                 )
             })?;
-            install_modrinth_pack(&user, &state, &id, &project_id, &version_id)
+            install_modrinth_pack(&state, &id, &project_id, &version_id)
                 .await?;
             Ok(Json(json!({})))
         }
@@ -558,12 +521,11 @@ async fn reinstall(
 }
 
 async fn startup_v0(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
-    let Json(startup) =
-        instances::get_startup(user, Path(id), State(state)).await?;
+    let Json(startup) = instances::get_startup(Path(id), State(state)).await?;
     Ok(Json(
         json!({"invocation": startup["effective_command"], "original_invocation": startup["default_command"],
         "jdk_version": startup["java_version"].as_i64().map(|v| format!("lts{v}")), "jdk_build": null}),
@@ -571,13 +533,12 @@ async fn startup_v0(
 }
 
 async fn startup_v1(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
     let Json(startup) =
-        instances::get_startup(user, Path(world(id, wid)?), State(state))
-            .await?;
+        instances::get_startup(Path(world(id, wid)?), State(state)).await?;
     Ok(Json(
         json!({"java_version": startup["java_version"], "jre_vendor": null,
         "original_invocation": startup["default_command"], "startup_command": startup["effective_command"]}),
@@ -648,13 +609,12 @@ async fn patch_startup_v1(
 }
 
 async fn patch_java(
-    user: AuthUser,
+    _user: AuthUser,
     state: Arc<AppState>,
     id: String,
     version: Option<Option<i64>>,
 ) -> ApiResult {
     instances::patch_instance(
-        user,
         Path(id),
         State(state),
         Json(instances::PatchBody {
@@ -669,16 +629,13 @@ async fn patch_java(
 }
 
 async fn get_properties(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
-    let Json(value) = properties::get_properties_handler(
-        user,
-        Path(world(id, wid)?),
-        State(state),
-    )
-    .await?;
+    let Json(value) =
+        properties::get_properties_handler(Path(world(id, wid)?), State(state))
+            .await?;
     let mut known = serde_json::Map::new();
     let mut custom = serde_json::Map::new();
     if let Some(props) = value["properties"].as_object() {
@@ -701,12 +658,11 @@ async fn patch_properties(
     Json(body): Json<PropertiesPatch>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    apply_properties(&user, &state, &id, body).await?;
+    apply_properties(&state, &id, body).await?;
     get_properties(user, State(state), Path((id.clone(), id))).await
 }
 
 async fn apply_properties(
-    user: &AuthUser,
     state: &Arc<AppState>,
     id: &str,
     body: PropertiesPatch,
@@ -735,7 +691,6 @@ async fn apply_properties(
         updates.insert(key.replace('_', "-"), value.unwrap());
     }
     let _ = properties::patch_properties_handler(
-        AuthUser(user.0.clone()),
         Path(id.into()),
         State(state.clone()),
         Json(updates),
@@ -745,13 +700,13 @@ async fn apply_properties(
 }
 
 async fn install_content(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<InstallContent>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let r = record(&state, &user, &id, "server:content").await?;
+    let r = record(&state, &id).await?;
     let props = match body {
         InstallContent::Bare {
             loader: value,
@@ -785,7 +740,6 @@ async fn install_content(
                     ApiError::BadRequest("game_version is required".into())
                 })?;
             let _ = instance_control::change_version_handler(
-                AuthUser(user.0.clone()),
                 Path(id.clone()),
                 State(state.clone()),
                 Json(instance_control::ChangeVersionBody {
@@ -813,7 +767,6 @@ async fn install_content(
                     version_id,
                 } => {
                     install_modrinth_pack(
-                        &user,
                         &state,
                         &id,
                         &project_id,
@@ -835,27 +788,26 @@ async fn install_content(
         // This is an initial install, not an instruction to remove properties.
         props.known.retain(|_, value| value.is_some());
         props.custom.retain(|_, value| value.is_some());
-        apply_properties(&user, &state, &id, props).await?;
+        apply_properties(&state, &id, props).await?;
     }
     Ok(Json(json!({})))
 }
 
 async fn repair(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
-    instance_control::repair(user, Path(world(id, wid)?), State(state)).await
+    instance_control::repair(Path(world(id, wid)?), State(state)).await
 }
 
 async fn install_modrinth_pack(
-    user: &AuthUser,
     state: &Arc<AppState>,
     id: &str,
     project: &str,
     version: &str,
 ) -> Result<(), ApiError> {
-    let r = record(state, user, id, "server:content").await?;
+    let r = record(&state, id).await?;
     if state.instances.contains_key(&r.id) {
         return Err(ApiError::Conflict(
             "Stop the server before installing a modpack".into(),
@@ -866,8 +818,10 @@ async fn install_modrinth_pack(
     let id = r.id.to_string();
     let linked = server_source_service::get_status(state, &id).await?;
     if linked.is_some() {
-        server_source_service::request_source_update(state, &id, version, false)
-            .await?;
+        server_source_service::request_source_update(
+            state, &id, version, false,
+        )
+        .await?;
     } else {
         server_source_service::link(
             state,
@@ -888,20 +842,20 @@ async fn install_modrinth_pack(
 }
 
 async fn unlink_modpack(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
-    modpack::remove_modpack(user, Path(world(id, wid)?), State(state)).await
+    modpack::remove_modpack(Path(world(id, wid)?), State(state)).await
 }
 
 async fn get_addons(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let r = record(&state, &user, &id, "server:content").await?;
+    let r = record(&state, &id).await?;
     let mut addons = Vec::new();
     for m in mod_service::list_mods(&state, &id).await? {
         let path = std::path::Path::new(&r.data_dir)
@@ -937,14 +891,13 @@ fn require_mod(kind: Option<&str>) -> Result<(), ApiError> {
 }
 
 async fn add_addon(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<AddAddon>,
 ) -> ApiResult {
     require_mod(body.kind.as_deref())?;
     mods::add_mod_handler(
-        user,
         Path(world(id, wid)?),
         State(state),
         Json(mods::AddModBody {
@@ -977,14 +930,13 @@ async fn add_addons(
 }
 
 async fn delete_addon(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<AddonFile>,
 ) -> ApiResult {
     require_mod(Some(&body.kind))?;
     mods::delete_mod_handler(
-        user,
         Path((world(id, wid)?, body.filename)),
         State(state),
     )
@@ -1013,7 +965,7 @@ async fn delete_addons(
 }
 
 async fn toggle(
-    user: AuthUser,
+    _user: AuthUser,
     state: Arc<AppState>,
     pair: (String, String),
     body: AddonFile,
@@ -1021,7 +973,6 @@ async fn toggle(
 ) -> ApiResult {
     require_mod(Some(&body.kind))?;
     mods::toggle_mod_handler(
-        user,
         Path((world(pair.0, pair.1)?, body.filename)),
         State(state),
         Json(mods::ToggleBody { enabled }),
@@ -1086,13 +1037,13 @@ async fn enable_addons(
 }
 
 async fn update_addon(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<UpdateAddon>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let r = record(&state, &user, &id, "server:content").await?;
+    let r = record(&state, &id).await?;
     let updated = mod_service::update_mod_version(
         &state,
         &r.id.to_string(),
@@ -1122,11 +1073,10 @@ async fn update_addons(
 }
 
 async fn backup_rows(
-    user: &AuthUser,
     state: &Arc<AppState>,
     id: &str,
 ) -> Result<Vec<Value>, ApiError> {
-    let r = record(state, user, id, "server:backups").await?;
+    let r = record(&state, id).await?;
     Ok(backup_service::list_backups(state, &r.id.to_string())
         .await?
         .iter()
@@ -1135,21 +1085,19 @@ async fn backup_rows(
 }
 
 async fn list_backups(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
-    Ok(Json(json!(
-        backup_rows(&user, &state, &world(id, wid)?).await?
-    )))
+    Ok(Json(json!(backup_rows(&state, &world(id, wid)?).await?)))
 }
 
 async fn get_backup(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
-    let rows = backup_rows(&user, &state, &world(id, wid)?).await?;
+    let rows = backup_rows(&state, &world(id, wid)?).await?;
     rows.into_iter()
         .find(|b| b["id"].as_str() == Some(&bid))
         .map(Json)
@@ -1157,48 +1105,40 @@ async fn get_backup(
 }
 
 async fn create_backup(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     body: Json<backups::CreateBody>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let Json(created) = backups::create_handler(
-        user,
-        Path(id.clone()),
-        State(state.clone()),
-        body,
-    )
-    .await?;
+    let Json(created) =
+        backups::create_handler(Path(id.clone()), State(state.clone()), body)
+            .await?;
     notify_changed(&state, &id, false).await?;
     Ok(Json(json!({"id": created["id"]})))
 }
 
 async fn delete_backup(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let result = backups::delete_handler(
-        user,
-        Path((id.clone(), bid)),
-        State(state.clone()),
-    )
-    .await?;
+    let result =
+        backups::delete_handler(Path((id.clone(), bid)), State(state.clone()))
+            .await?;
     notify_changed(&state, &id, false).await?;
     Ok(result)
 }
 
 async fn rename_backup(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
     body: Json<backups::RenameBody>,
 ) -> ApiResult {
     let id = world(id, wid)?;
     let result = backups::rename_handler(
-        user,
         Path((id.clone(), bid)),
         State(state.clone()),
         body,
@@ -1209,17 +1149,14 @@ async fn rename_backup(
 }
 
 async fn restore_backup(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let result = backups::restore_handler(
-        user,
-        Path((id.clone(), bid)),
-        State(state.clone()),
-    )
-    .await?;
+    let result =
+        backups::restore_handler(Path((id.clone(), bid)), State(state.clone()))
+            .await?;
     notify_changed(&state, &id, true).await?;
     Ok(result)
 }
@@ -1244,11 +1181,11 @@ async fn notify_changed(
 }
 
 async fn download_backup(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path((id, bid)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    let r = record(&state, &user, &id, "server:backups").await?;
+    let r = record(&state, &id).await?;
     // Resolve against this server's database rows before deriving any disk path.
     let rows = backup_service::list_backups(&state, &r.id.to_string()).await?;
     let row = rows

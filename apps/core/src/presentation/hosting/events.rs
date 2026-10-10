@@ -43,7 +43,7 @@ use crate::{
     },
     presentation::{
         error::ApiError, extractors::AuthUser,
-        instance_path::resolve_authorized_instance,
+        instance_path::resolve_instance_path,
     },
 };
 
@@ -65,14 +65,12 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn clear_logs(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Extension(cursors): Extension<LogCursors>,
 ) -> Result<StatusCode, ApiError> {
-    let record =
-        resolve_authorized_instance(&state, &claims.sub, &id, "server:logs")
-            .await?;
+    let record = resolve_instance_path(&state, &id).await?;
     let path = std::path::Path::new(&record.data_dir).join("logs/latest.log");
     let metadata = match tokio::fs::metadata(path).await {
         Ok(metadata) => Some(metadata),
@@ -119,8 +117,7 @@ enum ClientMessage {
 fn authenticate(state: &AppState, iid: &InstanceId, token: &str) -> bool {
     // Tickets are deliberately scoped to the URL's server and consumed once.
     state.ws_tickets.remove(token).is_some_and(|(_, ticket)| {
-        ticket.expires_at > Instant::now()
-            && ticket.user_id == format!("dev:{iid}")
+        ticket.expires_at > Instant::now() && ticket.instance_id == *iid
     })
 }
 

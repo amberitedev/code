@@ -49,25 +49,6 @@ impl From<ManifestRow> for ModpackManifest {
 
 #[async_trait]
 impl ModpackStore for ModpackRepo {
-    async fn save(&self, m: &ModpackManifest) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT OR REPLACE INTO modpack_manifests (id,instance_id,pack_name,pack_version,game_version,loader,loader_version,modrinth_project_id,modrinth_version_id,installed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
-        )
-        .bind(&m.id)
-        .bind(&m.instance_id)
-        .bind(&m.pack_name)
-        .bind(&m.pack_version)
-        .bind(&m.game_version)
-        .bind(&m.loader)
-        .bind(&m.loader_version)
-        .bind(&m.modrinth_project_id)
-        .bind(&m.modrinth_version_id)
-        .bind(&m.installed_at)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
     async fn get_for_instance(
         &self,
         instance_id: &str,

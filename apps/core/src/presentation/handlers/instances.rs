@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use serde::Deserialize;
@@ -10,46 +9,15 @@ use serde_json::{json, Value};
 
 use crate::{
     application::{
-        access_service, activity_service,
-        instance_service::{
-            create_instance as svc_create_instance,
-            delete_instance as svc_delete_instance, CreateInstanceRequest,
-        },
         instance_status_service::{default_launch_args, resolve_launch},
         state::AppState,
     },
     domain::{
         event::Event,
-        instance::{InstanceRecord, MemorySettings, ModLoader},
+        instance::{InstanceRecord, MemorySettings},
     },
-    presentation::{
-        authz::{can_access_instance, require_instance_permission},
-        error::ApiError,
-        extractors::AuthUser,
-        instance_path::resolve_instance_path,
-    },
+    presentation::{error::ApiError, instance_path::resolve_instance_path},
 };
-
-#[derive(Deserialize)]
-pub struct CreateBody {
-    pub name: String,
-    pub game_version: String,
-    pub loader: ModLoader,
-    pub loader_version: Option<String>,
-    pub port: u16,
-    pub memory: Option<MemorySettings>,
-}
-
-pub(crate) fn record_list_item(r: &InstanceRecord) -> Value {
-    json!({
-        "id": r.id.to_string(), "path": r.path, "name": r.name, "game_version": r.game_version,
-        "loader": r.loader.to_string(), "loader_version": r.loader_version,
-        "port": r.port, "memory": { "min_mb": r.memory.min_mb, "max_mb": r.memory.max_mb },
-        "status": r.status.to_string(), "install_status": r.install_status.to_string(),
-        "installation_id": r.installation_id,
-        "created_at": r.created_at, "updated_at": r.updated_at,
-    })
-}
 
 fn record_detail(r: &InstanceRecord) -> Value {
     json!({
@@ -62,76 +30,6 @@ fn record_detail(r: &InstanceRecord) -> Value {
         "installation_id": r.installation_id,
         "data_dir": r.data_dir, "created_at": r.created_at, "updated_at": r.updated_at,
     })
-}
-
-/// GET /instances — list all instances.
-pub async fn list_instances(
-    AuthUser(claims): AuthUser,
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Value>, ApiError> {
-    let records = state.instance_store.list().await?;
-    let mut instances = Vec::new();
-    for record in records {
-        let instance_id = record.id.to_string();
-        if can_access_instance(&state, &claims.sub, &instance_id, "server:view")
-            .await
-        {
-            instances.push(record_list_item(&record));
-        }
-    }
-    Ok(Json(json!({ "instances": instances })))
-}
-
-/// GET /instances/:id — get a single instance.
-pub async fn get_instance(
-    AuthUser(claims): AuthUser,
-    Path(path): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Value>, ApiError> {
-    let record = resolve_instance_path(&state, &path).await?;
-    let instance_id = record.id.to_string();
-    require_instance_permission(
-        &state,
-        &claims.sub,
-        &instance_id,
-        "server:view",
-    )
-    .await?;
-    Ok(Json(record_detail(&record)))
-}
-
-/// POST /instances — create a new instance (JAR download is async).
-pub async fn create_instance(
-    AuthUser(claims): AuthUser,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<CreateBody>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    if body.name.trim().is_empty() {
-        return Err(ApiError::BadRequest("name cannot be empty".into()));
-    }
-    access_service::require_core_manager(&state, &claims.sub)
-        .await
-        .map_err(|error| ApiError::Forbidden(error.to_string()))?;
-    let req = CreateInstanceRequest {
-        name: body.name,
-        game_version: body.game_version,
-        loader: body.loader,
-        loader_version: body.loader_version,
-        port: body.port,
-        memory: body.memory.unwrap_or_default(),
-    };
-    let id = svc_create_instance(&state, req).await?;
-    let record = state.instance_store.get(&id).await?;
-    activity_service::record(
-        &state,
-        &claims.sub,
-        "instance_created",
-        Some(&id.to_string()),
-        None,
-        Some(json!({ "name": record.name })),
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(record_detail(&record))))
 }
 
 /// PATCH /instances/:id — update mutable instance fields.
@@ -177,21 +75,12 @@ fn normalize_override(value: Option<String>) -> Option<String> {
 }
 
 pub async fn patch_instance(
-    AuthUser(claims): AuthUser,
     Path(path): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchBody>,
 ) -> Result<Json<Value>, ApiError> {
     let mut record = resolve_instance_path(&state, &path).await?;
     let iid = record.id.clone();
-    let instance_id = iid.to_string();
-    require_instance_permission(
-        &state,
-        &claims.sub,
-        &instance_id,
-        "server:settings",
-    )
-    .await?;
 
     if let Some(ref name) = body.name {
         if name.trim().is_empty() {
@@ -241,15 +130,6 @@ pub async fn patch_instance(
     }
 
     record = state.instance_store.get(&iid).await?;
-    activity_service::record(
-        &state,
-        &claims.sub,
-        "instance_updated",
-        Some(&iid.to_string()),
-        None,
-        Some(json!({ "name": record.name })),
-    )
-    .await?;
     state.broadcaster.send(Event::InstanceUpdated {
         instance: record.clone(),
     });
@@ -260,19 +140,10 @@ pub async fn patch_instance(
 /// and effective commands, so the Advanced settings tab can show users exactly
 /// what Core runs and offer a reset baseline.
 pub async fn get_startup(
-    AuthUser(claims): AuthUser,
     Path(path): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let record = resolve_instance_path(&state, &path).await?;
-    let instance_id = record.id.to_string();
-    require_instance_permission(
-        &state,
-        &claims.sub,
-        &instance_id,
-        "server:settings",
-    )
-    .await?;
     let (def_java, def_args) = default_launch_args(&state, &record).await;
     let (eff_java, eff_args) = resolve_launch(&state, &record).await;
     Ok(Json(json!({
@@ -299,37 +170,4 @@ fn quote_if_needed(token: &str) -> String {
     } else {
         token.to_string()
     }
-}
-
-/// DELETE /instances/:id — delete an instance (must be offline).
-pub async fn delete_instance(
-    AuthUser(claims): AuthUser,
-    Path(path): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Value>, ApiError> {
-    let record = resolve_instance_path(&state, &path).await?;
-    let iid = record.id;
-    let instance_id = iid.to_string();
-    require_instance_permission(
-        &state,
-        &claims.sub,
-        &instance_id,
-        "server:settings",
-    )
-    .await?;
-
-    svc_delete_instance(&state, &iid).await?;
-    activity_service::record(
-        &state,
-        &claims.sub,
-        "instance_deleted",
-        Some(&iid.to_string()),
-        None,
-        None,
-    )
-    .await?;
-    state
-        .broadcaster
-        .send(Event::InstanceDeleted { instance_id: iid });
-    Ok(Json(json!({ "ok": true })))
 }

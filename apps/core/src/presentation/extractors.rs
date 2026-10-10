@@ -17,15 +17,8 @@ use crate::{application::state::AppState, presentation::error::ApiError};
 /// How long the backend's answer for an account token is reused.
 const TOKEN_CACHE: Duration = Duration::from_secs(60);
 
-/// The signed-in account making a request.
-#[derive(Clone)]
-pub struct Claims {
-    pub sub: String,
-    pub username: String,
-}
-
 /// Axum extractor that accepts only the Core owner's account token.
-pub struct AuthUser(pub Claims);
+pub struct AuthUser(pub Account);
 
 #[async_trait]
 impl FromRequestParts<Arc<AppState>> for AuthUser {
@@ -53,10 +46,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             ));
         }
 
-        Ok(Self(Claims {
-            sub: account.id,
-            username: account.username,
-        }))
+        Ok(Self(account))
     }
 }
 
@@ -65,6 +55,7 @@ pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     val.strip_prefix("Bearer ")
 }
 
+/// The signed-in account making a request.
 #[derive(Clone, Deserialize)]
 pub struct Account {
     pub id: String,

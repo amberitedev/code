@@ -2,7 +2,6 @@ use std::{
     io::Write,
     path::{Component, Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -11,7 +10,7 @@ use walkdir::WalkDir;
 use zip::write::FileOptions;
 
 use crate::{
-    application::state::{AppState, FsDownloadToken},
+    application::state::AppState,
     domain::event::{Event, FsOperationKind},
     domain::instance::InstanceId,
 };
@@ -30,13 +29,6 @@ pub struct FsListing {
     pub items: Vec<FsEntry>,
     pub total: usize,
     pub current: usize,
-}
-
-/// Response from get_download_url — key is valid for 5 minutes.
-#[derive(Debug, Serialize)]
-pub struct FsDownloadUrlResponse {
-    pub key: String,
-    pub expires_in: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -122,27 +114,6 @@ fn guard_parent_canonical(data_dir: &Path, path: &Path) -> Result<(), FsError> {
     Ok(())
 }
 
-fn guarded_archive_path(
-    base: &Path,
-    entry_name: &str,
-) -> Result<PathBuf, FsError> {
-    let rel = Path::new(entry_name);
-    for component in rel.components() {
-        if matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        ) {
-            return Err(FsError::PathTraversal);
-        }
-    }
-    Ok(base.join(rel))
-}
-
-fn is_zip_symlink(mode: Option<u32>) -> bool {
-    mode.map(|mode| mode & 0o170000 == 0o120000)
-        .unwrap_or(false)
-}
-
 fn emit(
     state: &Arc<AppState>,
     instance_id: &str,
@@ -191,17 +162,6 @@ fn entry_to_json(
         size: if is_dir { None } else { Some(meta.len()) },
         modified_at,
     }
-}
-
-fn validate_filename(filename: &str) -> Result<(), FsError> {
-    if filename.is_empty()
-        || filename.contains("..")
-        || filename.contains('/')
-        || filename.contains('\\')
-    {
-        return Err(FsError::PathTraversal);
-    }
-    Ok(())
 }
 
 fn ensure_no_destination_symlink(path: &Path) -> Result<(), FsError> {
@@ -309,39 +269,6 @@ pub async fn delete_entry(
     Ok(())
 }
 
-pub async fn upload_file(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    target_dir: &str,
-    filename: &str,
-    data: bytes::Bytes,
-) -> Result<(), FsError> {
-    validate_filename(filename)?;
-    let data_dir = instance_data_dir(state, instance_id).await?;
-    let dir = guard_path(&data_dir, target_dir)?;
-    tokio::fs::create_dir_all(&dir).await?;
-    guard_canonical(&data_dir, &dir)?;
-    let dest = dir.join(filename);
-    ensure_no_destination_symlink(&dest)?;
-    tokio::fs::write(&dest, &data).await?;
-    emit(state, instance_id, FsOperationKind::Upload, &dest);
-    Ok(())
-}
-
-pub async fn read_file(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    client_path: &str,
-) -> Result<tokio::fs::File, FsError> {
-    let data_dir = instance_data_dir(state, instance_id).await?;
-    let path = guard_path(&data_dir, client_path)?;
-    let canonical = guard_canonical(&data_dir, &path)?;
-    if canonical.is_dir() {
-        return Err(FsError::NotAFile);
-    }
-    Ok(tokio::fs::File::open(&canonical).await?)
-}
-
 pub async fn write_file(
     state: &Arc<AppState>,
     instance_id: &str,
@@ -354,20 +281,6 @@ pub async fn write_file(
     ensure_no_destination_symlink(&path)?;
     tokio::fs::write(&path, &data).await?;
     emit(state, instance_id, FsOperationKind::Write, &path);
-    Ok(())
-}
-
-pub async fn create_file(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    client_path: &str,
-) -> Result<(), FsError> {
-    let data_dir = instance_data_dir(state, instance_id).await?;
-    let path = guard_path(&data_dir, client_path)?;
-    guard_parent_canonical(&data_dir, &path)?;
-    ensure_no_destination_symlink(&path)?;
-    tokio::fs::File::create(&path).await?;
-    emit(state, instance_id, FsOperationKind::Create, &path);
     Ok(())
 }
 
@@ -406,63 +319,6 @@ pub async fn move_entry(
         },
         &to,
     );
-    Ok(())
-}
-
-/// Unzip an archive into its containing directory.
-/// `option`: "normal" (flat), "smart" (collapse single-root), "to_dir" (named subdir)
-pub async fn unzip_file(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    client_path: &str,
-    option: UnzipOption,
-) -> Result<(), FsError> {
-    let data_dir = instance_data_dir(state, instance_id).await?;
-    let path = guard_path(&data_dir, client_path)?;
-    let canonical = guard_canonical(&data_dir, &path)?;
-    let dest_dir = canonical.parent().unwrap_or(&data_dir).to_path_buf();
-
-    tokio::task::spawn_blocking(move || -> Result<(), FsError> {
-        let file = std::fs::File::open(&canonical)?;
-        let mut archive = zip::ZipArchive::new(file)?;
-
-        let effective_dest = match option {
-            UnzipOption::Normal | UnzipOption::Smart => dest_dir.clone(),
-            UnzipOption::ToDir => {
-                let stem =
-                    canonical.file_stem().unwrap_or_default().to_string_lossy();
-                dest_dir.join(stem.as_ref())
-            }
-        };
-
-        std::fs::create_dir_all(&effective_dest)
-            .map_err(zip::result::ZipError::Io)?;
-
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)?;
-            if is_zip_symlink(entry.unix_mode()) {
-                return Err(FsError::PathTraversal);
-            }
-            let entry_path =
-                guarded_archive_path(&effective_dest, entry.name())?;
-            if !entry_path.starts_with(&effective_dest) {
-                return Err(FsError::PathTraversal);
-            }
-            if entry.is_dir() {
-                std::fs::create_dir_all(&entry_path)?;
-            } else {
-                guard_parent_canonical(&effective_dest, &entry_path)?;
-                ensure_no_destination_symlink(&entry_path)?;
-                let mut out = std::fs::File::create(&entry_path)?;
-                std::io::copy(&mut entry, &mut out)?;
-            }
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| FsError::Io(std::io::Error::other(e.to_string())))??;
-
-    emit(state, instance_id, FsOperationKind::Unzip, &path);
     Ok(())
 }
 
@@ -568,83 +424,4 @@ pub async fn copy_files(
     }
     emit(state, instance_id, FsOperationKind::Copy, &dest_dir);
     Ok(())
-}
-
-/// Issue a one-time download token. Tokens expire after 5 minutes.
-pub async fn get_download_url(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    client_path: &str,
-) -> Result<FsDownloadUrlResponse, FsError> {
-    let data_dir = instance_data_dir(state, instance_id).await?;
-    let path = guard_path(&data_dir, client_path)?;
-    let canonical = guard_canonical(&data_dir, &path)?;
-
-    let key = Uuid::new_v4().to_string();
-    let expires_in: u64 = 300;
-    state.fs_download_tokens.insert(
-        key.clone(),
-        FsDownloadToken {
-            path: canonical,
-            expires_at: Instant::now() + Duration::from_secs(expires_in),
-        },
-    );
-    Ok(FsDownloadUrlResponse { key, expires_in })
-}
-
-/// Search files by name within an instance's directory.
-pub async fn search_files(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    base_path: &str,
-    query: &str,
-    recursive: bool,
-) -> Result<Vec<FsEntry>, FsError> {
-    let data_dir = instance_data_dir(state, instance_id).await?;
-    let base = guard_path(&data_dir, base_path)?;
-    let base = guard_canonical(&data_dir, &base)?;
-    let query_lower = query.to_lowercase();
-
-    let mut results = Vec::new();
-
-    if recursive {
-        for entry in WalkDir::new(&base).into_iter().filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            if name.contains(&query_lower) {
-                if let Ok(meta) = entry.metadata() {
-                    results.push(entry_to_json(
-                        &data_dir,
-                        entry.path(),
-                        meta.is_dir(),
-                        &meta,
-                    ));
-                }
-            }
-        }
-    } else {
-        let mut rd = tokio::fs::read_dir(&base).await?;
-        while let Some(e) = rd.next_entry().await? {
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            if name.contains(&query_lower) {
-                if let Ok(meta) = e.metadata().await {
-                    results.push(entry_to_json(
-                        &data_dir,
-                        &e.path(),
-                        meta.is_dir(),
-                        &meta,
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(results)
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UnzipOption {
-    Normal,
-    Smart,
-    ToDir,
 }

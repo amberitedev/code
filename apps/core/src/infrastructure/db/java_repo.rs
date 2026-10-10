@@ -41,18 +41,4 @@ impl JavaStore for JavaRepo {
         .flatten();
         row.map(|(p,)| PathBuf::from(p))
     }
-
-    async fn list_all(&self) -> Vec<JavaInstall> {
-        let rows: Vec<(i64, String)> =
-            sqlx::query_as("SELECT version, path FROM java_installations ORDER BY version DESC")
-                .fetch_all(&self.pool)
-                .await
-                .unwrap_or_default();
-        rows.into_iter()
-            .map(|(v, p)| JavaInstall {
-                version: v as u32,
-                path: PathBuf::from(p),
-            })
-            .collect()
-    }
 }

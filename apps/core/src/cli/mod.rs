@@ -59,8 +59,6 @@ enum Command {
     Menu,
     /// Emergency instance controls for a running local Core.
     Instance(InstanceArgs),
-    /// Print local access maintenance status.
-    Access(AccessArgs),
     /// Remove locally installed service integration without deleting Core data.
     Uninstall(UninstallArgs),
 }
@@ -144,40 +142,6 @@ pub(crate) enum InstanceCommand {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct AccessArgs {
-    #[command(subcommand)]
-    command: AccessCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum AccessCommand {
-    /// Show local access status.
-    Status,
-    /// List Core group members and their roles.
-    List,
-    /// List Core roles, including retired roles.
-    Roles,
-    /// List pending and historical Core invitations.
-    Invitations,
-    /// Approve or reject a pending Core invitation.
-    ReviewInvitation {
-        id: String,
-        #[arg(long, conflicts_with = "reject")]
-        approve: bool,
-        #[arg(long, conflicts_with = "approve")]
-        reject: bool,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Remove a non-owner group member.
-    Remove {
-        user_id: String,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-}
-
-#[derive(Debug, Args)]
 pub(crate) struct UninstallArgs {
     /// Also remove the Core data directory. This is irreversible.
     #[arg(long)]
@@ -209,9 +173,6 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
         Command::Instance(args) => {
             interactive::instance(args.command, cli.format).await
         }
-        Command::Access(args) => {
-            interactive::access(args.command, cli.format).await
-        }
         Command::Uninstall(args) => install::uninstall(args).await,
     }
 }
@@ -242,7 +203,9 @@ async fn check() -> Result<()> {
     println!("Database: OK ({})", db_path.display());
     println!(
         "Owner   : {}",
-        owner.as_deref().unwrap_or("none, the first account to connect")
+        owner
+            .as_deref()
+            .unwrap_or("none, the first account to connect")
     );
     Ok(())
 }

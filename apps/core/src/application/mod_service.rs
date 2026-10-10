@@ -25,13 +25,6 @@ pub struct ModInfo {
     pub update_available: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct UpdateAllResult {
-    pub updated: Vec<String>,
-    pub already_latest: Vec<String>,
-    pub failed: Vec<serde_json::Value>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ModError {
     #[error("io: {0}")]
@@ -175,24 +168,6 @@ pub async fn add_mod_project(
     super::mod_installer::add_mod_project(state, instance_id, project_id).await
 }
 
-pub async fn upload_mod(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    filename: &str,
-    data: bytes::Bytes,
-) -> Result<String, ModError> {
-    sanitize_filename(filename)?;
-    let (data_dir, _, _) = instance_info(state, instance_id).await?;
-    let mods_dir = data_dir.join("mods");
-    tokio::fs::create_dir_all(&mods_dir).await?;
-    tokio::fs::write(mods_dir.join(filename), &data).await?;
-    let sha512 = hex::encode(sha2::Sha512::digest(&data));
-    sqlx::query("INSERT OR REPLACE INTO mods (id,instance_id,filename,sha512,enabled,installed_at) VALUES (?,?,?,?,1,?)")
-        .bind(Uuid::new_v4().to_string()).bind(instance_id).bind(filename)
-        .bind(sha512).bind(chrono::Utc::now().to_rfc3339()).execute(&state.pool).await?;
-    Ok(filename.to_string())
-}
-
 pub async fn delete_mod(
     state: &Arc<AppState>,
     instance_id: &str,
@@ -265,15 +240,6 @@ pub async fn toggle_mod(
     Ok(())
 }
 
-/// M6: update a single mod; returns true if updated, false if already latest.
-pub async fn update_mod(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    filename: &str,
-) -> Result<bool, ModError> {
-    update_mod_version(state, instance_id, filename, None).await
-}
-
 /// Update to a selected compatible version, or the latest when no version is selected.
 pub async fn update_mod_version(
     state: &Arc<AppState>,
@@ -335,28 +301,4 @@ pub async fn update_mod_version(
         .bind(&file.filename).bind(&latest.id).bind(&latest.version_number)
         .bind(&sha512).bind(instance_id).bind(filename).execute(&state.pool).await?;
     Ok(true)
-}
-
-pub async fn update_all_mods(
-    state: &Arc<AppState>,
-    instance_id: &str,
-) -> Result<UpdateAllResult, ModError> {
-    let filenames: Vec<String> = sqlx::query_scalar(
-        "SELECT filename FROM mods WHERE instance_id=? AND modrinth_version_id IS NOT NULL AND modrinth_version_id != ''"
-    ).bind(instance_id).fetch_all(&state.pool).await?;
-    let mut res = UpdateAllResult {
-        updated: vec![],
-        already_latest: vec![],
-        failed: vec![],
-    };
-    for fname in filenames {
-        match update_mod(state, instance_id, &fname).await {
-            Ok(true) => res.updated.push(fname),
-            Ok(false) => res.already_latest.push(fname),
-            Err(e) => res.failed.push(
-                serde_json::json!({"filename": fname, "error": e.to_string()}),
-            ),
-        }
-    }
-    Ok(res)
 }

@@ -11,25 +11,15 @@ use crate::{
     infrastructure::minecraft::server_properties::{
         patch_properties, read_properties,
     },
-    presentation::{
-        error::ApiError, extractors::AuthUser,
-        instance_path::resolve_authorized_instance_id,
-    },
+    presentation::{error::ApiError, instance_path::resolve_instance_id},
 };
 
 /// GET /instances/:id/properties
 pub async fn get_properties_handler(
-    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = resolve_authorized_instance_id(
-        &state,
-        &claims.sub,
-        &id,
-        "server:settings",
-    )
-    .await?;
+    let iid = resolve_instance_id(&state, &id).await?;
     let data_dir = fetch_data_dir(&state, &iid).await?;
     let props = read_properties(&data_dir)
         .await
@@ -39,18 +29,11 @@ pub async fn get_properties_handler(
 
 /// PATCH /instances/:id/properties — update specific keys in-place.
 pub async fn patch_properties_handler(
-    AuthUser(claims): AuthUser,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
-    let iid = resolve_authorized_instance_id(
-        &state,
-        &claims.sub,
-        &id,
-        "server:settings",
-    )
-    .await?;
+    let iid = resolve_instance_id(&state, &id).await?;
     let data_dir = fetch_data_dir(&state, &iid).await?;
     let body = normalize_properties(body);
     if let Some(port) = body.get("server-port") {

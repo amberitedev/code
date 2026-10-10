@@ -5,13 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     application::{
-        access_service,
         instance_service::repair_instance,
         instance_status_service::{
             kill_instance, restart_instance, send_command, start_instance,
             stop_instance,
         },
-        invite_service,
         state::AppState,
     },
     domain::instance::{InstanceId, InstanceRecord},
@@ -29,36 +27,6 @@ pub(crate) enum Request {
     RepairInstance { id: String },
     SendConsoleCommand { id: String, command: String },
     AttachConsole { id: String },
-    ListMembers,
-    RemoveMember { user_id: String },
-    ListRoles,
-    ListInvitations,
-    ReviewInvitation { id: String, accept: bool },
-}
-
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub(crate) struct MemberInfo {
-    pub(crate) user_id: String,
-    pub(crate) display_name: Option<String>,
-    pub(crate) role: String,
-    pub(crate) status: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub(crate) struct RoleInfo {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) retired_at: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub(crate) struct InvitationInfo {
-    pub(crate) id: String,
-    pub(crate) invitee_user_id: String,
-    pub(crate) invitee_display_name: Option<String>,
-    pub(crate) status: String,
-    pub(crate) expires_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,15 +38,6 @@ pub(crate) enum Response {
     },
     Instances {
         instances: Vec<InstanceRecord>,
-    },
-    Members {
-        members: Vec<MemberInfo>,
-    },
-    Roles {
-        roles: Vec<RoleInfo>,
-    },
-    Invitations {
-        invitations: Vec<InvitationInfo>,
     },
     Ok,
     Error {
@@ -117,35 +76,24 @@ pub(crate) async fn dispatch(
             restart_instance(state, &id).await?;
             Ok(Response::Ok)
         }
-		Request::KillInstance { id } => {
-			let id = id.parse::<InstanceId>()?;
-			kill_instance(state, &id).await?;
-			Ok(Response::Ok)
-		}
-		Request::RepairInstance { id } => {
-			let id = id.parse::<InstanceId>()?;
-			repair_instance(state, &id).await?;
-			Ok(Response::Ok)
-		}
+        Request::KillInstance { id } => {
+            let id = id.parse::<InstanceId>()?;
+            kill_instance(state, &id).await?;
+            Ok(Response::Ok)
+        }
+        Request::RepairInstance { id } => {
+            let id = id.parse::<InstanceId>()?;
+            repair_instance(state, &id).await?;
+            Ok(Response::Ok)
+        }
         Request::SendConsoleCommand { id, command } => {
             let id = id.parse::<InstanceId>()?;
             send_command(state, &id, command).await?;
             Ok(Response::Ok)
         }
-        Request::AttachConsole { .. } => bail!("Console attachments are streaming requests."),
-		Request::ListMembers => Ok(Response::Members { members: sqlx::query_as("SELECT user_id, display_name, role, status FROM core_members ORDER BY role, display_name, user_id").fetch_all(&state.pool).await? }),
-		Request::RemoveMember { user_id } => {
-			let owner = state.owner_user_id().await.ok_or_else(|| color_eyre::eyre::eyre!("Core has no configured owner."))?;
-			access_service::remove_core_access(state, &owner, &user_id).await?;
-			Ok(Response::Ok)
-		}
-		Request::ListRoles => Ok(Response::Roles { roles: sqlx::query_as("SELECT id, name, description, retired_at FROM core_roles ORDER BY created_at").fetch_all(&state.pool).await? }),
-		Request::ListInvitations => Ok(Response::Invitations { invitations: sqlx::query_as("SELECT id, invitee_user_id, invitee_display_name, status, expires_at FROM core_invitations ORDER BY created_at DESC").fetch_all(&state.pool).await? }),
-		Request::ReviewInvitation { id, accept } => {
-			let owner = state.owner_user_id().await.ok_or_else(|| color_eyre::eyre::eyre!("Core has no configured owner."))?;
-			invite_service::review(state, &owner, &id, accept).await?;
-			Ok(Response::Ok)
-		}
+        Request::AttachConsole { .. } => {
+            bail!("Console attachments are streaming requests.")
+        }
     }
 }
 

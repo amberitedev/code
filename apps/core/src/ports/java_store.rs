@@ -12,7 +12,4 @@ pub trait JavaStore: Send + Sync + 'static {
 
     /// Find a Java binary path by major version number.
     async fn find_by_version(&self, version: u32) -> Option<PathBuf>;
-
-    /// List all known Java installations.
-    async fn list_all(&self) -> Vec<JavaInstall>;
 }

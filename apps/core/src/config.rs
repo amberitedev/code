@@ -23,24 +23,11 @@ pub struct Config {
     pub allowed_origin: String,
     /// Debug build: relaxes CORS for local development.
     pub dev_mode: bool,
-    /// Number of sync snapshot archives retained per profile.
-    pub sync_retain_count: usize,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
         load_environment_profile()?;
-        let sync_retain_count: usize =
-            required_env("AMBERITE_SYNC_RETAIN_COUNT")?
-                .parse()
-                .wrap_err(
-                "AMBERITE_SYNC_RETAIN_COUNT must be a positive whole number",
-            )?;
-        if sync_retain_count == 0 {
-            return Err(eyre!(
-                "AMBERITE_SYNC_RETAIN_COUNT must be a positive whole number"
-            ));
-        }
         let dev_mode = cfg!(debug_assertions);
         Ok(Self {
             data_dir: PathBuf::from(required_env("CORE_DATA_DIR")?),
@@ -62,7 +49,6 @@ impl Config {
             bind_host: required_env("AMBERITE_BIND_HOST")?,
             allowed_origin: required_env("ALLOWED_ORIGIN")?,
             dev_mode,
-            sync_retain_count,
         })
     }
 }
