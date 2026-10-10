@@ -98,6 +98,8 @@ server-only additions (mods and datapacks).
 - Accounts work like Modrinth's, served by the backend.
 - Core gets basic authentication against that same account system now. The hosting API must work
   with authentication on; today it only mounts in dev with authentication off.
+- For now, the first account to connect to a fresh Core becomes its owner. This is temporary
+  until pairing exists.
 - Pairing is later. The intent: a Core is linked to an account directly, and several Cores under
   one account are managed as one.
 
@@ -119,8 +121,8 @@ server-only additions (mods and datapacks).
 - Remove Core's second API (`/instances`, `/sync`, `/core`, and the rest) and `CoreApiClient`.
 - Remove Core's legacy sync profiles.
 - Remove `apps/realtime`. Presence is in the backend.
-- Ignore the website (`apps/frontend`). It will be reverted to upstream. The local account login
-  page it currently provides needs a replacement before that.
+- Reset the website (`apps/frontend`) to upstream Modrinth. It is only used as the local sign-in
+  page, pointed at our backend.
 
 ## Open questions
 
