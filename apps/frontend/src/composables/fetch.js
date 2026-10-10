@@ -3,8 +3,6 @@
  * This composable is kept for legacy code that hasn't been migrated yet.
  */
 
-import { routeSelfHostedRequest } from '@modrinth/api-client'
-
 import { useVisitorUserAgent } from '~/composables/visitor-user-agent.ts'
 import { withLabrinthCanaryHeader } from '~/helpers/canary.ts'
 import { readEnv } from '~/helpers/env.ts'
@@ -67,24 +65,7 @@ export const useBaseFetch = async (url, options = {}, skipAuth = false) => {
 		delete options.apiVersion
 	}
 
-	const request = {
-		url: `${base}${url}`,
-		path: `/${url}`,
-		options: {
-			api: 'labrinth',
-			version: options.internal ? 'internal' : 2,
-			headers: options.headers,
-			skipAuth,
-		},
-	}
-	if (config.public.accountApiUrl) {
-		await routeSelfHostedRequest(request, {
-			baseUrl: config.public.accountApiUrl,
-			token: async () => undefined,
-		})
-		options.headers = request.options.headers
-	}
-	return await $fetch(request.url, {
+	return await $fetch(`${base}${url}`, {
 		timeout: import.meta.server ? 10000 : undefined,
 		...options,
 	})

@@ -168,7 +168,6 @@ export function createRuntimeEnvironment(input: {
 	env.ACCOUNT_API_URL = `http://127.0.0.1:${input.ports.backend}`
 	env.VITE_ACCOUNT_API_URL = env.ACCOUNT_API_URL
 	env.ACCOUNT_WEB_URL = `http://127.0.0.1:${input.ports.accountWeb}`
-	env.NUXT_PUBLIC_ACCOUNT_API_URL = env.ACCOUNT_API_URL
 	return {
 		...env,
 		AMBERITE_DATA_DIR: input.paths.data,
@@ -577,7 +576,13 @@ export function createProcessSpecs(input: {
 				String(input.ports.accountWeb),
 			],
 			cwd: NodePath.join(input.paths.worktree, 'apps', 'frontend'),
-			env: { ...input.env, SITE_URL: input.env.ACCOUNT_WEB_URL },
+			// The website is upstream Modrinth; these are its own settings for which API to call.
+			env: {
+				...input.env,
+				BASE_URL: `${backendUrl}/v2/`,
+				BROWSER_BASE_URL: `${backendUrl}/v2/`,
+				PORT: String(input.ports.accountWeb),
+			},
 			label: 'account-web',
 		},
 		'app-frontend': {

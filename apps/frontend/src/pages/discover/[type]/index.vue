@@ -37,6 +37,7 @@ import { computed, ref, watch } from 'vue'
 import type { LocationQueryRaw } from 'vue-router'
 
 import LogoAnimated from '~/components/brand/LogoAnimated.vue'
+import AdPlaceholder from '~/components/ui/AdPlaceholder.vue'
 import { projectQueryOptions, warmProjectCheckCaches } from '~/composables/queries/project'
 import { versionQueryOptions } from '~/composables/queries/version'
 import type {
@@ -641,7 +642,9 @@ const { isStuck: isInstallHeaderStuck } = useStickyObserver(
 			:aria-label="formatMessage(commonMessages.filtersLabel)"
 		>
 			<BrowseSidebar>
-				<template #prepend> </template>
+				<template #prepend>
+					<AdPlaceholder v-if="!auth.user && !serverData" />
+				</template>
 			</BrowseSidebar>
 		</aside>
 	</div>
