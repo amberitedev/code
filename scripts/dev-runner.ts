@@ -16,8 +16,6 @@ const BASE_PORTS = {
 	accountWeb: 3100,
 	storageA: 17800,
 	storageB: 17801,
-	convexCloud: 3210,
-	convexSite: 3211,
 	core: 16662,
 } as const
 const MAX_HASH_OFFSET = 3000
@@ -33,24 +31,20 @@ const FETCH_BAD_PORTS = new Set([
 	6669, 6679, 6697, 10080,
 ])
 
-export const DEV_MODES = ['dev', 'dev:app', 'dev:backend', 'dev:core', 'dev:convex'] as const
+export const DEV_MODES = ['dev', 'dev:app', 'dev:backend', 'dev:core'] as const
 export type DevMode = (typeof DEV_MODES)[number]
-export type ConvexMode = 'cloud' | 'local'
 export type DevPorts = {
 	readonly app: number
 	readonly backend: number
 	readonly accountWeb: number
 	readonly storageA: number
 	readonly storageB: number
-	readonly convexCloud: number
-	readonly convexSite: number
 	readonly core: number
 }
 
 type PortName = keyof DevPorts
 type PortAvailabilityCheck = (port: number, hosts: ReadonlyArray<string>) => Promise<boolean>
 export type WorktreePaths = {
-	readonly convexData: string
 	readonly coreData: string
 	readonly data: string
 	readonly primary: string
@@ -100,8 +94,6 @@ export function portsForOffset(offset: number): DevPorts {
 		accountWeb: BASE_PORTS.accountWeb + offset,
 		storageA: BASE_PORTS.storageA + offset,
 		storageB: BASE_PORTS.storageB + offset,
-		convexCloud: BASE_PORTS.convexCloud + offset,
-		convexSite: BASE_PORTS.convexSite + offset,
 		core: BASE_PORTS.core + offset,
 	}
 }
@@ -145,11 +137,10 @@ export function resolveStartOffset(input: {
 
 export async function findFirstAvailableOffset(input: {
 	readonly checkPort?: PortAvailabilityCheck
-	readonly convexMode?: ConvexMode
 	readonly mode: DevMode
 	readonly startOffset: number
 }): Promise<number> {
-	const requiredPorts = requiredPortNames(input.mode, input.convexMode ?? 'local')
+	const requiredPorts = requiredPortNames(input.mode)
 	const checkPort = input.checkPort ?? portIsAvailable
 
 	for (let offset = input.startOffset; offset <= MAX_PORT; offset += 1) {
@@ -168,8 +159,6 @@ export async function findFirstAvailableOffset(input: {
 
 export function createRuntimeEnvironment(input: {
 	readonly baseEnv: NodeJS.ProcessEnv
-	readonly convexMode: ConvexMode
-	readonly localDeployment?: string
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
 }): NodeJS.ProcessEnv {
@@ -180,41 +169,11 @@ export function createRuntimeEnvironment(input: {
 	env.VITE_ACCOUNT_API_URL = env.ACCOUNT_API_URL
 	env.ACCOUNT_WEB_URL = `http://127.0.0.1:${input.ports.accountWeb}`
 	env.NUXT_PUBLIC_ACCOUNT_API_URL = env.ACCOUNT_API_URL
-
-	if (input.convexMode === 'local') {
-		delete env.CONVEX_SELF_HOSTED_ADMIN_KEY
-		delete env.CONVEX_SELF_HOSTED_URL
-
-		const localDeployment = input.localDeployment ?? readLocalConvexDeployment(input.paths)
-		const convexUrl = `http://127.0.0.1:${input.ports.convexCloud}`
-		const convexSiteUrl = `http://127.0.0.1:${input.ports.convexSite}`
-		return {
-			...env,
-			AMBERITE_DATA_DIR: input.paths.data,
-			AMBERITE_DEV_MODE: 'true',
-			AMBERITE_LOCAL_CORE_DATA_DIR: input.paths.coreData,
-			CONVEX_DEPLOYMENT: `local:${localDeployment}`,
-			CONVEX_SITE_URL: convexSiteUrl,
-			CONVEX_URL: convexUrl,
-			VITE_CONVEX_SITE_URL: convexSiteUrl,
-			VITE_CONVEX_URL: convexUrl,
-			VITE_CORE_URL: `http://127.0.0.1:${input.ports.core}`,
-		}
-	}
-
-	const convexDeployment = requireCloudDevDeployment(env)
-	const convexUrl = requireEnvironmentValue(env, 'CONVEX_URL')
-	const convexSiteUrl = requireEnvironmentValue(env, 'CONVEX_SITE_URL')
 	return {
 		...env,
 		AMBERITE_DATA_DIR: input.paths.data,
 		AMBERITE_DEV_MODE: 'true',
 		AMBERITE_LOCAL_CORE_DATA_DIR: input.paths.coreData,
-		CONVEX_DEPLOYMENT: convexDeployment,
-		CONVEX_SITE_URL: convexSiteUrl,
-		CONVEX_URL: convexUrl,
-		VITE_CONVEX_SITE_URL: convexSiteUrl,
-		VITE_CONVEX_URL: convexUrl,
 		VITE_CORE_URL: `http://127.0.0.1:${input.ports.core}`,
 	}
 }
@@ -229,8 +188,6 @@ export function processLabelsForMode(mode: DevMode): ReadonlyArray<string> {
 			return ['app-frontend']
 		case 'dev:core':
 			return ['core']
-		case 'dev:convex':
-			return ['convex']
 	}
 }
 
@@ -240,8 +197,6 @@ async function main(): Promise<void> {
 		process.argv.slice(2),
 		readDefaultScenarios(NodePath.join(paths.worktree, 'dev.json')),
 	)
-	const convexMode =
-		input.mode === 'dev:convex' || input.mode === 'dev:core' ? resolveConvexMode(paths) : 'local'
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.AMBERITE_DEV_INSTANCE,
 		explicitOffset: process.env.AMBERITE_PORT_OFFSET,
@@ -249,7 +204,6 @@ async function main(): Promise<void> {
 		worktreePath: paths.worktree,
 	})
 	const selectedOffset = await findFirstAvailableOffset({
-		convexMode,
 		mode: input.mode,
 		startOffset,
 	})
@@ -263,15 +217,7 @@ async function main(): Promise<void> {
 		...readEnv(NodePath.join(paths.worktree, '.env.local')),
 		...process.env,
 	}
-	const env = createRuntimeEnvironment({
-		baseEnv: sharedEnv,
-		convexMode,
-		paths,
-		ports,
-		...(input.mode !== 'dev:convex' && input.mode !== 'dev:core'
-			? { localDeployment: 'unused' }
-			: {}),
-	})
+	const env = createRuntimeEnvironment({ baseEnv: sharedEnv, paths, ports })
 	if (!input.dryRun) {
 		const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
 		NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
@@ -284,7 +230,6 @@ async function main(): Promise<void> {
 	}
 	const specs = createProcessSpecs({
 		branch,
-		convexMode,
 		env,
 		mode: input.mode,
 		paths,
@@ -293,8 +238,6 @@ async function main(): Promise<void> {
 	})
 	printPlan({
 		branch,
-		convexMode,
-		env,
 		mode: input.mode,
 		paths,
 		ports,
@@ -305,20 +248,14 @@ async function main(): Promise<void> {
 	if (input.dryRun) return
 
 	ensureDataLayout(paths, input.scenarios)
-	if (input.mode === 'dev:convex' && convexMode === 'local') ensureConvexDataLink(paths)
 	writeRuntimeFile({
 		branch,
-		convexMode,
-		env,
 		mode: input.mode,
 		paths,
 		ports,
 		scenarios: input.scenarios,
 		source,
 	})
-	if (convexMode === 'cloud' && processLabelsForMode(input.mode).includes('convex')) {
-		runnerLog('info', 'Pushing Convex changes...')
-	}
 	const specsByLabel = new Map(specs.map((spec) => [spec.label, spec]))
 	const processes = new Map<string, RunningProcess>()
 	const restartFailures = new Map<string, number[]>()
@@ -466,23 +403,10 @@ async function main(): Promise<void> {
 				for (const spec of storageSpecs) start(spec)
 			}
 		}
-		if (convexMode === 'local' && processLabelsForMode(input.mode).includes('convex')) {
-			await prepareConvex({
-				env,
-				paths,
-				ports,
-				processes: [...processes.values()],
-				scenarios: input.scenarios,
-			})
-		}
 		await finished
 	} finally {
 		await stop(process.exitCode || 1)
 	}
-}
-
-export function resolveConvexMode(paths: Pick<WorktreePaths, 'primary' | 'worktree'>): ConvexMode {
-	return samePath(paths.primary, paths.worktree) ? 'cloud' : 'local'
 }
 
 export function parseInput(
@@ -545,7 +469,6 @@ function resolveWorktreePaths(): WorktreePaths {
 	const data = NodePath.join(worktree, '.data')
 
 	return {
-		convexData: NodePath.join(data, 'convex'),
 		coreData: NodePath.join(data, 'core'),
 		data,
 		primary: NodePath.resolve(primary),
@@ -563,35 +486,8 @@ function ensureDataLayout(paths: WorktreePaths, scenarios: ReadonlyArray<number>
 	}
 }
 
-function ensureConvexDataLink(paths: WorktreePaths): void {
-	const linkPath = NodePath.join(paths.worktree, '.convex')
-	if (NodeFS.existsSync(linkPath)) {
-		const stat = NodeFS.lstatSync(linkPath)
-		if (stat.isSymbolicLink()) {
-			const actual = NodeFS.realpathSync(linkPath)
-			NodeFS.mkdirSync(paths.convexData, { recursive: true })
-			if (!samePath(actual, NodeFS.realpathSync(paths.convexData))) {
-				throw new DevRunnerError(`.convex points to ${actual}, not ${paths.convexData}.`)
-			}
-			return
-		}
-
-		if (NodeFS.existsSync(paths.convexData)) {
-			throw new DevRunnerError(
-				'Both .convex and .data/convex exist. Move the wanted state into .data/convex before starting development.',
-			)
-		}
-		NodeFS.renameSync(linkPath, paths.convexData)
-	} else {
-		NodeFS.mkdirSync(paths.convexData, { recursive: true })
-	}
-
-	NodeFS.symlinkSync(paths.convexData, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
-}
-
 export function createProcessSpecs(input: {
 	readonly branch: string
-	readonly convexMode: ConvexMode
 	readonly env: NodeJS.ProcessEnv
 	readonly mode: DevMode
 	readonly paths: WorktreePaths
@@ -599,8 +495,6 @@ export function createProcessSpecs(input: {
 	readonly scenarios: ReadonlyArray<number>
 }): ReadonlyArray<ProcessSpec> {
 	const labels = processLabelsForMode(input.mode)
-	const convexUrl = requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')
-	const convexSiteUrl = requireEnvironmentValue(input.env, 'VITE_CONVEX_SITE_URL')
 	const tauri = JSON.parse(
 		NodeFS.readFileSync(
 			NodePath.join(input.paths.worktree, 'apps', 'app', 'tauri.conf.json'),
@@ -615,8 +509,6 @@ export function createProcessSpecs(input: {
 		}
 	}
 	const connectSrc = tauri.app.security.csp['connect-src']
-	const convexOrigin = new URL(convexUrl).origin
-	const convexSiteOrigin = new URL(convexSiteUrl).origin
 	const backendUrl = `http://127.0.0.1:${input.ports.backend}`
 	const coreUrl = `http://127.0.0.1:${input.ports.core}`
 	const tauriOverride = {
@@ -637,7 +529,7 @@ export function createProcessSpecs(input: {
 				],
 				csp: {
 					'img-src': `${tauri.app.security.csp['img-src']} ${backendUrl}`,
-					'connect-src': `${connectSrc} http://localhost:${input.ports.app} ws://localhost:${input.ports.app} ${convexOrigin} ${convexOrigin.replace('http', 'ws')} ${convexSiteOrigin} ${backendUrl} ${backendUrl.replace('http', 'ws')} ${coreUrl} ${coreUrl.replace('http', 'ws')}`,
+					'connect-src': `${connectSrc} http://localhost:${input.ports.app} ws://localhost:${input.ports.app} ${backendUrl} ${backendUrl.replace('http', 'ws')} ${coreUrl} ${coreUrl.replace('http', 'ws')}`,
 				},
 			},
 		},
@@ -694,25 +586,6 @@ export function createProcessSpecs(input: {
 			env: input.env,
 			label: 'app-frontend',
 		},
-		convex: {
-			args:
-				input.convexMode === 'cloud'
-					? ['exec', 'convex', 'dev', '--tail-logs', 'disable']
-					: [
-							'exec',
-							'convex',
-							'dev',
-							'--tail-logs',
-							'disable',
-							'--local-cloud-port',
-							String(input.ports.convexCloud),
-							'--local-site-port',
-							String(input.ports.convexSite),
-						],
-			cwd: input.paths.worktree,
-			env: input.env,
-			label: 'convex',
-		},
 		core: {
 			args: ['run', '--filter', '@amberite/core', 'dev'],
 			cwd: input.paths.worktree,
@@ -749,8 +622,6 @@ export function createProcessSpecs(input: {
 			createAppProcessSpec({
 				branch: input.branch,
 				coreUrl: `http://127.0.0.1:${input.ports.core}`,
-				convexSiteUrl,
-				convexUrl,
 				backendUrl,
 				env: input.env,
 				paths: input.paths,
@@ -765,8 +636,6 @@ function createAppProcessSpec(input: {
 	readonly backendUrl: string
 	readonly branch: string
 	readonly coreUrl: string
-	readonly convexSiteUrl: string
-	readonly convexUrl: string
 	readonly env: NodeJS.ProcessEnv
 	readonly paths: WorktreePaths
 	readonly scenario: number
@@ -779,8 +648,6 @@ function createAppProcessSpec(input: {
 		authMode: 'dev',
 		branch: input.branch,
 		coreUrl: input.coreUrl,
-		convexSiteUrl: input.convexSiteUrl,
-		convexUrl: input.convexUrl,
 		credentialNamespace: namespace,
 		dataDir,
 		title: `Modrinth ${input.scenario} - ${input.branch}`,
@@ -867,159 +734,6 @@ async function stopProcess(running: RunningProcess): Promise<void> {
 	} catch {
 		running.child.kill('SIGTERM')
 	}
-}
-
-async function prepareConvex(input: {
-	readonly env: NodeJS.ProcessEnv
-	readonly paths: WorktreePaths
-	readonly ports: DevPorts
-	readonly processes: ReadonlyArray<RunningProcess>
-	readonly scenarios: ReadonlyArray<number>
-}): Promise<void> {
-	const convexProcess = input.processes.find((process) => process.label === 'convex')
-	if (!convexProcess) return
-
-	await waitForUrl(`http://127.0.0.1:${input.ports.convexCloud}`, convexProcess)
-	ensureConvexDevMode(input.paths.worktree, input.env)
-	ensureConvexAuthKeys(input.paths.worktree, input.env)
-	await ensureConvexScenarios(input.paths.worktree, input.env, input.scenarios)
-}
-
-function ensureConvexDevMode(worktree: string, env: NodeJS.ProcessEnv): void {
-	const result = runVp(
-		worktree,
-		['exec', 'convex', 'env', 'get', 'AMBERITE_DEV_MODE', '--deployment', 'local'],
-		env,
-	)
-	if (result.status === 0 && result.stdout.trim() === 'true') return
-	runVpOrThrow(
-		worktree,
-		['exec', 'convex', 'env', 'set', 'AMBERITE_DEV_MODE', 'true', '--deployment', 'local'],
-		env,
-	)
-}
-
-async function ensureConvexScenarios(
-	worktree: string,
-	env: NodeJS.ProcessEnv,
-	scenarios: ReadonlyArray<number>,
-): Promise<void> {
-	if (scenarios.length === 0) return
-	const args = [
-		'exec',
-		'convex',
-		'run',
-		'dev:ensureScenarios',
-		JSON.stringify({ scenarios }),
-		'--deployment',
-		'local',
-	]
-	const deadline = Date.now() + 60_000
-	let failure = ''
-	while (Date.now() < deadline) {
-		const result = runVp(worktree, args, env)
-		if (result.status === 0) return
-		failure = result.stderr.trim() || result.stdout.trim()
-		await new Promise((resolve) => setTimeout(resolve, 250))
-	}
-	throw new DevRunnerError(failure || 'Convex dev scenarios could not be prepared.')
-}
-
-function ensureConvexAuthKeys(worktree: string, env: NodeJS.ProcessEnv): void {
-	const privateResult = runVp(
-		worktree,
-		['exec', 'convex', 'env', 'get', 'JWT_PRIVATE_KEY', '--deployment', 'local'],
-		env,
-	)
-	const jwksResult = runVp(
-		worktree,
-		['exec', 'convex', 'env', 'get', 'JWKS', '--deployment', 'local'],
-		env,
-	)
-	if (
-		privateResult.status === 0 &&
-		jwksResult.status === 0 &&
-		keysMatch(privateResult.stdout, jwksResult.stdout)
-	)
-		return
-
-	const { privateKey, publicKey } = NodeCrypto.generateKeyPairSync('rsa', { modulusLength: 2048 })
-	const privatePem = privateKey
-		.export({ type: 'pkcs8', format: 'pem' })
-		.trimEnd()
-		.replace(/\n/g, ' ')
-	const jwks = JSON.stringify({ keys: [{ use: 'sig', ...publicKey.export({ format: 'jwk' }) }] })
-	runVpOrThrow(
-		worktree,
-		['exec', 'convex', 'env', 'set', 'JWT_PRIVATE_KEY', privatePem, '--deployment', 'local'],
-		env,
-	)
-	runVpOrThrow(
-		worktree,
-		['exec', 'convex', 'env', 'set', 'JWKS', jwks, '--deployment', 'local'],
-		env,
-	)
-}
-
-function keysMatch(privateValue: string, jwksValue: string): boolean {
-	try {
-		const match = privateValue.match(
-			/-----BEGIN PRIVATE KEY-----([\s\S]+?)-----END PRIVATE KEY-----/,
-		)
-		if (!match) return false
-		const body = match[1]
-			.replace(/\s/g, '')
-			.match(/.{1,64}/g)
-			?.join('\n')
-		if (!body) return false
-		const expected = NodeCrypto.createPublicKey(
-			NodeCrypto.createPrivateKey(
-				`-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`,
-			),
-		).export({ format: 'jwk' })
-		const parsed = JSON.parse(jwksValue) as {
-			readonly keys?: ReadonlyArray<Record<string, unknown>>
-		}
-		return (
-			parsed.keys?.some(
-				(key) => key.kty === 'RSA' && key.n === expected.n && key.e === expected.e,
-			) ?? false
-		)
-	} catch {
-		return false
-	}
-}
-
-function runVp(worktree: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv) {
-	return NodeChildProcess.spawnSync(process.execPath, [resolveVpPath(worktree), ...args], {
-		cwd: worktree,
-		encoding: 'utf8',
-		env,
-		windowsHide: true,
-	})
-}
-
-function runVpOrThrow(worktree: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv): void {
-	const result = runVp(worktree, args, env)
-	if (result.status === 0) return
-	throw new DevRunnerError(
-		result.stderr.trim() || result.stdout.trim() || 'A Vite+ command failed.',
-	)
-}
-
-async function waitForUrl(url: string, running: RunningProcess): Promise<void> {
-	const deadline = Date.now() + 60_000
-	while (Date.now() < deadline) {
-		if (running.child.exitCode !== null) {
-			throw new DevRunnerError('Convex exited before its local backend became ready.')
-		}
-		try {
-			const response = await fetch(url)
-			if (response.status < 500) return
-		} catch {}
-		await new Promise((resolve) => setTimeout(resolve, 250))
-	}
-	throw new DevRunnerError(`Convex did not become ready at ${url} within 60 seconds.`)
 }
 
 function pipeOutput(
@@ -1153,7 +867,7 @@ function canListen(port: number, host: string): Promise<boolean> {
 	})
 }
 
-function requiredPortNames(mode: DevMode, convexMode: ConvexMode): ReadonlyArray<PortName> {
+function requiredPortNames(mode: DevMode): ReadonlyArray<PortName> {
 	switch (mode) {
 		case 'dev':
 			return ['app', 'backend', 'accountWeb', 'storageA', 'storageB', 'core']
@@ -1163,8 +877,6 @@ function requiredPortNames(mode: DevMode, convexMode: ConvexMode): ReadonlyArray
 			return ['app']
 		case 'dev:core':
 			return ['core']
-		case 'dev:convex':
-			return convexMode === 'local' ? ['convexCloud', 'convexSite'] : []
 	}
 }
 
@@ -1199,50 +911,6 @@ function readEnv(path: string): NodeJS.ProcessEnv {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function requireEnvironmentValue(env: NodeJS.ProcessEnv, name: string): string {
-	const value = env[name]?.trim()
-	if (value) return value
-	throw new DevRunnerError(
-		`${name} is required because the primary checkout uses the cloud Convex development deployment.`,
-	)
-}
-
-function requireCloudDevDeployment(env: NodeJS.ProcessEnv): string {
-	const deployment = requireEnvironmentValue(env, 'CONVEX_DEPLOYMENT')
-	if (deployment.startsWith('dev:')) return deployment
-	throw new DevRunnerError(
-		`The primary checkout requires a cloud Convex development deployment; received ${deployment.split(':', 1)[0] || 'an invalid value'}.`,
-	)
-}
-
-function readLocalConvexDeployment(paths: WorktreePaths): string {
-	const candidates = [
-		NodePath.join(paths.convexData, 'local', 'default', 'config.json'),
-		NodePath.join(paths.worktree, '.convex', 'local', 'default', 'config.json'),
-	]
-	const path = candidates.find((candidate) => NodeFS.existsSync(candidate))
-	if (!path) {
-		throw new DevRunnerError(
-			'Local Convex data is missing. Run the worktree setup before starting development.',
-		)
-	}
-
-	let value: unknown
-	try {
-		value = JSON.parse(NodeFS.readFileSync(path, 'utf8'))
-	} catch (error) {
-		throw new DevRunnerError(`Could not read ${path}: ${String(error)}`)
-	}
-	if (
-		!isRecord(value) ||
-		typeof value.deploymentName !== 'string' ||
-		!value.deploymentName.trim()
-	) {
-		throw new DevRunnerError(`${path} does not contain a local Convex deployment name.`)
-	}
-	return value.deploymentName.trim()
 }
 
 function storageSecret(env: NodeJS.ProcessEnv, id: string): string {
@@ -1319,8 +987,6 @@ function resolveVpPath(worktree: string): string {
 
 function writeRuntimeFile(input: {
 	readonly branch: string
-	readonly convexMode: ConvexMode
-	readonly env: NodeJS.ProcessEnv
 	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
@@ -1329,7 +995,6 @@ function writeRuntimeFile(input: {
 }): void {
 	const content = {
 		branch: input.branch,
-		convexMode: input.convexMode,
 		dataDir: input.paths.data,
 		mode: input.mode,
 		ports: input.ports,
@@ -1345,8 +1010,6 @@ function writeRuntimeFile(input: {
 			storageA: `http://127.0.0.1:${input.ports.storageA}`,
 			storageB: `http://127.0.0.1:${input.ports.storageB}`,
 			app: `http://localhost:${input.ports.app}`,
-			convex: requireEnvironmentValue(input.env, 'VITE_CONVEX_URL'),
-			convexSite: requireEnvironmentValue(input.env, 'VITE_CONVEX_SITE_URL'),
 			core: `http://127.0.0.1:${input.ports.core}`,
 		},
 	}
@@ -1355,8 +1018,6 @@ function writeRuntimeFile(input: {
 
 function printPlan(input: {
 	readonly branch: string
-	readonly convexMode: ConvexMode
-	readonly env: NodeJS.ProcessEnv
 	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
@@ -1378,11 +1039,6 @@ function printPlan(input: {
 		)
 	}
 	if (labels.includes('core')) runnerLog('info', `Core http://127.0.0.1:${input.ports.core}`)
-	if (labels.includes('convex'))
-		runnerLog(
-			'info',
-			`Convex ${requireEnvironmentValue(input.env, 'VITE_CONVEX_URL')} (${input.convexMode})`,
-		)
 	if (input.scenarios.length > 0) {
 		runnerLog('info', `scenarios ${input.scenarios.join(', ')}`)
 	}

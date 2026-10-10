@@ -25,13 +25,6 @@ export {
 	SelfHostedFeature,
 	routeSelfHostedRequest,
 } from './features/self-hosted'
-export * from './amberite'
-export {
-	AmberiteFeature,
-	AmberiteFeature as AmberiteModrinthCompatFeature,
-	amberiteFeatureConfig,
-	type AmberiteFeatureConfig,
-} from './features/amberite'
 export {
 	type CircuitBreakerConfig,
 	CircuitBreakerFeature,
@@ -44,8 +37,6 @@ export { PANEL_VERSION, PanelVersionFeature } from './features/panel-version'
 export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features/retry'
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
-export * from './modules/amberite'
-export * from './modules/core'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'
 export type { NuxtClientConfig } from './platform/nuxt'

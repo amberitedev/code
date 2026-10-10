@@ -102,9 +102,5 @@ apps/frontend/src/public/robots.txt
 
 packages/tooling-config/script-utils/import-sort.js
 
-# Convex generated/local state
-convex/_generated/
-.convex/
-
 # Worktree-local Core state
 /apps/core/.copal/

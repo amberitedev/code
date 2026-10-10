@@ -1,6 +1,0 @@
-export * from './cores/v1'
-export * from './friends/v1'
-export * from './sessions/v1'
-export * from './types'
-export * from './accounts/v1'
-export * from './auth/v1'

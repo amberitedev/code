@@ -9,7 +9,6 @@
 		"dev:app": "node scripts/dev-runner.ts dev:app",
 		"dev:backend": "node scripts/dev-runner.ts dev:backend",
 		"dev:core": "node scripts/dev-runner.ts dev:core",
-		"dev:convex": "node scripts/dev-runner.ts dev:convex",
 		"dev:check": "node scripts/dev-runner.ts dev --dry-run",
 		"dev:modrinth": "node scripts/dev-modrinth.ts",
 		"core:dev": "pnpm --filter @amberite/core run dev",
@@ -20,12 +19,9 @@
 		"devtool:app": "node scripts/app-debug.mjs app",
 		"devtool:core": "node scripts/app-debug.mjs core",
 		"devtool": "node scripts/app-debug.mjs",
-		"app:check": "node scripts/pre-dev.mjs",
 		"app:build": "vp run --filter @modrinth/app build",
 		"docs:dev": "vp run --filter @modrinth/docs dev",
 		"pages:build": "pnpm i18n:coverage && NITRO_PRESET=cloudflare-pages pnpm --filter frontend run build",
-		"realtime:dev": "node apps/realtime/scripts/deploy-development.mjs",
-		"realtime:status": "node apps/realtime/scripts/status-development.mjs",
 		"build": "node ./node_modules/turbo/bin/turbo run build --continue",
 		"check": "vp check",
 		"fmt": "vp fmt",
@@ -51,10 +47,6 @@
 		"scripts": "node scripts/run.mjs",
 		"i18n:coverage": "node scripts/run.mjs coverage-i18n --write packages/ui/src/layouts/wrapped/settings/language-settings/language-settings-coverage.generated.ts --quiet"
 	},
-	"dependencies": {
-		"@auth/core": "0.37.0",
-		"@convex-dev/auth": "^0.0.92"
-	},
 	"devDependencies": {
 		"@clack/prompts": "^1.0.0",
 		"@crowdin/crowdin-api-client": "^1.55.2",
@@ -67,7 +59,6 @@
 		"@vue/compiler-sfc": "^3.5.26",
 		"@vue/tsconfig": "^0.7.0",
 		"chalk": "^5.6.2",
-		"convex": "^1.21.0",
 		"if-ci": "^3.0.0",
 		"keep-a-changelog": "^3.0.2",
 		"oxfmt": "^0.62.0",

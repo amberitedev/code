@@ -183,7 +183,7 @@ async fn migrate() -> Result<()> {
     tokio::fs::create_dir_all(&config.data_dir).await?;
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    crate::infrastructure::db::migrate(&pool).await?;
     println!("Migrations applied successfully.");
     Ok(())
 }
@@ -194,7 +194,7 @@ async fn check() -> Result<()> {
     tokio::fs::create_dir_all(&config.data_dir).await?;
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    crate::infrastructure::db::migrate(&pool).await?;
     let owner: Option<String> =
         sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
             .fetch_optional(&pool)

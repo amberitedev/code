@@ -12,8 +12,6 @@ pub struct DevAppConfig {
     pub title: String,
     pub data_dir: String,
     pub backend_url: Option<String>,
-    pub convex_url: Option<String>,
-    pub convex_site_url: Option<String>,
     pub username: Option<String>,
 }
 

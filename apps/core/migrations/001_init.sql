@@ -1,5 +1,5 @@
 -- Core's schema. Written with IF NOT EXISTS so a database created by the older, longer
--- migration history can adopt it after its `_sqlx_migrations` rows are cleared.
+-- migration history adopts it and keeps its servers (see `infrastructure::db::migrate`).
 
 CREATE TABLE IF NOT EXISTS core_identity (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -124,3 +124,22 @@ CREATE TABLE IF NOT EXISTS server_source_files (
     version_id TEXT,
     PRIMARY KEY (instance_id, path)
 );
+
+-- Tables of the removed second API, left behind in databases from the older history.
+DROP TABLE IF EXISTS sync_events;
+DROP TABLE IF EXISTS sync_snapshots;
+DROP TABLE IF EXISTS sync_profiles;
+DROP TABLE IF EXISTS scheduled_tasks;
+DROP TABLE IF EXISTS backup_schedules;
+DROP TABLE IF EXISTS instance_members;
+DROP TABLE IF EXISTS activity_log;
+DROP TABLE IF EXISTS core_invitations;
+DROP TABLE IF EXISTS core_role_settings;
+DROP TABLE IF EXISTS core_roles;
+DROP TABLE IF EXISTS core_group_bans;
+DROP TABLE IF EXISTS core_members;
+DROP TABLE IF EXISTS core_metadata;
+DROP TABLE IF EXISTS core_config;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS paseto_key;
+DROP TABLE IF EXISTS users;

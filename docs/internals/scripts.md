@@ -24,13 +24,13 @@ cache. It does not overwrite data already in the worktree.
 ## Dev
 
 - `vp run dev`: Starts the local account/sharing Worker, two disk storage processes, the account
-  sign-in website, and the App scenarios selected by `dev.json`.
+  sign-in website, Core, and the App scenarios selected by `dev.json`.
 - `vp run dev 1 2 3`: Starts several isolated App installations against those same local services.
 - `vp run dev:backend`: Starts the Worker, storage processes, and account website without Apps.
 - `vp run dev:app 1 2`: Starts only those App scenarios and their shared frontend. Start
-  `dev:backend` first. Core, Convex, and Minecraft servers are not needed for account/sharing work.
-- `vp run dev:core`: Starts only the legacy Core service.
-- `vp run dev:convex`: Starts only the legacy Convex service.
+  `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
+- `vp run dev:core`: Starts only Core. It checks account tokens with the Worker, so start
+  `dev:backend` too.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -62,22 +62,6 @@ install, and upload paths follow the new directory; stale copied process records
 contract proof against the already-running backend. Its private test credentials stay in
 `.data/backend-proof/accounts.json`; rerunning after a restart verifies the same accounts persist.
 
-## Legacy Convex
-
-The primary checkout uses the cloud Convex development deployment selected by `.env.local`.
-Commands that include Convex start `convex dev` immediately, which pushes the local functions and
-continues watching for changes. Only `dev:convex` starts it; the default account/sharing stack does
-not. The runner refuses production and non-development cloud deployments.
-
-Linked worktrees always use the local Convex deployment stored in their `.data/`. The runner selects
-that deployment explicitly, even when the worktree has a copied `.env.local` pointing at the cloud.
-A worktree cannot push Convex changes to the cloud through the dev runner. This boundary follows the
-Git checkout, not the branch name: another branch in the primary checkout still uses cloud Convex,
-and a linked worktree named `main` still uses local Convex.
-
-Local Convex runs are prepared with development auth keys, development mode, and the fake accounts
-needed by the App scenarios that were launched.
-
 ## Dev state
 
 Each checkout owns a gitignored `.data/`:
@@ -87,7 +71,6 @@ Each checkout owns a gitignored `.data/`:
 ├── backend/         persistent local D1, Durable Objects, and dev secrets
 ├── storage-a/       first local shared-file copy
 ├── storage-b/       second local shared-file copy
-├── convex/          local Convex state used by linked worktrees
 ├── core/            shared Core state
 ├── scenarios/
 │   ├── 1/           one complete App installation
@@ -98,18 +81,16 @@ Each checkout owns a gitignored `.data/`:
 
 Every App scenario has its own local database, settings, Minecraft instances, credentials, WebView
 data, and session state. Scenarios in one checkout share that checkout's account backend and storage.
-Keep backend, storage, and scenarios together when copying the dataset. Legacy Core/Convex data can
-remain in the same directory for later hosting work.
+Keep backend, storage, Core, and scenarios together when copying the dataset.
 
 Worktree setup copies missing entries from the primary checkout's `.data/` without overwriting
-existing state. The first `dev:convex` run also migrates the old root `.convex/` directory into
-`.data/convex/` and leaves the compatibility link expected by the Convex CLI.
+existing state.
 
 ## Ports and multiple instances
 
-Base ports are App `1420`, account website `3100`, Worker `8787`, and storage `17800` and `17801`.
-Legacy local Convex uses `3210` and `3211`, and Core uses `16662`. Linked worktrees derive a stable
-preferred offset from their path and add it to every port.
+Base ports are App `1420`, account website `3100`, Worker `8787`, storage `17800` and `17801`, and
+Core `16662`. Linked worktrees derive a stable preferred offset from their path and add it to every
+port.
 
 Offset resolution, in order:
 
@@ -131,13 +112,12 @@ stable, but an occupied port can shift the actual run.
 The dev runner stops its child processes when it receives Ctrl+C or the `quit` input command.
 If you start it in the background,
 record its PID when it starts and stop that process only. Never kill by a broad process name, command
-match, or worktree path: several worktrees may be running Node, Convex, Core, and Tauri at the same
+match, or worktree path: several worktrees may be running Node, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.
 
 Core and crashed App scenarios restart automatically. Closing an App window normally leaves that
-scenario stopped. Enter `rs 1` to start or restart scenario 1, or `rs core` to restart Core. Core's
-development console remains available through `core <command>`. If Windows still has the App
-executable open, the runner waits for it to close before relaunching. Three fast failures pause
+scenario stopped. Enter `rs 1` to start or restart scenario 1, or `rs core` to restart Core. If
+Windows still has the App executable open, the runner waits for it to close before relaunching. Three fast failures pause
 automatic restarts so a broken launch cannot loop indefinitely; `rs 1` or `rs core` retries manually.
 
 The combined terminal removes repetitive watcher and progress output. Vite+ forwards App console

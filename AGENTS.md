@@ -131,7 +131,6 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - `apps/frontend` - Website and inherited Modrinth web surface. Not in use; it will be reverted to
   upstream.
 - `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers and D1.
-- `convex`, `apps/realtime` - legacy, being removed. Do not build on them.
 - `packages/ui` - shared Modrinth and Amberite UI.
 - `packages/api-client` - typed client for Modrinth, the backend, and Core.
 - `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly

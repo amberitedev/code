@@ -22,22 +22,7 @@ if (!samePath(worktree, primary) && NodeFS.existsSync(source)) {
 	if (copied) console.log(`[setup] copied development data from ${source}`)
 }
 
-const convexData = NodePath.join(destination, 'convex')
-const legacyConvexData = NodePath.join(primary, '.convex')
-if (
-	!samePath(worktree, primary) &&
-	!NodeFS.existsSync(convexData) &&
-	NodeFS.existsSync(legacyConvexData)
-) {
-	NodeFS.cpSync(legacyConvexData, convexData, { recursive: true })
-}
-
-const usesLegacyConvexDirectory =
-	samePath(worktree, primary) &&
-	!NodeFS.existsSync(convexData) &&
-	NodeFS.existsSync(legacyConvexData)
 for (const path of [
-	...(usesLegacyConvexDirectory ? [] : [convexData]),
 	NodePath.join(destination, 'core'),
 	...([1, 2, 3, 4] as const).map((scenario) =>
 		NodePath.join(destination, 'scenarios', String(scenario)),

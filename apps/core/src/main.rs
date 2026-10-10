@@ -39,7 +39,7 @@ pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
     let db_path = config.data_dir.join("data.db");
     let pool = infrastructure::db::connect(&db_path).await?;
 
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    infrastructure::db::migrate(&pool).await?;
 
     let port = config.port;
     let bind_host = config.bind_host.clone();
