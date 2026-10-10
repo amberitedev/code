@@ -18,7 +18,7 @@ use crate::{
     presentation::handlers::{
         access, backups, console, diagnostics, events, fs, installations,
         instance_control, instances, invites, logs, macros, modpack, mods,
-        players, projection, properties, query, rcon, roles, setup, social,
+        players, projection, properties, query, rcon, roles, social,
         source, stats, sync, tasks, uploads,
     },
 };
@@ -44,10 +44,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/version", get(diagnostics::version))
         .route("/java", get(diagnostics::java_installations))
         .route("/network/status", get(diagnostics::network_status))
-        // First-run pairing
-        .route("/setup", post(setup::complete_setup))
-        .route("/setup/status", get(setup::setup_status))
-        .route("/setup/dev-reset", post(setup::dev_reset_setup))
         // Core-local relay (Mode 2)
         // Core social, permissions, and sync scaffolding
         .route("/core", get(social::get_core))

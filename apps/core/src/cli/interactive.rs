@@ -95,7 +95,7 @@ pub(crate) async fn access(
 ) -> Result<()> {
     match command {
         AccessCommand::Status => {
-            println!("Use `copal check` to inspect local pairing state.");
+            println!("Use `copal check` to see this Core's owner.");
             Ok(())
         }
         AccessCommand::List => list_members(format).await,
@@ -131,10 +131,6 @@ pub(crate) async fn access(
             admin_request(Request::RemoveMember { user_id }).await?;
             println!("Member removed.");
             Ok(())
-        }
-        AccessCommand::ResetPairing { yes } => {
-            require_confirmation(yes, "Reset pairing data?")?;
-            super::reset_pairing().await
         }
     }
 }

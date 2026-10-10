@@ -46,8 +46,6 @@ enum Command {
     Migrate,
     /// Print the Copal version.
     Version,
-    /// Remove pairing data so the Core can be paired again.
-    ResetPairing,
     /// Install Copal as a local system service.
     Install(install::InstallArgs),
     /// Inspect or control the installed Copal service.
@@ -64,7 +62,7 @@ enum Command {
     Menu,
     /// Emergency instance controls for a running local Core.
     Instance(InstanceArgs),
-    /// Print local access and pairing maintenance status.
+    /// Print local access maintenance status.
     Access(AccessArgs),
     /// Remove locally installed service integration without deleting Core data.
     Uninstall(UninstallArgs),
@@ -156,7 +154,7 @@ pub(crate) struct AccessArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum AccessCommand {
-    /// Show pairing and local access status.
+    /// Show local access status.
     Status,
     /// List Core group members and their roles.
     List,
@@ -177,11 +175,6 @@ pub(crate) enum AccessCommand {
     /// Remove a non-owner group member.
     Remove {
         user_id: String,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Reset pairing data after confirmation.
-    ResetPairing {
         #[arg(short = 'y', long)]
         yes: bool,
     },
@@ -209,7 +202,6 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
             println!("copal {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Command::ResetPairing => reset_pairing().await,
         Command::Install(args) => install::execute(args).await,
         Command::Service(args) => service::execute(args, cli.format).await,
         Command::Status => service::status(cli.format).await,
@@ -245,32 +237,16 @@ async fn check() -> Result<()> {
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
-    let paired =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM core_config")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0)
-            > 0;
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
+            .fetch_optional(&pool)
+            .await?;
     println!("Config  : OK (data_dir = {})", config.data_dir.display());
     println!("Database: OK ({})", db_path.display());
     println!(
-        "Paired  : {}",
-        if paired { "yes" } else { "no — run to pair" }
+        "Owner   : {}",
+        owner.as_deref().unwrap_or("none, the first account to connect")
     );
-    Ok(())
-}
-
-async fn reset_pairing() -> Result<()> {
-    crate::init_tracing();
-    let config = crate::config::Config::from_env()?;
-    let db_path = config.data_dir.join("data.db");
-    let pool = crate::infrastructure::db::connect(&db_path).await?;
-    crate::application::pairing_service::clear_pairing_storage(
-        &pool,
-        &config.data_dir,
-    )
-    .await?;
-    println!("Pairing reset. Restart Core to generate a new pairing code.");
     Ok(())
 }
 

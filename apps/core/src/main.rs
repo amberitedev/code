@@ -77,23 +77,6 @@ pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::task_scheduler::run_task_scheduler(Arc::clone(
         &state,
     )));
-    if !state.config.no_auth {
-        tokio::spawn(application::pairing_service::register_pairing_core(
-            Arc::clone(&state),
-        ));
-        if let Some(expires_at) = *state.pairing_code_expires_at.lock().await {
-            tokio::spawn(application::pairing_service::expire_pairing_window(
-                Arc::clone(&state),
-                expires_at,
-            ));
-        }
-    }
-    if state.config.dev_mode
-        && std::io::IsTerminal::is_terminal(&std::io::stdin())
-    {
-        tokio::spawn(core_console_commands(Arc::clone(&state)));
-    }
-
     let router = presentation::router::create_router(state);
     let host: IpAddr = bind_host.parse()?;
     let addr = SocketAddr::new(host, port);
@@ -145,42 +128,6 @@ async fn gc_fs_upload_sessions(state: Arc<application::state::AppState>) {
         for (id, partial_path) in expired {
             state.fs_upload_sessions.remove(&id);
             tokio::fs::remove_file(partial_path).await.ok();
-        }
-    }
-}
-
-async fn core_console_commands(state: Arc<application::state::AppState>) {
-    use tokio::io::{self, AsyncBufReadExt};
-
-    println!("Copal dev console commands: clear, reset-pairing, help");
-
-    let mut lines = io::BufReader::new(io::stdin()).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        match line.trim().to_ascii_lowercase().as_str() {
-            "" => {}
-            "clear" | "clear-linked" | "reset" | "reset-pairing" => {
-                match application::pairing_service::reset_running_pairing(
-                    Arc::clone(&state),
-                )
-                .await
-                {
-                    Ok(true) => {
-                        println!("Core pairing reset and registered with Convex.")
-                    }
-                    Ok(false) => println!(
-                        "Core pairing reset locally, but Convex registration failed. No pairing code was shown. Try `clear` again."
-                    ),
-                    Err(error) => {
-                        eprintln!("Failed to reset Core pairing: {error}")
-                    }
-                }
-            }
-            "help" => println!(
-                "Core console commands: clear/reset-pairing resets linked Core state and registers a new pairing code."
-            ),
-            command => println!(
-                "Unknown Core console command `{command}`. Type `help`."
-            ),
         }
     }
 }

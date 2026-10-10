@@ -11,6 +11,8 @@ pub struct Config {
     pub convex_url: String,
     /// Convex HTTP actions URL.
     pub convex_site_url: String,
+    /// Backend that owns accounts; Core asks it who an account token belongs to.
+    pub account_api_url: String,
     /// Public URL clients should use to reach this Core.
     pub public_url: String,
     /// HTTP port for the Core API.
@@ -63,6 +65,9 @@ impl Config {
                 &required_env("CONVEX_SITE_URL")?,
                 dev_mode,
             )?,
+            account_api_url: required_env("ACCOUNT_API_URL")?
+                .trim_end_matches('/')
+                .to_string(),
             public_url: required_env("AMBERITE_PUBLIC_URL")?,
             port: required_env("PORT")?
                 .parse()

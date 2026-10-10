@@ -14,7 +14,6 @@ pub mod mod_installer;
 pub mod mod_service;
 pub mod modpack_service;
 pub mod network_service;
-pub mod pairing_service;
 pub mod player_service;
 pub mod query_service;
 pub mod rcon_service;
