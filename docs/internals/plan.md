@@ -13,8 +13,7 @@ Older planning files were merged into this one on 2026-10-10. They are in git hi
   the UI, not the UI.
 - **Backend** (`apps/backend`, Cloudflare Workers + D1): a runnable clone of Modrinth's labrinth
   minus content management. It owns accounts, sessions, friends, presence, and sharing metadata:
-  members, versions, where files are stored, and who may download them. It is a coordinator. It
-  does not hold shared files. It runs locally with no Cloudflare account or billing.
+  members, versions, where files are stored, and who may download them. Shared files live in R2 behind it. It runs locally with no Cloudflare account or billing.
 - **Core** (`apps/core`, also called Copal): the self-hosted server manager. It is a product, not
   the general backend.
 - **Modrinth** serves all public content. Shared versions reference Modrinth files by id.
@@ -26,51 +25,47 @@ Who talks to whom:
 - App to Core is direct. The backend is never in that path. Core has two separate APIs:
   - **Hosting API** at `/hosting`, shaped like Modrinth's Archon. Only the Core's owner can use it.
     Nobody else can access a server for now; sharing a server with friends is a later overhaul.
-  - **Sharing API**, for storing and fetching shared files. Who may use it comes from the
-    backend's metadata: the owner of a shared instance may send its files to a Core, and its
-    members may fetch them. The App sends files to whichever Core will store them, which is not
-    necessarily a Core the sender is linked to.
-- Sharing uploads and downloads: the existing native path in app-lib. app-lib may be edited for
-  this. Keep our additions in separate modules with small hooks into upstream code.
+  - **Sharing API**, later, for when Cores store shared files. It is separate from hosting and has
+    its own access: the backend's metadata says who may store or fetch a file.
+- Sharing uploads and downloads go through the existing native path in app-lib, kept as close to
+  upstream as possible.
 
 ## Sharing and storage
 
 There are no friend groups. You share an instance with friends, and sharing is not tied to a Core.
 Someone an instance is shared with does not control it; for now they can only propose changes.
 
-Goal: share an instance with friends, push updates, and have them install even while the owner's
-App is closed, without Amberite paying to host files.
+**Now: recreate Modrinth's sharing backend on R2.** The App keeps Modrinth's own sharing code and
+UI. Our backend answers the same API, with our accounts, and stores uploaded files in R2. Nothing
+custom on top.
 
-- Files that are not on Modrinth (configs, custom mods, datapacks) are stored on **Cores**. The
-  storage module runs inside Core. The standalone `sharing-storage` program in app-lib is the
-  starting code and a local test tool, not the destination.
-- Which Cores: other people's Cores, not only the sharer's own. If the sharer has a Core, prefer
-  it. Only always-on Cores count; a Core running from the desktop App is not used. Sharing does
-  not require owning a Core.
-- Contribution is on by default. Setup does not ask. Limits and opt out live in settings. Opting
-  out stops community storage on that Core and nothing else.
-- No temporary hosted copy. The owner's App already has the files. It saves metadata first, shows
-  "waiting for online Core" until a Core is available, uploads directly, and shows "pushed and
-  updated" only after the upload is verified. Both ends verify every transfer.
-- One verified copy is enough for friends to install. A second copy is made on another Core when
-  one is available.
-- The owner's App keeps its uploaded versions so lost files restore automatically when it is
-  online again.
-- Hosted online: the five latest versions plus versions the owner pins.
-- The NAS is separate storage-only overflow. It is not a Core and not a backup archive.
-- Moving files between Cores happens on events such as a copy disappearing. Healthy files do not
-  get reshuffled.
+- Shared exactly as Modrinth does: links for anything on Modrinth; real files for content that is
+  not (mod jars, resource packs, shaders, datapacks); and the config bundle the owner picks when
+  pushing.
+- Limits, much tighter than Modrinth's and easy to change: 25 MB per file, 20 uploaded files per
+  version, 5 MB config bundle, 100 MB stored per shared instance. An unchanged file is stored once.
+- A file over a limit fails the push the way Modrinth's flow already reports a rejected upload.
+- The five latest versions are kept. Files are deleted from R2 when their version is pruned.
+- R2 runs locally through wrangler's emulation. No Cloudflare account, card, or hosting yet.
+- The Amberite-only upload code is removed: the `sharing-storage` program, the two local storage
+  processes, local copies of pushed versions, and resumable uploads.
 
-Not built: storage inside Core, uploading to real Cores, choosing Cores, deleting pruned files,
-port forwarding or tunnels, encryption. What works today is the backend plus two local storage
-processes: upload, second copy, download with the owner offline, hash checks, retry, restore.
+Later, in rough order of intent:
+
+- Show in the push UI which files are over a limit, before pushing.
+- Pins, once a version history view exists. KubeJS scripts in the bundle.
+- Stop uploading files at all where possible: reference where a file already lives and make sure
+  it stays there, so a shared version is about half a megabyte.
+- Large files not held in R2 are listed as needed and pulled from another App that has them.
+- If you own a Core, share to it directly so friends fetch from your Core. Further out, files on
+  other people's always-on Cores (never desktop Cores), contribution on by default with opt out
+  in settings, a NAS as overflow, and encryption so a Core owner cannot read others' files.
 
 ## Privacy
 
-A Core owner must not be able to read other people's files stored on their Core. Encryption is
-required eventually and deferred for now, so today's storage is readable by whoever runs it. Do
-not describe it as private. Analytics can be opted out of. Private Cores and hiding contributor
-addresses are later.
+Files in R2 are readable by whoever operates the backend. Once files live on other people's Cores,
+a Core owner must not be able to read them; that needs encryption, which is deferred. Analytics
+can be opted out of.
 
 ## Linked servers
 
@@ -129,9 +124,6 @@ server-only additions (mods and datapacks).
 
 ## Open questions
 
-- R2: start with R2 for shared files and move to Cores if cost appears, or go straight to Cores.
-- Whether local owner history can be pruned by a setting, and its default.
-- Storage budgets per Core, and how Cores are picked.
 - How Core proves itself to the backend before pairing exists.
-- Tunnels, port forwarding, and how the NAS is packaged once storage lives in Core.
+- Whether the free Workers plan is enough for R2, to check before hosting.
 - Enforcing who can join a server, beyond hiding its address.
