@@ -1,11 +1,12 @@
 # Amberite
 
-Amberite is a self-hosted modded Minecraft launcher and server manager for private friend groups. A
-Rust server called Copal runs on a computer controlled by the group, and the desktop app is built on
-top of the Modrinth App.
+Amberite is a modded Minecraft launcher with instance sharing and self-hosted servers built in. A
+Rust server called Copal runs on whatever computer or cloud machine you install it on, and the
+desktop app is built on top of the Modrinth App.
 
-You can think of Amberite as Modrinth with private, self-hosted group servers built into it. Owners
-and Admins manage the server; everyone else installs, updates, and plays.
+You can think of Amberite as Modrinth with sharing and self-hosted servers built into it. You share
+your modpack with your friends, and any of you can run it as a server and control that server from
+the App. Sharing is not tied to a Core and works for everyone. There are no friend groups.
 
 ## What makes Amberite special?
 
@@ -17,7 +18,8 @@ Amberite makes everything feel simple and easy. The technical stuff is hidden be
 
 ### 2. Self-hosted Core
 
-Copal/Core is Amberite’s self-hosted server manager. It is open source and free, runs on hardware controlled by the group, and fully replaces Modrinth Hosting.
+Copal/Core is Amberite’s self-hosted server manager. It is open source and free, runs on hardware you control, and fully replaces Modrinth Hosting. A server can be created from an
+instance, so its content follows the instance without anyone managing or syncing it.
 
 ### 3. Modrinth handles public content
 
@@ -27,7 +29,7 @@ Modrinth handles public content (mods, modpacks, resource packs, etc.). Amberite
 
 The App keeps the full Modrinth experience. Users can continue using it as their main launcher (browsing content, managing instances, installing modpacks and mods, etc.), with Amberite’s features added on top.
 
-Amberite ports Modrinth’s social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to Convex while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over.
+Amberite ports Modrinth’s social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over.
 
 ### 5. Minecraft-first identity
 
@@ -46,12 +48,9 @@ The rest of this document is meant to help you navigate the codebase and make ch
 The most common frontend defect is a change that works on the side that was tested and is missing
 somewhere else. Before calling frontend work done, check which of these apply:
 
-- **Permissions.** Shared and administrative features need an explicit permission. Add it to the
-  permission model, decide which roles receive it, enforce it outside the UI, and reflect it in the
-  UI. Ask the developer when the intended access is unclear.
 - **Both ends.** Check every side of a feature, not only the side you changed.
-- **API client.** Any communication between clients (app) and backends (core, convex) is typed in
-  `packages/api-client`.
+- **API client.** Any communication between clients (app) and backends (Core, `apps/backend`) is typed in
+  `packages/api-client`. Native sharing uploads and downloads go through `packages/app-lib`.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. A one-way door is
   a bug.
 - **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the one
@@ -62,36 +61,37 @@ somewhere else. Before calling frontend work done, check which of these apply:
 - `vp i` installs dependencies. Worktrees get this from the `t3.json` setup script, which also copies
   the primary checkout's `.data/`. If module resolution or development data looks broken, setup
   probably did not run.
-- `vp run dev` starts Convex, one Core, and the App scenarios selected by `dev.json`. Pass scenario
-  numbers to run several isolated Apps against the same backends: `vp run dev 1 2 3`.
-- The primary checkout uses the cloud Convex development deployment. `vp run dev` watches and pushes
-  Convex changes there. Every linked worktree uses its own local Convex deployment and must never
-  push Convex changes to the cloud; this is determined by the checkout, not the branch name.
-- Worktree state lives in that worktree's gitignored `.data/`. Convex and Core are shared;
+- `vp run dev` starts the local backend, two storage processes, the account sign-in website, one
+  Core, and the App scenarios selected by `dev.json`. Pass scenario numbers to run several isolated
+  Apps against the same backends: `vp run dev 1 2 3`.
+- The backend runs locally through `wrangler dev --local`. No Cloudflare account, billing, or cloud
+  deployment is used, in the primary checkout or in worktrees.
+- Worktree state lives in that worktree's gitignored `.data/`. The backend, storage, and Core are shared;
   `scenarios/<number>/` is the complete persistent state of one App installation. Do not point a
   worktree at another checkout's live state.
 - Ports derive from the worktree path and stay stable across restarts when available. Read the real
   ports from the `[dev-runner]` output or `.data/runtime.json`, because occupied ports shift.
-- `vp run dev:app`, `vp run dev:core`, and `vp run dev:convex` start only that part of the
+- `vp run dev:app`, `vp run dev:core`, and `vp run dev:backend` start only that part of the
   environment.
 - If you start a process, record its PID and stop exactly that process. Never kill by a broad process
   name or path; several worktrees may be running at once.
 
-Full command, state, Convex, and port behavior: `docs/internals/scripts.md`.
+Full command, state, and port behavior: `docs/internals/scripts.md`.
 
 ## Test data
 
 An empty environment is a bad test. Worktrees get an isolated copy of the primary checkout's
 `.data/` instead of pointing at live state:
 
-- `.data/convex` and `.data/core` are shared by every App in the worktree.
+- `.data/backend`, `.data/storage-a`, `.data/storage-b`, and `.data/core` are shared by every App in
+  the worktree.
   `.data/scenarios/<number>` contains the complete local state of one App installation.
-- Run `vp run dev 1 2 3` to launch several Apps as different fake accounts against the same Convex and
+- Run `vp run dev 1 2 3` to launch several Apps as different fake accounts against the same backend and
   Core. Each scenario keeps its own database, settings, Minecraft instances, credentials, and
   WebView state.
 - Scenarios `1` through `4` are the default test set. A new positive number creates another isolated
   App state and fake account when the task needs one.
-- Treat Convex, Core, and the App scenarios as one dataset. Copy them together when replacing the
+- Treat the backend, storage, Core, and the App scenarios as one dataset. Copy them together when replacing the
   baseline; do not create Core-only scenarios.
 - Stop the affected process before editing or copying SQLite state. A live file copy is not safe
   unless its `-wal` and `-shm` files are copied with it.
@@ -128,14 +128,15 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - `apps/app-frontend` - Vue desktop product UI and inherited Modrinth launcher pages.
 - `apps/app` - Tauri shell, native commands, capabilities, and process integration.
 - `apps/core` - Copal, the Rust server manager.
-- `apps/frontend` - Website and inherited Modrinth web surface.
-- `convex` - durable Amberite identity, social, group, and cloud state.
-- `apps/realtime` - short-lived presence through Cloudflare Workers and Durable Objects.
+- `apps/frontend` - Website and inherited Modrinth web surface. Not in use; it will be reverted to
+  upstream.
+- `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers and D1.
+- `convex`, `apps/realtime` - legacy, being removed. Do not build on them.
 - `packages/ui` - shared Modrinth and Amberite UI.
-- `packages/api-client` - typed Modrinth API client.
+- `packages/api-client` - typed client for Modrinth, the backend, and Core.
 - `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly
   asked.
-- `docs/internals` - architecture, glossary, and focused maintainer documentation.
+- `docs/internals` - `plan.md` holds product goals and decisions; `scripts.md` covers dev commands.
 
 ## Taste
 
