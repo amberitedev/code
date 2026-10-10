@@ -358,6 +358,17 @@ async function download(
 	})
 }
 
+// Invite links carry this code, so it is short: 12 characters from a 32-character alphabet (60 bits).
+// The look-alike characters i, l, o and 0 are left out so a code can be read aloud or typed.
+const INVITE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz123456789'
+
+function inviteCode(): string {
+	return Array.from(
+		crypto.getRandomValues(new Uint8Array(12)),
+		(byte) => INVITE_ALPHABET[byte & 31],
+	).join('')
+}
+
 async function usableLink(env: Env, id: string): Promise<Link> {
 	const link = await env.DB.prepare(
 		'SELECT * FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
@@ -461,7 +472,7 @@ async function invites(
 	}
 	if (request.method === 'POST' && !inviteId) {
 		const body = await readJson(request)
-		const id = crypto.randomUUID()
+		const id = inviteCode()
 		const maxAge = natural(body.max_age, 604800, 31536000)
 		const maxUses = natural(body.max_uses, 0, 10000)
 		const expiration = new Date(
