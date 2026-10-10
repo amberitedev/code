@@ -51,55 +51,28 @@ pub(crate) async fn installed_shared_file_changed(
         .await
 }
 
+/// Download a shared file. The account session and plain HTTP are used only for
+/// the configured sharing service, which serves files to members.
 pub(crate) async fn download(url: &str) -> crate::Result<reqwest::Response> {
     let parsed = reqwest::Url::parse(url)?;
-    let local = parsed.scheme() == "http"
-        && matches!(
-            parsed.host_str(),
-            Some("127.0.0.1" | "localhost" | "[::1]")
-        )
-        && crate::instance::shared_clients_session().is_some_and(|session| {
+    let session =
+        crate::instance::shared_clients_session().filter(|session| {
             reqwest::Url::parse(&session.base_url)
                 .is_ok_and(|base| base.origin() == parsed.origin())
         });
-    if !local {
-        return Ok(crate::util::fetch::REQWEST_CLIENT
-            .get(url)
-            .send()
-            .await
-            .map_err(reqwest::Error::without_url)?);
+    let client = if session.is_some() && parsed.scheme() == "http" {
+        &crate::util::fetch::INSECURE_REQWEST_CLIENT
+    } else {
+        &crate::util::fetch::REQWEST_CLIENT
+    };
+    let mut request = client.get(url);
+    if let Some(token) = session.and_then(|session| session.access_token) {
+        request = request.bearer_auth(token);
     }
-    // HTTP is confined to configured localhost development services. No account
-    // Authorization header is attached; the backend URL is a scoped capability.
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            let target = attempt.url();
-            if attempt.previous().len() >= 5 {
-                return attempt.error("Too many storage redirects");
-            }
-            if target.scheme() == "https"
-                || target.scheme() == "http"
-                    && matches!(
-                        target.host_str(),
-                        Some("127.0.0.1" | "localhost" | "[::1]")
-                    )
-            {
-                attempt.follow()
-            } else {
-                attempt.error("Storage redirect must use HTTPS or localhost")
-            }
-        }))
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .read_timeout(std::time::Duration::from_secs(30))
-        .build()?;
-    Ok(client
-        .get(url)
-        .send()
-        .await
-        .map_err(reqwest::Error::without_url)?)
+    Ok(request.send().await.map_err(reqwest::Error::without_url)?)
 }
 
-/// Stream capability downloads into a temporary file and verify before extracting.
+/// Stream a shared file into a temporary file and verify before extracting.
 pub(crate) async fn download_to_file(
     url: &str,
     expected: Option<&str>,

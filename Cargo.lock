@@ -12406,7 +12406,6 @@ dependencies = [
 name = "theseus"
 version = "1.0.0-local"
 dependencies = [
- "actix-web",
  "ariadne",
  "async-minecraft-ping",
  "async-recursion",
@@ -12440,7 +12439,6 @@ dependencies = [
  "governor",
  "heck 0.5.0",
  "hickory-resolver 0.25.2",
- "hmac",
  "httpdate",
  "image",
  "indicatif",

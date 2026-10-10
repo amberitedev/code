@@ -176,8 +176,6 @@ impl State {
             .get_or_try_init(move || Self::initialize_state(app_identifier))
             .await?;
 
-        crate::self_hosted::sharing::start_worker();
-
         if state
             .startup_complete
             .load(std::sync::atomic::Ordering::Acquire)

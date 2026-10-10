@@ -652,7 +652,7 @@ pub(super) async fn publish_shared_instance_inner(
                 .is_none_or(|current| current.id != attachment.id))
     {
         return Err(crate::ErrorKind::InputError(
-            "The account or shared instance changed while publishing. The saved upload is retained."
+            "The account or shared instance changed while publishing."
                 .into(),
         ).into());
     }
@@ -779,32 +779,6 @@ pub(super) async fn publish_current_content(
             .clone()
             .unwrap_or_default(),
     });
-    if crate::self_hosted::accounts::enabled() {
-        let mut files = Vec::with_capacity(external_files.len());
-        for file in &external_files {
-            let path = match &file.source {
-                ExternalFileSource::InstanceFile(path) => state
-                    .directories
-                    .instances_dir()
-                    .join(&metadata.instance.path)
-                    .join(path),
-                ExternalFileSource::ConfigBundle(path) => path.to_path_buf(),
-            };
-            files.push(crate::self_hosted::sharing::SnapshotFile {
-                name: file.file_name.clone(),
-                kind: file.file_type.clone(),
-                path,
-            });
-        }
-        return crate::self_hosted::sharing::publish(
-            instance_id,
-            shared_instance_id,
-            version_request,
-            files,
-            state,
-        )
-        .await;
-    }
     let response =
         request_json_optional_unavailable::<InstanceVersionResponse>(
             "create_instance_version",

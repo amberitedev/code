@@ -3,4 +3,3 @@
 pub mod accounts;
 pub(crate) mod integrity;
 pub(crate) mod public_content;
-pub(crate) mod sharing;
