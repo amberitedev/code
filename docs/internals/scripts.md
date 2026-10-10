@@ -23,10 +23,10 @@ cache. It does not overwrite data already in the worktree.
 
 ## Dev
 
-- `vp run dev`: Starts the local account/sharing Worker, two disk storage processes, the account
-  sign-in website, and the App scenarios selected by `dev.json`.
+- `vp run dev`: Starts the local account/sharing Worker, the account sign-in website, and the App
+  scenarios selected by `dev.json`.
 - `vp run dev 1 2 3`: Starts several isolated App installations against those same local services.
-- `vp run dev:backend`: Starts the Worker, storage processes, and account website without Apps.
+- `vp run dev:backend`: Starts the Worker and account website without Apps.
 - `vp run dev:app 1 2`: Starts only those App scenarios and their shared frontend. Start
   `dev:backend` first. Core, Convex, and Minecraft servers are not needed for account/sharing work.
 - `vp run dev:core`: Starts only the legacy Core service.
@@ -36,16 +36,11 @@ cache. It does not overwrite data already in the worktree.
 
 Scenario numbers passed after the task name override `defaultScenarios` in `dev.json` for that run.
 
-The Worker runs through `wrangler dev --local`; D1 and Durable Objects persist in `.data/backend`.
+The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
+shared files persist in `.data/backend`.
 The runner applies local migrations first. It generates a persistent secret in
 `.data/backend/dev-secret` and passes it through `.data/backend/.dev.vars`, never command-line
-arguments. Shared files live in `.data/storage-a` and `.data/storage-b`, independently of Core.
-No Cloudflare account, billing, remote D1, or R2 is used.
-The runner builds the Rust storage service once, copies the executable into `.data/backend/bin`,
-and starts both storage processes from that copy so later Cargo builds can replace their own output.
-After rebuilding with `cargo build -p theseus --bin sharing-storage`, enter `rs storage` in the
-runner terminal to stop both storage processes, copy the new executable, and start them again.
-The Worker, account website, and Apps keep running.
+arguments. No Cloudflare account, billing, remote D1, or remote R2 is used.
 
 Scenario `1` uses username `scenario_1`, email `scenario_1@scenario.invalid`, and password
 `Scenario-scenario_1-Local-only!`. Other numbers follow the same pattern. These are real local
@@ -84,9 +79,7 @@ Each checkout owns a gitignored `.data/`:
 
 ```text
 .data/
-├── backend/         persistent local D1, Durable Objects, and dev secrets
-├── storage-a/       first local shared-file copy
-├── storage-b/       second local shared-file copy
+├── backend/         persistent local D1, Durable Objects, shared files (R2), and dev secrets
 ├── convex/          local Convex state used by linked worktrees
 ├── core/            shared Core state
 ├── scenarios/
@@ -97,8 +90,8 @@ Each checkout owns a gitignored `.data/`:
 ```
 
 Every App scenario has its own local database, settings, Minecraft instances, credentials, WebView
-data, and session state. Scenarios in one checkout share that checkout's account backend and storage.
-Keep backend, storage, and scenarios together when copying the dataset. Legacy Core/Convex data can
+data, and session state. Scenarios in one checkout share that checkout's account backend.
+Keep backend and scenarios together when copying the dataset. Legacy Core/Convex data can
 remain in the same directory for later hosting work.
 
 Worktree setup copies missing entries from the primary checkout's `.data/` without overwriting
@@ -107,7 +100,7 @@ existing state. The first `dev:convex` run also migrates the old root `.convex/`
 
 ## Ports and multiple instances
 
-Base ports are App `1420`, account website `3100`, Worker `8787`, and storage `17800` and `17801`.
+Base ports are App `1420`, account website `3100`, and Worker `8787`.
 Legacy local Convex uses `3210` and `3211`, and Core uses `16662`. Linked worktrees derive a stable
 preferred offset from their path and add it to every port.
 
@@ -118,7 +111,7 @@ Offset resolution, in order:
 3. `0` for the primary checkout, or a stable hash of the linked worktree path.
 
 The runner checks only the ports needed by the selected mode. A full run shifts the App, Worker,
-account website, and both storage ports together. When a required port is occupied, the runner
+and account website ports together. When a required port is occupied, the runner
 advances the complete applicable set until it finds an available one. To start Apps separately from
 an existing backend, use the same `AMBERITE_PORT_OFFSET` if that backend shifted from its preferred
 offset; read the ports in the runner output first.

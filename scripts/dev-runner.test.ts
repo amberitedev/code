@@ -25,8 +25,6 @@ describe('dev runner ports', () => {
 			app: 1420,
 			backend: 8787,
 			accountWeb: 3100,
-			storageA: 17800,
-			storageB: 17801,
 			convexCloud: 3210,
 			convexSite: 3211,
 			core: 16662,
@@ -92,8 +90,6 @@ describe('dev runner ports', () => {
 			app: 1421,
 			backend: 8788,
 			accountWeb: 3101,
-			storageA: 17801,
-			storageB: 17802,
 			convexCloud: 3211,
 			convexSite: 3212,
 			core: 16663,
@@ -207,24 +203,12 @@ describe('dev runner environment', () => {
 
 describe('dev runner modes', () => {
 	it('runs the complete product in dev mode', () => {
-		expect(processLabelsForMode('dev')).toEqual([
-			'backend',
-			'storage-a',
-			'storage-b',
-			'account-web',
-			'core',
-			'app-frontend',
-		])
+		expect(processLabelsForMode('dev')).toEqual(['backend', 'account-web', 'core', 'app-frontend'])
 	})
 
 	it('keeps partial modes focused', () => {
 		expect(processLabelsForMode('dev:app')).toEqual(['app-frontend'])
-		expect(processLabelsForMode('dev:backend')).toEqual([
-			'backend',
-			'storage-a',
-			'storage-b',
-			'account-web',
-		])
+		expect(processLabelsForMode('dev:backend')).toEqual(['backend', 'account-web'])
 		expect(processLabelsForMode('dev:core')).toEqual(['core'])
 		expect(processLabelsForMode('dev:convex')).toEqual(['convex'])
 	})
@@ -284,8 +268,6 @@ describe('dev runner scenarios', () => {
 
 		expect(specs.map((spec) => spec.label)).toEqual([
 			'backend',
-			'storage-a',
-			'storage-b',
 			'account-web',
 			'core',
 			'app-frontend',

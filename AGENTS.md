@@ -61,12 +61,12 @@ somewhere else. Before calling frontend work done, check which of these apply:
 - `vp i` installs dependencies. Worktrees get this from the `t3.json` setup script, which also copies
   the primary checkout's `.data/`. If module resolution or development data looks broken, setup
   probably did not run.
-- `vp run dev` starts the local backend, two storage processes, the account sign-in website, one
+- `vp run dev` starts the local backend, the account sign-in website, one
   Core, and the App scenarios selected by `dev.json`. Pass scenario numbers to run several isolated
   Apps against the same backends: `vp run dev 1 2 3`.
 - The backend runs locally through `wrangler dev --local`. No Cloudflare account, billing, or cloud
   deployment is used, in the primary checkout or in worktrees.
-- Worktree state lives in that worktree's gitignored `.data/`. The backend, storage, and Core are shared;
+- Worktree state lives in that worktree's gitignored `.data/`. The backend and Core are shared;
   `scenarios/<number>/` is the complete persistent state of one App installation. Do not point a
   worktree at another checkout's live state.
 - Ports derive from the worktree path and stay stable across restarts when available. Read the real
@@ -83,15 +83,15 @@ Full command, state, and port behavior: `docs/internals/scripts.md`.
 An empty environment is a bad test. Worktrees get an isolated copy of the primary checkout's
 `.data/` instead of pointing at live state:
 
-- `.data/backend`, `.data/storage-a`, `.data/storage-b`, and `.data/core` are shared by every App in
-  the worktree.
+- `.data/backend` (accounts, sharing metadata, and shared files) and `.data/core` are shared by every
+  App in the worktree.
   `.data/scenarios/<number>` contains the complete local state of one App installation.
 - Run `vp run dev 1 2 3` to launch several Apps as different fake accounts against the same backend and
   Core. Each scenario keeps its own database, settings, Minecraft instances, credentials, and
   WebView state.
 - Scenarios `1` through `4` are the default test set. A new positive number creates another isolated
   App state and fake account when the task needs one.
-- Treat the backend, storage, Core, and the App scenarios as one dataset. Copy them together when replacing the
+- Treat the backend, Core, and the App scenarios as one dataset. Copy them together when replacing the
   baseline; do not create Core-only scenarios.
 - Stop the affected process before editing or copying SQLite state. A live file copy is not safe
   unless its `-wal` and `-shm` files are copied with it.

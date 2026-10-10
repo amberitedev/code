@@ -14,8 +14,6 @@ const BASE_PORTS = {
 	app: 1420,
 	backend: 8787,
 	accountWeb: 3100,
-	storageA: 17800,
-	storageB: 17801,
 	convexCloud: 3210,
 	convexSite: 3211,
 	core: 16662,
@@ -40,8 +38,6 @@ export type DevPorts = {
 	readonly app: number
 	readonly backend: number
 	readonly accountWeb: number
-	readonly storageA: number
-	readonly storageB: number
 	readonly convexCloud: number
 	readonly convexSite: number
 	readonly core: number
@@ -98,8 +94,6 @@ export function portsForOffset(offset: number): DevPorts {
 		app: BASE_PORTS.app + offset,
 		backend: BASE_PORTS.backend + offset,
 		accountWeb: BASE_PORTS.accountWeb + offset,
-		storageA: BASE_PORTS.storageA + offset,
-		storageB: BASE_PORTS.storageB + offset,
 		convexCloud: BASE_PORTS.convexCloud + offset,
 		convexSite: BASE_PORTS.convexSite + offset,
 		core: BASE_PORTS.core + offset,
@@ -222,9 +216,9 @@ export function createRuntimeEnvironment(input: {
 export function processLabelsForMode(mode: DevMode): ReadonlyArray<string> {
 	switch (mode) {
 		case 'dev':
-			return ['backend', 'storage-a', 'storage-b', 'account-web', 'core', 'app-frontend']
+			return ['backend', 'account-web', 'core', 'app-frontend']
 		case 'dev:backend':
-			return ['backend', 'storage-a', 'storage-b', 'account-web']
+			return ['backend', 'account-web']
 		case 'dev:app':
 			return ['app-frontend']
 		case 'dev:core':
@@ -279,7 +273,7 @@ async function main(): Promise<void> {
 			NodeFS.writeFileSync(secretPath, NodeCrypto.randomBytes(32).toString('hex'), { mode: 0o600 })
 		env.AMBERITE_LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
 		if (processLabelsForMode(input.mode).includes('backend')) {
-			prepareLocalBackend(paths, ports, env)
+			prepareLocalBackend(paths, env)
 		}
 	}
 	const specs = createProcessSpecs({
@@ -358,27 +352,6 @@ async function main(): Promise<void> {
 		return running
 	}
 	const restart = async (label: string) => {
-		if (label === 'storage') {
-			const storage = ['storage-a', 'storage-b']
-				.map((id) => specsByLabel.get(id))
-				.filter((spec) => spec !== undefined)
-			if (storage.length !== 2) {
-				runnerLog('warning', 'Storage services are not part of this run.')
-				return
-			}
-			for (const spec of storage) {
-				const current = processes.get(spec.label)
-				processes.delete(spec.label)
-				if (current) await stopProcess(current)
-			}
-			try {
-				copyStorageBinary(paths, env)
-			} catch (error) {
-				runnerLog('error', `Storage executable update failed: ${String(error)}`)
-			}
-			for (const spec of storage) start(spec)
-			return
-		}
 		const spec = specsByLabel.get(label)
 		if (!spec || (label !== 'core' && !label.startsWith('app:'))) {
 			runnerLog('warning', `Unknown restart target ${label}. Use rs <scenario> or rs core.`)
@@ -397,7 +370,6 @@ async function main(): Promise<void> {
 		if (processes.get(spec.label) !== running) return
 		processes.delete(spec.label)
 		if (stopping) return
-		if (spec.label === 'storage-build' && code === 0) return
 
 		if (spec.label === 'core' || (spec.label.startsWith('app:') && code !== 0)) {
 			const now = Date.now()
@@ -441,31 +413,15 @@ async function main(): Promise<void> {
 	}
 	const commands = createCommandInput({
 		getCore: () => processes.get('core'),
-		restart: (target) => restart(['core', 'storage'].includes(target) ? target : `app:${target}`),
+		restart: (target) => restart(target === 'core' ? target : `app:${target}`),
 		stop: () => stop(0),
 	})
-
-	const storageSpecs = specs.filter((spec) => spec.label.startsWith('storage-'))
 
 	process.once('SIGINT', () => void stop(130))
 	process.once('SIGTERM', () => void stop(143))
 
 	try {
-		for (const spec of specs.filter((spec) => !spec.label.startsWith('storage-'))) start(spec)
-		if (storageSpecs.length > 0) {
-			const build = start({
-				executable: 'cargo',
-				args: ['build', '-p', 'theseus', '--bin', 'sharing-storage'],
-				cwd: paths.worktree,
-				env,
-				label: 'storage-build',
-			})
-			if ((await build.done) !== 0) throw new DevRunnerError('Local storage service build failed.')
-			if (!stopping) {
-				copyStorageBinary(paths, env)
-				for (const spec of storageSpecs) start(spec)
-			}
-		}
+		for (const spec of specs) start(spec)
 		if (convexMode === 'local' && processLabelsForMode(input.mode).includes('convex')) {
 			await prepareConvex({
 				env,
@@ -721,27 +677,6 @@ export function createProcessSpecs(input: {
 			label: 'core',
 		},
 	}
-	for (const [id, port] of [
-		['a', input.ports.storageA],
-		['b', input.ports.storageB],
-	] as const) {
-		const label = `storage-${id}`
-		specs[label] = {
-			executable: storageBinaryPath(input.paths),
-			args: [],
-			cwd: input.paths.worktree,
-			label,
-			env: {
-				...input.env,
-				SHARING_STORAGE_ID: label,
-				SHARING_STORAGE_ADDR: `127.0.0.1:${port}`,
-				SHARING_STORAGE_DIR: NodePath.join(input.paths.data, label),
-				SHARING_STORAGE_SECRET: storageSecret(input.env, label),
-				SHARING_BACKEND_URL: backendUrl,
-			},
-		}
-	}
-
 	const shared = labels.map((label) => specs[label]!)
 	if (input.mode !== 'dev' && input.mode !== 'dev:app') return shared
 	return [
@@ -1082,7 +1017,7 @@ function createCommandInput(input: {
 			void input.stop()
 			return
 		}
-		const restart = command.match(/^rs\s+(core|storage|\d+)$/i)
+		const restart = command.match(/^rs\s+(core|\d+)$/i)
 		if (restart) {
 			void input.restart(restart[1].toLowerCase())
 			return
@@ -1098,7 +1033,7 @@ function createCommandInput(input: {
 			return
 		}
 		if (command === 'help') {
-			runnerLog('info', 'Commands: rs <scenario>, rs core, rs storage, core <command>, quit')
+			runnerLog('info', 'Commands: rs <scenario>, rs core, core <command>, quit')
 			return
 		}
 		runnerLog('warning', `Unknown command ${command}. Type help for available commands.`)
@@ -1157,9 +1092,9 @@ function canListen(port: number, host: string): Promise<boolean> {
 function requiredPortNames(mode: DevMode, convexMode: ConvexMode): ReadonlyArray<PortName> {
 	switch (mode) {
 		case 'dev':
-			return ['app', 'backend', 'accountWeb', 'storageA', 'storageB', 'core']
+			return ['app', 'backend', 'accountWeb', 'core']
 		case 'dev:backend':
-			return ['backend', 'accountWeb', 'storageA', 'storageB']
+			return ['backend', 'accountWeb']
 		case 'dev:app':
 			return ['app']
 		case 'dev:core':
@@ -1246,43 +1181,8 @@ function readLocalConvexDeployment(paths: WorktreePaths): string {
 	return value.deploymentName.trim()
 }
 
-function storageSecret(env: NodeJS.ProcessEnv, id: string): string {
-	return NodeCrypto.createHmac('sha256', env.AMBERITE_LOCAL_DEV_SECRET ?? 'dry-run')
-		.update(id)
-		.digest('hex')
-}
-
-function storageBinaryPath(paths: WorktreePaths): string {
-	return NodePath.join(
-		paths.data,
-		'backend',
-		'bin',
-		process.platform === 'win32' ? 'sharing-storage.exe' : 'sharing-storage',
-	)
-}
-
-function copyStorageBinary(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
-	const destination = storageBinaryPath(paths)
-	const target = NodePath.resolve(paths.worktree, env.CARGO_TARGET_DIR ?? 'target')
-	NodeFS.mkdirSync(NodePath.dirname(destination), { recursive: true })
-	// Running a copied binary keeps later Cargo rebuilds from replacing a locked Windows executable.
-	NodeFS.copyFileSync(NodePath.join(target, 'debug', NodePath.basename(destination)), destination)
-}
-
-function prepareLocalBackend(paths: WorktreePaths, ports: DevPorts, env: NodeJS.ProcessEnv): void {
-	const nodes = [
-		{
-			id: 'storage-a',
-			url: `http://127.0.0.1:${ports.storageA}`,
-			secret: storageSecret(env, 'storage-a'),
-		},
-		{
-			id: 'storage-b',
-			url: `http://127.0.0.1:${ports.storageB}`,
-			secret: storageSecret(env, 'storage-b'),
-		},
-	]
-	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.AMBERITE_LOCAL_DEV_SECRET}\nSTORAGE_NODES='${JSON.stringify(nodes)}'\n`
+function prepareLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
+	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.AMBERITE_LOCAL_DEV_SECRET}\n`
 	NodeFS.writeFileSync(NodePath.join(paths.data, 'backend', '.dev.vars'), variables, {
 		mode: 0o600,
 	})
@@ -1343,8 +1243,6 @@ function writeRuntimeFile(input: {
 		urls: {
 			backend: `http://127.0.0.1:${input.ports.backend}`,
 			accountWeb: `http://127.0.0.1:${input.ports.accountWeb}`,
-			storageA: `http://127.0.0.1:${input.ports.storageA}`,
-			storageB: `http://127.0.0.1:${input.ports.storageB}`,
 			app: `http://localhost:${input.ports.app}`,
 			convex: requireEnvironmentValue(input.env, 'VITE_CONVEX_URL'),
 			convexSite: requireEnvironmentValue(input.env, 'VITE_CONVEX_SITE_URL'),
@@ -1373,10 +1271,6 @@ function printPlan(input: {
 	if (labels.includes('backend')) {
 		runnerLog('info', `Accounts and sharing http://127.0.0.1:${input.ports.backend} (local)`)
 		runnerLog('info', `Account sign-in http://127.0.0.1:${input.ports.accountWeb}`)
-		runnerLog(
-			'info',
-			`Storage http://127.0.0.1:${input.ports.storageA}, http://127.0.0.1:${input.ports.storageB}`,
-		)
 	}
 	if (labels.includes('core')) runnerLog('info', `Core http://127.0.0.1:${input.ports.core}`)
 	if (labels.includes('convex'))
