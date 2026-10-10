@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::Parser;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod application;
@@ -32,31 +32,17 @@ pub(crate) fn init_tracing() {
         .init();
 }
 
-pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
-    let config = config::Config::from_env_with_no_auth(no_auth)?;
-    if config.no_auth && !config.bind_host.parse::<IpAddr>()?.is_loopback() {
-        return Err(color_eyre::eyre::eyre!(
-            "No-auth development Core must bind to a loopback address"
-        ));
-    }
-
-    if config.no_auth && config.allowed_origin == "*" {
-        return Err(color_eyre::eyre::eyre!(
-            "No-auth development Core requires an explicit app origin"
-        ));
-    }
+pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
+    let config = config::Config::from_env()?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
 
     let db_path = config.data_dir.join("data.db");
     let pool = infrastructure::db::connect(&db_path).await?;
 
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    infrastructure::db::migrate(&pool).await?;
 
     let port = config.port;
     let bind_host = config.bind_host.clone();
-    if config.no_auth {
-        warn!("Core no-auth mode is enabled. Do not expose this server.");
-    }
     let state = application::state::AppState::new(config, pool).await?;
 
     #[cfg(unix)]
@@ -65,29 +51,10 @@ pub(crate) async fn run_server(no_auth: bool) -> color_eyre::eyre::Result<()> {
     tokio::spawn(application::instance_service::restore_instances(
         Arc::clone(&state),
     ));
-    tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
-    tokio::spawn(gc_fs_download_tokens(Arc::clone(&state)));
-    tokio::spawn(gc_fs_upload_sessions(Arc::clone(&state)));
-    tokio::spawn(application::task_scheduler::run_task_scheduler(Arc::clone(
+    tokio::spawn(application::server_source_service::resume(Arc::clone(
         &state,
     )));
-    if !state.config.no_auth {
-        tokio::spawn(application::pairing_service::register_pairing_core(
-            Arc::clone(&state),
-        ));
-        if let Some(expires_at) = *state.pairing_code_expires_at.lock().await {
-            tokio::spawn(application::pairing_service::expire_pairing_window(
-                Arc::clone(&state),
-                expires_at,
-            ));
-        }
-    }
-    if state.config.dev_mode
-        && std::io::IsTerminal::is_terminal(&std::io::stdin())
-    {
-        tokio::spawn(core_console_commands(Arc::clone(&state)));
-    }
-
+    tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
     let router = presentation::router::create_router(state);
     let host: IpAddr = bind_host.parse()?;
     let addr = SocketAddr::new(host, port);
@@ -107,74 +74,5 @@ async fn gc_ws_tickets(state: Arc<application::state::AppState>) {
         state
             .ws_tickets
             .retain(|_, t| t.expires_at > Instant::now());
-    }
-}
-
-async fn gc_fs_download_tokens(state: Arc<application::state::AppState>) {
-    use std::time::Instant;
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
-        state
-            .fs_download_tokens
-            .retain(|_, t| t.expires_at > Instant::now());
-    }
-}
-
-async fn gc_fs_upload_sessions(state: Arc<application::state::AppState>) {
-    use std::time::Instant;
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
-        let now = Instant::now();
-        let expired: Vec<(String, std::path::PathBuf)> = state
-            .fs_upload_sessions
-            .iter()
-            .filter_map(|session| {
-                if session.expires_at <= now {
-                    Some((session.key().clone(), session.partial_path.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for (id, partial_path) in expired {
-            state.fs_upload_sessions.remove(&id);
-            tokio::fs::remove_file(partial_path).await.ok();
-        }
-    }
-}
-
-async fn core_console_commands(state: Arc<application::state::AppState>) {
-    use tokio::io::{self, AsyncBufReadExt};
-
-    println!("Copal dev console commands: clear, reset-pairing, help");
-
-    let mut lines = io::BufReader::new(io::stdin()).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        match line.trim().to_ascii_lowercase().as_str() {
-            "" => {}
-            "clear" | "clear-linked" | "reset" | "reset-pairing" => {
-                match application::pairing_service::reset_running_pairing(
-                    Arc::clone(&state),
-                )
-                .await
-                {
-                    Ok(true) => {
-                        println!("Core pairing reset and registered with Convex.")
-                    }
-                    Ok(false) => println!(
-                        "Core pairing reset locally, but Convex registration failed. No pairing code was shown. Try `clear` again."
-                    ),
-                    Err(error) => {
-                        eprintln!("Failed to reset Core pairing: {error}")
-                    }
-                }
-            }
-            "help" => println!(
-                "Core console commands: clear/reset-pairing resets linked Core state and registers a new pairing code."
-            ),
-            command => println!(
-                "Unknown Core console command `{command}`. Type `help`."
-            ),
-        }
     }
 }

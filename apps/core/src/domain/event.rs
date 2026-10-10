@@ -4,6 +4,7 @@ use super::instance::{
     InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
 };
 use super::server_installation::InstallationStatus;
+use super::server_source::{ServerSourceStatus, SourceApplyPhase};
 
 /// Broadcast events emitted by instances and the macro engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +56,16 @@ pub enum Event {
         profile_id: String,
         snapshot_id: String,
         instance_id: Option<String>,
+    },
+    SourceStatusChanged {
+        instance_id: InstanceId,
+        status: Option<ServerSourceStatus>,
+    },
+    SourceApplyProgress {
+        instance_id: InstanceId,
+        version: String,
+        phase: SourceApplyPhase,
+        progress: Option<f32>,
     },
     SyncEventStatusChanged {
         profile_id: String,

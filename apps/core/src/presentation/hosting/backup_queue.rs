@@ -77,14 +77,13 @@ fn db_error(error: sqlx::Error) -> ApiError {
 }
 
 async fn authorize(
-    user: &AuthUser,
     state: &Arc<AppState>,
     queue: &Queue,
     id: String,
     wid: String,
 ) -> Result<String, ApiError> {
     let id = world(id, wid)?;
-    let r = record(state, user, &id, "server:backups").await?;
+    let r = record(&state, &id).await?;
     queue.init(state).await?;
     Ok(r.id.to_string())
 }
@@ -105,12 +104,12 @@ fn operation_json(op: &Operation) -> Value {
 }
 
 async fn list(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
+    let id = authorize(&state, &queue, id, wid).await?;
     let ops = operations(&state, &id).await?;
     let records = backup_service::list_backups(&state, &id).await?;
     let mut backups: Vec<Value> = records
@@ -262,7 +261,7 @@ async fn create(
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<Name>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
+    let id = authorize(&state, &queue, id, wid).await?;
     let bid = Uuid::new_v4().to_string();
     enqueue(
         state,
@@ -271,7 +270,7 @@ async fn create(
         bid.clone(),
         name(body.name)?,
         "create",
-        user.0.sub,
+        user.0.id,
         None,
     )
     .await?;
@@ -285,8 +284,8 @@ async fn restore(
     Path((id, wid, bid)): Path<(String, String, String)>,
     Json(body): Json<Name>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
-    let r = record(&state, &user, &id, "server:backups").await?;
+    let id = authorize(&state, &queue, id, wid).await?;
+    let r = record(&state, &id).await?;
     if state.instances.contains_key(&r.id) {
         return Err(ApiError::Conflict(
             "Stop the server before restoring a backup".into(),
@@ -304,7 +303,7 @@ async fn restore(
         bid,
         backup.name,
         "restore",
-        user.0.sub,
+        user.0.id,
         Some(name(body.name)?),
     )
     .await?;
@@ -312,7 +311,7 @@ async fn restore(
 }
 
 async fn history_action(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, kind, operation, action)): Path<(
@@ -323,7 +322,7 @@ async fn history_action(
         String,
     )>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
+    let id = authorize(&state, &queue, id, wid).await?;
     let op = operations(&state, &id)
         .await?
         .into_iter()
@@ -358,7 +357,7 @@ async fn retry(
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
+    let id = authorize(&state, &queue, id, wid).await?;
     let ops = operations(&state, &id).await?;
     let op =
         ops.into_iter()
@@ -385,7 +384,7 @@ async fn retry(
         bid,
         op.name,
         &op.operation_type,
-        user.0.sub,
+        user.0.id,
         op.safety_name,
     )
     .await?;
@@ -418,12 +417,12 @@ async fn remove_one(
 }
 
 async fn remove(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
+    let id = authorize(&state, &queue, id, wid).await?;
     let lock = queue.servers.entry(id.clone()).or_default().clone();
     let _guard = lock.lock().await;
     remove_one(&state, &id, &bid).await?;
@@ -432,13 +431,13 @@ async fn remove(
 }
 
 async fn delete_many(
-    user: AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<crate::presentation::hosting::models::DeleteBackups>,
 ) -> ApiResult {
-    let id = authorize(&user, &state, &queue, id, wid).await?;
+    let id = authorize(&state, &queue, id, wid).await?;
     let lock = queue.servers.entry(id.clone()).or_default().clone();
     let _guard = lock.lock().await;
     for bid in body.backup_ids {

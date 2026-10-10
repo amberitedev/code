@@ -3,6 +3,8 @@ import type { RequestContext } from '../types/request'
 
 export interface SelfHostedConfig extends FeatureConfig {
 	baseUrl: string
+	/** The Core's hosting API. Requests to it carry the account token; Core checks it with the backend. */
+	hostingUrl?: string
 	token: () => Promise<string | undefined>
 }
 
@@ -38,12 +40,16 @@ export async function routeSelfHostedRequest(
 		(context.options.api === 'labrinth' &&
 			context.options.accountSource !== 'modrinth' &&
 			isAccountPath(context.path))
+	const hostingRequest =
+		config.hostingUrl !== undefined && context.url.startsWith(config.hostingUrl)
 	const skipAuth = context.options.skipAuth
 	context.options.skipAuth = true
 	const headers = new Headers(context.options.headers)
-	if (privateRequest) {
-		const source = new URL(context.url)
-		context.url = new URL(source.pathname + source.search, config.baseUrl).toString()
+	if (privateRequest || hostingRequest) {
+		if (privateRequest) {
+			const source = new URL(context.url)
+			context.url = new URL(source.pathname + source.search, config.baseUrl).toString()
+		}
 		if (!headers.has('authorization') && !skipAuth) {
 			const token = await config.token()
 			if (token) headers.set('authorization', `Bearer ${token}`)

@@ -23,9 +23,6 @@ pub(crate) struct Cli {
     /// Include diagnostic detail in failures.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
-    /// Disable HTTP auth and permission checks. Debug builds only.
-    #[arg(short = 'n', long = "no-auth", alias = "noauth", global = true)]
-    no_auth: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -46,8 +43,6 @@ enum Command {
     Migrate,
     /// Print the Copal version.
     Version,
-    /// Remove pairing data so the Core can be paired again.
-    ResetPairing,
     /// Install Copal as a local system service.
     Install(install::InstallArgs),
     /// Inspect or control the installed Copal service.
@@ -64,8 +59,6 @@ enum Command {
     Menu,
     /// Emergency instance controls for a running local Core.
     Instance(InstanceArgs),
-    /// Print local access and pairing maintenance status.
-    Access(AccessArgs),
     /// Remove locally installed service integration without deleting Core data.
     Uninstall(UninstallArgs),
 }
@@ -149,45 +142,6 @@ pub(crate) enum InstanceCommand {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct AccessArgs {
-    #[command(subcommand)]
-    command: AccessCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum AccessCommand {
-    /// Show pairing and local access status.
-    Status,
-    /// List Core group members and their roles.
-    List,
-    /// List Core roles, including retired roles.
-    Roles,
-    /// List pending and historical Core invitations.
-    Invitations,
-    /// Approve or reject a pending Core invitation.
-    ReviewInvitation {
-        id: String,
-        #[arg(long, conflicts_with = "reject")]
-        approve: bool,
-        #[arg(long, conflicts_with = "approve")]
-        reject: bool,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Remove a non-owner group member.
-    Remove {
-        user_id: String,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Reset pairing data after confirmation.
-    ResetPairing {
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-}
-
-#[derive(Debug, Args)]
 pub(crate) struct UninstallArgs {
     /// Also remove the Core data directory. This is irreversible.
     #[arg(long)]
@@ -201,7 +155,7 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
     match cli.command.unwrap_or(Command::Run) {
         Command::Run => {
             crate::init_tracing();
-            crate::run_server(cli.no_auth).await
+            crate::run_server().await
         }
         Command::Check => check().await,
         Command::Migrate => migrate().await,
@@ -209,7 +163,6 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
             println!("copal {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Command::ResetPairing => reset_pairing().await,
         Command::Install(args) => install::execute(args).await,
         Command::Service(args) => service::execute(args, cli.format).await,
         Command::Status => service::status(cli.format).await,
@@ -219,9 +172,6 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
         Command::Menu => interactive::menu().await,
         Command::Instance(args) => {
             interactive::instance(args.command, cli.format).await
-        }
-        Command::Access(args) => {
-            interactive::access(args.command, cli.format).await
         }
         Command::Uninstall(args) => install::uninstall(args).await,
     }
@@ -233,7 +183,7 @@ async fn migrate() -> Result<()> {
     tokio::fs::create_dir_all(&config.data_dir).await?;
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    crate::infrastructure::db::migrate(&pool).await?;
     println!("Migrations applied successfully.");
     Ok(())
 }
@@ -244,33 +194,19 @@ async fn check() -> Result<()> {
     tokio::fs::create_dir_all(&config.data_dir).await?;
     let db_path = config.data_dir.join("data.db");
     let pool = crate::infrastructure::db::connect(&db_path).await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
-    let paired =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM core_config")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0)
-            > 0;
+    crate::infrastructure::db::migrate(&pool).await?;
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
+            .fetch_optional(&pool)
+            .await?;
     println!("Config  : OK (data_dir = {})", config.data_dir.display());
     println!("Database: OK ({})", db_path.display());
     println!(
-        "Paired  : {}",
-        if paired { "yes" } else { "no — run to pair" }
+        "Owner   : {}",
+        owner
+            .as_deref()
+            .unwrap_or("none, the first account to connect")
     );
-    Ok(())
-}
-
-async fn reset_pairing() -> Result<()> {
-    crate::init_tracing();
-    let config = crate::config::Config::from_env()?;
-    let db_path = config.data_dir.join("data.db");
-    let pool = crate::infrastructure::db::connect(&db_path).await?;
-    crate::application::pairing_service::clear_pairing_storage(
-        &pool,
-        &config.data_dir,
-    )
-    .await?;
-    println!("Pairing reset. Restart Core to generate a new pairing code.");
     Ok(())
 }
 

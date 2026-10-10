@@ -2,7 +2,7 @@ use color_eyre::eyre::{bail, Result};
 
 use super::{
     admin::{self, Request, Response},
-    require_confirmation, AccessCommand, InstanceCommand, OutputFormat,
+    require_confirmation, InstanceCommand, OutputFormat,
 };
 
 pub(crate) async fn menu() -> Result<()> {
@@ -87,132 +87,6 @@ pub(crate) async fn instance(
             }
         }
     }
-}
-
-pub(crate) async fn access(
-    command: AccessCommand,
-    format: OutputFormat,
-) -> Result<()> {
-    match command {
-        AccessCommand::Status => {
-            println!("Use `copal check` to inspect local pairing state.");
-            Ok(())
-        }
-        AccessCommand::List => list_members(format).await,
-        AccessCommand::Roles => list_roles(format).await,
-        AccessCommand::Invitations => list_invitations(format).await,
-        AccessCommand::ReviewInvitation {
-            id,
-            approve,
-            reject,
-            yes,
-        } => {
-            if approve == reject {
-                bail!("Specify exactly one of --approve or --reject.")
-            }
-            let action = if approve { "approve" } else { "reject" };
-            require_confirmation(yes, &format!("{action} invitation {id}?"))?;
-            admin_request(Request::ReviewInvitation {
-                id,
-                accept: approve,
-            })
-            .await?;
-            println!(
-                "Invitation {}.",
-                if approve { "approved" } else { "rejected" }
-            );
-            Ok(())
-        }
-        AccessCommand::Remove { user_id, yes } => {
-            require_confirmation(
-                yes,
-                &format!("Remove {user_id} from the Core group?"),
-            )?;
-            admin_request(Request::RemoveMember { user_id }).await?;
-            println!("Member removed.");
-            Ok(())
-        }
-        AccessCommand::ResetPairing { yes } => {
-            require_confirmation(yes, "Reset pairing data?")?;
-            super::reset_pairing().await
-        }
-    }
-}
-
-async fn list_members(format: OutputFormat) -> Result<()> {
-    let Response::Members { members } =
-        admin_request(Request::ListMembers).await?
-    else {
-        bail!("Unexpected response from local Core")
-    };
-    if matches!(format, OutputFormat::Json) {
-        println!("{}", serde_json::to_string(&members)?);
-    } else if members.is_empty() {
-        println!("No Core members found.");
-    } else {
-        println!("USER ID\tROLE\tSTATUS\tNAME");
-        for member in members {
-            println!(
-                "{}\t{}\t{}\t{}",
-                member.user_id,
-                member.role,
-                member.status,
-                member.display_name.unwrap_or_default()
-            );
-        }
-    }
-    Ok(())
-}
-
-async fn list_roles(format: OutputFormat) -> Result<()> {
-    let Response::Roles { roles } = admin_request(Request::ListRoles).await?
-    else {
-        bail!("Unexpected response from local Core")
-    };
-    if matches!(format, OutputFormat::Json) {
-        println!("{}", serde_json::to_string(&roles)?);
-    } else if roles.is_empty() {
-        println!("No roles found.");
-    } else {
-        println!("ID\tNAME\tRETIRED\tDESCRIPTION");
-        for role in roles {
-            println!(
-                "{}\t{}\t{}\t{}",
-                role.id,
-                role.name,
-                role.retired_at.unwrap_or_else(|| "no".to_owned()),
-                role.description
-            );
-        }
-    }
-    Ok(())
-}
-
-async fn list_invitations(format: OutputFormat) -> Result<()> {
-    let Response::Invitations { invitations } =
-        admin_request(Request::ListInvitations).await?
-    else {
-        bail!("Unexpected response from local Core")
-    };
-    if matches!(format, OutputFormat::Json) {
-        println!("{}", serde_json::to_string(&invitations)?);
-    } else if invitations.is_empty() {
-        println!("No invitations found.");
-    } else {
-        println!("ID\tINVITEE\tSTATUS\tEXPIRES");
-        for invitation in invitations {
-            println!(
-                "{}\t{}\t{}\t{}",
-                invitation.id,
-                invitation
-                    .invitee_display_name
-                    .unwrap_or(invitation.invitee_user_id),
-                invitation.status,
-                invitation.expires_at
-            );
-        }
-    }
-    Ok(())
 }
 
 async fn instance_menu() -> Result<()> {

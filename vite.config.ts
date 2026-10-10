@@ -9,14 +9,7 @@ export default defineConfig({
 	test: {
 		environment: 'node',
 		include: ['scripts/**/*.test.ts'],
-		exclude: [
-			'**/.convex/**',
-			'**/.data/**',
-			'**/.repos/**',
-			'**/dist/**',
-			'**/node_modules/**',
-			'**/target/**',
-		],
+		exclude: ['**/.data/**', '**/.repos/**', '**/dist/**', '**/node_modules/**', '**/target/**'],
 		hookTimeout: 60_000,
 		testTimeout: 60_000,
 	},
@@ -28,7 +21,6 @@ export default defineConfig({
 		singleQuote: true,
 		useTabs: true,
 		ignorePatterns: [
-			'.convex/**',
 			'.data/**',
 			'.repos/**',
 			'.turbo/**',
@@ -37,7 +29,6 @@ export default defineConfig({
 			'**/dist/**',
 			'**/node_modules/**',
 			'**/target/**',
-			'convex/_generated/**',
 			'pnpm-lock.yaml',
 			'*.tsbuildinfo',
 		],
@@ -45,7 +36,6 @@ export default defineConfig({
 	},
 	lint: {
 		ignorePatterns: [
-			'.convex/**',
 			'.data/**',
 			'.repos/**',
 			'.turbo/**',
@@ -54,7 +44,6 @@ export default defineConfig({
 			'**/dist/**',
 			'**/node_modules/**',
 			'**/target/**',
-			'convex/_generated/**',
 		],
 		plugins: ['eslint', 'oxc', 'typescript', 'unicorn'],
 		categories: {

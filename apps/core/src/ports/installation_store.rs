@@ -18,8 +18,6 @@ pub trait InstallationStore: Send + Sync + 'static {
         &self,
         id: &InstallationId,
     ) -> Result<Option<ServerInstallationRecord>, StoreError>;
-    /// List all known installations.
-    async fn list(&self) -> Result<Vec<ServerInstallationRecord>, StoreError>;
     /// List all installations currently in a given status (e.g. stuck `Installing`).
     async fn list_by_status(
         &self,
@@ -32,6 +30,4 @@ pub trait InstallationStore: Send + Sync + 'static {
         status: InstallationStatus,
         error: Option<&str>,
     ) -> Result<(), StoreError>;
-    /// Delete an installation record.
-    async fn delete(&self, id: &InstallationId) -> Result<(), StoreError>;
 }

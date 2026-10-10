@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import {
+	AuthFeature,
 	GenericModrinthClient,
 	NodeAuthFeature,
 	PanelVersionFeature,
@@ -18,12 +19,16 @@ async function main() {
 		'127.0.0.1',
 		'This check only runs against the local development Core',
 	)
+	// Core lets in only its owner, so this must be the owner's account session token.
+	const token = process.env.ACCOUNT_TOKEN
+	assert(token, 'Set ACCOUNT_TOKEN to the Core owner's account session token')
 	let fsAuth = null
 	const client = new GenericModrinthClient({
 		archonBaseUrl: `${coreUrl}/hosting`,
 		selfHostedHosting: true,
 		features: [
 			new NodeAuthFeature({ getAuth: () => fsAuth, refreshAuth: async () => {} }),
+			new AuthFeature({ token }),
 			new PanelVersionFeature(),
 		],
 	})

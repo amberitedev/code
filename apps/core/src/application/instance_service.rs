@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use tracing::{error, info};
 
@@ -12,27 +12,12 @@ use crate::{
     },
     domain::{
         event::Event,
-        instance::{
-            InstanceId, InstanceInstallStatus, InstanceRecord, InstanceStatus,
-            MemorySettings, ModLoader,
-        },
+        instance::{InstanceId, InstanceRecord, InstanceStatus, ModLoader},
         server_installation::InstallationId,
     },
-    infrastructure::minecraft::{
-        java::detect_java_installations,
-        server_properties::write_initial_properties,
-    },
+    infrastructure::minecraft::java::detect_java_installations,
     ports::instance_store::StoreError,
 };
-
-pub struct CreateInstanceRequest {
-    pub name: String,
-    pub game_version: String,
-    pub loader: ModLoader,
-    pub loader_version: Option<String>,
-    pub port: u16,
-    pub memory: MemorySettings,
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceError {
@@ -42,8 +27,6 @@ pub enum InstanceError {
     AlreadyRunning,
     #[error("not running")]
     NotRunning,
-    #[error("instance must be stopped before this operation")]
-    MustBeOffline,
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("spawn: {0}")]
@@ -56,112 +39,6 @@ pub enum InstanceError {
     ActorDead,
     #[error("invalid instance request: {0}")]
     Invalid(String),
-}
-
-/// Create a new instance: write its per-instance data dir + server.properties,
-/// bind it to a shared installation for the requested build (installing the
-/// shared server files in the background if needed), and persist the record.
-///
-/// Returns immediately. If the shared installation is already `Ready` the
-/// instance is `Ready` at once; otherwise track progress via the SSE endpoints.
-pub async fn create_instance(
-    state: &Arc<AppState>,
-    req: CreateInstanceRequest,
-) -> Result<InstanceId, InstanceError> {
-    validate_create_request(state, &req).await?;
-    let id = InstanceId::new();
-    let path = unique_instance_path(state, &req.name).await?;
-    let data_dir = unique_instance_data_dir(state, &req.name, &id).await?;
-
-    // B4: Write initial server.properties so the server can start on first launch.
-    write_initial_properties(&data_dir, req.port)
-        .await
-        .map_err(|e| InstanceError::Io(std::io::Error::other(e.to_string())))?;
-
-    let (installation_id, _status) = ensure_installation(
-        state,
-        &req.game_version,
-        &req.loader,
-        req.loader_version.as_deref(),
-    )
-    .await?;
-
-    let now = chrono::Utc::now();
-    let record = InstanceRecord {
-        id: id.clone(),
-        path,
-        name: req.name,
-        game_version: req.game_version,
-        loader: req.loader,
-        loader_version: req.loader_version,
-        port: req.port,
-        memory: req.memory,
-        java_version: None,
-        jvm_args: None,
-        server_args: None,
-        install_status: InstanceInstallStatus::Installing,
-        status: InstanceStatus::Offline,
-        data_dir: data_dir.display().to_string(),
-        installation_id: Some(installation_id.to_string()),
-        total_uptime_seconds: 0,
-        created_at: now,
-        updated_at: now,
-    };
-
-    state.instance_store.create(&record).await?;
-    state.broadcaster.send(Event::InstanceCreated {
-        instance: record.clone(),
-    });
-
-    // Reconcile after insert: an already-ready installation marks this instance
-    // ready immediately; otherwise the running install task will propagate.
-    reconcile_instance(state, &id, &installation_id).await;
-
-    Ok(id)
-}
-
-async fn validate_create_request(
-    state: &Arc<AppState>,
-    req: &CreateInstanceRequest,
-) -> Result<(), InstanceError> {
-    if req.port == 0 {
-        return Err(InstanceError::Invalid("port cannot be 0".into()));
-    }
-    if req.memory.min_mb == 0 || req.memory.max_mb == 0 {
-        return Err(InstanceError::Invalid(
-            "memory must be greater than 0".into(),
-        ));
-    }
-    if req.memory.min_mb > req.memory.max_mb {
-        return Err(InstanceError::Invalid(
-            "memory min_mb cannot exceed max_mb".into(),
-        ));
-    }
-    require_port_available(state, req.port, None).await?;
-    Ok(())
-}
-
-async fn unique_instance_path(
-    state: &Arc<AppState>,
-    name: &str,
-) -> Result<String, InstanceError> {
-    let base = sanitize_instance_path(name);
-    match state.instance_store.get_by_path(&base).await {
-        Ok(_) => {}
-        Err(StoreError::NotFound(_)) => return Ok(base),
-        Err(error) => return Err(error.into()),
-    }
-
-    let mut index = 1;
-    loop {
-        let candidate = format!("{base} ({index})");
-        match state.instance_store.get_by_path(&candidate).await {
-            Ok(_) => {}
-            Err(StoreError::NotFound(_)) => return Ok(candidate),
-            Err(error) => return Err(error.into()),
-        }
-        index += 1;
-    }
 }
 
 pub fn sanitize_instance_path(input: &str) -> String {
@@ -203,68 +80,6 @@ async fn require_port_available(
         )));
     }
     Ok(())
-}
-
-async fn unique_instance_data_dir(
-    state: &Arc<AppState>,
-    name: &str,
-    id: &InstanceId,
-) -> Result<PathBuf, InstanceError> {
-    let base = state.config.data_dir.join("instances");
-    tokio::fs::create_dir_all(&base).await?;
-    let slug = slug_instance_name(name);
-    if let Some(path) = try_create_instance_dir(&base.join(&slug)).await? {
-        return Ok(path);
-    }
-
-    let id_string = id.to_string();
-    let short = &id_string[..4];
-    if let Some(path) =
-        try_create_instance_dir(&base.join(format!("{slug}-{short}"))).await?
-    {
-        return Ok(path);
-    }
-
-    let mut index = 2;
-    loop {
-        let candidate = base.join(format!("{slug}-{short}-{index}"));
-        if let Some(path) = try_create_instance_dir(&candidate).await? {
-            return Ok(path);
-        }
-        index += 1;
-    }
-}
-
-async fn try_create_instance_dir(
-    candidate: &PathBuf,
-) -> Result<Option<PathBuf>, InstanceError> {
-    match tokio::fs::create_dir(candidate).await {
-        Ok(()) => Ok(Some(candidate.clone())),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-        Err(err) => Err(InstanceError::Io(err)),
-    }
-}
-
-fn slug_instance_name(name: &str) -> String {
-    let mut out = String::new();
-    let mut last_was_dash = false;
-    for ch in name.trim().chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch);
-            last_was_dash = false;
-        } else if !last_was_dash && !out.is_empty() {
-            out.push('-');
-            last_was_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        "server".to_string()
-    } else {
-        out
-    }
 }
 
 /// Re-download/reinstall the shared server files backing an instance ("repair").
@@ -383,31 +198,6 @@ pub async fn update_port(
     require_port_available(state, port, Some(id)).await?;
     state.instance_store.update_port(id, port).await?;
     Ok(())
-}
-
-/// Delete an offline instance and its local data/backup storage.
-pub async fn delete_instance(
-    state: &Arc<AppState>,
-    id: &InstanceId,
-) -> Result<(), InstanceError> {
-    if state.instances.contains_key(id) {
-        return Err(InstanceError::MustBeOffline);
-    }
-    let record = load_record(state, id).await?;
-    let backup_dir =
-        crate::application::backup_service::storage_dir(state, &id.to_string());
-    remove_dir_if_exists(PathBuf::from(&record.data_dir)).await?;
-    remove_dir_if_exists(backup_dir).await?;
-    state.instance_store.delete(id).await?;
-    Ok(())
-}
-
-async fn remove_dir_if_exists(path: PathBuf) -> Result<(), InstanceError> {
-    match tokio::fs::remove_dir_all(&path).await {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(InstanceError::Io(error)),
-    }
 }
 
 /// On startup, detect Java, resume interrupted shared installations, and restore

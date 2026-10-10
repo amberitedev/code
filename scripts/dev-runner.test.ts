@@ -8,7 +8,6 @@ import {
 	parseInput,
 	portsForOffset,
 	processLabelsForMode,
-	resolveConvexMode,
 	resolveStartOffset,
 	scenarioUsername,
 } from './dev-runner.ts'
@@ -25,8 +24,6 @@ describe('dev runner ports', () => {
 			app: 1420,
 			backend: 8787,
 			accountWeb: 3100,
-			convexCloud: 3210,
-			convexSite: 3211,
 			core: 16662,
 		})
 	})
@@ -90,8 +87,6 @@ describe('dev runner ports', () => {
 			app: 1421,
 			backend: 8788,
 			accountWeb: 3101,
-			convexCloud: 3211,
-			convexSite: 3212,
 			core: 16663,
 		})
 	})
@@ -120,15 +115,11 @@ describe('dev runner environment', () => {
 	it('owns runtime URLs and removes ambient host and port overrides', () => {
 		const env = createRuntimeEnvironment({
 			baseEnv: {
-				CONVEX_DEPLOYMENT: 'dev:must-not-escape',
 				HOST: 'example.com',
 				PORT: '9999',
 				SHARED: 'kept',
 			},
-			convexMode: 'local',
-			localDeployment: 'local-test',
 			paths: {
-				convexData: '/repo/.data/convex',
 				coreData: '/repo/.data/core',
 				data: '/repo/.data',
 				primary: '/repo',
@@ -143,61 +134,8 @@ describe('dev runner environment', () => {
 		expect(env.PORT).toBeUndefined()
 		expect(env.SHARED).toBe('kept')
 		expect(env.AMBERITE_DEV_MODE).toBe('true')
-		expect(env.CONVEX_DEPLOYMENT).toBe('local:local-test')
-		expect(env.VITE_CONVEX_URL).toBe('http://127.0.0.1:3213')
+		expect(env.ACCOUNT_API_URL).toBe('http://127.0.0.1:8790')
 		expect(env.VITE_CORE_URL).toBe('http://127.0.0.1:16665')
-	})
-
-	it('uses the configured cloud deployment in the primary checkout', () => {
-		const env = createRuntimeEnvironment({
-			baseEnv: {
-				CONVEX_DEPLOYMENT: 'dev:example',
-				CONVEX_SITE_URL: 'https://example.convex.site',
-				CONVEX_URL: 'https://example.convex.cloud',
-			},
-			convexMode: 'cloud',
-			paths: {
-				convexData: '/repo/.data/convex',
-				coreData: '/repo/.data/core',
-				data: '/repo/.data',
-				primary: '/repo',
-				runtime: '/repo/.data/runtime.json',
-				scenariosData: '/repo/.data/scenarios',
-				worktree: '/repo',
-			},
-			ports: portsForOffset(0),
-		})
-
-		expect(env.VITE_CONVEX_URL).toBe('https://example.convex.cloud')
-		expect(env.VITE_CONVEX_SITE_URL).toBe('https://example.convex.site')
-	})
-
-	it('rejects a production deployment in the primary checkout', () => {
-		expect(() =>
-			createRuntimeEnvironment({
-				baseEnv: {
-					CONVEX_DEPLOYMENT: 'prod:example',
-					CONVEX_SITE_URL: 'https://example.convex.site',
-					CONVEX_URL: 'https://example.convex.cloud',
-				},
-				convexMode: 'cloud',
-				paths: {
-					convexData: '/repo/.data/convex',
-					coreData: '/repo/.data/core',
-					data: '/repo/.data',
-					primary: '/repo',
-					runtime: '/repo/.data/runtime.json',
-					scenariosData: '/repo/.data/scenarios',
-					worktree: '/repo',
-				},
-				ports: portsForOffset(0),
-			}),
-		).toThrow('requires a cloud Convex development deployment')
-	})
-
-	it('chooses cloud only for the primary checkout', () => {
-		expect(resolveConvexMode({ primary: '/repo', worktree: '/repo' })).toBe('cloud')
-		expect(resolveConvexMode({ primary: '/repo', worktree: '/worktrees/main' })).toBe('local')
 	})
 })
 
@@ -210,7 +148,6 @@ describe('dev runner modes', () => {
 		expect(processLabelsForMode('dev:app')).toEqual(['app-frontend'])
 		expect(processLabelsForMode('dev:backend')).toEqual(['backend', 'account-web'])
 		expect(processLabelsForMode('dev:core')).toEqual(['core'])
-		expect(processLabelsForMode('dev:convex')).toEqual(['convex'])
 	})
 })
 
@@ -245,7 +182,6 @@ describe('dev runner scenarios', () => {
 
 	it('gives each App isolated persistent state', () => {
 		const paths = {
-			convexData: `${process.cwd()}/.data/convex`,
 			coreData: `${process.cwd()}/.data/core`,
 			data: `${process.cwd()}/.data`,
 			primary: process.cwd(),
@@ -255,11 +191,7 @@ describe('dev runner scenarios', () => {
 		}
 		const specs = createProcessSpecs({
 			branch: 'feature',
-			convexMode: 'local',
-			env: {
-				VITE_CONVEX_SITE_URL: 'http://127.0.0.1:3211',
-				VITE_CONVEX_URL: 'http://127.0.0.1:3210',
-			},
+			env: {},
 			mode: 'dev',
 			paths,
 			ports: portsForOffset(0),

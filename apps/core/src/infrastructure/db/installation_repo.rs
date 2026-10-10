@@ -89,15 +89,6 @@ impl InstallationStore for InstallationRepo {
         row.map(TryInto::try_into).transpose()
     }
 
-    async fn list(&self) -> Result<Vec<ServerInstallationRecord>, StoreError> {
-        let rows = sqlx::query_as::<_, InstallationRow>(
-            "SELECT * FROM server_installations ORDER BY created_at",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        rows.into_iter().map(TryInto::try_into).collect()
-    }
-
     async fn list_by_status(
         &self,
         status: InstallationStatus,
@@ -126,18 +117,6 @@ impl InstallationStore for InstallationRepo {
         .bind(id.to_string())
         .execute(&self.pool)
         .await?;
-        if result.rows_affected() == 0 {
-            return Err(StoreError::NotFound(id.to_string()));
-        }
-        Ok(())
-    }
-
-    async fn delete(&self, id: &InstallationId) -> Result<(), StoreError> {
-        let result =
-            sqlx::query("DELETE FROM server_installations WHERE id = ?")
-                .bind(id.to_string())
-                .execute(&self.pool)
-                .await?;
         if result.rows_affected() == 0 {
             return Err(StoreError::NotFound(id.to_string()));
         }

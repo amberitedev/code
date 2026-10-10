@@ -99,9 +99,8 @@ Development setup and state handling belong in `docs/internals/scripts.md`.
 ## How it works
 
 The desktop frontend is a Vue app inside a Tauri shell. Amberite-specific frontend workflows live in
-`@modrinth/api-client`, which connects the App and Website to Convex, Copal, and the realtime
-Worker. Convex holds durable identity and social state, Copal runs and manages the Minecraft
-servers, and realtime carries short-lived presence.
+`@modrinth/api-client`, which connects the App to the backend and to Copal. The backend holds
+accounts, friends, presence, and sharing metadata; Copal runs and manages the Minecraft servers.
 
 Architecture overview with source links: `docs/internals/overview.md`
 
@@ -111,8 +110,6 @@ Architecture overview with source links: `docs/internals/overview.md`
 - `apps/app` - Tauri shell, native commands, capabilities, and process integration.
 - `apps/core` - Copal, the Rust server manager.
 - `apps/frontend` - Website and inherited Modrinth web surface.
-- `convex` - durable Amberite identity, social, group, and cloud state.
-- `apps/realtime` - short-lived presence through Cloudflare Workers and Durable Objects.
 - `packages/ui` - shared Modrinth and Amberite UI.
 - `packages/api-client` - shared Modrinth and Amberite contracts, clients, and backend-facing workflows.
 - `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly

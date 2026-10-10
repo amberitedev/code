@@ -67,7 +67,6 @@ fs3 = "0.5"
 home = "0.5"
 indicatif = "0.17"
 inquire = "0.9"
-local-ip-address = "0.6"
 port_scanner = "0.1"
 sanitize-filename = "0.5"
 # ============================================================
@@ -93,12 +92,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # ============================================================
 # TIER 1 - CRYPTO & SECURITY
 # ============================================================
-base64 = "0.22"
 hex = "0.4"
-rand = "0.8"
-
-# JWT validation (RS256 JWKS)
-jsonwebtoken = "9.3"
 
 # ============================================================
 # TIER 2 - DATA & PARSING
@@ -106,7 +100,6 @@ jsonwebtoken = "9.3"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
-cron = "0.12"
 fancy-regex = "0.14"
 indexmap = "2.7"
 lazy_static = "1.5"
@@ -117,7 +110,6 @@ semver = { version = "1.0", features = ["serde"] }
 time = "0.3"
 url = "2.5"
 
-igd = "0.12"
 # ============================================================
 # TIER 1 - HTTP
 # ============================================================

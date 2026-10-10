@@ -5,8 +5,6 @@
 			:get-blocked-users="getBlockedUsers"
 			:get-users="getUsers"
 			:unblock-user="unblockUser"
-			:get-preferences="getPreferences"
-			:edit-preferences="editPreferences"
 		/>
 		<UnsavedChangesPopup
 			:original="socialSettings?.originalState ?? emptySocialState"
@@ -52,17 +50,6 @@ function getUsers(userIds: string[]): Promise<Labrinth.Users.v2.User[]> {
 
 function unblockUser(userId: string): Promise<void> {
 	return client.labrinth.blocked_users_v3.unblock(userId)
-}
-
-function getPreferences(userId: string): Promise<Labrinth.Users.v3.UserPreferences> {
-	return client.labrinth.users_v3.getPreferences(userId)
-}
-
-function editPreferences(
-	userId: string,
-	preferences: Labrinth.Users.v3.PartialUserPreferences,
-): Promise<Labrinth.Users.v3.UserPreferences> {
-	return client.labrinth.users_v3.editPreferences(userId, preferences)
 }
 
 useHead({

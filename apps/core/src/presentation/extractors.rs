@@ -1,23 +1,24 @@
-//! JWT extraction for Core HTTP routes.
+//! Account login for Core HTTP routes.
 
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     async_trait,
     extract::FromRequestParts,
-    http::{request::Parts, HeaderMap},
+    http::{request::Parts, HeaderMap, StatusCode},
 };
+use serde::Deserialize;
 
-use crate::{
-    application::{access_service, state::AppState},
-    infrastructure::auth::jwks::Claims,
-    presentation::error::ApiError,
-};
+use crate::{application::state::AppState, presentation::error::ApiError};
 
-const NO_AUTH_USER_ID: &str = "local-noauth-owner";
+/// How long the backend's answer for an account token is reused.
+const TOKEN_CACHE: Duration = Duration::from_secs(60);
 
-/// Axum extractor that validates an owner JWT and yields its claims.
-pub struct AuthUser(pub Claims);
+/// Axum extractor that accepts only the Core owner's account token.
+pub struct AuthUser(pub Account);
 
 #[async_trait]
 impl FromRequestParts<Arc<AppState>> for AuthUser {
@@ -27,96 +28,81 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        if state.config.no_auth {
-            return Ok(Self(no_auth_claims()));
+        let token = bearer_token(&parts.headers)
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| {
+                ApiError::Unauthorized("missing Authorization header".into())
+            })?;
+        let account = account(state, token).await?;
+
+        // Temporary until pairing exists: the first account to connect owns this Core.
+        let owner = state
+            .claim_owner(&account.id)
+            .await
+            .map_err(|error| ApiError::Internal(error.to_string()))?;
+        if owner != account.id {
+            return Err(ApiError::Forbidden(
+                "this Core belongs to another account".into(),
+            ));
         }
 
-        let token = bearer_token(&parts.headers).ok_or_else(|| {
-            ApiError::Unauthorized("missing Authorization header".into())
-        })?;
-
-        let mut claims = if state.config.dev_mode {
-            if let Some(claims) = dev_claims(token)? {
-                claims
-            } else {
-                validate_jwt(state, token).await?
-            }
-        } else {
-            validate_jwt(state, token).await?
-        };
-        claims.sub = auth_user_id(&claims.sub).to_string();
-
-        access_service::require_any_member(state, &claims.sub)
-            .await
-            .map_err(|e| ApiError::Forbidden(e.to_string()))?;
-
-        Ok(Self(claims))
+        Ok(Self(account))
     }
 }
 
-fn no_auth_claims() -> Claims {
-    Claims {
-        sub: NO_AUTH_USER_ID.to_string(),
-        aud: "no-auth".to_string(),
-        role: Some("owner".to_string()),
-        exp: (chrono::Utc::now().timestamp() + 3600) as u64,
-    }
-}
-
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let val = headers.get("authorization")?.to_str().ok()?;
     val.strip_prefix("Bearer ")
 }
 
-fn auth_user_id(subject: &str) -> &str {
-    match subject.split_once('|') {
-        Some((user_id, session_id))
-            if !user_id.is_empty() && !session_id.is_empty() =>
-        {
-            user_id
+/// The signed-in account making a request.
+#[derive(Clone, Deserialize)]
+pub struct Account {
+    pub id: String,
+    pub username: String,
+}
+
+/// Resolve an account token to its account by asking the backend (`GET /user`).
+async fn account(state: &AppState, token: &str) -> Result<Account, ApiError> {
+    let now = Instant::now();
+    if let Some(cached) = state.account_tokens.get(token) {
+        if cached.1 > now {
+            return Ok(cached.0.clone());
         }
-        _ => subject,
     }
-}
 
-async fn validate_jwt(
-    state: &Arc<AppState>,
-    token: &str,
-) -> Result<Claims, ApiError> {
-    let jwks_url = state
-        .jwks_url()
-        .await
-        .ok_or_else(|| ApiError::Unauthorized("Core is not paired".into()))?;
-
-    let audience = state.auth_audience().await.ok_or_else(|| {
-        ApiError::Unauthorized("Core auth audience is not configured".into())
-    })?;
-
-    state
-        .jwks_cache
-        .validate(token, &jwks_url, &audience)
-        .await
-        .map_err(|e| ApiError::Unauthorized(e.to_string()))
-}
-
-fn dev_claims(token: &str) -> Result<Option<Claims>, ApiError> {
-    let Some(user_id) = token.strip_prefix("dev:") else {
-        return Ok(None);
+    let unavailable = |error: reqwest::Error| {
+        ApiError::ServiceUnavailable(format!(
+            "account service unavailable: {error}"
+        ))
     };
-    if user_id.is_empty() || user_id.chars().any(char::is_control) {
-        return Err(ApiError::Unauthorized("invalid dev token".into()));
+    let response = state
+        .http
+        .get(format!("{}/user", state.config.account_api_url))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(unavailable)?;
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err(ApiError::Unauthorized("invalid account token".into()));
     }
-    Ok(Some(Claims {
-        sub: user_id.to_string(),
-        aud: "dev".to_string(),
-        role: Some("dev".to_string()),
-        exp: (chrono::Utc::now().timestamp() + 3600) as u64,
-    }))
+    let account: Account = response
+        .error_for_status()
+        .map_err(unavailable)?
+        .json()
+        .await
+        .map_err(unavailable)?;
+
+    state.account_tokens.retain(|_, cached| cached.1 > now);
+    state
+        .account_tokens
+        .insert(token.to_string(), (account.clone(), now + TOKEN_CACHE));
+    Ok(account)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_user_id, bearer_token};
+    use super::bearer_token;
     use axum::http::{header, HeaderMap, HeaderValue};
 
     fn with_auth(value: &str) -> HeaderMap {
@@ -140,38 +126,5 @@ mod tests {
     fn wrong_scheme_returns_none() {
         let headers = with_auth("Basic abc123");
         assert_eq!(bearer_token(&headers), None);
-    }
-
-    #[test]
-    fn bearer_with_empty_token() {
-        // Spec: caller is responsible for rejecting empty tokens
-        let headers = with_auth("Bearer ");
-        assert_eq!(bearer_token(&headers), Some(""));
-    }
-
-    #[test]
-    fn bearer_prefix_is_case_sensitive() {
-        // HTTP convention: scheme names are case-insensitive, but our impl uses exact match
-        let headers = with_auth("bearer abc123");
-        assert_eq!(bearer_token(&headers), None);
-    }
-
-    #[test]
-    fn convex_auth_subject_uses_user_id() {
-        assert_eq!(
-            auth_user_id("users:abc123|sessions:def456"),
-            "users:abc123"
-        );
-    }
-
-    #[test]
-    fn bare_subject_is_unchanged() {
-        assert_eq!(auth_user_id("dev-owner"), "dev-owner");
-    }
-
-    #[test]
-    fn malformed_subject_is_unchanged() {
-        assert_eq!(auth_user_id("users:abc123|"), "users:abc123|");
-        assert_eq!(auth_user_id("|sessions:def456"), "|sessions:def456");
     }
 }

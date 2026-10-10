@@ -22,20 +22,10 @@ export const config = {
 	labrinthBaseUrl,
 	archonBaseUrl,
 	sharedInstancesBaseUrl,
-	convexUrl: import.meta.env.VITE_CONVEX_URL,
-	convexSiteUrl: import.meta.env.VITE_CONVEX_SITE_URL,
-	realtimeUrl: import.meta.env.VITE_REALTIME_URL,
 }
 
-export function applyDevAppConfig(devConfig: {
-	coreUrl?: string
-	backendUrl?: string
-	convexUrl?: string
-	convexSiteUrl?: string
-}) {
+export function applyDevAppConfig(devConfig: { coreUrl?: string; backendUrl?: string }) {
 	if (!import.meta.env.DEV) return
 	if (devConfig.coreUrl) config.coreUrl = trimTrailingSlash(devConfig.coreUrl)
 	if (devConfig.backendUrl) config.accountApiUrl = trimTrailingSlash(devConfig.backendUrl)
-	config.convexUrl = devConfig.convexUrl
-	config.convexSiteUrl = devConfig.convexSiteUrl
 }

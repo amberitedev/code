@@ -5,7 +5,6 @@ use crate::domain::modpack::ModpackManifest;
 
 #[async_trait]
 pub trait ModpackStore: Send + Sync + 'static {
-    async fn save(&self, manifest: &ModpackManifest) -> Result<(), StoreError>;
     async fn get_for_instance(
         &self,
         instance_id: &str,

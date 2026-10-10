@@ -10,7 +10,9 @@
 		:on-create-project="openProjectCreateModal"
 		:on-create-collection="openCollectionCreateModal"
 	>
-		<template #sidebar> </template>
+		<template #sidebar>
+			<AdPlaceholder v-if="!auth.user" />
+		</template>
 	</UserProfilePageLayout>
 </template>
 
@@ -19,6 +21,7 @@ import type { Labrinth } from '@modrinth/api-client'
 import { injectModrinthClient, provideUserProfile, UserProfilePageLayout } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 
+import AdPlaceholder from '~/components/ui/AdPlaceholder.vue'
 import CollectionCreateModal from '~/components/ui/create/CollectionCreateModal.vue'
 import ProjectCreateModal from '~/components/ui/create/ProjectCreateModal.vue'
 import { warmProjectCheckCaches } from '~/composables/queries/project'

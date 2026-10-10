@@ -106,13 +106,6 @@ export default defineNuxtConfig({
 		},
 	},
 	hooks: {
-		'vite:extendConfig'(viteConfig, { isServer }) {
-			if (process.env.ACCOUNT_API_URL && !isProduction() && isServer) {
-				// Vite+ separates WebSockets from HMR. Nuxt disables SSR HMR, but
-				// its second socket listener would still upgrade the client socket twice.
-				viteConfig.server = { ...viteConfig.server, ws: false }
-			}
-		},
 		async 'build:before'() {
 			// 30 minutes
 			const TTL = 30 * 60 * 1000
@@ -127,18 +120,6 @@ export default defineNuxtConfig({
 			}
 
 			const API_URL = getApiUrl()
-			// Local launcher sign-in can reuse public content metadata between
-			// restarts without waiting for unrelated remote billing/tag endpoints.
-			if (
-				process.env.ACCOUNT_API_URL &&
-				process.env.NODE_ENV !== 'production' &&
-				state.apiUrl === API_URL &&
-				Array.isArray(state.categories) &&
-				Array.isArray(state.loaders)
-			) {
-				console.log('Using cached public content metadata for local account development.')
-				return
-			}
 
 			if (
 				// Skip regeneration if within TTL...
@@ -197,15 +178,12 @@ export default defineNuxtConfig({
 		// @ts-ignore
 		rateLimitKey: process.env.RATE_LIMIT_IGNORE_KEY ?? globalThis.RATE_LIMIT_IGNORE_KEY,
 		pyroBaseUrl: process.env.PYRO_BASE_URL,
-		amberiteMinecraftOAuthClientId: getAmberiteMinecraftOAuthClientId(),
-		amberiteMinecraftOAuthClientSecret: getAmberiteMinecraftOAuthClientSecret(),
-		amberiteAuthCookieSecret: process.env.AMBERITE_AUTH_COOKIE_SECRET ?? '',
+		sharedInstancesBaseUrl: getSharedInstancesApiUrl(),
 		intercomIdentitySecret:
 			process.env.INTERCOM_IDENTITY_SECRET ??
 			// @ts-ignore
 			globalThis.INTERCOM_IDENTITY_SECRET,
 		public: {
-			accountApiUrl: process.env.ACCOUNT_API_URL || '',
 			apiBaseUrl: getApiUrl(),
 			pyroBaseUrl: process.env.PYRO_BASE_URL,
 			sharedInstancesBaseUrl: getSharedInstancesApiUrl(),
@@ -217,10 +195,6 @@ export default defineNuxtConfig({
 				'ykeritl9',
 			production: isProduction(),
 			cookieSecure: isProduction(),
-			amberiteConvexUrl: getAmberiteConvexUrl(),
-			amberiteCoreUrl: getAmberiteCoreUrl(),
-			amberiteCoreJwt: getAmberiteCoreJwt(),
-			amberiteConnectedCoreId: getAmberiteConnectedCoreId(),
 			buildEnv: process.env.BUILD_ENV,
 			preview: process.env.PREVIEW === 'true',
 			featureFlagOverrides: getFeatureFlagOverrides(),
@@ -292,9 +266,7 @@ export default defineNuxtConfig({
 		},
 	},
 	devtools: {
-		// DevTools' Nitro storage inspector recursively registers file watchers
-		// before startup, which stalls the local Windows account website.
-		enabled: !process.env.ACCOUNT_API_URL,
+		enabled: true,
 	},
 	css: ['~/assets/styles/tailwind.css'],
 	postcss: {
@@ -391,73 +363,4 @@ function getDomain() {
 		const port = process.env.PORT || 3000
 		return `http://localhost:${port}`
 	}
-}
-
-function getAmberiteConvexUrl() {
-	return (
-		process.env.NUXT_PUBLIC_AMBERITE_CONVEX_URL ||
-		process.env.AMBERITE_CONVEX_URL ||
-		process.env.CONVEX_URL ||
-		// @ts-ignore
-		globalThis.NUXT_PUBLIC_AMBERITE_CONVEX_URL ||
-		// @ts-ignore
-		globalThis.AMBERITE_CONVEX_URL ||
-		// @ts-ignore
-		globalThis.CONVEX_URL ||
-		''
-	)
-}
-
-function getAmberiteCoreUrl() {
-	return (
-		process.env.NUXT_PUBLIC_AMBERITE_CORE_URL ||
-		process.env.AMBERITE_CORE_URL ||
-		// @ts-ignore
-		globalThis.NUXT_PUBLIC_AMBERITE_CORE_URL ||
-		// @ts-ignore
-		globalThis.AMBERITE_CORE_URL ||
-		''
-	)
-}
-
-function getAmberiteCoreJwt() {
-	return (
-		process.env.NUXT_PUBLIC_AMBERITE_CORE_JWT ||
-		process.env.AMBERITE_CORE_JWT ||
-		// @ts-ignore
-		globalThis.NUXT_PUBLIC_AMBERITE_CORE_JWT ||
-		// @ts-ignore
-		globalThis.AMBERITE_CORE_JWT ||
-		''
-	)
-}
-
-function getAmberiteConnectedCoreId() {
-	return (
-		process.env.NUXT_PUBLIC_AMBERITE_CONNECTED_CORE_ID ||
-		process.env.AMBERITE_CONNECTED_CORE_ID ||
-		// @ts-ignore
-		globalThis.NUXT_PUBLIC_AMBERITE_CONNECTED_CORE_ID ||
-		// @ts-ignore
-		globalThis.AMBERITE_CONNECTED_CORE_ID ||
-		''
-	)
-}
-
-function getAmberiteMinecraftOAuthClientId() {
-	return (
-		process.env.AMBERITE_MINECRAFT_OAUTH_CLIENT_ID ||
-		// @ts-ignore
-		globalThis.AMBERITE_MINECRAFT_OAUTH_CLIENT_ID ||
-		''
-	)
-}
-
-function getAmberiteMinecraftOAuthClientSecret() {
-	return (
-		process.env.AMBERITE_MINECRAFT_OAUTH_CLIENT_SECRET ||
-		// @ts-ignore
-		globalThis.AMBERITE_MINECRAFT_OAUTH_CLIENT_SECRET ||
-		''
-	)
 }

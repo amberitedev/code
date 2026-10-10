@@ -25,6 +25,7 @@ export const apiClient = new TauriModrinthClient({
 			? [
 					new SelfHostedFeature({
 						baseUrl: config.accountApiUrl,
+						hostingUrl: config.coreUrl ? `${config.coreUrl}/hosting` : undefined,
 						token: async () => (await getModrinthCredentials())?.session,
 					}),
 				]

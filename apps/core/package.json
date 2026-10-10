@@ -5,12 +5,9 @@
 	"type": "module",
 	"scripts": {
 		"dev": "cargo run",
-		"dev:noauth": "cargo run -- --no-auth",
-		"setup": "node scripts/core_setup.ts",
 		"build": "cargo build --release",
 		"check": "cargo check",
 		"test": "cargo test --lib",
-		"lint": "cargo fmt --check && cargo clippy --all-targets",
-		"exercise": "node scripts/core_exercise.ts"
+		"lint": "cargo fmt --check && cargo clippy --all-targets"
 	}
 }

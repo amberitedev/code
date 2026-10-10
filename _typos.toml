@@ -1,29 +1,27 @@
 [files]
 extend-exclude = [
-  "**/src/locales/",
-  "apps/frontend/",
-  "patches/",
-  "packages/utils/",
-  "packages/ui/",
-  "packages/blog/",
-  # generated Cloudflare Workers declarations contain upstream API names and ISO codes
-  "apps/realtime/src/worker-configuration.d.ts",
-  # contains licenses like `CC-BY-ND-4.0`
-  "packages/moderation/src/data/stages/license.ts",
-  "packages/moderation/src/utils.ts",
-  # contains payment card IDs like `IY1VMST1MOXS` which are flagged
-  "apps/labrinth/src/queue/payouts/mod.rs",
-  "apps/app-frontend/src/components/ui/settings/instances/game-settings-modal/languages.ts"
+	"**/src/locales/",
+	"apps/frontend/",
+	"patches/",
+	"packages/utils/",
+	"packages/ui/",
+	"packages/blog/",
+	# contains licenses like `CC-BY-ND-4.0`
+	"packages/moderation/src/data/stages/license.ts",
+	"packages/moderation/src/utils.ts",
+	# contains payment card IDs like `IY1VMST1MOXS` which are flagged
+	"apps/labrinth/src/queue/payouts/mod.rs",
+	"apps/app-frontend/src/components/ui/settings/instances/game-settings-modal/languages.ts",
 ]
 
 [default]
 extend-ignore-re = [
-  # Ignore lines that end with `// typos:ignore`
-  "(?Rm)^.*(#|//)\\s*typos:ignore$",
-  # Ignore the line after `// typos:ignore`:
-  "(#|//)\\s*typos:ignore\\n.*",
-  # Ignore blocks between `// typos:off` and `// typos:on`
-  "(?s)(#|//)\\s*typos:off.*?\\n\\s*(#|//)\\s*typos:on",
+	# Ignore lines that end with `// typos:ignore`
+	"(?Rm)^.*(#|//)\\s*typos:ignore$",
+	# Ignore the line after `// typos:ignore`:
+	"(#|//)\\s*typos:ignore\\n.*",
+	# Ignore blocks between `// typos:off` and `// typos:on`
+	"(?s)(#|//)\\s*typos:off.*?\\n\\s*(#|//)\\s*typos:on",
 ]
 
 [default.extend-words]

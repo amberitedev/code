@@ -10,8 +10,6 @@ export interface DevAppConfig {
 	title: string
 	dataDir: string
 	backendUrl?: string
-	convexUrl?: string
-	convexSiteUrl?: string
 }
 
 let config: DevAppConfig | null = null

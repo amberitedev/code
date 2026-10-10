@@ -935,9 +935,7 @@ const storedAccounts = useStoredAccounts()
 const link = config.public.siteUrl + route.path.replace(/\/+$/, '')
 const client = injectModrinthClient()
 const pageContext = injectPageContext()
-const hostingIntercomActive = computed(
-	() => !config.public.accountApiUrl && route.path.startsWith('/hosting') && !!auth.value.user,
-)
+const hostingIntercomActive = computed(() => route.path.startsWith('/hosting') && !!auth.value.user)
 const hostingIntercomServerId = computed(() => {
 	const rawId = route.params.id
 	return Array.isArray(rawId) ? rawId[0] : rawId

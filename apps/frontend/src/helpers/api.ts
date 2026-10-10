@@ -2,7 +2,6 @@ import {
 	type AbstractFeature,
 	type AuthConfig,
 	AuthFeature,
-	SelfHostedFeature,
 	CircuitBreakerFeature,
 	NodeAuthFeature,
 	nodeAuthState,
@@ -49,14 +48,6 @@ export function createModrinthClient(
 		archonSentryCapture: () => flags.value.archonSentryCapture,
 		rateLimitKey: config.rateLimitKey || (() => readEnv('RATE_LIMIT_IGNORE_KEY')),
 		features: [
-			...(useRuntimeConfig().public.accountApiUrl
-				? [
-						new SelfHostedFeature({
-							baseUrl: useRuntimeConfig().public.accountApiUrl,
-							token: async () => auth.value.token,
-						}),
-					]
-				: []),
 			// for modrinth hosting
 			// is skipped for normal reqs
 			new NodeAuthFeature({

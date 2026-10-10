@@ -43,7 +43,7 @@ use crate::{
     },
     presentation::{
         error::ApiError, extractors::AuthUser,
-        instance_path::resolve_authorized_instance,
+        instance_path::resolve_instance_path,
     },
 };
 
@@ -65,15 +65,12 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn clear_logs(
-    AuthUser(claims): AuthUser,
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Extension(cursors): Extension<LogCursors>,
 ) -> Result<StatusCode, ApiError> {
-    require_dev(&state)?;
-    let record =
-        resolve_authorized_instance(&state, &claims.sub, &id, "server:logs")
-            .await?;
+    let record = resolve_instance_path(&state, &id).await?;
     let path = std::path::Path::new(&record.data_dir).join("logs/latest.log");
     let metadata = match tokio::fs::metadata(path).await {
         Ok(metadata) => Some(metadata),
@@ -95,21 +92,12 @@ async fn clear_logs(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn require_dev(state: &AppState) -> Result<(), ApiError> {
-    if state.config.no_auth && state.config.dev_mode {
-        Ok(())
-    } else {
-        Err(ApiError::NotFound("development hosting is disabled".into()))
-    }
-}
-
 async fn upgrade(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Extension(cursors): Extension<LogCursors>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    require_dev(&state)?;
     let iid: InstanceId = id
         .parse()
         .map_err(|_| ApiError::NotFound("server not found".into()))?;
@@ -129,8 +117,7 @@ enum ClientMessage {
 fn authenticate(state: &AppState, iid: &InstanceId, token: &str) -> bool {
     // Tickets are deliberately scoped to the URL's server and consumed once.
     state.ws_tickets.remove(token).is_some_and(|(_, ticket)| {
-        ticket.expires_at > Instant::now()
-            && ticket.user_id == format!("dev:{iid}")
+        ticket.expires_at > Instant::now() && ticket.instance_id == *iid
     })
 }
 
@@ -432,6 +419,7 @@ struct SyncQuery {
 }
 
 async fn sync(
+    _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Query(query): Query<SyncQuery>,
     headers: HeaderMap,
@@ -439,7 +427,6 @@ async fn sync(
     Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>,
     ApiError,
 > {
-    require_dev(&state)?;
     let id = query.scope.strip_prefix("server:").ok_or_else(|| {
         ApiError::BadRequest("scope must be server:<id>".into())
     })?;

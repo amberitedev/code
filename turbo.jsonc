@@ -5,17 +5,15 @@
 		"packages/tooling-config/**",
 		"!packages/tooling-config/.turbo/**",
 		"!packages/tooling-config/node_modules/**",
-		"packages/app-lib/.env"
+		"packages/app-lib/.env",
 	],
 	"globalEnv": [
 		"MODRINTH_URL",
 		"MODRINTH_API_BASE_URL",
 		"SHARED_INSTANCES_API_BASE_URL",
 		"MODRINTH_ARCHON_BASE_URL",
-		"VITE_CONVEX_URL",
-		"VITE_REALTIME_URL",
 		"VITE_STRIPE_PUBLISHABLE_KEY",
-		"DEV"
+		"DEV",
 	],
 	"tasks": {
 		"build": {
@@ -40,7 +38,6 @@
 				"PYRO_BASE_URL",
 				"NUXT_PUBLIC_AMBERITE_*",
 				"AMBERITE_*",
-				"CONVEX_URL",
 				"PROD_OVERRIDE",
 				"PYRO_MASTER_KEY",
 				"PORT",
@@ -52,9 +49,14 @@
 				"FORCE_COLOR",
 				"NEXTEST_*",
 				"BUILD_ENV",
-				"PREVIEW"
+				"PREVIEW",
 			],
-			"passThroughEnv": ["SCCACHE_*", "RUSTC_WRAPPER", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+			"passThroughEnv": [
+				"SCCACHE_*",
+				"RUSTC_WRAPPER",
+				"AWS_ACCESS_KEY_ID",
+				"AWS_SECRET_ACCESS_KEY",
+			],
 		},
 		"lint": {
 			"env": [
@@ -64,9 +66,14 @@
 				"RUST_*",
 				"RUSTFLAGS",
 				"FORCE_COLOR",
-				"NEXTEST_*"
+				"NEXTEST_*",
 			],
-			"passThroughEnv": ["SCCACHE_*", "RUSTC_WRAPPER", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+			"passThroughEnv": [
+				"SCCACHE_*",
+				"RUSTC_WRAPPER",
+				"AWS_ACCESS_KEY_ID",
+				"AWS_SECRET_ACCESS_KEY",
+			],
 		},
 		"lint:ancillary": {},
 		"//#i18n:coverage": {
@@ -82,18 +89,36 @@
 				"packages/moderation/src/**/*.vue",
 				"packages/moderation/src/locales/**/*.json",
 				"packages/ui/src/**/*.vue",
-				"packages/ui/src/locales/**/*.json"
+				"packages/ui/src/locales/**/*.json",
 			],
 			"outputs": [
-				"packages/ui/src/layouts/wrapped/settings/language-settings/language-settings-coverage.generated.ts"
-			]
+				"packages/ui/src/layouts/wrapped/settings/language-settings/language-settings-coverage.generated.ts",
+			],
 		},
 		"dev": {
 			"cache": false,
 			"persistent": true,
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
-			"env": ["CARGO_*", "RUST_*", "RUSTFLAGS", "FORCE_COLOR", "NEXTEST_*", "PORT", "NUXT_PUBLIC_AMBERITE_*", "AMBERITE_*", "SUPABASE_*", "ALLOWED_ORIGIN", "CONVEX_*"],
-			"passThroughEnv": ["DISPLAY", "WEBKIT_DISABLE_DMABUF_RENDERER", "JAVA_HOME", "CARGO_INCREMENTAL", "SCCACHE_*", "RUSTC_WRAPPER"]
+			"env": [
+				"CARGO_*",
+				"RUST_*",
+				"RUSTFLAGS",
+				"FORCE_COLOR",
+				"NEXTEST_*",
+				"PORT",
+				"NUXT_PUBLIC_AMBERITE_*",
+				"AMBERITE_*",
+				"SUPABASE_*",
+				"ALLOWED_ORIGIN",
+			],
+			"passThroughEnv": [
+				"DISPLAY",
+				"WEBKIT_DISABLE_DMABUF_RENDERER",
+				"JAVA_HOME",
+				"CARGO_INCREMENTAL",
+				"SCCACHE_*",
+				"RUSTC_WRAPPER",
+			],
 		},
 		"test": {
 			"env": [
@@ -104,21 +129,26 @@
 				"RUST_*",
 				"RUSTFLAGS",
 				"FORCE_COLOR",
-				"NEXTEST_*"
+				"NEXTEST_*",
 			],
-			"passThroughEnv": ["SCCACHE_*", "RUSTC_WRAPPER", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+			"passThroughEnv": [
+				"SCCACHE_*",
+				"RUSTC_WRAPPER",
+				"AWS_ACCESS_KEY_ID",
+				"AWS_SECRET_ACCESS_KEY",
+			],
 		},
 		"fix": {},
 		"fix:ancillary": {
-			"cache": false
+			"cache": false,
 		},
 		"intl:extract": {},
 		"intl:prune-local": {
 			"cache": false,
-			"dependsOn": ["intl:extract"]
+			"dependsOn": ["intl:extract"],
 		},
 		"prepr": {
-			"dependsOn": ["^prepr", "fix", "intl:extract", "intl:prune-local"]
-		}
-	}
+			"dependsOn": ["^prepr", "fix", "intl:extract", "intl:prune-local"],
+		},
+	},
 }

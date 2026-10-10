@@ -3,11 +3,11 @@ use std::{
     sync::Arc,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
-    application::{rcon_service, state::AppState, task_service::validate_cron},
+    application::{rcon_service, state::AppState},
     domain::instance::{InstanceId, InstanceStatus},
 };
 
@@ -22,18 +22,6 @@ pub struct BackupRecord {
     pub hot: bool,
     pub consistency: String,
     pub created_at: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BackupSchedule {
-    pub enabled: bool,
-    pub cron: String,
-    pub retain_count: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BackupTaskPayload {
-    retain_count: i64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -56,8 +44,6 @@ pub enum BackupError {
     RconRequiredForHotBackup,
     #[error("rcon: {0}")]
     Rcon(String),
-    #[error("invalid schedule: {0}")]
-    InvalidSchedule(String),
 }
 
 async fn data_dir_for(
@@ -341,40 +327,6 @@ pub async fn delete_backup(
     Ok(())
 }
 
-pub async fn delete_many_backups(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    ids: &[String],
-) -> Result<usize, BackupError> {
-    let mut deleted = 0usize;
-    for id in ids {
-        if delete_backup(state, instance_id, id).await.is_ok() {
-            deleted += 1;
-        }
-    }
-    Ok(deleted)
-}
-
-pub async fn lock_backup(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    backup_id: &str,
-    locked: bool,
-) -> Result<(), BackupError> {
-    let rows = sqlx::query(
-        "UPDATE backups SET locked = ? WHERE id = ? AND instance_id = ?",
-    )
-    .bind(locked)
-    .bind(backup_id)
-    .bind(instance_id)
-    .execute(&state.pool)
-    .await?;
-    if rows.rows_affected() == 0 {
-        return Err(BackupError::NotFound);
-    }
-    Ok(())
-}
-
 pub async fn restore_backup(
     state: &Arc<AppState>,
     instance_id: &str,
@@ -494,113 +446,6 @@ fn restore_data_dir_atomically(
         }
     }
     result
-}
-
-pub async fn get_backup_schedule(
-    state: &Arc<AppState>,
-    instance_id: &str,
-) -> Result<BackupSchedule, BackupError> {
-    let row: Option<(bool, String, i64)> = sqlx::query_as(
-		"SELECT enabled, cron, retain_count FROM backup_schedules WHERE instance_id = ?",
-	)
-	.bind(instance_id)
-	.fetch_optional(&state.pool)
-	.await?;
-    Ok(row
-        .map(|(e, c, r)| BackupSchedule {
-            enabled: e,
-            cron: c,
-            retain_count: r,
-        })
-        .unwrap_or(BackupSchedule {
-            enabled: false,
-            cron: "0 4 * * *".to_string(),
-            retain_count: 5,
-        }))
-}
-
-pub async fn set_backup_schedule(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    enabled: bool,
-    cron: &str,
-    retain_count: i64,
-) -> Result<(), BackupError> {
-    let _ = data_dir_for(state, instance_id).await?;
-    if retain_count <= 0 {
-        return Err(BackupError::InvalidSchedule(
-            "retain_count must be greater than 0".into(),
-        ));
-    }
-    validate_cron(cron).map_err(|_| {
-        BackupError::InvalidSchedule("invalid cron expression".into())
-    })?;
-    let task_id = backup_task_id(instance_id);
-    let now = chrono::Utc::now().to_rfc3339();
-    let payload = serde_json::to_string(&BackupTaskPayload { retain_count })
-        .map_err(|error| BackupError::InvalidSchedule(error.to_string()))?;
-    sqlx::query(
-		"INSERT INTO backup_schedules (instance_id, enabled, cron, retain_count) VALUES (?, ?, ?, ?) ON CONFLICT(instance_id) DO UPDATE SET enabled=excluded.enabled, cron=excluded.cron, retain_count=excluded.retain_count",
-	)
-	.bind(instance_id)
-	.bind(enabled)
-	.bind(cron)
-	.bind(retain_count)
-	.execute(&state.pool)
-	.await?;
-    sqlx::query(
-		"INSERT INTO scheduled_tasks (id, instance_id, task_type, cron, enabled, payload, created_at, updated_at) VALUES (?, ?, 'backup', ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET cron = excluded.cron, enabled = excluded.enabled, payload = excluded.payload, updated_at = excluded.updated_at",
-	)
-	.bind(&task_id)
-	.bind(instance_id)
-	.bind(cron)
-	.bind(enabled as i32)
-	.bind(payload)
-	.bind(&now)
-	.bind(&now)
-	.execute(&state.pool)
-	.await?;
-    Ok(())
-}
-
-fn backup_task_id(instance_id: &str) -> String {
-    format!("backup-schedule-{instance_id}")
-}
-
-pub async fn enforce_backup_retention(
-    state: &Arc<AppState>,
-    instance_id: &str,
-    retain_count: i64,
-) -> Result<(), BackupError> {
-    let total: i64 = sqlx::query_scalar(
-		"SELECT COUNT(*) FROM backups WHERE instance_id = ? AND trigger = 'scheduled' AND locked = 0",
-	)
-	.bind(instance_id)
-	.fetch_one(&state.pool)
-	.await?;
-
-    let excess = (total - retain_count).max(0);
-    if excess == 0 {
-        return Ok(());
-    }
-
-    let ids: Vec<(String,)> = sqlx::query_as(
-		"SELECT id FROM backups WHERE instance_id = ? AND trigger = 'scheduled' AND locked = 0 ORDER BY created_at ASC LIMIT ?",
-	)
-	.bind(instance_id)
-	.bind(excess)
-	.fetch_all(&state.pool)
-	.await?;
-
-    for (id,) in ids {
-        let zip = storage_dir(state, instance_id).join(format!("{id}.zip"));
-        tokio::fs::remove_file(&zip).await.ok();
-        sqlx::query("DELETE FROM backups WHERE id = ?")
-            .bind(&id)
-            .execute(&state.pool)
-            .await?;
-    }
-    Ok(())
 }
 
 pub async fn rename_backup(

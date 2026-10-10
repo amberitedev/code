@@ -74,6 +74,8 @@
 				/>
 			</div>
 			<div class="normal-page__sidebar">
+				<AdPlaceholder v-if="!auth.user" />
+
 				<SidebarCard title="Members">
 					<div class="flex flex-col gap-3 font-semibold">
 						<nuxt-link
@@ -180,6 +182,7 @@ import type { Organization, ProjectType } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import UpToDate from '~/assets/images/illustrations/up_to_date.svg?component'
+import AdPlaceholder from '~/components/ui/AdPlaceholder.vue'
 import ModalCreation from '~/components/ui/create/ProjectCreateModal.vue'
 import NavStack from '~/components/ui/NavStack.vue'
 import OrganizationPageHeader from '~/components/ui/OrganizationPageHeader.vue'

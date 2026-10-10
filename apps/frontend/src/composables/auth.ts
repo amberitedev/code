@@ -234,10 +234,7 @@ export const getAuthUrl = (provider: string, redirect?: string) => {
 		callbackUrl.searchParams.set(ADD_ACCOUNT_QUERY_PARAM, 'true')
 	}
 
-	const authBase = config.public.accountApiUrl
-		? `${config.public.accountApiUrl.replace(/\/$/, '')}/v2/`
-		: config.public.apiBaseUrl
-	return `${authBase}auth/init?provider=${provider}&url=${encodeURIComponent(callbackUrl.toString())}`
+	return `${config.public.apiBaseUrl}auth/init?provider=${provider}&url=${encodeURIComponent(callbackUrl.toString())}`
 }
 
 export const promotePendingSignInOAuthProvider = () => {
@@ -276,12 +273,7 @@ export const removeAuthProvider = async (provider: string) => {
 export const getLauncherRedirectUrl = (route: LauncherRoute) => {
 	const ipver = getQueryString(route.query.ipver)
 	const port = Number(getQueryString(route.query.port))
-	const usesLocalhostRedirectionScheme =
-		['4', '6'].includes(ipver ?? '') && Number.isInteger(port) && port > 0 && port < 65536
-
-	if (useRuntimeConfig().public.accountApiUrl && !usesLocalhostRedirectionScheme) {
-		throw new Error('Invalid launcher callback. Start sign-in again from the app.')
-	}
+	const usesLocalhostRedirectionScheme = ['4', '6'].includes(ipver ?? '') && port < 65536
 
 	return usesLocalhostRedirectionScheme
 		? `http://${ipver === '4' ? '127.0.0.1' : '[::1]'}:${port}`

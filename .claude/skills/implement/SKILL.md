@@ -14,13 +14,13 @@ description: implenent a prototype into a complete production vertical slice, co
 
 ## Implement the Slice
 
-1. Define a complete vertical slice that delivers the approved flow, including every required UI state, API contract, persistence change, authorization rule, Core or Convex behavior, and failure path.
+1. Define a complete vertical slice that delivers the approved flow, including every required UI state, API contract, persistence change, authorization rule, Core or backend behavior, and failure path.
 2. Implement that slice on the original branch. Use the prototype as the UX and UI source of truth and existing project patterns for production architecture.
 3. Keep the scope tight. do not branch in to unafected and unrealted features. 
 
 ## Test with Development State
 
-1. if any changes to convex have been made use convex local deplyment. while testing use the corresponding porifle for the aria of ui you are working on, 
+1. While testing use the corresponding porifle for the aria of ui you are working on, 
 
 ## Review and Handoff
 
