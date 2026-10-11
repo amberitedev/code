@@ -17,6 +17,11 @@ export interface InstallationSettingsContext {
 	isLinked: ComputedRef<boolean>
 	/** The linked content is an App instance the server follows, not a modpack. */
 	isLinkedInstance?: ComputedRef<boolean>
+	/**
+	 * A server linked to an instance: whether the people the instance is shared with see the
+	 * server in Worlds and can join it.
+	 */
+	visibleToFriends?: { value: ComputedRef<boolean>; set: (visible: boolean) => Promise<void> }
 	isBusy: Ref<boolean> | ComputedRef<boolean>
 	busyMessage?: Ref<string | null> | ComputedRef<string | null>
 	skipNonEssentialWarnings?: Ref<boolean> | ComputedRef<boolean>

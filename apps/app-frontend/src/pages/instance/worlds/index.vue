@@ -19,13 +19,14 @@
 		@confirm="proceedRemoveWorld"
 	/>
 	<DesyncServerModal ref="desyncServerModal" @confirm="confirmDesyncServer" />
+	<UpdateBeforeJoinModal ref="updateBeforeJoinModal" />
 	<CreateServerFromInstanceModal
 		v-if="canCreateServer"
 		ref="createServerModal"
 		:instance="instance"
 	/>
 	<ReadyTransition :pending="worldsReadyPending">
-		<div v-if="dedupedWorlds.length > 0 || linkedServers.length > 0" class="flex flex-col gap-2">
+		<div v-if="rows.length > 0" class="flex flex-col gap-2">
 			<div class="flex flex-wrap items-center gap-2">
 				<Input
 					v-model="searchFilter"
@@ -36,9 +37,7 @@
 					size="medium"
 					wrapper-class="flex-1 min-w-0"
 					clearable
-					:placeholder="
-						formatMessage(messages.searchWorldsPlaceholder, { count: dedupedWorlds.length })
-					"
+					:placeholder="formatMessage(messages.searchWorldsPlaceholder, { count: rows.length })"
 				/>
 				<div class="flex gap-2">
 					<TeleportOverflowMenu
@@ -86,65 +85,68 @@
 					}}
 				</Button>
 			</div>
-			<div class="mt-2 flex w-full flex-col gap-2">
-				<WorldItem
-					v-for="{ server, world } in filteredLinkedServers"
-					:key="`linked-${server.server_id}`"
-					:world="world"
-					:linked-server-id="server.server_id"
-					:linked-note="linkedNote(server)"
-					:copy-address="shareableServerAddress(server)"
-					:outside-warning="unreachableCause(server)"
-					:supports-server-quick-play="supportsServerQuickPlay"
-					:quarantined="instance.quarantined"
-					:current-protocol="protocolVersion"
-					:playing-instance="playing"
-					:playing-world="worldsMatch(world, worldPlaying)"
-					:starting-instance="startingInstance"
-					:refreshing="serverData[world.address]?.refreshing"
-					:server-status="serverData[world.address]?.status"
-					:rendered-motd="serverData[world.address]?.renderedMotd"
-					:shortcut-instance-id="instance.id"
-					@play="() => joinWorld(world)"
-					@stop="() => instancePage.stop('InstanceWorlds')"
-					@refresh="() => refreshServer(world.address)"
-				/>
-				<WorldItem
-					v-for="world in filteredWorlds"
-					:key="`world-${world.type}-${world.type == 'singleplayer' ? world.path : `${world.address}-${world.index}`}`"
-					:world="world"
-					:managed="world.type === 'server' ? isManagedServerWorld(world) : false"
-					:highlighted="highlightedWorld === getWorldIdentifier(world)"
-					:supports-server-quick-play="supportsServerQuickPlay"
-					:supports-world-quick-play="supportsWorldQuickPlay"
-					:quarantined="instance.quarantined"
-					:current-protocol="protocolVersion"
-					:playing-instance="playing"
-					:playing-world="worldsMatch(world, worldPlaying)"
-					:starting-instance="startingInstance"
-					:refreshing="world.type === 'server' ? serverData[world.address]?.refreshing : undefined"
-					:server-status="world.type === 'server' ? serverData[world.address]?.status : undefined"
-					:rendered-motd="
-						world.type === 'server' ? serverData[world.address]?.renderedMotd : undefined
-					"
-					:game-mode="world.type === 'singleplayer' ? GAME_MODES[world.game_mode] : undefined"
-					:shortcut-instance-id="instance.id"
-					@play="() => joinWorld(world)"
-					@stop="() => instancePage.stop('InstanceWorlds')"
-					@refresh="() => refreshServer((world as ServerWorld).address)"
-					@edit="
-						() =>
-							world.type === 'singleplayer'
-								? editWorldModal?.show(world)
-								: isManagedServerWorld(world)
-									? undefined
-									: editServerModal?.show(world)
-					"
-					@delete="() => !isManagedServerWorld(world) && promptToRemoveWorld(world)"
-					@desync="() => world.type === 'server' && desyncServerModal?.show(world as ServerWorld)"
-					@open-folder="(world: SingleplayerWorld) => showWorldInFolder(instance.id, world.path)"
-				/>
-			</div>
+			<!-- One list: pinned rows first, in the order they were dragged into. -->
+			<Draggable
+				:model-value="filteredRows"
+				item-key="key"
+				class="mt-2 flex w-full flex-col gap-2"
+				handle=".world-drag-handle"
+				:disabled="filtering"
+				:animation="150"
+				:move="staysAmongPinned"
+				@update:model-value="reorderPinned"
+			>
+				<template #item="{ element: row }: { element: WorldRow }">
+					<WorldItem
+						:world="row.world"
+						:managed="isManagedServerWorld(row.world)"
+						:linked-server-id="row.linked?.server_id"
+						:linked-note="row.linked && linkedNote(row.linked)"
+						:copy-address="row.linked && shareableServerAddress(row.linked)"
+						:outside-warning="row.linked && unreachableCause(row.linked)"
+						:hosted-by="row.hosted?.host.username"
+						:hosted-server-id="
+							row.hosted && manageableCores.has(row.hosted.core_id)
+								? row.hosted.server_id
+								: undefined
+						"
+						pinnable
+						:pinned="pins.pinned.value.includes(row.key)"
+						:highlighted="highlightedWorld === getWorldIdentifier(row.world)"
+						:supports-server-quick-play="supportsServerQuickPlay"
+						:supports-world-quick-play="supportsWorldQuickPlay"
+						:quarantined="instance.quarantined"
+						:current-protocol="protocolVersion"
+						:playing-instance="playing"
+						:playing-world="worldsMatch(row.world, worldPlaying)"
+						:starting-instance="startingInstance"
+						:refreshing="
+							row.world.type === 'server' ? serverData[row.world.address]?.refreshing : undefined
+						"
+						:server-status="
+							row.world.type === 'server' ? serverData[row.world.address]?.status : undefined
+						"
+						:rendered-motd="
+							row.world.type === 'server' ? serverData[row.world.address]?.renderedMotd : undefined
+						"
+						:game-mode="
+							row.world.type === 'singleplayer' ? GAME_MODES[row.world.game_mode] : undefined
+						"
+						:shortcut-instance-id="instance.id"
+						@play="() => joinRow(row)"
+						@stop="() => instancePage.stop('InstanceWorlds')"
+						@refresh="() => row.world.type === 'server' && refreshServer(row.world.address)"
+						@toggle-pin="() => pins.toggle(row.key)"
+						@edit="() => editRow(row)"
+						@delete="
+							() =>
+								ownRow(row) && !isManagedServerWorld(row.world) && promptToRemoveWorld(row.world)
+						"
+						@desync="() => row.world.type === 'server' && desyncServerModal?.show(row.world)"
+						@open-folder="(world: SingleplayerWorld) => showWorldInFolder(instance.id, world.path)"
+					/>
+				</template>
+			</Draggable>
 		</div>
 		<EmptyState
 			v-else
@@ -206,6 +208,7 @@ import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { platform } from '@tauri-apps/plugin-os'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import Draggable from 'vuedraggable'
 
 import CreateServerFromInstanceModal from '@/components/ui/linked-servers/CreateServerFromInstanceModal.vue'
 import AddServerModal from '@/components/ui/world/modal/AddServerModal.vue'
@@ -213,6 +216,7 @@ import ConfirmRemoveWorldModal from '@/components/ui/world/modal/ConfirmRemoveWo
 import DesyncServerModal from '@/components/ui/world/modal/DesyncServerModal.vue'
 import EditServerModal from '@/components/ui/world/modal/EditServerModal.vue'
 import EditWorldModal from '@/components/ui/world/modal/EditSingleplayerWorldModal.vue'
+import UpdateBeforeJoinModal from '@/components/ui/world/modal/UpdateBeforeJoinModal.vue'
 import WorldItem from '@/components/ui/world/WorldItem.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { handleSevereError } from '@/composables/use-error.js'
@@ -220,15 +224,19 @@ import { trackEvent } from '@/helpers/analytics'
 import { get_project, get_project_v3 } from '@/helpers/cache.js'
 import { set_synced_option } from '@/helpers/instance'
 import {
+	canManageHostedServer,
 	coreOffline,
+	type HostedServer,
 	type LinkedServer,
 	linkedServerState,
+	serverAddress,
 	shareableServerAddress,
 	unreachableCause,
-	serverAddress,
+	useHostedServers,
 	useLinkedServers,
 } from '@/helpers/linked-servers'
 import { get_game_versions } from '@/helpers/tags'
+import { useWorldPins, worldPinKey } from '@/helpers/world-pins'
 import {
 	delete_world,
 	desync_server,
@@ -261,6 +269,7 @@ import { injectServerInstall } from '@/providers/server-install'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys, instanceWorldsQueryOptions } from '../query-options'
+import { injectSharedInstance } from '../shared-instance-context'
 
 const messages = defineMessages({
 	searchWorldsPlaceholder: {
@@ -334,6 +343,7 @@ const { handleError } = injectNotificationManager()
 const { playServerProject } = injectServerInstall()
 const route = useRoute()
 const instancePage = injectInstancePage()
+const sharedInstance = injectSharedInstance()
 
 const addServerModal = ref<InstanceType<typeof AddServerModal>>()
 const editServerModal = ref<InstanceType<typeof EditServerModal>>()
@@ -341,6 +351,7 @@ const editWorldModal = ref<InstanceType<typeof EditWorldModal>>()
 const removeWorldModal = ref<InstanceType<typeof ConfirmRemoveWorldModal>>()
 const desyncServerModal = ref<InstanceType<typeof DesyncServerModal>>()
 const createServerModal = ref<InstanceType<typeof CreateServerFromInstanceModal>>()
+const updateBeforeJoinModal = ref<InstanceType<typeof UpdateBeforeJoinModal>>()
 
 const worldToRemove = ref<World | null>(null)
 
@@ -361,24 +372,114 @@ const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
 const canCreateServer = computed(
 	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
 )
-// Linked servers are listed as ordinary server rows, so they look and join like the others.
-const filteredLinkedServers = computed(() =>
-	linkedServers.value
-		.filter(
-			(server) => !searchFilter.value || worldNameMatchesQuery(server.name, searchFilter.value),
-		)
-		.map((server) => ({
-			server,
-			world: {
-				type: 'server',
-				index: -1,
-				name: server.name,
-				display_status: 'normal',
-				address: serverAddress(server),
-				pack_status: 'enabled',
-			} satisfies ServerWorld,
-		})),
+// Servers other people host for this shared instance. A signed-out or wrong account gets none.
+const { servers: hostedServers, query: hostedServersQuery } = useHostedServers(() =>
+	sharedInstance.actionsLocked.value || sharedInstance.signedOut.value
+		? undefined
+		: instance.value.shared_instance?.id,
 )
+// The Cores among them this account may manage, which makes those rows open the server page.
+const manageableCores = ref(new Set<string>())
+watch(
+	hostedServers,
+	async (servers) => {
+		const answers = await Promise.all(servers.map(canManageHostedServer))
+		manageableCores.value = new Set(
+			servers.filter((_, index) => answers[index]).map((server) => server.core_id),
+		)
+	},
+	{ immediate: true },
+)
+
+const pins = useWorldPins(() => instance.value.id)
+
+/**
+ * One row of the list. A server on the user's Core (`linked`) and a server someone else hosts
+ * (`hosted`) are listed as ordinary server rows, so they look and join like the others.
+ */
+type WorldRow = { key: string; world: World; linked?: LinkedServer; hosted?: HostedServer }
+
+function serverRow(key: string, name: string, address: string): ServerWorld {
+	return {
+		type: 'server',
+		index: -1,
+		name,
+		display_status: 'normal',
+		address,
+		pack_status: 'enabled',
+		// These servers are not in the instance's own list, which is where play times come from.
+		last_played: pins.lastJoined(key),
+	}
+}
+
+/** Every row: pinned ones in their dragged order, then the rest by most recently played. */
+const rows = computed<WorldRow[]>(() => {
+	const all: WorldRow[] = [
+		...linkedServers.value.map((linked) => {
+			const key = `linked:${linked.server_id}`
+			return { key, linked, world: serverRow(key, linked.name, serverAddress(linked)) }
+		}),
+		...hostedServers.value.map((hosted) => {
+			const key = `hosted:${hosted.core_id}:${hosted.server_id}`
+			return { key, hosted, world: serverRow(key, hosted.name, hosted.address) }
+		}),
+		...dedupedWorlds.value.map((world) => ({ key: worldPinKey(world), world })),
+	]
+	const order = pins.pinned.value
+	const played = (row: WorldRow) => (row.world.last_played ? Date.parse(row.world.last_played) : 0)
+	return [
+		...all
+			.filter((row) => order.includes(row.key))
+			.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)),
+		...all.filter((row) => !order.includes(row.key)).sort((a, b) => played(b) - played(a)),
+	]
+})
+
+/** A row from the instance's own list, which the user may edit and remove. */
+function ownRow(row: WorldRow) {
+	return !row.linked && !row.hosted
+}
+
+function editRow(row: WorldRow) {
+	if (!ownRow(row) || isManagedServerWorld(row.world)) return
+	if (row.world.type === 'singleplayer') editWorldModal.value?.show(row.world)
+	else editServerModal.value?.show(row.world)
+}
+
+// Dragging reorders the pinned rows only. It is off while a search or filter hides some of them.
+const filtering = computed(() => !!searchFilter.value || selectedFilters.value.length > 0)
+
+function staysAmongPinned(event: { relatedContext: { element?: WorldRow } }) {
+	const over = event.relatedContext.element
+	return !!over && pins.pinned.value.includes(over.key)
+}
+
+function reorderPinned(reordered: WorldRow[]) {
+	const pinned = new Set(pins.pinned.value)
+	pins.pinned.value = reordered.filter((row) => pinned.has(row.key)).map((row) => row.key)
+}
+
+/**
+ * Joins a row's world. A member whose shared instance is behind is first asked whether to update
+ * when the server is someone else's, since that server follows the instance.
+ */
+async function joinRow(row: WorldRow) {
+	if (row.linked || row.hosted) pins.markJoined(row.key)
+	const hosted = row.hosted
+	if (hosted && instance.value.shared_instance?.role === 'member') {
+		const preview = await sharedInstance
+			.refreshUpdatePreview()
+			.catch(() => sharedInstance.updatePreview.value)
+		if (preview?.updateAvailable && updateBeforeJoinModal.value) {
+			updateBeforeJoinModal.value.show(instance.value.id, hosted.host.username, async () => {
+				await instancePage.refreshInstance()
+				await joinWorld(row.world)
+			})
+			return
+		}
+	}
+	await joinWorld(row.world)
+}
 
 function linkedNote(server: LinkedServer) {
 	// The rows are the last answer the Core gave, so its state is not known right now.
@@ -596,6 +697,22 @@ watch(
 	},
 	{ immediate: true },
 )
+
+// A hosted server's state is only known by pinging it, so each is pinged again whenever the list
+// is fetched. The row keeps its last answer meanwhile instead of showing as loading.
+watch(
+	[hostedServersQuery.dataUpdatedAt, protocolVersionReady],
+	async () => {
+		if (!protocolVersionReady.value) return
+		for (const { address } of hostedServers.value) {
+			const answer: ServerData = { refreshing: true }
+			void refreshServerData(answer, protocolVersion.value, address).then(() => {
+				serverData.value[address] = answer
+			})
+		}
+	},
+	{ immediate: true },
+)
 async function refreshAllWorlds() {
 	if (refreshingAll.value) {
 		console.log(`Already refreshing, cancelling refresh.`)
@@ -789,15 +906,16 @@ const dedupedWorlds = computed(() => {
 
 const filterOptions = computed(() => {
 	const options: { id: string; label: string }[] = []
-	const hasSingleplayer = dedupedWorlds.value.some((x) => x.type === 'singleplayer')
-	const hasServer = dedupedWorlds.value.some((x) => x.type === 'server')
+	const listed = rows.value.map((row) => row.world)
+	const hasSingleplayer = listed.some((x) => x.type === 'singleplayer')
+	const hasServer = listed.some((x) => x.type === 'server')
 
 	if (hasSingleplayer && hasServer) {
 		options.push({ id: 'singleplayer', label: formatMessage(commonMessages.singleplayerLabel) })
 	}
 
 	if (hasServer) {
-		const servers = dedupedWorlds.value.filter((x) => x.type === 'server')
+		const servers = listed.filter((x) => x.type === 'server')
 		const hasVanilla = servers.some((x) => x.content_kind !== 'modpack')
 		const hasModded = servers.some((x) => x.content_kind === 'modpack')
 		if (hasVanilla && hasModded) {
@@ -823,8 +941,8 @@ watch(filterOptions, (options) => {
 	}
 })
 
-const filteredWorlds = computed(() =>
-	dedupedWorlds.value.filter((x) => {
+const filteredRows = computed(() =>
+	rows.value.filter(({ world: x }) => {
 		if (searchFilter.value && !worldNameMatchesQuery(x.name, searchFilter.value)) {
 			return false
 		}

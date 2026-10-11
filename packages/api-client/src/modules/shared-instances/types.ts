@@ -45,6 +45,16 @@ export namespace SharedInstances {
 
 			export type JoinType = 'owner' | 'invite' | 'link'
 
+			/** A server someone else hosts for a shared instance and shows to its members. */
+			export type HostedServer = {
+				core_id: string
+				server_id: string
+				name: string
+				/** The Minecraft address to ping and join. Not shown to the member. */
+				address: string
+				host: { id: string; username: string; avatar_url: string | null }
+			}
+
 			export type InstanceUser = {
 				id: string
 				joined_at: string | null

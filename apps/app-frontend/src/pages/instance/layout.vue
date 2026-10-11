@@ -147,6 +147,7 @@ import {
 	run,
 	sync_content_files,
 } from '@/helpers/instance'
+import { useSharedInstanceLink } from '@/helpers/linked-servers'
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
 import { createInstanceShortcut, showInstanceInFolder } from '@/helpers/utils.js'
@@ -397,6 +398,7 @@ const sharedInstanceState = createSharedInstanceContext(
 	notifySharedInstanceError,
 )
 provideSharedInstance(sharedInstanceState)
+useSharedInstanceLink(instance)
 const {
 	actionsLocked: sharedInstanceActionsLocked,
 	expectedUserId: sharedInstanceExpectedUserId,

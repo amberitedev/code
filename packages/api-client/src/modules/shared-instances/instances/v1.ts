@@ -63,6 +63,17 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		)
 	}
 
+	/** The servers other people host for this shared instance and show to its members. */
+	public async getServers(
+		instanceId: string,
+	): Promise<SharedInstances.Instances.v1.HostedServer[]> {
+		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/servers`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+		})
+	}
+
 	public async inviteUsers(instanceId: string, userIds: string[]): Promise<void> {
 		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
 			api: 'sharedinstances',

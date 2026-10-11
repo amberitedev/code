@@ -207,7 +207,12 @@ export class ArchonCoresV1Module extends AbstractModule {
 	public async createServer(
 		name: string,
 		core: Archon.Cores.v1.Core,
-		instance?: { id: string; name: string },
+		instance?: {
+			id: string
+			name: string
+			visible_to_friends?: boolean
+			shared_instance_id?: string | null
+		},
 	): Promise<{ id: string }> {
 		const server = await this.client.request<{ id: string }>('/servers', {
 			api: `${this.base(core)}/hosting`,
@@ -217,6 +222,14 @@ export class ArchonCoresV1Module extends AbstractModule {
 		})
 		this.serverAddresses.set(server.id, this.base(core))
 		return server
+	}
+
+	/**
+	 * Whether the signed-in account may manage the servers of this Core: it is in the list of Cores
+	 * the account may reach. Today that list holds only the account's own Cores.
+	 */
+	public async canReachCore(coreId: string): Promise<boolean> {
+		return (await this.known()).some((core) => core.id === coreId)
 	}
 
 	private known(): Promise<Archon.Cores.v1.Core[]> {
