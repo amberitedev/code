@@ -311,17 +311,17 @@ watch(
 	{ immediate: true, flush: 'sync' },
 )
 
-function setFriendPrivacy(value: FriendPrivacy | null): void {
+function setFriendPrivacy(value: FriendPrivacy | null | undefined): void {
 	if (!value) return
 	friendPrivacy.value = value
 }
 
-function setSharedInstancesPrivacy(value: InvitePrivacy | null): void {
+function setSharedInstancesPrivacy(value: InvitePrivacy | null | undefined): void {
 	if (!value) return
 	sharedInstancesPrivacy.value = value
 }
 
-function setHostingAccessPrivacy(value: InvitePrivacy | null): void {
+function setHostingAccessPrivacy(value: InvitePrivacy | null | undefined): void {
 	if (!value) return
 	hostingAccessPrivacy.value = value
 }

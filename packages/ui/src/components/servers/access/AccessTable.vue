@@ -284,7 +284,7 @@ import {
 	UserXIcon,
 	XIcon,
 } from '@modrinth/assets'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { type Component, computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
 	type ButtonMenuOption,

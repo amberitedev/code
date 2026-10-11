@@ -125,6 +125,7 @@ const props = defineProps<{
 	project: {
 		actualProjectType: string
 		project_type: string
+		game_versions: string[]
 		loaders: string[]
 		client_side: EnvironmentValue
 		server_side: EnvironmentValue

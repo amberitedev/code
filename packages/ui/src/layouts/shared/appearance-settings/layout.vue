@@ -48,7 +48,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 				:theme-options="themeOptions"
 				:system-theme-color="systemTheme"
 				:preferred-dark-theme="preferredDarkTheme"
-				@update:model-value="theme.update"
+				@update:model-value="theme.update($event as typeof currentTheme)"
 			/>
 
 			<AppearanceSettingRow
@@ -70,7 +70,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 							:model-value="syncDisabled ? false : syncAcrossDevices"
 							:disabled="syncDisabled"
 							:aria-labelledby="labelledBy"
-							@update:model-value="theme.syncAcrossDevices.update"
+							@update:model-value="theme.syncAcrossDevices.update($event!)"
 						/>
 					</span>
 				</template>
@@ -109,7 +109,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 							id="advanced-rendering"
 							:model-value="advancedRendering"
 							:aria-labelledby="labelledBy"
-							@update:model-value="appearance.advancedRendering.update"
+							@update:model-value="appearance.advancedRendering.update($event!)"
 						/>
 					</template>
 				</AppearanceSettingRow>
@@ -125,7 +125,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 							id="external-links-new-tab"
 							:model-value="externalLinksNewTabValue ?? false"
 							:aria-labelledby="labelledBy"
-							@update:model-value="externalLinksNewTab.update"
+							@update:model-value="externalLinksNewTab.update($event!)"
 						/>
 					</template>
 				</AppearanceSettingRow>
@@ -141,7 +141,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 								id="search-layout-toggle"
 								:model-value="sidebarPreferenceValues?.right_aligned_search ?? false"
 								:aria-labelledby="labelledBy"
-								@update:model-value="sidebarPreferences.update('right_aligned_search', $event)"
+								@update:model-value="sidebarPreferences.update('right_aligned_search', $event!)"
 							/>
 						</template>
 					</AppearanceSettingRow>
@@ -156,7 +156,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 								id="project-layout-toggle"
 								:model-value="sidebarPreferenceValues?.left_aligned_content ?? false"
 								:aria-labelledby="labelledBy"
-								@update:model-value="sidebarPreferences.update('left_aligned_content', $event)"
+								@update:model-value="sidebarPreferences.update('left_aligned_content', $event!)"
 							/>
 						</template>
 					</AppearanceSettingRow>
@@ -173,7 +173,7 @@ const sidebarPreferenceValues = sidebarPreferences?.value
 							id="native-decorations"
 							:model-value="nativeDecorationsValue ?? false"
 							:aria-labelledby="labelledBy"
-							@update:model-value="nativeDecorations.update"
+							@update:model-value="nativeDecorations.update($event!)"
 						/>
 					</template>
 				</AppearanceSettingRow>

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import ace from 'ace-builds'
 
+// @ts-expect-error ace.define exists at runtime but is missing from the ace-builds types
 ace['define'](
 	'ace/mode/mclog_highlight_rules',
 	['require', 'exports', 'ace/lib/oop', 'ace/mode/text_highlight_rules'],
@@ -53,6 +54,7 @@ ace['define'](
 	},
 )
 
+// @ts-expect-error ace.define exists at runtime but is missing from the ace-builds types
 ace['define'](
 	'ace/mode/mclog',
 	['require', 'exports', 'ace/lib/oop', 'ace/mode/text', 'ace/mode/mclog_highlight_rules'],

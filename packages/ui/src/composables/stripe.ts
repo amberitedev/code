@@ -66,7 +66,7 @@ export const useStripe = (
 		return product.value?.prices.find((x) => x.currency_code === currency)
 	})
 
-	const createElements = (options) => {
+	const createElements = (options: import('@stripe/stripe-js').StripeElementsOptionsMode) => {
 		const styles = getComputedStyle(document.body)
 
 		if (!stripe.value) {

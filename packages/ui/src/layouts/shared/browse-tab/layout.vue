@@ -80,7 +80,7 @@ const messages = defineMessages({
 function cardActionType(action: CardAction) {
 	if (action.type === 'transparent') return 'quiet'
 	if (action.type === 'outlined') return 'outlined'
-	return action.color && action.color !== 'standard' ? 'colored' : 'base'
+	return action.color && (action.color as string) !== 'standard' ? 'colored' : 'base'
 }
 
 function cardActionColor(action: CardAction) {
@@ -89,7 +89,8 @@ function cardActionColor(action: CardAction) {
 }
 
 function cardActionClass(action: CardAction) {
-	if (action.type !== 'outlined' || !action.color || action.color === 'standard') return undefined
+	if (action.type !== 'outlined' || !action.color || (action.color as string) === 'standard')
+		return undefined
 
 	return {
 		brand: '!text-brand [&>svg]:!text-brand !shadow-[inset_0_0_0_1px_var(--color-brand)]',

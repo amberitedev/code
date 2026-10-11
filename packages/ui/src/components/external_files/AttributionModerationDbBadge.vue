@@ -63,7 +63,9 @@ const otherStatusesTooltip = computed(() => {
 		{{ statusLabel(moderationStatuses.primary) }}
 		<span class="text-primary">
 			{{
-				moderationStatuses.others?.length > 0 ? `+ ${moderationStatuses.others?.length} more` : ''
+				(moderationStatuses.others?.length ?? 0) > 0
+					? `+ ${moderationStatuses.others?.length} more`
+					: ''
 			}}
 		</span>
 	</TagItem>

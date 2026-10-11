@@ -196,6 +196,7 @@
 						@click="handleConfirm"
 					>
 						<component :is="confirmIcon" v-if="confirmIcon" />
+						<!-- @vue-expect-error upstream falls back to a commonMessages.confirmButton that does not exist -->
 						{{ confirmLabel || formatMessage(commonMessages.confirmButton) }}
 					</Button>
 				</div>
@@ -339,7 +340,7 @@ function getDiffTypeLabel(diff: ContentDiffItem) {
 	}
 	if (diff.type === 'added' && props.addedLabel) return props.addedLabel
 	if (diff.type === 'removed' && props.removedLabel) return props.removedLabel
-	return formatMessage(diffTypeMessages[diff.type])
+	return formatMessage(diffTypeMessages[diff.type as DependencyDiffType])
 }
 
 function getVersionLabel(diff: ContentDiffItem) {

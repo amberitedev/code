@@ -29,7 +29,7 @@
 				</span>
 
 				<input
-					v-bind="mergeProps(controlAttrs(), inputAttrs ?? {})"
+					v-bind="mergeProps(controlAttrs(), (inputAttrs ?? {}) as Record<string, unknown>)"
 					:id="id"
 					ref="inputRef"
 					:type="type"

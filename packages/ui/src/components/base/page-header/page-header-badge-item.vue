@@ -17,7 +17,7 @@
 		<slot />
 	</AutoLink>
 	<button
-		v-else-if="action || disabled"
+		v-else-if="!!action || disabled"
 		v-tooltip="tooltip"
 		type="button"
 		:disabled="disabled"

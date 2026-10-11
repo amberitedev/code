@@ -115,7 +115,7 @@ export function useUploadSessionUpload(options: {
 		let cancelled = false
 		let finalized = false
 		let uploadId: string | null = null
-		let uploadHandle: { cancel: () => void } | null = null
+		let uploadHandle: { cancel: () => void; promise: Promise<unknown> } | null = null
 		let cancelRequest: Promise<void> | null = null
 		let cancelCompletion: Promise<void> | null = null
 		let resolveCancelCompletion: (() => void) | null = null

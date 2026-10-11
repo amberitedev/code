@@ -76,13 +76,13 @@
 					v-tooltip="`${version.version_number} - ${version.name}`"
 					:to="versionLink?.(version)"
 					class="flex min-w-0 flex-col gap-1 w-fit"
-					:link-class="versionLink ? 'focus-visible:underline' : ''"
+					:link-class="!!versionLink ? 'focus-visible:underline' : ''"
 					:title="`${version.version_number} - ${version.name}`"
 				>
 					<div class="flex min-w-0 items-center gap-2">
 						<div
 							class="overflow-hidden text-ellipsis font-medium text-contrast"
-							:class="versionLink ? 'version-row-name' : ''"
+							:class="!!versionLink ? 'version-row-name' : ''"
 						>
 							{{ version.version_number }}
 						</div>

@@ -101,7 +101,7 @@ export function readStoredServerInstallQueue<
 		if (!Array.isArray(parsed)) return new Map<string, BrowseInstallPlan<TProject>>()
 
 		return new Map<string, BrowseInstallPlan<TProject>>(
-			parsed.filter(isStoredServerInstallQueueEntry),
+			parsed.filter(isStoredServerInstallQueueEntry) as [string, BrowseInstallPlan<TProject>][],
 		)
 	} catch {
 		return new Map<string, BrowseInstallPlan<TProject>>()

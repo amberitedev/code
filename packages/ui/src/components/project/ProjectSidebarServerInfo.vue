@@ -92,7 +92,11 @@
 			<h3 class="text-primary text-base m-0">{{ formatMessage(messages.languages) }}</h3>
 			<div class="flex flex-wrap gap-1.5">
 				<TagItem v-for="language in languages" :key="`${language}`">
-					{{ SERVER_LANGUAGES[language] ? formatMessage(SERVER_LANGUAGES[language]) : language }}
+					{{
+						SERVER_LANGUAGES[language as keyof typeof SERVER_LANGUAGES]
+							? formatMessage(SERVER_LANGUAGES[language as keyof typeof SERVER_LANGUAGES])
+							: language
+					}}
 				</TagItem>
 			</div>
 		</section>

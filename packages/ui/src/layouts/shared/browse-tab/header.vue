@@ -42,6 +42,7 @@ const selectedProjectsLeaveModal = ref<InstanceType<typeof SelectedProjectsLeave
 const serverId = computed(() => installContext.value?.serverId ?? '')
 const upstream = computed(() => installContext.value?.upstream ?? null)
 
+// @ts-expect-error upstream passes a ref where useServerImage expects a plain string
 const { image: fetchedIcon } = useServerImage(serverId, upstream, {
 	enabled: computed(() => !!installContext.value?.serverId),
 })

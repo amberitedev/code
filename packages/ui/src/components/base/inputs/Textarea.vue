@@ -17,7 +17,7 @@
 		</template>
 
 		<textarea
-			v-bind="mergeProps(controlAttrs(), inputAttrs ?? {})"
+			v-bind="mergeProps(controlAttrs(), (inputAttrs ?? {}) as Record<string, unknown>)"
 			:id="id"
 			ref="inputRef"
 			:value="model"
