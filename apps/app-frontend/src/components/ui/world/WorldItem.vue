@@ -105,6 +105,10 @@ const props = withDefaults(
 		linkedServerId?: string
 		// Replaces the MOTD, e.g. while an update from the instance is waiting or failed.
 		linkedNote?: { text: string; tone: 'blue' | 'orange' | 'red' }
+		// Copied by "Copy address" instead of the address this App joins with.
+		copyAddress?: string
+		// Why a running server cannot be joined from the internet. Turns the signal icon orange.
+		outsideWarning?: string
 		showPlayButton?: boolean
 		cardBackground?: 'raised' | 'surface-2'
 
@@ -376,7 +380,7 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		label: formatMessage(messages.copyAddress),
 		icon: ClipboardCopyIcon,
 		shown: props.world.type === 'server',
-		action: () => copyToClipboard((props.world as ServerWorld).address),
+		action: () => copyToClipboard(props.copyAddress ?? (props.world as ServerWorld).address),
 	},
 	{
 		id: 'desync',
@@ -576,9 +580,10 @@ function openContextMenu(event: MouseEvent) {
 								/>
 								<template v-else>
 									<SignalIcon
-										v-tooltip="`${serverStatus.ping}ms`"
+										v-tooltip="outsideWarning ?? `${serverStatus.ping}ms`"
 										aria-hidden="true"
-										:style="`--_signal-${getPingLevel(serverStatus.ping ?? 0)}: var(--color-green)`"
+										:class="{ 'cursor-help': outsideWarning }"
+										:style="`--_signal-${getPingLevel(serverStatus.ping ?? 0)}: var(${outsideWarning ? '--color-orange' : '--color-green'})`"
 										stroke-width="3px"
 										class="shrink-0 smart-clickable:allow-pointer-events"
 									/>

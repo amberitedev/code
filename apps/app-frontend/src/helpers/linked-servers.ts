@@ -111,8 +111,23 @@ export function linkedServerState(server: LinkedServer): LinkedServerState {
 	return isServerRunning(server) ? 'running' : 'offline'
 }
 
+/** Where this App joins and pings the server: its address on the Core's own network. */
 export function serverAddress(server: Archon.Servers.v0.Server) {
 	return `${server.net.domain || server.net.ip || '127.0.0.1'}:${server.net.port}`
+}
+
+/** The address to give to friends: the one on the internet when the server has one. */
+export function shareableServerAddress(server: Archon.Servers.v0.Server) {
+	const outside = server.net.outside
+	return outside ? `${outside.ip}:${outside.port}` : serverAddress(server)
+}
+
+/** Why a running server cannot be joined from the internet, or undefined when it can. */
+export function unreachableCause(server: Archon.Servers.v0.Server) {
+	if (server.power_state !== 'running' || server.reachability?.state !== 'unreachable') {
+		return undefined
+	}
+	return server.reachability.cause ?? undefined
 }
 
 /** Players on a running server right now, from a status ping. Zero when it cannot be reached. */

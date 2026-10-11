@@ -36,6 +36,13 @@ export interface ClientConfig {
 	selfHostedHosting?: boolean
 
 	/**
+	 * Opens a connection to a Core that serves HTTPS with its own certificate, trusting only the
+	 * certificate with this SHA-256 fingerprint. Returns the base URL requests to that Core go to.
+	 * Without it, a Core is reached at its address directly.
+	 */
+	connectCore?: (address: string, fingerprint: string) => Promise<string>
+
+	/**
 	 * User agent string or provider for requests
 	 * Should identify your application (e.g., 'my-app/1.0.0')
 	 * If not provided, the platform's default user agent will be used

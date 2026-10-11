@@ -1,3 +1,5 @@
+import { connect } from 'cloudflare:sockets'
+
 import { requireUser, tokenFrom } from '../common/auth'
 import { digest, randomId } from '../common/crypto'
 import { ApiError, json, readJson, routePath, stringField, unauthorized } from '../common/http'
@@ -5,7 +7,8 @@ import type { Env } from '../common/types'
 
 // Core pairing. A Core registers the code it is showing, an account claims that code in the App,
 // and the Core then confirms the claim to receive its own key. After that the backend only keeps
-// the account's list of Cores and their addresses.
+// the account's list of Cores and their addresses, and tests on request whether a Core can be
+// reached from the internet.
 
 const CODE_TTL_MS = 15 * 60_000
 // Expired codes are kept this long so a late guess is told "expired" instead of "wrong".
@@ -14,11 +17,17 @@ const MAX_WRONG_GUESSES = 5
 const GUESS_WINDOW_MS = 10 * 60_000
 // The Core's alphabet: no i, o, 0 or 1.
 const CODE_PATTERN = /^[a-hj-np-z2-9]{8}$/
+const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
+// Outside tests one Core may ask for within `CHECK_WINDOW_MS`.
+const MAX_CHECKS = 30
+const CHECK_WINDOW_MS = 10 * 60_000
+const CHECK_TIMEOUT_MS = 5_000
 
 interface CodeRow {
 	code: string
 	core_id: string
 	address: string
+	cert_fingerprint: string | null
 	expires: string
 	claimed_by: string | null
 }
@@ -28,6 +37,8 @@ interface CoreRow {
 	owner_id: string
 	name: string
 	address: string
+	cert_fingerprint: string | null
+	public_address: string | null
 	created: string
 	last_seen: string
 }
@@ -51,8 +62,8 @@ function isPrivateHost(hostname: string): boolean {
 }
 
 /** A Core address must be HTTPS unless it is loopback or on a private network. */
-function coreAddress(body: Record<string, unknown>): string {
-	const value = stringField(body, 'address', 512)
+function coreAddress(body: Record<string, unknown>, key = 'address'): string {
+	const value = stringField(body, key, 512)
 	let url: URL
 	try {
 		url = new URL(value)
@@ -70,6 +81,15 @@ function coreAddress(body: Record<string, unknown>): string {
 	return url.origin + url.pathname.replace(/\/$/, '')
 }
 
+/** The SHA-256 of the Core's certificate, or null from a Core that does not serve HTTPS yet. */
+function certFingerprint(body: Record<string, unknown>): string | null {
+	if (body.cert_fingerprint == null) return null
+	const value = stringField(body, 'cert_fingerprint', 64)
+	if (!FINGERPRINT_PATTERN.test(value))
+		throw new ApiError(400, 'invalid_input', 'Invalid cert_fingerprint')
+	return value
+}
+
 function pairingCode(body: Record<string, unknown>): string {
 	return stringField(body, 'code', 32)
 		.replace(/[^a-z0-9]/gi, '')
@@ -81,6 +101,8 @@ function publicCore(row: CoreRow) {
 		id: row.id,
 		name: row.name,
 		address: row.address,
+		cert_fingerprint: row.cert_fingerprint,
+		public_address: row.public_address,
 		created: row.created,
 		last_seen: row.last_seen,
 	}
@@ -93,6 +115,7 @@ async function registerCode(request: Request, env: Env) {
 	if (!CODE_PATTERN.test(code)) throw new ApiError(400, 'invalid_input', 'Invalid code')
 	const coreId = stringField(body, 'core_id', 64)
 	const address = coreAddress(body)
+	const fingerprint = certFingerprint(body)
 	const now = Date.now()
 	const nowIso = new Date(now).toISOString()
 
@@ -115,13 +138,16 @@ async function registerCode(request: Request, env: Env) {
 			coreId,
 		),
 		env.DB.prepare(
-			'INSERT INTO core_pairing_codes (code,core_id,address,expires) VALUES (?,?,?,?)',
-		).bind(code, coreId, address, expires),
+			'INSERT INTO core_pairing_codes (code,core_id,address,cert_fingerprint,expires) VALUES (?,?,?,?,?)',
+		).bind(code, coreId, address, fingerprint, expires),
 	])
 	return json({ expires })
 }
 
-/** App: claim the code a Core is showing. Returns where that Core is so the App can finish there. */
+/**
+ * App: claim the code a Core is showing. Returns where that Core is, and the certificate to trust
+ * there, so the App can finish with the Core itself.
+ */
 async function claimCode(request: Request, env: Env) {
 	const user = await requireUser(request, env)
 	const code = pairingCode(await readJson(request))
@@ -162,7 +188,11 @@ async function claimCode(request: Request, env: Env) {
 		.first()
 	if (!claimed)
 		throw new ApiError(409, 'already_paired', 'That Core is being paired to another account')
-	return json({ core_id: row.core_id, address: row.address })
+	return json({
+		core_id: row.core_id,
+		address: row.address,
+		cert_fingerprint: row.cert_fingerprint,
+	})
 }
 
 /**
@@ -176,6 +206,7 @@ async function confirmClaim(request: Request, env: Env) {
 	const userId = stringField(body, 'user_id', 64)
 	const name = stringField(body, 'name', 64)
 	const address = coreAddress(body)
+	const fingerprint = certFingerprint(body)
 	const now = new Date().toISOString()
 
 	const row = await env.DB.prepare(
@@ -190,27 +221,102 @@ async function confirmClaim(request: Request, env: Env) {
 	// Repeating a confirmation whose answer was lost issues a fresh key to the same owner. A Core
 	// that belongs to someone else is never taken over.
 	const stored = await env.DB.prepare(
-		'INSERT INTO cores (id,owner_id,name,address,key_hash,created,last_seen) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, address = excluded.address, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id',
+		'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, address = excluded.address, cert_fingerprint = excluded.cert_fingerprint, public_address = NULL, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id',
 	)
-		.bind(coreId, userId, name, address, await digest(key), now, now)
+		.bind(coreId, userId, name, address, fingerprint, await digest(key), now, now)
 		.first()
 	if (!stored)
 		throw new ApiError(409, 'already_paired', 'This Core is already paired to another account')
 	return json({ key })
 }
 
-/** Core, paired: report where it is now. Called every time the Core starts. */
+/**
+ * Core, paired: report where it is now. Called every time the Core starts and whenever its address
+ * on the internet changes. A Core paired before Cores served HTTPS reports its certificate here.
+ */
 async function reportAddress(request: Request, env: Env) {
 	const key = tokenFrom(request)
 	if (!key.startsWith('amc_')) unauthorized()
-	const address = coreAddress(await readJson(request))
+	const body = await readJson(request)
+	const address = coreAddress(body)
+	const publicAddress = body.public_address == null ? null : coreAddress(body, 'public_address')
+	if (publicAddress && !publicAddress.startsWith('https:'))
+		throw new ApiError(400, 'invalid_address', 'A public Core address must use HTTPS')
 	const row = await env.DB.prepare(
-		'UPDATE cores SET address = ?, last_seen = ? WHERE key_hash = ? RETURNING *',
+		'UPDATE cores SET address = ?, public_address = ?, cert_fingerprint = COALESCE(?, cert_fingerprint), last_seen = ? WHERE key_hash = ? RETURNING *',
 	)
-		.bind(address, new Date().toISOString(), await digest(key))
+		.bind(
+			address,
+			publicAddress,
+			certFingerprint(body),
+			new Date().toISOString(),
+			await digest(key),
+		)
 		.first<CoreRow>()
 	if (!row) unauthorized()
 	return json({ id: row.id, owner_id: row.owner_id })
+}
+
+/** Try to open a TCP connection. `detail` says how it failed, ready to show. */
+async function tcpConnects(
+	hostname: string,
+	port: number,
+): Promise<{ reachable: boolean; detail: string }> {
+	let socket: Socket | undefined
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		socket = connect({ hostname, port })
+		const timedOut = new Promise<false>((resolve) => {
+			timer = setTimeout(() => resolve(false), CHECK_TIMEOUT_MS)
+		})
+		const opened = await Promise.race([socket.opened.then(() => true as const), timedOut])
+		return opened
+			? { reachable: true, detail: '' }
+			: {
+					reachable: false,
+					detail: `no answer within ${CHECK_TIMEOUT_MS / 1000} seconds, the connection was dropped on the way`,
+				}
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error)
+		return { reachable: false, detail: `the connection was refused or reset (${reason})` }
+	} finally {
+		clearTimeout(timer)
+		void socket?.close().catch(() => undefined)
+	}
+}
+
+/**
+ * Core, paired: test whether a port on this Core can be reached from the internet. The connection
+ * only ever goes to the address this request came from, so it cannot be used to probe anyone else.
+ * `outside` is false when that address is a private one: this backend is then on the Core's own
+ * network (local development) and its answer says nothing about the internet.
+ */
+async function checkReachability(request: Request, env: Env) {
+	const key = tokenFrom(request)
+	if (!key.startsWith('amc_')) unauthorized()
+	const port = (await readJson(request)).port
+	if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535)
+		throw new ApiError(400, 'invalid_input', 'Invalid port')
+
+	const now = Date.now()
+	const nowIso = new Date(now).toISOString()
+	const windowStart = new Date(now - CHECK_WINDOW_MS).toISOString()
+	const row = await env.DB.prepare(
+		'UPDATE cores SET checks = CASE WHEN checks_window IS NULL OR checks_window < ?1 THEN 1 ELSE checks + 1 END, checks_window = CASE WHEN checks_window IS NULL OR checks_window < ?1 THEN ?2 ELSE checks_window END, last_seen = ?2 WHERE key_hash = ?3 RETURNING checks',
+	)
+		.bind(windowStart, nowIso, await digest(key))
+		.first<{ checks: number }>()
+	if (!row) unauthorized()
+	if (row.checks > MAX_CHECKS)
+		throw new ApiError(429, 'too_many_checks', 'Too many reachability tests. Try again later.')
+
+	const local = env.LOCAL_DEV === 'true'
+	const address = request.headers.get('CF-Connecting-IP') ?? (local ? '127.0.0.1' : null)
+	if (!address) throw new ApiError(500, 'internal_error', 'The caller address is unknown')
+	const outside = !isPrivateHost(address)
+	// A private caller is only ever tested in local development, where it exercises this route.
+	if (!outside && !local) return json({ address, outside, reachable: false, detail: '' })
+	return json({ address, outside, ...(await tcpConnects(address, port)) })
 }
 
 export async function handleCores(request: Request, env: Env): Promise<Response | null> {
@@ -219,6 +325,7 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 	if (path === '/core/pairing' && method === 'POST') return registerCode(request, env)
 	if (path === '/core/pairing/confirm' && method === 'POST') return confirmClaim(request, env)
 	if (path === '/core/address' && method === 'POST') return reportAddress(request, env)
+	if (path === '/core/reachability' && method === 'POST') return checkReachability(request, env)
 	if (path === '/cores/pair' && method === 'POST') return claimCode(request, env)
 	if (path === '/cores' && method === 'GET') {
 		const user = await requireUser(request, env)

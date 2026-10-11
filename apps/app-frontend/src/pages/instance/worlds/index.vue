@@ -93,6 +93,8 @@
 					:world="world"
 					:linked-server-id="server.server_id"
 					:linked-note="linkedNote(server)"
+					:copy-address="shareableServerAddress(server)"
+					:outside-warning="unreachableCause(server)"
 					:supports-server-quick-play="supportsServerQuickPlay"
 					:quarantined="instance.quarantined"
 					:current-protocol="protocolVersion"
@@ -221,6 +223,8 @@ import {
 	coreOffline,
 	type LinkedServer,
 	linkedServerState,
+	shareableServerAddress,
+	unreachableCause,
 	serverAddress,
 	useLinkedServers,
 } from '@/helpers/linked-servers'
