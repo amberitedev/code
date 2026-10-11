@@ -34,7 +34,7 @@ type EditorFabricObject = FabricObject & {
 type FabricPointerEvent = {
 	e: MouseEvent | TouchEvent | PointerEvent
 	target?: FabricObject
-	transform?: { corner?: string }
+	transform?: { corner?: string } | null
 }
 
 const MIN_ZOOM = 0.25
@@ -217,7 +217,7 @@ export function useImageEditor() {
 		})
 		editorCanvas.on('path:created', ({ path }) => {
 			if (tool.value === 'eraser' && eraserMode.value === 'area') {
-				void eraseAreaWithPath(path).catch((error) => {
+				void eraseAreaWithPath(path as FabricPath).catch((error) => {
 					debugEraser('area:error', error)
 				})
 				return
@@ -748,7 +748,7 @@ export function useImageEditor() {
 					const clipPath = await eraserMask.clone()
 					fabricModule.util.sendObjectToPlane(clipPath, undefined, object.calcTransformMatrix())
 					const nextClipPath = object.clipPath
-						? fabricModule.util.mergeClipPaths(object.clipPath, clipPath)
+						? fabricModule.util.mergeClipPaths(object.clipPath as FabricObject, clipPath)
 						: clipPath
 					object.set('clipPath', nextClipPath)
 				}),

@@ -13,7 +13,7 @@ const { formatMessage } = useVIntl()
 
 const { instance } = injectInstanceSettings()
 
-const globalSettings = (await get().catch(handleError)) as AppSettings
+const globalSettings = (await get().catch(handleError)) as unknown as AppSettings
 
 const hasCustomHooks =
 	!!instance.value.hooks.pre_launch ||

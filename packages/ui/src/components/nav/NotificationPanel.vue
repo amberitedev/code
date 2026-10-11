@@ -101,7 +101,7 @@
 									:type="button.color && button.color !== 'standard' ? 'colored' : 'base'"
 									:color="
 										button.color && button.color !== 'standard'
-											? button.color === 'medal-promo'
+											? (button.color as string) === 'medal-promo'
 												? 'medal_promotion'
 												: button.color
 											: undefined

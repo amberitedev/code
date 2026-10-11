@@ -53,7 +53,7 @@ async function addServer(play: boolean) {
 			index,
 			address: address.value,
 			pack_status: resourcePackStatus,
-		},
+		} as ServerWorld,
 		play,
 	)
 	hide()

@@ -174,7 +174,7 @@ const syncedServerFilterOptions = computed(() => [
 const syncedServerRows = computed<SyncedServerTableRow[]>(() =>
 	syncedServers.value.map((server) => ({
 		...server,
-		server: getWorldDisplayName(server),
+		server: getWorldDisplayName(server as unknown as ServerWorld),
 		status: serverData.value[server.address]?.status ? 'online' : 'offline',
 		version: serverData.value[server.address]?.status?.version?.name ?? '',
 		actions: null,
@@ -369,7 +369,7 @@ defineExpose({ show })
 							<div class="flex min-w-0 items-center gap-3">
 								<Avatar
 									:src="serverData[row.address]?.status?.favicon"
-									:alt="getWorldDisplayName(row)"
+									:alt="getWorldDisplayName(row as unknown as ServerWorld)"
 									:tint-by="row.address"
 									size="32px"
 									no-shadow
@@ -377,7 +377,7 @@ defineExpose({ show })
 								/>
 								<div class="flex min-w-0 flex-col">
 									<span class="truncate font-semibold text-contrast">
-										{{ getWorldDisplayName(row) }}
+										{{ getWorldDisplayName(row as unknown as ServerWorld) }}
 									</span>
 									<span class="truncate text-sm text-secondary">{{ row.address }}</span>
 								</div>

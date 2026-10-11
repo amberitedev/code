@@ -20,10 +20,12 @@ const props = defineProps<{
 const isCurrentRegion = computed(() => currentRegion.value === props.region.shortcode)
 const flag = computed(
 	() =>
-		regionOverrides[props.region.shortcode]?.flag ??
+		regionOverrides[props.region.shortcode as keyof typeof regionOverrides]?.flag ??
 		`https://flagcdn.com/${props.region.country_code}.svg`,
 )
-const overrideTitle = computed(() => regionOverrides[props.region.shortcode]?.name)
+const overrideTitle = computed(
+	() => regionOverrides[props.region.shortcode as keyof typeof regionOverrides]?.name,
+)
 const title = computed(() =>
 	overrideTitle.value ? formatMessage(overrideTitle.value) : props.region.display_name,
 )

@@ -10,7 +10,7 @@ import {
 	ManagedContentModal,
 	useVIntl,
 } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref, watch } from 'vue'
 
 import SyncedContentModal from '@/components/ui/instance/SyncedContentModal.vue'
@@ -53,10 +53,12 @@ const title = computed(() =>
 	formatMessage(projectType.value === 'resourcepack' ? messages.resourcePacks : messages.dataPacks),
 )
 const packsQuery = useQuery(
-	computed(() => ({
-		...syncedPackQueryOptions(projectType.value),
-		enabled: isOpen.value && isSyncedPackTypeAvailable(projectType.value),
-	})),
+	computed(() =>
+		queryOptions({
+			...syncedPackQueryOptions(projectType.value),
+			enabled: isOpen.value && isSyncedPackTypeAvailable(projectType.value),
+		}),
+	),
 )
 const mutation = useMutation({
 	mutationFn: (operation: () => Promise<void>) => operation(),

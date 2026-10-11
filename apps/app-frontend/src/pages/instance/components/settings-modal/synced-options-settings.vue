@@ -666,7 +666,7 @@ function resolveHotbars(resolution: SyncedOptionJoinResolution) {
 								mutation.isPending.value ||
 								!!disabledReason(row.option)
 							"
-							@update:model-value="(excluded) => setExcluded(row.option, excluded)"
+							@update:model-value="(excluded) => setExcluded(row.option, excluded!)"
 						/>
 					</span>
 				</div>

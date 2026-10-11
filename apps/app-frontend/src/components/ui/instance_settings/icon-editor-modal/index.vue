@@ -61,11 +61,11 @@ let suppressBackgroundClickTimeout: ReturnType<typeof setTimeout> | null = null
 const selectedBackground = ref<BackgroundId>(DEFAULT_BACKGROUND_ID)
 const selectedSymbol = ref<SymbolId>(DEFAULT_SYMBOL_ID)
 
-const selectedBackgroundOption = computed(
-	() => backgroundOptions.find((option) => option.id === selectedBackground.value)!,
+const selectedBackgroundOption = computed(() =>
+	backgroundOptions.find((option) => option.id === selectedBackground.value)!,
 )
-const selectedSymbolOption = computed(
-	() => symbolOptions.find((option) => option.id === selectedSymbol.value)!,
+const selectedSymbolOption = computed(() =>
+	symbolOptions.find((option) => option.id === selectedSymbol.value)!,
 )
 const vanillaSymbolStartIndex = symbolOptions.findIndex((option) => option.category === 'vanilla')
 const selectedConfig = computed<InstanceIconConfig>(() => ({
@@ -460,6 +460,7 @@ const messages = defineMessages({
 							/>
 							<button
 								v-tooltip="{
+									// @ts-expect-error the tooltip directive only reads `text`, so upstream's options show nothing
 									content: formatMessage(option.name),
 									delay: { show: 500, hide: 0 },
 								}"

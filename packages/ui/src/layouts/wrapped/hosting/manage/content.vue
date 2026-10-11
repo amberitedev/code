@@ -1343,6 +1343,7 @@ provideContentManager({
 	managedContentMenuOptions,
 	openManagedContentSettings: () => openServerSettings({ tabId: 'installation' }),
 	switchVersion: handleSwitchVersion,
+	// @ts-expect-error upstream builds these options without the label ButtonMenuOption requires
 	getOverflowOptions,
 	getItemId: getContentItemId,
 	mapToTableItem: (item) => {

@@ -200,7 +200,7 @@ import {
 	useReadyState,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { platform } from '@tauri-apps/plugin-os'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -429,10 +429,12 @@ const startingInstance = ref(false)
 const worldPlaying = ref<World>()
 
 const worldsQuery = useQuery(
-	computed(() => ({
-		...instanceWorldsQueryOptions(instancePage.instanceId.value),
-		enabled: !!instancePage.instanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceWorldsQueryOptions(instancePage.instanceId.value),
+			enabled: !!instancePage.instanceId.value,
+		}),
+	),
 )
 
 const worldsReadyPending = useReadyState(worldsQuery)

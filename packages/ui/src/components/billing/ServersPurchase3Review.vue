@@ -153,10 +153,12 @@ const planSpecs = computed(() => {
 
 const flag = computed(
 	() =>
-		regionOverrides[props.region.shortcode]?.flag ??
+		regionOverrides[props.region.shortcode as keyof typeof regionOverrides]?.flag ??
 		`https://flagcdn.com/${props.region.country_code}.svg`,
 )
-const overrideTitle = computed(() => regionOverrides[props.region.shortcode]?.name)
+const overrideTitle = computed(
+	() => regionOverrides[props.region.shortcode as keyof typeof regionOverrides]?.name,
+)
 const title = computed(() =>
 	overrideTitle.value ? formatMessage(overrideTitle.value) : props.region.display_name,
 )
@@ -246,7 +248,7 @@ function setInterval(newInterval: ServerBillingInterval) {
 					>Pay monthly</span
 				>
 				<span class="text-sm text-secondary flex items-center gap-1"
-					>{{ formatPrice(monthlyPrice, currency, true) }} / month</span
+					>{{ formatPrice(monthlyPrice!, currency, true) }} / month</span
 				>
 			</div>
 		</button>
@@ -334,14 +336,14 @@ function setInterval(newInterval: ServerBillingInterval) {
 			Today, you will be charged a prorated amount for the remainder of your current billing cycle.
 			<br />
 			Your subscription will renew at
-			{{ formatPrice(selectedPlanPriceForInterval, currency) }} / {{ period }} plus applicable taxes
-			at the end of your current billing interval, until you cancel. You can cancel anytime from
-			your settings page.
+			{{ formatPrice(selectedPlanPriceForInterval!, currency) }} / {{ period }} plus applicable
+			taxes at the end of your current billing interval, until you cancel. You can cancel anytime
+			from your settings page.
 		</template>
 		<template v-else>
 			You'll be charged
 			<SpinnerIcon v-if="loading" class="animate-spin relative top-0.5 mx-2" /><template v-else>{{
-				formatPrice(total, currency)
+				formatPrice(total!, currency)
 			}}</template>
 			every {{ period }} plus applicable taxes starting today, until you cancel. You can cancel
 			anytime from your settings page.

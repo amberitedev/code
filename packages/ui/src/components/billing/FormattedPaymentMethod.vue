@@ -17,15 +17,16 @@ defineProps<{
 			{{
 				formatMessage(paymentMethodMessages.paymentMethodCardDisplay, {
 					card_brand:
-						formatMessage(paymentMethodMessages[method.card.brand]) ??
-						formatMessage(paymentMethodMessages.unknown),
+						formatMessage(
+							paymentMethodMessages[method.card.brand as keyof typeof paymentMethodMessages],
+						) ?? formatMessage(paymentMethodMessages.unknown),
 					last_four: method.card.last4,
 				})
 			}}
 		</span>
 		<template v-else>
 			{{
-				formatMessage(paymentMethodMessages[method.type]) ??
+				formatMessage(paymentMethodMessages[method.type as keyof typeof paymentMethodMessages]) ??
 				formatMessage(paymentMethodMessages.unknown)
 			}}
 		</template>

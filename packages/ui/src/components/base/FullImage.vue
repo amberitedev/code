@@ -1,5 +1,11 @@
 <template>
-	<img ref="img" :src="src" v-bind="$attrs" @contextmenu="onContextMenu" @dragstart="onDragStart" />
+	<img
+		ref="img"
+		:src="src ?? undefined"
+		v-bind="$attrs"
+		@contextmenu="onContextMenu"
+		@dragstart="onDragStart"
+	/>
 </template>
 
 <script setup lang="ts">

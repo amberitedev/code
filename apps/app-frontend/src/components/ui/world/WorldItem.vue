@@ -568,6 +568,7 @@ function openContextMenu(event: MouseEvent) {
 								{{ formatMessage(commonMessages.loadingLabel) }}
 							</template>
 							<template v-else-if="serverStatus">
+								<!-- @vue-expect-error the tooltip directive only reads `text`, so upstream's options show nothing -->
 								<IssuesIcon
 									v-if="serverIncompatible"
 									v-tooltip="incompatibleVersionTooltip"

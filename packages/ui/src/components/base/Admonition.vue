@@ -64,9 +64,9 @@
 				type="quiet"
 				:color="
 					buttonColors[type] && buttonColors[type] !== 'standard'
-						? buttonColors[type] === 'medal-promo'
+						? (buttonColors[type] as string) === 'medal-promo'
 							? 'medal_promotion'
-							: buttonColors[type]
+							: (buttonColors[type] as ButtonColor)
 						: undefined
 				"
 				label="Dismiss"
@@ -102,7 +102,7 @@ import { ClockIcon, XIcon } from '@modrinth/assets'
 import { useNow } from '@vueuse/core'
 import { computed } from 'vue'
 
-import { IconButton } from '#ui/components/base/buttons'
+import { type ButtonColor, IconButton } from '#ui/components/base/buttons'
 
 import { useFormatDateTime, useRelativeTime } from '../../composables'
 import { getSeverityIcon } from '../../utils'

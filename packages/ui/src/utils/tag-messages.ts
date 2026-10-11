@@ -2,7 +2,7 @@ import { capitalizeString } from '@modrinth/utils'
 
 import { defineMessages, type MessageDescriptor, type VIntlFormatters } from '../composables/i18n'
 
-export const loaderMessages = defineMessages({
+export const loaderMessages: Record<string, MessageDescriptor> = defineMessages({
 	babric: {
 		id: 'tag.loader.babric',
 		defaultMessage: 'Babric',
@@ -125,7 +125,7 @@ export const loaderMessages = defineMessages({
 	},
 })
 
-export const categoryMessages = defineMessages({
+export const categoryMessages: Record<string, MessageDescriptor> = defineMessages({
 	'128x': {
 		id: 'tag.category.128x',
 		defaultMessage: '128x',
@@ -596,7 +596,7 @@ export function sortTagsForDisplay(tags: string[]): string[] {
 	return [...categories, ...loaders]
 }
 
-export const categoryHeaderMessages = defineMessages({
+export const categoryHeaderMessages: Record<string, MessageDescriptor> = defineMessages({
 	resolutions: {
 		id: 'header.category.resolutions',
 		defaultMessage: 'Resolution',

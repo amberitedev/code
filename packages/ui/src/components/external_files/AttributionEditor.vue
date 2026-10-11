@@ -285,7 +285,7 @@ const licenseOptions = computed<ComboboxOption<string>[]>(() => {
 		}),
 	)
 	const options = defaultLicenseIds
-		.filter((short) => short !== '')
+		.filter((short) => (short as string) !== '')
 		.map((short) => {
 			const license = licensesById.get(short)
 			return {

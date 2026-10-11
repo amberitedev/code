@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { createStripeElements } from '@modrinth/utils'
 import type { Stripe as StripsJs, StripeElements } from '@stripe/stripe-js'
+import type Stripe from 'stripe'
 import { ref } from 'vue'
 
 import { useDebugLogger } from '../../composables/debug-logger'
@@ -26,11 +27,11 @@ export type AddPaymentMethodProps = {
 const props = defineProps<AddPaymentMethodProps>()
 
 const elementsLoaded = ref<0 | 1 | 2>(0)
-const stripe = ref<StripsJs>()
+const stripe = ref<StripsJs | null>()
 const elements = ref<StripeElements>()
 const error = ref(false)
 
-function handleError(error: Error) {
+function handleError(error: Error & { value?: boolean }) {
 	props.onError(error)
 	error.value = true
 }
@@ -60,15 +61,15 @@ async function reload(paymentMethods: Stripe.PaymentMethod[]) {
 			elementsLoaded.value += 1
 		})
 	} catch (err) {
-		handleError(err)
+		handleError(err as Error)
 	}
 }
 
-async function submit(): Promise<boolean> {
+async function submit(): Promise<boolean | undefined> {
 	emit('startLoading')
 
-	const result = await stripe.value.confirmSetup({
-		elements: elements.value,
+	const result = await stripe.value!.confirmSetup({
+		elements: elements.value!,
 		confirmParams: {
 			return_url: props.returnUrl,
 		},
@@ -80,7 +81,7 @@ async function submit(): Promise<boolean> {
 
 	emit('stopLoading')
 	if (error && error.type !== 'validation_error') {
-		handleError(error.message)
+		handleError(error.message as unknown as Error)
 		return false
 	} else if (!error) {
 		return true

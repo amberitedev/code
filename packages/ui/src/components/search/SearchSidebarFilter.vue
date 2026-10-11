@@ -81,7 +81,7 @@
 			/>
 			<template v-else>
 				<div
-					v-if="filterType.display === 'toggle'"
+					v-if="(filterType.display as string) === 'toggle'"
 					:class="innerPanelClass ? innerPanelClass : ''"
 					class="flex flex-col gap-3"
 				>

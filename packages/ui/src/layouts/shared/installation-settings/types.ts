@@ -8,15 +8,15 @@ export interface InstallationInfoRow {
 export interface InstallationModpackOwner {
 	id: string
 	name: string
-	iconUrl?: string
+	iconUrl?: string | null
 	type: 'user' | 'organization'
 }
 
 export interface InstallationModpackData {
-	iconUrl?: string
+	iconUrl?: string | null
 	title: string
 	link?: string | RouteLocationRaw
-	versionNumber?: string
+	versionNumber?: string | null
 	filename?: string
 	owner?: InstallationModpackOwner
 }

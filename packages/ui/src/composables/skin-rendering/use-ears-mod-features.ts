@@ -349,7 +349,7 @@ function getImageDimensions(image: CanvasImageSource) {
 	if (image instanceof HTMLVideoElement) {
 		return [image.videoWidth, image.videoHeight] as const
 	}
-	return [image.width, image.height] as const
+	return [(image as ImageBitmap).width, (image as ImageBitmap).height] as const
 }
 
 function readSkinImage(texture: THREE.Texture) {
@@ -780,7 +780,7 @@ function createCanvasTexture(data: Uint8ClampedArray, width: number, height: num
 	canvas.height = height
 	const context = canvas.getContext('2d')
 	if (!context) throw new Error('Could not create Ears texture canvas')
-	context.putImageData(new ImageData(data, width, height), 0, 0)
+	context.putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, width, height), 0, 0)
 
 	const texture = new THREE.CanvasTexture(canvas)
 	texture.colorSpace = THREE.SRGBColorSpace

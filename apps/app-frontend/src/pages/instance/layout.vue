@@ -108,7 +108,7 @@ import {
 	useLoadingBarToken,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useOnline } from '@vueuse/core'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -221,16 +221,20 @@ const online = useOnline()
 const offline = computed(() => !online.value)
 const instanceId = computed(() => String(displayedInstanceRoute.value.params.id ?? ''))
 const instanceQuery = useQuery(
-	computed(() => ({
-		...instanceDetailQueryOptions(instanceId.value),
-		enabled: !!instanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceDetailQueryOptions(instanceId.value),
+			enabled: !!instanceId.value,
+		}),
+	),
 )
 useQuery(
-	computed(() => ({
-		...instanceContentQueryOptions(instanceId.value, (error) => handleError(toError(error))),
-		enabled: !!instanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceContentQueryOptions(instanceId.value, (error) => handleError(toError(error))),
+			enabled: !!instanceId.value,
+		}),
+	),
 )
 const instance = computed(() => instanceQuery.data.value)
 async function invalidateContent(targetInstanceId: string) {
@@ -290,18 +294,22 @@ const linkedProjectId = computed(
 	() => instance.value?.link?.server_project_id ?? instance.value?.link?.project_id ?? '',
 )
 const linkedProjectQuery = useQuery(
-	computed(() => ({
-		...instanceLinkedProjectQueryOptions(linkedProjectId.value),
-		enabled: !!linkedProjectId.value && !offline.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceLinkedProjectQueryOptions(linkedProjectId.value),
+			enabled: !!linkedProjectId.value && !offline.value,
+		}),
+	),
 )
 const linkedProjectV3 = computed(() => linkedProjectQuery.data.value ?? undefined)
 const isServerInstance = computed(() => linkedProjectV3.value?.minecraft_server != null)
 const processesQuery = useQuery(
-	computed(() => ({
-		...instanceProcessesQueryOptions(instanceId.value),
-		enabled: !!instanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceProcessesQueryOptions(instanceId.value),
+			enabled: !!instanceId.value,
+		}),
+	),
 )
 const playing = computed(() => (processesQuery.data.value?.length ?? 0) > 0)
 
@@ -336,6 +344,7 @@ onBeforeRouteUpdate(async (to, from) => {
 
 	try {
 		await ensureCriticalInstanceData(targetInstanceId)
+		// @ts-expect-error upstream assigns to a read-only computed, which is a no-op at runtime
 		instanceId.value = targetInstanceId
 	} catch (error) {
 		if (isUnmanagedInstanceError(error)) return { path: '/' }
@@ -845,7 +854,7 @@ const handleRightClick = (event: MouseEvent) => {
 			id: 'edit',
 			label: formatMessage(messages.edit),
 			icon: EditIcon,
-			action: openSettings,
+			action: openSettings as () => void,
 		},
 		{
 			id: 'open_folder',

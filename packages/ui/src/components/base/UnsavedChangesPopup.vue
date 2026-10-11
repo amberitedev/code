@@ -6,6 +6,7 @@ import { type Component, computed, ref } from 'vue'
 import { Button } from '#ui/components/base/buttons'
 
 import { defineMessage, type MessageDescriptor, useVIntl } from '../../composables/i18n'
+import type { TooltipProps } from '../../providers/tooltip'
 import { commonMessages } from '../../utils/common-messages'
 import FloatingActionBar from './FloatingActionBar.vue'
 
@@ -51,7 +52,9 @@ const props = withDefaults(
 const shown = computed(
 	() =>
 		props.saving ||
-		Object.keys(props.modified).some((key) => !isEqual(props.original[key], props.modified[key])),
+		(Object.keys(props.modified) as (keyof T)[]).some(
+			(key) => !isEqual(props.original[key], props.modified[key]),
+		),
 )
 
 function localizeIfPossible(message: MessageDescriptor | string) {
@@ -91,7 +94,7 @@ defineExpose({ nudge })
 				<HistoryIcon /> {{ formatMessage(commonMessages.resetButton) }}
 			</Button>
 			<span
-				v-tooltip="saveDisabledTooltip"
+				v-tooltip="saveDisabledTooltip as TooltipProps"
 				class="flex"
 				:class="{ 'cursor-not-allowed': saveDisabled }"
 			>

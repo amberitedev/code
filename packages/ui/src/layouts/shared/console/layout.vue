@@ -160,7 +160,8 @@ const fullscreenBodyClass = 'modrinth-console-fullscreen-active'
 const fullscreenIntercomPadding = 20
 const fullscreenIntercomPaddingRequestId = Symbol('console-fullscreen')
 const isApp =
-	typeof window !== 'undefined' && !!(window as Record<string, unknown>).__TAURI_INTERNALS__
+	typeof window !== 'undefined' &&
+	!!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
 const isSharing = ref(false)
 const { activeFilters, toggleFilter, buildFilterPredicate } = useConsoleFilters()
 const hasLogs = computed(() => ctx.logLines.value.length > 0)
@@ -229,7 +230,7 @@ const resolvedDisableInput = computed(() => {
 
 function unwrapMaybeRef<T>(value: T | { value: T } | undefined): T | undefined {
 	if (value === undefined) return undefined
-	return isRef(value) ? value.value : value
+	return (isRef(value) ? value.value : value) as T
 }
 
 // needs historical log start/end flags on ws to be properly useful

@@ -1,5 +1,5 @@
 import MarkdownIt from 'markdown-it'
-import xss from 'xss'
+import xss, { type ICSSFilter } from 'xss'
 
 // @ts-expect-error xss types don't reflect CJS default export shape
 const { escapeAttrValue, FilterXSS, safeAttrValue, whiteList } = xss
@@ -68,7 +68,7 @@ export const configuredXss = new FilterXSS({
 			float: /^left|right$/,
 		},
 	},
-	onIgnoreTagAttr: (tag, name, value) => {
+	onIgnoreTagAttr: (tag: string, name: string, value: string) => {
 		// Allow iframes from acceptable sources
 		if (tag === 'iframe' && name === 'src') {
 			const allowedSources = [
@@ -116,7 +116,7 @@ export const configuredXss = new FilterXSS({
 			return `${name}="${escapeAttrValue(allowedClasses.join(' '))}"`
 		}
 	},
-	safeAttrValue(tag, name, value, cssFilter) {
+	safeAttrValue(tag: string, name: string, value: string, cssFilter: ICSSFilter) {
 		if (
 			shouldProxyImgur() &&
 			((tag === 'a' && name === 'href') ||

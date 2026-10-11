@@ -60,8 +60,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      # The App frontend is left out until its inherited type errors are cleaned up.
-      - run: pnpm --filter @amberite/backend --filter @amberite/browser-bridge typecheck
+      - run: pnpm --filter @amberite/backend --filter @amberite/browser-bridge --filter @modrinth/app-frontend typecheck
       - run: pnpm test:unit
       - run: pnpm --filter @amberite/backend --filter @amberite/browser-bridge test
       - run: pnpm dev:check

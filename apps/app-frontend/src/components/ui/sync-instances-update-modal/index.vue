@@ -372,7 +372,7 @@ defineExpose({ show, hide })
 							:id="`update-sync-${option}`"
 							:model-value="draftOptions[option]"
 							:disabled="controlsDisabled"
-							@update:model-value="(enabled) => toggleOption(option, enabled)"
+							@update:model-value="(enabled) => toggleOption(option, enabled!)"
 						/>
 					</div>
 				</div>

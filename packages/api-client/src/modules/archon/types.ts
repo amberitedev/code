@@ -419,7 +419,7 @@ export namespace Archon {
 			}
 
 			export type ModpackFields = {
-				spec: ModpackSpec
+				readonly spec: ModpackSpec
 				has_update: string | null
 				title: string | null
 				description: string | null

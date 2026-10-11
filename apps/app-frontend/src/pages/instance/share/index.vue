@@ -424,7 +424,7 @@ watch(
 	},
 )
 watch(
-	[() => auth.isReady.value, isSignedIn, actionsLocked],
+	[() => auth.isReady!.value, isSignedIn, actionsLocked],
 	([ready, signedIn, locked]) => {
 		if (ready && !signedIn && !locked) signInToShare()
 	},

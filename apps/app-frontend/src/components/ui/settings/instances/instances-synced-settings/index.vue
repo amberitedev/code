@@ -625,7 +625,7 @@ onScopeDispose(clearBaseSource)
 								:model-value="globalOptions[row.option]"
 								:disabled="!canToggleGlobalOptions"
 								:aria-label="formatMessage(messages[row.title])"
-								@update:model-value="(enabled) => toggleGlobalOption(row.option, enabled)"
+								@update:model-value="(enabled) => toggleGlobalOption(row.option, enabled!)"
 							/>
 						</div>
 					</div>

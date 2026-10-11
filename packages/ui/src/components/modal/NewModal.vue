@@ -366,7 +366,7 @@ function isFocusInsideModal() {
 }
 
 function focusElement(el: HTMLElement) {
-	el.focus({ preventScroll: true, focusVisible: inputModality.keyboard })
+	el.focus({ preventScroll: true, focusVisible: inputModality.keyboard } as FocusOptions)
 }
 
 function focusModal() {
@@ -574,8 +574,12 @@ function trapFocus(event: KeyboardEvent) {
 	const last = focusable[focusable.length - 1]
 	const active = document.activeElement
 	const inside = dialog.contains(active)
-	const beforeFirst = !!(active?.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
-	const afterLast = !!(active?.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_PRECEDING)
+	const beforeFirst = !!(
+		(active?.compareDocumentPosition(first) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING
+	)
+	const afterLast = !!(
+		(active?.compareDocumentPosition(last) ?? 0) & Node.DOCUMENT_POSITION_PRECEDING
+	)
 
 	if (!inside) {
 		event.preventDefault()

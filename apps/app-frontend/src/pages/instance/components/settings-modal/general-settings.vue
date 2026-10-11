@@ -326,6 +326,7 @@ const messages = defineMessages({
 									: formatMessage(messages.selectIcon),
 								action: () => setIcon(),
 							},
+							// @ts-expect-error upstream omits the required label; the #create slot renders the text
 							{
 								id: 'create',
 								action: () => openIconEditor(),

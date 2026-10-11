@@ -119,7 +119,7 @@
 										<IconButton
 											v-tooltip="advancedActionTooltip"
 											type="quiet"
-											:label="advancedActionTooltip"
+											:label="advancedActionTooltip!"
 											:disabled="!canUseAdvancedSettings"
 											@click="showEditAllocationModal(row.port)"
 										>
@@ -128,7 +128,7 @@
 										<IconButton
 											v-tooltip="advancedActionTooltip"
 											type="outlined"
-											:label="advancedActionTooltip"
+											:label="advancedActionTooltip!"
 											:disabled="!canUseAdvancedSettings"
 											class="!text-red [&>svg]:!text-red !shadow-[inset_0_0_0_1px_var(--color-red)]"
 											@click="showConfirmDeleteModal(row.port)"

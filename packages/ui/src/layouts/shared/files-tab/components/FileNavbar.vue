@@ -13,7 +13,7 @@
 				:placeholder="formatMessage(messages.searchFiles)"
 				size="medium"
 				wrapper-class="flex-1 min-w-0"
-				@update:model-value="$emit('update:searchQuery', $event)"
+				@update:model-value="$emit('update:searchQuery', $event as string)"
 			/>
 		</div>
 		<div class="flex items-center justify-between gap-2">
@@ -105,7 +105,7 @@
 					class="hidden @[800px]:inline-flex"
 					size="medium"
 					wrapper-class="w-full sm:w-[280px]"
-					@update:model-value="$emit('update:searchQuery', $event)"
+					@update:model-value="$emit('update:searchQuery', $event as string)"
 				/>
 
 				<Button

@@ -59,11 +59,16 @@ defineExpose({
 				@stop-loading="loading = false"
 			/>
 			<div class="input-group mt-auto pt-4">
-				<Button type="colored" color="brand" :disabled="loading" @click="addPaymentMethod.submit()">
+				<Button
+					type="colored"
+					color="brand"
+					:disabled="loading"
+					@click="addPaymentMethod!.submit()"
+				>
 					<PlusIcon />
 					{{ formatMessage(messages.paymentMethodAdd) }}
 				</Button>
-				<Button @click="modal.hide()">
+				<Button @click="modal!.hide()">
 					<XIcon />
 					{{ formatMessage(commonMessages.cancelButton) }}
 				</Button>

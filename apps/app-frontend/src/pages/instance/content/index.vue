@@ -117,7 +117,7 @@ import {
 	useVIntl,
 	versionChangesGameVersion,
 } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -240,10 +240,12 @@ const {
 } = managedContentPolicy
 
 const contentQuery = useQuery(
-	computed(() => ({
-		...instanceContentQueryOptions(instancePage.instanceId.value),
-		enabled: !!instancePage.instanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceContentQueryOptions(instancePage.instanceId.value),
+			enabled: !!instancePage.instanceId.value,
+		}),
+	),
 )
 const loading = ref(contentQuery.data.value === undefined)
 const projects = ref<ContentItem[]>([])
@@ -996,7 +998,7 @@ async function updateProject(mod: ContentItem) {
 		const updateVersionId = mod.update_version_id!
 		await switch_project_version_with_dependencies(
 			instance.value.id,
-			mod.file_path,
+			mod.file_path!,
 			updateVersionId,
 		)
 
@@ -1292,7 +1294,7 @@ async function handleModpackUpdate() {
 		},
 		modalStateBeforeFetch: {
 			updatingModpack: updatingModpack.value,
-			updatingProjectId: updatingProject.value?.id,
+			updatingProjectId: (updatingProject.value as ContentItem | null)?.id,
 			updatingProjectVersions: updatingProjectVersions.value.map((version) => ({
 				id: version.id,
 				versionNumber: version.version_number,

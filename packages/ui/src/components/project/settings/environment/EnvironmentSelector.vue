@@ -131,6 +131,7 @@ const OUTER_OPTIONS: Record<
 } as const
 
 type OuterOptionKey = keyof typeof OUTER_OPTIONS
+type ValidKeys<T> = T extends unknown ? keyof T : never
 type SubOptionKey = ValidKeys<(typeof OUTER_OPTIONS)[keyof typeof OUTER_OPTIONS]['suboptions']>
 
 const currentOuterOption = ref<OuterOptionKey>()

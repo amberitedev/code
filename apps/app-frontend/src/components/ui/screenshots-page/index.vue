@@ -323,7 +323,10 @@ const screenshotsQuery = useQuery(
 	computed(() =>
 		props.instanceId
 			? instanceScreenshotsQueryOptions(props.instanceId)
-			: syncedScreenshotsQueryOptions(),
+			: // vue-query cannot infer one query key type from a union of query options
+				(syncedScreenshotsQueryOptions() as unknown as ReturnType<
+					typeof instanceScreenshotsQueryOptions
+				>),
 	),
 )
 const instancesQuery = useQuery(instanceListQueryOptions())
