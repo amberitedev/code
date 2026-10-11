@@ -4,9 +4,10 @@ import { basename, extname, resolve } from 'node:path'
 
 const DEFAULT_PROD_API = 'https://api.modrinth.com/v3'
 const DEFAULT_LOCAL_API = 'http://127.0.0.1:8000/v3'
-const DEFAULT_TOKEN_FIXTURE =
-	new URL('../apps/labrinth/fixtures/labrinth-seed-data-202508052143.sql', import.meta.url)
-		.pathname
+const DEFAULT_TOKEN_FIXTURE = new URL(
+	'../apps/labrinth/fixtures/labrinth-seed-data-202508052143.sql',
+	import.meta.url,
+).pathname
 const USER_AGENT = 'modrinth-local-labrinth-cloner/1.0'
 const LOCAL_ICON_LIMIT_BYTES = 256 * 1024
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024 * 1024
@@ -308,7 +309,10 @@ async function resolveProjectRefs(options) {
 }
 
 async function cloneProject(projectRef, options, localMetadata) {
-	const prodProject = await requestJson(options.prodApi, `/project/${encodeURIComponent(projectRef)}`)
+	const prodProject = await requestJson(
+		options.prodApi,
+		`/project/${encodeURIComponent(projectRef)}`,
+	)
 	const prodSlug = prodProject.slug || projectRef
 	const localSlug = sanitizeSlug(`${options.slugPrefix}${prodSlug}${options.slugSuffix}`)
 	const name = projectName(prodProject)
@@ -422,13 +426,17 @@ async function getProdProjectVersions(projectId, options) {
 	const versions = []
 	const pageSize = 100
 	for (let offset = 0; ; offset += pageSize) {
-		const batch = await requestJson(options.prodApi, `/project/${encodeURIComponent(projectId)}/version`, {
-			query: {
-				limit: pageSize,
-				offset,
-				include_changelog: true,
+		const batch = await requestJson(
+			options.prodApi,
+			`/project/${encodeURIComponent(projectId)}/version`,
+			{
+				query: {
+					limit: pageSize,
+					offset,
+					include_changelog: true,
+				},
 			},
-		})
+		)
 		versions.push(...batch)
 		if (batch.length < pageSize) break
 	}
@@ -457,12 +465,18 @@ async function cloneVersion(prodProject, prodVersion, localProject, options, loc
 
 	const uploadFiles = await downloadVersionFiles(prodFiles, options)
 	const primaryUpload =
-		uploadFiles.find((file) => file.source === primaryFile) || uploadFiles.find((file) => file.primary)
+		uploadFiles.find((file) => file.source === primaryFile) ||
+		uploadFiles.find((file) => file.primary)
 	if (!primaryUpload) {
 		throw new SkipVersionError('primary file was not downloaded')
 	}
 
-	const versionFields = normalizeVersionFields(prodProject, prodVersion, primaryUpload, localMetadata)
+	const versionFields = normalizeVersionFields(
+		prodProject,
+		prodVersion,
+		primaryUpload,
+		localMetadata,
+	)
 	const fileParts = uploadFiles.map((file) => file.partName)
 	const fileTypes = Object.fromEntries(
 		uploadFiles.map((file) => [file.partName, file.source.file_type || null]),
@@ -472,7 +486,12 @@ async function cloneVersion(prodProject, prodVersion, localProject, options, loc
 		project_id: localProject.id,
 		file_parts: fileParts,
 		version_number: sanitizeVersionNumber(prodVersion.version_number),
-		version_title: clampText(prodVersion.name || prodVersion.version_number, 'Imported version', 1, 64),
+		version_title: clampText(
+			prodVersion.name || prodVersion.version_number,
+			'Imported version',
+			1,
+			64,
+		),
 		version_body: prodVersion.changelog || '',
 		dependencies: dependencies(prodVersion, options),
 		release_channel: versionType(prodVersion),
@@ -585,7 +604,9 @@ async function downloadIcon(iconUrl) {
 function normalizeVersionFields(prodProject, prodVersion, primaryUpload, localMetadata) {
 	const projectTypes = projectTypesFor(prodProject)
 	const modpack = isModpack(projectTypes, primaryUpload.filename, prodVersion)
-	let loaders = stringArray(prodVersion.loaders).filter((loader) => localMetadata.loaders.has(loader))
+	let loaders = stringArray(prodVersion.loaders).filter((loader) =>
+		localMetadata.loaders.has(loader),
+	)
 	const fields = {}
 
 	if (modpack && localMetadata.loaders.has('mrpack')) {
@@ -613,7 +634,8 @@ function normalizeVersionFields(prodProject, prodVersion, primaryUpload, localMe
 
 	if (supportedFields.has('game_versions')) {
 		const gameVersions = filterGameVersions(fieldValue(prodVersion, 'game_versions'), localMetadata)
-		fields.game_versions = gameVersions.length > 0 ? gameVersions : [localMetadata.fallbackGameVersion]
+		fields.game_versions =
+			gameVersions.length > 0 ? gameVersions : [localMetadata.fallbackGameVersion]
 	}
 
 	if (supportedFields.has('environment')) {
@@ -661,7 +683,9 @@ function filterGameVersions(value, localMetadata) {
 }
 
 function filterLoaderList(value, localMetadata) {
-	return stringArray(value).filter((loader) => loader !== 'mrpack' && localMetadata.loaders.has(loader))
+	return stringArray(value).filter(
+		(loader) => loader !== 'mrpack' && localMetadata.loaders.has(loader),
+	)
 }
 
 function fallbackLoaders(projectTypes, filename, localMetadata) {
@@ -695,7 +719,9 @@ function dependencies(version, options) {
 	// Prod project/version ids do not exist locally unless separately mapped. Keep only
 	// external file-name dependencies, which Labrinth can store without local id lookup.
 	return (Array.isArray(version.dependencies) ? version.dependencies : [])
-		.filter((dependency) => dependency.file_name && !dependency.project_id && !dependency.version_id)
+		.filter(
+			(dependency) => dependency.file_name && !dependency.project_id && !dependency.version_id,
+		)
 		.map((dependency) => ({
 			file_name: dependency.file_name,
 			dependency_type: dependency.dependency_type || 'embedded',
@@ -746,7 +772,11 @@ function projectName(project) {
 }
 
 function projectSummary(project) {
-	return project.summary || (project.body ? project.description : null) || 'Imported from production Modrinth.'
+	return (
+		project.summary ||
+		(project.body ? project.description : null) ||
+		'Imported from production Modrinth.'
+	)
 }
 
 function projectBody(project) {
@@ -846,7 +876,7 @@ function sanitizeVersionNumber(value) {
 function safeFilename(filename, url, index) {
 	const candidate =
 		filename ||
-		decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '') ||
+		decodeURIComponent(new URL(url).pathname.split('/').findLast(Boolean) || '') ||
 		`file-${index}.jar`
 	return basename(candidate).replaceAll('/', '_').replaceAll('\\', '_').replaceAll('\0', '_')
 }

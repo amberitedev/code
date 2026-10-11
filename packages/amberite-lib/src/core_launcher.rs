@@ -4,13 +4,13 @@ use crate::error::{AmberiteError, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
-use tokio::{process::{Child, Command}, sync::Mutex};
-
-const CORE_BINARY_NAME: &str = if cfg!(windows) {
-    "copal.exe"
-} else {
-    "copal"
+use tokio::{
+    process::{Child, Command},
+    sync::Mutex,
 };
+
+const CORE_BINARY_NAME: &str =
+    if cfg!(windows) { "copal.exe" } else { "copal" };
 const DEFAULT_CORE_URL: &str = "http://localhost:16662";
 
 /// Status of the local Core process.
@@ -167,7 +167,8 @@ pub async fn get_local_setup_secret() -> Result<Option<String>> {
 /// Check whether the local Core process is responding on its HTTP port.
 pub async fn is_core_running(core_url: Option<&str>) -> bool {
     let url = core_url.unwrap_or(DEFAULT_CORE_URL);
-    let Ok(client) = Client::builder().timeout(Duration::from_secs(2)).build() else {
+    let Ok(client) = Client::builder().timeout(Duration::from_secs(2)).build()
+    else {
         return false;
     };
     match client

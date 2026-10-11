@@ -16,8 +16,8 @@ mod event;
 pub mod install;
 mod launcher;
 mod logger;
-mod state;
 pub mod self_hosted;
+mod state;
 
 pub use api::*;
 pub use error::*;

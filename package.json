@@ -26,7 +26,7 @@
 		"check": "vp check",
 		"fmt": "vp fmt",
 		"fmt:check": "vp fmt --check",
-		"lint": "vp lint",
+		"lint": "vp lint --deny-warnings",
 		"lint:ancillary": "prettier --check .github *.*",
 		"test": "vp run -r test",
 		"test:unit": "vp test run",

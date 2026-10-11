@@ -42,13 +42,13 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
-[dependencies.tauri]
-workspace = true
-features = ["devtools", "macos-private-api", "protocol-asset"]
-
 [dependencies.amberite-browser-bridge]
 path = "../../packages/browser-bridge"
 optional = true
+
+[dependencies.tauri]
+workspace = true
+features = ["devtools", "macos-private-api", "protocol-asset"]
 
 [build-dependencies]
 tauri-build = { workspace = true, features = ["codegen"] }
@@ -80,12 +80,12 @@ features = [
 # by default Tauri runs in production mode
 # when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
 default = ["custom-protocol"]
+browser-bridge = ["dep:amberite-browser-bridge"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
 export-app-events = ["theseus/export-ts"]
 updater = []
-browser-bridge = ["dep:amberite-browser-bridge"]
 
 [lints]
 workspace = true

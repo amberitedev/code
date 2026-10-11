@@ -3,7 +3,7 @@
 // start():L75  coreStart():L130  appConsole():L300  appNetwork():L350  coreTsx():L420
 // appEval():L270  coreApi():L450  healthAll():L500  main():L550
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
@@ -79,22 +79,48 @@ Global flags:
 `)
 }
 
-function ensureDir() { mkdirSync(dir, { recursive: true }) }
-function readState(file) { if (!existsSync(file)) return null; try { return JSON.parse(readFileSync(file, 'utf8')) } catch { return null } }
-function saveState(file, state) { ensureDir(); writeFileSync(file, JSON.stringify(state, null, 2)) }
+function ensureDir() {
+	mkdirSync(dir, { recursive: true })
+}
+function readState(file) {
+	if (!existsSync(file)) return null
+	try {
+		return JSON.parse(readFileSync(file, 'utf8'))
+	} catch {
+		return null
+	}
+}
+function saveState(file, state) {
+	ensureDir()
+	writeFileSync(file, JSON.stringify(state, null, 2))
+}
 
 function isAlive(pid) {
 	if (!pid) return false
-	try { process.kill(pid, 0); return true } catch { return false }
+	try {
+		process.kill(pid, 0)
+		return true
+	} catch {
+		return false
+	}
 }
 
-function ps(v) { return `'${String(v).replaceAll("'", "''")}'` }
+function ps(v) {
+	return `'${String(v).replaceAll("'", "''")}'`
+}
 
 function findWindowByTitle(title) {
-	const r = spawnSync('powershell.exe', [
-		'-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-		`$p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq ${ps(title)} } | Select-Object -First 1; if ($p) { $p.Id }`,
-	], { encoding: 'utf8', windowsHide: true, timeout: 7000 })
+	const r = spawnSync(
+		'powershell.exe',
+		[
+			'-NoLogo',
+			'-NoProfile',
+			'-NonInteractive',
+			'-Command',
+			`$p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq ${ps(title)} } | Select-Object -First 1; if ($p) { $p.Id }`,
+		],
+		{ encoding: 'utf8', windowsHide: true, timeout: 7000 },
+	)
 	const n = Number(r.stdout.trim())
 	return Number.isInteger(n) && n > 0 ? n : null
 }
@@ -111,16 +137,26 @@ function openTerminal(title, cwd, env, command) {
 			`$p = Start-Process powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-NoExit','-Command',${ps(inner)}) -WindowStyle Normal -PassThru`,
 			`Write-Output $p.Id`,
 		].join('; ')
-		const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', outer], {
-			encoding: 'utf8', windowsHide: true, timeout: 8000,
-		})
+		const result = spawnSync(
+			'powershell.exe',
+			['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', outer],
+			{
+				encoding: 'utf8',
+				windowsHide: true,
+				timeout: 8000,
+			},
+		)
 		if (result.status !== 0) throw new Error(result.stderr?.trim() || 'Failed to open terminal')
 		const pid = Number(result.stdout.trim().split(/\r?\n/).at(-1)?.trim())
-		if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Unexpected PID: ${JSON.stringify(result.stdout)}`)
+		if (!Number.isInteger(pid) || pid <= 0)
+			throw new Error(`Unexpected PID: ${JSON.stringify(result.stdout)}`)
 		return pid
 	}
 	const child = spawn('sh', ['-c', command], {
-		cwd, detached: true, stdio: 'ignore', env: { ...process.env, ...env },
+		cwd,
+		detached: true,
+		stdio: 'ignore',
+		env: { ...process.env, ...env },
 	})
 	child.unref()
 	return child.pid
@@ -129,9 +165,14 @@ function openTerminal(title, cwd, env, command) {
 function killProcessTree(pid) {
 	if (!pid) return
 	if (process.platform === 'win32') {
-		spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 8000 })
+		spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+			windowsHide: true,
+			timeout: 8000,
+		})
 	} else {
-		try { process.kill(-pid, 'SIGKILL') } catch {}
+		try {
+			process.kill(-pid, 'SIGKILL')
+		} catch {}
 	}
 }
 
@@ -139,9 +180,15 @@ function isPortOpen(host, port, timeout = 2000) {
 	return new Promise((resolve) => {
 		const socket = new net.Socket()
 		socket.setTimeout(timeout)
-		socket.once('connect', () => { socket.destroy(); resolve(true) })
+		socket.once('connect', () => {
+			socket.destroy()
+			resolve(true)
+		})
 		socket.once('error', () => resolve(false))
-		socket.once('timeout', () => { socket.destroy(); resolve(false) })
+		socket.once('timeout', () => {
+			socket.destroy()
+			resolve(false)
+		})
 		socket.connect(port, host)
 	})
 }
@@ -176,10 +223,15 @@ function appStart() {
 		return
 	}
 	const pnpm = process.env.APPDATA ? join(process.env.APPDATA, 'npm', 'pnpm.cmd') : 'pnpm'
-	const pid = openTerminal(APP_TITLE, root, {
-		WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${APP_CDP_PORT} --auto-open-devtools-for-tabs`,
-		RUST_LOG: 'info',
-	}, process.platform === 'win32' ? `& ${ps(pnpm)} app:dev` : 'pnpm app:dev')
+	const pid = openTerminal(
+		APP_TITLE,
+		root,
+		{
+			WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${APP_CDP_PORT} --auto-open-devtools-for-tabs`,
+			RUST_LOG: 'info',
+		},
+		process.platform === 'win32' ? `& ${ps(pnpm)} app:dev` : 'pnpm app:dev',
+	)
 	saveState(appStateFile, { terminalPid: pid })
 	log(`App terminal opened (pid ${pid})`)
 	log(`DevTools auto-open; CDP at ${cdpBase}`)
@@ -190,9 +242,14 @@ async function appStop() {
 	let pid = state?.terminalPid
 	if (pid && !isAlive(pid)) pid = null
 	if (!pid) pid = findWindowByTitle(APP_TITLE)
-	if (!pid) { log('No app terminal found'); return }
+	if (!pid) {
+		log('No app terminal found')
+		return
+	}
 	killProcessTree(pid)
-	try { unlinkSync(appStateFile) } catch {}
+	try {
+		unlinkSync(appStateFile)
+	} catch {}
 	log(`App stopped (pid ${pid})`)
 }
 
@@ -206,11 +263,19 @@ async function appStatus() {
 	try {
 		targets = await getTargets(3000)
 		cdpUp = true
-	} catch (e) {
+	} catch {
 		// CDP unavailable
 	}
 	if (JSON_MODE) {
-		log({ scope: 'app', pid, alive, windowByTitle: byTitle, cdpUp, targetCount: targets.length, targets })
+		log({
+			scope: 'app',
+			pid,
+			alive,
+			windowByTitle: byTitle,
+			cdpUp,
+			targetCount: targets.length,
+			targets,
+		})
 	} else {
 		log(`app terminal  : ${pid ?? 'none'} (${alive ? 'alive' : 'not running'})`)
 		log(`app window    : ${byTitle ? `pid ${byTitle}` : 'not found'}`)
@@ -225,8 +290,9 @@ async function appHealth() {
 	let error = null
 	try {
 		const targets = await getTargets(5000)
-		const page = targets.find((t) => t.type === 'page' && t.url.includes('localhost:1420'))
-			?? targets.find((t) => t.type === 'page')
+		const page =
+			targets.find((t) => t.type === 'page' && t.url.includes('localhost:1420')) ??
+			targets.find((t) => t.type === 'page')
 		if (page) {
 			healthy = true
 			pageUrl = page.url
@@ -294,15 +360,27 @@ async function coreStop() {
 	let pid = state?.terminalPid
 	if (pid && !isAlive(pid)) pid = null
 	if (!pid) {
-		const r = spawnSync('powershell.exe', [
-			'-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-			`$c = Get-NetTCPConnection -LocalPort ${CORE_PORT} -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $c.OwningProcess }`,
-		], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+		const r = spawnSync(
+			'powershell.exe',
+			[
+				'-NoLogo',
+				'-NoProfile',
+				'-NonInteractive',
+				'-Command',
+				`$c = Get-NetTCPConnection -LocalPort ${CORE_PORT} -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $c.OwningProcess }`,
+			],
+			{ encoding: 'utf8', windowsHide: true, timeout: 5000 },
+		)
 		pid = Number(r.stdout.trim()) || null
 	}
-	if (!pid) { log('No core process found'); return }
+	if (!pid) {
+		log('No core process found')
+		return
+	}
 	killProcessTree(pid)
-	try { unlinkSync(coreStateFile) } catch {}
+	try {
+		unlinkSync(coreStateFile)
+	} catch {}
 	log(`Core stopped (pid ${pid})`)
 }
 
@@ -324,7 +402,9 @@ async function coreHealth() {
 	let statusCode = null
 	let error = null
 	try {
-		const res = await fetch(`http://${CORE_HOST}:${CORE_PORT}/health`, { signal: AbortSignal.timeout(5000) })
+		const res = await fetch(`http://${CORE_HOST}:${CORE_PORT}/health`, {
+			signal: AbortSignal.timeout(5000),
+		})
 		statusCode = res.status
 		healthy = res.ok
 	} catch (e) {
@@ -349,23 +429,37 @@ function coreLogs(lines = 50) {
 
 function coreShell(cmd) {
 	const coreDir = join(root, 'apps', 'core')
-	const r = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', cmd], {
-		cwd: coreDir, encoding: 'utf8', windowsHide: true, timeout: 30000,
-	})
+	const r = spawnSync(
+		'powershell.exe',
+		['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', cmd],
+		{
+			cwd: coreDir,
+			encoding: 'utf8',
+			windowsHide: true,
+			timeout: 30000,
+		},
+	)
 	if (r.stdout) process.stdout.write(r.stdout)
 	if (r.stderr) process.stderr.write(r.stderr)
 	if (r.error) throw r.error
 }
 
-function coreTest() { coreShell('cargo test') }
-function coreCheck() { coreShell('cargo check') }
+function coreTest() {
+	coreShell('cargo test')
+}
+function coreCheck() {
+	coreShell('cargo check')
+}
 
 async function coreTsx(code) {
 	const tmpFile = join(dir, `core-script-${Date.now()}.ts`)
 	const wrapped = `const CORE_BASE = 'http://${CORE_HOST}:${CORE_PORT}';
 async function main() {
   try {
-${code.split('\n').map((l) => '    ' + l).join('\n')}
+${code
+	.split('\n')
+	.map((l) => '    ' + l)
+	.join('\n')}
   } catch (e) {
     console.error('Error:', e);
     process.exit(1);
@@ -376,11 +470,16 @@ main();
 	writeFileSync(tmpFile, wrapped)
 	log(`Executing TS script: ${tmpFile}`)
 	const r = spawnSync('npx', ['tsx', tmpFile], {
-		cwd: root, encoding: 'utf8', shell: true, timeout: 30000,
+		cwd: root,
+		encoding: 'utf8',
+		shell: true,
+		timeout: 30000,
 	})
 	if (r.stdout) process.stdout.write(r.stdout)
 	if (r.stderr) process.stderr.write(r.stderr)
-	try { unlinkSync(tmpFile) } catch {}
+	try {
+		unlinkSync(tmpFile)
+	} catch {}
 	if (r.status !== 0) throw new Error(`Script exited with code ${r.status}`)
 }
 
@@ -412,8 +511,9 @@ async function getTargets(timeout = 3000) {
 
 async function appTarget() {
 	const list = await getTargets()
-	const t = list.find((t) => t.type === 'page' && t.url.includes('localhost:1420'))
-		?? list.find((t) => t.type === 'page')
+	const t =
+		list.find((t) => t.type === 'page' && t.url.includes('localhost:1420')) ??
+		list.find((t) => t.type === 'page')
 	if (!t?.webSocketDebuggerUrl) throw new Error('No page target found')
 	return t
 }
@@ -424,20 +524,35 @@ async function cdpConnect(wsUrl) {
 	await Promise.race([
 		new Promise((res, rej) => {
 			ws.addEventListener('open', res, { once: true })
-			ws.addEventListener('error', (e) => rej(new Error(String(e.message ?? 'WS error'))), { once: true })
+			ws.addEventListener('error', (e) => rej(new Error(String(e.message ?? 'WS error'))), {
+				once: true,
+			})
 		}),
-		sleep(8000).then(() => { throw new Error('WebSocket connect timed out (8s)') }),
+		sleep(8000).then(() => {
+			throw new Error('WebSocket connect timed out (8s)')
+		}),
 	])
 	let id = 0
-	const send = (method, params = {}) => { ws.send(JSON.stringify({ id: ++id, method, params })); return id }
+	const send = (method, params = {}) => {
+		ws.send(JSON.stringify({ id: ++id, method, params }))
+		return id
+	}
 	return { ws, send }
 }
 
 async function appConsole(seconds = 30, filter = null) {
 	let target
 	try {
-		target = await Promise.race([appTarget(), sleep(10000).then(() => { throw new Error('Timed out waiting for target (10s)') })])
-	} catch (e) { log(`Cannot attach: ${e.message}`); return }
+		target = await Promise.race([
+			appTarget(),
+			sleep(10000).then(() => {
+				throw new Error('Timed out waiting for target (10s)')
+			}),
+		])
+	} catch (e) {
+		log(`Cannot attach: ${e.message}`)
+		return
+	}
 	const { ws, send } = await cdpConnect(target.webSocketDebuggerUrl)
 	if (!JSON_MODE) log(`Attached: ${target.title} — streaming for ${seconds}s`)
 	const messages = []
@@ -454,12 +569,13 @@ async function appConsole(seconds = 30, filter = null) {
 		}
 		if (m.method === 'Runtime.exceptionThrown') {
 			const d = m.params.exceptionDetails
-			const stackTrace = d.stackTrace?.callFrames?.map((f) => ({
-				functionName: f.functionName,
-				url: f.url,
-				line: f.lineNumber + 1,
-				column: f.columnNumber + 1,
-			})) || []
+			const stackTrace =
+				d.stackTrace?.callFrames?.map((f) => ({
+					functionName: f.functionName,
+					url: f.url,
+					line: f.lineNumber + 1,
+					column: f.columnNumber + 1,
+				})) || []
 			const entry = {
 				type: 'exception',
 				text: d.text,
@@ -487,7 +603,13 @@ async function appConsole(seconds = 30, filter = null) {
 	await sleep(seconds * 1000)
 	ws.close()
 	if (JSON_MODE) {
-		log({ scope: 'app', stream: 'console', duration: seconds, messageCount: messages.length, messages })
+		log({
+			scope: 'app',
+			stream: 'console',
+			duration: seconds,
+			messageCount: messages.length,
+			messages,
+		})
 	} else {
 		for (const m of messages) {
 			if (m.type === 'console') log(`[${m.level}] ${m.args.join(' ')}`)
@@ -495,7 +617,9 @@ async function appConsole(seconds = 30, filter = null) {
 				log(`[exception] ${m.text}`)
 				if (m.stackTrace.length > 0) {
 					for (const frame of m.stackTrace.slice(0, 5)) {
-						log(`  at ${frame.functionName || '<anonymous>'} (${frame.url}:${frame.line}:${frame.column})`)
+						log(
+							`  at ${frame.functionName || '<anonymous>'} (${frame.url}:${frame.line}:${frame.column})`,
+						)
 					}
 				}
 			}
@@ -511,8 +635,16 @@ async function appErrors(seconds = 30) {
 async function appEval(expression) {
 	let target
 	try {
-		target = await Promise.race([appTarget(), sleep(8000).then(() => { throw new Error('Timed out (8s)') })])
-	} catch (e) { log(`Cannot attach: ${e.message}`); return }
+		target = await Promise.race([
+			appTarget(),
+			sleep(8000).then(() => {
+				throw new Error('Timed out (8s)')
+			}),
+		])
+	} catch (e) {
+		log(`Cannot attach: ${e.message}`)
+		return
+	}
 	const { ws, send } = await cdpConnect(target.webSocketDebuggerUrl)
 	const evalId = send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
 	const result = await Promise.race([
@@ -524,7 +656,10 @@ async function appEval(expression) {
 				resolve(m.result)
 			})
 		}),
-		sleep(8000).then(() => { ws.close(); throw new Error('eval timed out (8s)') }),
+		sleep(8000).then(() => {
+			ws.close()
+			throw new Error('eval timed out (8s)')
+		}),
 	])
 	if (JSON_MODE) {
 		log({ scope: 'app', eval: expression, result })
@@ -536,8 +671,16 @@ async function appEval(expression) {
 async function appNetwork(seconds = 30) {
 	let target
 	try {
-		target = await Promise.race([appTarget(), sleep(10000).then(() => { throw new Error('Timed out (10s)') })])
-	} catch (e) { log(`Cannot attach: ${e.message}`); return }
+		target = await Promise.race([
+			appTarget(),
+			sleep(10000).then(() => {
+				throw new Error('Timed out (10s)')
+			}),
+		])
+	} catch (e) {
+		log(`Cannot attach: ${e.message}`)
+		return
+	}
 	const { ws, send } = await cdpConnect(target.webSocketDebuggerUrl)
 	if (!JSON_MODE) log(`Monitoring network for ${seconds}s...`)
 	const requests = new Map()
@@ -590,8 +733,16 @@ async function appNetwork(seconds = 30) {
 async function appScreenshot() {
 	let target
 	try {
-		target = await Promise.race([appTarget(), sleep(10000).then(() => { throw new Error('Timed out (10s)') })])
-	} catch (e) { log(`Cannot attach: ${e.message}`); return }
+		target = await Promise.race([
+			appTarget(),
+			sleep(10000).then(() => {
+				throw new Error('Timed out (10s)')
+			}),
+		])
+	} catch (e) {
+		log(`Cannot attach: ${e.message}`)
+		return
+	}
 	const { ws, send } = await cdpConnect(target.webSocketDebuggerUrl)
 	send('Page.enable')
 	await sleep(300)
@@ -605,7 +756,10 @@ async function appScreenshot() {
 				resolve(m.result)
 			})
 		}),
-		sleep(8000).then(() => { ws.close(); throw new Error('screenshot timed out (8s)') }),
+		sleep(8000).then(() => {
+			ws.close()
+			throw new Error('screenshot timed out (8s)')
+		}),
 	])
 	if (result?.data) {
 		const buf = Buffer.from(result.data, 'base64')
@@ -628,8 +782,16 @@ async function appScreenshot() {
 async function appDom(selector) {
 	let target
 	try {
-		target = await Promise.race([appTarget(), sleep(10000).then(() => { throw new Error('Timed out (10s)') })])
-	} catch (e) { log(`Cannot attach: ${e.message}`); return }
+		target = await Promise.race([
+			appTarget(),
+			sleep(10000).then(() => {
+				throw new Error('Timed out (10s)')
+			}),
+		])
+	} catch (e) {
+		log(`Cannot attach: ${e.message}`)
+		return
+	}
 	const { ws, send } = await cdpConnect(target.webSocketDebuggerUrl)
 	const expression = `JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(el => ({ tag: el.tagName, text: el.textContent?.slice(0, 200), id: el.id, class: el.className, href: el.href, src: el.src })))`
 	const evalId = send('Runtime.evaluate', { expression, returnByValue: true })
@@ -642,7 +804,10 @@ async function appDom(selector) {
 				resolve(m.result?.result?.value)
 			})
 		}),
-		sleep(8000).then(() => { ws.close(); throw new Error('dom timed out (8s)') }),
+		sleep(8000).then(() => {
+			ws.close()
+			throw new Error('dom timed out (8s)')
+		}),
 	])
 	try {
 		const parsed = result ? JSON.parse(result) : []
@@ -676,59 +841,111 @@ async function main() {
 
 	if (a1 === 'app') {
 		switch (a2) {
-			case 'start': return appStart()
-			case 'stop': return appStop()
-			case 'restart': { await appStop(); return appStart() }
-			case 'status': return appStatus()
-			case 'health': return appHealth()
-			case 'console': return appConsole(Number(rest[0] ?? 30))
-			case 'errors': return appErrors(Number(rest[0] ?? 30))
+			case 'start':
+				return appStart()
+			case 'stop':
+				return appStop()
+			case 'restart': {
+				await appStop()
+				return appStart()
+			}
+			case 'status':
+				return appStatus()
+			case 'health':
+				return appHealth()
+			case 'console':
+				return appConsole(Number(rest[0] ?? 30))
+			case 'errors':
+				return appErrors(Number(rest[0] ?? 30))
 			case 'eval':
-			case 'js': return appEval(rest.join(' '))
-			case 'network': return appNetwork(Number(rest[0] ?? 30))
-			case 'screenshot': return appScreenshot()
-			case 'dom': return appDom(rest.join(' ') || 'body')
-			case 'config': return appConfig()
+			case 'js':
+				return appEval(rest.join(' '))
+			case 'network':
+				return appNetwork(Number(rest[0] ?? 30))
+			case 'screenshot':
+				return appScreenshot()
+			case 'dom':
+				return appDom(rest.join(' ') || 'body')
+			case 'config':
+				return appConfig()
 		}
 	}
 
 	if (a1 === 'core') {
 		switch (a2) {
-			case 'start': return coreStart()
-			case 'stop': return coreStop()
-			case 'restart': { await coreStop(); return coreStart() }
-			case 'status': return coreStatus()
-			case 'health': return coreHealth()
-			case 'logs': return coreLogs(Number(rest[0] ?? 50))
-			case 'shell': return coreShell(rest.join(' '))
-			case 'test': return coreTest()
-			case 'check': return coreCheck()
-			case 'tsx': return coreTsx(rest.join(' '))
-			case 'run': return coreTsx(readFileSync(rest[0], 'utf8'))
-			case 'api': return coreApi(rest[0] || 'GET', rest[1] || '/', rest[2])
+			case 'start':
+				return coreStart()
+			case 'stop':
+				return coreStop()
+			case 'restart': {
+				await coreStop()
+				return coreStart()
+			}
+			case 'status':
+				return coreStatus()
+			case 'health':
+				return coreHealth()
+			case 'logs':
+				return coreLogs(Number(rest[0] ?? 50))
+			case 'shell':
+				return coreShell(rest.join(' '))
+			case 'test':
+				return coreTest()
+			case 'check':
+				return coreCheck()
+			case 'tsx':
+				return coreTsx(rest.join(' '))
+			case 'run':
+				return coreTsx(readFileSync(rest[0], 'utf8'))
+			case 'api':
+				return coreApi(rest[0] || 'GET', rest[1] || '/', rest[2])
 		}
 	}
 
-	if (a1 === 'start-all') { appStart(); return coreStart() }
-	if (a1 === 'stop-all') { await appStop(); return coreStop() }
-	if (a1 === 'status-all') { await appStatus(); log('---'); return coreStatus() }
+	if (a1 === 'start-all') {
+		appStart()
+		return coreStart()
+	}
+	if (a1 === 'stop-all') {
+		await appStop()
+		return coreStop()
+	}
+	if (a1 === 'status-all') {
+		await appStatus()
+		log('---')
+		return coreStatus()
+	}
 	if (a1 === 'health-all') return healthAll()
 
 	switch (a1) {
-		case 'start': return appStart()
-		case 'stop': return appStop()
-		case 'restart': { await appStop(); return appStart() }
-		case 'status': return appStatus()
-		case 'health': return appHealth()
-		case 'console': return appConsole(Number(a2 ?? 30))
-		case 'errors': return appErrors(Number(a2 ?? 30))
+		case 'start':
+			return appStart()
+		case 'stop':
+			return appStop()
+		case 'restart': {
+			await appStop()
+			return appStart()
+		}
+		case 'status':
+			return appStatus()
+		case 'health':
+			return appHealth()
+		case 'console':
+			return appConsole(Number(a2 ?? 30))
+		case 'errors':
+			return appErrors(Number(a2 ?? 30))
 		case 'eval':
-		case 'js': return appEval([a2, ...rest].join(' '))
-		case 'network': return appNetwork(Number(a2 ?? 30))
-		case 'screenshot': return appScreenshot()
-		case 'dom': return appDom([a2, ...rest].join(' ') || 'body')
+		case 'js':
+			return appEval([a2, ...rest].join(' '))
+		case 'network':
+			return appNetwork(Number(a2 ?? 30))
+		case 'screenshot':
+			return appScreenshot()
+		case 'dom':
+			return appDom([a2, ...rest].join(' ') || 'body')
 		case 'help':
-		case undefined: return usage()
+		case undefined:
+			return usage()
 	}
 
 	log(`Unknown command: ${a1}`)

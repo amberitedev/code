@@ -717,7 +717,7 @@ function isWindowsProcessRunning(imageName: string): boolean {
 	if (process.platform !== 'win32') return false
 	const result = NodeChildProcess.spawnSync(
 		'tasklist',
-		['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH'],
+		['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH'], // typos:ignore
 		{ encoding: 'utf8', windowsHide: true },
 	)
 	return result.status === 0 && result.stdout.toLowerCase().includes(`"${imageName.toLowerCase()}"`)

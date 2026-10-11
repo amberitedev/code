@@ -11,7 +11,11 @@ type MessageEntry = string | { message?: string; defaultMessage?: string }
 type MessageFile = Record<string, MessageEntry>
 type CrowdinFileEntry = { source: string; dest?: string; translation: string }
 type ArgUse = 'argument' | 'number' | 'date' | 'time' | 'plural' | 'select'
-type Contract = { args: Record<string, ArgUse[]>; tags: string[]; selectBranches: Record<string, string[]> }
+type Contract = {
+	args: Record<string, ArgUse[]>
+	tags: string[]
+	selectBranches: Record<string, string[]>
+}
 type Issue = { file: string; key: string; reason: string }
 type CrowdinListResponse<T> = {
 	data: Array<{ data: T }>
@@ -90,7 +94,7 @@ export function contractFromMessage(message: string, label: string): Contract {
 				}
 				case TYPE.plural: {
 					addArg(element.value, 'plural')
-					for (const [selector, option] of Object.entries(element.options)) {
+					for (const option of Object.values(element.options)) {
 						visit(option.value)
 					}
 					break
@@ -113,7 +117,11 @@ export function contractFromMessage(message: string, label: string): Contract {
 		}
 	}
 
-	return { args: stableRecord(args), tags: stable(tags), selectBranches: stableRecord(selectBranches) }
+	return {
+		args: stableRecord(args),
+		tags: stable(tags),
+		selectBranches: stableRecord(selectBranches),
+	}
 }
 
 export function contractsEqual(a: Contract, b: Contract) {
@@ -270,7 +278,10 @@ export async function pruneLocalTranslations(options: { check: boolean; scope?: 
 					}
 
 					try {
-						const translationContract = contractFromMessage(translationText, `${translationFile}:${key}`)
+						const translationContract = contractFromMessage(
+							translationText,
+							`${translationFile}:${key}`,
+						)
 						if (!translationCompatibleWithSource(sourceContract, translationContract)) {
 							delete translations[key]
 							changed = true
@@ -380,7 +391,8 @@ export async function clearCrowdinChangedTranslations(options: {
 }) {
 	const projectId = Number(process.env.CROWDIN_PROJECT_ID)
 	const token = process.env.CROWDIN_PERSONAL_TOKEN
-	if (!projectId || !token) throw new Error('CROWDIN_PROJECT_ID and CROWDIN_PERSONAL_TOKEN are required')
+	if (!projectId || !token)
+		throw new Error('CROWDIN_PROJECT_ID and CROWDIN_PERSONAL_TOKEN are required')
 
 	const changed = await changedSourceIds(options.baseRef, options.scope)
 	if (changed.size === 0) {
@@ -390,23 +402,25 @@ export async function clearCrowdinChangedTranslations(options: {
 
 	const credentials: Credentials = { token }
 	const client = new CrowdinClient(credentials)
-	const branches = await listAll((limit, offset) =>
-		client.sourceFilesApi.listProjectBranches(projectId, {
-			name: options.crowdinBranch,
-			limit,
-			offset,
-		}) as Promise<CrowdinListResponse<{ id: number; name: string }>>,
+	const branches = await listAll(
+		(limit, offset) =>
+			client.sourceFilesApi.listProjectBranches(projectId, {
+				name: options.crowdinBranch,
+				limit,
+				offset,
+			}) as Promise<CrowdinListResponse<{ id: number; name: string }>>,
 	)
 	const branch = branches.find((item) => item.name === options.crowdinBranch)
 	if (!branch) throw new Error(`Crowdin branch not found: ${options.crowdinBranch}`)
 
-	const files = await listAll((limit, offset) =>
-		client.sourceFilesApi.listProjectFiles(projectId, {
-			branchId: branch.id,
-			recursion: 1,
-			limit,
-			offset,
-		}) as Promise<CrowdinListResponse<{ id: number; path: string }>>,
+	const files = await listAll(
+		(limit, offset) =>
+			client.sourceFilesApi.listProjectFiles(projectId, {
+				branchId: branch.id,
+				recursion: 1,
+				limit,
+				offset,
+			}) as Promise<CrowdinListResponse<{ id: number; path: string }>>,
 	)
 	const branchPathPrefix = normalizeCrowdinPath(options.crowdinBranch)
 	const fileByPath = new Map<string, { id: number; path: string }>()
@@ -424,16 +438,19 @@ export async function clearCrowdinChangedTranslations(options: {
 		const file = fileByPath.get(destPath)
 		if (!file) throw new Error(`Crowdin file not found: ${destPath}`)
 
-		sourceStrings ??= await listAll((limit, offset) =>
-			client.sourceStringsApi.listProjectStrings(projectId, {
-				limit,
-				offset,
-			}) as Promise<CrowdinListResponse<CrowdinSourceString>>,
+		sourceStrings ??= await listAll(
+			(limit, offset) =>
+				client.sourceStringsApi.listProjectStrings(projectId, {
+					limit,
+					offset,
+				}) as Promise<CrowdinListResponse<CrowdinSourceString>>,
 		)
 		const strings = sourceStrings.filter(
 			(sourceString) => sourceString.branchId === branch.id && sourceString.fileId === file.id,
 		)
-		const stringByIdentifier = new Map(strings.map((sourceString) => [sourceString.identifier, sourceString]))
+		const stringByIdentifier = new Map(
+			strings.map((sourceString) => [sourceString.identifier, sourceString]),
+		)
 
 		for (const key of keys) {
 			const sourceString = stringByIdentifier.get(key)

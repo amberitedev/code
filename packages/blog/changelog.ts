@@ -748,7 +748,7 @@ const VERSIONS: VersionEntry[] = [
 		date: `2026-07-29T21:32:06+00:00`,
 		product: 'web',
 		body: `## Changed
-- Incomplete current day revenue hides that day's line segment instead of showing a dip to \$0.
+- Incomplete current day revenue hides that day's line segment instead of showing a dip to $0.
 - Updated the modal for creating OAuth applications.
 
 ## Fixed

@@ -20,23 +20,13 @@ const sourceRoots = [
 
 const expectedRuntimeImports: Record<string, ReadonlyArray<string>> = {
 	'@tauri-apps/api/app': ['getVersion'],
-	'@tauri-apps/api/core': ['convertFileSrc', 'invoke'],
+	'@tauri-apps/api/core': ['Channel', 'convertFileSrc', 'invoke'],
 	'@tauri-apps/api/event': ['listen'],
-	'@tauri-apps/api/path': ['join'],
+	'@tauri-apps/api/path': ['join', 'tempDir'],
 	'@tauri-apps/api/webview': ['getCurrentWebview'],
 	'@tauri-apps/api/window': ['getCurrentWindow'],
 	'@tauri-apps/plugin-dialog': ['open', 'save'],
-	'@tauri-apps/plugin-fs': [
-		'mkdir',
-		'readDir',
-		'readFile',
-		'readTextFile',
-		'remove',
-		'rename',
-		'stat',
-		'writeFile',
-		'writeTextFile',
-	],
+	'@tauri-apps/plugin-fs': ['readFile'],
 	'@tauri-apps/plugin-http': ['fetch'],
 	'@tauri-apps/plugin-opener': ['openUrl'],
 	'@tauri-apps/plugin-os': ['platform', 'type', 'version'],
@@ -66,7 +56,7 @@ describe.sequential('Amberite Tauri API inventory', () => {
 		expect(appCargo).toMatch(/\[dependencies\.amberite-browser-bridge\][\s\S]*?optional = true/)
 		expect(appCargo).toContain('browser-bridge = ["dep:amberite-browser-bridge"]')
 		expect(appMain).toContain('#[cfg(all(debug_assertions, feature = "browser-bridge"))]')
-		expect(appPackage).toContain('tauri dev --features browser-bridge')
+		expect(appPackage).toMatch(/tauri dev --features [\w,-]*browser-bridge/)
 		expect(devRunner).toMatch(
 			/["']tauri["'],\s*["']dev["'],\s*["']--features["'],\s*["']browser-bridge["']/,
 		)

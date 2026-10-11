@@ -17,10 +17,10 @@ tracing = { workspace = true }
 
 # HTTP client
 reqwest = { workspace = true, features = [
-  "json",
-  "multipart",
-  "rustls-tls-webpki-roots",
-  "stream"
+	"json",
+	"multipart",
+	"rustls-tls-webpki-roots",
+	"stream",
 ] }
 
 futures-util = { workspace = true }

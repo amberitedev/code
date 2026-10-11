@@ -1,24 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-  "apps/app",
-  "apps/app-playground",
-  "apps/daedalus_client",
-  "apps/labrinth",
-  "packages/amberite-lib",
-  "packages/browser-bridge",
-  "packages/app-lib",
-  "packages/ariadne",
-  "packages/component-derive",
-  "packages/daedalus",
-  "packages/modrinth-content-management",
-  "packages/modrinth-log",
-  "packages/modrinth-maxmind",
-  "packages/modrinth-util",
-  "packages/neverbounce",
-  "packages/path-util",
-  "packages/serde-binhum",
-  "packages/xredis",
+	"apps/app",
+	"apps/app-playground",
+	"apps/daedalus_client",
+	"apps/labrinth",
+	"packages/amberite-lib",
+	"packages/app-lib",
+	"packages/ariadne",
+	"packages/browser-bridge",
+	"packages/component-derive",
+	"packages/daedalus",
+	"packages/modrinth-content-management",
+	"packages/modrinth-log",
+	"packages/modrinth-maxmind",
+	"packages/modrinth-util",
+	"packages/neverbounce",
+	"packages/path-util",
+	"packages/serde-binhum",
+	"packages/xredis",
 ]
 
 [workspace.package]
@@ -336,7 +336,7 @@ debug = "line-tables-only"
 [profile.release-labrinth]
 inherits = "release"
 opt-level = 2
-debug = "line-tables-only"  # Minimal debug info
-strip = false  # Keep debug symbols for Sentry
-lto = "thin"  # Enable LTO but keep compile times reasonable
-panic = "unwind"  # Don't exit the whole app on panic in production
+debug = "line-tables-only" # Minimal debug info
+strip = false # Keep debug symbols for Sentry
+lto = "thin" # Enable LTO but keep compile times reasonable
+panic = "unwind" # Don't exit the whole app on panic in production

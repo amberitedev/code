@@ -1,8 +1,7 @@
 name: Modrinth App build
 on:
+  # Amberite has no build CI yet, so this only runs on release tags and by hand.
   push:
-    branches:
-      - main
     tags:
       - 'v*'
     paths:
@@ -57,11 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [
-            macos-latest,
-            windows-latest,
-            ubuntu-latest,
-          ]
+        platform: [macos-latest, windows-latest, ubuntu-latest]
         include:
           - platform: macos-latest
             artifact-target-name: universal-apple-darwin
