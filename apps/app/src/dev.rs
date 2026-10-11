@@ -39,6 +39,58 @@ pub fn config() -> Option<&'static DevAppConfig> {
     CONFIG.get().and_then(Option::as_ref)
 }
 
+/// Sign a dev App in to its scenario account, so every App the dev runner starts is signed in
+/// without going through the website. Does nothing when an account is already active. The backend
+/// opens the session only for the runner's secret, which arrives in the environment.
+#[cfg(debug_assertions)]
+pub async fn sign_in() {
+    let Some(config) = config().filter(|config| config.auth_mode == "dev")
+    else {
+        return;
+    };
+    let (Some(username), Some(backend_url), Ok(secret)) = (
+        &config.username,
+        &config.backend_url,
+        env::var("AMBERITE_LOCAL_DEV_SECRET"),
+    ) else {
+        return;
+    };
+    if let Err(error) = open_session(username, backend_url, &secret).await {
+        tracing::warn!("Could not sign in as {username}: {error}");
+    }
+}
+
+#[cfg(debug_assertions)]
+async fn open_session(
+    username: &str,
+    backend_url: &str,
+    secret: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if theseus::mr_auth::get_credentials().await?.is_some() {
+        return Ok(());
+    }
+    #[derive(Deserialize)]
+    struct Session {
+        session: String,
+    }
+    let response = tauri_plugin_http::reqwest::Client::new()
+        .post(format!(
+            "{}/_dev/session",
+            backend_url.trim_end_matches('/')
+        ))
+        .header("Content-Type", "application/json")
+        .header("X-Local-Dev-Secret", secret)
+        .body(serde_json::json!({ "username": username }).to_string())
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let session: Session = serde_json::from_str(&response)?;
+    theseus::mr_auth::authenticate_finish_flow(&session.session).await?;
+    Ok(())
+}
+
 #[cfg(debug_assertions)]
 fn parse_config() -> Option<DevAppConfig> {
     let mut args = env::args();
