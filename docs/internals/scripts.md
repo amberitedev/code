@@ -18,8 +18,8 @@ Node 24.15 or newer is required.
 This repository is commonly worked on through [T3 Code](https://github.com/pingdotgg/t3code), a
 coding-agent app that gives each task an isolated Git worktree. When T3 Code creates a worktree, it
 runs the setup script in `t3.json`. The script installs dependencies, copies missing development data
-from the primary checkout, links the App library's environment file, and warms the App dependency
-cache. It does not overwrite data already in the worktree.
+from the primary checkout, and links the App library's environment file. It does not overwrite data
+already in the worktree.
 
 ## Dev
 
@@ -35,6 +35,10 @@ cache. It does not overwrite data already in the worktree.
   use without starting anything.
 
 Scenario numbers passed after the task name override `defaultScenarios` in `dev.json` for that run.
+
+A fresh dev Core belongs to nobody. Pair it once from an App with the code in the `[core]` output;
+until then the Servers page asks for a Core. The dev App may call any Core address, which a
+packaged build does not allow yet.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
 shared files persist in `.data/backend`.

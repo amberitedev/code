@@ -148,8 +148,10 @@ Later:
 - Not yet checked on screen by anyone: the merged result of the sharing and Core work together.
 - Core pairing is built: backend list of Cores, pairing by code, the "Pair a Core" modal, and
   Settings, Cores. The dev setting that held the Core address is gone.
-- Known gaps: no way to delete a server; an over-limit push shows a generic error; the App's
-  network allowlist is opened to Core addresses only in the dev runner, not in a packaged build.
+- Linked servers are built: create a server from an instance, push updates to it, unlink it, and
+  delete it.
+- Known gaps: an over-limit push shows a generic error; the App's network allowlist is opened to
+  Core addresses only in the dev runner, not in a packaged build.
 
 ## Open questions
 
