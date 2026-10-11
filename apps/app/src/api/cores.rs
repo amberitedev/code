@@ -179,3 +179,36 @@ impl ServerCertVerifier for Pinned {
             .supported_schemes()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_pinned_certificate_is_accepted() {
+        let certificate = CertificateDer::from(b"the paired Core".to_vec());
+        let other = CertificateDer::from(b"somebody else".to_vec());
+        let pinned = Pinned {
+            fingerprint: Sha256::digest(&certificate).into(),
+            provider: Arc::new(default_provider()),
+        };
+        let verify = |certificate: &CertificateDer<'_>| {
+            pinned.verify_server_cert(
+                certificate,
+                &[],
+                &ServerName::try_from("amberite-core").unwrap(),
+                &[],
+                UnixTime::now(),
+            )
+        };
+        assert!(verify(&certificate).is_ok());
+        assert!(verify(&other).is_err());
+    }
+
+    #[test]
+    fn a_fingerprint_is_64_hex_characters() {
+        assert_eq!(hex(&"0f".repeat(32)), Some([15u8; 32]));
+        assert_eq!(hex("0f"), None);
+        assert_eq!(hex(&"zz".repeat(32)), None);
+    }
+}

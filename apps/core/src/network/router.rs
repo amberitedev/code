@@ -238,3 +238,91 @@ impl Router {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    use tokio::net::UdpSocket;
+
+    use super::*;
+
+    /// A NAT-PMP router on this computer. It grants the outside port one above the one asked for,
+    /// and records what is mapped: internal port to (outside port, times granted).
+    async fn fake_router() -> Arc<Mutex<HashMap<u16, (u16, u32)>>> {
+        let socket =
+            UdpSocket::bind((Ipv4Addr::LOCALHOST, crab_nat::GATEWAY_PORT))
+                .await
+                .expect("port 5351 is free on this computer");
+        let mapped = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::clone(&mapped);
+        tokio::spawn(async move {
+            let mut request = [0u8; 64];
+            loop {
+                let Ok((_, from)) = socket.recv_from(&mut request).await else {
+                    return;
+                };
+                let opcode = request[1];
+                let mut reply = vec![0, 0x80 | opcode, 0, 0, 0, 0, 0, 1];
+                if request[0] != 0 {
+                    // PCP: answer the way a NAT-PMP-only router does, "unsupported version".
+                    reply[3] = 1;
+                } else if opcode == 0 {
+                    reply.extend([203, 0, 113, 9]);
+                } else {
+                    let internal = u16::from_be_bytes([request[4], request[5]]);
+                    let wanted = u16::from_be_bytes([request[6], request[7]]);
+                    let lifetime = &request[8..12];
+                    let external = if lifetime == [0; 4] {
+                        seen.lock().unwrap().remove(&internal);
+                        0
+                    } else {
+                        let mut seen = seen.lock().unwrap();
+                        let entry =
+                            seen.entry(internal).or_insert((wanted + 1, 0));
+                        entry.1 += 1;
+                        entry.0
+                    };
+                    reply.extend(internal.to_be_bytes());
+                    reply.extend(external.to_be_bytes());
+                    reply.extend(lifetime);
+                }
+                let _ = socket.send_to(&reply, from).await;
+            }
+        });
+        mapped
+    }
+
+    #[tokio::test]
+    async fn a_nat_pmp_router_grants_renews_and_removes_a_mapping() {
+        let mapped = fake_router().await;
+        let router = Router {
+            local_ip: Ipv4Addr::LOCALHOST,
+            pmp: Some((
+                GatewayAddress::from(Ipv4Addr::LOCALHOST),
+                Protocol::NatPmp,
+            )),
+            upnp: None,
+        };
+        assert_eq!(router.protocols(), "NAT-PMP");
+        assert_eq!(
+            router.wan_ip().await,
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9)))
+        );
+
+        // The router grants a different outside port than the one asked for; Core takes it.
+        let mut mapping = router.map(25565, 25565).await.unwrap();
+        assert_eq!((mapping.internal, mapping.external), (25565, 25566));
+        assert_eq!(mapped.lock().unwrap().get(&25565), Some(&(25566, 1)));
+
+        router.renew(&mut mapping).await.unwrap();
+        assert_eq!(mapping.external, 25566);
+        assert_eq!(mapped.lock().unwrap().get(&25565), Some(&(25566, 2)));
+
+        router.remove(mapping).await;
+        assert!(mapped.lock().unwrap().is_empty());
+    }
+}
