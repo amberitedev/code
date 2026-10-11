@@ -124,6 +124,8 @@ jobs:
           components: rustfmt
       - uses: cargo-bins/cargo-binstall@ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4 # v1.21.0
       - run: cp packages/app-lib/.env.staging packages/app-lib/.env
+      # Tauri only checks that the frontend build folder exists; an empty one is enough to compile.
+      - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check
       - run: cargo binstall --no-confirm --force cargo-shear && cargo shear
       - run: cargo check -p theseus_gui --features browser-bridge --locked
