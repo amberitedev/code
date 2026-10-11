@@ -1,5 +1,5 @@
 import { defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, nextTick, onScopeDispose, ref, toValue, watch } from 'vue'
 
 import {
@@ -67,10 +67,12 @@ export function useGameSettingsEditor(
 			) ?? false,
 	)
 	const stateQuery = useQuery(
-		computed(() => ({
-			...gameSettingsQueryOptions(editorInstanceId.value),
-			enabled: false,
-		})),
+		computed(() =>
+			queryOptions({
+				...gameSettingsQueryOptions(editorInstanceId.value),
+				enabled: false,
+			}),
+		),
 	)
 	const loading = computed(
 		() => !draftState.value && (stateQuery.isPending.value || stateQuery.isFetching.value),

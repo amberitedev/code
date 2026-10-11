@@ -1,5 +1,5 @@
 import { injectNotificationManager } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
 import { gameSettingsKeys } from '@/helpers/game-options'
@@ -47,23 +47,29 @@ export function useSyncInstancesUpdate() {
 	const sourceInstanceId = ref('')
 	const needsGameOptionsSource = computed(() => sourceOptions.value.includes('game_options'))
 	const needsServerSource = computed(() => sourceOptions.value.includes('multiplayer_servers'))
-	const globalOptionsQuery = useQuery({
-		...globalSyncedOptionsQueryOptions(),
-		enabled: isOpen,
-	})
-	const gameSourcesQuery = useQuery({
-		...gameOptionsSyncSourcesQueryOptions(),
-		enabled: needsGameOptionsSource,
-	})
-	const instancesQuery = useQuery({
-		...instanceListQueryOptions(),
-		staleTime: 0,
-		enabled: computed(
-			() =>
-				sourceOptions.value.length > 0 &&
-				(!needsGameOptionsSource.value || needsServerSource.value),
-		),
-	})
+	const globalOptionsQuery = useQuery(
+		queryOptions({
+			...globalSyncedOptionsQueryOptions(),
+			enabled: isOpen,
+		}),
+	)
+	const gameSourcesQuery = useQuery(
+		queryOptions({
+			...gameOptionsSyncSourcesQueryOptions(),
+			enabled: needsGameOptionsSource,
+		}),
+	)
+	const instancesQuery = useQuery(
+		queryOptions({
+			...instanceListQueryOptions(),
+			staleTime: 0,
+			enabled: computed(
+				() =>
+					sourceOptions.value.length > 0 &&
+					(!needsGameOptionsSource.value || needsServerSource.value),
+			),
+		}),
+	)
 	const sources = computed(() =>
 		needsGameOptionsSource.value
 			? (gameSourcesQuery.data.value ?? []).map((source) => ({

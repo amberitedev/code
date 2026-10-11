@@ -32,7 +32,7 @@ import {
 	useDebugLogger,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import type { LocationQuery } from 'vue-router'
@@ -152,18 +152,22 @@ const {
 
 const initialInstanceId = computed(() => String(route.query.i ?? ''))
 const instanceQuery = useQuery(
-	computed(() => ({
-		...instanceDetailQueryOptions(initialInstanceId.value),
-		enabled: !!initialInstanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceDetailQueryOptions(initialInstanceId.value),
+			enabled: !!initialInstanceId.value,
+		}),
+	),
 )
 const instance = computed(() => instanceQuery.data.value ?? null)
 const linkedInstanceProjectId = computed(() => instance.value?.link?.project_id ?? '')
 const linkedInstanceProjectQuery = useQuery(
-	computed(() => ({
-		...instanceLinkedProjectQueryOptions(linkedInstanceProjectId.value),
-		enabled: !!linkedInstanceProjectId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceLinkedProjectQueryOptions(linkedInstanceProjectId.value),
+			enabled: !!linkedInstanceProjectId.value,
+		}),
+	),
 )
 const installedProjectIds: Ref<string[] | null> = ref(null)
 const instanceHideInstalled = ref(route.query.ai === 'true')

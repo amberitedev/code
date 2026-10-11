@@ -3,35 +3,35 @@ import type { Labrinth } from '@modrinth/api-client'
 import { compareByIndex } from './utils'
 // noinspection JSUnusedGlobalSymbols
 
-export const isApproved = (project) => {
+export const isApproved = (project: { status: string } | null | undefined) => {
 	return project && APPROVED_PROJECT_STATUSES.includes(project.status)
 }
 
-export const isListed = (project) => {
+export const isListed = (project: { status: string } | null | undefined) => {
 	return project && LISTED_PROJECT_STATUSES.includes(project.status)
 }
 
-export const isUnlisted = (project) => {
+export const isUnlisted = (project: { status: string } | null | undefined) => {
 	return project && UNLISTED_PROJECT_STATUSES.includes(project.status)
 }
 
-export const isPrivate = (project) => {
+export const isPrivate = (project: { status: string } | null | undefined) => {
 	return project && PRIVATE_PROJECT_STATUSES.includes(project.status)
 }
 
-export const isRejected = (project) => {
+export const isRejected = (project: { status: string } | null | undefined) => {
 	return project && REJECTED_PROJECT_STATUSES.includes(project.status)
 }
 
-export const isUnderReview = (project) => {
+export const isUnderReview = (project: { status: string } | null | undefined) => {
 	return project && UNDER_REVIEW_PROJECT_STATUSES.includes(project.status)
 }
 
-export const isDraft = (project) => {
+export const isDraft = (project: { status: string } | null | undefined) => {
 	return project && DRAFT_PROJECT_STATUSES.includes(project.status)
 }
 
-export const showDownloadCount = (project) => {
+export const showDownloadCount = (project: { status: string } | null | undefined) => {
 	return project && !['draft', 'processing', 'rejected'].includes(project.status)
 }
 
@@ -71,7 +71,10 @@ export type VersionDisplayGroup = {
 	versions: string[]
 }
 
-export function getVersionsToDisplay(project, allGameVersions: GameVersionTag[]) {
+export function getVersionsToDisplay(
+	project: { game_versions: string[] },
+	allGameVersions: GameVersionTag[],
+) {
 	return formatVersionsForDisplay(project.game_versions.slice(), allGameVersions)
 }
 
@@ -96,10 +99,13 @@ export function getVersionGroupsForDisplay(
 	)
 
 	{
-		const indices = allVersions.reduce((map, gameVersion, index) => {
-			map[gameVersion.version] = index
-			return map
-		}, {})
+		const indices = allVersions.reduce(
+			(map, gameVersion, index) => {
+				map[gameVersion.version] = index
+				return map
+			},
+			{} as Record<string, number>,
+		)
 		inputVersions.sort((a, b) => indices[a] - indices[b])
 	}
 

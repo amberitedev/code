@@ -8,7 +8,7 @@ import {
 	NewModal,
 	useVIntl,
 } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { defineAsyncComponent, nextTick, ref } from 'vue'
 
 import { set_command_history } from '@/helpers/instance'
@@ -19,7 +19,7 @@ const { handleError } = injectNotificationManager()
 const queryClient = useQueryClient()
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const commandHistory = ref('')
-const historyQuery = useQuery({ ...commandHistoryQueryOptions(), enabled: false })
+const historyQuery = useQuery(queryOptions({ ...commandHistoryQueryOptions(), enabled: false }))
 const CommandHistoryEditor = defineAsyncComponent(async () => {
 	const [editor] = await Promise.all([
 		import('vue3-ace-editor'),

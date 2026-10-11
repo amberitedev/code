@@ -8,7 +8,7 @@ import {
 	injectNotificationManager,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { computed, onUnmounted, ref, watch } from 'vue'
@@ -180,10 +180,12 @@ type JumpBackInItem = InstanceJumpBackInItem | WorldJumpBackInItem
 
 const showWorlds = computed(() => appSettings.showJumpIn)
 
-const recentWorldsQuery = useQuery({
-	...recentWorldsQueryOptions(MAX_JUMP_BACK_IN),
-	enabled: showWorlds,
-})
+const recentWorldsQuery = useQuery(
+	queryOptions({
+		...recentWorldsQueryOptions(MAX_JUMP_BACK_IN),
+		enabled: showWorlds,
+	}),
+)
 const loading = computed(() => showWorlds.value && recentWorldsQuery.isLoading.value)
 const worldItems = computed<WorldJumpBackInItem[]>(() => {
 	if (!showWorlds.value) return []

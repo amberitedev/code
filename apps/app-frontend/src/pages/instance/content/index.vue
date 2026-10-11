@@ -117,7 +117,7 @@ import {
 	useVIntl,
 	versionChangesGameVersion,
 } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -240,10 +240,12 @@ const {
 } = managedContentPolicy
 
 const contentQuery = useQuery(
-	computed(() => ({
-		...instanceContentQueryOptions(instancePage.instanceId.value),
-		enabled: !!instancePage.instanceId.value,
-	})),
+	computed(() =>
+		queryOptions({
+			...instanceContentQueryOptions(instancePage.instanceId.value),
+			enabled: !!instancePage.instanceId.value,
+		}),
+	),
 )
 const loading = ref(contentQuery.data.value === undefined)
 const projects = ref<ContentItem[]>([])
