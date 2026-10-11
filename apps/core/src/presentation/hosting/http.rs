@@ -651,12 +651,14 @@ async fn delete_server(
         }
     }
     let key = r.id.to_string();
-    // Child rows (mods, backups, the linked source) go with the instance row.
+    let invited = access_service::invited(&state, &key).await?;
+    // Child rows (mods, backups, the linked source, who has access) go with the instance row.
     sqlx::query("DELETE FROM instances WHERE id = ?")
         .bind(&key)
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    access_service::server_deleted(&state, &key, invited).await;
     for dir in [
         std::path::PathBuf::from(&r.data_dir),
         state.config.data_dir.join("backups").join(&key),

@@ -228,6 +228,12 @@ async fn serve(
     loop {
         tokio::select! {
             _ = tick.tick() => {
+                // Unpairing the Core announces nothing, so access is also checked on every tick.
+                let role = access_service::role(&state, &account.id, &iid.to_string()).await;
+                if !matches!(role, Ok(Some(_))) {
+                    send(&mut socket, json!({"event": "auth-incorrect"})).await;
+                    break;
+                }
                 let Ok(latest) = state.instance_store.get(&iid).await else { break; };
                 record = latest;
                 if !send_state(&mut socket, &state, &record, progress, install_error.as_deref()).await { break; }

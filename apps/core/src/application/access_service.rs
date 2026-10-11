@@ -299,8 +299,33 @@ async fn send_invite(
     Ok(account)
 }
 
+/// Everyone invited to a server, accepted or not.
+pub async fn invited(
+    state: &AppState,
+    server_id: &str,
+) -> Result<Vec<String>, ApiError> {
+    Ok(sqlx::query_scalar(
+        "SELECT user_id FROM server_users WHERE server_id = ?",
+    )
+    .bind(server_id)
+    .fetch_all(&state.pool)
+    .await?)
+}
+
+/// A server was deleted, and its `server_users` rows with it. Tell the backend for each account
+/// that was `invited` to it.
+pub async fn server_deleted(
+    state: &AppState,
+    server_id: &str,
+    invited: Vec<String>,
+) {
+    for user_id in invited {
+        withdraw(state, &user_id, server_id).await;
+    }
+}
+
 /// Withdraw `user_id`'s invite to a server at the backend, and its way to this Core when it has
-/// no server left here.
+/// no server left here. Call it after the account's row for that server is gone.
 async fn withdraw(state: &AppState, user_id: &str, server_id: &str) {
     let remaining: i64 = match sqlx::query_scalar(
         "SELECT COUNT(*) FROM server_users WHERE user_id = ?",
