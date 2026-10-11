@@ -804,6 +804,14 @@ async fn reinstall(
     Json(body): Json<Reinstall>,
 ) -> ApiResult {
     if q.hard {
+        // Resetting a server is the owner's alone.
+        access_service::require(
+            &state,
+            &user.0.id,
+            &id,
+            access_service::scope::RESET_SERVER,
+        )
+        .await?;
         return Err(ApiError::UnprocessableEntity(
             "Hard reset is not implemented by the local Core".into(),
         ));

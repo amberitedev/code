@@ -79,7 +79,6 @@ pub type CanWriteFiles = Can<{ access_service::scope::FILES_WRITE }>;
 pub type CanSetup = Can<{ access_service::scope::SETUP }>;
 pub type CanBackup = Can<{ access_service::scope::BACKUPS }>;
 pub type CanAdvanced = Can<{ access_service::scope::ADVANCED }>;
-pub type CanReset = Can<{ access_service::scope::RESET_SERVER }>;
 pub type CanManageUsers = Can<{ access_service::scope::MANAGE_USERS }>;
 
 #[async_trait]

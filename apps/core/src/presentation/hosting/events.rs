@@ -287,7 +287,16 @@ async fn serve(
                         }
                         if !send_state(&mut socket, &state, &record, None, install_error.as_deref()).await { break; }
                     }
-                    Ok(Event::InstanceUpdated { instance }) if instance.id == iid => { record = instance; }
+                    Ok(Event::InstanceUpdated { instance }) if instance.id == iid => {
+                        // Access changes announce themselves as a server update. Someone who was
+                        // removed stops getting the console right away, not at their next reconnect.
+                        let role = access_service::role(&state, &account.id, &iid.to_string()).await;
+                        if !matches!(role, Ok(Some(_))) {
+                            send(&mut socket, json!({"event": "auth-incorrect"})).await;
+                            break;
+                        }
+                        record = instance;
+                    }
                     Ok(Event::InstanceDeleted { instance_id }) if instance_id == iid => {
                         cursors.remove(&iid);
                         break;
