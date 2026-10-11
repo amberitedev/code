@@ -12,8 +12,9 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Backend that owns accounts; Core asks it who an account token belongs to.
     pub account_api_url: String,
-    /// Address clients use to reach this Core, reported to the backend.
-    /// `AMBERITE_PUBLIC_URL` when set, otherwise this machine's network address and port.
+    /// Address clients on this computer or network use to reach this Core, reported to the
+    /// backend. `AMBERITE_PUBLIC_URL` when set, otherwise this machine's network address and port.
+    /// The address on the internet is found by `network` and reported separately.
     pub public_url: String,
     /// HTTP port for the Core API.
     pub port: u16,
@@ -63,15 +64,23 @@ fn default_address(bind_host: &str, port: u16) -> Result<String> {
     } else {
         bound
     };
-    Ok(format!("http://{}", SocketAddr::new(host, port)))
+    Ok(format!("https://{}", SocketAddr::new(host, port)))
 }
 
 /// The address this machine uses on its local network. Connecting a UDP socket picks the
 /// outgoing interface without sending anything.
 fn local_network_ip() -> Option<IpAddr> {
+    local_ipv4().map(IpAddr::V4)
+}
+
+/// See `local_network_ip`. `None` when this machine has no network.
+pub fn local_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("10.255.255.255:1").ok()?;
-    Some(socket.local_addr().ok()?.ip())
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
 }
 
 fn required_env(name: &str) -> Result<String> {

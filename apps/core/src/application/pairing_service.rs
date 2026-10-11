@@ -33,6 +33,7 @@ const ALPHABET: &[u8] = b"abcdefghjklmnpqrstuvwxyz23456789";
 
 /// Keeps this Core either showing a pairing code or known to the backend. Runs for Core's lifetime.
 pub async fn run(state: Arc<AppState>) {
+    let mut outside = state.network.api_address();
     loop {
         let owner = match state.owner().await {
             Ok(owner) => owner,
@@ -44,7 +45,11 @@ pub async fn run(state: Arc<AppState>) {
         };
         match owner.and_then(|owner| owner.backend_key) {
             Some(key) => match report_address(&state, &key).await {
-                Report::Accepted => state.pairing_changed.notified().await,
+                // Report again when the address on the internet changes.
+                Report::Accepted => tokio::select! {
+                    () = state.pairing_changed.notified() => {}
+                    _ = outside.changed() => {}
+                },
                 Report::Changed => {}
                 Report::Rejected => {
                     println!(
@@ -76,7 +81,16 @@ async fn report_address(state: &AppState, key: &str) -> Report {
             .http
             .post(format!("{}/core/address", state.config.account_api_url))
             .bearer_auth(key)
-            .json(&json!({ "address": state.config.public_url }))
+            .json(&json!({
+                "address": state.config.public_url,
+                "cert_fingerprint": state.tls.fingerprint,
+                // Where the App finds this Core from outside the home, once that is proven.
+                "public_address": state
+                    .network
+                    .api_address()
+                    .borrow()
+                    .map(|address| format!("https://{address}")),
+            }))
             .send()
             .await;
         match response {
@@ -178,6 +192,7 @@ async fn register_code(
             "code": code,
             "core_id": state.core_id,
             "address": state.config.public_url,
+            "cert_fingerprint": state.tls.fingerprint,
         }))
         .send()
         .await
@@ -275,6 +290,7 @@ pub async fn pair(
             "user_id": account.id,
             "name": core_name(),
             "address": state.config.public_url,
+            "cert_fingerprint": state.tls.fingerprint,
         }))
         .send()
         .await

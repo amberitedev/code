@@ -12,6 +12,7 @@ mod cli;
 mod config;
 mod domain;
 mod infrastructure;
+mod network;
 mod ports;
 mod presentation;
 
@@ -56,15 +57,42 @@ pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
     )));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
     tokio::spawn(application::pairing_service::run(Arc::clone(&state)));
-    let router = presentation::router::create_router(state);
+    let stop = tokio_util::sync::CancellationToken::new();
+    let forwarding =
+        tokio::spawn(network::run(Arc::clone(&state), stop.clone()));
+    let router = presentation::router::create_router(Arc::clone(&state));
     let host: IpAddr = bind_host.parse()?;
     let addr = SocketAddr::new(host, port);
 
     info!("Copal listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router).await?;
+    tokio::select! {
+        () = network::tls::serve(listener, router, &state.tls) => {}
+        () = exit_requested() => {}
+    }
 
+    // Give the router its ports back before leaving.
+    stop.cancel();
+    let _ =
+        tokio::time::timeout(tokio::time::Duration::from_secs(15), forwarding)
+            .await;
     Ok(())
+}
+
+/// Resolves when Core is asked to stop: Ctrl+C, or a service manager's stop on Unix.
+async fn exit_requested() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 /// SEC-02: Drain expired WebSocket tickets every 5 minutes to prevent unbounded growth.
