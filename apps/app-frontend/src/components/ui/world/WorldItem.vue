@@ -5,10 +5,12 @@ import {
 	ExternalIcon,
 	EyeIcon,
 	FolderOpenIcon,
+	GripVerticalIcon,
 	IssuesIcon,
 	Link2Icon,
 	MoreVerticalIcon,
 	NoSignalIcon,
+	PinIcon,
 	PlayIcon,
 	SettingsIcon,
 	SignalIcon,
@@ -73,7 +75,18 @@ const router = useRouter()
 const { addNotification } = injectNotificationManager()
 
 const emit = defineEmits<{
-	(e: 'play' | 'play-instance' | 'update' | 'stop' | 'refresh' | 'edit' | 'delete' | 'desync'): void
+	(
+		e:
+			| 'play'
+			| 'play-instance'
+			| 'update'
+			| 'stop'
+			| 'refresh'
+			| 'edit'
+			| 'delete'
+			| 'desync'
+			| 'toggle-pin',
+	): void
 	(e: 'open-folder', world: SingleplayerWorld): void
 }>()
 
@@ -109,6 +122,15 @@ const props = withDefaults(
 		copyAddress?: string
 		// Why a running server cannot be joined from the internet. Turns the signal icon orange.
 		outsideWarning?: string
+		// The name of whoever hosts this server for the shared instance. The row then never shows
+		// or copies the address, and it can only be joined while the server answers.
+		hostedBy?: string
+		// A hosted server this account may also manage. Clicking the row opens its page.
+		hostedServerId?: string
+		// Worlds tab: the row can be pinned to the top, and whether it is. A pinned row has a
+		// `.world-drag-handle` to reorder it by.
+		pinnable?: boolean
+		pinned?: boolean
 		showPlayButton?: boolean
 		cardBackground?: 'raised' | 'surface-2'
 
@@ -135,6 +157,10 @@ const props = withDefaults(
 		managed: false,
 		linkedServerId: undefined,
 		linkedNote: undefined,
+		hostedBy: undefined,
+		hostedServerId: undefined,
+		pinnable: false,
+		pinned: false,
 		showPlayButton: true,
 		cardBackground: 'raised',
 
@@ -161,6 +187,9 @@ const serverIncompatible = computed(
 const locked = computed(() => props.world.type === 'singleplayer' && props.world.locked)
 const managed = computed(() => props.managed)
 const shortcutInstanceId = computed(() => props.shortcutInstanceId ?? props.instanceId)
+const manageServerId = computed(() => props.linkedServerId ?? props.hostedServerId)
+// An entry of the instance's own list, which the user may edit and remove.
+const ownEntry = computed(() => !props.instanceId && !props.linkedServerId && !props.hostedBy)
 
 async function createShortcut() {
 	if (!shortcutInstanceId.value || props.quarantined) return
@@ -282,6 +311,22 @@ const messages = defineMessages({
 		id: 'instance.worlds.manage_server',
 		defaultMessage: 'Manage server',
 	},
+	hostedBy: {
+		id: 'instance.worlds.hosted_by',
+		defaultMessage: 'Hosted by {name}',
+	},
+	pin: {
+		id: 'instance.worlds.pin',
+		defaultMessage: 'Pin to top',
+	},
+	unpin: {
+		id: 'instance.worlds.unpin',
+		defaultMessage: 'Unpin',
+	},
+	dragToReorder: {
+		id: 'instance.worlds.drag_to_reorder',
+		defaultMessage: 'Drag to reorder',
+	},
 	incompatibleVersion: {
 		id: 'app.world.world-item.incompatible-version',
 		defaultMessage: 'Incompatible version {version}',
@@ -325,6 +370,7 @@ const playDisabled = computed(
 		props.quarantined ||
 		playingOtherWorld.value ||
 		props.startingInstance ||
+		(!!props.hostedBy && !props.serverStatus) ||
 		(props.world.type === 'server' && !props.supportsServerQuickPlay) ||
 		(props.world.type === 'singleplayer' && !props.supportsWorldQuickPlay),
 )
@@ -347,8 +393,15 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		id: 'manage-server',
 		label: formatMessage(messages.manageServer),
 		icon: SettingsIcon,
-		shown: !!props.linkedServerId,
-		action: () => void router.push(`/hosting/manage/${props.linkedServerId}`),
+		shown: !!manageServerId.value,
+		action: () => void router.push(`/hosting/manage/${manageServerId.value}`),
+	},
+	{
+		id: 'toggle-pin',
+		label: formatMessage(props.pinned ? messages.unpin : messages.pin),
+		icon: PinIcon,
+		shown: props.pinnable,
+		action: () => emit('toggle-pin'),
 	},
 	{
 		id: 'play-instance',
@@ -379,7 +432,7 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		id: 'copy-address',
 		label: formatMessage(messages.copyAddress),
 		icon: ClipboardCopyIcon,
-		shown: props.world.type === 'server',
+		shown: props.world.type === 'server' && !props.hostedBy,
 		action: () => copyToClipboard(props.copyAddress ?? (props.world as ServerWorld).address),
 	},
 	{
@@ -398,7 +451,7 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		label: formatMessage(commonMessages.editButton),
 		icon: EditIcon,
 		action: () => emit('edit'),
-		shown: !props.instanceId && !props.linkedServerId,
+		shown: ownEntry.value,
 		disabled: locked.value || managed.value,
 		tooltip: locked.value
 			? formatMessage(messages.worldInUse)
@@ -438,12 +491,13 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		id: 'create-shortcut',
 		label: formatMessage(messages.createShortcut),
 		icon: ExternalIcon,
-		shown: !!shortcutInstanceId.value && !props.quarantined,
+		// A shortcut carries the address, so a hosted server gets none.
+		shown: !!shortcutInstanceId.value && !props.quarantined && !props.hostedBy,
 		action: () => createShortcut(),
 	},
 	{
 		type: 'divider',
-		shown: !props.instanceId && !props.linkedServerId,
+		shown: ownEntry.value,
 	},
 	{
 		id: 'delete',
@@ -453,7 +507,7 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		icon: TrashIcon,
 		tone: 'red',
 		action: () => emit('delete'),
-		shown: !props.instanceId && !props.linkedServerId,
+		shown: ownEntry.value,
 		disabled: locked.value || managed.value,
 		tooltip: locked.value
 			? formatMessage(messages.worldInUse)
@@ -494,8 +548,8 @@ function openContextMenu(event: MouseEvent) {
 <template>
 	<div @contextmenu.prevent.stop="openContextMenu">
 		<SmartClickable class="[--active-scale:0.985]">
-			<template v-if="linkedServerId" #clickable>
-				<router-link class="no-click-animation" :to="`/hosting/manage/${linkedServerId}`" />
+			<template v-if="manageServerId" #clickable>
+				<router-link class="no-click-animation" :to="`/hosting/manage/${manageServerId}`" />
 			</template>
 			<template v-else-if="instanceId" #clickable>
 				<router-link
@@ -511,16 +565,24 @@ function openContextMenu(event: MouseEvent) {
 					'bg-surface-2': cardBackground === 'surface-2',
 				}"
 			>
-				<Avatar
-					:src="
-						world.type === 'server' && serverStatus
-							? (serverStatus.favicon ?? world.icon)
-							: world.icon
-					"
-					size="48px"
-					no-shadow
-					class="!rounded-[14px]"
-				/>
+				<div class="flex items-center gap-2">
+					<GripVerticalIcon
+						v-if="pinned"
+						v-tooltip="formatMessage(messages.dragToReorder)"
+						aria-hidden="true"
+						class="world-drag-handle size-5 shrink-0 cursor-grab text-secondary smart-clickable:allow-pointer-events"
+					/>
+					<Avatar
+						:src="
+							world.type === 'server' && serverStatus
+								? (serverStatus.favicon ?? world.icon)
+								: world.icon
+						"
+						size="48px"
+						no-shadow
+						class="!rounded-[14px]"
+					/>
+				</div>
 				<div class="flex flex-col justify-center gap-0.5 h-full">
 					<div class="flex items-center gap-1.5">
 						<div class="text-base text-contrast font-semibold truncate">
@@ -632,6 +694,12 @@ function openContextMenu(event: MouseEvent) {
 								/>
 								<span class="truncate">{{ instanceName }}</span>
 							</router-link>
+							<BulletDivider class="shrink-0" />
+						</template>
+						<template v-if="hostedBy">
+							<span class="truncate">{{
+								formatMessage(messages.hostedBy, { name: hostedBy })
+							}}</span>
 							<BulletDivider class="shrink-0" />
 						</template>
 						<div

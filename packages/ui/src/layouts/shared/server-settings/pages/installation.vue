@@ -58,6 +58,7 @@ import {
 	injectTags,
 	InstallationSettingsLayout,
 	type LoaderVersionEntry,
+	notifyHomeAddressOnce,
 	provideInstallationSettings,
 	ServerSetupModal,
 	UploadProgressModal,
@@ -139,6 +140,10 @@ const messages = defineMessages({
 		id: 'hosting.loader.failed-to-reinstall',
 		defaultMessage: 'Failed to reinstall modpack',
 	},
+	failedToSaveVisibility: {
+		id: 'hosting.loader.failed-to-save-visibility',
+		defaultMessage: 'Failed to change who can see this server',
+	},
 	failedToUnlink: {
 		id: 'hosting.loader.failed-to-unlink',
 		defaultMessage: 'Failed to unlink modpack',
@@ -168,6 +173,9 @@ function showResetServerModal() {
 	if (resetServerDisabled.value) return
 	setupModal.value?.show()
 }
+
+// What the user just chose for "Visible to friends", shown until the Core's answer arrives.
+const visibleToFriendsChoice = ref<boolean>()
 
 async function invalidateServerState() {
 	debug('invalidateServerState: starting')
@@ -474,6 +482,30 @@ provideInstallationSettings({
 	isBusy: setupActionDisabled,
 	busyMessage: setupActionDisabledMessage,
 	isLinkedInstance: computed(() => !!modpack.value?.instance_id),
+	visibleToFriends: {
+		value: computed(
+			() =>
+				visibleToFriendsChoice.value ?? server.value.linked_instance?.visible_to_friends ?? true,
+		),
+		async set(visible) {
+			visibleToFriendsChoice.value = visible
+			try {
+				await client.archon.servers_v1.setLinkedInstance(serverId, { visible_to_friends: visible })
+				if (visible) notifyHomeAddressOnce(addNotification, formatMessage)
+				await Promise.all([
+					queryClient.invalidateQueries({ queryKey: serverDetailQueryKey }),
+					queryClient.invalidateQueries({ queryKey: ['servers'], exact: true }),
+				])
+			} catch (err) {
+				addNotification({
+					type: 'error',
+					text: err instanceof Error ? err.message : formatMessage(messages.failedToSaveVisibility),
+				})
+			} finally {
+				visibleToFriendsChoice.value = undefined
+			}
+		},
+	},
 	modpack: computed(() => {
 		if (!modpack.value) return null
 		const isLocal = modpack.value.spec.platform === 'local_file'

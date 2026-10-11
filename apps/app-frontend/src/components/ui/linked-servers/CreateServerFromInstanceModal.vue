@@ -18,6 +18,7 @@ import {
 	defineMessages,
 	injectModrinthClient,
 	injectNotificationManager,
+	notifyHomeAddressOnce,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -78,8 +79,13 @@ async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const { id } = await client.archon.cores_v1.createServer(instance.name, core, instance)
+		// A new server starts out visible to the people the instance is shared with.
+		const { id } = await client.archon.cores_v1.createServer(instance.name, core, {
+			...instance,
+			shared_instance_id: props.instance.shared_instance?.id ?? null,
+		})
 		flow.value?.hide()
+		notifyHomeAddressOnce(addNotification, formatMessage)
 		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
 		try {
 			const pack = await exportInstancePack(instance.id)

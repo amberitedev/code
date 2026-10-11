@@ -1,6 +1,11 @@
-import { type Archon, ModrinthApiError, type UploadProgress } from '@modrinth/api-client'
+import {
+	type Archon,
+	ModrinthApiError,
+	type SharedInstances,
+	type UploadProgress,
+} from '@modrinth/api-client'
 import type { ContentDiffItem } from '@modrinth/ui'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { invoke } from '@tauri-apps/api/core'
 import { join, tempDir } from '@tauri-apps/api/path'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
@@ -8,6 +13,7 @@ import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 import { apiClient } from '@/services/api-client'
 
 import { export_instance_mrpack, get_content_items } from './instance'
+import type { GameInstance } from './types'
 import { get_server_status } from './worlds'
 
 export type LinkedServer = Archon.Servers.v0.Server & {
@@ -87,6 +93,66 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 		)
 	})
 	return { servers, query }
+}
+
+/**
+ * Keeps the Core's record of which shared instance a linked server belongs to in step with the
+ * instance. The Core lists a server for friends only under that shared instance, so sharing or
+ * unsharing an instance reaches its servers through here. Call once, from the instance page.
+ */
+export function useSharedInstanceLink(instance: MaybeRefOrGetter<GameInstance | undefined>) {
+	const queryClient = useQueryClient()
+	const { servers } = useLinkedServers(() => toValue(instance)?.id)
+	const sending = new Set<string>()
+	watch(
+		() => {
+			const sharedId = toValue(instance)?.shared_instance?.id ?? null
+			return servers.value
+				.filter((server) => server.linked_instance.shared_instance_id !== sharedId)
+				.map((server) => ({ serverId: server.server_id, sharedId }))
+		},
+		async (stale) => {
+			for (const { serverId, sharedId } of stale) {
+				if (sending.has(serverId)) continue
+				sending.add(serverId)
+				// On failure the next server list still differs, which tries again.
+				await apiClient.archon.servers_v1
+					.setLinkedInstance(serverId, { shared_instance: { id: sharedId } })
+					.then(() => queryClient.invalidateQueries({ queryKey: serversQueryKey }))
+					.catch((error) => console.error('Failed to tell the Core about sharing', error))
+				sending.delete(serverId)
+			}
+		},
+		{ immediate: true },
+	)
+}
+
+export type HostedServer = SharedInstances.Instances.v1.HostedServer
+
+/**
+ * The servers other people host for a shared instance and show to its members. Empty when the
+ * instance is not shared. Checked again every few seconds so a server that was hidden, renamed,
+ * or moved shows up without a restart.
+ */
+export function useHostedServers(sharedInstanceId: MaybeRefOrGetter<string | undefined>) {
+	const query = useQuery({
+		queryKey: computed(() => ['shared-instance-servers', toValue(sharedInstanceId)] as const),
+		queryFn: () => apiClient.sharedinstances.instances_v1.getServers(toValue(sharedInstanceId)!),
+		enabled: () => !!toValue(sharedInstanceId),
+		refetchInterval: 15_000,
+		retry: false,
+	})
+	const servers = computed(() => (toValue(sharedInstanceId) ? (query.data.value ?? []) : []))
+	return { servers, query }
+}
+
+/**
+ * Whether this account may manage a server someone else hosts, which makes its Worlds row open
+ * the server page. TODO(server-access): the answer comes from the list of Cores the account may
+ * reach, which holds only its own Cores until server access is merged.
+ */
+export async function canManageHostedServer(server: HostedServer) {
+	return apiClient.archon.cores_v1.canReachCore(server.core_id).catch(() => false)
 }
 
 /** Whether the server's process is up, including while it starts or stops. */

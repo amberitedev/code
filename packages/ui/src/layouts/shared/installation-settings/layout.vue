@@ -23,6 +23,7 @@ import { Button } from '#ui/components/base/buttons'
 import Chips from '#ui/components/base/Chips.vue'
 import Combobox from '#ui/components/base/Combobox.vue'
 import PaperChannelBadge from '#ui/components/base/PaperChannelBadge.vue'
+import Toggle from '#ui/components/base/Toggle.vue'
 import ConfirmLeaveModal from '#ui/components/modal/ConfirmLeaveModal.vue'
 import { useDebugLogger } from '#ui/composables/debug-logger'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
@@ -446,6 +447,15 @@ const messages = defineMessages({
 		id: 'installation-settings.linked-instance.title',
 		defaultMessage: 'Linked {projectType}',
 	},
+	visibleToFriendsTitle: {
+		id: 'installation-settings.visible-to-friends.title',
+		defaultMessage: 'Visible to friends',
+	},
+	visibleToFriendsDescription: {
+		id: 'installation-settings.visible-to-friends.description',
+		defaultMessage:
+			'People this instance is shared with can see this server in Worlds and join it.',
+	},
 	unlinkInstanceTitle: {
 		id: 'installation-settings.unlink-instance.title',
 		defaultMessage: 'Unlink from instance',
@@ -705,6 +715,24 @@ const messages = defineMessages({
 					>
 						{{ ctx.managedModpackWarning?.value.changeVersionBody }}
 					</Admonition>
+				</div>
+
+				<!-- Visible to friends -->
+				<div v-if="isLinkedInstance && ctx.visibleToFriends" class="flex flex-col gap-2.5">
+					<div class="flex items-center justify-between gap-4">
+						<span id="visible-to-friends-label" class="text-lg font-semibold text-contrast">
+							{{ formatMessage(messages.visibleToFriendsTitle) }}
+						</span>
+						<Toggle
+							id="visible-to-friends"
+							:model-value="ctx.visibleToFriends.value.value"
+							aria-labelledby="visible-to-friends-label"
+							@update:model-value="ctx.visibleToFriends.set($event === true)"
+						/>
+					</div>
+					<span class="text-primary">
+						{{ formatMessage(messages.visibleToFriendsDescription) }}
+					</span>
 				</div>
 
 				<!-- Unlink -->
