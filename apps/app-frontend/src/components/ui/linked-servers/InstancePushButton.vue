@@ -56,6 +56,7 @@ import { computed, ref } from 'vue'
 
 import SharedInstancePublishModal from '@/components/ui/shared-instances/SharedInstancePublishModal.vue'
 import {
+	coreProblem,
 	exportInstancePack,
 	playersOnline,
 	pushPackToServer,
@@ -89,10 +90,11 @@ const publishModal = ref<InstanceType<typeof SharedInstancePublishModal>>()
 const playersModal = ref<InstanceType<typeof NewModal>>()
 const publishState = ref<'idle' | 'reviewing' | 'publishing'>('idle')
 const pushing = ref(false)
+const checkingPlayers = ref(false)
 const playersOnlineCount = ref(0)
 
 const publishesToFriends = computed(() => props.instance.shared_instance?.role === 'owner')
-const busy = computed(() => pushing.value || publishState.value !== 'idle')
+const busy = computed(() => pushing.value || checkingPlayers.value || publishState.value !== 'idle')
 const isDisabled = computed(
 	() => props.disabled || busy.value || props.instance.install_stage !== 'installed',
 )
@@ -105,8 +107,14 @@ function review(event?: MouseEvent) {
 /** Called once the review is confirmed. A restart first asks when players are online. */
 async function pushToServers(restart: boolean) {
 	if (restart) {
-		const counts = await Promise.all(servers.value.map(playersOnline))
-		playersOnlineCount.value = counts.reduce((sum, count) => sum + count, 0)
+		// Busy while the servers are asked, so a second click cannot open another review.
+		checkingPlayers.value = true
+		try {
+			const counts = await Promise.all(servers.value.map(playersOnline))
+			playersOnlineCount.value = counts.reduce((sum, count) => sum + count, 0)
+		} finally {
+			checkingPlayers.value = false
+		}
 		if (playersOnlineCount.value > 0) {
 			playersModal.value?.show()
 			return
@@ -127,6 +135,7 @@ async function upload(restart: boolean) {
 	try {
 		const pack = await exportInstancePack(props.instance.id)
 		const failed: string[] = []
+		let problem = ''
 		for (const server of targets) {
 			try {
 				await pushPackToServer(
@@ -138,13 +147,14 @@ async function upload(restart: boolean) {
 			} catch (error) {
 				console.error(`Failed to push to server ${server.server_id}`, error)
 				failed.push(server.name)
+				problem ||= coreProblem(error)
 			}
 		}
 		if (failed.length > 0) {
 			addNotification({
 				type: 'error',
 				title: formatMessage(messages.pushFailedTitle),
-				text: formatMessage(messages.pushFailedText, { servers: failed.join(', ') }),
+				text: `${formatMessage(messages.pushFailedText, { servers: failed.join(', ') })} ${problem}`,
 			})
 		} else {
 			addNotification({
@@ -205,7 +215,7 @@ const messages = defineMessages({
 	},
 	pushFailedText: {
 		id: 'instance.linked-servers.push-failed.text',
-		defaultMessage: 'Could not reach {servers}. Push again once the server can be reached.',
+		defaultMessage: 'Could not update {servers}.',
 	},
 })
 </script>

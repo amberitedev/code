@@ -19,7 +19,7 @@
 			v-else-if="filteredInstances.length === 0"
 			class="flex items-center justify-center py-12 text-secondary"
 		>
-			{{ formatMessage(messages.noInstances) }}
+			{{ formatMessage(emptyMessage) }}
 		</div>
 		<div v-else class="flex flex-col gap-1">
 			<div
@@ -59,6 +59,7 @@ const { formatMessage } = useVIntl()
 
 const instances = ref<ServerInstanceOption[]>([])
 const loading = ref(true)
+const failed = ref(false)
 const searchFilter = ref('')
 
 const filteredInstances = computed(() => {
@@ -66,9 +67,17 @@ const filteredInstances = computed(() => {
 	return instances.value.filter((instance) => instance.name.toLowerCase().includes(query))
 })
 
+const emptyMessage = computed(() => {
+	if (failed.value) return messages.loadFailed
+	return instances.value.length === 0 ? messages.noInstancesYet : messages.noInstances
+})
+
 onMounted(async () => {
 	try {
 		instances.value = (await instanceSource?.listInstances()) ?? []
+	} catch (error) {
+		console.error('Failed to list instances', error)
+		failed.value = true
 	} finally {
 		loading.value = false
 	}
@@ -88,6 +97,14 @@ const messages = defineMessages({
 	noInstances: {
 		id: 'creation-flow.modal.select-instance.no-instances',
 		defaultMessage: 'No instances found',
+	},
+	noInstancesYet: {
+		id: 'creation-flow.modal.select-instance.no-instances-yet',
+		defaultMessage: 'You have no instances yet',
+	},
+	loadFailed: {
+		id: 'creation-flow.modal.select-instance.load-failed',
+		defaultMessage: 'Could not load your instances',
 	},
 	selectButton: {
 		id: 'creation-flow.modal.select-instance.select-button',

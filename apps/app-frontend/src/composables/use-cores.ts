@@ -5,7 +5,7 @@ import { apiClient } from '@/services/api-client'
 
 export const coresQueryKey = ['cores']
 
-/** The account's paired Cores. `needsPairing` is true when there is none to host a server on. */
+/** The account's paired Cores. */
 export function useCores() {
 	const query = useQuery({
 		queryKey: coresQueryKey,
@@ -13,8 +13,7 @@ export function useCores() {
 		staleTime: 30_000,
 	})
 	const cores = computed(() => query.data.value ?? [])
-	const needsPairing = computed(() => !query.isLoading.value && cores.value.length === 0)
-	return { ...query, cores, needsPairing }
+	return { ...query, cores }
 }
 
 // The one "Pair a Core" modal is mounted in App.vue and registers itself here.
@@ -31,9 +30,10 @@ export function openPairCoreModal(): Promise<boolean> {
 
 /**
  * Call before anything that creates a server. Resolves true right away when a Core is paired;
- * otherwise opens "Pair a Core" and resolves true only once pairing succeeds.
+ * otherwise opens "Pair a Core" and resolves true only once pairing succeeds. Throws when the
+ * account's Cores cannot be loaded, so a failed lookup never asks to pair.
  */
 export async function ensureCorePaired(): Promise<boolean> {
-	const cores = await apiClient.archon.cores_v1.list().catch(() => [])
+	const cores = await apiClient.archon.cores_v1.list()
 	return cores.length > 0 || openPairCoreModal()
 }

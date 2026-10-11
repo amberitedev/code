@@ -1,7 +1,9 @@
 <template>
 	<NewModal
 		ref="modal"
-		:header="props.header ?? formatMessage(messages.header)"
+		:header="
+			props.header ?? formatMessage(props.instance ? messages.instanceHeader : messages.header)
+		"
 		fade="warning"
 		max-width="500px"
 		:on-hide="() => backupCreator?.cancelBackup()"
@@ -55,6 +57,8 @@ const props = defineProps<{
 	header?: string
 	warning?: { header: string; body: string } | null
 	server?: boolean
+	/** The server follows an App instance, not a modpack, so the wording says so. */
+	instance?: boolean
 	backupTip?: string
 	actionDisabled?: boolean
 	actionDisabledTooltip?: string
@@ -81,6 +85,19 @@ const messages = defineMessages({
 		id: 'content.confirm-unlink.unlink-button',
 		defaultMessage: 'Unlink',
 	},
+	instanceHeader: {
+		id: 'content.confirm-unlink.instance.header',
+		defaultMessage: 'Unlink from instance',
+	},
+	instanceAdmonitionHeader: {
+		id: 'content.confirm-unlink.instance.admonition-header',
+		defaultMessage: 'Unlinking from the instance',
+	},
+	instanceAdmonitionBody: {
+		id: 'content.confirm-unlink.instance.admonition-body',
+		defaultMessage:
+			'This server stops following the instance. Its content stays on the server, but pushes from the instance no longer reach it.',
+	},
 })
 
 const emit = defineEmits<{
@@ -92,13 +109,17 @@ const backupCreator = ref<InstanceType<typeof InlineBackupCreator>>()
 const buttonsDisabled = ref(false)
 const admonitionHeader = computed(() => {
 	if (props.warning) return props.warning.header
-	return formatMessage(messages.admonitionHeader)
+	return formatMessage(
+		props.instance ? messages.instanceAdmonitionHeader : messages.admonitionHeader,
+	)
 })
 const admonitionBody = computed(() => {
 	if (props.warning) return props.warning.body
-	return formatMessage(messages.admonitionBody)
+	return formatMessage(props.instance ? messages.instanceAdmonitionBody : messages.admonitionBody)
 })
-const actionMessage = computed(() => (props.server ? messages.header : messages.unlinkButton))
+const actionMessage = computed(() =>
+	props.server && !props.instance ? messages.header : messages.unlinkButton,
+)
 
 function show() {
 	debug('show: called', {

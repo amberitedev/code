@@ -11,7 +11,10 @@
 		:confirm-icon="UploadIcon"
 		:secondary-confirm-label="hasServers ? formatMessage(messages.publishButton) : undefined"
 		:confirm-disabled="
-			publishDiffs.length === 0 && selectedConfigPaths.length === 0 && !serverFailed
+			publishDiffs.length === 0 &&
+			selectedConfigPaths.length === 0 &&
+			!serverFailed &&
+			!serverUnchecked
 		"
 		:added-label="formatMessage(messages.addedLabel)"
 		:removed-label="formatMessage(messages.removedLabel)"
@@ -102,6 +105,8 @@ const hasServers = computed(() => (props.servers?.length ?? 0) > 0)
 const serverFailed = computed(
 	() => props.servers?.some((server) => server.linked_instance.state === 'failed') ?? false,
 )
+// A server that could not be compared may be behind, so it can be pushed to as well.
+const serverUnchecked = ref(false)
 const sharesWithFriends = computed(() => props.instance.shared_instance?.role === 'owner')
 // Whether the changes on screen are ones friends have not received yet.
 const friendsBehind = ref(false)
@@ -148,8 +153,14 @@ async function show(e?: MouseEvent) {
 		// Friends can be up to date while a server is not, so fall back to what the server lacks.
 		let serverDiffs: ContentDiffItem[] = []
 		if (friendDiffs.length === 0) {
+			serverUnchecked.value = false
 			for (const server of props.servers ?? []) {
-				serverDiffs = await diffInstanceAgainstServer(props.instance.id, server)
+				try {
+					serverDiffs = await diffInstanceAgainstServer(props.instance.id, server)
+				} catch (error) {
+					console.error(`Failed to compare with server ${server.server_id}`, error)
+					serverUnchecked.value = true
+				}
 				if (serverDiffs.length > 0) break
 			}
 		}

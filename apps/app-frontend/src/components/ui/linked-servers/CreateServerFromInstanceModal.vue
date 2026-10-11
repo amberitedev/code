@@ -25,7 +25,12 @@ import { nextTick, ref } from 'vue'
 
 import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
 import { getInstanceIconUrl } from '@/helpers/instance'
-import { exportInstancePack, pushPackToServer, serversQueryKey } from '@/helpers/linked-servers'
+import {
+	coreProblem,
+	exportInstancePack,
+	pushPackToServer,
+	serversQueryKey,
+} from '@/helpers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 /**
@@ -67,7 +72,7 @@ async function show() {
 
 /**
  * The server exists as soon as the Core makes it, linked to the instance. If the upload then
- * fails the server stays, and the instance shows a banner to push again.
+ * fails the server stays, and pushing an update from the instance sends it again.
  */
 async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
@@ -81,13 +86,18 @@ async function create(ctx: CreationFlowContextValue) {
 			await pushPackToServer(pack, instance, id, { properties: ctx.buildProperties() })
 		} catch (error) {
 			console.error('Failed to upload the instance to its new server', error)
+			addNotification({
+				type: 'error',
+				title: formatMessage(messages.uploadFailedTitle),
+				text: formatMessage(messages.uploadFailedText),
+			})
 		}
 	} catch (error) {
 		console.error('Failed to create server', error)
 		addNotification({
 			type: 'error',
 			title: formatMessage(messages.failedTitle),
-			text: formatMessage(messages.failedText),
+			text: coreProblem(error),
 		})
 	} finally {
 		ctx.loading.value = false
@@ -100,9 +110,13 @@ const messages = defineMessages({
 		id: 'instance.linked-servers.create.failed-title',
 		defaultMessage: 'Could not create the server',
 	},
-	failedText: {
-		id: 'instance.linked-servers.create.failed-text',
-		defaultMessage: 'Check that your Core is running, then try again.',
+	uploadFailedTitle: {
+		id: 'instance.linked-servers.create.upload-failed-title',
+		defaultMessage: 'Server created, but not set up',
+	},
+	uploadFailedText: {
+		id: 'instance.linked-servers.create.upload-failed-text',
+		defaultMessage: 'The instance could not be sent to it. Push an update to try again.',
 	},
 })
 

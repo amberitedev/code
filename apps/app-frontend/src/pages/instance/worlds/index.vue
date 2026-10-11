@@ -218,6 +218,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { get_project, get_project_v3 } from '@/helpers/cache.js'
 import { set_synced_option } from '@/helpers/instance'
 import {
+	coreOffline,
 	type LinkedServer,
 	linkedServerState,
 	serverAddress,
@@ -286,6 +287,10 @@ const messages = defineMessages({
 		id: 'app.instance.worlds.linked.failed',
 		defaultMessage: 'Update failed',
 	},
+	linkedCoreOffline: {
+		id: 'app.instance.worlds.linked.core-offline',
+		defaultMessage: 'Core offline',
+	},
 	browseServers: {
 		id: 'app.instance.worlds.browse-servers',
 		defaultMessage: 'Browse servers',
@@ -346,14 +351,11 @@ function play() {
 const selectedFilters = ref<string[]>([])
 const searchFilter = ref('')
 
-const { servers: linkedServers, query: serversQuery } = useLinkedServers(() => instance.value.id)
-// Servers are created on the Core this App is connected to. Core only answers its owner, so a
-// server list that loaded means this account can create one.
+const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
+// Always offered: creating a server pairs a Core first when the account has none, and says so
+// when the Core cannot be reached.
 const canCreateServer = computed(
-	() =>
-		serversQuery.isSuccess.value &&
-		!instance.value.quarantined &&
-		instance.value.install_stage === 'installed',
+	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
 )
 // Linked servers are listed as ordinary server rows, so they look and join like the others.
 const filteredLinkedServers = computed(() =>
@@ -375,6 +377,10 @@ const filteredLinkedServers = computed(() =>
 )
 
 function linkedNote(server: LinkedServer) {
+	// The rows are the last answer the Core gave, so its state is not known right now.
+	if (coreOffline.value) {
+		return { text: formatMessage(messages.linkedCoreOffline), tone: 'orange' as const }
+	}
 	switch (linkedServerState(server)) {
 		case 'updating':
 			return { text: formatMessage(messages.linkedUpdating), tone: 'blue' as const }
