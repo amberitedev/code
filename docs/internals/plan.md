@@ -138,6 +138,18 @@ Later:
 - A Core that was owned before pairing existed keeps its owner but must be paired once to be
   listed. It shows a code that only that owner can use.
 
+## Reaching a Core from outside
+
+A Core at home must be reachable for two things: friends joining the Minecraft server, and the
+App managing the Core from anywhere.
+
+- Core forwards its ports and opens the local firewall automatically.
+- When that fails, Core's command line explains in detail where the problem is and how to fix it.
+- Open: what to do on routers and networks where forwarding cannot work.
+- After this exists: friends see an instance's servers, and the owner can invite friends to
+  control a server.
+- Who can join a server is the owner's choice: a whitelist or none.
+
 ## Current state, 2026-10-10
 
 - Accounts, friends, presence, and sharing on R2 between two Apps work locally.
@@ -156,4 +168,3 @@ Later:
 ## Open questions
 
 - Whether the free Workers plan is enough for R2, to check before hosting.
-- Enforcing who can join a server, beyond hiding its address.
