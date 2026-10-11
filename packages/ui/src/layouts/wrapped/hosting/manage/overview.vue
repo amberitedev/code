@@ -78,7 +78,8 @@ const {
 	powerStateDetails: _powerStateDetails,
 } = injectModrinthServerContext()
 const modrinthServersConsole = useModrinthServersConsole()
-const { canUsePowerActions, permissionDeniedMessage } = useServerPermissions()
+// Running commands and clearing the console need more than the right to start the server.
+const { canExecuteCommands, permissionDeniedMessage } = useServerPermissions()
 
 watch(
 	() => props.showAdvancedDebugInfo,
@@ -122,7 +123,7 @@ const dismissCrash = () => {
 provideConsoleManager({
 	logLines: modrinthServersConsole.output,
 	sendCommand: (cmd: string) => {
-		if (!canUsePowerActions.value) return
+		if (!canExecuteCommands.value) return
 		try {
 			client.archon.sockets.send(serverId, { event: 'command', cmd })
 		} catch (error) {
@@ -131,10 +132,10 @@ provideConsoleManager({
 	},
 	showCommandInput: true,
 	disableCommandInput: computed(
-		() => !canUsePowerActions.value || serverPowerState.value !== 'running',
+		() => !canExecuteCommands.value || serverPowerState.value !== 'running',
 	),
 	disableCommandInputTooltip: computed(() =>
-		canUsePowerActions.value ? undefined : permissionDeniedMessage.value,
+		canExecuteCommands.value ? undefined : permissionDeniedMessage.value,
 	),
 	loading: computed(
 		() =>
@@ -143,7 +144,7 @@ provideConsoleManager({
 			isWsAuthIncorrect.value,
 	),
 	onClear: async () => {
-		if (!canUsePowerActions.value) return
+		if (!canExecuteCommands.value) return
 		modrinthServersConsole.clear()
 		try {
 			await client.kyros.logs_v1.clear()
@@ -151,9 +152,9 @@ provideConsoleManager({
 			console.error('Failed to clear server logs:', error)
 		}
 	},
-	clearDisabled: computed(() => !canUsePowerActions.value),
+	clearDisabled: computed(() => !canExecuteCommands.value),
 	clearDisabledTooltip: computed(() =>
-		canUsePowerActions.value ? undefined : permissionDeniedMessage.value,
+		canExecuteCommands.value ? undefined : permissionDeniedMessage.value,
 	),
 	shareDisabled: computed(() => !isConnected.value),
 	emptyStateType: 'server',

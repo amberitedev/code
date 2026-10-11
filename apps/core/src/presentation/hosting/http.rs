@@ -9,6 +9,7 @@ use super::models::*;
 use crate::network::diagnosis::Case;
 use crate::{
     application::{
+        access_service::{self, Role},
         backup_service, instance_status_service, mod_service,
         server_source_service,
         state::{AppState, WsTicket},
@@ -21,13 +22,17 @@ use crate::{
             MemorySettings, ModLoader,
         },
         server_source::{
-            ContentKind, ContentOrigin, ServerSource, SourceApplyState,
+            ContentKind, ContentOrigin, ServerSource, ServerSourceStatus,
+            SourceApplyState,
         },
     },
     infrastructure::minecraft::server_properties,
     presentation::{
         error::ApiError,
-        extractors::{bearer_token, AuthUser},
+        extractors::{
+            bearer_token, Account, AuthUser, CanAdvanced, CanBackup, CanPower,
+            CanRead, CanSetup, SignedIn,
+        },
         handlers::{backups, instance_control, instances, mods, properties},
         instance_path::resolve_instance_path,
     },
@@ -175,6 +180,115 @@ pub fn router() -> Router<Arc<AppState>> {
         )
 }
 
+/// Record an action in the server's activity log, as `account`.
+async fn log(
+    state: &AppState,
+    account: &Account,
+    server_id: &str,
+    action: &str,
+    metadata: Value,
+) {
+    access_service::log(state, server_id, &account.id, action, metadata).await;
+}
+
+async fn log_version(
+    state: &AppState,
+    account: &Account,
+    id: &str,
+    loader: &str,
+    loader_version: Option<String>,
+    game_version: Option<String>,
+) {
+    if let Some(version) = game_version {
+        log(
+            state,
+            account,
+            id,
+            "game_version_edited",
+            json!({"new_version": version}),
+        )
+        .await;
+    }
+    log(
+        state,
+        account,
+        id,
+        "loader_version_edited",
+        json!({"new_loader": loader, "new_version": loader_version}),
+    )
+    .await;
+}
+
+async fn log_modpack(
+    state: &AppState,
+    account: &Account,
+    id: &str,
+    project_id: &str,
+    version_id: &str,
+) {
+    let spec = json!({"platform": "modrinth", "project_id": project_id, "version_id": version_id});
+    log(state, account, id, "modpack_changed", json!({"spec": spec})).await;
+}
+
+/// A linked source as the activity log names a modpack.
+fn source_spec(status: &ServerSourceStatus) -> Value {
+    modpack(status)["spec"].clone()
+}
+
+/// The server was moved to a version of what it is linked to. For an App instance that is
+/// Amberite's own action; a modpack uses Modrinth's.
+pub(super) async fn log_source_update(
+    state: &AppState,
+    account: &Account,
+    id: &str,
+    status: &ServerSourceStatus,
+) {
+    match &status.source {
+        ServerSource::Instance { name, .. } => {
+            log(
+                state,
+                account,
+                id,
+                "instance_version_applied",
+                json!({"name": name, "version": status.desired_version}),
+            )
+            .await
+        }
+        _ => {
+            log(
+                state,
+                account,
+                id,
+                "modpack_changed",
+                json!({"spec": source_spec(status)}),
+            )
+            .await
+        }
+    }
+}
+
+/// What the activity log shows for a mod: its project and version, with the names they had.
+/// A file Core did not install from Modrinth is named by its filename.
+fn addon_json(info: Option<&mod_service::ModInfo>, filename: &str) -> Value {
+    let project = info.and_then(|m| m.modrinth_project_id.clone());
+    let version = info.and_then(|m| m.modrinth_version_id.clone());
+    json!({
+        "addon_id": project.unwrap_or_else(|| filename.into()),
+        "version_id": version.unwrap_or_else(|| "file".into()),
+        "title": info.and_then(|m| m.display_name.clone()).unwrap_or_else(|| filename.into()),
+        "version_number": info.and_then(|m| m.version_number.clone()).unwrap_or_else(|| "file".into()),
+    })
+}
+
+async fn addon_entry(state: &Arc<AppState>, id: &str, filename: &str) -> Value {
+    let mods = mod_service::list_mods(state, id).await.unwrap_or_default();
+    let enabled = filename.trim_end_matches(".disabled");
+    let info = mods
+        .iter()
+        .find(|m| m.filename.trim_end_matches(".disabled") == enabled);
+    addon_json(info, enabled)
+}
+
 async fn unsupported(_user: AuthUser) -> ApiResult {
     Err(ApiError::UnprocessableEntity(
         "This operation is not implemented by the local Core".into(),
@@ -244,7 +358,8 @@ async fn record(
 
 async fn v0(
     state: &Arc<AppState>,
-    user: &AuthUser,
+    owner_id: &str,
+    role: Role,
     r: &InstanceRecord,
     base: &str,
 ) -> Result<Value, ApiError> {
@@ -262,12 +377,11 @@ async fn v0(
     let count = backup_service::list_backups(state, &r.id.to_string())
         .await?
         .len();
-    // Only the Core's owner reaches the hosting API, so the caller is the owner.
     let node_url = format!("{base}/hosting/servers/{}", r.id);
     let mut server = server_v0(
         r,
-        &user.0.id,
-        -32768,
+        owner_id,
+        role.permissions_json(),
         count,
         &host(state),
         upstream,
@@ -320,7 +434,7 @@ async fn v1(
 }
 
 async fn select_download(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
@@ -329,54 +443,92 @@ async fn select_download(
     Ok(Json(json!({"method_type": "unavailable"})))
 }
 
+/// The servers the caller may see: all of them for the owner, the ones they accepted an invite
+/// to for anyone else.
+async fn visible(
+    state: &Arc<AppState>,
+    account: &Account,
+) -> Result<Vec<InstanceRecord>, ApiError> {
+    let mut records = state.instance_store.list().await?;
+    if let Some(ids) =
+        access_service::visible_servers(state, &account.id).await?
+    {
+        records.retain(|r| ids.contains(&r.id.to_string()));
+    }
+    Ok(records)
+}
+
+async fn owner_id(state: &AppState) -> Result<String, ApiError> {
+    Ok(state
+        .owner()
+        .await?
+        .ok_or_else(|| ApiError::Forbidden("this Core is not paired".into()))?
+        .user_id)
+}
+
 async fn list_v0(
-    user: AuthUser,
+    SignedIn(account): SignedIn,
     State(state): State<Arc<AppState>>,
     Query(q): Query<Pagination>,
     headers: HeaderMap,
 ) -> ApiResult {
     let base = client_base(&state, &headers);
-    let records = state.instance_store.list().await?;
+    let owner = owner_id(&state).await?;
+    let records = visible(&state, &account).await?;
     let count = records.len();
     let limit = q.limit.unwrap_or(100).clamp(1, 1000);
     let offset = q.offset.unwrap_or(0);
     let mut servers = Vec::new();
     for r in records.into_iter().skip(offset).take(limit) {
-        servers.push(v0(&state, &user, &r, &base).await?);
+        let Some(role) =
+            access_service::role(&state, &account.id, &r.id.to_string())
+                .await?
+        else {
+            continue;
+        };
+        servers.push(v0(&state, &owner, role, &r, &base).await?);
     }
     Ok(Json(
-        json!({"servers": servers, "users": {&user.0.id: {"id": user.0.id, "username": user.0.username, "avatar_url": null}},
+        json!({"servers": servers, "users": {&owner: access_service::user_json(&state, &owner).await?},
         "pagination": {"current_page": offset / limit + 1, "page_size": limit, "total_pages": count.div_ceil(limit), "total_items": count}}),
     ))
 }
 
 async fn get_v0(
-    user: AuthUser,
+    user: CanRead,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult {
     let r = record(&state, &id).await?;
+    let role = access_service::require(
+        &state,
+        &user.0.id,
+        &r.id.to_string(),
+        access_service::scope::BASE_READ,
+    )
+    .await?;
+    let owner = owner_id(&state).await?;
     Ok(Json(
-        v0(&state, &user, &r, &client_base(&state, &headers)).await?,
+        v0(&state, &owner, role, &r, &client_base(&state, &headers)).await?,
     ))
 }
 
 async fn list_v1(
-    _user: AuthUser,
+    SignedIn(account): SignedIn,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> ApiResult {
     let base = client_base(&state, &headers);
     let mut servers = Vec::new();
-    for r in state.instance_store.list().await? {
+    for r in visible(&state, &account).await? {
         servers.push(v1(&state, &r, &base).await?);
     }
     Ok(Json(json!(servers)))
 }
 
 async fn get_v1(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     headers: HeaderMap,
@@ -386,7 +538,7 @@ async fn get_v1(
 }
 
 async fn create_server(
-    _user: AuthUser,
+    user: AuthUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateServer>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
@@ -485,6 +637,14 @@ async fn create_server(
     state
         .broadcaster
         .send(Event::InstanceCreated { instance: r });
+    log(
+        &state,
+        &user.0,
+        &id.to_string(),
+        "server_created",
+        json!({}),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(json!({"id": id}))))
 }
 
@@ -514,12 +674,14 @@ async fn delete_server(
         }
     }
     let key = r.id.to_string();
-    // Child rows (mods, backups, the linked source) go with the instance row.
+    let invited = access_service::invited(&state, &key).await?;
+    // Child rows (mods, backups, the linked source, who has access) go with the instance row.
     sqlx::query("DELETE FROM instances WHERE id = ?")
         .bind(&key)
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    access_service::server_deleted(&state, &key, invited).await;
     for dir in [
         std::path::PathBuf::from(&r.data_dir),
         state.config.data_dir.join("backups").join(&key),
@@ -541,49 +703,64 @@ async fn delete_server(
 }
 
 async fn power(
-    _user: AuthUser,
+    user: CanPower,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<Power>,
 ) -> ApiResult {
-    match body.action {
-        PowerAction::Start => {
-            instance_control::start(Path(id), State(state)).await
-        }
+    let (server, core) = (Path(id.clone()), State(state.clone()));
+    let (result, action) = match body.action {
+        PowerAction::Start => (
+            instance_control::start(server, core).await,
+            "server_started",
+        ),
         PowerAction::Stop => {
-            instance_control::stop(Path(id), State(state)).await
+            (instance_control::stop(server, core).await, "server_stopped")
         }
-        PowerAction::Restart => {
-            instance_control::restart(Path(id), State(state)).await
-        }
+        PowerAction::Restart => (
+            instance_control::restart(server, core).await,
+            "server_restarted",
+        ),
         PowerAction::Kill => {
-            instance_control::kill(Path(id), State(state)).await
+            (instance_control::kill(server, core).await, "server_killed")
         }
-    }
+    };
+    let result = result?;
+    log(&state, &user.0, &id, action, json!({})).await;
+    Ok(result)
 }
 
 async fn rename(
-    _user: AuthUser,
+    user: CanAdvanced,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<Name>,
 ) -> ApiResult {
-    instances::patch_instance(
-        Path(id),
-        State(state),
+    let result = instances::patch_instance(
+        Path(id.clone()),
+        State(state.clone()),
         Json(instances::PatchBody {
-            name: Some(body.name),
+            name: Some(body.name.clone()),
             java_version: None,
             memory: None,
             jvm_args: None,
             server_args: None,
         }),
     )
-    .await
+    .await?;
+    log(
+        &state,
+        &user.0,
+        &id,
+        "changed_server_name",
+        json!({"name": body.name}),
+    )
+    .await;
+    Ok(result)
 }
 
 async fn end_intro(
-    _user: AuthUser,
+    _user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
@@ -597,7 +774,7 @@ async fn end_intro(
 }
 
 async fn allocations(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
@@ -608,7 +785,7 @@ async fn allocations(
 /// File routes take the same account token as the rest of the hosting API, so
 /// the caller's own token is handed back as the node token.
 async fn filesystem_auth(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     headers: HeaderMap,
@@ -620,7 +797,7 @@ async fn filesystem_auth(
 }
 
 async fn websocket_auth(
-    _user: AuthUser,
+    user: CanRead,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     headers: HeaderMap,
@@ -634,6 +811,7 @@ async fn websocket_auth(
         token.clone(),
         WsTicket {
             instance_id: r.id.clone(),
+            account: user.0,
             expires_at: Instant::now() + Duration::from_secs(60),
         },
     );
@@ -644,13 +822,21 @@ async fn websocket_auth(
 }
 
 async fn reinstall(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(q): Query<ReinstallQuery>,
     Json(body): Json<Reinstall>,
 ) -> ApiResult {
     if q.hard {
+        // Resetting a server is the owner's alone.
+        access_service::require(
+            &state,
+            &user.0.id,
+            &id,
+            access_service::scope::RESET_SERVER,
+        )
+        .await?;
         return Err(ApiError::UnprocessableEntity(
             "Hard reset is not implemented by the local Core".into(),
         ));
@@ -661,16 +847,26 @@ async fn reinstall(
             loader_version,
             game_version,
         } => {
-            instance_control::change_version_handler(
-                Path(id),
-                State(state),
+            let result = instance_control::change_version_handler(
+                Path(id.clone()),
+                State(state.clone()),
                 Json(instance_control::ChangeVersionBody {
-                    game_version,
+                    game_version: game_version.clone(),
                     loader: Some(loader(&value)?),
-                    loader_version: Some(loader_version),
+                    loader_version: Some(loader_version.clone()),
                 }),
             )
-            .await
+            .await?;
+            log_version(
+                &state,
+                &user.0,
+                &id,
+                &value,
+                loader_version,
+                game_version,
+            )
+            .await;
+            Ok(result)
         }
         Reinstall::Modpack {
             project_id,
@@ -683,13 +879,14 @@ async fn reinstall(
             })?;
             install_modrinth_pack(&state, &id, &project_id, &version_id)
                 .await?;
+            log_modpack(&state, &user.0, &id, &project_id, &version_id).await;
             Ok(Json(json!({})))
         }
     }
 }
 
 async fn startup_v0(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult {
@@ -701,7 +898,7 @@ async fn startup_v0(
 }
 
 async fn startup_v1(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
@@ -714,7 +911,7 @@ async fn startup_v1(
 }
 
 async fn patch_startup_v0(
-    user: AuthUser,
+    user: CanAdvanced,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<Value>,
@@ -743,11 +940,11 @@ async fn patch_startup_v0(
             }
         })
         .transpose()?;
-    patch_java(user, state, id, version).await
+    patch_java(&user.0, state, id, version).await
 }
 
 async fn patch_startup_v1(
-    user: AuthUser,
+    user: CanAdvanced,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<Value>,
@@ -773,18 +970,18 @@ async fn patch_startup_v1(
             }
         })
         .transpose()?;
-    patch_java(user, state, id, version).await
+    patch_java(&user.0, state, id, version).await
 }
 
 async fn patch_java(
-    _user: AuthUser,
+    account: &Account,
     state: Arc<AppState>,
     id: String,
     version: Option<Option<i64>>,
 ) -> ApiResult {
-    instances::patch_instance(
-        Path(id),
-        State(state),
+    let result = instances::patch_instance(
+        Path(id.clone()),
+        State(state.clone()),
         Json(instances::PatchBody {
             name: None,
             java_version: version,
@@ -793,17 +990,31 @@ async fn patch_java(
             server_args: None,
         }),
     )
-    .await
+    .await?;
+    if let Some(Some(version)) = version {
+        log(
+            &state,
+            account,
+            &id,
+            "java_version_modified",
+            json!({"version": version}),
+        )
+        .await;
+    }
+    Ok(result)
 }
 
 async fn get_properties(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
+    read_properties(state, world(id, wid)?).await
+}
+
+async fn read_properties(state: Arc<AppState>, id: String) -> ApiResult {
     let Json(value) =
-        properties::get_properties_handler(Path(world(id, wid)?), State(state))
-            .await?;
+        properties::get_properties_handler(Path(id), State(state)).await?;
     let mut known = serde_json::Map::new();
     let mut custom = serde_json::Map::new();
     if let Some(props) = value["properties"].as_object() {
@@ -820,14 +1031,28 @@ async fn get_properties(
 }
 
 async fn patch_properties(
-    user: AuthUser,
+    user: CanAdvanced,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<PropertiesPatch>,
 ) -> ApiResult {
     let id = world(id, wid)?;
+    let changed: serde_json::Map<String, Value> = body
+        .known
+        .iter()
+        .chain(&body.custom)
+        .map(|(key, value)| (key.clone(), json!(value)))
+        .collect();
     apply_properties(&state, &id, body).await?;
-    get_properties(user, State(state), Path((id.clone(), id))).await
+    log(
+        &state,
+        &user.0,
+        &id,
+        "server_properties_modified",
+        json!({"properties": changed}),
+    )
+    .await;
+    read_properties(state, id).await
 }
 
 async fn apply_properties(
@@ -868,7 +1093,7 @@ async fn apply_properties(
 }
 
 async fn install_content(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<InstallContent>,
@@ -911,12 +1136,21 @@ async fn install_content(
                 Path(id.clone()),
                 State(state.clone()),
                 Json(instance_control::ChangeVersionBody {
-                    game_version: Some(game_version),
+                    game_version: Some(game_version.clone()),
                     loader: Some(target),
-                    loader_version: Some(loader_version),
+                    loader_version: Some(loader_version.clone()),
                 }),
             )
             .await?;
+            log_version(
+                &state,
+                &user.0,
+                &id,
+                &value,
+                loader_version,
+                Some(game_version),
+            )
+            .await;
             properties
         }
         InstallContent::Modpack {
@@ -941,6 +1175,8 @@ async fn install_content(
                         &version_id,
                     )
                     .await?;
+                    log_modpack(&state, &user.0, &id, &project_id, &version_id)
+                        .await;
                 }
                 ModpackSpec::LocalFile { filename } => {
                     return Err(ApiError::UnprocessableEntity(format!(
@@ -962,11 +1198,16 @@ async fn install_content(
 }
 
 async fn repair(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
-    instance_control::repair(Path(world(id, wid)?), State(state)).await
+    let id = world(id, wid)?;
+    let result =
+        instance_control::repair(Path(id.clone()), State(state.clone()))
+            .await?;
+    log(&state, &user.0, &id, "server_repaired", json!({})).await;
+    Ok(result)
 }
 
 async fn install_modrinth_pack(
@@ -1005,17 +1246,28 @@ async fn install_modrinth_pack(
 
 /// The linked pack's files stay on the server and become its own content.
 async fn unlink_modpack(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
     let r = record(&state, &world(id, wid)?).await?;
-    server_source_service::unlink(&state, &r.id.to_string()).await?;
+    let id = r.id.to_string();
+    let linked = server_source_service::get_status(&state, &id).await?;
+    server_source_service::unlink(&state, &id).await?;
+    let spec = linked.as_ref().map(source_spec);
+    log(
+        &state,
+        &user.0,
+        &id,
+        "modpack_unlinked",
+        json!({"spec": spec}),
+    )
+    .await;
     Ok(Json(json!({})))
 }
 
 async fn get_modpack_update(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
@@ -1029,13 +1281,14 @@ async fn get_modpack_update(
 /// Applies the newest pushed version now. A running server restarts; a stopped one stays
 /// stopped. This is also the retry for a failed update.
 async fn update_modpack(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
     let r = record(&state, &world(id, wid)?).await?;
     let status =
         server_source_service::apply_now(&state, &r.id.to_string()).await?;
+    log_source_update(&state, &user.0, &r.id.to_string(), &status).await;
     Ok(Json(modpack(&status)))
 }
 
@@ -1047,7 +1300,7 @@ struct AddonsQuery {
 /// Mods and datapacks on the server. `from_modpack` selects the linked pack's content or the
 /// server's own additions. Client-only pack content is listed with `installed: false`.
 async fn get_addons(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<AddonsQuery>,
@@ -1141,185 +1394,265 @@ fn require_mod(kind: Option<&str>) -> Result<(), ApiError> {
     Ok(())
 }
 
-async fn add_addon(
-    _user: AuthUser,
-    State(state): State<Arc<AppState>>,
-    Path((id, wid)): Path<(String, String)>,
-    Json(body): Json<AddAddon>,
-) -> ApiResult {
-    require_mod(body.kind.as_deref())?;
-    mods::add_mod_handler(
-        Path(world(id, wid)?),
-        State(state),
+async fn add_one(
+    state: &Arc<AppState>,
+    id: &str,
+    body: AddAddon,
+) -> Result<Value, ApiError> {
+    let Json(added) = mods::add_mod_handler(
+        Path(id.to_string()),
+        State(state.clone()),
         Json(mods::AddModBody {
             project_id: Some(body.project_id),
             version_id: body.version_id,
         }),
     )
-    .await
+    .await?;
+    let filename = added["filename"].as_str().unwrap_or_default();
+    Ok(addon_entry(state, id, filename).await)
+}
+
+async fn add_addon(
+    user: CanSetup,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(body): Json<AddAddon>,
+) -> ApiResult {
+    require_mod(body.kind.as_deref())?;
+    let id = world(id, wid)?;
+    let added = add_one(&state, &id, body).await?;
+    log(
+        &state,
+        &user.0,
+        &id,
+        "addon_added",
+        json!({"addons": [added]}),
+    )
+    .await;
+    Ok(Json(json!({})))
 }
 
 async fn add_addons(
-    user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
-    Path(pair): Path<(String, String)>,
+    Path((id, wid)): Path<(String, String)>,
     Json(items): Json<Vec<AddAddon>>,
 ) -> ApiResult {
     for item in &items {
         require_mod(item.kind.as_deref())?;
     }
+    let id = world(id, wid)?;
+    let mut added = Vec::new();
+    let mut result = Ok(());
     for item in items {
-        let _ = add_addon(
-            AuthUser(user.0.clone()),
-            State(state.clone()),
-            Path(pair.clone()),
-            Json(item),
-        )
-        .await?;
+        match add_one(&state, &id, item).await {
+            Ok(addon) => added.push(addon),
+            Err(error) => {
+                result = Err(error);
+                break;
+            }
+        }
     }
-    Ok(Json(json!({})))
+    // What was installed before a failure is logged too.
+    if !added.is_empty() {
+        log(
+            &state,
+            &user.0,
+            &id,
+            "addon_added",
+            json!({"addons": added}),
+        )
+        .await;
+    }
+    result.map(|()| Json(json!({})))
+}
+
+/// Delete, disable, or enable the server's own mods, and log them as one action.
+async fn change_addons(
+    state: &Arc<AppState>,
+    account: &Account,
+    pair: (String, String),
+    items: Vec<AddonFile>,
+    change: AddonChange,
+) -> ApiResult {
+    for item in &items {
+        require_mod(Some(&item.kind))?;
+    }
+    let id = world(pair.0, pair.1)?;
+    let mut changed = Vec::new();
+    let mut result = Ok(());
+    for item in items {
+        let entry = addon_entry(state, &id, &item.filename).await;
+        let done = async {
+            require_own(state, &id, &item.filename).await?;
+            let target = Path((id.clone(), item.filename));
+            match change {
+                AddonChange::Delete => {
+                    mods::delete_mod_handler(target, State(state.clone())).await
+                }
+                AddonChange::Enable | AddonChange::Disable => {
+                    mods::toggle_mod_handler(
+                        target,
+                        State(state.clone()),
+                        Json(mods::ToggleBody {
+                            enabled: change == AddonChange::Enable,
+                        }),
+                    )
+                    .await
+                }
+            }
+        }
+        .await;
+        match done {
+            Ok(_) => changed.push(entry),
+            Err(error) => {
+                result = Err(error);
+                break;
+            }
+        }
+    }
+    if !changed.is_empty() {
+        let action = match change {
+            AddonChange::Delete => "addon_deleted",
+            AddonChange::Enable => "addon_enabled",
+            AddonChange::Disable => "addon_disabled",
+        };
+        log(state, account, &id, action, json!({"addons": changed})).await;
+    }
+    result.map(|()| Json(json!({})))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum AddonChange {
+    Delete,
+    Enable,
+    Disable,
 }
 
 async fn delete_addon(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
-    Path((id, wid)): Path<(String, String)>,
+    Path(pair): Path<(String, String)>,
     Json(body): Json<AddonFile>,
 ) -> ApiResult {
-    require_mod(Some(&body.kind))?;
-    let id = world(id, wid)?;
-    require_own(&state, &id, &body.filename).await?;
-    mods::delete_mod_handler(Path((id, body.filename)), State(state)).await
+    change_addons(&state, &user.0, pair, vec![body], AddonChange::Delete).await
 }
 
 async fn delete_addons(
-    user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(pair): Path<(String, String)>,
     Json(body): Json<AddonFiles>,
 ) -> ApiResult {
-    for item in &body.items {
-        require_mod(Some(&item.kind))?;
-    }
-    for item in body.items {
-        let _ = delete_addon(
-            AuthUser(user.0.clone()),
-            State(state.clone()),
-            Path(pair.clone()),
-            Json(item),
-        )
-        .await?;
-    }
-    Ok(Json(json!({})))
-}
-
-async fn toggle(
-    _user: AuthUser,
-    state: Arc<AppState>,
-    pair: (String, String),
-    body: AddonFile,
-    enabled: bool,
-) -> ApiResult {
-    require_mod(Some(&body.kind))?;
-    let id = world(pair.0, pair.1)?;
-    require_own(&state, &id, &body.filename).await?;
-    mods::toggle_mod_handler(
-        Path((id, body.filename)),
-        State(state),
-        Json(mods::ToggleBody { enabled }),
-    )
-    .await
+    change_addons(&state, &user.0, pair, body.items, AddonChange::Delete).await
 }
 
 async fn disable_addon(
-    user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(pair): Path<(String, String)>,
     Json(body): Json<AddonFile>,
 ) -> ApiResult {
-    toggle(user, state, pair, body, false).await
-}
-async fn enable_addon(
-    user: AuthUser,
-    State(state): State<Arc<AppState>>,
-    Path(pair): Path<(String, String)>,
-    Json(body): Json<AddonFile>,
-) -> ApiResult {
-    toggle(user, state, pair, body, true).await
+    change_addons(&state, &user.0, pair, vec![body], AddonChange::Disable).await
 }
 
-async fn toggle_many(
-    user: AuthUser,
-    state: Arc<AppState>,
-    pair: (String, String),
-    body: AddonFiles,
-    enabled: bool,
+async fn enable_addon(
+    user: CanSetup,
+    State(state): State<Arc<AppState>>,
+    Path(pair): Path<(String, String)>,
+    Json(body): Json<AddonFile>,
 ) -> ApiResult {
-    for item in &body.items {
-        require_mod(Some(&item.kind))?;
-    }
-    for item in body.items {
-        let _ = toggle(
-            AuthUser(user.0.clone()),
-            state.clone(),
-            pair.clone(),
-            item,
-            enabled,
-        )
-        .await?;
-    }
-    Ok(Json(json!({})))
+    change_addons(&state, &user.0, pair, vec![body], AddonChange::Enable).await
 }
+
 async fn disable_addons(
-    user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(pair): Path<(String, String)>,
     Json(body): Json<AddonFiles>,
 ) -> ApiResult {
-    toggle_many(user, state, pair, body, false).await
+    change_addons(&state, &user.0, pair, body.items, AddonChange::Disable).await
 }
+
 async fn enable_addons(
-    user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(pair): Path<(String, String)>,
     Json(body): Json<AddonFiles>,
 ) -> ApiResult {
-    toggle_many(user, state, pair, body, true).await
+    change_addons(&state, &user.0, pair, body.items, AddonChange::Enable).await
+}
+
+/// Update mods to a version, or to their newest, and log the ones that changed as one action.
+async fn update_many(
+    state: &Arc<AppState>,
+    account: &Account,
+    pair: (String, String),
+    items: Vec<UpdateAddon>,
+) -> Result<bool, ApiError> {
+    let id = world(pair.0, pair.1)?;
+    let id = record(state, &id).await?.id.to_string();
+    let mut updated = Vec::new();
+    let mut result = Ok(());
+    for item in items {
+        let before = addon_entry(state, &id, &item.filename).await;
+        match mod_service::update_mod_version(
+            state,
+            &id,
+            &item.filename,
+            item.version_id.as_deref(),
+        )
+        .await
+        {
+            Ok(true) => {
+                // The update renames the file, so the mod is found again by its project.
+                let mods = mod_service::list_mods(state, &id)
+                    .await
+                    .unwrap_or_default();
+                let info = mods.iter().find(|m| {
+                    m.modrinth_project_id.is_some()
+                        && json!(m.modrinth_project_id) == before["addon_id"]
+                });
+                updated.push(addon_json(info, &item.filename));
+            }
+            Ok(false) => {}
+            Err(error) => {
+                result = Err(error.into());
+                break;
+            }
+        }
+    }
+    let any = !updated.is_empty();
+    if any {
+        log(
+            state,
+            account,
+            &id,
+            "addon_updated",
+            json!({"addons": updated}),
+        )
+        .await;
+    }
+    result.map(|()| any)
 }
 
 async fn update_addon(
-    _user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
-    Path((id, wid)): Path<(String, String)>,
+    Path(pair): Path<(String, String)>,
     Json(body): Json<UpdateAddon>,
 ) -> ApiResult {
-    let id = world(id, wid)?;
-    let r = record(&state, &id).await?;
-    let updated = mod_service::update_mod_version(
-        &state,
-        &r.id.to_string(),
-        &body.filename,
-        body.version_id.as_deref(),
-    )
-    .await?;
+    let updated = update_many(&state, &user.0, pair, vec![body]).await?;
     Ok(Json(json!({"updated": updated})))
 }
 
 async fn update_addons(
-    user: AuthUser,
+    user: CanSetup,
     State(state): State<Arc<AppState>>,
     Path(pair): Path<(String, String)>,
     Json(body): Json<UpdateAddons>,
 ) -> ApiResult {
-    for item in body.addons {
-        let _ = update_addon(
-            AuthUser(user.0.clone()),
-            State(state.clone()),
-            Path(pair.clone()),
-            Json(item),
-        )
-        .await?;
-    }
+    update_many(&state, &user.0, pair, body.addons).await?;
     Ok(Json(json!({})))
 }
 
@@ -1336,7 +1669,7 @@ async fn backup_rows(
 }
 
 async fn list_backups(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> ApiResult {
@@ -1344,7 +1677,7 @@ async fn list_backups(
 }
 
 async fn get_backup(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
@@ -1356,7 +1689,7 @@ async fn get_backup(
 }
 
 async fn create_backup(
-    _user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
     body: Json<backups::CreateBody>,
@@ -1366,49 +1699,77 @@ async fn create_backup(
         backups::create_handler(Path(id.clone()), State(state.clone()), body)
             .await?;
     notify_changed(&state, &id, false).await?;
+    log(
+        &state,
+        &user.0,
+        &id,
+        "backup_created",
+        json!({"id": created["id"]}),
+    )
+    .await;
     Ok(Json(json!({"id": created["id"]})))
 }
 
 async fn delete_backup(
-    _user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let result =
-        backups::delete_handler(Path((id.clone(), bid)), State(state.clone()))
-            .await?;
+    let result = backups::delete_handler(
+        Path((id.clone(), bid.clone())),
+        State(state.clone()),
+    )
+    .await?;
     notify_changed(&state, &id, false).await?;
+    log(&state, &user.0, &id, "backup_deleted", json!({"id": bid})).await;
     Ok(result)
 }
 
 async fn rename_backup(
-    _user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
     body: Json<backups::RenameBody>,
 ) -> ApiResult {
     let id = world(id, wid)?;
+    let from = backup_rows(&state, &id)
+        .await?
+        .into_iter()
+        .find(|b| b["id"].as_str() == Some(&bid))
+        .map(|b| b["name"].clone());
+    let to = body.name.clone();
     let result = backups::rename_handler(
-        Path((id.clone(), bid)),
+        Path((id.clone(), bid.clone())),
         State(state.clone()),
         body,
     )
     .await?;
     notify_changed(&state, &id, false).await?;
+    log(
+        &state,
+        &user.0,
+        &id,
+        "backup_renamed",
+        json!({"id": bid, "from": from, "to": to}),
+    )
+    .await;
     Ok(result)
 }
 
 async fn restore_backup(
-    _user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
 ) -> ApiResult {
     let id = world(id, wid)?;
-    let result =
-        backups::restore_handler(Path((id.clone(), bid)), State(state.clone()))
-            .await?;
+    let result = backups::restore_handler(
+        Path((id.clone(), bid.clone())),
+        State(state.clone()),
+    )
+    .await?;
     notify_changed(&state, &id, true).await?;
+    log(&state, &user.0, &id, "backup_restored", json!({"id": bid})).await;
     Ok(result)
 }
 
@@ -1432,7 +1793,7 @@ async fn notify_changed(
 }
 
 async fn download_backup(
-    _user: AuthUser,
+    _user: CanBackup,
     State(state): State<Arc<AppState>>,
     Path((id, bid)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {

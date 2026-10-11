@@ -31,6 +31,7 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     application::{
+        access_service,
         instance_status_service::send_command,
         state::AppState,
         stats_service::{host_cpu_percent, host_memory_percent},
@@ -42,7 +43,8 @@ use crate::{
         },
     },
     presentation::{
-        error::ApiError, extractors::AuthUser,
+        error::ApiError,
+        extractors::{Account, CanExec, SignedIn},
         instance_path::resolve_instance_path,
     },
 };
@@ -65,7 +67,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn clear_logs(
-    _user: AuthUser,
+    user: CanExec,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Extension(cursors): Extension<LogCursors>,
@@ -81,6 +83,7 @@ async fn clear_logs(
         .instances
         .get(&record.id)
         .map(|handle| handle.started_at);
+    let server_id = record.id.to_string();
     cursors.insert(
         record.id,
         LogCursor {
@@ -89,6 +92,14 @@ async fn clear_logs(
             process_started,
         },
     );
+    access_service::log(
+        &state,
+        &server_id,
+        &user.0.id,
+        "console_cleared",
+        json!({}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -114,11 +125,46 @@ enum ClientMessage {
     Command { cmd: String },
 }
 
-fn authenticate(state: &AppState, iid: &InstanceId, token: &str) -> bool {
+/// The account a ticket was issued to, when the ticket is good for this server.
+fn authenticate(
+    state: &AppState,
+    iid: &InstanceId,
+    token: &str,
+) -> Option<Account> {
     // Tickets are deliberately scoped to the URL's server and consumed once.
-    state.ws_tickets.remove(token).is_some_and(|(_, ticket)| {
-        ticket.expires_at > Instant::now() && ticket.instance_id == *iid
-    })
+    let (_, ticket) = state.ws_tickets.remove(token)?;
+    (ticket.expires_at > Instant::now() && ticket.instance_id == *iid)
+        .then_some(ticket.account)
+}
+
+/// Run a console command as `account`, if its role still allows it.
+async fn run_command(
+    state: &Arc<AppState>,
+    iid: &InstanceId,
+    account: &Account,
+    command: String,
+) -> Result<(), String> {
+    let server_id = iid.to_string();
+    access_service::require(
+        state,
+        &account.id,
+        &server_id,
+        access_service::scope::EXEC_COMMANDS,
+    )
+    .await
+    .map_err(|_| "Your role on this server cannot run commands".to_string())?;
+    send_command(state, iid, command.clone())
+        .await
+        .map_err(|error| error.to_string())?;
+    access_service::log(
+        state,
+        &server_id,
+        &account.id,
+        "console_command_executed",
+        json!({"command": command}),
+    )
+    .await;
+    Ok(())
 }
 
 async fn send(socket: &mut WebSocket, data: Value) -> bool {
@@ -134,23 +180,23 @@ async fn serve(
     // The generic client refreshes an expired/consumed ticket asynchronously
     // after auth-incorrect. Keep this bounded handshake open for that refresh.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
+    let mut account = loop {
         let Ok(Some(Ok(Message::Text(text)))) =
             tokio::time::timeout_at(deadline, socket.recv()).await
         else {
             return;
         };
-        let valid = match serde_json::from_str::<ClientMessage>(&text) {
+        let account = match serde_json::from_str::<ClientMessage>(&text) {
             Ok(ClientMessage::Auth { jwt }) => authenticate(&state, &iid, &jwt),
-            _ => false,
+            _ => None,
         };
-        if valid {
-            break;
+        if let Some(account) = account {
+            break account;
         }
         if !send(&mut socket, json!({"event": "auth-incorrect"})).await {
             return;
         }
-    }
+    };
     let mut events = state.broadcaster.subscribe();
     if !send(&mut socket, json!({"event": "auth-ok"})).await {
         return;
@@ -182,6 +228,12 @@ async fn serve(
     loop {
         tokio::select! {
             _ = tick.tick() => {
+                // Unpairing the Core announces nothing, so access is also checked on every tick.
+                let role = access_service::role(&state, &account.id, &iid.to_string()).await;
+                if !matches!(role, Ok(Some(_))) {
+                    send(&mut socket, json!({"event": "auth-incorrect"})).await;
+                    break;
+                }
                 let Ok(latest) = state.instance_store.get(&iid).await else { break; };
                 record = latest;
                 if !send_state(&mut socket, &state, &record, progress, install_error.as_deref()).await { break; }
@@ -241,7 +293,16 @@ async fn serve(
                         }
                         if !send_state(&mut socket, &state, &record, None, install_error.as_deref()).await { break; }
                     }
-                    Ok(Event::InstanceUpdated { instance }) if instance.id == iid => { record = instance; }
+                    Ok(Event::InstanceUpdated { instance }) if instance.id == iid => {
+                        // Access changes announce themselves as a server update. Someone who was
+                        // removed stops getting the console right away, not at their next reconnect.
+                        let role = access_service::role(&state, &account.id, &iid.to_string()).await;
+                        if !matches!(role, Ok(Some(_))) {
+                            send(&mut socket, json!({"event": "auth-incorrect"})).await;
+                            break;
+                        }
+                        record = instance;
+                    }
                     Ok(Event::InstanceDeleted { instance_id }) if instance_id == iid => {
                         cursors.remove(&iid);
                         break;
@@ -257,15 +318,16 @@ async fn serve(
                 match message {
                     Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
                         Ok(ClientMessage::Command { cmd }) => {
-                            if let Err(error) = send_command(&state, &iid, cmd).await {
-                                if !send(&mut socket, json!({"event": "log", "stream": "stderr", "message": error.to_string()})).await { break; }
+                            if let Err(error) = run_command(&state, &iid, &account, cmd).await {
+                                if !send(&mut socket, json!({"event": "log", "stream": "stderr", "message": error})).await { break; }
                             }
                         }
                         Ok(ClientMessage::Auth { jwt }) => {
-                            if !authenticate(&state, &iid, &jwt) {
+                            let Some(renewed) = authenticate(&state, &iid, &jwt) else {
                                 send(&mut socket, json!({"event": "auth-incorrect"})).await;
                                 break;
-                            }
+                            };
+                            account = renewed;
                             if !send(&mut socket, json!({"event": "auth-ok"})).await { break; }
                         }
                         Err(_) => {
@@ -419,7 +481,7 @@ struct SyncQuery {
 }
 
 async fn sync(
-    _user: AuthUser,
+    SignedIn(account): SignedIn,
     State(state): State<Arc<AppState>>,
     Query(query): Query<SyncQuery>,
     headers: HeaderMap,
@@ -433,6 +495,13 @@ async fn sync(
     let iid: InstanceId = id
         .parse()
         .map_err(|_| ApiError::NotFound("server not found".into()))?;
+    access_service::require(
+        &state,
+        &account.id,
+        &iid.to_string(),
+        access_service::scope::BASE_READ,
+    )
+    .await?;
     let record = state.instance_store.get(&iid).await?;
     if let Some(intent) = &query.intent {
         if !intent.split(',').all(|part| {

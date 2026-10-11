@@ -26,6 +26,8 @@ use crate::{
 /// Short-lived, single-use ticket that opens one server's WebSocket.
 pub struct WsTicket {
     pub instance_id: InstanceId,
+    /// Who asked for the ticket. Commands sent on the socket are checked and logged as them.
+    pub account: Account,
     pub expires_at: Instant,
 }
 
@@ -171,6 +173,8 @@ impl AppState {
         sqlx::query("DELETE FROM core_owner")
             .execute(&self.pool)
             .await?;
+        // The next owner starts with nobody else on these servers.
+        super::access_service::forget_everyone(self).await?;
         self.account_tokens.clear();
         Ok(())
     }

@@ -21,7 +21,8 @@ let settle: ((core: Archon.Cores.v1.Core | null) => void) | null = null
 async function pick(): Promise<Archon.Cores.v1.Core | null> {
 	try {
 		if (!(await ensureCorePaired())) return null
-		cores.value = await client.archon.cores_v1.list()
+		// Servers are only created on the account's own Cores.
+		cores.value = (await client.archon.cores_v1.list()).filter((core) => core.owned)
 	} catch (cause) {
 		console.error('Failed to load Cores', cause)
 		addNotification({

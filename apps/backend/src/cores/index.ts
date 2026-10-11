@@ -1,14 +1,27 @@
 import { connect } from 'cloudflare:sockets'
 
-import { requireUser, tokenFrom } from '../common/auth'
+import { findUser, requireUser, tokenFrom } from '../common/auth'
 import { digest, randomId } from '../common/crypto'
-import { ApiError, json, readJson, routePath, stringField, unauthorized } from '../common/http'
+import {
+	ApiError,
+	invalid,
+	json,
+	readJson,
+	routePath,
+	stringField,
+	unauthorized,
+} from '../common/http'
+import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 
 // Core pairing. A Core registers the code it is showing, an account claims that code in the App,
 // and the Core then confirms the claim to receive its own key. After that the backend only keeps
 // the account's list of Cores and their addresses, and tests on request whether a Core can be
 // reached from the internet.
+//
+// A Core's owner can invite other accounts to manage its servers. The Core keeps who has which
+// role on which server; the backend only keeps which accounts may reach the Core, so their App is
+// told its address too, and delivers the invite.
 
 const CODE_TTL_MS = 15 * 60_000
 // Expired codes are kept this long so a late guess is told "expired" instead of "wrong".
@@ -39,6 +52,7 @@ interface CoreRow {
 	address: string
 	cert_fingerprint: string | null
 	public_address: string | null
+	version: string | null
 	created: string
 	last_seen: string
 }
@@ -96,13 +110,16 @@ function pairingCode(body: Record<string, unknown>): string {
 		.toLowerCase()
 }
 
-function publicCore(row: CoreRow) {
+/** A Core as `userId` sees it. `owned` is false for a Core they were only invited to. */
+function publicCore(row: CoreRow, userId: string) {
 	return {
 		id: row.id,
 		name: row.name,
 		address: row.address,
 		cert_fingerprint: row.cert_fingerprint,
 		public_address: row.public_address,
+		version: row.version,
+		owned: row.owner_id === userId,
 		created: row.created,
 		last_seen: row.last_seen,
 	}
@@ -242,13 +259,15 @@ async function reportAddress(request: Request, env: Env) {
 	const publicAddress = body.public_address == null ? null : coreAddress(body, 'public_address')
 	if (publicAddress && !publicAddress.startsWith('https:'))
 		throw new ApiError(400, 'invalid_address', 'A public Core address must use HTTPS')
+	const version = body.version == null ? null : stringField(body, 'version', 32)
 	const row = await env.DB.prepare(
-		'UPDATE cores SET address = ?, public_address = ?, cert_fingerprint = COALESCE(?, cert_fingerprint), last_seen = ? WHERE key_hash = ? RETURNING *',
+		'UPDATE cores SET address = ?, public_address = ?, cert_fingerprint = COALESCE(?, cert_fingerprint), version = COALESCE(?, version), last_seen = ? WHERE key_hash = ? RETURNING *',
 	)
 		.bind(
 			address,
 			publicAddress,
 			certFingerprint(body),
+			version,
 			new Date().toISOString(),
 			await digest(key),
 		)
@@ -321,6 +340,73 @@ async function checkReachability(request: Request, env: Env) {
 	return json({ address, outside, ...(await tcpConnects(address, port)) })
 }
 
+/** The Core a request's key belongs to. */
+async function requireCore(request: Request, env: Env): Promise<CoreRow> {
+	const key = tokenFrom(request)
+	if (!key.startsWith('amc_')) unauthorized()
+	const core = await env.DB.prepare('SELECT * FROM cores WHERE key_hash = ?')
+		.bind(await digest(key))
+		.first<CoreRow>()
+	if (!core) unauthorized()
+	return core
+}
+
+/** One account's invite to one server of one Core. Binds: account, Core, server. */
+const INVITE_FILTER =
+	"user_id = ? AND json_extract(body,'$.type') = 'server_invite' AND json_extract(body,'$.core_id') = ? AND json_extract(body,'$.server_id') = ?"
+
+/**
+ * Core, paired: an account was invited to one of its servers. The account may reach this Core from
+ * now on, and gets the invite as a notification to accept in the App. `user` is an id or a
+ * username; the answer says who it is, so the Core can show their name.
+ */
+async function grantAccess(request: Request, env: Env) {
+	const core = await requireCore(request, env)
+	const body = await readJson(request)
+	const serverId = stringField(body, 'server_id', 64)
+	const user = await findUser(env, stringField(body, 'user', 64))
+	if (!user) throw new ApiError(404, 'not_found', 'No account has that name')
+	if (user.id === core.owner_id) invalid('The owner already has full access')
+	await env.DB.batch([
+		env.DB.prepare(
+			'INSERT OR IGNORE INTO core_access (core_id,user_id,created) VALUES (?,?,?)',
+		).bind(core.id, user.id, new Date().toISOString()),
+		// A repeated invite replaces the one before it.
+		env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`).bind(
+			user.id,
+			core.id,
+			serverId,
+		),
+	])
+	await addNotification(env, user.id, {
+		type: 'server_invite',
+		core_id: core.id,
+		server_id: serverId,
+		server_name: stringField(body, 'server_name', 100),
+		role: stringField(body, 'role', 16),
+		invited_by: stringField(body, 'invited_by', 64),
+	})
+	return json({ id: user.id, username: user.username, avatar_url: user.avatar_url })
+}
+
+/**
+ * Core, paired: an account lost its access or its invite to one server. Its invite is withdrawn,
+ * and unless `keep_core` says it still has another server there, so is its way to this Core.
+ */
+async function revokeAccess(request: Request, env: Env) {
+	const core = await requireCore(request, env)
+	const body = await readJson(request)
+	const userId = stringField(body, 'user_id', 64)
+	await env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`)
+		.bind(userId, core.id, stringField(body, 'server_id', 64))
+		.run()
+	if (body.keep_core !== true)
+		await env.DB.prepare('DELETE FROM core_access WHERE core_id = ? AND user_id = ?')
+			.bind(core.id, userId)
+			.run()
+	return new Response(null, { status: 204 })
+}
+
 export async function handleCores(request: Request, env: Env): Promise<Response | null> {
 	const path = routePath(request),
 		method = request.method
@@ -328,13 +414,19 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 	if (path === '/core/pairing/confirm' && method === 'POST') return confirmClaim(request, env)
 	if (path === '/core/address' && method === 'POST') return reportAddress(request, env)
 	if (path === '/core/reachability' && method === 'POST') return checkReachability(request, env)
+	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
+	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)
 	if (path === '/cores/pair' && method === 'POST') return claimCode(request, env)
 	if (path === '/cores' && method === 'GET') {
+		// The account's own Cores, then the ones it was invited to. Nobody else is told where a
+		// Core is.
 		const user = await requireUser(request, env)
-		const rows = await env.DB.prepare('SELECT * FROM cores WHERE owner_id = ? ORDER BY created')
+		const rows = await env.DB.prepare(
+			'SELECT * FROM cores WHERE owner_id = ?1 OR id IN (SELECT core_id FROM core_access WHERE user_id = ?1) ORDER BY owner_id = ?1 DESC, created',
+		)
 			.bind(user.id)
 			.all<CoreRow>()
-		return json(rows.results.map(publicCore))
+		return json(rows.results.map((row) => publicCore(row, user.id)))
 	}
 	const core = path.match(/^\/cores\/([^/]+)$/)
 	if (core && method === 'DELETE') {

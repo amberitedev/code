@@ -32,9 +32,10 @@ export class CorePairingError extends Error {
 }
 
 /**
- * The account's paired Cores. The backend keeps the list and each Core's address; hosting calls go
- * to a Core directly. Several Cores are treated as one: their servers form one list, and a request
- * for a server is sent to the Core that has it.
+ * The Cores the account may reach: the ones it paired, and the ones it was invited to manage a
+ * server on. The backend keeps the list and each Core's address; hosting calls go to a Core
+ * directly. Several Cores are treated as one: their servers form one list, and a request for a
+ * server is sent to the Core that has it.
  */
 export class ArchonCoresV1Module extends AbstractModule {
 	private cores: Promise<Archon.Cores.v1.Core[]> | null = null
@@ -49,7 +50,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return 'archon_cores_v1'
 	}
 
-	/** Fetch the account's paired Cores from the backend. */
+	/** Fetch the Cores the account may reach from the backend, its own first. */
 	public list(): Promise<Archon.Cores.v1.Core[]> {
 		const cores = this.client
 			.request<Archon.Cores.v1.Core[]>('/cores', { api: 'labrinth', version: 3, method: 'GET' })
@@ -136,7 +137,28 @@ export class ArchonCoresV1Module extends AbstractModule {
 		this.cores = null
 	}
 
-	/** Whether `url` is on a paired Core, which is allowed to receive the account token. */
+	/**
+	 * Accept or decline an invite to manage a server on someone else's Core. The invite is what
+	 * made that Core reachable, so the list is fetched again to find it.
+	 */
+	public async respondToInvite(
+		coreId: string,
+		serverId: string,
+		action: 'accept' | 'decline',
+	): Promise<void> {
+		const core = (await this.list()).find((candidate) => candidate.id === coreId)
+		if (!core) throw new ModrinthApiError('This invite is no longer available', { statusCode: 404 })
+		await this.client.request(`/servers/${serverId}/invites/${action}`, {
+			api: `${this.base(core)}/hosting`,
+			version: 1,
+			method: 'POST',
+		})
+		if (action === 'accept') this.serverAddresses.set(serverId, this.base(core))
+		// Declining the only invite takes the Core out of the list.
+		else this.cores = null
+	}
+
+	/** Whether `url` is on a listed Core, which is allowed to receive the account token. */
 	public isCoreUrl(url: string): boolean {
 		for (const address of this.addresses) {
 			if (url.startsWith(address)) return true

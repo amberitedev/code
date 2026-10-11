@@ -101,7 +101,7 @@ import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
-import { useCores } from '@/composables/use-cores'
+import { coresQueryKey, useCores } from '@/composables/use-cores'
 import { useError } from '@/composables/use-error.js'
 import { useInstanceMetadataRefresh } from '@/composables/use-instance-metadata-refresh'
 import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts'
@@ -1504,11 +1504,25 @@ async function respondToServerInvite(notification, action) {
 		throw new Error('Missing server ID for invite notification.')
 	}
 
-	await tauriApiClient.request(`/servers/${serverId}/invites/${action}`, {
-		api: 'archon',
-		version: 1,
-		method: 'POST',
-	})
+	const coreId = notification.body?.core_id
+	if (typeof coreId === 'string') {
+		// The server is on someone else's Core, which the invite made reachable.
+		try {
+			await tauriApiClient.archon.cores_v1.respondToInvite(coreId, serverId, action)
+		} catch (error) {
+			// The invite, its server, or its Core is gone, so it should not be offered again.
+			if (error instanceof ModrinthApiError && error.statusCode === 404)
+				await markLiveNotificationRead(notification)
+			throw error
+		}
+		await queryClient.invalidateQueries({ queryKey: coresQueryKey })
+	} else {
+		await tauriApiClient.request(`/servers/${serverId}/invites/${action}`, {
+			api: 'archon',
+			version: 1,
+			method: 'POST',
+		})
+	}
 	await markLiveNotificationRead(notification)
 
 	return serverId

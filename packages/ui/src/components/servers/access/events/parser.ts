@@ -157,6 +157,20 @@ export function parseAuditEvent(
 					versionLabel,
 				])
 			}
+			case 'instance_version_applied': {
+				const name = stringField(metadataRecord(metadata), 'name')
+				if (!name) return unknown(base, action)
+				const instance: EventEntity = {
+					id: name,
+					label: name,
+					icon: PackageIcon,
+					iconShape: 'square',
+				}
+				return parsed(ModpackEvent, base, { kind: 'instance_updated', modpack: instance }, [
+					...actionSearchParts(action),
+					name,
+				])
+			}
 			case 'port_allocation_added':
 			case 'port_allocation_removed': {
 				const port = numberField(metadataRecord(metadata), 'port')
@@ -190,13 +204,11 @@ export function parseAuditEvent(
 			case 'server_properties_modified': {
 				const properties = objectField(metadataRecord(metadata), 'properties')
 				if (!properties) return unknown(base, action)
-				const items = Object.entries(properties).map(
-					([key, value]): EventEntity => ({
-						id: key,
-						label: `${key}: ${valueToString(value) ?? ''}`,
-						mono: true,
-					}),
-				)
+				const items = Object.entries(properties).map(([key, value]): EventEntity => ({
+					id: key,
+					label: `${key}: ${valueToString(value) ?? ''}`,
+					mono: true,
+				}))
 				return parsed(ConfigEvent, base, { kind: 'properties', properties: items }, [
 					...actionSearchParts(action),
 					...items.map((item) => item.label),

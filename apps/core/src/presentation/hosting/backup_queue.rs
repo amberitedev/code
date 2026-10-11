@@ -2,8 +2,11 @@
 //! Workers serialize operations for each server; progress is a real state, not a timer.
 use super::{notify_changed, record, world, ApiResult};
 use crate::{
-    application::{backup_service, state::AppState},
-    presentation::{error::ApiError, extractors::AuthUser},
+    application::{access_service, backup_service, state::AppState},
+    presentation::{
+        error::ApiError,
+        extractors::{CanBackup, CanRead},
+    },
 };
 use axum::{
     extract::{Path, State},
@@ -104,7 +107,7 @@ fn operation_json(op: &Operation) -> Value {
 }
 
 async fn list(
-    _user: AuthUser,
+    _user: CanRead,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid)): Path<(String, String)>,
@@ -180,6 +183,19 @@ async fn enqueue(
         .bind(&instance_id).bind(&backup_id).bind(&display_name).bind(kind).bind(&now).bind(&user_id).bind(&safety_name)
         .execute(&state.pool).await.map_err(db_error)?;
     let op_id = result.last_insert_rowid();
+    let action = if kind == "create" {
+        "backup_created"
+    } else {
+        "backup_restored"
+    };
+    access_service::log(
+        &state,
+        &instance_id,
+        &user_id,
+        action,
+        json!({"id": backup_id}),
+    )
+    .await;
     let lock = queue
         .servers
         .entry(instance_id.clone())
@@ -255,7 +271,7 @@ async fn run(state: &Arc<AppState>, op_id: i64) -> Result<bool, ApiError> {
 }
 
 async fn create(
-    user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid)): Path<(String, String)>,
@@ -278,7 +294,7 @@ async fn create(
 }
 
 async fn restore(
-    user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
@@ -311,7 +327,7 @@ async fn restore(
 }
 
 async fn history_action(
-    _user: AuthUser,
+    _user: CanBackup,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, kind, operation, action)): Path<(
@@ -352,7 +368,7 @@ async fn history_action(
 }
 
 async fn retry(
-    user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
@@ -417,7 +433,7 @@ async fn remove_one(
 }
 
 async fn remove(
-    _user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid, bid)): Path<(String, String, String)>,
@@ -426,12 +442,20 @@ async fn remove(
     let lock = queue.servers.entry(id.clone()).or_default().clone();
     let _guard = lock.lock().await;
     remove_one(&state, &id, &bid).await?;
+    access_service::log(
+        &state,
+        &id,
+        &user.0.id,
+        "backup_deleted",
+        json!({"id": bid}),
+    )
+    .await;
     notify_changed(&state, &id, false).await?;
     Ok(Json(json!({})))
 }
 
 async fn delete_many(
-    _user: AuthUser,
+    user: CanBackup,
     State(state): State<Arc<AppState>>,
     Extension(queue): Extension<Arc<Queue>>,
     Path((id, wid)): Path<(String, String)>,
@@ -442,6 +466,14 @@ async fn delete_many(
     let _guard = lock.lock().await;
     for bid in body.backup_ids {
         remove_one(&state, &id, &bid).await?;
+        access_service::log(
+            &state,
+            &id,
+            &user.0.id,
+            "backup_deleted",
+            json!({"id": bid}),
+        )
+        .await;
     }
     notify_changed(&state, &id, false).await?;
     Ok(Json(json!({})))
