@@ -29,9 +29,9 @@ use crate::{
         event::Event,
         instance::{InstanceId, InstanceStatus},
     },
+    infrastructure::minecraft::java::required_java_version,
 };
 use diagnosis::{diagnose, Case, Facts, Outside, RouterFacts};
-use firewall::Firewall;
 use router::{Mapping, Router};
 
 /// How often Core looks for a changed address, a restarted router, or a new network.
@@ -117,6 +117,8 @@ enum Key {
 struct Port {
     what: String,
     port: u16,
+    /// The program that listens on the port, when it is not Core itself: a server's Java.
+    program: Option<String>,
     mapping: Option<Mapping>,
     /// Why the router last refused, and how many outside ports were asked for.
     refusal: Option<(String, u8)>,
@@ -136,7 +138,7 @@ pub async fn run(state: Arc<AppState>, stop: CancellationToken) {
     let mut router: Option<Router> = None;
     let mut local_ip: Option<Ipv4Addr> = None;
     let mut wan_ip: Option<IpAddr> = None;
-    let mut firewall = Firewall::Open;
+    let mut firewall = firewall::Checked::default();
     let mut firewall_ports: Vec<u16> = Vec::new();
     let mut renewed_at = Instant::now();
 
@@ -176,10 +178,11 @@ pub async fn run(state: Arc<AppState>, stop: CancellationToken) {
                 state.network.servers.lock().unwrap().remove(id);
             }
         }
-        for (key, what, port) in &wanted {
+        for (key, what, port, program) in &wanted {
             let known = ports.entry(key.clone()).or_insert_with(|| Port {
                 what: what.clone(),
                 port: *port,
+                program: program.clone(),
                 mapping: None,
                 refusal: None,
                 retry_at: Instant::now(),
@@ -258,7 +261,7 @@ pub async fn run(state: Arc<AppState>, stop: CancellationToken) {
                     port: port.port,
                     local_ip: IpAddr::V4(ip),
                     listening,
-                    firewall: firewall.clone(),
+                    firewall: firewall.for_program(port.program.as_deref()),
                     router: match (&router, nat) {
                         (_, false) => RouterFacts::NoNat,
                         (None, true) => RouterFacts::NoProtocol {
@@ -350,7 +353,7 @@ pub async fn run(state: Arc<AppState>, stop: CancellationToken) {
 
 /// The ports Core wants reachable now: its own API unless it only listens on this computer, and
 /// every server that has finished starting.
-async fn wanted(state: &AppState) -> Vec<(Key, String, u16)> {
+async fn wanted(state: &AppState) -> Vec<(Key, String, u16, Option<String>)> {
     let mut wanted = Vec::new();
     let api_is_local = state
         .config
@@ -358,7 +361,12 @@ async fn wanted(state: &AppState) -> Vec<(Key, String, u16)> {
         .parse::<IpAddr>()
         .is_ok_and(|host| host.is_loopback());
     if !api_is_local {
-        wanted.push((Key::Api, "The Core's own API".into(), state.config.port));
+        wanted.push((
+            Key::Api,
+            "The Core's own API".into(),
+            state.config.port,
+            None,
+        ));
     }
     let running = state
         .instance_store
@@ -371,6 +379,13 @@ async fn wanted(state: &AppState) -> Vec<(Key, String, u16)> {
                 Key::Server(record.id.clone()),
                 format!("Minecraft server \"{}\"", record.name),
                 record.port,
+                state
+                    .java_store
+                    .find_by_version(required_java_version(
+                        &record.game_version,
+                    ))
+                    .await
+                    .map(|java| java.display().to_string()),
             ));
         }
     }

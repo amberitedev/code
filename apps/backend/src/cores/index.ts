@@ -310,8 +310,10 @@ async function checkReachability(request: Request, env: Env) {
 	if (row.checks > MAX_CHECKS)
 		throw new ApiError(429, 'too_many_checks', 'Too many reachability tests. Try again later.')
 
+	// Cloudflare sets CF-Connecting-IP itself, so a caller cannot choose it. The local Worker only
+	// listens on this computer and passes the header through untouched, so it is not read there.
 	const local = env.LOCAL_DEV === 'true'
-	const address = request.headers.get('CF-Connecting-IP') ?? (local ? '127.0.0.1' : null)
+	const address = local ? '127.0.0.1' : request.headers.get('CF-Connecting-IP')
 	if (!address) throw new ApiError(500, 'internal_error', 'The caller address is unknown')
 	const outside = !isPrivateHost(address)
 	// A private caller is only ever tested in local development, where it exercises this route.

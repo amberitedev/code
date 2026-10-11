@@ -13,9 +13,10 @@ use std::path::Path;
 /// Server ports covered by the one Windows rule. Core hands out ports upward from 25565.
 const SERVER_PORTS: std::ops::RangeInclusive<u16> = 25565..=25664;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Firewall {
     /// No firewall is on, or it allows the ports.
+    #[default]
     Open,
     /// A firewall is on and does not allow a port. `fix` is the steps to open it.
     Blocked { found: String, fix: Vec<String> },
@@ -25,11 +26,53 @@ pub enum Firewall {
 
 /// Make sure the firewall lets `ports` in, changing it when Core is allowed to.
 /// `data_dir` remembers that the Windows prompt was already shown.
-pub async fn ensure(ports: &[u16], data_dir: &Path) -> Firewall {
+pub async fn ensure(ports: &[u16], data_dir: &Path) -> Checked {
     if ports.is_empty() {
-        return Firewall::Open;
+        return Checked::default();
     }
-    platform::ensure(ports, data_dir).await
+    #[cfg(windows)]
+    let (ports, blocked_programs) = platform::ensure(ports, data_dir).await;
+    #[cfg(not(windows))]
+    let (ports, blocked_programs) =
+        (platform::ensure(ports, data_dir).await, Vec::new());
+    Checked {
+        ports,
+        blocked_programs,
+    }
+}
+
+/// The firewall's answer for the ports, and the programs it blocks whatever the port.
+#[derive(Default)]
+pub struct Checked {
+    pub ports: Firewall,
+    /// Programs with a rule that blocks incoming connections. Windows only. Such a rule wins
+    /// over Core's allow rule, so a server run by one of these programs cannot be joined.
+    pub blocked_programs: Vec<String>,
+}
+
+impl Checked {
+    /// The firewall's answer for a port served by `program`.
+    pub fn for_program(&self, program: Option<&str>) -> Firewall {
+        let blocked = program.filter(|program| {
+            self.blocked_programs
+                .iter()
+                .any(|blocked| blocked.eq_ignore_ascii_case(program))
+        });
+        match blocked {
+            Some(program) => Firewall::Blocked {
+                found: format!(
+                    "Windows Firewall has a rule that blocks {program}, the Java this server runs on. A block rule wins over Core's allow rule. Windows adds it when \"Cancel\" is pressed on its \"allow access\" window"
+                ),
+                fix: vec![
+                    "Open the Start menu, type PowerShell, choose \"Run as administrator\", and run:".into(),
+                    format!(
+                        "Get-NetFirewallRule -Direction Inbound -Action Block | Where-Object {{ ($_ | Get-NetFirewallApplicationFilter).Program -eq '{program}' }} | Remove-NetFirewallRule"
+                    ),
+                ],
+            },
+            None => self.ports.clone(),
+        }
+    }
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -89,7 +132,7 @@ mod platform {
         admin: bool,
         /// Local ports of the "Amberite Core" rule, when it exists.
         ports: Option<String>,
-        /// Programs with a rule that blocks incoming connections and look like Java.
+        /// Programs with a rule that blocks incoming connections.
         blocked: Vec<String>,
     }
 
@@ -97,7 +140,7 @@ mod platform {
 $ErrorActionPreference = 'SilentlyContinue'
 $rule = Get-NetFirewallRule -DisplayName 'Amberite Core' | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' } | Select-Object -First 1
 $ports = if ($rule) { (($rule | Get-NetFirewallPortFilter).LocalPort) -join ',' } else { $null }
-$blocked = @(Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True | Get-NetFirewallApplicationFilter | Where-Object { $_.Program -match '\\javaw?\.exe$' } | ForEach-Object { $_.Program } | Sort-Object -Unique)
+$blocked = @(Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True | Get-NetFirewallApplicationFilter | ForEach-Object { $_.Program } | Sort-Object -Unique)
 [pscustomobject]@{
   enabled = [bool](Get-NetFirewallProfile | Where-Object { $_.Enabled -eq 'True' })
   admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -125,16 +168,33 @@ $blocked = @(Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True 
         serde_json::from_str(text.trim()).ok()
     }
 
-    pub async fn ensure(ports: &[u16], data_dir: &Path) -> Firewall {
-        let Some(mut state) = query().await else {
-            return Firewall::Unsure {
-                found: "Windows Firewall could not be read".into(),
-                fix: vec![],
-            };
+    /// The answer for the ports, and every program a block rule names.
+    pub async fn ensure(
+        ports: &[u16],
+        data_dir: &Path,
+    ) -> (Firewall, Vec<String>) {
+        let Some(state) = query().await else {
+            return (
+                Firewall::Unsure {
+                    found: "Windows Firewall could not be read".into(),
+                    fix: vec![],
+                },
+                Vec::new(),
+            );
         };
         if !state.enabled {
-            return Firewall::Open;
+            return (Firewall::Open, Vec::new());
         }
+        let (firewall, state) = rule(ports, data_dir, state).await;
+        (firewall, state.blocked)
+    }
+
+    /// Make sure the "Amberite Core" rule allows `ports`, asking for permission at most once.
+    async fn rule(
+        ports: &[u16],
+        data_dir: &Path,
+        mut state: State,
+    ) -> (Firewall, State) {
         let wanted = rule_ports(ports);
         let covered = |state: &State| {
             state.ports.as_deref().is_some_and(|rule| {
@@ -190,21 +250,9 @@ $blocked = @(Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True 
                 fix.push(format!("netsh {delete}"));
             }
             fix.push(format!("netsh {add}"));
-            return Firewall::Blocked { found, fix };
+            return (Firewall::Blocked { found, fix }, state);
         }
-        if !state.blocked.is_empty() {
-            return Firewall::Blocked {
-                found: format!(
-                    "Windows Firewall has a rule that blocks Java ({}). A block rule wins over Core's allow rule. Windows adds it when \"Cancel\" is pressed on its \"allow access\" window",
-                    state.blocked.join(", ")
-                ),
-                fix: vec![
-                    as_admin.replace("cmd", "PowerShell"),
-                    "Get-NetFirewallRule -Direction Inbound -Action Block | Where-Object { ($_ | Get-NetFirewallApplicationFilter).Program -match 'javaw?\\.exe$' } | Remove-NetFirewallRule".into(),
-                ],
-            };
-        }
-        Firewall::Open
+        (Firewall::Open, state)
     }
 }
 

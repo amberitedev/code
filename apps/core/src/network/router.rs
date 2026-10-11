@@ -12,8 +12,7 @@ use std::{
 };
 
 use crab_nat::{
-    natpmp, GatewayAddress, InternetProtocol, PortMappingOptions,
-    PortMappingType, TimeoutConfig,
+    natpmp, GatewayAddress, InternetProtocol, PortMappingOptions, TimeoutConfig,
 };
 use igd_next::{
     aio::tokio::{search_gateway, Tokio},
@@ -62,7 +61,6 @@ pub struct Router {
 pub struct Mapping {
     pub internal: u16,
     pub external: u16,
-    pub protocol: Protocol,
     /// Kept for PCP and NAT-PMP, which renew and delete through it.
     pmp: Option<crab_nat::PortMapping>,
 }
@@ -160,10 +158,6 @@ impl Router {
                     return Ok(Mapping {
                         internal,
                         external: mapping.external_port().get(),
-                        protocol: match mapping.mapping_type() {
-                            PortMappingType::NatPmp => Protocol::NatPmp,
-                            PortMappingType::Pcp { .. } => Protocol::Pcp,
-                        },
                         pmp: Some(mapping),
                     })
                 }
@@ -176,7 +170,6 @@ impl Router {
                     return Ok(Mapping {
                         internal,
                         external,
-                        protocol: Protocol::Upnp,
                         pmp: None,
                     })
                 }
