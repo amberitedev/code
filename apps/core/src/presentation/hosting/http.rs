@@ -10,8 +10,9 @@ use crate::network::diagnosis::Case;
 use crate::{
     application::{
         backup_service, instance_status_service, mod_service,
-        server_source_service, visible_servers,
+        server_source_service,
         state::{AppState, WsTicket},
+        visible_servers,
     },
     domain::{
         event::{Event, FsOperationKind},
@@ -276,10 +277,9 @@ async fn v0(
     server["linked_instance"] = match &source {
         Some(status) => match &status.source {
             ServerSource::Instance { instance_id, name } => {
-                let visibility =
-                    visible_servers::get(state, &r.id.to_string())
-                        .await
-                        .map_err(|e| ApiError::Internal(e.to_string()))?;
+                let visibility = visible_servers::get(state, &r.id.to_string())
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
                 json!({
                     "id": instance_id, "name": name, "state": status.state, "error": status.error,
                     "visible_to_friends": visibility.as_ref().map_or(true, |v| v.visible_to_friends),
