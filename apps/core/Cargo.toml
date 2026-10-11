@@ -15,12 +15,12 @@ libsqlite3-sys = { version = "0.32", features = ["bundled"] }
 # TIER 2 - DATABASE
 # ============================================================
 sqlx = { version = "=0.9.0-alpha.1", features = [
-	"chrono",
-	"json",
-	"runtime-tokio",
-	"sqlite",
-	"tls-rustls",
-	"uuid",
+  "chrono",
+  "json",
+  "runtime-tokio",
+  "sqlite",
+  "tls-rustls",
+  "uuid",
 ] }
 
 # ============================================================

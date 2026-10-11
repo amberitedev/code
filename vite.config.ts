@@ -31,6 +31,8 @@ export default defineConfig({
 			'**/target/**',
 			'pnpm-lock.yaml',
 			'*.tsbuildinfo',
+			// tombi owns TOML formatting; formatting it here too makes CI's tombi check fail.
+			'**/*.toml',
 		],
 		sortPackageJson: {},
 	},
