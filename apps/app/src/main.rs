@@ -34,6 +34,8 @@ async fn initialize_state(
 
     tracing::info!("Initializing app state...");
     State::init(app.config().identifier.clone()).await?;
+    #[cfg(debug_assertions)]
+    dev::sign_in().await;
 
     let state = State::get().await?;
     app.asset_protocol_scope()
