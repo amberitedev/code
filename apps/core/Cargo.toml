@@ -139,12 +139,16 @@ sha2 = "0.10"
 daedalus = { path = "../../packages/daedalus" }
 # dunce::canonicalize avoids Windows \\?\ UNC prefixes that break the JVM -cp.
 dunce = "1.0"
-igd-next = { version = "0.17.1", features = ["aio_tokio"] }
+
+# ============================================================
+# REACHING CORE FROM OUTSIDE (port forwarding, own certificate)
+# ============================================================
 crab_nat = "0.8.1"
+hyper-util = { version = "0.1.21", features = ["http1", "http2", "server-auto", "service", "tokio"] }
+igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 netdev = "0.46.3"
 rcgen = "0.14.7"
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
-hyper-util = { version = "0.1.21", features = ["http1", "http2", "server-auto", "service", "tokio"] }
 
 [dependencies.openssl]
 version = "0.10"

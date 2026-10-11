@@ -8,18 +8,18 @@
 use std::{collections::HashMap, sync::Arc};
 
 use rustls::{
+    ClientConfig, DigitallySignedStruct, Error, SignatureScheme,
     client::danger::{
         HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
     },
     crypto::{
-        aws_lc_rs::default_provider, verify_tls12_signature,
-        verify_tls13_signature, CryptoProvider,
+        CryptoProvider, aws_lc_rs::default_provider, verify_tls12_signature,
+        verify_tls13_signature,
     },
     pki_types::{CertificateDer, ServerName, UnixTime},
-    ClientConfig, DigitallySignedStruct, Error, SignatureScheme,
 };
 use sha2::{Digest, Sha256};
-use tauri::{plugin::TauriPlugin, State};
+use tauri::{State, plugin::TauriPlugin};
 use tokio::{
     io::copy_bidirectional,
     net::{TcpListener, TcpStream},
@@ -56,15 +56,15 @@ async fn core_connect(
         return Ok(local.clone());
     }
     let url = url::Url::parse(&key.0).map_err(|error| error.to_string())?;
-    let target = match (url.scheme(), url.host_str(), url.port_or_known_default())
-    {
-        ("https", Some(host), Some(port)) => {
-            (host.trim_matches(['[', ']']).to_string(), port)
-        }
-        _ => return Err("a Core address must be https://host:port".into()),
-    };
-    let fingerprint: [u8; 32] = hex(&key.1)
-        .ok_or("a Core fingerprint must be 64 hex characters")?;
+    let target =
+        match (url.scheme(), url.host_str(), url.port_or_known_default()) {
+            ("https", Some(host), Some(port)) => {
+                (host.trim_matches(['[', ']']).to_string(), port)
+            }
+            _ => return Err("a Core address must be https://host:port".into()),
+        };
+    let fingerprint: [u8; 32] =
+        hex(&key.1).ok_or("a Core fingerprint must be 64 hex characters")?;
 
     let provider = Arc::new(default_provider());
     let config = ClientConfig::builder_with_provider(Arc::clone(&provider))

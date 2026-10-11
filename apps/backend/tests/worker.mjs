@@ -17,7 +17,7 @@ export async function startBackend(name) {
 		format: 'esm',
 		platform: 'browser',
 		target: 'es2022',
-		external: ['cloudflare:workers'],
+		external: ['cloudflare:workers', 'cloudflare:sockets'],
 	})
 	const runtime = new Miniflare({
 		modules: true,
