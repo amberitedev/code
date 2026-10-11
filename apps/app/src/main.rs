@@ -351,6 +351,7 @@ fn main() {
         .plugin(api::files::init())
         .plugin(api::friends::init())
         .plugin(api::worlds::init())
+        .plugin(api::cores::init())
         .manage(PendingUpdateData::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,

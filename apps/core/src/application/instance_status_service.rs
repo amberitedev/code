@@ -40,11 +40,6 @@ pub async fn start_instance(
     if state.instances.contains_key(id) {
         return Err(InstanceError::AlreadyRunning);
     }
-    // TODO(networking/playit): Start Playit.gg tunnel on instance start for public access
-    // without requiring port forwarding. See https://playit.gg/api-docs
-    // TODO(networking/upnp): Request UPnP port mapping on router at instance start
-    // Use the igd2 crate
-
     let record = state.instance_store.get(id).await.map_err(|e| match e {
         StoreError::NotFound(_) => InstanceError::NotFound(id.clone()),
         other => InstanceError::Store(other),

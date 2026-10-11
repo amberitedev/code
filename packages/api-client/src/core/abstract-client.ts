@@ -41,6 +41,11 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return this.config.selfHostedHosting === true
 	}
 
+	/** See `ClientConfig.connectCore`. */
+	public get connectCore(): ClientConfig['connectCore'] {
+		return this.config.connectCore
+	}
+
 	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']

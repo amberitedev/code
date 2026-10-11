@@ -7,8 +7,15 @@ export namespace Archon {
 			export type Core = {
 				id: string
 				name: string
-				/** Where the App reaches this Core, reported by the Core itself. */
+				/** Where this Core is on its own network, reported by the Core itself. */
 				address: string
+				/** Where this Core is on the internet, once it has proven it can be reached there. */
+				public_address: string | null
+				/**
+				 * SHA-256 of the certificate this Core serves HTTPS with. The App trusts only this
+				 * certificate for this Core. Null for a Core that does not serve HTTPS yet.
+				 */
+				cert_fingerprint: string | null
 				created: string
 				last_seen: string
 			}
@@ -699,6 +706,8 @@ export namespace Archon {
 				linked_instance?: LinkedInstance | null
 				/** Core only. Lets a list show running servers without opening a socket each. */
 				power_state?: 'offline' | 'starting' | 'running' | 'stopping' | 'crashed'
+				/** Core only. Null while the server is not running. */
+				reachability?: Reachability | null
 			}
 
 			export type LinkedInstance = {
@@ -715,6 +724,17 @@ export namespace Archon {
 				ip: string | null
 				port: number
 				domain: string
+				/** Core: where the server is on the internet, when it can be joined from there. */
+				outside?: { ip: string; port: number } | null
+			}
+
+			/**
+			 * Core: whether a running server can be joined from the internet. `unverified` means its
+			 * port is forwarded but could not be tested. `cause` says why it is unreachable.
+			 */
+			export type Reachability = {
+				state: 'checking' | 'reachable' | 'unverified' | 'unreachable'
+				cause: string | null
 			}
 
 			export type Upstream = {

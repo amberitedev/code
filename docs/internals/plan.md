@@ -127,7 +127,17 @@ Later:
 - A Core reports its own address, on every start. By default that is the address and port it
   listens on, or the machine's local network address when it listens on every interface.
   `AMBERITE_PUBLIC_URL` overrides it. Nobody types an address. It must be HTTPS unless it is
-  loopback or a private network address.
+  loopback or a private network address. Once the Core has an address on the internet it reports
+  that too, and again whenever it changes (see "Reaching a Core from outside").
+- A Core makes its own certificate on first start and serves its API over HTTPS with it. No domain
+  and no certificate authority. The Core sends the certificate's SHA-256 fingerprint with its
+  pairing code, the backend stores it with the Core, and the App trusts only that certificate for
+  that Core. The WebView cannot check a certificate like that, so the App's Rust side opens a port
+  on the App's own computer for each Core and carries every request, upload, and WebSocket to the
+  Core over TLS, checking the fingerprint.
+- The same port still answers plain HTTP, but only to callers on the Core's own computer or local
+  network, so local tools keep working. A Core paired before this reports its fingerprint with its
+  key the next time it starts; until then the App reaches it the old way.
 - An account can have many Cores, treated as one: their servers form one list, and creating a
   server asks which Core only when there is more than one.
 - Unpair is in the App under Settings, Cores. The Core leaves the account's list, forgets its
@@ -137,6 +147,56 @@ Later:
   code cannot be registered by another Core.
 - A Core that was owned before pairing existed keeps its owner but must be paired once to be
   listed. It shows a code that only that owner can use.
+
+## Reaching a Core from outside
+
+A Core at home must be reachable for two things: friends joining the Minecraft server, and the
+App managing the Core from anywhere.
+
+- Core forwards its ports and opens the local firewall automatically.
+- When that fails, Core's command line explains in detail where the problem is and how to fix it.
+- Game traffic never goes through us. No relay and no tunnel for now. The answer for bad routers
+  is a robust forwarding system and a clear diagnosis; tunnel support may be added later for
+  networks where forwarding is impossible.
+
+How it works (`apps/core/src/network`):
+
+- Forwarding: Core asks the router over PCP, NAT-PMP, then UPnP (`crab_nat` and `igd-next`). One
+  TCP port per running server and one for Core's API; none for the API when Core only listens on
+  its own computer. A server keeps its port inside the network. Outside, Core asks for the same
+  number first and takes whatever the router grants; if a port is refused, or granted but fails
+  the outside test, it tries up to two other outside ports.
+- Mappings have a one hour lease and are renewed every five minutes, which also restores them
+  after a router restart. They are removed when a server stops and when Core exits. Every minute
+  Core checks for a changed home address or a different network and starts over when it sees one.
+- Firewall: on Windows one inbound rule, "Amberite Core", covers Core's port and server ports
+  25565 to 25664. Core asks for administrator rights once with the normal Windows prompt and never
+  again, whatever the answer; after a refusal it prints the command to run. On Linux Core handles
+  ufw and firewalld: it opens ports itself when it runs as root and prints the command otherwise.
+  On macOS it only reports that the firewall is on. Hand-written nftables or iptables rules are
+  not read.
+- Outside test: a granted mapping is not proof. Core calls the backend's `/core/reachability`
+  with its key and a port; the backend opens a TCP connection to that port on the address the
+  request came from, never any other, and answers yes or no. A Core may ask 30 times in 10
+  minutes. A backend on the Core's own network (local development) says so instead of answering,
+  and Core then reports the port as not proven.
+- Diagnosis: whenever the answer for a port changes, Core prints what it tested, what it found,
+  and the steps to fix it. It tells these apart: the server is not listening; the local firewall
+  blocks it; the router answers no forwarding protocol; the router refused; two routers in a row;
+  the provider shares one address between customers; the router opened the port but nothing
+  arrives (the provider blocks it); a public address with a firewall in front. It says so when
+  nothing on the owner's side can fix it.
+- Addresses: once the API passes the outside test, Core reports `https://<address>:<port>` to the
+  backend as its `public_address`. The App uses a Core's local address when it answers and the
+  public one otherwise. Each server's outside address and its reachability come back from the
+  hosting API with the server (`net.outside`, `reachability`).
+- The App: "Copy address" on a linked server copies the outside address when there is one. The
+  signal icon on a linked server's row in Worlds turns orange when the server runs but cannot be
+  reached from outside, and hovering it shows the cause.
+- IPv6 is not handled yet.
+- After this exists: friends see an instance's servers, and the owner can invite friends to
+  control a server.
+- Who can join a server is the owner's choice: a whitelist or none.
 
 ## Current state, 2026-10-10
 
@@ -151,9 +211,9 @@ Later:
 - Linked servers are built: create a server from an instance, push updates to it, unlink it, and
   delete it.
 - Known gaps: an over-limit push shows a generic error; the App's network allowlist is opened to
-  Core addresses only in the dev runner, not in a packaged build.
+  Core addresses only in the dev runner, not in a packaged build (a packaged build does allow the
+  local port the App opens for a Core that serves HTTPS).
 
 ## Open questions
 
 - Whether the free Workers plan is enough for R2, to check before hosting.
-- Enforcing who can join a server, beyond hiding its address.

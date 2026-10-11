@@ -409,6 +409,14 @@ fn main() {
                     ),
             )
             .plugin(
+                "cores",
+                InlinedPlugin::new()
+                    .commands(&["core_connect"])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
                 "friends",
                 InlinedPlugin::new()
                     .commands(&[

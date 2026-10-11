@@ -8,6 +8,7 @@ import {
 	VerboseLoggingFeature,
 } from '@modrinth/api-client'
 import { getVersion } from '@tauri-apps/api/app'
+import { invoke } from '@tauri-apps/api/core'
 
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
@@ -19,6 +20,9 @@ export const apiClient: TauriModrinthClient = new TauriModrinthClient({
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	// With our own account backend, hosting is the account's paired Cores, found through it.
 	selfHostedHosting: Boolean(config.accountApiUrl),
+	// A Core's own certificate is checked in Rust; the WebView talks to a local address instead.
+	connectCore: (address, fingerprint) =>
+		invoke<string>('plugin:cores|core_connect', { address, fingerprint }),
 	archonBaseUrl: config.archonBaseUrl,
 	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
 	features: [

@@ -4,6 +4,7 @@
 mod backup_queue;
 
 use super::models::*;
+use crate::network::diagnosis::Case;
 use crate::{
     application::{
         backup_service, instance_status_service, mod_service,
@@ -183,6 +184,44 @@ fn host(state: &AppState) -> String {
         .unwrap_or_else(|| "127.0.0.1".into())
 }
 
+/// The base URL the caller used to reach this Core, so the URLs handed back work for that same
+/// caller: the local address at home, the App's pinned connection anywhere else. Callers always
+/// speak plain HTTP at their end; outside the local network the App's pinned connection adds TLS.
+fn client_base(state: &AppState, headers: &HeaderMap) -> String {
+    match headers
+        .get(header::HOST)
+        .and_then(|host| host.to_str().ok())
+    {
+        Some(host) => format!("http://{host}"),
+        None => state.config.public_url.trim_end_matches('/').to_string(),
+    }
+}
+
+/// Where a server is on the internet and whether it can be joined from there. `state` is
+/// `reachable`, `unverified` (forwarded but not tested), `unreachable` (with `cause`), or
+/// `checking`. Null while the server is not running.
+fn reachability(state: &AppState, r: &InstanceRecord) -> (Value, Value) {
+    if r.status != InstanceStatus::Running {
+        return (Value::Null, Value::Null);
+    }
+    let Some(port) = state.network.server(&r.id) else {
+        return (Value::Null, json!({"state": "checking", "cause": null}));
+    };
+    let outside = match port.outside {
+        Some(address) => {
+            json!({"ip": address.ip().to_string(), "port": address.port()})
+        }
+        None => Value::Null,
+    };
+    let name = match port.case {
+        Case::Reachable => "reachable",
+        Case::Unverified => "unverified",
+        _ => "unreachable",
+    };
+    let cause = (!port.cause.is_empty()).then_some(port.cause);
+    (outside, json!({"state": name, "cause": cause}))
+}
+
 fn world(id: String, wid: String) -> Result<String, ApiError> {
     if id != wid {
         return Err(ApiError::NotFound(
@@ -203,6 +242,7 @@ async fn v0(
     state: &Arc<AppState>,
     user: &AuthUser,
     r: &InstanceRecord,
+    base: &str,
 ) -> Result<Value, ApiError> {
     let source =
         server_source_service::get_status(state, &r.id.to_string()).await?;
@@ -219,11 +259,7 @@ async fn v0(
         .await?
         .len();
     // Only the Core's owner reaches the hosting API, so the caller is the owner.
-    let node_url = format!(
-        "{}/hosting/servers/{}",
-        state.config.public_url.trim_end_matches('/'),
-        r.id
-    );
+    let node_url = format!("{base}/hosting/servers/{}", r.id);
     let mut server = server_v0(
         r,
         &user.0.id,
@@ -244,6 +280,9 @@ async fn v0(
         None => Value::Null,
     };
     server["power_state"] = json!(r.status);
+    let (outside, reachability) = reachability(state, r);
+    server["net"]["outside"] = outside;
+    server["reachability"] = reachability;
     // The first install of a linked pack sets the game version when it applies. Until then the
     // server is installing, not waiting for setup.
     if let (Some(status), true) = (&source, r.game_version.is_empty()) {
@@ -258,16 +297,13 @@ async fn v0(
 async fn v1(
     state: &Arc<AppState>,
     r: &InstanceRecord,
+    base: &str,
 ) -> Result<Value, ApiError> {
     let rows = backup_service::list_backups(state, &r.id.to_string()).await?;
     Ok(server_v1(
         r,
         &host(state),
-        &format!(
-            "{}/hosting/servers/{}",
-            state.config.public_url.trim_end_matches('/'),
-            r.id
-        ),
+        &format!("{base}/hosting/servers/{}", r.id),
         rows.iter().map(backup).collect(),
     ))
 }
@@ -286,14 +322,16 @@ async fn list_v0(
     user: AuthUser,
     State(state): State<Arc<AppState>>,
     Query(q): Query<Pagination>,
+    headers: HeaderMap,
 ) -> ApiResult {
+    let base = client_base(&state, &headers);
     let records = state.instance_store.list().await?;
     let count = records.len();
     let limit = q.limit.unwrap_or(100).clamp(1, 1000);
     let offset = q.offset.unwrap_or(0);
     let mut servers = Vec::new();
     for r in records.into_iter().skip(offset).take(limit) {
-        servers.push(v0(&state, &user, &r).await?);
+        servers.push(v0(&state, &user, &r, &base).await?);
     }
     Ok(Json(
         json!({"servers": servers, "users": {&user.0.id: {"id": user.0.id, "username": user.0.username, "avatar_url": null}},
@@ -305,18 +343,23 @@ async fn get_v0(
     user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult {
     let r = record(&state, &id).await?;
-    Ok(Json(v0(&state, &user, &r).await?))
+    Ok(Json(
+        v0(&state, &user, &r, &client_base(&state, &headers)).await?,
+    ))
 }
 
 async fn list_v1(
     _user: AuthUser,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> ApiResult {
+    let base = client_base(&state, &headers);
     let mut servers = Vec::new();
     for r in state.instance_store.list().await? {
-        servers.push(v1(&state, &r).await?);
+        servers.push(v1(&state, &r, &base).await?);
     }
     Ok(Json(json!(servers)))
 }
@@ -325,9 +368,10 @@ async fn get_v1(
     _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult {
     let r = record(&state, &id).await?;
-    Ok(Json(v1(&state, &r).await?))
+    Ok(Json(v1(&state, &r, &client_base(&state, &headers)).await?))
 }
 
 async fn create_server(
@@ -548,7 +592,7 @@ async fn filesystem_auth(
 ) -> ApiResult {
     let r = record(&state, &id).await?;
     Ok(Json(
-        json!({"url": format!("{}/hosting/servers/{}/modrinth/v0/fs", state.config.public_url.trim_end_matches('/'), r.id), "token": bearer_token(&headers)}),
+        json!({"url": format!("{}/hosting/servers/{}/modrinth/v0/fs", client_base(&state, &headers), r.id), "token": bearer_token(&headers)}),
     ))
 }
 
@@ -556,6 +600,7 @@ async fn websocket_auth(
     _user: AuthUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult {
     let r = record(&state, &id).await?;
     let token = uuid::Uuid::new_v4().to_string();
@@ -569,11 +614,7 @@ async fn websocket_auth(
             expires_at: Instant::now() + Duration::from_secs(60),
         },
     );
-    let base = state
-        .config
-        .public_url
-        .trim_end_matches('/')
-        .replacen("http", "ws", 1);
+    let base = client_base(&state, &headers).replacen("http", "ws", 1);
     Ok(Json(
         json!({"url": format!("{base}/hosting/servers/{}/ws", r.id), "token": token}),
     ))

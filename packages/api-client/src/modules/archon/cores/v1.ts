@@ -4,6 +4,12 @@ import type { RequestOptions } from '../../../types/request'
 import type { Archon } from '../types'
 
 const SERVER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+/** How long a Core's local address may take to answer before its internet address is used. */
+const LOCAL_ANSWER_MS = 2500
+
+/** What is needed to reach a Core: its addresses and the certificate to trust there. */
+type CoreLocation = Pick<Archon.Cores.v1.Core, 'address' | 'cert_fingerprint'> &
+	Partial<Pick<Archon.Cores.v1.Core, 'public_address'>>
 
 const PAIRING_MESSAGES: Record<Archon.Cores.v1.PairingFailure, string> = {
 	wrong_code: 'Code invalid. Please check your Core and try again.',
@@ -32,8 +38,10 @@ export class CorePairingError extends Error {
  */
 export class ArchonCoresV1Module extends AbstractModule {
 	private cores: Promise<Archon.Cores.v1.Core[]> | null = null
-	/** Addresses that may receive the account token: paired Cores and the one being paired. */
+	/** Base URLs that may receive the account token: paired Cores and the one being paired. */
 	private addresses = new Set<string>()
+	/** Core id to the base URL its requests go to. See `route`. */
+	private routes = new Map<string, string>()
 	/** Server id to the address of the Core that has it. */
 	private serverAddresses = new Map<string, string>()
 
@@ -45,8 +53,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 	public list(): Promise<Archon.Cores.v1.Core[]> {
 		const cores = this.client
 			.request<Archon.Cores.v1.Core[]>('/cores', { api: 'labrinth', version: 3, method: 'GET' })
-			.then((list) => {
-				this.addresses = new Set(list.map((core) => core.address))
+			.then(async (list) => {
+				const routes = await Promise.all(list.map((core) => this.route(core)))
+				this.routes = new Map(list.map((core, index) => [core.id, routes[index]]))
+				this.addresses = new Set(routes)
 				return list
 			})
 		cores.catch(() => {
@@ -62,7 +72,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * accepts, pairing is done: refetch the list to see the new Core.
 	 */
 	public async pair(code: string): Promise<void> {
-		let claim: { core_id: string; address: string }
+		let claim: { core_id: string } & CoreLocation
 		try {
 			claim = await this.client.request('/cores/pair', {
 				api: 'labrinth',
@@ -75,11 +85,13 @@ export class ArchonCoresV1Module extends AbstractModule {
 			throw pairingError(error, 'failed')
 		}
 		// The Core checks the account token, so its address is allowed before it is paired.
-		const alreadyAllowed = this.addresses.has(claim.address)
-		this.addresses.add(claim.address)
+		let added: string | undefined
 		try {
+			const base = await this.route(claim)
+			if (!this.addresses.has(base)) added = base
+			this.addresses.add(base)
 			await this.client.request('', {
-				api: claim.address,
+				api: base,
 				version: 'pairing',
 				method: 'POST',
 				body: { code },
@@ -87,7 +99,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 				circuitBreaker: false,
 			})
 		} catch (error) {
-			if (!alreadyAllowed) this.addresses.delete(claim.address)
+			if (added) this.addresses.delete(added)
 			throw pairingError(error, 'unreachable')
 		}
 		this.cores = null
@@ -110,7 +122,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 			})
 		await this.client
 			.request('', {
-				api: core.address,
+				api: this.base(core),
 				version: 'pairing',
 				method: 'DELETE',
 				retry: false,
@@ -118,9 +130,9 @@ export class ArchonCoresV1Module extends AbstractModule {
 			})
 			.catch(() => undefined)
 		for (const [serverId, address] of this.serverAddresses) {
-			if (address === core.address) this.serverAddresses.delete(serverId)
+			if (address === this.base(core)) this.serverAddresses.delete(serverId)
 		}
-		this.addresses.delete(core.address)
+		this.addresses.delete(this.base(core))
 		this.cores = null
 	}
 
@@ -142,7 +154,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 			const address = this.serverAddresses.get(serverId[0])
 			if (address) return `${address}/hosting`
 		}
-		return `${cores[0].address}/hosting`
+		return `${this.base(cores[0])}/hosting`
 	}
 
 	/**
@@ -156,7 +168,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 		const results = await Promise.allSettled(
 			cores.map((core) =>
 				this.client.request<Archon.Servers.v0.ServerGetResponse>('/servers', {
-					api: `${core.address}/hosting`,
+					api: `${this.base(core)}/hosting`,
 					version: 'modrinth/v0',
 					method: 'GET',
 					params: { limit: options?.limit ?? 100, offset: options?.offset ?? 0 },
@@ -175,12 +187,14 @@ export class ArchonCoresV1Module extends AbstractModule {
 				return
 			}
 			for (const server of result.value.servers) {
-				this.serverAddresses.set(server.server_id, cores[index].address)
+				this.serverAddresses.set(server.server_id, this.base(cores[index]))
 				merged.servers.push(server)
 			}
 			Object.assign(merged.users, result.value.users)
 		})
 		const failure = results.find((result) => result.status === 'rejected')
+		// A Core that did not answer may have moved or changed its certificate: ask the backend again.
+		if (failure) this.cores = null
 		if (failure && !results.some((result) => result.status === 'fulfilled')) throw failure.reason
 		merged.pagination.page_size = merged.pagination.total_items = merged.servers.length
 		return merged
@@ -196,17 +210,54 @@ export class ArchonCoresV1Module extends AbstractModule {
 		instance?: { id: string; name: string },
 	): Promise<{ id: string }> {
 		const server = await this.client.request<{ id: string }>('/servers', {
-			api: `${core.address}/hosting`,
+			api: `${this.base(core)}/hosting`,
 			version: 'local',
 			method: 'POST',
 			body: { name, instance },
 		})
-		this.serverAddresses.set(server.id, core.address)
+		this.serverAddresses.set(server.id, this.base(core))
 		return server
 	}
 
 	private known(): Promise<Archon.Cores.v1.Core[]> {
 		return this.cores ?? this.list()
+	}
+
+	/** The base URL requests to a listed Core go to. */
+	private base(core: Archon.Cores.v1.Core): string {
+		return this.routes.get(core.id) ?? core.address
+	}
+
+	/**
+	 * Work out the base URL for a Core. Its local address is used when it answers, which is the
+	 * case at home; otherwise its address on the internet. An HTTPS address goes through
+	 * `connectCore`, which trusts only that Core's certificate.
+	 */
+	private async route(core: CoreLocation): Promise<string> {
+		const connect = this.client.connectCore
+		const open = (address: string) =>
+			connect && core.cert_fingerprint && address.startsWith('https:')
+				? connect(address, core.cert_fingerprint)
+				: Promise.resolve(address)
+		const local = await open(core.address)
+		if (!core.public_address) return local
+		const answered = await Promise.race([
+			this.client
+				.request('', {
+					api: local,
+					version: 'health',
+					method: 'GET',
+					skipAuth: true,
+					retry: false,
+					circuitBreaker: false,
+				})
+				.then(
+					() => true,
+					() => false,
+				),
+			new Promise<false>((resolve) => setTimeout(() => resolve(false), LOCAL_ANSWER_MS)),
+		])
+		return answered ? local : open(core.public_address)
 	}
 }
 

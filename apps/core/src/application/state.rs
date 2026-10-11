@@ -15,6 +15,7 @@ use crate::{
         events::EventBroadcaster,
         process::{instance_actor::InstanceHandle, std_spawner::StdSpawner},
     },
+    network::{tls::Identity, Network},
     ports::{
         installation_store::InstallationStore, instance_store::InstanceStore,
         java_store::JavaStore, process_spawner::AnySpawner,
@@ -78,6 +79,10 @@ pub struct AppState {
     pub java_store: Arc<dyn JavaStore>,
     /// Process spawner — `StdSpawner` in production, `MockSpawner` in tests.
     pub spawner: Arc<dyn AnySpawner>,
+    /// The certificate Core serves its API with. The App pins its fingerprint.
+    pub tls: Identity,
+    /// What is known about reaching this Core and its servers from the internet.
+    pub network: Network,
 }
 
 impl AppState {
@@ -103,6 +108,7 @@ impl AppState {
         let installation_store = Arc::new(InstallationRepo::new(pool.clone()));
         let java_store = Arc::new(JavaRepo::new(pool.clone()));
         let core_id = load_or_create_core_id(&pool).await?;
+        let tls = Identity::load_or_create(&config.data_dir)?;
 
         Ok(Arc::new(Self {
             pool,
@@ -121,6 +127,8 @@ impl AppState {
             installation_store,
             java_store,
             spawner,
+            tls,
+            network: Network::default(),
         }))
     }
 
@@ -152,6 +160,8 @@ impl AppState {
         .execute(&self.pool)
         .await?;
         self.pairing_changed.notify_one();
+        // The outside test needs the key that was just stored.
+        self.network.wake();
         Ok(())
     }
 
