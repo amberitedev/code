@@ -3,7 +3,7 @@
 //! file, or an instance the App exported) or a Modrinth pack version into a [`Setup`] staged
 //! on disk; [`apply`] then reconciles the server against it, only while the server is stopped.
 //!
-//! Durable state lives in `server_sources` / `server_source_files` (migration 023), so a Core
+//! Durable state lives in `server_sources` / `server_source_files`, so a Core
 //! restart resumes pending work. Files the source previously provided are tracked with their
 //! last-applied hash; anything else on disk is server content and is never touched.
 
@@ -17,7 +17,7 @@ use std::{
 
 use dashmap::DashMap;
 use sha1::Digest;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::{
     application::{
@@ -302,6 +302,27 @@ pub async fn resume(state: Arc<AppState>) {
     for id in ids {
         spawn_process(&state, &id);
     }
+    remove_orphan_staging(&state).await;
+}
+
+/// A server deleted while its update was being staged can leave staged files behind.
+async fn remove_orphan_staging(state: &AppState) {
+    let linked: HashSet<String> =
+        sqlx::query_scalar("SELECT instance_id FROM server_sources")
+            .fetch_all(&state.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+    let root = state.config.data_dir.join("source_staging");
+    let Ok(mut entries) = tokio::fs::read_dir(&root).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if !linked.contains(entry.file_name().to_string_lossy().as_ref()) {
+            let _ = tokio::fs::remove_dir_all(entry.path()).await;
+        }
+    }
 }
 
 /// Called when a server process exits so a pending update applies.
@@ -427,13 +448,14 @@ async fn step(
     }
     if restart {
         progress(state, instance_id, &version, SourceApplyPhase::Starting);
-        if let Err(err) =
-            instance_status_service::start_instance(state, &iid).await
-        {
-            warn!(
-                "Restart after source update failed for {instance_id}: {err}"
-            );
-        }
+        // Reported as a failed update, so the App does not show a stopped server as fine.
+        instance_status_service::start_instance(state, &iid)
+            .await
+            .map_err(|err| {
+                SourceError::Invalid(format!(
+                    "The update was applied, but the server did not start: {err}"
+                ))
+            })?;
     }
     Ok(true)
 }
@@ -816,12 +838,8 @@ async fn stage_mrpack(
                 .filter(|p| p.server_side.as_deref() == Some("unsupported"))
                 .map(|p| p.id)
                 .collect(),
-            Err(error) => {
-                warn!(
-                    "could not check which pack mods are client-only: {error}"
-                );
-                BTreeSet::new()
-            }
+            // Without this check client-only mods would be installed and crash the server.
+            Err(error) => return Err(error.into()),
         };
     let mut files = BTreeMap::new();
     for file in &index.files {

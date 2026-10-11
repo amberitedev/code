@@ -84,10 +84,7 @@ impl ModrinthClient {
             let resp = self
                 .http
                 .get(format!("{MODRINTH_API}/projects"))
-                .query(&[(
-                    "ids",
-                    serde_json::to_string(chunk).unwrap_or_default(),
-                )])
+                .query(&[("ids", serde_json::json!(chunk).to_string())])
                 .send()
                 .await?
                 .error_for_status()?;

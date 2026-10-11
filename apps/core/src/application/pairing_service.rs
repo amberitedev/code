@@ -241,8 +241,14 @@ pub async fn pair(
         .map(|character| character.to_ascii_lowercase())
         .collect();
     let shown = state.pairing_code.lock().unwrap().clone();
-    if !shown.is_some_and(|shown| shown.code == code && shown.expires_at > now)
+    // The right code typed too late is not a wrong guess.
+    if shown
+        .as_ref()
+        .is_some_and(|shown| shown.code == code && shown.expires_at <= now)
     {
+        return Err(ApiError::Gone("that code has expired".into()));
+    }
+    if !shown.is_some_and(|shown| shown.code == code) {
         state
             .pairing_guesses
             .retain(|_, guesses| guesses.1 + GUESS_WINDOW > now);
@@ -281,7 +287,9 @@ pub async fn pair(
     if !status.is_success() {
         let reason = error_text(response).await;
         return Err(match status {
-            StatusCode::FORBIDDEN => ApiError::Forbidden(reason),
+            // The backend does not know this account claimed the code, which the App reports
+            // as a wrong code. 403 would read as "paired to another account".
+            StatusCode::FORBIDDEN => ApiError::NotFound(reason),
             StatusCode::CONFLICT => ApiError::Conflict(reason),
             _ => ApiError::ServiceUnavailable(reason),
         });
