@@ -10,3 +10,4 @@ pub mod rcon_service;
 pub mod server_source_service;
 pub mod state;
 pub mod stats_service;
+pub mod visible_servers;

@@ -33,6 +33,10 @@ pub struct CreateServer {
 pub struct LinkedInstanceRef {
     pub id: String,
     pub name: String,
+    /// "Visible to friends". On when left out.
+    pub visible_to_friends: Option<bool>,
+    /// The shared instance behind the App instance, when it is shared.
+    pub shared_instance_id: Option<String>,
 }
 
 #[derive(Deserialize)]

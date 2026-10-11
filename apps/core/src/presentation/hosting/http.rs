@@ -2,13 +2,15 @@
 
 #[path = "backup_queue.rs"]
 mod backup_queue;
+#[path = "friends.rs"]
+mod friends;
 
 use super::models::*;
 use crate::network::diagnosis::Case;
 use crate::{
     application::{
         backup_service, instance_status_service, mod_service,
-        server_source_service,
+        server_source_service, visible_servers,
         state::{AppState, WsTicket},
     },
     domain::{
@@ -49,6 +51,7 @@ type ApiResult = Result<Json<Value>, ApiError>;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .merge(backup_queue::router())
+        .merge(friends::router())
         .route(
             "/servers/:id/modrinth/v0/backups/:bid/download",
             get(download_backup),
@@ -273,7 +276,15 @@ async fn v0(
     server["linked_instance"] = match &source {
         Some(status) => match &status.source {
             ServerSource::Instance { instance_id, name } => {
-                json!({"id": instance_id, "name": name, "state": status.state, "error": status.error})
+                let visibility =
+                    visible_servers::get(state, &r.id.to_string())
+                        .await
+                        .map_err(|e| ApiError::Internal(e.to_string()))?;
+                json!({
+                    "id": instance_id, "name": name, "state": status.state, "error": status.error,
+                    "visible_to_friends": visibility.as_ref().map_or(true, |v| v.visible_to_friends),
+                    "shared_instance_id": visibility.and_then(|v| v.shared_instance_id),
+                })
             }
             _ => Value::Null,
         },
@@ -440,6 +451,10 @@ async fn create_server(
     };
     state.instance_store.create(&r).await?;
     if let Some(instance) = body.instance {
+        let visibility = (
+            instance.visible_to_friends,
+            instance.shared_instance_id.clone(),
+        );
         let linked = server_source_service::link_awaiting_upload(
             &state,
             &id.to_string(),
@@ -458,6 +473,14 @@ async fn create_server(
             let _ = tokio::fs::remove_dir_all(&directory).await;
             return Err(ApiError::Internal(e.to_string()));
         }
+        // Left as it is on failure: the App reports the shared instance again when it differs.
+        let _ = visible_servers::set(
+            &state,
+            &id.to_string(),
+            visibility.0,
+            Some(visibility.1),
+        )
+        .await;
     }
     state
         .broadcaster
