@@ -6,6 +6,7 @@ import {
 	type CreationFlowContextValue,
 	CreationFlowModal,
 	EmptyState,
+	injectAuth,
 	injectInstanceServerSource,
 	injectModrinthClient,
 	injectNotificationManager,
@@ -16,12 +17,14 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { computed, inject, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
 import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
 import { openPairCoreModal, useCores } from '@/composables/use-cores'
-import { coreOffline, useServers } from '@/helpers/linked-servers'
+import { coreOffline, coreProblem, useServers } from '@/helpers/linked-servers'
 import { appSettingsModalOpenCoresKey } from '@/providers/app-settings-modal'
 
 const client = injectModrinthClient()
+const auth = injectAuth()
 const { addNotification } = injectNotificationManager()
 const instanceSource = injectInstanceServerSource(null)
 const openCoreSettings = inject(appSettingsModalOpenCoresKey, () => {})
@@ -54,16 +57,28 @@ const servers = computed(() =>
 	),
 )
 
-// Never show the raw error: whatever went wrong, the Core could not be used.
-const problem = computed(() =>
-	coreOffline.value
-		? {
-				type: 'no-connection' as const,
-				heading: 'Your Core is offline',
-				description: 'Start your Core, or check its connection, then try again.',
-			}
-		: null,
-)
+// Never show the raw error. Either the account's Cores could not be looked up, or the Core
+// itself could not be used.
+const problem = computed(() => {
+	const coresError = coresQuery.data.value ? null : coresQuery.error.value
+	if (coresError) {
+		return {
+			type: 'error' as const,
+			heading: 'Could not load your Cores',
+			description: 'Check your connection, then try again.',
+			retrying: coresQuery.isFetching.value,
+			retry: () => coresQuery.refetch(),
+		}
+	}
+	if (!coreOffline.value) return null
+	return {
+		type: 'no-connection' as const,
+		heading: 'Your Core is offline',
+		description: 'Start your Core, or check its connection, then try again.',
+		retrying: isFetching.value,
+		retry: () => refetch(),
+	}
+})
 
 async function searchModpacks(query: string, limit: number = 10) {
 	return client.labrinth.projects_v2.search({
@@ -165,7 +180,7 @@ async function createServer(config: CreationFlowContextValue) {
 		addNotification({
 			type: 'error',
 			title: 'Could not create the server',
-			text: 'Check that your Core is running, then try again.',
+			text: coreProblem(cause),
 		})
 	} finally {
 		config.loading.value = false
@@ -185,7 +200,7 @@ async function browseModpacks() {
 		addNotification({
 			type: 'error',
 			title: 'Could not create the server',
-			text: 'Check that your Core is running, then try again.',
+			text: coreProblem(cause),
 		})
 	}
 }
@@ -194,7 +209,7 @@ async function browseModpacks() {
 <template>
 	<div data-pyro-server-list-root class="relative mx-auto flex h-full w-full flex-col p-6">
 		<div
-			v-if="!problem && !needsPairing"
+			v-if="auth.user.value && !problem && !needsPairing"
 			class="mb-4 flex w-full flex-row items-center justify-between gap-2"
 		>
 			<h1 class="m-0 text-2xl font-extrabold text-contrast">Servers</h1>
@@ -212,7 +227,10 @@ async function browseModpacks() {
 			</div>
 		</div>
 
-		<div v-if="needsPairing" class="flex min-h-[60vh] grow items-center justify-center">
+		<div v-if="!auth.user.value" class="flex min-h-[60vh] grow items-center justify-center">
+			<AccountRequired description="Sign in to host servers on a Core you control" />
+		</div>
+		<div v-else-if="needsPairing" class="flex min-h-[60vh] grow items-center justify-center">
 			<EmptyState
 				type="empty"
 				heading="Pair a Core to host servers"
@@ -232,7 +250,9 @@ async function browseModpacks() {
 				:description="problem.description"
 			>
 				<template #actions>
-					<Button :disabled="isFetching" @click="refetch()"> <UpdatedIcon /> Try again </Button>
+					<Button :disabled="problem.retrying" @click="problem.retry()">
+						<UpdatedIcon /> Try again
+					</Button>
 					<Button @click="openCoreSettings"><SettingsIcon /> Core settings</Button>
 				</template>
 			</EmptyState>

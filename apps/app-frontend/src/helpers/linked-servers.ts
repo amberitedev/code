@@ -1,4 +1,4 @@
-import type { AbstractModrinthClient, Archon, UploadProgress } from '@modrinth/api-client'
+import { type Archon, ModrinthApiError, type UploadProgress } from '@modrinth/api-client'
 import type { ContentDiffItem } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { invoke } from '@tauri-apps/api/core'
@@ -17,17 +17,13 @@ export type LinkedServer = Archon.Servers.v0.Server & {
 /** Shared with the Servers page, so both read the same cached list. */
 export const serversQueryKey = ['servers'] as const
 
-export function fetchServers(client: AbstractModrinthClient = apiClient) {
-	return client.archon.servers_v0.list({ limit: 100 })
-}
-
 /**
  * The one query for the Core's server list. It never retries: a Core that is down refuses the
  * connection at once, and the next check is only seconds away.
  */
 const serversQueryOptions = {
 	queryKey: serversQueryKey,
-	queryFn: () => fetchServers(),
+	queryFn: () => apiClient.archon.servers_v0.list({ limit: 100 }),
 	enabled: () => apiClient.selfHostedHosting,
 	staleTime: 5_000,
 	refetchInterval: 5_000,
@@ -61,6 +57,18 @@ export function useCoreWatch() {
 	})
 }
 
+/**
+ * What to tell the user when a request to a Core fails. The Core's own wording is for the log:
+ * no answer means it is off or unreachable, a refusal means it is no longer paired to the account.
+ */
+export function coreProblem(cause: unknown): string {
+	const status = cause instanceof ModrinthApiError ? cause.statusCode : undefined
+	if (status === undefined) return 'Check that your Core is running, then try again.'
+	if (status === 401 || status === 403)
+		return 'Your Core is not paired to this account. Pair it again from Core settings.'
+	return 'Your Core ran into a problem. Try again in a moment.'
+}
+
 /** The Core's server list, kept fresh by {@link useCoreWatch}. */
 export function useServers() {
 	return useQuery(serversQueryOptions)
@@ -90,7 +98,7 @@ export function isServerRunning(server: Archon.Servers.v0.Server) {
 	)
 }
 
-export type LinkedServerState = 'running' | 'offline' | 'updating' | 'pending' | 'failed'
+type LinkedServerState = 'running' | 'offline' | 'updating' | 'pending' | 'failed'
 
 /** The one state shown for a linked server. An update in progress wins over power state. */
 export function linkedServerState(server: LinkedServer): LinkedServerState {
@@ -146,15 +154,14 @@ export async function pushPackToServer(
 		restart?: boolean
 		onProgress?: (progress: UploadProgress) => void
 	} = {},
-	client: AbstractModrinthClient = apiClient,
 ) {
 	// A Core server has one world, with the server's own id.
 	const worldId = serverId
-	await client.archon.content_v1.uploadInstance(serverId, worldId, pack, instance, {
+	await apiClient.archon.content_v1.uploadInstance(serverId, worldId, pack, instance, {
 		properties: options.properties,
 		onProgress: options.onProgress,
 	}).promise
-	if (options.restart) await client.archon.content_v1.updateModpack(serverId, worldId)
+	if (options.restart) await apiClient.archon.content_v1.updateModpack(serverId, worldId)
 }
 
 /**
@@ -164,11 +171,10 @@ export async function pushPackToServer(
 export async function diffInstanceAgainstServer(
 	instanceId: string,
 	server: Archon.Servers.v0.Server,
-	client: AbstractModrinthClient = apiClient,
 ): Promise<ContentDiffItem[]> {
 	const [items, content] = await Promise.all([
 		get_content_items(instanceId),
-		client.archon.content_v1.getAddons(server.server_id, server.server_id, {
+		apiClient.archon.content_v1.getAddons(server.server_id, server.server_id, {
 			from_modpack: true,
 		}),
 	])

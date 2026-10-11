@@ -1384,6 +1384,7 @@ provideContentManager({
 				<ConfirmUnlinkModal
 					ref="modpackUnlinkModal"
 					server
+					:instance="!!linkedInstanceId"
 					:action-disabled="setupActionDisabled"
 					:action-disabled-tooltip="setupActionBusyMessage ?? undefined"
 					@unlink="handleModpackUnlinkConfirm"

@@ -396,7 +396,7 @@ async fn create_server(
     };
     state.instance_store.create(&r).await?;
     if let Some(instance) = body.instance {
-        server_source_service::link_awaiting_upload(
+        let linked = server_source_service::link_awaiting_upload(
             &state,
             &id.to_string(),
             ServerSource::Instance {
@@ -404,8 +404,16 @@ async fn create_server(
                 name: instance.name,
             },
         )
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .await;
+        if let Err(e) = linked {
+            // Nothing was announced yet, so a server that could not be linked leaves no trace.
+            let _ = sqlx::query("DELETE FROM instances WHERE id = ?")
+                .bind(id.to_string())
+                .execute(&state.pool)
+                .await;
+            let _ = tokio::fs::remove_dir_all(&directory).await;
+            return Err(ApiError::Internal(e.to_string()));
+        }
     }
     state
         .broadcaster

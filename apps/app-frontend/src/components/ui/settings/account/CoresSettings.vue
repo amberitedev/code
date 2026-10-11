@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { Archon } from '@modrinth/api-client'
-import { LinkIcon, UnlinkIcon } from '@modrinth/assets'
+import { LinkIcon, UnlinkIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Button,
 	ConfirmModal,
+	injectAuth,
 	injectModrinthClient,
 	injectNotificationManager,
 	useRelativeTime,
@@ -11,58 +12,90 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
+import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
 import { coresQueryKey, openPairCoreModal, useCores } from '@/composables/use-cores'
+import { coreOffline, serversQueryKey, useServers } from '@/helpers/linked-servers'
 
 const client = injectModrinthClient()
+const auth = injectAuth()
 const queryClient = useQueryClient()
-const { handleError } = injectNotificationManager()
+const { addNotification } = injectNotificationManager()
 const formatRelativeTime = useRelativeTime()
-const { cores, isLoading, error } = useCores()
+// Both are kept fresh from the App root, so this page has its answer the moment it opens.
+const { cores, data, isFetching, error, refetch } = useCores()
+const { data: servers } = useServers()
+
+/** Whether a Core answered the last server check. Undefined before the first check finishes. */
+function isOnline(core: Archon.Cores.v1.Core) {
+	if (coreOffline.value) return false
+	return servers.value ? !servers.value.offline_cores?.includes(core.id) : undefined
+}
 
 const confirmUnpair = ref<InstanceType<typeof ConfirmModal> | null>(null)
-const unpairing = ref<Archon.Cores.v1.Core | null>(null)
+// The Core the confirmation is about, then the one being unpaired.
+const selected = ref<Archon.Cores.v1.Core | null>(null)
+const unpairingId = ref<string | null>(null)
 
 function askUnpair(core: Archon.Cores.v1.Core) {
-	unpairing.value = core
+	selected.value = core
 	confirmUnpair.value?.show()
 }
 
 async function unpair() {
-	const core = unpairing.value
-	if (!core) return
+	const core = selected.value
+	if (!core || unpairingId.value) return
+	unpairingId.value = core.id
 	try {
 		await client.archon.cores_v1.unpair(core)
-	} catch (reason) {
-		handleError(reason instanceof Error ? reason : new Error(String(reason)))
+	} catch (cause) {
+		console.error('Failed to unpair Core', cause)
+		addNotification({
+			type: 'error',
+			title: `Could not unpair ${core.name}`,
+			text: 'Check your connection, then try again.',
+		})
 	} finally {
-		unpairing.value = null
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: coresQueryKey }),
-			queryClient.invalidateQueries({ queryKey: ['servers'] }),
+			queryClient.invalidateQueries({ queryKey: serversQueryKey }),
 		])
+		unpairingId.value = null
 	}
 }
 </script>
 
 <template>
-	<ConfirmModal
-		ref="confirmUnpair"
-		title="Unpair this Core?"
-		description="Its servers and files stay on the Core. It will show a new code so it can be paired again."
-		proceed-label="Unpair"
-		:proceed-icon="UnlinkIcon"
-		@proceed="unpair"
+	<AccountRequired
+		v-if="!auth.user.value"
+		description="Sign in to pair a Core and host servers on a computer you control"
 	/>
-	<div class="flex flex-col gap-4">
+	<div v-else class="flex flex-col gap-4">
+		<ConfirmModal
+			ref="confirmUnpair"
+			:title="`Unpair ${selected?.name ?? 'this Core'}?`"
+			description="Its servers and files stay on the Core, but you can't manage them from the App until you pair it again. The Core will show a new pairing code."
+			proceed-label="Unpair"
+			:proceed-icon="UnlinkIcon"
+			@proceed="unpair"
+		/>
 		<div class="flex items-center justify-between gap-4">
-			<h2 class="m-0 text-lg font-semibold text-contrast">Cores</h2>
+			<div class="flex flex-col gap-1">
+				<h2 class="m-0 text-lg font-semibold text-contrast">Cores</h2>
+				<p class="m-0 text-secondary">A Core runs your servers on a computer you control.</p>
+			</div>
 			<Button type="colored" color="brand" @click="openPairCoreModal()">
 				<LinkIcon aria-hidden="true" /> Pair a Core
 			</Button>
 		</div>
-		<p v-if="error" class="m-0 text-red">{{ error.message }}</p>
-		<p v-else-if="isLoading" class="m-0 text-secondary">Loading Cores...</p>
-		<p v-else-if="!cores.length" class="m-0 text-secondary">No Core is paired.</p>
+		<div v-if="error && !data" class="flex items-center justify-between gap-4">
+			<p class="m-0 text-red">Could not load your Cores. Check your connection, then try again.</p>
+			<Button :disabled="isFetching" @click="refetch()">
+				<UpdatedIcon aria-hidden="true" /> Try again
+			</Button>
+		</div>
+		<p v-else-if="data && !cores.length" class="m-0 text-secondary">
+			No Core is paired yet. Start a Core, then enter the code it shows.
+		</p>
 		<div v-else class="flex flex-col">
 			<div
 				v-for="core in cores"
@@ -71,12 +104,23 @@ async function unpair() {
 			>
 				<div class="flex min-w-0 flex-col gap-1">
 					<span class="truncate font-semibold text-contrast">{{ core.name }}</span>
-					<span class="truncate text-sm text-secondary">
-						{{ core.address }} · Last seen {{ formatRelativeTime(core.last_seen) }}
+					<span class="flex min-w-0 items-center gap-1.5 text-sm text-secondary">
+						<template v-if="isOnline(core) !== undefined">
+							<span
+								class="size-2 shrink-0 rounded-full"
+								:class="isOnline(core) ? 'bg-green' : 'bg-red'"
+								aria-hidden="true"
+							/>
+							{{ isOnline(core) ? 'Online' : 'Offline' }} ·
+						</template>
+						<span class="truncate">
+							{{ core.address }} · Paired {{ formatRelativeTime(core.created) }}
+						</span>
 					</span>
 				</div>
-				<Button :disabled="unpairing?.id === core.id" @click="askUnpair(core)">
-					<UnlinkIcon aria-hidden="true" /> Unpair
+				<Button :disabled="unpairingId !== null" @click="askUnpair(core)">
+					<UnlinkIcon aria-hidden="true" />
+					{{ unpairingId === core.id ? 'Unpairing' : 'Unpair' }}
 				</Button>
 			</div>
 		</div>

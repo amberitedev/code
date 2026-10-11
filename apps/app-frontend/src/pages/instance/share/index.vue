@@ -102,6 +102,8 @@
 			:description="formatMessage(messages.noFriendsInvitedDescription)"
 		>
 			<template #actions>
+				<!-- Not shared yet, but a linked server still takes pushes. -->
+				<InstancePushButton :instance="instance" />
 				<Button
 					type="colored"
 					color="brand"
@@ -138,6 +140,7 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
+import InstancePushButton from '@/components/ui/linked-servers/InstancePushButton.vue'
 import ModrinthAccountRequiredModal from '@/components/ui/modal/ModrinthAccountRequiredModal.vue'
 import {
 	getSharedInstanceUnavailableReason,

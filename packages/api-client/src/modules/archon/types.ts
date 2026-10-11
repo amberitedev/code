@@ -628,6 +628,8 @@ export namespace Archon {
 				servers: Server[]
 				pagination: Pagination
 				users: Record<string, ServerOwner>
+				/** Ids of paired Cores that did not answer. Only set when hosting is self-hosted. */
+				offline_cores?: string[]
 			}
 
 			export type Pagination = {

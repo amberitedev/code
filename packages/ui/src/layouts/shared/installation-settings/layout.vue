@@ -1108,6 +1108,7 @@ const messages = defineMessages({
 			<ConfirmUnlinkModal
 				ref="unlinkModal"
 				:server="ctx.isServer"
+				:instance="isLinkedInstance"
 				:backup-tip="ctx.modpack.value?.title"
 				@unlink="handleUnlink"
 			/>

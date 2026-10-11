@@ -58,9 +58,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 
 	/**
 	 * Pair the Core showing `code` to the signed-in account. The backend says where that Core is,
-	 * then the Core itself accepts the code and asks the backend to confirm the claim.
+	 * then the Core itself accepts the code and asks the backend to confirm the claim. Once the Core
+	 * accepts, pairing is done: refetch the list to see the new Core.
 	 */
-	public async pair(code: string): Promise<Archon.Cores.v1.Core> {
+	public async pair(code: string): Promise<void> {
 		let claim: { core_id: string; address: string }
 		try {
 			claim = await this.client.request('/cores/pair', {
@@ -73,6 +74,8 @@ export class ArchonCoresV1Module extends AbstractModule {
 		} catch (error) {
 			throw pairingError(error, 'failed')
 		}
+		// The Core checks the account token, so its address is allowed before it is paired.
+		const alreadyAllowed = this.addresses.has(claim.address)
 		this.addresses.add(claim.address)
 		try {
 			await this.client.request('', {
@@ -84,11 +87,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 				circuitBreaker: false,
 			})
 		} catch (error) {
+			if (!alreadyAllowed) this.addresses.delete(claim.address)
 			throw pairingError(error, 'unreachable')
 		}
-		const core = (await this.list()).find((paired) => paired.id === claim.core_id)
-		if (!core) throw new CorePairingError('failed')
-		return core
+		this.cores = null
 	}
 
 	/**
@@ -96,11 +98,16 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * a Core that missed it finds out the next time it starts. Its servers and files stay.
 	 */
 	public async unpair(core: Archon.Cores.v1.Core): Promise<void> {
-		await this.client.request(`/cores/${encodeURIComponent(core.id)}`, {
-			api: 'labrinth',
-			version: 3,
-			method: 'DELETE',
-		})
+		await this.client
+			.request(`/cores/${encodeURIComponent(core.id)}`, {
+				api: 'labrinth',
+				version: 3,
+				method: 'DELETE',
+			})
+			.catch((error) => {
+				// Already unpaired somewhere else, which is what was asked for.
+				if (!(error instanceof ModrinthApiError && error.statusCode === 404)) throw error
+			})
 		await this.client
 			.request('', {
 				api: core.address,
@@ -113,7 +120,8 @@ export class ArchonCoresV1Module extends AbstractModule {
 		for (const [serverId, address] of this.serverAddresses) {
 			if (address === core.address) this.serverAddresses.delete(serverId)
 		}
-		await this.list()
+		this.addresses.delete(core.address)
+		this.cores = null
 	}
 
 	/** Whether `url` is on a paired Core, which is allowed to receive the account token. */
@@ -137,7 +145,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return `${cores[0].address}/hosting`
 	}
 
-	/** The servers of every paired Core as one list. A Core that cannot be reached is left out. */
+	/**
+	 * The servers of every paired Core as one list. A Core that cannot be reached is left out and
+	 * named in `offline_cores`; when none can be reached this throws.
+	 */
 	public async servers(
 		options?: Archon.Servers.v0.GetServersOptions,
 	): Promise<Archon.Servers.v0.ServerGetResponse> {
@@ -156,9 +167,13 @@ export class ArchonCoresV1Module extends AbstractModule {
 			servers: [],
 			pagination: { current_page: 1, page_size: 0, total_pages: 1, total_items: 0 },
 			users: {},
+			offline_cores: [],
 		}
 		results.forEach((result, index) => {
-			if (result.status !== 'fulfilled') return
+			if (result.status !== 'fulfilled') {
+				merged.offline_cores?.push(cores[index].id)
+				return
+			}
 			for (const server of result.value.servers) {
 				this.serverAddresses.set(server.server_id, cores[index].address)
 				merged.servers.push(server)
