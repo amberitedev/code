@@ -39,6 +39,7 @@ export const actionLogActionNames = [
 	'addon_updated',
 	'modpack_changed',
 	'modpack_unlinked',
+	'instance_version_applied',
 	'server_repaired',
 	'server_reset',
 	'server_started',
@@ -128,6 +129,7 @@ export const actionLogActionGroups = [
 			'addon_deleted',
 			'modpack_changed',
 			'modpack_unlinked',
+			'instance_version_applied',
 		],
 	},
 	{

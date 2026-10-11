@@ -3,10 +3,17 @@ import type { Labrinth } from '../labrinth/types'
 export namespace Archon {
 	export namespace Cores {
 		export namespace v1 {
-			/** A Core paired to the signed-in account, as listed by the backend. */
+			/**
+			 * A Core the signed-in account may reach, as listed by the backend: one it paired, or
+			 * one whose owner invited it to manage a server.
+			 */
 			export type Core = {
 				id: string
 				name: string
+				/** False for a Core the account was only invited to. Its owner manages it. */
+				owned: boolean
+				/** The Core's own version. Null until it has started once since it learned to report it. */
+				version: string | null
 				/** Where this Core is on its own network, reported by the Core itself. */
 				address: string
 				/** Where this Core is on the internet, once it has proven it can be reached there. */
@@ -152,6 +159,8 @@ export namespace Archon {
 				| 'addon_updated'
 				| 'modpack_changed'
 				| 'modpack_unlinked'
+				/** Core only. The server was moved to a version of the App instance it follows. */
+				| 'instance_version_applied'
 				| 'server_repaired'
 				| 'server_reset'
 				| 'server_started'

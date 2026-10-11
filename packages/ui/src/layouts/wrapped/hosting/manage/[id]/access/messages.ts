@@ -69,6 +69,11 @@ export const accessMessages = defineMessages({
 		id: 'servers.access-page.role.owner-description',
 		defaultMessage: 'Full access including billing, members, and destructive actions.',
 	},
+	// A self-hosted Core has no billing.
+	ownerDescriptionSelfHosted: {
+		id: 'servers.access-page.role.owner-description-self-hosted',
+		defaultMessage: 'Full access including members and destructive actions.',
+	},
 	editorRole: {
 		id: 'servers.access-page.role.editor',
 		defaultMessage: 'Editor',
@@ -211,6 +216,10 @@ export const actionLogActionMessages = defineMessages({
 	modpack_unlinked: {
 		id: 'servers.access-page.activity-log-filter.action.modpack-unlinked',
 		defaultMessage: 'Unlinked modpack',
+	},
+	instance_version_applied: {
+		id: 'servers.access-page.activity-log-filter.action.instance-version-applied',
+		defaultMessage: 'Updated from instance',
 	},
 	server_repaired: {
 		id: 'servers.access-page.activity-log-filter.action.server-repaired',

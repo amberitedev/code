@@ -190,7 +190,9 @@ const roleOptions = computed<ServerAccessRoleOption[]>(() => [
 	{
 		value: 'owner',
 		label: formatMessage(messages.ownerRole),
-		description: formatMessage(messages.ownerDescription),
+		description: formatMessage(
+			client.selfHostedHosting ? messages.ownerDescriptionSelfHosted : messages.ownerDescription,
+		),
 	},
 	{
 		value: 'editor',

@@ -5,7 +5,10 @@ import { apiClient } from '@/services/api-client'
 
 export const coresQueryKey = ['cores']
 
-/** The account's paired Cores. */
+/**
+ * The Cores the account may reach. `cores` has all of them, including ones it was only invited
+ * to manage a server on; `ownCores` has the ones it paired, which is where it can create servers.
+ */
 export function useCores() {
 	const query = useQuery({
 		queryKey: coresQueryKey,
@@ -13,7 +16,8 @@ export function useCores() {
 		staleTime: 30_000,
 	})
 	const cores = computed(() => query.data.value ?? [])
-	return { ...query, cores }
+	const ownCores = computed(() => cores.value.filter((core) => core.owned))
+	return { ...query, cores, ownCores }
 }
 
 // The one "Pair a Core" modal is mounted in App.vue and registers itself here.
@@ -29,11 +33,12 @@ export function openPairCoreModal(): Promise<boolean> {
 }
 
 /**
- * Call before anything that creates a server. Resolves true right away when a Core is paired;
+ * Call before anything that creates a server. Resolves true right away when a Core is paired
+ * (being invited to someone else's does not count);
  * otherwise opens "Pair a Core" and resolves true only once pairing succeeds. Throws when the
  * account's Cores cannot be loaded, so a failed lookup never asks to pair.
  */
 export async function ensureCorePaired(): Promise<boolean> {
 	const cores = await apiClient.archon.cores_v1.list()
-	return cores.length > 0 || openPairCoreModal()
+	return cores.some((core) => core.owned) || openPairCoreModal()
 }

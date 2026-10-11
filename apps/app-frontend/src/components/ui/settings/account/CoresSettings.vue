@@ -22,7 +22,8 @@ const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
 const formatRelativeTime = useRelativeTime()
 // Both are kept fresh from the App root, so this page has its answer the moment it opens.
-const { cores, data, isFetching, error, refetch } = useCores()
+// Only the account's own Cores are managed here, not ones it was invited to.
+const { ownCores: cores, data, isFetching, error, refetch } = useCores()
 const { data: servers } = useServers()
 
 /** Whether a Core answered the last server check. Undefined before the first check finishes. */

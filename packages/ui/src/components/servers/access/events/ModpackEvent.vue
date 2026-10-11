@@ -22,7 +22,7 @@ import EventInlineText from './EventInlineText.vue'
 import type { EventEntity } from './types'
 
 const props = defineProps<{
-	kind: 'changed' | 'unlinked'
+	kind: 'changed' | 'unlinked' | 'instance_updated'
 	modpack?: EventEntity | null
 	versionLabel?: string | null
 }>()
@@ -40,6 +40,10 @@ const messages = defineMessages({
 		id: 'servers.audit-log.event.modpack-changed-to-version',
 		defaultMessage: 'Changed modpack to version <version></version>',
 	},
+	instanceUpdated: {
+		id: 'servers.audit-log.event.instance-version-applied',
+		defaultMessage: 'Updated server to a new version of <modpack></modpack>',
+	},
 	unlinked: {
 		id: 'servers.audit-log.event.modpack-unlinked',
 		defaultMessage: 'Unlinked modpack',
@@ -55,6 +59,7 @@ const messages = defineMessages({
 })
 
 const message = computed(() => {
+	if (props.kind === 'instance_updated') return messages.instanceUpdated
 	if (props.kind === 'unlinked') {
 		if (props.modpack) return messages.unlinkedModpack
 		return props.versionLabel ? messages.unlinkedVersion : messages.unlinked
