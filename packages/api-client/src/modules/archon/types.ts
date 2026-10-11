@@ -716,6 +716,17 @@ export namespace Archon {
 				name: string
 				state: Content.v1.LinkedPackState
 				error: string | null
+				/** "Visible to friends": the people the instance is shared with see and join it. */
+				visible_to_friends: boolean
+				/** The shared instance behind the instance, as the App last told the Core. */
+				shared_instance_id: string | null
+			}
+
+			/** The parts of a linked server's sharing settings to change. */
+			export type LinkedInstanceSettings = {
+				visible_to_friends?: boolean
+				/** `{ id: null }` once the instance is no longer shared. */
+				shared_instance?: { id: string | null }
 			}
 
 			export type UserScope = number

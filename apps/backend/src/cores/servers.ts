@@ -89,7 +89,7 @@ export async function handleVisibleServers(request: Request, env: Env): Promise<
 	const path = routePath(request),
 		method = request.method
 	if (path === '/core/servers' && method === 'PUT') return replaceServers(request, env)
-	const instance = path.match(/^\/instances\/([^/]+)\/servers$/)
+	const instance = path.match(/^\/v1\/instances\/([^/]+)\/servers$/)
 	if (instance && method === 'GET')
 		return listServers(request, env, decodeURIComponent(instance[1]))
 	return null

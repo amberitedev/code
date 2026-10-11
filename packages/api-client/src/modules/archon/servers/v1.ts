@@ -16,6 +16,19 @@ export class ArchonServersV1Module extends AbstractModule {
 		})
 	}
 
+	/** Changes who sees a server linked to an instance, on its Core. */
+	public async setLinkedInstance(
+		serverId: string,
+		settings: Archon.Servers.v0.LinkedInstanceSettings,
+	): Promise<void> {
+		await this.client.request<void>(`/servers/${serverId}/linked-instance`, {
+			api: 'archon',
+			version: 'local',
+			method: 'PATCH',
+			body: settings,
+		})
+	}
+
 	/**
 	 * Get list of servers for the authenticated user
 	 * GET /v1/servers
