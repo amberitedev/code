@@ -136,7 +136,7 @@ impl ServerCertVerifier for Pinned {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
-        if Sha256::digest(end_entity).as_slice() == self.fingerprint {
+        if Sha256::digest(end_entity)[..] == self.fingerprint {
             Ok(ServerCertVerified::assertion())
         } else {
             Err(Error::General(

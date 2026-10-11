@@ -193,6 +193,8 @@ export class ArchonCoresV1Module extends AbstractModule {
 			Object.assign(merged.users, result.value.users)
 		})
 		const failure = results.find((result) => result.status === 'rejected')
+		// A Core that did not answer may have moved or changed its certificate: ask the backend again.
+		if (failure) this.cores = null
 		if (failure && !results.some((result) => result.status === 'fulfilled')) throw failure.reason
 		merged.pagination.page_size = merged.pagination.total_items = merged.servers.length
 		return merged
