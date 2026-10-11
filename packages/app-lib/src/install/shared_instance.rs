@@ -915,7 +915,10 @@ async fn install_shared_instance_external_file(
         ))
         .into());
     }
-    crate::self_hosted::integrity::verify_shared_file(&bytes, file.sha256.as_deref())?;
+    crate::self_hosted::integrity::verify_shared_file(
+        &bytes,
+        file.sha256.as_deref(),
+    )?;
     let bytes = bytes::Bytes::from(bytes);
 
     if file.file_type == CONFIG_BUNDLE_FILE_TYPE {

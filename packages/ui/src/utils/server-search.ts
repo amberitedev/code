@@ -171,7 +171,7 @@ export function useServerSearch(opts: {
 			})
 		}
 
-		const sortedRegions = Object.entries(SERVER_REGIONS).sort(([_, a], [__, b]) => {
+		const sortedRegions = Object.entries(SERVER_REGIONS).sort(([, a], [, b]) => {
 			const aFormatted = formatMessage(a)
 			const bFormatted = formatMessage(b)
 			return aFormatted.localeCompare(bFormatted, locale.value)

@@ -21,7 +21,7 @@ async function main() {
 	)
 	// Core lets in only its owner, so this must be the owner's account session token.
 	const token = process.env.ACCOUNT_TOKEN
-	assert(token, 'Set ACCOUNT_TOKEN to the Core owner's account session token')
+	assert(token, "Set ACCOUNT_TOKEN to the Core owner's account session token")
 	let fsAuth = null
 	const client = new GenericModrinthClient({
 		archonBaseUrl: `${coreUrl}/hosting`,

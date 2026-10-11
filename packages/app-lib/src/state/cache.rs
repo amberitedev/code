@@ -1451,13 +1451,15 @@ impl CachedEntry {
                 values
             }
             CacheValueType::File => {
-                let hashes = keys.iter().map(|key| key.to_string()).collect::<Vec<_>>();
-                let mut versions = crate::self_hosted::public_content::versions_by_hash(
-                    &hashes,
-                    fetch_semaphore,
-                    pool,
-                )
-                .await?;
+                let hashes =
+                    keys.iter().map(|key| key.to_string()).collect::<Vec<_>>();
+                let mut versions =
+                    crate::self_hosted::public_content::versions_by_hash(
+                        &hashes,
+                        fetch_semaphore,
+                        pool,
+                    )
+                    .await?;
 
                 let mut vals = Vec::new();
 

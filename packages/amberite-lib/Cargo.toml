@@ -20,7 +20,7 @@ reqwest = { workspace = true, features = [
   "json",
   "multipart",
   "rustls-tls-webpki-roots",
-  "stream"
+  "stream",
 ] }
 
 futures-util = { workspace = true }

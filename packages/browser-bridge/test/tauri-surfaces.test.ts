@@ -1,7 +1,7 @@
 import { getVersion } from '@tauri-apps/api/app'
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { join } from '@tauri-apps/api/path'
+import { join, tempDir } from '@tauri-apps/api/path'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open, save } from '@tauri-apps/plugin-dialog'
@@ -59,6 +59,7 @@ describe.sequential('Tauri surfaces used by Amberite', () => {
 			},
 			'C:\\Amberite\\profiles',
 		)
+		await roundTrip(tempDir(), 'plugin:path|resolve_directory', { directory: 12 }, 'C:\\Temp')
 		await roundTrip(
 			open({ directory: true, multiple: false }),
 			'plugin:dialog|open',

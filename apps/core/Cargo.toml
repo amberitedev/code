@@ -20,7 +20,7 @@ sqlx = { version = "=0.9.0-alpha.1", features = [
   "runtime-tokio",
   "sqlite",
   "tls-rustls",
-  "uuid"
+  "uuid",
 ] }
 
 # ============================================================
@@ -31,11 +31,7 @@ axum-macros = "0.4.2"
 axum-server = { version = "0.7.3", features = ["tls-rustls"] }
 headers = "0.4.0"
 # Use ring crypto backend to avoid aws-lc-sys CMake build issues on Windows
-rustls = { version = "0.23", default-features = false, features = [
-  "ring",
-  "std",
-  "tls12"
-] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tower = "0.4"
 tower-http = { version = "0.5.2", features = ["cors", "fs", "trace"] }
 
@@ -113,12 +109,7 @@ url = "2.5"
 # ============================================================
 # TIER 1 - HTTP
 # ============================================================
-reqwest = { version = "0.12", features = [
-  "json",
-  "multipart",
-  "rustls-tls",
-  "stream"
-] }
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls", "stream"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 derive_more = "0.99"
