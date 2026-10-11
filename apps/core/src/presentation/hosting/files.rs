@@ -22,13 +22,15 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::{
-    application::{fs_service, state::AppState},
+    application::{access_service, fs_service, state::AppState},
     domain::{
         event::{Event, FsOperationKind},
         instance::{InstanceRecord, ModLoader},
     },
     presentation::{
-        error::ApiError, extractors::AuthUser, handlers::properties,
+        error::ApiError,
+        extractors::{Can, CanRead, CanSetup, CanWriteFiles},
+        handlers::properties,
         instance_path::resolve_instance_path,
     },
 };
@@ -64,6 +66,24 @@ async fn instance(
     id: &str,
 ) -> Result<InstanceRecord, ApiError> {
     resolve_instance_path(state, id).await
+}
+
+/// Record a file action in the server's activity log.
+async fn log(
+    state: &AppState,
+    record: &InstanceRecord,
+    user_id: &str,
+    action: &str,
+    metadata: Value,
+) {
+    access_service::log(
+        state,
+        &record.id.to_string(),
+        user_id,
+        action,
+        metadata,
+    )
+    .await;
 }
 
 /// Check existing ancestors before a service creates directories. Refuse symlinks,
@@ -186,7 +206,7 @@ fn timestamp(value: std::io::Result<SystemTime>) -> u64 {
 }
 
 async fn list(
-    _user: AuthUser,
+    _user: CanRead,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListQuery>,
@@ -247,7 +267,7 @@ async fn list(
 }
 
 async fn download(
-    _user: AuthUser,
+    _user: CanRead,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<FileQuery>,
@@ -267,7 +287,7 @@ async fn download(
 }
 
 async fn create(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<CreateQuery>,
@@ -295,11 +315,19 @@ async fn create(
             ))
         }
     }
+    log(
+        &state,
+        &record,
+        &user.0.id,
+        "file_uploaded",
+        json!({"path": query.path}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn write(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<FileQuery>,
@@ -310,11 +338,19 @@ async fn write(
     fs_service::write_file(&state, &record.id.to_string(), &query.path, body)
         .await
         .map_err(fs_error)?;
+    log(
+        &state,
+        &record,
+        &user.0.id,
+        "file_edited",
+        json!({"path": query.path}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn move_file(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<MoveBody>,
@@ -330,11 +366,19 @@ async fn move_file(
     )
     .await
     .map_err(fs_error)?;
+    log(
+        &state,
+        &record,
+        &user.0.id,
+        "file_renamed",
+        json!({"from": body.source, "to": body.destination}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn remove(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<DeleteQuery>,
@@ -349,6 +393,14 @@ async fn remove(
     )
     .await
     .map_err(fs_error)?;
+    log(
+        &state,
+        &record,
+        &user.0.id,
+        "file_deleted",
+        json!({"path": query.path}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -367,7 +419,7 @@ fn check_tree(record: &InstanceRecord, path: &str) -> Result<(), ApiError> {
 }
 
 async fn copy(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CopyBody>,
@@ -410,11 +462,19 @@ async fn copy(
     )
     .await
     .map_err(fs_error)?;
+    log(
+        &state,
+        &record,
+        &user.0.id,
+        "file_uploaded",
+        json!({"path": body.destination}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn zip(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CopyBody>,
@@ -437,6 +497,14 @@ async fn zip(
     )
     .await
     .map_err(fs_error)?;
+    log(
+        &state,
+        &record,
+        &user.0.id,
+        "file_uploaded",
+        json!({"path": body.destination}),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -454,7 +522,7 @@ enum ZipRequest {
 }
 
 async fn stat(
-    _user: AuthUser,
+    _user: CanRead,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<FileQuery>,
@@ -484,7 +552,7 @@ async fn stat(
 }
 
 async fn zip_world_paths(
-    user: AuthUser,
+    user: CanWriteFiles,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<ZipRequest>,
@@ -567,7 +635,7 @@ struct ArchiveQuery {
 }
 
 async fn unarchive(
-    _user: AuthUser,
+    user: CanWriteFiles,
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ArchiveQuery>,
@@ -638,6 +706,14 @@ async fn unarchive(
     .await
     .map_err(|error| ApiError::Internal(error.to_string()))??;
     if !dry {
+        access_service::log(
+            &state,
+            &event_id.to_string(),
+            &user.0.id,
+            "file_uploaded",
+            json!({"path": event_path}),
+        )
+        .await;
         state.broadcaster.send(Event::FsChanged {
             instance_id: event_id,
             operation: FsOperationKind::Unzip,
@@ -650,7 +726,7 @@ async fn unarchive(
 }
 
 async fn modify_operation(
-    _user: AuthUser,
+    _user: CanWriteFiles,
     Path((id, _action)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<StatusCode, ApiError> {
@@ -687,17 +763,24 @@ struct SessionPath {
     upload: Option<String>,
 }
 
+/// The server an upload goes to. Uploading files and uploading content are different
+/// permissions, so the scope in the path decides which one `user_id` needs.
 async fn session_instance(
     state: &Arc<AppState>,
     path: &SessionPath,
+    user_id: &str,
 ) -> Result<InstanceRecord, ApiError> {
     let record = instance(state, &path.id).await?;
     if path.world != record.id.to_string() {
         return Err(ApiError::NotFound("world not found".into()));
     }
-    if path.scope != "files" && path.scope != "content" {
-        return Err(ApiError::NotFound("upload scope not found".into()));
-    }
+    let needed = match path.scope.as_str() {
+        "files" => access_service::scope::FILES_WRITE,
+        "content" => access_service::scope::SETUP,
+        _ => return Err(ApiError::NotFound("upload scope not found".into())),
+    };
+    access_service::require(state, user_id, &record.id.to_string(), needed)
+        .await?;
     Ok(record)
 }
 
@@ -743,12 +826,12 @@ fn check_session(
 }
 
 async fn create_session(
-    AuthUser(account): AuthUser,
+    Can(account): CanRead,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &path).await?;
+    let record = session_instance(&state, &path, &account.id).await?;
     let now = chrono::Utc::now().timestamp();
     // Dropping expired sessions also removes their temporary directories.
     sessions.retain(|_, value| {
@@ -782,12 +865,12 @@ async fn create_session(
 }
 
 async fn get_session(
-    AuthUser(account): AuthUser,
+    Can(account): CanRead,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<Value>, ApiError> {
-    let record = session_instance(&state, &path).await?;
+    let record = session_instance(&state, &path, &account.id).await?;
     let candidates: Vec<_> =
         sessions.iter().map(|entry| entry.value().clone()).collect();
     let mut latest: Option<SessionResponse> = None;
@@ -900,13 +983,13 @@ async fn stage_files(
 }
 
 async fn upload_session_files(
-    AuthUser(account): AuthUser,
+    Can(account): CanRead,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
     mut multipart: Multipart,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &path).await?;
+    let record = session_instance(&state, &path, &account.id).await?;
     let session = find_session(&sessions, &path)?;
     let mut session = session.lock().await;
     check_session(&mut session, &record, &account.id, &path.scope, true)?;
@@ -944,6 +1027,32 @@ async fn commit_files(
             path: destination.clone(),
         });
     }
+    let uploaded: Vec<&String> = session.files.keys().collect();
+    if session.scope == "content" {
+        let names: Vec<&str> = uploaded
+            .iter()
+            .map(|path| path.rsplit('/').next().unwrap_or(path))
+            .collect();
+        log(
+            state,
+            record,
+            &session.user_id,
+            "addon_uploaded",
+            json!({"file_names": names}),
+        )
+        .await;
+    } else {
+        for path in uploaded {
+            log(
+                state,
+                record,
+                &session.user_id,
+                "file_uploaded",
+                json!({"path": path}),
+            )
+            .await;
+        }
+    }
     session.response.status = "finalized";
     session.response.updated_at = chrono::Utc::now().timestamp();
     session.staging.take();
@@ -952,12 +1061,12 @@ async fn commit_files(
 }
 
 async fn finalize_session(
-    AuthUser(account): AuthUser,
+    Can(account): CanRead,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &path).await?;
+    let record = session_instance(&state, &path, &account.id).await?;
     let session = find_session(&sessions, &path)?;
     let mut session = session.lock().await;
     check_session(&mut session, &record, &account.id, &path.scope, false)?;
@@ -970,12 +1079,12 @@ async fn finalize_session(
 }
 
 async fn cancel_session(
-    AuthUser(account): AuthUser,
+    Can(account): CanRead,
     Path(path): Path<SessionPath>,
     State(state): State<Arc<AppState>>,
     Extension(sessions): Extension<Sessions>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let record = session_instance(&state, &path).await?;
+    let record = session_instance(&state, &path, &account.id).await?;
     let session = find_session(&sessions, &path)?;
     let mut session = session.lock().await;
     check_session(&mut session, &record, &account.id, &path.scope, false)?;
@@ -992,7 +1101,7 @@ async fn cancel_session(
 }
 
 async fn upload_addons(
-    AuthUser(account): AuthUser,
+    Can(account): CanSetup,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
@@ -1003,7 +1112,7 @@ async fn upload_addons(
         scope: "content".into(),
         upload: None,
     };
-    let record = session_instance(&state, &path).await?;
+    let record = session_instance(&state, &path, &account.id).await?;
     let now = chrono::Utc::now().timestamp();
     let mut session = UploadSession {
         instance_id: record.id.to_string(),
@@ -1040,7 +1149,7 @@ struct ModpackUploadQuery {
 }
 
 async fn upload_modpack(
-    _user: AuthUser,
+    user: CanSetup,
     Path((id, world)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModpackUploadQuery>,
@@ -1223,13 +1332,20 @@ async fn upload_modpack(
     }
     drop(archive);
     drop(_operation_guard);
-    crate::application::server_source_service::link_mrpack(
+    let status = crate::application::server_source_service::link_mrpack(
         &state,
         &record.id.to_string(),
         pack.path(),
         instance,
     )
     .await?;
+    super::http::log_source_update(
+        &state,
+        &user.0,
+        &record.id.to_string(),
+        &status,
+    )
+    .await;
     if !updates.is_empty() {
         let _ = properties::patch_properties_handler(
             Path(id),

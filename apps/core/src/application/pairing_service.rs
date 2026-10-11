@@ -84,6 +84,7 @@ async fn report_address(state: &AppState, key: &str) -> Report {
             .json(&json!({
                 "address": state.config.public_url,
                 "cert_fingerprint": state.tls.fingerprint,
+                "version": env!("CARGO_PKG_VERSION"),
                 // Where the App finds this Core from outside the home, once that is proven.
                 "public_address": state
                     .network

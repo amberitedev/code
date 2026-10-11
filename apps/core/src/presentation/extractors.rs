@@ -1,18 +1,22 @@
 //! Account login for Core HTTP routes.
 
 use std::{
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use axum::{
     async_trait,
-    extract::FromRequestParts,
+    extract::{FromRequestParts, Path},
     http::{request::Parts, HeaderMap, StatusCode},
 };
 use serde::Deserialize;
 
-use crate::{application::state::AppState, presentation::error::ApiError};
+use crate::{
+    application::{access_service, state::AppState},
+    presentation::{error::ApiError, instance_path::resolve_instance_path},
+};
 
 /// How long the backend's answer for an account token is reused.
 const TOKEN_CACHE: Duration = Duration::from_secs(60);
@@ -28,27 +32,80 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        let token = bearer_token(&parts.headers)
-            .filter(|token| !token.is_empty())
-            .ok_or_else(|| {
-                ApiError::Unauthorized("missing Authorization header".into())
-            })?;
-        let account = account(state, token).await?;
-
+        let SignedIn(account) =
+            SignedIn::from_request_parts(parts, state).await?;
         // An unowned Core refuses everything except pairing.
-        let owner = state
-            .owner()
-            .await
-            .map_err(|error| ApiError::Internal(error.to_string()))?
-            .ok_or_else(|| {
-                ApiError::Forbidden("this Core is not paired".into())
-            })?;
+        let owner = state.owner().await?.ok_or_else(|| {
+            ApiError::Forbidden("this Core is not paired".into())
+        })?;
         if owner.user_id != account.id {
             return Err(ApiError::Forbidden(
                 "this Core belongs to another account".into(),
             ));
         }
+        Ok(Self(account))
+    }
+}
 
+/// Axum extractor for any signed-in account. It proves who is calling and nothing else: the
+/// handler decides what that account may see.
+pub struct SignedIn(pub Account);
+
+#[async_trait]
+impl FromRequestParts<Arc<AppState>> for SignedIn {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let token = bearer_token(&parts.headers)
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| {
+                ApiError::Unauthorized("missing Authorization header".into())
+            })?;
+        Ok(Self(account(state, token).await?))
+    }
+}
+
+/// Axum extractor for a route under a server (`:id` in its path). Accepts an account whose role
+/// on that server has every permission in `SCOPE`; see `access_service::scope`.
+pub struct Can<const SCOPE: u64>(pub Account);
+
+pub type CanRead = Can<{ access_service::scope::BASE_READ }>;
+pub type CanPower = Can<{ access_service::scope::POWER_ACTIONS }>;
+pub type CanExec = Can<{ access_service::scope::EXEC_COMMANDS }>;
+pub type CanWriteFiles = Can<{ access_service::scope::FILES_WRITE }>;
+pub type CanSetup = Can<{ access_service::scope::SETUP }>;
+pub type CanBackup = Can<{ access_service::scope::BACKUPS }>;
+pub type CanAdvanced = Can<{ access_service::scope::ADVANCED }>;
+pub type CanReset = Can<{ access_service::scope::RESET_SERVER }>;
+pub type CanManageUsers = Can<{ access_service::scope::MANAGE_USERS }>;
+
+#[async_trait]
+impl<const SCOPE: u64> FromRequestParts<Arc<AppState>> for Can<SCOPE> {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let SignedIn(account) =
+            SignedIn::from_request_parts(parts, state).await?;
+        let Path(params) =
+            Path::<HashMap<String, String>>::from_request_parts(parts, state)
+                .await
+                .map_err(|_| ApiError::NotFound("server not found".into()))?;
+        let id = params
+            .get("id")
+            .ok_or_else(|| ApiError::NotFound("server not found".into()))?;
+        // Check the role before saying whether the server exists.
+        let server = resolve_instance_path(state, id).await;
+        let server_id = server
+            .as_ref()
+            .map_or_else(|_| id.clone(), |server| server.id.to_string());
+        access_service::require(state, &account.id, &server_id, SCOPE).await?;
+        server?;
         Ok(Self(account))
     }
 }
@@ -63,6 +120,8 @@ pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 pub struct Account {
     pub id: String,
     pub username: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 /// Resolve an account token to its account by asking the backend (`GET /user`).
@@ -99,6 +158,7 @@ pub async fn account(
         .await
         .map_err(unavailable)?;
 
+    access_service::remember(state, &account).await;
     state.account_tokens.retain(|_, cached| cached.1 > now);
     state
         .account_tokens

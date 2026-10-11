@@ -1,4 +1,5 @@
 //! Local Hosting compatibility routes over the existing Core services.
+pub mod access;
 pub mod events;
 pub mod files;
 pub mod http;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .merge(http::router())
+        .merge(access::router())
         .merge(files::router())
         .merge(events::router())
 }

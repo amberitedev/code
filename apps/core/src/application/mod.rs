@@ -1,3 +1,4 @@
+pub mod access_service;
 pub mod backup_service;
 pub mod fs_service;
 pub mod installation_service;
