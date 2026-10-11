@@ -210,7 +210,6 @@ describe('dev runner scenarios', () => {
 			const config = JSON.parse(app.args[app.args.indexOf('--config') + 1]!)
 			expect(config.app.security.csp['img-src']).toContain('http://127.0.0.1:8787')
 			expect(config.app.security.capabilities).toEqual([
-				'ads',
 				'core',
 				'plugins',
 				{
