@@ -23,8 +23,8 @@ const historyQuery = useQuery(queryOptions({ ...commandHistoryQueryOptions(), en
 const CommandHistoryEditor = defineAsyncComponent(async () => {
 	const [editor] = await Promise.all([
 		import('vue3-ace-editor'),
-		import('@modrinth/ui/src/utils/ace-theme'),
-		import('@modrinth/ui/src/utils/ace-mode-mcfunction'),
+		import('@modrinth/ui/src/utils/ace-theme.ts'),
+		import('@modrinth/ui/src/utils/ace-mode-mcfunction.ts'),
 	])
 	return editor.VAceEditor
 })

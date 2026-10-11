@@ -13,7 +13,7 @@ const { formatMessage } = useVIntl()
 
 const { instance } = injectInstanceSettings()
 
-const globalSettings = (await get().catch(handleError)) as AppSettings
+const globalSettings = (await get().catch(handleError)) as unknown as AppSettings
 
 const overrideWindowSettings = ref(
 	!!instance.value.game_resolution || !!instance.value.force_fullscreen,

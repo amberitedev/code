@@ -230,7 +230,7 @@ async function fetchData(versionId: string) {
 		requiredContentProject.value = await get_project(version.project_id, 'bypass')
 		externalFiles.value = [
 			...new Set(
-				(version.dependencies ?? [])
+				((version.dependencies ?? []) as Labrinth.Versions.v3.Dependency[])
 					.filter(
 						(dependency) =>
 							dependency.dependency_type === 'embedded' &&
@@ -246,7 +246,7 @@ async function fetchData(versionId: string) {
 
 async function handleAccept() {
 	hide()
-	const serverProjectId = project.value?.id
+	const serverProjectId = project.value?.id as string
 	startInstallingServer(serverProjectId)
 	try {
 		await installServerProject(serverProjectId)
@@ -326,7 +326,7 @@ async function openViewContents() {
 								},
 							}
 						: {}),
-				}
+				} as ContentItem
 			},
 		)
 		managedContentModal.value?.show(contentItems)

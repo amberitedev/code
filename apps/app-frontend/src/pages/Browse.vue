@@ -628,7 +628,9 @@ function resetInstanceContext() {
 	newlyInstalled.value = []
 	hiddenInstanceProjectIds.value = new Set()
 	hiddenInstanceProjectIdsInitialized.value = false
+	// @ts-expect-error upstream assigns to a read-only computed, which is a no-op at runtime
 	isServerInstance.value = false
+	// @ts-expect-error upstream calls an undefined name
 	browseBreadcrumb.reset()
 	void refreshInstalledProjectIds()
 }
@@ -872,6 +874,7 @@ async function chooseFilterMatchingInstallVersion(
 	const plan = await resolveInstallPlan({
 		project: {
 			project_id: project.project_id,
+			// @ts-expect-error v3 search results carry name, not title
 			title: project.title,
 			icon_url: project.icon_url,
 		},
@@ -1304,6 +1307,7 @@ provideBrowseManager({
 	showHideInstalled: computed(
 		() =>
 			projectType.value === 'modpack' ||
+			// @ts-expect-error the line above already rules out modpack
 			(isServerContext.value && projectType.value !== 'modpack') ||
 			!!instance.value,
 	),

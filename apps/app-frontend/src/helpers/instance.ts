@@ -613,7 +613,10 @@ export async function kill(instanceId: string): Promise<void> {
 }
 
 // Edits an instance
-export async function edit(instanceId: string, editInstance: Partial<GameInstance>): Promise<void> {
+export async function edit(
+	instanceId: string,
+	editInstance: { [K in keyof GameInstance]?: GameInstance[K] | null },
+): Promise<void> {
 	return await invoke('plugin:instance|instance_edit', { instanceId, editInstance })
 }
 
@@ -692,7 +695,7 @@ export interface SharedInstanceInviteLink {
 	maxUses: number
 }
 
-export interface SharedInstanceInvite {
+export type SharedInstanceInvite = {
 	id: string
 	expiration: string
 	maxUses: number

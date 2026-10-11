@@ -21,8 +21,12 @@ type AnalyticsEventMap = {
 	InstanceStop: Partial<InstanceProperties> & { source?: string }
 	InstanceDuplicate: InstanceProperties
 	InstanceRepair: InstanceProperties
+	InstanceRemove: InstanceProperties
 	InstanceSetIcon: Record<string, never>
 	InstanceRemoveIcon: Record<string, never>
+	InstanceCreateIcon: Record<string, never>
+	InstanceEditCreatedIcon: Record<string, never>
+	InstanceSaveCreatedIcon: Record<string, never>
 	InstanceProjectUpdate: InstanceProperties & { id: string; name: string; project_type: string }
 	InstanceProjectDisable: InstanceProperties & {
 		id: string
@@ -50,7 +54,10 @@ let enabled = false
 let activated = false
 let debug = false
 let explicitlyOptedIn = false
-const events: Array<{ name: AnalyticsEvent; properties: Record<string, unknown> | undefined }> = []
+const events: Array<{
+	name: AnalyticsEvent
+	properties: AnalyticsEventMap[AnalyticsEvent] | undefined
+}> = []
 const allowed = import.meta.env.PROD || import.meta.env.VITE_ENABLE_ANALYTICS === 'true'
 
 function removeActivationListeners() {

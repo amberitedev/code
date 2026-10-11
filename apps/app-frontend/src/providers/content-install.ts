@@ -82,13 +82,14 @@ const RESOLVABLE_PROJECT_TYPES = new Set<Labrinth.Content.v3.ContentType>([
 ])
 
 function resolveContentType(projectType?: Labrinth.Projects.v2.ProjectType) {
-	return projectType && RESOLVABLE_PROJECT_TYPES.has(projectType) ? projectType : 'mod'
+	const contentType = projectType as Labrinth.Content.v3.ContentType | undefined
+	return contentType && RESOLVABLE_PROJECT_TYPES.has(contentType) ? contentType : 'mod'
 }
 
 function isVersionCompatible(
 	version: Labrinth.Versions.v2.Version,
 	project: Labrinth.Projects.v2.Project,
-	instance: GameInstance,
+	instance: Pick<GameInstance, 'game_version' | 'loader'>,
 ) {
 	return (
 		version.game_versions.includes(instance.game_version) &&
@@ -101,7 +102,7 @@ function isVersionCompatible(
 function findPreferredVersion(
 	versions: Labrinth.Versions.v2.Version[],
 	project: Labrinth.Projects.v2.Project,
-	instance: GameInstance,
+	instance: Pick<GameInstance, 'game_version' | 'loader'>,
 ) {
 	const projectType = project.project_type ?? 'mod'
 
@@ -549,7 +550,7 @@ export function createContentInstall(opts: {
 			)
 			const newInstanceMap: Record<string, InstallTargetInstance> = {}
 			const newInstances: ContentInstallInstance[] = candidates.map((instance) => {
-				newInstanceMap[instance.id] = instance
+				newInstanceMap[instance.id] = instance as InstallTargetInstance
 				return {
 					id: instance.id,
 					name: instance.name,

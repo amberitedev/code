@@ -135,7 +135,7 @@ async function setTabVisible(tab: InstanceTab, visible: boolean) {
 						:id="`show-${row.tab}-tab`"
 						:model-value="isTabVisible(row.tab)"
 						:disabled="saving || !!disabledReason(row.tab)"
-						@update:model-value="(visible) => setTabVisible(row.tab, visible)"
+						@update:model-value="(visible) => setTabVisible(row.tab, visible!)"
 					/>
 				</span>
 			</div>

@@ -98,7 +98,7 @@ function contentItem(
 	external = false,
 	fallbackProjectId = id,
 	fallbackTitle = fileName,
-	projectType = project?.project_type ?? 'mod',
+	projectType: string = project?.project_type ?? 'mod',
 ): ContentItem {
 	return {
 		id,

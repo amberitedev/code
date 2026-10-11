@@ -27,7 +27,7 @@ export default function useJavaTest() {
 		testingJava.value = false
 
 		if (track) {
-			trackEvent('JavaTest', { path, success: javaTestResult.value })
+			trackEvent('JavaTest', { path, success: javaTestResult.value! })
 		}
 	}
 

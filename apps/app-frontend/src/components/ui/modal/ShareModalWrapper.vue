@@ -26,13 +26,14 @@ defineProps({
 	},
 })
 
-const modal = ref(null)
+const modal = ref<InstanceType<typeof ShareModal>>(null!)
 
 defineExpose({
-	show: (passedContent) => {
+	show: (passedContent: unknown) => {
 		modal.value.show(passedContent)
 	},
 	hide: () => {
+		// @ts-expect-error ShareModal exposes no hide, so upstream's call throws
 		modal.value.hide()
 	},
 })

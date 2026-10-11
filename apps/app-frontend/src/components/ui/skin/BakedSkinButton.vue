@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { SkinButton } from '@modrinth/ui'
 import { useIntersectionObserver } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
+import { type ComponentPublicInstance, computed, ref, watch } from 'vue'
 
 import { acquireSkinPreview, getSkinPreviewKey } from '@/helpers/rendering/skin-previews'
 import type { Cape, Skin } from '@/helpers/skins'
@@ -11,7 +11,7 @@ const props = defineProps<{
 	capes: Cape[]
 	selected: boolean
 }>()
-const button = ref<InstanceType<typeof SkinButton>>()
+const button = ref<ComponentPublicInstance>()
 const visible = ref(false)
 const url = ref<string>()
 const key = computed(() => getSkinPreviewKey(props.skin))

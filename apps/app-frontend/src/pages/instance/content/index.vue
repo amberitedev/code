@@ -998,7 +998,7 @@ async function updateProject(mod: ContentItem) {
 		const updateVersionId = mod.update_version_id!
 		await switch_project_version_with_dependencies(
 			instance.value.id,
-			mod.file_path,
+			mod.file_path!,
 			updateVersionId,
 		)
 
@@ -1294,7 +1294,7 @@ async function handleModpackUpdate() {
 		},
 		modalStateBeforeFetch: {
 			updatingModpack: updatingModpack.value,
-			updatingProjectId: updatingProject.value?.id,
+			updatingProjectId: (updatingProject.value as ContentItem | null)?.id,
 			updatingProjectVersions: updatingProjectVersions.value.map((version) => ({
 				id: version.id,
 				versionNumber: version.version_number,

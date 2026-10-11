@@ -211,7 +211,7 @@ const settingsMutation = useMutation({
 
 const { saved, current, changes, saving, hasChanges, reset, save } = useSavable(
 	() => getBehaviorSettingsState(settingsQuery.data.value!),
-	() => settingsMutation.mutateAsync({ ...current.value }),
+	(): Promise<void> => settingsMutation.mutateAsync({ ...current.value }),
 )
 
 async function saveBehaviorSettings(): Promise<void> {
@@ -259,7 +259,7 @@ onBeforeUnmount(() => {
 					:model-value="Boolean(auth.user.value) && current.syncBehaviorAcrossDevices"
 					:disabled="!auth.user.value"
 					aria-labelledby="sync-behavior-across-devices-label"
-					@update:model-value="current.syncBehaviorAcrossDevices = $event"
+					@update:model-value="current.syncBehaviorAcrossDevices = $event!"
 				/>
 			</span>
 		</div>

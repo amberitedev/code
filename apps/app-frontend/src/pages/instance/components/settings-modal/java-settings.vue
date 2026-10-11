@@ -24,7 +24,7 @@ import { computed, readonly, ref, watch } from 'vue'
 import JavaDetectionModal from '@/components/ui/JavaDetectionModal.vue'
 import useJavaTest from '@/composables/useJavaTest'
 import useMemorySlider from '@/composables/useMemorySlider'
-import { edit, get_optimal_jre_key } from '@/helpers/instance'
+import { edit, get_optimal_jre_key, type JavaVersion } from '@/helpers/instance'
 import { get, parseEnvVars, serializeEnvVars } from '@/helpers/settings.ts'
 
 import type { AppSettings } from '../../../../helpers/types'
@@ -37,7 +37,9 @@ const { instance } = injectInstanceSettings()
 
 const globalSettings = (await get().catch(handleError)) as unknown as AppSettings
 
-const optimalJava = readonly(await get_optimal_jre_key(instance.value.id).catch(handleError))
+const optimalJava = readonly(
+	(await get_optimal_jre_key(instance.value.id).catch(handleError)) as JavaVersion,
+)
 
 const overrideJavaInstall = ref(!!instance.value.java_path)
 const javaPath = ref(instance.value.java_path ?? optimalJava?.path ?? '')
@@ -285,6 +287,7 @@ const messages = defineMessages({
 									:disabled="!overrideJavaInstall || testingJava"
 									:style="{
 										'--legacy-button-color':
+											// @ts-expect-error upstream's first operand is a non-empty string, so always truthy
 											(overrideJavaInstall && !hoveringTest && !testingJava
 												? javaTestResult === true
 													? 'green'

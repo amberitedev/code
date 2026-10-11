@@ -296,7 +296,7 @@ const messages = defineMessages({
 function userProfileLink(username: string) {
 	return !username || username.includes('@') ? undefined : `/user/${encodeURIComponent(username)}`
 }
-function setUsernameRef(id: string, element: Element | null) {
+function setUsernameRef(id: string, element: unknown) {
 	usernameRefs.value[id] = element instanceof HTMLElement ? element : null
 }
 </script>
