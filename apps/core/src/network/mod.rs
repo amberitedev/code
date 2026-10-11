@@ -470,8 +470,13 @@ async fn outside(state: &AppState, port: u16) -> Outside {
             "this Core is not paired to an account yet".into(),
         );
     };
-    let response = state
-        .http
+    // Only IPv4 is forwarded, so the backend must see, and test, this Core's IPv4 address.
+    let ipv4_only = reqwest::Client::builder()
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+        .build();
+    let response = ipv4_only
+        .as_ref()
+        .unwrap_or(&state.http)
         .post(format!(
             "{}/core/reachability",
             state.config.account_api_url

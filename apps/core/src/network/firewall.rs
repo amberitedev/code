@@ -212,9 +212,7 @@ $blocked = @(Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True 
             // The marker is written first: the prompt is shown once, whatever happens next.
             let _ = std::fs::write(&asked, "");
             if state.admin {
-                let _ = Command::new("netsh")
-                    .args(delete.split(' '))
-                    .output()
+                let _ = powershell(&format!("netsh {delete}"), PROMPT_TIMEOUT)
                     .await;
                 let _ =
                     powershell(&format!("netsh {add}"), PROMPT_TIMEOUT).await;

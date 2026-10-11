@@ -54,7 +54,7 @@ impl Identity {
                     .wrap_err("could not make the Core certificate")?;
                     let cert = made.cert.der().to_vec();
                     let key = made.signing_key.serialize_der();
-                    std::fs::write(&key_path, &key)?;
+                    write_private(&key_path, &key)?;
                     std::fs::write(&cert_path, &cert)?;
                     (cert, key)
                 }
@@ -78,6 +78,15 @@ impl Identity {
             fingerprint,
         })
     }
+}
+
+/// Write a file only its owner may read. Windows keeps the data directory's own permissions.
+fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::io::Write::write_all(&mut options.open(path)?, contents)
 }
 
 /// Serve `router` on `listener` until the process ends. A connection that opens with a TLS
