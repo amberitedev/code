@@ -145,7 +145,9 @@ App managing the Core from anywhere.
 
 - Core forwards its ports and opens the local firewall automatically.
 - When that fails, Core's command line explains in detail where the problem is and how to fix it.
-- Open: what to do on routers and networks where forwarding cannot work.
+- Game traffic never goes through us. No relay and no tunnel for now. The answer for bad routers
+  is a robust forwarding system and a clear diagnosis; tunnel support may be added later for
+  networks where forwarding is impossible.
 - After this exists: friends see an instance's servers, and the owner can invite friends to
   control a server.
 - Who can join a server is the owner's choice: a whitelist or none.
