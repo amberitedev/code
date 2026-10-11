@@ -598,7 +598,7 @@ const messages = defineMessages({
 	},
 	news: {
 		id: 'app.news.modrinth-title',
-		defaultMessage: 'Modrinth news',
+		defaultMessage: 'Modrinth News',
 	},
 	viewAllNews: {
 		id: 'app.news.view-all',
@@ -2337,7 +2337,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		>
 			<div
 				v-overlay-scrollbars="sidebarOverlayScrollbarsOptions"
-				class="app-sidebar-scrollable flex-grow shrink min-h-0 relative"
+				class="app-sidebar-scrollable shrink min-h-0 relative"
 				data-overlayscrollbars-initialize
 			>
 				<OnboardingChecklist
@@ -2376,35 +2376,35 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					/>
 				</div>
 			</div>
-			<div
-				v-if="sidebarVisible && news && news.length > 0"
-				class="sidebar-news flex min-h-0 shrink-0 flex-col border-0 border-t-[1px] border-[--brand-gradient-border] border-solid"
-				:class="{ 'max-h-[50%]': !newsCollapsed }"
-			>
+			<div v-if="sidebarVisible && news && news.length > 0" class="sidebar-news contents">
 				<button
 					type="button"
-					class="flex w-full shrink-0 cursor-pointer items-center justify-between border-none bg-transparent px-4 py-3 text-base font-medium text-primary hover:text-contrast"
+					class="-mt-px flex w-full shrink-0 cursor-pointer items-center justify-between border-0 border-t-[1px] border-solid border-[--brand-gradient-border] bg-transparent px-4 py-3 text-base font-medium text-primary hover:text-contrast"
 					:aria-expanded="!newsCollapsed"
 					@click="newsCollapsed = !newsCollapsed"
 				>
 					{{ formatMessage(messages.news) }}
-					<ChevronDownIcon class="size-5 text-secondary" :class="{ 'rotate-180': newsCollapsed }" />
+					<ChevronDownIcon
+						class="size-5 text-secondary transition-transform duration-300"
+						:class="{ 'rotate-180': newsCollapsed }"
+					/>
 				</button>
-				<div
-					v-if="!newsCollapsed"
-					class="flex min-h-0 flex-col items-center space-y-4 overflow-y-auto px-4 pb-4"
-				>
-					<NewsArticleCard v-for="(item, index) in news" :key="`news-${index}`" :article="item" />
-					<ButtonLink
-						type="colored"
-						color="brand"
-						size="xl"
-						href="https://modrinth.com/news"
-						target="_blank"
+				<div class="sidebar-news-body" :class="{ open: !newsCollapsed }" :inert="newsCollapsed">
+					<div
+						class="flex min-h-0 flex-1 flex-col items-center space-y-4 overflow-y-auto px-4 pb-4"
 					>
-						<NewspaperIcon />
-						{{ formatMessage(messages.viewAllNews) }}
-					</ButtonLink>
+						<NewsArticleCard v-for="(item, index) in news" :key="`news-${index}`" :article="item" />
+						<ButtonLink
+							type="colored"
+							color="brand"
+							size="xl"
+							href="https://modrinth.com/news"
+							target="_blank"
+						>
+							<NewspaperIcon />
+							{{ formatMessage(messages.viewAllNews) }}
+						</ButtonLink>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -2612,6 +2612,40 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 // News belongs to the default sidebar, so it hides when a page fills the sidebar itself.
 .app-sidebar:has(.sidebar-teleport-content:not(:empty)) .sidebar-news {
 	display: none;
+}
+
+// The sidebar's free space belongs to the scrollable area while news is closed and to the news
+// body while it is open. Swapping flex-grow between them animates the news open and closed and
+// leaves no gap above it. The minimum height keeps news visible when the sidebar content is long.
+.app-sidebar-scrollable {
+	flex-grow: 1;
+}
+
+.sidebar-news-body {
+	display: flex;
+	flex-direction: column;
+	flex: 0 1 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.sidebar-news-body.open {
+	flex-grow: 1;
+	min-height: 40%;
+}
+
+.app-sidebar:not(:has(.sidebar-teleport-content:not(:empty))):has(.sidebar-news-body.open)
+	.app-sidebar-scrollable {
+	flex-grow: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.app-sidebar-scrollable,
+	.sidebar-news-body {
+		transition:
+			flex-grow 300ms ease-in-out,
+			min-height 300ms ease-in-out;
+	}
 }
 
 @media (prefers-reduced-motion: no-preference) {
