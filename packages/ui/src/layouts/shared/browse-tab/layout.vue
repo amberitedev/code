@@ -7,7 +7,7 @@ import Admonition from '#ui/components/base/Admonition.vue'
 import { Button, IconButton } from '#ui/components/base/buttons'
 import Combobox, { type ComboboxOption } from '#ui/components/base/Combobox.vue'
 import Input from '#ui/components/base/inputs/Input.vue'
-import LoadingIndicator from '#ui/components/base/LoadingIndicator.vue'
+import GhostBlock from '#ui/components/base/GhostBlock.vue'
 import NavTabs from '#ui/components/base/NavTabs.vue'
 import Pagination from '#ui/components/base/Pagination.vue'
 import ProjectCard from '#ui/components/project/card/ProjectCard.vue'
@@ -15,6 +15,7 @@ import ProjectCardList from '#ui/components/project/ProjectCardList.vue'
 import SearchFilterControl from '#ui/components/search/SearchFilterControl.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useStickyObserver } from '#ui/composables/sticky-observer'
+import { useGhostReveal } from '#ui/composables/use-ghost-reveal'
 import { commonMessages, formatProjectTypeSentence } from '#ui/utils/common-messages'
 import type { SortType } from '#ui/utils/search'
 
@@ -26,6 +27,7 @@ import type { CardAction } from './types'
 const ctx = injectBrowseManager()
 const { formatMessage } = useVIntl()
 const lockedMessages = computed(() => toValue(ctx.lockedFilterMessages))
+const resultsReveal = useGhostReveal(() => ctx.loading.value && !ctx.loadingComponent)
 const stickyInstallHeaderRef = ref<HTMLElement | null>(null)
 const { isStuck: isInstallHeaderStuck } = useStickyObserver(
 	stickyInstallHeaderRef,
@@ -257,9 +259,41 @@ function getProjectCardTags(result: Labrinth.Search.v3.ResultSearchProject, disp
 	/>
 
 	<div class="search mt-1 [overflow-anchor:none]">
-		<section v-if="ctx.loading.value" class="offline">
-			<component :is="ctx.loadingComponent ?? LoadingIndicator" />
+		<section v-if="ctx.loading.value && ctx.loadingComponent" class="offline">
+			<component :is="ctx.loadingComponent" />
 		</section>
+		<!-- One ghost per result, in the card's own box, so the real cards land in place. -->
+		<ProjectCardList
+			v-else-if="ctx.loading.value"
+			:layout="ctx.effectiveLayout.value"
+			aria-busy="true"
+		>
+			<div
+				v-for="n in ctx.maxResults.value"
+				:key="n"
+				class="overflow-hidden rounded-2xl border border-solid border-surface-4 bg-surface-3"
+				:class="ctx.effectiveLayout.value === 'grid' ? 'flex flex-col' : 'flex h-[134px] gap-3 p-4'"
+			>
+				<template v-if="ctx.effectiveLayout.value === 'grid'">
+					<GhostBlock class="aspect-[2/1] w-full !rounded-none" />
+					<div class="flex h-56 gap-3 p-4">
+						<GhostBlock class="size-16 shrink-0 !rounded-xl" />
+						<div class="flex grow flex-col gap-2.5">
+							<GhostBlock class="h-5 w-1/2" />
+							<GhostBlock class="h-4 w-full" />
+						</div>
+					</div>
+				</template>
+				<template v-else>
+					<GhostBlock class="aspect-square h-full shrink-0 !rounded-xl" />
+					<div class="flex grow flex-col gap-2.5">
+						<GhostBlock class="h-6 w-56 max-w-full" />
+						<GhostBlock class="h-4 w-2/3" />
+						<GhostBlock class="mt-auto h-6 w-72 max-w-full" />
+					</div>
+				</template>
+			</div>
+		</ProjectCardList>
 		<section v-else-if="ctx.offline?.value && ctx.totalHits.value === 0" class="offline">
 			{{ formatMessage(messages.offline) }}
 		</section>
@@ -274,7 +308,7 @@ function getProjectCardTags(result: Labrinth.Search.v3.ResultSearchProject, disp
 			<p>{{ formatMessage(messages.noResults) }}</p>
 		</section>
 
-		<ProjectCardList v-else :layout="ctx.effectiveLayout.value">
+		<ProjectCardList v-else :layout="ctx.effectiveLayout.value" :class="resultsReveal">
 			<template v-if="ctx.isServerType.value">
 				<ProjectCard
 					v-for="result in ctx.serverHits.value"

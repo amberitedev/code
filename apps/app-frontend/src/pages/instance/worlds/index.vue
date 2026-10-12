@@ -25,8 +25,26 @@
 		ref="createServerModal"
 		:instance="instance"
 	/>
-	<ReadyTransition :pending="worldsReadyPending">
-		<div v-if="rows.length > 0" class="flex flex-col gap-2">
+	<!-- Ghost rows while the first answer is pending. Static on purpose: no shimmer. -->
+	<div v-if="worldsReadyPending" class="flex flex-col gap-2" aria-busy="true">
+		<GhostBlock class="h-10 w-full !rounded-xl" />
+		<GhostBlock class="h-9 w-24 self-end" />
+		<div class="mt-2 flex flex-col gap-2">
+			<div
+				v-for="row in 3"
+				:key="row"
+				class="flex min-h-20 items-center gap-2 rounded-[20px] border border-solid border-surface-4 bg-bg-raised p-3"
+			>
+				<GhostBlock class="size-12 shrink-0 !rounded-[14px]" />
+				<div class="flex flex-col gap-2">
+					<GhostBlock class="h-4 w-40" />
+					<GhostBlock class="h-3.5 w-56" />
+				</div>
+			</div>
+		</div>
+	</div>
+	<template v-else>
+		<div v-if="rows.length > 0" class="flex flex-col gap-2" :class="worldsReveal">
 			<div class="flex flex-wrap items-center gap-2">
 				<Input
 					v-model="searchFilter"
@@ -149,6 +167,7 @@
 		<EmptyState
 			v-else
 			type="empty-inbox"
+			:class="worldsReveal"
 			:heading="formatMessage(messages.noWorldsHeading)"
 			:description="formatMessage(messages.noWorldsDescription)"
 		>
@@ -176,7 +195,7 @@
 				</Button>
 			</template>
 		</EmptyState>
-	</ReadyTransition>
+	</template>
 </template>
 <script setup lang="ts">
 import {
@@ -196,9 +215,11 @@ import {
 	FilterPills,
 	GAME_MODES,
 	type GameVersion,
+	GhostBlock,
 	injectNotificationManager,
 	Input,
-	ReadyTransition,
+	useGhostReveal,
+	useLoadingBarToken,
 	useReadyState,
 	useVIntl,
 } from '@modrinth/ui'
@@ -536,6 +557,8 @@ const worldsQuery = useQuery(
 )
 
 const worldsReadyPending = useReadyState(worldsQuery)
+useLoadingBarToken(worldsReadyPending)
+const worldsReveal = useGhostReveal(() => worldsReadyPending.value)
 
 const worlds = ref<World[]>([])
 const serverData = ref<Record<string, ServerData>>({})
