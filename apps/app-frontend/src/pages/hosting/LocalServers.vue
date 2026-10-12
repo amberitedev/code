@@ -19,7 +19,7 @@ import { useRouter } from 'vue-router'
 
 import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
 import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
-import { openPairCoreModal, useCores } from '@/composables/use-cores'
+import { openAddCoreModal, useCores } from '@/composables/use-cores'
 import { coreOffline, coreProblem, useServers } from '@/helpers/linked-servers'
 import { appSettingsModalOpenCoresKey } from '@/providers/app-settings-modal'
 
@@ -34,10 +34,8 @@ const searchInput = ref('')
 const setupModal = ref<InstanceType<typeof CreationFlowModal>>()
 const chooseCore = ref<InstanceType<typeof ChooseCoreModal>>()
 const coresQuery = useCores()
-// Only once the account's Cores are known, so a slow or failed lookup never asks to pair.
-const needsPairing = computed(
-	() => coresQuery.isSuccess.value && coresQuery.cores.value.length === 0,
-)
+// Only once the account's Cores are known, so a slow or failed lookup never asks for a Core.
+const needsCore = computed(() => coresQuery.isSuccess.value && coresQuery.cores.value.length === 0)
 // The Core the new server goes on, chosen before setup opens.
 let core: Archon.Cores.v1.Core | null = null
 
@@ -209,7 +207,7 @@ async function browseModpacks() {
 <template>
 	<div data-pyro-server-list-root class="relative mx-auto flex h-full w-full flex-col p-6">
 		<div
-			v-if="auth.user.value && !problem && !needsPairing"
+			v-if="auth.user.value && !problem && !needsCore"
 			class="mb-4 flex w-full flex-row items-center justify-between gap-2"
 		>
 			<h1 class="m-0 text-2xl font-extrabold text-contrast">Servers</h1>
@@ -230,15 +228,15 @@ async function browseModpacks() {
 		<div v-if="!auth.user.value" class="flex min-h-[60vh] grow items-center justify-center">
 			<AccountRequired description="Sign in to host servers on a Core you control" />
 		</div>
-		<div v-else-if="needsPairing" class="flex min-h-[60vh] grow items-center justify-center">
+		<div v-else-if="needsCore" class="flex min-h-[60vh] grow items-center justify-center">
 			<EmptyState
 				type="empty"
-				heading="Pair a Core to host servers"
+				heading="Add a Core to host servers"
 				description="A Core runs your servers on a computer you control."
 			>
 				<template #actions>
-					<Button type="colored" color="brand" size="lg" @click="openPairCoreModal()">
-						<LinkIcon /> Pair a Core
+					<Button type="colored" color="brand" size="lg" @click="openAddCoreModal()">
+						<LinkIcon /> Add Core
 					</Button>
 				</template>
 			</EmptyState>

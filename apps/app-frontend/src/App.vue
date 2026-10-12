@@ -71,7 +71,7 @@ import { RouterView, useRoute, useRouter } from 'vue-router'
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
-import PairCoreModal from '@/components/ui/cores/PairCoreModal.vue'
+import AddCoreModal from '@/components/ui/cores/AddCoreModal.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import HostingUpdateRequired from '@/components/ui/HostingUpdateRequired.vue'
@@ -101,7 +101,7 @@ import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
-import { coresQueryKey, useCores } from '@/composables/use-cores'
+import { coresQueryKey, openAddCoreModal, useCores } from '@/composables/use-cores'
 import { useError } from '@/composables/use-error.js'
 import { useInstanceMetadataRefresh } from '@/composables/use-instance-metadata-refresh'
 import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts'
@@ -474,6 +474,8 @@ onMounted(async () => {
 		const listeners = await Promise.all([
 			listen('edit-menu://undo', () => handleEditMenuAction('undo')),
 			listen('edit-menu://redo', () => handleEditMenuAction('redo')),
+			// The App's own deep links while it is already running. See `handle_command` in apps/app.
+			listen('amberite-command', (event) => handleCommand(event.payload)),
 		])
 		unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
 	} catch (error) {
@@ -1245,7 +1247,7 @@ async function fetchCredentials() {
 	}
 	credentials.value = creds ?? null
 	liveNotificationsEnabled = !!creds?.session
-	// Paired Cores and their servers belong to the signed-in account.
+	// Cores and their servers belong to the signed-in account.
 	void queryClient.invalidateQueries({ queryKey: ['cores'] })
 	void queryClient.invalidateQueries({ queryKey: ['servers'] })
 	await traceStartupStep('Load stored account profiles', fetchStoredModrinthAccounts)
@@ -1629,6 +1631,8 @@ async function handleCommand(e) {
 		} else {
 			await run(e.id).catch(handleError)
 		}
+	} else if (e.event === 'ApproveCore') {
+		await openAddCoreModal(e.code)
 	} else if (e.event === 'InstallSharedInstanceInvite') {
 		await sharedInstanceInviteHandler.value?.installFromInviteId(e.invite_id)
 	} else if (e.event === 'InstallServer') {
@@ -2077,7 +2081,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</div>
 		</Transition>
 		<AppSettingsModal ref="appSettingsModal" />
-		<PairCoreModal />
+		<AddCoreModal />
 		<SyncInstancesUpdateModal ref="syncInstancesUpdateModal" />
 		<Suspense>
 			<ModrinthAccountRequiredModal ref="modrinthLoginModal" :request-auth="requestModrinthAuth" />

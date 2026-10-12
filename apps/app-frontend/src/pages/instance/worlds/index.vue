@@ -367,7 +367,7 @@ const selectedFilters = ref<string[]>([])
 const searchFilter = ref('')
 
 const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
-// Always offered: creating a server pairs a Core first when the account has none, and says so
+// Always offered: creating a server asks for a Core first when the account has none, and says so
 // when the Core cannot be reached.
 const canCreateServer = computed(
 	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
