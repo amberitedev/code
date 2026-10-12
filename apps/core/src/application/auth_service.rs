@@ -142,6 +142,10 @@ pub fn key_refused(state: &AppState) {
 /// opened in the App on this computer when it is installed, like `claude auth` does.
 pub async fn sign_in(state: &AppState, interactive: bool) {
     loop {
+        // Another copal process on this data directory may have finished the sign-in.
+        if matches!(state.owner().await, Ok(Some(_))) {
+            return;
+        }
         let pending = match current_code(state).await {
             Some(pending) => pending,
             None => match request_code(state).await {
@@ -173,7 +177,13 @@ pub async fn sign_in(state: &AppState, interactive: bool) {
         loop {
             tokio::select! {
                 () = tokio::time::sleep(interval) => {}
-                () = state.auth_changed.notified() => return,
+                // Woken: signed in elsewhere, or a stale wake-up to ignore.
+                () = state.auth_changed.notified() => {
+                    if matches!(state.owner().await, Ok(Some(_))) {
+                        return;
+                    }
+                    continue;
+                }
             }
             match poll(state, &pending.key).await {
                 Poll::Approved(account) => {

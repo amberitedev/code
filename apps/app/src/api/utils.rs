@@ -208,7 +208,7 @@ pub enum AmberiteCommand {
 }
 
 /// What the App was opened with: a Modrinth link or file, or an Amberite link.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(untagged)]
 pub enum OpeningCommand {
     Modrinth(CommandPayload),

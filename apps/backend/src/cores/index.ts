@@ -272,11 +272,11 @@ async function pendingCore(env: Env, userId: string, code: string): Promise<Pend
 	return row
 }
 
-/** App: which Core is behind this code, so the user can check before approving. */
+/** App: which machine is behind this code, so the user can check before approving. */
 async function lookupCode(request: Request, env: Env) {
 	const user = await requireUser(request, env)
 	const row = await pendingCore(env, user.id, authCode(await readJson(request)))
-	return json({ name: row.name, address: row.address })
+	return json({ name: row.name })
 }
 
 /**

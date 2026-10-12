@@ -21,10 +21,8 @@ pub enum ApiError {
     NotFound(String),
     BadRequest(String),
     Conflict(String),
-    Gone(String),
     Internal(String),
     UnprocessableEntity(String),
-    TooManyRequests(String),
     ServiceUnavailable(String),
 }
 
@@ -36,12 +34,10 @@ impl IntoResponse for ApiError {
             Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
-            Self::Gone(m) => (StatusCode::GONE, m),
             Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
             Self::UnprocessableEntity(m) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, m)
             }
-            Self::TooManyRequests(m) => (StatusCode::TOO_MANY_REQUESTS, m),
             Self::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
         };
         (status, Json(json!({ "error": msg }))).into_response()

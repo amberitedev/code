@@ -232,7 +232,6 @@ async function focusInput(index: number) {
 			</p>
 			<div class="flex flex-1 flex-col items-center justify-center gap-2">
 				<span class="text-3xl font-bold text-contrast">{{ pending.name }}</span>
-				<span class="font-mono text-secondary">{{ pending.address }}</span>
 				<p class="m-0 mt-4 max-w-md text-center text-sm text-secondary">
 					Only approve a code shown by a Core you set up yourself. The Core will be able to host
 					servers under your account.

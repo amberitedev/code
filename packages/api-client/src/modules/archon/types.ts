@@ -31,7 +31,6 @@ export namespace Archon {
 			export type PendingCore = {
 				/** The machine's name, shown so the user can tell it is their Core. */
 				name: string
-				address: string
 			}
 
 			export type ApprovalFailure =

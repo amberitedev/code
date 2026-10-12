@@ -135,12 +135,20 @@ impl AppState {
         }))
     }
 
-    /// Store the owner and the key that was approved for this Core.
+    /// Store the owner and the key that was approved for this Core. A different account than
+    /// before starts with nobody else on the servers.
     pub async fn set_owner(
         &self,
         user_id: &str,
         key: &str,
     ) -> sqlx::Result<()> {
+        let previous: Option<String> =
+            sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await?;
+        if previous.as_deref() != Some(user_id) {
+            super::access_service::forget_everyone(self).await?;
+        }
         sqlx::query(
             "INSERT INTO core_owner (id, user_id, backend_key) VALUES (1, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, backend_key = excluded.backend_key",
