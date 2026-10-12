@@ -48,7 +48,12 @@ export default {
 		} catch (error) {
 			if (error instanceof ApiError) response = errorResponse(error)
 			else {
-				console.error('Backend request failed', error)
+				console.error(
+					'Backend request failed',
+					request.method,
+					new URL(request.url).pathname,
+					error,
+				)
 				response = json({ error: 'internal_error', description: 'An internal error occurred' }, 500)
 			}
 		}

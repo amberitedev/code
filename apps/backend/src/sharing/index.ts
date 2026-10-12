@@ -400,13 +400,21 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 	if (!stored?.present && (stored?.size ?? 0) + bytes.byteLength > MAX_INSTANCE_SIZE)
 		throw new ApiError(413, 'invalid_input', 'Shared instance storage is full')
 	const key = objectKey(item.id, sha256)
-	// The rows say the hash is held, but only R2 knows whether the object is still there.
-	if (!stored?.present || !(await env.FILES.head(key))) await env.FILES.put(key, bytes)
+	// Reserve the hash before R2 stores it, so a concurrent orphan sweep sees its reference.
 	await env.DB.prepare('UPDATE shared_files SET sha256 = ?, size = ? WHERE id = ?')
 		.bind(sha256, bytes.byteLength, file.id)
 		.run()
-	// Until the row named the object, a sweep could delete it. The row now protects it.
-	if (!(await env.FILES.head(key))) await env.FILES.put(key, bytes)
+	try {
+		if (!(await env.FILES.head(key))) await env.FILES.put(key, bytes)
+	} catch (error) {
+		// A failed write must leave this upload retryable.
+		await env.DB.prepare(
+			'UPDATE shared_files SET sha256 = NULL, size = NULL WHERE id = ? AND sha256 = ?',
+		)
+			.bind(file.id, sha256)
+			.run()
+		throw error
+	}
 	const { ready, missing } = await finalizeVersion(env, item.id, file.version)
 	return json({ ready, missing_files: missing.map((entry) => fileResponse(request, entry)) })
 }
@@ -422,7 +430,18 @@ async function download(
 	if (!/^[a-f0-9]{64}$/.test(sha256)) throw fileMissing()
 	const key = objectKey(item.id, sha256)
 	const object = await env.FILES.get(key)
-	if (!object) throw fileMissing()
+	if (!object) {
+		// A hash can be reused by several versions. Reset them together before clearing the hash.
+		await env.DB.batch([
+			env.DB.prepare(
+				'UPDATE shared_versions SET ready = 0 WHERE instance_id = ?1 AND version IN (SELECT version FROM shared_files WHERE instance_id = ?1 AND sha256 = ?2)',
+			).bind(item.id, sha256),
+			env.DB.prepare(
+				'UPDATE shared_files SET sha256 = NULL, size = NULL WHERE instance_id = ? AND sha256 = ?',
+			).bind(item.id, sha256),
+		])
+		throw fileMissing()
+	}
 	// The object is stored under the hash of its bytes, so the hash is what a client checks against.
 	return new Response(request.method === 'HEAD' ? null : object.body, {
 		headers: {
@@ -779,6 +798,8 @@ async function handle(request: Request, env: Env): Promise<Response | null> {
 		if (item.quarantine) throw quarantined()
 		if (request.method === 'POST' && !child) return createVersion(request, env, item, user.id)
 		if (request.method === 'GET') {
+			if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
+				throw new ApiError(400, 'invalid_input', 'Invalid shared version')
 			const version = child
 				? await env.DB.prepare(
 						'SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?',

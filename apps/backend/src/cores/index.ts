@@ -383,6 +383,7 @@ async function grantAccess(request: Request, env: Env) {
 
 	// Counted before the account is looked up, so a Core cannot use this to test names either.
 	const now = Date.now()
+	await env.DB.prepare('DELETE FROM auth_attempts WHERE expires < ?').bind(now).run()
 	const sent = await env.DB.prepare(
 		'INSERT INTO auth_attempts (key,count,expires) VALUES (?1,1,?2) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN expires < ?3 THEN 1 ELSE count + 1 END, expires = CASE WHEN expires < ?3 THEN excluded.expires ELSE expires END RETURNING count',
 	)
@@ -404,7 +405,7 @@ async function grantAccess(request: Request, env: Env) {
 		env.DB.prepare(
 			'INSERT OR IGNORE INTO core_access (core_id,user_id,created) VALUES (?,?,?)',
 		).bind(core.id, user.id, new Date().toISOString()),
-		// A repeated invite replaces the one before it.
+		// Access may already exist for another server. Every invite still gets a fresh notification.
 		env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`).bind(
 			user.id,
 			core.id,
