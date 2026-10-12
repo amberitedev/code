@@ -173,7 +173,8 @@ const onDividerPointerUp = (event) => {
 	endDrag(event)
 }
 
-await instancesQuery.suspense().catch(handleError)
+// A cached list renders at once; suspense() would wait for a refetch on every mount.
+if (instancesQuery.data.value === undefined) await instancesQuery.suspense().catch(handleError)
 
 useAppEvent('process', checkProcesses)
 
