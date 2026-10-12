@@ -177,10 +177,17 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/** The hosting API base URL for a request: the Core that has the server the request names. */
-	public async hostingUrl(path: string, params?: RequestOptions['params']): Promise<string> {
+	public async hostingUrl(
+		path: string,
+		params?: RequestOptions['params'],
+		version?: RequestOptions['version'],
+	): Promise<string> {
 		const cores = await this.known()
 		if (!cores.length) throw new ModrinthApiError('No Core is paired', { statusCode: 404 })
-		const serverId = cores.length > 1 && `${path} ${JSON.stringify(params ?? {})}`.match(SERVER_ID)
+		// Uploads carry the server id in the version segment (`servers/<id>/v1`), not the path.
+		const serverId =
+			cores.length > 1 &&
+			`${version ?? ''} ${path} ${JSON.stringify(params ?? {})}`.match(SERVER_ID)
 		if (serverId) {
 			if (!this.serverAddresses.has(serverId[0])) await this.servers()
 			const address = this.serverAddresses.get(serverId[0])
