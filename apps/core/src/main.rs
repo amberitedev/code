@@ -56,7 +56,7 @@ pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
         &state,
     )));
     tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
-    tokio::spawn(application::pairing_service::run(Arc::clone(&state)));
+    tokio::spawn(application::auth_service::run(Arc::clone(&state)));
     tokio::spawn(application::visible_servers::run(Arc::clone(&state)));
     let stop = tokio_util::sync::CancellationToken::new();
     let forwarding =

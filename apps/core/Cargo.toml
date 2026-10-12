@@ -63,6 +63,7 @@ fs3 = "0.5"
 home = "0.5"
 indicatif = "0.17"
 inquire = "0.9"
+open = "5"
 port_scanner = "0.1"
 sanitize-filename = "0.5"
 # ============================================================

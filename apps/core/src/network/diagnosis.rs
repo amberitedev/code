@@ -535,7 +535,7 @@ mod tests {
                 RouterFacts::NoProtocol {
                     gateway: Some(Ipv4Addr::new(192, 168, 1, 1))
                 },
-                Outside::NotChecked("this Core is not paired".into())
+                Outside::NotChecked("this Core is not signed in".into())
             ),
             Case::NoProtocol
         );
@@ -562,7 +562,7 @@ mod tests {
         assert_eq!(
             case(
                 found("10.0.0.2", Err("refused".into())),
-                Outside::NotChecked("not paired".into())
+                Outside::NotChecked("not signed in".into())
             ),
             Case::DoubleNat
         );
@@ -592,7 +592,7 @@ mod tests {
     fn a_granted_mapping_nobody_tested_is_unverified_and_usable() {
         let diagnosis = diagnose(&facts(
             found("203.0.113.9", Ok(25565)),
-            Outside::NotChecked("this Core is not paired".into()),
+            Outside::NotChecked("this Core is not signed in".into()),
         ));
         assert_eq!(diagnosis.case, Case::Unverified);
         assert!(diagnosis.usable());
@@ -612,7 +612,7 @@ mod tests {
             RouterFacts::NoProtocol {
                 gateway: Some(Ipv4Addr::new(192, 168, 1, 1)),
             },
-            Outside::NotChecked("this Core is not paired".into()),
+            Outside::NotChecked("this Core is not signed in".into()),
         );
         let report = diagnose(&facts).render(&facts);
         assert!(report.contains("NOT reachable from the internet: Minecraft server \"SMP\" (port 25565)"));

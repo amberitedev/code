@@ -461,15 +461,12 @@ struct Reachability {
 
 /// Ask the backend to connect to `port` on this Core's address from the internet.
 async fn outside(state: &AppState, port: u16) -> Outside {
-    let key = match state.owner().await {
-        Ok(Some(owner)) => owner.backend_key,
-        _ => None,
-    };
-    let Some(key) = key else {
+    let Ok(Some(owner)) = state.owner().await else {
         return Outside::NotChecked(
-            "this Core is not paired to an account yet".into(),
+            "this Core is not signed in to an account yet".into(),
         );
     };
+    let key = owner.backend_key;
     // Only IPv4 is forwarded, so the backend must see, and test, this Core's IPv4 address.
     let ipv4_only = reqwest::Client::builder()
         .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
@@ -492,6 +489,13 @@ async fn outside(state: &AppState, port: u16) -> Outside {
     let Ok(response) = response else {
         return unavailable();
     };
+    if response.status() == StatusCode::UNAUTHORIZED {
+        // Removed from its account: the sign-in task signs the Core out.
+        crate::application::auth_service::key_refused(state);
+        return Outside::NotChecked(
+            "this Core was removed from its account".into(),
+        );
+    }
     if response.status() == StatusCode::TOO_MANY_REQUESTS {
         return Outside::NotChecked(
             "Core asked for too many tests in a short time and tries again later"

@@ -107,13 +107,12 @@ async fn visible(state: &AppState) -> sqlx::Result<Vec<VisibleServer>> {
 
 /// Keeps the backend's list of this Core's visible servers current. Runs for Core's lifetime.
 pub async fn run(state: Arc<AppState>) {
-    // The key the list was sent with, and the list. A Core paired again starts over.
+    // The key the list was sent with, and the list. A Core signed in again starts over.
     let mut sent: Option<(String, Vec<VisibleServer>)> = None;
     loop {
         tokio::time::sleep(TICK).await;
         let Ok(Some(Owner {
-            backend_key: Some(key),
-            ..
+            backend_key: key, ..
         })) = state.owner().await
         else {
             sent = None;
