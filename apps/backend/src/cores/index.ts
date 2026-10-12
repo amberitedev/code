@@ -286,20 +286,35 @@ async function lookupCode(request: Request, env: Env) {
 
 /**
  * App: approve the Core showing this code. It joins the account's list and the key it holds starts
- * working. A Core that belongs to someone else is never taken over.
+ * working. The insert reads the pending row itself, so a code replaced or expired since the lookup
+ * cannot store a key the Core no longer holds. A Core that belongs to someone else is never taken
+ * over.
  */
 async function approveCode(request: Request, env: Env) {
 	const user = await requireUser(request, env)
 	const row = await pendingCore(env, user.id, authCode(await readJson(request)))
 	const now = new Date().toISOString()
 	const stored = await env.DB.prepare(
-		'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, name = excluded.name, address = excluded.address, cert_fingerprint = excluded.cert_fingerprint, public_address = NULL, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id',
+		'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) SELECT core_id, ?1, name, address, cert_fingerprint, key_hash, ?2, ?2 FROM core_auth_codes WHERE code = ?3 AND expires > ?2 ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, name = excluded.name, address = excluded.address, cert_fingerprint = excluded.cert_fingerprint, public_address = NULL, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id, name',
 	)
-		.bind(row.core_id, user.id, row.name, row.address, row.cert_fingerprint, row.key_hash, now, now)
-		.first()
-	if (!stored) throw new ApiError(409, 'already_signed_in', 'That Core belongs to another account')
+		.bind(user.id, now, row.code)
+		.first<{ id: string; name: string }>()
+	if (!stored) {
+		const pending = await env.DB.prepare(
+			'SELECT 1 FROM core_auth_codes WHERE code = ? AND expires > ?',
+		)
+			.bind(row.code, now)
+			.first()
+		if (!pending)
+			throw new ApiError(
+				410,
+				'code_expired',
+				'That code has expired. Use the new one on your Core.',
+			)
+		throw new ApiError(409, 'already_signed_in', 'That Core belongs to another account')
+	}
 	await env.DB.prepare('DELETE FROM core_auth_codes WHERE code = ?').bind(row.code).run()
-	return json({ id: row.core_id, name: row.name })
+	return json(stored)
 }
 
 /** Core: sign itself out. Its key stops working and it leaves the owner's list. */
