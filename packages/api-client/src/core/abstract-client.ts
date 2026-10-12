@@ -299,7 +299,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			versionPath = `/${version}`
 		}
 
-		const cleanPath = path.startsWith('/') ? path : `/${path}`
+		// An empty path addresses the version root itself (a Core's /health), which must not gain a
+		// trailing slash: the Core answers 404 to `/health/`.
+		const cleanPath = path === '' ? '' : path.startsWith('/') ? path : `/${path}`
 
 		return `${base}${versionPath}${cleanPath}`
 	}

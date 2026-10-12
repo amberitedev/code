@@ -11,35 +11,37 @@ const LOCAL_ANSWER_MS = 2500
 type CoreLocation = Pick<Archon.Cores.v1.Core, 'address' | 'cert_fingerprint'> &
 	Partial<Pick<Archon.Cores.v1.Core, 'public_address'>>
 
-const PAIRING_MESSAGES: Record<Archon.Cores.v1.PairingFailure, string> = {
+const APPROVAL_MESSAGES: Record<Archon.Cores.v1.ApprovalFailure, string> = {
 	wrong_code: 'Code invalid. Please check your Core and try again.',
 	expired: 'That code has expired. Use the new code shown on your Core.',
 	too_many_attempts: 'Too many wrong codes. Wait a few minutes and try again.',
-	already_paired: 'That Core is already paired to another account.',
-	unreachable: 'Could not reach that Core. Make sure it is running and on a network you can reach.',
-	failed: 'Pairing failed. Please try again.',
+	already_signed_in: 'That Core is already signed in to another account.',
+	failed: 'Could not add the Core. Please try again.',
 }
 
-/** Why pairing did not finish. `message` is ready to show. */
-export class CorePairingError extends Error {
+/** Why a Core could not be added. `message` is ready to show. */
+export class CoreApprovalError extends Error {
 	constructor(
-		public readonly reason: Archon.Cores.v1.PairingFailure,
-		message = PAIRING_MESSAGES[reason],
+		public readonly reason: Archon.Cores.v1.ApprovalFailure,
+		message = APPROVAL_MESSAGES[reason],
 	) {
 		super(message)
-		this.name = 'CorePairingError'
+		this.name = 'CoreApprovalError'
 	}
 }
 
 /**
- * The Cores the account may reach: the ones it paired, and the ones it was invited to manage a
- * server on. The backend keeps the list and each Core's address; hosting calls go to a Core
+ * The Cores the account may reach: the ones signed in to it, and the ones it was invited to manage
+ * a server on. The backend keeps the list and each Core's address; hosting calls go to a Core
  * directly. Several Cores are treated as one: their servers form one list, and a request for a
  * server is sent to the Core that has it.
+ *
+ * A Core signs in on its own: it shows a code, and `approve` here is what binds it to the account.
+ * The App never contacts a Core before it is listed.
  */
 export class ArchonCoresV1Module extends AbstractModule {
 	private cores: Promise<Archon.Cores.v1.Core[]> | null = null
-	/** Base URLs that may receive the account token: paired Cores and the one being paired. */
+	/** Base URLs that may receive the account token: the listed Cores. */
 	private addresses = new Set<string>()
 	/** Core id to the base URL its requests go to. See `route`. */
 	private routes = new Map<string, string>()
@@ -68,14 +70,12 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Pair the Core showing `code` to the signed-in account. The backend says where that Core is,
-	 * then the Core itself accepts the code and asks the backend to confirm the claim. Once the Core
-	 * accepts, pairing is done: refetch the list to see the new Core.
+	 * Which Core is showing `code`, so the user can check it is theirs before approving. Throws a
+	 * `CoreApprovalError` for a wrong or expired code.
 	 */
-	public async pair(code: string): Promise<void> {
-		let claim: { core_id: string } & CoreLocation
+	public async lookup(code: string): Promise<Archon.Cores.v1.PendingCore> {
 		try {
-			claim = await this.client.request('/cores/pair', {
+			return await this.client.request('/cores/approve/lookup', {
 				api: 'labrinth',
 				version: 3,
 				method: 'POST',
@@ -83,34 +83,35 @@ export class ArchonCoresV1Module extends AbstractModule {
 				retry: false,
 			})
 		} catch (error) {
-			throw pairingError(error, 'failed')
+			throw approvalError(error)
 		}
-		// The Core checks the account token, so its address is allowed before it is paired.
-		let added: string | undefined
+	}
+
+	/**
+	 * Approve the Core showing `code`: it signs in to the account and joins the list. The Core
+	 * learns of it on its own; refetch the list to see it.
+	 */
+	public async approve(code: string): Promise<void> {
 		try {
-			const base = await this.route(claim)
-			if (!this.addresses.has(base)) added = base
-			this.addresses.add(base)
-			await this.client.request('', {
-				api: base,
-				version: 'pairing',
+			await this.client.request('/cores/approve', {
+				api: 'labrinth',
+				version: 3,
 				method: 'POST',
 				body: { code },
 				retry: false,
-				circuitBreaker: false,
 			})
 		} catch (error) {
-			if (added) this.addresses.delete(added)
-			throw pairingError(error, 'unreachable')
+			throw approvalError(error)
 		}
 		this.cores = null
 	}
 
 	/**
-	 * Unpair a Core. It leaves the account's list first, so this works even when the Core is off;
-	 * a Core that missed it finds out the next time it starts. Its servers and files stay.
+	 * Take a Core off the account. Its key stops working at once, and the Core signs itself out on
+	 * its next call to the backend, so this works even while the Core is off. Its servers and files
+	 * stay.
 	 */
-	public async unpair(core: Archon.Cores.v1.Core): Promise<void> {
+	public async revoke(core: Archon.Cores.v1.Core): Promise<void> {
 		await this.client
 			.request(`/cores/${encodeURIComponent(core.id)}`, {
 				api: 'labrinth',
@@ -118,18 +119,9 @@ export class ArchonCoresV1Module extends AbstractModule {
 				method: 'DELETE',
 			})
 			.catch((error) => {
-				// Already unpaired somewhere else, which is what was asked for.
+				// Already gone, which is what was asked for.
 				if (!(error instanceof ModrinthApiError && error.statusCode === 404)) throw error
 			})
-		await this.client
-			.request('', {
-				api: this.base(core),
-				version: 'pairing',
-				method: 'DELETE',
-				retry: false,
-				circuitBreaker: false,
-			})
-			.catch(() => undefined)
 		for (const [serverId, address] of this.serverAddresses) {
 			if (address === this.base(core)) this.serverAddresses.delete(serverId)
 		}
@@ -169,7 +161,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	/** The hosting API base URL for a request: the Core that has the server the request names. */
 	public async hostingUrl(path: string, params?: RequestOptions['params']): Promise<string> {
 		const cores = await this.known()
-		if (!cores.length) throw new ModrinthApiError('No Core is paired', { statusCode: 404 })
+		if (!cores.length) throw new ModrinthApiError('No Core is signed in', { statusCode: 404 })
 		const serverId = cores.length > 1 && `${path} ${JSON.stringify(params ?? {})}`.match(SERVER_ID)
 		if (serverId) {
 			if (!this.serverAddresses.has(serverId[0])) await this.servers()
@@ -180,7 +172,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/**
-	 * The servers of every paired Core as one list. A Core that cannot be reached is left out and
+	 * The servers of every listed Core as one list. A Core that cannot be reached is left out and
 	 * named in `offline_cores`; when none can be reached this throws.
 	 */
 	public async servers(
@@ -296,13 +288,14 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 }
 
-function pairingError(error: unknown, fallback: Archon.Cores.v1.PairingFailure): CorePairingError {
+function approvalError(error: unknown): CoreApprovalError {
 	const status = error instanceof ModrinthApiError ? error.statusCode : undefined
-	if (status === 404) return new CorePairingError('wrong_code')
-	if (status === 410) return new CorePairingError('expired')
-	if (status === 429) return new CorePairingError('too_many_attempts')
-	if (status === 409 || status === 403) return new CorePairingError('already_paired')
-	if (status === 401) return new CorePairingError('failed', 'Sign in to pair a Core.')
-	if (status === undefined) return new CorePairingError(fallback)
-	return new CorePairingError('failed')
+	if (status === 404) return new CoreApprovalError('wrong_code')
+	if (status === 410) return new CoreApprovalError('expired')
+	if (status === 429) return new CoreApprovalError('too_many_attempts')
+	if (status === 409) return new CoreApprovalError('already_signed_in')
+	if (status === 401) return new CoreApprovalError('failed', 'Sign in to add a Core.')
+	if (status === undefined)
+		return new CoreApprovalError('failed', 'Could not reach Amberite. Check your connection.')
+	return new CoreApprovalError('failed')
 }

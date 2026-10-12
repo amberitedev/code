@@ -4,8 +4,8 @@ export namespace Archon {
 	export namespace Cores {
 		export namespace v1 {
 			/**
-			 * A Core the signed-in account may reach, as listed by the backend: one it paired, or
-			 * one whose owner invited it to manage a server.
+			 * A Core the signed-in account may reach, as listed by the backend: one signed in to the
+			 * account, or one whose owner invited it to manage a server.
 			 */
 			export type Core = {
 				id: string
@@ -27,12 +27,18 @@ export namespace Archon {
 				last_seen: string
 			}
 
-			export type PairingFailure =
+			/** A Core waiting for the account to approve its sign-in code. */
+			export type PendingCore = {
+				/** The machine's name, shown so the user can tell it is their Core. */
+				name: string
+				address: string
+			}
+
+			export type ApprovalFailure =
 				| 'wrong_code'
 				| 'expired'
 				| 'too_many_attempts'
-				| 'already_paired'
-				| 'unreachable'
+				| 'already_signed_in'
 				| 'failed'
 		}
 	}
@@ -644,7 +650,7 @@ export namespace Archon {
 				servers: Server[]
 				pagination: Pagination
 				users: Record<string, ServerOwner>
-				/** Ids of paired Cores that did not answer. Only set when hosting is self-hosted. */
+				/** Ids of listed Cores that did not answer. Only set when hosting is self-hosted. */
 				offline_cores?: string[]
 			}
 
