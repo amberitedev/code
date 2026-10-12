@@ -220,9 +220,9 @@ fn amberite_command(command: &str) -> Option<AmberiteCommand> {
     let path = command.strip_prefix("amberite://")?.trim_end_matches('/');
     let code = path.strip_prefix("approve/")?;
     let valid = code.len() <= 9
-        && code
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-');
+        && code.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-'
+        });
     valid.then(|| AmberiteCommand::ApproveCore {
         code: code.to_uppercase(),
     })

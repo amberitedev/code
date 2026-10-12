@@ -302,11 +302,9 @@ fn main() {
                             *payload = Some(actual_request.clone());
                         }
 
-                        let _ = api::utils::handle_command(
-                            handle,
-                            actual_request,
-                        )
-                        .await;
+                        let _ =
+                            api::utils::handle_command(handle, actual_request)
+                                .await;
                     });
                 });
             };
