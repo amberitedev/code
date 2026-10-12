@@ -550,7 +550,7 @@ const messages = defineMessages({
 	},
 	modrinthHosting: {
 		id: 'app.nav.modrinth-hosting',
-		defaultMessage: 'Modrinth Hosting',
+		defaultMessage: 'Servers',
 	},
 	screenshots: {
 		id: 'app.nav.screenshots',
