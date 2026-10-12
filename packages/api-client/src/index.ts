@@ -38,6 +38,7 @@ export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
 export { CorePairingError } from './modules/archon/cores/v1'
+export { SharedInstancesApiError } from './modules/shared-instances/errors'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'
 export type { NuxtClientConfig } from './platform/nuxt'

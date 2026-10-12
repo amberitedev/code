@@ -370,9 +370,10 @@ const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
 const canCreateServer = computed(
 	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
 )
-// Servers other people host for this shared instance. A signed-out or wrong account gets none.
+// Servers other people host for this shared instance. A signed-out or wrong account gets none,
+// and neither does an instance that was deleted or that this account lost access to.
 const { servers: hostedServers, query: hostedServersQuery } = useHostedServers(() =>
-	sharedInstance.actionsLocked.value || sharedInstance.signedOut.value
+	sharedInstance.shareActionsLocked.value || sharedInstance.signedOut.value
 		? undefined
 		: instance.value.shared_instance?.id,
 )

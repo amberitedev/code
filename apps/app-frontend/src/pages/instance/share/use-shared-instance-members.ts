@@ -47,6 +47,8 @@ export function useSharedInstanceMembers(options: {
 	isSignedIn: Ref<boolean>
 	actionsLocked: Ref<boolean>
 	onError: (error: unknown) => void
+	/** A failed invite, with the user it was for. */
+	onInviteError: (error: unknown, user: InvitePlayersUser) => void
 }) {
 	const queryClient = useQueryClient()
 	const queryKey = computed(() => instanceKeys.sharedMembers(options.instance.value.id))
@@ -70,9 +72,9 @@ export function useSharedInstanceMembers(options: {
 	const inviteMutation = useMutation({
 		mutationFn: ({ user, change }: InviteVariables) =>
 			invite_shared_instance_users(change.queryKey[1], [user.id]),
-		onError: (error, { change }) => {
+		onError: (error, { user, change }) => {
 			rollback(change)
-			options.onError(error)
+			options.onInviteError(error, user)
 		},
 		onSettled: (_data, _error, { user, exclusive }) => {
 			invitingUserIds.delete(normalizeInviteKey(user.id))
