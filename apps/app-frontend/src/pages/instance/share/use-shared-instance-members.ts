@@ -63,6 +63,9 @@ export function useSharedInstanceMembers(options: {
 			options.isSignedIn.value && !!options.instance.value.id && !options.actionsLocked.value,
 		retry: false,
 		staleTime: Infinity,
+		// A declined or accepted invite changes the list on the backend without any event reaching
+		// the owner, so the open Share tab asks again every so often.
+		refetchInterval: 15_000,
 		refetchOnMount: 'always',
 		refetchOnReconnect: false,
 		refetchOnWindowFocus: false,
