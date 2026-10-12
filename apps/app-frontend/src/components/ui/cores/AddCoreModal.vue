@@ -16,11 +16,15 @@ const queryClient = useQueryClient()
 
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const code = ref('')
-// Which Core the code belongs to, once looked up. Approval is the second step.
-const pending = ref<Archon.Cores.v1.PendingCore | null>(null)
+// The code that was looked up and the Core behind it. Approval is the second step and always
+// sends this code, never whatever the inputs hold by then.
+const pending = ref<{ code: string; core: Archon.Cores.v1.PendingCore } | null>(null)
 const error = ref('')
 const working = ref(false)
 let settle: ((added: boolean) => void) | null = null
+// Bumped whenever the modal is (re)opened or goes back to the code, so an answer to an earlier
+// lookup or approval cannot land on a later opening.
+let opening = 0
 
 const inputs = ref<HTMLInputElement[]>([])
 const codeError = ref('')
@@ -49,6 +53,7 @@ onBeforeUnmount(() => registerAddCoreModal(null))
 /** Open the modal. With `prefilled` (from an `amberite://approve` link) it looks the code up at once. */
 function show(prefilled = ''): Promise<boolean> {
 	settle?.(false)
+	opening++
 	code.value = prefilled
 		.replace(/[^A-Z0-9]/gi, '')
 		.toUpperCase()
@@ -70,40 +75,49 @@ function handleHide() {
 
 async function lookup() {
 	if (working.value || !complete.value) return
+	const started = opening
+	const typed = code.value
 	working.value = true
 	error.value = ''
 	try {
-		pending.value = await client.archon.cores_v1.lookup(code.value)
+		const core = await client.archon.cores_v1.lookup(typed)
+		if (started === opening) pending.value = { code: typed, core }
 	} catch (reason) {
-		error.value =
-			reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
+		if (started === opening)
+			error.value =
+				reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
 	} finally {
 		working.value = false
 	}
 }
 
 async function approve() {
-	if (working.value || !pending.value) return
+	const current = pending.value
+	if (working.value || !current) return
+	const started = opening
 	working.value = true
 	error.value = ''
 	try {
-		await client.archon.cores_v1.approve(code.value)
+		await client.archon.cores_v1.approve(current.code)
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: coresQueryKey }),
 			queryClient.invalidateQueries({ queryKey: ['servers'] }),
 		])
+		if (started !== opening) return
 		settle?.(true)
 		settle = null
 		modal.value?.hide()
 	} catch (reason) {
-		error.value =
-			reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
+		if (started === opening)
+			error.value =
+				reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
 	} finally {
 		working.value = false
 	}
 }
 
 function back() {
+	opening++
 	pending.value = null
 	clearErrorState()
 	void focusInput(0)
@@ -231,7 +245,7 @@ async function focusInput(index: number) {
 				Sign this Core in to your account?
 			</p>
 			<div class="flex flex-1 flex-col items-center justify-center gap-2">
-				<span class="text-3xl font-bold text-contrast">{{ pending.name }}</span>
+				<span class="text-3xl font-bold text-contrast">{{ pending.core.name }}</span>
 				<p class="m-0 mt-4 max-w-md text-center text-sm text-secondary">
 					Only approve a code shown by a Core you set up yourself. The Core will be able to host
 					servers under your account.
