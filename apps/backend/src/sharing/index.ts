@@ -104,6 +104,13 @@ function owner(item: Instance, userId: string) {
 		throw new ApiError(403, 'forbidden', 'Only the owner can change this shared instance')
 }
 
+async function requireSharing(env: Env, userId: string): Promise<void> {
+	if (
+		await env.DB.prepare('SELECT 1 FROM sharing_blacklist WHERE user_id = ?').bind(userId).first()
+	)
+		throw new ApiError(403, 'forbidden', 'This account cannot use sharing')
+}
+
 async function files(env: Env, item: Version): Promise<File[]> {
 	return (
 		await env.DB.prepare(
@@ -145,8 +152,11 @@ async function latestVersion(env: Env, id: string): Promise<Version> {
 	return result
 }
 
-/** Deletes the instance's R2 objects that no remaining version uses. */
-async function sweepFiles(env: Env, id: string): Promise<void> {
+/**
+ * Deletes the instance's R2 objects that no remaining version uses. Called after the rows are gone,
+ * so it clears everything once the instance itself is deleted.
+ */
+export async function sweepFiles(env: Env, id: string): Promise<void> {
 	const used = new Set(
 		(
 			await env.DB.prepare(
@@ -310,6 +320,8 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 	if (!file) throw new ApiError(404, 'not_found', 'Upload was not found')
 	const item = await instance(env, file.instance_id)
 	owner(item, user.id)
+	await requireSharing(env, user.id)
+	if (item.quarantine) throw new ApiError(403, 'forbidden', 'Shared instance is quarantined')
 	if (file.sha256) throw new ApiError(409, 'conflict', 'This file was already uploaded')
 	const bytes = await readBytes(
 		request,
@@ -319,10 +331,12 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 	if (expected && expected !== hex(await crypto.subtle.digest('SHA-512', bytes)))
 		throw new ApiError(400, 'upload_failed', 'Upload does not match its hash')
 	const sha256 = hex(await crypto.subtle.digest('SHA-256', bytes))
+	// Only what finalizing this version keeps counts: this version and the ready ones that survive
+	// pruning. A hash held only by a version about to be pruned is stored and counted again.
 	const stored = await env.DB.prepare(
-		'SELECT COALESCE(SUM(size),0) AS size, COALESCE(MAX(sha256 = ?1),0) AS present FROM (SELECT DISTINCT sha256,size FROM shared_files WHERE instance_id = ?2 AND sha256 IS NOT NULL)',
+		'SELECT COALESCE(SUM(size),0) AS size, COALESCE(MAX(sha256 = ?1),0) AS present FROM (SELECT DISTINCT sha256,size FROM shared_files WHERE instance_id = ?2 AND sha256 IS NOT NULL AND (version = ?3 OR version IN (SELECT version FROM shared_versions WHERE instance_id = ?2 AND ready = 1 ORDER BY version DESC LIMIT ?4)))',
 	)
-		.bind(sha256, item.id)
+		.bind(sha256, item.id, file.version, KEPT_VERSIONS - 1)
 		.first<{ size: number; present: number }>()
 	if (!stored?.present) {
 		if ((stored?.size ?? 0) + bytes.byteLength > MAX_INSTANCE_SIZE)
@@ -624,10 +638,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		}
 	}
 	if (route !== 'instances') throw new ApiError(404, 'not_found', 'Sharing endpoint was not found')
-	if (
-		await env.DB.prepare('SELECT 1 FROM sharing_blacklist WHERE user_id = ?').bind(user.id).first()
-	)
-		throw new ApiError(403, 'forbidden', 'This account cannot use sharing')
+	await requireSharing(env, user.id)
 	if (!id) {
 		if (request.method === 'GET') {
 			if (url.searchParams.has('user') && url.searchParams.get('user') !== user.id)
