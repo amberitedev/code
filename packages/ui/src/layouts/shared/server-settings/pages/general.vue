@@ -461,7 +461,7 @@ const infoProperties = computed<InfoProperty[]>(() => [
 const hasServerSettingsChanges = computed(
 	() =>
 		(serverName.value && serverName.value !== data.value?.name) ||
-		serverSubdomain.value !== data.value?.net?.domain,
+		(!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')),
 )
 const hasPreferenceChanges = computed(
 	() => JSON.stringify(newUserPreferences.value) !== JSON.stringify(userPreferences.value),
@@ -479,7 +479,7 @@ const saveGeneral = async () => {
 		if (serverName.value !== data.value?.name) {
 			await client.archon.servers_v0.updateName(serverId, serverName.value ?? '')
 		}
-		if (serverSubdomain.value !== data.value?.net?.domain) {
+		if (!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')) {
 			try {
 				const result = await client.archon.servers_v0.checkSubdomainAvailability(
 					serverSubdomain.value,
