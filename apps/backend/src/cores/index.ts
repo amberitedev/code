@@ -248,27 +248,32 @@ async function pollCode(request: Request, env: Env) {
 }
 
 /**
- * The pending Core behind a code the signed-in account typed. Every try counts towards the
- * account's limit; a right code resets it.
+ * The pending Core behind a code the signed-in account typed. Only wrong and expired codes count
+ * towards the account's limit, so a right code never clears it.
  */
 async function pendingCore(env: Env, userId: string, code: string): Promise<PendingRow> {
 	const now = Date.now()
-	const tries = await countInWindow(env, `approve:${userId}`, GUESS_WINDOW_MS, now)
-	if (tries.count > MAX_WRONG_GUESSES)
+	const scope = `approve:${userId}`
+	const tries = await env.DB.prepare(
+		'SELECT count, window_start FROM core_auth_limits WHERE scope = ?',
+	)
+		.bind(scope)
+		.first<{ count: number; window_start: string }>()
+	const windowEnds = tries ? Date.parse(tries.window_start) + GUESS_WINDOW_MS : 0
+	if (tries && windowEnds > now && tries.count >= MAX_WRONG_GUESSES)
 		throw new ApiError(
 			429,
 			'too_many_attempts',
-			`Too many wrong codes. Try again in ${Math.ceil((tries.windowEnds - now) / 60_000)} minutes.`,
+			`Too many wrong codes. Try again in ${Math.ceil((windowEnds - now) / 60_000)} minutes.`,
 		)
 	const row = await env.DB.prepare('SELECT * FROM core_auth_codes WHERE code = ?')
 		.bind(code)
 		.first<PendingRow>()
+	const expired = row && row.expires <= new Date(now).toISOString()
+	if (!row || expired) await countInWindow(env, scope, GUESS_WINDOW_MS, now)
 	if (!row) throw new ApiError(404, 'wrong_code', 'That code does not match any Core')
-	if (row.expires <= new Date(now).toISOString())
+	if (expired)
 		throw new ApiError(410, 'code_expired', 'That code has expired. Use the new one on your Core.')
-	await env.DB.prepare('DELETE FROM core_auth_limits WHERE scope = ?')
-		.bind(`approve:${userId}`)
-		.run()
 	return row
 }
 
