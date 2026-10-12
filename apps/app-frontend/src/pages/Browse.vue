@@ -628,10 +628,6 @@ function resetInstanceContext() {
 	newlyInstalled.value = []
 	hiddenInstanceProjectIds.value = new Set()
 	hiddenInstanceProjectIdsInitialized.value = false
-	// @ts-expect-error upstream assigns to a read-only computed, which is a no-op at runtime
-	isServerInstance.value = false
-	// @ts-expect-error upstream calls an undefined name
-	browseBreadcrumb.reset()
 	void refreshInstalledProjectIds()
 }
 
