@@ -1223,24 +1223,17 @@ async fn install_modrinth_pack(
         ));
     }
     // Installs through the linked-source engine: the first pack links the server, later packs
-    // update it, removing files the previous pack provided.
-    let id = r.id.to_string();
-    let linked = server_source_service::get_status(state, &id).await?;
-    if linked.is_some() {
-        server_source_service::request_source_update(state, &id, version)
-            .await?;
-    } else {
-        server_source_service::link(
-            state,
-            &id,
-            ServerSource::Modrinth {
-                project_id: project.to_string(),
-                version_id: version.to_string(),
-            },
-            version,
-        )
-        .await?;
-    }
+    // replace the link (another pack or an instance), removing files the previous one provided.
+    server_source_service::link_or_update(
+        state,
+        &r.id.to_string(),
+        ServerSource::Modrinth {
+            project_id: project.to_string(),
+            version_id: version.to_string(),
+        },
+        version,
+    )
+    .await?;
     Ok(())
 }
 
