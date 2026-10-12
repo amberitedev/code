@@ -195,6 +195,7 @@ fn main() {
                     tracing::info!("Handling command-line deep link");
                     let payload = payload.clone();
                     tauri::async_runtime::spawn(api::utils::handle_command(
+                        app.clone(),
                         payload,
                     ));
                 }
@@ -281,8 +282,10 @@ fn main() {
                 let payload = macos::deep_link::get_or_init_payload(app);
 
                 let mtx_copy = payload.payload;
+                let handle = app.handle().clone();
                 app.listen("deep-link://new-url", move |url| {
                     let mtx_copy_copy = mtx_copy.clone();
+                    let handle = handle.clone();
                     let request = url.payload().to_owned();
 
                     let actual_request =
@@ -299,20 +302,27 @@ fn main() {
                             *payload = Some(actual_request.clone());
                         }
 
-                        let _ =
-                            api::utils::handle_command(actual_request).await;
+                        let _ = api::utils::handle_command(
+                            handle,
+                            actual_request,
+                        )
+                        .await;
                     });
                 });
             };
 
             #[cfg(not(target_os = "macos"))]
-            app.listen("deep-link://new-url", |url| {
-                let payload = url.payload().to_owned();
-                tracing::info!("Handling deep link");
-                tauri::async_runtime::spawn(api::utils::handle_command(
-                    payload,
-                ));
-            });
+            {
+                let handle = app.handle().clone();
+                app.listen("deep-link://new-url", move |url| {
+                    let payload = url.payload().to_owned();
+                    tracing::info!("Handling deep link");
+                    tauri::async_runtime::spawn(api::utils::handle_command(
+                        handle.clone(),
+                        payload,
+                    ));
+                });
+            }
 
             #[cfg(not(target_os = "linux"))]
             if let Some(window) = app.get_window("main")
@@ -472,13 +482,16 @@ fn main() {
 
                         let mtx_copy = payload.payload;
                         let request = file.to_string_lossy().to_string();
+                        let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
                             let mut payload = mtx_copy.lock().await;
                             if payload.is_none() {
                                 *payload = Some(request.clone());
                             }
 
-                            let _ = api::utils::handle_command(request).await;
+                            let _ =
+                                api::utils::handle_command(handle, request)
+                                    .await;
                         });
                     }
                 }
