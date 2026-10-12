@@ -1,5 +1,5 @@
 import { handleAccounts } from './accounts'
-import { ApiError, json } from './common/http'
+import { ApiError, errorResponse, json } from './common/http'
 import type { Env } from './common/types'
 import { handleCores } from './cores'
 import { handleVisibleServers } from './cores/servers'
@@ -46,8 +46,7 @@ export default {
 					(await handleSocial(request, env)) ??
 					json({ error: 'not_found', description: 'Not found' }, 404)
 		} catch (error) {
-			if (error instanceof ApiError)
-				response = json({ error: error.error, description: error.description }, error.status)
+			if (error instanceof ApiError) response = errorResponse(error)
 			else {
 				console.error('Backend request failed', error)
 				response = json({ error: 'internal_error', description: 'An internal error occurred' }, 500)
