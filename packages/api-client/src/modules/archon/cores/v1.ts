@@ -6,6 +6,8 @@ import type { Archon } from '../types'
 const SERVER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 /** How long a Core's local address may take to answer before its internet address is used. */
 const LOCAL_ANSWER_MS = 2500
+/** How long the Core list is kept after an unreachable Core last caused it to be fetched again. */
+const FAILURE_REFETCH_MS = 60_000
 
 /** What is needed to reach a Core: its addresses and the certificate to trust there. */
 type CoreLocation = Pick<Archon.Cores.v1.Core, 'address' | 'cert_fingerprint'> &
@@ -39,6 +41,8 @@ export class CorePairingError extends Error {
  */
 export class ArchonCoresV1Module extends AbstractModule {
 	private cores: Promise<Archon.Cores.v1.Core[]> | null = null
+	/** When the list was last dropped because a Core did not answer. See `servers`. */
+	private droppedAfterFailureAt = 0
 	/** Base URLs that may receive the account token: paired Cores and the one being paired. */
 	private addresses = new Set<string>()
 	/** Core id to the base URL its requests go to. See `route`. */
@@ -50,12 +54,18 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return 'archon_cores_v1'
 	}
 
-	/** Fetch the Cores the account may reach from the backend, its own first. */
+	/**
+	 * Fetch the Cores the account may reach from the backend, its own first. A Core whose route
+	 * cannot be worked out keeps its plain address, so it does not take the other Cores down with it.
+	 */
 	public list(): Promise<Archon.Cores.v1.Core[]> {
 		const cores = this.client
 			.request<Archon.Cores.v1.Core[]>('/cores', { api: 'labrinth', version: 3, method: 'GET' })
 			.then(async (list) => {
-				const routes = await Promise.all(list.map((core) => this.route(core)))
+				const settled = await Promise.allSettled(list.map((core) => this.route(core)))
+				const routes = settled.map((result, index) =>
+					result.status === 'fulfilled' ? result.value : list[index].address,
+				)
 				this.routes = new Map(list.map((core, index) => [core.id, routes[index]]))
 				this.addresses = new Set(routes)
 				return list
@@ -181,7 +191,9 @@ export class ArchonCoresV1Module extends AbstractModule {
 
 	/**
 	 * The servers of every paired Core as one list. A Core that cannot be reached is left out and
-	 * named in `offline_cores`; when none can be reached this throws.
+	 * named in `offline_cores`; when none can be reached this throws. A Core that did not answer
+	 * makes the next call ask the backend for the list again, at most once every
+	 * `FAILURE_REFETCH_MS`, so polling while a Core is down does not redo the routing every time.
 	 */
 	public async servers(
 		options?: Archon.Servers.v0.GetServersOptions,
@@ -216,7 +228,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 		})
 		const failure = results.find((result) => result.status === 'rejected')
 		// A Core that did not answer may have moved or changed its certificate: ask the backend again.
-		if (failure) this.cores = null
+		if (failure && Date.now() - this.droppedAfterFailureAt >= FAILURE_REFETCH_MS) {
+			this.droppedAfterFailureAt = Date.now()
+			this.cores = null
+		}
 		if (failure && !results.some((result) => result.status === 'fulfilled')) throw failure.reason
 		merged.pagination.page_size = merged.pagination.total_items = merged.servers.length
 		return merged
