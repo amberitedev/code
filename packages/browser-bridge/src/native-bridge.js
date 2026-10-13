@@ -51,12 +51,32 @@
 		return output
 	}
 
-	function emit(event, payload) {
-		void window.__TAURI_INTERNALS__
-			.invoke('plugin:event|emit', { event, payload })
+	// Rejects instead of throwing, so a page without Tauri or an unserializable payload always
+	// reaches the caller's catch.
+	async function emit(event, payload) {
+		await window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event, payload })
+	}
+
+	function reportEmitFailure(error) {
+		console.error('Amberite browser bridge could not emit a transport message', error)
+	}
+
+	// Every invoke must be answered. If the answer itself cannot be sent, say so and try once more
+	// with a plain error the transport can always carry.
+	function respond(request, status, payload) {
+		const envelope = { connectionId: request.connectionId, id: request.id }
+		emit(request.responseEvent, { ...envelope, payload, status })
 			.catch((error) => {
-				console.error('Amberite browser bridge could not emit a transport message', error)
+				reportEmitFailure(error)
+				return emit(request.responseEvent, {
+					...envelope,
+					payload: toWire(
+						new Error(`The App could not send its answer to ${request.cmd}: ${String(error)}`),
+					),
+					status: 'error',
+				})
 			})
+			.catch(reportEmitFailure)
 	}
 
 	function callbackKey(connectionId, callbackId) {
@@ -69,7 +89,9 @@
 		if (existing !== undefined) return existing
 		let nativeId
 		nativeId = window.__TAURI_INTERNALS__.transformCallback((payload) => {
-			emit(callbackEvent, { callbackId, connectionId, payload: toWire(payload) })
+			emit(callbackEvent, { callbackId, connectionId, payload: toWire(payload) }).catch(
+				reportEmitFailure,
+			)
 			if (payload && typeof payload === 'object' && 'end' in payload) {
 				window.__TAURI_INTERNALS__.unregisterCallback(nativeId)
 				callbackIds.delete(key)
@@ -103,16 +125,33 @@
 	}
 
 	async function invoke(request) {
+		let status = 'success'
+		let payload
 		try {
-			const result = await window.__TAURI_INTERNALS__.invoke(
-				request.cmd,
-				fromWire(request.args, request),
-				fromWire(request.options, request),
+			payload = toWire(
+				await window.__TAURI_INTERNALS__.invoke(
+					request.cmd,
+					fromWire(request.args, request),
+					fromWire(request.options, request),
+				),
 			)
-			emit(request.responseEvent, { payload: toWire(result), status: 'success' })
 		} catch (error) {
-			emit(request.responseEvent, { payload: toWire(error), status: 'error' })
+			status = 'error'
+			try {
+				payload = toWire(error)
+			} catch {
+				payload = toWire(new Error(String(error)))
+			}
 		}
+		respond(request, status, payload)
+	}
+
+	// Entry point for the App's eval. Its return value tells Rust whether this page can answer at
+	// all, because an error page left behind by a failed reload has no Tauri to invoke or emit with.
+	function dispatch(request) {
+		if (!window.__TAURI_INTERNALS__) return 'no-tauri'
+		void invoke(request)
+		return 'ok'
 	}
 
 	function unregister(connectionId, callbackId) {
@@ -133,6 +172,6 @@
 	}
 
 	Object.defineProperty(window, '__AMBERITE_BROWSER_BRIDGE_NATIVE__', {
-		value: { clear, invoke, unregister },
+		value: { clear, dispatch, invoke, unregister },
 	})
 })()
