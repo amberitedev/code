@@ -719,11 +719,27 @@ function reportProject() {
 // How long versions, members and the organization are reused before a visit reads them again.
 const PROJECT_PART_STALE_TIME = 5 * 60_000
 
-function loadProject(projectId, cacheBehaviour, onProjectV3Error) {
-	return Promise.all([
+// Rejects for a project that does not exist, so a missing one is never cached or shown.
+async function loadProject(projectId, cacheBehaviour, onProjectV3Error) {
+	const [project, projectV3Result] = await Promise.all([
 		get_project(projectId, cacheBehaviour),
 		get_project_v3(projectId, cacheBehaviour).catch(onProjectV3Error),
 	])
+	if (!project) throw new Error('Error loading project')
+	return [project, projectV3Result]
+}
+
+// The key lists the version ids, so a newly published version is always fetched. Versions that
+// are already cached are served as they are and refreshed by the cache in the background.
+function projectVersionsQuery(project) {
+	return {
+		queryKey: ['projects', 'versions', project.id, project.versions],
+		queryFn: async () =>
+			(await get_version_many(project.versions)).sort(
+				(a, b) => Date.parse(b.date_published) - Date.parse(a.date_published),
+			),
+		staleTime: PROJECT_PART_STALE_TIME,
+	}
 }
 
 async function loadInstanceState() {
@@ -785,11 +801,7 @@ async function fetchProjectData() {
 		.catch(reportError)
 	if (!isCurrent()) return
 
-	if (fresh) {
-		showProject(fresh)
-	} else {
-		reportError('Error loading project')
-	}
+	if (fresh) showProject(fresh)
 }
 
 // Puts a project on screen and loads the parts that hang off it. Called again when the background
@@ -822,13 +834,8 @@ function showProject([project, projectV3Result]) {
 			.catch(handleError)
 	}
 
-	// The key lists the version ids, so a newly published version is always fetched. Versions that
-	// are already cached are served as they are and refreshed by the cache in the background.
-	loadPart(versions, ['projects', 'versions', project.id, project.versions], async () =>
-		(await get_version_many(project.versions)).sort(
-			(a, b) => Date.parse(b.date_published) - Date.parse(a.date_published),
-		),
-	)
+	const versionsQuery = projectVersionsQuery(project)
+	loadPart(versions, versionsQuery.queryKey, versionsQuery.queryFn)
 	loadPart(members, ['projects', 'members', project.team], async () => {
 		const team = await get_team(project.team)
 		for (const member of team ?? []) {
@@ -970,7 +977,8 @@ async function install(version) {
 					},
 					contentType,
 				),
-				getProjectVersions: async () => versions.value,
+				// Versions load after the header, so an early click waits for them here.
+				getProjectVersions: () => queryClient.fetchQuery(projectVersionsQuery(data.value)),
 				queue: {
 					get: serverInstallContent.getQueuedServerInstallPlans,
 					set: serverInstallContent.setQueuedServerInstallPlans,
