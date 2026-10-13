@@ -1,6 +1,8 @@
 import { computed, type ComputedRef, onUnmounted, type Ref, ref, watch } from 'vue'
 
-const LOADING_INDICATOR_DELAY_MS = 200
+// The model usually needs 200 to 400ms. Showing the indicator inside that window held the finished
+// model back for the indicator's minimum time, so it only appears for loads that are really slow.
+const LOADING_INDICATOR_DELAY_MS = 600
 const LOADING_INDICATOR_MIN_MS = 250
 
 type MaybeReadonlyRef<T> = Ref<T> | ComputedRef<T>
