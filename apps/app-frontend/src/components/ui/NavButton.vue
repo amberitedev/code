@@ -78,7 +78,9 @@ defineOptions({
 	}
 }
 
-.router-link-active {
+// A pressed link already looks selected, so the press is answered before the next page renders.
+.router-link-active,
+a.nav-button:active {
 	@apply text-[--color-button-text-selected];
 	&::before {
 		background-color: var(--color-button-bg-selected);
