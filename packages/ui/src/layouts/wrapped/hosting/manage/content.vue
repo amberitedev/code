@@ -144,8 +144,15 @@ const messages = defineMessages({
 })
 
 const client = injectModrinthClient()
-const { server, worldId, busyReasons, installProgressItems, uploadState, cancelUpload } =
-	injectModrinthServerContext()
+const {
+	server,
+	worldId,
+	busyReasons,
+	installProgressItems,
+	uploadState,
+	cancelUpload,
+	powerState,
+} = injectModrinthServerContext()
 const contentUploadSession = useUploadSessionUpload({
 	client,
 	scope: 'content',
@@ -186,11 +193,20 @@ const contentQuery = useQuery({
 		client.archon.content_v1.getAddons(serverId, worldId.value!, { from_modpack: false }),
 	enabled: computed(() => worldId.value !== null),
 	staleTime: 30_000,
-	// A linked pack installs in the background, so keep reading until it settles.
+	// A linked pack installs in the background, so keep reading until it settles. A pending update
+	// waits for the server to stop, which can take a while, so it is read more slowly.
 	refetchInterval: (query) => {
 		const state = query.state.data?.modpack?.state
-		return state === 'downloading' || state === 'applying' ? 2_000 : false
+		if (state === 'downloading' || state === 'applying') return 2_000
+		return state === 'pending' ? 10_000 : false
 	},
+})
+
+// A pending update applies as soon as the server stops.
+watch(powerState, (state) => {
+	if (state === 'stopped' && contentQuery.data.value?.modpack?.state === 'pending') {
+		void contentQuery.refetch()
+	}
 })
 
 /** The App instance this server follows, when its linked pack is one. */

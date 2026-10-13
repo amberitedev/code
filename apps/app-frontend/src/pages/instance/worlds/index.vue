@@ -106,9 +106,7 @@
 						:outside-warning="row.linked && unreachableCause(row.linked)"
 						:hosted-by="row.hosted?.host.username"
 						:hosted-server-id="
-							row.hosted && manageableCores.has(row.hosted.core_id)
-								? row.hosted.server_id
-								: undefined
+							row.hosted && canManageHostedServer(row.hosted) ? row.hosted.server_id : undefined
 						"
 						pinnable
 						:pinned="pins.pinned.value.includes(row.key)"
@@ -224,7 +222,6 @@ import { trackEvent } from '@/helpers/analytics'
 import { get_project, get_project_v3 } from '@/helpers/cache.js'
 import { set_synced_option } from '@/helpers/instance'
 import {
-	canManageHostedServer,
 	coreOffline,
 	type HostedServer,
 	type LinkedServer,
@@ -232,6 +229,7 @@ import {
 	serverAddress,
 	shareableServerAddress,
 	unreachableCause,
+	useCanManageHostedServer,
 	useHostedServers,
 	useLinkedServers,
 } from '@/helpers/linked-servers'
@@ -372,24 +370,15 @@ const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
 const canCreateServer = computed(
 	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
 )
-// Servers other people host for this shared instance. A signed-out or wrong account gets none.
+// Servers other people host for this shared instance. A signed-out or wrong account gets none,
+// and neither does an instance that was deleted or that this account lost access to.
 const { servers: hostedServers, query: hostedServersQuery } = useHostedServers(() =>
-	sharedInstance.actionsLocked.value || sharedInstance.signedOut.value
+	sharedInstance.shareActionsLocked.value || sharedInstance.signedOut.value
 		? undefined
 		: instance.value.shared_instance?.id,
 )
-// The Cores among them this account may manage, which makes those rows open the server page.
-const manageableCores = ref(new Set<string>())
-watch(
-	hostedServers,
-	async (servers) => {
-		const answers = await Promise.all(servers.map(canManageHostedServer))
-		manageableCores.value = new Set(
-			servers.filter((_, index) => answers[index]).map((server) => server.core_id),
-		)
-	},
-	{ immediate: true },
-)
+// The ones among them this account may manage, which makes those rows open the server page.
+const canManageHostedServer = useCanManageHostedServer()
 
 const pins = useWorldPins(() => instance.value.id)
 
@@ -467,9 +456,13 @@ async function joinRow(row: WorldRow) {
 	if (row.linked || row.hosted) pins.markJoined(row.key)
 	const hosted = row.hosted
 	if (hosted && instance.value.shared_instance?.role === 'member') {
+		// Busy from the first click, so a second one does not check and join again.
+		if (startingInstance.value) return
+		startingInstance.value = true
 		const preview = await sharedInstance
 			.refreshUpdatePreview()
 			.catch(() => sharedInstance.updatePreview.value)
+			.finally(() => (startingInstance.value = false))
 		if (preview?.updateAvailable && updateBeforeJoinModal.value) {
 			updateBeforeJoinModal.value.show(instance.value.id, hosted.host.username, async () => {
 				await instancePage.refreshInstance()

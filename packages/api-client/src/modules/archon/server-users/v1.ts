@@ -65,6 +65,19 @@ export class ArchonServerUsersV1Module extends AbstractModule {
 	}
 
 	/**
+	 * Core only. The signed-in account gives up its own access to a server it was invited to
+	 * manage. The same route declines a pending invite; see `cores_v1.respondToInvite` for that.
+	 * POST /v1/servers/:server_id/invites/decline
+	 */
+	public async leave(serverId: string): Promise<void> {
+		await this.client.request(`/servers/${serverId}/invites/decline`, {
+			api: 'archon',
+			version: 1,
+			method: 'POST',
+		})
+	}
+
+	/**
 	 * Update a user's server role
 	 * PATCH /v1/servers/:server_id/users/:user_id
 	 */

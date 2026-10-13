@@ -85,7 +85,8 @@ async function create(ctx: CreationFlowContextValue) {
 			shared_instance_id: props.instance.shared_instance?.id ?? null,
 		})
 		flow.value?.hide()
-		notifyHomeAddressOnce(addNotification, formatMessage)
+		// Nobody else sees the server of an instance that is not shared.
+		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)
 		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
 		try {
 			const pack = await exportInstancePack(instance.id)

@@ -345,8 +345,6 @@ onBeforeRouteUpdate(async (to, from) => {
 
 	try {
 		await ensureCriticalInstanceData(targetInstanceId)
-		// @ts-expect-error upstream assigns to a read-only computed, which is a no-op at runtime
-		instanceId.value = targetInstanceId
 	} catch (error) {
 		if (isUnmanagedInstanceError(error)) return { path: '/' }
 		handleError(toError(error))

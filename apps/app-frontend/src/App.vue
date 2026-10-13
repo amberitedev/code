@@ -1248,6 +1248,7 @@ async function fetchCredentials() {
 	// Paired Cores and their servers belong to the signed-in account.
 	void queryClient.invalidateQueries({ queryKey: ['cores'] })
 	void queryClient.invalidateQueries({ queryKey: ['servers'] })
+	void replayUnreadNotifications()
 	await traceStartupStep('Load stored account profiles', fetchStoredModrinthAccounts)
 }
 
@@ -1583,6 +1584,40 @@ async function handleLiveNotification(notification) {
 		serverInvitePopupNotificationIds.add(popupNotification.id)
 	}
 }
+
+// The friends socket only delivers notifications while the App is open, so unread ones are
+// replayed through the live path at sign-in, when the network returns, and when the socket
+// (re)connects. Both invite handlers dedupe by notification ID, so one that also arrives live is
+// shown once.
+async function replayUnreadNotifications() {
+	const userId = credentials.value?.user_id
+	if (!liveNotificationsEnabled || !userId) return
+
+	const refreshId = credentialsRefreshId
+	const generation = liveNotificationGeneration
+	try {
+		const notifications =
+			await tauriApiClient.labrinth.notifications_v2.getUserNotifications(userId)
+		// The backend returns newest first; toasts should appear in the order they were sent.
+		for (const notification of notifications.filter((n) => !n.read).reverse()) {
+			if (refreshId !== credentialsRefreshId || generation !== liveNotificationGeneration) return
+			await handleLiveNotification(notification).catch((error) =>
+				console.error(`Failed to replay notification ${notification.id}`, error),
+			)
+		}
+	} catch (error) {
+		console.error('Failed to fetch unread notifications', error)
+	}
+}
+window.addEventListener('online', replayUnreadNotifications)
+// The backend sends the full friend status list each time the socket connects.
+useAppEvent(
+	'friend',
+	(event) => {
+		if (event.event === 'status_sync') void replayUnreadNotifications()
+	},
+	appEvents,
+)
 
 function clearLiveNotifications() {
 	liveNotificationGeneration++

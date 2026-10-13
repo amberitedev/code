@@ -1,5 +1,24 @@
 <template>
 	<div class="flex flex-col gap-8">
+		<Admonition
+			v-if="sharedInstance.missing.value"
+			type="warning"
+			:header="formatMessage(sharedInstanceErrorMessages.missingTitle)"
+		>
+			{{ formatMessage(sharedInstanceErrorMessages.missingText) }}
+			<template #actions>
+				<Button type="outlined" class="!border" :disabled="recovering" @click="stopSharing">
+					<UnlinkIcon aria-hidden="true" />
+					{{ formatMessage(sharedInstanceErrorMessages.stopSharingButton) }}
+				</Button>
+				<Button type="colored" color="brand" :disabled="recovering" @click="shareAgain">
+					<SpinnerIcon v-if="recovering" class="animate-spin" aria-hidden="true" />
+					<UserPlusIcon v-else aria-hidden="true" />
+					{{ formatMessage(sharedInstanceErrorMessages.shareAgainButton) }}
+				</Button>
+			</template>
+		</Admonition>
+
 		<section class="flex flex-col gap-4">
 			<div class="flex flex-col gap-1">
 				<h3 class="m-0 text-lg font-semibold text-contrast">
@@ -79,9 +98,11 @@
 </template>
 
 <script setup lang="ts">
-import { SpinnerIcon, XIcon } from '@modrinth/assets'
+import { SpinnerIcon, UnlinkIcon, UserPlusIcon, XIcon } from '@modrinth/assets'
 import { IconButton } from '@modrinth/ui'
 import {
+	Admonition,
+	Button,
 	CopyCode,
 	defineMessages,
 	Table,
@@ -91,27 +112,28 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { config } from '@/config'
 import {
+	create_shared_instance_invite_link,
 	get_shared_instance_invites,
 	revoke_shared_instance_invite,
 	type SharedInstanceInvite,
-	unpublish_shared_instance,
 } from '@/helpers/instance'
-import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
+import { sharedInstanceErrorMessages } from '@/helpers/shared-instance-errors'
 
-import { instanceKeys } from '../../query-options.ts'
+import { injectSharedInstance } from '../../shared-instance-context.ts'
 import ConfirmRevokeSharedInstanceInviteModal from './confirm-revoke-shared-instance-invite-modal.vue'
 import { injectInstanceSettings } from './instance-settings-context.ts'
 import SharedInstanceInstallationSettingsControls from './shared-instance-installation-settings-controls.vue'
 
 const { instance, offline, onUnlinked } = injectInstanceSettings()
-const { notifySharedInstanceError } = useSharedInstanceErrors()
+const sharedInstance = injectSharedInstance()
 const { formatMessage } = useVIntl()
 const queryClient = useQueryClient()
 const unpublishing = ref(false)
+const recovering = ref(false)
 const revokeInviteModal = ref<InstanceType<typeof ConfirmRevokeSharedInstanceInviteModal>>()
 const formatRelativeTime = useRelativeTime()
 const formatDateTime = useFormatDateTime({ dateStyle: 'medium', timeStyle: 'short' })
@@ -128,11 +150,11 @@ const activeInvitesQuery = useQuery({
 		try {
 			return await get_shared_instance_invites(queryKey[1])
 		} catch (error) {
-			notifySharedInstanceError(error)
+			void sharedInstance.reportActionError(error)
 			throw error
 		}
 	},
-	enabled: () => !!instance.value.id && !offline,
+	enabled: () => !!instance.value.id && !offline && !sharedInstance.shareActionsLocked.value,
 	retry: false,
 	staleTime: Infinity,
 	refetchOnMount: 'always',
@@ -150,13 +172,14 @@ const revokeInviteMutation = useMutation({
 			(invites = []) => invites.filter((invite) => invite.id !== inviteId),
 		)
 	},
-	onError: notifySharedInstanceError,
+	onError: (error) => void sharedInstance.reportActionError(error),
 })
 
 const isBusy = computed(
 	() =>
 		instance.value.install_stage !== 'installed' ||
 		unpublishing.value ||
+		recovering.value ||
 		revokeInviteMutation.isPending.value ||
 		!!offline,
 )
@@ -193,16 +216,46 @@ function revokeInvite(inviteId: string) {
 async function unpublishSharedInstance() {
 	unpublishing.value = true
 	try {
-		await unpublish_shared_instance(instance.value.id)
-		queryClient.setQueryData(instanceKeys.sharedMembers(instance.value.id), [])
+		await sharedInstance.stopSharing()
 		await queryClient.invalidateQueries({ queryKey: ['linkedModpackInfo', instance.value.id] })
 		onUnlinked()
 	} catch (error) {
-		notifySharedInstanceError(error)
+		void sharedInstance.reportActionError(error)
 	} finally {
 		unpublishing.value = false
 	}
 }
+
+async function stopSharing() {
+	recovering.value = true
+	await unpublishSharedInstance()
+	recovering.value = false
+}
+
+/**
+ * For a shared instance the backend no longer has. Detaching first makes creating an invite link
+ * do what a first share does: create a fresh shared instance and publish to it.
+ */
+async function shareAgain() {
+	const instanceId = instance.value.id
+	recovering.value = true
+	try {
+		await sharedInstance.stopSharing()
+		await create_shared_instance_invite_link(instanceId, { maxUses: 10 })
+		await queryClient.invalidateQueries({ queryKey: ['sharedInstanceInvites', instanceId] })
+	} catch (error) {
+		void sharedInstance.reportActionError(error)
+	} finally {
+		recovering.value = false
+	}
+}
+
+// Opening the page checks that the backend still has this shared instance and that we own it.
+watch(
+	() => instance.value.id,
+	() => void sharedInstance.verifyOwner(),
+	{ immediate: true },
+)
 
 const messages = defineMessages({
 	activeInvitesTitle: {

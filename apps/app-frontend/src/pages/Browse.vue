@@ -565,6 +565,10 @@ const messages = defineMessages({
 		id: 'search.filter.locked.server-environment.title',
 		defaultMessage: 'Only client-side mods can be added to the server instance',
 	},
+	environmentProvidedByCoreServer: {
+		id: 'app.browse.filter.locked.core-server-environment.title',
+		defaultMessage: 'Only mods compatible with servers can be added to this server',
+	},
 	gameVersionProvidedByInstance: {
 		id: 'search.filter.locked.instance-game-version.title',
 		defaultMessage: 'Game version is provided by the instance',
@@ -628,10 +632,6 @@ function resetInstanceContext() {
 	newlyInstalled.value = []
 	hiddenInstanceProjectIds.value = new Set()
 	hiddenInstanceProjectIdsInitialized.value = false
-	// @ts-expect-error upstream assigns to a read-only computed, which is a no-op at runtime
-	isServerInstance.value = false
-	// @ts-expect-error upstream calls an undefined name
-	browseBreadcrumb.reset()
 	void refreshInstalledProjectIds()
 }
 
@@ -663,6 +663,8 @@ watch(
 		}
 
 		installedProjectIds.value = null
+		newlyInstalled.value = []
+		hiddenInstanceProjectIds.value = new Set()
 		hiddenInstanceProjectIdsInitialized.value = false
 		await Promise.all([instanceQuery.suspense().catch(handleError), refreshInstalledProjectIds()])
 		if (instance.value?.link?.project_id) {
@@ -1150,7 +1152,11 @@ async function search(requestParams: string) {
 const lockedFilterMessages = computed(() => ({
 	gameVersion: formatMessage(messages.gameVersionProvidedByInstance),
 	modLoader: formatMessage(messages.modLoaderProvidedByInstance),
-	environment: formatMessage(messages.environmentProvidedByServer),
+	environment: formatMessage(
+		isServerContext.value
+			? messages.environmentProvidedByCoreServer
+			: messages.environmentProvidedByServer,
+	),
 	syncButton: formatMessage(messages.syncFilterButton),
 	providedBy: formatMessage(messages.providedByInstance),
 }))
