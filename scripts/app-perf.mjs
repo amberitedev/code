@@ -126,6 +126,7 @@ const RECORDER = `(() => {
 	// Requests still open keep a click from counting as settled.
 	let openRequests = 0
 	let lastRequestEnd = 0
+	let resetAt = 0
 	const nativeFetch = window.fetch
 	window.fetch = (...args) => {
 		openRequests++
@@ -165,6 +166,7 @@ const RECORDER = `(() => {
 	requestAnimationFrame(frame)
 	window.__appPerf = {
 		reset() {
+			resetAt = performance.now()
 			Object.assign(state, { inputAt: 0, events: [], longTasks: [], loafs: [], frames: [], shift: 0, firstMutation: 0, lastMutation: 0 })
 		},
 		activity() {
@@ -172,7 +174,8 @@ const RECORDER = `(() => {
 			return { now: performance.now(), openRequests, lastChange: Math.max(state.inputAt, state.lastMutation, lastRequestEnd, lastLoaf ? lastLoaf.start + lastLoaf.duration : 0) }
 		},
 		snapshot() {
-			return JSON.stringify({ ...state, path: location.pathname + location.search })
+			// A click that never reached the page has no input time, so measure from the reset.
+			return JSON.stringify({ ...state, inputAt: state.inputAt || resetAt, path: location.pathname + location.search })
 		},
 	}
 })()`
@@ -460,13 +463,13 @@ async function run(options) {
 
 	const tour = selectTour(options)
 	const results = new Map(tour.map((step) => [step.name, []]))
-	const skipped = new Set()
+	const skipped = new Map()
 	// Pass 0 loads every page's modules and data and is thrown away.
 	for (let pass = 0; pass <= options.passes; pass++) {
 		for (const step of tour) {
 			const measurement = await measureStep(page, step)
 			if (!measurement) {
-				skipped.add(step.name)
+				skipped.set(step.name, (skipped.get(step.name) ?? 0) + 1)
 				continue
 			}
 			if (pass > 0 && !step.leadIn) results.get(step.name).push(measurement)
@@ -510,7 +513,14 @@ async function run(options) {
 			.map((entry) => `${entry.name} ${entry.ms}ms`)
 		if (functions?.length) console.log(`${step.name} hotspots:\n  ${functions.join('\n  ')}`)
 	}
-	if (skipped.size) console.log(`Skipped (element not found): ${[...skipped].join(', ')}`)
+	if (skipped.size) {
+		const missed = [...skipped].map(
+			([name, passes]) => `${name} (${passes} of ${options.passes + 1} passes)`,
+		)
+		console.log(
+			`Element not found, so later steps may have started from the wrong page: ${missed.join(', ')}`,
+		)
+	}
 	console.log(`Saved ${output}`)
 	page.close()
 }
