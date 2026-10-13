@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/vue-query'
+import { type QueryClient, queryOptions } from '@tanstack/vue-query'
 
 import { get_project_v3 } from '@/helpers/cache.js'
 import {
@@ -126,4 +126,14 @@ export function instanceWorldsQueryOptions(instanceId: string) {
 		queryFn: () => refreshWorlds(instanceId),
 		staleTime: 0,
 	})
+}
+
+/**
+ * Loads what the instance page shows first, so opening the instance starts from cache. Call it
+ * when the user hovers or presses something that leads to the instance. Both loads are skipped
+ * while their cached copy is fresh.
+ */
+export function prefetchInstancePage(queryClient: QueryClient, instanceId: string) {
+	void queryClient.prefetchQuery(instanceDetailQueryOptions(instanceId))
+	void queryClient.prefetchQuery(instanceContentQueryOptions(instanceId))
 }

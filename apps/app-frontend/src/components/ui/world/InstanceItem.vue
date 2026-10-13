@@ -25,8 +25,9 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { capitalizeString } from '@modrinth/utils/utils'
+import { useQueryClient } from '@tanstack/vue-query'
 import type { Dayjs } from 'dayjs'
-import { computed, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAppEvent } from '@/composables/use-app-event'
@@ -36,6 +37,7 @@ import { getInstanceIconUrl, kill, run } from '@/helpers/instance'
 import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
 import { showInstanceInFolder } from '@/helpers/utils'
+import { prefetchInstancePage } from '@/pages/instance/query-options'
 import { injectServerInstall } from '@/providers/server-install'
 
 const { handleError } = injectNotificationManager()
@@ -48,6 +50,7 @@ const formatDateTime = useFormatDateTime({
 })
 
 const router = useRouter()
+const queryClient = useQueryClient()
 
 const emit = defineEmits<{
 	(e: 'play' | 'stop'): void
@@ -58,6 +61,26 @@ const props = defineProps<{
 	last_played: Dayjs
 	newlyAdded?: boolean
 }>()
+
+// Hovering waits a moment so sweeping across the list does not load every instance; pressing
+// loads at once.
+let prefetchTimeout: ReturnType<typeof setTimeout> | undefined
+
+function prefetchInstance() {
+	clearTimeout(prefetchTimeout)
+	prefetchInstancePage(queryClient, props.instance.id)
+}
+
+function prefetchInstanceSoon() {
+	clearTimeout(prefetchTimeout)
+	prefetchTimeout = setTimeout(prefetchInstance, 100)
+}
+
+function cancelPrefetch() {
+	clearTimeout(prefetchTimeout)
+}
+
+onBeforeUnmount(cancelPrefetch)
 
 const messages = defineMessages({
 	newInstance: {
@@ -224,7 +247,12 @@ function openContextMenu(event: MouseEvent) {
 }
 </script>
 <template>
-	<div @contextmenu.prevent.stop="openContextMenu">
+	<div
+		@contextmenu.prevent.stop="openContextMenu"
+		@pointerenter="prefetchInstanceSoon"
+		@pointerleave="cancelPrefetch"
+		@pointerdown="prefetchInstance"
+	>
 		<SmartClickable class="[--active-scale:0.99]">
 			<template v-if="!installing" #clickable>
 				<router-link
