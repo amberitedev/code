@@ -29,6 +29,8 @@ export default defineConfig({
 			'**/dist/**',
 			'**/node_modules/**',
 			'**/target/**',
+			// Locale JSON stays in upstream's two-space format so translation syncs merge cleanly.
+			'**/src/locales/**',
 			'pnpm-lock.yaml',
 			'*.tsbuildinfo',
 			// tombi owns TOML formatting; formatting it here too makes CI's tombi check fail.
