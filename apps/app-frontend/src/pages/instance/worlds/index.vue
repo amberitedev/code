@@ -137,7 +137,7 @@
 						:playing-world="worldsMatch(row.world, worldPlaying)"
 						:starting-instance="startingInstance"
 						:refreshing="
-							row.world.type === 'server' ? serverData[row.world.address]?.refreshing : undefined
+							row.world.type === 'server' ? showsRefreshing(row.world.address) : undefined
 						"
 						:server-status="
 							row.world.type === 'server' ? serverData[row.world.address]?.status : undefined
@@ -151,7 +151,7 @@
 						:shortcut-instance-id="instance.id"
 						@play="() => joinRow(row)"
 						@stop="() => instancePage.stop('InstanceWorlds')"
-						@refresh="() => row.world.type === 'server' && refreshServer(row.world.address)"
+						@refresh="() => row.world.type === 'server' && refreshServerVisibly(row.world.address)"
 						@toggle-pin="() => pins.toggle(row.key)"
 						@edit="() => editRow(row)"
 						@delete="
@@ -197,6 +197,10 @@
 		</EmptyState>
 	</template>
 </template>
+<script lang="ts">
+// The last ping answers of each instance, kept across visits to the tab.
+const serverDataByInstance = new Map<string, Record<string, ServerData>>()
+</script>
 <script setup lang="ts">
 import {
 	CompassIcon,
@@ -225,7 +229,7 @@ import {
 } from '@modrinth/ui'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { platform } from '@tauri-apps/plugin-os'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Draggable from 'vuedraggable'
 
@@ -561,7 +565,41 @@ useLoadingBarToken(worldsReadyPending)
 const worldsReveal = useGhostReveal(() => worldsReadyPending.value)
 
 const worlds = ref<World[]>([])
-const serverData = ref<Record<string, ServerData>>({})
+const serverData = ref<Record<string, ServerData>>(
+	serverDataByInstance.get(instance.value.id) ?? {},
+)
+serverDataByInstance.set(instance.value.id, serverData.value)
+
+// Servers whose answer from an earlier visit is on screen. The pings made when the tab opens
+// replace those answers quietly; only a refresh the user asks for shows the row as loading again.
+const answeredBeforeOpen = reactive(
+	new Set(
+		Object.entries(serverData.value)
+			.filter(([, data]) => !data.refreshing)
+			.map(([address]) => address),
+	),
+)
+
+function showsRefreshing(address: string) {
+	return serverData.value[address]?.refreshing && !answeredBeforeOpen.has(address)
+}
+
+// Whether this visit has pinged every server yet. After that, a changed list only pings the
+// servers it added.
+let pingedAllServers = false
+
+function pingAllServers() {
+	pingedAllServers = true
+	return refreshServers(worlds.value, serverData.value, protocolVersion.value)
+}
+
+function listedServerAddresses() {
+	return new Set([
+		...worlds.value.filter((world) => world.type === 'server').map((world) => world.address),
+		...linkedServers.value.map(serverAddress),
+		...hostedServers.value.map((hosted) => hosted.address),
+	])
+}
 
 // Track servers_updated calls on Linux to prevent server ping spam
 const MAX_LINUX_REFRESHES = 3
@@ -584,14 +622,24 @@ watch(
 		if (data) {
 			worlds.value = [...data]
 			hadNoWorlds.value = worlds.value.length === 0
+			// Answers are kept across visits, so drop the ones whose server is no longer listed.
+			const listed = listedServerAddresses()
+			for (const address of Object.keys(serverData.value)) {
+				if (!listed.has(address)) delete serverData.value[address]
+			}
 			// Manual refresh handles its own server pings to avoid double-pinging
-			if (!refreshingAll.value) {
-				void refreshServers(
-					worlds.value,
-					serverData.value,
-					protocolVersion.value,
-					protocolVersionReady.value,
-				)
+			if (refreshingAll.value) return
+			if (pingedAllServers) {
+				for (const world of worlds.value) {
+					if (world.type === 'server' && !serverData.value[world.address]) {
+						void refreshServer(world.address)
+					}
+				}
+			} else if (protocolVersionReady.value) {
+				void pingAllServers()
+			} else {
+				// Marks the rows as loading. initWorldsTab pings them once the protocol is known.
+				void refreshServers(worlds.value, serverData.value, protocolVersion.value, false)
 			}
 		}
 	},
@@ -688,9 +736,7 @@ async function initWorldsTab() {
 	gameVersions.value = resolvedGameVersions
 	protocolVersionReady.value = true
 
-	if (worlds.value.length > 0) {
-		refreshServers(worlds.value, serverData.value, protocolVersion.value)
-	}
+	if (!pingedAllServers) void pingAllServers()
 }
 
 void initWorldsTab()
@@ -703,6 +749,11 @@ async function refreshServer(address: string) {
 	}
 	if (!protocolVersionReady.value) return
 	await refreshServerData(serverData.value[address], protocolVersion.value, address)
+}
+
+function refreshServerVisibly(address: string) {
+	answeredBeforeOpen.delete(address)
+	return refreshServer(address)
 }
 
 // Ping linked servers like the rest, and again whenever one starts, stops, or moves.
@@ -736,6 +787,7 @@ async function refreshAllWorlds() {
 	}
 
 	refreshingAll.value = true
+	answeredBeforeOpen.clear()
 	try {
 		// Show loading on server rows immediately while the list refreshes
 		for (const world of worlds.value) {
