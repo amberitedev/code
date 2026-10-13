@@ -382,6 +382,9 @@ let unlistenAddSkinDragDrop: UnlistenFn | null = null
 let isUnmounted = false
 
 const isDraggingSkinFile = ref(false)
+// The 3D preview is the slowest part of the page to mount and fades in anyway, so it mounts after
+// the rest of the page has painted.
+const isPreviewMounted = ref(false)
 const isAddSkinButtonDragActive = ref(false)
 
 const deleteSkinModal = ref()
@@ -1049,6 +1052,11 @@ onMounted(() => {
 	window.addEventListener('focus', checkUserChanges)
 	window.addEventListener('click', checkUserChangesAfterClick, true)
 	void setupAddSkinDragDropListener()
+	window.requestAnimationFrame(() =>
+		window.requestAnimationFrame(() => {
+			isPreviewMounted.value = true
+		}),
+	)
 })
 
 onUnmounted(() => {
@@ -1160,6 +1168,7 @@ void Promise.all([initialUserLoad, loadCapes(), loadSkins()]).then(() => {
 				class="ml-5 mt-4 flex h-[calc(80vh-1rem)] items-center justify-center max-[700px]:h-[calc(50vh-1rem)]"
 			>
 				<SkinPreviewRenderer
+					v-if="isPreviewMounted"
 					:cape-src="capeTexture"
 					:texture-src="skinTexture || ''"
 					:ears-texture-src="selectedSkin?.texture"
