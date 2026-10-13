@@ -8,6 +8,7 @@
 		<div
 			data-skin-preview-debug="controls"
 			class="absolute left-0 right-0 z-10 flex items-center justify-center pointer-events-none"
+			:class="{ invisible: !hasResolvedFit }"
 			:style="previewControlsPositionStyle"
 		>
 			<span
@@ -21,6 +22,7 @@
 			v-if="$slots.subtitle"
 			data-skin-preview-debug="subtitle"
 			class="absolute left-0 right-0 z-10 flex items-center justify-center pointer-events-none"
+			:class="{ invisible: !hasResolvedFit }"
 			:style="subtitlePositionStyle"
 		>
 			<div ref="subtitleElement" class="w-full pointer-events-auto" @click="ignoreControlClick">
@@ -31,6 +33,7 @@
 			v-if="nametag || $slots['nametag-badge']"
 			data-skin-preview-debug="nametag"
 			class="absolute left-1/2 pointer-events-none z-10"
+			:class="{ invisible: !hasResolvedFit }"
 			:style="nametagStyle"
 		>
 			<div
@@ -55,7 +58,7 @@
 				toneMapping: THREE.NoToneMapping,
 				toneMappingExposure: 10.0,
 			}"
-			class="transition-opacity duration-500"
+			class="transition-opacity duration-200"
 			:class="{ 'opacity-0': !isPreviewVisible, 'opacity-100': isPreviewVisible }"
 			@pointerdown="onPointerDown"
 			@pointermove="onPointerMove"
