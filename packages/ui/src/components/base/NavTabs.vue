@@ -21,7 +21,7 @@
 					:replace="replace"
 					draggable="false"
 					:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
-					class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
+					class="navtab-link button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
 					@pointerdown="onLinkPointerDown($event, index)"
 					@click="onLinkClick($event, index)"
@@ -46,7 +46,7 @@
 					v-show="link.shown ?? true"
 					:key="link.href"
 					ref="tabLinkElements"
-					class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
+					class="navtab-link button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
 					@click="emit('tabClick', index, link)"
 				>
@@ -406,6 +406,24 @@ watch(
 
 <style scoped>
 .tab-color {
-	transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+	transition:
+		color 100ms cubic-bezier(0.4, 0, 0.2, 1),
+		transform 0.05s ease-in-out;
+}
+
+/* The press effect shrinks the label and icon, not the tab. A tab that shrank under the pointer
+   left a band along its edge where the release missed it and the click was lost. */
+.navtab-link.button-animation:active:not(:disabled) {
+	transform: none;
+}
+
+.navtab-link:active .tab-color {
+	transform: scale(0.95);
+}
+
+@media (prefers-reduced-motion) {
+	.navtab-link:active .tab-color {
+		transform: none;
+	}
 }
 </style>
