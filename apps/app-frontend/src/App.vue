@@ -1982,6 +1982,10 @@ function handleAuxClick(e) {
 }
 
 function handleContextMenu(event) {
+	// Dev builds keep the webview's own menu, which has Inspect. The App's custom menus still open
+	// because they cancel the event themselves.
+	if (import.meta.env.DEV) return
+
 	const target = event.target
 	if (target instanceof Element) {
 		if (target.closest('img, textarea, [contenteditable="true"]')) return
