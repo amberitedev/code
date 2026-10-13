@@ -324,10 +324,14 @@ async function ensureCriticalInstanceData(targetInstanceId: string) {
 	if (queryClient.getQueryData(detailKey) === undefined) {
 		// The library already loaded this instance, so show its row now and let the query above
 		// refresh it in the background.
-		const listState = queryClient.getQueryState(instanceListQueryOptions().queryKey)
-		const listed = listState?.data?.find((listedInstance) => listedInstance.id === targetInstanceId)
+		const listKey = instanceListQueryOptions().queryKey
+		const listed = queryClient
+			.getQueryData(listKey)
+			?.find((listedInstance) => listedInstance.id === targetInstanceId)
 		if (listed) {
-			queryClient.setQueryData(detailKey, listed, { updatedAt: listState?.dataUpdatedAt })
+			queryClient.setQueryData(detailKey, listed, {
+				updatedAt: queryClient.getQueryState(listKey)?.dataUpdatedAt,
+			})
 			return
 		}
 	}
