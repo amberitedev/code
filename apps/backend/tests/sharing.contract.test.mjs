@@ -116,6 +116,7 @@ test('sharing API as the App uses it, with files in R2', async () => {
 		await ok(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'friend'))
 		assert.deepEqual(await ok(await call('/instances', 'GET', undefined, 'friend')), [id])
 		const latest = await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'friend'))
+		assert.equal((await call(`/instances/${id}/versions/not-a-number`)).status, 400)
 		assert.deepEqual(
 			{ ...latest, external_files: undefined },
 			{ ...manifest, version: 1, ready: true, external_files: undefined },
@@ -274,6 +275,26 @@ test('sharing API as the App uses it, with files in R2', async () => {
 		assert.equal((await call(`/instances/${full.id}`)).status, 404)
 		assert.deepEqual(await stored(full.id), [])
 		assert.equal((await stored(id)).length, 2, 'other instances keep their files')
+
+		// A ready version loses its object: download discovers it, then the owner repairs it.
+		const repair = await ok(await call('/instances', 'POST', { name: 'Repair' }))
+		await publish(repair.id, [jar])
+		await publish(repair.id, [jar])
+		const beforeLoss = await ok(await call(`/instances/${repair.id}/versions`))
+		await files.delete(`${repair.id}/${sha256(jar.bytes)}`)
+		const missing = await send(beforeLoss.external_files[0].url, 'GET', 'owner')
+		assert.equal(missing.status, 404)
+		assert.equal((await missing.json()).code, 'file_missing')
+		for (const version of [1, 2]) {
+			const broken = await ok(await call(`/instances/${repair.id}/versions/${version}`))
+			assert.equal(broken.ready, false)
+			assert.equal(broken.external_files[0].sha256, undefined)
+			assert.ok(broken.external_files[0].url.includes('/uploads/'))
+		}
+		const pending = await ok(await call(`/instances/${repair.id}/versions`))
+		assert.equal((await ok(await put(pending.external_files[0].url, jar.bytes))).ready, true)
+		assert.equal((await ok(await call(`/instances/${repair.id}/versions`))).ready, true)
+		await ok(await call(`/instances/${repair.id}`, 'DELETE'))
 	} finally {
 		await backend.dispose()
 	}

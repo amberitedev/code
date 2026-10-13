@@ -47,6 +47,10 @@ type Manifest = {
 const empty = () => new Response(null, { status: 204 })
 const now = () => new Date().toISOString()
 const objectKey = (instanceId: string, sha256: string) => `${instanceId}/${sha256}`
+const quarantined = () =>
+	new ApiError(403, 'forbidden', 'Shared instance is quarantined', 'quarantined')
+const fileMissing = () =>
+	new ApiError(404, 'not_found', 'Shared file was not found', 'file_missing')
 const hex = (bytes: ArrayBuffer) =>
 	Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
 
@@ -79,7 +83,8 @@ async function instance(env: Env, id: string): Promise<Instance> {
 	const result = await env.DB.prepare('SELECT * FROM shared_instances WHERE id = ?')
 		.bind(id)
 		.first<Instance>()
-	if (!result) throw new ApiError(404, 'not_found', 'Shared instance was not found')
+	if (!result)
+		throw new ApiError(404, 'not_found', 'Shared instance was not found', 'instance_not_found')
 	return result
 }
 
@@ -96,15 +101,27 @@ async function member(
 		.bind(item.id, userId)
 		.first<{ joined_at: string | null }>()
 	if (!row || (!allowPending && !row.joined_at))
-		throw new ApiError(401, 'unauthorized', 'Shared instance access was revoked')
+		throw new ApiError(401, 'unauthorized', 'Shared instance access was revoked', 'not_member')
 }
 
 function owner(item: Instance, userId: string) {
 	if (item.owner_id !== userId)
-		throw new ApiError(403, 'forbidden', 'Only the owner can change this shared instance')
+		throw new ApiError(
+			403,
+			'forbidden',
+			'Only the owner can change this shared instance',
+			'not_owner',
+		)
 }
 
-async function files(env: Env, item: Version): Promise<File[]> {
+async function requireSharing(env: Env, userId: string): Promise<void> {
+	if (
+		await env.DB.prepare('SELECT 1 FROM sharing_blacklist WHERE user_id = ?').bind(userId).first()
+	)
+		throw new ApiError(403, 'forbidden', 'This account cannot use sharing', 'blacklisted')
+}
+
+async function files(env: Env, item: Pick<Version, 'instance_id' | 'version'>): Promise<File[]> {
 	return (
 		await env.DB.prepare(
 			'SELECT * FROM shared_files WHERE instance_id = ? AND version = ? ORDER BY rowid',
@@ -114,23 +131,27 @@ async function files(env: Env, item: Version): Promise<File[]> {
 	).results
 }
 
-async function versionResponse(env: Env, request: Request, item: Version) {
+/** An uploaded file points at its download; one still missing points at its upload. */
+function fileResponse(request: Request, file: File) {
 	const origin = new URL(request.url).origin
+	return {
+		file_name: file.file_name,
+		file_type: file.file_type,
+		url: file.sha256
+			? `${origin}/v1/instances/${file.instance_id}/files/${file.sha256}/${encodeURIComponent(file.file_name)}`
+			: `${origin}/v1/uploads/${file.id}`,
+		file_size: file.size ?? undefined,
+		sha256: file.sha256 ?? undefined,
+	}
+}
+
+async function versionResponse(env: Env, request: Request, item: Version) {
 	const manifest = JSON.parse(item.manifest) as Manifest
 	return {
 		...manifest,
 		version: item.version,
 		ready: item.ready === 1,
-		// An uploaded file points at its download; one still missing points at its upload.
-		external_files: (await files(env, item)).map((file) => ({
-			file_name: file.file_name,
-			file_type: file.file_type,
-			url: file.sha256
-				? `${origin}/v1/instances/${item.instance_id}/files/${file.sha256}/${encodeURIComponent(file.file_name)}`
-				: `${origin}/v1/uploads/${file.id}`,
-			file_size: file.size ?? undefined,
-			sha256: file.sha256 ?? undefined,
-		})),
+		external_files: (await files(env, item)).map((file) => fileResponse(request, file)),
 	}
 }
 
@@ -141,12 +162,24 @@ async function latestVersion(env: Env, id: string): Promise<Version> {
 	)
 		.bind(id)
 		.first<Version>()
-	if (!result) throw new ApiError(404, 'not_found', 'Shared instance has no version')
+	if (!result)
+		throw new ApiError(404, 'not_found', 'Shared instance has no version', 'version_not_found')
 	return result
 }
 
-/** Deletes the instance's R2 objects that no remaining version uses. */
-async function sweepFiles(env: Env, id: string): Promise<void> {
+/**
+ * Deletes the instance's R2 objects that no remaining version uses, complete or still uploading.
+ * Called after the rows are gone, so it clears everything once the instance itself is deleted.
+ * R2 is listed before the rows are read, so an object whose row was written in between is kept.
+ */
+export async function sweepFiles(env: Env, id: string): Promise<void> {
+	const stored: string[] = []
+	let cursor: string | undefined
+	do {
+		const page = await env.FILES.list({ prefix: `${id}/`, cursor })
+		stored.push(...page.objects.map((object) => object.key))
+		cursor = page.truncated ? page.cursor : undefined
+	} while (cursor)
 	const used = new Set(
 		(
 			await env.DB.prepare(
@@ -156,8 +189,7 @@ async function sweepFiles(env: Env, id: string): Promise<void> {
 				.all<{ sha256: string }>()
 		).results.map((row) => objectKey(id, row.sha256)),
 	)
-	const stored = await env.FILES.list({ prefix: `${id}/` })
-	const unused = stored.objects.map((object) => object.key).filter((key) => !used.has(key))
+	const unused = stored.filter((key) => !used.has(key))
 	if (unused.length) await env.FILES.delete(unused)
 }
 
@@ -223,18 +255,51 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 	}
 }
 
-/** Marks a version ready once every file it lists is uploaded. */
-async function finalizeVersion(env: Env, id: string, version: number): Promise<boolean> {
+/**
+ * Marks a version ready once every file it lists is uploaded and its R2 object exists. A file whose
+ * object is gone goes back to awaiting upload, so the version lists its upload URL again; those
+ * files are returned as `missing`.
+ */
+async function finalizeVersion(
+	env: Env,
+	id: string,
+	version: number,
+): Promise<{ ready: boolean; missing: File[] }> {
+	const listed = await files(env, { instance_id: id, version })
+	if (listed.some((file) => !file.sha256)) return { ready: false, missing: [] }
+	const hashes = [...new Set(listed.flatMap((file) => file.sha256 ?? []))]
+	const gone = (
+		await Promise.all(
+			hashes.map(async (sha256) => ((await env.FILES.head(objectKey(id, sha256))) ? [] : [sha256])),
+		)
+	).flat()
+	if (gone.length) {
+		// A version that is already ready keeps its rows: its files cannot be uploaded again.
+		const reset = await env.DB.prepare(
+			`UPDATE shared_files SET sha256 = NULL, size = NULL WHERE instance_id = ?1 AND version = ?2
+			AND sha256 IN (${gone.map((_, index) => `?${index + 3}`).join(',')})
+			AND EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND version = ?2 AND ready = 0)`,
+		)
+			.bind(id, version, ...gone)
+			.run()
+		if (!reset.meta.changes) return { ready: false, missing: [] }
+		return {
+			ready: false,
+			missing: listed
+				.filter((file) => file.sha256 && gone.includes(file.sha256))
+				.map((file) => ({ ...file, sha256: null, size: null })),
+		}
+	}
 	const result = await env.DB.prepare(
 		`UPDATE shared_versions SET ready = 1 WHERE instance_id = ?1 AND version = ?2 AND ready = 0
 		AND NOT EXISTS (SELECT 1 FROM shared_files WHERE instance_id = ?1 AND version = ?2 AND sha256 IS NULL)`,
 	)
 		.bind(id, version)
 		.run()
-	if (!result.meta.changes) return false
+	if (!result.meta.changes) return { ready: false, missing: [] }
 	await notifyReadyInvites(env, id)
 	await pruneVersions(env, id)
-	return true
+	return { ready: true, missing: [] }
 }
 
 async function createVersion(
@@ -295,11 +360,15 @@ async function createVersion(
 	])
 	const version = result[result.length - 1]?.results[0]
 	if (!version) throw new ApiError(500, 'database_error', 'Could not create shared version')
-	const ready = await finalizeVersion(env, item.id, version.version)
+	const { ready } = await finalizeVersion(env, item.id, version.version)
 	return json(await versionResponse(env, request, { ...version, ready: ready ? 1 : 0 }))
 }
 
-/** Stores one file of a version. A hash the instance already holds is not stored again. */
+/**
+ * Stores one file of a version. A hash the instance already holds is not stored again. Answers
+ * whether the version became ready, and which of its files have to be uploaded again because their
+ * stored object is gone.
+ */
 async function upload(request: Request, env: Env, fileId: string): Promise<Response> {
 	const user = await requireUser(request, env)
 	if (request.method !== 'PUT')
@@ -307,9 +376,11 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 	const file = await env.DB.prepare('SELECT * FROM shared_files WHERE id = ?')
 		.bind(fileId)
 		.first<File>()
-	if (!file) throw new ApiError(404, 'not_found', 'Upload was not found')
+	if (!file) throw new ApiError(404, 'not_found', 'Upload was not found', 'upload_not_found')
 	const item = await instance(env, file.instance_id)
 	owner(item, user.id)
+	await requireSharing(env, user.id)
+	if (item.quarantine) throw quarantined()
 	if (file.sha256) throw new ApiError(409, 'conflict', 'This file was already uploaded')
 	const bytes = await readBytes(
 		request,
@@ -319,21 +390,33 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 	if (expected && expected !== hex(await crypto.subtle.digest('SHA-512', bytes)))
 		throw new ApiError(400, 'upload_failed', 'Upload does not match its hash')
 	const sha256 = hex(await crypto.subtle.digest('SHA-256', bytes))
+	// Only what finalizing this version keeps counts: this version and the ready ones that survive
+	// pruning. A hash held only by a version about to be pruned is stored and counted again.
 	const stored = await env.DB.prepare(
-		'SELECT COALESCE(SUM(size),0) AS size, COALESCE(MAX(sha256 = ?1),0) AS present FROM (SELECT DISTINCT sha256,size FROM shared_files WHERE instance_id = ?2 AND sha256 IS NOT NULL)',
+		'SELECT COALESCE(SUM(size),0) AS size, COALESCE(MAX(sha256 = ?1),0) AS present FROM (SELECT DISTINCT sha256,size FROM shared_files WHERE instance_id = ?2 AND sha256 IS NOT NULL AND (version = ?3 OR version IN (SELECT version FROM shared_versions WHERE instance_id = ?2 AND ready = 1 ORDER BY version DESC LIMIT ?4)))',
 	)
-		.bind(sha256, item.id)
+		.bind(sha256, item.id, file.version, KEPT_VERSIONS - 1)
 		.first<{ size: number; present: number }>()
-	if (!stored?.present) {
-		if ((stored?.size ?? 0) + bytes.byteLength > MAX_INSTANCE_SIZE)
-			throw new ApiError(413, 'invalid_input', 'Shared instance storage is full')
-		await env.FILES.put(objectKey(item.id, sha256), bytes)
-	}
+	if (!stored?.present && (stored?.size ?? 0) + bytes.byteLength > MAX_INSTANCE_SIZE)
+		throw new ApiError(413, 'invalid_input', 'Shared instance storage is full')
+	const key = objectKey(item.id, sha256)
+	// Reserve the hash before R2 stores it, so a concurrent orphan sweep sees its reference.
 	await env.DB.prepare('UPDATE shared_files SET sha256 = ?, size = ? WHERE id = ?')
 		.bind(sha256, bytes.byteLength, file.id)
 		.run()
-	await finalizeVersion(env, item.id, file.version)
-	return empty()
+	try {
+		if (!(await env.FILES.head(key))) await env.FILES.put(key, bytes)
+	} catch (error) {
+		// A failed write must leave this upload retryable.
+		await env.DB.prepare(
+			'UPDATE shared_files SET sha256 = NULL, size = NULL WHERE id = ? AND sha256 = ?',
+		)
+			.bind(file.id, sha256)
+			.run()
+		throw error
+	}
+	const { ready, missing } = await finalizeVersion(env, item.id, file.version)
+	return json({ ready, missing_files: missing.map((entry) => fileResponse(request, entry)) })
 }
 
 /** Serves an uploaded file to a member, who authenticates like any other sharing request. */
@@ -343,17 +426,30 @@ async function download(
 	item: Instance,
 	sha256: string,
 ): Promise<Response> {
-	if (item.quarantine) throw new ApiError(403, 'forbidden', 'Shared instance is quarantined')
-	if (!/^[a-f0-9]{64}$/.test(sha256))
-		throw new ApiError(404, 'not_found', 'Shared file was not found')
+	if (item.quarantine) throw quarantined()
+	if (!/^[a-f0-9]{64}$/.test(sha256)) throw fileMissing()
 	const key = objectKey(item.id, sha256)
 	const object = await env.FILES.get(key)
-	if (!object) throw new ApiError(404, 'not_found', 'Shared file was not found')
+	if (!object) {
+		// A hash can be reused by several versions. Reset them together before clearing the hash.
+		await env.DB.batch([
+			env.DB.prepare(
+				'UPDATE shared_versions SET ready = 0 WHERE instance_id = ?1 AND version IN (SELECT version FROM shared_files WHERE instance_id = ?1 AND sha256 = ?2)',
+			).bind(item.id, sha256),
+			env.DB.prepare(
+				'UPDATE shared_files SET sha256 = NULL, size = NULL WHERE instance_id = ? AND sha256 = ?',
+			).bind(item.id, sha256),
+		])
+		throw fileMissing()
+	}
+	// The object is stored under the hash of its bytes, so the hash is what a client checks against.
 	return new Response(request.method === 'HEAD' ? null : object.body, {
 		headers: {
 			'Content-Type': 'application/octet-stream',
 			'Content-Length': String(object.size),
 			'Cache-Control': 'private, no-store',
+			ETag: `"${sha256}"`,
+			'x-file-sha256': sha256,
 		},
 	})
 }
@@ -375,7 +471,7 @@ async function usableLink(env: Env, id: string): Promise<Link> {
 	)
 		.bind(id, now())
 		.first<Link>()
-	if (!link) throw new ApiError(404, 'not_found', 'Invite is invalid or expired')
+	if (!link) throw new ApiError(404, 'not_found', 'Invite is invalid or expired', 'invite_invalid')
 	return link
 }
 
@@ -421,7 +517,8 @@ async function invites(
 			)
 				.bind(now(), item.id, userId)
 				.run()
-			if (!result.meta.changes) throw new ApiError(404, 'not_found', 'Pending invite was not found')
+			if (!result.meta.changes)
+				throw new ApiError(404, 'not_found', 'Pending invite was not found', 'invite_not_found')
 			return empty()
 		}
 		if (request.method === 'DELETE') {
@@ -441,7 +538,8 @@ async function invites(
 			.first<{ joined_at: string | null }>()
 		if (existing?.joined_at) return empty()
 		const link = await usableLink(env, inviteId)
-		if (link.instance_id !== item.id) throw new ApiError(404, 'not_found', 'Invite was not found')
+		if (link.instance_id !== item.id)
+			throw new ApiError(404, 'not_found', 'Invite was not found', 'invite_invalid')
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) SELECT instance_id,?,?,'link' FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses) ON CONFLICT(instance_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
@@ -533,7 +631,12 @@ async function users(
 	for (const id of ids) {
 		if (id === userId) continue
 		if (!(await canInviteToSharedInstance(env, userId, id)))
-			throw new ApiError(403, 'forbidden', 'This account does not accept this sharing invitation')
+			throw new ApiError(
+				403,
+				'forbidden',
+				'This account does not accept this sharing invitation',
+				'invite_not_accepted',
+			)
 	}
 	for (const id of ids) {
 		if (id === userId) continue
@@ -566,7 +669,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		)
 			.bind(url.origin + url.pathname)
 			.first<{ icon_data: string | null; icon_type: string | null }>()
-		if (!row?.icon_data) throw new ApiError(404, 'not_found', 'Icon was not found')
+		if (!row?.icon_data)
+			throw new ApiError(404, 'not_found', 'Icon was not found', 'icon_not_found')
 		return new Response(
 			Uint8Array.from(atob(row.icon_data), (character) => character.charCodeAt(0)),
 			{
@@ -587,7 +691,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	}
 	if (route === 'moderation') {
 		if (user.role !== 'admin' && user.role !== 'moderator')
-			throw new ApiError(403, 'forbidden', 'Moderator access is required')
+			throw new ApiError(403, 'forbidden', 'Moderator access is required', 'not_moderator')
 		if (id === 'blacklist' && ['POST', 'DELETE'].includes(request.method)) {
 			const ids = strings((await readJson(request)).user_ids, 'user_ids', 100)
 			if (ids.length)
@@ -623,15 +727,18 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			return empty()
 		}
 	}
-	if (route !== 'instances') throw new ApiError(404, 'not_found', 'Sharing endpoint was not found')
-	if (
-		await env.DB.prepare('SELECT 1 FROM sharing_blacklist WHERE user_id = ?').bind(user.id).first()
-	)
-		throw new ApiError(403, 'forbidden', 'This account cannot use sharing')
+	if (route !== 'instances')
+		throw new ApiError(404, 'not_found', 'Sharing endpoint was not found', 'endpoint_not_found')
+	await requireSharing(env, user.id)
 	if (!id) {
 		if (request.method === 'GET') {
 			if (url.searchParams.has('user') && url.searchParams.get('user') !== user.id)
-				throw new ApiError(403, 'forbidden', 'Private instance lists belong to their account')
+				throw new ApiError(
+					403,
+					'forbidden',
+					'Private instance lists belong to their account',
+					'not_own_list',
+				)
 			return json(
 				(
 					await env.DB.prepare(
@@ -678,9 +785,11 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		}
 	}
 	if (section === 'versions') {
-		if (item.quarantine) throw new ApiError(403, 'forbidden', 'Shared instance is quarantined')
+		if (item.quarantine) throw quarantined()
 		if (request.method === 'POST' && !child) return createVersion(request, env, item, user.id)
 		if (request.method === 'GET') {
+			if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
+				throw new ApiError(400, 'invalid_input', 'Invalid shared version')
 			const version = child
 				? await env.DB.prepare(
 						'SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?',
@@ -688,7 +797,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 						.bind(id, Number(child))
 						.first<Version>()
 				: await latestVersion(env, id)
-			if (!version) throw new ApiError(404, 'not_found', 'Shared version was not found')
+			if (!version)
+				throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
 			return json(await versionResponse(env, request, version))
 		}
 	}

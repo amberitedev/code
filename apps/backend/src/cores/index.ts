@@ -13,6 +13,7 @@ import {
 } from '../common/http'
 import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
+import { blockedEitherWay } from '../social/preferences'
 
 // Core pairing. A Core registers the code it is showing, an account claims that code in the App,
 // and the Core then confirms the claim to receive its own key. After that the backend only keeps
@@ -35,6 +36,9 @@ const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
 const MAX_CHECKS = 30
 const CHECK_WINDOW_MS = 10 * 60_000
 const CHECK_TIMEOUT_MS = 5_000
+// Invites one Core may send within `INVITE_WINDOW_MS`.
+const MAX_INVITES = 30
+const INVITE_WINDOW_MS = 10 * 60_000
 
 interface CodeRow {
 	code: string
@@ -358,20 +362,50 @@ const INVITE_FILTER =
 /**
  * Core, paired: an account was invited to one of its servers. The account may reach this Core from
  * now on, and gets the invite as a notification to accept in the App. `user` is an id or a
- * username; the answer says who it is, so the Core can show their name.
+ * username; the answer says who it is, so the Core can show their name. `invited_by` must be the
+ * Core's owner or an account that can already reach it.
  */
 async function grantAccess(request: Request, env: Env) {
 	const core = await requireCore(request, env)
 	const body = await readJson(request)
 	const serverId = stringField(body, 'server_id', 64)
-	const user = await findUser(env, stringField(body, 'user', 64))
-	if (!user) throw new ApiError(404, 'not_found', 'No account has that name')
+	const serverName = stringField(body, 'server_name', 100)
+	const role = stringField(body, 'role', 16)
+	const invitedBy = stringField(body, 'invited_by', 64)
+	const username = stringField(body, 'user', 64)
+	if (
+		invitedBy !== core.owner_id &&
+		!(await env.DB.prepare('SELECT 1 FROM core_access WHERE core_id = ? AND user_id = ?')
+			.bind(core.id, invitedBy)
+			.first())
+	)
+		throw new ApiError(403, 'forbidden', 'Only someone with access to this Core can invite')
+
+	// Counted before the account is looked up, so a Core cannot use this to test names either.
+	const now = Date.now()
+	await env.DB.prepare('DELETE FROM auth_attempts WHERE expires < ?').bind(now).run()
+	const sent = await env.DB.prepare(
+		'INSERT INTO auth_attempts (key,count,expires) VALUES (?1,1,?2) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN expires < ?3 THEN 1 ELSE count + 1 END, expires = CASE WHEN expires < ?3 THEN excluded.expires ELSE expires END RETURNING count',
+	)
+		.bind(`core-access:${core.id}`, now + INVITE_WINDOW_MS, now)
+		.first<{ count: number }>()
+	if (sent && sent.count > MAX_INVITES)
+		throw new ApiError(429, 'too_many_invites', 'Too many invites. Try again later.')
+
+	// Answers like a friend request does, for an unknown name and for a block.
+	const user = await findUser(env, username)
+	if (!user) throw new ApiError(404, 'not_found', 'Not found')
 	if (user.id === core.owner_id) invalid('The owner already has full access')
+	if (
+		(await blockedEitherWay(env, user.id, invitedBy)) ||
+		(await blockedEitherWay(env, user.id, core.owner_id))
+	)
+		invalid("You've blocked the other user or have been blocked by them!")
 	await env.DB.batch([
 		env.DB.prepare(
 			'INSERT OR IGNORE INTO core_access (core_id,user_id,created) VALUES (?,?,?)',
 		).bind(core.id, user.id, new Date().toISOString()),
-		// A repeated invite replaces the one before it.
+		// Access may already exist for another server. Every invite still gets a fresh notification.
 		env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`).bind(
 			user.id,
 			core.id,
@@ -382,9 +416,9 @@ async function grantAccess(request: Request, env: Env) {
 		type: 'server_invite',
 		core_id: core.id,
 		server_id: serverId,
-		server_name: stringField(body, 'server_name', 100),
-		role: stringField(body, 'role', 16),
-		invited_by: stringField(body, 'invited_by', 64),
+		server_name: serverName,
+		role,
+		invited_by: invitedBy,
 	})
 	return json({ id: user.id, username: user.username, avatar_url: user.avatar_url })
 }
