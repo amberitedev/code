@@ -6,12 +6,14 @@ import {
 	type CreationFlowContextValue,
 	CreationFlowModal,
 	EmptyState,
+	GhostBlock,
 	injectAuth,
 	injectInstanceServerSource,
 	injectModrinthClient,
 	injectNotificationManager,
 	Input,
 	ServerListing,
+	useGhostReveal,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, inject, onMounted, ref } from 'vue'
@@ -19,7 +21,7 @@ import { useRouter } from 'vue-router'
 
 import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
 import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
-import { openPairCoreModal, useCores } from '@/composables/use-cores'
+import { openAddCoreModal, useCores } from '@/composables/use-cores'
 import { coreOffline, coreProblem, useServers } from '@/helpers/linked-servers'
 import { appSettingsModalOpenCoresKey } from '@/providers/app-settings-modal'
 
@@ -34,10 +36,8 @@ const searchInput = ref('')
 const setupModal = ref<InstanceType<typeof CreationFlowModal>>()
 const chooseCore = ref<InstanceType<typeof ChooseCoreModal>>()
 const coresQuery = useCores()
-// Only once the account's Cores are known, so a slow or failed lookup never asks to pair.
-const needsPairing = computed(
-	() => coresQuery.isSuccess.value && coresQuery.cores.value.length === 0,
-)
+// Only once the account's Cores are known, so a slow or failed lookup never asks for a Core.
+const needsCore = computed(() => coresQuery.isSuccess.value && coresQuery.cores.value.length === 0)
 // The Core the new server goes on, chosen before setup opens.
 let core: Archon.Cores.v1.Core | null = null
 
@@ -50,6 +50,7 @@ const { data, isFetching, refetch } = useServers()
 // cover a cold start that has not answered within a moment.
 const waitedForAnswer = ref(false)
 onMounted(() => setTimeout(() => (waitedForAnswer.value = true), 300))
+const serversReveal = useGhostReveal(() => !data.value && waitedForAnswer.value)
 const allServers = computed(() => data.value?.servers ?? [])
 const servers = computed(() =>
 	allServers.value.filter((server) =>
@@ -209,7 +210,7 @@ async function browseModpacks() {
 <template>
 	<div data-pyro-server-list-root class="relative mx-auto flex h-full w-full flex-col p-6">
 		<div
-			v-if="auth.user.value && !problem && !needsPairing"
+			v-if="auth.user.value && !problem && !needsCore"
 			class="mb-4 flex w-full flex-row items-center justify-between gap-2"
 		>
 			<h1 class="m-0 text-2xl font-extrabold text-contrast">Servers</h1>
@@ -230,15 +231,15 @@ async function browseModpacks() {
 		<div v-if="!auth.user.value" class="flex min-h-[60vh] grow items-center justify-center">
 			<AccountRequired description="Sign in to host servers on a Core you control" />
 		</div>
-		<div v-else-if="needsPairing" class="flex min-h-[60vh] grow items-center justify-center">
+		<div v-else-if="needsCore" class="flex min-h-[60vh] grow items-center justify-center">
 			<EmptyState
 				type="empty"
-				heading="Pair a Core to host servers"
+				heading="Add a Core to host servers"
 				description="A Core runs your servers on a computer you control."
 			>
 				<template #actions>
-					<Button type="colored" color="brand" size="lg" @click="openPairCoreModal()">
-						<LinkIcon /> Pair a Core
+					<Button type="colored" color="brand" size="lg" @click="openAddCoreModal()">
+						<LinkIcon /> Add Core
 					</Button>
 				</template>
 			</EmptyState>
@@ -264,16 +265,17 @@ async function browseModpacks() {
 				:key="row"
 				class="flex items-center gap-4 rounded-2xl border border-solid border-surface-4 bg-bg-raised p-4"
 			>
-				<div class="size-16 shrink-0 rounded-xl bg-surface-4" />
+				<GhostBlock class="size-16 shrink-0 !rounded-xl" />
 				<div class="flex flex-col gap-2.5">
-					<div class="h-5 w-48 rounded-md bg-surface-4" />
-					<div class="h-4 w-72 rounded-md bg-surface-3" />
+					<GhostBlock class="h-5 w-48" />
+					<GhostBlock class="h-4 w-72" />
 				</div>
 			</div>
 		</div>
 		<div
 			v-else-if="data && allServers.length === 0"
 			class="flex min-h-[60vh] grow items-center justify-center"
+			:class="serversReveal"
 		>
 			<EmptyState
 				type="empty"
@@ -287,7 +289,7 @@ async function browseModpacks() {
 				</template>
 			</EmptyState>
 		</div>
-		<div v-else-if="data" class="flex flex-col gap-3">
+		<div v-else-if="data" class="flex flex-col gap-3" :class="serversReveal">
 			<ServerListing v-for="server in servers" :key="server.server_id" v-bind="server" />
 			<EmptyState
 				v-if="servers.length === 0"

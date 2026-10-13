@@ -3,7 +3,7 @@ import type { Archon } from '@modrinth/api-client'
 import { Button, injectModrinthClient, injectNotificationManager, NewModal } from '@modrinth/ui'
 import { ref } from 'vue'
 
-import { ensureCorePaired } from '@/composables/use-cores'
+import { ensureCore } from '@/composables/use-cores'
 
 // Decides which Core a new server goes on. Mount it where servers are created and call `pick`.
 
@@ -15,12 +15,12 @@ let settle: ((core: Archon.Cores.v1.Core | null) => void) | null = null
 
 /**
  * Resolves the Core to create a server on, or null if the user backs out or the account's Cores
- * cannot be loaded. Pairs a Core first when there is none, and only asks which one when there are
- * several.
+ * cannot be loaded. Asks to add a Core first when there is none, and only asks which one when there
+ * are several.
  */
 async function pick(): Promise<Archon.Cores.v1.Core | null> {
 	try {
-		if (!(await ensureCorePaired())) return null
+		if (!(await ensureCore())) return null
 		// Servers are only created on the account's own Cores.
 		cores.value = (await client.archon.cores_v1.list()).filter((core) => core.owned)
 	} catch (cause) {

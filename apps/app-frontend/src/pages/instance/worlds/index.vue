@@ -25,8 +25,26 @@
 		ref="createServerModal"
 		:instance="instance"
 	/>
-	<ReadyTransition :pending="worldsReadyPending">
-		<div v-if="rows.length > 0" class="flex flex-col gap-2">
+	<!-- Ghost rows while the first answer is pending. Static on purpose: no shimmer. -->
+	<div v-if="worldsReadyPending" class="flex flex-col gap-2" aria-busy="true">
+		<GhostBlock class="h-10 w-full !rounded-xl" />
+		<GhostBlock class="h-9 w-24 self-end" />
+		<div class="mt-2 flex flex-col gap-2">
+			<div
+				v-for="row in 3"
+				:key="row"
+				class="flex min-h-20 items-center gap-2 rounded-[20px] border border-solid border-surface-4 bg-bg-raised p-3"
+			>
+				<GhostBlock class="size-12 shrink-0 !rounded-[14px]" />
+				<div class="flex flex-col gap-2">
+					<GhostBlock class="h-4 w-40" />
+					<GhostBlock class="h-3.5 w-56" />
+				</div>
+			</div>
+		</div>
+	</div>
+	<template v-else>
+		<div v-if="rows.length > 0" class="flex flex-col gap-2" :class="worldsReveal">
 			<div class="flex flex-wrap items-center gap-2">
 				<Input
 					v-model="searchFilter"
@@ -106,9 +124,7 @@
 						:outside-warning="row.linked && unreachableCause(row.linked)"
 						:hosted-by="row.hosted?.host.username"
 						:hosted-server-id="
-							row.hosted && manageableCores.has(row.hosted.core_id)
-								? row.hosted.server_id
-								: undefined
+							row.hosted && canManageHostedServer(row.hosted) ? row.hosted.server_id : undefined
 						"
 						pinnable
 						:pinned="pins.pinned.value.includes(row.key)"
@@ -151,6 +167,7 @@
 		<EmptyState
 			v-else
 			type="empty-inbox"
+			:class="worldsReveal"
 			:heading="formatMessage(messages.noWorldsHeading)"
 			:description="formatMessage(messages.noWorldsDescription)"
 		>
@@ -178,7 +195,7 @@
 				</Button>
 			</template>
 		</EmptyState>
-	</ReadyTransition>
+	</template>
 </template>
 <script setup lang="ts">
 import {
@@ -198,9 +215,11 @@ import {
 	FilterPills,
 	GAME_MODES,
 	type GameVersion,
+	GhostBlock,
 	injectNotificationManager,
 	Input,
-	ReadyTransition,
+	useGhostReveal,
+	useLoadingBarToken,
 	useReadyState,
 	useVIntl,
 } from '@modrinth/ui'
@@ -224,7 +243,6 @@ import { trackEvent } from '@/helpers/analytics'
 import { get_project, get_project_v3 } from '@/helpers/cache.js'
 import { set_synced_option } from '@/helpers/instance'
 import {
-	canManageHostedServer,
 	coreOffline,
 	type HostedServer,
 	type LinkedServer,
@@ -232,6 +250,7 @@ import {
 	serverAddress,
 	shareableServerAddress,
 	unreachableCause,
+	useCanManageHostedServer,
 	useHostedServers,
 	useLinkedServers,
 } from '@/helpers/linked-servers'
@@ -367,29 +386,20 @@ const selectedFilters = ref<string[]>([])
 const searchFilter = ref('')
 
 const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
-// Always offered: creating a server pairs a Core first when the account has none, and says so
+// Always offered: creating a server asks for a Core first when the account has none, and says so
 // when the Core cannot be reached.
 const canCreateServer = computed(
 	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
 )
-// Servers other people host for this shared instance. A signed-out or wrong account gets none.
+// Servers other people host for this shared instance. A signed-out or wrong account gets none,
+// and neither does an instance that was deleted or that this account lost access to.
 const { servers: hostedServers, query: hostedServersQuery } = useHostedServers(() =>
-	sharedInstance.actionsLocked.value || sharedInstance.signedOut.value
+	sharedInstance.shareActionsLocked.value || sharedInstance.signedOut.value
 		? undefined
 		: instance.value.shared_instance?.id,
 )
-// The Cores among them this account may manage, which makes those rows open the server page.
-const manageableCores = ref(new Set<string>())
-watch(
-	hostedServers,
-	async (servers) => {
-		const answers = await Promise.all(servers.map(canManageHostedServer))
-		manageableCores.value = new Set(
-			servers.filter((_, index) => answers[index]).map((server) => server.core_id),
-		)
-	},
-	{ immediate: true },
-)
+// The ones among them this account may manage, which makes those rows open the server page.
+const canManageHostedServer = useCanManageHostedServer()
 
 const pins = useWorldPins(() => instance.value.id)
 
@@ -467,9 +477,13 @@ async function joinRow(row: WorldRow) {
 	if (row.linked || row.hosted) pins.markJoined(row.key)
 	const hosted = row.hosted
 	if (hosted && instance.value.shared_instance?.role === 'member') {
+		// Busy from the first click, so a second one does not check and join again.
+		if (startingInstance.value) return
+		startingInstance.value = true
 		const preview = await sharedInstance
 			.refreshUpdatePreview()
 			.catch(() => sharedInstance.updatePreview.value)
+			.finally(() => (startingInstance.value = false))
 		if (preview?.updateAvailable && updateBeforeJoinModal.value) {
 			updateBeforeJoinModal.value.show(instance.value.id, hosted.host.username, async () => {
 				await instancePage.refreshInstance()
@@ -543,6 +557,8 @@ const worldsQuery = useQuery(
 )
 
 const worldsReadyPending = useReadyState(worldsQuery)
+useLoadingBarToken(worldsReadyPending)
+const worldsReveal = useGhostReveal(() => worldsReadyPending.value)
 
 const worlds = ref<World[]>([])
 const serverData = ref<Record<string, ServerData>>({})

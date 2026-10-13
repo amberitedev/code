@@ -60,18 +60,21 @@ import {
 	defineMessages,
 	FileTreeSelect,
 	type FileTreeSelectItem,
+	injectNotificationManager,
 	useVIntl,
 } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
-import {
-	getSharedInstanceUnavailableReason,
-	isSharedInstanceUnavailableError,
-} from '@/helpers/install'
+import { isSharedInstanceUnavailableError } from '@/helpers/install'
 import { get_shared_instance_publish_preview, publish_shared_instance } from '@/helpers/instance'
 import { diffInstanceAgainstServer, type LinkedServer } from '@/helpers/linked-servers'
-import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
-import type { GameInstance } from '@/helpers/types'
+import {
+	sharedInstanceErrorMessages,
+	useSharedInstanceErrors,
+} from '@/helpers/shared-instance-errors'
+import type { GameInstance, SharedInstanceAttachment } from '@/helpers/types'
+import { injectSharedInstance } from '@/pages/instance/shared-instance-context'
+import { apiClient } from '@/services/api-client'
 
 type SharedInstancePublishState = 'idle' | 'reviewing' | 'publishing'
 
@@ -92,7 +95,9 @@ const emit = defineEmits<{
 }>()
 
 const { formatMessage } = useVIntl()
-const { notifySharedInstanceError, notifySharedInstanceUnavailable } = useSharedInstanceErrors()
+const { addNotification } = injectNotificationManager()
+const { notifySharedInstanceError, notifySharedInstanceAvailability } = useSharedInstanceErrors()
+const sharedInstanceState = injectSharedInstance()
 const publishReviewModal = ref<InstanceType<typeof ContentDiffModal>>()
 const configFileTreeContainer = ref<HTMLElement>()
 const publishDiffs = ref<ContentDiffItem[]>([])
@@ -133,7 +138,9 @@ async function show(e?: MouseEvent) {
 		if (sharesWithFriends.value) {
 			const preview = await get_shared_instance_publish_preview(props.instance.id)
 			if (!preview) {
-				notifySharedInstanceUnavailable()
+				// The local record is already detached, so there is nothing left to push to.
+				sharedInstanceState.setUnavailable('deleted')
+				notifySharedInstanceAvailability(sharedInstanceState.availability.value ?? 'deleted')
 				emit('published')
 				if (!hasServers.value) return
 			} else {
@@ -184,7 +191,15 @@ async function publishChanges(restart: boolean) {
 	setState('publishing')
 	try {
 		if (sharesWithFriends.value && (friendsBehind.value || selectedConfigPaths.value.length > 0)) {
-			await publish_shared_instance(props.instance.id, selectedConfigPaths.value)
+			const attachment = await publish_shared_instance(props.instance.id, selectedConfigPaths.value)
+			if (!(await pushReachedFriends(attachment))) {
+				addNotification({
+					type: 'error',
+					title: formatMessage(sharedInstanceErrorMessages.pushUnfinishedTitle),
+					text: formatMessage(sharedInstanceErrorMessages.pushUnfinishedText),
+				})
+				return
+			}
 			emit('published')
 		}
 		if (hasServers.value) emit('push-servers', restart)
@@ -193,6 +208,39 @@ async function publishChanges(restart: boolean) {
 	} finally {
 		setState('idle')
 	}
+}
+
+/**
+ * Checks a finished push against the backend. The version it made must be complete with every
+ * file stored, and the instance must no longer differ from what friends get, which compares the
+ * file list and each uploaded file's hash. Anything else means the push stopped partway.
+ */
+async function pushReachedFriends(attachment: SharedInstanceAttachment) {
+	const version = attachment.latest_version
+	if (version == null) {
+		console.error('Push finished without a version', attachment)
+		return false
+	}
+
+	const remote = await apiClient.sharedinstances.instances_v1.getVersion(attachment.id, version)
+	const notStored = remote.external_files.filter((file) => !file.sha256)
+	const preview = await get_shared_instance_publish_preview(props.instance.id)
+	const complete =
+		remote.ready &&
+		notStored.length === 0 &&
+		preview?.latestVersion === version &&
+		preview.diffs.length === 0
+	if (!complete) {
+		console.error('Push did not reach the backend intact', {
+			sharedInstanceId: attachment.id,
+			version,
+			ready: remote.ready,
+			filesNotStored: notStored.map((file) => file.file_name),
+			latestVersion: preview?.latestVersion,
+			remainingDiffs: preview?.diffs,
+		})
+	}
+	return complete
 }
 
 function isConfigPathSelected(
@@ -225,13 +273,8 @@ function finishReview() {
 }
 
 function handlePublishError(error: unknown) {
-	if (isSharedInstanceUnavailableError(error)) {
-		notifySharedInstanceUnavailable(getSharedInstanceUnavailableReason(error))
-		emit('published')
-		return
-	}
-
-	notifySharedInstanceError(error)
+	void sharedInstanceState.reportActionError(error, notifySharedInstanceError)
+	if (isSharedInstanceUnavailableError(error)) emit('published')
 }
 
 function setState(nextState: SharedInstancePublishState) {

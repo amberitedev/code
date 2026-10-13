@@ -203,6 +203,17 @@ export function useSharedInstanceInviteHandler(
 		}
 	}
 
+	// Withdraws the pending membership so the owner stops seeing the invite as outstanding.
+	async function declineNotification(notification: AppNotification, invite: SharedInstanceInvite) {
+		try {
+			await client.sharedinstances.instances_v1.declinePendingInvite(invite.sharedInstanceId)
+		} catch (error) {
+			// The invite or its instance is already gone.
+			if (!(error instanceof ModrinthApiError && error.statusCode === 404)) throw error
+		}
+		await markNotificationRead(notification)
+	}
+
 	async function handleNotification(notification: AppNotification) {
 		const parsedInvite = parseSharedInstanceInviteNotification(notification)
 		if (!parsedInvite) return false
@@ -235,7 +246,7 @@ export function useSharedInstanceInviteHandler(
 			autoCloseMs: null,
 			onAccept: () => acceptNotification(notification, invite),
 			onDecline: () =>
-				markNotificationRead(notification).catch((error) => handleError(toError(error))),
+				declineNotification(notification, invite).catch((error) => handleError(toError(error))),
 			onOpenActor: () => {
 				if (invite.invitedByUsername) {
 					void router.push(`/user/${encodeURIComponent(invite.invitedByUsername)}`)

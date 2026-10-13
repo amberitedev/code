@@ -36,7 +36,7 @@ already in the worktree.
 
 Scenario numbers passed after the task name override `defaultScenarios` in `dev.json` for that run.
 
-A fresh dev Core belongs to nobody. Pair it once from an App with the code in the `[core]` output;
+A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
 packaged build does not allow yet.
 
@@ -115,6 +115,15 @@ Core and crashed App scenarios restart automatically. Closing an App window norm
 scenario stopped. Enter `rs 1` to start or restart scenario 1, or `rs core` to restart Core. If
 Windows still has the App executable open, the runner waits for it to close before relaunching. Three fast failures pause
 automatic restarts so a broken launch cannot loop indefinitely; `rs 1` or `rs core` retries manually.
+
+The same commands can be appended as lines to `.data/dev-commands` when the runner has no usable
+stdin, which is the case for a runner started detached in the background:
+
+```bash
+echo "rs core" >> .data/dev-commands
+```
+
+The runner empties that file when it starts and reads new lines every half second.
 
 The combined terminal removes repetitive watcher and progress output. Vite+ forwards App console
 errors and warnings to the same terminal; error and warning notifications are logged there too.

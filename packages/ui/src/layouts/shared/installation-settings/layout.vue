@@ -27,6 +27,8 @@ import Toggle from '#ui/components/base/Toggle.vue'
 import ConfirmLeaveModal from '#ui/components/modal/ConfirmLeaveModal.vue'
 import { useDebugLogger } from '#ui/composables/debug-logger'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { injectServerSettings } from '#ui/layouts/shared/server-settings/providers/server-settings'
+import { injectModrinthServerContext } from '#ui/providers/server-context'
 import { commonMessages } from '#ui/utils/common-messages'
 import { formatLoaderLabel } from '#ui/utils/loaders'
 import { versionChangesGameVersion } from '#ui/utils/version-compatibility'
@@ -215,6 +217,15 @@ const isManagedModpack = computed(() => {
 const isLinkedModpack = computed(() => showModpackVersionActions.value || isLocalFile.value)
 // An instance is updated by pushing from the instance, so it has no version to change or re-install.
 const isLinkedInstance = computed(() => ctx.isLinkedInstance?.value ?? false)
+
+// "Visible to friends" is the Core owner's to change, and only means something once the instance
+// is shared. Both come from the server this layout is opened for; an instance has neither.
+const hostedServer = injectModrinthServerContext(null)?.server
+const viewerId = injectServerSettings(null)?.currentUserId
+const viewerOwnsServer = computed(
+	() => !!viewerId?.value && viewerId.value === hostedServer?.value?.owner_id,
+)
+const instanceIsShared = computed(() => !!hostedServer?.value?.linked_instance?.shared_instance_id)
 
 function handleModpackUpdateRequest(version: Labrinth.Versions.v2.Version, event?: MouseEvent) {
 	debug('handleModpackUpdateRequest: start', {
@@ -455,6 +466,10 @@ const messages = defineMessages({
 		id: 'installation-settings.visible-to-friends.description',
 		defaultMessage:
 			'People this instance is shared with can see this server in Worlds and join it.',
+	},
+	visibleToFriendsNotShared: {
+		id: 'installation-settings.visible-to-friends.not-shared',
+		defaultMessage: 'Share the instance to let friends see this server.',
 	},
 	unlinkInstanceTitle: {
 		id: 'installation-settings.unlink-instance.title',
@@ -718,20 +733,30 @@ const messages = defineMessages({
 				</div>
 
 				<!-- Visible to friends -->
-				<div v-if="isLinkedInstance && ctx.visibleToFriends" class="flex flex-col gap-2.5">
+				<div
+					v-if="isLinkedInstance && ctx.visibleToFriends && viewerOwnsServer"
+					class="flex flex-col gap-2.5"
+				>
 					<div class="flex items-center justify-between gap-4">
 						<span id="visible-to-friends-label" class="text-lg font-semibold text-contrast">
 							{{ formatMessage(messages.visibleToFriendsTitle) }}
 						</span>
 						<Toggle
 							id="visible-to-friends"
-							:model-value="ctx.visibleToFriends.value.value"
+							:model-value="instanceIsShared && ctx.visibleToFriends.value.value"
+							:disabled="!instanceIsShared"
 							aria-labelledby="visible-to-friends-label"
 							@update:model-value="ctx.visibleToFriends.set($event === true)"
 						/>
 					</div>
 					<span class="text-primary">
-						{{ formatMessage(messages.visibleToFriendsDescription) }}
+						{{
+							formatMessage(
+								instanceIsShared
+									? messages.visibleToFriendsDescription
+									: messages.visibleToFriendsNotShared,
+							)
+						}}
 					</span>
 				</div>
 

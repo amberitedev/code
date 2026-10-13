@@ -71,7 +71,7 @@ import { RouterView, useRoute, useRouter } from 'vue-router'
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
-import PairCoreModal from '@/components/ui/cores/PairCoreModal.vue'
+import AddCoreModal from '@/components/ui/cores/AddCoreModal.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
 import FriendsList from '@/components/ui/friends/FriendsList.vue'
 import HostingUpdateRequired from '@/components/ui/HostingUpdateRequired.vue'
@@ -96,7 +96,7 @@ import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
-import { coresQueryKey, useCores } from '@/composables/use-cores'
+import { coresQueryKey, openAddCoreModal, useCores } from '@/composables/use-cores'
 import { useError } from '@/composables/use-error.js'
 import { useInstanceMetadataRefresh } from '@/composables/use-instance-metadata-refresh'
 import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts'
@@ -470,6 +470,8 @@ onMounted(async () => {
 		const listeners = await Promise.all([
 			listen('edit-menu://undo', () => handleEditMenuAction('undo')),
 			listen('edit-menu://redo', () => handleEditMenuAction('redo')),
+			// The App's own deep links while it is already running. See `handle_command` in apps/app.
+			listen('amberite-command', (event) => handleCommand(event.payload)),
 		])
 		unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
 	} catch (error) {
@@ -529,7 +531,7 @@ const messages = defineMessages({
 	},
 	modrinthHosting: {
 		id: 'app.nav.modrinth-hosting',
-		defaultMessage: 'Modrinth Hosting',
+		defaultMessage: 'Servers',
 	},
 	screenshots: {
 		id: 'app.nav.screenshots',
@@ -1165,9 +1167,10 @@ async function fetchCredentials() {
 	}
 	credentials.value = creds ?? null
 	liveNotificationsEnabled = !!creds?.session
-	// Paired Cores and their servers belong to the signed-in account.
+	// Cores and their servers belong to the signed-in account.
 	void queryClient.invalidateQueries({ queryKey: ['cores'] })
 	void queryClient.invalidateQueries({ queryKey: ['servers'] })
+	void replayUnreadNotifications()
 	await traceStartupStep('Load stored account profiles', fetchStoredModrinthAccounts)
 }
 
@@ -1504,6 +1507,40 @@ async function handleLiveNotification(notification) {
 	}
 }
 
+// The friends socket only delivers notifications while the App is open, so unread ones are
+// replayed through the live path at sign-in, when the network returns, and when the socket
+// (re)connects. Both invite handlers dedupe by notification ID, so one that also arrives live is
+// shown once.
+async function replayUnreadNotifications() {
+	const userId = credentials.value?.user_id
+	if (!liveNotificationsEnabled || !userId) return
+
+	const refreshId = credentialsRefreshId
+	const generation = liveNotificationGeneration
+	try {
+		const notifications =
+			await tauriApiClient.labrinth.notifications_v2.getUserNotifications(userId)
+		// The backend returns newest first; toasts should appear in the order they were sent.
+		for (const notification of notifications.filter((n) => !n.read).reverse()) {
+			if (refreshId !== credentialsRefreshId || generation !== liveNotificationGeneration) return
+			await handleLiveNotification(notification).catch((error) =>
+				console.error(`Failed to replay notification ${notification.id}`, error),
+			)
+		}
+	} catch (error) {
+		console.error('Failed to fetch unread notifications', error)
+	}
+}
+window.addEventListener('online', replayUnreadNotifications)
+// The backend sends the full friend status list each time the socket connects.
+useAppEvent(
+	'friend',
+	(event) => {
+		if (event.event === 'status_sync') void replayUnreadNotifications()
+	},
+	appEvents,
+)
+
 function clearLiveNotifications() {
 	liveNotificationGeneration++
 	liveNotificationsEnabled = false
@@ -1549,6 +1586,8 @@ async function handleCommand(e) {
 		} else {
 			await run(e.id).catch(handleError)
 		}
+	} else if (e.event === 'ApproveCore') {
+		await openAddCoreModal(e.code)
 	} else if (e.event === 'InstallSharedInstanceInvite') {
 		await sharedInstanceInviteHandler.value?.installFromInviteId(e.invite_id)
 	} else if (e.event === 'InstallServer') {
@@ -1997,7 +2036,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</div>
 		</Transition>
 		<AppSettingsModal ref="appSettingsModal" />
-		<PairCoreModal />
+		<AddCoreModal />
 		<NewUpdateModal ref="newUpdateModal" />
 		<Suspense>
 			<ModrinthAccountRequiredModal ref="modrinthLoginModal" :request-auth="requestModrinthAuth" />

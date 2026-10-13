@@ -6,9 +6,10 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex as StdMutex, MutexGuard, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 use futures::{SinkExt, StreamExt};
@@ -23,18 +24,33 @@ use hyper_tungstenite::{HyperWebsocket, tungstenite::Message};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tauri::{AppHandle, Listener, Manager, Runtime, Wry, plugin::TauriPlugin};
+use tauri::{
+    AppHandle, Listener, Manager, Runtime, Webview, Wry,
+    plugin::TauriPlugin,
+    webview::{PageLoadEvent, PageLoadPayload},
+};
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, RwLock},
+    sync::{Mutex, RwLock, mpsc},
 };
 use url::Url;
 
 const ASSET_PATH: &str = "/__amberite_browser_bridge_asset";
 const CALLBACK_EVENT: &str = "amberite-browser-bridge://callback";
+const RESPONSE_EVENT: &str = "amberite-browser-bridge://response";
 const SCRIPT_PATH: &str = "/__amberite_browser_bridge.js";
 const TAG: &str = "__amberiteBrowserBridge";
 const WS_PATH: &str = "/__amberite_browser_bridge_ws";
+
+/// How long the native webview gets to run a script before it counts as not running.
+const EVAL_TIMEOUT: Duration = Duration::from_secs(5);
+const WATCHDOG_INTERVAL: Duration = Duration::from_secs(5);
+/// An invoke unanswered for this long is reported by the watchdog.
+const STUCK_AFTER: Duration = Duration::from_secs(30);
+/// Minimum gap between reloads of a native page that has no Tauri, so a dev server that is still
+/// down is not hammered.
+const HEAL_COOLDOWN: Duration = Duration::from_secs(10);
+const PROBE_SCRIPT: &str = "JSON.stringify({ href: location.href, readyState: document.readyState, tauri: typeof window.__TAURI_INTERNALS__, dispatcher: typeof window.__AMBERITE_BROWSER_BRIDGE_NATIVE__ })";
 
 type SocketSink =
     Arc<Mutex<futures::stream::SplitSink<BridgeWebsocket, Message>>>;
@@ -72,8 +88,28 @@ struct BridgeState {
     app: AppHandle,
     client: reqwest::Client,
     dev_url: Url,
+    last_heal: StdMutex<Option<Instant>>,
     next_connection_id: AtomicU64,
+    /// Every invoke sent to the native page and not yet answered, keyed by connection and request
+    /// ID. Whoever removes an entry answers its tab, so each invoke gets exactly one response.
+    pending: StdMutex<HashMap<(u64, u64), PendingInvoke>>,
     sessions: RwLock<HashMap<u64, SocketSink>>,
+}
+
+impl BridgeState {
+    /// Never hold this guard across an await or a webview call: the page load hook takes it on
+    /// the main thread.
+    fn pending(&self) -> MutexGuard<'_, HashMap<(u64, u64), PendingInvoke>> {
+        self.pending.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[derive(Debug)]
+struct PendingInvoke {
+    cmd: String,
+    since: Instant,
+    sink: SocketSink,
+    warned: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,12 +133,16 @@ struct NativeInvoke<'a> {
     callback_event: &'static str,
     cmd: &'a str,
     connection_id: u64,
+    id: u64,
     options: &'a Value,
-    response_event: &'a str,
+    response_event: &'static str,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct NativeResponse {
+    connection_id: u64,
+    id: u64,
     payload: Value,
     status: RpcStatus,
 }
@@ -143,11 +183,16 @@ pub fn init() -> TauriPlugin<Wry> {
                     .redirect(reqwest::redirect::Policy::none())
                     .build()?,
                 dev_url,
+                last_heal: StdMutex::new(None),
                 next_connection_id: AtomicU64::new(1),
+                pending: StdMutex::new(HashMap::new()),
                 sessions: RwLock::new(HashMap::new()),
             });
+            app.manage(Arc::clone(&state));
             register_callback_forwarder(app, Arc::clone(&state));
+            register_response_forwarder(app, Arc::clone(&state));
 
+            tauri::async_runtime::spawn(watch_pending(Arc::clone(&state)));
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = serve(state).await {
                     tracing::error!(%error, "Amberite browser bridge stopped");
@@ -155,7 +200,34 @@ pub fn init() -> TauriPlugin<Wry> {
             });
             Ok(())
         })
+        .on_page_load(reject_on_reload)
         .build()
+}
+
+/// A page that starts loading can no longer answer what the previous page was asked, so tell the
+/// tabs now instead of leaving them waiting forever.
+fn reject_on_reload(webview: &Webview<Wry>, payload: &PageLoadPayload<'_>) {
+    if webview.label() != "main" || payload.event() != PageLoadEvent::Started {
+        return;
+    }
+    let Some(state) = webview.try_state::<Arc<BridgeState>>() else {
+        return;
+    };
+    let interrupted = std::mem::take(&mut *state.pending());
+    if interrupted.is_empty() {
+        return;
+    }
+    tracing::warn!(
+        count = interrupted.len(),
+        "Browser bridge failed the invokes the App's native page had not answered before it reloaded"
+    );
+    for ((_, id), invoke) in interrupted {
+        reject(
+            invoke.sink,
+            id,
+            format!("The App page reloaded before it answered {}", invoke.cmd),
+        );
+    }
 }
 
 fn validate_dev_url(url: &Url) -> Result<(), BridgeError> {
@@ -199,6 +271,121 @@ fn register_callback_forwarder<R: Runtime>(
             }
         });
     });
+}
+
+/// Forwards every native answer to the tab that asked. One permanent listener, because a listener
+/// registered per request can miss an answer emitted before Tauri finishes registering it.
+fn register_response_forwarder<R: Runtime>(
+    app: &AppHandle<R>,
+    state: Arc<BridgeState>,
+) {
+    app.listen_any(RESPONSE_EVENT, move |event| {
+        let response = match serde_json::from_str::<NativeResponse>(event.payload()) {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(%error, "Browser bridge received an invalid response envelope");
+                return;
+            }
+        };
+        // Already answered when the page reloaded, the tab left, or the script never reported.
+        let Some(invoke) = state
+            .pending()
+            .remove(&(response.connection_id, response.id))
+        else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            let message = json!({
+                "type": "response",
+                "id": response.id,
+                "status": response.status,
+                "payload": response.payload,
+            });
+            if let Err(error) = send_json(&invoke.sink, &message).await {
+                tracing::warn!(%error, "Browser bridge could not forward an invoke response");
+            }
+        });
+    });
+}
+
+/// Reports invokes the native page has sat on, once each, with what the page looks like.
+async fn watch_pending(state: Arc<BridgeState>) {
+    let mut interval = tokio::time::interval(WATCHDOG_INTERVAL);
+    loop {
+        interval.tick().await;
+        let stuck = state
+            .pending()
+            .values_mut()
+            .filter(|invoke| {
+                !invoke.warned && invoke.since.elapsed() >= STUCK_AFTER
+            })
+            .map(|invoke| {
+                invoke.warned = true;
+                (invoke.cmd.clone(), invoke.since.elapsed().as_secs())
+            })
+            .collect::<Vec<_>>();
+        if stuck.is_empty() {
+            continue;
+        }
+        for (cmd, age_secs) in stuck {
+            tracing::warn!(
+                cmd,
+                age_secs,
+                "Browser bridge invoke has not been answered"
+            );
+        }
+        probe_native(&state).await;
+    }
+}
+
+async fn probe_native(state: &BridgeState) {
+    let result = match eval_native_result(&state.app, PROBE_SCRIPT) {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::warn!(%error, "Browser bridge could not probe the App's native page");
+            return;
+        }
+    };
+    let Some(report) = script_result(result).await else {
+        tracing::warn!(
+            "Browser bridge: native webview is not executing script"
+        );
+        return;
+    };
+    tracing::warn!(%report, "Browser bridge native page state");
+    let has_no_tauri = serde_json::from_str::<Value>(&report)
+        .is_ok_and(|report| report["tauri"] == "undefined");
+    if has_no_tauri {
+        heal(state);
+    }
+}
+
+/// Reloads a native page that has no Tauri, such as the error page left by a reload while the dev
+/// server was restarting. Nobody sees that page because the native window is hidden.
+fn heal(state: &BridgeState) {
+    {
+        let mut last_heal = state
+            .last_heal
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if last_heal.is_some_and(|at| at.elapsed() < HEAL_COOLDOWN) {
+            return;
+        }
+        *last_heal = Some(Instant::now());
+    }
+    let navigated = main_webview(&state.app).and_then(|webview| {
+        webview.navigate(state.dev_url.clone()).map_err(Into::into)
+    });
+    match navigated {
+        Ok(()) => tracing::warn!(
+            url = %state.dev_url,
+            "Browser bridge reloaded the App's native page because it had no Tauri"
+        ),
+        Err(error) => tracing::warn!(
+            %error,
+            "Browser bridge could not reload the App's native page"
+        ),
+    }
 }
 
 async fn serve(state: Arc<BridgeState>) -> Result<(), BridgeError> {
@@ -312,69 +499,91 @@ async fn handle_bridge_socket(
         .await
         .insert(connection_id, Arc::clone(&sender));
 
-    while let Some(message) = receiver.next().await {
-        match message? {
-            Message::Text(text) => {
-                match serde_json::from_str::<IncomingMessage>(&text) {
-                    Ok(IncomingMessage::Invoke {
-                        id,
-                        cmd,
-                        args,
-                        options,
-                    }) => {
-                        invoke_native(
-                            &state,
-                            &sender,
-                            connection_id,
+    // A request that fails is answered with an error; only a dead socket ends the session.
+    let result: Result<(), BridgeError> = async {
+        while let Some(message) = receiver.next().await {
+            match message? {
+                Message::Text(text) => {
+                    match serde_json::from_str::<IncomingMessage>(&text) {
+                        Ok(IncomingMessage::Invoke {
                             id,
-                            &cmd,
-                            &args,
-                            &options,
-                        )?;
-                    }
-                    Ok(IncomingMessage::UnregisterCallback { callback_id }) => {
-                        eval_native(
-                            &state.app,
-                            &format!(
-                                "window.__AMBERITE_BROWSER_BRIDGE_NATIVE__?.unregister({connection_id}, {callback_id});"
-                            ),
-                        )?;
-                    }
-                    Err(error) => {
-                        let payload = wire_error(&format!(
-                            "Invalid browser bridge request: {error}"
-                        ));
-                        send_json(
-                            &sender,
-                            &json!({
-                                "type": "response",
-                                "id": Value::Null,
-                                "status": "error",
-                                "payload": payload,
-                            }),
-                        )
-                        .await?;
+                            cmd,
+                            args,
+                            options,
+                        }) => {
+                            if let Err(error) = invoke_native(
+                                &state,
+                                &sender,
+                                connection_id,
+                                id,
+                                &cmd,
+                                &args,
+                                &options,
+                            ) {
+                                tracing::warn!(%error, cmd, "Browser bridge could not send an invoke to the App's native page");
+                                send_json(
+                                    &sender,
+                                    &error_response(
+                                        json!(id),
+                                        &error.to_string(),
+                                    ),
+                                )
+                                .await?;
+                            }
+                        }
+                        Ok(IncomingMessage::UnregisterCallback {
+                            callback_id,
+                        }) => {
+                            if let Err(error) = eval_native(
+                                &state.app,
+                                &format!(
+                                    "window.__AMBERITE_BROWSER_BRIDGE_NATIVE__?.unregister({connection_id}, {callback_id});"
+                                ),
+                            ) {
+                                tracing::warn!(%error, "Browser bridge could not unregister a callback");
+                            }
+                        }
+                        Err(error) => {
+                            send_json(
+                                &sender,
+                                &error_response(
+                                    Value::Null,
+                                    &format!(
+                                        "Invalid browser bridge request: {error}"
+                                    ),
+                                ),
+                            )
+                            .await?;
+                        }
                     }
                 }
+                Message::Ping(payload) => {
+                    sender.lock().await.send(Message::Pong(payload)).await?
+                }
+                Message::Close(_) => break,
+                _ => {}
             }
-            Message::Ping(payload) => {
-                sender.lock().await.send(Message::Pong(payload)).await?
-            }
-            Message::Close(_) => break,
-            _ => {}
         }
+        Ok(())
     }
+    .await;
 
     state.sessions.write().await.remove(&connection_id);
+    // The tab is gone, so there is nobody left to answer.
+    state
+        .pending()
+        .retain(|(connection, _), _| *connection != connection_id);
     let _ = eval_native(
         &state.app,
         &format!(
             "window.__AMBERITE_BROWSER_BRIDGE_NATIVE__?.clear({connection_id});"
         ),
     );
-    Ok(())
+    result
 }
 
+/// Sends an invoke to the native page. The answer arrives later through the response forwarder; if
+/// the page cannot run the invoke at all, the tab is told so here instead of waiting forever.
 fn invoke_native(
     state: &Arc<BridgeState>,
     sender: &SocketSink,
@@ -384,57 +593,122 @@ fn invoke_native(
     args: &Value,
     options: &Value,
 ) -> Result<(), BridgeError> {
-    let response_event = format!(
-        "amberite-browser-bridge://response/{connection_id}/{request_id}"
-    );
-    let response_sender = Arc::clone(sender);
-    state.app.once_any(response_event.clone(), move |event| {
-        let response_sender = Arc::clone(&response_sender);
-        let parsed = serde_json::from_str::<NativeResponse>(event.payload());
-        tauri::async_runtime::spawn(async move {
-            let message = match parsed {
-                Ok(response) => json!({
-                    "type": "response",
-                    "id": request_id,
-                    "status": response.status,
-                    "payload": response.payload,
-                }),
-                Err(error) => json!({
-                    "type": "response",
-                    "id": request_id,
-                    "status": "error",
-                    "payload": wire_error(&format!("Invalid native response: {error}")),
-                }),
-            };
-            if let Err(error) = send_json(&response_sender, &message).await {
-                tracing::warn!(%error, "Browser bridge could not forward an invoke response");
-            }
-        });
-    });
-
     let request = NativeInvoke {
         args,
         callback_event: CALLBACK_EVENT,
         cmd,
         connection_id,
+        id: request_id,
         options,
-        response_event: &response_event,
+        response_event: RESPONSE_EVENT,
     };
     let serialized = serde_json::to_string(&request)?;
+    // The dispatcher is sent with every invoke because a reloaded page has lost it. The script
+    // evaluates to what `dispatch` returns.
     let script = format!(
-        "{}\nvoid window.__AMBERITE_BROWSER_BRIDGE_NATIVE__.invoke({serialized});",
+        "{}\nwindow.__AMBERITE_BROWSER_BRIDGE_NATIVE__.dispatch({serialized})",
         include_str!("native-bridge.js")
     );
-    eval_native(&state.app, &script)
+
+    let key = (connection_id, request_id);
+    state.pending().insert(
+        key,
+        PendingInvoke {
+            cmd: cmd.to_owned(),
+            since: Instant::now(),
+            sink: Arc::clone(sender),
+            warned: false,
+        },
+    );
+    let result = match eval_native_result(&state.app, &script) {
+        Ok(result) => result,
+        Err(error) => {
+            state.pending().remove(&key);
+            return Err(error);
+        }
+    };
+
+    let state = Arc::clone(state);
+    tauri::async_runtime::spawn(async move {
+        let outcome = script_result(result).await;
+        if outcome.as_deref() == Some("ok") {
+            return;
+        }
+        // Already answered if the page reloaded or the answer beat this check.
+        let Some(invoke) = state.pending().remove(&key) else {
+            return;
+        };
+        tracing::warn!(
+            cmd = invoke.cmd,
+            ?outcome,
+            "Browser bridge invoke did not reach a running native page"
+        );
+        reject(
+            invoke.sink,
+            request_id,
+            "The App's native page is not running (reloading or failed to load)"
+                .to_owned(),
+        );
+        if outcome.as_deref() == Some("no-tauri") {
+            heal(&state);
+        }
+    });
+    Ok(())
+}
+
+// The upstream ad view shares the main window, so it is no longer a
+// single-webview window. Address the launcher webview directly.
+fn main_webview(app: &AppHandle) -> Result<Webview<Wry>, BridgeError> {
+    app.get_webview("main").ok_or(BridgeError::MissingWebview)
 }
 
 fn eval_native(app: &AppHandle, script: &str) -> Result<(), BridgeError> {
-    // The upstream ad view shares the main window, so it is no longer a
-    // single-webview window. Address the launcher webview directly.
-    app.get_webview("main")
-        .ok_or(BridgeError::MissingWebview)?
-        .eval(script)?;
+    main_webview(app)?.eval(script)?;
     Ok(())
+}
+
+/// Runs a script in the native page and returns where its value will arrive. Read it with
+/// `script_result`.
+fn eval_native_result(
+    app: &AppHandle,
+    script: &str,
+) -> Result<mpsc::UnboundedReceiver<String>, BridgeError> {
+    let (sender, receiver) = mpsc::unbounded_channel();
+    main_webview(app)?.eval_with_callback(script, move |value| {
+        let _ = sender.send(value);
+    })?;
+    Ok(receiver)
+}
+
+/// The string a script evaluated to, or `None` when the webview did not run it in time. The
+/// webview reports values as JSON, so a string arrives quoted.
+async fn script_result(
+    mut result: mpsc::UnboundedReceiver<String>,
+) -> Option<String> {
+    let value = tokio::time::timeout(EVAL_TIMEOUT, result.recv())
+        .await
+        .ok()
+        .flatten()?;
+    Some(serde_json::from_str::<String>(&value).unwrap_or(value))
+}
+
+fn reject(sink: SocketSink, id: u64, message: String) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) =
+            send_json(&sink, &error_response(json!(id), &message)).await
+        {
+            tracing::warn!(%error, "Browser bridge could not report a failed invoke");
+        }
+    });
+}
+
+fn error_response(id: Value, message: &str) -> Value {
+    json!({
+        "type": "response",
+        "id": id,
+        "status": "error",
+        "payload": wire_error(message),
+    })
 }
 
 async fn send_json(
@@ -712,5 +986,6 @@ mod tests {
         assert!(script.contains("__CHANNEL__"));
         assert!(script.contains("arrayBuffer"));
         assert!(script.contains("callbackEvent"));
+        assert!(script.contains("'no-tauri'"));
     }
 }

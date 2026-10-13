@@ -78,6 +78,16 @@ describe.sequential('browser transport', () => {
 		expect(window.__TAURI_INTERNALS__.callbacks.has(callbackId)).toBe(false)
 	})
 
+	it('ignores a response for a request it is not waiting on', async () => {
+		const { socket, window } = await installBrowserBridge()
+		const resultPromise = window.__TAURI_INTERNALS__.invoke('plugin:test|late')
+		const request = await socket.nextInvoke()
+		socket.respond({ ...request, id: request.id + 1000 }, 'error', { message: 'stale' })
+		socket.respond(request, 'success', 'answered')
+		await expect(resultPromise).resolves.toBe('answered')
+		socket.respond(request, 'error', { message: 'answered twice' })
+	})
+
 	it('maps convertFileSrc to the scoped loopback asset endpoint', async () => {
 		const { window } = await installBrowserBridge()
 		const url = new URL(window.__TAURI_INTERNALS__.convertFileSrc('C:\\Amberite Data\\icon.png'))
@@ -89,6 +99,15 @@ describe.sequential('browser transport', () => {
 })
 
 describe.sequential('native webview dispatcher', () => {
+	const request = {
+		args: {},
+		callbackEvent: 'bridge://callback',
+		connectionId: 5,
+		id: 14,
+		options: { [TAG]: 'undefined' },
+		responseEvent: 'bridge://response',
+	}
+
 	it('revives arguments and options and serializes raw native results', async () => {
 		const handler = vi.fn((_invocation: unknown) => new Uint8Array([4, 5, 6]).buffer)
 		const { dispatcher, emitted } = installNativeBridge(handler)
@@ -97,6 +116,7 @@ describe.sequential('native webview dispatcher', () => {
 			callbackEvent: 'bridge://callback',
 			cmd: 'plugin:test|binary',
 			connectionId: 3,
+			id: 11,
 			options: { headers: { path: 'file.dat' } },
 			responseEvent: 'bridge://response',
 		})
@@ -109,7 +129,12 @@ describe.sequential('native webview dispatcher', () => {
 		})
 		expect(emitted).toContainEqual({
 			event: 'bridge://response',
-			payload: { payload: { [TAG]: 'arrayBuffer', data: 'BAUG' }, status: 'success' },
+			payload: {
+				connectionId: 3,
+				id: 11,
+				payload: { [TAG]: 'arrayBuffer', data: 'BAUG' },
+				status: 'success',
+			},
 		})
 	})
 
@@ -122,12 +147,15 @@ describe.sequential('native webview dispatcher', () => {
 			callbackEvent: 'bridge://callback',
 			cmd: 'plugin:test|fail',
 			connectionId: 1,
+			id: 12,
 			options: { [TAG]: 'undefined' },
 			responseEvent: 'bridge://response',
 		})
 		expect(emitted).toContainEqual({
 			event: 'bridge://response',
 			payload: {
+				connectionId: 1,
+				id: 12,
 				payload: { code: 'invalid', detail: 'bad input' },
 				status: 'error',
 			},
@@ -148,6 +176,7 @@ describe.sequential('native webview dispatcher', () => {
 			callbackEvent: 'bridge://callback',
 			cmd: 'plugin:test|callbacks',
 			connectionId: 9,
+			id: 13,
 			options: { [TAG]: 'undefined' },
 			responseEvent: 'bridge://response',
 		})
@@ -173,5 +202,50 @@ describe.sequential('native webview dispatcher', () => {
 		expect(callbacks.has(nativeArgs.callback)).toBe(false)
 		dispatcher.clear(9)
 		expect(callbacks.has(channelId)).toBe(false)
+	})
+
+	it('reports a page without Tauri instead of leaving the invoke unanswered', () => {
+		const { dispatcher, emitted, invocations, window } = installNativeBridge(() => 'unused')
+		delete window.__TAURI_INTERNALS__
+		expect(dispatcher.dispatch({ ...request, cmd: 'plugin:test|gone' })).toBe('no-tauri')
+		expect(invocations).toEqual([])
+		expect(emitted).toEqual([])
+	})
+
+	it('answers with an error when the result itself cannot be sent', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+		const { dispatcher, emitted, window } = installNativeBridge(() => 'result')
+		const internals = window.__TAURI_INTERNALS__
+		if (!internals) throw new Error('Native internals were not installed')
+		const invoke = internals.invoke
+		let failed = false
+		internals.invoke = async (cmd, args, options) => {
+			if (cmd === 'plugin:event|emit' && !failed) {
+				failed = true
+				throw new TypeError('cannot serialize')
+			}
+			return invoke(cmd, args, options)
+		}
+		expect(dispatcher.dispatch({ ...request, cmd: 'plugin:test|unsendable' })).toBe('ok')
+		await flushTasks()
+		expect(consoleError).toHaveBeenCalledOnce()
+		consoleError.mockRestore()
+		expect(emitted).toEqual([
+			{
+				event: 'bridge://response',
+				payload: {
+					connectionId: 5,
+					id: 14,
+					payload: {
+						[TAG]: 'error',
+						message:
+							'The App could not send its answer to plugin:test|unsendable: TypeError: cannot serialize',
+						name: 'Error',
+						stack: expect.any(String),
+					},
+					status: 'error',
+				},
+			},
+		])
 	})
 })

@@ -1,11 +1,24 @@
 export class ApiError extends Error {
+	/**
+	 * `error` is the broad kind clients already read. `code` names the exact cause for a client that
+	 * recovers from it, and `details` are extra body fields that say what to recover.
+	 */
 	constructor(
 		public status: number,
 		public error: string,
 		public description: string,
+		public code?: string,
+		public details?: Record<string, unknown>,
 	) {
 		super(description)
 	}
+}
+
+export function errorResponse(error: ApiError): Response {
+	return json(
+		{ ...error.details, error: error.error, description: error.description, code: error.code },
+		error.status,
+	)
 }
 
 export function json(value: unknown, status = 200): Response {

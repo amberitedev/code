@@ -21,7 +21,6 @@ pub enum ApiError {
     NotFound(String),
     BadRequest(String),
     Conflict(String),
-    Gone(String),
     Internal(String),
     UnprocessableEntity(String),
     TooManyRequests(String),
@@ -36,7 +35,6 @@ impl IntoResponse for ApiError {
             Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
-            Self::Gone(m) => (StatusCode::GONE, m),
             Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
             Self::UnprocessableEntity(m) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, m)
@@ -121,7 +119,9 @@ impl From<SourceError> for ApiError {
             SourceError::NotLinked => {
                 Self::NotFound("server is not linked to a source".into())
             }
-            SourceError::AlreadyLinked => Self::Conflict(e.to_string()),
+            SourceError::AlreadyLinked | SourceError::AwaitingUpload => {
+                Self::Conflict(e.to_string())
+            }
             SourceError::Invalid(message) => Self::BadRequest(message),
             // The uploaded pack itself is wrong, so the caller can fix it.
             SourceError::Mrpack(e) => Self::BadRequest(e.to_string()),

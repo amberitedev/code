@@ -65,13 +65,13 @@ export function useCoreWatch() {
 
 /**
  * What to tell the user when a request to a Core fails. The Core's own wording is for the log:
- * no answer means it is off or unreachable, a refusal means it is no longer paired to the account.
+ * no answer means it is off or unreachable, a refusal means it is no longer signed in to the account.
  */
 export function coreProblem(cause: unknown): string {
 	const status = cause instanceof ModrinthApiError ? cause.statusCode : undefined
 	if (status === undefined) return 'Check that your Core is running, then try again.'
 	if (status === 401 || status === 403)
-		return 'Your Core is not paired to this account. Pair it again from Core settings.'
+		return 'Your Core is not signed in to this account. Add it again from Core settings.'
 	return 'Your Core ran into a problem. Try again in a moment.'
 }
 
@@ -148,11 +148,15 @@ export function useHostedServers(sharedInstanceId: MaybeRefOrGetter<string | und
 
 /**
  * Whether this account may manage a server someone else hosts, which makes its Worlds row open
- * the server page. TODO(server-access): the answer comes from the list of Cores the account may
- * reach, which holds only its own Cores until server access is merged.
+ * the server page. Access is given per server, not per Core, so the answer is whether the server
+ * is in the account's own server list, which holds every server it can reach.
  */
-export async function canManageHostedServer(server: HostedServer) {
-	return apiClient.archon.cores_v1.canReachCore(server.core_id).catch(() => false)
+export function useCanManageHostedServer() {
+	const query = useServers()
+	const reachable = computed(
+		() => new Set((query.data.value?.servers ?? []).map((server) => server.server_id)),
+	)
+	return (server: HostedServer) => reachable.value.has(server.server_id)
 }
 
 /** Whether the server's process is up, including while it starts or stops. */

@@ -19,6 +19,10 @@ pub trait ProcessHandle: Send + 'static {
     fn take_stdout_rx(&mut self) -> Option<mpsc::Receiver<String>>;
     /// Returns true if the process is still alive.
     fn is_running(&self) -> bool;
+    /// Available once the child has exited; used for the console exit message.
+    fn exit_status(&self) -> Option<std::process::ExitStatus> {
+        None
+    }
     /// Send SIGKILL (or TerminateProcess on Windows).
     fn kill(&mut self) -> Result<(), SpawnError>;
     /// Return the OS process ID if known.
@@ -38,6 +42,9 @@ impl ProcessHandle for Box<dyn ProcessHandle> {
     }
     fn is_running(&self) -> bool {
         (**self).is_running()
+    }
+    fn exit_status(&self) -> Option<std::process::ExitStatus> {
+        (**self).exit_status()
     }
     fn kill(&mut self) -> Result<(), SpawnError> {
         (**self).kill()

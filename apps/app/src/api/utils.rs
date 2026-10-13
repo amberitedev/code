@@ -201,6 +201,45 @@ pub fn cancel_debug_info_export<R: Runtime>(
     }
 }
 
+/// Amberite's own deep links, next to the Modrinth ones app-lib parses. The frontend handles both
+/// in `handleCommand`, told apart by `event`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event")]
+pub enum AmberiteCommand {
+    /// `amberite://approve/<code>`: open "Add Core" with the code a Core is showing filled in.
+    ApproveCore { code: String },
+}
+
+/// What the App was opened with: a Modrinth link or file, or an Amberite link.
+#[derive(Clone, Serialize)]
+#[serde(untagged)]
+pub enum OpeningCommand {
+    Modrinth(CommandPayload),
+    Amberite(AmberiteCommand),
+}
+
+/// The Amberite command behind a deep link, or `None` for anything else.
+fn amberite_command(command: &str) -> Option<AmberiteCommand> {
+    let path = command.strip_prefix("amberite://")?.trim_end_matches('/');
+    let code = path.strip_prefix("approve/")?;
+    let valid = code.len() <= 9
+        && code.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-'
+        });
+    valid.then(|| AmberiteCommand::ApproveCore {
+        code: code.to_uppercase(),
+    })
+}
+
+async fn parse_opening_command(command: &str) -> Result<OpeningCommand> {
+    if let Some(command) = amberite_command(command) {
+        return Ok(OpeningCommand::Amberite(command));
+    }
+    Ok(OpeningCommand::Modrinth(
+        handler::parse_command(command).await?,
+    ))
+}
+
 // Get opening command
 // For example, if a user clicks on an .mrpack to open the app.
 // This should be called once and only when the app is done booting up and ready to receive a command
@@ -209,7 +248,7 @@ pub fn cancel_debug_info_export<R: Runtime>(
 #[cfg(target_os = "macos")]
 pub async fn get_opening_command(
     state: tauri::State<'_, crate::macos::deep_link::InitialPayload>,
-) -> Result<Option<CommandPayload>> {
+) -> Result<Option<OpeningCommand>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
@@ -229,7 +268,7 @@ pub async fn get_opening_command(
 
 #[tauri::command]
 #[cfg(not(target_os = "macos"))]
-pub async fn get_opening_command() -> Result<Option<CommandPayload>> {
+pub async fn get_opening_command() -> Result<Option<OpeningCommand>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
@@ -245,24 +284,36 @@ pub async fn get_opening_command() -> Result<Option<CommandPayload>> {
 
 // helper function called when redirected by a weblink (ie: modrith://do-something) or when redirected by a .mrpack file (in which case its a filepath)
 // We hijack the deep link library (which also contains functionality for instance-checking)
-pub async fn handle_command(command: String) -> Result<()> {
+pub async fn handle_command<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    command: String,
+) -> Result<()> {
     let command = normalize_deep_link_command(&command);
     if accept_auth_deeplink(&command).await {
         return Ok(());
     }
 
     tracing::info!("handle command: {command}");
+    // Amberite's own links go straight to the frontend; app-lib only knows the Modrinth ones.
+    if let Some(command) = amberite_command(&command) {
+        use tauri::Emitter;
+        app.emit("amberite-command", command)?;
+        if let Some(window) = app.get_window("main") {
+            let _ = window.set_focus();
+        }
+        return Ok(());
+    }
     Ok(theseus::handler::parse_and_emit_command(&command).await?)
 }
 
-async fn opening_command(command: &str) -> Result<Option<CommandPayload>> {
+async fn opening_command(command: &str) -> Result<Option<OpeningCommand>> {
     let command = normalize_deep_link_command(command);
     if accept_auth_deeplink(&command).await {
         return Ok(None);
     }
 
     tracing::info!("opening command {command}");
-    Ok(Some(handler::parse_command(&command).await?))
+    Ok(Some(parse_opening_command(&command).await?))
 }
 
 async fn accept_auth_deeplink(command: &str) -> bool {

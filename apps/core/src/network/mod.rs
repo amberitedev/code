@@ -29,7 +29,6 @@ use crate::{
         event::Event,
         instance::{InstanceId, InstanceStatus},
     },
-    infrastructure::minecraft::java::required_java_version,
 };
 use diagnosis::{diagnose, Case, Facts, Outside, RouterFacts};
 use router::{Mapping, Router};
@@ -375,15 +374,23 @@ async fn wanted(state: &AppState) -> Vec<(Key, String, u16, Option<String>)> {
         .unwrap_or_default();
     for record in running {
         if state.instances.contains_key(&record.id) {
+            let (required, _) = crate::application::java_service::requirement(
+                state,
+                &record.game_version,
+                record.loader_version.as_deref(),
+            )
+            .await;
+            let java_version = record
+                .java_version
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(required);
             wanted.push((
                 Key::Server(record.id.clone()),
                 format!("Minecraft server \"{}\"", record.name),
                 record.port,
                 state
                     .java_store
-                    .find_by_version(required_java_version(
-                        &record.game_version,
-                    ))
+                    .find_by_version(java_version)
                     .await
                     .map(|java| java.display().to_string()),
             ));
@@ -461,15 +468,12 @@ struct Reachability {
 
 /// Ask the backend to connect to `port` on this Core's address from the internet.
 async fn outside(state: &AppState, port: u16) -> Outside {
-    let key = match state.owner().await {
-        Ok(Some(owner)) => owner.backend_key,
-        _ => None,
-    };
-    let Some(key) = key else {
+    let Ok(Some(owner)) = state.owner().await else {
         return Outside::NotChecked(
-            "this Core is not paired to an account yet".into(),
+            "this Core is not signed in to an account yet".into(),
         );
     };
+    let key = owner.backend_key;
     // Only IPv4 is forwarded, so the backend must see, and test, this Core's IPv4 address.
     let ipv4_only = reqwest::Client::builder()
         .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
@@ -492,6 +496,13 @@ async fn outside(state: &AppState, port: u16) -> Outside {
     let Ok(response) = response else {
         return unavailable();
     };
+    if response.status() == StatusCode::UNAUTHORIZED {
+        // Removed from its account: the sign-in task signs the Core out.
+        crate::application::auth_service::key_refused(state);
+        return Outside::NotChecked(
+            "this Core was removed from its account".into(),
+        );
+    }
     if response.status() == StatusCode::TOO_MANY_REQUESTS {
         return Outside::NotChecked(
             "Core asked for too many tests in a short time and tries again later"

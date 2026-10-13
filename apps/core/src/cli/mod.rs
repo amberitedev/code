@@ -41,6 +41,10 @@ enum Command {
     Check,
     /// Apply pending database migrations and exit.
     Migrate,
+    /// Sign this Core in to an Amberite account: shows a code to approve in the App.
+    Auth,
+    /// Sign this Core out of its account. Its servers and files stay.
+    Logout,
     /// Print the Copal version.
     Version,
     /// Install Copal as a local system service.
@@ -159,6 +163,8 @@ pub(crate) async fn execute(cli: Cli) -> Result<()> {
         }
         Command::Check => check().await,
         Command::Migrate => migrate().await,
+        Command::Auth => auth().await,
+        Command::Logout => logout().await,
         Command::Version => {
             println!("copal {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -188,6 +194,48 @@ async fn migrate() -> Result<()> {
     Ok(())
 }
 
+/// The Core's state for a second process next to a running Core, or on its own. Sign-in needs
+/// the database, the certificate, and the backend address, nothing that listens.
+async fn open_state(
+) -> Result<std::sync::Arc<crate::application::state::AppState>> {
+    let config = crate::config::Config::from_env()?;
+    tokio::fs::create_dir_all(&config.data_dir).await?;
+    let db_path = config.data_dir.join("data.db");
+    let pool = crate::infrastructure::db::connect(&db_path).await?;
+    crate::infrastructure::db::migrate(&pool).await?;
+    crate::application::state::AppState::new(config, pool).await
+}
+
+/// `copal auth`: the same sign-in a Core without an owner runs on start. A running Core shows
+/// the same code and picks the approval up too.
+async fn auth() -> Result<()> {
+    let state = open_state().await?;
+    if let Some(owner) = state.owner().await? {
+        println!(
+            "This Core is already signed in (account {}). Run `copal logout` first to sign in as someone else.",
+            owner.user_id
+        );
+        return Ok(());
+    }
+    crate::application::auth_service::sign_in(&state, true).await;
+    Ok(())
+}
+
+/// `copal logout`: revoke the key and forget the owner. A running Core notices within a few
+/// minutes and shows a sign-in code again.
+async fn logout() -> Result<()> {
+    let state = open_state().await?;
+    if state.owner().await?.is_none() {
+        println!("This Core is not signed in.");
+        return Ok(());
+    }
+    crate::application::auth_service::sign_out(&state).await?;
+    println!(
+        "Signed out. Servers and files stay. A running Core shows a new code within five minutes."
+    );
+    Ok(())
+}
+
 async fn check() -> Result<()> {
     crate::init_tracing();
     let config = crate::config::Config::from_env()?;
@@ -205,7 +253,7 @@ async fn check() -> Result<()> {
         "Owner   : {}",
         owner
             .as_deref()
-            .unwrap_or("none, start Core to get a pairing code")
+            .unwrap_or("none, run copal auth or start Core to sign in")
     );
     Ok(())
 }

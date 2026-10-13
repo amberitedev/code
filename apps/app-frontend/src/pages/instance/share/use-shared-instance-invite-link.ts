@@ -2,7 +2,6 @@ import type { InviteLinkSettings } from '@modrinth/ui'
 import { computed, type Ref, ref, watch } from 'vue'
 
 import { config } from '@/config'
-import { toError } from '@/helpers/errors'
 import { create_shared_instance_invite_link } from '@/helpers/instance'
 
 const DEFAULT_INVITE_LINK_MAX_USES = 10
@@ -55,16 +54,20 @@ export function useSharedInstanceInviteLink(
 				replaceInviteId: details.value.inviteId,
 			})
 		} catch (error) {
-			throw toError(error)
+			// Reported here and not rethrown, so the link editor does not show the raw request error.
+			onError(error)
 		} finally {
 			pending.value = false
 		}
 	}
 
-	watch(instanceId, () => {
+	/** Forgets the current link, for when the shared instance it belongs to is gone. */
+	function reset() {
 		details.value = undefined
 		pending.value = false
-	})
+	}
 
-	return { details, pending, link, ensure, update }
+	watch(instanceId, reset)
+
+	return { details, pending, link, ensure, update, reset }
 }

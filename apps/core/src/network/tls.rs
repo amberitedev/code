@@ -1,7 +1,7 @@
 //! HTTPS for the Core API with a certificate the Core makes itself.
 //!
 //! There is no domain and no certificate authority. The App learns the certificate's SHA-256
-//! fingerprint at pairing and trusts only that. The same port still answers plain HTTP for callers
+//! fingerprint at sign-in and trusts only that. The same port still answers plain HTTP for callers
 //! on this computer or the local network, so local tools keep working.
 
 use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};

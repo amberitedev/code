@@ -12,6 +12,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { inject, onBeforeUnmount, onMounted } from 'vue'
 
+import { onboardingChecklistDismissed } from '@/components/ui/onboarding-checklist/dismissed'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import {
 	QUICK_INSTANCE_LIMIT_MAX,
@@ -28,6 +29,7 @@ import {
 import { globalSyncedOptionsQueryOptions, syncedOptionsKeys } from '@/helpers/synced-options'
 import { screenshotKeys } from '@/pages/instance/query-options.ts'
 import { appSettingsModalContextKey } from '@/providers/app-settings-modal'
+import { injectOnboardingChecklist } from '@/providers/onboarding-checklist'
 
 const appSettings = useAppSettings()
 const { formatMessage } = useVIntl()
@@ -37,6 +39,8 @@ const { updatePreferences } = injectUserPreferences()
 const settingsModal = inject(appSettingsModalContextKey, null)
 const quickInstances = useQuickInstanceLimit()
 const queryClient = useQueryClient()
+// Once every step is done the checklist is gone for good, so there is nothing left to show.
+const { showChecklist: checklistAvailable } = injectOnboardingChecklist()
 
 const messages = defineMessages({
 	syncAcrossDevicesTitle: {
@@ -89,6 +93,14 @@ const messages = defineMessages({
 		id: 'app.features-settings.show-skin-selector.description',
 		defaultMessage: 'Show a button in the left sidebar to open the skin selector.',
 	},
+	showGettingStartedTitle: {
+		id: 'app.features-settings.show-getting-started.title',
+		defaultMessage: 'Show Getting started checklist',
+	},
+	showGettingStartedDescription: {
+		id: 'app.features-settings.show-getting-started.description',
+		defaultMessage: 'Show the remaining setup steps at the top of the left sidebar.',
+	},
 	quickInstancesTitle: {
 		id: 'app.features-settings.quick-instances.title',
 		defaultMessage: 'Quick instances in sidebar',
@@ -119,6 +131,7 @@ type FeaturesSettingsState = {
 	showScreenshotsTab: boolean
 	showAllScreenshots: boolean
 	showSkinSelector: boolean
+	showGettingStarted: boolean
 	quickInstanceCount: number
 	showJumpIn: boolean
 }
@@ -138,6 +151,8 @@ function getFeaturesSettingsState(
 		showScreenshotsTab: settings.show_screenshots_tab_in_instances,
 		showAllScreenshots: globalSyncedOptions.screenshots,
 		showSkinSelector: settings.show_skin_selector_in_sidebar,
+		// Local to this install, like the Dismiss button on the checklist it mirrors.
+		showGettingStarted: !onboardingChecklistDismissed.value,
 		quickInstanceCount: quickInstances.limit.value ?? QUICK_INSTANCE_LIMIT_MAX,
 		showJumpIn: settings.show_jump_in,
 	}
@@ -197,6 +212,7 @@ const settingsMutation = useMutation({
 		appSettings.showScreenshotsTabInInstances = value.showScreenshotsTab
 		appSettings.showSkinSelectorInSidebar = value.showSkinSelector
 		appSettings.showJumpIn = value.showJumpIn
+		onboardingChecklistDismissed.value = !value.showGettingStarted
 
 		if (updateQuickInstanceCount) {
 			quickInstances.setLimit(value.quickInstanceCount)
@@ -354,6 +370,20 @@ onBeforeUnmount(() => {
 					id="show-skin-selector-in-sidebar"
 					v-model="current.showSkinSelector"
 					:aria-label="formatMessage(messages.showSkinSelectorTitle)"
+				/>
+			</div>
+
+			<div v-if="checklistAvailable" class="flex items-center justify-between gap-4">
+				<div>
+					<h3 class="m-0 text-lg font-semibold text-contrast">
+						{{ formatMessage(messages.showGettingStartedTitle) }}
+					</h3>
+					<p class="m-0 mt-1">{{ formatMessage(messages.showGettingStartedDescription) }}</p>
+				</div>
+				<Toggle
+					id="show-getting-started-checklist"
+					v-model="current.showGettingStarted"
+					:aria-label="formatMessage(messages.showGettingStartedTitle)"
 				/>
 			</div>
 

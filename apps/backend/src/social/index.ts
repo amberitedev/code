@@ -4,6 +4,7 @@ import { randomId } from '../common/crypto'
 import { ApiError, invalid, json, readBytes, readJson, routePath } from '../common/http'
 import { notificationResponse, type NotificationRow } from '../common/notifications'
 import type { Env, UserRow } from '../common/types'
+import { sweepFiles } from '../sharing'
 import { blockedEitherWay, patchPreferences, preferences } from './preferences'
 import { friendsStatuses, notifyUser } from './socket'
 
@@ -258,7 +259,15 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 		}
 		if (!action && method === 'DELETE') {
 			await requireOwner(request, env, target)
+			// Deleting the account cascades to its shared instances, Cores and their rows, but not to
+			// the files those instances hold in R2.
+			const instances = (
+				await env.DB.prepare('SELECT id FROM shared_instances WHERE owner_id = ?')
+					.bind(target.id)
+					.all<{ id: string }>()
+			).results
 			await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(target.id).run()
+			for (const instance of instances) await sweepFiles(env, instance.id)
 			return empty()
 		}
 		if (action === 'preferences' && ['GET', 'PATCH'].includes(method)) {

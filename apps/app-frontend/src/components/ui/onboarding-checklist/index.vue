@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { CheckIcon, RadioButtonIcon, XIcon } from '@modrinth/assets'
 import { Accordion, defineMessages, useVIntl } from '@modrinth/ui'
-import { useStorage } from '@vueuse/core'
 import { computed, onUnmounted, ref } from 'vue'
 
 import { injectOnboardingChecklist } from '@/providers/onboarding-checklist'
+
+import { onboardingChecklistDismissed } from './dismissed'
 
 const emit = defineEmits<{
 	'create-instance': []
@@ -20,8 +21,7 @@ const {
 	isReady,
 	showChecklist,
 } = injectOnboardingChecklist()
-// Dismissing is local to this install; the checklist itself still completes in the background.
-const dismissed = useStorage('onboarding-checklist-dismissed', false)
+const dismissed = onboardingChecklistDismissed
 const collapsedCornersVisible = ref(false)
 let collapseTimer: ReturnType<typeof setTimeout> | undefined
 

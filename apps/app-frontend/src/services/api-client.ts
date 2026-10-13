@@ -18,7 +18,7 @@ const appVersion = getVersion()
 export const apiClient: TauriModrinthClient = new TauriModrinthClient({
 	userAgent: async () => `modrinth/theseus/${await appVersion}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
-	// With our own account backend, hosting is the account's paired Cores, found through it.
+	// With our own account backend, hosting is the account's own Cores, found through it.
 	selfHostedHosting: Boolean(config.accountApiUrl),
 	// A Core's own certificate is checked in Rust; the WebView talks to a local address instead.
 	connectCore: (address, fingerprint) =>

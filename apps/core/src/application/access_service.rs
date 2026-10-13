@@ -122,7 +122,7 @@ pub async fn role(
     server_id: &str,
 ) -> Result<Option<Role>, ApiError> {
     let Some(owner) = state.owner().await? else {
-        return Err(ApiError::Forbidden("this Core is not paired".into()));
+        return Err(ApiError::Forbidden("this Core is not signed in".into()));
     };
     if owner.user_id == user_id {
         return Ok(Some(Role::Owner));
@@ -164,7 +164,7 @@ pub async fn visible_servers(
     user_id: &str,
 ) -> Result<Option<Vec<String>>, ApiError> {
     let Some(owner) = state.owner().await? else {
-        return Err(ApiError::Forbidden("this Core is not paired".into()));
+        return Err(ApiError::Forbidden("this Core is not signed in".into()));
     };
     if owner.user_id == user_id {
         return Ok(None);
@@ -200,10 +200,9 @@ pub async fn list(
     server_id: &str,
     created: &str,
 ) -> Result<Value, ApiError> {
-    let owner = state
-        .owner()
-        .await?
-        .ok_or_else(|| ApiError::Forbidden("this Core is not paired".into()))?;
+    let owner = state.owner().await?.ok_or_else(|| {
+        ApiError::Forbidden("this Core is not signed in".into())
+    })?;
     let mut users = vec![json!({
         "user": user_json(state, &owner.user_id).await?,
         "added_on": created,
@@ -233,10 +232,10 @@ async fn backend_key(state: &AppState) -> Result<String, ApiError> {
     state
         .owner()
         .await?
-        .and_then(|owner| owner.backend_key)
+        .map(|owner| owner.backend_key)
         .ok_or_else(|| {
             ApiError::Conflict(
-                "Pair this Core in the App before inviting people".into(),
+                "Sign this Core in before inviting people".into(),
             )
         })
 }
@@ -284,6 +283,12 @@ async fn send_invite(
                 ApiError::NotFound("No account has that name".into())
             }
             StatusCode::BAD_REQUEST => ApiError::BadRequest(reason.description),
+            StatusCode::FORBIDDEN => ApiError::Forbidden(
+                "You are not allowed to invite on this Core".into(),
+            ),
+            StatusCode::TOO_MANY_REQUESTS => ApiError::TooManyRequests(
+                "Too many invites, try again in a few minutes".into(),
+            ),
             _ => ApiError::ServiceUnavailable(format!(
                 "Amberite answered {status} to the invite"
             )),
@@ -536,7 +541,7 @@ pub async fn accept(
     Ok(accepted.rows_affected() > 0)
 }
 
-/// Forget everyone invited to this Core's servers. Used when the Core is unpaired: its next
+/// Forget everyone invited to this Core's servers. Used when the Core signs out: its next
 /// owner starts with nobody else.
 pub async fn forget_everyone(state: &AppState) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM server_users")

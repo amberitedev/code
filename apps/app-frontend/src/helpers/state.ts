@@ -26,7 +26,10 @@ export interface LoadingBar {
 	bar_type?: LoadingBarType
 }
 
-export type OpeningCommand = Extract<AppEvent, { type: 'command' }>['payload']
+export type OpeningCommand =
+	| Extract<AppEvent, { type: 'command' }>['payload']
+	// The App's own link: `amberite://approve/<code>` opens "Add Core" with the code filled in.
+	| { event: 'ApproveCore'; code: string }
 
 // Initialize the theseus API state
 // This should be called during the initializion/opening of the launcher

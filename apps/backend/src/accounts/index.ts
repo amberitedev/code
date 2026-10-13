@@ -98,6 +98,13 @@ async function queueEmail(env: Env, user: UserRow, kind: 'verify_email' | 'reset
 async function throttle(request: Request, env: Env) {
 	const key = `auth:${request.headers.get('CF-Connecting-IP') ?? 'local'}`
 	const now = Date.now()
+	const nowIso = new Date(now).toISOString()
+	await env.DB.batch([
+		env.DB.prepare('DELETE FROM auth_attempts WHERE expires < ?').bind(now),
+		env.DB.prepare('DELETE FROM auth_flows WHERE expires <= ?').bind(nowIso),
+		// An expired access token may still be refreshable, so keep it until refresh expires.
+		env.DB.prepare('DELETE FROM sessions WHERE refresh_expires <= ?').bind(nowIso),
+	])
 	const result = await env.DB.prepare(
 		'INSERT INTO auth_attempts (key,count,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN expires < ? THEN 1 ELSE count + 1 END, expires = CASE WHEN expires < ? THEN excluded.expires ELSE expires END RETURNING count',
 	)

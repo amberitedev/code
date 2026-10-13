@@ -62,7 +62,7 @@
 	"plugins": {
 		"deep-link": {
 			"desktop": {
-				"schemes": ["modrinth"]
+				"schemes": ["modrinth", "amberite"]
 			},
 			"mobile": []
 		}

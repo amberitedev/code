@@ -1,12 +1,13 @@
 pub mod access_service;
+pub mod auth_service;
 pub mod backup_service;
 pub mod fs_service;
 pub mod installation_service;
 pub mod instance_service;
 pub mod instance_status_service;
+pub mod java_service;
 pub mod mod_installer;
 pub mod mod_service;
-pub mod pairing_service;
 pub mod rcon_service;
 pub mod server_source_service;
 pub mod state;

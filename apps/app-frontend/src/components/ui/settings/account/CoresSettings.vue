@@ -13,7 +13,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
 import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
-import { coresQueryKey, openPairCoreModal, useCores } from '@/composables/use-cores'
+import { coresQueryKey, openAddCoreModal, useCores } from '@/composables/use-cores'
 import { coreOffline, serversQueryKey, useServers } from '@/helpers/linked-servers'
 
 const client = injectModrinthClient()
@@ -32,27 +32,27 @@ function isOnline(core: Archon.Cores.v1.Core) {
 	return servers.value ? !servers.value.offline_cores?.includes(core.id) : undefined
 }
 
-const confirmUnpair = ref<InstanceType<typeof ConfirmModal> | null>(null)
-// The Core the confirmation is about, then the one being unpaired.
+const confirmRemove = ref<InstanceType<typeof ConfirmModal> | null>(null)
+// The Core the confirmation is about, then the one being removed.
 const selected = ref<Archon.Cores.v1.Core | null>(null)
-const unpairingId = ref<string | null>(null)
+const removingId = ref<string | null>(null)
 
-function askUnpair(core: Archon.Cores.v1.Core) {
+function askRemove(core: Archon.Cores.v1.Core) {
 	selected.value = core
-	confirmUnpair.value?.show()
+	confirmRemove.value?.show()
 }
 
-async function unpair() {
+async function remove() {
 	const core = selected.value
-	if (!core || unpairingId.value) return
-	unpairingId.value = core.id
+	if (!core || removingId.value) return
+	removingId.value = core.id
 	try {
-		await client.archon.cores_v1.unpair(core)
+		await client.archon.cores_v1.revoke(core)
 	} catch (cause) {
-		console.error('Failed to unpair Core', cause)
+		console.error('Failed to remove Core', cause)
 		addNotification({
 			type: 'error',
-			title: `Could not unpair ${core.name}`,
+			title: `Could not remove ${core.name}`,
 			text: 'Check your connection, then try again.',
 		})
 	} finally {
@@ -60,7 +60,7 @@ async function unpair() {
 			queryClient.invalidateQueries({ queryKey: coresQueryKey }),
 			queryClient.invalidateQueries({ queryKey: serversQueryKey }),
 		])
-		unpairingId.value = null
+		removingId.value = null
 	}
 }
 </script>
@@ -68,24 +68,24 @@ async function unpair() {
 <template>
 	<AccountRequired
 		v-if="!auth.user.value"
-		description="Sign in to pair a Core and host servers on a computer you control"
+		description="Sign in to add a Core and host servers on a computer you control"
 	/>
 	<div v-else class="flex flex-col gap-4">
 		<ConfirmModal
-			ref="confirmUnpair"
-			:title="`Unpair ${selected?.name ?? 'this Core'}?`"
-			description="Its servers and files stay on the Core, but you can't manage them from the App until you pair it again. The Core will show a new pairing code."
-			proceed-label="Unpair"
+			ref="confirmRemove"
+			:title="`Remove ${selected?.name ?? 'this Core'}?`"
+			description="The Core is signed out of your account. Its servers and files stay on it, but you can't manage them from the App until you add it again. The Core will show a new code."
+			proceed-label="Remove"
 			:proceed-icon="UnlinkIcon"
-			@proceed="unpair"
+			@proceed="remove"
 		/>
 		<div class="flex items-center justify-between gap-4">
 			<div class="flex flex-col gap-1">
 				<h2 class="m-0 text-lg font-semibold text-contrast">Cores</h2>
 				<p class="m-0 text-secondary">A Core runs your servers on a computer you control.</p>
 			</div>
-			<Button type="colored" color="brand" @click="openPairCoreModal()">
-				<LinkIcon aria-hidden="true" /> Pair a Core
+			<Button type="colored" color="brand" @click="openAddCoreModal()">
+				<LinkIcon aria-hidden="true" /> Add Core
 			</Button>
 		</div>
 		<div v-if="error && !data" class="flex items-center justify-between gap-4">
@@ -95,7 +95,7 @@ async function unpair() {
 			</Button>
 		</div>
 		<p v-else-if="data && !cores.length" class="m-0 text-secondary">
-			No Core is paired yet. Start a Core, then enter the code it shows.
+			No Core yet. Start a Core, then enter the code it shows.
 		</p>
 		<div v-else class="flex flex-col">
 			<div
@@ -115,13 +115,13 @@ async function unpair() {
 							{{ isOnline(core) ? 'Online' : 'Offline' }} ·
 						</template>
 						<span class="truncate">
-							{{ core.address }} · Paired {{ formatRelativeTime(core.created) }}
+							{{ core.address }} · Added {{ formatRelativeTime(core.created) }}
 						</span>
 					</span>
 				</div>
-				<Button :disabled="unpairingId !== null" @click="askUnpair(core)">
+				<Button :disabled="removingId !== null" @click="askRemove(core)">
 					<UnlinkIcon aria-hidden="true" />
-					{{ unpairingId === core.id ? 'Unpairing' : 'Unpair' }}
+					{{ removingId === core.id ? 'Removing' : 'Remove' }}
 				</Button>
 			</div>
 		</div>

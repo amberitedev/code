@@ -34,9 +34,9 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
     ) -> Result<Self, Self::Rejection> {
         let SignedIn(account) =
             SignedIn::from_request_parts(parts, state).await?;
-        // An unowned Core refuses everything except pairing.
+        // A signed-out Core refuses everything.
         let owner = state.owner().await?.ok_or_else(|| {
-            ApiError::Forbidden("this Core is not paired".into())
+            ApiError::Forbidden("this Core is not signed in".into())
         })?;
         if owner.user_id != account.id {
             return Err(ApiError::Forbidden(
