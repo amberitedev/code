@@ -23,7 +23,6 @@
 					:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
 					class="navtab-link no-click-animation button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
-					@pointerdown="onLinkPointerDown($event, index)"
 					@click="onLinkClick($event, index)"
 					@mouseenter="link.onHover?.()"
 					@focus="link.onHover?.()"
@@ -344,7 +343,8 @@ function updateActiveTab() {
 	setActiveTab(index, isSubpage)
 }
 
-// Moves the pill on the click itself instead of waiting for the navigation to commit. The route
+// Moves the pill on the click itself instead of waiting for the navigation to commit. It reacts to
+// the release, not the press: holding the mouse down on a tab must not move anything. The route
 // watcher and the failure hook below correct it if the navigation lands somewhere else.
 //
 // RouterLink has already called preventDefault by the time this runs, so only the clicks it
@@ -353,27 +353,6 @@ function onLinkClick(event: MouseEvent, index: number) {
 	if (event.button !== 0) return
 	if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
 	setActiveTab(index, false)
-}
-
-// A mouse press already moves the pill, so its animation is running on the compositor by the time
-// the click starts rendering the next page. Letting go anywhere else puts the pill back.
-function onLinkPointerDown(event: PointerEvent, index: number) {
-	if (event.pointerType !== 'mouse' || event.button !== 0) return
-	if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
-	const tab = event.currentTarget
-	setActiveTab(index, false)
-
-	const release = new AbortController()
-	const settle = (released: Event) => {
-		release.abort()
-		if (released.type === 'pointerup' && tab instanceof Node && released.target instanceof Node) {
-			if (tab.contains(released.target)) return
-		}
-		updateActiveTab()
-	}
-	for (const type of ['pointerup', 'pointercancel', 'dragend']) {
-		window.addEventListener(type, settle, { signal: release.signal })
-	}
 }
 
 const initialActive = computeActiveIndex()
