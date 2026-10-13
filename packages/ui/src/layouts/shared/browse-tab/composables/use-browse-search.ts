@@ -41,10 +41,6 @@ export interface UseBrowseSearchOptions {
 	 * that is cached shows in the same frame as the action that started it.
 	 */
 	peekSearch?: (params: string) => BrowseSearchResponse | undefined
-	/** Caches the results for `params` without showing them. Enables `prefetchProjectType`. */
-	prefetchSearch?: (params: string) => void
-	/** The provided filters another project type would get, to prefetch its search. */
-	providedFiltersFor?: (projectType: string) => FilterValue[]
 	persistentQueryParams: string[]
 	getExtraQueryParams?: () => Record<string, string | undefined>
 	maxResultsOptions?: ComputedRef<number[]>
@@ -82,8 +78,6 @@ export interface BrowseSearchState {
 	excludeLoaders: ComputedRef<boolean>
 
 	refreshSearch: () => Promise<void>
-	/** Call when a project type tab is hovered, so its results are usually ready by the click. */
-	prefetchProjectType: (projectType: string) => void
 	setPage: (page: number) => Promise<void>
 	clearSearch: () => void
 	onFilterChange: () => void
@@ -114,8 +108,6 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		filters,
 		sortTypes,
 		requestParams,
-		createFilterTypes,
-		createSwitchRequestParams,
 		createPageParams,
 	} = useSearch(
 		projectTypes,
@@ -434,47 +426,6 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		refreshing.value = false
 	}
 
-	function prefetchProjectType(projectType: string) {
-		if (!options.prefetchSearch || !active.value || projectType === options.projectType.value) {
-			return
-		}
-		const params = getSwitchRequestParams(projectType)
-		if (params) {
-			options.prefetchSearch(params)
-		}
-	}
-
-	// Mirrors what the project type watcher does on a switch, without switching.
-	function getSwitchRequestParams(projectType: string): string | undefined {
-		const toServer = projectType === 'server'
-		const filterTypes = toServer
-			? serverFilterTypes.value
-			: createFilterTypes([projectType as ProjectType])
-		const selected = toServer ? serverCurrentFilters.value : currentFilters.value
-		const prefs = compatibleAdvancedFilters(advancedPrefs.value, filterTypes)
-		const switchFilters = prefs.length > 0 ? replaceAdvancedFilters(selected, prefs) : selected
-		const provided = options.providedFiltersFor?.(projectType) ?? providedFiltersOrEmpty.value
-
-		if (toServer) {
-			// The server request cannot be built ahead, so it is only prefetched when a switch would
-			// leave it as it is now. Provided project ids are the only provided filters it reads.
-			const unchanged =
-				query.value === '' &&
-				currentPage.value === 1 &&
-				serverCurrentSortType.value.name === 'relevance' &&
-				sameOptionIds(getAdvancedOptionIds(selected), getAdvancedOptionIds(switchFilters)) &&
-				![...provided, ...providedFiltersOrEmpty.value].some((f) => f.type === 'project_id')
-			return unchanged ? serverRequestParams.value : undefined
-		}
-
-		return createSwitchRequestParams(
-			[projectType as ProjectType],
-			filterTypes,
-			switchFilters,
-			provided,
-		)
-	}
-
 	function updateUrlParams() {
 		if (!active.value) {
 			return
@@ -541,7 +492,6 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		deprioritizedTags,
 		excludeLoaders,
 		refreshSearch,
-		prefetchProjectType,
 		setPage,
 		clearSearch,
 		onFilterChange,

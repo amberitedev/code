@@ -429,12 +429,11 @@ const hideInstalledModpacks = computed({
 	set: (value: boolean) => setHideInstalledModpacks(value),
 })
 
-// Take the project type so a tab's search can be built before switching to it.
-function getInstanceFilters(pt: ProjectType) {
+const instanceFilters = computed(() => {
 	const filters = []
 
-	if (instance.value && pt !== 'resourcepack') {
-		const isVanillaShader = pt === 'shader' && instance.value.loader === 'vanilla'
+	if (instance.value && projectType.value !== 'resourcepack') {
+		const isVanillaShader = projectType.value === 'shader' && instance.value.loader === 'vanilla'
 		const gameVersion = instance.value.game_version
 		if (gameVersion && !isVanillaShader) {
 			filters.push({ type: 'game_version', option: gameVersion })
@@ -443,7 +442,7 @@ function getInstanceFilters(pt: ProjectType) {
 		const platform = instance.value.loader
 		const supportedModLoaders = ['fabric', 'forge', 'quilt', 'neoforge']
 
-		if (platform && pt === 'mod' && supportedModLoaders.includes(platform)) {
+		if (platform && projectType.value === 'mod' && supportedModLoaders.includes(platform)) {
 			filters.push({ type: 'mod_loader', option: platform })
 		}
 		if (isVanillaShader) {
@@ -456,8 +455,8 @@ function getInstanceFilters(pt: ProjectType) {
 	}
 
 	if (
-		(instance.value || pt === 'modpack') &&
-		(pt === 'modpack' ? hideInstalledModpacks.value : instanceHideInstalled.value) &&
+		(instance.value || projectType.value === 'modpack') &&
+		(projectType.value === 'modpack' ? hideInstalledModpacks.value : instanceHideInstalled.value) &&
 		hiddenInstanceProjectIds.value.size > 0
 	) {
 		for (const id of hiddenInstanceProjectIds.value) {
@@ -466,7 +465,7 @@ function getInstanceFilters(pt: ProjectType) {
 	}
 
 	return filters
-}
+})
 
 const serverHideInstalled = ref(false)
 const hideSelectedServerInstalls = ref(false)
@@ -491,9 +490,10 @@ watch(
 	{ immediate: true },
 )
 
-function getServerContextFilters(pt: ProjectType) {
+const serverContextFilters = computed(() => {
 	const filters: { type: string; option: string; negative?: boolean }[] = []
 	if (!serverContextServerData.value) return filters
+	const pt = projectType.value
 
 	if (pt !== 'modpack') {
 		const gameVersion = serverContextServerData.value.mc_version
@@ -534,13 +534,11 @@ function getServerContextFilters(pt: ProjectType) {
 	}
 
 	return filters
-}
+})
 
-function getProvidedFilters(pt: ProjectType) {
-	return isServerContext.value ? getServerContextFilters(pt) : getInstanceFilters(pt)
-}
-
-const combinedProvidedFilters = computed(() => getProvidedFilters(projectType.value))
+const combinedProvidedFilters = computed(() =>
+	isServerContext.value ? serverContextFilters.value : instanceFilters.value,
+)
 
 const {
 	serverPings,
@@ -743,7 +741,6 @@ const selectableProjectTypes = computed(() => {
 	}
 
 	const suffix = projectTypeTabSuffix.value
-	const prefetch = (type: ProjectType) => () => searchState.prefetchProjectType(type)
 
 	if (isSetupServerContext.value) {
 		return [
@@ -760,35 +757,22 @@ const selectableProjectTypes = computed(() => {
 			label: formatMessage(messages.modpacksProjectType),
 			href: `/browse/modpack${suffix}`,
 			shown: modpacks,
-			onHover: prefetch('modpack'),
 		},
-		{
-			label: formatMessage(messages.modsProjectType),
-			href: `/browse/mod${suffix}`,
-			shown: mods,
-			onHover: prefetch('mod'),
-		},
+		{ label: formatMessage(messages.modsProjectType), href: `/browse/mod${suffix}`, shown: mods },
 		{
 			label: formatMessage(messages.resourcePacksProjectType),
 			href: `/browse/resourcepack${suffix}`,
-			onHover: prefetch('resourcepack'),
 		},
 		{
 			label: formatMessage(messages.dataPacksProjectType),
 			href: `/browse/datapack${suffix}`,
 			shown: dataPacks,
-			onHover: prefetch('datapack'),
 		},
-		{
-			label: formatMessage(messages.shadersProjectType),
-			href: `/browse/shader${suffix}`,
-			onHover: prefetch('shader'),
-		},
+		{ label: formatMessage(messages.shadersProjectType), href: `/browse/shader${suffix}` },
 		{
 			label: formatMessage(messages.serversProjectType),
 			href: `/browse/server${suffix}`,
 			shown: !instance.value,
-			onHover: prefetch('server'),
 		},
 	]
 })
@@ -1225,11 +1209,8 @@ const searchState = useBrowseSearch({
 	tags,
 	active: computed(() => browseRouteActive.value && searchContextReady.value),
 	providedFilters: combinedProvidedFilters,
-	providedFiltersFor: (type) => getProvidedFilters(type as ProjectType),
 	search,
 	peekSearch,
-	prefetchSearch: (requestParams) =>
-		void queryClient.prefetchQuery(searchQueryOptions(requestParams)),
 	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
