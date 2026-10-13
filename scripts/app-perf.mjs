@@ -9,6 +9,7 @@
 //   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=19222 --remote-allow-origins=*" vp run dev
 //   node scripts/app-perf.mjs run --label baseline
 //   node scripts/app-perf.mjs run --label after --baseline .data/perf/baseline.json
+//   node scripts/app-perf.mjs run --label browse --groups browse,project
 //   node scripts/app-perf.mjs eval "location.pathname"
 //
 // Dev mode serves unbundled modules, so numbers rank pages and compare before/after. They are not
@@ -28,48 +29,95 @@ const QUIET_MS = 700
 const SETTLE_TIMEOUT_MS = 15_000
 
 // Each step clicks one element from wherever the previous step left the App. `find` is evaluated in
-// the page and returns the element to click.
+// the page and returns the element to click. `--groups` limits a run to some groups.
 const TOUR = [
-	{ name: 'Home', find: `document.querySelector('.app-grid-navbar a[href="/"]')` },
+	{ name: 'Home', group: 'home', find: `document.querySelector('.app-grid-navbar a[href="/"]')` },
 	{
 		name: 'Browse',
+		group: 'browse',
 		find: `document.querySelector('.app-grid-navbar a[href="/browse/modpack"]')`,
 	},
-	{ name: 'Browse: Mods tab', find: `document.querySelector('nav a[href="/browse/mod"]')` },
+	{
+		name: 'Browse: Mods tab',
+		group: 'browse',
+		find: `document.querySelector('nav a[href="/browse/mod"]')`,
+	},
 	{
 		name: 'Browse: Resource Packs tab',
+		group: 'browse',
 		find: `document.querySelector('nav a[href^="/browse/resourcepack"]')`,
 	},
 	{
 		name: 'Browse: Modpacks tab',
+		group: 'browse',
 		find: `document.querySelector('nav a[href^="/browse/modpack"]')`,
 	},
 	{
 		name: 'Project',
+		group: 'project',
 		find: `document.querySelector('.app-viewport a[href^="/project/"]')`,
 	},
 	{
 		name: 'Project: Versions tab',
+		group: 'project',
 		find: `document.querySelector('nav a[href*="/versions"]')`,
 	},
 	{
 		name: 'Project: Gallery tab',
+		group: 'project',
 		find: `document.querySelector('nav a[href*="/gallery"]')`,
 	},
-	{ name: 'Home (from project)', find: `document.querySelector('.app-grid-navbar a[href="/"]')` },
+	{
+		name: 'Home (from project)',
+		group: 'project',
+		find: `document.querySelector('.app-grid-navbar a[href="/"]')`,
+	},
 	{
 		name: 'Instance',
+		group: 'instance',
 		find: `document.querySelector('.app-grid-navbar a[href^="/instance/"]')`,
 	},
-	{ name: 'Instance: Worlds tab', find: `document.querySelector('nav a[href$="/worlds"]')` },
-	{ name: 'Instance: Files tab', find: `document.querySelector('nav a[href$="/files"]')` },
-	{ name: 'Instance: Logs tab', find: `document.querySelector('nav a[href$="/logs"]')` },
-	{ name: 'Skins', find: `document.querySelector('.app-grid-navbar a[href="/skins"]')` },
+	{
+		name: 'Instance: Worlds tab',
+		group: 'instance',
+		find: `document.querySelector('nav a[href$="/worlds"]')`,
+	},
+	{
+		name: 'Instance: Files tab',
+		group: 'instance',
+		find: `document.querySelector('nav a[href$="/files"]')`,
+	},
+	{
+		name: 'Instance: Logs tab',
+		group: 'instance',
+		find: `document.querySelector('nav a[href$="/logs"]')`,
+	},
+	{
+		name: 'Skins',
+		group: 'skins',
+		find: `document.querySelector('.app-grid-navbar a[href="/skins"]')`,
+	},
 	{
 		name: 'Servers',
+		group: 'servers',
 		find: `document.querySelector('.app-grid-navbar a[href="/hosting/manage"]')`,
 	},
 ]
+
+// Steps a group needs clicked first to reach its starting page. They are clicked but not recorded.
+const LEAD_IN = { project: ['Browse'] }
+
+// Picks the steps for a run: a custom tour file, some groups of the built-in tour, or all of it.
+// A custom tour is a JSON array of { name, find, leadIn? }.
+function selectTour(options) {
+	if (options.tour) return JSON.parse(readFileSync(options.tour, 'utf8'))
+	if (!options.groups) return TOUR
+	const groups = options.groups.split(',')
+	const leadIns = new Set(groups.flatMap((group) => LEAD_IN[group] ?? []))
+	return TOUR.filter((step) => groups.includes(step.group) || leadIns.has(step.name)).map(
+		(step) => ({ ...step, leadIn: !groups.includes(step.group) }),
+	)
+}
 
 // Installed once per page load. Collects raw entries; all math happens in Node.
 const RECORDER = `(() => {
@@ -410,17 +458,18 @@ async function run(options) {
 		)
 	}
 
-	const results = new Map(TOUR.map((step) => [step.name, []]))
+	const tour = selectTour(options)
+	const results = new Map(tour.map((step) => [step.name, []]))
 	const skipped = new Set()
 	// Pass 0 loads every page's modules and data and is thrown away.
 	for (let pass = 0; pass <= options.passes; pass++) {
-		for (const step of TOUR) {
+		for (const step of tour) {
 			const measurement = await measureStep(page, step)
 			if (!measurement) {
 				skipped.add(step.name)
 				continue
 			}
-			if (pass > 0) results.get(step.name).push(measurement)
+			if (pass > 0 && !step.leadIn) results.get(step.name).push(measurement)
 			process.stderr.write(
 				`${pass === 0 ? 'warm-up' : `pass ${pass}`}  ${step.name}  ${Math.round(measurement.settle)}ms${measurement.settled ? '' : '  (never settled)'}\n`,
 			)
@@ -431,17 +480,16 @@ async function run(options) {
 	await page.send('Profiler.enable')
 	await page.send('Profiler.setSamplingInterval', { interval: 500 })
 	const profiles = new Map()
-	for (const step of TOUR) {
+	for (const step of tour) {
 		const profile = await measureStep(page, step, true)
 		if (profile) profiles.set(step.name, profile)
-		process.stderr.write(`profile  ${step.name}
-`)
+		process.stderr.write(`profile  ${step.name}\n`)
 	}
 
 	const steps = [...results]
 		.filter(([, runs]) => runs.length > 0)
 		.map(([name, runs]) => ({ name, median: summarize(runs), hotspots: profiles.get(name), runs }))
-	const output = join(root, '.data', 'perf', `${options.label}.json`)
+	const output = join(options.out, `${options.label}.json`)
 	mkdirSync(dirname(output), { recursive: true })
 	writeFileSync(
 		output,
@@ -456,6 +504,12 @@ async function run(options) {
 		steps,
 		options.baseline ? JSON.parse(readFileSync(options.baseline, 'utf8')) : undefined,
 	)
+	for (const step of steps) {
+		const functions = step.hotspots?.functions
+			.slice(0, 6)
+			.map((entry) => `${entry.name} ${entry.ms}ms`)
+		if (functions?.length) console.log(`${step.name} hotspots:\n  ${functions.join('\n  ')}`)
+	}
 	if (skipped.size) console.log(`Skipped (element not found): ${[...skipped].join(', ')}`)
 	console.log(`Saved ${output}`)
 	page.close()
@@ -468,6 +522,9 @@ const { values, positionals } = parseArgs({
 		label: { type: 'string', default: 'run' },
 		passes: { type: 'string', default: '3' },
 		baseline: { type: 'string' },
+		groups: { type: 'string' },
+		tour: { type: 'string' },
+		out: { type: 'string', default: join(root, '.data', 'perf') },
 	},
 })
 
@@ -480,7 +537,7 @@ if (command === 'run') {
 	page.close()
 } else {
 	console.log(
-		'Usage: node scripts/app-perf.mjs <run|eval> [--label name] [--passes 3] [--baseline file] [--port 19222]',
+		'Usage: node scripts/app-perf.mjs <run|eval> [--label name] [--passes 3] [--baseline file] [--groups home,browse,project,instance,skins,servers] [--tour file.json] [--out dir] [--port 19222]',
 	)
 	process.exitCode = 1
 }
