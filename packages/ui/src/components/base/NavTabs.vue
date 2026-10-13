@@ -65,7 +65,7 @@
 			<div
 				v-if="sliderReady && currentActiveIndex !== -1"
 				ref="sliderElement"
-				class="pointer-events-none absolute origin-top-left rounded-full"
+				class="pointer-events-none absolute inset-0"
 				:class="subpageSelected ? 'bg-button-bg' : 'bg-button-bgSelected'"
 				:style="sliderStyle"
 				aria-hidden="true"
@@ -136,12 +136,16 @@ const sliderReady = ref(false)
 
 const filteredLinks = computed(() => props.links.filter((link) => link.shown ?? true))
 
-const sliderStyle = computed(() => ({
-	left: `${sliderRect.value.left}px`,
-	top: `${sliderRect.value.top}px`,
-	width: `${sliderRect.value.width}px`,
-	height: `${sliderRect.value.height}px`,
-}))
+// The pill covers the whole bar and is clipped down to one tab, so each of its edges can move on
+// its own without resizing anything.
+function clipTo(left: number, top: number, right: number, bottom: number) {
+	return `inset(${top}px calc(100% - ${right}px) calc(100% - ${bottom}px) ${left}px round 9999px)`
+}
+
+const sliderStyle = computed(() => {
+	const { left, top, width, height } = sliderRect.value
+	return { clipPath: clipTo(left, top, left + width, top + height) }
+})
 
 const isActiveAndNotSubpage = computed(
 	() => (index: number) => currentActiveIndex.value === index && !subpageSelected.value,
@@ -245,10 +249,18 @@ function getSliderRect(): SliderRect | null {
 
 let sliderAnimation: Animation | undefined
 
+// How long each edge of the pill takes to move, and how long the trailing edge waits first.
+const EDGE_MS = 80
+const TRAIL_DELAY_MS = 175
+
 /**
- * Moves the pill under the active tab. The pill is placed at its final box right away and the
- * move is played back as a transform animation from the previous box, so it runs on the
- * compositor and stays smooth while the page below is rendering.
+ * Moves the pill under the active tab.
+ *
+ * THE PILL MUST SLIDE. Its leading edge moves to the new tab first and its trailing edge follows,
+ * so the pill stretches across and then closes up. Do not replace this with a FLIP animation, a
+ * transform scale, a fade, or a jump: scaling squashes the rounded ends and reads as the pill
+ * flipping over. Keep it off layout properties (left, right, width); clip-path keeps the slide
+ * without them.
  */
 function positionSlider(animate = true) {
 	const next = getSliderRect()
@@ -272,14 +284,38 @@ function positionSlider(animate = true) {
 	sliderAnimation = undefined
 	if (!animate || !slider || !previous.width || !next.width || !next.height) return
 
+	const from = {
+		left: previous.left,
+		top: previous.top,
+		right: previous.left + previous.width,
+		bottom: previous.top + previous.height,
+	}
+	const to = {
+		left: next.left,
+		top: next.top,
+		right: next.left + next.width,
+		bottom: next.top + next.height,
+	}
+	// The edge facing the direction of travel leads; the other one waits.
+	const movingRight = to.left >= from.left
+	const movingDown = to.top >= from.top
+	const stretched = clipTo(
+		movingRight ? from.left : to.left,
+		movingDown ? from.top : to.top,
+		movingRight ? to.right : from.right,
+		movingDown ? to.bottom : from.bottom,
+	)
+	const duration = TRAIL_DELAY_MS + EDGE_MS
+	const easing = 'cubic-bezier(0.4, 0, 0.2, 1)'
+
 	sliderAnimation = slider.animate(
 		[
-			{
-				transform: `translate(${previous.left - next.left}px, ${previous.top - next.top}px) scale(${previous.width / next.width}, ${previous.height / next.height})`,
-			},
-			{ transform: 'none' },
+			{ clipPath: clipTo(from.left, from.top, from.right, from.bottom), easing },
+			{ clipPath: stretched, offset: EDGE_MS / duration, easing: 'linear' },
+			{ clipPath: stretched, offset: TRAIL_DELAY_MS / duration, easing },
+			{ clipPath: clipTo(to.left, to.top, to.right, to.bottom) },
 		],
-		{ duration: 150, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
+		{ duration },
 	)
 }
 
