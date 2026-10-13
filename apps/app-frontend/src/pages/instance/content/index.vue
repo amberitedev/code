@@ -122,7 +122,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ExportModal from '@/components/ui/ExportModal.vue'
@@ -1566,23 +1566,10 @@ async function initProjects(cacheBehaviour?: CacheBehaviour, staleTime = 0) {
 	applyContentData(contentData)
 }
 
-// The fetch result last copied into `projects`. initProjects and the contentQuery watcher both
-// see every fetch, so this keeps one result from rebuilding the list twice. A refetch always
-// applies, even with identical data, because it also resets local optimistic edits.
-let appliedContent: { data: InstanceContentData; updatedAt: number } | null = null
-
-function applyContentData(observedContentData: InstanceContentData) {
-	const contentData = toRaw(observedContentData)
+function applyContentData(contentData: InstanceContentData) {
 	if (contentData.path !== instance.value.id) {
 		return false
 	}
-
-	const updatedAt =
-		queryClient.getQueryState(instanceKeys.content(contentData.path))?.dataUpdatedAt ?? 0
-	if (appliedContent?.data === contentData && appliedContent.updatedAt === updatedAt) {
-		return true
-	}
-	appliedContent = { data: contentData, updatedAt }
 
 	if (!contentData.contentItems) {
 		loading.value = false

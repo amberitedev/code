@@ -23,7 +23,7 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { useSessionStorage } from '@vueuse/core'
 import { chunk } from 'es-toolkit'
-import { computed, type ComputedRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import Avatar from '#ui/components/base/Avatar.vue'
 import { Button, type ButtonMenuOption, TeleportOverflowMenu } from '#ui/components/base/buttons'
@@ -232,27 +232,18 @@ const sortOptions = computed<ButtonMenuOption[]>(() => [
 	},
 ])
 
-// One collator and one lowercased name per item, instead of both per comparison. It orders
-// strings exactly like `localeCompare` without arguments.
-const collator = new Intl.Collator()
-
 const sortedItems = computed(() => {
 	const items = [...ctx.items.value]
-	const sortNames = new Map<ContentItem, string>()
-	const sortName = (item: ContentItem) => {
-		let name = sortNames.get(item)
-		if (name === undefined) {
-			name = (item.project?.title ?? item.file_name).toLowerCase()
-			sortNames.set(item, name)
-		}
-		return name
-	}
 	switch (sortMode.value) {
 		case 'alphabetical-desc':
-			return items.sort(
-				(a, b) =>
-					collator.compare(sortName(b), sortName(a)) || collator.compare(a.file_name, b.file_name),
-			)
+			return items.sort((a, b) => {
+				const nameA = a.project?.title ?? a.file_name
+				const nameB = b.project?.title ?? b.file_name
+				return (
+					nameB.toLowerCase().localeCompare(nameA.toLowerCase()) ||
+					a.file_name.localeCompare(b.file_name)
+				)
+			})
 		case 'date-added-newest':
 			return items.sort((a, b) => {
 				const dateA = a.date_added ?? ''
@@ -266,10 +257,14 @@ const sortedItems = computed(() => {
 				return dateA.localeCompare(dateB) || a.file_name.localeCompare(b.file_name)
 			})
 		default:
-			return items.sort(
-				(a, b) =>
-					collator.compare(sortName(a), sortName(b)) || collator.compare(a.file_name, b.file_name),
-			)
+			return items.sort((a, b) => {
+				const nameA = a.project?.title ?? a.file_name
+				const nameB = b.project?.title ?? b.file_name
+				return (
+					nameA.toLowerCase().localeCompare(nameB.toLowerCase()) ||
+					a.file_name.localeCompare(b.file_name)
+				)
+			})
 	}
 })
 
@@ -450,21 +445,6 @@ const filteredItems = computed(() => {
 	const searched = search(sorted)
 	return applyMetadataFilters(applyFilters(searched))
 })
-// Overflow menus are built per item on first read and cached until what they depend on changes.
-// The table only reads them for the rows it renders, so a long list never builds every menu.
-const overflowOptionsByItem = new WeakMap<
-	ContentItem,
-	ComputedRef<ButtonMenuOption[] | undefined>
->()
-function overflowOptionsFor(item: ContentItem) {
-	let options = overflowOptionsByItem.get(item)
-	if (!options) {
-		options = computed(() => ctx.getOverflowOptions?.(item))
-		overflowOptionsByItem.set(item, options)
-	}
-	return options.value
-}
-
 const tableItems = computed<ContentCardTableItem[]>(() => {
 	const items = filteredItems.value.map((item) => {
 		const base = ctx.mapToTableItem(item)
@@ -489,9 +469,7 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 			clientWarning,
 			hideDelete: base.hideDelete,
 			hideSwitchVersion: base.hideSwitchVersion ?? !base.versionLink,
-			get overflowOptions() {
-				return overflowOptionsFor(item)
-			},
+			overflowOptions: ctx.getOverflowOptions?.(item),
 		}
 	})
 

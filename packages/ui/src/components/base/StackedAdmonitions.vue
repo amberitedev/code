@@ -186,10 +186,8 @@ const springTransition = computed(() =>
 		? { duration: 0 }
 		: { type: 'spring' as const, stiffness: 260, damping: 32 },
 )
-// A lone alert that appears takes its space at once. Easing the height would push the page
-// content below it down frame by frame while that page is still loading in.
 const heightTransition = computed(() =>
-	singleItemEntrance.value ? { duration: 0 } : springTransition.value,
+	singleItemEntrance.value ? { duration: 0.12, ease: 'easeOut' as const } : springTransition.value,
 )
 
 const exitTransition = computed(() =>
@@ -392,7 +390,7 @@ watch(containerHeight, (height, previousHeight) => {
 		}
 
 		containerHeightSettled.value =
-			prefersReducedMotion.value || !initialMeasurementSettled.value || openingSingleItem
+			prefersReducedMotion.value || (!initialMeasurementSettled.value && !openingSingleItem)
 	}
 })
 
