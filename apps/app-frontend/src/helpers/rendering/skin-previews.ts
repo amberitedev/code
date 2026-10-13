@@ -9,6 +9,8 @@ interface PreviewEntry {
 	promise: Promise<RenderResult | undefined>
 }
 
+// Loaded previews stay here after their last card unmounts, so the next visit shows them without
+// reading storage again. `cleanupUnusedPreviews` drops the ones whose skin no longer exists.
 const previews = new Map<string, PreviewEntry>()
 let renderQueue: Promise<unknown> = Promise.resolve()
 let pendingRenders = 0
@@ -17,6 +19,7 @@ export function getSkinPreviewKey(skin: Skin): string {
 	return `ears-2-fixed-uvs+${skin.texture_key}+${skin.variant}+${skin.cape_id ?? 'no-cape'}`
 }
 
+/** `result` is set when the preview is already loaded, so a card can show it without waiting. */
 export function acquireSkinPreview(skin: Skin, capes: Cape[]) {
 	const key = getSkinPreviewKey(skin)
 	let entry = previews.get(key)
@@ -58,19 +61,26 @@ export function acquireSkinPreview(skin: Skin, capes: Cape[]) {
 	let released = false
 	return {
 		promise: acquired.promise,
+		result: acquired.result,
 		release: () => {
 			if (released) return
 			released = true
-			if (--acquired.users > 0) return
-			if (acquired.result) URL.revokeObjectURL(acquired.result.forwards)
+			if (--acquired.users > 0 || acquired.result) return
 			if (previews.get(key) === acquired) previews.delete(key)
 		},
 	}
 }
 
 export async function cleanupUnusedPreviews(skins: Skin[]): Promise<void> {
+	const validKeys = new Set(skins.map(getSkinPreviewKey))
+	for (const [key, entry] of previews) {
+		if (entry.users > 0 || !entry.result || validKeys.has(key)) continue
+		URL.revokeObjectURL(entry.result.forwards)
+		previews.delete(key)
+	}
+
 	await Promise.all([
-		skinPreviewStorage.cleanupInvalidKeys(new Set(skins.map(getSkinPreviewKey))),
+		skinPreviewStorage.cleanupInvalidKeys(validKeys),
 		headStorage.cleanupInvalidKeys(new Set(skins.map((skin) => `${skin.texture_key}-head`))),
 	])
 }
