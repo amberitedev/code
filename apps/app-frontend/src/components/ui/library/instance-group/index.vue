@@ -34,8 +34,6 @@ import { useLibrary } from '@/components/ui/library/use-library'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { FAVORITES_GROUP_ID, MAX_INSTANCE_GROUP_NAME_LENGTH } from '@/helpers/instance-groups'
 
-const INSTANCE_GRID_OBSERVER_ACTIVATION_DELAY = 500
-
 const props = withDefaults(
 	defineProps<{
 		animationsReady?: boolean
@@ -195,7 +193,6 @@ function handleCardBlur(event: FocusEvent, instanceId: string) {
 	if (focusedInstanceId.value === instanceId) focusedInstanceId.value = null
 }
 
-const instanceGridHeight = ref<number>()
 const deletingGroup = ref(false)
 const groupName = ref(props.instanceGroup.key)
 const isUngrouped = computed(() => props.instanceGroup.id === 'group:none')
@@ -212,9 +209,7 @@ const isGroupToggleBlocked = computed(
 )
 let shouldSkipGroupToggle = false
 let groupToggleEventToSkip: MouseEvent | undefined
-let instanceGridResizeObserver: ResizeObserver | undefined
 let libraryResizeObserver: ResizeObserver | undefined
-let instanceGridObserverActivationTimeout: ReturnType<typeof setTimeout> | undefined
 
 const emit = defineEmits<{
 	(e: 'toggle-selection', instanceId: string, shiftKey: boolean): void
@@ -451,37 +446,12 @@ watch(
 	{ flush: 'post' },
 )
 
-function stopInstanceGridResizeObserver() {
-	clearTimeout(instanceGridObserverActivationTimeout)
-	instanceGridResizeObserver?.disconnect()
-}
-
-function startInstanceGridResizeObserver() {
-	stopInstanceGridResizeObserver()
-	instanceGridHeight.value = undefined
-	instanceGridObserverActivationTimeout = setTimeout(() => {
-		instanceGridObserverActivationTimeout = undefined
-
-		const gridContent = instanceGridContent.value
-		if (!gridContent?.isConnected) return
-
-		instanceGridHeight.value = gridContent.getBoundingClientRect().height
-		instanceGridResizeObserver = new ResizeObserver(() => {
-			if (!gridContent.isConnected) return
-			instanceGridHeight.value = gridContent.getBoundingClientRect().height
-		})
-		instanceGridResizeObserver.observe(gridContent)
-	}, INSTANCE_GRID_OBSERVER_ACTIVATION_DELAY)
-}
-
 onUnmounted(() => {
 	clearTimeout(cardMoveTimer)
-	stopInstanceGridResizeObserver()
 	libraryResizeObserver?.disconnect()
 })
 onMounted(() => {
 	remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize)
-	startInstanceGridResizeObserver()
 	const library = groupDropTarget.value?.closest('[data-library-page-background]')
 	if (library) {
 		libraryResizeObserver = new ResizeObserver(syncScrollState)
@@ -594,15 +564,13 @@ watch([gridHeight, () => props.instanceGroup.instances], () => nextTick(syncScro
 			ref="groupAccordion"
 			:open-by-default="hideHeader || !isSectionCollapsed(instanceGroup.id)"
 			:force-open="isSearching"
-			class="w-full"
+			class="w-full [&>.accordion-content]:!transition-none"
 			@on-open="setSectionCollapsed(instanceGroup.id, false)"
 			@on-close="setSectionCollapsed(instanceGroup.id, true)"
 		>
+			<!-- Opening, closing and row changes snap the layout; only the content's opacity animates. -->
 			<div
-				class="mt-2.5 overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
-				:style="{
-					height: instanceGridHeight === undefined ? undefined : `${instanceGridHeight}px`,
-				}"
+				class="mt-2.5 overflow-hidden transition-opacity duration-200 ease-out motion-reduce:transition-none [.accordion-content:not(.open)_&]:opacity-0"
 			>
 				<div ref="instanceGridContent" :style="{ height: `${gridHeight}px` }">
 					<TransitionGroup
