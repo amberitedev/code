@@ -47,6 +47,10 @@ import { computed, ref } from 'vue'
 
 import { trackEvent } from '@/helpers/analytics'
 
+// The parent route view passes every tab's props. This tab has two root nodes, so without this Vue
+// warns about the ones it does not declare on every render and dev mode serializes them.
+defineOptions({ inheritAttrs: false })
+
 const MC_SERVER_BANNER_NAME = '__mc_server_banner__'
 
 const formatDate = useFormatDateTime({
