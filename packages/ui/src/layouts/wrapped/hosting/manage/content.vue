@@ -146,6 +146,7 @@ const messages = defineMessages({
 const client = injectModrinthClient()
 const {
 	server,
+	serverFull,
 	worldId,
 	busyReasons,
 	installProgressItems,
@@ -627,11 +628,14 @@ const contentItems = computed<ContentItem[]>(() =>
 			: contentItem
 	}),
 )
+// The query is disabled until the world is known, and `isLoading` is false while it is disabled,
+// which would flash the empty state.
 const contentReadyPending = computed(
 	() =>
-		contentQuery.isLoading.value &&
-		contentQuery.data.value === undefined &&
-		contentItems.value.length === 0,
+		(worldId.value === null && !serverFull.value) ||
+		(contentQuery.isLoading.value &&
+			contentQuery.data.value === undefined &&
+			contentItems.value.length === 0),
 )
 
 function getContentItemId(item: ContentItem) {

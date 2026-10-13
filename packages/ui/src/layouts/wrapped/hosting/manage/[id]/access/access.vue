@@ -36,7 +36,9 @@
 			</div>
 		</div>
 
+		<!-- Hidden until the first answer, so the empty state never shows for a server that has members. -->
 		<AccessTable
+			v-if="!serverUsersQuery.isLoading.value"
 			:members="filteredMembers"
 			:roles="roleOptions"
 			:can-manage-users="canManageUsers"
