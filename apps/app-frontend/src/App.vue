@@ -1586,8 +1586,9 @@ async function handleLiveNotification(notification) {
 }
 
 // The friends socket only delivers notifications while the App is open, so unread ones are
-// replayed through the live path at sign-in and when the network returns. Both invite handlers
-// dedupe by notification ID, so one that also arrives live is shown once.
+// replayed through the live path at sign-in, when the network returns, and when the socket
+// (re)connects. Both invite handlers dedupe by notification ID, so one that also arrives live is
+// shown once.
 async function replayUnreadNotifications() {
 	const userId = credentials.value?.user_id
 	if (!liveNotificationsEnabled || !userId) return
@@ -1609,6 +1610,14 @@ async function replayUnreadNotifications() {
 	}
 }
 window.addEventListener('online', replayUnreadNotifications)
+// The backend sends the full friend status list each time the socket connects.
+useAppEvent(
+	'friend',
+	(event) => {
+		if (event.event === 'status_sync') void replayUnreadNotifications()
+	},
+	appEvents,
+)
 
 function clearLiveNotifications() {
 	liveNotificationGeneration++
