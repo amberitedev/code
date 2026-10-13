@@ -165,6 +165,7 @@ import {
 	instanceDetailQueryOptions,
 	instanceKeys,
 	instanceLinkedProjectQueryOptions,
+	instanceListQueryOptions,
 	instanceProcessesQueryOptions,
 } from './query-options'
 import { createSharedInstanceContext, provideSharedInstance } from './shared-instance-context'
@@ -262,8 +263,9 @@ const contentSyncQuery = useQuery(
 			},
 			enabled: !!targetInstanceId && instance.value?.install_stage === 'installed',
 			networkMode: 'always' as const,
-			staleTime: 0,
-			gcTime: 0,
+			// Coming back to an instance within this window reuses the last disk scan. The Content
+			// tab still reloads on the app's `synced` event when files change.
+			staleTime: 30_000,
 			refetchOnWindowFocus: false,
 			refetchOnReconnect: false,
 			retry: false,
@@ -314,17 +316,26 @@ const processesQuery = useQuery(
 )
 const playing = computed(() => (processesQuery.data.value?.length ?? 0) > 0)
 
-async function ensureCriticalContent(targetInstanceId: string) {
-	await queryClient.ensureQueryData(
-		instanceContentQueryOptions(targetInstanceId, (error) => handleError(toError(error))),
-	)
-}
-
+// The instance row is all the page shell needs. Content is not awaited: the query above and the
+// Content tab load it behind their own placeholder, so a slow content scan never holds the
+// previous page on screen.
 async function ensureCriticalInstanceData(targetInstanceId: string) {
-	await Promise.all([
-		queryClient.ensureQueryData(instanceDetailQueryOptions(targetInstanceId)),
-		ensureCriticalContent(targetInstanceId),
-	])
+	const detailKey = instanceKeys.detail(targetInstanceId)
+	if (queryClient.getQueryData(detailKey) === undefined) {
+		// The library already loaded this instance, so show its row now and let the query above
+		// refresh it in the background.
+		const listKey = instanceListQueryOptions().queryKey
+		const listed = queryClient
+			.getQueryData(listKey)
+			?.find((listedInstance) => listedInstance.id === targetInstanceId)
+		if (listed) {
+			queryClient.setQueryData(detailKey, listed, {
+				updatedAt: queryClient.getQueryState(listKey)?.dataUpdatedAt,
+			})
+			return
+		}
+	}
+	await queryClient.ensureQueryData(instanceDetailQueryOptions(targetInstanceId))
 }
 
 function isUnmanagedInstanceError(error: unknown) {
@@ -903,7 +914,6 @@ provideInstanceBackup(() => instance.value!)
 
 function destroyInstanceConsole(targetInstanceId: string) {
 	void useInstanceConsole(targetInstanceId).destroy()
-	queryClient.removeQueries({ queryKey: instanceKeys.console(targetInstanceId), exact: true })
 }
 
 watch(instanceId, (currentInstanceId, previousInstanceId) => {

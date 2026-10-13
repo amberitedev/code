@@ -161,9 +161,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalReturn {
 			import('@xterm/xterm'),
 			import('@xterm/addon-fit'),
 			import('@xterm/addon-search'),
+			import('@xterm/xterm/css/xterm.css'),
 		])
-
-		await import('@xterm/xterm/css/xterm.css')
 
 		const term = new Terminal({
 			disableStdin: true,

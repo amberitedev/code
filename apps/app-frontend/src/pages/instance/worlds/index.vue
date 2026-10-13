@@ -688,9 +688,9 @@ async function initWorldsTab() {
 	gameVersions.value = resolvedGameVersions
 	protocolVersionReady.value = true
 
-	if (worlds.value.length > 0) {
-		refreshServers(worlds.value, serverData.value, protocolVersion.value)
-	}
+	// Not only when the instance has worlds of its own: linked servers registered themselves in
+	// `serverData` before the protocol was known and are still waiting for their first ping.
+	void refreshServers(worlds.value, serverData.value, protocolVersion.value)
 }
 
 void initWorldsTab()

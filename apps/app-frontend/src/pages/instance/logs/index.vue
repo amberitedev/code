@@ -35,17 +35,15 @@ const {
 	clearLive,
 } = useInstanceConsole(instanceId.value)
 
-const consoleHydrationQuery = useQuery({
-	queryKey: computed(() => instanceKeys.console(instanceId.value)),
-	queryFn: async () => {
-		await hydrate()
-		return true
-	},
-	staleTime: 0,
-	refetchOnMount: 'always',
-})
-
-await consoleHydrationQuery.suspense()
+// Not awaited, so the tab opens at once: the live console is a per-instance store, and the
+// terminal fills in when the buffered output arrives. Live `log` events are ignored until then
+// because the buffer already contains them.
+let liveConsoleHydrated = false
+const liveConsoleHydration = hydrate()
+	.catch(handleError)
+	.finally(() => {
+		liveConsoleHydrated = true
+	})
 
 function buildLogList(rawLogs) {
 	return [
@@ -187,12 +185,12 @@ watch(selectedLogIndex, async (newIndex) => {
 
 selectedLogIndex.value = 0
 
-if (!instancePage.playing.value) {
-	void analyseForCrash()
-}
+void liveConsoleHydration.then(() => {
+	if (!instancePage.playing.value) void analyseForCrash()
+})
 
 useAppEvent('log', (payload) => {
-	if (payload.instance_id !== instanceId.value) return
+	if (payload.instance_id !== instanceId.value || !liveConsoleHydrated) return
 
 	if (payload.type === 'log4j') {
 		liveConsole.addLog4jEvent(payload)

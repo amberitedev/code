@@ -172,7 +172,7 @@ watch(thumbnail, (url, previousUrl) => {
 		class="group relative isolate aspect-video min-w-0 cursor-pointer overflow-hidden rounded-xl border border-solid border-surface-5 bg-surface-2 p-0 text-left shadow-sm transition-[filter] hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
 		:class="{
 			'!border-contrast brightness-110': selected,
-			'!border-brand ring-2 ring-brand animate-pulse': highlighted,
+			'!border-brand ring-2 ring-brand': highlighted,
 			'opacity-50': activeDragged,
 			'cursor-grab active:cursor-grabbing': canDrag,
 		}"
@@ -224,11 +224,7 @@ watch(thumbnail, (url, previousUrl) => {
 			@load="markImageLoaded"
 			@error="markImageFailed"
 		/>
-		<div
-			aria-hidden="true"
-			class="pointer-events-none absolute inset-0 bg-button-bg"
-			:class="{ 'animate-pulse': !imageReady }"
-		/>
+		<div aria-hidden="true" class="pointer-events-none absolute inset-0 bg-button-bg" />
 		<div
 			class="absolute inset-x-0 bottom-0 z-[2] flex items-end justify-between gap-2 bg-gradient-to-t from-surface-1 to-transparent p-3 pt-[120px] text-contrast opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
 		>
