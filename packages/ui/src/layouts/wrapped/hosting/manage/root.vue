@@ -99,7 +99,7 @@
 	<div
 		v-else-if="serverData"
 		data-pyro-server-manager-root
-		class="relative mx-auto box-border flex w-full min-w-0 flex-col gap-4 px-6 transition-all duration-300"
+		class="relative mx-auto box-border flex w-full min-w-0 flex-col gap-4 px-6"
 		:style="{
 			'--server-bg-image': serverImage
 				? `url(${serverImage})`
@@ -241,7 +241,7 @@
 			<ServerOnboardingPanelPage v-if="isOnboarding" :browse-modpacks="handleBrowseModpacks" />
 
 			<template v-else>
-				<div class="server-stagger-item -mb-3">
+				<div class="server-stagger-item -mb-3" @pointerover="prefetchTab">
 					<NavTabs
 						:links="navLinks"
 						replace
@@ -552,6 +552,10 @@ const lockMessages = defineMessages({
 	},
 })
 
+// Matches the tab pages and the hover prefetches, so opening a server or switching tabs reuses
+// what was just fetched. Changes arrive over the websocket and invalidate these queries.
+const PANEL_STALE_MS = 30_000
+
 const {
 	data: serverData,
 	error: serverQueryError,
@@ -559,6 +563,13 @@ const {
 } = useQuery({
 	queryKey: ['servers', 'detail', props.serverId],
 	queryFn: () => client.archon.servers_v0.get(props.serverId)!,
+	// The server list already holds this server, so the panel shows at once and the full answer
+	// replaces it when it lands.
+	placeholderData: () =>
+		queryClient
+			.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
+			?.servers.find((server) => server.server_id === props.serverId),
+	staleTime: PANEL_STALE_MS,
 })
 
 useLoadingBarToken(useReadyState({ isLoading: serverLoading, data: serverData }))
@@ -580,6 +591,7 @@ const serverError = computed(() => {
 const { data: serverFull } = useQuery({
 	queryKey: ['servers', 'v1', 'detail', props.serverId],
 	queryFn: () => client.archon.servers_v1.get(props.serverId),
+	staleTime: PANEL_STALE_MS,
 })
 
 const worldId = computed(() => {
@@ -593,6 +605,7 @@ const { data: serverContent } = useQuery({
 	queryFn: () =>
 		client.archon.content_v1.getAddons(props.serverId, worldId.value!, { from_modpack: false }),
 	enabled: computed(() => worldId.value !== null),
+	staleTime: PANEL_STALE_MS,
 })
 
 const { handleWsBackupProgress, busyReasons: backupsBusy } = useServerBackupsQueue(
@@ -866,6 +879,29 @@ const navLinks = computed<Tab[]>(() => [
 	},
 	...props.additionalTabs,
 ])
+
+// Content and backups are already loaded by this layout; these two tabs fetch on their own.
+const tabPrefetches: Record<string, () => Promise<void>> = {
+	files: () =>
+		queryClient.prefetchQuery({
+			queryKey: ['files', props.serverId, '/'],
+			queryFn: () => client.kyros.files_v0.listDirectory('/', 1, 2000),
+			staleTime: PANEL_STALE_MS,
+		}),
+	access: () =>
+		queryClient.prefetchQuery({
+			queryKey: ['servers', 'users', 'v1', props.serverId],
+			queryFn: () => client.archon.server_users_v1.list(props.serverId),
+			staleTime: PANEL_STALE_MS,
+		}),
+}
+
+/** Warms a tab's first request while the pointer is over its link. */
+function prefetchTab(event: PointerEvent) {
+	const link = event.target instanceof Element ? event.target.closest('a') : null
+	const tab = link?.getAttribute('href')?.split(/[?#]/)[0].split('/').pop()
+	if (tab) void tabPrefetches[tab]?.()
+}
 
 const filteredNotices = computed(
 	() => serverData.value?.notices?.filter((n) => n.level !== 'survey') ?? [],
