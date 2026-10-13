@@ -462,7 +462,9 @@ async fn owner_id(state: &AppState) -> Result<String, ApiError> {
     Ok(state
         .owner()
         .await?
-        .ok_or_else(|| ApiError::Forbidden("this Core is not paired".into()))?
+        .ok_or_else(|| {
+            ApiError::Forbidden("this Core is not signed in".into())
+        })?
         .user_id)
 }
 

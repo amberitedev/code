@@ -14,7 +14,7 @@ const sharedWith = (account: string) =>
 	`EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = ?1 AND m.user_id = ${account} AND m.joined_at IS NOT NULL)`
 
 /**
- * Core, paired: replace the servers this Core shows to friends. The Core sends its whole list
+ * Core, signed in: replace the servers this Core shows to friends. The Core sends its whole list
  * whenever anything in it changes, so a server missing from the list stops being visible. A server
  * whose instance the Core's owner does not share is left out.
  */

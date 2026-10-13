@@ -31,19 +31,11 @@ pub struct WsTicket {
     pub expires_at: Instant,
 }
 
-/// The pairing code an unowned Core is showing.
-#[derive(Clone)]
-pub struct PairingCode {
-    pub code: String,
-    pub expires_at: Instant,
-}
-
-/// The account this Core belongs to.
+/// The account this Core is signed in to.
 pub struct Owner {
     pub user_id: String,
-    /// Key for this Core's own calls to the backend. Missing on a Core that was owned before
-    /// pairing existed; it keeps its owner and shows a code only that owner can use.
-    pub backend_key: Option<String>,
+    /// Key for this Core's own calls to the backend, issued when the owner approved the sign-in.
+    pub backend_key: String,
 }
 
 /// Central shared state — passed as `Arc<AppState>` through all layers.
@@ -65,12 +57,9 @@ pub struct AppState {
     pub broadcaster: EventBroadcaster,
     /// Verified account tokens: token -> (account, expiry). See `AuthUser`.
     pub account_tokens: DashMap<String, (Account, Instant)>,
-    /// Code currently shown for pairing, if any. See `pairing_service`.
-    pub pairing_code: std::sync::Mutex<Option<PairingCode>>,
-    /// Wakes the pairing task when this Core is paired or unpaired.
-    pub pairing_changed: tokio::sync::Notify,
-    /// Wrong pairing codes per account: account id -> (count, window start).
-    pub pairing_guesses: DashMap<String, (u32, Instant)>,
+    /// Wakes the sign-in task when the owner changes or the backend refused the key. See
+    /// `auth_service`.
+    pub auth_changed: tokio::sync::Notify,
     /// In-memory short-lived WebSocket tickets.
     pub ws_tickets: DashMap<String, WsTicket>,
     /// Instance data store.
@@ -121,9 +110,7 @@ impl AppState {
             instance_operation_locks: DashMap::new(),
             broadcaster,
             account_tokens: DashMap::new(),
-            pairing_code: std::sync::Mutex::new(None),
-            pairing_changed: tokio::sync::Notify::new(),
-            pairing_guesses: DashMap::new(),
+            auth_changed: tokio::sync::Notify::new(),
             ws_tickets: DashMap::new(),
             instance_store,
             installation_store,
@@ -134,10 +121,11 @@ impl AppState {
         }))
     }
 
-    /// The account this Core is paired to, if any.
+    /// The account this Core is signed in to, if any. An owner row without a key is from before
+    /// Cores had keys and counts as signed out: the next sign-in replaces it.
     pub async fn owner(&self) -> sqlx::Result<Option<Owner>> {
-        let row: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT user_id, backend_key FROM core_owner WHERE id = 1",
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT user_id, backend_key FROM core_owner WHERE id = 1 AND backend_key IS NOT NULL",
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -147,12 +135,20 @@ impl AppState {
         }))
     }
 
-    /// Store the owner and the key the backend issued, then stop showing a code.
+    /// Store the owner and the key that was approved for this Core. A different account than
+    /// before starts with nobody else on the servers.
     pub async fn set_owner(
         &self,
         user_id: &str,
         key: &str,
     ) -> sqlx::Result<()> {
+        let previous: Option<String> =
+            sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await?;
+        if previous.as_deref() != Some(user_id) {
+            super::access_service::forget_everyone(self).await?;
+        }
         sqlx::query(
             "INSERT INTO core_owner (id, user_id, backend_key) VALUES (1, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, backend_key = excluded.backend_key",
@@ -161,14 +157,14 @@ impl AppState {
         .bind(key)
         .execute(&self.pool)
         .await?;
-        self.pairing_changed.notify_one();
+        self.auth_changed.notify_one();
         // The outside test needs the key that was just stored.
         self.network.wake();
         Ok(())
     }
 
     /// Forget the owner and the backend key. Servers and files stay. The caller wakes the
-    /// pairing task if it is not the one calling.
+    /// sign-in task if it is not the one calling.
     pub async fn forget_owner(&self) -> sqlx::Result<()> {
         sqlx::query("DELETE FROM core_owner")
             .execute(&self.pool)

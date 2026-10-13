@@ -1,22 +1,30 @@
 <script setup lang="ts">
+import type { Archon } from '@modrinth/api-client'
 import { RightArrowIcon } from '@modrinth/assets'
 import { Button, injectModrinthClient, NewModal } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { coresQueryKey, registerPairCoreModal } from '@/composables/use-cores'
+import { coresQueryKey, registerAddCoreModal } from '@/composables/use-cores'
 
-// The one "Pair a Core" modal, mounted once in App.vue. Open it with `openPairCoreModal` or
-// `ensureCorePaired` from `@/composables/use-cores`.
+// The one "Add Core" modal, mounted once in App.vue. Open it with `openAddCoreModal` or
+// `ensureCore` from `@/composables/use-cores`. The user types the code their Core shows, sees
+// which machine is asking, and approves it; the Core then signs in on its own.
 
 const client = injectModrinthClient()
 const queryClient = useQueryClient()
 
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const code = ref('')
+// The code that was looked up and the Core behind it. Approval is the second step and always
+// sends this code, never whatever the inputs hold by then.
+const pending = ref<{ code: string; core: Archon.Cores.v1.PendingCore } | null>(null)
 const error = ref('')
 const working = ref(false)
-let settle: ((paired: boolean) => void) | null = null
+let settle: ((added: boolean) => void) | null = null
+// Bumped whenever the modal is (re)opened or goes back to the code, so an answer to an earlier
+// lookup or approval cannot land on a later opening.
+let opening = 0
 
 const inputs = ref<HTMLInputElement[]>([])
 const codeError = ref('')
@@ -39,15 +47,22 @@ watch(error, (message) => {
 	triggerErrorFeedback()
 })
 
-onMounted(() => registerPairCoreModal(show))
-onBeforeUnmount(() => registerPairCoreModal(null))
+onMounted(() => registerAddCoreModal(show))
+onBeforeUnmount(() => registerAddCoreModal(null))
 
-function show(): Promise<boolean> {
+/** Open the modal. With `prefilled` (from an `amberite://approve` link) it looks the code up at once. */
+function show(prefilled = ''): Promise<boolean> {
 	settle?.(false)
-	code.value = ''
+	opening++
+	code.value = prefilled
+		.replace(/[^A-Z0-9]/gi, '')
+		.toUpperCase()
+		.slice(0, 8)
+	pending.value = null
 	clearErrorState()
 	modal.value?.show()
-	void focusInput(0)
+	if (complete.value) void lookup()
+	else void focusInput(0)
 	return new Promise((resolve) => {
 		settle = resolve
 	})
@@ -58,24 +73,54 @@ function handleHide() {
 	settle = null
 }
 
-async function pair() {
+async function lookup() {
 	if (working.value || !complete.value) return
+	const started = opening
+	const typed = code.value
 	working.value = true
 	error.value = ''
 	try {
-		await client.archon.cores_v1.pair(code.value)
+		const core = await client.archon.cores_v1.lookup(typed)
+		if (started === opening) pending.value = { code: typed, core }
+	} catch (reason) {
+		if (started === opening)
+			error.value =
+				reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
+	} finally {
+		working.value = false
+	}
+}
+
+async function approve() {
+	const current = pending.value
+	if (working.value || !current) return
+	const started = opening
+	working.value = true
+	error.value = ''
+	try {
+		await client.archon.cores_v1.approve(current.code)
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: coresQueryKey }),
 			queryClient.invalidateQueries({ queryKey: ['servers'] }),
 		])
+		if (started !== opening) return
 		settle?.(true)
 		settle = null
 		modal.value?.hide()
 	} catch (reason) {
-		error.value = reason instanceof Error ? reason.message : 'Pairing failed. Please try again.'
+		if (started === opening)
+			error.value =
+				reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
 	} finally {
 		working.value = false
 	}
+}
+
+function back() {
+	opening++
+	pending.value = null
+	clearErrorState()
+	void focusInput(0)
 }
 
 function setInputRef(element: unknown, index: number) {
@@ -119,7 +164,7 @@ function handlePaste(event: ClipboardEvent, index: number) {
 
 function handleKeydown(event: KeyboardEvent, index: number) {
 	if (event.key === 'Enter') {
-		void pair()
+		void lookup()
 		return
 	}
 	if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !/[a-z0-9]/i.test(event.key)) {
@@ -194,10 +239,25 @@ async function focusInput(index: number) {
 </script>
 
 <template>
-	<NewModal ref="modal" header="Pair a Core" max-width="800px" width="100%" :on-hide="handleHide">
-		<div class="flex min-h-[26rem] flex-col gap-4">
+	<NewModal ref="modal" header="Add Core" max-width="800px" width="100%" :on-hide="handleHide">
+		<div v-if="pending" class="flex min-h-[26rem] flex-col gap-4">
 			<p class="m-0 text-center text-lg font-medium text-primary">
-				Enter the pairing code from the Core you want to connect.
+				Sign this Core in to your account?
+			</p>
+			<div class="flex flex-1 flex-col items-center justify-center gap-2">
+				<span class="text-3xl font-bold text-contrast">{{ pending.core.name }}</span>
+				<p class="m-0 mt-4 max-w-md text-center text-sm text-secondary">
+					Only approve a code shown by a Core you set up yourself. The Core will be able to host
+					servers under your account.
+				</p>
+				<p class="m-0 min-h-5 text-center text-sm text-red" :role="error ? 'alert' : undefined">
+					{{ error }}
+				</p>
+			</div>
+		</div>
+		<div v-else class="flex min-h-[26rem] flex-col gap-4">
+			<p class="m-0 text-center text-lg font-medium text-primary">
+				Enter the code shown by the Core you want to add.
 			</p>
 			<div class="flex flex-1 flex-col items-center justify-center gap-4">
 				<div
@@ -255,9 +315,16 @@ async function focusInput(index: number) {
 			</p>
 		</div>
 		<template #actions>
-			<div class="flex justify-end">
-				<Button type="colored" color="brand" :disabled="working || !complete" @click="pair">
-					{{ working ? 'Pairing' : 'Pair' }}
+			<div v-if="pending" class="flex justify-between">
+				<Button :disabled="working" @click="back">Back</Button>
+				<Button type="colored" color="brand" :disabled="working" @click="approve">
+					{{ working ? 'Approving' : 'Approve' }}
+					<RightArrowIcon aria-hidden="true" />
+				</Button>
+			</div>
+			<div v-else class="flex justify-end">
+				<Button type="colored" color="brand" :disabled="working || !complete" @click="lookup">
+					{{ working ? 'Checking' : 'Next' }}
 					<RightArrowIcon aria-hidden="true" />
 				</Button>
 			</div>

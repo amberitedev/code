@@ -30,7 +30,7 @@ export type RequestHooks = {
  */
 export interface ClientConfig {
 	/**
-	 * Hosting is served by the account's paired Cores instead of Modrinth Hosting. Hosting requests
+	 * Hosting is served by the account's own Cores instead of Modrinth Hosting. Hosting requests
 	 * go to those Cores (see `archon.cores_v1`), and there are no purchase or subscription flows.
 	 */
 	selfHostedHosting?: boolean

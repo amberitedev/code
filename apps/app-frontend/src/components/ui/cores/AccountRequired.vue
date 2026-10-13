@@ -2,7 +2,7 @@
 import { LogInIcon, ThinkingRinthbot } from '@modrinth/assets'
 import { Button, commonMessages, EmptyState, injectAuth, useVIntl } from '@modrinth/ui'
 
-// The signed-out screen for anything that needs paired Cores. Same look as the account tabs in
+// The signed-out screen for anything that needs the account's Cores. Same look as the account tabs in
 // settings. Show it when `injectAuth().user` is empty.
 defineProps<{
 	description: string

@@ -109,44 +109,54 @@ Later:
 - Update progress in the Tasks panel. History views, overrides, branches, forced resource packs,
   and creating a server on someone else's Core.
 
-## Accounts, Core auth, pairing
+## Accounts and Core sign-in
 
 - Accounts work like Modrinth's, served by the backend.
 - Core checks account tokens against that same account system. The hosting API is always on and
   requires login.
 - A Core belongs to one account, its owner. Owner only: no members, roles, or invites.
-- Pairing is how a Core gets its owner. An unowned Core shows an 8-character code in its terminal,
-  valid 15 minutes, and makes a new one when it expires. You type the code into "Pair a Core" in
-  the App and that Core belongs to your account. An unowned Core refuses everything else.
+- A Core signs in like a device: it asks the backend for a code and the key it will use, prints
+  "Open Amberite, go to Settings > Cores > Add Core, and enter ABCD-EFGH", and polls. You enter
+  the code in the App and approve it; the App shows the Core's machine name first so you can tell
+  it is yours. From then on the key works, the Core is listed under your account, and the Core
+  prints "Signed in as <you>". The App never talks to the Core during sign-in, so
+  approving sends your account session nowhere; once the Core is listed, the App sends it your
+  session like any other Core on your list. A code works for 15 minutes; a Core has one code at a
+  time.
+- The Core does this on its own on first start, and `copal auth` does the same from the command
+  line, for a Core installed as a service or reached over SSH. Both show one code: the code is
+  kept in the Core's database so a running Core and `copal auth` do not replace each other's. From
+  a terminal on a computer with the App, the Core also opens `amberite://approve/<code>`, which
+  opens Add Core with the code filled in.
+- The Core's key is a Core key, not a session. With it the Core reports its address, certificate,
+  and version, lists the servers it shows to friends, invites and removes people on its servers,
+  and asks for reachability tests. It cannot touch friends, sharing, notifications, or the
+  account; those routes take account sessions only.
 - The backend keeps each account's list of Cores and where they are, so the App finds them on any
-  computer you sign in on. After pairing the App still talks to the Core directly.
-- How a code is trusted: the App claims the code with the backend, then sends the code and the
-  account token to the Core. The Core checks the code itself and asks the backend whether that
-  account claimed it. Only then does it store the owner. In that answer the backend issues the
-  Core its own key (only the hash is stored), which the Core uses for its later calls.
-- A Core reports its own address, on every start. By default that is the address and port it
-  listens on, or the machine's local network address when it listens on every interface.
-  `AMBERITE_PUBLIC_URL` overrides it. Nobody types an address. It must be HTTPS unless it is
-  loopback or a private network address. Once the Core has an address on the internet it reports
-  that too, and again whenever it changes (see "Reaching a Core from outside").
+  computer you sign in on. After sign-in the App talks to the Core directly.
+- A Core reports its own address, on every start, every five minutes after that, and whenever it
+  changes. By default that is the address and port it listens on, or the machine's local network
+  address when it listens on every interface. `AMBERITE_PUBLIC_URL` overrides it. Nobody types an
+  address. It must be HTTPS unless it is loopback or a private network address. Once the Core has
+  an address on the internet it reports that too (see "Reaching a Core from outside").
 - A Core makes its own certificate on first start and serves its API over HTTPS with it. No domain
-  and no certificate authority. The Core sends the certificate's SHA-256 fingerprint with its
-  pairing code, the backend stores it with the Core, and the App trusts only that certificate for
+  and no certificate authority. The Core sends the certificate's SHA-256 fingerprint when it asks
+  for a code, the backend stores it with the Core, and the App trusts only that certificate for
   that Core. The WebView cannot check a certificate like that, so the App's Rust side opens a port
   on the App's own computer for each Core and carries every request, upload, and WebSocket to the
   Core over TLS, checking the fingerprint.
 - The same port still answers plain HTTP, but only to callers on the Core's own computer or local
-  network, so local tools keep working. A Core paired before this reports its fingerprint with its
-  key the next time it starts; until then the App reaches it the old way.
+  network, so local tools keep working. A Core signed in before this reports its fingerprint with
+  its key the next time it starts; until then the App reaches it the old way.
 - An account can have many Cores, treated as one: their servers form one list, and creating a
   server asks which Core only when there is more than one.
-- Unpair is in the App under Settings, Cores. The Core leaves the account's list, forgets its
-  owner and key, and shows a new code. Its servers and files stay. If the Core is off at the
-  time, it finds out the next time it starts.
-- Wrong codes are limited to 5 per account in 10 minutes, on the backend and on the Core. A live
-  code cannot be registered by another Core.
-- A Core that was owned before pairing existed keeps its owner but must be paired once to be
-  listed. It shows a code that only that owner can use.
+- Remove is in the App under Settings, Cores. It is one call to the backend: the key stops working
+  at once. The Core finds out on its next call, within five minutes, forgets its owner and key,
+  refuses hosting calls, and shows a new code. Its servers and files stay. `copal logout` does the
+  same from the Core's side.
+- Limits, all on the backend: 5 wrong codes per account in 10 minutes; code requests are limited
+  per Core and per caller address.
+- A Core that was owned before Cores had keys counts as signed out and signs in once.
 
 ## Reaching a Core from outside
 
@@ -198,7 +208,7 @@ How it works (`apps/core/src/network`):
   control a server.
 - Who can join a server is the owner's choice: a whitelist or none.
 
-## Current state, 2026-10-10
+## Current state, 2026-10-12
 
 - Accounts, friends, presence, and sharing on R2 between two Apps work locally.
 - Core has login against our accounts, one API (hosting), and the engine that installs and updates
@@ -206,8 +216,9 @@ How it works (`apps/core/src/network`):
   The last commit where everything worked on Convex is `762843d41`.
 - The website is upstream Modrinth, used only as the local sign-in page.
 - Not yet checked on screen by anyone: the merged result of the sharing and Core work together.
-- Core pairing is built: backend list of Cores, pairing by code, the "Pair a Core" modal, and
-  Settings, Cores. The dev setting that held the Core address is gone.
+- Core sign-in is built: backend list of Cores, sign-in by approved code, the "Add Core" modal,
+  `copal auth` and `copal logout`, and Settings, Cores. The dev setting that held the Core address
+  is gone.
 - Linked servers are built: create a server from an instance, push updates to it, unlink it, and
   delete it.
 - Known gaps: an over-limit push shows a generic error; the App's network allowlist is opened to

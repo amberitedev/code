@@ -15,9 +15,11 @@ import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
 
-// Core pairing. A Core registers the code it is showing, an account claims that code in the App,
-// and the Core then confirms the claim to receive its own key. After that the backend only keeps
-// the account's list of Cores and their addresses, and tests on request whether a Core can be
+// Core sign-in. A signed-out Core asks for a code and the key it will use, shows the code to its
+// owner, and polls. The owner enters the code in the App, which approves it with their session;
+// from then on the key works and the Core is listed under that account. The App never talks to the
+// Core during sign-in and the account session never leaves the App. After that the backend only
+// keeps the account's list of Cores and their addresses, and tests on request whether a Core can be
 // reached from the internet.
 //
 // A Core's owner can invite other accounts to manage its servers. The Core keeps who has which
@@ -25,12 +27,18 @@ import { blockedEitherWay } from '../social/preferences'
 // told its address too, and delivers the invite.
 
 const CODE_TTL_MS = 15 * 60_000
+const POLL_INTERVAL_S = 5
 // Expired codes are kept this long so a late guess is told "expired" instead of "wrong".
 const EXPIRED_GRACE_MS = 60 * 60_000
+// Wrong or expired codes one account may try within `GUESS_WINDOW_MS`. Right codes do not count.
 const MAX_WRONG_GUESSES = 5
 const GUESS_WINDOW_MS = 10 * 60_000
-// The Core's alphabet: no i, o, 0 or 1.
-const CODE_PATTERN = /^[a-hj-np-z2-9]{8}$/
+// Code requests one Core, and one caller address, may make within `REQUEST_WINDOW_MS`.
+const MAX_CORE_REQUESTS = 10
+const MAX_ADDRESS_REQUESTS = 60
+const REQUEST_WINDOW_MS = 10 * 60_000
+// The code's alphabet: no i, o, 0 or 1, so it reads the same in any font.
+const CODE_ALPHABET = 'abcdefghjklmnpqrstuvwxyz23456789'
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
 // Outside tests one Core may ask for within `CHECK_WINDOW_MS`.
 const MAX_CHECKS = 30
@@ -40,13 +48,14 @@ const CHECK_TIMEOUT_MS = 5_000
 const MAX_INVITES = 30
 const INVITE_WINDOW_MS = 10 * 60_000
 
-interface CodeRow {
+interface PendingRow {
 	code: string
 	core_id: string
+	name: string
 	address: string
 	cert_fingerprint: string | null
+	key_hash: string
 	expires: string
-	claimed_by: string | null
 }
 
 interface CoreRow {
@@ -108,12 +117,6 @@ function certFingerprint(body: Record<string, unknown>): string | null {
 	return value
 }
 
-function pairingCode(body: Record<string, unknown>): string {
-	return stringField(body, 'code', 32)
-		.replace(/[^a-z0-9]/gi, '')
-		.toLowerCase()
-}
-
 /** A Core as `userId` sees it. `owned` is false for a Core they were only invited to. */
 function publicCore(row: CoreRow, userId: string) {
 	return {
@@ -129,131 +132,209 @@ function publicCore(row: CoreRow, userId: string) {
 	}
 }
 
-/** Core, unowned: publish the code it is showing. */
-async function registerCode(request: Request, env: Env) {
-	const body = await readJson(request)
-	const code = pairingCode(body)
-	if (!CODE_PATTERN.test(code)) throw new ApiError(400, 'invalid_input', 'Invalid code')
-	const coreId = stringField(body, 'core_id', 64)
-	const address = coreAddress(body)
-	const fingerprint = certFingerprint(body)
-	const now = Date.now()
-	const nowIso = new Date(now).toISOString()
+/** The code as the user typed it: the dash and case do not matter. */
+function authCode(body: Record<string, unknown>): string {
+	return stringField(body, 'code', 32)
+		.replace(/[^a-z0-9]/gi, '')
+		.toLowerCase()
+}
 
-	await env.DB.prepare('DELETE FROM core_pairing_codes WHERE expires < ?')
-		.bind(new Date(now - EXPIRED_GRACE_MS).toISOString())
-		.run()
-	if (await env.DB.prepare('SELECT 1 FROM cores WHERE id = ?').bind(coreId).first())
-		throw new ApiError(409, 'already_paired', 'This Core is already paired to an account')
-	// A Core may replace its own code. Another Core's live code is never overwritten.
-	const taken = await env.DB.prepare(
-		'SELECT 1 FROM core_pairing_codes WHERE code = ? AND core_id != ? AND expires > ?',
-	)
-		.bind(code, coreId, nowIso)
-		.first()
-	if (taken) throw new ApiError(409, 'code_taken', 'This code is in use')
-	const expires = new Date(now + CODE_TTL_MS).toISOString()
-	await env.DB.batch([
-		env.DB.prepare('DELETE FROM core_pairing_codes WHERE code = ? OR core_id = ?').bind(
-			code,
-			coreId,
-		),
-		env.DB.prepare(
-			'INSERT INTO core_pairing_codes (code,core_id,address,cert_fingerprint,expires) VALUES (?,?,?,?,?)',
-		).bind(code, coreId, address, fingerprint, expires),
-	])
-	return json({ expires })
+function generateCode(): string {
+	return Array.from(
+		crypto.getRandomValues(new Uint8Array(8)),
+		(byte) => CODE_ALPHABET[byte & 31],
+	).join('')
+}
+
+/** Where a request came from. Cloudflare sets the header itself, so a caller cannot choose it. */
+function callerAddress(request: Request, env: Env): string {
+	return env.LOCAL_DEV === 'true' ? '127.0.0.1' : (request.headers.get('CF-Connecting-IP') ?? '')
 }
 
 /**
- * App: claim the code a Core is showing. Returns where that Core is, and the certificate to trust
- * there, so the App can finish with the Core itself.
+ * Count one event under `scope` and return the count in the current window, in one statement so
+ * concurrent requests cannot slip past a limit. A window starts with the first event after the
+ * previous window ended.
  */
-async function claimCode(request: Request, env: Env) {
-	const user = await requireUser(request, env)
-	const code = pairingCode(await readJson(request))
-	const now = Date.now()
-	const nowIso = new Date(now).toISOString()
-
-	const attempts = await env.DB.prepare(
-		'SELECT failures,window_start FROM core_pairing_attempts WHERE user_id = ?',
+async function countInWindow(env: Env, scope: string, windowMs: number, now: number) {
+	const row = await env.DB.prepare(
+		'INSERT INTO core_auth_limits (scope,count,window_start) VALUES (?1,1,?2) ON CONFLICT(scope) DO UPDATE SET count = CASE WHEN window_start <= ?3 THEN 1 ELSE count + 1 END, window_start = CASE WHEN window_start <= ?3 THEN ?2 ELSE window_start END RETURNING count, window_start',
 	)
-		.bind(user.id)
-		.first<{ failures: number; window_start: string }>()
-	const windowEnds = attempts ? Date.parse(attempts.window_start) + GUESS_WINDOW_MS : 0
-	const failures = attempts && windowEnds > now ? attempts.failures : 0
-	if (failures >= MAX_WRONG_GUESSES)
+		.bind(scope, new Date(now).toISOString(), new Date(now - windowMs).toISOString())
+		.first<{ count: number; window_start: string }>()
+	if (!row) throw new ApiError(500, 'internal_error', 'Could not count the request')
+	return { count: row.count, windowEnds: Date.parse(row.window_start) + windowMs }
+}
+
+/**
+ * Core, signed out: ask for a code to show its owner, and the key it will use once the owner
+ * approves. Only the key's hash is stored, and the key does nothing until approval. A Core has one
+ * pending code at a time; asking again replaces it.
+ */
+async function requestCode(request: Request, env: Env) {
+	const body = await readJson(request)
+	const coreId = stringField(body, 'core_id', 64)
+	const name = stringField(body, 'name', 64)
+	const address = coreAddress(body)
+	const fingerprint = certFingerprint(body)
+	const now = Date.now()
+
+	// Checked before counting: a listed Core keeps asking until it is removed in the App, and must
+	// not use up the requests it needs right after.
+	if (await env.DB.prepare('SELECT 1 FROM cores WHERE id = ?').bind(coreId).first())
+		throw new ApiError(
+			409,
+			'already_signed_in',
+			'This Core is still listed under an account. Remove it in the App under Settings, Cores.',
+		)
+
+	const byCore = await countInWindow(env, `code:${coreId}`, REQUEST_WINDOW_MS, now)
+	const byAddress = await countInWindow(
+		env,
+		`ip:${callerAddress(request, env)}`,
+		REQUEST_WINDOW_MS,
+		now,
+	)
+	if (byCore.count > MAX_CORE_REQUESTS || byAddress.count > MAX_ADDRESS_REQUESTS)
+		throw new ApiError(
+			429,
+			'too_many_requests',
+			'Too many sign-in codes were asked for. Try again later.',
+		)
+
+	await env.DB.batch([
+		env.DB.prepare('DELETE FROM core_auth_codes WHERE expires < ?').bind(
+			new Date(now - EXPIRED_GRACE_MS).toISOString(),
+		),
+		env.DB.prepare('DELETE FROM core_auth_limits WHERE window_start < ?').bind(
+			new Date(now - Math.max(GUESS_WINDOW_MS, REQUEST_WINDOW_MS)).toISOString(),
+		),
+	])
+
+	const key = `amc_${randomId(48)}`
+	const keyHash = await digest(key)
+	const expires = new Date(now + CODE_TTL_MS).toISOString()
+	// A code still held by another Core is not reused; a new one is drawn instead.
+	for (let attempt = 0; ; attempt++) {
+		const code = generateCode()
+		try {
+			await env.DB.batch([
+				env.DB.prepare('DELETE FROM core_auth_codes WHERE core_id = ?').bind(coreId),
+				env.DB.prepare(
+					'INSERT INTO core_auth_codes (code,core_id,name,address,cert_fingerprint,key_hash,expires) VALUES (?,?,?,?,?,?,?)',
+				).bind(code, coreId, name, address, fingerprint, keyHash, expires),
+			])
+		} catch (error) {
+			if (attempt < 3) continue
+			throw error
+		}
+		return json({ code, key, expires_in: CODE_TTL_MS / 1000, poll_interval: POLL_INTERVAL_S })
+	}
+}
+
+/**
+ * Core, signed out: has the owner approved yet? Sent with the key from `requestCode`. Approval is
+ * what makes that key a Core's key, so an approved key is recognised here like on every other Core
+ * route. 410 tells the Core its code is gone and it should ask for a new one.
+ */
+async function pollCode(request: Request, env: Env) {
+	const key = tokenFrom(request)
+	if (!key.startsWith('amc_')) unauthorized()
+	const keyHash = await digest(key)
+	const core = await env.DB.prepare(
+		'SELECT u.id, u.username FROM cores c JOIN users u ON u.id = c.owner_id WHERE c.key_hash = ?',
+	)
+		.bind(keyHash)
+		.first<{ id: string; username: string }>()
+	if (core) return json({ status: 'approved', account: core })
+	const pending = await env.DB.prepare('SELECT expires FROM core_auth_codes WHERE key_hash = ?')
+		.bind(keyHash)
+		.first<{ expires: string }>()
+	if (pending && pending.expires > new Date().toISOString()) return json({ status: 'pending' })
+	throw new ApiError(410, 'code_expired', 'That code has expired')
+}
+
+/**
+ * The pending Core behind a code the signed-in account typed. Only wrong and expired codes count
+ * towards the account's limit, so a right code never clears it.
+ */
+async function pendingCore(env: Env, userId: string, code: string): Promise<PendingRow> {
+	const now = Date.now()
+	const scope = `approve:${userId}`
+	const tries = await env.DB.prepare(
+		'SELECT count, window_start FROM core_auth_limits WHERE scope = ?',
+	)
+		.bind(scope)
+		.first<{ count: number; window_start: string }>()
+	const windowEnds = tries ? Date.parse(tries.window_start) + GUESS_WINDOW_MS : 0
+	if (tries && windowEnds > now && tries.count >= MAX_WRONG_GUESSES)
 		throw new ApiError(
 			429,
 			'too_many_attempts',
 			`Too many wrong codes. Try again in ${Math.ceil((windowEnds - now) / 60_000)} minutes.`,
 		)
-
-	const row = await env.DB.prepare('SELECT * FROM core_pairing_codes WHERE code = ?')
+	const row = await env.DB.prepare('SELECT * FROM core_auth_codes WHERE code = ?')
 		.bind(code)
-		.first<CodeRow>()
-	if (!row) {
-		await env.DB.prepare(
-			'INSERT INTO core_pairing_attempts (user_id,failures,window_start) VALUES (?,1,?) ON CONFLICT(user_id) DO UPDATE SET failures = ?, window_start = ?',
-		)
-			.bind(user.id, nowIso, failures + 1, failures ? (attempts?.window_start ?? nowIso) : nowIso)
-			.run()
-		throw new ApiError(404, 'wrong_code', 'That code does not match any Core')
-	}
-	if (row.expires <= nowIso)
+		.first<PendingRow>()
+	const expired = row && row.expires <= new Date(now).toISOString()
+	if (!row || expired) await countInWindow(env, scope, GUESS_WINDOW_MS, now)
+	if (!row) throw new ApiError(404, 'wrong_code', 'That code does not match any Core')
+	if (expired)
 		throw new ApiError(410, 'code_expired', 'That code has expired. Use the new one on your Core.')
-	const claimed = await env.DB.prepare(
-		'UPDATE core_pairing_codes SET claimed_by = ? WHERE code = ? AND (claimed_by IS NULL OR claimed_by = ?) RETURNING code',
-	)
-		.bind(user.id, code, user.id)
-		.first()
-	if (!claimed)
-		throw new ApiError(409, 'already_paired', 'That Core is being paired to another account')
-	return json({
-		core_id: row.core_id,
-		address: row.address,
-		cert_fingerprint: row.cert_fingerprint,
-	})
+	return row
+}
+
+/** App: which machine is behind this code, so the user can check before approving. */
+async function lookupCode(request: Request, env: Env) {
+	const user = await requireUser(request, env)
+	const row = await pendingCore(env, user.id, authCode(await readJson(request)))
+	return json({ name: row.name })
 }
 
 /**
- * Core: check that `user_id` claimed this Core's code. On success the Core joins that account's
- * list and gets the key it uses from now on. Only the key's hash is stored.
+ * App: approve the Core showing this code. It joins the account's list and the key it holds starts
+ * working. The insert reads the pending row itself, so a code replaced or expired since the lookup
+ * cannot store a key the Core no longer holds. A Core that belongs to someone else is never taken
+ * over.
  */
-async function confirmClaim(request: Request, env: Env) {
-	const body = await readJson(request)
-	const code = pairingCode(body)
-	const coreId = stringField(body, 'core_id', 64)
-	const userId = stringField(body, 'user_id', 64)
-	const name = stringField(body, 'name', 64)
-	const address = coreAddress(body)
-	const fingerprint = certFingerprint(body)
+async function approveCode(request: Request, env: Env) {
+	const user = await requireUser(request, env)
+	const row = await pendingCore(env, user.id, authCode(await readJson(request)))
 	const now = new Date().toISOString()
-
-	const row = await env.DB.prepare(
-		'SELECT * FROM core_pairing_codes WHERE code = ? AND core_id = ? AND expires > ?',
-	)
-		.bind(code, coreId, now)
-		.first<CodeRow>()
-	if (!row || row.claimed_by !== userId)
-		throw new ApiError(403, 'not_claimed', 'This code was not claimed by that account')
-
-	const key = `amc_${randomId(48)}`
-	// Repeating a confirmation whose answer was lost issues a fresh key to the same owner. A Core
-	// that belongs to someone else is never taken over.
 	const stored = await env.DB.prepare(
-		'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, address = excluded.address, cert_fingerprint = excluded.cert_fingerprint, public_address = NULL, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id',
+		'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) SELECT core_id, ?1, name, address, cert_fingerprint, key_hash, ?2, ?2 FROM core_auth_codes WHERE code = ?3 AND expires > ?2 ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, name = excluded.name, address = excluded.address, cert_fingerprint = excluded.cert_fingerprint, public_address = NULL, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id, name',
 	)
-		.bind(coreId, userId, name, address, fingerprint, await digest(key), now, now)
-		.first()
-	if (!stored)
-		throw new ApiError(409, 'already_paired', 'This Core is already paired to another account')
-	return json({ key })
+		.bind(user.id, now, row.code)
+		.first<{ id: string; name: string }>()
+	if (!stored) {
+		const pending = await env.DB.prepare(
+			'SELECT 1 FROM core_auth_codes WHERE code = ? AND expires > ?',
+		)
+			.bind(row.code, now)
+			.first()
+		if (!pending)
+			throw new ApiError(
+				410,
+				'code_expired',
+				'That code has expired. Use the new one on your Core.',
+			)
+		throw new ApiError(409, 'already_signed_in', 'That Core belongs to another account')
+	}
+	await env.DB.prepare('DELETE FROM core_auth_codes WHERE code = ?').bind(row.code).run()
+	return json(stored)
+}
+
+/** Core: sign itself out. Its key stops working and it leaves the owner's list. */
+async function signOut(request: Request, env: Env) {
+	const core = await requireCore(request, env)
+	await env.DB.prepare('DELETE FROM cores WHERE id = ?').bind(core.id).run()
+	return new Response(null, { status: 204 })
 }
 
 /**
- * Core, paired: report where it is now. Called every time the Core starts and whenever its address
- * on the internet changes. A Core paired before Cores served HTTPS reports its certificate here.
+ * Core, signed in: report where it is now. Called every time the Core starts, every few minutes
+ * after that, and whenever its address on the internet changes. A Core signed in before Cores
+ * served HTTPS reports its certificate here.
  */
 async function reportAddress(request: Request, env: Env) {
 	const key = tokenFrom(request)
@@ -309,7 +390,7 @@ async function tcpConnects(
 }
 
 /**
- * Core, paired: test whether a port on this Core can be reached from the internet. The connection
+ * Core, signed in: test whether a port on this Core can be reached from the internet. The connection
  * only ever goes to the address this request came from, so it cannot be used to probe anyone else.
  * `outside` is false when that address is a private one: this backend is then on the Core's own
  * network (local development) and its answer says nothing about the internet.
@@ -360,7 +441,7 @@ const INVITE_FILTER =
 	"user_id = ? AND json_extract(body,'$.type') = 'server_invite' AND json_extract(body,'$.core_id') = ? AND json_extract(body,'$.server_id') = ?"
 
 /**
- * Core, paired: an account was invited to one of its servers. The account may reach this Core from
+ * Core, signed in: an account was invited to one of its servers. The account may reach this Core from
  * now on, and gets the invite as a notification to accept in the App. `user` is an id or a
  * username; the answer says who it is, so the Core can show their name. `invited_by` must be the
  * Core's owner or an account that can already reach it.
@@ -424,7 +505,7 @@ async function grantAccess(request: Request, env: Env) {
 }
 
 /**
- * Core, paired: an account lost its access or its invite to one server. Its invite is withdrawn,
+ * Core, signed in: an account lost its access or its invite to one server. Its invite is withdrawn,
  * and unless `keep_core` says it still has another server there, so is its way to this Core.
  */
 async function revokeAccess(request: Request, env: Env) {
@@ -444,13 +525,15 @@ async function revokeAccess(request: Request, env: Env) {
 export async function handleCores(request: Request, env: Env): Promise<Response | null> {
 	const path = routePath(request),
 		method = request.method
-	if (path === '/core/pairing' && method === 'POST') return registerCode(request, env)
-	if (path === '/core/pairing/confirm' && method === 'POST') return confirmClaim(request, env)
+	if (path === '/core/auth/code' && method === 'POST') return requestCode(request, env)
+	if (path === '/core/auth/poll' && method === 'POST') return pollCode(request, env)
+	if (path === '/core/auth' && method === 'DELETE') return signOut(request, env)
 	if (path === '/core/address' && method === 'POST') return reportAddress(request, env)
 	if (path === '/core/reachability' && method === 'POST') return checkReachability(request, env)
 	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
 	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)
-	if (path === '/cores/pair' && method === 'POST') return claimCode(request, env)
+	if (path === '/cores/approve/lookup' && method === 'POST') return lookupCode(request, env)
+	if (path === '/cores/approve' && method === 'POST') return approveCode(request, env)
 	if (path === '/cores' && method === 'GET') {
 		// The account's own Cores, then the ones it was invited to. Nobody else is told where a
 		// Core is.
@@ -462,6 +545,8 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 			.all<CoreRow>()
 		return json(rows.results.map((row) => publicCore(row, user.id)))
 	}
+	// The owner takes a Core off the account. Its key stops working at once; the Core notices on
+	// its next call and signs out on its own.
 	const core = path.match(/^\/cores\/([^/]+)$/)
 	if (core && method === 'DELETE') {
 		const user = await requireUser(request, env)

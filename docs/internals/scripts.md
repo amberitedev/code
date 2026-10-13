@@ -36,7 +36,7 @@ already in the worktree.
 
 Scenario numbers passed after the task name override `defaultScenarios` in `dev.json` for that run.
 
-A fresh dev Core belongs to nobody. Pair it once from an App with the code in the `[core]` output;
+A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
 packaged build does not allow yet.
 

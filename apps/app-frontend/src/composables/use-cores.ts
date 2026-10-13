@@ -7,7 +7,8 @@ export const coresQueryKey = ['cores']
 
 /**
  * The Cores the account may reach. `cores` has all of them, including ones it was only invited
- * to manage a server on; `ownCores` has the ones it paired, which is where it can create servers.
+ * to manage a server on; `ownCores` has the ones signed in to the account, which is where it can
+ * create servers.
  */
 export function useCores() {
 	const query = useQuery({
@@ -20,25 +21,28 @@ export function useCores() {
 	return { ...query, cores, ownCores }
 }
 
-// The one "Pair a Core" modal is mounted in App.vue and registers itself here.
-let showPairCoreModal: (() => Promise<boolean>) | null = null
+// The one "Add Core" modal is mounted in App.vue and registers itself here.
+let showAddCoreModal: ((code?: string) => Promise<boolean>) | null = null
 
-export function registerPairCoreModal(show: (() => Promise<boolean>) | null) {
-	showPairCoreModal = show
-}
-
-/** Open "Pair a Core". Resolves true once a Core is paired, false if the modal is closed. */
-export function openPairCoreModal(): Promise<boolean> {
-	return showPairCoreModal?.() ?? Promise.resolve(false)
+export function registerAddCoreModal(show: ((code?: string) => Promise<boolean>) | null) {
+	showAddCoreModal = show
 }
 
 /**
- * Call before anything that creates a server. Resolves true right away when a Core is paired
- * (being invited to someone else's does not count);
- * otherwise opens "Pair a Core" and resolves true only once pairing succeeds. Throws when the
- * account's Cores cannot be loaded, so a failed lookup never asks to pair.
+ * Open "Add Core", with the code filled in when an `amberite://approve/<code>` link brought it up.
+ * Resolves true once a Core is added, false if the modal is closed.
  */
-export async function ensureCorePaired(): Promise<boolean> {
+export function openAddCoreModal(code?: string): Promise<boolean> {
+	return showAddCoreModal?.(code) ?? Promise.resolve(false)
+}
+
+/**
+ * Call before anything that creates a server. Resolves true right away when the account has a Core
+ * of its own (being invited to someone else's does not count); otherwise opens "Add Core" and
+ * resolves true only once one is added. Throws when the account's Cores cannot be loaded, so a
+ * failed lookup never asks for a Core.
+ */
+export async function ensureCore(): Promise<boolean> {
 	const cores = await apiClient.archon.cores_v1.list()
-	return cores.some((core) => core.owned) || openPairCoreModal()
+	return cores.some((core) => core.owned) || openAddCoreModal()
 }

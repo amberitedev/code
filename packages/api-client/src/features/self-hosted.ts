@@ -3,7 +3,7 @@ import type { RequestContext } from '../types/request'
 
 export interface SelfHostedConfig extends FeatureConfig {
 	baseUrl: string
-	/** Whether a URL is on a paired Core. Those requests carry the account token; Core checks it with the backend. */
+	/** Whether a URL is on a listed Core. Those requests carry the account token; Core checks it with the backend. */
 	isCoreUrl?: (url: string) => boolean
 	token: () => Promise<string | undefined>
 }

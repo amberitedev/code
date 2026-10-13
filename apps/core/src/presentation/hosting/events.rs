@@ -228,7 +228,7 @@ async fn serve(
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                // Unpairing the Core announces nothing, so access is also checked on every tick.
+                // Removing the Core from its account announces nothing, so access is also checked on every tick.
                 let role = access_service::role(&state, &account.id, &iid.to_string()).await;
                 if !matches!(role, Ok(Some(_))) {
                     send(&mut socket, json!({"event": "auth-incorrect"})).await;
