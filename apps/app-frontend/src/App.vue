@@ -182,6 +182,7 @@ import { setupAppEventsProvider } from '@/providers/setup/app-events'
 import { setupAuthProvider } from '@/providers/setup/auth'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { setupAppUserPreferencesProvider } from '@/providers/setup/user-preferences.ts'
+import { preloadRouteChunks } from '@/routes'
 import { apiClient as tauriApiClient } from '@/services/api-client'
 import { appMessages } from '@/utils/app-messages'
 
@@ -852,6 +853,8 @@ watch(stateInitialized, (ready) => {
 			loading.end(routerToken)
 			routerToken = null
 		}
+
+		void preloadRouteChunks(router)
 
 		queryClient.prefetchQuery({
 			queryKey: ['servers'],
@@ -2266,7 +2269,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					width: 'calc(100% - var(--left-bar-width) - var(--right-bar-width))',
 				}"
 			>
-				<LoadingBar position="absolute" />
+				<LoadingBar position="absolute" :throttle="300" />
 			</div>
 			<div
 				v-if="appSettings.featureFlags.page_path"

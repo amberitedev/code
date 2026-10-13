@@ -4,13 +4,14 @@
 		:to="isLink ? to : undefined"
 		v-bind="$attrs"
 		:disabled="isLink ? undefined : disabled"
+		draggable="false"
 		:active-class="isLink && isSubpage ? '' : undefined"
 		:class="{
 			'router-link-active': isPrimary && isPrimary(route),
 			'subpage-active': isSubpage && isSubpage(route),
 			disabled: disabled,
 		}"
-		class="nav-button border-none text-primary cursor-pointer w-12 rounded-full h-12 flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-button-bg hover:text-contrast"
+		class="nav-button border-none text-primary cursor-pointer w-12 rounded-full h-12 flex items-center justify-center text-2xl transition-colors bg-transparent hover:bg-button-bg hover:text-contrast"
 		@click="onClick"
 	>
 		<slot />

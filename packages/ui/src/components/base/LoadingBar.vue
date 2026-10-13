@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed } from 'vue'
 
 import { injectLoadingState } from '#ui/providers/loading-state'
 
@@ -36,93 +36,27 @@ const props = withDefaults(
 
 const loadingState = injectLoadingState(null)
 
-const progress = ref(0)
-const isVisible = ref(false)
-const step = computed(() => 10000 / props.duration)
-
-let _timer: ReturnType<typeof setInterval> | null = null
-let _throttle: ReturnType<typeof setTimeout> | null = null
-let _hideTimeout: ReturnType<typeof setTimeout> | null = null
-let _resetTimeout: ReturnType<typeof setTimeout> | null = null
-
-function clearTimers() {
-	if (_timer) clearInterval(_timer)
-	if (_throttle) clearTimeout(_throttle)
-	if (_hideTimeout) clearTimeout(_hideTimeout)
-	if (_resetTimeout) clearTimeout(_resetTimeout)
-	_timer = null
-	_throttle = null
-	_hideTimeout = null
-	_resetTimeout = null
-}
-
-function startTimer() {
-	if (typeof window === 'undefined') return
-	_timer = setInterval(() => {
-		progress.value = Math.min(100, progress.value + step.value)
-	}, 100)
-}
-
-function start() {
-	clearTimers()
-	progress.value = 0
-	if (props.throttle && typeof window !== 'undefined') {
-		_throttle = setTimeout(() => {
-			isVisible.value = true
-			startTimer()
-		}, props.throttle)
-	} else {
-		isVisible.value = true
-		startTimer()
-	}
-}
-
-function finish() {
-	progress.value = 100
-	clearTimers()
-	if (typeof window === 'undefined') {
-		isVisible.value = false
-		progress.value = 0
-		return
-	}
-	_hideTimeout = setTimeout(() => {
-		isVisible.value = false
-		_resetTimeout = setTimeout(() => {
-			progress.value = 0
-		}, 400)
-	}, 500)
-}
-
-if (loadingState) {
-	watch(
-		() => loadingState.pending.value && loadingState.barEnabled.value,
-		(active) => {
-			if (active) start()
-			else finish()
-		},
-		{ immediate: true },
-	)
-}
-
-onBeforeUnmount(clearTimers)
+// The fill and the show delay run as a CSS animation on transform and opacity, so the bar costs
+// no main-thread work while a page loads. A load that ends inside `throttle` never shows it.
+const active = computed(
+	() => !!loadingState && loadingState.pending.value && loadingState.barEnabled.value,
+)
 </script>
 
 <template>
 	<div
 		class="modrinth-loading-bar"
+		:class="{ active }"
 		:style="{
 			position: props.position,
 			top: props.offsetTop,
 			right: props.offsetRight,
 			left: props.offsetLeft,
-			pointerEvents: 'none',
-			width: `${progress}%`,
-			height: `${isVisible ? props.height : 0}px`,
+			height: `${props.height}px`,
 			borderRadius: `${props.height}px`,
 			background: props.color,
-			backgroundSize: `${(100 / Math.max(progress, 0.01)) * 100}% auto`,
-			opacity: isVisible ? 1 : 0,
-			transition: 'width 0.1s ease-in-out, height 0.1s ease-out, opacity 0.4s',
+			'--loading-bar-duration': `${props.duration}ms`,
+			'--loading-bar-delay': `${props.throttle}ms`,
 		}"
 	/>
 </template>
@@ -130,6 +64,18 @@ onBeforeUnmount(clearTimers)
 <style lang="scss" scoped>
 .modrinth-loading-bar {
 	z-index: 999999;
+	pointer-events: none;
+	transform-origin: left;
+	opacity: 0;
+	transition: opacity 0.4s;
+
+	// Dropping the animation snaps the bar to full width, so a finished load fades out complete.
+	&.active {
+		opacity: 1;
+		transition: opacity 0.1s linear var(--loading-bar-delay);
+		animation: modrinth-loading-bar-fill var(--loading-bar-duration) ease-out
+			var(--loading-bar-delay) both;
+	}
 
 	&::before {
 		content: '';
@@ -143,6 +89,12 @@ onBeforeUnmount(clearTimers)
 		opacity: 0.1;
 		z-index: -1;
 		pointer-events: none;
+	}
+}
+
+@keyframes modrinth-loading-bar-fill {
+	from {
+		transform: scaleX(0);
 	}
 }
 </style>

@@ -161,3 +161,21 @@ export default new createRouter({
 		}
 	},
 })
+
+/**
+ * Loads every page module in the background, one per idle period, so the first visit to a page
+ * does not wait on module loading. Call once after startup.
+ */
+export async function preloadRouteChunks(router) {
+	// Called through `window`: a detached requestIdleCallback throws "Illegal invocation".
+	const whenIdle = window.requestIdleCallback
+		? (callback) => window.requestIdleCallback(callback)
+		: (callback) => setTimeout(callback, 200)
+	for (const record of router.getRoutes()) {
+		// Still a lazy loader: vue-router swaps in the component object once a route has resolved.
+		const load = record.components?.default
+		if (typeof load !== 'function') continue
+		await new Promise((resolve) => whenIdle(resolve))
+		await load().catch(() => {})
+	}
+}
