@@ -23,6 +23,7 @@ pub enum ApiError {
     Conflict(String),
     Internal(String),
     UnprocessableEntity(String),
+    TooManyRequests(String),
     ServiceUnavailable(String),
 }
 
@@ -38,6 +39,7 @@ impl IntoResponse for ApiError {
             Self::UnprocessableEntity(m) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, m)
             }
+            Self::TooManyRequests(m) => (StatusCode::TOO_MANY_REQUESTS, m),
             Self::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
         };
         (status, Json(json!({ "error": msg }))).into_response()
