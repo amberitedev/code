@@ -45,7 +45,9 @@
 		</div>
 
 		<TresCanvas
+			ref="tresCanvas"
 			alpha
+			render-mode="on-demand"
 			:antialias="true"
 			:dpr="rendererDpr"
 			:renderer-options="{
@@ -179,6 +181,7 @@ const emit = defineEmits<{
 
 const skinPreviewContainer = useTemplateRef<HTMLElement>('skinPreviewContainer')
 const subtitleElement = useTemplateRef<HTMLElement>('subtitleElement')
+const tresCanvas = useTemplateRef<InstanceType<typeof TresCanvas>>('tresCanvas')
 const slots = useSlots()
 const nametagText = computed(() => props.nametag)
 const hasSubtitle = computed(() => Boolean(slots.subtitle))
@@ -189,6 +192,12 @@ const selectedModelSrc = computed(() =>
 )
 
 let subtitleResizeObserver: ResizeObserver | undefined
+
+// The canvas only draws when asked. Tres asks on its own when a bound prop changes (rotation,
+// camera, size); changes made directly to the three.js scene have to ask through this.
+function invalidatePreview() {
+	tresCanvas.value?.context?.invalidate()
+}
 
 function getSubtitleLayoutRoot(element: HTMLElement) {
 	const elementChildren = Array.from(element.children).filter(
@@ -254,7 +263,7 @@ const {
 	playAnimation,
 	playClickInteraction,
 	stopAnimations,
-} = useSkinPreviewAnimation(toRef(props, 'animationConfig'))
+} = useSkinPreviewAnimation(toRef(props, 'animationConfig'), invalidatePreview)
 
 const {
 	ignoreControlClick,
@@ -286,10 +295,12 @@ const {
 	earsEnabled: toRef(props, 'earsEnabled'),
 	initializeAnimations,
 	cleanupAnimationState,
+	onSceneChanged: invalidatePreview,
 })
 
 function syncDamageFlashShaderMaterials() {
 	syncDamageFlashShader(scene.value, damageFlashIntensity.value)
+	invalidatePreview()
 }
 
 const {

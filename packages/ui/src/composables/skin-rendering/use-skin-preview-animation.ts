@@ -1,6 +1,6 @@
-import { useRenderLoop } from '@tresjs/core'
+import { useDocumentVisibility, useWindowFocus } from '@vueuse/core'
 import * as THREE from 'three'
-import { computed, type ComputedRef, type Ref, ref, watch } from 'vue'
+import { computed, type ComputedRef, onUnmounted, type Ref, ref, watch } from 'vue'
 
 import { useDebugLogger } from '../debug-logger'
 import type { SkinPreviewAnimationConfig } from './types'
@@ -34,8 +34,14 @@ const DAMAGE_FLASH_MAX_INTENSITY = 0.7
 
 type MaybeReadonlyRef<T> = Ref<T> | ComputedRef<T>
 
+/**
+ * `onFrame` runs after every animation step so the caller can redraw. Steps only run while
+ * something is animating and the window is visible and focused, so an idle or background preview
+ * costs nothing.
+ */
 export function useSkinPreviewAnimation(
 	animationConfig: MaybeReadonlyRef<SkinPreviewAnimationConfig | undefined>,
+	onFrame?: () => void,
 ) {
 	const mixer = ref<THREE.AnimationMixer | null>(null)
 	const actions = ref<Record<string, THREE.AnimationAction>>({})
@@ -68,6 +74,7 @@ export function useSkinPreviewAnimation(
 
 		mixer.value = new THREE.AnimationMixer(loadedScene)
 		clock.start()
+		startAnimationLoop()
 		actions.value = {}
 
 		clips.forEach((clip) => {
@@ -259,6 +266,8 @@ export function useSkinPreviewAnimation(
 		if (clickImpulseEnergy.value >= CLICK_IMPULSE_MAX_ENERGY && damageFlashCooldownSeconds <= 0) {
 			triggerDamageFlash()
 		}
+
+		startAnimationLoop()
 	}
 
 	function updateClickImpulse(delta: number) {
@@ -382,8 +391,27 @@ export function useSkinPreviewAnimation(
 		{ deep: true },
 	)
 
-	const { onLoop } = useRenderLoop()
-	onLoop(() => {
+	const isWindowFocused = useWindowFocus()
+	const documentVisibility = useDocumentVisibility()
+	let animationFrame: number | null = null
+
+	function hasActiveAnimation() {
+		return (
+			mixer.value !== null ||
+			clickImpulseEnergy.value > 0 ||
+			damageFlashRemainingSeconds > 0 ||
+			damageFlashCooldownSeconds > 0
+		)
+	}
+
+	function canAnimate() {
+		return isWindowFocused.value && documentVisibility.value === 'visible' && hasActiveAnimation()
+	}
+
+	function stepAnimation() {
+		animationFrame = null
+		if (!canAnimate()) return
+
 		const delta = clock.getDelta()
 
 		if (mixer.value) {
@@ -392,6 +420,23 @@ export function useSkinPreviewAnimation(
 
 		updateClickImpulse(delta)
 		updateDamageFlash(delta)
+		onFrame?.()
+
+		animationFrame = window.requestAnimationFrame(stepAnimation)
+	}
+
+	function startAnimationLoop() {
+		if (animationFrame !== null || typeof window === 'undefined' || !canAnimate()) return
+
+		// Drop the time spent paused so the animation resumes where it stopped instead of jumping.
+		clock.getDelta()
+		animationFrame = window.requestAnimationFrame(stepAnimation)
+	}
+
+	watch([isWindowFocused, documentVisibility], startAnimationLoop)
+
+	onUnmounted(() => {
+		if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
 	})
 
 	return {
