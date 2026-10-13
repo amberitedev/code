@@ -1,15 +1,28 @@
 <script lang="ts">
 // Screenshot cards fade in one after another because their thumbnails load one at a time. Skin
-// previews all arrive together, so each card that loads claims the next slot to get the same look.
+// previews all arrive together and in no particular order, so cards that load in the same frame
+// are collected, put in page order, and each given the next slot.
 const FADE_STAGGER_MS = 30
 const FADE_STAGGER_MAX_MS = 450
 let nextFadeAt = 0
+let waiting: { element: Element; start: (delay: number) => void }[] = []
 
-function claimFadeDelay() {
-	const now = performance.now()
-	const start = Math.min(Math.max(now, nextFadeAt), now + FADE_STAGGER_MAX_MS)
-	nextFadeAt = start + FADE_STAGGER_MS
-	return start - now
+function queueFade(element: Element, start: (delay: number) => void) {
+	waiting.push({ element, start })
+	if (waiting.length > 1) return
+
+	requestAnimationFrame(() => {
+		const cards = waiting.toSorted((a, b) =>
+			a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+		)
+		waiting = []
+		const now = performance.now()
+		for (const card of cards) {
+			const at = Math.min(Math.max(now, nextFadeAt), now + FADE_STAGGER_MAX_MS)
+			nextFadeAt = at + FADE_STAGGER_MS
+			card.start(at - now)
+		}
+	})
 }
 </script>
 
@@ -52,14 +65,19 @@ const imagesLoaded = ref({
 	forward: false,
 })
 
-// True while a freshly loaded image is waiting its turn and fading in over the skeleton.
+// A freshly loaded image first waits for its place in the order, then fades in over the skeleton.
+const awaitingFade = ref(false)
 const fadingIn = ref(false)
 const fadeDelay = ref(0)
 
-function onImageLoad() {
-	if (!imagesLoaded.value.forward) {
-		fadeDelay.value = claimFadeDelay()
-		fadingIn.value = true
+function onImageLoad(event: Event) {
+	if (!imagesLoaded.value.forward && event.target instanceof Element) {
+		awaitingFade.value = true
+		queueFade(event.target, (delay) => {
+			fadeDelay.value = delay
+			awaitingFade.value = false
+			fadingIn.value = true
+		})
 	}
 	imagesLoaded.value.forward = true
 }
@@ -119,7 +137,7 @@ watch(
 		</span>
 
 		<div
-			v-if="!imagesLoaded.forward || fadingIn"
+			v-if="!imagesLoaded.forward || awaitingFade || fadingIn"
 			class="skeleton-loader h-full w-full"
 			:class="{ 'absolute inset-0': imagesLoaded.forward }"
 		>
@@ -131,7 +149,7 @@ watch(
 			:key="`${selected}-${active}`"
 			:class="[
 				'skin-button__image-parent pointer-events-none relative z-0 mb-[1.5px] grid place-items-stretch with-shadow',
-				{ 'skin-button__image-parent--fading-in': fadingIn },
+				{ 'skin-button__image-parent--fading-in': fadingIn, 'opacity-0': awaitingFade },
 			]"
 			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
 			@animationend="fadingIn = false"
