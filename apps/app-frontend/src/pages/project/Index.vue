@@ -1,6 +1,6 @@
 <template>
-	<div v-if="data">
-		<Teleport to="#sidebar-teleport-target">
+	<div v-if="headerProject">
+		<Teleport v-if="data" to="#sidebar-teleport-target">
 			<ProjectSidebarCompatibility
 				v-if="!isServerProject"
 				:project="data"
@@ -53,18 +53,18 @@
 				<BrowseInstallHeader :install-context="projectInstallContext" />
 			</div>
 			<InstanceIndicator v-if="instance && !projectInstallContext" :instance="instance" />
-			<template v-if="data">
+			<template v-if="headerProject">
 				<Teleport
 					v-if="appSettings.featureFlags.project_background"
 					to="#background-teleport-target"
 				>
-					<ProjectBackgroundGradient :project="data" />
+					<ProjectBackgroundGradient :project="headerProject" />
 				</Teleport>
 				<ProjectPageHeader
 					v-else
-					:project="data"
+					:project="headerProject"
 					:project-v3="projectV3"
-					:show-status-badge="data.status !== 'approved'"
+					:show-status-badge="!!data && data.status !== 'approved'"
 					@contextmenu.prevent.stop="handleRightClick"
 					@category="(category) => router.push(`${projectSearchUrl}?f=categories:${category}`)"
 				>
@@ -115,7 +115,7 @@
 								<MoreVerticalIcon />
 							</TeleportOverflowMenu>
 						</template>
-						<template v-else>
+						<template v-else-if="data">
 							<Button
 								v-if="showSwitchVersion && onVersionsPage"
 								v-tooltip="formatMessage(messages.alreadyInstalled)"
@@ -172,6 +172,7 @@
 					</template>
 				</ProjectPageHeader>
 				<NavTabs
+					v-if="data"
 					:links="[
 						{
 							label: formatMessage(messages.descriptionTab),
@@ -191,7 +192,7 @@
 					]"
 				/>
 				<RouterView
-					v-if="route.path.startsWith('/project')"
+					v-if="data && route.path.startsWith('/project')"
 					:project="data"
 					:versions="versions"
 					:members="members"
@@ -306,12 +307,13 @@ import {
 } from '@/helpers/instance'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
 import { get_by_instance_id } from '@/helpers/process'
-import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
 import { getServerAddress } from '@/helpers/worlds'
 import { provideBreadcrumbParent, useBreadcrumb } from '@/providers/breadcrumbs'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
 import { createServerInstallContent } from '@/providers/setup/server-install-content'
+
+import { useProjectTags } from './use-project-tags'
 
 dayjs.extend(relativeTime)
 
@@ -378,12 +380,34 @@ const { installingServerProjects, playServerProject, showAddServerToInstanceModa
 	injectServerInstall()
 const installing = ref(false)
 const data = shallowRef(null)
+// Stands in for `data` while the project loads, so the header is on screen from the first frame.
+// Search results and profile cards leave the summary it is built from in the query cache.
+const summaryProject = shallowRef(null)
+const headerProject = computed(() => data.value ?? summaryProject.value)
 
 function getProjectBreadcrumbSummary(projectId) {
 	const identifier = Array.isArray(projectId) ? projectId[0] : projectId
 	if (typeof identifier !== 'string' || !identifier) return undefined
 
 	return queryClient.getQueryData(['projects', 'summary', identifier])
+}
+
+function getSummaryProject(projectId) {
+	const summary = getProjectBreadcrumbSummary(projectId)
+	// A server's header shows live server details instead of these stats, so it waits for the project.
+	if (!summary || summary.minecraft_server) return null
+
+	return {
+		id: summary.project_id ?? summary.id,
+		title: summary.name ?? summary.title,
+		description: summary.summary ?? summary.description,
+		icon_url: summary.icon_url,
+		color: summary.color,
+		project_type: summary.project_types?.[0] ?? summary.project_type,
+		downloads: summary.downloads ?? 0,
+		followers: summary.follows ?? summary.followers ?? 0,
+		categories: summary.display_categories ?? summary.categories ?? [],
+	}
 }
 
 function getProjectBreadcrumbLabel(projectId) {
@@ -414,7 +438,6 @@ provideBreadcrumbParent(projectBreadcrumb)
 
 const versions = shallowRef([])
 const members = shallowRef([])
-const categories = shallowRef([])
 const organization = shallowRef(null)
 const instance = ref(null)
 const instanceProjects = ref(null)
@@ -435,10 +458,10 @@ const serverSetupModalRef = ref(null)
 const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
 
 serverInstallContent.watchServerContextChanges()
-await serverInstallContent.initServerContext()
+serverInstallContent.initServerContext().catch(handleError)
 
 const instanceFilters = computed(() => {
-	if (!instance.value) {
+	if (!instance.value || !data.value) {
 		return {}
 	}
 
@@ -638,7 +661,7 @@ const projectHeaderMoreActions = computed(() => [
 	},
 ])
 const projectSearchUrl = computed(
-	() => `/browse/${isServerProject.value ? 'server' : data.value?.project_type}`,
+	() => `/browse/${isServerProject.value ? 'server' : headerProject.value?.project_type}`,
 )
 
 const showSwitchVersion = computed(() => !!instance.value && installed.value)
@@ -648,10 +671,7 @@ function goToVersions() {
 	router.push(versionsHref.value)
 }
 
-const [allLoaders, allGameVersions] = await Promise.all([
-	get_loaders().catch(handleError).then(ref),
-	get_game_versions().catch(handleError).then(ref),
-])
+const { loaders: allLoaders, gameVersions: allGameVersions } = useProjectTags()
 
 async function handleClickPlay() {
 	if (!isServerProject.value) return
@@ -696,69 +716,149 @@ function reportProject() {
 	void openUrl(`https://modrinth.com/report?item=project&itemID=${data.value.id}`)
 }
 
+// How long versions, members and the organization are reused before a visit reads them again.
+const PROJECT_PART_STALE_TIME = 5 * 60_000
+
+// Rejects for a project that does not exist, so a missing one is never cached or shown.
+async function loadProject(projectId, cacheBehaviour, onProjectV3Error) {
+	const [project, projectV3Result] = await Promise.all([
+		get_project(projectId, cacheBehaviour),
+		get_project_v3(projectId, cacheBehaviour).catch(onProjectV3Error),
+	])
+	if (!project) throw new Error('Error loading project')
+	return [project, projectV3Result]
+}
+
+// The key lists the version ids, so a newly published version is always fetched. Versions that
+// are already cached are served as they are and refreshed by the cache in the background.
+function projectVersionsQuery(project) {
+	return {
+		queryKey: ['projects', 'versions', project.id, project.versions],
+		queryFn: async () =>
+			(await get_version_many(project.versions)).sort(
+				(a, b) => Date.parse(b.date_published) - Date.parse(a.date_published),
+			),
+		staleTime: PROJECT_PART_STALE_TIME,
+	}
+}
+
+async function loadInstanceState() {
+	const instanceId = route.query.i
+	;[instance.value, instanceProjects.value] = await Promise.all([
+		instanceId ? getInstance(instanceId).catch(handleError) : undefined,
+		instanceId ? getInstanceProjects(instanceId).catch(handleError) : undefined,
+	])
+}
+
+watch([instanceProjects, () => data.value?.id], ([projects, projectId]) => {
+	const installedFile =
+		projects && projectId
+			? Object.values(projects).find((x) => x.metadata && x.metadata.project_id === projectId)
+			: undefined
+	installed.value = !!installedFile
+	installedVersion.value = installedFile?.metadata.version_id ?? null
+})
+
+// The page never waits for everything: it shows what the query cache holds from an earlier visit,
+// else what the disk cache holds (even if expired), and then checks the project again in the
+// background. Each step goes through showProject, which only redraws what changed.
 async function fetchProjectData() {
 	const requestedId = String(route.params.id ?? '')
+	const isCurrent = () => String(route.params.id ?? '') === requestedId
+	const queryKey = ['projects', 'detail', requestedId]
 	projectBreadcrumbLabel.value = getProjectBreadcrumbLabel(requestedId)
-	const [project, projectV3Result] = await Promise.all([
-		get_project(requestedId, 'must_revalidate').catch(handleError),
-		get_project_v3(requestedId, 'must_revalidate').catch(handleError),
-	])
-	if (String(route.params.id ?? '') !== requestedId) {
-		return
-	}
 
-	projectV3.value = projectV3Result
+	// A local read. In an instance context the install button depends on it, so it comes first.
+	await loadInstanceState()
+	if (!isCurrent()) return
 
-	if (!project) {
-		handleError('Error loading project')
-		return
-	}
+	const cached = queryClient.getQueryData(queryKey)
+	if (cached) {
+		showProject(cached)
+	} else {
+		data.value = null
+		projectV3.value = null
+		isServerProject.value = false
+		summaryProject.value = getSummaryProject(requestedId)
 
-	data.value = project
-	projectBreadcrumbLabel.value = project.title
-	;[versions.value, members.value, categories.value, instance.value, instanceProjects.value] =
-		await Promise.all([
-			get_version_many(project.versions, 'must_revalidate').catch(handleError),
-			get_team(project.team).catch(handleError),
-			get_categories().catch(handleError),
-			route.query.i ? getInstance(route.query.i).catch(handleError) : Promise.resolve(),
-			route.query.i ? getInstanceProjects(route.query.i).catch(handleError) : Promise.resolve(),
-		])
-	if (String(route.params.id ?? '') !== requestedId) {
-		return
-	}
-
-	for (const member of members.value ?? []) {
-		for (const identifier of [member.user.id, member.user.username]) {
-			if (identifier) {
-				queryClient.setQueryData(['users', 'modrinth', 'summary', identifier], member.user)
-			}
+		const stale = await loadProject(requestedId).catch(() => null)
+		if (!isCurrent()) return
+		if (stale) {
+			queryClient.setQueryData(queryKey, stale)
+			showProject(stale)
 		}
 	}
 
-	versions.value = versions.value.sort((a, b) => dayjs(b.date_published) - dayjs(a.date_published))
+	// A failed background check is only worth reporting when there is nothing to show.
+	const reportError = (error) => {
+		if (!data.value) handleError(error)
+	}
+	const fresh = await queryClient
+		.fetchQuery({
+			queryKey,
+			queryFn: () => loadProject(requestedId, 'must_revalidate', reportError),
+		})
+		.catch(reportError)
+	if (!isCurrent()) return
 
-	const installedFile = instanceProjects.value
-		? Object.values(instanceProjects.value).find(
-				(x) => x.metadata && x.metadata.project_id === data.value.id,
-			)
-		: undefined
-	installed.value = !!installedFile
-	installedVersion.value = installedFile?.metadata.version_id ?? null
+	if (fresh) showProject(fresh)
+}
 
+// Puts a project on screen and loads the parts that hang off it. Called again when the background
+// check lands: an unchanged project keeps its identity in the query cache, so nothing re-renders.
+function showProject([project, projectV3Result]) {
+	const isNewProject = data.value?.id !== project.id
+	const isNewProjectV3 = isNewProject || projectV3.value !== projectV3Result
+
+	data.value = project
+	projectV3.value = projectV3Result
+	projectBreadcrumbLabel.value = project.title
+	isServerProject.value = projectV3Result?.minecraft_server != null
+	if (isNewProject) {
+		versions.value = []
+		members.value = []
+		organization.value = null
+	}
+
+	// Parts read through the query cache too: a revisit shows the last result at once, and calls a
+	// moment apart share one request.
+	const loadPart = (target, queryKey, queryFn) => {
+		const cachedPart = queryClient.getQueryData(queryKey)
+		if (cachedPart) target.value = cachedPart
+
+		queryClient
+			.fetchQuery({ queryKey, queryFn, staleTime: PROJECT_PART_STALE_TIME })
+			.then((part) => {
+				if (data.value === project && part) target.value = part
+			})
+			.catch(handleError)
+	}
+
+	const versionsQuery = projectVersionsQuery(project)
+	loadPart(versions, versionsQuery.queryKey, versionsQuery.queryFn)
+	loadPart(members, ['projects', 'members', project.team], async () => {
+		const team = await get_team(project.team)
+		for (const member of team ?? []) {
+			for (const identifier of [member.user.id, member.user.username]) {
+				if (identifier) {
+					queryClient.setQueryData(['users', 'modrinth', 'summary', identifier], member.user)
+				}
+			}
+		}
+		return team
+	})
 	if (project.organization) {
-		organization.value = await get_organization(project.organization).catch(handleError)
+		loadPart(organization, ['projects', 'organization', project.organization], () =>
+			get_organization(project.organization),
+		)
 	} else {
 		organization.value = null
 	}
-	if (String(route.params.id ?? '') !== requestedId) {
-		return
+
+	if (isNewProjectV3) {
+		serverStatusOnline.value = !!projectV3Result?.minecraft_java_server?.ping?.data
+		fetchDeferredServerData(project)
 	}
-
-	isServerProject.value = projectV3.value?.minecraft_server != null
-	serverStatusOnline.value = !!projectV3.value?.minecraft_java_server?.ping?.data
-
-	fetchDeferredServerData(project)
 }
 
 function fetchDeferredServerData(project) {
@@ -827,7 +927,7 @@ function fetchDeferredServerData(project) {
 	updateServerPlayState()
 }
 
-await fetchProjectData()
+fetchProjectData().catch(handleError)
 
 useAppEvent('process', (e) => {
 	if (
@@ -877,7 +977,8 @@ async function install(version) {
 					},
 					contentType,
 				),
-				getProjectVersions: async () => versions.value,
+				// Versions load after the header, so an early click waits for them here.
+				getProjectVersions: () => queryClient.fetchQuery(projectVersionsQuery(data.value)),
 				queue: {
 					get: serverInstallContent.getQueuedServerInstallPlans,
 					set: serverInstallContent.setQueuedServerInstallPlans,
@@ -922,6 +1023,7 @@ async function install(version) {
 const options = ref(null)
 const handleRightClick = (event) => {
 	const project = data.value
+	if (!project) return
 	options.value.open(event, [
 		{
 			id: 'install',

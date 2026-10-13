@@ -54,16 +54,15 @@ import {
 	commonMessages,
 	defineMessages,
 	IconButton,
-	injectNotificationManager,
 	ProjectPageVersions,
 	useVIntl,
 } from '@modrinth/ui'
-import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons/index.js'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
-import { get_game_versions, get_loaders } from '@/helpers/tags.js'
+
+import { useProjectTags } from './use-project-tags'
 
 const { formatMessage } = useVIntl()
 const appSettings = useAppSettings()
@@ -106,7 +105,6 @@ defineProps({
 	},
 })
 
-const { handleError } = injectNotificationManager()
 const route = useRoute()
 
 function buildProjectHref(path) {
@@ -122,10 +120,7 @@ function buildProjectHref(path) {
 	return qs ? `${path}?${qs}` : path
 }
 
-const [loaders, gameVersions] = await Promise.all([
-	get_loaders().catch(handleError).then(ref),
-	get_game_versions().catch(handleError).then(ref),
-])
+const { loaders, gameVersions } = useProjectTags()
 </script>
 
 <style scoped lang="scss">

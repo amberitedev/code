@@ -232,5 +232,6 @@ watch([() => props.versions, () => route.params.version], async () => {
 	}
 })
 
-await refreshEnrichment()
+// Not awaited: the version shows at once and its dependencies fill in.
+void refreshEnrichment()
 </script>

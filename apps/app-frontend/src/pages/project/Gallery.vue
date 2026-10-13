@@ -2,7 +2,13 @@
 	<div class="gallery">
 		<Card v-for="(image, index) in filteredGallery" :key="image.url" class="gallery-item">
 			<a @click="expandImage(image, index)">
-				<img :src="image.url" :alt="image.title" class="gallery-image" />
+				<img
+					:src="image.url"
+					:alt="image.title"
+					class="gallery-image"
+					loading="lazy"
+					decoding="async"
+				/>
 			</a>
 			<div class="gallery-body">
 				<h3>{{ image.title }}</h3>
@@ -40,6 +46,10 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref } from 'vue'
 
 import { trackEvent } from '@/helpers/analytics'
+
+// The parent route view passes every tab's props. This tab has two root nodes, so without this Vue
+// warns about the ones it does not declare on every render and dev mode serializes them.
+defineOptions({ inheritAttrs: false })
 
 const MC_SERVER_BANNER_NAME = '__mc_server_banner__'
 

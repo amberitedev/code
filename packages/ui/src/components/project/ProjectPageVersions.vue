@@ -47,7 +47,7 @@
 	</div>
 
 	<Table
-		v-if="versions.length > 0"
+		v-if="versions.length > 0 && showTable"
 		class="hidden sm:block"
 		:columns="versionColumns"
 		:data="currentVersionRows"
@@ -264,7 +264,7 @@
 
 	<!-- MOBILE VERSIONS TABLE/LIST -->
 	<div
-		v-if="versions.length > 0"
+		v-if="versions.length > 0 && showMobileList"
 		class="flex flex-col gap-4 rounded-2xl bg-bg-raised p-5 sm:hidden"
 	>
 		<template v-for="(version, index) in currentVersions" :key="version.id ?? index">
@@ -480,7 +480,8 @@ import {
 	getVersionGroupsForDisplay,
 	type VersionDisplayGroup,
 } from '@modrinth/utils'
-import { computed, type Ref, ref } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
+import { computed, getCurrentInstance, type Ref, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { Button } from '#ui/components/base/buttons'
@@ -548,6 +549,14 @@ const props = withDefaults(
 		versionLink: undefined,
 	},
 )
+
+// The table and the mobile list are never visible together (Tailwind `sm` is 640px), so a client
+// mount renders only the visible one. Server-rendered markup contains both, so SSR and hydration
+// keep both to match it.
+const rendersBothLayouts = typeof window === 'undefined' || !!getCurrentInstance()?.vnode.el
+const isTableViewport = useMediaQuery('(min-width: 640px)')
+const showTable = computed(() => rendersBothLayouts || isTableViewport.value)
+const showMobileList = computed(() => rendersBothLayouts || !isTableViewport.value)
 
 const visibleCellClass = '!overflow-visible py-3 align-middle pr-2.5'
 
@@ -638,7 +647,10 @@ function hasNoModLoader(loaders: string[]): boolean {
 }
 
 function getDisplayGameVersions(version: DisplayVersion): VersionDisplayGroup[] {
-	return getVersionGroupsForDisplay(version.game_versions, props.gameVersions)
+	return (
+		displayGameVersions.value.get(version.id) ??
+		getVersionGroupsForDisplay(version.game_versions, props.gameVersions)
+	)
 }
 
 function getFilterTooltip(filter: string): string {
@@ -724,6 +736,16 @@ const currentVersions = computed(() =>
 		(currentPage.value - 1) * pageSize.value,
 		currentPage.value * pageSize.value,
 	),
+)
+// Grouped once per visible version: the template asks for the same row's groups several times.
+const displayGameVersions = computed(
+	() =>
+		new Map(
+			currentVersions.value.map((version) => [
+				version.id,
+				getVersionGroupsForDisplay(version.game_versions, props.gameVersions),
+			]),
+		),
 )
 const currentVersionRows = computed<VersionTableRow[]>(
 	() => currentVersions.value as VersionTableRow[],
