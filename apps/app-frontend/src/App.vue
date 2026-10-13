@@ -780,10 +780,18 @@ let suspenseToken = null
 
 let suspensePending = false
 
+// Pages teleport whole trees into the sidebar. Waiting for the mutations to go quiet makes a swap
+// cost one scrollbar measurement, taken after the page has rendered instead of forcing layout
+// in the middle of it.
 const sidebarOverlayScrollbarsOptions = Object.freeze({
 	overflow: {
 		x: 'hidden',
 		y: 'scroll',
+	},
+	update: {
+		debounce: {
+			mutation: [150, 500],
+		},
 	},
 })
 
@@ -2592,8 +2600,9 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 }
 
 // The sidebar's free space belongs to the scrollable area while news is closed and to the news
-// body while it is open. Swapping flex-grow between them animates the news open and closed and
-// leaves no gap above it. The minimum height keeps news visible when the sidebar content is long.
+// body while it is open, which leaves no gap above it. The swap is not animated: it also flips
+// when a page fills or empties the sidebar, and animating it relaid out the sidebar every frame.
+// The minimum height keeps news visible when the sidebar content is long.
 .app-sidebar-scrollable {
 	flex-grow: 1;
 }
@@ -2614,15 +2623,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 .app-sidebar:not(:has(.sidebar-teleport-content:not(:empty))):has(.sidebar-news-body.open)
 	.app-sidebar-scrollable {
 	flex-grow: 0;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-	.app-sidebar-scrollable,
-	.sidebar-news-body {
-		transition:
-			flex-grow 300ms ease-in-out,
-			min-height 300ms ease-in-out;
-	}
 }
 
 @media (prefers-reduced-motion: no-preference) {
