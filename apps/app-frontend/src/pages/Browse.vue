@@ -253,14 +253,27 @@ function syncBreadcrumbs() {
 watch(displayedBrowseRoute, syncBreadcrumbs, { immediate: true, flush: 'sync' })
 
 debugLog('fetching tags (categories, loaders, gameVersions)')
+// Tags do not change while the App runs, so only the first Browse visit waits for them.
+const tagQueryOptions = { staleTime: Infinity, gcTime: Infinity } as const
 const [categories, loaders, availableGameVersions] = await Promise.all([
-	get_categories()
+	queryClient
+		.ensureQueryData({
+			queryKey: ['tags', 'categories'],
+			queryFn: get_categories,
+			...tagQueryOptions,
+		})
 		.catch(handleError)
 		.then(ref<Labrinth.Tags.v2.Category[]>),
-	get_loaders()
+	queryClient
+		.ensureQueryData({ queryKey: ['tags', 'loaders'], queryFn: get_loaders, ...tagQueryOptions })
 		.catch(handleError)
 		.then(ref<Labrinth.Tags.v2.Loader[]>),
-	get_game_versions()
+	queryClient
+		.ensureQueryData({
+			queryKey: ['tags', 'game-versions'],
+			queryFn: get_game_versions,
+			...tagQueryOptions,
+		})
 		.catch(handleError)
 		.then(ref<Labrinth.Tags.v2.GameVersion[]>),
 ])
@@ -1094,7 +1107,8 @@ async function search(requestParams: string) {
 					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
 				}
 			} | null>,
-		staleTime: 30_000,
+		// Coming back to a search within a few minutes shows the same page at once.
+		staleTime: 5 * 60_000,
 	})
 
 	if (!rawResults) {

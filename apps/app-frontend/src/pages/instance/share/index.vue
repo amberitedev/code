@@ -82,9 +82,25 @@
 			</template>
 		</SharedInstanceShareEmptyState>
 
+		<!-- Ghost of the member table on the first load only. Static on purpose: no shimmer. -->
+		<div v-else-if="membersFirstLoad" class="flex flex-col gap-4" aria-busy="true">
+			<GhostBlock class="h-10 w-full !rounded-xl" />
+			<div class="overflow-hidden rounded-2xl border border-solid border-surface-4">
+				<div class="h-12 bg-surface-3" />
+				<div
+					v-for="row in 2"
+					:key="row"
+					class="flex h-14 items-center gap-2 border-0 border-t border-solid border-surface-4 bg-surface-2 px-4"
+				>
+					<GhostBlock class="size-6 shrink-0 !rounded-full" />
+					<GhostBlock class="h-4 w-40" />
+				</div>
+			</div>
+		</div>
+
 		<div v-else-if="membersTableLoading" class="h-64" aria-hidden="true" />
 
-		<SharedInstanceMembersTable v-else-if="showMembersTable" />
+		<SharedInstanceMembersTable v-else-if="showMembersTable" :class="membersReveal" />
 
 		<SharedInstanceShareEmptyState
 			v-else-if="sharedInstanceUnavailable"
@@ -166,11 +182,13 @@ import {
 	Button,
 	ConfirmUnlinkModal,
 	defineMessages,
+	GhostBlock,
 	injectAuth,
 	injectNotificationManager,
 	type InvitePlayersInvitePayload,
 	InvitePlayersModal,
 	type InvitePlayersUser,
+	useGhostReveal,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -303,6 +321,11 @@ const membersTableLoading = computed(
 		!sharedInstanceUnavailable.value &&
 		!sharedInstanceActionsLocked.value,
 )
+// Only a cold load gets ghost rows. A later refetch of an empty list keeps the blank gap it had.
+const membersFirstLoad = computed(
+	() => membersTableLoading.value && members.query.data.value === undefined,
+)
+const membersReveal = useGhostReveal(() => membersFirstLoad.value)
 const showMembersTable = computed(
 	() =>
 		members.rows.value.length > 0 ||
