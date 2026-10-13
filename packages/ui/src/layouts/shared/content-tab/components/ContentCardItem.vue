@@ -1,3 +1,8 @@
+<script lang="ts">
+// One set of global key listeners shared by every row, instead of one per mounted row.
+const useSharedMagicKeys = createSharedComposable(useMagicKeys)
+</script>
+
 <script setup lang="ts">
 import {
 	ArrowLeftRightIcon,
@@ -11,8 +16,8 @@ import {
 	TriangleAlertIcon,
 	UploadIcon,
 } from '@modrinth/assets'
-import { useMagicKeys } from '@vueuse/core'
-import { computed, getCurrentInstance, ref } from 'vue'
+import { createSharedComposable, useMagicKeys } from '@vueuse/core'
+import { computed, getCurrentInstance, onMounted, ref } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
 import AutoLink from '#ui/components/base/AutoLink.vue'
@@ -25,7 +30,6 @@ import ProgressSpinner from '#ui/components/base/ProgressSpinner.vue'
 import Toggle from '#ui/components/base/Toggle.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { commonMessages } from '#ui/utils/common-messages'
-import { truncatedTooltip } from '#ui/utils/truncate'
 
 import type {
 	ClientWarningType,
@@ -144,6 +148,25 @@ const hasSwitchVersionListener = computed(
 const versionNumberRef = ref<HTMLElement | null>(null)
 const fileNameRef = ref<HTMLElement | null>(null)
 
+// Truncation is measured once the row is mounted and again when the pointer enters it, never
+// while rendering, so re-rendering rows does not force layout between DOM updates.
+const versionNumberTruncated = ref(false)
+const fileNameTruncated = ref(false)
+
+function isTruncated(element: HTMLElement | null) {
+	return (
+		!!element &&
+		(element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight)
+	)
+}
+
+function measureTruncation() {
+	versionNumberTruncated.value = isTruncated(versionNumberRef.value)
+	fileNameTruncated.value = isTruncated(fileNameRef.value)
+}
+
+onMounted(measureTruncation)
+
 const isDisabled = computed(() => props.disabled || props.installing)
 const isToggleDisabled = computed(() => isDisabled.value || props.toggleDisabled)
 const syncStatusLabel = computed(() =>
@@ -161,7 +184,7 @@ const clientWarningMessage = computed(() => {
 	}
 })
 
-const { shift: shiftHeld } = useMagicKeys()
+const { shift: shiftHeld } = useSharedMagicKeys()
 const deleteHovered = ref(false)
 const installTooltip = computed(() => {
 	if (!props.installing) return undefined
@@ -180,6 +203,7 @@ const installTooltip = computed(() => {
 			'opacity-50 grayscale': disabled && !installing,
 			'opacity-50': installing,
 		}"
+		@pointerenter="measureTruncation"
 	>
 		<div
 			class="flex min-w-0 items-center gap-4"
@@ -199,7 +223,7 @@ const installTooltip = computed(() => {
 			/>
 
 			<div
-				class="flex min-w-0 items-center gap-3 transition-[filter,opacity] duration-200"
+				class="flex min-w-0 items-center gap-3 transition-opacity duration-200"
 				:class="enabled === false && !disabled ? 'grayscale opacity-50' : ''"
 			>
 				<div v-tooltip="installTooltip" class="relative flex shrink-0 items-center">
@@ -329,7 +353,7 @@ const installTooltip = computed(() => {
 
 		<div
 			v-if="showVersion"
-			class="hidden flex-col gap-0.5 transition-[filter,opacity] duration-200 @[800px]:flex"
+			class="hidden flex-col gap-0.5 transition-opacity duration-200 @[800px]:flex"
 			:class="[
 				hideActions ? 'flex-1' : 'flex-1 min-w-0',
 				enabled === false && !disabled ? 'grayscale opacity-50' : '',
@@ -337,7 +361,7 @@ const installTooltip = computed(() => {
 		>
 			<template v-if="version">
 				<AutoLink
-					v-tooltip="truncatedTooltip(versionNumberRef, version.version_number)"
+					v-tooltip="versionNumberTruncated ? version.version_number : undefined"
 					:target="
 						typeof versionLink === 'string' && versionLink.startsWith('http') ? '_blank' : undefined
 					"
@@ -353,7 +377,7 @@ const installTooltip = computed(() => {
 					}}</span>
 				</AutoLink>
 				<span
-					v-tooltip="truncatedTooltip(fileNameRef, version.file_name)"
+					v-tooltip="fileNameTruncated ? version.file_name : undefined"
 					class="flex min-w-0 leading-6 text-secondary"
 				>
 					<span ref="fileNameRef" class="truncate">{{
