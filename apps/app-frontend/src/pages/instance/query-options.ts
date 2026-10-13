@@ -24,7 +24,6 @@ export const instanceKeys = {
 	rootPath: (instanceId: string) => [...instanceKeys.detail(instanceId), 'root-path'] as const,
 	files: (instanceId: string, path: string) =>
 		[...instanceKeys.detail(instanceId), 'files', path] as const,
-	console: (instanceId: string) => [...instanceKeys.detail(instanceId), 'console'] as const,
 	logs: (instanceId: string) => [...instanceKeys.detail(instanceId), 'logs'] as const,
 	installedProjectIds: (instanceId: string, source: 'content' | 'worlds') =>
 		[...instanceKeys.detail(instanceId), 'installed-project-ids', source] as const,

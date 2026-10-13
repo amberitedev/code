@@ -910,7 +910,6 @@ provideInstanceBackup(() => instance.value!)
 
 function destroyInstanceConsole(targetInstanceId: string) {
 	void useInstanceConsole(targetInstanceId).destroy()
-	queryClient.removeQueries({ queryKey: instanceKeys.console(targetInstanceId), exact: true })
 }
 
 watch(instanceId, (currentInstanceId, previousInstanceId) => {
