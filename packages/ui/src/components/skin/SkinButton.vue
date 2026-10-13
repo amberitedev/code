@@ -1,28 +1,29 @@
 <script lang="ts">
 // Screenshot cards fade in one after another because their thumbnails load one at a time. Skin
-// previews all arrive together and in no particular order, so cards that load in the same frame
-// are collected, put in page order, and each given the next slot.
+// previews arrive together and in no particular order, so each card's turn comes from its place on
+// the page: the first card of a burst fades at once and each one after it a step later.
 const FADE_STAGGER_MS = 30
 const FADE_STAGGER_MAX_MS = 450
-let nextFadeAt = 0
-let waiting: { element: Element; start: (delay: number) => void }[] = []
+// Cards that load within this long of each other belong to the same burst.
+const FADE_BURST_GAP_MS = 300
+let burstStart = 0
+let burstEnd = 0
+let burstFirstIndex = 0
 
-function queueFade(element: Element, start: (delay: number) => void) {
-	waiting.push({ element, start })
-	if (waiting.length > 1) return
+function claimFadeDelay(card: Element | null) {
+	const now = performance.now()
+	const index = card
+		? Array.prototype.indexOf.call(document.querySelectorAll('.skin-button'), card)
+		: 0
+	if (now > burstEnd) {
+		burstStart = now
+		burstFirstIndex = index
+	}
+	burstFirstIndex = Math.min(burstFirstIndex, index)
+	burstEnd = now + FADE_BURST_GAP_MS
 
-	requestAnimationFrame(() => {
-		const cards = waiting.toSorted((a, b) =>
-			a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
-		)
-		waiting = []
-		const now = performance.now()
-		for (const card of cards) {
-			const at = Math.min(Math.max(now, nextFadeAt), now + FADE_STAGGER_MAX_MS)
-			nextFadeAt = at + FADE_STAGGER_MS
-			card.start(at - now)
-		}
-	})
+	const turn = Math.min((index - burstFirstIndex) * FADE_STAGGER_MS, FADE_STAGGER_MAX_MS)
+	return Math.max(0, burstStart + turn - now)
 }
 </script>
 
@@ -65,19 +66,15 @@ const imagesLoaded = ref({
 	forward: false,
 })
 
-// A freshly loaded image first waits for its place in the order, then fades in over the skeleton.
-const awaitingFade = ref(false)
+// True while a freshly loaded image is waiting its turn and fading in over the skeleton.
 const fadingIn = ref(false)
 const fadeDelay = ref(0)
 
 function onImageLoad(event: Event) {
-	if (!imagesLoaded.value.forward && event.target instanceof Element) {
-		awaitingFade.value = true
-		queueFade(event.target, (delay) => {
-			fadeDelay.value = delay
-			awaitingFade.value = false
-			fadingIn.value = true
-		})
+	if (!imagesLoaded.value.forward) {
+		const image = event.target instanceof Element ? event.target : null
+		fadeDelay.value = claimFadeDelay(image?.closest('.skin-button') ?? null)
+		fadingIn.value = true
 	}
 	imagesLoaded.value.forward = true
 }
@@ -137,7 +134,7 @@ watch(
 		</span>
 
 		<div
-			v-if="!imagesLoaded.forward || awaitingFade || fadingIn"
+			v-if="!imagesLoaded.forward || fadingIn"
 			class="skeleton-loader h-full w-full"
 			:class="{ 'absolute inset-0': imagesLoaded.forward }"
 		>
@@ -149,7 +146,7 @@ watch(
 			:key="`${selected}-${active}`"
 			:class="[
 				'skin-button__image-parent pointer-events-none relative z-0 mb-[1.5px] grid place-items-stretch with-shadow',
-				{ 'skin-button__image-parent--fading-in': fadingIn, 'opacity-0': awaitingFade },
+				{ 'skin-button__image-parent--fading-in': fadingIn },
 			]"
 			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
 			@animationend="fadingIn = false"
