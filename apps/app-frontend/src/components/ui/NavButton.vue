@@ -4,6 +4,7 @@
 		:to="isLink ? to : undefined"
 		v-bind="$attrs"
 		:disabled="isLink ? undefined : disabled"
+		draggable="false"
 		:active-class="isLink && isSubpage ? '' : undefined"
 		:class="{
 			'router-link-active': isPrimary && isPrimary(route),
