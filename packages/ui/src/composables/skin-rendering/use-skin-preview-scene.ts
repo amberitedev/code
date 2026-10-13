@@ -132,7 +132,6 @@ export function useSkinPreviewScene({
 	earsEnabled,
 	initializeAnimations,
 	cleanupAnimationState,
-	onSceneChanged,
 }: {
 	selectedModelSrc: MaybeReadonlyRef<string>
 	textureSrc: MaybeReadonlyRef<string>
@@ -141,8 +140,6 @@ export function useSkinPreviewScene({
 	earsEnabled: MaybeReadonlyRef<boolean>
 	initializeAnimations: (loadedScene: THREE.Object3D, clips: THREE.AnimationClip[]) => void
 	cleanupAnimationState: (root: THREE.Object3D | null) => void
-	/** Called after the model, a texture or the ears features change, so the caller can redraw. */
-	onSceneChanged?: () => void
 }) {
 	const scene = shallowRef<THREE.Object3D | null>(null)
 	const lastCapeSrc = ref<string | undefined>(undefined)
@@ -293,8 +290,6 @@ export function useSkinPreviewScene({
 	}
 
 	function updateModelInfo() {
-		onSceneChanged?.()
-
 		const box = scene.value ? getVisibleMeshBox(scene.value) : null
 		const playerBox = scene.value ? getVisibleMeshBox(scene.value, isPlayerMesh) : null
 

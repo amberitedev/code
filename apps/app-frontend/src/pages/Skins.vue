@@ -1,16 +1,3 @@
-<script lang="ts">
-// What the page showed on the last visit. A new visit starts from this instead of an empty page,
-// and the reload that every visit runs replaces it.
-let lastVisit:
-	| {
-			skins: Skin[]
-			capes: Cape[]
-			currentUser: Awaited<ReturnType<typeof users>>[number] | undefined
-			currentUserId: string | undefined
-	  }
-	| undefined
-</script>
-
 <script setup lang="ts">
 import {
 	CheckIcon,
@@ -84,8 +71,6 @@ type VirtualSkinSectionListExpose = {
 }
 
 const PENDING_SKIN_REFRESH_DELAY_MS = 11_000
-const USER_CHECK_INTERVAL_MS = 2000
-const USER_CHECK_AFTER_CLICK_MS = 200
 const DEFAULT_SKIN_SECTION_SORT_ORDER = ['Default skins', 'Modrinth Pride']
 const EARS_NOTICE_PLACEHOLDER = '__EARS_MOD_NAME__'
 const messages = defineMessages({
@@ -240,25 +225,21 @@ const auth = injectAuth()
 const client = injectModrinthClient()
 
 const appSettings = useAppSettings()
-const skins = ref<Skin[]>(lastVisit?.skins ?? [])
-const capes = ref<Cape[]>(lastVisit?.capes ?? [])
-// False until the first load of this visit finishes, unless the last visit left data to show.
-const isLoaded = ref(!!lastVisit)
+const skins = ref<Skin[]>([])
+const capes = ref<Cape[]>([])
 const offline = ref(!navigator.onLine)
 
 const accountsCard = inject('accountsCard') as Ref<typeof AccountsCard>
-const currentUser = ref<Awaited<ReturnType<typeof users>>[number] | undefined>(
-	lastVisit?.currentUser,
-)
-const currentUserId = ref<string | undefined>(lastVisit?.currentUserId)
+const currentUser = ref<Awaited<ReturnType<typeof users>>[number]>()
+const currentUserId = ref<string | undefined>(undefined)
 
 const username = computed(() => currentUser.value?.profile?.name ?? undefined)
-const selectedSkin = ref<Skin | null>(skins.value.find((skin) => skin.is_equipped) ?? null)
+const selectedSkin = ref<Skin | null>(null)
 const isApplyingSkin = ref(false)
 const earsFeaturesEnabled = ref(true)
 const selectedSkinHasEarsFeatures = ref(false)
 
-const originalSelectedSkin = ref<Skin | null>(selectedSkin.value)
+const originalSelectedSkin = ref<Skin | null>(null)
 const earsFeatureNoticeParts = computed(() => {
 	const notice = formatMessage(messages.earsFeatureNotice, {
 		ears: EARS_NOTICE_PLACEHOLDER,
@@ -376,15 +357,11 @@ const hasPendingSkinChange = computed(
 )
 
 let userCheckInterval: number | null = null
-let isCheckingUser = false
 let pendingSkinRefreshTimeout: number | null = null
 let unlistenAddSkinDragDrop: UnlistenFn | null = null
 let isUnmounted = false
 
 const isDraggingSkinFile = ref(false)
-// The 3D preview is the slowest part of the page to mount and fades in anyway, so it mounts after
-// the rest of the page has painted.
-const isPreviewMounted = ref(false)
 const isAddSkinButtonDragActive = ref(false)
 
 const deleteSkinModal = ref()
@@ -417,7 +394,6 @@ async function loadCapes() {
 	try {
 		capes.value = (await get_available_capes()) ?? []
 	} catch (error) {
-		await initialUserLoad
 		if (currentUser.value && error instanceof Error) {
 			handleError(error)
 		}
@@ -449,7 +425,6 @@ async function loadSkins() {
 		selectedSkin.value = skins.value.find((s) => s.is_equipped) ?? null
 		originalSelectedSkin.value = selectedSkin.value
 	} catch (error) {
-		await initialUserLoad
 		if (currentUser.value && error instanceof Error) {
 			handleError(error)
 		}
@@ -842,9 +817,10 @@ async function onSkinSaved(options: { applied: boolean; skin?: Skin; previousSki
 
 async function loadCurrentUser() {
 	try {
-		const [defaultId, allAccounts]: [string | undefined, Awaited<ReturnType<typeof users>>] =
-			await Promise.all([get_default_user(), users()])
+		const defaultId = await get_default_user()
 		currentUserId.value = defaultId
+
+		const allAccounts = await users()
 		currentUser.value = allAccounts.find((acc) => acc.profile.id === defaultId)
 	} catch (e) {
 		handleError(e as Error)
@@ -1048,23 +1024,14 @@ watch(isSkinManagementReadOnly, (readOnly) => {
 onMounted(() => {
 	window.addEventListener('offline', onOffline)
 	window.addEventListener('online', onOnline)
-	userCheckInterval = window.setInterval(checkUserChanges, USER_CHECK_INTERVAL_MS)
-	window.addEventListener('focus', checkUserChanges)
-	window.addEventListener('click', checkUserChangesAfterClick, true)
+	userCheckInterval = window.setInterval(checkUserChanges, 250)
 	void setupAddSkinDragDropListener()
-	window.requestAnimationFrame(() =>
-		window.requestAnimationFrame(() => {
-			isPreviewMounted.value = true
-		}),
-	)
 })
 
 onUnmounted(() => {
 	isUnmounted = true
 	window.removeEventListener('offline', onOffline)
 	window.removeEventListener('online', onOnline)
-	window.removeEventListener('focus', checkUserChanges)
-	window.removeEventListener('click', checkUserChangesAfterClick, true)
 
 	if (userCheckInterval !== null) {
 		window.clearInterval(userCheckInterval)
@@ -1090,13 +1057,7 @@ function onOnline() {
 	void authServerQuery.refetch()
 }
 
-// Nothing tells this page when the Minecraft account changes, so it asks. Switching accounts takes
-// a click in this window, so it asks shortly after one, when the window regains focus (signing in
-// happens in another window), and on a slow timer as a backstop.
 async function checkUserChanges() {
-	if (isUnmounted || isCheckingUser || !document.hasFocus()) return
-
-	isCheckingUser = true
 	try {
 		const defaultId = await get_default_user()
 		if (defaultId !== currentUserId.value) {
@@ -1109,31 +1070,11 @@ async function checkUserChanges() {
 		if (currentUser.value && error instanceof Error) {
 			handleError(error)
 		}
-	} finally {
-		isCheckingUser = false
 	}
 }
 
-function checkUserChangesAfterClick() {
-	window.setTimeout(checkUserChanges, USER_CHECK_AFTER_CLICK_MS)
-}
-
-watch([skins, capes, currentUser, currentUserId, isLoaded], () => {
-	if (!isLoaded.value) return
-
-	lastVisit = {
-		skins: skins.value,
-		capes: capes.value,
-		currentUser: currentUser.value,
-		currentUserId: currentUserId.value,
-	}
-})
-
-// Not awaited: an awaited setup keeps the previous page on screen until every call returns.
-const initialUserLoad = loadCurrentUser()
-void Promise.all([initialUserLoad, loadCapes(), loadSkins()]).then(() => {
-	isLoaded.value = true
-})
+await Promise.all([loadCapes(), loadCurrentUser()])
+await loadSkins()
 </script>
 
 <template>
@@ -1159,7 +1100,7 @@ void Promise.all([initialUserLoad, loadCapes(), loadSkins()]).then(() => {
 		@proceed="deleteSkin"
 	/>
 
-	<div class="skin-layout box-border grow p-4" :class="{ 'pb-40': isLoaded && !currentUser }">
+	<div class="skin-layout box-border grow p-4" :class="{ 'pb-40': !currentUser }">
 		<div class="sticky top-6 self-start p-2 pt-0">
 			<h1 class="m-0 text-2xl font-bold flex items-center gap-2">
 				{{ formatMessage(appMessages.skinSelectorLabel) }}
@@ -1168,7 +1109,6 @@ void Promise.all([initialUserLoad, loadCapes(), loadSkins()]).then(() => {
 				class="ml-5 mt-4 flex h-[calc(80vh-1rem)] items-center justify-center max-[700px]:h-[calc(50vh-1rem)]"
 			>
 				<SkinPreviewRenderer
-					v-if="isPreviewMounted"
 					:cape-src="capeTexture"
 					:texture-src="skinTexture || ''"
 					:ears-texture-src="selectedSkin?.texture"
@@ -1339,7 +1279,7 @@ void Promise.all([initialUserLoad, loadCapes(), loadSkins()]).then(() => {
 		</div>
 	</div>
 
-	<div v-if="isLoaded && !currentUser" class="sticky w-full bottom-0 z-20 p-4 pt-0">
+	<div v-if="!currentUser" class="sticky w-full bottom-0 z-20 p-4 pt-0">
 		<div
 			class="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[20px] border border-solid border-surface-5 bg-surface-3 p-4"
 		>

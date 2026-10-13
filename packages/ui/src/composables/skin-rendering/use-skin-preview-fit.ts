@@ -53,9 +53,6 @@ function cloneBounds(bounds: SkinPreviewBounds): SkinPreviewBounds {
 }
 
 const MODEL_ROTATION_AXIS = new THREE.Vector3(0, 1, 0)
-// Scratch objects for projecting the model bounds, reused so a resize does not allocate each time.
-const PROJECTION_CAMERA = new THREE.PerspectiveCamera()
-const PROJECTION_POINT = new THREE.Vector3()
 
 type MaybeReadonlyRef<T> = Ref<T> | ComputedRef<T>
 
@@ -302,9 +299,7 @@ export function useSkinPreviewFit({
 		const width = Math.max(containerSize.value.width, 1)
 		const height = Math.max(containerSize.value.height, 1)
 		const { fov: resolvedFov, position, target } = cameraConfig.value
-		const camera = PROJECTION_CAMERA
-		camera.fov = resolvedFov
-		camera.aspect = width / height
+		const camera = new THREE.PerspectiveCamera(resolvedFov, width / height, 0.1, 1000)
 		camera.position.set(...position)
 		camera.lookAt(...target)
 		camera.updateProjectionMatrix()
@@ -318,7 +313,7 @@ export function useSkinPreviewFit({
 		for (const x of [bounds.min[0], bounds.max[0]]) {
 			for (const y of [bounds.min[1], bounds.max[1]]) {
 				for (const z of [bounds.min[2], bounds.max[2]]) {
-					const point = PROJECTION_POINT.set(x + offsetX, y + offsetY, z + offsetZ)
+					const point = new THREE.Vector3(x + offsetX, y + offsetY, z + offsetZ)
 					point.applyAxisAngle(MODEL_ROTATION_AXIS, fitModelRotation.value)
 					point.project(camera)
 
@@ -467,11 +462,8 @@ export function useSkinPreviewFit({
 		debug(snapshot)
 	}
 
-	// Snapshots read layout and walk the whole scene, so they are off unless a developer opts in
-	// from the console with `window.__SKIN_PREVIEW_DEBUG__ = []`.
 	function queueDebugSnapshot(reason: string) {
 		if (typeof window === 'undefined') return
-		if (!(window as SkinPreviewDebugWindow).__SKIN_PREVIEW_DEBUG__) return
 
 		pendingDebugReasons.add(reason)
 		if (debugAnimationFrame !== null) return

@@ -27,12 +27,9 @@ useIntersectionObserver(
 watch(
 	[visible, key, () => props.capes],
 	([isVisible], _, onCleanup) => {
-		if (!isVisible) {
-			url.value = undefined
-			return
-		}
+		url.value = undefined
+		if (!isVisible) return
 		const preview = acquireSkinPreview(props.skin, props.capes)
-		url.value = preview.result?.forwards
 		let active = true
 		onCleanup(() => {
 			active = false

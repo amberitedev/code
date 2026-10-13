@@ -68,18 +68,29 @@ export function useDynamicFontSize(options: DynamicFontSizeOptions) {
 		return element.getBoundingClientRect().width
 	}
 
-	// Width grows in step with font size, so one measurement per text is enough to size it for any
-	// container width without forcing layout again.
-	let measuredText: string | undefined
-	let measuredWidthPerRem = 0
+	const findOptimalFontSize = (textContent: string, availableWidth: number): number => {
+		let low = minFontSize
+		let high = maxFontSize
+		let bestSize = minFontSize
 
-	const getWidthPerRem = (textContent: string): number => {
-		if (textContent !== measuredText) {
-			measuredWidthPerRem = measureTextWidth(textContent, baseFontSize) / baseFontSize
-			measuredText = textContent
+		const maxWidth = measureTextWidth(textContent, maxFontSize)
+		if (maxWidth <= availableWidth) return maxFontSize
+
+		for (let i = 0; i < 8; i++) {
+			const mid = (low + high) / 2
+			const width = measureTextWidth(textContent, mid)
+
+			if (width <= availableWidth) {
+				bestSize = mid
+				low = mid
+			} else {
+				high = mid
+			}
+
+			if (high - low < 0.01) break
 		}
 
-		return measuredWidthPerRem
+		return Math.max(bestSize, minFontSize)
 	}
 
 	const fontSize = computed(() => {
@@ -88,10 +99,10 @@ export function useDynamicFontSize(options: DynamicFontSizeOptions) {
 		const availableWidth =
 			Math.min(containerWidth.value * availableWidthRatio, maxContainerWidth) - padding
 
-		const widthPerRem = getWidthPerRem(text.value)
-		if (widthPerRem * baseFontSize <= availableWidth) return `${baseFontSize}rem`
+		const baseWidth = measureTextWidth(text.value, baseFontSize)
+		if (baseWidth <= availableWidth) return `${baseFontSize}rem`
 
-		const optimalSize = Math.min(Math.max(availableWidth / widthPerRem, minFontSize), maxFontSize)
+		const optimalSize = findOptimalFontSize(text.value, availableWidth)
 		return `${optimalSize}rem`
 	})
 

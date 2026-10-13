@@ -8,7 +8,6 @@
 		<div
 			data-skin-preview-debug="controls"
 			class="absolute left-0 right-0 z-10 flex items-center justify-center pointer-events-none"
-			:class="{ invisible: !hasResolvedFit }"
 			:style="previewControlsPositionStyle"
 		>
 			<span
@@ -22,7 +21,6 @@
 			v-if="$slots.subtitle"
 			data-skin-preview-debug="subtitle"
 			class="absolute left-0 right-0 z-10 flex items-center justify-center pointer-events-none"
-			:class="{ invisible: !hasResolvedFit }"
 			:style="subtitlePositionStyle"
 		>
 			<div ref="subtitleElement" class="w-full pointer-events-auto" @click="ignoreControlClick">
@@ -33,7 +31,6 @@
 			v-if="nametag || $slots['nametag-badge']"
 			data-skin-preview-debug="nametag"
 			class="absolute left-1/2 pointer-events-none z-10"
-			:class="{ invisible: !hasResolvedFit }"
 			:style="nametagStyle"
 		>
 			<div
@@ -48,9 +45,7 @@
 		</div>
 
 		<TresCanvas
-			ref="tresCanvas"
 			alpha
-			render-mode="on-demand"
 			:antialias="true"
 			:dpr="rendererDpr"
 			:renderer-options="{
@@ -58,7 +53,7 @@
 				toneMapping: THREE.NoToneMapping,
 				toneMappingExposure: 10.0,
 			}"
-			class="transition-opacity duration-200"
+			class="transition-opacity duration-500"
 			:class="{ 'opacity-0': !isPreviewVisible, 'opacity-100': isPreviewVisible }"
 			@pointerdown="onPointerDown"
 			@pointermove="onPointerMove"
@@ -80,10 +75,10 @@
 			<Suspense>
 				<TresMesh
 					:position="spotlightPosition"
-					:rotation="SPOTLIGHT_ROTATION"
+					:rotation="[-Math.PI / 2, 0, 0]"
 					:scale="spotlightScale"
 				>
-					<TresCircleGeometry :args="SPOTLIGHT_GEOMETRY_ARGS" />
+					<TresCircleGeometry :args="[1, 128]" />
 					<TresShaderMaterial v-bind="radialSpotlightShader" />
 				</TresMesh>
 			</Suspense>
@@ -96,7 +91,7 @@
 			/>
 
 			<TresAmbientLight :intensity="2" />
-			<TresDirectionalLight :position="DIRECTIONAL_LIGHT_POSITION" :intensity="1.2" />
+			<TresDirectionalLight :position="[-3, 4, -2]" :intensity="1.2" />
 		</TresCanvas>
 
 		<div v-if="showLoading" class="absolute inset-0 flex items-center justify-center">
@@ -184,7 +179,6 @@ const emit = defineEmits<{
 
 const skinPreviewContainer = useTemplateRef<HTMLElement>('skinPreviewContainer')
 const subtitleElement = useTemplateRef<HTMLElement>('subtitleElement')
-const tresCanvas = useTemplateRef<InstanceType<typeof TresCanvas>>('tresCanvas')
 const slots = useSlots()
 const nametagText = computed(() => props.nametag)
 const hasSubtitle = computed(() => Boolean(slots.subtitle))
@@ -195,12 +189,6 @@ const selectedModelSrc = computed(() =>
 )
 
 let subtitleResizeObserver: ResizeObserver | undefined
-
-// The canvas only draws when asked. Tres asks on its own when a bound prop changes (rotation,
-// camera, size); changes made directly to the three.js scene have to ask through this.
-function invalidatePreview() {
-	tresCanvas.value?.context?.invalidate()
-}
 
 function getSubtitleLayoutRoot(element: HTMLElement) {
 	const elementChildren = Array.from(element.children).filter(
@@ -266,7 +254,7 @@ const {
 	playAnimation,
 	playClickInteraction,
 	stopAnimations,
-} = useSkinPreviewAnimation(toRef(props, 'animationConfig'), invalidatePreview)
+} = useSkinPreviewAnimation(toRef(props, 'animationConfig'))
 
 const {
 	ignoreControlClick,
@@ -298,12 +286,10 @@ const {
 	earsEnabled: toRef(props, 'earsEnabled'),
 	initializeAnimations,
 	cleanupAnimationState,
-	onSceneChanged: invalidatePreview,
 })
 
 function syncDamageFlashShaderMaterials() {
 	syncDamageFlashShader(scene.value, damageFlashIntensity.value)
-	invalidatePreview()
 }
 
 const {
@@ -340,12 +326,6 @@ const {
 })
 
 const rendererDpr: [number, number] = [1, 1.5]
-// Scene props must keep their identity between renders. Tres redraws whenever a prop is patched and
-// re-renders the scene after each draw, so an array written inline in the template would be patched
-// every time and keep the canvas drawing forever.
-const SPOTLIGHT_ROTATION: SkinPreviewTuple = [-Math.PI / 2, 0, 0]
-const SPOTLIGHT_GEOMETRY_ARGS: [number, number] = [1, 128]
-const DIRECTIONAL_LIGHT_POSITION: SkinPreviewTuple = [-3, 4, -2]
 const radialSpotlightShader = createRadialSpotlightShader()
 const isReady = computed(() => isModelLoaded.value && isTextureLoaded.value && hasResolvedFit.value)
 const { isPreviewVisible, showLoading } = useSkinPreviewLoading(isReady)
