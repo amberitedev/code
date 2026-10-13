@@ -169,7 +169,10 @@ const linkedInstanceProjectQuery = useQuery(
 		}),
 	),
 )
-const installedProjectIds: Ref<string[] | null> = ref(null)
+// Starts from the last read, so a return visit can search before the fresh read arrives.
+const installedProjectIds: Ref<string[] | null> = ref(
+	queryClient.getQueryData<string[]>(installedProjectIdsQuery().queryKey) ?? null,
+)
 const instanceHideInstalled = ref(route.query.ai === 'true')
 const newlyInstalled = ref<string[]>([])
 const hiddenInstanceProjectIds = ref<Set<string>>(new Set())
@@ -318,54 +321,66 @@ watch(
 
 watchServerContextChanges()
 
-await initInstanceContext()
+// True when everything the first search depends on is already cached. The search then runs during
+// setup and its cached results are on screen in the first frame. Otherwise it waits for the context
+// below, with the placeholders showing.
+const searchContextReady = ref(
+	installedProjectIds.value !== null &&
+		!route.query.sid &&
+		(!route.query.i ||
+			(!!instance.value &&
+				(!linkedInstanceProjectId.value || linkedInstanceProjectQuery.data.value !== undefined))),
+)
 
-async function refreshInstalledProjectIds() {
-	if (!route.query.i) {
-		const instances = await queryClient
-			.fetchQuery({
-				queryKey: [...instanceKeys.all, 'installed-project-ids'],
-				queryFn: listInstances,
-				staleTime: 0,
-			})
-			.catch(handleError)
-		if (!instances) return
+// Not awaited, so entering Browse does not hold the previous page on screen.
+void initInstanceContext().finally(() => {
+	// The hidden ids were first taken from cached or still empty state, so take them again from
+	// what was just loaded, as a first visit does.
+	if (installedProjectIds.value) syncHiddenInstanceProjectIds()
+	syncHiddenServerContentProjectIds()
+	addInstanceGameVersionToServerFilters()
+	searchContextReady.value = true
+})
 
-		const ids = instances
-			.map((gameInstance) => gameInstance.link?.project_id)
-			.filter((id): id is string => !!id)
-		debugLog('installedInstanceProjectIds loaded', { count: ids.length })
-		installedProjectIds.value = ids
-		return
+// The ids of what is already installed, for the context Browse was opened in.
+function installedProjectIdsQuery(): {
+	queryKey: readonly unknown[]
+	queryFn: () => Promise<string[]>
+	staleTime: number
+} {
+	const targetInstanceId = route.query.i ? String(route.query.i) : null
+
+	if (!targetInstanceId) {
+		return {
+			queryKey: [...instanceKeys.all, 'installed-project-ids'],
+			queryFn: async () =>
+				(await listInstances())
+					.map((gameInstance) => gameInstance.link?.project_id)
+					.filter((id): id is string => !!id),
+			staleTime: 0,
+		}
 	}
 
 	if (route.query.from === 'worlds') {
-		const targetInstanceId = route.query.i as string
-		const worlds = await queryClient
-			.fetchQuery({
-				queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
-				queryFn: () => get_instance_worlds(targetInstanceId),
-				staleTime: 0,
-			})
-			.catch(handleError)
-		if (!worlds) return
-
-		const serverProjectIds = worlds
-			.filter((w) => w.type === 'server' && 'project_id' in w && w.project_id)
-			.map((w) => (w as { project_id: string }).project_id)
-		debugLog('installedServerProjectIds loaded', { count: serverProjectIds.length })
-		installedProjectIds.value = serverProjectIds
-		return
+		return {
+			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
+			queryFn: async () =>
+				(await get_instance_worlds(targetInstanceId))
+					.filter((w) => w.type === 'server' && 'project_id' in w && w.project_id)
+					.map((w) => (w as { project_id: string }).project_id),
+			staleTime: 0,
+		}
 	}
 
-	const targetInstanceId = route.query.i as string
-	const ids = await queryClient
-		.fetchQuery({
-			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'content'),
-			queryFn: () => getInstalledProjectIds(targetInstanceId),
-			staleTime: 0,
-		})
-		.catch(handleError)
+	return {
+		queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'content'),
+		queryFn: () => getInstalledProjectIds(targetInstanceId),
+		staleTime: 0,
+	}
+}
+
+async function refreshInstalledProjectIds() {
+	const ids = await queryClient.fetchQuery(installedProjectIdsQuery()).catch(handleError)
 	if (!ids) return
 
 	debugLog('installedProjectIds loaded', { count: ids.length })
@@ -1208,7 +1223,7 @@ const lockedFilterMessages = computed(() => ({
 const searchState = useBrowseSearch({
 	projectType,
 	tags,
-	active: browseRouteActive,
+	active: computed(() => browseRouteActive.value && searchContextReady.value),
 	providedFilters: combinedProvidedFilters,
 	providedFiltersFor: (type) => getProvidedFilters(type as ProjectType),
 	search,
@@ -1249,8 +1264,10 @@ watch(queuedServerInstallCount, (count) => {
 	}
 })
 
-if (instance.value?.game_version) {
-	const gv = instance.value.game_version
+// Runs during setup when the instance is cached, and again once the context has loaded.
+function addInstanceGameVersionToServerFilters() {
+	const gv = instance.value?.game_version
+	if (!gv) return
 	const alreadyHasGv = searchState.serverCurrentFilters.value.some(
 		(f) => f.type === 'server_game_version' && f.option === gv,
 	)
@@ -1259,6 +1276,9 @@ if (instance.value?.game_version) {
 	}
 }
 
+addInstanceGameVersionToServerFilters()
+
+// Does nothing until the search context is ready; becoming ready starts the search instead.
 void searchState.refreshSearch()
 
 useAppEvent('instance', async (event) => {
