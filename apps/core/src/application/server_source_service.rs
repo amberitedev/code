@@ -51,6 +51,8 @@ pub enum SourceError {
     AlreadyLinked,
     #[error("server is not linked to a source")]
     NotLinked,
+    #[error("{}", AWAITING_UPLOAD)]
+    AwaitingUpload,
     #[error("{0}")]
     Invalid(String),
     #[error("db: {0}")]
@@ -176,22 +178,53 @@ pub async fn unlink(
     Ok(())
 }
 
-/// Record a newer desired version. Core downloads and verifies it now and applies it when the
-/// server is stopped; [`apply_now`] restarts a running server instead of waiting.
-pub async fn request_source_update(
+/// Link the server to `source` at `version`, or move an already linked server to it. A different
+/// source replaces the old link; the files the old one provided are removed by the next apply.
+pub async fn link_or_update(
     state: &Arc<AppState>,
     instance_id: &str,
+    source: ServerSource,
+    version: &str,
+) -> Result<ServerSourceStatus, SourceError> {
+    match load_row(state, instance_id).await? {
+        Some(_) => {
+            request_source_update(state, instance_id, &source, version).await
+        }
+        None => link(state, instance_id, source, version).await,
+    }
+}
+
+/// Record a newer desired version of `source`, which becomes the server's link. Core downloads
+/// and verifies it now and applies it when the server is stopped; [`apply_now`] restarts a
+/// running server instead of waiting.
+async fn request_source_update(
+    state: &Arc<AppState>,
+    instance_id: &str,
+    source: &ServerSource,
     version: &str,
 ) -> Result<ServerSourceStatus, SourceError> {
     let row = load_row(state, instance_id)
         .await?
         .ok_or(SourceError::NotLinked)?;
+    let source_json = serde_json::to_string(source)
+        .map_err(|e| SourceError::Invalid(e.to_string()))?;
     if row.installed_version.as_deref() == Some(version)
         && row.desired_version == version
     {
-        return row.status();
+        // Nothing to apply, but the link itself may have changed (a renamed instance).
+        sqlx::query(
+            "UPDATE server_sources SET source_json = ? WHERE instance_id = ?",
+        )
+        .bind(&source_json)
+        .bind(instance_id)
+        .execute(&state.pool)
+        .await?;
+        return broadcast(state, instance_id)
+            .await?
+            .ok_or(SourceError::NotLinked);
     }
-    sqlx::query("UPDATE server_sources SET desired_version = ?, restart_requested = 0, state = ?, error = NULL, updated_at = ? WHERE instance_id = ?")
+    sqlx::query("UPDATE server_sources SET source_json = ?, desired_version = ?, restart_requested = 0, state = ?, error = NULL, updated_at = ? WHERE instance_id = ?")
+        .bind(&source_json)
         .bind(version)
         .bind(SourceApplyState::Downloading.as_str())
         .bind(now())
@@ -212,11 +245,12 @@ pub async fn apply_now(
     let row = load_row(state, instance_id)
         .await?
         .ok_or(SourceError::NotLinked)?;
-    // An empty desired version is a server still waiting for its first upload: nothing to retry.
-    if row.desired_version.is_empty()
-        || row.installed_version.as_deref()
-            == Some(row.desired_version.as_str())
-    {
+    // An empty desired version is a server still waiting for its first upload. Core has nothing
+    // to retry; only a push from the App can fix it, so say that instead of doing nothing.
+    if row.desired_version.is_empty() {
+        return Err(SourceError::AwaitingUpload);
+    }
+    if row.installed_version.as_deref() == Some(row.desired_version.as_str()) {
         return row.status();
     }
     let next = if row.staged_version.as_deref()
@@ -307,13 +341,19 @@ pub async fn resume(state: Arc<AppState>) {
 
 /// A server deleted while its update was being staged can leave staged files behind.
 async fn remove_orphan_staging(state: &AppState) {
-    let linked: HashSet<String> =
-        sqlx::query_scalar("SELECT instance_id FROM server_sources")
-            .fetch_all(&state.pool)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+    let linked: HashSet<String> = match sqlx::query_scalar::<_, String>(
+        "SELECT instance_id FROM server_sources",
+    )
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(ids) => ids.into_iter().collect(),
+        // Without the list every staged update would look orphaned and be deleted.
+        Err(err) => {
+            error!("Skipping the staged update cleanup: {err}");
+            return;
+        }
+    };
     let root = state.config.data_dir.join("source_staging");
     let Ok(mut entries) = tokio::fs::read_dir(&root).await else {
         return;
@@ -441,7 +481,7 @@ async fn step(
         instance_status_service::stop_instance(state, &iid).await?;
         wait_for_stop(state, &iid).await?;
     }
-    if !apply(state, &iid, &row, &version).await? {
+    if !apply(state, &iid, &version).await? {
         // Started again before the apply took the lock. Wait for the next stop.
         set_state(state, instance_id, SourceApplyState::Pending).await?;
         return Ok(false);
@@ -482,7 +522,6 @@ async fn wait_for_stop(
 async fn apply(
     state: &Arc<AppState>,
     iid: &InstanceId,
-    row: &SourceRow,
     version: &str,
 ) -> Result<bool, SourceError> {
     let lock = state
@@ -580,13 +619,8 @@ async fn apply(
         return Err(err);
     }
 
-    let source = match row.source()? {
-        ServerSource::Modrinth { project_id, .. } => ServerSource::Modrinth {
-            project_id,
-            version_id: version.to_string(),
-        },
-        other => other,
-    };
+    // The link itself is written when a version is requested, never here: this apply may be
+    // finishing an older version after the server was moved to another source.
     let mut tx = state.pool.begin().await?;
     sqlx::query("DELETE FROM server_source_files WHERE instance_id = ?")
         .bind(&instance_id)
@@ -604,8 +638,7 @@ async fn apply(
             .execute(&mut *tx)
             .await?;
     }
-    sqlx::query("UPDATE server_sources SET source_json = ?, installed_version = ?, staged_version = NULL, state = ?, error = NULL, restart_requested = 0, updated_at = ? WHERE instance_id = ?")
-        .bind(serde_json::to_string(&source).map_err(|e| SourceError::Invalid(e.to_string()))?)
+    sqlx::query("UPDATE server_sources SET installed_version = ?, staged_version = NULL, state = ?, error = NULL, restart_requested = 0, updated_at = ? WHERE instance_id = ?")
         .bind(version)
         .bind(SourceApplyState::UpToDate.as_str())
         .bind(now())
@@ -782,17 +815,7 @@ pub async fn link_mrpack(
             name: index.name,
         },
     };
-    match load_row(state, instance_id).await? {
-        Some(_) => {
-            sqlx::query("UPDATE server_sources SET source_json = ? WHERE instance_id = ?")
-                .bind(serde_json::to_string(&source).map_err(|e| SourceError::Invalid(e.to_string()))?)
-                .bind(instance_id)
-                .execute(&state.pool)
-                .await?;
-            request_source_update(state, instance_id, &version).await
-        }
-        None => link(state, instance_id, source, &version).await,
-    }
+    link_or_update(state, instance_id, source, &version).await
 }
 
 async fn stage_mrpack(

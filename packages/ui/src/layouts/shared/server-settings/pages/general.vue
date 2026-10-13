@@ -108,8 +108,31 @@
 					</div>
 				</div>
 
+				<!-- Leave server (someone invited to manage it; the Core's owner deletes it instead) -->
+				<div v-if="canLeave" class="flex items-center justify-between gap-2">
+					<div class="flex flex-col gap-1">
+						<span class="text-lg font-semibold text-contrast">Leave server</span>
+						<span>Gives up your access to this server. Its owner can invite you again.</span>
+					</div>
+					<Button type="colored" color="red" :disabled="leaving" @click="leaveModal?.show()">
+						<LogOutIcon aria-hidden="true" />
+						Leave server
+					</Button>
+				</div>
+				<ConfirmModal
+					ref="leaveModal"
+					title="Leave this server?"
+					:description="`You will no longer be able to manage ${data.name}. Its owner can invite you again.`"
+					proceed-label="Leave server"
+					:proceed-icon="LogOutIcon"
+					@proceed="leaveServer"
+				/>
+
 				<!-- Delete server (self-hosted only; hosted servers end with their subscription) -->
-				<div v-if="client.selfHostedHosting" class="flex items-center justify-between gap-2">
+				<div
+					v-if="client.selfHostedHosting && !canLeave"
+					class="flex items-center justify-between gap-2"
+				>
 					<div class="flex flex-col gap-1">
 						<span class="text-lg font-semibold text-contrast">Delete server</span>
 						<span
@@ -175,7 +198,7 @@
 
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
-import { TrashIcon } from '@modrinth/assets'
+import { LogOutIcon, TrashIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useStorage } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
@@ -186,6 +209,7 @@ import { Button } from '#ui/components/base/buttons'
 import EditServerIcon from '#ui/components/servers/edit-server-icon/EditServerIcon.vue'
 import SaveBanner from '#ui/components/servers/SaveBanner.vue'
 import { useServerPermissions } from '#ui/composables/server-permissions'
+import { injectServerSettings } from '#ui/layouts/shared/server-settings/providers/server-settings'
 import {
 	injectModrinthClient,
 	injectModrinthServerContext,
@@ -204,6 +228,7 @@ const advancedActionTooltip = computed(() =>
 )
 
 const router = useRouter()
+const serverSettings = injectServerSettings(null)
 const deleteModal = ref<InstanceType<typeof ConfirmModal>>()
 const deleting = ref(false)
 
@@ -223,6 +248,36 @@ async function deleteServer() {
 		})
 		deleting.value = false
 	}
+}
+
+// Someone invited to manage this server on another account's Core. Unknown until the viewer loads.
+const canLeave = computed(() => {
+	const viewerId = serverSettings?.currentUserId.value
+	return client.selfHostedHosting && !!viewerId && !!data.value && viewerId !== data.value.owner_id
+})
+const leaveModal = ref<InstanceType<typeof ConfirmModal>>()
+const leaving = ref(false)
+
+async function leaveServer() {
+	if (leaving.value) return
+	leaving.value = true
+	try {
+		await client.archon.server_users_v1.leave(serverId)
+	} catch (error) {
+		addNotification({
+			type: 'error',
+			title: 'Could not leave the server',
+			text: error instanceof Error ? error.message : undefined,
+		})
+		leaving.value = false
+		return
+	}
+	// This server's own queries would only be refused from here on.
+	queryClient.removeQueries({ queryKey: ['servers', 'detail', serverId] })
+	await router.push('/hosting/manage/')
+	// Cores first: leaving the only server on a Core takes that Core out of the list.
+	await queryClient.invalidateQueries({ queryKey: ['cores'] })
+	await queryClient.invalidateQueries({ queryKey: ['servers'] })
 }
 
 const serverName = ref(data.value?.name)
@@ -406,7 +461,7 @@ const infoProperties = computed<InfoProperty[]>(() => [
 const hasServerSettingsChanges = computed(
 	() =>
 		(serverName.value && serverName.value !== data.value?.name) ||
-		serverSubdomain.value !== data.value?.net?.domain,
+		(!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')),
 )
 const hasPreferenceChanges = computed(
 	() => JSON.stringify(newUserPreferences.value) !== JSON.stringify(userPreferences.value),
@@ -424,7 +479,7 @@ const saveGeneral = async () => {
 		if (serverName.value !== data.value?.name) {
 			await client.archon.servers_v0.updateName(serverId, serverName.value ?? '')
 		}
-		if (serverSubdomain.value !== data.value?.net?.domain) {
+		if (!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')) {
 			try {
 				const result = await client.archon.servers_v0.checkSubdomainAvailability(
 					serverSubdomain.value,

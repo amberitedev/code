@@ -116,6 +116,15 @@ scenario stopped. Enter `rs 1` to start or restart scenario 1, or `rs core` to r
 Windows still has the App executable open, the runner waits for it to close before relaunching. Three fast failures pause
 automatic restarts so a broken launch cannot loop indefinitely; `rs 1` or `rs core` retries manually.
 
+The same commands can be appended as lines to `.data/dev-commands` when the runner has no usable
+stdin, which is the case for a runner started detached in the background:
+
+```bash
+echo "rs core" >> .data/dev-commands
+```
+
+The runner empties that file when it starts and reads new lines every half second.
+
 The combined terminal removes repetitive watcher and progress output. Vite+ forwards App console
 errors and warnings to the same terminal; error and warning notifications are logged there too.
 

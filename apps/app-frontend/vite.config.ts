@@ -88,6 +88,9 @@ export default defineConfig({
 	clearScreen: false,
 	// tauri expects a fixed port, fail if that port is not available
 	server: {
+		// Bind the IPv4 loopback explicitly. Node resolves `localhost` to `::1` first, so an unset
+		// host listens on IPv6 only and the Tauri shell waits forever for http://localhost:<port>.
+		host: '127.0.0.1',
 		port: devPort,
 		strictPort: true,
 		headers: {

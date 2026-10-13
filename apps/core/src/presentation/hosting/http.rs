@@ -657,12 +657,8 @@ async fn delete_server(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let r = record(&state, &id).await?;
-    let lock = state
-        .instance_operation_locks
-        .entry(r.id.clone())
-        .or_default()
-        .clone();
-    let _guard = lock.lock().await;
+    // The stopping process takes the operation lock to mark itself stopped, so wait for it
+    // before taking the lock here.
     if state.instances.contains_key(&r.id) {
         instance_status_service::kill_instance(&state, &r.id).await?;
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -674,6 +670,17 @@ async fn delete_server(
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
+    }
+    let lock = state
+        .instance_operation_locks
+        .entry(r.id.clone())
+        .or_default()
+        .clone();
+    let _guard = lock.lock().await;
+    if state.instances.contains_key(&r.id) {
+        return Err(ApiError::Conflict(
+            "The server was started again; try again".into(),
+        ));
     }
     let key = r.id.to_string();
     let invited = access_service::invited(&state, &key).await?;
@@ -1225,24 +1232,17 @@ async fn install_modrinth_pack(
         ));
     }
     // Installs through the linked-source engine: the first pack links the server, later packs
-    // update it, removing files the previous pack provided.
-    let id = r.id.to_string();
-    let linked = server_source_service::get_status(state, &id).await?;
-    if linked.is_some() {
-        server_source_service::request_source_update(state, &id, version)
-            .await?;
-    } else {
-        server_source_service::link(
-            state,
-            &id,
-            ServerSource::Modrinth {
-                project_id: project.to_string(),
-                version_id: version.to_string(),
-            },
-            version,
-        )
-        .await?;
-    }
+    // replace the link (another pack or an instance), removing files the previous one provided.
+    server_source_service::link_or_update(
+        state,
+        &r.id.to_string(),
+        ServerSource::Modrinth {
+            project_id: project.to_string(),
+            version_id: version.to_string(),
+        },
+        version,
+    )
+    .await?;
     Ok(())
 }
 

@@ -6,12 +6,14 @@ import {
 	type CreationFlowContextValue,
 	CreationFlowModal,
 	EmptyState,
+	GhostBlock,
 	injectAuth,
 	injectInstanceServerSource,
 	injectModrinthClient,
 	injectNotificationManager,
 	Input,
 	ServerListing,
+	useGhostReveal,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, inject, onMounted, ref } from 'vue'
@@ -48,6 +50,7 @@ const { data, isFetching, refetch } = useServers()
 // cover a cold start that has not answered within a moment.
 const waitedForAnswer = ref(false)
 onMounted(() => setTimeout(() => (waitedForAnswer.value = true), 300))
+const serversReveal = useGhostReveal(() => !data.value && waitedForAnswer.value)
 const allServers = computed(() => data.value?.servers ?? [])
 const servers = computed(() =>
 	allServers.value.filter((server) =>
@@ -262,16 +265,17 @@ async function browseModpacks() {
 				:key="row"
 				class="flex items-center gap-4 rounded-2xl border border-solid border-surface-4 bg-bg-raised p-4"
 			>
-				<div class="size-16 shrink-0 rounded-xl bg-surface-4" />
+				<GhostBlock class="size-16 shrink-0 !rounded-xl" />
 				<div class="flex flex-col gap-2.5">
-					<div class="h-5 w-48 rounded-md bg-surface-4" />
-					<div class="h-4 w-72 rounded-md bg-surface-3" />
+					<GhostBlock class="h-5 w-48" />
+					<GhostBlock class="h-4 w-72" />
 				</div>
 			</div>
 		</div>
 		<div
 			v-else-if="data && allServers.length === 0"
 			class="flex min-h-[60vh] grow items-center justify-center"
+			:class="serversReveal"
 		>
 			<EmptyState
 				type="empty"
@@ -285,7 +289,7 @@ async function browseModpacks() {
 				</template>
 			</EmptyState>
 		</div>
-		<div v-else-if="data" class="flex flex-col gap-3">
+		<div v-else-if="data" class="flex flex-col gap-3" :class="serversReveal">
 			<ServerListing v-for="server in servers" :key="server.server_id" v-bind="server" />
 			<EmptyState
 				v-if="servers.length === 0"

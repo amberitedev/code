@@ -1,4 +1,6 @@
 import { AbstractModule } from '../../../core/abstract-module'
+import type { RequestOptions } from '../../../types/request'
+import { SharedInstancesApiError } from '../errors'
 import type { SharedInstances } from '../types'
 
 export class SharedInstancesInstancesV1Module extends AbstractModule {
@@ -6,8 +8,17 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		return 'sharedinstances_instances_v1'
 	}
 
+	/** Every request goes through here so a refused one is thrown as a `SharedInstancesApiError`. */
+	private async request<T>(path: string, options: RequestOptions): Promise<T> {
+		try {
+			return await this.client.request<T>(path, options)
+		} catch (error) {
+			throw SharedInstancesApiError.from(error)
+		}
+	}
+
 	public async get(instanceId: string): Promise<SharedInstances.Instances.v1.Instance> {
-		return this.client.request<SharedInstances.Instances.v1.Instance>(
+		return this.request<SharedInstances.Instances.v1.Instance>(
 			`/instances/${encodeURIComponent(instanceId)}`,
 			{
 				api: 'sharedinstances',
@@ -18,7 +29,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async create(name: string): Promise<{ id: string }> {
-		return this.client.request('/instances', {
+		return this.request('/instances', {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -27,7 +38,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async update(instanceId: string, name: string): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'PATCH',
@@ -36,7 +47,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async delete(instanceId: string): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'DELETE',
@@ -44,7 +55,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async getForUser(userId: string): Promise<string[]> {
-		return this.client.request<string[]>('/instances', {
+		return this.request<string[]>('/instances', {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'GET',
@@ -53,7 +64,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async getUsers(instanceId: string): Promise<SharedInstances.Instances.v1.InstanceUsers> {
-		return this.client.request<SharedInstances.Instances.v1.InstanceUsers>(
+		return this.request<SharedInstances.Instances.v1.InstanceUsers>(
 			`/instances/${encodeURIComponent(instanceId)}/users`,
 			{
 				api: 'sharedinstances',
@@ -67,7 +78,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	public async getServers(
 		instanceId: string,
 	): Promise<SharedInstances.Instances.v1.HostedServer[]> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/servers`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/servers`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'GET',
@@ -75,7 +86,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async inviteUsers(instanceId: string, userIds: string[]): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -84,7 +95,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async removeUsers(instanceId: string, userIds: string[]): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'DELETE',
@@ -96,7 +107,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		instanceId: string,
 		options: { max_age?: number; max_uses?: number } = {},
 	): Promise<{ id: string }> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -105,7 +116,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async getInvites(instanceId: string): Promise<SharedInstances.Instances.v1.LinkInvite[]> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'GET',
@@ -113,14 +124,14 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async revokeInvite(instanceId: string, inviteId: string): Promise<void> {
-		return this.client.request(
+		return this.request(
 			`/instances/${encodeURIComponent(instanceId)}/invites/${encodeURIComponent(inviteId)}`,
 			{ api: 'sharedinstances', version: 1, method: 'DELETE' },
 		)
 	}
 
 	public async acceptPendingInvite(instanceId: string): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/invites/pending`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites/pending`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -128,7 +139,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async declinePendingInvite(instanceId: string): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/invites/pending`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites/pending`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'DELETE',
@@ -136,7 +147,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async acceptInvite(instanceId: string, inviteId: string): Promise<void> {
-		return this.client.request(
+		return this.request(
 			`/instances/${encodeURIComponent(instanceId)}/invites/${encodeURIComponent(inviteId)}`,
 			{ api: 'sharedinstances', version: 1, method: 'POST' },
 		)
@@ -146,7 +157,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		instanceId: string,
 		request: SharedInstances.Instances.v1.CreateVersionRequest,
 	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/versions`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -155,7 +166,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async setIcon(instanceId: string, icon: Blob): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/icon`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/icon`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'PUT',
@@ -165,7 +176,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async deleteIcon(instanceId: string): Promise<void> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/icon`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/icon`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'DELETE',
@@ -173,7 +184,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	}
 
 	public async uploadExternalFile(uploadToken: string, file: Blob): Promise<void> {
-		return this.client.request(`/uploads/${encodeURIComponent(uploadToken)}`, {
+		return this.request(`/uploads/${encodeURIComponent(uploadToken)}`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'PUT',
@@ -185,7 +196,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 	public async getLatestVersion(
 		instanceId: string,
 	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.client.request<SharedInstances.Instances.v1.InstanceVersion>(
+		return this.request<SharedInstances.Instances.v1.InstanceVersion>(
 			`/instances/${encodeURIComponent(instanceId)}/versions`,
 			{
 				api: 'sharedinstances',
@@ -199,7 +210,7 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		instanceId: string,
 		version: number,
 	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.client.request<SharedInstances.Instances.v1.InstanceVersion>(
+		return this.request<SharedInstances.Instances.v1.InstanceVersion>(
 			`/instances/${encodeURIComponent(instanceId)}/versions/${version}`,
 			{
 				api: 'sharedinstances',

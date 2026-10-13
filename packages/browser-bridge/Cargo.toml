@@ -19,7 +19,7 @@ serde_json = { workspace = true }
 tauri = { workspace = true, features = ["protocol-asset", "unstable"] }
 tauri-plugin-os = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "macros", "net", "sync"] }
+tokio = { workspace = true, features = ["fs", "macros", "net", "sync", "time"] }
 tokio-tungstenite = "0.27"
 tracing = { workspace = true }
 url = { workspace = true }

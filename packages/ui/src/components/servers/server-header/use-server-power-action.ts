@@ -44,6 +44,11 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 	const canTakeAction = computed(
 		() => !isTransitioning.value && !isBlockedByPropsBusyOrPermission.value,
 	)
+	const canStop = computed(
+		() =>
+			canTakeAction.value ||
+			(client.selfHostedHosting && isStarting.value && !isBlockedByPropsBusyOrPermission.value),
+	)
 
 	const canKill = computed(
 		() =>
@@ -79,6 +84,8 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 	function initiateAction(action: PowerAction) {
 		if (action === 'Kill') {
 			if (!canKill.value) return
+		} else if (action === 'Stop') {
+			if (!canStop.value) return
 		} else {
 			if (!canTakeAction.value) return
 		}
@@ -98,6 +105,7 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 		showRestartButton,
 		busyTooltip,
 		canTakeAction,
+		canStop,
 		canKill,
 		primaryActionText,
 		sendPowerAction,

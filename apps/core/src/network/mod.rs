@@ -29,7 +29,6 @@ use crate::{
         event::Event,
         instance::{InstanceId, InstanceStatus},
     },
-    infrastructure::minecraft::java::required_java_version,
 };
 use diagnosis::{diagnose, Case, Facts, Outside, RouterFacts};
 use router::{Mapping, Router};
@@ -375,15 +374,23 @@ async fn wanted(state: &AppState) -> Vec<(Key, String, u16, Option<String>)> {
         .unwrap_or_default();
     for record in running {
         if state.instances.contains_key(&record.id) {
+            let (required, _) = crate::application::java_service::requirement(
+                state,
+                &record.game_version,
+                record.loader_version.as_deref(),
+            )
+            .await;
+            let java_version = record
+                .java_version
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(required);
             wanted.push((
                 Key::Server(record.id.clone()),
                 format!("Minecraft server \"{}\"", record.name),
                 record.port,
                 state
                     .java_store
-                    .find_by_version(required_java_version(
-                        &record.game_version,
-                    ))
+                    .find_by_version(java_version)
                     .await
                     .map(|java| java.display().to_string()),
             ));

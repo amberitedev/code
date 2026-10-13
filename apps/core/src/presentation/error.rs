@@ -117,7 +117,9 @@ impl From<SourceError> for ApiError {
             SourceError::NotLinked => {
                 Self::NotFound("server is not linked to a source".into())
             }
-            SourceError::AlreadyLinked => Self::Conflict(e.to_string()),
+            SourceError::AlreadyLinked | SourceError::AwaitingUpload => {
+                Self::Conflict(e.to_string())
+            }
             SourceError::Invalid(message) => Self::BadRequest(message),
             // The uploaded pack itself is wrong, so the caller can fix it.
             SourceError::Mrpack(e) => Self::BadRequest(e.to_string()),

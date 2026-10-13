@@ -1,3 +1,4 @@
+import { SharedInstancesApiError } from '@modrinth/api-client'
 import { createContext, injectAuth } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
@@ -6,11 +7,20 @@ import { useUserQuery } from '@/composables/users/use-user-query'
 import {
 	getSharedInstanceUnavailableReason,
 	install_get_shared_instance_update_preview,
+	isSharedInstancesApiError,
 	isSharedInstanceUnavailableError,
 	type SharedInstanceUnavailableReason,
 } from '@/helpers/install'
-import { can_current_user_use_shared_instances } from '@/helpers/instance'
+import {
+	can_current_user_use_shared_instances,
+	unpublish_shared_instance,
+} from '@/helpers/instance'
+import {
+	type SharedInstanceAvailability,
+	useSharedInstanceErrors,
+} from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
+import { apiClient } from '@/services/api-client'
 
 import { instanceKeys } from './query-options'
 
@@ -35,21 +45,30 @@ export function createSharedInstanceContext(
 ) {
 	const auth = injectAuth()
 	const queryClient = useQueryClient()
+	const { notifySharedInstanceAvailability } = useSharedInstanceErrors()
 	const forcedUnavailableReason = ref<SharedInstanceUnavailableReason | null>(null)
+	// What the backend said about an instance this App shares: it is gone, or another account owns it.
+	const ownerProblem = ref<'missing' | 'wrong_account' | null>(null)
+	// The local record is detached as soon as the backend reports the instance gone, so the role it
+	// had is kept to tell an owner's "no longer shared" from a member's "deleted".
+	let lastRole: 'owner' | 'member' | null = null
 
 	const expectedUserId = computed(() => instance.value?.shared_instance?.linked_user_id ?? null)
-	const wrongAccount = computed(() => {
+	const linkedToOtherAccount = computed(() => {
 		if (auth.isReady && !auth.isReady.value) return false
 		if (!expectedUserId.value) return false
 		return auth.user.value?.id !== expectedUserId.value
 	})
+	const wrongAccount = computed(
+		() => linkedToOtherAccount.value || ownerProblem.value === 'wrong_account',
+	)
 	const actionsLocked = computed(() => wrongAccount.value)
 	const signedOut = computed(() => !auth.session_token.value)
 	const managerUserId = computed(() => {
 		const attachment = instance.value?.shared_instance
 		if (!attachment) return null
 		if (attachment.role === 'owner') {
-			return actionsLocked.value ? (attachment.linked_user_id ?? null) : null
+			return linkedToOtherAccount.value ? (attachment.linked_user_id ?? null) : null
 		}
 		return attachment.manager_id ?? null
 	})
@@ -118,23 +137,47 @@ export function createSharedInstanceContext(
 	watch(updatePreviewQuery.error, (error) => {
 		if (!error) return
 		if (isSharedInstanceUnavailableError(error)) {
-			forcedUnavailableReason.value = getSharedInstanceUnavailableReason(error)
+			setUnavailable(getSharedInstanceUnavailableReason(error))
 		} else {
 			notifyError(error)
 		}
 	})
 
 	const unavailableReason = computed(() => forcedUnavailableReason.value)
-	const shareActionsLocked = computed(() => actionsLocked.value || unavailableReason.value !== null)
+	const missing = computed(() => ownerProblem.value === 'missing')
+	/** The single state every sharing surface shows. `unavailableReason` is its member-side part. */
+	const availability = computed<SharedInstanceAvailability | null>(() => {
+		if (missing.value) return 'missing'
+		if (wrongAccount.value) return 'wrong_account'
+		return unavailableReason.value
+	})
+	const shareActionsLocked = computed(
+		() => actionsLocked.value || unavailableReason.value !== null || missing.value,
+	)
 	const updatePreview = computed(() =>
 		unavailableReason.value ? null : (updatePreviewQuery.data.value ?? null),
 	)
 	const lastUpdateCheckAt = computed(() => updatePreviewQuery.dataUpdatedAt.value || undefined)
 
 	watch(
-		() => instance.value?.id,
+		() => [instance.value?.id, instance.value?.shared_instance?.id] as const,
+		([id, sharedId], previous) => {
+			if (id !== previous?.[0]) {
+				forcedUnavailableReason.value = null
+				ownerProblem.value = null
+				lastRole = null
+			} else if (sharedId && sharedId !== previous?.[1]) {
+				// Attached to a different shared instance, so whatever was wrong with the old one is over.
+				ownerProblem.value = null
+			}
+			lastRole = instance.value?.shared_instance?.role ?? lastRole
+		},
+		{ immediate: true },
+	)
+	watch(
+		() => auth.user.value?.id,
 		() => {
-			forcedUnavailableReason.value = null
+			if (ownerProblem.value === 'wrong_account') ownerProblem.value = null
 		},
 	)
 
@@ -154,13 +197,88 @@ export function createSharedInstanceContext(
 	}
 
 	function setUnavailable(reason: SharedInstanceUnavailableReason | null) {
+		// To its owner a shared instance that is gone is "no longer shared", with a way to share again.
+		if (reason && reason !== 'quarantined' && lastRole === 'owner') {
+			forcedUnavailableReason.value = null
+			ownerProblem.value = 'missing'
+			return
+		}
 		forcedUnavailableReason.value = reason
+		if (!reason) ownerProblem.value = null
+	}
+
+	/**
+	 * Asks the backend whether the shared instance this App owns still exists and belongs to this
+	 * account, and updates the state to match. Call it when a sharing surface opens. Returns the
+	 * problem it found, if any; a failed connection leaves the state as it was.
+	 */
+	async function verifyOwner() {
+		const instanceId = instance.value?.id
+		const attachment = instance.value?.shared_instance
+		const userId = auth.user.value?.id
+		if (attachment?.role !== 'owner' || !userId || offline.value || linkedToOtherAccount.value) {
+			return ownerProblem.value
+		}
+
+		let problem: typeof ownerProblem.value = null
+		try {
+			const { users } = await apiClient.sharedinstances.instances_v1.getUsers(attachment.id)
+			const owner = users.find((user) => user.join_type === 'owner')
+			if (owner && owner.id !== userId) problem = 'wrong_account'
+		} catch (error) {
+			if (!(error instanceof SharedInstancesApiError)) return ownerProblem.value
+			if (error.status === 404) problem = 'missing'
+			// A session the backend no longer accepts is a sign-in problem, not the wrong account.
+			else if (error.status === 401 && error.code !== 'invalid_credentials')
+				problem = 'wrong_account'
+			else return ownerProblem.value
+		}
+
+		if (instance.value?.id !== instanceId || auth.user.value?.id !== userId) return null
+		ownerProblem.value = problem
+		return problem
+	}
+
+	/**
+	 * Call with the error of any failed sharing action. A shared instance that is gone or belongs to
+	 * another account becomes the availability state and gets its own message; everything else goes
+	 * to `notifyOther`.
+	 */
+	async function reportActionError(
+		error: unknown,
+		notifyOther: (error: unknown) => void = notifyError,
+	) {
+		const reason = getSharedInstanceUnavailableReason(error)
+		if (reason) {
+			setUnavailable(reason)
+			notifySharedInstanceAvailability(availability.value ?? reason, unavailableManager.value)
+			return
+		}
+
+		// The App's sharing commands report a refused request as plain text, so ask the backend.
+		const problem = isSharedInstancesApiError(error) ? null : await verifyOwner()
+		if (problem) notifySharedInstanceAvailability(problem)
+		else notifyOther(error)
+	}
+
+	/**
+	 * Ends sharing for an instance this App owns. The backend's copy is deleted when it still has
+	 * one; when it has none, only the local record is detached.
+	 */
+	async function stopSharing() {
+		const current = instance.value
+		if (!current) return
+		if (current.shared_instance?.role === 'owner') await unpublish_shared_instance(current.id)
+		queryClient.setQueryData(instanceKeys.sharedMembers(current.id), [])
+		ownerProblem.value = null
 	}
 
 	return {
 		actionsLocked,
 		shareActionsLocked,
 		unavailableReason,
+		missing,
+		availability,
 		unavailableManager,
 		manager,
 		updatePreview,
@@ -173,6 +291,9 @@ export function createSharedInstanceContext(
 		refreshAvailability,
 		refreshUpdatePreview,
 		setUnavailable,
+		verifyOwner,
+		reportActionError,
+		stopSharing,
 	}
 }
 

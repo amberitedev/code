@@ -5,6 +5,7 @@ pub mod fs_service;
 pub mod installation_service;
 pub mod instance_service;
 pub mod instance_status_service;
+pub mod java_service;
 pub mod mod_installer;
 pub mod mod_service;
 pub mod rcon_service;

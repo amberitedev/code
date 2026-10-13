@@ -349,6 +349,7 @@ async function main(): Promise<void> {
 		await stop(code || 1)
 	}
 	const commands = createCommandInput({
+		commandFile: NodePath.join(paths.data, 'dev-commands'),
 		getCore: () => processes.get('core'),
 		restart: (target) => restart(target === 'core' ? target : `app:${target}`),
 		stop: () => stop(0),
@@ -723,13 +724,44 @@ function isWindowsProcessRunning(imageName: string): boolean {
 	return result.status === 0 && result.stdout.toLowerCase().includes(`"${imageName.toLowerCase()}"`)
 }
 
+/**
+ * Commands come from stdin and from `.data/dev-commands`: a runner started detached (by an agent,
+ * or from another terminal) has no usable stdin, so appending a line to that file is the way to
+ * send it `rs core`, `rs 1`, or `quit`. The file is emptied when the runner starts.
+ */
 function createCommandInput(input: {
+	readonly commandFile: string
 	readonly getCore: () => RunningProcess | undefined
 	readonly restart: (target: string) => Promise<void>
 	readonly stop: () => Promise<void>
-}): NodeReadline.Interface {
+}): { close: () => void } {
 	const commands = NodeReadline.createInterface({ input: process.stdin })
-	commands.on('line', (line) => {
+	commands.on('line', handle)
+	NodeFS.writeFileSync(input.commandFile, '')
+	let offset = 0
+	const poll = setInterval(() => {
+		let buffer: Buffer
+		// The file can vanish or be replaced at any point; skip this poll and read it on the next.
+		try {
+			const size = NodeFS.statSync(input.commandFile).size
+			if (size < offset) offset = 0
+			if (size === offset) return
+			buffer = Buffer.alloc(size - offset)
+			const fd = NodeFS.openSync(input.commandFile, 'r')
+			try {
+				NodeFS.readSync(fd, buffer, 0, buffer.length, offset)
+			} finally {
+				NodeFS.closeSync(fd)
+			}
+			offset = size
+		} catch {
+			return
+		}
+		for (const line of buffer.toString('utf8').split(/\r?\n/)) handle(line)
+	}, 500)
+	poll.unref()
+
+	function handle(line: string) {
 		const command = line.trim()
 		if (!command) return
 		if (command === 'quit') {
@@ -756,8 +788,13 @@ function createCommandInput(input: {
 			return
 		}
 		runnerLog('warning', `Unknown command ${command}. Type help for available commands.`)
-	})
-	return commands
+	}
+	return {
+		close: () => {
+			clearInterval(poll)
+			commands.close()
+		},
+	}
 }
 
 function isNoisyProgressLine(line: string): boolean {

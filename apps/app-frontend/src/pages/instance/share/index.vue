@@ -47,9 +47,60 @@
 			:description="formatMessage(messages.unableToConnectDescription)"
 		/>
 
+		<SharedInstanceShareEmptyState
+			v-else-if="sharedInstanceMissing"
+			:heading="formatMessage(sharedInstanceErrorMessages.missingTitle)"
+			:description="formatMessage(sharedInstanceErrorMessages.missingText)"
+		>
+			<template #actions>
+				<Button
+					type="outlined"
+					size="lg"
+					class="!border"
+					:disabled="recovering"
+					@click="stopSharing"
+				>
+					<UnlinkIcon aria-hidden="true" />{{
+						formatMessage(sharedInstanceErrorMessages.stopSharingButton)
+					}}
+				</Button>
+				<Button
+					type="colored"
+					color="brand"
+					size="lg"
+					:disabled="recovering || inviteLink.pending.value"
+					@click="shareAgain($event)"
+				>
+					<SpinnerIcon
+						v-if="recovering || inviteLink.pending.value"
+						class="animate-spin"
+						aria-hidden="true"
+					/><UserPlusIcon v-else aria-hidden="true" />{{
+						formatMessage(sharedInstanceErrorMessages.shareAgainButton)
+					}}
+				</Button>
+			</template>
+		</SharedInstanceShareEmptyState>
+
+		<!-- Ghost of the member table on the first load only. Static on purpose: no shimmer. -->
+		<div v-else-if="membersFirstLoad" class="flex flex-col gap-4" aria-busy="true">
+			<GhostBlock class="h-10 w-full !rounded-xl" />
+			<div class="overflow-hidden rounded-2xl border border-solid border-surface-4">
+				<div class="h-12 bg-surface-3" />
+				<div
+					v-for="row in 2"
+					:key="row"
+					class="flex h-14 items-center gap-2 border-0 border-t border-solid border-surface-4 bg-surface-2 px-4"
+				>
+					<GhostBlock class="size-6 shrink-0 !rounded-full" />
+					<GhostBlock class="h-4 w-40" />
+				</div>
+			</div>
+		</div>
+
 		<div v-else-if="membersTableLoading" class="h-64" aria-hidden="true" />
 
-		<SharedInstanceMembersTable v-else-if="showMembersTable" />
+		<SharedInstanceMembersTable v-else-if="showMembersTable" :class="membersReveal" />
 
 		<SharedInstanceShareEmptyState
 			v-else-if="sharedInstanceUnavailable"
@@ -125,16 +176,19 @@
 </template>
 
 <script setup lang="ts">
-import { LogInIcon, SpinnerIcon, UserPlusIcon } from '@modrinth/assets'
+import { LogInIcon, SpinnerIcon, UnlinkIcon, UserPlusIcon } from '@modrinth/assets'
 import {
 	Avatar,
 	Button,
 	ConfirmUnlinkModal,
 	defineMessages,
+	GhostBlock,
 	injectAuth,
+	injectNotificationManager,
 	type InvitePlayersInvitePayload,
 	InvitePlayersModal,
 	type InvitePlayersUser,
+	useGhostReveal,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -142,11 +196,7 @@ import { computed, ref, watch } from 'vue'
 
 import InstancePushButton from '@/components/ui/linked-servers/InstancePushButton.vue'
 import ModrinthAccountRequiredModal from '@/components/ui/modal/ModrinthAccountRequiredModal.vue'
-import {
-	getSharedInstanceUnavailableReason,
-	isSharedInstancesApiError,
-	isSharedInstanceUnavailableError,
-} from '@/helpers/install'
+import { isSharedInstancesApiError } from '@/helpers/install'
 import { edit } from '@/helpers/instance'
 import type { ModrinthAuthFlow } from '@/helpers/mr_auth.ts'
 import {
@@ -169,11 +219,8 @@ const instancePage = injectInstancePage()
 const auth = injectAuth()
 const queryClient = useQueryClient()
 const { formatMessage } = useVIntl()
-const {
-	formatSharedInstanceUnavailable,
-	notifySharedInstanceError,
-	notifySharedInstanceUnavailable,
-} = useSharedInstanceErrors()
+const { addNotification } = injectNotificationManager()
+const { formatSharedInstanceUnavailable, notifySharedInstanceError } = useSharedInstanceErrors()
 const sharedInstanceState = injectSharedInstance()
 const instance = computed(() => instancePage.instance.value!)
 const offline = instancePage.offline
@@ -188,17 +235,30 @@ const unlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 const removeMemberModal = ref<InstanceType<typeof SharedInstanceRemoveMemberModal>>()
 const pendingRemovalRow = ref<ShareRow | null>(null)
 const importedModpackUnlinked = ref(false)
+const recovering = ref(false)
 
+function notifyOtherError(error: unknown) {
+	if (isSharedInstancesApiError(error)) sharedInstancesApiUnavailable.value = true
+	notifySharedInstanceError(error)
+}
+
+/** Every failed sharing action on this page ends up here. */
 function notifyOperationError(error: unknown) {
-	if (isSharedInstanceUnavailableError(error)) {
-		notifySharedInstanceUnavailable(
-			getSharedInstanceUnavailableReason(error),
-			sharedInstanceState.unavailableManager.value,
-		)
-	} else {
-		if (isSharedInstancesApiError(error)) sharedInstancesApiUnavailable.value = true
-		notifySharedInstanceError(error)
-	}
+	void sharedInstanceState.reportActionError(error, notifyOtherError)
+}
+
+function notifyInviteError(error: unknown, user: InvitePlayersUser) {
+	void sharedInstanceState.reportActionError(error, (other) => {
+		if (isSharedInstancesApiError(other)) return notifyOtherError(other)
+		console.error(`Failed to invite ${user.username}`, other)
+		addNotification({
+			type: 'error',
+			title: formatMessage(sharedInstanceErrorMessages.inviteFailedTitle),
+			text: formatMessage(sharedInstanceErrorMessages.inviteFailedText, {
+				username: user.username,
+			}),
+		})
+	})
 }
 
 const eligibilityQuery = sharedInstanceState.eligibilityQuery
@@ -209,6 +269,7 @@ const members = useSharedInstanceMembers({
 	isSignedIn,
 	actionsLocked,
 	onError: notifyOperationError,
+	onInviteError: notifyInviteError,
 })
 const remainingUserSlots = computed(() =>
 	Math.max(0, SHARED_INSTANCE_USER_LIMIT - members.rows.value.length),
@@ -244,6 +305,7 @@ const lockedActionButton = computed(() =>
 )
 const sharedInstanceUnavailableReason = sharedInstanceState.unavailableReason
 const sharedInstanceUnavailable = computed(() => !!sharedInstanceUnavailableReason.value)
+const sharedInstanceMissing = sharedInstanceState.missing
 const sharedInstanceUnavailableManager = sharedInstanceState.unavailableManager
 const unableToConnect = computed(
 	() =>
@@ -259,6 +321,11 @@ const membersTableLoading = computed(
 		!sharedInstanceUnavailable.value &&
 		!sharedInstanceActionsLocked.value,
 )
+// Only a cold load gets ghost rows. A later refetch of an empty list keeps the blank gap it had.
+const membersFirstLoad = computed(
+	() => membersTableLoading.value && members.query.data.value === undefined,
+)
+const membersReveal = useGhostReveal(() => membersFirstLoad.value)
 const showMembersTable = computed(
 	() =>
 		members.rows.value.length > 0 ||
@@ -371,6 +438,23 @@ async function unlinkImportedModpack() {
 		notifyOperationError(error)
 	}
 }
+async function stopSharing() {
+	recovering.value = true
+	try {
+		await sharedInstanceState.stopSharing()
+		inviteLink.reset()
+		return true
+	} catch (error) {
+		notifyOperationError(error)
+		return false
+	} finally {
+		recovering.value = false
+	}
+}
+/** Detaching first makes the usual first share create a fresh shared instance and publish to it. */
+async function shareAgain(event?: MouseEvent) {
+	if (await stopSharing()) await showInvitePlayers(event)
+}
 function showRemoveMemberModal(row: ShareRow) {
 	if (!actionsLocked.value) {
 		pendingRemovalRow.value = row
@@ -409,9 +493,18 @@ watch(
 		for (const error of errors) {
 			if (isSharedInstancesApiError(error)) notifyOperationError(error)
 		}
+		// The member list refusing to load usually means the shared instance is gone or not ours.
+		const membersError = errors[1]
+		if (membersError && !isSharedInstancesApiError(membersError)) {
+			notifyOperationError(membersError)
+		}
 	},
 	{ immediate: true },
 )
+// Opening the page checks that the backend still has this shared instance and that we own it.
+watch([() => instance.value.id, currentUserId], () => void sharedInstanceState.verifyOwner(), {
+	immediate: true,
+})
 watch([eligibilityQuery.data, members.query.data], ([eligibility, memberRows]) => {
 	if (eligibility !== undefined && memberRows !== undefined) {
 		sharedInstancesApiUnavailable.value = false

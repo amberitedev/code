@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use tokio::time::{sleep, Duration};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     application::{
@@ -14,10 +14,7 @@ use crate::{
     },
     domain::server_installation::InstallationId,
     infrastructure::{
-        minecraft::{
-            installer::{read_launch_config, LaunchStyle},
-            java::required_java_version,
-        },
+        minecraft::installer::{read_launch_config, LaunchStyle},
         process::instance_actor::spawn_actor,
     },
     ports::instance_store::StoreError,
@@ -62,7 +59,38 @@ pub async fn start_instance(
         ));
     }
 
-    let (java, args) = resolve_launch(state, &record).await;
+    let (required, reason) = super::java_service::requirement(
+        state,
+        &record.game_version,
+        record.loader_version.as_deref(),
+    )
+    .await;
+    let selected = record
+        .java_version
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(required);
+    if selected < required {
+        return Err(InstanceError::Spawn(format!("Minecraft {} requires Java {required}; the configured Java {selected} is too old", record.game_version)));
+    }
+    let java = super::java_service::ensure_java(state, selected)
+        .await
+        .map_err(InstanceError::Spawn)?;
+    let reason = if record.java_version.is_some() {
+        "server override"
+    } else {
+        reason
+    };
+    info!(instance_id = %id, game_version = record.game_version, java_version = selected, path = %java.display(), reason, "Selecting server Java runtime");
+    state
+        .broadcaster
+        .send(crate::domain::event::Event::InstanceOutput {
+            instance_id: id.clone(),
+            line: format!(
+                "[Core] Using Java {selected} for Minecraft {} ({reason})",
+                record.game_version
+            ),
+        });
+    let (_, args) = resolve_launch(state, &record).await;
     let data_dir = PathBuf::from(&record.data_dir);
 
     let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -79,8 +107,7 @@ pub async fn start_instance(
         .map_err(|e| InstanceError::Spawn(e.to_string()))?;
 
     set_status(state, id, InstanceStatus::Starting).await;
-    let actor_handle = spawn_actor(id.clone(), handle, Arc::clone(state));
-    state.instances.insert(id.clone(), actor_handle);
+    spawn_actor(id.clone(), handle, Arc::clone(state));
     Ok(())
 }
 
@@ -250,7 +277,16 @@ pub(crate) async fn resolve_launch(
     state: &Arc<AppState>,
     record: &InstanceRecord,
 ) -> (PathBuf, Vec<String>) {
-    let req_java = required_java_version(&record.game_version);
+    let (required, _) = super::java_service::requirement(
+        state,
+        &record.game_version,
+        record.loader_version.as_deref(),
+    )
+    .await;
+    let req_java = record
+        .java_version
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(required);
     let java = find_java_path(state, req_java)
         .await
         .unwrap_or_else(|| PathBuf::from("java"));
@@ -278,7 +314,12 @@ pub(crate) async fn default_launch_args(
     state: &Arc<AppState>,
     record: &InstanceRecord,
 ) -> (PathBuf, Vec<String>) {
-    let req_java = required_java_version(&record.game_version);
+    let (req_java, _) = super::java_service::requirement(
+        state,
+        &record.game_version,
+        record.loader_version.as_deref(),
+    )
+    .await;
     let java = find_java_path(state, req_java)
         .await
         .unwrap_or_else(|| PathBuf::from("java"));
@@ -289,7 +330,7 @@ pub(crate) async fn default_launch_args(
     (java, args)
 }
 
-/// Request graceful stop of a running instance.
+/// Stop a server, including one that has not finished starting.
 pub async fn stop_instance(
     state: &Arc<AppState>,
     id: &InstanceId,
@@ -302,9 +343,13 @@ pub async fn stop_instance(
         })?;
         return Err(InstanceError::NotRunning);
     }
-    let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
-    handle
-		.cmd_tx
+    let cmd_tx = state
+        .instances
+        .get(id)
+        .ok_or(InstanceError::NotRunning)?
+        .cmd_tx
+        .clone();
+    cmd_tx
 		.send(crate::infrastructure::process::instance_actor::ActorCmd::GracefulStop)
 		.await
 		.map_err(|_| InstanceError::ActorDead)?;
@@ -324,9 +369,13 @@ pub async fn kill_instance(
         })?;
         return Err(InstanceError::NotRunning);
     }
-    let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
-    handle
+    let cmd_tx = state
+        .instances
+        .get(id)
+        .ok_or(InstanceError::NotRunning)?
         .cmd_tx
+        .clone();
+    cmd_tx
         .send(crate::infrastructure::process::instance_actor::ActorCmd::Kill)
         .await
         .map_err(|_| InstanceError::ActorDead)?;
@@ -347,8 +396,13 @@ pub async fn send_command(
         })?;
         return Err(InstanceError::NotRunning);
     }
-    let handle = state.instances.get(id).ok_or(InstanceError::NotRunning)?;
-    handle.cmd_tx.send(crate::infrastructure::process::instance_actor::ActorCmd::SendCommand(cmd))
+    let cmd_tx = state
+        .instances
+        .get(id)
+        .ok_or(InstanceError::NotRunning)?
+        .cmd_tx
+        .clone();
+    cmd_tx.send(crate::infrastructure::process::instance_actor::ActorCmd::SendCommand(cmd))
         .await
         .map_err(|_| InstanceError::ActorDead)?;
     Ok(())

@@ -73,7 +73,10 @@ async fn open_session(
     struct Session {
         session: String,
     }
-    let response = tauri_plugin_http::reqwest::Client::new()
+    // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
+    let response = tauri_plugin_http::reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?
         .post(format!(
             "{}/_dev/session",
             backend_url.trim_end_matches('/')

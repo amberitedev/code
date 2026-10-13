@@ -253,14 +253,27 @@ function syncBreadcrumbs() {
 watch(displayedBrowseRoute, syncBreadcrumbs, { immediate: true, flush: 'sync' })
 
 debugLog('fetching tags (categories, loaders, gameVersions)')
+// Tags do not change while the App runs, so only the first Browse visit waits for them.
+const tagQueryOptions = { staleTime: Infinity, gcTime: Infinity } as const
 const [categories, loaders, availableGameVersions] = await Promise.all([
-	get_categories()
+	queryClient
+		.ensureQueryData({
+			queryKey: ['tags', 'categories'],
+			queryFn: get_categories,
+			...tagQueryOptions,
+		})
 		.catch(handleError)
 		.then(ref<Labrinth.Tags.v2.Category[]>),
-	get_loaders()
+	queryClient
+		.ensureQueryData({ queryKey: ['tags', 'loaders'], queryFn: get_loaders, ...tagQueryOptions })
 		.catch(handleError)
 		.then(ref<Labrinth.Tags.v2.Loader[]>),
-	get_game_versions()
+	queryClient
+		.ensureQueryData({
+			queryKey: ['tags', 'game-versions'],
+			queryFn: get_game_versions,
+			...tagQueryOptions,
+		})
 		.catch(handleError)
 		.then(ref<Labrinth.Tags.v2.GameVersion[]>),
 ])
@@ -565,6 +578,10 @@ const messages = defineMessages({
 		id: 'search.filter.locked.server-environment.title',
 		defaultMessage: 'Only client-side mods can be added to the server instance',
 	},
+	environmentProvidedByCoreServer: {
+		id: 'app.browse.filter.locked.core-server-environment.title',
+		defaultMessage: 'Only mods compatible with servers can be added to this server',
+	},
 	gameVersionProvidedByInstance: {
 		id: 'search.filter.locked.instance-game-version.title',
 		defaultMessage: 'Game version is provided by the instance',
@@ -628,10 +645,6 @@ function resetInstanceContext() {
 	newlyInstalled.value = []
 	hiddenInstanceProjectIds.value = new Set()
 	hiddenInstanceProjectIdsInitialized.value = false
-	// @ts-expect-error upstream assigns to a read-only computed, which is a no-op at runtime
-	isServerInstance.value = false
-	// @ts-expect-error upstream calls an undefined name
-	browseBreadcrumb.reset()
 	void refreshInstalledProjectIds()
 }
 
@@ -663,6 +676,8 @@ watch(
 		}
 
 		installedProjectIds.value = null
+		newlyInstalled.value = []
+		hiddenInstanceProjectIds.value = new Set()
 		hiddenInstanceProjectIdsInitialized.value = false
 		await Promise.all([instanceQuery.suspense().catch(handleError), refreshInstalledProjectIds()])
 		if (instance.value?.link?.project_id) {
@@ -1092,7 +1107,8 @@ async function search(requestParams: string) {
 					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
 				}
 			} | null>,
-		staleTime: 30_000,
+		// Coming back to a search within a few minutes shows the same page at once.
+		staleTime: 5 * 60_000,
 	})
 
 	if (!rawResults) {
@@ -1150,7 +1166,11 @@ async function search(requestParams: string) {
 const lockedFilterMessages = computed(() => ({
 	gameVersion: formatMessage(messages.gameVersionProvidedByInstance),
 	modLoader: formatMessage(messages.modLoaderProvidedByInstance),
-	environment: formatMessage(messages.environmentProvidedByServer),
+	environment: formatMessage(
+		isServerContext.value
+			? messages.environmentProvidedByCoreServer
+			: messages.environmentProvidedByServer,
+	),
 	syncButton: formatMessage(messages.syncFilterButton),
 	providedBy: formatMessage(messages.providedByInstance),
 }))

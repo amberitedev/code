@@ -26,13 +26,13 @@
 				</Button>
 
 				<SplitButton
-					v-tooltip="busyTooltip"
+					v-tooltip="canStop ? undefined : busyTooltip"
 					type="colored"
 					color="red"
 					size="xl"
 					:options="stopMenuOptions"
 					menu-label="Force stop options"
-					:primary-disabled="!canTakeAction"
+					:primary-disabled="!canStop"
 					:menu-disabled="!canKill"
 					@click="initiateAction('Stop')"
 				>
@@ -105,6 +105,7 @@ const {
 	showRestartButton,
 	busyTooltip,
 	canTakeAction,
+	canStop,
 	canKill,
 	primaryActionText,
 	initiateAction,

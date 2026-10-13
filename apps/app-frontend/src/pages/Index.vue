@@ -55,7 +55,9 @@ useRootBreadcrumb({
 
 const instancesQuery = useQuery(instanceListQueryOptions())
 const instances = computed(() => instancesQuery.data.value ?? [])
-if (hasCreatedInstance.value) {
+// Only a cold start waits for the list. A cached list is shown at once and refreshed behind it;
+// suspense() would wait for a full refetch on every visit.
+if (hasCreatedInstance.value && instancesQuery.data.value === undefined) {
 	await traceStartupStep('Load library instances', () => instancesQuery.suspense()).catch(
 		handleError,
 	)

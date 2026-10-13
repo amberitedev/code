@@ -311,8 +311,10 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	/** Self-hosted hosting has no single base URL: each request goes to the Core it is about. */
-	private async resolveArchonBaseUrl(path: string, options: RequestOptions): Promise<string> {
-		if (this.selfHostedHosting) return this.archon.cores_v1.hostingUrl(path, options.params)
+	protected async resolveArchonBaseUrl(path: string, options: RequestOptions): Promise<string> {
+		if (this.selfHostedHosting) {
+			return this.archon.cores_v1.hostingUrl(path, options.params, options.version)
+		}
 		return this.resolveBaseUrl(this.config.archonBaseUrl!)
 	}
 

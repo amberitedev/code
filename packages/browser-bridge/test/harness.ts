@@ -166,6 +166,7 @@ export type NativeInvocation = {
 
 type NativeDispatcher = {
 	clear: (connectionId: number) => void
+	dispatch: (request: Record<string, unknown>) => 'no-tauri' | 'ok'
 	invoke: (request: Record<string, unknown>) => Promise<void>
 	unregister: (connectionId: number, callbackId: number) => void
 }
@@ -193,7 +194,9 @@ export function installNativeBridge(handler: (invocation: NativeInvocation) => u
 		},
 		unregisterCallback: (id: number) => callbacks.delete(id),
 	}
-	const window = { __TAURI_INTERNALS__: nativeInternals } as Record<string, unknown>
+	const window: { __TAURI_INTERNALS__?: typeof nativeInternals } & Record<string, unknown> = {
+		__TAURI_INTERNALS__: nativeInternals,
+	}
 	NodeVM.runInNewContext(
 		readSource('native-bridge.js'),
 		{
@@ -210,7 +213,7 @@ export function installNativeBridge(handler: (invocation: NativeInvocation) => u
 		{ filename: 'native-bridge.js' },
 	)
 	const dispatcher = window.__AMBERITE_BROWSER_BRIDGE_NATIVE__ as NativeDispatcher
-	return { callbacks, dispatcher, emitted, invocations }
+	return { callbacks, dispatcher, emitted, invocations, window }
 }
 
 export async function flushTasks(): Promise<void> {
