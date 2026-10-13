@@ -31,6 +31,9 @@ const CLICK_IMPULSE_SCALE_Y = 0.025
 const DAMAGE_FLASH_DURATION_SECONDS = 0.2
 const DAMAGE_FLASH_REPEAT_DELAY_SECONDS = 0.5
 const DAMAGE_FLASH_MAX_INTENSITY = 0.7
+// Animation steps closer together than this are skipped, which holds high refresh rate displays to
+// about 60 to 72 redraws a second instead of one per display frame.
+const MIN_ANIMATION_STEP_MS = 13.5
 
 type MaybeReadonlyRef<T> = Ref<T> | ComputedRef<T>
 
@@ -394,6 +397,7 @@ export function useSkinPreviewAnimation(
 	const isWindowFocused = useWindowFocus()
 	const documentVisibility = useDocumentVisibility()
 	let animationFrame: number | null = null
+	let lastAnimationStepAt = 0
 
 	function hasActiveAnimation() {
 		return (
@@ -408,9 +412,13 @@ export function useSkinPreviewAnimation(
 		return isWindowFocused.value && documentVisibility.value === 'visible' && hasActiveAnimation()
 	}
 
-	function stepAnimation() {
+	function stepAnimation(now: number) {
 		animationFrame = null
 		if (!canAnimate()) return
+
+		animationFrame = window.requestAnimationFrame(stepAnimation)
+		if (now - lastAnimationStepAt < MIN_ANIMATION_STEP_MS) return
+		lastAnimationStepAt = now
 
 		const delta = clock.getDelta()
 
@@ -421,8 +429,6 @@ export function useSkinPreviewAnimation(
 		updateClickImpulse(delta)
 		updateDamageFlash(delta)
 		onFrame?.()
-
-		animationFrame = window.requestAnimationFrame(stepAnimation)
 	}
 
 	function startAnimationLoop() {
