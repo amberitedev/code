@@ -365,7 +365,9 @@ function onLinkClick(event: MouseEvent, index: number, link: Tab) {
 	requestAnimationFrame(() => {
 		// A timeout from inside a frame callback runs after that frame has been painted.
 		setTimeout(() => {
-			void (props.replace ? router.replace(target) : router.push(target))
+			// A navigation that throws (a page module that fails to load) skips the failure hook
+			// below, so the pill is put back here.
+			void (props.replace ? router.replace(target) : router.push(target)).catch(updateActiveTab)
 		})
 	})
 }
