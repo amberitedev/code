@@ -740,22 +740,23 @@ function createCommandInput(input: {
 	NodeFS.writeFileSync(input.commandFile, '')
 	let offset = 0
 	const poll = setInterval(() => {
-		let size: number
+		let buffer: Buffer
+		// The file can vanish or be replaced at any point; skip this poll and read it on the next.
 		try {
-			size = NodeFS.statSync(input.commandFile).size
+			const size = NodeFS.statSync(input.commandFile).size
+			if (size < offset) offset = 0
+			if (size === offset) return
+			buffer = Buffer.alloc(size - offset)
+			const fd = NodeFS.openSync(input.commandFile, 'r')
+			try {
+				NodeFS.readSync(fd, buffer, 0, buffer.length, offset)
+			} finally {
+				NodeFS.closeSync(fd)
+			}
+			offset = size
 		} catch {
 			return
 		}
-		if (size < offset) offset = 0
-		if (size === offset) return
-		const buffer = Buffer.alloc(size - offset)
-		const fd = NodeFS.openSync(input.commandFile, 'r')
-		try {
-			NodeFS.readSync(fd, buffer, 0, buffer.length, offset)
-		} finally {
-			NodeFS.closeSync(fd)
-		}
-		offset = size
 		for (const line of buffer.toString('utf8').split(/\r?\n/)) handle(line)
 	}, 500)
 	poll.unref()
