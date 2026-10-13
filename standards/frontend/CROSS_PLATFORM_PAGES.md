@@ -50,8 +50,10 @@ export interface ContentManagerContext {
 	mapToTableItem: (item: ContentItem) => ContentCardTableItem
 }
 
-export const [injectContentManager, provideContentManager] =
-	createContext<ContentManagerContext>('ContentPageLayout', 'contentManagerContext')
+export const [injectContentManager, provideContentManager] = createContext<ContentManagerContext>(
+	'ContentPageLayout',
+	'contentManagerContext',
+)
 ```
 
 ### Platform Implementations
@@ -82,30 +84,26 @@ provideContentManager({
 </template>
 ```
 
-The app uses Tauri `invoke`:
+For new app code, keep the desktop behavior in a feature and use typed commands from `platform/app-lib/`. This follows [Application Structure](app-frontend/APP_FRONTEND_STRUCTURE.md) without changing the shared layout's folders.
+
+The page then connects that behavior to the layout. This example proposes `useInstanceContentManager`, a composable that returns the existing `ContentManagerContext`:
 
 ```vue
-<!-- apps/app-frontend/src/pages/instance/Mods.vue -->
 <script setup lang="ts">
 import { provideContentManager, ContentPageLayout } from '@modrinth/ui'
-import { invoke } from '@tauri-apps/api/core'
 
-const items = ref<ContentItem[]>([])
-await invoke('get_instance_content', { instanceId }).then(/* Map the result to ContentItem[]. */)
+import { useInstanceContentManager } from '@/features/instances/content/use-instance-content-manager'
 
-provideContentManager({
-	items,
-	deleteItem: async (item) => {
-		await invoke('delete_content', { instanceId, path: item.file_path })
-	},
-	// Implement the remaining contract fields.
-})
+const contentManager = useInstanceContentManager()
+provideContentManager(contentManager)
 </script>
 
 <template>
 	<ContentPageLayout />
 </template>
 ```
+
+The composable manages queries and desktop actions, while the shared layout uses the provided value. The [app composable guidance](app-frontend/APP_FRONTEND_COMPOSABLES.md) explains how to keep that behavior focused.
 
 ### Optional Capabilities
 
@@ -124,10 +122,10 @@ v-if="ctx.bulkUpdateItems && hasOutdatedProjects"
 
 ### Props and DI
 
-| Use   | Condition                                                                  |
-| ----- | -------------------------------------------------------------------------- |
-| DI    | Use when API calls, file operations, or navigation differ by platform.     |
-| Props | Use when configuration and display data are the same on all platforms.      |
+| Use   | Condition                                                              |
+| ----- | ---------------------------------------------------------------------- |
+| DI    | Use when API calls, file operations, or navigation differ by platform. |
+| Props | Use when configuration and display data are the same on all platforms. |
 
 ## Wrapped Pages (`layouts/wrapped/`)
 
@@ -179,7 +177,7 @@ This behavior prevents empty content from appearing before the data exists.
 ```
 
 ```ts
-const primaryQuery = useQuery({ /* Query options. */ })
+const primaryQuery = useQuery({/* Query options. */})
 const readyPending = useReadyState(primaryQuery)
 
 // Use this form when the complete query object is not available.
@@ -203,7 +201,11 @@ Put the call in a `try` block. Catch the error so that route setup can continue.
 The mounted layout runs its `useQuery` call and shows the error to the user.
 
 ```ts
-import { injectModrinthClient, injectModrinthServerContext, ServersManageFilesPage } from '@modrinth/ui'
+import {
+	injectModrinthClient,
+	injectModrinthServerContext,
+	ServersManageFilesPage,
+} from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 
 const client = injectModrinthClient()
