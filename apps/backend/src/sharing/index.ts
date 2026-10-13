@@ -1,6 +1,6 @@
 import { requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'
-import { ApiError, errorResponse, json, readBytes, readJson } from '../common/http'
+import { ApiError, json, readBytes, readJson } from '../common/http'
 import { notificationResponse } from '../common/notifications'
 import type { Env } from '../common/types'
 import { canInviteToSharedInstance } from '../social/preferences'
@@ -650,17 +650,7 @@ async function users(
 	return empty()
 }
 
-/** Answers sharing errors itself so their `code` and details reach the client. */
 export async function handleSharing(request: Request, env: Env): Promise<Response | null> {
-	try {
-		return await handle(request, env)
-	} catch (error) {
-		if (error instanceof ApiError) return errorResponse(error)
-		throw error
-	}
-}
-
-async function handle(request: Request, env: Env): Promise<Response | null> {
 	const url = new URL(request.url)
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
 	if (
