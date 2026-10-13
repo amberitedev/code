@@ -1,29 +1,49 @@
 <script lang="ts">
 // Screenshot cards fade in one after another because their thumbnails load one at a time. Skin
 // previews arrive together and in no particular order, so each card's turn comes from its place on
-// the page: the first card of a burst fades at once and each one after it a step later.
+// the page: the first card of a burst fades first and each one after it a step later.
 const FADE_STAGGER_MS = 30
 const FADE_STAGGER_MAX_MS = 450
+// A burst waits this long for its cards to report in, so the first one on the page is known.
+const FADE_GATHER_MS = 32
 // Cards that load within this long of each other belong to the same burst.
 const FADE_BURST_GAP_MS = 300
+
+type FadeStart = (delay: number) => void
+let gathering: { index: number; start: FadeStart }[] | undefined
 let burstStart = 0
 let burstEnd = 0
 let burstFirstIndex = 0
 
-function claimFadeDelay(card: Element | null) {
+function fadeDelayFor(index: number, now: number) {
+	const turn = Math.min(Math.max(0, index - burstFirstIndex) * FADE_STAGGER_MS, FADE_STAGGER_MAX_MS)
+	return Math.max(0, burstStart + turn - now)
+}
+
+function queueFade(card: Element | null, start: FadeStart) {
 	const now = performance.now()
 	const index = card
 		? Array.prototype.indexOf.call(document.querySelectorAll('.skin-button'), card)
 		: 0
-	if (now > burstEnd) {
-		burstStart = now
-		burstFirstIndex = index
-	}
-	burstFirstIndex = Math.min(burstFirstIndex, index)
-	burstEnd = now + FADE_BURST_GAP_MS
 
-	const turn = Math.min((index - burstFirstIndex) * FADE_STAGGER_MS, FADE_STAGGER_MAX_MS)
-	return Math.max(0, burstStart + turn - now)
+	if (gathering) {
+		gathering.push({ index, start })
+		return
+	}
+	if (now <= burstEnd) {
+		burstEnd = now + FADE_BURST_GAP_MS
+		start(fadeDelayFor(index, now))
+		return
+	}
+
+	const cards = (gathering = [{ index, start }])
+	setTimeout(() => {
+		gathering = undefined
+		burstStart = performance.now()
+		burstEnd = burstStart + FADE_BURST_GAP_MS
+		burstFirstIndex = Math.min(...cards.map((entry) => entry.index))
+		for (const entry of cards) entry.start(fadeDelayFor(entry.index, burstStart))
+	}, FADE_GATHER_MS)
 }
 </script>
 
@@ -66,15 +86,20 @@ const imagesLoaded = ref({
 	forward: false,
 })
 
-// True while a freshly loaded image is waiting its turn and fading in over the skeleton.
+// A freshly loaded image waits for its turn, then fades in over the skeleton.
+const awaitingFade = ref(false)
 const fadingIn = ref(false)
 const fadeDelay = ref(0)
 
 function onImageLoad(event: Event) {
 	if (!imagesLoaded.value.forward) {
 		const image = event.target instanceof Element ? event.target : null
-		fadeDelay.value = claimFadeDelay(image?.closest('.skin-button') ?? null)
-		fadingIn.value = true
+		awaitingFade.value = true
+		queueFade(image?.closest('.skin-button') ?? null, (delay) => {
+			fadeDelay.value = delay
+			awaitingFade.value = false
+			fadingIn.value = true
+		})
 	}
 	imagesLoaded.value.forward = true
 }
@@ -134,7 +159,7 @@ watch(
 		</span>
 
 		<div
-			v-if="!imagesLoaded.forward || fadingIn"
+			v-if="!imagesLoaded.forward || awaitingFade || fadingIn"
 			class="skeleton-loader h-full w-full"
 			:class="{ 'absolute inset-0': imagesLoaded.forward }"
 		>
@@ -146,7 +171,7 @@ watch(
 			:key="`${selected}-${active}`"
 			:class="[
 				'skin-button__image-parent pointer-events-none relative z-0 mb-[1.5px] grid place-items-stretch with-shadow',
-				{ 'skin-button__image-parent--fading-in': fadingIn },
+				{ 'skin-button__image-parent--fading-in': fadingIn, 'opacity-0': awaitingFade },
 			]"
 			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
 			@animationend="fadingIn = false"
