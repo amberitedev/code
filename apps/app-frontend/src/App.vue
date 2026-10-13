@@ -781,19 +781,10 @@ let suspenseToken = null
 
 let suspensePending = false
 
-// Pages teleport whole trees into the sidebar, and every scrollbar update re-lays out the sidebar
-// to measure it. Waiting for mutations and resizes to go quiet makes a swap cost one update,
-// taken after the page has rendered instead of several in the middle of it.
 const sidebarOverlayScrollbarsOptions = Object.freeze({
 	overflow: {
 		x: 'hidden',
 		y: 'scroll',
-	},
-	update: {
-		debounce: {
-			mutation: [100, 300],
-			resize: [100, 300],
-		},
 	},
 })
 
@@ -801,10 +792,7 @@ router.beforeEach((to, from) => {
 	debugStartup('Route navigation started', { to: to.path, from: from.path })
 	suspensePending = false
 	if (routerToken) loading.end(routerToken)
-	routerToken = null
-	// Route tokens only hold the splash screen open until the first page is ready. Once the bar is
-	// enabled, ordinary navigation must not show it.
-	if (!loading.barEnabled.value) routerToken = loading.begin(`Route navigation: ${to.path}`)
+	routerToken = loading.begin(`Route navigation: ${to.path}`)
 })
 router.afterEach((to, from, failure) => {
 	debugStartup('Route navigation settled', { to: to.path, failed: !!failure })
@@ -837,8 +825,7 @@ function onSuspensePending() {
 	debugStartup('Route Suspense pending', { route: route.path })
 	suspensePending = true
 	if (suspenseToken) loading.end(suspenseToken)
-	suspenseToken = null
-	if (!loading.barEnabled.value) suspenseToken = loading.begin(`Route Suspense: ${route.path}`)
+	suspenseToken = loading.begin(`Route Suspense: ${route.path}`)
 }
 
 function onSuspenseResolve() {
@@ -2604,9 +2591,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 }
 
 // The sidebar's free space belongs to the scrollable area while news is closed and to the news
-// body while it is open, which leaves no gap above it. The swap is not animated: it also flips
-// when a page fills or empties the sidebar, and animating it relaid out the sidebar every frame.
-// The minimum height keeps news visible when the sidebar content is long.
+// body while it is open. Swapping flex-grow between them animates the news open and closed and
+// leaves no gap above it. The minimum height keeps news visible when the sidebar content is long.
 .app-sidebar-scrollable {
 	flex-grow: 1;
 }
@@ -2627,6 +2613,15 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 .app-sidebar:not(:has(.sidebar-teleport-content:not(:empty))):has(.sidebar-news-body.open)
 	.app-sidebar-scrollable {
 	flex-grow: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.app-sidebar-scrollable,
+	.sidebar-news-body {
+		transition:
+			flex-grow 300ms ease-in-out,
+			min-height 300ms ease-in-out;
+	}
 }
 
 @media (prefers-reduced-motion: no-preference) {

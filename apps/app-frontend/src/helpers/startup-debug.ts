@@ -2,18 +2,8 @@ import { useDebugLogger } from '@modrinth/ui'
 
 const debug = useDebugLogger('Startup')
 
-let active = import.meta.env.DEV
-
-/**
- * Called once the splash screen is gone. Startup logging is only useful until then, and callers
- * on the navigation path would otherwise serialize and forward a log line on every click.
- */
-export function stopStartupDebug(): void {
-	active = false
-}
-
 export function debugStartup(event: string, details: Record<string, unknown> = {}): void {
-	if (!active) return
+	if (!import.meta.env.DEV) return
 	debug(
 		event,
 		JSON.stringify({
@@ -25,7 +15,7 @@ export function debugStartup(event: string, details: Record<string, unknown> = {
 }
 
 export async function traceStartupStep<T>(label: string, run: () => Promise<T>): Promise<T> {
-	if (!active) return run()
+	if (!import.meta.env.DEV) return run()
 	const startedAt = performance.now()
 	debugStartup('Step started', { label })
 	const timer = setTimeout(() => {

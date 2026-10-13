@@ -61,7 +61,7 @@
 <script setup lang="ts">
 import { ChevronRightIcon } from '@modrinth/assets'
 import { Avatar } from '@modrinth/ui'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { injectBreadcrumbManager } from '@/providers/breadcrumbs'
@@ -78,17 +78,11 @@ const overflowAmount = ref(0)
 let hovered = false
 let stopping = false
 
-let horizontalPadding: number | undefined
-
-// Only runs from the ResizeObserver, where layout is already up to date, so these reads never
-// force a layout while a page is mounting.
 function checkOverflow() {
 	if (!outerRef.value || !innerRef.value) return
-	if (horizontalPadding === undefined) {
-		const outerStyles = window.getComputedStyle(outerRef.value)
-		horizontalPadding =
-			Number.parseFloat(outerStyles.paddingLeft) + Number.parseFloat(outerStyles.paddingRight)
-	}
+	const outerStyles = window.getComputedStyle(outerRef.value)
+	const horizontalPadding =
+		Number.parseFloat(outerStyles.paddingLeft) + Number.parseFloat(outerStyles.paddingRight)
 	const availableWidth = outerRef.value.clientWidth - horizontalPadding
 	const overflow = innerRef.value.scrollWidth - availableWidth
 	isOverflowing.value = overflow > 0
@@ -119,9 +113,8 @@ function onAnimationIteration() {
 
 let resizeObserver: ResizeObserver | null = null
 
-// The inner element is sized to its content, so the observer also reports breadcrumb changes
-// and its first report covers the initial check.
 onMounted(() => {
+	checkOverflow()
 	resizeObserver = new ResizeObserver(checkOverflow)
 	if (outerRef.value) resizeObserver.observe(outerRef.value)
 	if (innerRef.value) resizeObserver.observe(innerRef.value)
@@ -129,6 +122,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	resizeObserver?.disconnect()
+})
+
+watch(breadcrumbs, () => {
+	requestAnimationFrame(checkOverflow)
 })
 </script>
 

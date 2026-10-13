@@ -76,12 +76,12 @@
 
 					<div v-if="scrollable" class="relative flex-1 min-h-0 flex flex-col">
 						<Transition
-							enter-active-class="transition-opacity duration-200 ease-out"
-							enter-from-class="opacity-0"
-							enter-to-class="opacity-100"
-							leave-active-class="transition-opacity duration-200 ease-in"
-							leave-from-class="opacity-100"
-							leave-to-class="opacity-0"
+							enter-active-class="transition-all duration-200 ease-out"
+							enter-from-class="opacity-0 max-h-0"
+							enter-to-class="opacity-100 max-h-6"
+							leave-active-class="transition-all duration-200 ease-in"
+							leave-from-class="opacity-100 max-h-6"
+							leave-to-class="opacity-0 max-h-0"
 						>
 							<div
 								v-if="showTopFade"
@@ -104,12 +104,12 @@
 						</div>
 
 						<Transition
-							enter-active-class="transition-opacity duration-200 ease-out"
-							enter-from-class="opacity-0"
-							enter-to-class="opacity-100"
-							leave-active-class="transition-opacity duration-200 ease-in"
-							leave-from-class="opacity-100"
-							leave-to-class="opacity-0"
+							enter-active-class="transition-all duration-200 ease-out"
+							enter-from-class="opacity-0 max-h-0"
+							enter-to-class="opacity-100 max-h-6"
+							leave-active-class="transition-all duration-200 ease-in"
+							leave-from-class="opacity-100 max-h-6"
+							leave-to-class="opacity-0 max-h-0"
 						>
 							<div
 								v-if="showBottomFade"
@@ -622,12 +622,7 @@ defineOptions({
 	opacity: 0;
 	visibility: hidden;
 	pointer-events: none;
-	// The blur is static and fades in with the overlay. Animating its radius re-blurs the whole
-	// window on every frame.
-	backdrop-filter: blur(5px);
-	transition:
-		opacity 0.2s ease-out,
-		visibility 0.2s ease-out;
+	transition: all 0.2s ease-out;
 	//transform: translate(
 	//    calc((-50vw + var(--_mouse-x, 50vw) * 1px) / 2),
 	//    calc((-50vh + var(--_mouse-y, 50vh) * 1px) / 2)
@@ -657,6 +652,7 @@ defineOptions({
 		opacity: 1;
 		visibility: visible;
 		pointer-events: auto;
+		backdrop-filter: blur(5px);
 	}
 
 	&.noblur {
@@ -688,7 +684,7 @@ defineOptions({
 	&.shown {
 		visibility: visible;
 		transform: translate(0, 0);
-		transition: transform 0.2s ease-out;
+		transition: all 0.2s ease-out;
 
 		> .modal-body {
 			opacity: 1;
@@ -710,13 +706,7 @@ defineOptions({
 
 		visibility: hidden;
 		opacity: 0;
-		// Width is listed because some modals change it between steps.
-		transition:
-			opacity 0.2s ease-in-out,
-			scale 0.2s ease-in-out,
-			visibility 0.2s ease-in-out,
-			width 0.2s ease-in-out,
-			max-width 0.2s ease-in-out;
+		transition: all 0.2s ease-in-out;
 
 		@media (prefers-reduced-motion) {
 			transition: none !important;

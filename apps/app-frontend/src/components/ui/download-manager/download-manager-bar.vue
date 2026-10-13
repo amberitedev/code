@@ -158,9 +158,8 @@ const layout = computed(() => {
 	}
 })
 
-// Sizes are applied directly and only transform and opacity are animated, so a state change costs
-// one layout of the top bar instead of one per frame of a spring.
 const compressed = ref(false)
+let compressAfterCollapse = false
 let compressionTimer: ReturnType<typeof setTimeout> | undefined
 const resizeTransition = computed(() =>
 	animate.value ? { type: 'spring' as const, stiffness: 260, damping: 32 } : { duration: 0 },
@@ -169,13 +168,18 @@ const contentTransition = computed(() => ({ duration: animate.value ? 0.18 : 0 }
 
 watch(idle, (isIdle) => {
 	clearTimeout(compressionTimer)
-	compressed.value = isIdle && animate.value
-	if (compressed.value) {
-		compressionTimer = setTimeout(() => {
-			compressed.value = false
-		}, 110)
-	}
+	compressed.value = false
+	compressAfterCollapse = isIdle && animate.value
 })
+
+function finishResize() {
+	if (!compressAfterCollapse || !idle.value || !animate.value) return
+	compressAfterCollapse = false
+	compressed.value = true
+	compressionTimer = setTimeout(() => {
+		compressed.value = false
+	}, 110)
+}
 
 onScopeDispose(() => {
 	clearTimeout(pulseTimer)
@@ -189,17 +193,16 @@ defineExpose({ focus: () => trigger.value?.focus() })
 		as="div"
 		class="relative flex origin-right shrink-0 text-sm font-medium leading-5 text-primary"
 		:class="{ 'download-bar-static': !animate }"
-		:style="{
-			width: `${layout.width}px`,
-			height: `${layout.height}px`,
-			borderRadius: `${layout.borderRadius}px`,
-		}"
-		:initial="animate ? { opacity: 0 } : false"
+		:initial="animate ? { width: layout.controlsWidth + 2, opacity: 0 } : false"
 		:animate="{
+			width: layout.width,
+			height: layout.height,
+			borderRadius: layout.borderRadius,
 			scaleX: compressed && animate ? 0.9 : 1,
 			opacity: measured ? 1 : 0,
 		}"
 		:transition="resizeTransition"
+		@animation-complete="finishResize"
 	>
 		<span
 			class="pointer-events-none invisible absolute left-0 top-0 h-0 w-full overflow-hidden whitespace-nowrap"
@@ -287,22 +290,25 @@ defineExpose({ focus: () => trigger.value?.focus() })
 					<Motion
 						as="span"
 						class="shrink-0 overflow-hidden whitespace-nowrap text-right tabular-nums"
-						:style="{ width: `${hasRate ? rateWidth : 0}px`, marginLeft: hasRate ? '8px' : 0 }"
 						:initial="false"
-						:animate="{ opacity: hasRate ? 1 : 0 }"
-						:transition="contentTransition"
+						:animate="{
+							width: hasRate ? rateWidth : 0,
+							marginLeft: hasRate ? 8 : 0,
+							opacity: hasRate ? 1 : 0,
+						}"
+						:transition="resizeTransition"
 						:aria-hidden="!hasRate"
 					>
 						<span class="inline-block w-[8ch]">{{ lastRate }}</span>
 					</Motion>
 				</span>
 			</span>
-			<span
+			<Motion
+				as="span"
 				class="flex h-full shrink-0 items-center justify-center"
-				:style="{
-					paddingLeft: `${layout.controlsPadding}px`,
-					paddingRight: `${layout.controlsPadding}px`,
-				}"
+				:initial="false"
+				:animate="{ paddingLeft: layout.controlsPadding, paddingRight: layout.controlsPadding }"
+				:transition="resizeTransition"
 			>
 				<DownloadIcon
 					class="size-4 shrink-0"
@@ -312,12 +318,12 @@ defineExpose({ focus: () => trigger.value?.focus() })
 				<Motion
 					as="span"
 					class="relative h-5 shrink-0"
-					:style="{
-						width: `${activeCount ? countWidth : 0}px`,
-						marginLeft: activeCount ? '4px' : 0,
-					}"
 					:initial="false"
-					:animate="{ opacity: activeCount ? 1 : 0 }"
+					:animate="{
+						width: activeCount ? countWidth : 0,
+						marginLeft: activeCount ? 4 : 0,
+						opacity: activeCount ? 1 : 0,
+					}"
 					:transition="contentTransition"
 					:aria-hidden="!activeCount"
 				>
@@ -340,9 +346,12 @@ defineExpose({ focus: () => trigger.value?.focus() })
 				<Motion
 					as="span"
 					class="relative h-4 shrink-0"
-					:style="{ width: hasAttention ? '16px' : 0, marginLeft: hasAttention ? '4px' : 0 }"
 					:initial="false"
-					:animate="{ opacity: hasAttention ? 1 : 0 }"
+					:animate="{
+						width: hasAttention ? 16 : 0,
+						marginLeft: hasAttention ? 4 : 0,
+						opacity: hasAttention ? 1 : 0,
+					}"
 					:transition="contentTransition"
 					:aria-hidden="!hasAttention"
 				>
@@ -353,7 +362,7 @@ defineExpose({ focus: () => trigger.value?.focus() })
 						:aria-label="formatMessage(messages.attention)"
 					/>
 				</Motion>
-			</span>
+			</Motion>
 		</button>
 	</Motion>
 </template>
