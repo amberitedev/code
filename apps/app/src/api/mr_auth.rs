@@ -36,7 +36,7 @@ pub async fn modrinth_login<R: Runtime>(
     let mut reply = AuthReplySession::start(seal.nonce().to_string());
     let auth_code_recv_socket = reply.socket_addr().await?;
     let auth_request_uri = auth_request_url(
-        mr_auth::authenticate_begin_flow(flow).await?,
+        &mr_auth::authenticate_begin_flow(flow).await?,
         &auth_code_recv_socket,
         &seal.public_key()?,
         seal.nonce(),
