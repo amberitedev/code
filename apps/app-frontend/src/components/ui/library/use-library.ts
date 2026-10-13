@@ -185,6 +185,11 @@ const instanceActionMessages = defineMessages({
 	},
 })
 
+// Home remounts on every visit. The groups live here so a revisit paints the last known library in
+// its first frame; every mount still refreshes them in the background.
+const libraryGroups = ref<InstanceGroupDefinition[]>([])
+const libraryGroupsLoaded = ref(false)
+
 function createLibraryState(instances: Ref<GameInstance[]>) {
 	const { handleError } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
@@ -201,8 +206,6 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		{ mergeDefaults: true },
 	)
 	const serverProjectIds = ref(new Set<string>())
-	const libraryGroups = ref<InstanceGroupDefinition[]>([])
-	const libraryGroupsLoaded = ref(false)
 	const isNewGroupModalOpen = ref(false)
 	const newGroupName = ref('')
 	const newGroupSearch = ref('')
@@ -340,7 +343,17 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 
 	const refreshGroups = async () => {
 		try {
-			libraryGroups.value = await listInstanceGroups()
+			const groups = await listInstanceGroups()
+			const current = libraryGroups.value
+			// An unchanged list keeps its identity so a revisit does not re-render every group.
+			if (
+				groups.length !== current.length ||
+				groups.some(
+					(group, index) => group.id !== current[index].id || group.name !== current[index].name,
+				)
+			) {
+				libraryGroups.value = groups
+			}
 		} catch (error) {
 			handleError(toError(error))
 		} finally {
