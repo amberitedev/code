@@ -299,7 +299,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			versionPath = `/${version}`
 		}
 
-		const cleanPath = path.startsWith('/') ? path : `/${path}`
+		// An empty path addresses the version root itself (a Core's /pairing and /health), which
+		// must not gain a trailing slash: the Core answers 404 to `/pairing/`.
+		const cleanPath = path === '' ? '' : path.startsWith('/') ? path : `/${path}`
 
 		return `${base}${versionPath}${cleanPath}`
 	}
@@ -309,8 +311,10 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	/** Self-hosted hosting has no single base URL: each request goes to the Core it is about. */
-	private async resolveArchonBaseUrl(path: string, options: RequestOptions): Promise<string> {
-		if (this.selfHostedHosting) return this.archon.cores_v1.hostingUrl(path, options.params)
+	protected async resolveArchonBaseUrl(path: string, options: RequestOptions): Promise<string> {
+		if (this.selfHostedHosting) {
+			return this.archon.cores_v1.hostingUrl(path, options.params, options.version)
+		}
 		return this.resolveBaseUrl(this.config.archonBaseUrl!)
 	}
 
