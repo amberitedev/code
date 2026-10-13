@@ -300,8 +300,11 @@ function updateActiveTab() {
 
 // Moves the pill on the click itself instead of waiting for the navigation to commit. The route
 // watcher and the failure hook below correct it if the navigation lands somewhere else.
+//
+// RouterLink has already called preventDefault by the time this runs, so only the clicks it
+// ignores are filtered out here.
 function onLinkClick(event: MouseEvent, index: number) {
-	if (event.defaultPrevented || event.button !== 0) return
+	if (event.button !== 0) return
 	if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
 	setActiveTab(index, false)
 }
