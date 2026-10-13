@@ -169,7 +169,10 @@ const linkedInstanceProjectQuery = useQuery(
 		}),
 	),
 )
-const installedProjectIds: Ref<string[] | null> = ref(null)
+// Starts from the last read, so a return visit can search before the fresh read arrives.
+const installedProjectIds: Ref<string[] | null> = ref(
+	queryClient.getQueryData<string[]>(installedProjectIdsQuery().queryKey) ?? null,
+)
 const instanceHideInstalled = ref(route.query.ai === 'true')
 const newlyInstalled = ref<string[]>([])
 const hiddenInstanceProjectIds = ref<Set<string>>(new Set())
@@ -318,54 +321,66 @@ watch(
 
 watchServerContextChanges()
 
-await initInstanceContext()
+// True when everything the first search depends on is already cached. The search then runs during
+// setup and its cached results are on screen in the first frame. Otherwise it waits for the context
+// below, with the placeholders showing.
+const searchContextReady = ref(
+	installedProjectIds.value !== null &&
+		!route.query.sid &&
+		(!route.query.i ||
+			(!!instance.value &&
+				(!linkedInstanceProjectId.value || linkedInstanceProjectQuery.data.value !== undefined))),
+)
 
-async function refreshInstalledProjectIds() {
-	if (!route.query.i) {
-		const instances = await queryClient
-			.fetchQuery({
-				queryKey: [...instanceKeys.all, 'installed-project-ids'],
-				queryFn: listInstances,
-				staleTime: 0,
-			})
-			.catch(handleError)
-		if (!instances) return
+// Not awaited, so entering Browse does not hold the previous page on screen.
+void initInstanceContext().finally(() => {
+	// The hidden ids were first taken from cached or still empty state, so take them again from
+	// what was just loaded, as a first visit does.
+	if (installedProjectIds.value) syncHiddenInstanceProjectIds()
+	syncHiddenServerContentProjectIds()
+	addInstanceGameVersionToServerFilters()
+	searchContextReady.value = true
+})
 
-		const ids = instances
-			.map((gameInstance) => gameInstance.link?.project_id)
-			.filter((id): id is string => !!id)
-		debugLog('installedInstanceProjectIds loaded', { count: ids.length })
-		installedProjectIds.value = ids
-		return
+// The ids of what is already installed, for the context Browse was opened in.
+function installedProjectIdsQuery(): {
+	queryKey: readonly unknown[]
+	queryFn: () => Promise<string[]>
+	staleTime: number
+} {
+	const targetInstanceId = route.query.i ? String(route.query.i) : null
+
+	if (!targetInstanceId) {
+		return {
+			queryKey: [...instanceKeys.all, 'installed-project-ids'],
+			queryFn: async () =>
+				(await listInstances())
+					.map((gameInstance) => gameInstance.link?.project_id)
+					.filter((id): id is string => !!id),
+			staleTime: 0,
+		}
 	}
 
 	if (route.query.from === 'worlds') {
-		const targetInstanceId = route.query.i as string
-		const worlds = await queryClient
-			.fetchQuery({
-				queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
-				queryFn: () => get_instance_worlds(targetInstanceId),
-				staleTime: 0,
-			})
-			.catch(handleError)
-		if (!worlds) return
-
-		const serverProjectIds = worlds
-			.filter((w) => w.type === 'server' && 'project_id' in w && w.project_id)
-			.map((w) => (w as { project_id: string }).project_id)
-		debugLog('installedServerProjectIds loaded', { count: serverProjectIds.length })
-		installedProjectIds.value = serverProjectIds
-		return
+		return {
+			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
+			queryFn: async () =>
+				(await get_instance_worlds(targetInstanceId))
+					.filter((w) => w.type === 'server' && 'project_id' in w && w.project_id)
+					.map((w) => (w as { project_id: string }).project_id),
+			staleTime: 0,
+		}
 	}
 
-	const targetInstanceId = route.query.i as string
-	const ids = await queryClient
-		.fetchQuery({
-			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'content'),
-			queryFn: () => getInstalledProjectIds(targetInstanceId),
-			staleTime: 0,
-		})
-		.catch(handleError)
+	return {
+		queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'content'),
+		queryFn: () => getInstalledProjectIds(targetInstanceId),
+		staleTime: 0,
+	}
+}
+
+async function refreshInstalledProjectIds() {
+	const ids = await queryClient.fetchQuery(installedProjectIdsQuery()).catch(handleError)
 	if (!ids) return
 
 	debugLog('installedProjectIds loaded', { count: ids.length })
@@ -686,6 +701,21 @@ watch(
 	},
 )
 
+// A string, so the tabs below are only rebuilt when it changes and not on every search, which
+// replaces the route query.
+const projectTypeTabSuffix = computed(() => {
+	const params: LocationQuery = {}
+
+	if (route.query.i) params.i = route.query.i
+	if (route.query.ai) params.ai = route.query.ai
+	if (route.query.from) params.from = route.query.from
+	if (route.query.sid) params.sid = route.query.sid
+	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
+
+	const queryString = new URLSearchParams(params as Record<string, string>).toString()
+	return queryString ? `?${queryString}` : ''
+})
+
 const selectableProjectTypes = computed(() => {
 	let dataPacks = false,
 		mods = false,
@@ -710,16 +740,7 @@ const selectableProjectTypes = computed(() => {
 		modpacks = true
 	}
 
-	const params: LocationQuery = {}
-
-	if (route.query.i) params.i = route.query.i
-	if (route.query.ai) params.ai = route.query.ai
-	if (route.query.from) params.from = route.query.from
-	if (route.query.sid) params.sid = route.query.sid
-	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
-
-	const queryString = new URLSearchParams(params as Record<string, string>).toString()
-	const suffix = queryString ? `?${queryString}` : ''
+	const suffix = projectTypeTabSuffix.value
 
 	if (isSetupServerContext.value) {
 		return [
@@ -912,12 +933,8 @@ function getCardActions(
 		return getServerCardActions(result)
 	}
 
-	const projectResult = result as Labrinth.Search.v3.ResultSearchProject & {
-		installed?: boolean
-		installing?: boolean
-	}
+	const projectResult = result
 	const isInstalled =
-		projectResult.installed ||
 		allInstalledIds.value.has(projectResult.project_id || '') ||
 		serverContentProjectIds.value.has(projectResult.project_id || '') ||
 		serverContextServerData.value?.upstream?.project_id === projectResult.project_id
@@ -1095,36 +1112,64 @@ function onSearchResultsInstalled(ids: string[]) {
 	newlyInstalled.value = Array.from(new Set([...newlyInstalled.value, ...ids]))
 }
 
+type RawSearchResults = { result: Labrinth.Search.v3.SearchResults } | null
+
+// Coming back to a search within a few minutes shows the same page at once.
+const SEARCH_STALE_TIME = 5 * 60_000
+
+function searchQueryOptions(requestParams: string) {
+	return queryOptions({
+		queryKey: ['search', 'v3', requestParams],
+		queryFn: async () => {
+			const rawResults = (await get_search_results_v3(
+				requestParams,
+				'must_revalidate',
+			)) as RawSearchResults
+
+			// Seeded here so it happens once per fetch, not again each time a cached search is shown.
+			for (const hit of rawResults?.result.hits ?? []) {
+				for (const identifier of [hit.project_id, hit.slug]) {
+					if (identifier) {
+						queryClient.setQueryData(['projects', 'summary', identifier], hit)
+					}
+				}
+			}
+
+			return rawResults
+		},
+		staleTime: SEARCH_STALE_TIME,
+	})
+}
+
 async function search(requestParams: string) {
 	debugLog('searching v3', requestParams)
 	const isServer = projectType.value === 'server'
+	return toSearchResponse(await queryClient.fetchQuery(searchQueryOptions(requestParams)), isServer)
+}
 
-	const rawResults = await queryClient.fetchQuery({
-		queryKey: ['search', 'v3', requestParams],
-		queryFn: () =>
-			get_search_results_v3(requestParams, 'must_revalidate') as Promise<{
-				result: Labrinth.Search.v3.SearchResults & {
-					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
-				}
-			} | null>,
-		// Coming back to a search within a few minutes shows the same page at once.
-		staleTime: 5 * 60_000,
-	})
+// The cached results of a search that `search` would return without fetching.
+function peekSearch(requestParams: string) {
+	const state = queryClient.getQueryState<RawSearchResults>(
+		searchQueryOptions(requestParams).queryKey,
+	)
+	if (
+		!state ||
+		state.data === undefined ||
+		state.isInvalidated ||
+		Date.now() - state.dataUpdatedAt >= SEARCH_STALE_TIME
+	) {
+		return undefined
+	}
+	return toSearchResponse(state.data, projectType.value === 'server')
+}
 
+function toSearchResponse(rawResults: RawSearchResults, isServer: boolean) {
 	if (!rawResults) {
 		return {
 			projectHits: [],
 			serverHits: [],
 			total_hits: 0,
 			per_page: 20,
-		}
-	}
-
-	for (const hit of rawResults.result.hits) {
-		for (const identifier of [hit.project_id, hit.slug]) {
-			if (identifier) {
-				queryClient.setQueryData(['projects', 'summary', identifier], hit)
-			}
 		}
 	}
 
@@ -1139,24 +1184,8 @@ async function search(requestParams: string) {
 		}
 	}
 
-	const hits = rawResults.result.hits.map((hit) => {
-		const mapped: Labrinth.Search.v3.ResultSearchProject & { installed?: boolean } = {
-			...hit,
-		}
-
-		if (instance.value || isServerContext.value || projectType.value === 'modpack') {
-			const installedIds =
-				isServerContext.value && projectType.value !== 'modpack'
-					? serverContentProjectIds.value
-					: new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
-			mapped.installed = installedIds.has(hit.project_id)
-		}
-
-		return mapped
-	})
-
 	return {
-		projectHits: hits,
+		projectHits: rawResults.result.hits,
 		serverHits: [],
 		total_hits: rawResults.result.total_hits,
 		per_page: rawResults.result.hits_per_page,
@@ -1178,9 +1207,10 @@ const lockedFilterMessages = computed(() => ({
 const searchState = useBrowseSearch({
 	projectType,
 	tags,
-	active: browseRouteActive,
+	active: computed(() => browseRouteActive.value && searchContextReady.value),
 	providedFilters: combinedProvidedFilters,
 	search,
+	peekSearch,
 	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
@@ -1215,8 +1245,10 @@ watch(queuedServerInstallCount, (count) => {
 	}
 })
 
-if (instance.value?.game_version) {
-	const gv = instance.value.game_version
+// Runs during setup when the instance is cached, and again once the context has loaded.
+function addInstanceGameVersionToServerFilters() {
+	const gv = instance.value?.game_version
+	if (!gv) return
 	const alreadyHasGv = searchState.serverCurrentFilters.value.some(
 		(f) => f.type === 'server_game_version' && f.option === gv,
 	)
@@ -1225,6 +1257,9 @@ if (instance.value?.game_version) {
 	}
 }
 
+addInstanceGameVersionToServerFilters()
+
+// Does nothing until the search context is ready; becoming ready starts the search instead.
 void searchState.refreshSearch()
 
 useAppEvent('instance', async (event) => {

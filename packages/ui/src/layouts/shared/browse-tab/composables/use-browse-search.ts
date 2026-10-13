@@ -36,6 +36,11 @@ export interface UseBrowseSearchOptions {
 	environmentOverride?: ComputedRef<EnvironmentSearchOverride | undefined>
 	active?: ComputedRef<boolean>
 	search: (params: string) => Promise<BrowseSearchResponse>
+	/**
+	 * Returns the results for `params` when they are already cached and fresh. With it, a search
+	 * that is cached shows in the same frame as the action that started it.
+	 */
+	peekSearch?: (params: string) => BrowseSearchResponse | undefined
 	persistentQueryParams: string[]
 	getExtraQueryParams?: () => Record<string, string | undefined>
 	maxResultsOptions?: ComputedRef<number[]>
@@ -198,6 +203,8 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 	})
 
 	let searchVersion = 0
+	// The project type the hits on screen were searched for.
+	let hitsProjectType: string | undefined
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 	function clearSearchDebounce() {
@@ -298,6 +305,22 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		{ deep: true },
 	)
 
+	// Declared before the request watcher so a project type switch settles the sort, query and
+	// advanced filters first, and the switch then makes exactly one search.
+	watch(
+		() => options.projectType.value,
+		(newType, oldType) => {
+			debug('projectType changed', { from: oldType, to: newType })
+			effectiveCurrentSortType.value =
+				effectiveSortTypes.value.find((sortType) => sortType.name === 'relevance') ??
+				effectiveSortTypes.value[0]
+			query.value = ''
+			initAdvancedPrefs()
+		},
+	)
+
+	let lastQuery = query.value
+
 	watch(effectiveRequestParams, (newVal, oldVal) => {
 		refreshing.value = true
 		debug('effectiveRequestParams changed', {
@@ -305,12 +328,20 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			to: newVal?.substring(0, 80),
 		})
 		clearSearchDebounce()
+		const typing = query.value !== lastQuery && query.value !== ''
+		lastQuery = query.value
 		if (!active.value) {
 			return
 		}
-		searchDebounceTimer = setTimeout(() => {
-			refreshSearch()
-		}, 200)
+		// Only typing waits for a pause. A project type, filter, sort or page change is one action,
+		// so it searches before the next render instead of showing the old results for 200ms.
+		if (typing) {
+			searchDebounceTimer = setTimeout(() => {
+				refreshSearch()
+			}, 200)
+		} else {
+			void refreshSearch()
+		}
 	})
 
 	watch(active, (isActive, wasActive) => {
@@ -333,6 +364,18 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			params: effectiveRequestParams.value.substring(0, 100),
 		})
 
+		const cached = options.peekSearch?.(effectiveRequestParams.value)
+		if (cached) {
+			showResponse(cached)
+			return
+		}
+
+		// Another project type's results are never shown under this one: the ghosts take their place.
+		if (hitsProjectType !== options.projectType.value) {
+			projectHits.value = []
+			serverHits.value = []
+		}
+
 		const currentHitsEmpty = isServerType.value
 			? serverHits.value.length === 0
 			: projectHits.value.length === 0
@@ -352,22 +395,13 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 				return
 			}
 
-			if (isServerType.value) {
-				serverHits.value = response.serverHits
-			} else {
-				projectHits.value = response.projectHits
-			}
-			totalHits.value = response.total_hits
+			showResponse(response)
 			debug('refreshSearch complete', {
 				version,
 				hits: response.total_hits,
 				projectHits: response.projectHits.length,
 				serverHits: response.serverHits.length,
 			})
-
-			updateUrlParams()
-			loading.value = false
-			refreshing.value = false
 		} catch (err) {
 			debug('refreshSearch error', err)
 			console.error('Browse search error:', err)
@@ -376,6 +410,20 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 				refreshing.value = false
 			}
 		}
+	}
+
+	function showResponse(response: BrowseSearchResponse) {
+		if (isServerType.value) {
+			serverHits.value = response.serverHits
+		} else {
+			projectHits.value = response.projectHits
+		}
+		hitsProjectType = options.projectType.value
+		totalHits.value = response.total_hits
+
+		updateUrlParams()
+		loading.value = false
+		refreshing.value = false
 	}
 
 	function updateUrlParams() {
@@ -419,21 +467,6 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 	function onFilterChange() {
 		nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
 	}
-
-	watch(
-		() => options.projectType.value,
-		(newType, oldType) => {
-			debug('projectType changed', { from: oldType, to: newType })
-			effectiveCurrentSortType.value =
-				effectiveSortTypes.value.find((sortType) => sortType.name === 'relevance') ??
-				effectiveSortTypes.value[0]
-			query.value = ''
-
-			void nextTick(() => {
-				initAdvancedPrefs()
-			})
-		},
-	)
 
 	return {
 		query,
