@@ -314,11 +314,19 @@ let resizeObserver: ResizeObserver | undefined
 
 let removeNavigationHook: (() => void) | undefined
 
+// The nav only renders with more than one tab, so it can appear after mount.
+function observeScrollContainer() {
+	resizeObserver?.disconnect()
+	if (scrollContainer.value) {
+		resizeObserver?.observe(scrollContainer.value)
+	}
+}
+
+watch(scrollContainer, observeScrollContainer, { flush: 'post' })
+
 onMounted(() => {
 	resizeObserver = new ResizeObserver(resetSliderPosition)
-	if (scrollContainer.value) {
-		resizeObserver.observe(scrollContainer.value)
-	}
+	observeScrollContainer()
 	removeNavigationHook = router?.afterEach((_to, _from, failure) => {
 		if (failure && props.mode === 'navigation') {
 			updateActiveTab()
@@ -353,9 +361,7 @@ watch(
 // Consumers often rebuild the links array on every route change, so this only reacts when the
 // rendered tabs differ. Size changes are picked up by the ResizeObserver.
 watch(
-	() => filteredLinks.value.map((link) => `${link.href}
-${link.label}`).join('
-'),
+	() => filteredLinks.value.map((link) => `${link.href} ${link.label}`).join('|'),
 	updateActiveTab,
 	{ flush: 'post' },
 )
