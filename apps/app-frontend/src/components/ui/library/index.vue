@@ -63,13 +63,16 @@ let restoreScrollFrame: number | undefined
 let unmounted = false
 const animationsReady = ref(false)
 // Runs once the groups are rendered: straight after mount when they come from cache, so the
-// restored position is in the first painted frame. Animations stay off until that frame is out.
+// restored position is in the first painted frame. Cards are added late in that frame, once their
+// grid has been measured, so animations stay off until the frame after it.
 async function restoreScroll() {
 	await nextTick()
 	if (unmounted) return
 	document.querySelector('.app-viewport')?.scrollTo(0, libraryScrollTop.value)
 	restoreScrollFrame = requestAnimationFrame(() => {
-		animationsReady.value = true
+		restoreScrollFrame = requestAnimationFrame(() => {
+			animationsReady.value = true
+		})
 	})
 }
 onMounted(() => {
