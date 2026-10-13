@@ -80,10 +80,10 @@
 			<Suspense>
 				<TresMesh
 					:position="spotlightPosition"
-					:rotation="[-Math.PI / 2, 0, 0]"
+					:rotation="SPOTLIGHT_ROTATION"
 					:scale="spotlightScale"
 				>
-					<TresCircleGeometry :args="[1, 128]" />
+					<TresCircleGeometry :args="SPOTLIGHT_GEOMETRY_ARGS" />
 					<TresShaderMaterial v-bind="radialSpotlightShader" />
 				</TresMesh>
 			</Suspense>
@@ -96,7 +96,7 @@
 			/>
 
 			<TresAmbientLight :intensity="2" />
-			<TresDirectionalLight :position="[-3, 4, -2]" :intensity="1.2" />
+			<TresDirectionalLight :position="DIRECTIONAL_LIGHT_POSITION" :intensity="1.2" />
 		</TresCanvas>
 
 		<div v-if="showLoading" class="absolute inset-0 flex items-center justify-center">
@@ -340,6 +340,12 @@ const {
 })
 
 const rendererDpr: [number, number] = [1, 1.5]
+// Scene props must keep their identity between renders. Tres redraws whenever a prop is patched and
+// re-renders the scene after each draw, so an array written inline in the template would be patched
+// every time and keep the canvas drawing forever.
+const SPOTLIGHT_ROTATION: SkinPreviewTuple = [-Math.PI / 2, 0, 0]
+const SPOTLIGHT_GEOMETRY_ARGS: [number, number] = [1, 128]
+const DIRECTIONAL_LIGHT_POSITION: SkinPreviewTuple = [-3, 4, -2]
 const radialSpotlightShader = createRadialSpotlightShader()
 const isReady = computed(() => isModelLoaded.value && isTextureLoaded.value && hasResolvedFit.value)
 const { isPreviewVisible, showLoading } = useSkinPreviewLoading(isReady)

@@ -1,6 +1,6 @@
 import { useDocumentVisibility, useWindowFocus } from '@vueuse/core'
 import * as THREE from 'three'
-import { computed, type ComputedRef, onUnmounted, type Ref, ref, watch } from 'vue'
+import { computed, type ComputedRef, onUnmounted, type Ref, ref, shallowRef, watch } from 'vue'
 
 import { useDebugLogger } from '../debug-logger'
 import type { SkinPreviewAnimationConfig } from './types'
@@ -46,8 +46,9 @@ export function useSkinPreviewAnimation(
 	animationConfig: MaybeReadonlyRef<SkinPreviewAnimationConfig | undefined>,
 	onFrame?: () => void,
 ) {
-	const mixer = ref<THREE.AnimationMixer | null>(null)
-	const actions = ref<Record<string, THREE.AnimationAction>>({})
+	// Shallow, so three.js steps the mixer on its own objects instead of through Vue proxies.
+	const mixer = shallowRef<THREE.AnimationMixer | null>(null)
+	const actions = shallowRef<Record<string, THREE.AnimationAction>>({})
 	const clock = new THREE.Clock()
 	const currentAnimation = ref<string>('')
 	const randomAnimationTimer = ref<number | null>(null)
