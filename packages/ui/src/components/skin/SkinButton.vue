@@ -37,7 +37,11 @@ const imagesLoaded = ref({
 	forward: false,
 })
 
+// True while a freshly loaded image is fading in over the skeleton.
+const fadingIn = ref(false)
+
 function onImageLoad() {
+	if (!imagesLoaded.value.forward) fadingIn.value = true
 	imagesLoaded.value.forward = true
 }
 
@@ -95,7 +99,11 @@ watch(
 			<CheckIcon class="relative size-4 invert [stroke-width:3]" />
 		</span>
 
-		<div v-if="!imagesLoaded.forward" class="skeleton-loader h-full w-full">
+		<div
+			v-if="!imagesLoaded.forward || fadingIn"
+			class="skeleton-loader h-full w-full"
+			:class="{ 'absolute inset-0': imagesLoaded.forward }"
+		>
 			<div class="skeleton absolute inset-0 aspect-[5/7]"></div>
 		</div>
 
@@ -104,7 +112,9 @@ watch(
 			:key="`${selected}-${active}`"
 			:class="[
 				'skin-button__image-parent pointer-events-none relative z-0 mb-[1.5px] grid place-items-stretch with-shadow',
+				{ 'skin-button__image-parent--fading-in': fadingIn },
 			]"
+			@animationend="fadingIn = false"
 		>
 			<img
 				alt=""
@@ -215,6 +225,17 @@ watch(
 
 .skin-button__image-facing {
 	transform: translateZ(0);
+}
+
+/* The same fade screenshot cards use when their image arrives. */
+.skin-button__image-parent--fading-in {
+	animation: skin-button-fade-in 350ms ease-in-out;
+}
+
+@keyframes skin-button-fade-in {
+	from {
+		opacity: 0;
+	}
 }
 
 .with-shadow img {
