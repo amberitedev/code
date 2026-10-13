@@ -117,10 +117,11 @@ Later:
 - A Core belongs to one account, its owner. Owner only: no members, roles, or invites.
 - A Core signs in like a device: it asks the backend for a code and the key it will use, prints
   "Open Amberite, go to Settings > Cores > Add Core, and enter ABCD-EFGH", and polls. You enter
-  the code in the App and approve it; the App shows the Core's machine name and address first so
-  you can tell it is yours. From then on the key works, the Core is listed under your account, and
-  the Core prints "Signed in as <you>". The App never talks to the Core during sign-in, and your
-  account session never leaves the App. A code works for 15 minutes; a Core has one code at a
+  the code in the App and approve it; the App shows the Core's machine name first so you can tell
+  it is yours. From then on the key works, the Core is listed under your account, and the Core
+  prints "Signed in as <you>". The App never talks to the Core during sign-in, so
+  approving sends your account session nowhere; once the Core is listed, the App sends it your
+  session like any other Core on your list. A code works for 15 minutes; a Core has one code at a
   time.
 - The Core does this on its own on first start, and `copal auth` does the same from the command
   line, for a Core installed as a service or reached over SSH. Both show one code: the code is
@@ -153,8 +154,8 @@ Later:
   at once. The Core finds out on its next call, within five minutes, forgets its owner and key,
   refuses hosting calls, and shows a new code. Its servers and files stay. `copal logout` does the
   same from the Core's side.
-- Limits, all on the backend: 5 wrong codes per account in 10 minutes, counted in one statement so
-  parallel guesses cannot slip past; code requests are limited per Core and per caller address.
+- Limits, all on the backend: 5 wrong codes per account in 10 minutes; code requests are limited
+  per Core and per caller address.
 - A Core that was owned before Cores had keys counts as signed out and signs in once.
 
 ## Reaching a Core from outside

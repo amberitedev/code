@@ -29,7 +29,7 @@ const CODE_TTL_MS = 15 * 60_000
 const POLL_INTERVAL_S = 5
 // Expired codes are kept this long so a late guess is told "expired" instead of "wrong".
 const EXPIRED_GRACE_MS = 60 * 60_000
-// Codes one account may try within `GUESS_WINDOW_MS`. A right code resets the count.
+// Wrong or expired codes one account may try within `GUESS_WINDOW_MS`. Right codes do not count.
 const MAX_WRONG_GUESSES = 5
 const GUESS_WINDOW_MS = 10 * 60_000
 // Code requests one Core, and one caller address, may make within `REQUEST_WINDOW_MS`.
@@ -175,6 +175,15 @@ async function requestCode(request: Request, env: Env) {
 	const fingerprint = certFingerprint(body)
 	const now = Date.now()
 
+	// Checked before counting: a listed Core keeps asking until it is removed in the App, and must
+	// not use up the requests it needs right after.
+	if (await env.DB.prepare('SELECT 1 FROM cores WHERE id = ?').bind(coreId).first())
+		throw new ApiError(
+			409,
+			'already_signed_in',
+			'This Core is still listed under an account. Remove it in the App under Settings, Cores.',
+		)
+
 	const byCore = await countInWindow(env, `code:${coreId}`, REQUEST_WINDOW_MS, now)
 	const byAddress = await countInWindow(
 		env,
@@ -197,12 +206,6 @@ async function requestCode(request: Request, env: Env) {
 			new Date(now - Math.max(GUESS_WINDOW_MS, REQUEST_WINDOW_MS)).toISOString(),
 		),
 	])
-	if (await env.DB.prepare('SELECT 1 FROM cores WHERE id = ?').bind(coreId).first())
-		throw new ApiError(
-			409,
-			'already_signed_in',
-			'This Core is still listed under an account. Remove it in the App under Settings, Cores.',
-		)
 
 	const key = `amc_${randomId(48)}`
 	const keyHash = await digest(key)
