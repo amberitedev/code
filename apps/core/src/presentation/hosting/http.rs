@@ -655,12 +655,8 @@ async fn delete_server(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let r = record(&state, &id).await?;
-    let lock = state
-        .instance_operation_locks
-        .entry(r.id.clone())
-        .or_default()
-        .clone();
-    let _guard = lock.lock().await;
+    // The stopping process takes the operation lock to mark itself stopped, so wait for it
+    // before taking the lock here.
     if state.instances.contains_key(&r.id) {
         instance_status_service::kill_instance(&state, &r.id).await?;
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -672,6 +668,17 @@ async fn delete_server(
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
+    }
+    let lock = state
+        .instance_operation_locks
+        .entry(r.id.clone())
+        .or_default()
+        .clone();
+    let _guard = lock.lock().await;
+    if state.instances.contains_key(&r.id) {
+        return Err(ApiError::Conflict(
+            "The server was started again; try again".into(),
+        ));
     }
     let key = r.id.to_string();
     let invited = access_service::invited(&state, &key).await?;

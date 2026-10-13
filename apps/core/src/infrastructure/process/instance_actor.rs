@@ -92,8 +92,9 @@ async fn run_actor<H: ProcessHandle>(
                     ActorCmd::GracefulStop => {
                         expected_shutdown = true;
                         set_status(&state, &instance_id, InstanceStatus::Stopping).await;
-                        // A starting JVM cannot be trusted to consume Minecraft commands.
-                        if !ready || handle.send_stdin("stop").is_err() {
+                        // A starting server runs `stop` once it has loaded; the deadline covers
+                        // one that never does.
+                        if handle.send_stdin("stop").is_err() {
                             let _ = handle.kill();
                             break;
                         }
