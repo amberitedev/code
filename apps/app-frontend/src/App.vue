@@ -781,9 +781,9 @@ let suspenseToken = null
 
 let suspensePending = false
 
-// Pages teleport whole trees into the sidebar. Waiting for the mutations to go quiet makes a swap
-// cost one scrollbar measurement, taken after the page has rendered instead of forcing layout
-// in the middle of it.
+// Pages teleport whole trees into the sidebar, and every scrollbar update re-lays out the sidebar
+// to measure it. Waiting for mutations and resizes to go quiet makes a swap cost one update,
+// taken after the page has rendered instead of several in the middle of it.
 const sidebarOverlayScrollbarsOptions = Object.freeze({
 	overflow: {
 		x: 'hidden',
@@ -791,7 +791,8 @@ const sidebarOverlayScrollbarsOptions = Object.freeze({
 	},
 	update: {
 		debounce: {
-			mutation: [150, 500],
+			mutation: [100, 300],
+			resize: [100, 300],
 		},
 	},
 })
