@@ -791,7 +791,10 @@ router.beforeEach((to, from) => {
 	debugStartup('Route navigation started', { to: to.path, from: from.path })
 	suspensePending = false
 	if (routerToken) loading.end(routerToken)
-	routerToken = loading.begin(`Route navigation: ${to.path}`)
+	routerToken = null
+	// Route tokens only hold the splash screen open until the first page is ready. Once the bar is
+	// enabled, ordinary navigation must not show it.
+	if (!loading.barEnabled.value) routerToken = loading.begin(`Route navigation: ${to.path}`)
 })
 router.afterEach((to, from, failure) => {
 	debugStartup('Route navigation settled', { to: to.path, failed: !!failure })
@@ -824,7 +827,8 @@ function onSuspensePending() {
 	debugStartup('Route Suspense pending', { route: route.path })
 	suspensePending = true
 	if (suspenseToken) loading.end(suspenseToken)
-	suspenseToken = loading.begin(`Route Suspense: ${route.path}`)
+	suspenseToken = null
+	if (!loading.barEnabled.value) suspenseToken = loading.begin(`Route Suspense: ${route.path}`)
 }
 
 function onSuspenseResolve() {
@@ -2262,7 +2266,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					width: 'calc(100% - var(--left-bar-width) - var(--right-bar-width))',
 				}"
 			>
-				<LoadingBar position="absolute" />
+				<LoadingBar position="absolute" :throttle="300" />
 			</div>
 			<div
 				v-if="appSettings.featureFlags.page_path"
