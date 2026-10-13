@@ -2,8 +2,8 @@
 import { KeyboardSensor, PointerSensor, useDraggable } from '@dnd-kit/vue'
 import { CheckIcon, DownloadIcon, PlayIcon, SpinnerIcon, StopCircleIcon } from '@modrinth/assets'
 import { defineMessages, IconButton, injectNotificationManager, useVIntl } from '@modrinth/ui'
-import { useEventListener, useMagicKeys } from '@vueuse/core'
-import { computed, onMounted, ref, watch } from 'vue'
+import { useEventListener } from '@vueuse/core'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import InstanceCardView from '@/components/ui/library/instance-group/instance-card-view.vue'
@@ -56,6 +56,8 @@ const {
 	selectedLibraryInstances,
 	isLibraryInstanceSelectionActive,
 	activeDraggedInstanceKeys,
+	runningInstanceIds,
+	holdingShift,
 } = useLibrary()
 
 const props = defineProps<{
@@ -106,8 +108,6 @@ const selectionKey = computed(() =>
 	}),
 )
 const selected = computed(() => selectedLibraryInstances.value.has(selectionKey.value))
-const keys = useMagicKeys()
-const holdingShift = computed(() => keys.shift.value)
 const isPartOfActiveDrag = computed(() => activeDraggedInstanceKeys.value.has(selectionKey.value))
 const { isDragging } = useDraggable({
 	id: computed(() => `instance:${props.instanceGroupId}:${props.instance.id}`),
@@ -255,9 +255,14 @@ useAppEvent('process', (event) => {
 	}
 })
 
-onMounted(() => {
-	void checkProcess()
-})
+// The library's shared process list sets the initial state, so mounting a card costs no request.
+watch(
+	() => runningInstanceIds.value.has(props.instance.id),
+	(running) => {
+		playing.value = running
+	},
+	{ immediate: true },
+)
 </script>
 
 <template>
@@ -297,7 +302,7 @@ onMounted(() => {
 				<div class="absolute inset-0 bg-surface-1 opacity-30" />
 				<SpinnerIcon
 					v-tooltip="formatMessage(modLoading ? messages.loading : messages.installing)"
-					class="relative animate-spin text-contrast"
+					class="relative text-contrast"
 					:class="compact ? 'size-5' : 'size-[30%]'"
 					tabindex="-1"
 				/>
