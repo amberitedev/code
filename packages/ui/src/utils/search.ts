@@ -412,11 +412,17 @@ export function useSearch(
 		id: 'search.filter_type.included_content',
 		defaultMessage: 'Included content',
 	})
-	const formatCategoryName = (categoryName: string) => {
-		return formatCategory(formatMessage, categoryName)
-	}
+	// Category filters are the same for every project type, so they are built once instead of on
+	// every project type switch. Each name is formatted once: the sort compares them many times.
+	const categoryFilterTypes = computed(() => {
+		const categoryNames = new Map<string, ReturnType<typeof formatCategory>>()
+		const formatCategoryName = (categoryName: string) => {
+			if (!categoryNames.has(categoryName)) {
+				categoryNames.set(categoryName, formatCategory(formatMessage, categoryName))
+			}
+			return categoryNames.get(categoryName)
+		}
 
-	const filters = computed(() => {
 		const categoryFilters: Record<string, FilterType> = {}
 		for (const category of sortedCategories(tags.value, formatCategoryName, locale.value)) {
 			const filterTypeId = `category_${category.project_type}_${category.header}`
@@ -437,15 +443,21 @@ export function useSearch(
 			}
 			categoryFilters[filterTypeId].options.push({
 				id: category.name,
-				formatted_name: formatCategory(formatMessage, category.name),
+				formatted_name: formatCategoryName(category.name),
 				icon: getCategoryIcon(category.name),
 				value: `categories:${category.name}`,
 				method: category.header === 'resolutions' ? 'or' : 'and',
 			})
 		}
+		return Object.values(categoryFilters)
+	})
 
+	const filters = computed(() => createFilterTypes(projectTypes.value))
+
+	// Also used to build the search for a project type before switching to it.
+	function createFilterTypes(projectTypes: ProjectType[]): FilterType[] {
 		const excludeableProjectTypes: ProjectType[] = []
-		for (const projectType of projectTypes.value) {
+		for (const projectType of projectTypes) {
 			for (const target of PROJECT_TYPE_EXCLUSION_FILTERS[projectType] ?? []) {
 				if (!excludeableProjectTypes.includes(target)) {
 					excludeableProjectTypes.push(target)
@@ -454,11 +466,11 @@ export function useSearch(
 		}
 
 		const filterTypes: FilterType[] = [
-			...Object.values(categoryFilters),
+			...categoryFilterTypes.value,
 			{
 				id: 'compatible_dependency_project_ids',
 				formatted_name: formatMessage(
-					projectTypes.value.includes('modpack') ? includedContentFilterName : dependsOnFilterName,
+					projectTypes.includes('modpack') ? includedContentFilterName : dependsOnFilterName,
 				),
 				supported_project_types: ALL_PROJECT_TYPES,
 				query_param: 'dep',
@@ -468,7 +480,7 @@ export function useSearch(
 				options: [],
 				allows_custom_options: 'and',
 				custom_option_field: 'compatible_dependency_project_ids',
-				ordering: projectTypes.value.includes('modpack') ? undefined : -999,
+				ordering: projectTypes.includes('modpack') ? undefined : -999,
 			},
 			{
 				id: 'environment',
@@ -542,9 +554,9 @@ export function useSearch(
 					query_value: gameVersion.version,
 					method: 'or',
 				})),
-				ordering: projectTypes.value.includes('mod')
+				ordering: projectTypes.includes('mod')
 					? 2
-					: projectTypes.value.includes('shader')
+					: projectTypes.includes('shader')
 						? -1
 						: undefined,
 			},
@@ -578,7 +590,7 @@ export function useSearch(
 							value: `categories:${loader.name}`,
 						}
 					}),
-				ordering: projectTypes.value.includes('mod') ? 1 : undefined,
+				ordering: projectTypes.includes('mod') ? 1 : undefined,
 			},
 			{
 				id: 'modpack_loader',
@@ -741,7 +753,7 @@ export function useSearch(
 				searchable: false,
 				ordering: -1000,
 				options: [
-					...createDisclosureFilterOptions(formatMessage, projectTypes.value),
+					...createDisclosureFilterOptions(formatMessage, projectTypes),
 					...excludeableProjectTypes.map((target) => ({
 						id: target,
 						formatted_name: formatMessage(getProjectTypeCategoryMessage(target)),
@@ -756,18 +768,32 @@ export function useSearch(
 		return filterTypes
 			.filter((filterType) =>
 				filterType.supported_project_types.some((projectType) =>
-					projectTypes.value.includes(projectType),
+					projectTypes.includes(projectType),
 				),
 			)
 			.filter((filterType) => filterType.id !== 'advanced' || filterType.options.length > 0)
 			.sort((a, b) => (b.ordering ?? 0) - (a.ordering ?? 0))
-	})
+	}
 
-	const newFilters = computed(() => {
-		const validProvidedFilters = providedFilters.value.filter(
+	const newFilters = computed(() =>
+		createNewFilters(
+			projectTypes.value,
+			filters.value,
+			currentFilters.value,
+			providedFilters.value,
+		),
+	)
+
+	function createNewFilters(
+		projectTypes: ProjectType[],
+		filters: FilterType[],
+		currentFilters: FilterValue[],
+		providedFilters: FilterValue[],
+	) {
+		const validProvidedFilters = providedFilters.filter(
 			(providedFilter) => !overriddenProvidedFilterTypes.value.includes(providedFilter.type),
 		)
-		const filteredFilters = currentFilters.value.filter(
+		const filteredFilters = currentFilters.filter(
 			(userFilter) =>
 				!validProvidedFilters.some((providedFilter) => providedFilter.type === userFilter.type),
 		)
@@ -782,7 +808,7 @@ export function useSearch(
 				const { projectId, dependencyTypes } = parseDependencyProjectFilterOption(
 					filterValue.option,
 				)
-				const fields = projectTypes.value.includes('modpack')
+				const fields = projectTypes.includes('modpack')
 					? ['compatible_dependency_project_ids']
 					: dependencyTypes.map((type) => DEPENDENCY_TYPE_FIELDS[type])
 				const operator = filterValue.negative ? '!=' : '='
@@ -798,7 +824,7 @@ export function useSearch(
 				continue
 			}
 
-			const type = filters.value.find((type) => type.id === filterValue.type)
+			const type = filters.find((type) => type.id === filterValue.type)
 			if (!type) {
 				console.error(`Filter type ${filterValue.type} not found`)
 				continue
@@ -890,7 +916,7 @@ export function useSearch(
 		}
 
 		// Project types
-		const mappedProjectTypes = projectTypes.value.map(mapProjectTypeToSearch)
+		const mappedProjectTypes = projectTypes.map(mapProjectTypeToSearch)
 		if (mappedProjectTypes.length === 1) {
 			parts.push(`project_types = ${formatSearchFilterValue(mappedProjectTypes[0])}`)
 		} else if (mappedProjectTypes.length > 1) {
@@ -911,26 +937,53 @@ export function useSearch(
 		}
 
 		return parts.join(' AND ')
-	})
+	}
 
-	const requestParams: Ref<string> = computed(() => {
-		const params = [`limit=${maxResults.value}`, `index=${currentSortType.value.name}`]
+	const requestParams: Ref<string> = computed(() =>
+		createRequestParams(newFilters.value, currentSortType.value, query.value, currentPage.value),
+	)
 
-		if (query.value.length > 0) {
-			params.push(`query=${encodeURIComponent(query.value)}`)
+	function createRequestParams(
+		newFilters: string,
+		sortType: SortType,
+		query: string,
+		page: number,
+	) {
+		const params = [`limit=${maxResults.value}`, `index=${sortType.name}`]
+
+		if (query.length > 0) {
+			params.push(`query=${encodeURIComponent(query)}`)
 		}
 
-		if (newFilters.value) {
-			params.push(`new_filters=${encodeURIComponent(newFilters.value)}`)
+		if (newFilters) {
+			params.push(`new_filters=${encodeURIComponent(newFilters)}`)
 		}
 
-		const offset = (currentPage.value - 1) * maxResults.value
-		if (currentPage.value !== 1) {
+		const offset = (page - 1) * maxResults.value
+		if (page !== 1) {
 			params.push(`offset=${offset}`)
 		}
 
 		return `?${params.join('&')}`
-	})
+	}
+
+	/**
+	 * The request a switch to `projectTypes` starts with: first page, relevance, no query. It has to
+	 * match `requestParams` after the switch exactly, because it is used as the prefetch cache key.
+	 */
+	function createSwitchRequestParams(
+		projectTypes: ProjectType[],
+		filterTypes: FilterType[],
+		currentFilters: FilterValue[],
+		providedFilters: FilterValue[],
+	) {
+		return createRequestParams(
+			createNewFilters(projectTypes, filterTypes, currentFilters, providedFilters),
+			sortTypes[0],
+			'',
+			1,
+		)
+	}
 
 	readQueryParams()
 
@@ -1140,6 +1193,8 @@ export function useSearch(
 		requestParams,
 
 		// Functions
+		createFilterTypes,
+		createSwitchRequestParams,
 		createPageParams,
 		createPageParamsString,
 	}
