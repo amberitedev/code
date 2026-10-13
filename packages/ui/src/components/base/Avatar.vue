@@ -48,6 +48,21 @@
 	</svg>
 </template>
 
+<script lang="ts">
+// Corner detection result per loaded image URL, shared by every Avatar. Reading pixels through a
+// canvas is slow and the answer for a URL does not change, so each one is only decoded once.
+const MAX_KNOWN_CORNERS = 1000
+const knownTransparentCorners = new Map<string, boolean>()
+
+function rememberTransparentCorners(source: string, transparent: boolean) {
+	const oldest = knownTransparentCorners.keys().next()
+	if (knownTransparentCorners.size >= MAX_KNOWN_CORNERS && !oldest.done) {
+		knownTransparentCorners.delete(oldest.value)
+	}
+	knownTransparentCorners.set(source, transparent)
+}
+</script>
+
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 
@@ -109,14 +124,22 @@ const LEGACY_PRESETS: Record<string, string> = {
 
 const cssSize = computed(() => LEGACY_PRESETS[props.size] ?? props.size)
 
+// A known source is shown padded (or not) from its first frame instead of hidden until it is read.
+function applyKnownCorners() {
+	const known =
+		props.padTransparentCorners && props.src ? knownTransparentCorners.get(props.src) : undefined
+	hasTransparentCorners.value = known ?? false
+	hasDetectedCorners.value = known !== undefined
+}
+applyKnownCorners()
+
 watch(
 	() => props.src,
 	() => {
 		clearDetectionTimeout()
 		detectingSource = undefined
 		failed.value = false
-		hasTransparentCorners.value = false
-		hasDetectedCorners.value = false
+		applyKnownCorners()
 	},
 )
 
@@ -163,6 +186,15 @@ function onLoad() {
 		return
 	}
 
+	const known = knownTransparentCorners.get(source)
+	if (known !== undefined) {
+		clearDetectionTimeout()
+		detectingSource = undefined
+		hasTransparentCorners.value = known
+		hasDetectedCorners.value = true
+		return
+	}
+
 	detectingSource = source
 	clearDetectionTimeout()
 
@@ -172,6 +204,7 @@ function onLoad() {
 			detectingSource = undefined
 			hasTransparentCorners.value = transparentCorners
 			hasDetectedCorners.value = true
+			rememberTransparentCorners(source, transparentCorners)
 			return
 		}
 	}
@@ -184,8 +217,10 @@ function onLoad() {
 		detectionFinished = true
 		detectingSource = undefined
 		clearDetectionTimeout()
-		hasTransparentCorners.value = detectTransparentCorners(probe) ?? false
+		const transparentCorners = detectTransparentCorners(probe)
+		hasTransparentCorners.value = transparentCorners ?? false
 		hasDetectedCorners.value = true
+		if (transparentCorners !== null) rememberTransparentCorners(source, transparentCorners)
 	}
 	probe.onerror = () => {
 		if (detectionFinished || img.value?.currentSrc !== source) return
