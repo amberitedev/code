@@ -21,7 +21,7 @@
 					:replace="replace"
 					draggable="false"
 					:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
-					class="navtab-link button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
+					class="navtab-link no-click-animation button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
 					@pointerdown="onLinkPointerDown($event, index)"
 					@click="onLinkClick($event, index)"
@@ -46,7 +46,7 @@
 					v-show="link.shown ?? true"
 					:key="link.href"
 					ref="tabLinkElements"
-					class="navtab-link button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
+					class="navtab-link no-click-animation button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
 					@click="emit('tabClick', index, link)"
 				>
@@ -412,7 +412,8 @@ watch(
 }
 
 /* The press effect shrinks the label and icon, not the tab. A tab that shrank under the pointer
-   left a band along its edge where the release missed it and the click was lost. */
+   left a band along its edge where the release missed it and the click was lost. Links also
+   shrink globally while pressed, which `no-click-animation` on the tab turns off. */
 .navtab-link.button-animation:active:not(:disabled) {
 	transform: none;
 }
