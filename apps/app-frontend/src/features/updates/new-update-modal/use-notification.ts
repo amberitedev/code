@@ -65,7 +65,10 @@ export function useNewUpdateNotification(showModal: () => void) {
 				{
 					label: formatMessage(messages.dismiss),
 					color: 'standard',
-					action: () => popupNotificationManager.removeNotification(notification.id),
+					// Block body: an inferred return type here would depend on `notification` itself.
+					action: () => {
+						popupNotificationManager.removeNotification(notification.id)
+					},
 				},
 				{
 					label: formatMessage(messages.view),
