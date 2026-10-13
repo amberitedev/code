@@ -161,7 +161,11 @@ watch(
 		<div
 			v-if="!imagesLoaded.forward || awaitingFade || fadingIn"
 			class="skeleton-loader h-full w-full"
-			:class="{ 'absolute inset-0': imagesLoaded.forward }"
+			:class="{
+				'absolute inset-0': imagesLoaded.forward,
+				'skeleton-loader--fading-out': fadingIn,
+			}"
+			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
 		>
 			<div class="skeleton absolute inset-0 aspect-[5/7]"></div>
 		</div>
@@ -295,6 +299,18 @@ watch(
 
 @keyframes skin-button-fade-in {
 	from {
+		opacity: 0;
+	}
+}
+
+/* The skeleton leaves on the same clock, so the card's background does not change after the
+   image has already arrived. */
+.skeleton-loader--fading-out {
+	animation: skin-button-fade-out 350ms ease-in-out forwards;
+}
+
+@keyframes skin-button-fade-out {
+	to {
 		opacity: 0;
 	}
 }
