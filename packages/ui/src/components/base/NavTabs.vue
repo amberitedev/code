@@ -222,8 +222,8 @@ function getTabElement(index: number): HTMLElement | null {
 	return element
 }
 
-function getSliderRect(): SliderRect | null {
-	const el = getTabElement(currentActiveIndex.value)
+function measureTab(index: number): SliderRect | null {
+	const el = getTabElement(index)
 	if (!el) return null
 
 	return {
@@ -232,6 +232,13 @@ function getSliderRect(): SliderRect | null {
 		width: el.offsetWidth,
 		height: el.offsetHeight,
 	}
+}
+
+// Tab boxes as of the last resize, so a click can move the pill without reading layout.
+let tabRects: (SliderRect | null)[] = []
+
+function getSliderRect(): SliderRect | null {
+	return tabRects[currentActiveIndex.value] ?? measureTab(currentActiveIndex.value)
 }
 
 let sliderAnimation: Animation | undefined
@@ -277,6 +284,7 @@ function positionSlider(animate = true) {
 // Runs from the ResizeObserver, which also reports once on mount. Layout is already clean there,
 // so the first measurement does not force one while the page is still mounting.
 function resetSliderPosition() {
+	tabRects = filteredLinks.value.map((_link, index) => measureTab(index))
 	if (currentActiveIndex.value === -1) {
 		return
 	}
@@ -365,7 +373,10 @@ watch(
 // rendered tabs differ. Size changes are picked up by the ResizeObserver.
 watch(
 	() => filteredLinks.value.map((link) => `${link.href} ${link.label}`).join('|'),
-	updateActiveTab,
+	() => {
+		tabRects = []
+		updateActiveTab()
+	},
 	{ flush: 'post' },
 )
 </script>
