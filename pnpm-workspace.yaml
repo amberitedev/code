@@ -3,6 +3,7 @@ packages:
   - 'packages/*'
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.9
+  vue: 3.5.27
 minimumReleaseAge: 10080 # 7 days
 strictPeerDependencies: false
 autoInstallPeers: true
