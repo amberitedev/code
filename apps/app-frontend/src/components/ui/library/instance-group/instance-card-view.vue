@@ -1,6 +1,12 @@
+<script lang="ts">
+// Thumbnail URL per icon, size and revision. A remounted card shows its icon in the first frame
+// instead of the placeholder while the thumbnail is looked up again.
+const knownThumbnails = new Map<string, string>()
+</script>
+
 <script setup lang="ts">
 import { Avatar, truncatedTooltip } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { useImageThumbnail } from '@/composables/use-image-thumbnail'
@@ -28,8 +34,16 @@ const thumbnail = useImageThumbnail(
 	() => (compactMode.value ? 96 : 384),
 	() => String(props.instance.modified),
 )
+const thumbnailKey = computed(
+	() => `${localIcon.value}|${compactMode.value ? 96 : 384}|${props.instance.modified}`,
+)
+watch(thumbnail, (url) => {
+	if (url) knownThumbnails.set(thumbnailKey.value, url)
+})
 const iconSrc = computed(() =>
-	localIcon.value ? thumbnail.value : getInstanceIconUrl(props.instance.icon_path),
+	localIcon.value
+		? (thumbnail.value ?? knownThumbnails.get(thumbnailKey.value))
+		: getInstanceIconUrl(props.instance.icon_path),
 )
 
 const nameRef = ref<HTMLElement | null>(null)
