@@ -171,6 +171,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			return result
 		} catch (error) {
 			const apiError = this.normalizeError(error, context)
+			apiError.url ??= context.url
 			await this.config.hooks?.onError?.(apiError, context)
 
 			throw apiError
@@ -212,6 +213,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			)
 		} catch (error) {
 			const apiError = this.normalizeError(error, context)
+			apiError.url ??= context.url
 			await this.config.hooks?.onError?.(apiError, context)
 
 			throw apiError

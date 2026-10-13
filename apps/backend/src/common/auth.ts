@@ -157,6 +157,19 @@ export async function issueSession(
 	return sessionResponse(row, token)
 }
 
+// Port of labrinth's issue_auth_sessions. The website asks for `app_session` when it signs the App
+// in, so the App keeps a session of its own instead of sharing the browser's.
+export async function issueAuthSessions(
+	request: Request,
+	env: Env,
+	userId: string,
+	appSession: unknown,
+) {
+	const session = await issueSession(request, env, userId)
+	if (appSession !== true) return session
+	return { ...session, app_session: (await issueSession(request, env, userId)).session }
+}
+
 export async function findUser(env: Env, id: string) {
 	return env.DB.prepare('SELECT * FROM users WHERE id = ? OR username = ? COLLATE NOCASE')
 		.bind(id, id)

@@ -1,3 +1,8 @@
+<picture>
+	<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/modrinth/code/main/.github/assets/api_client_cover_light.png">
+	<img alt="Modrinth API Client Cover" src="https://raw.githubusercontent.com/modrinth/code/main/.github/assets/api_client_cover.png">
+</picture>
+
 # @modrinth/api-client
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-c78aff?style=for-the-badge)](https://www.typescriptlang.org/)
@@ -47,7 +52,12 @@ const project = await client.request<Labrinth.Projects.v2.Project>('/project/sod
 ### Nuxt
 
 ```ts
-import { AuthFeature, CircuitBreakerFeature, NuxtCircuitBreakerStorage, NuxtModrinthClient } from '@modrinth/api-client'
+import {
+	AuthFeature,
+	CircuitBreakerFeature,
+	NuxtCircuitBreakerStorage,
+	NuxtModrinthClient,
+} from '@modrinth/api-client'
 
 export const useModrinthClient = async () => {
 	const config = useRuntimeConfig()
@@ -136,7 +146,11 @@ Features wrap requests before they reach the platform implementation:
 import { AuthFeature, CircuitBreakerFeature, RetryFeature } from '@modrinth/api-client'
 
 const client = new GenericModrinthClient({
-	features: [new AuthFeature({ token: async () => process.env.MODRINTH_TOKEN }), new RetryFeature({ maxAttempts: 3, backoffStrategy: 'exponential' }), new CircuitBreakerFeature({ maxFailures: 3, resetTimeout: 30_000 })],
+	features: [
+		new AuthFeature({ token: async () => process.env.MODRINTH_TOKEN }),
+		new RetryFeature({ maxAttempts: 3, backoffStrategy: 'exponential' }),
+		new CircuitBreakerFeature({ maxFailures: 3, resetTimeout: 30_000 }),
+	],
 })
 ```
 

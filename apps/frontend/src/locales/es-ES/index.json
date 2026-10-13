@@ -899,17 +899,11 @@
   "auth.sign-in.launcher.callback.title": {
     "message": "Inicio de sesión de Modrinth App"
   },
-  "auth.sign-in.launcher.complete.description": {
-    "message": "Te estamos devolviendo a la aplicación Modrinth. Si nada sucede, usa el botón de abajo."
-  },
   "auth.sign-in.launcher.complete.go-to-website": {
     "message": "Ir a Modrinth.com"
   },
   "auth.sign-in.launcher.complete.return-button": {
     "message": "Abrir la aplicación Modrinth"
-  },
-  "auth.sign-in.launcher.complete.title": {
-    "message": "Ha iniciado sesión"
   },
   "auth.sign-in.launcher.opening.description": {
     "message": "Si la aplicación no abre, utilice el botón de abajo para terminar de iniciar sesión."
@@ -2254,9 +2248,6 @@
   },
   "error.generic.default.list_item.1": {
     "message": "Mira si Modrinth está fuera de servicio en nuestra <status-link>página de Estado</status-link>."
-  },
-  "error.generic.default.list_item.2": {
-    "message": "Si esto sigue ocurriendo, quizá quieras informar al equipo de Modrinth uniéndote a nuestro <discord-link>servidor Discord</discord-link>."
   },
   "error.generic.default.list_title": {
     "message": "Vuelve a intentarlo dentro de unos minutos."

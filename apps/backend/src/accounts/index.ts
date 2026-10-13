@@ -3,6 +3,7 @@ import zxcvbn from 'zxcvbn'
 import {
 	accountLock,
 	findUser,
+	issueAuthSessions,
 	issueSession,
 	publicUser,
 	requireLocal,
@@ -342,7 +343,7 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 		const user = await findUser(env, id)
 		if (!user) unauthorized()
 		await queueEmail(env, user, 'verify_email')
-		return json(await issueSession(request, env, id))
+		return json(await issueAuthSessions(request, env, id, body.app_session))
 	}
 	if (path === '/auth/login' && method === 'POST') {
 		const body = await readJson(request)
@@ -362,7 +363,7 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 				description: '2FA is required to complete this operation.',
 				flow: await createFlow(env, 'login_2fa', user.id),
 			})
-		return json(await issueSession(request, env, user.id))
+		return json(await issueAuthSessions(request, env, user.id, body.app_session))
 	}
 	if (path === '/auth/login/2fa' && method === 'POST') {
 		await throttle(request, env)
@@ -372,7 +373,7 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 		if (!user) unauthorized()
 		await validateCode(env, user, stringField(body, 'code'))
 		await consumeFlow(env, flow)
-		return json(await issueSession(request, env, user.id))
+		return json(await issueAuthSessions(request, env, user.id, body.app_session))
 	}
 	if (path === '/session/refresh' && method === 'POST') {
 		const session = await requireSession(request, env, true)

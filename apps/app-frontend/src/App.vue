@@ -92,11 +92,6 @@ import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import SharedInstanceInviteHandler from '@/components/ui/shared-instances/shared-instance-invite-handler/index.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import SurveyPopup from '@/components/ui/SurveyPopup.vue'
-import SyncInstancesUpdateModal from '@/components/ui/sync-instances-update-modal/index.vue'
-import {
-	markSyncInstancesUpdateNotificationShown,
-	shouldShowSyncInstancesUpdateNotification,
-} from '@/components/ui/sync-instances-update-modal/show-notification'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
@@ -107,6 +102,7 @@ import { useInstanceMetadataRefresh } from '@/composables/use-instance-metadata-
 import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts'
 import { isDarkTheme, useTheme } from '@/composables/use-theme.ts'
 import { config } from '@/config'
+import NewUpdateModal from '@/features/updates/new-update-modal/index.vue'
 import { getAccountAppearance, rememberAccountAppearance } from '@/helpers/account-appearance.ts'
 import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
@@ -504,23 +500,6 @@ const { formatMessage } = useVIntl()
 const formatBytes = useFormatBytes()
 
 const messages = defineMessages({
-	syncUpdateTitle: {
-		id: 'app.sync-instances-update.notification.title',
-		defaultMessage: 'Sync your instances',
-	},
-	syncUpdateDescription: {
-		id: 'app.sync-instances-update.notification.description',
-		defaultMessage:
-			'Keep game settings, servers, resource packs, and more in sync across your instances.',
-	},
-	syncUpdateView: {
-		id: 'app.sync-instances-update.notification.view-update',
-		defaultMessage: 'View update',
-	},
-	syncUpdateDismiss: {
-		id: 'app.sync-instances-update.notification.dismiss',
-		defaultMessage: 'Dismiss',
-	},
 	warning: { id: 'app.notification.warning', defaultMessage: 'Warning' },
 	goBack: { id: 'app.navigation.go-back', defaultMessage: 'Go back' },
 	goForward: { id: 'app.navigation.go-forward', defaultMessage: 'Go forward' },
@@ -702,22 +681,7 @@ async function setupApp() {
 	stateInitialized.value = true
 	debugStartup('App state initialized')
 	await traceStartupStep('Render initialized app', nextTick)
-	const isSyncUpdateVersion = version.startsWith('0.20.')
-	if (isSyncUpdateVersion && pending_update_toast_for_version !== version) {
-		markSyncInstancesUpdateNotificationShown()
-	}
-	if (
-		appSettings.getFeatureFlag('show_sync_instances_update_modal') ||
-		(isSyncUpdateVersion &&
-			pending_update_toast_for_version === version &&
-			(
-				await traceStartupStep('Load instances for update notification', () =>
-					queryClient.fetchQuery(instanceListQueryOptions()),
-				)
-			).length > 0)
-	) {
-		showSyncInstancesUpdateNotification()
-	}
+	await newUpdateModal.value?.notifyForVersion(version, pending_update_toast_for_version)
 
 	await traceStartupStep('Register window resize listener', () =>
 		getCurrentWindow().onResized(async () => {
@@ -1019,55 +983,11 @@ const updateToPlayModal = ref()
 
 const modrinthLoginModal = ref()
 const appSettingsModal = ref()
-const syncInstancesUpdateModal = ref()
-let syncInstancesUpdateNotificationId = null
-
-function showSyncInstancesUpdateNotification() {
-	if (
-		popupNotificationManager
-			.getNotifications()
-			.some((notification) => notification.id === syncInstancesUpdateNotificationId)
-	) {
-		return
-	}
-
-	if (!shouldShowSyncInstancesUpdateNotification()) return
-
-	const notification = addPopupNotification({
-		contentType: 'standard',
-		title: formatMessage(messages.syncUpdateTitle),
-		text: formatMessage(messages.syncUpdateDescription),
-		type: 'info',
-		hideIcon: true,
-		autoCloseMs: null,
-		buttons: [
-			{
-				label: formatMessage(messages.syncUpdateDismiss),
-				color: 'standard',
-				action: () => popupNotificationManager.removeNotification(notification.id),
-			},
-			{
-				label: formatMessage(messages.syncUpdateView),
-				color: 'brand',
-				action: () => syncInstancesUpdateModal.value?.show(),
-			},
-		],
-	})
-	syncInstancesUpdateNotificationId = notification.id
-}
+const newUpdateModal = ref()
 
 provide(appSettingsModalOpenProfileKey, () => appSettingsModal.value?.showProfile())
 provide(appSettingsModalOpenSyncedOptionsKey, () => appSettingsModal.value?.showSyncedOptions())
 provide(appSettingsModalOpenCoresKey, () => appSettingsModal.value?.showCores())
-
-watch(
-	() => appSettings.getFeatureFlag('show_sync_instances_update_modal'),
-	(enabled) => {
-		if (enabled && stateInitialized.value) {
-			showSyncInstancesUpdateNotification()
-		}
-	},
-)
 
 watch(incompatibilityWarningModal, (modal) => {
 	if (modal) {
@@ -2117,7 +2037,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</Transition>
 		<AppSettingsModal ref="appSettingsModal" />
 		<AddCoreModal />
-		<SyncInstancesUpdateModal ref="syncInstancesUpdateModal" />
+		<NewUpdateModal ref="newUpdateModal" />
 		<Suspense>
 			<ModrinthAccountRequiredModal ref="modrinthLoginModal" :request-auth="requestModrinthAuth" />
 		</Suspense>
