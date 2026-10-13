@@ -166,8 +166,8 @@ export function createSharedInstanceContext(
 				forcedUnavailableReason.value = null
 				ownerProblem.value = null
 				lastRole = null
-			} else if (sharedId) {
-				// Attached to a shared instance again, so whatever was wrong with the old one is over.
+			} else if (sharedId && sharedId !== previous?.[1]) {
+				// Attached to a different shared instance, so whatever was wrong with the old one is over.
 				ownerProblem.value = null
 			}
 			lastRole = instance.value?.shared_instance?.role ?? lastRole
@@ -228,7 +228,9 @@ export function createSharedInstanceContext(
 		} catch (error) {
 			if (!(error instanceof SharedInstancesApiError)) return ownerProblem.value
 			if (error.status === 404) problem = 'missing'
-			else if (error.status === 401) problem = 'wrong_account'
+			// A session the backend no longer accepts is a sign-in problem, not the wrong account.
+			else if (error.status === 401 && error.code !== 'invalid_credentials')
+				problem = 'wrong_account'
 			else return ownerProblem.value
 		}
 
