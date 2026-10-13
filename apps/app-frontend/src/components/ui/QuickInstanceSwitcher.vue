@@ -8,7 +8,7 @@ import {
 	injectNotificationManager,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import dayjs from 'dayjs'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -24,12 +24,13 @@ import { trackEvent } from '@/helpers/analytics'
 import { getInstanceIconUrl, kill, run } from '@/helpers/instance'
 import { get_all } from '@/helpers/process'
 import { showInstanceInFolder } from '@/helpers/utils'
-import { instanceListQueryOptions } from '@/pages/instance/query-options'
+import { instanceListQueryOptions, prefetchInstancePage } from '@/pages/instance/query-options'
 
 const ITEM_SIZE = 52
 const { handleError } = injectNotificationManager()
 const instancesQuery = useQuery(instanceListQueryOptions())
 const router = useRouter()
+const queryClient = useQueryClient()
 const instanceOptions = ref()
 const runningInstances = ref([])
 
@@ -308,6 +309,7 @@ function openContextMenu(event, instance) {
 					v-tooltip.right="instance.name"
 					class="quick-instance-item relative"
 					:to="`/instance/${encodeURIComponent(instance.id)}`"
+					@mouseenter="prefetchInstancePage(queryClient, instance.id)"
 					@contextmenu.prevent.stop="(event) => openContextMenu(event, instance)"
 				>
 					<Avatar
