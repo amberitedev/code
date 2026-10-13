@@ -36,6 +36,15 @@ export interface UseBrowseSearchOptions {
 	environmentOverride?: ComputedRef<EnvironmentSearchOverride | undefined>
 	active?: ComputedRef<boolean>
 	search: (params: string) => Promise<BrowseSearchResponse>
+	/**
+	 * Returns the results for `params` when they are already cached and fresh. With it, a search
+	 * that is cached shows in the same frame as the action that started it.
+	 */
+	peekSearch?: (params: string) => BrowseSearchResponse | undefined
+	/** Caches the results for `params` without showing them. Enables `prefetchProjectType`. */
+	prefetchSearch?: (params: string) => void
+	/** The provided filters another project type would get, to prefetch its search. */
+	providedFiltersFor?: (projectType: string) => FilterValue[]
 	persistentQueryParams: string[]
 	getExtraQueryParams?: () => Record<string, string | undefined>
 	maxResultsOptions?: ComputedRef<number[]>
@@ -73,6 +82,8 @@ export interface BrowseSearchState {
 	excludeLoaders: ComputedRef<boolean>
 
 	refreshSearch: () => Promise<void>
+	/** Call when a project type tab is hovered, so its results are usually ready by the click. */
+	prefetchProjectType: (projectType: string) => void
 	setPage: (page: number) => Promise<void>
 	clearSearch: () => void
 	onFilterChange: () => void
@@ -103,6 +114,8 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		filters,
 		sortTypes,
 		requestParams,
+		createFilterTypes,
+		createSwitchRequestParams,
 		createPageParams,
 	} = useSearch(
 		projectTypes,
@@ -198,6 +211,8 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 	})
 
 	let searchVersion = 0
+	// The project type the hits on screen were searched for.
+	let hitsProjectType: string | undefined
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 	function clearSearchDebounce() {
@@ -298,6 +313,22 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		{ deep: true },
 	)
 
+	// Declared before the request watcher so a project type switch settles the sort, query and
+	// advanced filters first, and the switch then makes exactly one search.
+	watch(
+		() => options.projectType.value,
+		(newType, oldType) => {
+			debug('projectType changed', { from: oldType, to: newType })
+			effectiveCurrentSortType.value =
+				effectiveSortTypes.value.find((sortType) => sortType.name === 'relevance') ??
+				effectiveSortTypes.value[0]
+			query.value = ''
+			initAdvancedPrefs()
+		},
+	)
+
+	let lastQuery = query.value
+
 	watch(effectiveRequestParams, (newVal, oldVal) => {
 		refreshing.value = true
 		debug('effectiveRequestParams changed', {
@@ -305,12 +336,20 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			to: newVal?.substring(0, 80),
 		})
 		clearSearchDebounce()
+		const typing = query.value !== lastQuery && query.value !== ''
+		lastQuery = query.value
 		if (!active.value) {
 			return
 		}
-		searchDebounceTimer = setTimeout(() => {
-			refreshSearch()
-		}, 200)
+		// Only typing waits for a pause. A project type, filter, sort or page change is one action,
+		// so it searches before the next render instead of showing the old results for 200ms.
+		if (typing) {
+			searchDebounceTimer = setTimeout(() => {
+				refreshSearch()
+			}, 200)
+		} else {
+			void refreshSearch()
+		}
 	})
 
 	watch(active, (isActive, wasActive) => {
@@ -333,6 +372,18 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 			params: effectiveRequestParams.value.substring(0, 100),
 		})
 
+		const cached = options.peekSearch?.(effectiveRequestParams.value)
+		if (cached) {
+			showResponse(cached)
+			return
+		}
+
+		// Another project type's results are never shown under this one: the ghosts take their place.
+		if (hitsProjectType !== options.projectType.value) {
+			projectHits.value = []
+			serverHits.value = []
+		}
+
 		const currentHitsEmpty = isServerType.value
 			? serverHits.value.length === 0
 			: projectHits.value.length === 0
@@ -352,22 +403,13 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 				return
 			}
 
-			if (isServerType.value) {
-				serverHits.value = response.serverHits
-			} else {
-				projectHits.value = response.projectHits
-			}
-			totalHits.value = response.total_hits
+			showResponse(response)
 			debug('refreshSearch complete', {
 				version,
 				hits: response.total_hits,
 				projectHits: response.projectHits.length,
 				serverHits: response.serverHits.length,
 			})
-
-			updateUrlParams()
-			loading.value = false
-			refreshing.value = false
 		} catch (err) {
 			debug('refreshSearch error', err)
 			console.error('Browse search error:', err)
@@ -376,6 +418,61 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 				refreshing.value = false
 			}
 		}
+	}
+
+	function showResponse(response: BrowseSearchResponse) {
+		if (isServerType.value) {
+			serverHits.value = response.serverHits
+		} else {
+			projectHits.value = response.projectHits
+		}
+		hitsProjectType = options.projectType.value
+		totalHits.value = response.total_hits
+
+		updateUrlParams()
+		loading.value = false
+		refreshing.value = false
+	}
+
+	function prefetchProjectType(projectType: string) {
+		if (!options.prefetchSearch || !active.value || projectType === options.projectType.value) {
+			return
+		}
+		const params = getSwitchRequestParams(projectType)
+		if (params) {
+			options.prefetchSearch(params)
+		}
+	}
+
+	// Mirrors what the project type watcher does on a switch, without switching.
+	function getSwitchRequestParams(projectType: string): string | undefined {
+		const toServer = projectType === 'server'
+		const filterTypes = toServer
+			? serverFilterTypes.value
+			: createFilterTypes([projectType as ProjectType])
+		const selected = toServer ? serverCurrentFilters.value : currentFilters.value
+		const prefs = compatibleAdvancedFilters(advancedPrefs.value, filterTypes)
+		const switchFilters = prefs.length > 0 ? replaceAdvancedFilters(selected, prefs) : selected
+		const provided = options.providedFiltersFor?.(projectType) ?? providedFiltersOrEmpty.value
+
+		if (toServer) {
+			// The server request cannot be built ahead, so it is only prefetched when a switch would
+			// leave it as it is now. Provided project ids are the only provided filters it reads.
+			const unchanged =
+				query.value === '' &&
+				currentPage.value === 1 &&
+				serverCurrentSortType.value.name === 'relevance' &&
+				sameOptionIds(getAdvancedOptionIds(selected), getAdvancedOptionIds(switchFilters)) &&
+				![...provided, ...providedFiltersOrEmpty.value].some((f) => f.type === 'project_id')
+			return unchanged ? serverRequestParams.value : undefined
+		}
+
+		return createSwitchRequestParams(
+			[projectType as ProjectType],
+			filterTypes,
+			switchFilters,
+			provided,
+		)
 	}
 
 	function updateUrlParams() {
@@ -420,21 +517,6 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
 	}
 
-	watch(
-		() => options.projectType.value,
-		(newType, oldType) => {
-			debug('projectType changed', { from: oldType, to: newType })
-			effectiveCurrentSortType.value =
-				effectiveSortTypes.value.find((sortType) => sortType.name === 'relevance') ??
-				effectiveSortTypes.value[0]
-			query.value = ''
-
-			void nextTick(() => {
-				initAdvancedPrefs()
-			})
-		},
-	)
-
 	return {
 		query,
 		filters,
@@ -459,6 +541,7 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 		deprioritizedTags,
 		excludeLoaders,
 		refreshSearch,
+		prefetchProjectType,
 		setPage,
 		clearSearch,
 		onFilterChange,

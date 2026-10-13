@@ -414,11 +414,12 @@ const hideInstalledModpacks = computed({
 	set: (value: boolean) => setHideInstalledModpacks(value),
 })
 
-const instanceFilters = computed(() => {
+// Take the project type so a tab's search can be built before switching to it.
+function getInstanceFilters(pt: ProjectType) {
 	const filters = []
 
-	if (instance.value && projectType.value !== 'resourcepack') {
-		const isVanillaShader = projectType.value === 'shader' && instance.value.loader === 'vanilla'
+	if (instance.value && pt !== 'resourcepack') {
+		const isVanillaShader = pt === 'shader' && instance.value.loader === 'vanilla'
 		const gameVersion = instance.value.game_version
 		if (gameVersion && !isVanillaShader) {
 			filters.push({ type: 'game_version', option: gameVersion })
@@ -427,7 +428,7 @@ const instanceFilters = computed(() => {
 		const platform = instance.value.loader
 		const supportedModLoaders = ['fabric', 'forge', 'quilt', 'neoforge']
 
-		if (platform && projectType.value === 'mod' && supportedModLoaders.includes(platform)) {
+		if (platform && pt === 'mod' && supportedModLoaders.includes(platform)) {
 			filters.push({ type: 'mod_loader', option: platform })
 		}
 		if (isVanillaShader) {
@@ -440,8 +441,8 @@ const instanceFilters = computed(() => {
 	}
 
 	if (
-		(instance.value || projectType.value === 'modpack') &&
-		(projectType.value === 'modpack' ? hideInstalledModpacks.value : instanceHideInstalled.value) &&
+		(instance.value || pt === 'modpack') &&
+		(pt === 'modpack' ? hideInstalledModpacks.value : instanceHideInstalled.value) &&
 		hiddenInstanceProjectIds.value.size > 0
 	) {
 		for (const id of hiddenInstanceProjectIds.value) {
@@ -450,7 +451,7 @@ const instanceFilters = computed(() => {
 	}
 
 	return filters
-})
+}
 
 const serverHideInstalled = ref(false)
 const hideSelectedServerInstalls = ref(false)
@@ -475,10 +476,9 @@ watch(
 	{ immediate: true },
 )
 
-const serverContextFilters = computed(() => {
+function getServerContextFilters(pt: ProjectType) {
 	const filters: { type: string; option: string; negative?: boolean }[] = []
 	if (!serverContextServerData.value) return filters
-	const pt = projectType.value
 
 	if (pt !== 'modpack') {
 		const gameVersion = serverContextServerData.value.mc_version
@@ -519,11 +519,13 @@ const serverContextFilters = computed(() => {
 	}
 
 	return filters
-})
+}
 
-const combinedProvidedFilters = computed(() =>
-	isServerContext.value ? serverContextFilters.value : instanceFilters.value,
-)
+function getProvidedFilters(pt: ProjectType) {
+	return isServerContext.value ? getServerContextFilters(pt) : getInstanceFilters(pt)
+}
+
+const combinedProvidedFilters = computed(() => getProvidedFilters(projectType.value))
 
 const {
 	serverPings,
@@ -686,6 +688,21 @@ watch(
 	},
 )
 
+// A string, so the tabs below are only rebuilt when it changes and not on every search, which
+// replaces the route query.
+const projectTypeTabSuffix = computed(() => {
+	const params: LocationQuery = {}
+
+	if (route.query.i) params.i = route.query.i
+	if (route.query.ai) params.ai = route.query.ai
+	if (route.query.from) params.from = route.query.from
+	if (route.query.sid) params.sid = route.query.sid
+	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
+
+	const queryString = new URLSearchParams(params as Record<string, string>).toString()
+	return queryString ? `?${queryString}` : ''
+})
+
 const selectableProjectTypes = computed(() => {
 	let dataPacks = false,
 		mods = false,
@@ -710,16 +727,8 @@ const selectableProjectTypes = computed(() => {
 		modpacks = true
 	}
 
-	const params: LocationQuery = {}
-
-	if (route.query.i) params.i = route.query.i
-	if (route.query.ai) params.ai = route.query.ai
-	if (route.query.from) params.from = route.query.from
-	if (route.query.sid) params.sid = route.query.sid
-	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
-
-	const queryString = new URLSearchParams(params as Record<string, string>).toString()
-	const suffix = queryString ? `?${queryString}` : ''
+	const suffix = projectTypeTabSuffix.value
+	const prefetch = (type: ProjectType) => () => searchState.prefetchProjectType(type)
 
 	if (isSetupServerContext.value) {
 		return [
@@ -736,22 +745,35 @@ const selectableProjectTypes = computed(() => {
 			label: formatMessage(messages.modpacksProjectType),
 			href: `/browse/modpack${suffix}`,
 			shown: modpacks,
+			onHover: prefetch('modpack'),
 		},
-		{ label: formatMessage(messages.modsProjectType), href: `/browse/mod${suffix}`, shown: mods },
+		{
+			label: formatMessage(messages.modsProjectType),
+			href: `/browse/mod${suffix}`,
+			shown: mods,
+			onHover: prefetch('mod'),
+		},
 		{
 			label: formatMessage(messages.resourcePacksProjectType),
 			href: `/browse/resourcepack${suffix}`,
+			onHover: prefetch('resourcepack'),
 		},
 		{
 			label: formatMessage(messages.dataPacksProjectType),
 			href: `/browse/datapack${suffix}`,
 			shown: dataPacks,
+			onHover: prefetch('datapack'),
 		},
-		{ label: formatMessage(messages.shadersProjectType), href: `/browse/shader${suffix}` },
+		{
+			label: formatMessage(messages.shadersProjectType),
+			href: `/browse/shader${suffix}`,
+			onHover: prefetch('shader'),
+		},
 		{
 			label: formatMessage(messages.serversProjectType),
 			href: `/browse/server${suffix}`,
 			shown: !instance.value,
+			onHover: prefetch('server'),
 		},
 	]
 })
@@ -912,12 +934,8 @@ function getCardActions(
 		return getServerCardActions(result)
 	}
 
-	const projectResult = result as Labrinth.Search.v3.ResultSearchProject & {
-		installed?: boolean
-		installing?: boolean
-	}
+	const projectResult = result
 	const isInstalled =
-		projectResult.installed ||
 		allInstalledIds.value.has(projectResult.project_id || '') ||
 		serverContentProjectIds.value.has(projectResult.project_id || '') ||
 		serverContextServerData.value?.upstream?.project_id === projectResult.project_id
@@ -1095,36 +1113,64 @@ function onSearchResultsInstalled(ids: string[]) {
 	newlyInstalled.value = Array.from(new Set([...newlyInstalled.value, ...ids]))
 }
 
+type RawSearchResults = { result: Labrinth.Search.v3.SearchResults } | null
+
+// Coming back to a search within a few minutes shows the same page at once.
+const SEARCH_STALE_TIME = 5 * 60_000
+
+function searchQueryOptions(requestParams: string) {
+	return queryOptions({
+		queryKey: ['search', 'v3', requestParams],
+		queryFn: async () => {
+			const rawResults = (await get_search_results_v3(
+				requestParams,
+				'must_revalidate',
+			)) as RawSearchResults
+
+			// Seeded here so it happens once per fetch, not again each time a cached search is shown.
+			for (const hit of rawResults?.result.hits ?? []) {
+				for (const identifier of [hit.project_id, hit.slug]) {
+					if (identifier) {
+						queryClient.setQueryData(['projects', 'summary', identifier], hit)
+					}
+				}
+			}
+
+			return rawResults
+		},
+		staleTime: SEARCH_STALE_TIME,
+	})
+}
+
 async function search(requestParams: string) {
 	debugLog('searching v3', requestParams)
 	const isServer = projectType.value === 'server'
+	return toSearchResponse(await queryClient.fetchQuery(searchQueryOptions(requestParams)), isServer)
+}
 
-	const rawResults = await queryClient.fetchQuery({
-		queryKey: ['search', 'v3', requestParams],
-		queryFn: () =>
-			get_search_results_v3(requestParams, 'must_revalidate') as Promise<{
-				result: Labrinth.Search.v3.SearchResults & {
-					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
-				}
-			} | null>,
-		// Coming back to a search within a few minutes shows the same page at once.
-		staleTime: 5 * 60_000,
-	})
+// The cached results of a search that `search` would return without fetching.
+function peekSearch(requestParams: string) {
+	const state = queryClient.getQueryState<RawSearchResults>(
+		searchQueryOptions(requestParams).queryKey,
+	)
+	if (
+		!state ||
+		state.data === undefined ||
+		state.isInvalidated ||
+		Date.now() - state.dataUpdatedAt >= SEARCH_STALE_TIME
+	) {
+		return undefined
+	}
+	return toSearchResponse(state.data, projectType.value === 'server')
+}
 
+function toSearchResponse(rawResults: RawSearchResults, isServer: boolean) {
 	if (!rawResults) {
 		return {
 			projectHits: [],
 			serverHits: [],
 			total_hits: 0,
 			per_page: 20,
-		}
-	}
-
-	for (const hit of rawResults.result.hits) {
-		for (const identifier of [hit.project_id, hit.slug]) {
-			if (identifier) {
-				queryClient.setQueryData(['projects', 'summary', identifier], hit)
-			}
 		}
 	}
 
@@ -1139,24 +1185,8 @@ async function search(requestParams: string) {
 		}
 	}
 
-	const hits = rawResults.result.hits.map((hit) => {
-		const mapped: Labrinth.Search.v3.ResultSearchProject & { installed?: boolean } = {
-			...hit,
-		}
-
-		if (instance.value || isServerContext.value || projectType.value === 'modpack') {
-			const installedIds =
-				isServerContext.value && projectType.value !== 'modpack'
-					? serverContentProjectIds.value
-					: new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])])
-			mapped.installed = installedIds.has(hit.project_id)
-		}
-
-		return mapped
-	})
-
 	return {
-		projectHits: hits,
+		projectHits: rawResults.result.hits,
 		serverHits: [],
 		total_hits: rawResults.result.total_hits,
 		per_page: rawResults.result.hits_per_page,
@@ -1180,7 +1210,11 @@ const searchState = useBrowseSearch({
 	tags,
 	active: browseRouteActive,
 	providedFilters: combinedProvidedFilters,
+	providedFiltersFor: (type) => getProvidedFilters(type as ProjectType),
 	search,
+	peekSearch,
+	prefetchSearch: (requestParams) =>
+		void queryClient.prefetchQuery(searchQueryOptions(requestParams)),
 	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
