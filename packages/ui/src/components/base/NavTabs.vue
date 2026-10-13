@@ -9,7 +9,6 @@
 			class="relative flex w-fit rounded-full bg-bg-raised p-1 text-xs sm:text-sm font-bold"
 			:class="{
 				'card-shadow border border-solid border-surface-4': mode === 'navigation',
-				'tab-color-delayed': colorChangeDelayed,
 			}"
 			v-bind="pageNav ? {} : $attrs"
 		>
@@ -23,6 +22,7 @@
 					:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
 					class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
+					@click="onLinkClick($event, index)"
 					@mouseenter="link.onHover?.()"
 					@focus="link.onHover?.()"
 				>
@@ -62,11 +62,9 @@
 
 			<div
 				v-if="sliderReady && currentActiveIndex !== -1"
-				class="pointer-events-none absolute rounded-full"
-				:class="[
-					subpageSelected ? 'bg-button-bg' : 'bg-button-bgSelected',
-					{ 'navtabs-transition': transitionsEnabled },
-				]"
+				ref="sliderElement"
+				class="pointer-events-none absolute origin-top-left rounded-full"
+				:class="subpageSelected ? 'bg-button-bg' : 'bg-button-bgSelected'"
 				:style="sliderStyle"
 				aria-hidden="true"
 			/>
@@ -76,10 +74,11 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
 
 defineOptions({ inheritAttrs: false })
 
@@ -117,33 +116,30 @@ const emit = defineEmits<{
 const scrollContainer = ref<HTMLElement | null>(null)
 const tabLinkElements = ref<HTMLElement[]>()
 
-const sliderLeft = ref(0)
-const sliderTop = ref(0)
-const sliderRight = ref(0)
-const sliderBottom = ref(0)
+const sliderElement = ref<HTMLElement | null>(null)
+
+interface SliderRect {
+	left: number
+	top: number
+	width: number
+	height: number
+}
+
+const sliderRect = ref<SliderRect>({ left: 0, top: 0, width: 0, height: 0 })
 
 const currentActiveIndex = ref(-1)
 const subpageSelected = ref(false)
 
 const sliderReady = ref(false)
-const transitionsEnabled = ref(false)
-const colorChangeDelayed = ref(false)
-
-const sliderDelays = ref({ left: '0ms', top: '0ms', right: '0ms', bottom: '0ms' })
 
 const filteredLinks = computed(() => props.links.filter((link) => link.shown ?? true))
 
 const sliderStyle = computed(() => ({
-	left: `${sliderLeft.value}px`,
-	top: `${sliderTop.value}px`,
-	right: `${sliderRight.value}px`,
-	bottom: `${sliderBottom.value}px`,
+	left: `${sliderRect.value.left}px`,
+	top: `${sliderRect.value.top}px`,
+	width: `${sliderRect.value.width}px`,
+	height: `${sliderRect.value.height}px`,
 }))
-
-const leftDelay = computed(() => sliderDelays.value.left)
-const rightDelay = computed(() => sliderDelays.value.right)
-const topDelay = computed(() => sliderDelays.value.top)
-const bottomDelay = computed(() => sliderDelays.value.bottom)
 
 const isActiveAndNotSubpage = computed(
 	() => (index: number) => currentActiveIndex.value === index && !subpageSelected.value,
@@ -226,95 +222,88 @@ function getTabElement(index: number): HTMLElement | null {
 	return element
 }
 
-function getSliderPosition() {
+function getSliderRect(): SliderRect | null {
 	const el = getTabElement(currentActiveIndex.value)
-	const parent = scrollContainer.value
-	if (!el || !parent) return null
+	if (!el) return null
 
 	return {
 		left: el.offsetLeft,
 		top: el.offsetTop,
-		right: parent.clientWidth - el.offsetLeft - el.offsetWidth,
-		bottom: parent.clientHeight - el.offsetTop - el.offsetHeight,
+		width: el.offsetWidth,
+		height: el.offsetHeight,
 	}
 }
 
-function applySliderPosition(newPosition: {
-	left: number
-	top: number
-	right: number
-	bottom: number
-}) {
-	sliderLeft.value = newPosition.left
-	sliderTop.value = newPosition.top
-	sliderRight.value = newPosition.right
-	sliderBottom.value = newPosition.bottom
-}
+let sliderAnimation: Animation | undefined
 
-function animateSliderTo(newPosition: {
-	left: number
-	top: number
-	right: number
-	bottom: number
-}) {
-	const STAGGER_DELAY = '175ms'
-
-	sliderDelays.value = {
-		left: newPosition.left < sliderLeft.value ? '0ms' : STAGGER_DELAY,
-		right: newPosition.left < sliderLeft.value ? STAGGER_DELAY : '0ms',
-		top: newPosition.top < sliderTop.value ? '0ms' : STAGGER_DELAY,
-		bottom: newPosition.top < sliderTop.value ? STAGGER_DELAY : '0ms',
-	}
-
-	applySliderPosition(newPosition)
-}
-
+/**
+ * Moves the pill under the active tab. The pill is placed at its final box right away and the
+ * move is played back as a transform animation from the previous box, so it runs on the
+ * compositor and stays smooth while the page below is rendering.
+ */
 function positionSlider(animate = true) {
-	const newPosition = getSliderPosition()
-	if (!newPosition) {
+	const next = getSliderRect()
+	if (!next) {
 		return
 	}
 
-	if (!sliderReady.value) {
-		applySliderPosition(newPosition)
-		sliderReady.value = true
-		nextTick(() => {
-			requestAnimationFrame(() => {
-				transitionsEnabled.value = true
-			})
-		})
-		return
-	}
+	const previous = sliderRect.value
+	const slider = sliderElement.value
+	sliderRect.value = next
+	sliderReady.value = true
 
-	if (!animate) {
-		transitionsEnabled.value = false
-		applySliderPosition(newPosition)
-		requestAnimationFrame(() => {
-			transitionsEnabled.value = true
-		})
-		return
-	}
+	const moved =
+		previous.left !== next.left ||
+		previous.top !== next.top ||
+		previous.width !== next.width ||
+		previous.height !== next.height
+	if (!moved) return
 
-	animateSliderTo(newPosition)
+	sliderAnimation?.cancel()
+	sliderAnimation = undefined
+	if (!animate || !slider || !previous.width || !next.width || !next.height) return
+
+	sliderAnimation = slider.animate(
+		[
+			{
+				transform: `translate(${previous.left - next.left}px, ${previous.top - next.top}px) scale(${previous.width / next.width}, ${previous.height / next.height})`,
+			},
+			{ transform: 'none' },
+		],
+		{ duration: 150, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
+	)
 }
 
+// Runs from the ResizeObserver, which also reports once on mount. Layout is already clean there,
+// so the first measurement does not force one while the page is still mounting.
 function resetSliderPosition() {
-	if (!sliderReady.value || currentActiveIndex.value === -1) {
+	if (currentActiveIndex.value === -1) {
 		return
 	}
 	positionSlider(false)
 }
 
-async function updateActiveTab() {
-	await nextTick()
-	const { index, isSubpage } = computeActiveIndex()
-	colorChangeDelayed.value = sliderReady.value && index !== currentActiveIndex.value
+function setActiveTab(index: number, isSubpage: boolean) {
+	const changed = index !== currentActiveIndex.value
 	currentActiveIndex.value = index
 	subpageSelected.value = isSubpage
 
-	if (index !== -1) {
+	if (index !== -1 && changed) {
 		positionSlider()
 	}
+}
+
+function updateActiveTab() {
+	const { index, isSubpage } = computeActiveIndex()
+	setActiveTab(index, isSubpage)
+}
+
+// Moves the pill on the click itself instead of waiting for the navigation to commit. The route
+// watcher and the failure hook below correct it if the navigation lands somewhere else.
+function onLinkClick(event: MouseEvent, index: number) {
+	if (event.defaultPrevented || event.button !== 0) return
+	if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+	setActiveTab(index, false)
 }
 
 const initialActive = computeActiveIndex()
@@ -323,16 +312,24 @@ subpageSelected.value = initialActive.isSubpage
 
 let resizeObserver: ResizeObserver | undefined
 
+let removeNavigationHook: (() => void) | undefined
+
 onMounted(() => {
-	updateActiveTab()
 	resizeObserver = new ResizeObserver(resetSliderPosition)
 	if (scrollContainer.value) {
 		resizeObserver.observe(scrollContainer.value)
 	}
+	removeNavigationHook = router?.afterEach((_to, _from, failure) => {
+		if (failure && props.mode === 'navigation') {
+			updateActiveTab()
+		}
+	})
 })
 
 onUnmounted(() => {
 	resizeObserver?.disconnect()
+	removeNavigationHook?.()
+	sliderAnimation?.cancel()
 })
 
 watch(
@@ -353,30 +350,19 @@ watch(
 	},
 )
 
+// Consumers often rebuild the links array on every route change, so this only reacts when the
+// rendered tabs differ. Size changes are picked up by the ResizeObserver.
 watch(
-	() => props.links,
-	async () => {
-		await nextTick()
-		updateActiveTab()
-	},
-	{ deep: true },
+	() => filteredLinks.value.map((link) => `${link.href}
+${link.label}`).join('
+'),
+	updateActiveTab,
+	{ flush: 'post' },
 )
 </script>
 
 <style scoped>
-.navtabs-transition {
-	transition:
-		left 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(leftDelay),
-		right 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(rightDelay),
-		top 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(topDelay),
-		bottom 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(bottomDelay);
-}
-
 .tab-color {
 	transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.tab-color-delayed .tab-color {
-	transition-delay: 100ms;
 }
 </style>
