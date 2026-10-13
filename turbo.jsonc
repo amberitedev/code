@@ -1,6 +1,8 @@
 {
 	"$schema": "./node_modules/turbo/schema.json",
 	"concurrency": "100%",
+	// Turborepo otherwise appends its own block to AGENTS.md whenever an agent runs it.
+	"agentGuidance": false,
 	"futureFlags": {
 		"experimentalCargoWorkspaces": true,
 		"experimentalTaskCommand": true,
