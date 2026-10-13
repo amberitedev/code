@@ -167,7 +167,10 @@ export default new createRouter({
  * does not wait on module loading. Call once after startup.
  */
 export async function preloadRouteChunks(router) {
-	const whenIdle = window.requestIdleCallback ?? ((callback) => setTimeout(callback, 200))
+	// Called through `window`: a detached requestIdleCallback throws "Illegal invocation".
+	const whenIdle = window.requestIdleCallback
+		? (callback) => window.requestIdleCallback(callback)
+		: (callback) => setTimeout(callback, 200)
 	for (const record of router.getRoutes()) {
 		// Still a lazy loader: vue-router swaps in the component object once a route has resolved.
 		const load = record.components?.default
