@@ -20,10 +20,10 @@
 					ref="tabLinkElements"
 					:replace="replace"
 					draggable="false"
-					:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
+					:to="linkTarget(link)"
 					class="navtab-link no-click-animation button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
-					@click="onLinkClick($event, index)"
+					@click.capture="onLinkClick($event, index, link)"
 					@mouseenter="link.onHover?.()"
 					@focus="link.onHover?.()"
 				>
@@ -343,16 +343,31 @@ function updateActiveTab() {
 	setActiveTab(index, isSubpage)
 }
 
-// Moves the pill on the click itself instead of waiting for the navigation to commit. It reacts to
-// the release, not the press: holding the mouse down on a tab must not move anything. The route
-// watcher and the failure hook below correct it if the navigation lands somewhere else.
+function linkTarget(link: Tab) {
+	if (!props.query) return link.href
+	return link.href ? `?${props.query}=${link.href}` : '?'
+}
+
+// Starts the pill on the click and navigates one frame later, so the slide is already on screen
+// before the next page begins to render. It reacts to the release, not the press: holding the
+// mouse down on a tab must not move anything. The route watcher and the failure hook below correct
+// the pill if the navigation lands somewhere else.
 //
-// RouterLink has already called preventDefault by the time this runs, so only the clicks it
-// ignores are filtered out here.
-function onLinkClick(event: MouseEvent, index: number) {
-	if (event.button !== 0) return
+// This runs in the capture phase and prevents the default, which also stops RouterLink from
+// navigating on its own. Clicks RouterLink would leave to the browser are left alone.
+function onLinkClick(event: MouseEvent, index: number, link: Tab) {
+	if (event.defaultPrevented || event.button !== 0) return
 	if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+	event.preventDefault()
 	setActiveTab(index, false)
+
+	const target = linkTarget(link)
+	requestAnimationFrame(() => {
+		// A timeout from inside a frame callback runs after that frame has been painted.
+		setTimeout(() => {
+			void (props.replace ? router.replace(target) : router.push(target))
+		})
+	})
 }
 
 const initialActive = computeActiveIndex()
