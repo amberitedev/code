@@ -1,52 +1,3 @@
-<script lang="ts">
-// Screenshot cards fade in one after another because their thumbnails load one at a time. Skin
-// previews arrive together and in no particular order, so each card's turn comes from its place on
-// the page: the first card of a burst fades first and each one after it a step later.
-const FADE_STAGGER_MS = 30
-const FADE_STAGGER_MAX_MS = 450
-// A burst waits this long for its cards to report in, so the first one on the page is known.
-const FADE_GATHER_MS = 32
-// Cards that load within this long of each other belong to the same burst.
-const FADE_BURST_GAP_MS = 300
-
-type FadeStart = (delay: number) => void
-let gathering: { index: number; start: FadeStart }[] | undefined
-let burstStart = 0
-let burstEnd = 0
-let burstFirstIndex = 0
-
-function fadeDelayFor(index: number, now: number) {
-	const turn = Math.min(Math.max(0, index - burstFirstIndex) * FADE_STAGGER_MS, FADE_STAGGER_MAX_MS)
-	return Math.max(0, burstStart + turn - now)
-}
-
-function queueFade(card: Element | null, start: FadeStart) {
-	const now = performance.now()
-	const index = card
-		? Array.prototype.indexOf.call(document.querySelectorAll('.skin-button'), card)
-		: 0
-
-	if (gathering) {
-		gathering.push({ index, start })
-		return
-	}
-	if (now <= burstEnd) {
-		burstEnd = now + FADE_BURST_GAP_MS
-		start(fadeDelayFor(index, now))
-		return
-	}
-
-	const cards = (gathering = [{ index, start }])
-	setTimeout(() => {
-		gathering = undefined
-		burstStart = performance.now()
-		burstEnd = burstStart + FADE_BURST_GAP_MS
-		burstFirstIndex = Math.min(...cards.map((entry) => entry.index))
-		for (const entry of cards) entry.start(fadeDelayFor(entry.index, burstStart))
-	}, FADE_GATHER_MS)
-}
-</script>
-
 <script setup lang="ts">
 import { CheckIcon } from '@modrinth/assets'
 import { ref, watch } from 'vue'
@@ -86,21 +37,11 @@ const imagesLoaded = ref({
 	forward: false,
 })
 
-// A freshly loaded image waits for its turn, then fades in over the skeleton.
-const awaitingFade = ref(false)
+// A freshly loaded image fades in over the skeleton, which stays until the fade ends.
 const fadingIn = ref(false)
-const fadeDelay = ref(0)
 
-function onImageLoad(event: Event) {
-	if (!imagesLoaded.value.forward) {
-		const image = event.target instanceof Element ? event.target : null
-		awaitingFade.value = true
-		queueFade(image?.closest('.skin-button') ?? null, (delay) => {
-			fadeDelay.value = delay
-			awaitingFade.value = false
-			fadingIn.value = true
-		})
-	}
+function onImageLoad() {
+	if (!imagesLoaded.value.forward) fadingIn.value = true
 	imagesLoaded.value.forward = true
 }
 
@@ -108,6 +49,7 @@ watch(
 	() => props.forwardImageSrc,
 	() => {
 		imagesLoaded.value.forward = false
+		fadingIn.value = false
 	},
 )
 </script>
@@ -159,13 +101,9 @@ watch(
 		</span>
 
 		<div
-			v-if="!imagesLoaded.forward || awaitingFade || fadingIn"
+			v-if="!imagesLoaded.forward || fadingIn"
 			class="skeleton-loader h-full w-full"
-			:class="{
-				'absolute inset-0': imagesLoaded.forward,
-				'skeleton-loader--fading-out': fadingIn,
-			}"
-			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
+			:class="{ 'absolute inset-0': imagesLoaded.forward }"
 		>
 			<div class="skeleton absolute inset-0 aspect-[5/7]"></div>
 		</div>
@@ -175,9 +113,8 @@ watch(
 			:key="`${selected}-${active}`"
 			:class="[
 				'skin-button__image-parent pointer-events-none relative z-0 mb-[1.5px] grid place-items-stretch with-shadow',
-				{ 'skin-button__image-parent--fading-in': fadingIn, 'opacity-0': awaitingFade },
+				{ 'skin-button__image-parent--fading-in': fadingIn },
 			]"
-			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
 			@animationend="fadingIn = false"
 		>
 			<img
@@ -218,9 +155,24 @@ watch(
 	}
 }
 
+/* The same fade screenshot cards use when their image arrives. */
+.skin-button__image-parent--fading-in {
+	animation: skin-button-fade-in 350ms ease-in-out;
+}
+
+@keyframes skin-button-fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.skeleton {
 		animation: none;
+	}
+
+	.skin-button__image-parent--fading-in {
+		animation-duration: 1ms;
 	}
 }
 
@@ -289,30 +241,6 @@ watch(
 
 .skin-button__image-facing {
 	transform: translateZ(0);
-}
-
-/* The same fade screenshot cards use when their image arrives. `backwards` keeps the image hidden
-   while it waits for its turn. */
-.skin-button__image-parent--fading-in {
-	animation: skin-button-fade-in 350ms ease-in-out backwards;
-}
-
-@keyframes skin-button-fade-in {
-	from {
-		opacity: 0;
-	}
-}
-
-/* The skeleton leaves on the same clock, so the card's background does not change after the
-   image has already arrived. */
-.skeleton-loader--fading-out {
-	animation: skin-button-fade-out 350ms ease-in-out forwards;
-}
-
-@keyframes skin-button-fade-out {
-	to {
-		opacity: 0;
-	}
 }
 
 .with-shadow img {
