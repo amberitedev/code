@@ -1,6 +1,7 @@
 <template>
 	<div class="w-full p-2">
 		<UserProfilePageLayout
+			v-if="profileReady"
 			:user-id="userId"
 			:account-source="isPublicProfile ? 'modrinth' : 'self-hosted'"
 			:project-type="projectType"
@@ -48,11 +49,12 @@ import {
 	provideAuth,
 	injectAuth,
 	UserProfilePageLayout,
+	useLoadingBarToken,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, inject, ref, watch } from 'vue'
-import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
 	block_user,
@@ -177,13 +179,8 @@ function readRouteParam(param: unknown): string | undefined {
 	return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
+// The profile on screen. It trails the route while the next profile loads, see the watcher below.
 const userId = ref(readRouteParam(route.params.user) ?? '')
-watch(
-	() => readRouteParam(route.params.user),
-	(next) => {
-		if (next) userId.value = next
-	},
-)
 const projectType = computed(() => readRouteParam(route.params.projectType))
 
 function getCachedUserSummary(id: string) {
@@ -209,6 +206,8 @@ watch(
 	[userId, user, () => route.fullPath],
 	([currentUserId, currentUser, currentPath]) => {
 		if (route.name !== 'User') return
+		// While the next profile loads, keep the breadcrumb on the one still on screen.
+		if (readRouteParam(route.params.user) !== currentUserId) return
 		breadcrumbUserId.value = currentUserId
 		breadcrumbLabel.value = currentUser?.username ?? currentUserId
 		breadcrumbTo.value = currentPath
@@ -230,20 +229,16 @@ useBreadcrumb({
 	}),
 })
 
+/** Loads everything the profile shows, in parallel. Never rejects: the layout surfaces errors. */
 async function ensureUserProfileData(id: string): Promise<void> {
 	if (!id) return
 
-	try {
-		await queryClient.ensureQueryData({
+	await Promise.allSettled([
+		queryClient.ensureQueryData({
 			queryKey: profileQueryKey(id),
 			queryFn: () => userProfile.getUser(id),
 			staleTime: 30_000,
-		})
-	} catch {
-		// Let the mounted layout's useQuery surface errors; do not fail route setup.
-	}
-
-	await Promise.allSettled([
+		}),
 		queryClient.ensureQueryData({
 			queryKey: [...profileQueryKey(id), 'projects'],
 			queryFn: () => userProfile.getProjects(id),
@@ -262,12 +257,20 @@ async function ensureUserProfileData(id: string): Promise<void> {
 	])
 }
 
-onBeforeRouteUpdate(async (to) => {
-	if (to.query.source !== route.query.source) return
-	const value = to.params.user
-	const id = Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
-	await ensureUserProfileData(id)
-})
+// The page opens at once and the layout mounts when the first profile has loaded, because the
+// layout reads a missing user as "not found" and missing projects as "no projects".
+const profileReady = ref(false)
+useLoadingBarToken(computed(() => !profileReady.value))
+void ensureUserProfileData(userId.value).then(() => (profileReady.value = true))
 
-await ensureUserProfileData(userId.value)
+// Going from one profile to another keeps the current one on screen until the next is loaded, so
+// the whole profile swaps at once. The navigation itself is not held back.
+watch(
+	() => readRouteParam(route.params.user),
+	async (next) => {
+		if (!next || next === userId.value) return
+		await ensureUserProfileData(next)
+		if (readRouteParam(route.params.user) === next) userId.value = next
+	},
+)
 </script>

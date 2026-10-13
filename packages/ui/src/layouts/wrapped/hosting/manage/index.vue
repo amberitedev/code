@@ -963,7 +963,9 @@ const serverBillingMap = computed(() => {
 
 .list-enter-active,
 .list-leave-active {
-	transition: all 200ms ease-in-out;
+	transition:
+		opacity 200ms ease-in-out,
+		transform 200ms ease-in-out;
 }
 
 .list-enter-from {
