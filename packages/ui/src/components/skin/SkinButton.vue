@@ -1,3 +1,18 @@
+<script lang="ts">
+// Screenshot cards fade in one after another because their thumbnails load one at a time. Skin
+// previews all arrive together, so each card that loads claims the next slot to get the same look.
+const FADE_STAGGER_MS = 30
+const FADE_STAGGER_MAX_MS = 450
+let nextFadeAt = 0
+
+function claimFadeDelay() {
+	const now = performance.now()
+	const start = Math.min(Math.max(now, nextFadeAt), now + FADE_STAGGER_MAX_MS)
+	nextFadeAt = start + FADE_STAGGER_MS
+	return start - now
+}
+</script>
+
 <script setup lang="ts">
 import { CheckIcon } from '@modrinth/assets'
 import { ref, watch } from 'vue'
@@ -37,11 +52,15 @@ const imagesLoaded = ref({
 	forward: false,
 })
 
-// True while a freshly loaded image is fading in over the skeleton.
+// True while a freshly loaded image is waiting its turn and fading in over the skeleton.
 const fadingIn = ref(false)
+const fadeDelay = ref(0)
 
 function onImageLoad() {
-	if (!imagesLoaded.value.forward) fadingIn.value = true
+	if (!imagesLoaded.value.forward) {
+		fadeDelay.value = claimFadeDelay()
+		fadingIn.value = true
+	}
 	imagesLoaded.value.forward = true
 }
 
@@ -114,6 +133,7 @@ watch(
 				'skin-button__image-parent pointer-events-none relative z-0 mb-[1.5px] grid place-items-stretch with-shadow',
 				{ 'skin-button__image-parent--fading-in': fadingIn },
 			]"
+			:style="fadingIn ? { animationDelay: `${fadeDelay}ms` } : undefined"
 			@animationend="fadingIn = false"
 		>
 			<img
@@ -227,9 +247,10 @@ watch(
 	transform: translateZ(0);
 }
 
-/* The same fade screenshot cards use when their image arrives. */
+/* The same fade screenshot cards use when their image arrives. `backwards` keeps the image hidden
+   while it waits for its turn. */
 .skin-button__image-parent--fading-in {
-	animation: skin-button-fade-in 350ms ease-in-out;
+	animation: skin-button-fade-in 350ms ease-in-out backwards;
 }
 
 @keyframes skin-button-fade-in {
