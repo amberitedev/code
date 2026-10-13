@@ -242,7 +242,7 @@ const messages = defineMessages({
 					v-else
 					role="status"
 					:aria-label="formatMessage(commonMessages.loadingLabel)"
-					class="h-10 animate-pulse rounded-lg bg-surface-3"
+					class="h-10 rounded-lg bg-surface-3"
 				/>
 			</div>
 		</section>
