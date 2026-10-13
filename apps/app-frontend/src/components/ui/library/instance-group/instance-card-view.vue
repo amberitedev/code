@@ -34,6 +34,18 @@ const iconSrc = computed(() =>
 
 const nameRef = ref<HTMLElement | null>(null)
 const versionRef = ref<HTMLElement | null>(null)
+const nameTooltip = ref<string>()
+const versionTooltip = ref<string>()
+
+// Truncation is measured when the pointer enters the card, not while rendering: reading layout in
+// render forces a reflow per card. The card is entered before its text, so the tooltips are ready.
+function measureTruncation() {
+	nameTooltip.value = truncatedTooltip(nameRef, props.instance.name)
+	versionTooltip.value = truncatedTooltip(
+		versionRef,
+		`${props.instance.loader} ${props.instance.game_version}`,
+	)
+}
 </script>
 
 <template>
@@ -46,6 +58,7 @@ const versionRef = ref<HTMLElement | null>(null)
 				selected,
 			'border-surface-4': !selected,
 		}"
+		@mouseenter="measureTruncation"
 	>
 		<div
 			class="relative flex shrink-0 items-center max-w-full overflow-clip"
@@ -76,14 +89,14 @@ const versionRef = ref<HTMLElement | null>(null)
 		>
 			<p
 				ref="nameRef"
-				v-tooltip="truncatedTooltip(nameRef, instance.name)"
+				v-tooltip="nameTooltip"
 				class="m-0 w-full truncate text-base font-semibold leading-5 text-contrast"
 			>
 				{{ instance.name }}
 			</p>
 			<p
 				ref="versionRef"
-				v-tooltip="truncatedTooltip(versionRef, `${instance.loader} ${instance.game_version}`)"
+				v-tooltip="versionTooltip"
 				class="m-0 w-full truncate text-sm font-medium capitalize leading-[18px] text-primary"
 			>
 				{{ instance.loader }} {{ instance.game_version }}
