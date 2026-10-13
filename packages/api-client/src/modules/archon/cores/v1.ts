@@ -268,14 +268,6 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return server
 	}
 
-	/**
-	 * Whether the signed-in account may manage the servers of this Core: it is in the list of Cores
-	 * the account may reach. Today that list holds only the account's own Cores.
-	 */
-	public async canReachCore(coreId: string): Promise<boolean> {
-		return (await this.known()).some((core) => core.id === coreId)
-	}
-
 	private known(): Promise<Archon.Cores.v1.Core[]> {
 		return this.cores ?? this.list()
 	}
