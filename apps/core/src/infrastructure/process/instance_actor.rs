@@ -28,20 +28,23 @@ pub struct InstanceHandle {
 }
 
 /// Spawn an actor task for a running instance.
-/// Returns an `InstanceHandle` to communicate with it.
+/// Register the handle before the actor can observe a fast startup failure.
 pub fn spawn_actor<H: ProcessHandle>(
     instance_id: InstanceId,
     handle: H,
     state: Arc<AppState>,
-) -> InstanceHandle {
+) {
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
     let pid = handle.pid();
+    state.instances.insert(
+        instance_id.clone(),
+        InstanceHandle {
+            cmd_tx,
+            pid,
+            started_at: Instant::now(),
+        },
+    );
     tokio::spawn(run_actor(instance_id, handle, cmd_rx, state));
-    InstanceHandle {
-        cmd_tx,
-        pid,
-        started_at: Instant::now(),
-    }
 }
 
 async fn run_actor<H: ProcessHandle>(
@@ -50,23 +53,28 @@ async fn run_actor<H: ProcessHandle>(
     mut cmd_rx: mpsc::Receiver<ActorCmd>,
     state: Arc<AppState>,
 ) {
-    let Some(mut stdout_rx) = handle.take_stdout_rx() else {
+    let mut stdout_rx = handle.take_stdout_rx().unwrap_or_else(|| {
         error!("No stdout rx for instance {instance_id}");
-        return;
-    };
+        let (tx, rx) = mpsc::channel(1);
+        drop(tx);
+        rx
+    });
 
     info!("Actor started for instance {instance_id}");
     let started_at = Instant::now();
     let mut expected_shutdown = false;
+    let mut ready = false;
+    let mut stop_deadline = None;
+    let mut tick = tokio::time::interval(Duration::from_millis(500));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
-            Some(line) = stdout_rx.recv() => {
+            line = stdout_rx.recv() => {
+                let Some(line) = line else { break; };
                 // Minecraft signals readiness with "Done ("
-                if line.contains("Done (") && matches!(
-                    state.instances.get(&instance_id).map(|_| true),
-                    Some(true)
-                ) {
+                if line.contains("Done (") && !ready && !expected_shutdown {
+                    ready = true;
                     set_status(&state, &instance_id, InstanceStatus::Running).await;
                 }
                 state.broadcaster.send(Event::InstanceOutput {
@@ -84,44 +92,64 @@ async fn run_actor<H: ProcessHandle>(
                     ActorCmd::GracefulStop => {
                         expected_shutdown = true;
                         set_status(&state, &instance_id, InstanceStatus::Stopping).await;
-                        let _ = handle.send_stdin("stop");
-                        let did_exit = timeout(
-                            Duration::from_secs(30),
-                            drain_until_closed(&mut stdout_rx),
-                        ).await;
-                        if did_exit.is_err() {
-                            warn!("Graceful stop timed out for {instance_id}, killing");
+                        // A starting server runs `stop` once it has loaded; the deadline covers
+                        // one that never does.
+                        if handle.send_stdin("stop").is_err() {
                             let _ = handle.kill();
+                            break;
                         }
-                        break;
+                        if stop_deadline.is_none() {
+                            stop_deadline = Some(Instant::now() + Duration::from_secs(30));
+                        }
                     }
                     ActorCmd::Kill => {
                         expected_shutdown = true;
+                        set_status(&state, &instance_id, InstanceStatus::Stopping).await;
                         let _ = handle.kill();
                         break;
                     }
                 }
             }
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            _ = tick.tick() => {
+                if !handle.is_running() { break; }
+                if stop_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    warn!("Graceful stop timed out for {instance_id}, killing");
+                    let _ = handle.kill();
+                    break;
+                }
+            }
             else => break,
-        }
-
-        if !handle.is_running() {
-            break;
         }
     }
 
-    // Determine final status.
-    let final_status = if expected_shutdown {
-        InstanceStatus::Offline
-    } else if handle.is_running() {
+    if handle.is_running() {
         let _ = handle.kill();
-        InstanceStatus::Crashed
+    }
+    // Forward the last stderr lines even if the exit poll won the select.
+    let _ = timeout(Duration::from_secs(1), async {
+        while let Some(line) = stdout_rx.recv().await {
+            state.broadcaster.send(Event::InstanceOutput {
+                instance_id: instance_id.clone(),
+                line,
+            });
+        }
+    })
+    .await;
+    let exit = handle
+        .exit_status()
+        .map(|status| status.to_string())
+        .unwrap_or_else(|| "unknown exit status".to_string());
+    let context = if expected_shutdown {
+        "stopped"
+    } else if ready {
+        "exited"
     } else {
-        InstanceStatus::Offline
+        "exited during startup"
     };
-
-    set_status(&state, &instance_id, final_status).await;
+    state.broadcaster.send(Event::InstanceOutput {
+        instance_id: instance_id.clone(),
+        line: format!("[Core] Server {context} ({exit})"),
+    });
 
     let session_secs = started_at.elapsed().as_secs();
     if session_secs > 0 {
@@ -134,9 +162,17 @@ async fn run_actor<H: ProcessHandle>(
         }
     }
 
+    let operation_lock = state
+        .instance_operation_locks
+        .entry(instance_id.clone())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    let guard = operation_lock.lock().await;
     state.instances.remove(&instance_id);
+    set_status(&state, &instance_id, InstanceStatus::Offline).await;
+    drop(guard);
     crate::application::server_source_service::on_stopped(&state, &instance_id);
-    info!("Actor exited for instance {instance_id}");
+    info!("Actor exited for instance {instance_id}: {context} ({exit})");
 }
 
 async fn set_status(
@@ -144,14 +180,13 @@ async fn set_status(
     id: &InstanceId,
     status: InstanceStatus,
 ) {
-    let _ = state.instance_store.update_status(id, status.clone()).await;
+    if let Err(error) =
+        state.instance_store.update_status(id, status.clone()).await
+    {
+        error!("Failed to persist {status} for instance {id}: {error}");
+    }
     state.broadcaster.send(Event::StatusChanged {
         instance_id: id.clone(),
         status,
     });
-}
-
-/// Drain stdout until the channel closes (process exited).
-async fn drain_until_closed(rx: &mut mpsc::Receiver<String>) {
-    while rx.recv().await.is_some() {}
 }

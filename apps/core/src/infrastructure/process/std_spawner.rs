@@ -44,7 +44,13 @@ impl ProcessHandle for StdHandle {
             .child
             .lock()
             .map_err(|e| SpawnError::Failed(e.to_string()))?;
-        child.kill().map_err(SpawnError::Io)
+        child.kill().map_err(SpawnError::Io)?;
+        child.wait().map_err(SpawnError::Io)?;
+        Ok(())
+    }
+
+    fn exit_status(&self) -> Option<std::process::ExitStatus> {
+        self.child.lock().ok()?.try_wait().ok().flatten()
     }
 
     fn pid(&self) -> Option<u32> {

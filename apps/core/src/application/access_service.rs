@@ -284,6 +284,12 @@ async fn send_invite(
                 ApiError::NotFound("No account has that name".into())
             }
             StatusCode::BAD_REQUEST => ApiError::BadRequest(reason.description),
+            StatusCode::FORBIDDEN => ApiError::Forbidden(
+                "You are not allowed to invite on this Core".into(),
+            ),
+            StatusCode::TOO_MANY_REQUESTS => ApiError::TooManyRequests(
+                "Too many invites, try again in a few minutes".into(),
+            ),
             _ => ApiError::ServiceUnavailable(format!(
                 "Amberite answered {status} to the invite"
             )),

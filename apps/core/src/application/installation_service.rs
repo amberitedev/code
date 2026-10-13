@@ -25,7 +25,6 @@ use crate::{
     },
     infrastructure::minecraft::{
         installer::{read_launch_config, LaunchStyle},
-        java::required_java_version,
         server_jar::download_server_jar,
     },
 };
@@ -186,8 +185,26 @@ pub fn spawn_installation_install(
             return;
         }
 
-        let req_java = required_java_version(&game_version);
-        let java_path = state.java_store.find_by_version(req_java).await;
+        let (req_java, reason) = super::java_service::requirement(
+            &state,
+            &game_version,
+            loader_version.as_deref(),
+        )
+        .await;
+        info!(
+            game_version,
+            java_version = req_java,
+            reason,
+            "Selecting installer Java runtime"
+        );
+        let java_path =
+            match super::java_service::ensure_java(&state, req_java).await {
+                Ok(path) => path,
+                Err(error) => {
+                    finish_failed(&state, &id, &error).await;
+                    return;
+                }
+            };
         let result = download_server_jar(
             &state.http,
             &loader,
@@ -195,7 +212,7 @@ pub fn spawn_installation_install(
             loader_version.as_deref(),
             &dir,
             &state.config.data_dir,
-            java_path.as_deref(),
+            Some(&java_path),
         )
         .await;
 
