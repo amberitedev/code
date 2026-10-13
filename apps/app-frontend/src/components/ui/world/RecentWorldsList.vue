@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { LoaderCircleIcon } from '@modrinth/assets'
 import {
 	Accordion,
 	defineMessages,
@@ -13,6 +12,7 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
+import { useRunningProcesses } from '@/components/ui/library/running-processes'
 import InstanceItem from '@/components/ui/world/InstanceItem.vue'
 import {
 	instanceProtocolQueryOptions,
@@ -26,7 +26,6 @@ import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { handleSevereError } from '@/composables/use-error.js'
 import { trackEvent } from '@/helpers/analytics'
 import { kill, run } from '@/helpers/instance'
-import { get_all } from '@/helpers/process'
 import { traceStartupStep } from '@/helpers/startup-debug'
 import { get_game_versions } from '@/helpers/tags'
 import type { GameInstance } from '@/helpers/types'
@@ -68,6 +67,7 @@ const MAX_JUMP_BACK_IN = 5
 const MAX_NEW_INSTANCES = 3
 const ITEM_DRAG_DISTANCE = 92
 const STORAGE_KEY = 'modrinth-jump-back-in-count'
+const SHOWN_COUNT_STORAGE_KEY = 'amberite-jump-in-shown-count'
 
 const storedVisibleCount = Number.parseInt(localStorage.getItem(STORAGE_KEY) ?? '', 10)
 const visibleItemLimit = ref(
@@ -184,6 +184,8 @@ const recentWorldsQuery = useQuery(
 	queryOptions({
 		...recentWorldsQueryOptions(MAX_JUMP_BACK_IN),
 		enabled: showWorlds,
+		// Kept for the app's lifetime so every return to Home shows the last list at once.
+		gcTime: Infinity,
 	}),
 )
 const loading = computed(() => showWorlds.value && recentWorldsQuery.isLoading.value)
@@ -231,6 +233,22 @@ const jumpBackInItems = computed<JumpBackInItem[]>(() => {
 		})
 		.slice(0, MAX_JUMP_BACK_IN)
 })
+
+// Only the first load after launch has nothing to show. It holds the space the list took last time
+// with static placeholders, so Home does not reflow when the worlds arrive.
+const storedShownCount = Number.parseInt(localStorage.getItem(SHOWN_COUNT_STORAGE_KEY) ?? '', 10)
+const placeholderCount = computed(() =>
+	Number.isFinite(storedShownCount)
+		? Math.max(1, Math.min(storedShownCount, visibleItemLimit.value))
+		: visibleItemCount.value,
+)
+watch(
+	[loading, visibleItemCount],
+	([isLoading, count]) => {
+		if (!isLoading && count > 0) localStorage.setItem(SHOWN_COUNT_STORAGE_KEY, String(count))
+	},
+	{ immediate: true },
+)
 
 function markInstancePlayed(item: InstanceJumpBackInItem) {
 	const lastPlayed = dayjs()
@@ -372,16 +390,7 @@ async function stopInstance(path: string) {
 const currentInstance = ref<string>()
 const currentWorld = ref<string>()
 
-type ProcessMetadata = {
-	uuid: string
-	instance_id: string
-	start_time: string
-}
-
-const processesQuery = useQuery({
-	queryKey: ['processes', 'list'],
-	queryFn: (): Promise<ProcessMetadata[]> => get_all(),
-})
+const processesQuery = useRunningProcesses()
 const runningInstances = computed(() =>
 	(processesQuery.data.value ?? []).map((process) => process.instance_id),
 )
@@ -395,10 +404,7 @@ watch(runningInstances, (running, previous) => {
 		currentWorld.value = undefined
 	}
 })
-useAppEvent('process', () => {
-	void queryClient.invalidateQueries({ queryKey: ['processes', 'list'] }, { cancelRefetch: false })
-	scheduleWorldsRefresh()
-})
+useAppEvent('process', scheduleWorldsRefresh)
 useAppEvent('instance', (event) => {
 	if (event.event !== 'screenshots_updated' && event.event !== 'synced') scheduleWorldsRefresh()
 })
@@ -415,6 +421,7 @@ onUnmounted(() => {
 	<Accordion
 		v-if="loading || jumpBackInItems.length > 0"
 		open-by-default
+		class="[&>.accordion-content]:!transition-none"
 		button-class="group mt-1 mb-3 flex w-fit cursor-pointer items-center border-0 bg-transparent p-0 text-left"
 	>
 		<template #title>
@@ -422,11 +429,18 @@ onUnmounted(() => {
 				{{ formatMessage(messages.jumpIn) }}
 			</span>
 		</template>
-		<div v-if="loading" class="text-center py-4">
-			<LoaderCircleIcon class="mx-auto size-8 animate-spin text-contrast" />
-		</div>
-		<div v-else class="grid-when-huge relative flex w-full flex-col gap-3">
-			<TransitionGroup name="jump-back-in-item">
+		<!-- Collapsing snaps the layout; only the content's opacity animates. -->
+		<div
+			class="grid-when-huge relative flex w-full flex-col gap-3 transition-opacity duration-200 ease-out motion-reduce:transition-none [.accordion-content:not(.open)_&]:opacity-0"
+		>
+			<template v-if="loading">
+				<div
+					v-for="index in placeholderCount"
+					:key="index"
+					class="h-20 rounded-[20px] border border-solid border-surface-4 bg-bg-raised"
+				/>
+			</template>
+			<TransitionGroup v-else name="jump-back-in-item">
 				<div
 					v-for="item in visibleJumpBackInItems"
 					:key="`${item.instance.id}-${item.type === 'world' ? getWorldIdentifier(item.world) : 'instance'}`"
@@ -541,32 +555,26 @@ onUnmounted(() => {
 	overflow: hidden;
 }
 
-.jump-back-in-item-enter-active,
-.jump-back-in-item-leave-active {
+/* The list's height snaps when items come and go; a new item only fades in. */
+.jump-back-in-item-enter-active {
 	transition:
 		opacity 0.25s ease,
-		transform 0.25s ease,
-		height 0.25s ease;
+		transform 0.25s ease;
 }
 
-.jump-back-in-item-enter-from,
-.jump-back-in-item-leave-to {
+.jump-back-in-item-enter-from {
 	opacity: 0;
 	transform: scale(0.98);
-	height: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.jump-back-in-item-enter-active,
-	.jump-back-in-item-leave-active {
+	.jump-back-in-item-enter-active {
 		transition: none;
 	}
 
-	.jump-back-in-item-enter-from,
-	.jump-back-in-item-leave-to {
+	.jump-back-in-item-enter-from {
 		opacity: 1;
 		transform: none;
-		height: 5rem;
 	}
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { StarIcon } from '@modrinth/assets'
 import { ContextMenu, defineMessages, useVIntl } from '@modrinth/ui'
-import { computed, nextTick, onDeactivated, onUnmounted, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onDeactivated, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import Draggable from 'vuedraggable'
 
 import IconEditorModal from '@/components/ui/instance_settings/icon-editor-modal/index.vue'
@@ -62,16 +62,24 @@ const {
 let restoreScrollFrame: number | undefined
 let unmounted = false
 const animationsReady = ref(false)
-watch(libraryGroupsLoaded, async (loaded) => {
-	if (!loaded || animationsReady.value) return
+// Runs once the groups are rendered: straight after mount when they come from cache, so the
+// restored position is in the first painted frame. Cards are added late in that frame, once their
+// grid has been measured, so animations stay off until the frame after it.
+async function restoreScroll() {
 	await nextTick()
 	if (unmounted) return
+	document.querySelector('.app-viewport')?.scrollTo(0, libraryScrollTop.value)
 	restoreScrollFrame = requestAnimationFrame(() => {
-		document.querySelector('.app-viewport')?.scrollTo(0, libraryScrollTop.value)
 		restoreScrollFrame = requestAnimationFrame(() => {
 			animationsReady.value = true
 		})
 	})
+}
+onMounted(() => {
+	if (libraryGroupsLoaded.value) void restoreScroll()
+})
+watch(libraryGroupsLoaded, (loaded) => {
+	if (loaded) void restoreScroll()
 })
 
 const hasActiveFilters = computed(() =>
