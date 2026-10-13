@@ -241,7 +241,7 @@
 			<ServerOnboardingPanelPage v-if="isOnboarding" :browse-modpacks="handleBrowseModpacks" />
 
 			<template v-else>
-				<div class="server-stagger-item -mb-3" @pointerover="prefetchTab">
+				<div class="server-stagger-item -mb-3">
 					<NavTabs
 						:links="navLinks"
 						replace
@@ -846,6 +846,24 @@ watch(serverData, (data) => {
 	log('serverData changed', !!data)
 })
 
+// Content and backups are already loaded by this layout; these two tabs fetch on their own, so
+// hovering their link warms the first request.
+function prefetchFiles() {
+	void queryClient.prefetchQuery({
+		queryKey: ['files', props.serverId, '/'],
+		queryFn: () => client.kyros.files_v0.listDirectory('/', 1, 2000),
+		staleTime: PANEL_STALE_MS,
+	})
+}
+
+function prefetchAccess() {
+	void queryClient.prefetchQuery({
+		queryKey: ['servers', 'users', 'v1', props.serverId],
+		queryFn: () => client.archon.server_users_v1.list(props.serverId),
+		staleTime: PANEL_STALE_MS,
+	})
+}
+
 const navLinks = computed<Tab[]>(() => [
 	{
 		label: 'Overview',
@@ -864,6 +882,7 @@ const navLinks = computed<Tab[]>(() => [
 		href: `/hosting/manage/${props.serverId}/files`,
 		icon: FolderOpenIcon,
 		subpages: [],
+		onHover: prefetchFiles,
 	},
 	{
 		label: 'Backups',
@@ -876,32 +895,10 @@ const navLinks = computed<Tab[]>(() => [
 		href: `/hosting/manage/${props.serverId}/access`,
 		icon: UsersIcon,
 		subpages: [],
+		onHover: prefetchAccess,
 	},
 	...props.additionalTabs,
 ])
-
-// Content and backups are already loaded by this layout; these two tabs fetch on their own.
-const tabPrefetches: Record<string, () => Promise<void>> = {
-	files: () =>
-		queryClient.prefetchQuery({
-			queryKey: ['files', props.serverId, '/'],
-			queryFn: () => client.kyros.files_v0.listDirectory('/', 1, 2000),
-			staleTime: PANEL_STALE_MS,
-		}),
-	access: () =>
-		queryClient.prefetchQuery({
-			queryKey: ['servers', 'users', 'v1', props.serverId],
-			queryFn: () => client.archon.server_users_v1.list(props.serverId),
-			staleTime: PANEL_STALE_MS,
-		}),
-}
-
-/** Warms a tab's first request while the pointer is over its link. */
-function prefetchTab(event: PointerEvent) {
-	const link = event.target instanceof Element ? event.target.closest('a') : null
-	const tab = link?.getAttribute('href')?.split(/[?#]/)[0].split('/').pop()
-	if (tab) void tabPrefetches[tab]?.()
-}
 
 const filteredNotices = computed(
 	() => serverData.value?.notices?.filter((n) => n.level !== 'survey') ?? [],
