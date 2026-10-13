@@ -839,7 +839,8 @@ async function onSkinSaved(options: { applied: boolean; skin?: Skin; previousSki
 
 async function loadCurrentUser() {
 	try {
-		const [defaultId, allAccounts] = await Promise.all([get_default_user(), users()])
+		const [defaultId, allAccounts]: [string | undefined, Awaited<ReturnType<typeof users>>] =
+			await Promise.all([get_default_user(), users()])
 		currentUserId.value = defaultId
 		currentUser.value = allAccounts.find((acc) => acc.profile.id === defaultId)
 	} catch (e) {
