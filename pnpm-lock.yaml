@@ -980,9 +980,6 @@ importers:
       motion-v:
         specifier: ^2.2.1
         version: 2.2.1(@vueuse/core@11.3.0(vue@3.5.43(typescript@5.9.3)))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vue@3.5.43(typescript@5.9.3))
-      obscenity:
-        specifier: ^0.4.6
-        version: 0.4.6
       overlayscrollbars:
         specifier: ^2.15.1
         version: 2.15.1
@@ -8661,10 +8658,6 @@ packages:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
     engines: {node: '>= 0.4'}
 
-  obscenity@0.4.6:
-    resolution: {integrity: sha512-pHk7kNN7j3L3zGhhGnwxjvXIGsPpLrcZl2r58fqWh/V/rH6b/dafscj2sMmAY+A/9/wPsocLmimgGk2DKeKsFQ==}
-    engines: {node: '>=18.0.0'}
-
   obug@2.1.1:
     resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
 
@@ -15210,7 +15203,7 @@ snapshots:
       '@oxc-project/runtime': 0.143.0
       '@oxc-project/types': 0.143.0
       lightningcss: 1.33.0
-      postcss: 8.5.8
+      postcss: 8.5.29
       yuku-codegen: 0.5.48
       yuku-parser: 0.5.48
     optionalDependencies:
@@ -15236,7 +15229,7 @@ snapshots:
       '@oxc-project/runtime': 0.143.0
       '@oxc-project/types': 0.143.0
       lightningcss: 1.33.0
-      postcss: 8.5.8
+      postcss: 8.5.29
       yuku-codegen: 0.5.48
       yuku-parser: 0.5.48
     optionalDependencies:
@@ -15262,7 +15255,7 @@ snapshots:
       '@oxc-project/runtime': 0.143.0
       '@oxc-project/types': 0.143.0
       lightningcss: 1.33.0
-      postcss: 8.5.8
+      postcss: 8.5.29
       yuku-codegen: 0.5.48
       yuku-parser: 0.5.48
     optionalDependencies:
@@ -15288,7 +15281,7 @@ snapshots:
       '@oxc-project/runtime': 0.143.0
       '@oxc-project/types': 0.143.0
       lightningcss: 1.33.0
-      postcss: 8.5.8
+      postcss: 8.5.29
       yuku-codegen: 0.5.48
       yuku-parser: 0.5.48
     optionalDependencies:
@@ -15314,7 +15307,7 @@ snapshots:
       '@oxc-project/runtime': 0.143.0
       '@oxc-project/types': 0.143.0
       lightningcss: 1.33.0
-      postcss: 8.5.8
+      postcss: 8.5.29
       yuku-codegen: 0.5.48
       yuku-parser: 0.5.48
     optionalDependencies:
@@ -19575,8 +19568,6 @@ snapshots:
   object-hash@3.0.0: {}
 
   object-inspect@1.13.4: {}
-
-  obscenity@0.4.6: {}
 
   obug@2.1.1: {}
 
