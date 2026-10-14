@@ -7,6 +7,8 @@
 //! otherwise says which command to run. Hand-written nftables or iptables rules are not read.
 //! macOS: the firewall is off by default; when it is on, Core says where to allow the server.
 
+#![allow(dead_code)] // Wired in step 2: `copal install` opens the firewall once.
+
 use std::path::Path;
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -118,7 +120,7 @@ mod platform {
     use serde::Deserialize;
     use tokio::process::Command;
 
-    use super::{rule_covers, rule_ports, Firewall};
+    use super::{Firewall, rule_covers, rule_ports};
 
     const RULE: &str = "Amberite Core";
     /// Windows closes an unanswered administrator prompt by itself after about two minutes.
@@ -319,10 +321,14 @@ mod platform {
                         == Some(true);
                 if !opened {
                     return Firewall::Blocked {
-                        found: format!("firewalld is on and does not allow port {port}"),
+                        found: format!(
+                            "firewalld is on and does not allow port {port}"
+                        ),
                         fix: vec![
                             format!("sudo firewall-cmd --add-port={spec}"),
-                            format!("sudo firewall-cmd --permanent --add-port={spec}"),
+                            format!(
+                                "sudo firewall-cmd --permanent --add-port={spec}"
+                            ),
                         ],
                     };
                 }

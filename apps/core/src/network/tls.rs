@@ -1,38 +1,33 @@
 //! HTTPS for the Core API with a certificate the Core makes itself.
 //!
 //! There is no domain and no certificate authority. The App learns the certificate's SHA-256
-//! fingerprint at sign-in and trusts only that. The same port still answers plain HTTP for callers
-//! on this computer or the local network, so local tools keep working.
+//! fingerprint through the backend and trusts only that. There is no plain HTTP listener; the CLI
+//! reaches Core over the local socket (step 2).
 
-use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use axum::Router;
-use color_eyre::eyre::{eyre, Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
     service::TowerToHyperService,
 };
 use rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     ServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use sha2::{Digest, Sha256};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream},
-};
+use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 use tracing::debug;
 
-use super::is_private;
+use crate::daemon::paths::Paths;
 
-/// First byte of every TLS connection: a handshake record.
-const TLS_HANDSHAKE: u8 = 0x16;
-/// How long a new connection may take to send its first byte and finish the TLS handshake.
+/// How long a new connection may take to finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// This Core's certificate, made once and kept in the data directory.
+/// This Core's certificate: self-signed, made once on first start and never renewed.
 pub struct Identity {
     config: Arc<ServerConfig>,
     /// SHA-256 of the certificate, lowercase hex. This is what the App pins.
@@ -40,10 +35,10 @@ pub struct Identity {
 }
 
 impl Identity {
-    /// Load the certificate from `data_dir`, making it on first start.
-    pub fn load_or_create(data_dir: &Path) -> Result<Self> {
-        let cert_path = data_dir.join("core-cert.der");
-        let key_path = data_dir.join("core-key.der");
+    /// Load the certificate from `db/`, making it on first start.
+    pub fn load_or_create(paths: &Paths) -> Result<Self> {
+        let cert_path = paths.tls_cert();
+        let key_path = paths.tls_key();
         let (cert, key) =
             match (std::fs::read(&cert_path), std::fs::read(&key_path)) {
                 (Ok(cert), Ok(key)) => (cert, key),
@@ -89,9 +84,7 @@ fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     std::io::Write::write_all(&mut options.open(path)?, contents)
 }
 
-/// Serve `router` on `listener` until the process ends. A connection that opens with a TLS
-/// handshake is served over HTTPS. Anything else is plain HTTP, accepted only from this computer
-/// or a private network address.
+/// Serve `router` over HTTPS on `listener` until the process ends.
 pub async fn serve(listener: TcpListener, router: Router, identity: &Identity) {
     let acceptor = TlsAcceptor::from(Arc::clone(&identity.config));
     loop {
@@ -102,8 +95,7 @@ pub async fn serve(listener: TcpListener, router: Router, identity: &Identity) {
         let acceptor = acceptor.clone();
         let router = router.clone();
         tokio::spawn(async move {
-            if let Err(error) = connection(stream, peer, acceptor, router).await
-            {
+            if let Err(error) = connection(stream, acceptor, router).await {
                 debug!(%peer, %error, "connection closed");
             }
         });
@@ -112,32 +104,12 @@ pub async fn serve(listener: TcpListener, router: Router, identity: &Identity) {
 
 async fn connection(
     stream: TcpStream,
-    peer: SocketAddr,
     acceptor: TlsAcceptor,
     router: Router,
 ) -> Result<()> {
-    let mut first = [0u8; 1];
-    let read = tokio::time::timeout(HANDSHAKE_TIMEOUT, stream.peek(&mut first))
-        .await??;
-    if read == 0 {
-        return Ok(());
-    }
-    if first[0] == TLS_HANDSHAKE {
-        let stream =
-            tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream))
-                .await??;
-        http(stream, router).await
-    } else if is_private(peer.ip()) {
-        http(stream, router).await
-    } else {
-        Err(eyre!("plain HTTP is only served on the local network"))
-    }
-}
-
-async fn http<S>(stream: S, router: Router) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
+    let stream =
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream))
+            .await??;
     Builder::new(TokioExecutor::new())
         .serve_connection_with_upgrades(
             TokioIo::new(stream),

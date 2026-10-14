@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/app",
   "apps/app-playground",
+  "apps/core",
   "apps/daedalus_client",
   "apps/labrinth",
   "packages/amberite-lib",

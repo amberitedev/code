@@ -1,128 +1,144 @@
--- Core's schema. Written with IF NOT EXISTS so a database created by the older, longer
--- migration history adopts it and keeps its servers (see `infrastructure::db::migrate`).
+-- Core's schema. Until `core-rewrite` merges into `main` this file may be edited freely; from the
+-- first release on, shipped migrations are never edited again.
+-- Times are unix seconds. Ids are UUID strings unless noted.
 
-CREATE TABLE IF NOT EXISTS core_identity (
+-- This Core. One row.
+CREATE TABLE core (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    core_id TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL
+    -- The audience of every ticket the backend signs for this Core.
+    core_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    -- Set at pairing. The owner has every role on every server and is never in `access`.
+    owner_user_id TEXT,
+    -- Core's own key for its calls to the backend (`amc_...`), issued at pairing.
+    backend_key TEXT
 );
 
--- Temporary until pairing exists: the first account to connect owns this Core.
-CREATE TABLE IF NOT EXISTS core_owner (
+-- The pairing code this Core is showing, shared by every copal process on this data folder. One row.
+CREATE TABLE pairing (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    user_id TEXT NOT NULL
+    code TEXT NOT NULL,
+    -- The backend key that works once the code is approved.
+    key TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    poll_interval INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS java_installations (
-    version INTEGER PRIMARY KEY,
-    path TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS server_installations (
+CREATE TABLE servers (
     id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
     game_version TEXT NOT NULL,
-    loader TEXT NOT NULL,
+    loader TEXT NOT NULL CHECK (loader IN ('vanilla', 'fabric', 'quilt', 'forge', 'neoforge', 'paper')),
     loader_version TEXT,
-    status TEXT NOT NULL DEFAULT 'installing',
-    error TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    port INTEGER NOT NULL UNIQUE,
+    memory_mb INTEGER NOT NULL,
+    -- Advanced override; null means the Java Core manages for this version.
+    java_path TEXT
 );
 
-CREATE TABLE IF NOT EXISTS instances (
+-- Every time a server ran. The live process identity (pid, start time, boot id) is in
+-- `runs/<server>/`; this is the history.
+CREATE TABLE runs (
+    -- The run id the shim records.
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    -- Null while running.
+    outcome TEXT CHECK (outcome IN ('stopped', 'crashed', 'killed')),
+    exit_code INTEGER,
+    -- The last console lines of a crashed run.
+    last_lines TEXT
+);
+CREATE INDEX runs_server ON runs (server_id, started_at);
+
+-- Names and avatars as the last ticket for each user carried them, for access lists and the
+-- activity log.
+CREATE TABLE users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    game_version TEXT,
-    loader TEXT,
-    port INTEGER,
-    memory_min INTEGER,
-    memory_max INTEGER,
-    status TEXT DEFAULT 'offline',
-    data_dir TEXT,
-    loader_version TEXT,
-    java_version INTEGER,
-    updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00',
-    install_status TEXT NOT NULL DEFAULT 'ready',
-    jvm_args TEXT,
-    server_args TEXT,
-    total_uptime_seconds INTEGER NOT NULL DEFAULT 0,
-    installation_id TEXT,
-    path TEXT
+    avatar_url TEXT,
+    updated_at INTEGER NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_path ON instances(path);
+-- Who may do what on each server. The only list that decides anything. Invite means granted.
+CREATE TABLE access (
+    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (server_id, user_id)
+);
+CREATE INDEX access_user ON access (user_id);
 
-CREATE TABLE IF NOT EXISTS mods (
+-- One per device per Core. Only a hash of the token is stored.
+CREATE TABLE sessions (
+    -- Public id, for listing and revoking. Not the token.
     id TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
-    filename TEXT NOT NULL,
-    display_name TEXT,
-    modrinth_project_id TEXT,
-    modrinth_version_id TEXT,
-    version_number TEXT,
-    client_side TEXT,
-    server_side TEXT,
-    sha512 TEXT,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    installed_at TEXT NOT NULL,
-    UNIQUE(instance_id, filename)
+    -- SHA-256 of the token.
+    token_hash BLOB NOT NULL UNIQUE,
+    user_id TEXT NOT NULL,
+    device_name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    -- Written at most once an hour. A session ends 30 days after this.
+    last_used_at INTEGER NOT NULL,
+    -- One year after creation, whatever the use.
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX sessions_user ON sessions (user_id);
+
+-- One-time ids of tickets already used. Kept until the ticket would have expired anyway.
+CREATE TABLE used_tickets (
+    jti TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS backups (
+CREATE TABLE activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    -- Who did it. Null for the local CLI, which is the owner.
+    user_id TEXT,
+    -- Null for actions on the Core itself.
+    server_id TEXT REFERENCES servers (id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    -- JSON with the details of the action.
+    detail TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX activity_server ON activity (server_id, at);
+
+-- Calls Core still owes the backend, retried with backoff until it answers.
+CREATE TABLE backend_owed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- JSON of `api::backend::OwedCall`.
+    call TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL
+);
+
+CREATE TABLE backups (
     id TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     name TEXT NOT NULL,
+    -- Pre-update backups have their own retention, so they do not evict scheduled ones.
+    kind TEXT NOT NULL CHECK (kind IN ('manual', 'scheduled', 'pre_update')),
+    state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'done', 'failed')),
     size_bytes INTEGER NOT NULL DEFAULT 0,
-    locked INTEGER NOT NULL DEFAULT 0,
-    trigger TEXT NOT NULL DEFAULT 'manual',
-    created_at TEXT NOT NULL,
-    hot INTEGER NOT NULL DEFAULT 0,
-    consistency TEXT NOT NULL DEFAULT 'offline'
+    created_at INTEGER NOT NULL,
+    error TEXT
 );
+CREATE INDEX backups_server ON backups (server_id, created_at);
 
-CREATE TABLE IF NOT EXISTS server_sources (
-    instance_id TEXT PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
-    -- ServerSource JSON.
-    source_json TEXT NOT NULL,
-    desired_version TEXT NOT NULL,
-    installed_version TEXT,
-    -- Version whose files are downloaded and verified in Core's staging directory.
-    staged_version TEXT,
-    state TEXT NOT NULL,
-    error TEXT,
-    -- Stop a running server, apply, and start it again.
-    restart_requested INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS server_source_files (
-    instance_id TEXT NOT NULL REFERENCES server_sources(instance_id) ON DELETE CASCADE,
-    -- Path relative to the instance data dir, e.g. `mods/a.jar` or `world/datapacks/b.zip`.
+-- Content is the files on disk; this records where each tracked file came from.
+CREATE TABLE content_files (
+    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
+    -- Relative to the server folder, with forward slashes: `mods/a.jar`, `config/b.toml`.
     path TEXT NOT NULL,
-    kind TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('pack', 'added')),
+    -- SHA-1 of the file as Core placed it. A different hash on disk means the owner edited it.
     sha1 TEXT NOT NULL,
-    client_only INTEGER NOT NULL,
     project_id TEXT,
     version_id TEXT,
-    PRIMARY KEY (instance_id, path)
+    PRIMARY KEY (server_id, path)
 );
-
--- Tables of the removed second API, left behind in databases from the older history.
-DROP TABLE IF EXISTS sync_events;
-DROP TABLE IF EXISTS sync_snapshots;
-DROP TABLE IF EXISTS sync_profiles;
-DROP TABLE IF EXISTS scheduled_tasks;
-DROP TABLE IF EXISTS backup_schedules;
-DROP TABLE IF EXISTS instance_members;
-DROP TABLE IF EXISTS activity_log;
-DROP TABLE IF EXISTS core_invitations;
-DROP TABLE IF EXISTS core_role_settings;
-DROP TABLE IF EXISTS core_roles;
-DROP TABLE IF EXISTS core_group_bans;
-DROP TABLE IF EXISTS core_members;
-DROP TABLE IF EXISTS core_metadata;
-DROP TABLE IF EXISTS core_config;
-DROP TABLE IF EXISTS events;
-DROP TABLE IF EXISTS paseto_key;
-DROP TABLE IF EXISTS users;

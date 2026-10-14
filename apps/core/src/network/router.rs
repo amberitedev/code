@@ -4,20 +4,22 @@
 //! most common and is tried last. Every mapping is TCP and has a finite lease, so one that is never
 //! removed (a crash) still goes away by itself.
 
+#![allow(dead_code)] // Wired in step 2: port mappings that belong to servers.
+
 use std::{
-    fmt,
+    fmt::{self, Write as _},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
     time::Duration,
 };
 
 use crab_nat::{
-    natpmp, GatewayAddress, InternetProtocol, PortMappingOptions, TimeoutConfig,
+    GatewayAddress, InternetProtocol, PortMappingOptions, TimeoutConfig, natpmp,
 };
 use igd_next::{
-    aio::tokio::{search_gateway, Tokio},
-    aio::Gateway,
     AddPortError, PortMappingProtocol, SearchOptions,
+    aio::Gateway,
+    aio::tokio::{Tokio, search_gateway},
 };
 
 /// How long the router keeps a mapping without hearing from Core again.
@@ -116,12 +118,11 @@ impl Router {
     /// The address the router has on its internet side. A private or shared address here means
     /// the router is not the last hop to the internet.
     pub async fn wan_ip(&self) -> Option<IpAddr> {
-        if let Some((gateway, Protocol::NatPmp)) = self.pmp {
-            if let Ok(ip) =
+        if let Some((gateway, Protocol::NatPmp)) = self.pmp
+            && let Ok(ip) =
                 natpmp::external_address(gateway, Some(PMP_TIMEOUT)).await
-            {
-                return Some(IpAddr::V4(ip));
-            }
+        {
+            return Some(IpAddr::V4(ip));
         }
         match &self.upnp {
             Some(upnp) => upnp.get_external_ip().await.ok(),
@@ -159,7 +160,7 @@ impl Router {
                         internal,
                         external: mapping.external_port().get(),
                         pmp: Some(mapping),
-                    })
+                    });
                 }
                 Err(error) => refusal = format!("{protocol}: {error}"),
             }
@@ -171,13 +172,13 @@ impl Router {
                         internal,
                         external,
                         pmp: None,
-                    })
+                    });
                 }
                 Err(error) => {
                     if !refusal.is_empty() {
                         refusal.push_str("; ");
                     }
-                    refusal.push_str(&format!("UPnP: {error}"));
+                    let _ = write!(refusal, "UPnP: {error}");
                 }
             }
         }
