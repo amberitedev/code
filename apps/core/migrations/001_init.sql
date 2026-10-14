@@ -28,8 +28,10 @@ CREATE TABLE servers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    game_version TEXT NOT NULL,
-    loader TEXT NOT NULL CHECK (loader IN ('vanilla', 'fabric', 'quilt', 'forge', 'neoforge', 'paper')),
+    -- Null until content is installed: the App creates a server first, then installs into it.
+    -- Starting a server with either null is refused.
+    game_version TEXT,
+    loader TEXT CHECK (loader IN ('vanilla', 'fabric', 'quilt', 'forge', 'neoforge', 'paper')),
     loader_version TEXT,
     port INTEGER NOT NULL UNIQUE,
     memory_mb INTEGER NOT NULL,
@@ -99,8 +101,9 @@ CREATE TABLE activity (
     at INTEGER NOT NULL,
     -- Who did it. Null for the local CLI, which is the owner.
     user_id TEXT,
-    -- Null for actions on the Core itself.
-    server_id TEXT REFERENCES servers (id) ON DELETE CASCADE,
+    -- Null for actions on the Core itself. No foreign key: a server's history, including its
+    -- deletion, outlives the server.
+    server_id TEXT,
     action TEXT NOT NULL,
     -- JSON with the details of the action.
     detail TEXT NOT NULL DEFAULT '{}'
