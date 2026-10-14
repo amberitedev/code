@@ -8,6 +8,7 @@
 mod access;
 mod activity;
 mod backend;
+mod backups;
 mod content;
 mod error;
 mod events;
