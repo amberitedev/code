@@ -1,174 +1,49 @@
 [package]
 name = "copal"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.85.0"
-description = "Copal — Minecraft server management backend"
-
-# Isolated from root workspace to keep Core dependencies independent.
-[workspace]
+edition.workspace = true
+rust-version.workspace = true
+description = "Copal, Amberite's self-hosted Minecraft server manager"
+repository.workspace = true
 
 [dependencies]
-# Force bundled SQLite so libsqlite3-sys compiles from C source (no libclang/LLVM needed on Windows)
-libsqlite3-sys = { version = "0.32", features = ["bundled"] }
-# ============================================================
-# TIER 2 - DATABASE
-# ============================================================
-sqlx = { version = "=0.9.0-alpha.1", features = [
-  "chrono",
-  "json",
-  "runtime-tokio",
-  "sqlite",
-  "tls-rustls",
-  "uuid",
-] }
-
-# ============================================================
-# TIER 2 - WEB FRAMEWORK
-# ============================================================
-axum = { version = "0.7.9", features = ["macros", "multipart", "ws"] }
-axum-macros = "0.4.2"
-axum-server = { version = "0.7.3", features = ["tls-rustls"] }
-headers = "0.4.0"
-# Use ring crypto backend to avoid aws-lc-sys CMake build issues on Windows
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-tower = "0.4"
-tower-http = { version = "0.5.2", features = ["cors", "fs", "trace"] }
-
-async-trait = "0.1"
-futures = "0.3"
-futures-util = "0.3"
-# ============================================================
-# TIER 1 - ASYNC RUNTIME
-# ============================================================
-tokio = { version = "1.47", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-util = "0.7"
-
-# ============================================================
-# TIER 2 - SERIALIZATION
-# ============================================================
-serde = { version = "1.0.228", features = ["derive"] }
-serde-aux = "4.5"
-serde_json = "1.0.145"
-toml = "0.8"
-ts-rs = "10.0"
-
-ansi_term = "0.12"
-dashmap = "6.1"
-dotenvy = "0.15"
-flate2 = "1.0"
-fs_extra = "1.3"
-fs3 = "0.5"
-home = "0.5"
-indicatif = "0.17"
-inquire = "0.9"
-open = "5"
-port_scanner = "0.1"
-sanitize-filename = "0.5"
-# ============================================================
-# TIER 1/2 - SYSTEM & IO
-# ============================================================
-sysinfo = "0.33"
-tar = "0.4"
-tempfile = "3.15"
-walkdir = "2.5"
-which = "7.0"
-whoami = "1.5"
-zip = "2.2"
-
-color-eyre = "0.6"
-# ============================================================
-# TIER 2 - OBSERVABILITY
-# ============================================================
-tracing = "0.1"
-tracing-appender = "0.2"
-tracing-error = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# ============================================================
-# TIER 1 - CRYPTO & SECURITY
-# ============================================================
-hex = "0.4"
-
-# ============================================================
-# TIER 2 - DATA & PARSING
-# ============================================================
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive"] }
-clap_complete = "4.5"
-fancy-regex = "0.14"
-indexmap = "2.7"
-lazy_static = "1.5"
-once_cell = "1.20"
-rcon = "0.6"
-ringbuffer = "0.15"
-semver = { version = "1.0", features = ["serde"] }
-time = "0.3"
-url = "2.5"
-
-# ============================================================
-# TIER 1 - HTTP
-# ============================================================
-reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls", "stream"] }
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
-
-derive_more = "0.99"
-# ============================================================
-# TIER 2/3 - OTHER
-# ============================================================
-thiserror = "1.0"
-
-# ============================================================
-# UUID
-# ============================================================
-uuid = { version = "1.11", features = ["serde", "v4"] }
-
-# ============================================================
-# MODPACK HANDLING
-# ============================================================
-async_zip = { version = "0.0.17", features = ["deflate", "tokio", "tokio-fs"] }
-bytes = "1.9"
-sha1 = "0.10"
-sha2 = "0.10"
-
-# ============================================================
-# MINECRAFT METADATA (shared content-addressed library store)
-# ============================================================
-# Local path crate (Modrinth's daedalus) — parses Mojang/loader version metadata
-# and provides merge_partial_version + get_path_from_artifact (maven pathing).
-daedalus = { path = "../../packages/daedalus" }
-# dunce::canonicalize avoids Windows \\?\ UNC prefixes that break the JVM -cp.
-dunce = "1.0"
-
-# ============================================================
-# REACHING CORE FROM OUTSIDE (port forwarding, own certificate)
-# ============================================================
+axum = "0.8.4"
+bytes = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+clap = { workspace = true, features = ["derive"] }
+color-eyre = { workspace = true }
 crab_nat = "0.8.1"
-hyper-util = { version = "0.1.21", features = ["http1", "http2", "server-auto", "service", "tokio"] }
+daedalus = { workspace = true }
+dunce = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+hyper-util = { workspace = true, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 netdev = "0.46.3"
 rcgen = "0.14.7"
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+# The ring backend avoids aws-lc-sys's CMake build on Windows.
+rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true, features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+toml = { workspace = true }
+tower-http = { version = "0.6.6", features = ["trace"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+ts-rs = { workspace = true, features = ["uuid-impl"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
+walkdir = "2.5"
+zip = { workspace = true }
 
-[dependencies.openssl]
-version = "0.10"
-features = ["vendored"]
-optional = true
+[target.'cfg(target_os = "linux")'.dependencies]
+whoami = { workspace = true }
 
-[dev-dependencies]
-tokio = { version = "1.47", features = ["full"] }
-
-# ============================================================
-# FEATURES
-# ============================================================
-[features]
-vendored-openssl = ["dep:openssl"]
-
-[profile.dev]
-debug = 1
-incremental = true
-
-# Deps don't need debug info — cuts compile time significantly for heavy crates like deno/v8
-[profile.dev.package."*"]
-debug = false
+[lints]
+workspace = true
