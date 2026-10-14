@@ -102,10 +102,13 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 
 - Use the smallest proof that the change works: `vp test run <files>` for tests you touched, targeted
   lint, and typecheck only for the workspace you changed.
-- **Do not build unless the developer asks.** No `cargo build`, `cargo check`, `vp build`, or app
-  bundles. Amberite is dev-only; `vp run dev` compiles what it runs.
-- **Do not run repo-wide checks.** No `vp check`, `vp run -r test`, or `vp run -r typecheck` unless
-  the developer asks. CI owns the full suite.
+- You usually do not need to build or compile. CI checks every push, and `vp run dev` compiles what
+  it runs. When you do need the compiler, such as for a large Rust change, run `cargo check` scoped
+  to the crate you changed (`-p <crate>` or that crate's directory). Release builds (`cargo build
+  --release`, `vp build`) and app bundles are slow and rarely tell you anything a check would not.
+- You usually do not need repo-wide checks (`vp check`, `vp run -r test`, `vp run -r typecheck`).
+  CI runs the full suite. Run one when your change really reaches across the repo, and prefer the
+  narrowest command that covers it.
 - Do not add backend tests by default. Add them when the developer asks or when the behavior is
   stable enough that a focused regression test is useful.
 - Upon request, user-visible App changes get one integrated pass against the real App and real
