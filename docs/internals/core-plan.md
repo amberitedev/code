@@ -1,211 +1,322 @@
-# Core plan
+# Core design
 
-What Core (`apps/core`) needs to become a real replacement for paid Minecraft hosting, in the order
-we intend to do it. Based on a full read-only diagnostic on 2026-10-13: 102 findings across seven
-subsystems, with the 19 serious ones re-checked against the source (15 confirmed, 4 partly right,
-none refuted).
+The target design for the standalone Core (`apps/core`, Copal): what it looks like when the rewrite
+on the `core-rewrite` branch is done. It replaces the earlier phased plan. Everything here is built
+in one pass, in the order at the end, and merged to `main` when it is finished.
 
-Order of work: architecture first, then the bugs that sit on top of it, then features.
+Out of scope: the Core built into the App (later), the App's UI and product logic (designed
+separately; Core exposes the capabilities and the App decides how to present them), and a tunnel
+for users behind CGNAT (deferred).
 
-## Decided
+Based on a full read-only diagnostic on 2026-10-13 (102 findings, the 19 serious ones re-checked
+against the source) and the design questions answered on 2026-10-14.
 
-- Keep Rust, Axum, Tokio, and SQLite.
-- Forge and NeoForge keep using the vendor installer.
-- No Docker.
-- No shared storage for mods across servers.
-- Servers run detached from Core and are adopted again after a restart (the full process redesign).
-- Core checks who a user is itself, from a short-lived token the backend signs for that one Core.
-- Windows is a required target. Core already runs on Windows in development; what is missing is a
-  release build, an installer, and a way to keep it running.
-- Core joins the root Cargo workspace.
+## Decisions
 
-## Deferred
+- Keep Rust, Axum (upgraded to 0.8), Tokio, and SQLite. Core joins the root Cargo workspace.
+- Standalone Core runs as a system service on every OS, including Windows. Install needs admin
+  once; nothing runs as admin after that.
+- Servers run as a separate, unprivileged OS account, so a malicious mod cannot reach the owner's
+  files or Core. No Docker.
+- Servers run detached from Core and keep running when Core stops, crashes, or updates.
+- Forge and NeoForge keep the vendor installer. Vanilla, Fabric, and Quilt use the shared Daedalus
+  store. Paper stays: it fits dedicated SMP-style servers.
+- Java is managed by Core only, with a per-server custom path override.
+- No shared storage for mods across servers, no sleep-when-empty, no RCON.
+- The owner accepts the Minecraft EULA once; Core does not start servers before that.
+- Identity comes from the backend; sessions belong to Core. No ban handling: the owner's access list
+  is the only thing that decides who gets in.
+- Backups live on the Core machine. Off-machine backups can come later.
+- The CLI is powerful but does not mirror the App: machine tasks and control, not content
+  management.
 
-- Tunnel fallback for users behind CGNAT or a locked router. Not part of this plan.
+## Layout
 
-## Where Core stands
+One crate, organized by domain instead of by layer:
 
-| Subsystem | State | Why |
-|---|---|---|
-| Install and launch | Shaky | Installs are sound for Vanilla, Fabric, Quilt, Paper. The process layer has no supervision and Forge has real bugs. |
-| Content sync | Mostly solid | The pack sync engine is the best part of Core. It overwrites owner edits and has a second, overlapping mod system beside it. |
-| API | Functional | The main loop works. Several panel features are stubs or return fake data. |
-| Files and backups | Half-built | Path safety is good. Backups while running cannot work, and there is no schedule or retention. |
-| Auth and access | Needs redesign | Permission checks are solid. The way users prove who they are is not. |
-| Networking | Sound design | Thorough when a direct connection is possible. No fallback when it is not. |
-| Foundation | Needs rework | Will not start without hand-set config, Linux only, update path has bugs, almost no tests. |
+```
+src/
+  main.rs        CLI entry; `copal run` starts the daemon
+  daemon/        startup, config, service integration, shutdown
+  servers/       server records, lifecycle, shim, console, restarts
+  installs/      Daedalus store, Forge/NeoForge installer, Paper, Java
+  content/       pack sync, files on disk, origins
+  backups/
+  access/        tickets, sessions, roles, local token, activity log
+  network/       UPnP, TLS, reachability
+  update/        self-updater
+  api/           Axum routes, one file per resource, typed request/response structs
+  db/            pool, migrations, queries
+```
 
-## Phase 1: architecture
+- No ports layer or trait-per-store. Code calls the database and the OS directly. Tests use a real
+  in-memory SQLite database.
+- Every API response is a typed struct, so a mismatch with `packages/api-client` is a compile error
+  on the Rust side.
+- One module tree, declared in `main.rs`.
+- `sqlx` 0.8.6 like the rest of the repo. Migrations restart from one clean `001`. Nothing is
+  deployed, so existing dev data is wiped. Shipped migrations are never edited again.
+- Unused crates and dead install paths are deleted.
 
-Each item is one pull request or a short series. They are ordered so later ones build on earlier
-ones.
+## Running as a service
 
-### 1.1 Foundation cleanup
+- `copal install` runs once as admin and:
+  - creates two OS accounts: `copal`, which runs Core, and `copal-servers`, which runs every server;
+  - grants the one narrow permission Core needs to start servers as `copal-servers` (see below);
+  - registers Core as a service running as `copal`: systemd on Linux, a Windows Service, a launchd
+    daemon on macOS. The OS starts Core at boot and restarts it if it crashes.
+- `copal uninstall` removes the service, the accounts, and, on request, the data.
+- `copal run` runs Core in the foreground, for development and manual use.
+- A lock file keeps a second copy from starting.
+- Every setting has a default, so Core starts with no configuration. A config file is optional.
+- Logs go to a rotating file in the data folder as well as the console.
 
-No behavior change. Makes everything after it easier to read and review.
+## Server processes
 
-- Move `sqlx` from `0.9.0-alpha.1` to the stable `0.8.6` the rest of the repo uses. Core uses no
-  0.9-only API; the pin came in with the first import and was never explained.
-- Delete unused crates and the dead install paths (`install_quilt`, `resolve_vanilla`,
-  `resolve_fabric`).
-- Delete the ports layer: three store traits and the spawner traits, each with one implementation,
-  plus a mock no test uses. About 100 queries already bypass them.
-- Delete `presentation/handlers/`. No route reaches it. `hosting/` calls its functions by building
-  fake request objects.
-- Split `hosting/http.rs` by resource and replace hand-built JSON responses with typed structs, so a
-  mismatch with the client contract is a compile error.
-- Stop declaring the module tree in both `lib.rs` and `main.rs`, which compiles everything twice.
-- Reset migrations to a clean set. Nothing is deployed, so remove the adoption block and the
-  edited-in-place first migration, and never edit a shipped migration again.
-- Join the root workspace, with a release profile for Core that does not abort on
-  panic.
+Today a server is a child of Core, controlled through stdin and stdout pipes. It dies with Core, a
+crash is recorded as a normal stop, and a frozen server looks healthy.
 
-### 1.2 Process lifecycle
+**The shim.** Core does not start Java directly. It starts a small supervisor, `copal shim`, the
+same binary in a different mode, fully detached from Core and running as `copal-servers`. The shim
+starts Java as its own child and owns its console: it writes stdout and stderr to `console.log` in
+the server folder, passes commands from Core to Java's stdin over a local socket only Core can open,
+and when Java exits it writes the exit code and time to a status file. A non-parent process cannot
+read another process's exit code on Linux, and output from before Minecraft opens its own log is
+otherwise lost. The shim solves both, the same way Podman's conmon and containerd's shim do.
 
-The largest change, and the one most features wait on.
+**Isolation.** Every server runs as `copal-servers`, which can write only to server folders and
+read the shared `meta` and `java` stores. It cannot read the owner's files or Core's database and
+sessions. All servers share the account, so a malicious mod on one server could touch another
+server's folder on the same Core; backups cover that. How Core starts the shim as that account
+without admin:
 
-Today a server is a child process of Core, controlled through its stdin and stdout pipes. That is
-why servers cannot survive a Core restart, why a crash is recorded as a normal stop, and why Core
-cannot tell a frozen server from a healthy one.
+- Windows: install creates the account with a random password that only `copal` can read, and Core
+  uses `CreateProcessWithLogonW`, which needs no special privilege. A job object per server caps
+  memory and is not set to kill on close.
+- Linux and macOS: install adds a sudoers rule allowing `copal` to run only `copal shim` as
+  `copal-servers`.
 
-Proposed:
+**Surviving Core.**
 
-- Start Java detached from Core, and record its process id and start time in the server's folder.
-- Read the console by following the server's own log file instead of a pipe.
-- Send commands over RCON, which Core turns on for every server with a random password and its own
-  port, bound to the local machine only.
-- On startup, adopt any server whose recorded process is still alive instead of starting a second
-  copy.
-- Record how each run ended: stopped, crashed (with exit code), or killed.
+- On Linux, Core's unit uses `KillMode=process`, so stopping or updating Core never kills shims.
+- On Windows, shims must not sit in a job that dies with the service.
+- On startup, Core reads each server's pid file and status file and adopts every server that is
+  still running instead of starting a second copy.
+- Both are verified on real machines at the build checkpoint, not assumed.
 
-This one change is what makes these possible: surviving restarts and updates, crash auto-restart,
-freeze detection, player counts, and backups while running.
+**Console and commands.** Core follows `console.log` for output and sends commands through the
+shim. RCON is never turned on: no extra ports, no passwords, no edits to `server.properties`.
 
-### 1.3 Auth
+**How a run ended.** Every run is recorded as stopped, crashed (with exit code and the last console
+lines), or killed.
 
-Today the App sends each user's full account session token to whichever Core they open. The person
-running that Core is a friend, not a trusted party, and can replay the token to act as that user on
-the backend. Core also asks the backend to vouch for every token, so it is unusable whenever the
-backend is unreachable, even for the owner on their own network.
+**Stopping.** `stop` through the shim, then wait for the process to exit, with no fixed timeout. The owner
+can force-kill.
 
-There are two different tokens, and only one is a problem. Core has its own key, issued by the
-backend when the owner pairs it, which it uses to report its address. That stays. The problem is the
-user's account session, which the App attaches to every request it sends to a Core.
+**Crash restart.** On by default, a per-server setting. After 3 crashes in 10 minutes Core stops
+trying and leaves the crash report.
 
-Proposed: before talking to a Core, the App asks the backend for a short-lived token that is valid
-for that one Core and carries just the user's id, name, and avatar. The backend signs it. Core
-fetches the backend's public key once and checks the signature itself, with no backend call per
-request. This touches `apps/backend`, `packages/api-client`, and Core.
+**Freeze detection.** Core sends a cheap command through the shim on an interval and watches for
+its output. If the server stops answering for a while, it is marked frozen and the API offers a
+restart. Players online come from join and leave lines in the console, checked with `list`.
 
-Limit: the App still needs the backend to get a token, so a Core with no internet for longer than
-the token's lifetime is still locked. Short backend outages stop mattering; long offline use is not
-solved here.
+**Restarts.** Two per-server settings, shown by the App under performance:
 
-Same pass:
+- Scheduled restarts: a daily or weekly time, with an in-game countdown.
+- Smart restarts (experimental): restart only when nobody is online, after the server has run past
+  an uptime threshold, preferring the hour it is usually empty, learned from join and leave history.
+  Later signals feed the same rule: heap still in use after a full GC, rising over days, read from a
+  per-server GC log; and tick time where the loader reports it (Paper, Forge, NeoForge, vanilla
+  `/tick query` from 1.20.3).
 
-- Stop wiping every collaborator when Core gets a single 401 from the backend.
-- Say plainly in the invite screen that an editor can run code on the host machine, because
-  uploading a mod is running code.
-- Hide the RCON password from viewers.
+**Memory and flags.** A small `-Xms`, the chosen `-Xmx`, and G1 settings that hand unused memory back
+to the system, so an idle server shrinks. Tuned flags are the default; they are visible and
+resettable per server. Memory can be changed after creation. Core reports the machine's RAM and
+warns when servers together are set above it.
 
-### 1.4 One content model
+## Installs
 
-Core has two systems that both answer "which mods are on this server": the `mods` table for mods
-added on the server, and the source files table for mods from the linked pack. They use different
-hashes and separate folder scans and are joined by filename.
+- **Vanilla, Fabric, Quilt:** the shared Daedalus store in `{data}/meta/` (libraries, server jars,
+  merged version JSON), installed once and reused by every server on the same version.
+- **Forge, NeoForge:** the vendor installer. Fix old Forge (before 1.17) jar detection, and use
+  `run.bat` on Windows.
+- **Paper:** keep it, and support updating to a newer Paper build instead of pinning the one from
+  install time.
+- Repairing a shared install never removes files while a server is using it.
+- Every download has a timeout and retries, and installs report real progress over the API.
+- Server and loader updates are a supported operation, with a backup first.
 
-Proposed: one read path. Content is the files on disk plus optional metadata, with the origin (pack
-or server) recorded per file.
+**Java.** Core downloads the Java major version each Minecraft version needs (Azul Zulu, checked by
+sha256) into `{data}/java/<major>`, shared by every server. On startup it checks for a newer patch.
+System Java detection is removed. A server can set a custom Java path as an advanced override.
 
-### 1.5 Config and platforms
+## Content
 
-- Give every setting a default so Core starts with no configuration. Today it refuses to start
-  without five environment variables, and the release ships no config file.
-- Replace the Unix admin socket with the existing HTTPS API plus a local token file, so the CLI
-  works on Windows.
-- Build releases for Windows x64, macOS arm64, Linux x64, and Linux arm64. Only Linux x64 is built
-  today.
-- Start with the user's session on Windows and macOS instead of a full system service.
-- Trim the CLI to what the product needs. `uninstall` currently removes nothing.
+One model: content is the files on disk, plus optional metadata, with the origin of each file
+recorded (from the pack, or added on the server). The separate `mods` table and its second scan go
+away.
 
-### 1.6 One backup path
+- Core tracks which files the owner edited after the pack put them there and exposes that list. A
+  pack update leaves edited files alone until the App says to keep or replace them.
+- Pack overrides never replace server-owned files: `server.properties`, `ops.json`, the whitelist,
+  ban lists, and the world.
+- Adding a mod checks what the pack already provides before installing dependencies.
+- A failed pack update can always be cleared.
+- Core reports available updates for the pack and for mods.
 
-Two backup APIs exist with different locking and can run over each other. Keep the queued one.
+## Backups
 
-Back up the world and a short list of settings files instead of the whole server folder. Today every
-backup includes all jars and libraries, and a restore reverts `server.properties`.
+One queued backup engine. The second backup API is removed.
 
-## Phase 2: bugs
+- A backup is the world plus a short list of settings files, not the server folder.
+- Backups run while the server is up: `save-off`, `save-all flush`, copy, `save-on` through the
+  shim.
+- Each server has a schedule and retention. Default: daily, plus before every pack or loader update,
+  keeping the last 7. The API is general; it gets matched to the App's UI once that exists.
+- Core checks free disk space first and cleans up after a failed backup.
+- Backups and the current world can be downloaded through an authenticated route.
 
-Confirmed bugs that are not fixed as a side effect of phase 1.
+## Access
 
-| Bug | Effect |
-|---|---|
-| Console reader stops on the first non-UTF-8 line | The server freezes while Core shows it as running. Likely on Windows with accented names or chat. Goes away with 1.2. |
-| Old Forge (before 1.17) looks for `forge-server.jar` | Every install of 1.16.5, 1.12.2, and similar fails. The installer never writes that name. |
-| Forge launch detection reads `run.sh` first, even on Windows | Wrong args file on Windows (suspected, not yet confirmed). |
-| Repair wipes a shared install while another server is using it | A running server on the same build can crash. |
-| Graceful stop kills after a fixed 30 seconds | Large worlds can be cut off mid-save. |
-| Adding a mod ignores mods the pack already provides | A duplicate dependency is installed and the server will not boot. Goes away with 1.4. |
-| Pack update overwrites files the owner edited | Config changes made on the server are silently reverted. |
-| Pack overrides can replace `server.properties`, `ops.json`, the world | A client export can clobber server-owned files. |
-| A failed pack update can stick in "failed" | The owner cannot clear it. |
-| Downloads have no timeout | A hung download blocks pack sync forever. |
-| Backup download link in the panel cannot authenticate | Backups cannot be downloaded. |
-| Datapack buttons always return an error | Listed with controls that never work. |
-| Stats stream stops on any disk error | CPU and memory graphs go blank until reconnect. |
-| Stable release channel picks the repo's latest release | The installer can fetch a Modrinth App release instead of Core. |
-| Beta and alpha update channels never resolve | `update --check` checks nothing. |
-| Linux service runs as a user that cannot open the firewall | Core cannot open its own ports on ufw or firewalld. |
-| Core's API port is forwarded to the internet with no off switch | Exposure for users who only want LAN play. |
+**Roles:** owner, editor, viewer. Editors can upload files and mods, which means running code on the
+host machine; the App says so when inviting.
 
-## Phase 3: features
+**Identity.** The backend vouches for who a user is; Core does its own checking.
 
-What makes Core feel finished. Grouped by what the user gets.
+1. The App asks the backend for a ticket for one Core. The ticket is a JWT signed with Ed25519,
+   carrying the user id, name, avatar, and the Core id as its audience, and it expires after 5
+   minutes. A ticket for one Core is useless on another Core and on the backend.
+2. Core verifies the ticket with the backend's public keys, cached by key id and fetched again when
+   an unknown id shows up. No backend call per request.
+3. Core creates a session for that device: a random 256-bit token, stored only as a hash, tied to
+   the user and a device name.
 
-**Servers that stay up** (needs 1.2)
+**Sessions.**
 
-- Restart a crashed server automatically and show why it died.
-- Detect a frozen server and offer to restart it.
-- Servers keep running through a Core update.
-- Scheduled restarts.
+- A session expires after 30 days without use.
+- The token rotates on every renewal; the old one stops working. If a rotated-out token is ever
+  used, the session is treated as stolen and killed.
+- Renewal does not need the backend. The backend is only needed the first time a device connects to
+  a Core, and for dangerous actions.
+- Removing someone from the access list ends all their sessions immediately. The owner can list
+  sessions per user and device and revoke one. A user can sign out of a Core.
+- Sessions are only accepted over Core's TLS, with the certificate pinned by the App.
+- Token comparisons are constant-time, and the sign-in route is rate-limited.
 
-**Performance**
+**Dangerous actions** need a ticket from the last few minutes, or the local CLI: changing access,
+transferring ownership, deleting a server, and updating Core remotely. A stolen session can run
+servers but cannot add people or delete anything.
 
-- Tuned Java flags by default, shown and resettable in startup settings.
-- Memory suggested from the machine's RAM, with a warning when servers together exceed it.
-- Change memory after creation. The API accepts it today but the panel never sends it.
-- Sleep when empty: stop a server with nobody online and start it when someone joins.
+**Local access.** The CLI talks to Core over a Unix socket (Linux, macOS) or a named pipe (Windows)
+that only the owner's OS account and `copal` can open. The OS checks who connects, so there is no
+token to steal, and browsers cannot reach it. The same Axum routes serve both the socket and HTTPS;
+a request over the socket is the owner. This is how Tailscale's CLI talks to its daemon. The CLI
+works fully with the backend down. The localhost HTTPS listener checks `Host` and rejects browser
+`Origin` headers, against DNS rebinding.
 
-**Backups** (needs 1.2 and 1.6)
+**Core's own key** (`amc_...`, issued at pairing, used to report Core's address) stays. A single
+401 from the backend no longer wipes collaborators.
 
-- Backups while the server is running.
-- Scheduled backups with retention.
-- Check free disk space first and clean up a failed backup.
-- Download a world.
+**Activity log.** Access changes, sessions created and revoked, sensitive reads, and server actions,
+with who did them.
 
-**Installs and content**
+## Network
 
-- Real install progress and download retries.
-- Update indicators for mods and the pack. The check is a stub today.
-- Hard reset.
-- Server and loader updates. Paper is pinned to whichever build was current at install.
-- Ask about the Minecraft EULA instead of accepting it silently.
+- The API is reachable from the internet. Core forwards its API port and each server's game port
+  with UPnP, as today, and opens the local firewall where it can. The service account must be able
+  to do this on Linux (ufw, firewalld).
+- IPv6 alongside IPv4.
+- When a server cannot be reached from outside, Core reports the problem and the single next step
+  over the API, not only in its terminal.
+- Core checks its public IP every minute and reports a change to the backend right away, with each
+  server's port. Joining through the App always uses the current address.
 
-**Knowing what is happening** (needs 1.2)
+**Stable addresses (backend, once the project domain exists).** The backend writes one SRV record
+per server, `_minecraft._tcp.<random>.<domain>`, pointing at `<ip-with-dashes>.sslip.io` and the
+server's port, and updates it when Core reports a new IP. Minecraft Java follows SRV records, so a
+saved address keeps working and needs no port. Browsers ignore SRV records and the domain never has
+an address record for a user's machine, so nobody can host a page on it and its cookies and
+reputation stay safe. Names are random so they cannot be guessed to find someone's home IP. Nothing
+in Core changes when this lands.
 
-- Player count and player list.
-- Logs written to a file with rotation, reachable from the App.
-- A complete activity log, including access changes and sensitive reads.
+## Updates
 
-**Reaching the server**
+A self-updater that feels native, because it is one of the most important parts.
 
-- Show the connection problem and the single next step in the App, not only in Core's terminal.
-- A stable address per server, so a changing home IP does not break saved servers.
-- IPv6.
+- Releases are built for Windows x64, macOS arm64, Linux x64, and Linux arm64. Each release has one
+  manifest listing every file's SHA-256, signed with Ed25519 (minisign format). The updater verifies
+  the signature, not only HTTPS.
+- Each version is installed in its own folder (`versions/<version>/`), owned by `copal`. A small
+  launcher points at the active one. Updating is download, verify, repoint, restart the service. No
+  running file is ever overwritten, so Windows' locked-exe problem does not arise. This is how T3
+  Code and Claude Code update.
+- Channels: stable, beta, alpha. Each channel resolves to Copal releases only, never a Modrinth App
+  release.
+- Auto-update is on by default; update on request is a setting. Updates can be triggered remotely
+  from the App (a dangerous action) or from the CLI.
+- Servers keep running through an update.
+- The previous version is kept. If the new version fails to start, the launcher points back at the
+  old one. No other automatic rollback.
+
+## CLI
+
+Powerful, but not a second App. It covers the machine and control of servers, and works with the
+backend down. Content management (mods, packs) stays in the App.
+
+- Core: `install`, `uninstall`, `run`, `status`, `logs`, `update` (check, apply, channel, rollback),
+  `eula`
+- Servers: `list`, `start`, `stop`, `kill`, `restart`, `console` (attach, send), `memory`, `java`,
+  `restarts`
+- Backups: `list`, `create`, `restore`, `schedule`
+- Access: `list`, `role`, `remove`, `sessions`, `revoke`
+
+It talks to Core over the local socket or pipe described under Access, so it works the same on
+Windows.
+
+## Bugs the design must close
+
+Each of these is fixed by the design above; listed so none gets lost.
+
+- The console reader freezes on the first non-UTF-8 line.
+- Old Forge looks for `forge-server.jar`, which the installer never writes.
+- Forge launch detection reads `run.sh` first on Windows.
+- Repair wipes a shared install while another server uses it.
+- Graceful stop kills after a fixed 30 seconds.
+- Adding a mod ignores mods the pack already provides.
+- Pack updates overwrite owner edits; overrides can replace `server.properties`, `ops.json`, the
+  world.
+- A failed pack update sticks in "failed".
+- Downloads have no timeout.
+- The backup download link cannot authenticate.
+- Datapack buttons always return an error.
+- The stats stream stops on any disk error.
+- The stable channel can pick a Modrinth App release; beta and alpha never resolve.
+- The Linux service cannot open the firewall.
+- `uninstall` removes nothing.
+
+## Build order
+
+Built in this order, in small commits that each compile. Real servers are started at the marked
+checkpoints, not only at the end.
+
+1. **Foundation:** workspace, `sqlx` 0.8.6, Axum 0.8, new layout, clean migrations, config
+   defaults, typed API structs, dead code removed.
+2. **Service and processes:** `copal install` (accounts, permission, service) and `run`, the shim,
+   isolation, adoption, console, run outcomes, stopping, the local socket. *Checkpoint: start,
+   restart Core, adopt, stop, on Windows and Linux; a server cannot read the owner's files.*
+3. **Access:** tickets and the key endpoint in `apps/backend`, sessions in Core, the ticket flow in
+   `packages/api-client`, dangerous actions, activity log. Merge `main` in first.
+4. **Installs and content:** Java, Forge and Paper fixes, downloads, the single content model, edited
+   files. *Checkpoint: one server per loader, plus a pack update with an edited config.*
+5. **Backups:** engine, hot backups, schedule, retention, download.
+6. **Updater and releases:** four targets, signing, channels, rollback. *Checkpoint: update Core
+   with servers running.*
+7. **CLI:** the full command set.
+8. **Reliability and insight:** crash restart, freeze detection, players, memory and flags,
+   scheduled and smart restarts, EULA, reachability reporting, IPv6.
 
 ## Testing
 
-Coverage of the database, migrations, CLI, and install paths is close to zero. Add focused tests as
-each phase 1 item lands, against an in-memory SQLite database, rather than one large testing pass at
-the end.
+Focused tests as each step lands, against an in-memory SQLite database: migrations, access and
+sessions (rotation, reuse detection, revocation, dangerous actions), content origins and edited
+files, backup retention, and run outcome recording.
