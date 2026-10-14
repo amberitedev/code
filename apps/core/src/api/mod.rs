@@ -10,10 +10,13 @@ mod activity;
 mod backend;
 mod content;
 mod error;
+mod events;
 mod files;
 mod health;
 mod properties;
+mod servers;
 mod sessions;
+mod startup;
 #[cfg(test)]
 mod typescript;
 
