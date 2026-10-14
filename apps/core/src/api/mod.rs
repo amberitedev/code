@@ -5,7 +5,14 @@
 //! Amberite has (access, sessions, activity, backend sync) generate their TypeScript from these
 //! structs with `ts-rs`; see `typescript`.
 
+mod access;
+mod activity;
+mod backend;
+mod error;
 mod health;
+mod sessions;
+#[cfg(test)]
+mod typescript;
 
 use std::sync::Arc;
 
