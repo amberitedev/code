@@ -35,25 +35,32 @@ pub struct Identity {
 }
 
 impl Identity {
-    /// Load the certificate from `db/`, making it on first start.
+    /// Load the certificate from `db/`, making it only when neither file exists. Every App pins
+    /// this certificate, so anything else that goes wrong is an error, never a new identity.
     pub fn load_or_create(paths: &Paths) -> Result<Self> {
         let cert_path = paths.tls_cert();
         let key_path = paths.tls_key();
-        let (cert, key) =
-            match (std::fs::read(&cert_path), std::fs::read(&key_path)) {
-                (Ok(cert), Ok(key)) => (cert, key),
-                _ => {
-                    let made = rcgen::generate_simple_self_signed(vec![
-                        "amberite-core".to_string(),
-                    ])
-                    .wrap_err("could not make the Core certificate")?;
-                    let cert = made.cert.der().to_vec();
-                    let key = made.signing_key.serialize_der();
-                    write_private(&key_path, &key)?;
-                    std::fs::write(&cert_path, &cert)?;
-                    (cert, key)
-                }
-            };
+        let (cert, key) = match (read(&cert_path)?, read(&key_path)?) {
+            (Some(cert), Some(key)) => (cert, key),
+            (None, None) => {
+                let made = rcgen::generate_simple_self_signed(vec![
+                    "amberite-core".to_string(),
+                ])
+                .wrap_err("could not make the Core certificate")?;
+                let cert = made.cert.der().to_vec();
+                let key = made.signing_key.serialize_der();
+                // Key first: a crash between the writes leaves no certificate without its key.
+                write_private(&key_path, &key).wrap_err_with(|| {
+                    format!("could not write {}", key_path.display())
+                })?;
+                std::fs::write(&cert_path, &cert).wrap_err_with(|| {
+                    format!("could not write {}", cert_path.display())
+                })?;
+                (cert, key)
+            }
+            (Some(_), None) => return Err(half_identity(&key_path)),
+            (None, Some(_)) => return Err(half_identity(&cert_path)),
+        };
         let fingerprint = hex::encode(Sha256::digest(&cert));
         let config = ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
@@ -73,6 +80,24 @@ impl Identity {
             fingerprint,
         })
     }
+}
+
+/// The file's contents, or `None` when it does not exist.
+fn read(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error)
+            .wrap_err_with(|| format!("could not read {}", path.display())),
+    }
+}
+
+fn half_identity(missing: &Path) -> color_eyre::Report {
+    eyre!(
+        "{} is missing but the rest of Core's TLS identity is there. Restore it from a backup; \
+         making a new identity would break every App that trusts this Core",
+        missing.display()
+    )
 }
 
 /// Write a file only its owner may read. Windows keeps the data directory's own permissions.
@@ -117,4 +142,36 @@ async fn connection(
         )
         .await
         .map_err(|error| eyre!("{error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paths() -> (tempfile::TempDir, Paths) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        std::fs::create_dir_all(paths.tls_cert().parent().unwrap()).unwrap();
+        (dir, paths)
+    }
+
+    #[test]
+    fn the_identity_is_made_once_and_kept() {
+        let (_dir, paths) = paths();
+        let first = Identity::load_or_create(&paths).unwrap();
+        let again = Identity::load_or_create(&paths).unwrap();
+        assert_eq!(first.fingerprint, again.fingerprint);
+    }
+
+    #[test]
+    fn half_an_identity_is_an_error_not_a_new_one() {
+        let (_dir, paths) = paths();
+        Identity::load_or_create(&paths).unwrap();
+        let cert = std::fs::read(paths.tls_cert()).unwrap();
+        std::fs::remove_file(paths.tls_key()).unwrap();
+        let error = Identity::load_or_create(&paths).err().unwrap();
+        assert!(error.to_string().contains("tls-key.der"));
+        assert_eq!(std::fs::read(paths.tls_cert()).unwrap(), cert);
+        assert!(!paths.tls_key().exists());
+    }
 }
