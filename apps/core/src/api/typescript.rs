@@ -1,13 +1,10 @@
 //! TypeScript for the Amberite-only routes, generated with `ts-rs` into one file in
 //! `packages/api-client`, so a shape that differs between Core and the App is a type error.
 //!
-//! `cargo test -p copal` fails when the file is out of date. Regenerate it with
-//! `cargo test -p copal -- --ignored write_typescript`.
-//!
-//! The repo's pre-commit hook reformats the file, so the check compares a hash of the raw output,
-//! written in the file's header, instead of the text.
+//! `cargo test -p copal` fails when the file differs from what the structs generate. Regenerate it
+//! with `pnpm --filter @amberite/core types`. The file is in `.prettierignore` so the formatter
+//! leaves it exactly as generated.
 
-use sha2::{Digest, Sha256};
 use ts_rs::{Config, TS};
 
 use super::{access, activity, backend, error, sessions};
@@ -50,33 +47,28 @@ fn declarations() -> String {
     .join("\n")
 }
 
-fn header(declarations: &str) -> String {
-    let hash = hex::encode(Sha256::digest(declarations));
+/// The whole file, as `write_typescript` writes it.
+fn file() -> String {
     format!(
         "// Generated from apps/core by ts-rs. Do not edit.\n\
-         // Regenerate: cargo test -p copal -- --ignored write_typescript\n\
-         // ts-rs output sha256: {hash}\n"
+         // Regenerate: pnpm --filter @amberite/core types\n\n{}",
+        declarations()
     )
 }
 
 #[test]
 fn typescript_is_up_to_date() {
-    let declarations = declarations();
     let written = std::fs::read_to_string(PATH).unwrap_or_default();
     assert!(
-        written
-            .replace("\r\n", "\n")
-            .starts_with(&header(&declarations)),
-        "{PATH} is out of date. Run: cargo test -p copal -- --ignored write_typescript"
+        written.replace("\r\n", "\n") == file(),
+        "{PATH} is out of date. Run: pnpm --filter @amberite/core types"
     );
 }
 
 #[test]
 #[ignore = "writes the generated file; run on purpose"]
 fn write_typescript() {
-    let declarations = declarations();
-    let file = format!("{}\n{declarations}", header(&declarations));
     std::fs::create_dir_all(std::path::Path::new(PATH).parent().unwrap())
         .unwrap();
-    std::fs::write(PATH, file).unwrap();
+    std::fs::write(PATH, file()).unwrap();
 }
