@@ -65,10 +65,12 @@ pub enum InstallError {
 ///   installation dir and writes a `Jar`/`ArgsFile` launch style.
 /// * Paper → a single URL-based jar written into the installation dir.
 ///
-/// `data_dir` is the Core data root used to locate the shared store; it differs
-/// from `installation_dir` (`{data_dir}/installations/{id}`), which only holds
-/// the per-build `launch.json`. For installer-based loaders the Java process is
-/// invoked, so `java_path` should be provided (falls back to `"java"`).
+/// `data_dir` is the Core data root used to locate the shared store.
+/// `installation_dir` receives the build's `launch.json`; step 4 places it, since
+/// the data folder table has no shared `installations/` folder and the Forge
+/// installer may write only inside a server folder. For installer-based loaders
+/// the Java process is invoked, so `java_path` should be provided (falls back to
+/// `"java"`).
 pub async fn install(
     http: &reqwest::Client,
     loader: &ModLoader,
@@ -128,7 +130,7 @@ pub async fn install(
                 .await?;
             tokio::fs::write(&dest, &bytes).await?;
             info!("Server JAR written to {}", dest.display());
-            // Write launch.json so instance_status_service knows how to start this jar.
+            // launch.json is how the server is started from this jar.
             write_launch_config(
                 installation_dir,
                 &LaunchConfig {

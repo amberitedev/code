@@ -1,9 +1,9 @@
 [package]
 name = "copal"
 version = "0.1.0"
-description = "Copal, Amberite's self-hosted Minecraft server manager"
 edition.workspace = true
 rust-version.workspace = true
+description = "Copal, Amberite's self-hosted Minecraft server manager"
 repository.workspace = true
 
 [dependencies]

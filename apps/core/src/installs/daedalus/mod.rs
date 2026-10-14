@@ -1,16 +1,14 @@
 //! Global content-addressed shared store for Minecraft server installs.
 //!
 //! This is the server-side port of app-lib's (Theseus) shared client storage.
-//! Where the legacy installer downloaded an opaque blob into each instance's
-//! directory, the shared store downloads each game version's libraries and
-//! server jar ONCE into `{data_dir}/meta/` and launches every build with
+//! The shared store downloads each game version's libraries and server jar ONCE into `{data_dir}/meta/` and launches every build with
 //! absolute classpaths into that single tree. A library or server jar fetched
 //! for one build is reused by every other build that needs it.
 //!
 //! Only loaders whose server launch daedalus models directly are handled here —
 //! Vanilla, Fabric, and Quilt. Forge/NeoForge (BootstrapLauncher module path,
-//! generated args files, SIDE=server processors) and Paper (URL jar) stay on the
-//! vendor installer/flavours path in `installer.rs`/`flavours.rs`.
+//! generated args files, SIDE=server processors) use the vendor installer in
+//! `forge.rs`, and Paper its single jar in `paper.rs`.
 //!
 //! `install_shared` returns the absolute, instance-independent launch tokens
 //! (the portion of the JVM command between the memory flags and the user's extra
