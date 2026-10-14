@@ -42,5 +42,8 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 walkdir = "2.5"
 zip = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+whoami = { workspace = true }
+
 [lints]
 workspace = true

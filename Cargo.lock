@@ -2652,6 +2652,7 @@ dependencies = [
  "ts-rs",
  "uuid 1.23.3",
  "walkdir",
+ "whoami",
  "zip 6.0.0",
 ]
 
