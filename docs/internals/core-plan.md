@@ -500,9 +500,10 @@ separate worktrees.
   config changes go straight onto the branch.
 - Backend and `api-client` changes in step 3 go to `main` as their own PRs and are deployed, so the
   new Core is tested against the real backend and the final merge is mostly Rust.
-- Gate per PR: CI green, every CodeRabbit finding fixed or dismissed with a written reason, and a
-  read by the agent driving the rewrite. GPT-6.1 Sol gives a second-opinion review on three PRs
-  only: service and processes, access, and the updater.
+- Gate per PR: CI green, every CodeRabbit finding fixed or dismissed with a written reason, a
+  second-opinion review by GPT-6.1 Sol run as a subagent on every PR, and a read by the agent
+  driving the rewrite. Sol's findings are judged, not merged: each one is taken or rejected with a
+  reason.
 - Parity checkpoint: after step 8 the owner installs the new Core on their own machine and uses it
   for a few days. That is the acceptance test.
 - Final: one PR switches the App to tickets and merges `core-rewrite` into `main`. Until then the
