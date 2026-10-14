@@ -1,0 +1,5 @@
+# CodeRabbit only reviews pull requests into the default branch unless told otherwise.
+# The Core rewrite lands as pull requests into core-rewrite, so review those too.
+reviews:
+  base_branches:
+    - core-rewrite

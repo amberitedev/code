@@ -177,8 +177,9 @@ How it works (`apps/core/src/network`):
   number first and takes whatever the router grants; if a port is refused, or granted but fails
   the outside test, it tries up to two other outside ports.
 - Mappings have a one hour lease and are renewed every five minutes, which also restores them
-  after a router restart. They are removed when a server stops and when Core exits. Every minute
-  Core checks for a changed home address or a different network and starts over when it sees one.
+  after a router restart. They are removed when a server stops, never when Core exits, because
+  servers outlive Core. Every few minutes Core checks for a changed home address or a different
+  network and starts over when it sees one.
 - Firewall: on Windows one inbound rule, "Amberite Core", covers Core's port and server ports
   25565 to 25664. Core asks for administrator rights once with the normal Windows prompt and never
   again, whatever the answer; after a refusal it prints the command to run. On Linux Core handles
