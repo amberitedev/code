@@ -8,8 +8,11 @@
 mod access;
 mod activity;
 mod backend;
+mod content;
 mod error;
+mod files;
 mod health;
+mod properties;
 mod sessions;
 #[cfg(test)]
 mod typescript;
