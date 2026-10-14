@@ -496,8 +496,9 @@ separate worktrees.
 ## How it ships
 
 - `core-rewrite` is the integration branch. Each step is one PR into it from a short branch, so
-  CodeRabbit reviews the code (`.coderabbit.yaml` lists `core-rewrite` as a base branch). Docs and
-  config changes go straight onto the branch.
+  CodeRabbit reviews the code (`.coderabbit.yaml` lists `core-rewrite` as a base branch).
+  CodeRabbit skips any PR over 100 changed files, so a step that would pass that splits into two
+  PRs. Docs and config changes go straight onto the branch.
 - Backend and `api-client` changes in step 3 go to `main` as their own PRs and are deployed, so the
   new Core is tested against the real backend and the final merge is mostly Rust.
 - Gate per PR: CI green, every CodeRabbit finding fixed or dismissed with a written reason, a
