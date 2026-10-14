@@ -85,49 +85,100 @@ export function formatVersionsForDisplay(
 	return getVersionGroupsForDisplay(gameVersions, allGameVersions).map((group) => group.label)
 }
 
-export function getVersionGroupsForDisplay(
-	gameVersions: string[],
-	allGameVersions: GameVersionTag[],
-): VersionDisplayGroup[] {
-	const inputVersions = gameVersions.slice()
-	const allVersions = allGameVersions.slice()
+type GameVersionLookup = {
+	length: number
+	indices: Record<string, number>
+	releaseDates: Map<string, string>
+	latestSnapshotDates: Map<string, number>
+	allSnapshots: GameVersionTag[]
+	allLegacy: GameVersionTag[]
+	legacyVersions: Set<string>
+	allReleasesGrouped: VersionRange[]
+}
 
+// The game version list is long and the same array is passed for every project and version on a
+// page, so everything derived from it alone is built once per array.
+const gameVersionLookups = new WeakMap<GameVersionTag[], GameVersionLookup>()
+
+function getGameVersionLookup(allGameVersions: GameVersionTag[]): GameVersionLookup {
+	const cached = gameVersionLookups.get(allGameVersions)
+	if (cached && cached.length === allGameVersions.length) {
+		return cached
+	}
+
+	const allVersions = allGameVersions.slice()
 	const allSnapshots = allVersions.filter((version) => version.version_type === 'snapshot')
 	const allReleases = allVersions.filter((version) => version.version_type === 'release')
 	const allLegacy = allVersions.filter(
 		(version) => version.version_type !== 'snapshot' && version.version_type !== 'release',
 	)
 
-	{
-		const indices = allVersions.reduce(
-			(map, gameVersion, index) => {
-				map[gameVersion.version] = index
-				return map
-			},
-			{} as Record<string, number>,
-		)
-		inputVersions.sort((a, b) => indices[a] - indices[b])
+	const indices: Record<string, number> = {}
+	allVersions.forEach((gameVersion, index) => {
+		indices[gameVersion.version] = index
+	})
+
+	const releaseDates = new Map<string, string>()
+	for (const release of allReleases) {
+		if (!releaseDates.has(release.version)) {
+			releaseDates.set(release.version, release.date)
+		}
 	}
 
-	const releaseVersions = inputVersions.filter((projVer) =>
-		allReleases.some((gameVer) => gameVer.version === projVer),
-	)
+	const latestSnapshotDates = new Map<string, number>()
+	for (const snapshot of allSnapshots) {
+		const date = Date.parse(snapshot.date)
+		const latest = latestSnapshotDates.get(snapshot.version) ?? -Infinity
+		latestSnapshotDates.set(snapshot.version, date > latest ? date : latest)
+	}
 
-	const dateString = allReleases.find((version) => version.version === releaseVersions[0])?.date
+	const lookup: GameVersionLookup = {
+		length: allGameVersions.length,
+		indices,
+		releaseDates,
+		latestSnapshotDates,
+		allSnapshots,
+		allLegacy,
+		legacyVersions: new Set(allLegacy.map((version) => version.version)),
+		allReleasesGrouped: groupVersions(
+			allReleases.map((release) => release.version),
+			false,
+		),
+	}
+	gameVersionLookups.set(allGameVersions, lookup)
+	return lookup
+}
+
+export function getVersionGroupsForDisplay(
+	gameVersions: string[],
+	allGameVersions: GameVersionTag[],
+): VersionDisplayGroup[] {
+	const inputVersions = gameVersions.slice()
+	const {
+		indices,
+		releaseDates,
+		latestSnapshotDates,
+		allSnapshots,
+		allLegacy,
+		legacyVersions,
+		allReleasesGrouped,
+	} = getGameVersionLookup(allGameVersions)
+
+	inputVersions.sort((a, b) => indices[a] - indices[b])
+
+	const releaseVersions = inputVersions.filter((projVer) => releaseDates.has(projVer))
+
+	const dateString = releaseDates.get(releaseVersions[0])
 
 	const latestReleaseVersionDate = dateString ? Date.parse(dateString) : 0
-	const latestSnapshot = inputVersions.find((projVer) =>
-		allSnapshots.some(
-			(gameVer) =>
-				gameVer.version === projVer &&
-				(!latestReleaseVersionDate || latestReleaseVersionDate < Date.parse(gameVer.date)),
-		),
-	)
+	const latestSnapshot = inputVersions.find((projVer) => {
+		const snapshotDate = latestSnapshotDates.get(projVer)
+		return (
+			snapshotDate !== undefined &&
+			(!latestReleaseVersionDate || latestReleaseVersionDate < snapshotDate)
+		)
+	})
 
-	const allReleasesGrouped = groupVersions(
-		allReleases.map((release) => release.version),
-		false,
-	)
 	const projectVersionsGrouped = groupVersions(releaseVersions, true)
 
 	const releaseVersionsAsRanges: VersionDisplayGroup[] = projectVersionsGrouped.map(
@@ -152,7 +203,7 @@ export function getVersionGroupsForDisplay(
 	)
 
 	const legacyVersionsAsRanges = groupConsecutiveIndices(
-		inputVersions.filter((projVer) => allLegacy.some((gameVer) => gameVer.version === projVer)),
+		inputVersions.filter((projVer) => legacyVersions.has(projVer)),
 		allLegacy,
 	)
 
@@ -160,9 +211,7 @@ export function getVersionGroupsForDisplay(
 
 	// show all snapshots if there's no release versions
 	if (releaseVersionsAsRanges.length === 0) {
-		const snapshotVersions = inputVersions.filter((projVer) =>
-			allSnapshots.some((gameVer) => gameVer.version === projVer),
-		)
+		const snapshotVersions = inputVersions.filter((projVer) => latestSnapshotDates.has(projVer))
 		const snapshotVersionsAsRanges =
 			snapshotVersions.length > 3
 				? groupConsecutiveIndices(snapshotVersions, allSnapshots)

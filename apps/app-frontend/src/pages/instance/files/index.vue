@@ -10,7 +10,7 @@ import {
 	useDebugLogger,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 
@@ -23,6 +23,7 @@ import { instanceKeys } from '../query-options'
 
 const instancePage = injectInstancePage()
 const instanceId = instancePage.instanceId
+const queryClient = useQueryClient()
 
 const { formatMessage } = useVIntl()
 const { addNotification } = injectNotificationManager()
@@ -53,8 +54,6 @@ const instanceRootQuery = useQuery(
 )
 const instanceRoot = computed(() => instanceRootQuery.data.value ?? '')
 const items = ref<FileItem[]>([])
-/** True until the first directory read for the current instance path finishes (initial load only). */
-const firstPaintPending = ref(true)
 const loading = ref(true)
 const error = ref<Error | null>(null)
 const currentPath = ref('')
@@ -83,14 +82,25 @@ async function writeBytes(path: string, bytes: Uint8Array, createOnly = false) {
 	})
 }
 
+function directoryQueryOptions(dirPath: string) {
+	return {
+		queryKey: instanceKeys.files(instancePage.instanceId.value, dirPath),
+		queryFn: () => listDirectory(dirPath),
+		staleTime: 30_000,
+	}
+}
+
+// A cached listing shows at once. Opening the tab always re-reads it in the background, because
+// files change outside this tab (content installs, the game itself).
 const directoryQuery = useQuery(
 	computed(() => ({
-		queryKey: instanceKeys.files(instancePage.instanceId.value, currentPath.value),
-		queryFn: () => listDirectory(currentPath.value),
+		...directoryQueryOptions(currentPath.value),
 		enabled: !!instanceRoot.value,
-		staleTime: 30_000,
+		refetchOnMount: 'always' as const,
 	})),
 )
+/** True until the first directory listing for this instance is available (initial load only). */
+const firstPaintPending = ref(directoryQuery.data.value === undefined)
 
 watch(
 	directoryQuery.data,
@@ -106,22 +116,38 @@ watch(directoryQuery.isFetching, (fetching) => {
 })
 watch(directoryQuery.error, (queryError) => {
 	error.value = queryError
-	if (queryError) items.value = []
+	if (queryError) {
+		items.value = []
+		firstPaintPending.value = false
+	}
+})
+watch(instanceRootQuery.error, (queryError) => {
+	if (!queryError) return
+	error.value = queryError
+	firstPaintPending.value = false
 })
 
-await instanceRootQuery.suspense()
-await directoryQuery.refetch()
-firstPaintPending.value = false
-
+// Marks every cached folder of this instance stale and re-reads the open one, so a folder changed
+// by a move or an extract is read again when it is opened.
 async function refresh() {
 	debug('refresh: called, currentPath =', currentPath.value, 'instanceRoot =', instanceRoot.value)
-	await directoryQuery.refetch()
+	await queryClient.invalidateQueries({
+		queryKey: [...instanceKeys.detail(instanceId.value), 'files'],
+	})
 }
 
+function toDirectoryPath(path: string) {
+	return path.startsWith('/') ? path.slice(1) : path
+}
+
+// Changing the path switches the query key, which loads the folder unless a fresh copy is cached.
 function navigateTo(path: string) {
 	debug('navigateTo:', path)
-	currentPath.value = path.startsWith('/') ? path.slice(1) : path
-	refresh()
+	currentPath.value = toDirectoryPath(path)
+}
+
+function prefetchDirectory(path: string) {
+	void queryClient.prefetchQuery(directoryQueryOptions(toDirectoryPath(path)))
 }
 
 function startEditing(file: EditingFile) {
@@ -294,12 +320,9 @@ useAppEvent('instance', async (event) => {
 	}
 })
 
-watch(instanceId, async () => {
+watch(instanceId, () => {
 	debug('watch instance.id: changed to', instanceId.value)
-	firstPaintPending.value = true
 	currentPath.value = ''
-	await instanceRootQuery.refetch()
-	await refresh()
 })
 
 provideFileManager({
@@ -310,6 +333,7 @@ provideFileManager({
 	error,
 	currentPath,
 	navigateTo,
+	prefetchDirectory,
 	editingFile,
 	startEditing,
 	stopEditing,

@@ -22,19 +22,10 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { useEventListener, useStorage } from '@vueuse/core'
+import { keepPreviousData, useQuery } from '@tanstack/vue-query'
+import { useEventListener, useMagicKeys, useStorage } from '@vueuse/core'
 import dayjs from 'dayjs'
-import {
-	computed,
-	inject,
-	type InjectionKey,
-	nextTick,
-	provide,
-	type Ref,
-	ref,
-	watch,
-	watchEffect,
-} from 'vue'
+import { computed, inject, type InjectionKey, nextTick, provide, type Ref, ref, watch } from 'vue'
 
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_v3_many } from '@/helpers/cache.js'
@@ -54,6 +45,7 @@ import {
 } from '@/helpers/instance-groups'
 import type { GameInstance, InstanceIconConfig } from '@/helpers/types'
 
+import { useRunningProcesses } from './running-processes'
 import { librarySearch } from './view-state'
 
 export const librarySortOptions = [
@@ -185,6 +177,11 @@ const instanceActionMessages = defineMessages({
 	},
 })
 
+// Home remounts on every visit. The groups live here so a revisit paints the last known library in
+// its first frame; every mount still refreshes them in the background.
+const libraryGroups = ref<InstanceGroupDefinition[]>([])
+const libraryGroupsLoaded = ref(false)
+
 function createLibraryState(instances: Ref<GameInstance[]>) {
 	const { handleError } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
@@ -200,9 +197,6 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		localStorage,
 		{ mergeDefaults: true },
 	)
-	const serverProjectIds = ref(new Set<string>())
-	const libraryGroups = ref<InstanceGroupDefinition[]>([])
-	const libraryGroupsLoaded = ref(false)
 	const isNewGroupModalOpen = ref(false)
 	const newGroupName = ref('')
 	const newGroupSearch = ref('')
@@ -340,7 +334,17 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 
 	const refreshGroups = async () => {
 		try {
-			libraryGroups.value = await listInstanceGroups()
+			const groups = await listInstanceGroups()
+			const current = libraryGroups.value
+			// An unchanged list keeps its identity so a revisit does not re-render every group.
+			if (
+				groups.length !== current.length ||
+				groups.some(
+					(group, index) => group.id !== current[index].id || group.name !== current[index].name,
+				)
+			) {
+				libraryGroups.value = groups
+			}
 		} catch (error) {
 			handleError(toError(error))
 		} finally {
@@ -350,36 +354,47 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 
 	void refreshGroups()
 
-	watchEffect(async () => {
-		const projectIds = [
+	const linkedProjectIds = computed(() =>
+		[
 			...new Set(
 				linkedInstances.value.flatMap((instance) =>
 					instance.link?.project_id ? [instance.link.project_id] : [],
 				),
 			),
-		]
-
-		if (projectIds.length === 0) {
-			serverProjectIds.value = new Set()
-			return
-		}
-
-		try {
+		].sort(),
+	)
+	// Linked projects only tell servers from modpacks, so they are fetched (and then cached across
+	// visits) only while the library filters or groups by instance type.
+	const serverProjectIdsQuery = useQuery({
+		queryKey: computed(() => ['library', 'server-project-ids', linkedProjectIds.value] as const),
+		queryFn: async () => {
 			const projects = (await get_project_v3_many(
-				projectIds,
+				linkedProjectIds.value,
 				'must_revalidate',
 			)) as Array<Labrinth.Projects.v3.Project | null>
-			serverProjectIds.value = new Set(
-				projects
-					.filter(
-						(project): project is Labrinth.Projects.v3.Project => project?.minecraft_server != null,
-					)
-					.map((project) => project.id),
-			)
-		} catch {
-			serverProjectIds.value = new Set()
-		}
+			return projects.flatMap((project) => (project?.minecraft_server != null ? [project.id] : []))
+		},
+		enabled: computed(
+			() =>
+				linkedProjectIds.value.length > 0 &&
+				(filters.value.instanceType.length > 0 || displayState.value.group === 'Instance type'),
+		),
+		staleTime: 5 * 60_000,
+		retry: false,
+		placeholderData: keepPreviousData,
 	})
+	const serverProjectIds = computed(() =>
+		linkedProjectIds.value.length > 0
+			? new Set(serverProjectIdsQuery.data.value)
+			: new Set<string>(),
+	)
+
+	const processesQuery = useRunningProcesses()
+	const runningInstanceIds = computed(
+		() => new Set((processesQuery.data.value ?? []).map((process) => process.instance_id)),
+	)
+	// One listener set for the whole library instead of one per card.
+	const { shift: holdingShift } = useMagicKeys()
 
 	const getInstanceType = (instance: GameInstance) => {
 		if (!instance.link) return 'custom'
@@ -1382,6 +1397,8 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		instances,
 		libraryGroups,
 		libraryGroupsLoaded,
+		runningInstanceIds,
+		holdingShift,
 		search,
 		isSearching,
 		filters,

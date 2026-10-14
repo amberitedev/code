@@ -1,6 +1,12 @@
+<script lang="ts">
+// Thumbnail URL per icon, size and revision. A remounted card shows its icon in the first frame
+// instead of the placeholder while the thumbnail is looked up again.
+const knownThumbnails = new Map<string, string>()
+</script>
+
 <script setup lang="ts">
 import { Avatar, truncatedTooltip } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { useImageThumbnail } from '@/composables/use-image-thumbnail'
@@ -28,12 +34,32 @@ const thumbnail = useImageThumbnail(
 	() => (compactMode.value ? 96 : 384),
 	() => String(props.instance.modified),
 )
+const thumbnailKey = computed(
+	() => `${localIcon.value}|${compactMode.value ? 96 : 384}|${props.instance.modified}`,
+)
+watch(thumbnail, (url) => {
+	if (url) knownThumbnails.set(thumbnailKey.value, url)
+})
 const iconSrc = computed(() =>
-	localIcon.value ? thumbnail.value : getInstanceIconUrl(props.instance.icon_path),
+	localIcon.value
+		? (thumbnail.value ?? knownThumbnails.get(thumbnailKey.value))
+		: getInstanceIconUrl(props.instance.icon_path),
 )
 
 const nameRef = ref<HTMLElement | null>(null)
 const versionRef = ref<HTMLElement | null>(null)
+const nameTooltip = ref<string>()
+const versionTooltip = ref<string>()
+
+// Truncation is measured when the pointer enters the card, not while rendering: reading layout in
+// render forces a reflow per card. The card is entered before its text, so the tooltips are ready.
+function measureTruncation() {
+	nameTooltip.value = truncatedTooltip(nameRef, props.instance.name)
+	versionTooltip.value = truncatedTooltip(
+		versionRef,
+		`${props.instance.loader} ${props.instance.game_version}`,
+	)
+}
 </script>
 
 <template>
@@ -46,6 +72,7 @@ const versionRef = ref<HTMLElement | null>(null)
 				selected,
 			'border-surface-4': !selected,
 		}"
+		@mouseenter="measureTruncation"
 	>
 		<div
 			class="relative flex shrink-0 items-center max-w-full overflow-clip"
@@ -76,14 +103,14 @@ const versionRef = ref<HTMLElement | null>(null)
 		>
 			<p
 				ref="nameRef"
-				v-tooltip="truncatedTooltip(nameRef, instance.name)"
+				v-tooltip="nameTooltip"
 				class="m-0 w-full truncate text-base font-semibold leading-5 text-contrast"
 			>
 				{{ instance.name }}
 			</p>
 			<p
 				ref="versionRef"
-				v-tooltip="truncatedTooltip(versionRef, `${instance.loader} ${instance.game_version}`)"
+				v-tooltip="versionTooltip"
 				class="m-0 w-full truncate text-sm font-medium capitalize leading-[18px] text-primary"
 			>
 				{{ instance.loader }} {{ instance.game_version }}

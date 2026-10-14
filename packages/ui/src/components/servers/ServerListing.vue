@@ -9,6 +9,7 @@
 		:role="!isDisabled ? 'link' : undefined"
 		:tabindex="!isDisabled ? 0 : undefined"
 		@click="navigateToServer"
+		@pointerenter="prefetchServer"
 		@keydown.enter.self="navigateToServer"
 		@keydown.space.prevent.self="navigateToServer"
 	>
@@ -267,7 +268,7 @@ import {
 	SparklesIcon,
 	SpinnerIcon,
 } from '@modrinth/assets'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -438,6 +439,22 @@ const props = defineProps<ServerListingProps>()
 const router = useRouter()
 
 const { archon, kyros, labrinth } = injectModrinthClient()
+const queryClient = useQueryClient()
+
+/** Warms the two requests the server panel opens with while the pointer is over the row. */
+function prefetchServer() {
+	if (isDisabled.value) return
+	void queryClient.prefetchQuery({
+		queryKey: ['servers', 'detail', props.server_id],
+		queryFn: () => archon.servers_v0.get(props.server_id),
+		staleTime: 30_000,
+	})
+	void queryClient.prefetchQuery({
+		queryKey: ['servers', 'v1', 'detail', props.server_id],
+		queryFn: () => archon.servers_v1.get(props.server_id),
+		staleTime: 30_000,
+	})
+}
 
 const isConfiguring = computed(() => props.flows?.intro)
 const isUpgrading = computed(

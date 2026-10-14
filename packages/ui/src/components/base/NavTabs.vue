@@ -9,7 +9,6 @@
 			class="relative flex w-fit rounded-full bg-bg-raised p-1 text-xs sm:text-sm font-bold"
 			:class="{
 				'card-shadow border border-solid border-surface-4': mode === 'navigation',
-				'tab-color-delayed': colorChangeDelayed,
 			}"
 			v-bind="pageNav ? {} : $attrs"
 		>
@@ -20,9 +19,11 @@
 					:key="link.href"
 					ref="tabLinkElements"
 					:replace="replace"
-					:to="query ? (link.href ? `?${query}=${link.href}` : '?') : link.href"
-					class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
+					draggable="false"
+					:to="linkTarget(link)"
+					class="navtab-link no-click-animation button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
+					@click.capture="onLinkClick($event, index, link)"
 					@mouseenter="link.onHover?.()"
 					@focus="link.onHover?.()"
 				>
@@ -44,7 +45,7 @@
 					v-show="link.shown ?? true"
 					:key="link.href"
 					ref="tabLinkElements"
-					class="button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
+					class="navtab-link no-click-animation button-animation z-[1] flex flex-row items-center gap-2 px-4 py-2 hover:cursor-pointer focus:rounded-full"
 					:class="getSSRFallbackClasses(index)"
 					@click="emit('tabClick', index, link)"
 				>
@@ -62,11 +63,9 @@
 
 			<div
 				v-if="sliderReady && currentActiveIndex !== -1"
-				class="pointer-events-none absolute rounded-full"
-				:class="[
-					subpageSelected ? 'bg-button-bg' : 'bg-button-bgSelected',
-					{ 'navtabs-transition': transitionsEnabled },
-				]"
+				ref="sliderElement"
+				class="pointer-events-none absolute inset-0"
+				:class="subpageSelected ? 'bg-button-bg' : 'bg-button-bgSelected'"
 				:style="sliderStyle"
 				aria-hidden="true"
 			/>
@@ -76,10 +75,11 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
 
 defineOptions({ inheritAttrs: false })
 
@@ -117,33 +117,34 @@ const emit = defineEmits<{
 const scrollContainer = ref<HTMLElement | null>(null)
 const tabLinkElements = ref<HTMLElement[]>()
 
-const sliderLeft = ref(0)
-const sliderTop = ref(0)
-const sliderRight = ref(0)
-const sliderBottom = ref(0)
+const sliderElement = ref<HTMLElement | null>(null)
+
+interface SliderRect {
+	left: number
+	top: number
+	width: number
+	height: number
+}
+
+const sliderRect = ref<SliderRect>({ left: 0, top: 0, width: 0, height: 0 })
 
 const currentActiveIndex = ref(-1)
 const subpageSelected = ref(false)
 
 const sliderReady = ref(false)
-const transitionsEnabled = ref(false)
-const colorChangeDelayed = ref(false)
-
-const sliderDelays = ref({ left: '0ms', top: '0ms', right: '0ms', bottom: '0ms' })
 
 const filteredLinks = computed(() => props.links.filter((link) => link.shown ?? true))
 
-const sliderStyle = computed(() => ({
-	left: `${sliderLeft.value}px`,
-	top: `${sliderTop.value}px`,
-	right: `${sliderRight.value}px`,
-	bottom: `${sliderBottom.value}px`,
-}))
+// The pill covers the whole bar and is clipped down to one tab, so each of its edges can move on
+// its own without resizing anything.
+function clipTo(left: number, top: number, right: number, bottom: number) {
+	return `inset(${top}px calc(100% - ${right}px) calc(100% - ${bottom}px) ${left}px round 9999px)`
+}
 
-const leftDelay = computed(() => sliderDelays.value.left)
-const rightDelay = computed(() => sliderDelays.value.right)
-const topDelay = computed(() => sliderDelays.value.top)
-const bottomDelay = computed(() => sliderDelays.value.bottom)
+const sliderStyle = computed(() => {
+	const { left, top, width, height } = sliderRect.value
+	return { clipPath: clipTo(left, top, left + width, top + height) }
+})
 
 const isActiveAndNotSubpage = computed(
 	() => (index: number) => currentActiveIndex.value === index && !subpageSelected.value,
@@ -226,95 +227,149 @@ function getTabElement(index: number): HTMLElement | null {
 	return element
 }
 
-function getSliderPosition() {
-	const el = getTabElement(currentActiveIndex.value)
-	const parent = scrollContainer.value
-	if (!el || !parent) return null
+function measureTab(index: number): SliderRect | null {
+	const el = getTabElement(index)
+	if (!el) return null
 
 	return {
 		left: el.offsetLeft,
 		top: el.offsetTop,
-		right: parent.clientWidth - el.offsetLeft - el.offsetWidth,
-		bottom: parent.clientHeight - el.offsetTop - el.offsetHeight,
+		width: el.offsetWidth,
+		height: el.offsetHeight,
 	}
 }
 
-function applySliderPosition(newPosition: {
-	left: number
-	top: number
-	right: number
-	bottom: number
-}) {
-	sliderLeft.value = newPosition.left
-	sliderTop.value = newPosition.top
-	sliderRight.value = newPosition.right
-	sliderBottom.value = newPosition.bottom
+// Tab boxes as of the last resize, so a click can move the pill without reading layout.
+let tabRects: (SliderRect | null)[] = []
+
+function getSliderRect(): SliderRect | null {
+	return tabRects[currentActiveIndex.value] ?? measureTab(currentActiveIndex.value)
 }
 
-function animateSliderTo(newPosition: {
-	left: number
-	top: number
-	right: number
-	bottom: number
-}) {
-	const STAGGER_DELAY = '175ms'
+let sliderAnimation: Animation | undefined
 
-	sliderDelays.value = {
-		left: newPosition.left < sliderLeft.value ? '0ms' : STAGGER_DELAY,
-		right: newPosition.left < sliderLeft.value ? STAGGER_DELAY : '0ms',
-		top: newPosition.top < sliderTop.value ? '0ms' : STAGGER_DELAY,
-		bottom: newPosition.top < sliderTop.value ? STAGGER_DELAY : '0ms',
-	}
+// How long each edge of the pill takes to move, and how long the trailing edge waits first.
+const EDGE_MS = 80
+const TRAIL_DELAY_MS = 175
 
-	applySliderPosition(newPosition)
-}
-
+/**
+ * Moves the pill under the active tab.
+ *
+ * THE PILL MUST SLIDE. Its leading edge moves to the new tab first and its trailing edge follows,
+ * so the pill stretches across and then closes up. Do not replace this with a FLIP animation, a
+ * transform scale, a fade, or a jump: scaling squashes the rounded ends and reads as the pill
+ * flipping over. Keep it off layout properties (left, right, width); clip-path keeps the slide
+ * without them.
+ */
 function positionSlider(animate = true) {
-	const newPosition = getSliderPosition()
-	if (!newPosition) {
+	const next = getSliderRect()
+	if (!next) {
 		return
 	}
 
-	if (!sliderReady.value) {
-		applySliderPosition(newPosition)
-		sliderReady.value = true
-		nextTick(() => {
-			requestAnimationFrame(() => {
-				transitionsEnabled.value = true
-			})
-		})
-		return
-	}
+	const previous = sliderRect.value
+	const slider = sliderElement.value
+	sliderRect.value = next
+	sliderReady.value = true
 
-	if (!animate) {
-		transitionsEnabled.value = false
-		applySliderPosition(newPosition)
-		requestAnimationFrame(() => {
-			transitionsEnabled.value = true
-		})
-		return
-	}
+	const moved =
+		previous.left !== next.left ||
+		previous.top !== next.top ||
+		previous.width !== next.width ||
+		previous.height !== next.height
+	if (!moved) return
 
-	animateSliderTo(newPosition)
+	sliderAnimation?.cancel()
+	sliderAnimation = undefined
+	if (!animate || !slider || !previous.width || !next.width || !next.height) return
+
+	const from = {
+		left: previous.left,
+		top: previous.top,
+		right: previous.left + previous.width,
+		bottom: previous.top + previous.height,
+	}
+	const to = {
+		left: next.left,
+		top: next.top,
+		right: next.left + next.width,
+		bottom: next.top + next.height,
+	}
+	// The edge facing the direction of travel leads; the other one waits.
+	const movingRight = to.left >= from.left
+	const movingDown = to.top >= from.top
+	const stretched = clipTo(
+		movingRight ? from.left : to.left,
+		movingDown ? from.top : to.top,
+		movingRight ? to.right : from.right,
+		movingDown ? to.bottom : from.bottom,
+	)
+	const duration = TRAIL_DELAY_MS + EDGE_MS
+	const easing = 'cubic-bezier(0.4, 0, 0.2, 1)'
+
+	sliderAnimation = slider.animate(
+		[
+			{ clipPath: clipTo(from.left, from.top, from.right, from.bottom), easing },
+			{ clipPath: stretched, offset: EDGE_MS / duration, easing: 'linear' },
+			{ clipPath: stretched, offset: TRAIL_DELAY_MS / duration, easing },
+			{ clipPath: clipTo(to.left, to.top, to.right, to.bottom) },
+		],
+		{ duration },
+	)
 }
 
+// Runs from the ResizeObserver, which also reports once on mount. Layout is already clean there,
+// so the first measurement does not force one while the page is still mounting.
 function resetSliderPosition() {
-	if (!sliderReady.value || currentActiveIndex.value === -1) {
+	tabRects = filteredLinks.value.map((_link, index) => measureTab(index))
+	if (currentActiveIndex.value === -1) {
 		return
 	}
 	positionSlider(false)
 }
 
-async function updateActiveTab() {
-	await nextTick()
-	const { index, isSubpage } = computeActiveIndex()
-	colorChangeDelayed.value = sliderReady.value && index !== currentActiveIndex.value
+function setActiveTab(index: number, isSubpage: boolean) {
+	const changed = index !== currentActiveIndex.value
 	currentActiveIndex.value = index
 	subpageSelected.value = isSubpage
 
-	if (index !== -1) {
+	if (index !== -1 && changed) {
 		positionSlider()
 	}
+}
+
+function updateActiveTab() {
+	const { index, isSubpage } = computeActiveIndex()
+	setActiveTab(index, isSubpage)
+}
+
+function linkTarget(link: Tab) {
+	if (!props.query) return link.href
+	return link.href ? `?${props.query}=${link.href}` : '?'
+}
+
+// Starts the pill on the click and navigates one frame later, so the slide is already on screen
+// before the next page begins to render. It reacts to the release, not the press: holding the
+// mouse down on a tab must not move anything. The route watcher and the failure hook below correct
+// the pill if the navigation lands somewhere else.
+//
+// This runs in the capture phase and prevents the default, which also stops RouterLink from
+// navigating on its own. Clicks RouterLink would leave to the browser are left alone.
+function onLinkClick(event: MouseEvent, index: number, link: Tab) {
+	if (event.defaultPrevented || event.button !== 0) return
+	if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+	event.preventDefault()
+	setActiveTab(index, false)
+
+	const target = linkTarget(link)
+	requestAnimationFrame(() => {
+		// A timeout from inside a frame callback runs after that frame has been painted.
+		setTimeout(() => {
+			// A navigation that throws (a page module that fails to load) skips the failure hook
+			// below, so the pill is put back here.
+			void (props.replace ? router.replace(target) : router.push(target)).catch(updateActiveTab)
+		})
+	})
 }
 
 const initialActive = computeActiveIndex()
@@ -323,16 +378,32 @@ subpageSelected.value = initialActive.isSubpage
 
 let resizeObserver: ResizeObserver | undefined
 
-onMounted(() => {
-	updateActiveTab()
-	resizeObserver = new ResizeObserver(resetSliderPosition)
+let removeNavigationHook: (() => void) | undefined
+
+// The nav only renders with more than one tab, so it can appear after mount.
+function observeScrollContainer() {
+	resizeObserver?.disconnect()
 	if (scrollContainer.value) {
-		resizeObserver.observe(scrollContainer.value)
+		resizeObserver?.observe(scrollContainer.value)
 	}
+}
+
+watch(scrollContainer, observeScrollContainer, { flush: 'post' })
+
+onMounted(() => {
+	resizeObserver = new ResizeObserver(resetSliderPosition)
+	observeScrollContainer()
+	removeNavigationHook = router?.afterEach((_to, _from, failure) => {
+		if (failure && props.mode === 'navigation') {
+			updateActiveTab()
+		}
+	})
 })
 
 onUnmounted(() => {
 	resizeObserver?.disconnect()
+	removeNavigationHook?.()
+	sliderAnimation?.cancel()
 })
 
 watch(
@@ -353,30 +424,39 @@ watch(
 	},
 )
 
+// Consumers often rebuild the links array on every route change, so this only reacts when the
+// rendered tabs differ. Size changes are picked up by the ResizeObserver.
 watch(
-	() => props.links,
-	async () => {
-		await nextTick()
+	() => filteredLinks.value.map((link) => `${link.href} ${link.label}`).join('|'),
+	() => {
+		tabRects = []
 		updateActiveTab()
 	},
-	{ deep: true },
+	{ flush: 'post' },
 )
 </script>
 
 <style scoped>
-.navtabs-transition {
-	transition:
-		left 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(leftDelay),
-		right 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(rightDelay),
-		top 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(topDelay),
-		bottom 80ms cubic-bezier(0.4, 0, 0.2, 1) v-bind(bottomDelay);
-}
-
 .tab-color {
-	transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+	transition:
+		color 100ms cubic-bezier(0.4, 0, 0.2, 1),
+		transform 0.05s ease-in-out;
 }
 
-.tab-color-delayed .tab-color {
-	transition-delay: 100ms;
+/* The press effect shrinks the label and icon, not the tab. A tab that shrank under the pointer
+   left a band along its edge where the release missed it and the click was lost. Links also
+   shrink globally while pressed, which `no-click-animation` on the tab turns off. */
+.navtab-link.button-animation:active:not(:disabled) {
+	transform: none;
+}
+
+.navtab-link:active .tab-color {
+	transform: scale(0.95);
+}
+
+@media (prefers-reduced-motion) {
+	.navtab-link:active .tab-color {
+		transform: none;
+	}
 }
 </style>

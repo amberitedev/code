@@ -777,7 +777,9 @@ function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
 
 .list-enter-active,
 .list-leave-active {
-	transition: all 200ms ease-in-out;
+	transition:
+		opacity 200ms ease-in-out,
+		transform 200ms ease-in-out;
 }
 
 .list-enter-from {
@@ -794,18 +796,19 @@ function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
 	transition: transform 200ms ease-in-out;
 }
 
+/* The bar is 20% wide and grows to 60% while it crosses, using transform only so it never lays out. */
 @keyframes indeterminate {
 	0% {
-		width: 20%;
-		margin-left: -20%;
+		transform: translateX(-100%) scaleX(1);
 	}
 	100% {
-		width: 60%;
-		margin-left: 100%;
+		transform: translateX(500%) scaleX(3);
 	}
 }
 
 .animate-indeterminate {
+	width: 20%;
+	transform-origin: left;
 	animation: indeterminate 1.5s ease-in-out infinite;
 }
 
@@ -818,7 +821,9 @@ function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
 	align-items: center;
 	pointer-events: none;
 	scale: 0.5;
-	transition: all 0.5s ease-out;
+	transition:
+		scale 0.5s ease-out,
+		opacity 0.5s ease-out;
 	opacity: 1;
 
 	&.animation-hidden {
@@ -826,16 +831,13 @@ function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
 		opacity: 0;
 
 		.animation-ring-1 {
-			width: 25rem;
-			height: 25rem;
+			scale: 1.25;
 		}
 		.animation-ring-2 {
-			width: 50rem;
-			height: 50rem;
+			scale: 2.5;
 		}
 		.animation-ring-3 {
-			width: 100rem;
-			height: 100rem;
+			scale: 5;
 		}
 	}
 
@@ -850,7 +852,7 @@ function deleteBackup(backup?: Archon.BackupsQueue.v1.BackupQueueBackup) {
 		> * {
 			position: absolute;
 			scale: 1;
-			transition: all 0.2s ease-out;
+			transition: scale 0.2s ease-out;
 			width: 20rem;
 			height: 20rem;
 		}

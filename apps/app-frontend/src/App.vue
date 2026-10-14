@@ -182,6 +182,7 @@ import { setupAppEventsProvider } from '@/providers/setup/app-events'
 import { setupAuthProvider } from '@/providers/setup/auth'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { setupAppUserPreferencesProvider } from '@/providers/setup/user-preferences.ts'
+import { preloadRouteChunks } from '@/routes'
 import { apiClient as tauriApiClient } from '@/services/api-client'
 import { appMessages } from '@/utils/app-messages'
 
@@ -852,6 +853,8 @@ watch(stateInitialized, (ready) => {
 			loading.end(routerToken)
 			routerToken = null
 		}
+
+		void preloadRouteChunks(router)
 
 		queryClient.prefetchQuery({
 			queryKey: ['servers'],
@@ -1982,6 +1985,10 @@ function handleAuxClick(e) {
 }
 
 function handleContextMenu(event) {
+	// Dev builds keep the webview's own menu, which has Inspect. The App's custom menus still open
+	// because they cancel the event themselves.
+	if (import.meta.env.DEV) return
+
 	const target = event.target
 	if (target instanceof Element) {
 		if (target.closest('img, textarea, [contenteditable="true"]')) return
@@ -2262,7 +2269,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					width: 'calc(100% - var(--left-bar-width) - var(--right-bar-width))',
 				}"
 			>
-				<LoadingBar position="absolute" />
+				<LoadingBar position="absolute" :throttle="300" />
 			</div>
 			<div
 				v-if="appSettings.featureFlags.page_path"
