@@ -45,13 +45,13 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 walkdir = "2.5"
 zip = { workspace = true }
 
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.30.1", features = ["fs", "signal", "user"] }
-
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2.186"
 
-[target.'cfg(windows)'.dependencies]
+[target."cfg(unix)".dependencies]
+nix = { version = "0.30.1", features = ["fs", "signal", "user"] }
+
+[target."cfg(windows)".dependencies]
 windows-service = "0.8.1"
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
