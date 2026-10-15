@@ -65,27 +65,37 @@ pub async fn create(
     db: &SqlitePool,
     name: &str,
 ) -> sqlx::Result<Option<ServerRow>> {
-    let used: Vec<i64> = sqlx::query_scalar("SELECT port FROM servers")
-        .fetch_all(db)
-        .await?;
-    let Some(port) = SERVER_PORTS
-        .map(i64::from)
-        .find(|port| !used.contains(port))
-    else {
-        return Ok(None);
-    };
-    let id = uuid::Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO servers (id, name, created_at, port, memory_mb) \
-         VALUES (?, ?, unixepoch(), ?, ?)",
-    )
-    .bind(&id)
-    .bind(name)
-    .bind(port)
-    .bind(DEFAULT_MEMORY_MB)
-    .execute(db)
-    .await?;
-    get(db, &id).await
+    // Two creates at once can pick the same port; `port` is UNIQUE, so the later one picks again.
+    loop {
+        let used: Vec<i64> = sqlx::query_scalar("SELECT port FROM servers")
+            .fetch_all(db)
+            .await?;
+        let Some(port) = SERVER_PORTS
+            .map(i64::from)
+            .find(|port| !used.contains(port))
+        else {
+            return Ok(None);
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        let inserted = sqlx::query(
+            "INSERT INTO servers (id, name, created_at, port, memory_mb) \
+             VALUES (?, ?, unixepoch(), ?, ?)",
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(port)
+        .bind(DEFAULT_MEMORY_MB)
+        .execute(db)
+        .await;
+        match inserted {
+            Err(sqlx::Error::Database(error))
+                if error.is_unique_violation() => {}
+            inserted => {
+                inserted?;
+                return get(db, &id).await;
+            }
+        }
+    }
 }
 
 /// Record what is installed in a server.
