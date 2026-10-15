@@ -164,7 +164,7 @@ pub fn uninstall(remove_data: bool) -> Result<()> {
     let paths = Paths::new(&config.data_dir);
     let record = InstallRecord::load(&paths)?;
 
-    service::stop()?;
+    // Checked while Core still runs, so the servers can still be stopped through it.
     let running = crate::servers::shim::running(&paths);
     if !running.is_empty() {
         bail!(
