@@ -55,6 +55,17 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
 
     let console =
         Arc::new(Mutex::new(Console::create(&paths.console_log(&server_id))?));
+    // The socket comes first: a server nobody could stop must not start.
+    let socket = paths.shim_socket(&server_id);
+    let listener = match listen(&socket) {
+        Ok(listener) => listener,
+        Err(error) => {
+            let error =
+                eyre!("could not listen on {}: {error}", socket.display());
+            status(None, EndedBy::Exit, Some(format!("{error:#}")))?;
+            return Err(error);
+        }
+    };
     let java =
         run_as(&paths).and_then(|run_as| Ok(java::spawn(&launch, &run_as)?));
     let Java {
@@ -83,17 +94,7 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
         killer,
         ended_by: Mutex::new(EndedBy::Exit),
     });
-    let socket = paths.shim_socket(&server_id);
-    let server = match listen(&socket) {
-        Ok(listener) => {
-            Some(tokio::spawn(serve(listener, Arc::clone(&shared))))
-        }
-        Err(error) => {
-            // Java runs either way; Core sees a shim it cannot reach and leaves it running.
-            eprintln!("could not listen on {}: {error}", socket.display());
-            None
-        }
-    };
+    let server = tokio::spawn(serve(listener, Arc::clone(&shared)));
     let pid = std::process::id();
     write_json(
         &paths.run_record(&server_id),
@@ -110,9 +111,7 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
     )?;
 
     let exit = tokio::task::spawn_blocking(move || waiter.wait()).await?;
-    if let Some(server) = server {
-        server.abort();
-    }
+    server.abort();
     // A process Java started may still hold its output open; that must not keep the shim up.
     let deadline = Instant::now() + Duration::from_secs(5);
     while pumps.iter().any(|pump| !pump.is_finished())

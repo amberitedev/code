@@ -49,6 +49,10 @@ pub enum ServerError {
     NotRunning,
     #[error("the server is still starting")]
     Starting,
+    #[error(
+        "Core cannot reach this server's shim, so the server keeps running on its own. Stop it from the game, then start it again"
+    )]
+    Unmanaged,
     #[error("Core is out of server ports")]
     NoPorts,
     #[error(transparent)]
@@ -278,26 +282,49 @@ impl Servers {
                 },
             );
         }
-        match self.launch(&server).await {
-            Ok(child) => {
-                if let Some(live) = self.live().get_mut(id) {
+        let result = self.launch(&server).await;
+        let mut live = self.live();
+        match result {
+            Ok(()) => {
+                if let Some(live) = live.get_mut(id) {
                     live.phase = Phase::Running;
-                    live.child = Some(child);
                 }
                 info!(server = %id, "started");
                 Ok(())
             }
-            Err(error) => {
-                self.live().remove(id);
+            // A shim that holds the lock but never answered keeps its server running.
+            Err(error) if shim::is_running(&self.paths, id) => {
+                if let Some(live) = live.get_mut(id) {
+                    live.phase = Phase::Unmanaged(None);
+                }
                 Err(error)
             }
+            Err(error) => {
+                if let Some(mut child) =
+                    live.remove(id).and_then(|live| live.child)
+                {
+                    let _ = child.try_wait();
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// How the shim this Core started for a server exited, once it has.
+    fn reap(
+        &self,
+        id: &str,
+    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+        match self.live().get_mut(id).and_then(|live| live.child.as_mut()) {
+            Some(child) => child.try_wait(),
+            None => Ok(None),
         }
     }
 
     async fn launch(
         &self,
         server: &records::ServerRow,
-    ) -> Result<Child, ServerError> {
+    ) -> Result<(), ServerError> {
         let id = server.id.as_str();
         let run_id = uuid::Uuid::new_v4().to_string();
         let launch = launch::prepare(&self.paths, &self.http, server, &run_id)
@@ -324,21 +351,24 @@ impl Servers {
             chrono::Utc::now().timestamp(),
         )
         .await?;
-        let mut child = match shim::spawn(&self.paths, id) {
+        let child = match shim::spawn(&self.paths, id) {
             Ok(child) => child,
             Err(error) => {
                 self.finish(id).await;
                 return Err(error.into());
             }
         };
+        if let Some(live) = self.live().get_mut(id) {
+            live.child = Some(child);
+        }
         let deadline = Instant::now() + START_TIMEOUT;
         loop {
             if let Ok(connection) = Connection::open(&self.paths, id).await
                 && connection.run_id == run_id
             {
-                return Ok(child);
+                return Ok(());
             }
-            if let Some(exit) = child.try_wait()? {
+            if let Some(exit) = self.reap(id)? {
                 self.finish(id).await;
                 let status: Option<ExitStatus> =
                     shim::read_versioned(&self.paths.run_status(id)).ok();
@@ -368,9 +398,10 @@ impl Servers {
         match self.phase(id) {
             None => Err(ServerError::NotRunning),
             Some(Phase::Starting) => Err(ServerError::Starting),
-            Some(Phase::Unmanaged(version)) => {
-                Err(ShimError::Incompatible(version.unwrap_or_default()).into())
+            Some(Phase::Unmanaged(Some(version))) => {
+                Err(ShimError::Incompatible(version).into())
             }
+            Some(Phase::Unmanaged(None)) => Err(ServerError::Unmanaged),
             Some(Phase::Running | Phase::Stopping) => {
                 Connection::open(&self.paths, id)
                     .await?

@@ -427,6 +427,7 @@ impl From<ServerError> for ApiError {
             ServerError::AlreadyRunning
             | ServerError::NotRunning
             | ServerError::Starting
+            | ServerError::Unmanaged
             | ServerError::NoPorts
             | ServerError::NotReady(_)
             | ServerError::Shim(_) => ErrorCode::Conflict,
