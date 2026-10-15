@@ -204,6 +204,17 @@ pub async fn download_java(
         }
         std::fs::rename(temp.path(), &destination)
             .map_err(|e| e.to_string())?;
+        // The temporary folder was private; servers run this Java as `copal-servers`, whose
+        // group owns `java/`.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                &destination,
+                std::fs::Permissions::from_mode(0o2750),
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(destination.join(relative))
     })
     .await

@@ -1,9 +1,10 @@
 //! The data folder. Its layout is the isolation story: Core runs as the `copal` OS account and
 //! every server, installer, and custom Java runs as `copal-servers`, which may touch only what
-//! [`FOLDERS`] grants it. Step 2 creates the folders with these permissions; nothing else may put
-//! a file Core trusts somewhere `copal-servers` can write.
-
-#![allow(dead_code)] // Wired in step 2: `copal install` creates these folders with their permissions.
+//! [`FOLDERS`] grants it. `copal install` creates the folders with these permissions (see
+//! `daemon::folders`); nothing else may put a file Core trusts somewhere `copal-servers` can write.
+//!
+//! The data folder itself is owned by `copal` and only listable by others. Besides the folders it
+//! holds `config.toml` and, on Linux and macOS, `copal.sock`, the local socket.
 
 use std::path::{Path, PathBuf};
 
@@ -19,6 +20,7 @@ pub enum ServersAccess {
 pub struct Folder {
     pub name: &'static str,
     pub servers: ServersAccess,
+    #[allow(dead_code)] // Documents the table; nothing reads it.
     pub holds: &'static str,
 }
 
@@ -105,10 +107,12 @@ impl Paths {
         self.root.join("db").join("tls-key.der")
     }
 
+    #[allow(dead_code)] // Wired in step 5: backups.
     pub fn backups(&self) -> PathBuf {
         self.root.join("backups")
     }
 
+    #[allow(dead_code)] // Wired in step 6: the updater.
     pub fn versions(&self) -> PathBuf {
         self.root.join("versions")
     }
@@ -117,9 +121,78 @@ impl Paths {
         self.root.join("sockets")
     }
 
+    /// Holds the lock that keeps a second Core off this data folder.
+    pub fn core_lock(&self) -> PathBuf {
+        self.root.join("db").join("core.lock")
+    }
+
+    /// What `copal install` recorded. See `daemon::install::InstallRecord`.
+    pub fn install_record(&self) -> PathBuf {
+        self.root.join("db").join("install.toml")
+    }
+
+    /// Where the CLI reaches Core: a Unix socket in the data folder, or on Windows a named pipe
+    /// whose name comes from the data folder, so Cores on different data folders never collide.
+    pub fn local_socket(&self) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(self.pipe_name(""))
+        } else {
+            self.root.join("copal.sock")
+        }
+    }
+
+    /// The command socket of one server's shim: in `sockets/` on Linux and macOS, a named pipe on
+    /// Windows, where the pipe's own permissions do the job of the folder's.
+    pub fn shim_socket(&self, server_id: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(self.pipe_name(&format!("-{server_id}")))
+        } else {
+            self.sockets().join(format!("{server_id}.sock"))
+        }
+    }
+
+    fn pipe_name(&self, suffix: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let root = std::path::absolute(&self.root)
+            .unwrap_or_else(|_| self.root.clone());
+        let hash =
+            Sha256::digest(root.to_string_lossy().to_lowercase().as_bytes());
+        format!(r"\\.\pipe\copal-{}{suffix}", hex::encode(&hash[..6]))
+    }
+
     /// Run state the shim writes for one server.
     pub fn run(&self, server_id: &str) -> PathBuf {
         self.root.join("runs").join(server_id)
+    }
+
+    /// Held by a server's shim for as long as it runs.
+    pub fn run_lock(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("lock")
+    }
+
+    /// What Core asks the shim to start. See `servers::shim::Launch`.
+    pub fn launch_spec(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("launch.json")
+    }
+
+    /// Who the running shim is. See `servers::shim::RunRecord`.
+    pub fn run_record(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("run.json")
+    }
+
+    /// How the last run ended. See `servers::shim::ExitStatus`.
+    pub fn run_status(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("status.json")
+    }
+
+    /// The server's output, one line per line, as the shim saw it.
+    pub fn console_log(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("console.log")
+    }
+
+    /// The shim's own messages.
+    pub fn shim_log(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("shim.log")
     }
 
     pub fn logs(&self) -> PathBuf {
@@ -132,6 +205,7 @@ impl Paths {
     }
 
     /// The shared Daedalus store. See `installs::daedalus::SharedDirs`.
+    #[allow(dead_code)] // Wired in step 4: installs reach the store through this.
     pub fn meta(&self) -> PathBuf {
         self.root.join("meta")
     }
@@ -156,7 +230,15 @@ mod tests {
             paths.backups(),
             paths.versions(),
             paths.sockets(),
+            paths.core_lock(),
+            paths.install_record(),
             paths.run("a"),
+            paths.run_lock("a"),
+            paths.launch_spec("a"),
+            paths.run_record("a"),
+            paths.run_status("a"),
+            paths.console_log("a"),
+            paths.shim_log("a"),
             paths.logs(),
             paths.server("a"),
             paths.meta(),
@@ -171,5 +253,14 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    #[test]
+    fn sockets_differ_per_data_folder_and_server() {
+        let one = Paths::new("one");
+        let two = Paths::new("two");
+        assert_ne!(one.local_socket(), two.local_socket());
+        assert_ne!(one.shim_socket("a"), one.shim_socket("b"));
+        assert_ne!(one.shim_socket("a"), two.shim_socket("a"));
     }
 }

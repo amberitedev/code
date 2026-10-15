@@ -2,16 +2,106 @@
 //! `POST /servers/{id}/v1/logs/clear` (no body, no response). Mirrors `Archon.Websocket.v0` and
 //! `Archon.Sync.v1` in `packages/api-client/src/modules/archon/types.ts`.
 
-#![allow(dead_code)] // Wired in step 2: console and event routes.
+#![allow(dead_code)] // The sync stream and most events are wired with the steps that make them.
 
+use std::sync::Arc;
+
+use axum::{
+    extract::{
+        Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    response::Response,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use super::content::{
-    Addon, AddonStatus, AddonVersion, Addons, ContentError, ContentOwner,
-    Environment, Installing,
+use super::{
+    AppState,
+    content::{
+        Addon, AddonStatus, AddonVersion, Addons, ContentError, ContentOwner,
+        Environment, Installing,
+    },
 };
+use crate::{access::local::Owner, servers::console};
+
+/// Console lines a new console socket starts with.
+const BACKLOG: usize = 200;
+
+/// `GET /servers/{id}/ws`: the console. Sends the last lines and every new one as `log` events
+/// and passes `command` messages to the server. The first message must be `auth`; its token is
+/// checked once sessions exist (step 3), until then only the owner reaches this route.
+pub async fn console(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    upgrade.on_upgrade(move |socket| console_socket(state, id, socket))
+}
+
+async fn console_socket(
+    state: Arc<AppState>,
+    id: String,
+    mut socket: WebSocket,
+) {
+    let first = socket.recv().await;
+    let authed = matches!(
+        first,
+        Some(Ok(Message::Text(text)))
+            if matches!(serde_json::from_str(&text), Ok(WsClientMessage::Auth { .. }))
+    );
+    if !authed || send(&mut socket, &WsEvent::AuthOk).await.is_err() {
+        return;
+    }
+    let path = state.servers.paths().console_log(&id);
+    let (backlog, end) = console::tail(&path, BACKLOG).unwrap_or_default();
+    for line in backlog {
+        if send(&mut socket, &log(line)).await.is_err() {
+            return;
+        }
+    }
+    let (sender, mut lines) = mpsc::channel(256);
+    console::follow(path, end, sender);
+    loop {
+        tokio::select! {
+            line = lines.recv() => {
+                let Some(line) = line else { return };
+                if send(&mut socket, &log(line)).await.is_err() {
+                    return;
+                }
+            }
+            message = socket.recv() => match message {
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(WsClientMessage::Command { cmd }) = serde_json::from_str(&text)
+                        && let Err(error) = state.servers.command(&id, &cmd).await
+                    {
+                        tracing::debug!(server = %id, %error, "console command");
+                    }
+                }
+                Some(Ok(_)) => {}
+                Some(Err(_)) | None => return,
+            },
+        }
+    }
+}
+
+fn log(message: String) -> WsEvent {
+    WsEvent::Log {
+        stream: LogStream::Stdout,
+        message,
+    }
+}
+
+async fn send(
+    socket: &mut WebSocket,
+    event: &WsEvent,
+) -> Result<(), axum::Error> {
+    let text = serde_json::to_string(event).expect("events serialize");
+    socket.send(Message::Text(text.into())).await
+}
 
 /// A message the App sends on the console socket. Mirrors Archon.Websocket.v0.WSOutgoingMessage.
 #[derive(Debug, Clone, Deserialize)]

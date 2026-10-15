@@ -3,7 +3,7 @@
 //! `Archon.Servers.v0.StartupConfig` (`archon/servers/v0.ts`) and the runtime options of
 //! `Archon.Content.v1` (`archon/options/v1.ts`).
 
-#![allow(dead_code)] // Wired in step 2: server routes.
+#![allow(dead_code)] // Wired in step 8: memory and flags.
 
 use serde::{Deserialize, Serialize};
 
