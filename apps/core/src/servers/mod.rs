@@ -92,7 +92,7 @@ pub struct Servers {
     live: Mutex<HashMap<String, Live>>,
 }
 
-/// How long a new shim may take to greet Core.
+/// How long a new shim may take to start Java.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How many console lines a crash keeps.
@@ -210,13 +210,17 @@ impl Servers {
                 if shim::is_running(&self.paths, &id) {
                     continue;
                 }
-                let child = self.live().remove(&id).and_then(|live| live.child);
+                let child =
+                    self.live().get_mut(&id).and_then(|live| live.child.take());
                 if let Some(mut child) = child {
                     // The shim released its lock as it exited; this returns at once.
                     let _ =
                         tokio::task::spawn_blocking(move || child.wait()).await;
                 }
+                // Recorded before the server leaves `live`, so a restart waiting on it cannot
+                // start the next run first.
                 self.finish(&id).await;
+                self.live().remove(&id);
             }
         }
     }
@@ -363,8 +367,10 @@ impl Servers {
         }
         let deadline = Instant::now() + START_TIMEOUT;
         loop {
-            if let Ok(connection) = Connection::open(&self.paths, id).await
-                && connection.run_id == run_id
+            // The shim writes run.json once Java runs, after its socket is open.
+            if let Ok(record) =
+                shim::read_versioned::<RunRecord>(&self.paths.run_record(id))
+                && record.run_id == run_id
             {
                 return Ok(());
             }
