@@ -197,10 +197,12 @@ fn write_server_file(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 
 fn no_follow(options: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
+    // O_NONBLOCK: opening a FIFO a mod planted returns at once instead of waiting forever,
+    // and `regular` then refuses it. It changes nothing for a plain file.
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::custom_flags(
         options,
-        nix::libc::O_NOFOLLOW,
+        nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK,
     );
     #[cfg(windows)]
     std::os::windows::fs::OpenOptionsExt::custom_flags(
@@ -252,6 +254,21 @@ mod tests {
                 .is_err()
         );
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "secret");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_fifo_is_refused_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["eula.txt", "server.properties"] {
+            nix::unistd::mkfifo(
+                &dir.path().join(name),
+                nix::sys::stat::Mode::from_bits_truncate(0o600),
+            )
+            .unwrap();
+        }
+        assert!(write_server_file(&dir.path().join("eula.txt"), b"x").is_err());
+        assert!(set_port(dir.path(), 25565).is_err());
     }
 
     #[test]
