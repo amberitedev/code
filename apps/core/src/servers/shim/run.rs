@@ -96,19 +96,24 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
     });
     let server = tokio::spawn(serve(listener, Arc::clone(&shared)));
     let pid = std::process::id();
-    write_json(
-        &paths.run_record(&server_id),
-        &RunRecord {
-            v: PROTOCOL,
-            run_id: launch.run_id.clone(),
-            pid,
-            start_time: process::start_time(pid).ok_or_else(|| {
-                eyre!("cannot read the shim's own start time")
-            })?,
-            boot_id: process::boot_id()?,
-            java_pid,
-        },
-    )?;
+    let record = process::start_time(pid)
+        .ok_or_else(|| eyre!("cannot read the shim's own start time"))
+        .and_then(|start_time| {
+            let record = RunRecord {
+                v: PROTOCOL,
+                run_id: launch.run_id.clone(),
+                pid,
+                start_time,
+                boot_id: process::boot_id()?,
+                java_pid,
+            };
+            Ok(write_json(&paths.run_record(&server_id), &record)?)
+        });
+    if let Err(error) = record {
+        // Without run.json Core cannot adopt this run, so it must not keep running unseen.
+        eprintln!("could not write run.json: {error:#}");
+        shared.act(Message::Kill);
+    }
 
     let exit = tokio::task::spawn_blocking(move || waiter.wait()).await?;
     server.abort();
