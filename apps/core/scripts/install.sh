@@ -46,5 +46,5 @@ install -m 0755 "$temporary_dir/copal" "$install_dir/copal"
 printf '%s\n' "Installed Copal $tag to $install_dir/copal"
 case ":$PATH:" in
 	*":$install_dir:"*) ;;
-	*) printf '%s\n' "Add $install_dir to PATH, then run: copal install --curl --env-file /path/to/copal.env" ;;
+	*) printf '%s\n' "Add $install_dir to PATH, then run: sudo copal install" ;;
 esac
