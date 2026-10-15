@@ -179,6 +179,10 @@ mod platform {
     }
 
     fn service_main(_arguments: Vec<OsString>) {
+        // A service has no console, so the file log starts before anything can fail.
+        crate::daemon::logging(&crate::daemon::paths::Paths::new(
+            crate::daemon::config::data_dir(),
+        ));
         let stop = Arc::new(Notify::new());
         let stop_requested = Arc::clone(&stop);
         let Ok(status) = service_control_handler::register(
