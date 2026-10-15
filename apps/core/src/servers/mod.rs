@@ -367,13 +367,8 @@ impl Servers {
         }
         let deadline = Instant::now() + START_TIMEOUT;
         loop {
-            // The shim writes run.json once Java runs, after its socket is open.
-            if let Ok(record) =
-                shim::read_versioned::<RunRecord>(&self.paths.run_record(id))
-                && record.run_id == run_id
-            {
-                return Ok(());
-            }
+            // Checked first: a Java that already exited is not a successful start, whatever
+            // run.json says.
             if let Some(exit) = self.reap(id)? {
                 self.finish(id).await;
                 let status: Option<ExitStatus> =
@@ -385,6 +380,13 @@ impl Servers {
                     .or_else(|| shim_log.lines().last().map(str::to_owned))
                     .unwrap_or_else(|| format!("the shim exited ({exit})"));
                 return Err(ServerError::StartFailed(reason));
+            }
+            // The shim writes run.json once Java runs, after its socket is open.
+            if let Ok(record) =
+                shim::read_versioned::<RunRecord>(&self.paths.run_record(id))
+                && record.run_id == run_id
+            {
+                return Ok(());
             }
             if Instant::now() > deadline {
                 return Err(ServerError::StartFailed(
