@@ -2,17 +2,12 @@
 //!
 //! There is no domain and no certificate authority. The App learns the certificate's SHA-256
 //! fingerprint through the backend and trusts only that. There is no plain HTTP listener; the CLI
-//! reaches Core over the local socket (step 2).
+//! reaches Core over the local socket (see `access::local`).
 
 use std::{path::Path, sync::Arc, time::Duration};
 
 use axum::Router;
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto::Builder,
-    service::TowerToHyperService,
-};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
@@ -135,13 +130,7 @@ async fn connection(
     let stream =
         tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream))
             .await??;
-    Builder::new(TokioExecutor::new())
-        .serve_connection_with_upgrades(
-            TokioIo::new(stream),
-            TowerToHyperService::new(router),
-        )
-        .await
-        .map_err(|error| eyre!("{error}"))
+    crate::api::serve_connection(stream, router).await
 }
 
 #[cfg(test)]

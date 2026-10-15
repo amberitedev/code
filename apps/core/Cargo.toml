@@ -7,7 +7,7 @@ description = "Copal, Amberite's self-hosted Minecraft server manager"
 repository.workspace = true
 
 [dependencies]
-axum = "0.8.4"
+axum = { version = "0.8.4", features = ["ws"] }
 bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
@@ -17,6 +17,8 @@ daedalus = { workspace = true }
 dunce = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
+http-body-util = "0.1.3"
+hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 netdev = "0.46.3"
@@ -36,14 +38,36 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring
 toml = { workspace = true }
 tower-http = { version = "0.6.6", features = ["trace"] }
 tracing = { workspace = true }
+tracing-appender = "0.2.5"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ts-rs = { workspace = true, features = ["uuid-impl"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 walkdir = "2.5"
 zip = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-whoami = { workspace = true }
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.186"
+
+[target."cfg(unix)".dependencies]
+nix = { version = "0.30.1", features = ["fs", "signal", "user"] }
+
+[target."cfg(windows)".dependencies]
+windows-service = "0.8.1"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_Security",
+  "Win32_Security_Authentication_Identity",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_Services",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+] }
 
 [lints]
 workspace = true

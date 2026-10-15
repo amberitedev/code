@@ -7,7 +7,7 @@ export type ApiError = { error: ErrorCode,
  */
 description: string, };
 
-export type ErrorCode = "unauthorized" | "forbidden" | "ticket_required" | "ticket_invalid" | "ticket_wrong_core" | "ticket_expired" | "ticket_reused" | "clock_wrong" | "not_invited" | "not_found" | "rate_limited" | "invalid_request";
+export type ErrorCode = "unauthorized" | "forbidden" | "ticket_required" | "ticket_invalid" | "ticket_wrong_core" | "ticket_expired" | "ticket_reused" | "clock_wrong" | "not_invited" | "not_found" | "rate_limited" | "invalid_request" | "conflict" | "internal";
 
 export type Role = "viewer" | "editor";
 

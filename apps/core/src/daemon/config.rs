@@ -45,8 +45,7 @@ impl Config {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
         };
-        let data_dir =
-            env("CORE_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
+        let data_dir = data_dir();
         let file = read_file(&Paths::new(&data_dir).config_file())?;
         let mut config = Self::with_file(data_dir, file);
         if let Some(port) = env("PORT") {
@@ -89,8 +88,17 @@ fn read_file(path: &Path) -> Result<File> {
     }
 }
 
-/// Where a system service keeps its data on each OS. `copal install` (step 2) gives this folder
-/// to the `copal` account.
+/// The data folder alone, without reading `config.toml`. The CLI uses this: the owner may
+/// reach the local socket but not read the data folder's files.
+pub fn data_dir() -> PathBuf {
+    std::env::var("CORE_DATA_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map_or_else(default_data_dir, PathBuf::from)
+}
+
+/// Where a system service keeps its data on each OS. `copal install` gives this folder to the
+/// `copal` account.
 fn default_data_dir() -> PathBuf {
     if cfg!(windows) {
         std::env::var_os("ProgramData")
