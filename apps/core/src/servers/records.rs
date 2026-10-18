@@ -144,15 +144,18 @@ pub async fn start_run(
     Ok(())
 }
 
-/// Runs of a server that have no end yet.
+/// Runs of a server that have no end yet and started before `started_before`.
 pub async fn open_runs(
     db: &SqlitePool,
     server_id: &str,
+    started_before: i64,
 ) -> sqlx::Result<Vec<String>> {
     sqlx::query_scalar(
-        "SELECT id FROM runs WHERE server_id = ? AND ended_at IS NULL ORDER BY started_at",
+        "SELECT id FROM runs WHERE server_id = ? AND ended_at IS NULL AND started_at < ? \
+         ORDER BY started_at",
     )
     .bind(server_id)
+    .bind(started_before)
     .fetch_all(db)
     .await
 }
@@ -265,7 +268,10 @@ mod tests {
         let server = create(&db, "A").await.unwrap().unwrap();
         assert_eq!(server.port, i64::from(*SERVER_PORTS.start()));
         start_run(&db, &server.id, "run", 1).await.unwrap();
-        assert_eq!(open_runs(&db, &server.id).await.unwrap(), ["run"]);
+        assert_eq!(
+            open_runs(&db, &server.id, i64::MAX).await.unwrap(),
+            ["run"]
+        );
         assert_eq!(
             servers_with_open_runs(&db).await.unwrap(),
             [server.id.as_str()]
@@ -299,7 +305,12 @@ mod tests {
                 Some("Exception in server tick loop".into())
             )
         );
-        assert!(open_runs(&db, &server.id).await.unwrap().is_empty());
+        assert!(
+            open_runs(&db, &server.id, i64::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             last_outcome(&db, &server.id).await.unwrap(),
             Some(Outcome::Crashed)

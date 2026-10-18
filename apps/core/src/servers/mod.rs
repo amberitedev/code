@@ -100,7 +100,7 @@ const CRASH_LINES: usize = 50;
 
 impl Servers {
     /// Adopt every server whose shim still runs, record how the others' runs ended, and start
-    /// watching for runs that end.
+    /// watching for runs that end and shims that appear.
     pub async fn open(paths: Paths, db: SqlitePool) -> Result<Arc<Self>> {
         let http = reqwest::Client::builder()
             .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
@@ -112,12 +112,7 @@ impl Servers {
             http,
             live: Mutex::new(HashMap::new()),
         });
-        servers.adopt().await?;
-        for id in records::servers_with_open_runs(&servers.db).await? {
-            if !servers.live().contains_key(&id) {
-                servers.finish(&id).await;
-            }
-        }
+        servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
         Ok(servers)
     }
@@ -141,12 +136,19 @@ impl Servers {
         }
     }
 
-    /// Take over every server a shim still runs for, instead of starting a second copy. A
-    /// shim is trusted only when its run id, pid, start time, and boot all match.
-    async fn adopt(&self) -> Result<()> {
+    /// Take over every shim that runs for a server Core does not track, instead of starting a
+    /// second copy, and record the end of runs whose shim is gone. Runs at start and every second:
+    /// a Core that died right after starting a shim leaves a run whose shim has not taken its lock
+    /// yet, and that shim is adopted once it appears.
+    async fn scan(&self) -> Result<()> {
         let boot_id = process::boot_id()?;
         for id in shim::running(&self.paths) {
-            let phase = self.identify(&id, &boot_id).await;
+            if self.live().contains_key(&id) {
+                continue;
+            }
+            let Some(phase) = self.identify(&id, &boot_id).await else {
+                continue;
+            };
             match phase {
                 Phase::Running => {
                     info!(server = %id, "adopted a running server")
@@ -156,46 +158,61 @@ impl Servers {
                     "a server runs under a shim this Core cannot use; it is left running"
                 ),
             }
-            self.live().insert(id, Live { phase, child: None });
+            self.live().entry(id).or_insert(Live { phase, child: None });
+        }
+        // A run younger than START_TIMEOUT may belong to a shim still starting. The cutoff also
+        // keeps this from closing a run a start in progress has just recorded.
+        let cutoff =
+            chrono::Utc::now().timestamp() - START_TIMEOUT.as_secs() as i64;
+        for id in records::servers_with_open_runs(&self.db).await? {
+            if !self.live().contains_key(&id)
+                && !shim::is_running(&self.paths, &id)
+            {
+                self.finish(&id, cutoff).await;
+            }
         }
         Ok(())
     }
 
-    /// What the shim holding a server's lock is. A shim that holds the lock but has not yet
-    /// written `run.json` is starting; it gets a few seconds.
-    async fn identify(&self, id: &str, boot_id: &str) -> Phase {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match shim::read_versioned::<RunRecord>(&self.paths.run_record(id))
+    /// What the shim holding a server's lock is. A shim is trusted only when its run id, pid,
+    /// start time, and boot all match. `None` while it has not written `run.json` yet, which it
+    /// does within START_TIMEOUT of its launch; after that it is a shim Core cannot use.
+    async fn identify(&self, id: &str, boot_id: &str) -> Option<Phase> {
+        match shim::read_versioned::<RunRecord>(&self.paths.run_record(id)) {
+            Ok(record)
+                if record
+                    .is_alive(boot_id, process::start_time(record.pid)) =>
             {
-                Ok(record)
-                    if record
-                        .is_alive(boot_id, process::start_time(record.pid)) =>
-                {
-                    return match Connection::open(&self.paths, id).await {
-                        Ok(connection)
-                            if connection.run_id == record.run_id =>
-                        {
-                            Phase::Running
-                        }
-                        Err(ShimError::Incompatible(version)) => {
-                            Phase::Unmanaged(Some(version))
-                        }
-                        _ => Phase::Unmanaged(None),
-                    };
-                }
-                Err(ShimError::Incompatible(version)) => {
-                    return Phase::Unmanaged(Some(version));
-                }
-                _ if Instant::now() > deadline => {
-                    return Phase::Unmanaged(None);
-                }
-                _ => tokio::time::sleep(Duration::from_millis(200)).await,
+                Some(match Connection::open(&self.paths, id).await {
+                    Ok(connection) if connection.run_id == record.run_id => {
+                        Phase::Running
+                    }
+                    Err(ShimError::Incompatible(version)) => {
+                        Phase::Unmanaged(Some(version))
+                    }
+                    _ => Phase::Unmanaged(None),
+                })
             }
+            Err(ShimError::Incompatible(version)) => {
+                Some(Phase::Unmanaged(Some(version)))
+            }
+            _ if self.launch_is_recent(id) => None,
+            _ => Some(Phase::Unmanaged(None)),
         }
     }
 
-    /// Check every second for shims that exited, and record how their runs ended.
+    /// Whether `launch.json` was written less than START_TIMEOUT ago, so its shim may still be
+    /// starting.
+    fn launch_is_recent(&self, id: &str) -> bool {
+        std::fs::metadata(self.paths.launch_spec(id))
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|written| written.elapsed().ok())
+            .is_some_and(|age| age < START_TIMEOUT)
+    }
+
+    /// Check every second for shims that exited, record how their runs ended, and adopt shims
+    /// that appeared.
     async fn watch(self: Arc<Self>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         loop {
@@ -219,17 +236,22 @@ impl Servers {
                 }
                 // Recorded before the server leaves `live`, so a restart waiting on it cannot
                 // start the next run first.
-                self.finish(&id).await;
+                self.finish(&id, i64::MAX).await;
                 self.live().remove(&id);
+            }
+            if let Err(error) = self.scan().await {
+                warn!(%error, "could not look for running servers");
             }
         }
     }
 
-    /// Record the end of every open run of a server whose shim is gone.
-    async fn finish(&self, id: &str) {
+    /// Record the end of every open run of a server whose shim is gone, among those started
+    /// before `started_before`.
+    async fn finish(&self, id: &str, started_before: i64) {
         let status: Option<ExitStatus> =
             shim::read_versioned(&self.paths.run_status(id)).ok();
-        let runs = match records::open_runs(&self.db, id).await {
+        let runs = match records::open_runs(&self.db, id, started_before).await
+        {
             Ok(runs) => runs,
             Err(error) => {
                 warn!(server = %id, %error, "could not read open runs");
@@ -358,7 +380,7 @@ impl Servers {
         let child = match shim::spawn(&self.paths, id) {
             Ok(child) => child,
             Err(error) => {
-                self.finish(id).await;
+                self.finish(id, i64::MAX).await;
                 return Err(error.into());
             }
         };
@@ -370,7 +392,7 @@ impl Servers {
             // Checked first: a Java that already exited is not a successful start, whatever
             // run.json says.
             if let Some(exit) = self.reap(id)? {
-                self.finish(id).await;
+                self.finish(id, i64::MAX).await;
                 let status: Option<ExitStatus> =
                     shim::read_versioned(&self.paths.run_status(id)).ok();
                 let shim_log = std::fs::read_to_string(self.paths.shim_log(id))
@@ -541,6 +563,72 @@ mod tests {
         let mode = std::fs::metadata(&store).unwrap().permissions().mode();
         assert_eq!(mode & 0o7777, 0o750);
         assert_eq!(servers.phase(&server.id), None);
+    }
+
+    #[tokio::test]
+    async fn a_shim_started_by_a_core_that_died_is_adopted_when_it_appears() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        crate::daemon::folders::create(&paths, None).unwrap();
+        let db = db::memory().await;
+        let server = records::create(&db, "A").await.unwrap().unwrap();
+        // The dead Core recorded the run and wrote the launch; its shim has not started yet.
+        let now = chrono::Utc::now().timestamp();
+        records::start_run(&db, &server.id, "late", now)
+            .await
+            .unwrap();
+        std::fs::create_dir_all(paths.run(&server.id)).unwrap();
+        shim::write_json(
+            &paths.launch_spec(&server.id),
+            &shim::Launch {
+                v: shim::PROTOCOL,
+                run_id: "late".into(),
+                java: "java".into(),
+                args: Vec::new(),
+                dir: paths.server(&server.id),
+                memory_limit_mb: 1024,
+            },
+        )
+        .unwrap();
+
+        let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+        assert_eq!(servers.phase(&server.id), None);
+        assert_eq!(
+            records::open_runs(&db, &server.id, i64::MAX).await.unwrap(),
+            ["late"]
+        );
+
+        // The shim takes its lock and records itself, as this test process.
+        let _lock = shim::try_lock(&paths, &server.id).unwrap().unwrap();
+        let pid = std::process::id();
+        shim::write_json(
+            &paths.run_record(&server.id),
+            &RunRecord {
+                v: shim::PROTOCOL,
+                run_id: "late".into(),
+                pid,
+                start_time: process::start_time(pid).unwrap(),
+                boot_id: process::boot_id().unwrap(),
+                java_pid: pid,
+            },
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while servers.phase(&server.id).is_none() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            servers.phase(&server.id).is_some(),
+            "the late shim was ignored"
+        );
+        assert!(matches!(
+            servers.start(&server.id).await,
+            Err(ServerError::AlreadyRunning)
+        ));
+        assert_eq!(
+            records::open_runs(&db, &server.id, i64::MAX).await.unwrap(),
+            ["late"]
+        );
     }
 
     #[tokio::test]
