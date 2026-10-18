@@ -89,7 +89,7 @@ pub fn create_server_folder(path: &std::path::Path) -> std::io::Result<()> {
 #[cfg(unix)]
 mod platform {
     use std::{
-        os::unix::fs::{PermissionsExt, chown},
+        os::unix::fs::{PermissionsExt, chown, lchown},
         path::Path,
     };
 
@@ -101,6 +101,31 @@ mod platform {
         chown(root, Some(accounts.core.uid), Some(accounts.core.gid))?;
         // Listable by everyone, so the owner can reach `copal.sock`.
         std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o755))?;
+        // `config.toml` and the socket; the folders are handled by `set`.
+        for entry in std::fs::read_dir(root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() && !entry.file_type()?.is_symlink() {
+                lchown(
+                    entry.path(),
+                    Some(accounts.core.uid),
+                    Some(accounts.core.gid),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Give everything inside `path` to `copal` and `group`. Data kept from an earlier install
+    /// belongs to accounts that no longer exist. Links are skipped, never followed; install
+    /// refuses to run while a server runs, so nothing swaps entries during the walk.
+    fn chown_tree(path: &Path, uid: u32, group: u32) -> Result<()> {
+        for entry in walkdir::WalkDir::new(path).min_depth(1).follow_links(false)
+        {
+            let entry = entry?;
+            if !entry.path_is_symlink() {
+                lchown(entry.path(), Some(uid), Some(group))?;
+            }
+        }
         Ok(())
     }
 
@@ -118,7 +143,7 @@ mod platform {
         };
         chown(path, Some(accounts.core.uid), Some(group))?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
-        Ok(())
+        chown_tree(path, accounts.core.uid, group)
     }
 }
 
