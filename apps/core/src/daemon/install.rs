@@ -99,19 +99,25 @@ impl InstallRecord {
 }
 
 /// `copal install`. `owner` names the account that may use the CLI; by default the one that
-/// ran install (through `sudo`, the one that ran `sudo`).
+/// ran install (through `sudo`, the one that ran `sudo`). Refuses while a server runs, like
+/// uninstall: it replaces the binary shims run from and resets the accounts' passwords.
 pub fn install(owner: Option<&str>) -> Result<()> {
     require_admin()?;
-    if std::env::var_os("CORE_DATA_DIR").is_some() {
-        bail!(
-            "copal install always uses this machine's data folder. Unset CORE_DATA_DIR and run it again"
-        );
-    }
+    refuse_data_dir_override("install")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
 
-    // Core must not run while its binary is replaced and its folders change hands.
-    service::stop()?;
+    // Core must not run while its binary is replaced and its folders change hands. The binary
+    // goes first, so a replacement that fails has not touched any account or password.
+    stop_core_with_no_servers(&paths, "install")?;
+    let exe = match install_binary() {
+        Ok(exe) => exe,
+        Err(error) => {
+            let _ = service::start();
+            return Err(error);
+        }
+    };
+    println!("Program: {}", exe.display());
     let created = accounts::create()?;
     println!("Accounts: {CORE} and {SERVERS}, without interactive sign-in");
     let owner = match owner {
@@ -119,9 +125,6 @@ pub fn install(owner: Option<&str>) -> Result<()> {
         None => accounts::current_id()?,
     };
     println!("Owner: {owner} may use the copal CLI");
-
-    let exe = install_binary()?;
-    println!("Program: {}", exe.display());
     #[cfg(unix)]
     {
         install_sudoers()?;
@@ -160,18 +163,12 @@ pub fn install(owner: Option<&str>) -> Result<()> {
 /// removes. `remove_data` deletes the data folder too: worlds, backups, everything.
 pub fn uninstall(remove_data: bool) -> Result<()> {
     require_admin()?;
+    refuse_data_dir_override("uninstall")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
     let record = InstallRecord::load(&paths)?;
 
-    // Checked while Core still runs, so the servers can still be stopped through it.
-    let running = crate::servers::shim::running(&paths);
-    if !running.is_empty() {
-        bail!(
-            "these servers are still running: {}. Stop them first (copal servers stop <id>), then run uninstall again",
-            running.join(", ")
-        );
-    }
+    stop_core_with_no_servers(&paths, "uninstall")?;
     service::unregister()?;
     println!("Service: removed");
 
@@ -212,6 +209,32 @@ pub fn uninstall(remove_data: bool) -> Result<()> {
         );
     }
     println!("\nCopal is uninstalled.");
+    Ok(())
+}
+
+/// Install and uninstall work on this machine's data folder only, never a development one.
+fn refuse_data_dir_override(command: &str) -> Result<()> {
+    if std::env::var_os("CORE_DATA_DIR").is_some() {
+        bail!(
+            "copal {command} always uses this machine's data folder. Unset CORE_DATA_DIR and run it again"
+        );
+    }
+    Ok(())
+}
+
+/// Stop Core, then refuse while any server runs: its shim runs as an account `command` changes.
+/// Shims outlive Core, so checking after the stop is exact, and no start can slip in between.
+/// When servers run, Core is started again so they can be stopped through it.
+fn stop_core_with_no_servers(paths: &Paths, command: &str) -> Result<()> {
+    service::stop()?;
+    let running = crate::servers::shim::running(paths);
+    if !running.is_empty() {
+        let _ = service::start();
+        bail!(
+            "these servers are still running: {}. Stop them first (copal servers stop <id>), then run {command} again",
+            running.join(", ")
+        );
+    }
     Ok(())
 }
 

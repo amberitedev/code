@@ -23,6 +23,11 @@ pub fn stop() -> Result<()> {
     platform::stop()
 }
 
+/// Start the service again after `stop`. Fails when it is not registered.
+pub fn start() -> Result<()> {
+    platform::start()
+}
+
 /// Stop and remove the service. A service that is not registered is skipped.
 pub fn unregister() -> Result<()> {
     platform::unregister()
@@ -155,6 +160,17 @@ mod platform {
             }
             std::thread::sleep(Duration::from_millis(250));
         }
+        Ok(())
+    }
+
+    pub fn start() -> Result<()> {
+        let manager = ServiceManager::local_computer(
+            None::<&str>,
+            ServiceManagerAccess::CONNECT,
+        )?;
+        manager
+            .open_service(NAME, ServiceAccess::START)?
+            .start::<&str>(&[])?;
         Ok(())
     }
 
@@ -312,6 +328,10 @@ mod platform {
         Ok(())
     }
 
+    pub fn start() -> Result<()> {
+        systemctl(&["start", NAME])
+    }
+
     pub fn unregister() -> Result<()> {
         if systemd() && Path::new(UNIT).exists() {
             systemctl(&["disable", "--now", NAME])?;
@@ -366,6 +386,19 @@ mod platform {
             exe.display()
         );
         std::fs::write(PLIST, plist)?;
+        start()?;
+        Ok(format!("launchd daemon {LABEL} loaded"))
+    }
+
+    pub fn stop() -> Result<()> {
+        // Fails when the daemon is not loaded, which is fine.
+        let _ = Command::new("launchctl")
+            .args(["bootout", &format!("system/{LABEL}")])
+            .output()?;
+        Ok(())
+    }
+
+    pub fn start() -> Result<()> {
         let output = Command::new("launchctl")
             .args(["bootstrap", "system", PLIST])
             .output()?;
@@ -375,14 +408,6 @@ mod platform {
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }
-        Ok(format!("launchd daemon {LABEL} loaded"))
-    }
-
-    pub fn stop() -> Result<()> {
-        // Fails when the daemon is not loaded, which is fine.
-        let _ = Command::new("launchctl")
-            .args(["bootout", &format!("system/{LABEL}")])
-            .output()?;
         Ok(())
     }
 
