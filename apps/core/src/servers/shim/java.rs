@@ -160,9 +160,12 @@ mod platform {
     use windows_sys::Win32::{
         Foundation::{
             ERROR_PRIVILEGE_NOT_HELD, HANDLE, HANDLE_FLAG_INHERIT,
-            SetHandleInformation,
+            INVALID_HANDLE_VALUE, SetHandleInformation,
         },
         Security::{LOGON32_LOGON_BATCH, LOGON32_PROVIDER_DEFAULT, LogonUserW},
+        System::Console::{
+            GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+        },
         System::{
             JobObjects::{
                 AssignProcessToJobObject, CreateJobObjectW,
@@ -189,6 +192,7 @@ mod platform {
     };
 
     pub fn spawn(launch: &Launch, run_as: &RunAs) -> io::Result<Java> {
+        keep_std_handles_private();
         let (stdin_child, stdin) = pipe()?;
         let (stdout, stdout_child) = pipe()?;
         let (stderr, stderr_child) = pipe()?;
@@ -318,6 +322,20 @@ mod platform {
             killer: Killer(job),
             waiter: Waiter(process),
         })
+    }
+
+    /// Java inherits every inheritable handle of the shim. The shim's standard handles came from
+    /// Core, and its stderr is `shim.log`, which Java must not be able to write. Every other
+    /// handle the shim opens is not inheritable, so Java gets only its three pipe ends.
+    pub(super) fn keep_std_handles_private() {
+        for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            // SAFETY: GetStdHandle returns a handle owned by the process, or none.
+            let handle = unsafe { GetStdHandle(id) };
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                // SAFETY: a valid handle; only its inherit flag changes.
+                unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) };
+            }
+        }
     }
 
     /// An anonymous pipe: (read end, write end). Neither end is inherited until told.
@@ -465,6 +483,35 @@ fn quote(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn java_cannot_inherit_the_shims_own_handles() {
+        use windows_sys::Win32::{
+            Foundation::{
+                GetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+            },
+            System::Console::{
+                GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+                STD_OUTPUT_HANDLE,
+            },
+        };
+
+        platform::keep_std_handles_private();
+        for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            // SAFETY: reads this process's standard handles and their flags.
+            unsafe {
+                let handle = GetStdHandle(id);
+                let mut flags = 0;
+                if !handle.is_null()
+                    && handle != INVALID_HANDLE_VALUE
+                    && GetHandleInformation(handle, &raw mut flags) != 0
+                {
+                    assert_eq!(flags & HANDLE_FLAG_INHERIT, 0);
+                }
+            }
+        }
+    }
 
     #[test]
     fn arguments_are_quoted_for_the_c_runtime() {
