@@ -45,18 +45,43 @@ pub fn create(paths: &Paths, accounts: Option<&Accounts>) -> Result<()> {
     Ok(())
 }
 
-/// Create one server's folder, where `copal-servers` may write. Its parent lets
-/// `copal-servers` list but not rename or replace entries, so a mod cannot swap a server's
-/// folder for a link elsewhere.
+/// Create a folder inside `servers/`, where `copal-servers` may write: a server's folder, or one
+/// inside it such as `tmp`. Its parent must exist. A mod can plant a link where the folder should
+/// be, so a link is refused rather than followed: Core never chmods or writes through one.
 pub fn create_server_folder(path: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(path)?;
+    match std::fs::create_dir(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => {
+            return Err(error);
+        }
+        _ => {}
+    }
+    let refuse = || {
+        std::io::Error::other(format!(
+            "{} is a link or not a folder, so Core will not use it. Delete it and start again",
+            path.display()
+        ))
+    };
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(
-            path,
-            std::fs::Permissions::from_mode(0o2770),
-        )?;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        // O_NOFOLLOW fails on a link; the mode is then set through the handle, never the path.
+        let folder = std::fs::File::options()
+            .read(true)
+            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_DIRECTORY)
+            .open(path)
+            .map_err(|_| refuse())?;
+        folder.set_permissions(std::fs::Permissions::from_mode(0o2770))?;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        let meta = std::fs::symlink_metadata(path)?;
+        if !meta.is_dir()
+            || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            return Err(refuse());
+        }
     }
     Ok(())
 }

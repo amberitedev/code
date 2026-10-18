@@ -497,10 +497,50 @@ mod tests {
 
     async fn servers() -> (tempfile::TempDir, Arc<Servers>) {
         let dir = tempfile::tempdir().unwrap();
-        let servers = Servers::open(Paths::new(dir.path()), db::memory().await)
-            .await
-            .unwrap();
+        let paths = Paths::new(dir.path());
+        crate::daemon::folders::create(&paths, None).unwrap();
+        let servers = Servers::open(paths, db::memory().await).await.unwrap();
         (dir, servers)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_link_planted_in_a_server_folder_is_not_followed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, servers) = servers().await;
+        let server = servers.create("A").await.unwrap();
+        records::set_installed(
+            &servers.db,
+            &server.id,
+            "vanilla",
+            "1.21.1",
+            None,
+        )
+        .await
+        .unwrap();
+        records::accept_eula(&servers.db, &server.id).await.unwrap();
+        // A mod points `tmp` at a store it may only read.
+        let store = dir.path().join("java");
+        std::fs::set_permissions(
+            &store,
+            std::fs::Permissions::from_mode(0o750),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            &store,
+            servers.paths().server(&server.id).join("tmp"),
+        )
+        .unwrap();
+
+        let error = servers.start(&server.id).await.unwrap_err();
+        assert!(
+            error.to_string().contains("is a link or not a folder"),
+            "{error}"
+        );
+        let mode = std::fs::metadata(&store).unwrap().permissions().mode();
+        assert_eq!(mode & 0o7777, 0o750);
+        assert_eq!(servers.phase(&server.id), None);
     }
 
     #[tokio::test]

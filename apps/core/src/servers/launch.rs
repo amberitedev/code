@@ -187,12 +187,15 @@ fn read_server_file(path: &Path) -> io::Result<String> {
     Ok(text)
 }
 
+/// Create or replace a file in a server folder. It is truncated only once the open handle is
+/// known to be a plain file, never through a link.
 fn write_server_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut options = std::fs::File::options();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create(true).truncate(false);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o660);
     let mut file = no_follow(&mut options).open(path).and_then(regular)?;
+    file.set_len(0)?;
     file.write_all(contents)
 }
 
@@ -214,7 +217,14 @@ fn no_follow(options: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
 
 /// Refuse anything but a plain file, such as a link opened as itself.
 fn regular(file: std::fs::File) -> io::Result<std::fs::File> {
-    if file.metadata()?.is_file() {
+    let meta = file.metadata()?;
+    #[cfg(windows)]
+    let link = std::os::windows::fs::MetadataExt::file_attributes(&meta)
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0;
+    #[cfg(unix)]
+    let link = false;
+    if meta.is_file() && !link {
         Ok(file)
     } else {
         Err(io::Error::other("not a plain file"))
