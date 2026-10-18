@@ -104,7 +104,8 @@ mod platform {
         // `config.toml` and the socket; the folders are handled by `set`.
         for entry in std::fs::read_dir(root)? {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() && !entry.file_type()?.is_symlink() {
+            if !entry.file_type()?.is_dir() && !entry.file_type()?.is_symlink()
+            {
                 lchown(
                     entry.path(),
                     Some(accounts.core.uid),
@@ -119,7 +120,8 @@ mod platform {
     /// belongs to accounts that no longer exist. Links are skipped, never followed; install
     /// refuses to run while a server runs, so nothing swaps entries during the walk.
     fn chown_tree(path: &Path, uid: u32, group: u32) -> Result<()> {
-        for entry in walkdir::WalkDir::new(path).min_depth(1).follow_links(false)
+        for entry in
+            walkdir::WalkDir::new(path).min_depth(1).follow_links(false)
         {
             let entry = entry?;
             if !entry.path_is_symlink() {
