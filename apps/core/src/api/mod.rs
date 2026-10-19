@@ -20,6 +20,8 @@ pub mod servers;
 pub mod sessions;
 mod startup;
 #[cfg(test)]
+mod tests;
+#[cfg(test)]
 mod typescript;
 
 use std::{sync::Arc, time::Duration};
