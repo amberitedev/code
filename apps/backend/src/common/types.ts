@@ -2,6 +2,8 @@ export interface Env extends Cloudflare.Env {
 	LOCAL_DEV?: string
 	LOCAL_DEV_SECRET?: string
 	CORS_ORIGINS?: string
+	/** The Ed25519 JWK tickets are signed with. See README.md. */
+	TICKET_KEY?: string
 }
 
 export interface UserRow {
