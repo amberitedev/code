@@ -56,3 +56,34 @@ running it again after a backend restart also proves persistence. It does not st
 
 `pnpm test` in `apps/backend` runs the contract tests in wrangler's local runtime. The sharing test
 sends every request the App's sharing client sends and checks the files in R2.
+
+## Cores
+
+A Core pairs with a code its owner approves in the App, then calls the backend with its own `amc_`
+key. It reports its state with `POST /core/state` on start and when something changes, never on a
+timer, and a report that changes nothing writes nothing. `PUT /core/access` replaces the Core's
+access directory, the accounts that may be told where it is. The Core is the only authority on
+roles; the backend never sees them. A Core removed from its account gets `410 core_removed` from
+both calls and un-pairs.
+
+`POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner or an account in that
+Core's directory: an Ed25519 JWT with `iss`, `sub`, `name`, `avatar_url`, `aud` (the Core id),
+`iat`, `exp` five minutes later, and a random `jti`. It writes nothing. The Core verifies it against
+`public/core/keys.json`, served as a static asset at `/core/keys.json` so it costs no requests.
+
+### Ticket keys
+
+The private key is the `TICKET_KEY` secret, an Ed25519 JWK with a `kid`. Make one with:
+
+```sh
+node -e "const {privateKey}=require('node:crypto').generateKeyPairSync('ed25519');const jwk={...privateKey.export({format:'jwk'}),kid:new Date().toISOString().slice(0,10)};const {d,...pub}=jwk;console.log(JSON.stringify(jwk));console.log(JSON.stringify(pub))"
+```
+
+The first line is the secret (`wrangler secret put TICKET_KEY`); the second goes in the `keys` list
+of `public/core/keys.json`. Cores refresh the file daily and refetch it, at most every ten minutes,
+when a ticket names a `kid` they do not know.
+
+To rotate: add the new public key to `keys.json` and deploy, then set `TICKET_KEY` to the new
+private key. Keep the old public key listed for a day, then remove it and deploy again.
+
+Local development makes its own key; see `docs/internals/scripts.md`.
