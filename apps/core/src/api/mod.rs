@@ -6,8 +6,8 @@
 //! Amberite has (access, sessions, activity, backend sync) generate their TypeScript from these
 //! structs with `ts-rs`; see `typescript`.
 
-mod access;
-mod activity;
+pub mod access;
+pub mod activity;
 pub mod backend;
 mod backups;
 mod content;
@@ -17,7 +17,7 @@ mod files;
 mod health;
 mod properties;
 pub mod servers;
-mod sessions;
+pub mod sessions;
 mod startup;
 #[cfg(test)]
 mod typescript;
@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use color_eyre::eyre::{Result, eyre};
 use hyper_util::{
@@ -42,22 +42,39 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub db: SqlitePool,
     pub servers: Arc<crate::servers::Servers>,
+    pub access: Arc<crate::access::Access>,
 }
 
+/// Every route. Each one checks its caller itself (see `access`); the network listener adds its
+/// own checks on top (see `network::tls`).
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health::get))
+        .route("/sessions", post(sessions::sign_in).get(sessions::list))
+        .route("/sessions/current", delete(sessions::sign_out))
+        .route("/sessions/{id}", delete(sessions::revoke))
+        .route("/access/me", get(access::me))
+        .route(
+            "/servers/{id}/access",
+            get(access::list).post(access::invite),
+        )
+        .route(
+            "/servers/{id}/access/{user_id}",
+            delete(access::remove).patch(access::change_role),
+        )
+        .route("/activity", get(activity::list))
         .route("/modrinth/v0/servers", get(servers::list))
         .route("/modrinth/v0/servers/{id}", get(servers::get))
+        .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
+        .route("/servers/{id}/ws", get(events::console))
+        .route("/local/servers", post(servers::create))
+        .route("/local/servers/{id}", delete(servers::delete))
+        .route("/local/servers/{id}/eula", post(servers::accept_eula))
         .route("/modrinth/v0/servers/{id}/power", post(servers::power))
         .route(
             "/modrinth/v0/servers/{id}/reinstall",
             post(servers::reinstall),
         )
-        .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
-        .route("/servers/{id}/ws", get(events::console))
-        .route("/local/servers", post(servers::create))
-        .route("/local/servers/{id}/eula", post(servers::accept_eula))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }

@@ -24,7 +24,6 @@ pub struct Config {
     pub bind: IpAddr,
     /// `ACCOUNT_API_URL`. The Amberite backend. `None` until the hosted backend has an address;
     /// a Core without one serves its API but cannot pair or sync.
-    #[allow(dead_code)] // Wired in step 3: pairing and backend sync.
     pub backend_url: Option<String>,
 }
 

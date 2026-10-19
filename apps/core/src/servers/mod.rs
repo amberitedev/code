@@ -492,6 +492,19 @@ impl Servers {
         Ok(server)
     }
 
+    /// Remove a deleted server's world and run files. Its row is already gone.
+    pub fn delete_folders(&self, id: &str) -> Result<(), ServerError> {
+        for folder in [self.paths.server(id), self.paths.run(id)] {
+            match std::fs::remove_dir_all(&folder) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Install Vanilla `game_version` on a stopped server.
     pub async fn install_vanilla(
         &self,

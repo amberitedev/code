@@ -21,11 +21,12 @@ use uuid::Uuid;
 
 use super::{
     AppState,
+    activity::Action,
     content::LinkedPackState,
     error::{ApiError, ErrorCode},
 };
 use crate::{
-    access::local::Owner,
+    access::{Caller, Dangerous, Level, activity},
     servers::{Phase, ServerError, launch::NotReady, records},
 };
 
@@ -445,8 +446,7 @@ impl From<sqlx::Error> for ApiError {
     }
 }
 
-// The routes below are served to the owner over the local socket only; step 3 adds sessions and
-// per-server roles for everyone else.
+// Every route below checks the caller's role on the server, or that they own the Core.
 
 /// What the hosting API shows for a server row.
 async fn server(
@@ -519,14 +519,16 @@ fn loader(stored: &str) -> Option<Loader> {
     })
 }
 
-/// `GET /modrinth/v0/servers`: every server, on one page.
+/// `GET /modrinth/v0/servers`: every server the caller has a role on, on one page.
 pub async fn list(
-    _: Owner,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
     for row in records::list(&state.db).await? {
-        servers.push(server(&state, row).await?);
+        if caller.level(&state.db, &row.id).await?.is_some() {
+            servers.push(server(&state, row).await?);
+        }
     }
     let count = servers.len() as u32;
     Ok(Json(ServerGetResponse {
@@ -543,22 +545,24 @@ pub async fn list(
 
 /// `GET /modrinth/v0/servers/{id}`.
 pub async fn get(
-    _: Owner,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
+    caller.require(&state.db, &id, Level::Viewer).await?;
     let row = records::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server(&state, row).await?))
 }
 
-/// `POST /local/servers`: an unconfigured server. Linked instances are step 4.
+/// `POST /local/servers`: an unconfigured server. Linked instances are step 4. Owner only.
 pub async fn create(
-    _: Owner,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateServerRequest>,
 ) -> Result<Json<CreateServerResponse>, ApiError> {
+    caller.require_owner()?;
     let name = request.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(ApiError::new(
@@ -567,6 +571,8 @@ pub async fn create(
         ));
     }
     let row = state.servers.create(name).await?;
+    activity::log(&state.db, &caller, Some(&row.id), Action::ServerCreated)
+        .await;
     Ok(Json(CreateServerResponse {
         id: Uuid::parse_str(&row.id).unwrap_or_default(),
     }))
@@ -575,11 +581,18 @@ pub async fn create(
 /// `POST /modrinth/v0/servers/{id}/power`. Start answers once Java runs; stop and kill once the
 /// shim has the request; restart at once.
 pub async fn power(
-    _: Owner,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(request): Json<PowerRequest>,
 ) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let action = match request.action {
+        PowerAction::Start => Action::ServerStarted,
+        PowerAction::Stop => Action::ServerStopped,
+        PowerAction::Kill => Action::ServerKilled,
+        PowerAction::Restart => Action::ServerRestarted,
+    };
     match request.action {
         PowerAction::Start => state.servers.start(&id).await?,
         PowerAction::Stop => state.servers.stop(&id).await?,
@@ -588,6 +601,7 @@ pub async fn power(
             if state.servers.phase(&id).is_none() {
                 return Err(ServerError::NotRunning.into());
             }
+            let (state, id) = (Arc::clone(&state), id.clone());
             tokio::spawn(async move {
                 if let Err(error) = state.servers.restart(&id).await {
                     tracing::warn!(server = %id, %error, "restart failed");
@@ -595,18 +609,20 @@ pub async fn power(
             });
         }
     }
+    activity::log(&state.db, &caller, Some(&id), action).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /modrinth/v0/servers/{id}/reinstall`: Vanilla only, and never erasing, until step 4.
 /// Answers when the install is done.
 pub async fn reinstall(
-    _: Owner,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(query): Query<ReinstallQuery>,
     Json(request): Json<ReinstallRequest>,
 ) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
     let unsupported =
         || ApiError::from(ServerError::from(NotReady::Unsupported));
     let ReinstallRequest::Loader {
@@ -621,34 +637,84 @@ pub async fn reinstall(
         return Err(unsupported());
     }
     state.servers.install_vanilla(&id, &game_version).await?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /local/servers/{id}/eula`: the owner accepted the Minecraft EULA for this server.
 pub async fn accept_eula(
-    _: Owner,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    caller.require_owner()?;
     if !records::accept_eula(&state.db, &id).await? {
         return Err(ServerError::NotFound(id).into());
     }
+    activity::log(&state.db, &caller, Some(&id), Action::EulaAccepted).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `GET /modrinth/v0/servers/{id}/ws`: where the console socket is. Its token is checked once
-/// sessions exist (step 3); until then the socket, like this route, is the owner's.
+/// `DELETE /local/servers/{id}`: delete a stopped server, its world, and every role on it. Owner
+/// only, dangerous. Its activity history stays.
+pub async fn delete(
+    Dangerous(caller): Dangerous,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    records::get(&state.db, &id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    if state.servers.phase(&id).is_some() {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            "Stop the server before deleting it.",
+        ));
+    }
+    let mut tx = state.db.begin().await?;
+    let members: Vec<String> =
+        sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
+            .bind(&id)
+            .fetch_all(&mut *tx)
+            .await?;
+    sqlx::query("DELETE FROM servers WHERE id = ?")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    for user in &members {
+        super::access::owe_removal(&mut tx, user, &id).await?;
+    }
+    activity::record(
+        &mut tx,
+        caller.user_id(),
+        Some(&id),
+        &Action::ServerDeleted,
+    )
+    .await?;
+    tx.commit().await?;
+    state.access.owed.notify_one();
+    for user in &members {
+        state.access.changed(user);
+    }
+    state.servers.delete_folders(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /modrinth/v0/servers/{id}/ws`: where the console socket is. The socket checks the
+/// session itself, so the token here is empty. Editors and the owner only.
 pub async fn ws_auth(
-    _: Owner,
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Json<WsAuth> {
+) -> Result<Json<WsAuth>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
     let host = headers
         .get(HOST)
         .and_then(|host| host.to_str().ok())
         .unwrap_or("localhost");
-    Json(WsAuth {
+    Ok(Json(WsAuth {
         url: format!("{host}/servers/{id}/ws"),
         token: String::new(),
-    })
+    }))
 }

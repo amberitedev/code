@@ -19,7 +19,11 @@ export type Member = { user: User, role: Role,
  */
 added_at: number, };
 
-export type ServerAccess = { owner: User, members: Array<Member>, };
+export type ServerAccess = { 
+/**
+ * Null until the Core is paired.
+ */
+owner: User | null, members: Array<Member>, };
 
 export type Invite = { 
 /**
@@ -72,8 +76,8 @@ created_at: number,
  */
 last_used_at: number, 
 /**
- * Unix seconds. The session ends at this time or 30 days after `last_used_at`, whichever
- * is first.
+ * Unix seconds. The session ends at this time unless it is used before then; it never
+ * lasts past a year from `created_at`.
  */
 expires_at: number, 
 /**
@@ -175,8 +179,27 @@ public_address: string | null,
 /**
  * SHA-256 of the TLS certificate, lowercase hex. The App pins it.
  */
-cert_fingerprint: string, };
+cert_fingerprint: string, 
+/**
+ * The servers shown to the people their instance is shared with. Empty until servers
+ * follow shared instances (step 4).
+ */
+servers: Array<VisibleServer>, };
+
+export type VisibleServer = { id: string, name: string, 
+/**
+ * The Minecraft address, `host:port`.
+ */
+address: string, shared_instance_id: string, };
 
 export type AccessDirectory = { user_ids: Array<string>, };
 
-export type OwedCall = { "type": "grant", user_id: string, } | { "type": "drop", user_id: string, } | { "type": "report_state" };
+export type Grant = { 
+/**
+ * The user id.
+ */
+user: string, server_id: string, server_name: string, role: Role, };
+
+export type Remove = { user_id: string, server_id: string, keep_core: boolean, };
+
+export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "report_state" };

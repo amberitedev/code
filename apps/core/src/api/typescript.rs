@@ -40,7 +40,10 @@ fn declarations() -> String {
         backend::PublicKeys::decl(&cfg),
         backend::PublicKey::decl(&cfg),
         backend::StateReport::decl(&cfg),
+        backend::VisibleServer::decl(&cfg),
         backend::AccessDirectory::decl(&cfg),
+        backend::Grant::decl(&cfg),
+        backend::Remove::decl(&cfg),
         backend::OwedCall::decl(&cfg),
     ]
     .map(|declaration| format!("export {declaration}\n"))

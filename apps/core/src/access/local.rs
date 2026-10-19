@@ -7,44 +7,18 @@
 
 use std::{io, path::Path};
 
-use axum::{
-    Extension, Router, extract::FromRequestParts, http::request::Parts,
-};
+use axum::{Extension, Router};
 use color_eyre::eyre::Result;
 #[cfg(unix)]
 use color_eyre::eyre::WrapErr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, warn};
 
-use crate::{
-    api::error::{ApiError, ErrorCode},
-    daemon::paths::Paths,
-};
+use crate::daemon::paths::Paths;
 
-/// Marks a request that came over the local socket.
+/// Marks a request that came over the local socket. `access::Caller` reads it as the owner.
 #[derive(Debug, Clone, Copy)]
 pub struct Local;
-
-/// The owner, known because the request came over the local socket. Routes that take this
-/// answer 401 over HTTPS; step 3 adds sessions and per-server roles for remote callers.
-pub struct Owner;
-
-impl<S: Send + Sync> FromRequestParts<S> for Owner {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Self, ApiError> {
-        match parts.extensions.get::<Local>() {
-            Some(Local) => Ok(Self),
-            None => Err(ApiError::new(
-                ErrorCode::Unauthorized,
-                "Signing in to a Core over the network is not built yet. Use the copal CLI on the Core's machine.",
-            )),
-        }
-    }
-}
 
 /// A connection the local socket or a shim accepted.
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
