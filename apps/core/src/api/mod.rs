@@ -8,7 +8,7 @@
 
 mod access;
 mod activity;
-mod backend;
+pub mod backend;
 mod backups;
 mod content;
 pub mod error;
