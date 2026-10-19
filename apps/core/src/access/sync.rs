@@ -277,25 +277,21 @@ impl Sync {
             |error: sqlx::Error| Lost::Unreachable(error.to_string());
         loop {
             let now = now();
-            let next: Option<(i64, String, i64)> = sqlx::query_as(
-                "SELECT id, call, attempts FROM backend_owed WHERE next_attempt_at <= ? \
+            // Strictly in order: a later call never overtakes one waiting to retry, so an old
+            // grant cannot undo a newer removal.
+            let next: Option<(i64, String, i64, i64)> = sqlx::query_as(
+                "SELECT id, call, attempts, next_attempt_at FROM backend_owed \
                  ORDER BY id LIMIT 1",
             )
-            .bind(now)
             .fetch_optional(&self.db)
             .await
             .map_err(db_error)?;
-            let Some((id, call, attempts)) = next else {
-                let due: Option<i64> = sqlx::query_scalar(
-                    "SELECT MIN(next_attempt_at) FROM backend_owed",
-                )
-                .fetch_one(&self.db)
-                .await
-                .map_err(db_error)?;
-                return Ok(due.map_or(Duration::from_secs(86_400), |due| {
-                    Duration::from_secs((due - now).max(1) as u64)
-                }));
+            let Some((id, call, attempts, due)) = next else {
+                return Ok(Duration::from_secs(86_400));
             };
+            if due > now {
+                return Ok(Duration::from_secs((due - now) as u64));
+            }
             let current = addresses.borrow().clone();
             let sent = match serde_json::from_str(&call) {
                 Ok(call) => self.send(key, &call, &current).await,
@@ -340,6 +336,20 @@ impl Sync {
     ) -> Result<(), Failure> {
         match call {
             OwedCall::Grant(grant) => {
+                // Removed again since: the removal that follows says all there is to say.
+                let current: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM access WHERE server_id = ? AND user_id = ?)",
+                )
+                .bind(&grant.server_id)
+                .bind(&grant.user)
+                .fetch_one(&self.db)
+                .await
+                .map_err(|error| {
+                    Failure::Lost(Lost::Unreachable(error.to_string()))
+                })?;
+                if !current {
+                    return Ok(());
+                }
                 self.call(key, Method::POST, "/core/access", grant).await
             }
             OwedCall::Remove(remove) => {
@@ -573,6 +583,13 @@ mod tests {
     async fn owed_calls_retry_with_backoff_until_the_backend_answers() {
         let (backend, url) = backend(vec![503]).await;
         let sync = sync(url).await;
+        sqlx::query(
+            "INSERT INTO servers (id, name, created_at, port, memory_mb) VALUES ('s1', 'A', 0, 25565, 1024); \
+             INSERT INTO access (server_id, user_id, role, added_at) VALUES ('s1', 'friend', 'editor', 0)",
+        )
+        .execute(&sync.db)
+        .await
+        .unwrap();
         let grant = OwedCall::Grant(Grant {
             user: "friend".into(),
             server_id: "s1".into(),
@@ -589,20 +606,19 @@ mod tests {
         owe(&mut conn, &remove).await.unwrap();
         drop(conn);
 
-        // The backend fails the first call: it waits, and nothing after it is sent.
+        // The backend fails the first call: it waits, and nothing after it overtakes it.
         let lost = sync.send_due("amc_key", &addresses()).await.unwrap_err();
         assert!(matches!(lost, Lost::Unreachable(_)));
         assert_eq!(owed(&sync).await[0].1, 1);
-        assert_eq!(backend.calls.lock().unwrap().len(), 1);
         let wait = sync.send_due("amc_key", &addresses()).await.unwrap();
         assert_eq!(
             backend.calls.lock().unwrap().len(),
-            2,
-            "the second call was not held up"
+            1,
+            "held behind the retry"
         );
         assert!(wait > Duration::from_secs(5) && wait <= backoff(1));
 
-        // Once due, it goes, and the list is empty.
+        // Once due, both go in order, and the list is empty.
         sqlx::query("UPDATE backend_owed SET next_attempt_at = 0")
             .execute(&sync.db)
             .await
@@ -612,14 +628,26 @@ mod tests {
         let calls = backend.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 3);
         assert_eq!(
-            (calls[1].0.as_str(), calls[1].2["user_id"].as_str()),
-            ("DELETE", Some("other"))
-        );
-        assert_eq!(
-            (calls[2].0.as_str(), calls[2].2["user"].as_str()),
+            (calls[1].0.as_str(), calls[1].2["user"].as_str()),
             ("POST", Some("friend"))
         );
-        assert_eq!(calls[2].2["role"], "editor");
+        assert_eq!(
+            (calls[2].0.as_str(), calls[2].2["user_id"].as_str()),
+            ("DELETE", Some("other"))
+        );
+        assert_eq!(calls[1].2["role"], "editor");
+
+        // A grant for someone removed since is not sent.
+        sqlx::query("DELETE FROM access")
+            .execute(&sync.db)
+            .await
+            .unwrap();
+        let mut conn = sync.db.acquire().await.unwrap();
+        owe(&mut conn, &grant).await.unwrap();
+        drop(conn);
+        sync.send_due("amc_key", &addresses()).await.unwrap();
+        assert!(owed(&sync).await.is_empty());
+        assert_eq!(backend.calls.lock().unwrap().len(), 3);
     }
 
     #[tokio::test]

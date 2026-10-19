@@ -15,7 +15,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
 use super::{
@@ -27,25 +27,30 @@ use super::{
     },
 };
 use crate::{
-    access::{Caller, Changed, Level, StreamGuard, activity},
+    access::{Caller, Changed, Level, StreamGuard, activity, now, sessions},
     api::error::{ApiError, ErrorCode},
     servers::console,
 };
 
 /// Console lines a new console socket starts with.
 const BACKLOG: usize = 200;
+/// How often an open console checks that its session has not expired.
+const RECHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// `GET /servers/{id}/ws`: the console. Sends the last lines and every new one as `log` events
 /// and passes `command` messages to the server. Editors and the owner only: it carries chat and
 /// player IPs. The upgrade request carries the session; the first message must still be `auth`,
 /// as the hosting API has it, but its token is not read. The stream closes when its session ends
-/// or its user loses the role.
+/// or its user loses the role, and when the session expires.
 pub async fn console(
     caller: Caller,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
+    // Before the role check, so a change from here on is never missed; the socket checks again
+    // before it shows anything, for the changes before.
+    let changes = state.access.changed.subscribe();
     if let Err(error) = caller.require(&state.db, &id, Level::Editor).await {
         return error.into_response();
     }
@@ -57,11 +62,11 @@ pub async fn console(
         .into_response();
     };
     upgrade.on_upgrade(move |socket| {
-        console_socket(state, caller, guard, id, socket)
+        console_socket(state, caller, guard, changes, id, socket)
     })
 }
 
-/// Whether `caller` may still read `server`'s console: their session exists and their role
+/// Whether `caller` may still read `server`'s console: their session is live and their role
 /// still allows it.
 async fn still_allowed(
     state: &AppState,
@@ -69,10 +74,14 @@ async fn still_allowed(
     server: &str,
 ) -> bool {
     if let Caller::Session { id, .. } = caller {
-        let exists = sqlx::query("SELECT 1 FROM sessions WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await;
+        let exists = sqlx::query(
+            "SELECT 1 FROM sessions WHERE id = ?1 AND expires_at > ?2 AND last_used_at > ?2 - ?3",
+        )
+        .bind(id)
+        .bind(now())
+        .bind(sessions::IDLE_S)
+        .fetch_optional(&state.db)
+        .await;
         if !matches!(exists, Ok(Some(_))) {
             return false;
         }
@@ -87,19 +96,24 @@ async fn console_socket(
     state: Arc<AppState>,
     caller: Caller,
     _guard: StreamGuard,
+    mut changes: broadcast::Receiver<Changed>,
     id: String,
     mut socket: WebSocket,
 ) {
-    let mut changes = state.access.changed.subscribe();
     let first = socket.recv().await;
     let authed = matches!(
         first,
         Some(Ok(Message::Text(text)))
             if matches!(serde_json::from_str(&text), Ok(WsClientMessage::Auth { .. }))
     );
-    if !authed || send(&mut socket, &WsEvent::AuthOk).await.is_err() {
+    if !authed
+        || !still_allowed(&state, &caller, &id).await
+        || send(&mut socket, &WsEvent::AuthOk).await.is_err()
+    {
         return;
     }
+    let mut recheck = tokio::time::interval(RECHECK_EVERY);
+    recheck.tick().await;
     let path = state.servers.paths().console_log(&id);
     let (backlog, end) = console::tail(&path, BACKLOG).unwrap_or_default();
     for line in backlog {
@@ -123,6 +137,12 @@ async fn console_socket(
                     Ok(Changed::Everyone) | Err(_) => true,
                 };
                 if concerns_me && !still_allowed(&state, &caller, &id).await {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
+            }
+            _ = recheck.tick() => {
+                if !still_allowed(&state, &caller, &id).await {
                     let _ = socket.send(Message::Close(None)).await;
                     return;
                 }

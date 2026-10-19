@@ -665,39 +665,57 @@ pub async fn delete(
     records::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    if state.servers.phase(&id).is_some() {
+    if state.servers.hold_for_deletion(&id).is_err() {
         return Err(ApiError::new(
             ErrorCode::Conflict,
             "Stop the server before deleting it.",
         ));
     }
-    let mut tx = state.db.begin().await?;
-    let members: Vec<String> =
-        sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
-            .bind(&id)
-            .fetch_all(&mut *tx)
-            .await?;
-    sqlx::query("DELETE FROM servers WHERE id = ?")
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
-    for user in &members {
-        super::access::owe_removal(&mut tx, user, &id).await?;
-    }
-    activity::record(
-        &mut tx,
-        caller.user_id(),
-        Some(&id),
-        &Action::ServerDeleted,
-    )
-    .await?;
-    tx.commit().await?;
+    let removed = remove_server(&state, &caller, &id).await;
+    let members = match removed {
+        Ok(members) => members,
+        Err(error) => {
+            state.servers.release(&id);
+            return Err(error);
+        }
+    };
     state.access.owed.notify_one();
     for user in &members {
         state.access.changed(user);
     }
     state.servers.delete_folders(&id)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete a held server's row, and with it every role on it, owing the backend each removal.
+/// Returns who had a role.
+async fn remove_server(
+    state: &AppState,
+    caller: &Caller,
+    id: &str,
+) -> Result<Vec<String>, ApiError> {
+    let mut tx = state.db.begin().await?;
+    let members: Vec<String> =
+        sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    sqlx::query("DELETE FROM servers WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    for user in &members {
+        super::access::owe_removal(&mut tx, user, id).await?;
+    }
+    activity::record(
+        &mut tx,
+        caller.user_id(),
+        Some(id),
+        &Action::ServerDeleted,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(members)
 }
 
 /// `GET /modrinth/v0/servers/{id}/ws`: where the console socket is. The socket checks the
