@@ -36,7 +36,10 @@ CREATE TABLE servers (
     port INTEGER NOT NULL UNIQUE,
     memory_mb INTEGER NOT NULL,
     -- Advanced override; null means the Java Core manages for this version.
-    java_path TEXT
+    java_path TEXT,
+    -- The owner accepted the Minecraft EULA for this server, so Core writes eula=true. Step 8
+    -- replaces it with one acceptance per Core.
+    eula_accepted INTEGER NOT NULL DEFAULT 0
 );
 
 -- Every time a server ran. The live process identity (pid, start time, boot id) is in

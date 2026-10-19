@@ -1,41 +1,78 @@
-//! Startup and shutdown of the Core process. `copal run` lands here.
+//! Startup and shutdown of the Core process. `copal run` lands here, in the foreground or under
+//! the service manager.
 
+pub mod accounts;
 pub mod config;
+pub mod folders;
+pub mod install;
 pub mod paths;
+pub mod service;
+#[cfg(windows)]
+pub mod win;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{fs::File, future::Future, net::SocketAddr, sync::Arc};
 
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{
+    EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
-use crate::{api, db, network::tls::Identity};
+use crate::{access, api, db, network::tls::Identity, servers::Servers};
+use accounts::Accounts;
 use config::Config;
+use install::InstallRecord;
 use paths::Paths;
 
-/// Run Core until it is asked to stop: open the database, then serve the API over HTTPS.
-pub async fn run() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("copal=info")),
-        )
-        .init();
+/// `copal run`. `service` is set by the Windows service manager, which starts Core that way.
+pub fn run(service: bool) -> Result<()> {
+    if service {
+        #[cfg(windows)]
+        return service::dispatch();
+        #[cfg(not(windows))]
+        bail!(
+            "--service is for the Windows service manager; systemd and launchd use copal run"
+        );
+    }
+    tokio::runtime::Runtime::new()?.block_on(serve(exit_requested()))
+}
 
+/// Run Core until `stop` resolves: adopt running servers, then serve the API over HTTPS and the
+/// local socket. Servers keep running after Core stops.
+pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
-    // Step 2 creates every folder with its owner and permissions; until then only `db/` exists.
-    std::fs::create_dir_all(paths.database().parent().expect("db/ folder"))
-        .wrap_err_with(|| {
-            format!(
-                "could not create the data folder {}. Set CORE_DATA_DIR to use another one",
-                paths.root().display()
-            )
-        })?;
+    #[cfg(unix)]
+    nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o027));
+    let owner = match InstallRecord::load(&paths)? {
+        Some(record) => {
+            let accounts = Accounts::find()?.ok_or_else(|| {
+                eyre!("the copal accounts are missing. Run copal install again")
+            })?;
+            if !accounts.is_current()? {
+                bail!(
+                    "Copal is installed here, so Core runs as the {} account. {}",
+                    accounts::CORE,
+                    if cfg!(windows) {
+                        "Start the copal service instead"
+                    } else {
+                        "Start the copal service, or run: sudo -u copal copal run"
+                    }
+                );
+            }
+            record.owner
+        }
+        // Development: the account running Core is the owner, and servers run as it too.
+        None => accounts::current_id()?,
+    };
+    folders::create(&paths, None)?;
+    logging(&paths);
+    let _lock = lock(&paths)?;
 
     let db = db::open(&paths.database()).await?;
     let identity = Identity::load_or_create(&paths)?;
-    let state = Arc::new(api::AppState { db });
+    let servers = Servers::open(paths.clone(), db.clone()).await?;
+    let router = api::router(Arc::new(api::AppState { db, servers }));
 
     let address = SocketAddr::new(config.bind, config.port);
     let listener = tokio::net::TcpListener::bind(address)
@@ -49,10 +86,53 @@ pub async fn run() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     tokio::select! {
-        () = crate::network::tls::serve(listener, api::router(state), &identity) => {}
-        () = exit_requested() => info!("stopping"),
+        () = crate::network::tls::serve(listener, router.clone(), &identity) => {}
+        result = access::local::serve(&paths, &owner, router) => result?,
+        () = stop => info!("stopping; servers keep running"),
     }
     Ok(())
+}
+
+/// Log to the console and to a file in `logs/` that starts over daily, keeping a week.
+fn logging(paths: &Paths) {
+    let file = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("copal")
+        .filename_suffix("log")
+        .max_log_files(7)
+        .build(paths.logs())
+        .ok();
+    let _ = tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("copal=info")),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .with(file.map(|file| {
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(file)
+        }))
+        .try_init();
+}
+
+/// Hold the lock that keeps a second Core off this data folder, until the process exits.
+fn lock(paths: &Paths) -> Result<File> {
+    let path = paths.core_lock();
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .wrap_err_with(|| format!("could not open {}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            bail!("another Core already runs on {}", paths.root().display())
+        }
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+    }
 }
 
 /// Resolves on Ctrl+C, or a service manager's stop on Unix.
@@ -69,4 +149,20 @@ async fn exit_requested() {
         }
     }
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_core_cannot_take_the_data_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        folders::create(&paths, None).unwrap();
+        let first = lock(&paths).unwrap();
+        assert!(lock(&paths).is_err());
+        drop(first);
+        assert!(lock(&paths).is_ok());
+    }
 }

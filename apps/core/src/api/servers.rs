@@ -6,18 +6,31 @@
 //! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
 //! and `createServer` in `archon/cores/v1.ts`).
 
-#![allow(dead_code)] // Wired in step 2: server routes.
+#![allow(dead_code)] // Wired in step 4: worlds, files, and linked instances.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode, header::HOST},
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::content::LinkedPackState;
+use super::{
+    AppState,
+    content::LinkedPackState,
+    error::{ApiError, ErrorCode},
+};
+use crate::{
+    access::local::Owner,
+    servers::{Phase, ServerError, launch::NotReady, records},
+};
 
 /// Query of GET `/modrinth/v0/servers`. Mirrors Archon.Servers.v0.GetServersOptions.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerListQuery {
     #[serde(default)]
     pub limit: Option<u32>,
@@ -27,7 +40,7 @@ pub struct ServerListQuery {
 
 /// Response of GET `/modrinth/v0/servers`. `users` is keyed by user id. Mirrors
 /// Archon.Servers.v0.ServerGetResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerGetResponse {
     pub servers: Vec<Server>,
     pub pagination: Pagination,
@@ -35,7 +48,7 @@ pub struct ServerGetResponse {
 }
 
 /// Mirrors Archon.Servers.v0.Pagination.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pagination {
     pub current_page: u32,
     pub page_size: u32,
@@ -44,7 +57,7 @@ pub struct Pagination {
 }
 
 /// Mirrors Archon.Servers.v0.ServerOwner.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerOwner {
     pub id: String,
     pub username: String,
@@ -52,7 +65,7 @@ pub struct ServerOwner {
 }
 
 /// Mirrors Archon.Servers.v0.Status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerStatus {
     Installing,
@@ -62,7 +75,7 @@ pub enum ServerStatus {
 }
 
 /// Mirrors Archon.Servers.v0.Loader.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Loader {
     Forge,
     NeoForge,
@@ -75,13 +88,13 @@ pub enum Loader {
 }
 
 /// Mirrors Archon.Servers.v0.Game.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Game {
     Minecraft,
 }
 
 /// Mirrors Archon.Servers.v0.UpstreamKind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpstreamKind {
     Modpack,
@@ -89,7 +102,7 @@ pub enum UpstreamKind {
 }
 
 /// The Modrinth pack a server was installed from. Mirrors Archon.Servers.v0.Upstream.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Upstream {
     pub kind: UpstreamKind,
     pub version_id: String,
@@ -97,7 +110,7 @@ pub struct Upstream {
 }
 
 /// Where players join the server. Mirrors Archon.Servers.v0.Net.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Net {
     pub ip: Option<String>,
     pub port: u16,
@@ -106,14 +119,14 @@ pub struct Net {
 }
 
 /// Where the server is on the internet. Mirrors the `outside` object of Archon.Servers.v0.Net.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutsideAddress {
     pub ip: String,
     pub port: u16,
 }
 
 /// Mirrors the `state` union of Archon.Servers.v0.Reachability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReachabilityState {
     Checking,
@@ -124,14 +137,14 @@ pub enum ReachabilityState {
 
 /// Whether a running server can be joined from the internet; `cause` says why not. Mirrors
 /// Archon.Servers.v0.Reachability.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reachability {
     pub state: ReachabilityState,
     pub cause: Option<String>,
 }
 
 /// Mirrors the `power_state` union of Archon.Servers.v0.Server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerPowerState {
     Offline,
@@ -142,7 +155,7 @@ pub enum ServerPowerState {
 }
 
 /// The App instance a server follows. Mirrors Archon.Servers.v0.LinkedInstance.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkedInstance {
     pub id: String,
     pub name: String,
@@ -153,7 +166,7 @@ pub struct LinkedInstance {
 }
 
 /// Mirrors Archon.Servers.v0.Notice.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notice {
     pub id: u32,
     pub dismissable: bool,
@@ -164,14 +177,14 @@ pub struct Notice {
 }
 
 /// Mirrors Archon.Servers.v0.NodeInfo.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     pub token: String,
     pub instance: String,
 }
 
 /// Mirrors Archon.Servers.v0.Flows.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Flows {
     pub intro: bool,
 }
@@ -180,7 +193,7 @@ pub struct Flows {
 /// `current_user_permissions` is a Modrinth scope bitset. The SFTP fields, `datacenter`,
 /// `suspension_reason`, `notices`, and `is_medal` are Modrinth hosting fields Core fills with
 /// constants. Mirrors Archon.Servers.v0.Server.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Server {
     pub server_id: Uuid,
     pub name: String,
@@ -213,7 +226,7 @@ pub struct Server {
 
 /// Response of GET `/modrinth/v0/servers/{id}/fs`: where the file API is and the token for it.
 /// Mirrors Archon.Servers.v0.JWTAuth.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtAuth {
     pub url: String,
     pub token: String,
@@ -221,14 +234,14 @@ pub struct JwtAuth {
 
 /// Response of GET `/modrinth/v0/servers/{id}/ws`: the console socket and a ticket for it.
 /// Mirrors Archon.Websocket.v0.WSAuth.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WsAuth {
     pub url: String,
     pub token: String,
 }
 
 /// Mirrors the `action` of `ArchonServersV0Module.power`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PowerAction {
     Start,
     Stop,
@@ -238,28 +251,28 @@ pub enum PowerAction {
 
 /// Body of POST `/modrinth/v0/servers/{id}/power`. Mirrors the body of
 /// `ArchonServersV0Module.power`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerRequest {
     pub action: PowerAction,
 }
 
 /// Body of POST `/modrinth/v0/servers/{id}/name`. Mirrors the body of
 /// `ArchonServersV0Module.updateName`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameRequest {
     pub name: String,
 }
 
 /// Query of POST `/modrinth/v0/servers/{id}/reinstall`. `hard` erases the server's data first.
 /// Mirrors the `hard` param of `ArchonServersV0Module.reinstall`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReinstallQuery {
     pub hard: bool,
 }
 
 /// Body of POST `/modrinth/v0/servers/{id}/reinstall`, told apart by which fields it has. Mirrors
 /// Archon.Servers.v0.ReinstallRequest.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ReinstallRequest {
     /// Mirrors Archon.Servers.v0.ReinstallModpackRequest.
@@ -280,7 +293,7 @@ pub enum ReinstallRequest {
 
 /// Response of GET `/v1/servers/{id}/worlds/{wid}/select-download`, and a world's
 /// `download_method`. Mirrors Archon.Servers.v1.WorldDownloadMethod.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method_type", rename_all = "snake_case")]
 pub enum WorldDownloadMethod {
     DirectNodeDownload,
@@ -291,7 +304,7 @@ pub enum WorldDownloadMethod {
 /// Response of GET `/v1/servers/{id}`, and an item of GET `/v1/servers`. `subdomain`, `specs`,
 /// the SFTP fields, `tags`, and `location` are Modrinth hosting fields Core fills with constants.
 /// Mirrors Archon.Servers.v1.ServerFull.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerFull {
     pub id: Uuid,
     pub name: String,
@@ -305,7 +318,7 @@ pub struct ServerFull {
 }
 
 /// Mirrors Archon.Servers.v1.ServerResources.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerResources {
     pub cpu: u32,
     pub memory_mb: u32,
@@ -314,7 +327,7 @@ pub struct ServerResources {
 }
 
 /// Mirrors Archon.Servers.v1.ServerLocation.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ServerLocation {
     Assigned { location_metadata: LocationMetadata },
@@ -322,7 +335,7 @@ pub enum ServerLocation {
 }
 
 /// Mirrors the `location_metadata` object of Archon.Servers.v1.ServerLocation.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocationMetadata {
     pub region: String,
     pub region_should_be_user_displayed: bool,
@@ -332,7 +345,7 @@ pub struct LocationMetadata {
 }
 
 /// A server's world. Mirrors Archon.Servers.v1.WorldFull.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldFull {
     pub id: Uuid,
     pub name: String,
@@ -346,13 +359,13 @@ pub struct WorldFull {
 }
 
 /// Mirrors Archon.Servers.v1.WorldReadiness.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldReadiness {
     pub data_synchronized_fetched: bool,
 }
 
 /// Mirrors Archon.Servers.v1.WorldContentInfo.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldContentInfo {
     pub modloader: String,
     pub modloader_version: String,
@@ -364,7 +377,7 @@ pub struct WorldContentInfo {
 
 /// Body of POST `/local/servers`: create an unconfigured server, linked to `instance` when it is
 /// created from an App instance. Mirrors the body of `ArchonCoresV1Module.createServer`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateServerRequest {
     pub name: String,
     #[serde(default)]
@@ -373,7 +386,7 @@ pub struct CreateServerRequest {
 
 /// The App instance a new server follows. Mirrors the `instance` argument of
 /// `ArchonCoresV1Module.createServer`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateServerInstance {
     pub id: String,
     pub name: String,
@@ -385,14 +398,14 @@ pub struct CreateServerInstance {
 
 /// Response of POST `/local/servers`. Mirrors the `{ id }` result of
 /// `ArchonCoresV1Module.createServer`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateServerResponse {
     pub id: Uuid,
 }
 
 /// Body of PATCH `/local/servers/{id}/linked-instance`: the sharing settings to change. Mirrors
 /// Archon.Servers.v0.LinkedInstanceSettings.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkedInstanceSettings {
     #[serde(default)]
     pub visible_to_friends: Option<bool>,
@@ -402,7 +415,240 @@ pub struct LinkedInstanceSettings {
 
 /// `id` is null once the instance is no longer shared. Mirrors the `shared_instance` object of
 /// Archon.Servers.v0.LinkedInstanceSettings.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedInstance {
     pub id: Option<String>,
+}
+
+impl From<ServerError> for ApiError {
+    fn from(error: ServerError) -> Self {
+        let code = match &error {
+            ServerError::NotFound(_) => ErrorCode::NotFound,
+            ServerError::AlreadyRunning
+            | ServerError::NotRunning
+            | ServerError::Starting
+            | ServerError::Unmanaged
+            | ServerError::NoPorts
+            | ServerError::NotReady(_)
+            | ServerError::Shim(_) => ErrorCode::Conflict,
+            ServerError::StartFailed(_) | ServerError::Other(_) => {
+                ErrorCode::Internal
+            }
+        };
+        Self::new(code, format!("{error:#}"))
+    }
+}
+
+impl From<sqlx::Error> for ApiError {
+    fn from(error: sqlx::Error) -> Self {
+        ServerError::from(error).into()
+    }
+}
+
+// The routes below are served to the owner over the local socket only; step 3 adds sessions and
+// per-server roles for everyone else.
+
+/// What the hosting API shows for a server row.
+async fn server(
+    state: &AppState,
+    row: records::ServerRow,
+) -> Result<Server, ApiError> {
+    let power_state = match state.servers.phase(&row.id) {
+        Some(Phase::Starting) => ServerPowerState::Starting,
+        Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
+        Some(Phase::Stopping) => ServerPowerState::Stopping,
+        None => match records::last_outcome(&state.db, &row.id).await? {
+            Some(records::Outcome::Crashed) => ServerPowerState::Crashed,
+            _ => ServerPowerState::Offline,
+        },
+    };
+    let owner_id: Option<String> =
+        sqlx::query_scalar("SELECT owner_user_id FROM core WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await?
+            .flatten();
+    Ok(Server {
+        server_id: Uuid::parse_str(&row.id).unwrap_or_default(),
+        name: row.name,
+        owner_id: owner_id.unwrap_or_default(),
+        net: Net {
+            ip: None,
+            port: u16::try_from(row.port).unwrap_or_default(),
+            domain: String::new(),
+            outside: None,
+        },
+        game: Game::Minecraft,
+        backup_quota: 0,
+        used_backup_quota: 0,
+        status: if row.game_version.is_some() {
+            ServerStatus::Available
+        } else {
+            ServerStatus::Installing
+        },
+        suspension_reason: None,
+        loader: row.loader.as_deref().and_then(loader),
+        loader_version: row.loader_version,
+        mc_version: row.game_version,
+        upstream: None,
+        sftp_username: String::new(),
+        sftp_password: String::new(),
+        sftp_host: String::new(),
+        datacenter: String::new(),
+        notices: Vec::new(),
+        node: None,
+        flows: Flows { intro: false },
+        is_medal: false,
+        current_user_permissions: u64::MAX,
+        locked_since: None,
+        linked_instance: None,
+        power_state: Some(power_state),
+        reachability: None,
+    })
+}
+
+/// `servers.loader` as the hosting API names it.
+fn loader(stored: &str) -> Option<Loader> {
+    Some(match stored {
+        "vanilla" => Loader::Vanilla,
+        "fabric" => Loader::Fabric,
+        "quilt" => Loader::Quilt,
+        "forge" => Loader::Forge,
+        "neoforge" => Loader::NeoForge,
+        "paper" => Loader::Paper,
+        _ => return None,
+    })
+}
+
+/// `GET /modrinth/v0/servers`: every server, on one page.
+pub async fn list(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ServerGetResponse>, ApiError> {
+    let mut servers = Vec::new();
+    for row in records::list(&state.db).await? {
+        servers.push(server(&state, row).await?);
+    }
+    let count = servers.len() as u32;
+    Ok(Json(ServerGetResponse {
+        servers,
+        pagination: Pagination {
+            current_page: 1,
+            page_size: count,
+            total_pages: 1,
+            total_items: count,
+        },
+        users: BTreeMap::new(),
+    }))
+}
+
+/// `GET /modrinth/v0/servers/{id}`.
+pub async fn get(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Server>, ApiError> {
+    let row = records::get(&state.db, &id)
+        .await?
+        .ok_or(ServerError::NotFound(id))?;
+    Ok(Json(server(&state, row).await?))
+}
+
+/// `POST /local/servers`: an unconfigured server. Linked instances are step 4.
+pub async fn create(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<CreateServerRequest>,
+) -> Result<Json<CreateServerResponse>, ApiError> {
+    let name = request.name.trim();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "A server name has 1 to 64 characters.",
+        ));
+    }
+    let row = state.servers.create(name).await?;
+    Ok(Json(CreateServerResponse {
+        id: Uuid::parse_str(&row.id).unwrap_or_default(),
+    }))
+}
+
+/// `POST /modrinth/v0/servers/{id}/power`. Start answers once Java runs; stop and kill once the
+/// shim has the request; restart at once.
+pub async fn power(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<PowerRequest>,
+) -> Result<StatusCode, ApiError> {
+    match request.action {
+        PowerAction::Start => state.servers.start(&id).await?,
+        PowerAction::Stop => state.servers.stop(&id).await?,
+        PowerAction::Kill => state.servers.kill(&id).await?,
+        PowerAction::Restart => {
+            if state.servers.phase(&id).is_none() {
+                return Err(ServerError::NotRunning.into());
+            }
+            tokio::spawn(async move {
+                if let Err(error) = state.servers.restart(&id).await {
+                    tracing::warn!(server = %id, %error, "restart failed");
+                }
+            });
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /modrinth/v0/servers/{id}/reinstall`: Vanilla only, and never erasing, until step 4.
+/// Answers when the install is done.
+pub async fn reinstall(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<ReinstallQuery>,
+    Json(request): Json<ReinstallRequest>,
+) -> Result<StatusCode, ApiError> {
+    let unsupported =
+        || ApiError::from(ServerError::from(NotReady::Unsupported));
+    let ReinstallRequest::Loader {
+        loader,
+        game_version: Some(game_version),
+        ..
+    } = request
+    else {
+        return Err(unsupported());
+    };
+    if query.hard || !loader.eq_ignore_ascii_case("vanilla") {
+        return Err(unsupported());
+    }
+    state.servers.install_vanilla(&id, &game_version).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /local/servers/{id}/eula`: the owner accepted the Minecraft EULA for this server.
+pub async fn accept_eula(
+    _: Owner,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if !records::accept_eula(&state.db, &id).await? {
+        return Err(ServerError::NotFound(id).into());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /modrinth/v0/servers/{id}/ws`: where the console socket is. Its token is checked once
+/// sessions exist (step 3); until then the socket, like this route, is the owner's.
+pub async fn ws_auth(
+    _: Owner,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Json<WsAuth> {
+    let host = headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .unwrap_or("localhost");
+    Json(WsAuth {
+        url: format!("{host}/servers/{id}/ws"),
+        token: String::new(),
+    })
 }

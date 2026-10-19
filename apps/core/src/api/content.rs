@@ -104,7 +104,7 @@ pub struct Addon {
 
 /// Where a linked server is with the newest version pushed to it. Mirrors
 /// Archon.Content.v1.LinkedPackState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkedPackState {
     UpToDate,

@@ -4,7 +4,7 @@
 //! most common and is tried last. Every mapping is TCP and has a finite lease, so one that is never
 //! removed (a crash) still goes away by itself.
 
-#![allow(dead_code)] // Wired in step 2: port mappings that belong to servers.
+#![allow(dead_code)] // Wired in step 8: port mappings that belong to servers, with reachability.
 
 use std::{
     fmt::{self, Write as _},
