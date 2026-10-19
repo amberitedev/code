@@ -39,7 +39,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 toml = { workspace = true }
-tower-http = { version = "0.6.6", features = ["trace"] }
+tower-http = { version = "0.6.6", features = ["timeout", "trace"] }
 tracing = { workspace = true }
 tracing-appender = "0.2.5"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
@@ -47,6 +47,9 @@ ts-rs = { workspace = true, features = ["uuid-impl"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 walkdir = "2.5"
 zip = { workspace = true }
+
+[dev-dependencies]
+tower = { version = "0.5.2", features = ["util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2.186"
