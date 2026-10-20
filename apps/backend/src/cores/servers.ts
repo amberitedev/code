@@ -8,46 +8,99 @@ import type { Env } from '../common/types'
 // and join by the Minecraft address; nobody else is given it.
 
 const MAX_SERVERS = 100
+/**
+ * A server name, in UTF-16 units. Core's own limit, 64 characters (`create` in
+ * `apps/core/src/api/servers.rs`), is the real one; this is loose enough for every name it allows.
+ */
+export const MAX_SERVER_NAME = 256
 
 /** SQL for "this account owns the shared instance bound as `?1` or has joined it". */
 const sharedWith = (account: string) =>
 	`EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = ?1 AND m.user_id = ${account} AND m.joined_at IS NOT NULL)`
 
-/**
- * Core, signed in: replace the servers this Core shows to friends. The Core sends its whole list
- * whenever anything in it changes, so a server missing from the list stops being visible. A server
- * whose instance the Core's owner does not share is left out.
- */
-async function replaceServers(request: Request, env: Env) {
-	const key = tokenFrom(request)
-	if (!key.startsWith('amc_')) unauthorized()
-	const { servers } = await readJson(request)
+/** A server a Core shows to the people its instance is shared with. */
+interface VisibleServer {
+	id: string
+	name: string
+	address: string
+	instance: string
+}
+
+/** The `servers` list of a Core's report. */
+export function parseServers(servers: unknown): VisibleServer[] {
 	if (!Array.isArray(servers) || servers.length > MAX_SERVERS)
 		throw new ApiError(400, 'invalid_input', 'Invalid servers')
-	const rows = servers.map((server: unknown) => {
+	return servers.map((server: unknown) => {
 		if (!server || typeof server !== 'object')
 			throw new ApiError(400, 'invalid_input', 'Invalid servers')
 		const body: Record<string, unknown> = { ...server }
 		return {
 			id: stringField(body, 'id', 64),
-			name: stringField(body, 'name', 100),
+			name: stringField(body, 'name', MAX_SERVER_NAME),
 			address: stringField(body, 'address', 261),
 			instance: stringField(body, 'shared_instance_id', 64),
 		}
 	})
+}
 
+/**
+ * Make `servers` the whole list this Core shows to friends, writing only the rows that changed. A
+ * server whose instance the Core's owner does not share is left out.
+ */
+export async function writeServers(
+	env: Env,
+	core: { id: string; owner_id: string },
+	servers: VisibleServer[],
+) {
+	const stored = await env.DB.prepare(
+		'SELECT server_id AS id, name, address, instance_id AS instance FROM visible_servers WHERE core_id = ?',
+	)
+		.bind(core.id)
+		.all<VisibleServer>()
+	const before = new Map(stored.results.map((row) => [row.id, row]))
+	const wanted = new Set(servers.map((server) => server.id))
+	const remove = (id: string) =>
+		env.DB.prepare('DELETE FROM visible_servers WHERE core_id = ? AND server_id = ?').bind(
+			core.id,
+			id,
+		)
+	const statements = [
+		...stored.results.filter((row) => !wanted.has(row.id)).map((row) => remove(row.id)),
+		...servers
+			.filter((server) => {
+				const old = before.get(server.id)
+				return (
+					!old ||
+					old.name !== server.name ||
+					old.address !== server.address ||
+					old.instance !== server.instance
+				)
+			})
+			// A changed row goes first, so one whose instance is no longer shared is not kept stale.
+			.flatMap((server) => [
+				remove(server.id),
+				env.DB.prepare(
+					`INSERT OR REPLACE INTO visible_servers (instance_id,core_id,server_id,name,address) SELECT ?1,?3,?4,?5,?6 WHERE ${sharedWith('?2')}`,
+				).bind(server.instance, core.owner_id, core.id, server.id, server.name, server.address),
+			]),
+	]
+	if (statements.length) await env.DB.batch(statements)
+}
+
+/**
+ * Core on `main`, signed in: replace the servers this Core shows to friends. The Core sends its
+ * whole list whenever anything in it changes, so a server missing from the list stops being
+ * visible. The new Core sends the list in its state report instead.
+ */
+async function replaceServers(request: Request, env: Env) {
+	const key = tokenFrom(request)
+	if (!key.startsWith('amc_')) unauthorized()
+	const servers = parseServers((await readJson(request)).servers)
 	const core = await env.DB.prepare('SELECT id,owner_id FROM cores WHERE key_hash = ?')
 		.bind(await digest(key))
 		.first<{ id: string; owner_id: string }>()
 	if (!core) unauthorized()
-	await env.DB.batch([
-		env.DB.prepare('DELETE FROM visible_servers WHERE core_id = ?').bind(core.id),
-		...rows.map((row) =>
-			env.DB.prepare(
-				`INSERT OR REPLACE INTO visible_servers (instance_id,core_id,server_id,name,address) SELECT ?1,?3,?4,?5,?6 WHERE ${sharedWith('?2')}`,
-			).bind(row.instance, core.owner_id, core.id, row.id, row.name, row.address),
-		),
-	])
+	await writeServers(env, core, servers)
 	return new Response(null, { status: 204 })
 }
 

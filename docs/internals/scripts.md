@@ -44,7 +44,9 @@ The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 
 shared files persist in `.data/backend`.
 The runner applies local migrations first. It generates a persistent secret in
 `.data/backend/dev-secret` and passes it through `.data/backend/.dev.vars`, never command-line
-arguments. No Cloudflare account, billing, remote D1, or remote R2 is used.
+arguments. It also makes a local ticket key in `.data/backend/ticket-key.json`, passes it as
+`TICKET_KEY`, and serves its public half from `.data/backend/assets/core/keys.json` in place of the
+production keys. No Cloudflare account, billing, remote D1, or remote R2 is used.
 
 Scenario `1` uses username `scenario_1`, email `scenario_1@scenario.invalid`, and password
 `Scenario-scenario_1-Local-only!`. Other numbers follow the same pattern. These are real local

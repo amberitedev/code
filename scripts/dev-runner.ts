@@ -521,6 +521,8 @@ export function createProcessSpecs(input: {
 				NodePath.join(input.paths.data, 'backend'),
 				'--env-file',
 				NodePath.join(input.paths.data, 'backend', '.dev.vars'),
+				'--assets',
+				NodePath.join(input.paths.data, 'backend', 'assets'),
 			],
 			cwd: NodePath.join(input.paths.worktree, 'apps', 'backend'),
 			env: input.env,
@@ -892,7 +894,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function prepareLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
-	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.AMBERITE_LOCAL_DEV_SECRET}\n`
+	const ticketKey = localTicketKey(NodePath.join(paths.data, 'backend'))
+	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.AMBERITE_LOCAL_DEV_SECRET}\nTICKET_KEY=${ticketKey}\n`
 	NodeFS.writeFileSync(NodePath.join(paths.data, 'backend', '.dev.vars'), variables, {
 		mode: 0o600,
 	})
@@ -918,6 +921,26 @@ function prepareLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void
 		},
 	)
 	if (result.status !== 0) throw new DevRunnerError('Local account database migration failed.')
+}
+
+/**
+ * The local backend's ticket key, made once in `ticket-key.json`, with its public half served as
+ * `assets/core/keys.json` in place of the production keys in `apps/backend/public`. Returns the
+ * private JWK for `TICKET_KEY`.
+ */
+function localTicketKey(backendData: string): string {
+	const keyPath = NodePath.join(backendData, 'ticket-key.json')
+	if (!NodeFS.existsSync(keyPath)) {
+		const { privateKey } = NodeCrypto.generateKeyPairSync('ed25519')
+		const jwk = { ...privateKey.export({ format: 'jwk' }), kid: `local-${NodeCrypto.randomUUID()}` }
+		NodeFS.writeFileSync(keyPath, JSON.stringify(jwk), { mode: 0o600 })
+	}
+	const secret = NodeFS.readFileSync(keyPath, 'utf8').trim()
+	const { kty, crv, kid, x } = JSON.parse(secret)
+	const keysPath = NodePath.join(backendData, 'assets', 'core', 'keys.json')
+	NodeFS.mkdirSync(NodePath.dirname(keysPath), { recursive: true })
+	NodeFS.writeFileSync(keysPath, JSON.stringify({ keys: [{ kty, crv, kid, x }] }))
+	return secret
 }
 
 function resolveVpPath(worktree: string): string {
