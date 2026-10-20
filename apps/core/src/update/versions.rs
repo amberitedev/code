@@ -112,16 +112,42 @@ pub fn load(paths: &Paths) -> io::Result<Option<State>> {
     }
 }
 
-/// Write the state whole, or remove it with `None`.
+/// Write the state whole and durably, or remove it with `None`. After a power loss the file is
+/// the old state or the new one, never part of one.
 pub fn save(paths: &Paths, state: Option<&State>) -> io::Result<()> {
     let path = paths.version_state();
     let Some(state) = state else {
-        return remove_file(&path);
+        remove_file(&path)?;
+        return sync_dir(&paths.versions());
     };
     std::fs::create_dir_all(paths.versions())?;
     let staged = path.with_extension("json.new");
-    std::fs::write(&staged, serde_json::to_vec_pretty(state)?)?;
-    std::fs::rename(&staged, &path)
+    write_synced(&staged, &serde_json::to_vec_pretty(state)?)?;
+    std::fs::rename(&staged, &path)?;
+    sync_dir(&paths.versions())
+}
+
+/// Write a file and wait until its bytes are on disk.
+fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = std::fs::File::create(path)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()
+}
+
+/// Copy a file and wait until the copy is on disk.
+fn copy_synced(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::copy(from, to)?;
+    std::fs::File::options().write(true).open(to)?.sync_all()
+}
+
+/// Make the renames and removals in `dir` durable. Windows cannot open a folder this way; NTFS
+/// journals the rename itself.
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    std::fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
 }
 
 /// The database and its WAL files, which only make sense together.
@@ -129,27 +155,31 @@ fn database_files(dir: &Path) -> [PathBuf; 3] {
     ["copal.db", "copal.db-wal", "copal.db-shm"].map(|name| dir.join(name))
 }
 
-/// Copy the database aside before a new version migrates it. Only while no Core runs.
+/// Copy the database aside before a new version migrates it. Only while no Core runs. The copy
+/// is made in a staging folder and synced before it takes the place of the last one, so a copy
+/// that exists is whole.
 pub fn save_database(paths: &Paths) -> io::Result<()> {
     let copy = paths.database_before_update();
-    match std::fs::remove_dir_all(&copy) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => {
-            return Err(error);
-        }
-        _ => {}
-    }
-    std::fs::create_dir_all(&copy)?;
+    let staged = copy.with_extension("new");
+    remove_dir(&staged)?;
+    std::fs::create_dir_all(&staged)?;
     let db = paths.database();
-    let live = database_files(db.parent().expect("the database has a folder"));
-    for (from, to) in live.iter().zip(database_files(&copy)) {
+    let db_dir = db.parent().expect("the database has a folder");
+    for (from, to) in database_files(db_dir).iter().zip(database_files(&staged))
+    {
         if from.exists() {
-            std::fs::copy(from, to)?;
+            copy_synced(from, &to)?;
         }
     }
-    Ok(())
+    sync_dir(&staged)?;
+    remove_dir(&copy)?;
+    std::fs::rename(&staged, &copy)?;
+    sync_dir(db_dir)
 }
 
-/// Put back the database [`save_database`] copied. Only while no Core runs.
+/// Put back the database [`save_database`] copied. Only while no Core runs. Each file is copied
+/// next to the live one, synced, then renamed over it, and the copy is left as it was, so a
+/// restore that is cut short can be done again from the start.
 pub fn restore_database(paths: &Paths) -> io::Result<()> {
     let copy = database_files(&paths.database_before_update());
     if !copy[0].exists() {
@@ -159,15 +189,26 @@ pub fn restore_database(paths: &Paths) -> io::Result<()> {
         ));
     }
     let db = paths.database();
-    let live = database_files(db.parent().expect("the database has a folder"));
-    for (from, to) in copy.iter().zip(live) {
+    let db_dir = db.parent().expect("the database has a folder");
+    for (from, to) in copy.iter().zip(database_files(db_dir)) {
         if from.exists() {
-            std::fs::copy(from, &to)?;
+            let name = to.file_name().expect("a database file has a name");
+            let staged = to
+                .with_file_name(format!("{}.restore", name.to_string_lossy()));
+            copy_synced(from, &staged)?;
+            std::fs::rename(&staged, &to)?;
         } else {
             remove_file(&to)?;
         }
     }
-    Ok(())
+    sync_dir(db_dir)
+}
+
+fn remove_dir(path: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
 }
 
 /// Copy the running binary into its version folder, so an update has a version to roll back

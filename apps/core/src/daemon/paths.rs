@@ -122,6 +122,11 @@ impl Paths {
         self.versions().join("state.json")
     }
 
+    /// Held by the launcher for as long as it runs. See `update::launcher`.
+    pub fn launcher_lock(&self) -> PathBuf {
+        self.versions().join("launcher.lock")
+    }
+
     /// One installed version's folder. `version` is a parsed semver version, so it is a plain
     /// folder name.
     pub fn version(&self, version: &str) -> PathBuf {
@@ -246,6 +251,7 @@ mod tests {
             paths.backups(),
             paths.versions(),
             paths.version_state(),
+            paths.launcher_lock(),
             paths.version("1.0.0"),
             paths.database_before_update(),
             paths.sockets(),

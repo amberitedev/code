@@ -60,11 +60,9 @@ pub async fn run(
     stop: impl Future<Output = ()>,
 ) -> Result<i32> {
     tokio::pin!(stop);
+    let _lock = lock(paths)?;
     loop {
-        let (exe, trial) = prepare(paths)?;
-        let mut child = spawn(&exe, service).wrap_err_with(|| {
-            format!("could not start Core from {}", exe.display())
-        })?;
+        let (mut child, trial) = start(paths, service)?;
         let stdin = child.stdin.take();
         let started = Instant::now();
         let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -117,6 +115,63 @@ pub async fn run(
     }
 }
 
+/// Start the active version, and its trial version when it has one. A trial binary the OS
+/// refuses to run is a failed trial: Core goes back to the previous version and starts that.
+fn start(paths: &Paths, service: bool) -> Result<(Child, Option<String>)> {
+    loop {
+        let (exe, trial) = prepare(paths)?;
+        match spawn(&exe, service) {
+            Ok(child) => return Ok((child, trial)),
+            Err(error) if trial.is_some() => {
+                error!(
+                    %error,
+                    "the new version would not start; going back to the previous one"
+                );
+                fail(paths)?;
+            }
+            Err(error) => {
+                return Err(error).wrap_err_with(|| {
+                    format!("could not start Core from {}", exe.display())
+                });
+            }
+        }
+    }
+}
+
+/// Hold the lock that makes this the only launcher on the data folder, for as long as it
+/// supervises. A second `copal run` would otherwise change the state and the database under a
+/// running Core. An account that may not open the data folder can change nothing there, so it
+/// goes on without the lock, and the Core it starts says what is wrong.
+fn lock(paths: &Paths) -> Result<Option<std::fs::File>> {
+    let path = paths.launcher_lock();
+    let file = match std::fs::create_dir_all(paths.versions()).and_then(|()| {
+        std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+    }) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Ok(None);
+        }
+        Err(error) => {
+            return Err(error).wrap_err_with(|| {
+                format!("could not open {}", path.display())
+            });
+        }
+    };
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => color_eyre::eyre::bail!(
+            "copal run is already running on {}",
+            paths.root().display()
+        ),
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+    }
+}
+
 /// The binary to run and, when it is on trial, its version. A trial's database is copied
 /// aside here, before the new version runs, and a requested rollback's is put back.
 fn prepare(paths: &Paths) -> Result<(PathBuf, Option<String>)> {
@@ -125,18 +180,17 @@ fn prepare(paths: &Paths) -> Result<(PathBuf, Option<String>)> {
         return Ok((own()?, None));
     };
     if state.restore_database {
-        // Asked for once: a database that cannot come back must not stop Core from starting.
-        match versions::restore_database(paths) {
-            Ok(()) => info!(
-                version = %state.active,
-                "rolled back with the database from before the update"
-            ),
-            Err(error) => {
-                error!(%error, "could not put the database from before the update back");
-            }
-        }
+        // The flag stays until the restore is done, so one cut short is done again, and Core does
+        // not start on a database the rolled-back version cannot open.
+        versions::restore_database(paths).wrap_err(
+            "could not put the database from before the update back; Core starts once it is",
+        )?;
         state.restore_database = false;
         versions::save(paths, Some(&state))?;
+        info!(
+            version = %state.active,
+            "rolled back with the database from before the update"
+        );
     }
     if let Some(trial) = &mut state.trial
         && !trial.database_saved
@@ -240,6 +294,74 @@ mod tests {
             health(false, false, HEALTH_TIMEOUT - Duration::from_millis(1)),
             Health::Waiting
         );
+    }
+
+    #[test]
+    fn a_second_launcher_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let first = lock(&paths).unwrap();
+        assert!(first.is_some());
+        assert!(lock(&paths).is_err());
+        drop(first);
+        assert!(lock(&paths).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_trial_binary_the_os_refuses_falls_back_to_the_previous_version()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        crate::daemon::folders::create(&paths, None).unwrap();
+        std::fs::write(paths.database(), "0.1.0 schema").unwrap();
+        for version in ["0.1.0", "0.2.0"] {
+            std::fs::create_dir_all(paths.version(version)).unwrap();
+        }
+        // Something that starts, as the previous version, and an empty file the OS will not run.
+        let shell = if cfg!(windows) {
+            std::path::PathBuf::from(std::env::var("ComSpec").unwrap())
+        } else {
+            "/bin/sh".into()
+        };
+        std::fs::copy(&shell, versions::binary(&paths, "0.1.0")).unwrap();
+        std::fs::write(versions::binary(&paths, "0.2.0"), "").unwrap();
+        versions::save(&paths, Some(&State::update("0.1.0", "0.2.0", None)))
+            .unwrap();
+
+        let (mut child, trial) = start(&paths, true).unwrap();
+        let _ = child.kill().await;
+        assert_eq!(trial, None);
+        let state = versions::load(&paths).unwrap().unwrap();
+        assert_eq!(state.active, "0.1.0");
+        assert_eq!(state.failed.as_deref(), Some("0.2.0"));
+        assert_eq!(
+            std::fs::read_to_string(paths.database()).unwrap(),
+            "0.1.0 schema"
+        );
+    }
+
+    #[test]
+    fn a_rollback_whose_restore_fails_is_retried_and_holds_core_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        crate::daemon::folders::create(&paths, None).unwrap();
+        std::fs::create_dir_all(paths.version("0.1.0")).unwrap();
+        std::fs::write(versions::binary(&paths, "0.1.0"), "").unwrap();
+        let back = State::update("0.1.0", "0.2.0", None).roll_back().unwrap();
+        versions::save(&paths, Some(&back)).unwrap();
+        // No copy from before the update: the restore cannot happen.
+        assert!(prepare(&paths).is_err());
+        assert!(versions::load(&paths).unwrap().unwrap().restore_database);
+
+        std::fs::write(paths.database(), "before").unwrap();
+        versions::save_database(&paths).unwrap();
+        std::fs::write(paths.database(), "after").unwrap();
+        prepare(&paths).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(paths.database()).unwrap(),
+            "before"
+        );
+        assert!(!versions::load(&paths).unwrap().unwrap().restore_database);
     }
 
     #[test]
