@@ -25,7 +25,7 @@ use crate::{
     update::{UpdateError, release::Channel},
 };
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct UpdateStatus {
     /// The running version.
     pub version: String,
@@ -49,7 +49,7 @@ pub struct UpdateStatus {
     pub failed: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 pub struct UpdateSettings {
     #[ts(optional)]
     pub channel: Option<Channel>,
@@ -57,7 +57,7 @@ pub struct UpdateSettings {
     pub auto_update: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ApplyUpdate {
     /// Install the channel's release even when it is older. Only the copal CLI may.
     #[serde(default)]
@@ -65,7 +65,7 @@ pub struct ApplyUpdate {
     pub allow_downgrade: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Restarting {
     /// The version Core restarts into.
     pub version: String,

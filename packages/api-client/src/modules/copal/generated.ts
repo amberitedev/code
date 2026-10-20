@@ -258,3 +258,51 @@ export type Restarting = {
  * The version Core restarts into.
  */
 version: string, };
+
+export type Eula = { 
+/**
+ * The EULA's address.
+ */
+url: string, 
+/**
+ * Unix seconds. Null until the owner accepts it.
+ */
+accepted_at: number | null, };
+
+export type LogsQuery = { 
+/**
+ * At most 1000. 100 when left out.
+ */
+lines?: number, };
+
+export type CoreLogs = { 
+/**
+ * Oldest first.
+ */
+lines: Array<string>, };
+
+export type Performance = { 
+/**
+ * The most memory Java may use.
+ */
+memory_mb: number, restarts: Restarts, };
+
+export type Memory = { memory_mb: number, };
+
+export type Restarts = { 
+/**
+ * Start the server again after a crash. On by default.
+ */
+crash: boolean, 
+/**
+ * A restart at a set time, with an in-game countdown.
+ */
+schedule: Schedule | null, 
+/**
+ * Experimental: restart once nobody is online and the server has run this many hours.
+ */
+smart_after_hours: number | null, };
+
+export type Schedule = { "every": "daily", at: string, } | { "every": "weekly", on: Weekday, at: string, };
+
+export type Weekday = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";

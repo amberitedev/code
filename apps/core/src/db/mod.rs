@@ -78,6 +78,7 @@ mod tests {
                 "content_files",
                 "core",
                 "pairing",
+                "restarts",
                 "runs",
                 "servers",
                 "sessions",
