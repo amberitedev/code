@@ -36,6 +36,11 @@ use crate::{
     servers::{ServerError, records},
 };
 
+/// People with a role on any server of this Core, at most. The backend's directory holds no
+/// more (`MAX_DIRECTORY` in `apps/backend/src/cores/index.ts`), and a directory past it could
+/// never be replaced there. The two must stay equal.
+pub const MAX_DIRECTORY: i64 = 1000;
+
 /// A role on one server. The owner has every role on every server and is never a member.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, sqlx::Type,
@@ -193,6 +198,21 @@ pub async fn invite(
     }
 
     let mut tx = state.db.begin().await?;
+    let (known, people): (bool, i64) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM access WHERE user_id = ?), \
+         (SELECT COUNT(DISTINCT user_id) FROM access)",
+    )
+    .bind(&user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !known && people >= MAX_DIRECTORY {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            format!(
+                "This Core already has {MAX_DIRECTORY} people with access, the most it can have. Remove someone first."
+            ),
+        ));
+    }
     // A name their own ticket gave is newer than the one in the invite.
     sqlx::query(
         "INSERT INTO users (id, name, avatar_url, updated_at) VALUES (?, ?, ?, ?) \

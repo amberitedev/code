@@ -383,6 +383,51 @@ async fn dangerous_actions_need_a_fresh_ticket_of_the_owner() {
 }
 
 #[tokio::test]
+async fn invites_stop_at_the_directory_cap() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    // Two people already have a role; fill the rest of the directory.
+    for n in 2..super::access::MAX_DIRECTORY {
+        sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, 'viewer', 0)")
+            .bind(&core.server)
+            .bind(format!("user{n}"))
+            .execute(&core.state.db)
+            .await
+            .unwrap();
+    }
+    let invite = format!("/servers/{}/access", core.server);
+    let body = |id: &str| {
+        Some(
+            json!({ "user": { "id": id, "name": id, "avatar_url": null }, "role": "editor" }),
+        )
+    };
+    let (status, error) = core
+        .call(
+            Method::POST,
+            &invite,
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            body("newcomer"),
+        )
+        .await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::CONFLICT, Some("conflict"))
+    );
+    // Someone already in the directory still gets a new role.
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &invite,
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            body("viewer"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn sessions_are_revoked_and_signed_out() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
