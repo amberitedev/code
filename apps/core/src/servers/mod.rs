@@ -3,23 +3,29 @@
 //! Core never starts Java itself. It writes a launch to `runs/<server>/` and starts a detached
 //! shim (see `shim`), which runs Java and outlives Core. [`Servers`] keeps track of which servers
 //! have a shim, adopts the shims it finds when Core starts, and records how every run ended.
+//! While a server runs, Core reads its console for players and freezes (see `watch`), restarts
+//! it after a crash, and tells [`Servers::events`] subscribers, such as port forwarding.
 
 pub mod console;
+pub mod insight;
 pub mod launch;
+pub mod memory;
 pub mod process;
 pub mod records;
 pub mod restarts;
 pub mod shim;
+mod watch;
 
 use std::{
     collections::{HashMap, HashSet},
     process::Child,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
 };
 
 use color_eyre::eyre::Result;
 use sqlx::SqlitePool;
+use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::daemon::paths::Paths;
@@ -99,6 +105,22 @@ pub struct Servers {
     deleted: Mutex<HashSet<String>>,
     /// Servers killed while a restart waited for them to stop. The kill wins: they stay off.
     killed: Mutex<HashSet<String>>,
+    /// Itself, for the tasks a run starts.
+    me: Weak<Servers>,
+    /// Servers starting to run and runs ending.
+    pub events: broadcast::Sender<Lifecycle>,
+    /// What each running server's console said. See `watch`.
+    insight: Mutex<HashMap<String, watch::Watched>>,
+    /// Servers that crashed too often to start again. Cleared by the next start.
+    gave_up: Mutex<HashSet<String>>,
+}
+
+/// A change in which servers run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lifecycle {
+    /// A run started, or Core adopted one.
+    Running(String),
+    Ended(String),
 }
 
 /// How long a new shim may take to start Java.
@@ -115,13 +137,17 @@ impl Servers {
             .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(15))
             .build()?;
-        let servers = Arc::new(Self {
+        let servers = Arc::new_cyclic(|me| Self {
             paths,
             db,
             http,
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
             killed: Mutex::default(),
+            me: me.clone(),
+            events: broadcast::channel(64).0,
+            insight: Mutex::default(),
+            gave_up: Mutex::default(),
         });
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
@@ -169,7 +195,13 @@ impl Servers {
                     "a server runs under a shim this Core cannot use; it is left running"
                 ),
             }
-            self.live().entry(id).or_insert(Live { phase, child: None });
+            let running = phase == Phase::Running;
+            self.live()
+                .entry(id.clone())
+                .or_insert(Live { phase, child: None });
+            if running {
+                self.on_running(&id);
+            }
         }
         // A run younger than START_TIMEOUT may belong to a shim still starting. The cutoff also
         // keeps this from closing a run a start in progress has just recorded.
@@ -249,6 +281,7 @@ impl Servers {
                 // start the next run first.
                 self.finish(&id, i64::MAX).await;
                 self.live().remove(&id);
+                self.ended(&id).await;
             }
             if let Err(error) = self.scan().await {
                 warn!(%error, "could not look for running servers");
@@ -330,6 +363,9 @@ impl Servers {
                     live.phase = Phase::Running;
                 }
                 info!(server = %id, "started");
+                drop(live);
+                self.gave_up.lock().expect("not poisoned").remove(id);
+                self.on_running(id);
                 Ok(())
             }
             // A shim that holds the lock but never answered keeps its server running.
@@ -376,12 +412,18 @@ impl Servers {
             ..server.clone()
         };
         let run_id = uuid::Uuid::new_v4().to_string();
-        let launch = launch::prepare(&self.paths, &self.http, server, &run_id)
-            .await
-            .map_err(|error| match error.downcast::<launch::NotReady>() {
-                Ok(not_ready) => ServerError::NotReady(not_ready),
-                Err(error) => ServerError::Other(error),
-            })?;
+        let mut launch =
+            launch::prepare(&self.paths, &self.http, server, &run_id)
+                .await
+                .map_err(|error| {
+                    match error.downcast::<launch::NotReady>() {
+                        Ok(not_ready) => ServerError::NotReady(not_ready),
+                        Err(error) => ServerError::Other(error),
+                    }
+                })?;
+        if let Some(flags) = memory::flags(&self.db, id).await? {
+            memory::use_flags(&mut launch.args, flags);
+        }
         std::fs::create_dir_all(self.paths.run(id))?;
         // What an earlier run left must not be mistaken for this one's.
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {

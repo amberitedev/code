@@ -4,8 +4,6 @@
 //! most common and is tried last. Every mapping is TCP and has a finite lease, so one that is never
 //! removed (a crash) still goes away by itself.
 
-#![allow(dead_code)] // Wired in step 8: port mappings that belong to servers, with reachability.
-
 use std::{
     fmt::{self, Write as _},
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -202,7 +200,8 @@ impl Router {
             )
         };
         match add(LEASE_SECONDS).await {
-            // Some routers only accept mappings that never expire. Core removes those on exit.
+            // Some routers only accept mappings that never expire. Core removes those when their
+            // server stops.
             Err(AddPortError::OnlyPermanentLeasesSupported) => add(0).await,
             result => result,
         }

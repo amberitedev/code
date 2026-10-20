@@ -77,6 +77,7 @@ mod tests {
                 "backups",
                 "content_files",
                 "core",
+                "jvm_flags",
                 "pairing",
                 "restarts",
                 "runs",

@@ -72,6 +72,7 @@ async fn core() -> Core {
     let state = Arc::new(AppState {
         servers,
         access: Arc::new(Access::new(keys)),
+        network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
         update,
     });

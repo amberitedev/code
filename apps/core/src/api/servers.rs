@@ -503,7 +503,7 @@ async fn server(
         locked_since: None,
         linked_instance: None,
         power_state: Some(power_state),
-        reachability: None,
+        reachability: super::insight::archon(state, &row.id),
     })
 }
 

@@ -171,3 +171,10 @@ CREATE TABLE restarts (
     -- Restart once nobody is online and the server has run this many hours. Null: off.
     smart_after_hours INTEGER
 );
+
+-- A server's own JVM flags, instead of the tuned ones. No row: the tuned flags.
+CREATE TABLE jvm_flags (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- JSON array of strings.
+    flags TEXT NOT NULL
+);

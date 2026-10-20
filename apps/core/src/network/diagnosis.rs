@@ -4,8 +4,6 @@
 //! This is pure. The measuring happens in the parent module; everything here can be tested
 //! without a router.
 
-#![allow(dead_code)] // Wired in step 8: reachability reporting over the API.
-
 use std::{
     fmt::Write as _,
     net::{IpAddr, Ipv4Addr},
@@ -48,6 +46,8 @@ pub enum RouterFacts {
 
 /// The result of asking the backend to connect from the internet.
 #[derive(Debug, Clone)]
+// The backend's test from the internet is a later step; until then every check is NotChecked.
+#[allow(dead_code)]
 pub enum Outside {
     Reachable {
         ip: IpAddr,

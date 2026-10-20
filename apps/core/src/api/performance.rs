@@ -1,9 +1,11 @@
-//! A server's memory and restarts, which the App shows under performance.
+//! A server's memory, JVM flags, and restarts, which the App shows under performance.
 //!
 //! - `GET /servers/{id}/performance`: [`Performance`]. Viewers and up.
-//! - `PUT /servers/{id}/memory`: [`Memory`] in, [`Performance`] out. Editors and up. A running
-//!   server uses the new memory from its next start.
+//! - `PUT /servers/{id}/memory`: [`Memory`] in, [`Performance`] out. Editors and up.
+//! - `PUT /servers/{id}/flags`: [`JvmFlags`] in, [`Performance`] out. Editors and up.
 //! - `PUT /servers/{id}/restarts`: `Restarts` in, [`Performance`] out. Editors and up.
+//!
+//! A running server uses new memory and flags from its next start.
 
 use std::sync::Arc;
 
@@ -22,7 +24,7 @@ use super::{
 use crate::{
     access::{Caller, Level, activity},
     servers::{
-        ServerError, records,
+        ServerError, memory, records,
         restarts::{self, Restarts},
     },
 };
@@ -32,10 +34,23 @@ pub const MIN_MEMORY_MB: u32 = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Performance {
-    /// The most memory Java may use.
+    /// The most memory Java may use. Java starts with less and grows to it.
     pub memory_mb: u32,
+    /// The JVM flags the server starts with.
+    pub flags: Vec<String>,
+    /// `flags` are the server's own rather than Core's tuned ones.
+    pub custom_flags: bool,
     pub restarts: Restarts,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct JvmFlags {
+    /// The server's own flags, each starting with `-`. Null goes back to the tuned ones.
+    pub flags: Option<Vec<String>>,
+}
+
+/// The most flags a server may have.
+const MAX_FLAGS: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Memory {
@@ -49,8 +64,12 @@ async fn performance(
     let server = records::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
+    let own = memory::flags(&state.db, id).await?;
     Ok(Performance {
         memory_mb: u32::try_from(server.memory_mb).unwrap_or(u32::MAX),
+        custom_flags: own.is_some(),
+        flags: own
+            .unwrap_or_else(|| memory::TUNED_FLAGS.map(String::from).to_vec()),
         restarts: restarts::get(&state.db, id).await?,
     })
 }
@@ -86,6 +105,33 @@ pub async fn set_memory(
         .bind(&id)
         .execute(&state.db)
         .await?;
+    activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
+    Ok(Json(performance(&state, &id).await?))
+}
+
+/// `PUT /servers/{id}/flags`.
+pub async fn set_flags(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<JvmFlags>,
+) -> Result<Json<Performance>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    if let Some(flags) = &request.flags
+        && (flags.len() > MAX_FLAGS
+            || flags
+                .iter()
+                .any(|flag| !flag.starts_with('-') || flag.trim() != flag))
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Give at most {MAX_FLAGS} flags, each starting with - and without spaces around it."
+            ),
+        ));
+    }
+    performance(&state, &id).await?;
+    memory::set_flags(&state.db, &id, request.flags.as_deref()).await?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
     Ok(Json(performance(&state, &id).await?))
 }
