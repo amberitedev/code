@@ -14,7 +14,8 @@ use crate::{
     api::{
         console::SendCommand,
         eula::Eula,
-        performance::{Memory, Performance},
+        insight::{Machine, Reach, ServerInsight},
+        performance::{JvmFlags, Memory, Performance},
         servers::{
             CreateServerRequest, CreateServerResponse, PowerAction,
             PowerRequest, ReinstallRequest, Server, ServerGetResponse,
@@ -49,11 +50,24 @@ pub enum ServersCommand {
     /// Read a server's console or send it a command.
     #[command(subcommand)]
     Console(ConsoleCommand),
-    /// Show or set the most memory a server's Java may use.
+    /// Who is online, whether the server answers, its last crash, and whether players can
+    /// reach it.
+    Info { server: String },
+    /// Show or set the most memory a server's Java may use, and its JVM flags.
     Memory {
         server: String,
         /// In MB. The server uses it from its next start.
         mb: Option<u32>,
+        /// The server's own JVM flags instead of the tuned ones, such as "-XX:+UseZGC".
+        #[arg(
+            long,
+            conflicts_with = "default_flags",
+            allow_hyphen_values = true
+        )]
+        flags: Option<String>,
+        /// Go back to the tuned JVM flags.
+        #[arg(long)]
+        default_flags: bool,
     },
     /// Run a server with a Java binary of your choice, or go back to the Java Core manages.
     #[command(group(ArgGroup::new("java").required(true)))]
@@ -178,23 +192,65 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         ServersCommand::Console(ConsoleCommand::Attach { .. }) => {
             unreachable!("attach streams; see attach")
         }
-        ServersCommand::Memory { server, mb } => {
+        ServersCommand::Info { server } => {
             let server = find(client, &server).await?;
-            let path = format!("/servers/{}/memory", server.server_id);
-            let performance: Performance = match mb {
-                Some(memory_mb) => {
-                    client
-                        .call(Method::PUT, &path, Some(&Memory { memory_mb }))
-                        .await?
-                }
-                None => client.get(&performance_path(&server)).await?,
-            };
-            let mut text =
-                format!("{}: {} MB", server.name, performance.memory_mb);
-            if mb.is_some() && server.power_state.is_some_and(is_up) {
-                text.push_str(", from its next start");
+            let insight: ServerInsight = client
+                .get(&format!("/servers/{}/insight", server.server_id))
+                .await?;
+            Ok(Output::new(describe(&server, &insight), &insight))
+        }
+        ServersCommand::Memory {
+            server,
+            mb,
+            flags,
+            default_flags,
+        } => {
+            let server = find(client, &server).await?;
+            let mut performance: Performance =
+                client.get(&performance_path(&server)).await?;
+            if let Some(memory_mb) = mb {
+                performance = client
+                    .call(
+                        Method::PUT,
+                        &format!("/servers/{}/memory", server.server_id),
+                        Some(&Memory { memory_mb }),
+                    )
+                    .await?;
             }
-            Ok(Output::new(text, &performance))
+            let changed = mb.is_some() || flags.is_some() || default_flags;
+            if flags.is_some() || default_flags {
+                let flags = flags.map(|flags| {
+                    flags.split_whitespace().map(str::to_owned).collect()
+                });
+                performance = client
+                    .call(
+                        Method::PUT,
+                        &format!("/servers/{}/flags", server.server_id),
+                        Some(&JvmFlags { flags }),
+                    )
+                    .await?;
+            }
+            let later = changed && server.power_state.is_some_and(is_up);
+            let mut lines = vec![
+                format!(
+                    "{}: up to {} MB{}",
+                    server.name,
+                    performance.memory_mb,
+                    if later { ", from its next start" } else { "" }
+                ),
+                format!(
+                    "  {} flags: {}",
+                    if performance.custom_flags {
+                        "own"
+                    } else {
+                        "tuned"
+                    },
+                    performance.flags.join(" ")
+                ),
+            ];
+            let machine: Machine = client.get("/machine").await?;
+            lines.extend(machine.warning);
+            Ok(Output::new(lines.join("\n"), &performance))
         }
         ServersCommand::Java {
             server,
@@ -284,6 +340,68 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             ))
         }
     }
+}
+
+/// `copal servers info` as text.
+fn describe(server: &Server, insight: &ServerInsight) -> String {
+    let mut lines = vec![format!(
+        "{}  {}  port {}",
+        server.name,
+        server.power_state.map_or("unknown", state_name),
+        server.net.port
+    )];
+    if server.power_state.is_some_and(is_up) {
+        let players = if insight.players.is_empty() {
+            "nobody".to_owned()
+        } else {
+            insight.players.join(", ")
+        };
+        let checked = if insight.players_checked {
+            ""
+        } else {
+            " (not checked yet)"
+        };
+        lines.push(format!("  online{checked}: {players}"));
+        lines.push(if insight.frozen {
+            format!(
+                "  FROZEN: it stopped answering. Restart it with: copal servers restart {}",
+                server.server_id
+            )
+        } else if insight.answered_at.is_some() {
+            "  answering".into()
+        } else {
+            "  answering: not known yet".into()
+        });
+    }
+    if insight.crash_restart_stopped {
+        lines.push(
+            "  crashed 3 times in 10 minutes, so Core left it stopped".into(),
+        );
+    }
+    if let Some(crash) = &insight.last_crash {
+        let code = crash
+            .exit_code
+            .map_or("none".to_owned(), |code| code.to_string());
+        lines.push(format!(
+            "  last crash: {}, exit code {code}",
+            super::local_time(crash.at)
+        ));
+        let last: Vec<&str> = crash.last_lines.lines().collect();
+        let start = last.len().saturating_sub(5);
+        lines.extend(last[start..].iter().map(|line| format!("    {line}")));
+    }
+    if let Some(reach) = &insight.reachability {
+        let state = match reach.state {
+            Reach::Reachable => "reachable",
+            Reach::Unverified => "forwarded",
+            Reach::Unreachable => "NOT reachable",
+        };
+        lines.push(format!("  {state}: {}", reach.title));
+        lines.extend(
+            reach.next_step.iter().map(|step| format!("  next: {step}")),
+        );
+    }
+    lines.join("\n")
 }
 
 /// The body of `PUT /servers/{id}/java`, as step 4's `api::startup::JavaPath` has it.

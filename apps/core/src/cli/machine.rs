@@ -11,6 +11,7 @@ use super::{Client, Output, Switch, local_time, on_off, servers};
 use crate::{
     api::{
         eula::Eula,
+        insight::{Machine, Reach},
         logs::CoreLogs,
         update::{ApplyUpdate, Restarting, UpdateSettings, UpdateStatus},
     },
@@ -50,10 +51,12 @@ pub async fn status(client: &Client) -> Result<Output> {
     struct Status {
         health: Health,
         update: UpdateStatus,
+        machine: Machine,
         servers: Vec<crate::api::servers::Server>,
     }
     let health: Health = client.get("/health").await?;
     let update: UpdateStatus = client.get("/update").await?;
+    let machine: Machine = client.get("/machine").await?;
     let servers = servers::list(client).await?;
     let mut lines = vec![format!(
         "Core {} is running (id {})",
@@ -70,12 +73,29 @@ pub async fn status(client: &Client) -> Result<Output> {
             health.version
         ));
     }
+    if let Some(memory_mb) = machine.memory_mb {
+        lines.push(format!(
+            "Memory: the servers may use {} of this machine's {memory_mb} MB",
+            machine.assigned_mb
+        ));
+    }
+    lines.extend(machine.warning.clone());
+    if let Some(api) = &machine.api_reachability
+        && api.state == Reach::Unreachable
+    {
+        lines.push(format!(
+            "The App cannot reach Core from the internet: {}",
+            api.title
+        ));
+        lines.extend(api.next_step.iter().map(|step| format!("Next: {step}")));
+    }
     lines.push(servers::table(&servers));
     Ok(Output::new(
         lines.join("\n"),
         &Status {
             health,
             update,
+            machine,
             servers,
         },
     ))
