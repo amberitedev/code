@@ -106,6 +106,7 @@ pub fn install(owner: Option<&str>) -> Result<()> {
     refuse_data_dir_override("install")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
+    refuse_older_than_active(&paths)?;
 
     // Core must not run while its binary is replaced and its folders change hands. The binary
     // goes first, so a replacement that fails has not touched any account or password.
@@ -118,7 +119,8 @@ pub fn install(owner: Option<&str>) -> Result<()> {
         }
     };
     println!("Program: {}", exe.display());
-    // The program just installed runs, not a version an earlier install updated to.
+    // The program just installed runs, not a version an earlier install updated to. It is at
+    // least as new as that one (see `refuse_older_than_active`).
     crate::update::versions::save(&paths, None)?;
     let created = accounts::create()?;
     println!("Accounts: {CORE} and {SERVERS}, without interactive sign-in");
@@ -211,6 +213,23 @@ pub fn uninstall(remove_data: bool) -> Result<()> {
         );
     }
     println!("\nCopal is uninstalled.");
+    Ok(())
+}
+
+/// Refuse to install a binary older than the version Core updated itself to: that version may
+/// have migrated the database past what this binary can open, and it would be a downgrade.
+fn refuse_older_than_active(paths: &Paths) -> Result<()> {
+    let current = crate::update::current();
+    if let Some(state) = crate::update::versions::load(paths)?
+        && semver::Version::parse(&state.active)
+            .is_ok_and(|active| active > current)
+    {
+        bail!(
+            "Core has updated itself to {}, newer than this copal ({current}). Run install with copal {} or newer",
+            state.active,
+            state.active
+        );
+    }
     Ok(())
 }
 
@@ -327,5 +346,24 @@ fn remove_file(path: &Path) -> Result<()> {
             })
         }
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::update::versions::{self, State};
+
+    #[test]
+    fn an_install_older_than_the_active_version_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        assert!(refuse_older_than_active(&paths).is_ok());
+        versions::save(&paths, Some(&State::update("0.0.1", "99.0.0", None)))
+            .unwrap();
+        assert!(refuse_older_than_active(&paths).is_err());
+        versions::save(&paths, Some(&State::update("99.0.0", "0.0.1", None)))
+            .unwrap();
+        assert!(refuse_older_than_active(&paths).is_ok());
     }
 }

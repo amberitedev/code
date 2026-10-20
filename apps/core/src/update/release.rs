@@ -124,6 +124,19 @@ pub fn resolve(
         .max_by(|(a, _), (b, _)| a.cmp(b))
 }
 
+/// The next page of a GitHub list, from its `Link` header.
+pub fn next_page(link: &str) -> Option<String> {
+    link.split(',').find_map(|part| {
+        let (url, rel) = part.split_once(';')?;
+        (rel.trim() == r#"rel="next""#).then(|| {
+            url.trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .into()
+        })
+    })
+}
+
 /// What a release holds, as the release workflow signed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -318,6 +331,19 @@ mINo/gYrYpZyaxCbxH2qcY0JDcSIxwE8hmuhaSlbetKaT2+5+icaNVkLEbo2lc1QAJ/XV0iNIK9wQrlR
         assert_eq!(picked(Channel::Beta).as_deref(), Some("0.3.0-beta.1"));
         assert_eq!(picked(Channel::Alpha).as_deref(), Some("0.4.0-alpha.2"));
         assert!(resolve(&[release("v0.21.10")], Channel::Alpha).is_none());
+    }
+
+    #[test]
+    fn the_next_page_comes_from_the_link_header() {
+        let link = r#"<https://api.github.com/repositories/1/releases?per_page=100&page=2>; rel="next", <https://api.github.com/repositories/1/releases?per_page=100&page=5>; rel="last""#;
+        assert_eq!(
+            next_page(link).as_deref(),
+            Some(
+                "https://api.github.com/repositories/1/releases?per_page=100&page=2"
+            )
+        );
+        let last = r#"<https://api.github.com/repositories/1/releases?page=4>; rel="prev""#;
+        assert_eq!(next_page(last), None);
     }
 
     #[test]

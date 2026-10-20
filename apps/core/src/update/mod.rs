@@ -40,6 +40,8 @@ const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long auto-update waits for servers to finish starting or stopping.
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
+/// Pages of the releases list read at most, 100 releases each.
+const MAX_PAGES: usize = 5;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// The version of this binary.
@@ -347,16 +349,7 @@ impl Updater {
         &self,
         channel: Channel,
     ) -> Result<Candidate, UpdateError> {
-        let releases: Vec<Release> = self
-            .http
-            .get(&self.source)
-            .header("accept", "application/vnd.github+json")
-            .timeout(METADATA_TIMEOUT)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let releases = self.releases(channel).await?;
         let (version, release) = release::resolve(&releases, channel)
             .ok_or(UpdateError::NoRelease(channel))?;
         let asset = |name: &str| {
@@ -377,6 +370,38 @@ impl Updater {
             version,
             file,
         })
+    }
+
+    /// The releases list, newest first, page by page until one has a release on `channel`.
+    /// The Modrinth App's releases share the list, so the newest Copal release can be past the
+    /// first page.
+    async fn releases(
+        &self,
+        channel: Channel,
+    ) -> Result<Vec<Release>, UpdateError> {
+        let mut releases = Vec::new();
+        let mut next = Some(self.source.clone());
+        for _ in 0..MAX_PAGES {
+            let Some(url) = next.take() else { break };
+            let response = self
+                .http
+                .get(&url)
+                .header("accept", "application/vnd.github+json")
+                .timeout(METADATA_TIMEOUT)
+                .send()
+                .await?
+                .error_for_status()?;
+            next = response
+                .headers()
+                .get("link")
+                .and_then(|link| link.to_str().ok())
+                .and_then(release::next_page);
+            releases.extend(response.json::<Vec<Release>>().await?);
+            if release::resolve(&releases, channel).is_some() {
+                break;
+            }
+        }
+        Ok(releases)
     }
 
     async fn fetch(&self, url: &str) -> Result<bytes::Bytes, UpdateError> {

@@ -31,9 +31,9 @@ cleanup() { rm -rf "$temporary_dir"; }
 trap cleanup EXIT INT TERM
 
 # The same rules as Core's updater: copal-v tags only, and each channel also gets the ones
-# before it (beta gets stable releases, alpha gets both).
-curl --fail --silent --show-error "https://api.github.com/repos/$repository/releases?per_page=100" -o "$temporary_dir/releases.json"
-tag="$(python3 - "$temporary_dir/releases.json" "$channel" <<'EOF'
+# before it (beta gets stable releases, alpha gets both). The Modrinth App's releases share the
+# list, so it is read page by page until a page holds a release on the channel.
+cat > "$temporary_dir/resolve.py" <<'EOF'
 import json, re, sys
 
 releases = json.load(open(sys.argv[1]))
@@ -53,7 +53,13 @@ for release in releases:
         best = (key, release["tag_name"])
 print(best[1] if best else "")
 EOF
-)"
+tag=""
+for page in 1 2 3 4 5; do
+	curl --fail --silent --show-error "https://api.github.com/repos/$repository/releases?per_page=100&page=$page" -o "$temporary_dir/releases.json"
+	tag="$(python3 "$temporary_dir/resolve.py" "$temporary_dir/releases.json" "$channel")"
+	[ -n "$tag" ] && break
+	grep -q '"tag_name"' "$temporary_dir/releases.json" || break
+done
 [ -n "$tag" ] || { printf '%s\n' "No Copal release is on the $channel channel yet." >&2; exit 1; }
 
 base_url="https://github.com/$repository/releases/download/$tag"
