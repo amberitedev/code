@@ -1,10 +1,14 @@
 #!/usr/bin/env sh
-# Download the copal binary for this machine from the newest Copal release on a channel, checked
-# against the release manifest's SHA-256. Then run `sudo copal install` to set Copal up as a
-# service. From there Core updates itself and checks every update's signature.
+# Download the copal binary for this machine from the newest Copal release on a channel. The
+# release manifest's minisign signature is checked against the release key first, then the
+# binary against the manifest's SHA-256. Then run `sudo copal install` to set Copal up as a
+# service. From there Core updates itself and checks every update's signature the same way.
 set -eu
 
 repository="amberitedev/code"
+# The release key. The same as PUBLIC_KEY in apps/core/src/update/release.rs; the release
+# workflow refuses to publish when they differ.
+public_key="RWQqPj5ql/C7RJ/2nm3MHZkzq7zGJNkPz82ttxT3HnQokqfiRH2Uqzjb"
 channel="stable"
 install_dir="${COPAL_INSTALL_DIR:-$HOME/.local/bin}"
 
@@ -25,6 +29,12 @@ esac
 
 command -v curl >/dev/null 2>&1 || { printf '%s\n' "curl is required." >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { printf '%s\n' "python3 is required." >&2; exit 1; }
+command -v minisign >/dev/null 2>&1 || {
+	printf '%s\n' "minisign is required to check the release's signature. Install it first:" >&2
+	printf '%s\n' "  Debian or Ubuntu: sudo apt install minisign" >&2
+	printf '%s\n' "  macOS: brew install minisign" >&2
+	exit 1
+}
 
 temporary_dir="$(mktemp -d)"
 cleanup() { rm -rf "$temporary_dir"; }
@@ -65,6 +75,12 @@ done
 base_url="https://github.com/$repository/releases/download/$tag"
 curl --fail --location --silent --show-error "$base_url/$asset" -o "$temporary_dir/copal"
 curl --fail --location --silent --show-error "$base_url/copal-manifest.json" -o "$temporary_dir/manifest.json"
+curl --fail --location --silent --show-error "$base_url/copal-manifest.json.minisig" -o "$temporary_dir/manifest.json.minisig"
+# Nothing in the manifest is used before its signature checks out.
+minisign -V -q -P "$public_key" -m "$temporary_dir/manifest.json" -x "$temporary_dir/manifest.json.minisig" || {
+	printf '%s\n' "The release manifest's signature is not valid, so nothing was installed." >&2
+	exit 1
+}
 python3 - "$temporary_dir/manifest.json" "$temporary_dir/copal" "$asset" <<'EOF'
 import hashlib, json, sys
 
