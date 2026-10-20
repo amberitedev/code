@@ -26,6 +26,7 @@ use super::{
 };
 use crate::{
     access::{Caller, Level, activity},
+    installs::java,
     servers::{ServerError, launch, records},
 };
 
@@ -161,11 +162,25 @@ async fn set_major(
     let server = records::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
+    // The major the version needs is the default, not a choice: stored, it would pin the server
+    // to it after a game version change.
+    let needed = match &server.game_version {
+        Some(game_version) => Some(
+            java::java_requirement(
+                &state.content.http,
+                state.servers.paths().root(),
+                game_version,
+            )
+            .await,
+        ),
+        None => None,
+    };
+    let chosen = major.filter(|major| Some(*major) != needed);
     records::set_java(
         &state.db,
         id,
         server.java_path.as_deref(),
-        major.map(i64::from),
+        chosen.map(i64::from),
     )
     .await?;
     activity::log(&state.db, caller, Some(id), Action::SettingsChanged).await;
@@ -211,15 +226,19 @@ pub async fn update_v0(
     Json(body): Json<UpdateStartupConfig>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
-    let (invocation, _) = report(&state, &id).await?;
+    let (invocation, major) = report(&state, &id).await?;
     custom_command(body.invocation.as_deref(), &invocation)?;
-    set_major(
-        &state,
-        &caller,
-        &id,
-        body.jdk_version.map(JdkVersion::major),
-    )
-    .await?;
+    // The App sends back what it read. That name is lossy (Java 25 reads as `lts21`), so the
+    // same name means no change.
+    if body.jdk_version != Some(JdkVersion::from_major(major)) {
+        set_major(
+            &state,
+            &caller,
+            &id,
+            body.jdk_version.map(JdkVersion::major),
+        )
+        .await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

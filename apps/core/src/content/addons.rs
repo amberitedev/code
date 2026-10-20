@@ -507,20 +507,26 @@ pub async fn upload(
         .await
         .map_err(std::io::Error::other)??
     };
-    let kept = records::file(&content.db, server_id, &path).await?;
-    records::put(
-        &content.db,
-        server_id,
-        &ContentFile {
-            path,
-            origin: kept.as_ref().map_or(Origin::Added, |row| row.origin),
-            sha1,
-            project_id: None,
-            version_id: None,
-            pending: None,
-        },
-    )
-    .await?;
+    // Over a pack file, the row keeps what the pack placed, so the upload counts as the owner's
+    // edit and a pack update leaves it alone.
+    let pack_file = records::file(&content.db, server_id, &path)
+        .await?
+        .is_some_and(|row| row.origin == Origin::Pack);
+    if !pack_file {
+        records::put(
+            &content.db,
+            server_id,
+            &ContentFile {
+                path,
+                origin: Origin::Added,
+                sha1,
+                project_id: None,
+                version_id: None,
+                pending: None,
+            },
+        )
+        .await?;
+    }
     identify(content, server_id).await;
     Ok(())
 }

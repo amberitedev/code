@@ -127,10 +127,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(files::get_session).post(files::open_session),
         )
         .route(
-            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/finalize",
-            post(files::finalize_session),
-        )
-        .route(
             "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}",
             delete(files::cancel_session),
         )
@@ -153,6 +149,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(content::get_update).post(content::update),
         )
         .route("/v1/servers/{id}/worlds/{wid}/addons/update-many", post(content::update_many))
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/finalize",
+            post(files::finalize_session),
+        )
         .route("/servers/{id}/v1/fs/unarchive", post(files::unarchive))
         .route("/servers/{id}/v1/worlds/{wid}/files/zip", post(files::zip))
         .layer(DefaultBodyLimit::max(MAX_BODY))

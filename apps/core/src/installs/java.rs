@@ -120,12 +120,21 @@ pub fn installed(paths: &Paths, major: u32) -> Option<PathBuf> {
     binary.is_file().then_some(binary)
 }
 
+/// One Java install at a time, so two servers starting on a missing major, or a start and the
+/// patch check, never unpack the same release over each other.
+static INSTALLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The Java binary for `major`, downloaded first when missing.
 pub async fn ensure(
     paths: &Paths,
     http: &reqwest::Client,
     major: u32,
 ) -> Result<PathBuf, JavaError> {
+    if let Some(binary) = installed(paths, major) {
+        return Ok(binary);
+    }
+    let _installing = INSTALLING.lock().await;
+    // Another start may have installed it while this one waited.
     if let Some(binary) = installed(paths, major) {
         return Ok(binary);
     }
@@ -275,6 +284,7 @@ pub async fn update_all(paths: &Paths, http: &reqwest::Client) {
         .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
         .collect();
     for major in majors {
+        let _installing = INSTALLING.lock().await;
         let Some(current) = read_current(paths, major) else {
             continue;
         };

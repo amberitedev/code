@@ -1137,29 +1137,35 @@ pub async fn stage_field(
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let mut file = tokio::fs::File::create(path).await?;
-    let mut hasher = sha1::Sha1::default();
-    let mut written = 0u64;
-    while let Some(chunk) = field.chunk().await.map_err(|error| {
-        ApiError::new(ErrorCode::InvalidRequest, error.body_text())
-    })? {
-        written += chunk.len() as u64;
-        if written > limit {
-            drop(file);
-            let _ = tokio::fs::remove_file(path).await;
-            return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
-                format!(
-                    "Uploads are at most {} GB.",
-                    limit / 1024 / 1024 / 1024
-                ),
-            ));
+    let result = async {
+        let mut file = tokio::fs::File::create(path).await?;
+        let mut hasher = sha1::Sha1::default();
+        let mut written = 0u64;
+        while let Some(chunk) = field.chunk().await.map_err(|error| {
+            ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+        })? {
+            written += chunk.len() as u64;
+            if written > limit {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    format!(
+                        "Uploads are at most {} GB.",
+                        limit / 1024 / 1024 / 1024
+                    ),
+                ));
+            }
+            sha1::Digest::update(&mut hasher, &chunk);
+            file.write_all(&chunk).await?;
         }
-        sha1::Digest::update(&mut hasher, &chunk);
-        file.write_all(&chunk).await?;
+        file.flush().await?;
+        Ok(hex::encode(sha1::Digest::finalize(hasher)))
     }
-    file.flush().await?;
-    Ok(hex::encode(sha1::Digest::finalize(hasher)))
+    .await;
+    // Whatever stopped it, a client gone or a full disk, nothing half-written stays.
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    result
 }
 
 fn bad_form(error: axum::extract::multipart::MultipartError) -> ApiError {

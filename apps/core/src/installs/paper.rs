@@ -58,20 +58,21 @@ pub async fn install(
         "https://fill.papermc.io/v3/projects/paper/versions/{game_version}/builds"
     );
     let builds: Vec<Build> = download::json(http, &url).await?;
-    let chosen = match build.filter(|build| *build != "latest") {
-        Some(wanted) => builds
-            .into_iter()
-            .find(|candidate| candidate.id.to_string() == wanted)
-            .ok_or_else(|| PaperError::UnknownBuild {
-                game_version: game_version.into(),
-                build: wanted.into(),
-            })?,
-        None => builds
-            .into_iter()
-            .filter(|candidate| candidate.channel == "STABLE")
-            .max_by_key(|candidate| candidate.id)
-            .ok_or_else(|| PaperError::NoBuild(game_version.into()))?,
-    };
+    let chosen =
+        match build.filter(|build| !matches!(*build, "latest" | "stable")) {
+            Some(wanted) => builds
+                .into_iter()
+                .find(|candidate| candidate.id.to_string() == wanted)
+                .ok_or_else(|| PaperError::UnknownBuild {
+                    game_version: game_version.into(),
+                    build: wanted.into(),
+                })?,
+            None => builds
+                .into_iter()
+                .filter(|candidate| candidate.channel == "STABLE")
+                .max_by_key(|candidate| candidate.id)
+                .ok_or_else(|| PaperError::NoBuild(game_version.into()))?,
+        };
     let build = chosen.id.to_string();
     let path = dirs.paper_jar(game_version, &build);
     let hash = Hash::Sha256(&chosen.downloads.server.checksums.sha256);

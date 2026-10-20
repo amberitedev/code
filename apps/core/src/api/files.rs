@@ -263,7 +263,8 @@ pub struct GetUploadSessionResponse {
 /// How long an upload session lives without a request.
 const SESSION_IDLE_S: i64 = 3600;
 
-/// One upload session: files staged out of the server folder until it is finalized.
+/// One upload session: files staged in its own folder, out of the server folder, until it is
+/// finalized.
 #[derive(Debug, Clone)]
 struct Session {
     server_id: String,
@@ -274,6 +275,8 @@ struct Session {
     created_at: i64,
     updated_at: i64,
     last_upload_at: Option<i64>,
+    /// Where its files wait. Removed whenever the session ends.
+    dir: PathBuf,
     /// The name each file was sent with, and where it waits.
     files: Vec<(String, PathBuf)>,
     bytes: u64,
@@ -303,22 +306,74 @@ impl Session {
             UploadSessionStatus::Active | UploadSessionStatus::Uploading
         )
     }
+
+    fn belongs_to(
+        &self,
+        caller: &Caller,
+        server_id: &str,
+        scope: UploadScope,
+    ) -> bool {
+        self.server_id == server_id
+            && self.scope == scope
+            && self.user_id.as_deref() == caller.user_id()
+    }
+
+    /// End the session: it is over and holds no files.
+    fn end(&mut self, status: UploadSessionStatus) {
+        self.status = status;
+        self.updated_at = now();
+        self.files.clear();
+    }
 }
 
-/// Every open upload session, by id. Sessions live in memory: a Core restart ends them.
+/// Every upload session, by id. Sessions live in memory: a Core restart ends them, and the next
+/// one clears `staging/`.
 #[derive(Default)]
 pub struct Uploads {
     sessions: Mutex<HashMap<String, Session>>,
 }
 
 impl Uploads {
+    /// The sessions, after dropping those an hour without a request, whatever their state, and
+    /// removing what they staged.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Session>> {
         let mut sessions = self.sessions.lock().expect("not poisoned");
         let now = now();
-        sessions
-            .retain(|_, session| !session.open() || session.expires_at() > now);
+        sessions.retain(|_, session| {
+            let live = session.expires_at() > now;
+            if !live {
+                let _ = std::fs::remove_dir_all(&session.dir);
+            }
+            live
+        });
         sessions
     }
+
+    /// Run `change` on the caller's session `upload_id`, under the lock, if it is still open.
+    fn change<T>(
+        &self,
+        caller: &Caller,
+        server_id: &str,
+        scope: UploadScope,
+        upload_id: &str,
+        change: impl FnOnce(&mut Session) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        let mut sessions = self.lock();
+        let session = sessions
+            .get_mut(upload_id)
+            .filter(|session| session.belongs_to(caller, server_id, scope))
+            .ok_or_else(|| {
+                ApiError::new(ErrorCode::NotFound, "There is no such upload.")
+            })?;
+        if !session.open() {
+            return Err(over());
+        }
+        change(session)
+    }
+}
+
+fn over() -> ApiError {
+    ApiError::new(ErrorCode::Conflict, "This upload is over.")
 }
 
 fn not_found(path: &str) -> ApiError {
@@ -945,63 +1000,34 @@ pub async fn open_session(
         created_at: now,
         updated_at: now,
         last_upload_at: None,
+        dir: state
+            .servers
+            .paths()
+            .staging(&id)
+            .join(format!("session-{upload_id}")),
         files: Vec::new(),
         bytes: 0,
     };
     let response = session.response(&upload_id);
-    let ended: Vec<Session> = {
+    let ended: Vec<PathBuf> = {
         let mut sessions = state.uploads.lock();
-        let mine: Vec<String> = sessions
-            .iter()
-            .filter(|(_, other)| {
-                other.open()
-                    && other.server_id == id
-                    && other.scope == scope
-                    && other.user_id.as_deref() == caller.user_id()
+        let ended = sessions
+            .values_mut()
+            .filter(|other| {
+                other.open() && other.belongs_to(&caller, &id, scope)
             })
-            .map(|(other, _)| other.clone())
-            .collect();
-        let ended = mine
-            .iter()
-            .filter_map(|other| sessions.remove(other))
+            .map(|other| {
+                other.end(UploadSessionStatus::Cancelled);
+                other.dir.clone()
+            })
             .collect();
         sessions.insert(upload_id, session);
         ended
     };
-    discard(&ended).await;
-    Ok(Json(response))
-}
-
-/// Remove what ended sessions staged.
-async fn discard(sessions: &[Session]) {
-    for session in sessions {
-        for (_, staged) in &session.files {
-            let _ = tokio::fs::remove_file(staged).await;
-        }
+    for dir in ended {
+        let _ = tokio::fs::remove_dir_all(dir).await;
     }
-}
-
-/// The caller's open session `upload_id` on this server and scope.
-fn session(
-    state: &AppState,
-    caller: &Caller,
-    id: &str,
-    scope: UploadScope,
-    upload_id: &str,
-) -> Result<Session, ApiError> {
-    state
-        .uploads
-        .lock()
-        .get(upload_id)
-        .filter(|session| {
-            session.server_id == id
-                && session.scope == scope
-                && session.user_id.as_deref() == caller.user_id()
-        })
-        .cloned()
-        .ok_or_else(|| {
-            ApiError::new(ErrorCode::NotFound, "There is no such upload.")
-        })
+    Ok(Json(response))
 }
 
 /// `GET v1/worlds/{wid}/{scope}/upload-session`: the caller's open session, if any.
@@ -1017,10 +1043,7 @@ pub async fn get_session(
         .lock()
         .iter()
         .find(|(_, session)| {
-            session.open()
-                && session.server_id == id
-                && session.scope == scope
-                && session.user_id.as_deref() == caller.user_id()
+            session.open() && session.belongs_to(&caller, &id, scope)
         })
         .map(|(upload_id, session)| session.response(upload_id));
     Ok(Json(GetUploadSessionResponse { session }))
@@ -1028,7 +1051,8 @@ pub async fn get_session(
 
 /// `POST v1/worlds/{wid}/{scope}/upload-session/{upload}/files`: stage the `file` parts. Each
 /// part's file name is where it goes: a path in the server folder for `files`, a file name for
-/// `content`.
+/// `content`. The files count only if the session is still open, and within its cap, once they
+/// have all arrived.
 pub async fn upload_files(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -1042,17 +1066,17 @@ pub async fn upload_files(
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let before = session(&state, &caller, &id, scope, &upload_id)?;
-    if !before.open() {
-        return Err(ApiError::new(ErrorCode::Conflict, "This upload is over."));
-    }
-    let staging = state
-        .servers
-        .paths()
-        .staging(&id)
-        .join(format!("session-{upload_id}"));
+    let (dir, budget) =
+        state
+            .uploads
+            .change(&caller, &id, scope, &upload_id, |session| {
+                Ok((
+                    session.dir.clone(),
+                    MAX_UPLOAD.saturating_sub(session.bytes),
+                ))
+            })?;
     let mut added = Vec::new();
-    let mut budget = MAX_UPLOAD.saturating_sub(before.bytes);
+    let mut remaining = budget;
     let result = async {
         while let Some(mut field) =
             form.next_field().await.map_err(|error| {
@@ -1076,34 +1100,44 @@ pub async fn upload_files(
                     })?;
                 }
             }
-            let staged = staging.join(uuid::Uuid::new_v4().to_string());
-            stage_field(&mut field, &staged, budget).await?;
+            let staged = dir.join(uuid::Uuid::new_v4().to_string());
+            stage_field(&mut field, &staged, remaining).await?;
             let size = tokio::fs::metadata(&staged).await?.len();
-            budget = budget.saturating_sub(size);
+            remaining = remaining.saturating_sub(size);
             added.push((name, staged, size));
         }
         Ok::<_, ApiError>(())
     }
     .await;
-    if let Err(error) = result {
+    let committed =
+        result.and_then(|()| {
+            state
+                .uploads
+                .change(&caller, &id, scope, &upload_id, |session| {
+                    let size: u64 = added.iter().map(|(_, _, size)| size).sum();
+                    if session.bytes + size > MAX_UPLOAD {
+                        return Err(ApiError::new(
+                            ErrorCode::InvalidRequest,
+                            "Uploads are at most 4 GB.",
+                        ));
+                    }
+                    let now = now();
+                    session.files.extend(added.iter().map(
+                        |(name, staged, _)| (name.clone(), staged.clone()),
+                    ));
+                    session.bytes += size;
+                    session.status = UploadSessionStatus::Uploading;
+                    session.updated_at = now;
+                    session.last_upload_at = Some(now);
+                    Ok(session.response(&upload_id))
+                })
+        });
+    if committed.is_err() {
         for (_, staged, _) in &added {
             let _ = tokio::fs::remove_file(staged).await;
         }
-        return Err(error);
     }
-    let mut sessions = state.uploads.lock();
-    let session = sessions.get_mut(&upload_id).ok_or_else(|| {
-        ApiError::new(ErrorCode::NotFound, "There is no such upload.")
-    })?;
-    let now = now();
-    for (name, staged, size) in added {
-        session.files.push((name, staged));
-        session.bytes += size;
-    }
-    session.status = UploadSessionStatus::Uploading;
-    session.updated_at = now;
-    session.last_upload_at = Some(now);
-    Ok(Json(session.response(&upload_id)))
+    Ok(Json(committed?))
 }
 
 /// `POST .../upload-session/{upload}/finalize`: put every staged file in place. Files go where
@@ -1120,25 +1154,23 @@ pub async fn finalize_session(
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let session = session(&state, &caller, &id, scope, &upload_id)?;
-    if !session.open() {
-        return Err(ApiError::new(ErrorCode::Conflict, "This upload is over."));
-    }
-    let set_status = |status| {
-        if let Some(session) = state.uploads.lock().get_mut(&upload_id) {
-            session.status = status;
-            session.updated_at = now();
-        }
-    };
-    set_status(UploadSessionStatus::Finalizing);
+    // Taken in one step, so a second finalize finds the session over.
+    let (files, dir) =
+        state
+            .uploads
+            .change(&caller, &id, scope, &upload_id, |session| {
+                session.status = UploadSessionStatus::Finalizing;
+                session.updated_at = now();
+                Ok((session.files.clone(), session.dir.clone()))
+            })?;
     let result = async {
         match scope {
             UploadScope::Files => {
                 let folder = folder(&state, &id)?;
-                for (name, _) in &session.files {
+                for (name, _) in &files {
                     refuse_owned(&folder, &inner_path(name)?)?;
                 }
-                for (name, staged) in &session.files {
+                for (name, staged) in &files {
                     place(
                         Arc::clone(&folder),
                         inner_path(name)?,
@@ -1149,7 +1181,7 @@ pub async fn finalize_session(
             }
             UploadScope::Content => {
                 let _busy = state.content.busy(&id)?;
-                for (name, staged) in &session.files {
+                for (name, staged) in &files {
                     addons::upload(&state.content, &id, name, staged).await?;
                 }
             }
@@ -1157,43 +1189,30 @@ pub async fn finalize_session(
         Ok::<_, ApiError>(())
     }
     .await;
-    discard(std::slice::from_ref(&session)).await;
-    let _ = tokio::fs::remove_dir(
-        state
-            .servers
-            .paths()
-            .staging(&id)
-            .join(format!("session-{upload_id}")),
-    )
-    .await;
-    match result {
-        Ok(()) => {
-            set_status(UploadSessionStatus::Finalized);
-            activity::log(
-                &state.db,
-                &caller,
-                Some(&id),
-                Action::ContentChanged,
-            )
-            .await;
-        }
-        Err(error) => {
-            set_status(UploadSessionStatus::Cancelled);
-            return Err(error);
-        }
-    }
-    let response = state
-        .uploads
-        .lock()
-        .get(&upload_id)
-        .map(|session| session.response(&upload_id))
-        .ok_or_else(|| {
-            ApiError::new(ErrorCode::NotFound, "There is no such upload.")
-        })?;
-    Ok(Json(response))
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    let status = if result.is_ok() {
+        UploadSessionStatus::Finalized
+    } else {
+        UploadSessionStatus::Cancelled
+    };
+    let response = state.uploads.lock().get_mut(&upload_id).map(|session| {
+        let bytes = session.bytes;
+        let count = session.files.len();
+        session.end(status);
+        let mut response = session.response(&upload_id);
+        response.entry_count = count as u32;
+        response.uploaded_byte_count = bytes;
+        response
+    });
+    result?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    response.map(Json).ok_or_else(|| {
+        ApiError::new(ErrorCode::NotFound, "There is no such upload.")
+    })
 }
 
-/// `DELETE .../upload-session/{upload}`: cancel it and remove what it staged.
+/// `DELETE .../upload-session/{upload}`: cancel it and remove what it staged. A session being
+/// finalized can no longer be cancelled.
 pub async fn cancel_session(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -1206,12 +1225,13 @@ pub async fn cancel_session(
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let mut session = session(&state, &caller, &id, scope, &upload_id)?;
-    discard(std::slice::from_ref(&session)).await;
-    session.status = UploadSessionStatus::Cancelled;
-    session.updated_at = now();
-    session.files.clear();
-    let response = session.response(&upload_id);
-    state.uploads.lock().insert(upload_id, session);
+    let (response, dir) =
+        state
+            .uploads
+            .change(&caller, &id, scope, &upload_id, |session| {
+                session.end(UploadSessionStatus::Cancelled);
+                Ok((session.response(&upload_id), session.dir.clone()))
+            })?;
+    let _ = tokio::fs::remove_dir_all(dir).await;
     Ok(Json(response))
 }

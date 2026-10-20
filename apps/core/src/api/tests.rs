@@ -722,3 +722,54 @@ async fn content_and_files_follow_the_role_table() {
         json!({ "files": [{ "path": "config/a.toml", "deleted": false, "pending": null }] })
     );
 }
+
+#[tokio::test]
+async fn an_upload_over_a_pack_file_counts_as_the_owners_edit() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    sqlx::query(
+        "INSERT INTO content_files (server_id, path, origin, sha1, project_id, version_id) \
+         VALUES (?, 'mods/a.jar', 'pack', 'as placed', 'P', 'V')",
+    )
+    .bind(&server)
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    let boundary = "copal-test";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.jar\"\r\n\r\npatched\r\n--{boundary}--\r\n"
+    );
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!(
+            "/servers/{server}/v1/worlds/{server}/content/upload-addon-file"
+        ))
+        .header("authorization", format!("Bearer {editor}"))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let (status, _) = core.send(request).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let row: (String, String) = sqlx::query_as(
+        "SELECT origin, sha1 FROM content_files WHERE path = 'mods/a.jar'",
+    )
+    .fetch_one(&core.state.db)
+    .await
+    .unwrap();
+    assert_eq!(row, ("pack".into(), "as placed".into()));
+    let (_, edited) = core
+        .call(
+            Method::GET,
+            &format!("/servers/{server}/content/edited"),
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(edited["files"][0]["path"], "mods/a.jar");
+}

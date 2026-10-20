@@ -46,10 +46,13 @@ pub fn clean(path: &str) -> Result<String, PathError> {
             ["CON", "PRN", "AUX", "NUL"]
                 .iter()
                 .any(|name| stem.eq_ignore_ascii_case(name))
-                || ((stem.len() == 4)
-                    && (stem[..3].eq_ignore_ascii_case("COM")
-                        || stem[..3].eq_ignore_ascii_case("LPT"))
-                    && stem.as_bytes()[3].is_ascii_digit())
+                || matches!(
+                    stem.as_bytes(),
+                    [a, b, c, digit]
+                        if digit.is_ascii_digit()
+                            && ([*a, *b, *c].eq_ignore_ascii_case(b"COM")
+                                || [*a, *b, *c].eq_ignore_ascii_case(b"LPT"))
+                )
         };
         if reserved
             || part.ends_with(['.', ' '])
@@ -257,6 +260,10 @@ mod tests {
     #[test]
     fn paths_that_leave_or_change_meaning_are_refused() {
         assert_eq!(clean("mods/a.jar").unwrap(), "mods/a.jar");
+        // Four bytes, but not four letters: never sliced inside a character.
+        for name in ["a\u{20ac}", "a\u{6a21}", "\u{6a21}\u{7ec4}.jar"] {
+            assert_eq!(clean(name).unwrap(), name);
+        }
         assert_eq!(
             clean("config/sub dir/b.toml").unwrap(),
             "config/sub dir/b.toml"
