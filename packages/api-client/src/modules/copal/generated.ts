@@ -203,3 +203,58 @@ user: string, server_id: string, server_name: string, role: Role, };
 export type Remove = { user_id: string, server_id: string, keep_core: boolean, };
 
 export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "report_state" };
+
+export type UpdateStatus = { 
+/**
+ * The running version.
+ */
+version: string, 
+/**
+ * Which release files this Core installs, such as `linux-x64`. Null on a platform Copal is
+ * not released for, which cannot update.
+ */
+target: string | null, channel: Channel, 
+/**
+ * Updates install by themselves. Off: only when the owner asks.
+ */
+auto_update: boolean, 
+/**
+ * The newest release on the channel, as of the last check.
+ */
+latest: string | null, 
+/**
+ * `latest` is newer than the running version.
+ */
+update_available: boolean, 
+/**
+ * Unix seconds.
+ */
+checked_at: number | null, 
+/**
+ * Why the last check failed.
+ */
+check_error: string | null, 
+/**
+ * The version a rollback goes back to.
+ */
+previous: string | null, 
+/**
+ * The last version that failed to start and was rolled back from.
+ */
+failed: string | null, };
+
+export type Channel = "stable" | "beta" | "alpha";
+
+export type UpdateSettings = { channel?: Channel, auto_update?: boolean, };
+
+export type ApplyUpdate = { 
+/**
+ * Install the channel's release even when it is older. Only the copal CLI may.
+ */
+allow_downgrade?: boolean, };
+
+export type Restarting = { 
+/**
+ * The version Core restarts into.
+ */
+version: string, };

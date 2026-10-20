@@ -118,6 +118,8 @@ pub fn install(owner: Option<&str>) -> Result<()> {
         }
     };
     println!("Program: {}", exe.display());
+    // The program just installed runs, not a version an earlier install updated to.
+    crate::update::versions::save(&paths, None)?;
     let created = accounts::create()?;
     println!("Accounts: {CORE} and {SERVERS}, without interactive sign-in");
     let owner = match owner {

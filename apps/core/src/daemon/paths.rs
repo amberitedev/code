@@ -112,9 +112,25 @@ impl Paths {
         self.root.join("backups")
     }
 
-    #[allow(dead_code)] // Wired in step 6: the updater.
+    /// Installed Core versions, one folder each. See `update::versions`.
     pub fn versions(&self) -> PathBuf {
         self.root.join("versions")
+    }
+
+    /// Which version the launcher runs. See `update::versions::State`.
+    pub fn version_state(&self) -> PathBuf {
+        self.versions().join("state.json")
+    }
+
+    /// One installed version's folder. `version` is a parsed semver version, so it is a plain
+    /// folder name.
+    pub fn version(&self, version: &str) -> PathBuf {
+        self.versions().join(version)
+    }
+
+    /// The database as it was before the last update migrated it, kept for a rollback.
+    pub fn database_before_update(&self) -> PathBuf {
+        self.root.join("db").join("before-update")
     }
 
     pub fn sockets(&self) -> PathBuf {
@@ -229,6 +245,9 @@ mod tests {
             paths.tls_key(),
             paths.backups(),
             paths.versions(),
+            paths.version_state(),
+            paths.version("1.0.0"),
+            paths.database_before_update(),
             paths.sockets(),
             paths.core_lock(),
             paths.install_record(),

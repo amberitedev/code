@@ -7,7 +7,7 @@
 
 use ts_rs::{Config, TS};
 
-use super::{access, activity, backend, error, sessions};
+use super::{access, activity, backend, error, sessions, update};
 
 const PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -45,6 +45,11 @@ fn declarations() -> String {
         backend::Grant::decl(&cfg),
         backend::Remove::decl(&cfg),
         backend::OwedCall::decl(&cfg),
+        update::UpdateStatus::decl(&cfg),
+        crate::update::release::Channel::decl(&cfg),
+        update::UpdateSettings::decl(&cfg),
+        update::ApplyUpdate::decl(&cfg),
+        update::Restarting::decl(&cfg),
     ]
     .map(|declaration| format!("export {declaration}\n"))
     .join("\n")

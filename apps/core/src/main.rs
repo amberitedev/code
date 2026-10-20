@@ -45,6 +45,9 @@ enum Command {
         #[arg(long, hide = true)]
         service: bool,
     },
+    /// Core itself, as `copal run` starts it. Not for people.
+    #[command(hide = true)]
+    Core,
     /// Show whether Core runs and what its servers are doing.
     Status,
     /// Create and control servers.
@@ -74,6 +77,7 @@ fn main() -> color_eyre::Result<()> {
             daemon::install::uninstall(remove_data)
         }
         Command::Run { service } => daemon::run(service),
+        Command::Core => daemon::core(),
         Command::Status => small_runtime()?.block_on(cli::status()),
         Command::Servers(command) => {
             small_runtime()?.block_on(cli::servers(command))
