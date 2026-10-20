@@ -8,6 +8,11 @@ import type { Env } from '../common/types'
 // and join by the Minecraft address; nobody else is given it.
 
 const MAX_SERVERS = 100
+/**
+ * A server name, in UTF-16 units. Core's own limit, 64 characters (`create` in
+ * `apps/core/src/api/servers.rs`), is the real one; this is loose enough for every name it allows.
+ */
+export const MAX_SERVER_NAME = 256
 
 /** SQL for "this account owns the shared instance bound as `?1` or has joined it". */
 const sharedWith = (account: string) =>
@@ -31,7 +36,7 @@ export function parseServers(servers: unknown): VisibleServer[] {
 		const body: Record<string, unknown> = { ...server }
 		return {
 			id: stringField(body, 'id', 64),
-			name: stringField(body, 'name', 100),
+			name: stringField(body, 'name', MAX_SERVER_NAME),
 			address: stringField(body, 'address', 261),
 			instance: stringField(body, 'shared_instance_id', 64),
 		}

@@ -14,7 +14,7 @@ import {
 import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
-import { parseServers, writeServers } from './servers'
+import { MAX_SERVER_NAME, parseServers, writeServers } from './servers'
 import { issueTicket } from './tickets'
 
 // Core sign-in. A signed-out Core asks for a code and the key it will use, shows the code to its
@@ -51,7 +51,8 @@ const CHECK_TIMEOUT_MS = 5_000
 // Invites one Core may send within `INVITE_WINDOW_MS`.
 const MAX_INVITES = 30
 const INVITE_WINDOW_MS = 10 * 60_000
-// Accounts one Core's access directory may hold.
+// Accounts one Core's access directory may hold. Core refuses an invite past it, with
+// `MAX_DIRECTORY` in `apps/core/src/api/access.rs`; the two must stay equal.
 const MAX_DIRECTORY = 1000
 
 interface PendingRow {
@@ -520,7 +521,7 @@ async function grantAccess(request: Request, env: Env) {
 	const core = await requireCore(request, env)
 	const body = await readJson(request)
 	const serverId = stringField(body, 'server_id', 64)
-	const serverName = stringField(body, 'server_name', 100)
+	const serverName = stringField(body, 'server_name', MAX_SERVER_NAME)
 	const role = stringField(body, 'role', 16)
 	const invitedBy = core.owner_id
 	const username = stringField(body, 'user', 64)

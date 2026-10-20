@@ -214,6 +214,9 @@ test('only the owner invites', async () => {
 			.prepare("SELECT body FROM notifications WHERE user_id = 'other'")
 			.first()
 		assert.equal(JSON.parse(notification.body).invited_by, 'owner')
+		// Core allows 64 characters; outside the BMP that is 128 UTF-16 units.
+		const wide = { ...invite, server_name: '\u{1F7E7}'.repeat(64) }
+		assert.equal((await call('POST', '/core/access', wide)).status, 200)
 		assert.ok(
 			await backend.db
 				.prepare("SELECT 1 FROM core_access WHERE core_id = 'core' AND user_id = 'other'")
