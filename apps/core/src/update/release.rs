@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// The public half of the release signing key, in minisign's format. Its secret half is the
-/// `COPAL_MINISIGN_KEY` repository secret.
+/// `COPAL_MINISIGN_KEY` repository secret. The release workflow reads the key from the line
+/// below to check the secret against it.
 pub const PUBLIC_KEY: &str =
     "RWQqPj5ql/C7RJ/2nm3MHZkzq7zGJNkPz82ttxT3HnQokqfiRH2Uqzjb";
 
