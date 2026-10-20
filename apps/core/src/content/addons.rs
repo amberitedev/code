@@ -65,7 +65,9 @@ pub fn scan(folder: &Folder, loader: Option<ModLoader>) -> Vec<Listed> {
     let mut listed = Vec::new();
     for kind in kinds(loader) {
         let dir = kind_folder(kind, &level);
-        let Ok(entries) = folder.dir().read_dir(&dir) else {
+        let Ok(entries) =
+            folder.open_dir(Some(&dir)).and_then(|dir| dir.entries())
+        else {
             continue;
         };
         for entry in entries.filter_map(Result::ok) {

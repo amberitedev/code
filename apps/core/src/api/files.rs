@@ -443,11 +443,9 @@ pub async fn list(
     let path = api_path(&query.path)?;
     let folder = folder(&state, &id)?;
     let mut items = blocking(move || {
-        let dir = match &path {
-            Some(path) => folder.dir().open_dir(path),
-            None => folder.dir().try_clone(),
-        }
-        .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
+        let dir = folder
+            .open_dir(path.as_deref())
+            .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
         let mut items = Vec::new();
         for entry in dir.entries()?.filter_map(Result::ok) {
             let Ok(name) = entry.file_name().into_string() else {
@@ -521,10 +519,11 @@ pub async fn download(
     let folder = folder(&state, &id)?;
     let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
     let file = blocking(move || {
-        let file = folder.dir().open(&path).map_err(|_| not_found(&path))?;
-        if !file.metadata()?.is_file() {
-            return Err(not_found(&path));
-        }
+        let file = folder
+            .open_file(&path)
+            .ok()
+            .flatten()
+            .ok_or_else(|| not_found(&path))?;
         Ok(file.into_std())
     })
     .await?;
@@ -702,12 +701,9 @@ pub async fn delete(
     let path = inner_path(&query.path)?;
     let folder = folder(&state, &id)?;
     blocking(move || {
-        let meta = folder
-            .dir()
-            .symlink_metadata(&path)
-            .map_err(|_| not_found(&path))?;
+        let meta = folder.metadata(&path).map_err(|_| not_found(&path))?;
         if meta.is_dir() && !query.recursive {
-            folder.dir().remove_dir(&path).map_err(|_| {
+            folder.remove_empty_dir(&path).map_err(|_| {
                 ApiError::new(
                     ErrorCode::Conflict,
                     format!("{path} is not empty."),
@@ -739,9 +735,10 @@ pub async fn unarchive(
     let folder = folder(&state, &id)?;
     let result = blocking(move || {
         let file = folder
-            .dir()
-            .open(&source)
-            .map_err(|_| not_found(&source))?
+            .open_file(&source)
+            .ok()
+            .flatten()
+            .ok_or_else(|| not_found(&source))?
             .into_std();
         let mut zip = zip::ZipArchive::new(file).map_err(|error| {
             ApiError::from(crate::content::Error::from(ArchiveError::from(
@@ -811,8 +808,8 @@ pub async fn stat(
     let folder = folder(&state, &id)?;
     let response = blocking(move || {
         let meta = match &path {
-            Some(path) => folder.dir().symlink_metadata(path),
-            None => folder.dir().dir_metadata(),
+            Some(path) => folder.metadata(path),
+            None => folder.open_dir(None).and_then(|dir| dir.dir_metadata()),
         }
         .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
         let time = |time: std::io::Result<cap_std::time::SystemTime>| {
@@ -862,10 +859,14 @@ fn zip_tree(
         if kind.is_dir() {
             zip.add_directory(format!("{path}/"), options)
                 .map_err(zip_error)?;
-            zip_tree(zip, &entry.open_dir()?, &format!("{path}/"))?;
+            zip_tree(
+                zip,
+                &folder::open_child(dir, &name, &path)?,
+                &format!("{path}/"),
+            )?;
         } else if kind.is_file() {
             zip.start_file(&path, options).map_err(zip_error)?;
-            std::io::copy(&mut entry.open()?, zip)?;
+            std::io::copy(&mut folder::open_plain(dir, &name, &path)?, zip)?;
         }
     }
     Ok(())
@@ -922,15 +923,14 @@ pub async fn zip(
         let staged = staged.clone();
         let folder = Arc::clone(&folder);
         move || {
-            let base = match &parent {
-                Some(parent) => folder.dir().open_dir(parent),
-                None => folder.dir().try_clone(),
-            }
-            .map_err(|_| not_found(parent.as_deref().unwrap_or("folder")))?;
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&staged)?);
             for name in &include {
+                let path = match &parent {
+                    Some(parent) => format!("{parent}/{name}"),
+                    None => name.clone(),
+                };
                 let meta =
-                    base.symlink_metadata(name).map_err(|_| not_found(name))?;
+                    folder.metadata(&path).map_err(|_| not_found(name))?;
                 if meta.is_dir() {
                     zip.add_directory(
                         format!("{name}/"),
@@ -939,7 +939,7 @@ pub async fn zip(
                     .map_err(zip_error)?;
                     zip_tree(
                         &mut zip,
-                        &base.open_dir(name)?,
+                        &folder.open_dir(Some(&path))?,
                         &format!("{name}/"),
                     )?;
                 } else if meta.is_file() {
@@ -949,7 +949,10 @@ pub async fn zip(
                             .large_file(true),
                     )
                     .map_err(zip_error)?;
-                    std::io::copy(&mut base.open(name)?, &mut zip)?;
+                    let mut file = folder
+                        .open_file(&path)?
+                        .ok_or_else(|| not_found(name))?;
+                    std::io::copy(&mut file, &mut zip)?;
                 }
             }
             zip.finish().map_err(zip_error)?;

@@ -8,7 +8,10 @@ use std::{
 
 use cap_std::fs::Dir;
 
-use crate::{content::folder::Folder, daemon::paths::Paths};
+use crate::{
+    content::folder::{Folder, open_child, open_plain},
+    daemon::paths::Paths,
+};
 
 /// Pre-update copies kept per server.
 const KEEP_PRE_UPDATE: usize = 2;
@@ -42,7 +45,7 @@ pub async fn pre_update(paths: &Paths, server_id: &str) -> io::Result<PathBuf> {
             format!("{level}_nether"),
             format!("{level}_the_end"),
         ] {
-            if let Ok(dir) = server.dir().open_dir(&world) {
+            if let Ok(dir) = server.open_dir(Some(&world)) {
                 copy_tree(&dir, &destination.join(&world))?;
             }
         }
@@ -79,9 +82,11 @@ fn copy_tree(dir: &Dir, to: &Path) -> io::Result<()> {
         let kind = entry.file_type()?;
         let name = entry.file_name();
         if kind.is_dir() {
-            copy_tree(&entry.open_dir()?, &to.join(&name))?;
+            let path = name.to_string_lossy();
+            copy_tree(&open_child(dir, &path, &path)?, &to.join(&name))?;
         } else if kind.is_file() {
-            let mut from = entry.open()?;
+            let path = name.to_string_lossy();
+            let mut from = open_plain(dir, &path, &path)?;
             let mut file = std::fs::File::create(to.join(&name))?;
             io::copy(&mut from, &mut file)?;
         }

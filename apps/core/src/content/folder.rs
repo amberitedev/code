@@ -1,8 +1,11 @@
 //! A server's folder, as Core opens it. Mods write in it too and can plant links anywhere inside,
-//! so Core opens every path through a `cap_std::fs::Dir` on the folder: a path that would leave it,
-//! by `..`, a root, or a link pointing out, fails instead of reaching Core's own files. Paths from
-//! the API, packs, and archives are also checked by [`clean`] first, so they fail with a clear
-//! reason and mean the same thing on every OS.
+//! so Core walks every path one part at a time from a handle on the folder and refuses a link or
+//! reparse point at any part, the folder itself included: a link can neither lead out of the
+//! folder nor from one place in it to another (`mods` to the world, past the deny-list). Files
+//! are opened without following a link and without blocking, and read only once the handle is a
+//! plain file, so a FIFO a mod planted cannot hang Core. Paths from the API, packs, and archives
+//! are also checked by [`clean`] first, so they fail with a clear reason and mean the same thing
+//! on every OS.
 //!
 //! Files and folders Core creates here stay writable by `copal-servers` (see `daemon::folders`).
 
@@ -11,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use cap_fs_ext::DirExt;
 use cap_std::{ambient_authority, fs::Dir};
 
 use crate::{installs::download::sha1_of, servers::launch};
@@ -127,22 +131,79 @@ pub fn level_name(server_dir: &Path) -> String {
         .unwrap_or_else(|| "world".into())
 }
 
-/// One server's folder, opened so no path can leave it.
+/// One server's folder, opened so no path can leave it or pass through a link.
 pub struct Folder {
     dir: Dir,
     root: PathBuf,
 }
 
+/// A link where Core will not follow one.
+fn link(path: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("{path} goes through a link, which Core does not follow"),
+    )
+}
+
+/// Open the folder `name` inside `dir`, refusing a link. `path` names it in errors.
+pub fn open_child(dir: &Dir, name: &str, path: &str) -> io::Result<Dir> {
+    if dir.symlink_metadata(name)?.file_type().is_symlink() {
+        return Err(link(path));
+    }
+    dir.open_dir_nofollow(name)
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::NotFound => error,
+            _ => link(path),
+        })
+}
+
+/// Open the plain file `name` inside `dir` without following a link or blocking, and check the
+/// handle is a plain file before anything reads it. `path` names it in errors.
+pub fn open_plain(
+    dir: &Dir,
+    name: &str,
+    path: &str,
+) -> io::Result<cap_std::fs::File> {
+    let not_plain = || {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{path} is not a plain file"),
+        )
+    };
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.read(true);
+    cap_fs_ext::OpenOptionsFollowExt::follow(
+        &mut options,
+        cap_fs_ext::FollowSymlinks::No,
+    );
+    cap_fs_ext::OpenOptionsSyncExt::nonblock(&mut options, true);
+    let file = match dir.open_with(name, &options) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(error);
+        }
+        Err(error) if dir.symlink_metadata(name).is_ok() => {
+            let _ = error;
+            return Err(not_plain());
+        }
+        Err(error) => return Err(error),
+    };
+    if !file.metadata()?.is_file() {
+        return Err(not_plain());
+    }
+    Ok(file)
+}
+
 impl Folder {
+    /// Open a server folder. The folder itself must not be a link.
     pub fn open(root: &Path) -> io::Result<Self> {
+        if std::fs::symlink_metadata(root)?.file_type().is_symlink() {
+            return Err(link(&root.display().to_string()));
+        }
         Ok(Self {
             dir: Dir::open_ambient_dir(root, ambient_authority())?,
             root: root.to_owned(),
         })
-    }
-
-    pub fn dir(&self) -> &Dir {
-        &self.dir
     }
 
     /// The world folder this server uses.
@@ -150,92 +211,140 @@ impl Folder {
         level_name(&self.root)
     }
 
-    /// Create `path` and the folders above it, writable by servers.
-    pub fn create_dir_all(&self, path: &str) -> io::Result<()> {
-        let mut prefix = PathBuf::new();
+    /// The folder at `path`, or the server folder itself for `None`.
+    pub fn open_dir(&self, path: Option<&str>) -> io::Result<Dir> {
+        let mut dir = self.dir.try_clone()?;
+        for part in path.into_iter().flat_map(|path| path.split('/')) {
+            dir = open_child(&dir, part, path.unwrap_or_default())?;
+        }
+        Ok(dir)
+    }
+
+    /// The folder holding `path`, and the last part of `path`.
+    fn parent<'a>(&self, path: &'a str) -> io::Result<(Dir, &'a str)> {
+        match path.rsplit_once('/') {
+            Some((parent, name)) => Ok((self.open_dir(Some(parent))?, name)),
+            None => Ok((self.dir.try_clone()?, path)),
+        }
+    }
+
+    /// As [`Folder::parent`], creating the folders above `path` that are missing.
+    fn parent_creating<'a>(&self, path: &'a str) -> io::Result<(Dir, &'a str)> {
+        match path.rsplit_once('/') {
+            Some((parent, name)) => Ok((self.create_dir_all(parent)?, name)),
+            None => Ok((self.dir.try_clone()?, path)),
+        }
+    }
+
+    /// Create `path` and the folders above it, writable by servers, and open it.
+    pub fn create_dir_all(&self, path: &str) -> io::Result<Dir> {
+        let mut dir = self.dir.try_clone()?;
         for part in path.split('/') {
-            prefix.push(part);
-            match self.dir.create_dir(&prefix) {
-                Ok(()) => shared(&self.dir, &prefix, true)?,
+            match dir.create_dir(part) {
+                Ok(()) => shared(&dir, Path::new(part), true)?,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
+            dir = open_child(&dir, part, path)?;
         }
-        Ok(())
+        Ok(dir)
     }
 
     /// Write `path` whole: into a file beside it, renamed over it once complete. A server that
     /// has the old file open keeps reading the old one.
     pub fn write(&self, path: &str, reader: &mut impl Read) -> io::Result<u64> {
-        if let Some((parent, _)) = path.rsplit_once('/') {
-            self.create_dir_all(parent)?;
-        }
-        let staged = staging(path);
+        let (dir, name) = self.parent_creating(path)?;
+        let staged = staging(name);
         let result = (|| {
-            let mut file = self.dir.create(&staged)?;
+            let mut file = dir.create(&staged)?;
             let written = io::copy(reader, &mut file)?;
             file.flush()?;
             drop(file);
-            shared(&self.dir, Path::new(&staged), false)?;
-            self.dir.rename(&staged, &self.dir, path)?;
+            shared(&dir, Path::new(&staged), false)?;
+            dir.rename(&staged, &dir, name)?;
             Ok(written)
         })();
         if result.is_err() {
-            let _ = self.dir.remove_file(&staged);
+            let _ = dir.remove_file(&staged);
         }
         result
     }
 
-    /// The SHA-1 of the file at `path`, or `None` when there is no file there.
-    pub fn sha1(&self, path: &str) -> io::Result<Option<String>> {
-        match self.dir.open(path) {
-            Ok(file) => {
-                if !file.metadata()?.is_file() {
-                    return Ok(None);
-                }
-                sha1_of(file.into_std()).map(Some)
+    /// The plain file at `path`, opened without following a link or blocking. `None` when
+    /// nothing is there; an error for a link, a folder, a FIFO, or anything else.
+    pub fn open_file(
+        &self,
+        path: &str,
+    ) -> io::Result<Option<cap_std::fs::File>> {
+        let (dir, name) = match self.parent(path) {
+            Ok(parent) => parent,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(None);
             }
+            Err(error) => return Err(error),
+        };
+        match open_plain(&dir, name, path) {
+            Ok(file) => Ok(Some(file)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
     }
 
-    /// Whether anything is at `path`, without following a link there.
-    pub fn exists(&self, path: &str) -> bool {
-        self.dir.symlink_metadata(path).is_ok()
+    /// The SHA-1 of the file at `path`, or `None` when there is no plain file there.
+    pub fn sha1(&self, path: &str) -> io::Result<Option<String>> {
+        match self.open_file(path) {
+            Ok(Some(file)) => sha1_of(file.into_std()).map(Some),
+            Ok(None) => Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
-    /// Remove the file or folder at `path`. Nothing there is not an error.
+    /// What is at `path`, without following a link there.
+    pub fn metadata(&self, path: &str) -> io::Result<cap_std::fs::Metadata> {
+        let (dir, name) = self.parent(path)?;
+        dir.symlink_metadata(name)
+    }
+
+    /// Whether anything is at `path`, without following a link there.
+    pub fn exists(&self, path: &str) -> bool {
+        self.metadata(path).is_ok()
+    }
+
+    /// Remove the file, link, or folder at `path`. Nothing there is not an error.
     pub fn remove(&self, path: &str) -> io::Result<()> {
-        let result = match self.dir.symlink_metadata(path) {
-            Ok(meta) if meta.is_dir() => self.dir.remove_dir_all(path),
-            Ok(_) => self.dir.remove_file(path),
-            Err(error) => Err(error),
-        };
+        let result = self.parent(path).and_then(|(dir, name)| {
+            match dir.symlink_metadata(name) {
+                Ok(meta) if meta.is_dir() => dir.remove_dir_all(name),
+                Ok(_) => dir.remove_file(name),
+                Err(error) => Err(error),
+            }
+        });
         match result {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             result => result,
         }
     }
 
+    /// Remove the folder at `path` only if it is empty.
+    pub fn remove_empty_dir(&self, path: &str) -> io::Result<()> {
+        let (dir, name) = self.parent(path)?;
+        dir.remove_dir(name)
+    }
+
     /// Move `from` to `to`, creating the folders above `to`.
     pub fn rename(&self, from: &str, to: &str) -> io::Result<()> {
-        if let Some((parent, _)) = to.rsplit_once('/') {
-            self.create_dir_all(parent)?;
-        }
-        self.dir.rename(from, &self.dir, to)
+        let (from_dir, from_name) = self.parent(from)?;
+        let (to_dir, to_name) = self.parent_creating(to)?;
+        from_dir.rename(from_name, &to_dir, to_name)
     }
 }
 
-/// A unique name beside `path` for writing it whole.
-fn staging(path: &str) -> String {
-    let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
-    let staged = format!(".{name}.{}.part", uuid::Uuid::new_v4());
-    if parent.is_empty() {
-        staged
-    } else {
-        format!("{parent}/{staged}")
-    }
+/// A unique name beside the file `name` for writing it whole.
+fn staging(name: &str) -> String {
+    format!(".{name}.{}.part", uuid::Uuid::new_v4())
 }
 
 /// Unix: Core's umask keeps what it creates from its group, but servers must be able to change
@@ -383,7 +492,9 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), dir.path().join("mods"))
             .unwrap();
         let folder = Folder::open(dir.path()).unwrap();
-        assert!(folder.sha1("mods/copal.db").is_err());
+        // Read as no file at all: the link is never followed.
+        assert_eq!(folder.sha1("mods/copal.db").unwrap(), None);
+        assert!(folder.open_file("mods/copal.db").is_err());
         assert!(
             folder
                 .write("mods/copal.db", &mut &b"overwritten"[..])
@@ -392,6 +503,77 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(outside.path().join("copal.db")).unwrap(),
             "secret"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_from_one_place_in_the_folder_to_another_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("world")).unwrap();
+        std::fs::write(dir.path().join("world/level.dat"), "world").unwrap();
+        // A mod points `mods` at the world, so `mods/level.dat` is `world/level.dat`.
+        std::os::unix::fs::symlink("world", dir.path().join("mods")).unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        assert!(
+            folder
+                .write("mods/level.dat", &mut &b"replaced"[..])
+                .is_err()
+        );
+        assert!(folder.open_dir(Some("mods")).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("world/level.dat"))
+                .unwrap(),
+            "world"
+        );
+        // The folder itself may not be a link either.
+        let outer = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(dir.path(), outer.path().join("server"))
+            .unwrap();
+        assert!(Folder::open(&outer.path().join("server")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_a_mod_planted_is_refused_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        nix::unistd::mkfifo(
+            &dir.path().join("config.toml"),
+            nix::sys::stat::Mode::from_bits_truncate(0o600),
+        )
+        .unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        assert_eq!(folder.sha1("config.toml").unwrap(), None);
+        assert!(folder.open_file("config.toml").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_from_one_place_in_the_folder_to_another_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("world")).unwrap();
+        std::fs::write(dir.path().join("world").join("level.dat"), "world")
+            .unwrap();
+        let status = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(dir.path().join("mods"))
+            .arg(dir.path().join("world"))
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{status:?}");
+        let folder = Folder::open(dir.path()).unwrap();
+        assert!(
+            folder
+                .write("mods/level.dat", &mut &b"replaced"[..])
+                .is_err()
+        );
+        assert!(folder.open_dir(Some("mods")).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("world").join("level.dat"))
+                .unwrap(),
+            "world"
         );
     }
 
@@ -412,7 +594,9 @@ mod tests {
             .unwrap();
         assert!(status.status.success(), "{status:?}");
         let folder = Folder::open(dir.path()).unwrap();
-        assert!(folder.sha1("mods/copal.db").is_err());
+        // Read as no file at all: the link is never followed.
+        assert_eq!(folder.sha1("mods/copal.db").unwrap(), None);
+        assert!(folder.open_file("mods/copal.db").is_err());
         assert!(
             folder
                 .write("mods/copal.db", &mut &b"overwritten"[..])

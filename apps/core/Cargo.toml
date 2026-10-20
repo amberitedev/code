@@ -11,6 +11,7 @@ axum = { version = "0.8.4", features = ["multipart", "ws"] }
 base64 = { workspace = true }
 bytes = { workspace = true }
 # Server folders are written by mods; every path Core opens in one stays inside it.
+cap-fs-ext = "3.4"
 cap-std = "3.4"
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
