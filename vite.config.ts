@@ -8,7 +8,7 @@ export default defineConfig({
 	},
 	test: {
 		environment: 'node',
-		include: ['scripts/**/*.test.ts'],
+		include: ['scripts/**/*.test.ts', 'packages/api-client/src/**/*.test.ts'],
 		exclude: ['**/.data/**', '**/.repos/**', '**/dist/**', '**/node_modules/**', '**/target/**'],
 		hookTimeout: 60_000,
 		testTimeout: 60_000,

@@ -8,8 +8,11 @@ const wranglerRequire = createRequire(require.resolve('wrangler'))
 const { Miniflare } = wranglerRequire('miniflare')
 const { build } = wranglerRequire('esbuild')
 
-/** Runs the real Worker in wrangler's local runtime with a fresh, fully migrated D1 and an empty R2. */
-export async function startBackend(name) {
+/**
+ * Runs the real Worker in wrangler's local runtime with a fresh, fully migrated D1 and an empty R2.
+ * `bindings` adds secrets such as `TICKET_KEY`.
+ */
+export async function startBackend(name, bindings = {}) {
 	const bundle = await build({
 		entryPoints: [fileURLToPath(new URL('../src/index.ts', import.meta.url))],
 		bundle: true,
@@ -27,7 +30,7 @@ export async function startBackend(name) {
 		d1Databases: { DB: name },
 		r2Buckets: { FILES: name },
 		durableObjects: { FRIENDS: { className: 'FriendsHub', useSQLite: true } },
-		bindings: { LOCAL_DEV: 'true' },
+		bindings: { LOCAL_DEV: 'true', ...bindings },
 	})
 	const db = await runtime.getD1Database('DB')
 	const migrations = new URL('../migrations/', import.meta.url)

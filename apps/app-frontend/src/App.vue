@@ -2365,7 +2365,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				>
 					{{ formatMessage(messages.news) }}
 					<ChevronDownIcon
-						class="size-5 text-secondary transition-transform duration-300"
+						class="size-5 text-secondary transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
 						:class="{ 'rotate-180': newsCollapsed }"
 					/>
 				</button>
@@ -2623,8 +2623,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	.app-sidebar-scrollable,
 	.sidebar-news-body {
 		transition:
-			flex-grow 300ms ease-in-out,
-			min-height 300ms ease-in-out;
+			flex-grow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+			min-height 220ms cubic-bezier(0.16, 1, 0.3, 1);
 	}
 }
 
