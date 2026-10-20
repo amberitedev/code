@@ -81,10 +81,12 @@ impl Keys {
             return None;
         }
         state.refetched = Some(Instant::now());
-        if let Err(error) = self.fetch(&mut state).await {
+        // Unlocked while the backend answers, so tickets with known keys never wait on it.
+        drop(state);
+        if let Err(error) = self.fetch().await {
             warn!(%error, "could not refetch the ticket keys");
         }
-        state.keys.get(kid).copied()
+        self.state.lock().await.keys.get(kid).copied()
     }
 
     /// Refetch the keys whenever they are a day old, for as long as Core runs.
@@ -93,12 +95,12 @@ impl Keys {
             return;
         }
         loop {
-            let mut state = self.state.lock().await;
-            let due = state.fetched_at + REFRESH_EVERY_S - now();
+            let due =
+                self.state.lock().await.fetched_at + REFRESH_EVERY_S - now();
             let wait = if due > 0 {
                 Duration::from_secs(due as u64)
             } else {
-                match self.fetch(&mut state).await {
+                match self.fetch().await {
                     Ok(()) => Duration::from_secs(REFRESH_EVERY_S as u64),
                     Err(error) => {
                         warn!(%error, "could not refresh the ticket keys");
@@ -106,12 +108,12 @@ impl Keys {
                     }
                 }
             };
-            drop(state);
             tokio::time::sleep(wait).await;
         }
     }
 
-    async fn fetch(&self, state: &mut State) -> Result<(), String> {
+    /// Download the keys, then take the lock only to store them.
+    async fn fetch(&self) -> Result<(), String> {
         let Some(url) = &self.url else {
             return Err("this Core has no backend".into());
         };
@@ -126,7 +128,8 @@ impl Keys {
             .json()
             .await
             .map_err(|error| error.to_string())?;
-        self.store(state, &keys)
+        let mut state = self.state.lock().await;
+        self.store(&mut state, &keys)
             .await
             .map_err(|error| error.to_string())
     }

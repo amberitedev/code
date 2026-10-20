@@ -109,6 +109,8 @@ pub async fn run(sync: Arc<Sync>) {
         })
         .await;
         let Some(key) = sync.key().await else {
+            // Paired but the key cannot be read: wait rather than spin.
+            tokio::time::sleep(backoff(1)).await;
             continue;
         };
         let lost = match sync.connect(&key, &addresses).await {

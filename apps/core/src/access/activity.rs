@@ -70,7 +70,10 @@ pub async fn page(
         .bind(i64::from(limit) + 1)
         .fetch_all(db)
         .await?;
-    let more = rows.len() > limit as usize;
+    // The cursor is the last row read, so rows left out below never hide older ones.
+    let next_before = (rows.len() > limit as usize)
+        .then(|| rows.get(limit as usize - 1).map(|row| row.0))
+        .flatten();
     let entries: Vec<ActivityEntry> = rows
         .into_iter()
         .take(limit as usize)
@@ -95,9 +98,7 @@ pub async fn page(
         )
         .collect();
     Ok(ActivityPage {
-        next_before: more
-            .then(|| entries.last().map(|entry| entry.id))
-            .flatten(),
+        next_before,
         entries,
     })
 }
@@ -106,6 +107,38 @@ pub async fn page(
 mod tests {
     use super::*;
     use crate::{api::access::Role, db};
+
+    #[tokio::test]
+    async fn a_page_of_unknown_actions_still_leads_to_older_entries() {
+        let db = db::memory().await;
+        let mut conn = db.acquire().await.unwrap();
+        record(&mut conn, None, None, &Action::EulaAccepted)
+            .await
+            .unwrap();
+        drop(conn);
+        // Written by a newer Core.
+        sqlx::query(
+            "INSERT INTO activity (at, action) VALUES (1, 'from_the_future'), (2, 'from_the_future')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let query = |before| ActivityQuery {
+            server_id: None,
+            before,
+            limit: Some(2),
+        };
+        let first = page(&db, &query(None)).await.unwrap();
+        assert!(first.entries.is_empty());
+        let rest = page(&db, &query(first.next_before)).await.unwrap();
+        assert!(matches!(
+            rest.entries[..],
+            [ActivityEntry {
+                action: Action::EulaAccepted,
+                ..
+            }]
+        ));
+    }
 
     #[tokio::test]
     async fn entries_page_newest_first_with_their_details() {
