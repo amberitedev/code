@@ -71,12 +71,15 @@ pub async fn install_shared(
         http,
         dirs,
         &version,
-        loader_ver.as_ref(),
+        loader_ver.as_ref().map(|version| (loader, version)),
         verify,
     )
     .await?;
-    let version_id =
-        version_info::merged_version_id(game_version, loader_ver.as_ref());
+    let version_id = version_info::merged_version_id(
+        game_version,
+        loader,
+        loader_ver.as_ref().map(|version| version.id.as_str()),
+    );
     progress(0.05);
 
     libraries::download_libraries(

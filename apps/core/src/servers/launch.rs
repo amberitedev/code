@@ -16,7 +16,10 @@ use crate::{
     daemon::{folders, paths::Paths},
     installs::{
         ModLoader,
-        daedalus::{SharedDirs, launch::build_launch_tokens},
+        daedalus::{
+            SharedDirs, launch::build_launch_tokens,
+            version_info::merged_version_id,
+        },
         forge, java,
     },
 };
@@ -94,10 +97,8 @@ pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
     let loader_version = server.loader_version.as_deref().unwrap_or_default();
     match loader {
         ModLoader::Vanilla | ModLoader::Fabric | ModLoader::Quilt => {
-            let version_id = match loader {
-                ModLoader::Vanilla => game_version.to_owned(),
-                _ => format!("{game_version}-{loader_version}"),
-            };
+            let version_id =
+                merged_version_id(game_version, loader, Some(loader_version));
             let info = std::fs::read(dirs.version_info_path(&version_id))
                 .map_err(|_| NotReady::NotInstalled)?;
             let tokens = build_launch_tokens(
