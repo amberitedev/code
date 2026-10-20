@@ -1,26 +1,42 @@
-//! HTTPS for the Core API with a certificate the Core makes itself.
+//! HTTPS for the Core API with a certificate the Core makes itself, and the limits of the one
+//! listener the internet can reach.
 //!
 //! There is no domain and no certificate authority. The App learns the certificate's SHA-256
 //! fingerprint through the backend and trusts only that. There is no plain HTTP listener; the CLI
 //! reaches Core over the local socket (see `access::local`).
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{net::IpAddr, path::Path, sync::Arc, time::Duration};
 
-use axum::Router;
+use axum::{
+    Extension, Router,
+    extract::Request,
+    http::header::{HOST, ORIGIN},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use sha2::{Digest, Sha256};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::Semaphore,
+};
 use tokio_rustls::TlsAcceptor;
 use tracing::debug;
 
-use crate::daemon::paths::Paths;
+use crate::{
+    access::Peer,
+    api::error::{ApiError, ErrorCode},
+    daemon::paths::Paths,
+};
 
 /// How long a new connection may take to finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Open connections at once. More wait to be accepted.
+const MAX_CONNECTIONS: usize = 256;
 
 /// This Core's certificate: self-signed, made once on first start and never renewed.
 pub struct Identity {
@@ -107,19 +123,60 @@ fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 /// Serve `router` over HTTPS on `listener` until the process ends.
 pub async fn serve(listener: TcpListener, router: Router, identity: &Identity) {
     let acceptor = TlsAcceptor::from(Arc::clone(&identity.config));
+    let router = router.layer(middleware::from_fn(guard));
+    let open = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
+        let permit = Arc::clone(&open)
+            .acquire_owned()
+            .await
+            .expect("never closed");
         let Ok((stream, peer)) = listener.accept().await else {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
         let acceptor = acceptor.clone();
-        let router = router.clone();
+        let router = router.clone().layer(Extension(Peer(peer.ip())));
         tokio::spawn(async move {
             if let Err(error) = connection(stream, acceptor, router).await {
                 debug!(%peer, %error, "connection closed");
             }
+            drop(permit);
         });
     }
+}
+
+/// Refuse what only a browser or a DNS rebinding attack sends: an `Origin` header, or a `Host`
+/// that is a name instead of this Core's address. The App's Rust side sends neither.
+async fn guard(request: Request, next: Next) -> Response {
+    if request.headers().contains_key(ORIGIN) {
+        return ApiError::new(
+            ErrorCode::Forbidden,
+            "Browsers cannot call a Core.",
+        )
+        .into_response();
+    }
+    let host = request
+        .headers()
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .or_else(|| request.uri().host());
+    if !host.is_some_and(host_allowed) {
+        return ApiError::new(
+            ErrorCode::InvalidRequest,
+            "Reach this Core by its IP address.",
+        )
+        .into_response();
+    }
+    next.run(request).await
+}
+
+/// An IP address or `localhost`, with or without a port.
+fn host_allowed(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<IpAddr>().is_ok()
 }
 
 async fn connection(
@@ -136,6 +193,61 @@ async fn connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_addresses_are_allowed_hosts() {
+        for host in [
+            "192.168.1.2:16662",
+            "203.0.113.5",
+            "[::1]:16662",
+            "localhost:1",
+        ] {
+            assert!(host_allowed(host), "{host}");
+        }
+        for host in [
+            "evil.example:16662",
+            "evil.example",
+            "192.168.1.2.sslip.io",
+            "",
+        ] {
+            assert!(!host_allowed(host), "{host}");
+        }
+    }
+
+    #[tokio::test]
+    async fn browsers_and_names_are_refused() {
+        use axum::{body::Body, routing::get};
+        use tower::ServiceExt;
+
+        let router = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(middleware::from_fn(guard));
+        let status = |headers: &[(&str, &str)]| {
+            let mut request = Request::builder().uri("/");
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
+            let router = router.clone();
+            async move {
+                router
+                    .oneshot(request.body(Body::empty()).unwrap())
+                    .await
+                    .unwrap()
+                    .status()
+                    .as_u16()
+            }
+        };
+        assert_eq!(status(&[("host", "192.168.1.2:16662")]).await, 200);
+        assert_eq!(status(&[("host", "evil.example")]).await, 400);
+        assert_eq!(
+            status(&[
+                ("host", "192.168.1.2"),
+                ("origin", "https://evil.example")
+            ])
+            .await,
+            403
+        );
+    }
 
     fn paths() -> (tempfile::TempDir, Paths) {
         let dir = tempfile::tempdir().unwrap();

@@ -11,7 +11,11 @@ CREATE TABLE core (
     -- Set at pairing. The owner has every role on every server and is never in `access`.
     owner_user_id TEXT,
     -- Core's own key for its calls to the backend (`amc_...`), issued at pairing.
-    backend_key TEXT
+    backend_key TEXT,
+    -- The backend's ticket keys as it last published them (`api::backend::PublicKeys` JSON), and
+    -- when they were fetched. Kept so tickets verify while the backend is down.
+    ticket_keys TEXT,
+    ticket_keys_at INTEGER
 );
 
 -- The pairing code this Core is showing, shared by every copal process on this data folder. One row.

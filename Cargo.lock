@@ -2624,6 +2624,7 @@ name = "copal"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "clap 4.5.48",
@@ -2642,6 +2643,7 @@ dependencies = [
  "nix",
  "rcgen",
  "reqwest 0.12.24",
+ "ring",
  "rustls 0.23.32",
  "serde",
  "serde_json",
@@ -2653,6 +2655,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.6",
  "toml 0.9.8",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-appender",

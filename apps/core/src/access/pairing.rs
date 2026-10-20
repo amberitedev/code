@@ -5,8 +5,6 @@
 //! on the key works. The App never talks to the Core during pairing. The code being shown is kept
 //! in the `pairing` table, so every copal process on one data folder shows the same code.
 
-#![allow(dead_code)] // Wired in step 3: pairing and backend sync.
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::StatusCode;
@@ -75,7 +73,7 @@ pub async fn pair(state: &Pairing<'_>) {
             match poll(state, &pending.key).await {
                 Poll::Approved(account) => {
                     if let Err(error) =
-                        set_owner(state.db, &account.id, &pending.key).await
+                        set_owner(state.db, &account, &pending.key).await
                     {
                         warn!(%error, "could not store the Core owner");
                         continue;
@@ -113,19 +111,28 @@ pub async fn paired(db: &SqlitePool) -> sqlx::Result<bool> {
     .map(|paired| paired.unwrap_or(false))
 }
 
+/// Record the owner and the key, and the owner's name until their first ticket names them.
 async fn set_owner(
     db: &SqlitePool,
-    user_id: &str,
+    owner: &Approved,
     key: &str,
 ) -> sqlx::Result<()> {
+    let mut tx = db.begin().await?;
     sqlx::query(
         "UPDATE core SET owner_user_id = ?, backend_key = ? WHERE id = 1",
     )
-    .bind(user_id)
+    .bind(&owner.id)
     .bind(key)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
-    Ok(())
+    sqlx::query(
+        "INSERT INTO users (id, name, updated_at) VALUES (?, ?, unixepoch())          ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(&owner.id)
+    .bind(&owner.username)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
 }
 
 /// The code this Core is already showing, if it has not expired.

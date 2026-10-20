@@ -13,7 +13,7 @@ pub mod win;
 use std::{fs::File, future::Future, net::SocketAddr, sync::Arc};
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
@@ -70,9 +70,46 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
     let _lock = lock(&paths)?;
 
     let db = db::open(&paths.database()).await?;
+    let core_id = db::core_id(&db).await?;
     let identity = Identity::load_or_create(&paths)?;
+    let http = reqwest::Client::builder()
+        .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let keys = access::keys::Keys::load(
+        db.clone(),
+        http.clone(),
+        config.backend_url.as_deref(),
+    )
+    .await?;
+    let access = Arc::new(access::Access::new(keys));
     let servers = Servers::open(paths.clone(), db.clone()).await?;
-    let router = api::router(Arc::new(api::AppState { db, servers }));
+    let state = Arc::new(api::AppState {
+        db: db.clone(),
+        servers,
+        access: Arc::clone(&access),
+    });
+    let router = api::router(Arc::clone(&state));
+    match config.backend_url.clone() {
+        Some(backend_url) => {
+            tokio::spawn(access::sync::run(Arc::new(access::sync::Sync {
+                db,
+                http,
+                backend_url,
+                core_id,
+                cert_fingerprint: identity.fingerprint.clone(),
+                port: config.port,
+                bind: config.bind,
+                access: Arc::clone(&access),
+            })));
+            tokio::spawn(
+                async move { state.access.keys.refresh_daily().await },
+            );
+        }
+        None => warn!(
+            "no backend is set (ACCOUNT_API_URL), so this Core cannot pair and only the copal CLI can use it"
+        ),
+    }
 
     let address = SocketAddr::new(config.bind, config.port);
     let listener = tokio::net::TcpListener::bind(address)

@@ -11,7 +11,7 @@ pub mod records;
 pub mod shim;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     process::Child,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -90,6 +90,8 @@ pub struct Servers {
     db: SqlitePool,
     http: reqwest::Client,
     live: Mutex<HashMap<String, Live>>,
+    /// Servers held for deletion, which never start again. Only taken while `live` is held.
+    deleted: Mutex<HashSet<String>>,
 }
 
 /// How long a new shim may take to start Java.
@@ -111,6 +113,7 @@ impl Servers {
             db,
             http,
             live: Mutex::new(HashMap::new()),
+            deleted: Mutex::default(),
         });
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
@@ -299,6 +302,9 @@ impl Servers {
             // started a moment before it died.
             if live.contains_key(id) || shim::is_running(&self.paths, id) {
                 return Err(ServerError::AlreadyRunning);
+            }
+            if self.deleted.lock().expect("not poisoned").contains(id) {
+                return Err(ServerError::NotFound(id.into()));
             }
             live.insert(
                 id.into(),
@@ -492,6 +498,35 @@ impl Servers {
         Ok(server)
     }
 
+    /// Hold a stopped server for deletion, so it cannot start while its row and files go. Fails
+    /// while it runs. `release` undoes it when the deletion does not happen.
+    pub fn hold_for_deletion(&self, id: &str) -> Result<(), ServerError> {
+        let live = self.live();
+        if live.contains_key(id) || shim::is_running(&self.paths, id) {
+            return Err(ServerError::AlreadyRunning);
+        }
+        self.deleted.lock().expect("not poisoned").insert(id.into());
+        Ok(())
+    }
+
+    pub fn release(&self, id: &str) {
+        let _live = self.live();
+        self.deleted.lock().expect("not poisoned").remove(id);
+    }
+
+    /// Remove a held server's world and run files, once its row is gone.
+    pub fn delete_folders(&self, id: &str) -> Result<(), ServerError> {
+        for folder in [self.paths.server(id), self.paths.run(id)] {
+            match std::fs::remove_dir_all(&folder) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Install Vanilla `game_version` on a stopped server.
     pub async fn install_vanilla(
         &self,
@@ -563,6 +598,22 @@ mod tests {
         let mode = std::fs::metadata(&store).unwrap().permissions().mode();
         assert_eq!(mode & 0o7777, 0o750);
         assert_eq!(servers.phase(&server.id), None);
+    }
+
+    #[tokio::test]
+    async fn a_server_held_for_deletion_never_starts() {
+        let (_dir, servers) = servers().await;
+        let server = servers.create("A").await.unwrap();
+        servers.hold_for_deletion(&server.id).unwrap();
+        assert!(matches!(
+            servers.start(&server.id).await,
+            Err(ServerError::NotFound(_))
+        ));
+        servers.release(&server.id);
+        assert!(!matches!(
+            servers.start(&server.id).await,
+            Err(ServerError::NotFound(_))
+        ));
     }
 
     #[tokio::test]

@@ -3,13 +3,32 @@
 //!
 //! - `GET /activity`: newest first. [`ActivityQuery`] as query parameters, [`ActivityPage`] out.
 
-#![allow(dead_code)] // Wired in step 3: activity log.
+use std::sync::Arc;
 
+use axum::{
+    Json,
+    extract::{Query, State},
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use super::access::{Role, User};
+use super::{
+    AppState,
+    access::{Role, User},
+    error::ApiError,
+};
+use crate::access::{Caller, activity};
+
+/// `GET /activity`. Owner only.
+pub async fn list(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ActivityQuery>,
+) -> Result<Json<ActivityPage>, ApiError> {
+    caller.require_owner()?;
+    Ok(Json(activity::page(&state.db, &query).await?))
+}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 pub struct ActivityQuery {

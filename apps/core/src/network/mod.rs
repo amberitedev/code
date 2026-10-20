@@ -3,13 +3,13 @@
 
 pub mod diagnosis;
 pub mod firewall;
+pub mod public_ip;
 pub mod router;
 pub mod tls;
 
 use std::net::IpAddr;
 
 /// Loopback, private network, and link-local addresses: not reachable from the internet.
-#[allow(dead_code)] // Wired in step 8: reachability reporting.
 pub fn is_private(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
