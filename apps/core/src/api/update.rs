@@ -1,7 +1,8 @@
 //! Updating Core. Owner only.
 //!
 //! - `GET /update`: [`UpdateStatus`].
-//! - `PATCH /update`: [`UpdateSettings`] in, [`UpdateStatus`] out.
+//! - `PATCH /update`: [`UpdateSettings`] in, [`UpdateStatus`] out. Dangerous when it turns
+//!   auto-update on or changes the channel.
 //! - `POST /update/check`: look up the newest release now. [`UpdateStatus`].
 //! - `POST /update/apply`: dangerous. [`ApplyUpdate`] in (`{}` for the usual update),
 //!   [`Restarting`] out; Core restarts into the new version right after answering.
@@ -10,7 +11,7 @@
 
 use std::sync::Arc;
 
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -20,7 +21,7 @@ use super::{
     error::{ApiError, ErrorCode},
 };
 use crate::{
-    access::{Caller, Dangerous, activity},
+    access::{Caller, Dangerous, activity, fresh_ticket},
     update::{UpdateError, release::Channel},
 };
 
@@ -98,9 +99,18 @@ pub async fn get(
 pub async fn settings(
     caller: Caller,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<UpdateSettings>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
     caller.require_owner()?;
+    // Turning auto-update on or changing the channel decides what Core installs next, so it is
+    // as dangerous as installing it. Turning auto-update off is not.
+    let (channel, _) = state.update.settings().await?;
+    if request.auto_update == Some(true)
+        || request.channel.is_some_and(|wanted| wanted != channel)
+    {
+        fresh_ticket(&state, &caller, &headers).await?;
+    }
     state
         .update
         .set_settings(request.channel, request.auto_update)

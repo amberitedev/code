@@ -567,13 +567,32 @@ async fn updating_core_is_the_owners_dangerous_action() {
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
+    // Turning auto-update off is plain; a new channel or turning it on takes a ticket.
+    let patch = |body| {
+        core.call(Method::PATCH, "/update", Some(&owner), None, Some(body))
+    };
+    let (status, update) = patch(json!({ "auto_update": false })).await;
+    assert_eq!(
+        (status, &update["auto_update"]),
+        (StatusCode::OK, &json!(false))
+    );
+    for risky in [
+        json!({ "channel": "alpha" }),
+        json!({ "auto_update": true }),
+    ] {
+        let (status, error) = patch(risky).await;
+        assert_eq!(
+            (status, error["error"].as_str()),
+            (StatusCode::UNAUTHORIZED, Some("ticket_required"))
+        );
+    }
     let (status, update) = core
         .call(
             Method::PATCH,
             "/update",
             Some(&owner),
-            None,
-            Some(json!({ "channel": "beta", "auto_update": false })),
+            Some(&core.ticket("owner")),
+            Some(json!({ "channel": "beta" })),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
