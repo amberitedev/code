@@ -556,3 +556,169 @@ async fn sign_ins_are_limited_per_address() {
             .allow_sign_in("203.0.113.6".parse().unwrap())
     );
 }
+
+/// A request with a session and a raw body, answered as raw bytes.
+async fn raw(
+    core: &Core,
+    method: Method,
+    uri: &str,
+    token: &str,
+    body: &'static str,
+) -> (StatusCode, bytes::Bytes) {
+    let request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(body))
+        .unwrap();
+    let response = core.router.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    (
+        status,
+        response.into_body().collect().await.unwrap().to_bytes(),
+    )
+}
+
+#[tokio::test]
+async fn content_and_files_follow_the_role_table() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    let fs = format!("/servers/{server}/modrinth/v0/fs");
+    let world = format!("/v1/servers/{server}/worlds/{server}");
+
+    // Viewers see the content list and what the owner edited, nothing else.
+    let (status, addons) = core
+        .call(
+            Method::GET,
+            &format!("{world}/addons"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(addons["addons"], json!([]));
+    for (method, uri) in [
+        (Method::GET, format!("{fs}/list?path=/&page=1&page_size=10")),
+        (Method::GET, format!("{world}/properties")),
+        (Method::POST, format!("{world}/content/repair")),
+    ] {
+        let (status, _) =
+            core.call(method, &uri, Some(&viewer), None, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+    }
+    let (status, _) = core
+        .call(
+            Method::GET,
+            &format!("/servers/{server}/content/edited"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = core
+        .call(
+            Method::GET,
+            &format!("/v1/servers/{server}/worlds/another/addons"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "a server has one world");
+
+    // Editors use the files, inside the server folder only.
+    let create = format!("{fs}/create?path=/config/a.toml&type=file");
+    assert_eq!(
+        raw(&core, Method::POST, &create, &editor, "x = 1").await.0,
+        StatusCode::NO_CONTENT
+    );
+    let (status, list) = core
+        .call(
+            Method::GET,
+            &format!("{fs}/list?path=/config&page=1&page_size=10"),
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["items"][0]["path"], "/config/a.toml");
+    let (status, body) = raw(
+        &core,
+        Method::GET,
+        &format!("{fs}/download?path=/config/a.toml"),
+        &editor,
+        "",
+    )
+    .await;
+    assert_eq!((status, &body[..]), (StatusCode::OK, &b"x = 1"[..]));
+    let (status, _) = raw(
+        &core,
+        Method::GET,
+        &format!("{fs}/download?path=/../../db/copal.db"),
+        &editor,
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // An upload never replaces a server-owned file; an edit may.
+    let properties = format!("{fs}/create?path=/server.properties&type=file");
+    assert_eq!(
+        raw(&core, Method::POST, &properties, &editor, "motd=Mine\n")
+            .await
+            .0,
+        StatusCode::NO_CONTENT,
+        "nothing to replace yet"
+    );
+    assert_eq!(
+        raw(&core, Method::POST, &properties, &editor, "motd=Theirs\n")
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    let update = format!("{fs}/update?path=/server.properties");
+    assert_eq!(
+        raw(&core, Method::PUT, &update, &editor, "motd=Edited\n")
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (status, read) = core
+        .call(
+            Method::GET,
+            &format!("{world}/properties"),
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read["known"]["motd"], "Edited");
+
+    // A file the pack placed and the owner changed is listed as edited.
+    sqlx::query(
+        "INSERT INTO content_files (server_id, path, origin, sha1) VALUES (?, 'config/a.toml', 'pack', 'as placed')",
+    )
+    .bind(&server)
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    let (_, edited) = core
+        .call(
+            Method::GET,
+            &format!("/servers/{server}/content/edited"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        edited,
+        json!({ "files": [{ "path": "config/a.toml", "deleted": false, "pending": null }] })
+    );
+}

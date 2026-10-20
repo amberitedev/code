@@ -101,15 +101,13 @@ pub struct AddonVersion {
 
 /// Serializes as `"pending"`, `"installed"`, or `{"failed": {"error": ...}}`. Mirrors
 /// Archon.Content.v1.AddonStatus.
+#[allow(dead_code)] // Adds answer once placed or with their error, so none is pending or failed.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AddonStatus {
     Pending,
     Installed,
-    #[allow(dead_code)] // A failed add answers with its error instead.
-    Failed {
-        error: String,
-    },
+    Failed { error: String },
 }
 
 /// One file in the content list. Response of GET `.../addons/update`, and an item of GET
@@ -489,7 +487,6 @@ async fn addon_list(
     } else {
         HashMap::new()
     };
-    let activity = state.content.activity(id);
     Ok(listed
         .into_iter()
         .map(|item| {
@@ -500,11 +497,6 @@ async fn addon_list(
             let version = row
                 .and_then(|row| row.version_id.as_ref())
                 .and_then(|version| versions.get(version));
-            let pending = activity.installing.is_some()
-                && activity
-                    .items
-                    .iter()
-                    .any(|progress| progress.id == item.path);
             Addon {
                 id: item.path.clone(),
                 filename: item.filename,
@@ -513,11 +505,7 @@ async fn addon_list(
                 disabled: item.disabled,
                 kind: item.kind,
                 from_modpack: row.is_some_and(|row| row.origin == Origin::Pack),
-                status: if pending {
-                    AddonStatus::Pending
-                } else {
-                    AddonStatus::Installed
-                },
+                status: AddonStatus::Installed,
                 pack_client_retained: false,
                 pack_client_depends: false,
                 has_update: newer
