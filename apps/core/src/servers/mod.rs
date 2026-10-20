@@ -200,7 +200,7 @@ impl Servers {
                 .entry(id.clone())
                 .or_insert(Live { phase, child: None });
             if running {
-                self.on_running(&id);
+                self.on_running(&id, true);
             }
         }
         // A run younger than START_TIMEOUT may belong to a shim still starting. The cutoff also
@@ -365,7 +365,7 @@ impl Servers {
                 info!(server = %id, "started");
                 drop(live);
                 self.gave_up.lock().expect("not poisoned").remove(id);
-                self.on_running(id);
+                self.on_running(id, false);
                 Ok(())
             }
             // A shim that holds the lock but never answered keeps its server running.

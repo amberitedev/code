@@ -45,14 +45,18 @@ pub fn may_restart_after_crash(recent: i64) -> bool {
 }
 
 impl Servers {
-    /// A run started or was adopted: follow its console and tell subscribers.
-    pub(super) fn on_running(&self, id: &str) {
+    /// A run started or was adopted: follow its console and tell subscribers. An adopted run
+    /// printed its "Done" line before this Core read the console, so it counts as ready.
+    pub(super) fn on_running(&self, id: &str, adopted: bool) {
         let run = RUNS.fetch_add(1, Ordering::Relaxed);
         self.watched().insert(
             id.into(),
             Watched {
                 run,
-                insight: Insight::default(),
+                insight: Insight {
+                    ready: adopted,
+                    ..Insight::default()
+                },
             },
         );
         let _ = self.events.send(Lifecycle::Running(id.into()));
