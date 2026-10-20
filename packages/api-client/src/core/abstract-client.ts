@@ -46,6 +46,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return this.config.connectCore
 	}
 
+	public readonly copal!: InferredClientModules['copal']
 	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']
