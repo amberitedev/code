@@ -13,7 +13,7 @@ use crate::{content::folder::Folder, daemon::paths::Paths};
 /// Pre-update copies kept per server.
 const KEEP_PRE_UPDATE: usize = 2;
 
-/// Copy a server's worlds into `backups/<server>/pre-update-<time>/` before an update, keeping
+/// Copy a server's worlds into `backups/<server>/pre-update-<n>/` before an update, keeping
 /// the last two. A plain copy; the backup engine replaces it.
 pub async fn pre_update(paths: &Paths, server_id: &str) -> io::Result<PathBuf> {
     let source = paths.server(server_id);
@@ -21,16 +21,18 @@ pub async fn pre_update(paths: &Paths, server_id: &str) -> io::Result<PathBuf> {
     tokio::task::spawn_blocking(move || {
         let server = Folder::open(&source)?;
         let level = server.level_name();
-        // Names sort by time; two copies in the same instant get the next free name.
+        // Copies are numbered, each one past the highest there, so their order never depends
+        // on the clock.
         std::fs::create_dir_all(&folder)?;
-        let mut stamp =
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+        let mut number = numbered(&folder)?
+            .last()
+            .map_or(1, |(number, _)| number + 1);
         let destination = loop {
-            let candidate = folder.join(format!("pre-update-{stamp:020}"));
+            let candidate = folder.join(format!("pre-update-{number}"));
             match std::fs::create_dir(&candidate) {
                 Ok(()) => break candidate,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    stamp += 1;
+                    number += 1;
                 }
                 Err(error) => return Err(error),
             }
@@ -44,24 +46,29 @@ pub async fn pre_update(paths: &Paths, server_id: &str) -> io::Result<PathBuf> {
                 copy_tree(&dir, &destination.join(&world))?;
             }
         }
-        let mut copies: Vec<PathBuf> = std::fs::read_dir(&folder)?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("pre-update-"))
-            })
-            .collect();
-        copies.sort();
+        let copies = numbered(&folder)?;
         let excess = copies.len().saturating_sub(KEEP_PRE_UPDATE);
-        for old in &copies[..excess] {
+        for (_, old) in &copies[..excess] {
             std::fs::remove_dir_all(old)?;
         }
         Ok(destination)
     })
     .await
     .map_err(io::Error::other)?
+}
+
+/// The pre-update copies in `folder`, oldest first, by their number.
+fn numbered(folder: &Path) -> io::Result<Vec<(u64, PathBuf)>> {
+    let mut copies: Vec<(u64, PathBuf)> = std::fs::read_dir(folder)?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let number = name.strip_prefix("pre-update-")?.parse().ok()?;
+            Some((number, entry.path()))
+        })
+        .collect();
+    copies.sort_by_key(|(number, _)| *number);
+    Ok(copies)
 }
 
 /// Copy everything in `dir` to `to`. Links are skipped: a mod may have planted them.
@@ -107,5 +114,28 @@ mod tests {
         assert!(!made[2].join("mods.jar").exists());
         assert!(!made[0].exists());
         assert!(made[1].exists());
+        let names: Vec<_> = made
+            .iter()
+            .map(|path| path.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, ["pre-update-1", "pre-update-2", "pre-update-3"]);
+    }
+
+    #[tokio::test]
+    async fn copies_are_ordered_by_number_not_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        std::fs::create_dir_all(paths.server("a")).unwrap();
+        let folder = paths.backups().join("a");
+        for number in [9, 10] {
+            std::fs::create_dir_all(
+                folder.join(format!("pre-update-{number}")),
+            )
+            .unwrap();
+        }
+        let made = pre_update(&paths, "a").await.unwrap();
+        assert!(made.ends_with("pre-update-11"));
+        assert!(!folder.join("pre-update-9").exists());
+        assert!(folder.join("pre-update-10").exists());
     }
 }
