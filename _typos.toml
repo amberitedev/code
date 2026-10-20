@@ -41,6 +41,8 @@ ND = "ND"
 [default.extend-identifiers]
 # Universal Plug and Play
 UPnP = "UPnP"
+# Built-in Administrators in Windows SDDL strings
+BA = "BA"
 # BTA dependency project name
 HalpLibe = "HalpLibe"
 # Constant from the `zip` crate
