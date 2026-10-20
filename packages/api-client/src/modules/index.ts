@@ -14,6 +14,7 @@ import { ArchonServersInternalModule } from './archon/servers/internal'
 import { ArchonServersV0Module } from './archon/servers/v0'
 import { ArchonServersV1Module } from './archon/servers/v1'
 import { ArchonTransfersInternalModule } from './archon/transfers/internal'
+import { CopalAccessV1Module } from './copal/access/v1'
 import { ISO3166Module } from './iso3166'
 import { KyrosContentV1Module } from './kyros/content/v1'
 import { KyrosFilesV0Module } from './kyros/files/v0'
@@ -96,6 +97,7 @@ export const MODULE_REGISTRY = {
 	archon_servers_v0: ArchonServersV0Module,
 	archon_servers_v1: ArchonServersV1Module,
 	archon_transfers_internal: ArchonTransfersInternalModule,
+	copal_access_v1: CopalAccessV1Module,
 	iso3166_data: ISO3166Module,
 	mclogs_insights_v1: MclogsInsightsV1Module,
 	mclogs_logs_v1: MclogsLogsV1Module,
