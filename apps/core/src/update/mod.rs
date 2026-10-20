@@ -4,6 +4,7 @@
 #![allow(dead_code)] // Wired in step 6: the self-updater replaces these with signed versions.
 
 pub mod metadata;
+pub mod release;
 
 use std::path::Path;
 
