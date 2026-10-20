@@ -62,10 +62,18 @@ async fn core() -> Core {
         .await
         .unwrap();
     keys.set(&signer.public_keys()).await;
+    let content = crate::content::Content::open(
+        servers.paths().clone(),
+        db.clone(),
+        Arc::clone(&servers),
+    )
+    .unwrap();
     let state = Arc::new(AppState {
         servers,
         access: Arc::new(Access::new(keys)),
         db,
+        content,
+        uploads: super::files::Uploads::default(),
     });
     Core {
         _dir: dir,

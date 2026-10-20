@@ -1,13 +1,50 @@
 //! A server's files, under `/servers/{id}`: `modrinth/v0/fs/` list, download, create, update, move,
-//! delete, copy, and zip; `v1/worlds/{wid}/files/stat` and `.../files/zip`; `v1/fs/unarchive`;
+//! and delete; `v1/worlds/{wid}/files/stat` and `.../files/zip`; `v1/fs/unarchive`;
 //! `v1/fs/ops/{action}`; and the upload sessions at `v1/worlds/{wid}/{scope}/upload-session`
 //! (create, get, files, finalize, cancel). Mirrors `Kyros.Files` and `Kyros.UploadSessions` in
-//! `packages/api-client/src/modules/kyros/types.ts`.
+//! `packages/api-client/src/modules/kyros/types.ts`. Also `GET /modrinth/v0/servers/{id}/fs`,
+//! where the App learns the base of these routes.
+//!
+//! Editors and the owner only: the files hold the world and every setting. Every path goes
+//! through `content::folder`, so nothing reaches outside the server folder, links included.
+//! Uploads and unpacking never replace server-owned files (see `folder::is_server_owned`);
+//! `fs/update` is an explicit edit and may change them. `fs/copy` and the v0 `fs/zip` have no
+//! caller in the App and are not served.
 
-#![allow(dead_code)] // Wired in step 4: file routes.
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
+use axum::{
+    Json,
+    body::Body,
+    extract::{Multipart, Path, Query, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
+};
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
+
+use super::{
+    AppState,
+    activity::Action,
+    content::{MAX_UPLOAD, stage_field, world},
+    error::{ApiError, ErrorCode},
+    servers::JwtAuth,
+};
+use crate::{
+    access::{Caller, Level, activity, now},
+    content::{
+        addons,
+        archive::{self, ArchiveError},
+        folder::{self, Folder},
+        pack,
+    },
+};
 
 /// Query of GET `fs/download` and PUT `fs/update`. Mirrors the `path` param of
 /// `KyrosFilesV0Module.downloadFile` and `.updateFile`.
@@ -90,14 +127,6 @@ pub struct MoveRequest {
     pub destination: String,
 }
 
-/// Body of POST `fs/copy` and `fs/zip`. The api-client has no method for these routes; this is the
-/// shape the old Core accepted.
-#[derive(Debug, Clone, Deserialize)]
-pub struct CopyRequest {
-    pub sources: Vec<String>,
-    pub destination: String,
-}
-
 /// Query of POST `v1/fs/unarchive`: extract `src` into `trg`. `dry` only reports conflicts.
 /// Mirrors the params of `KyrosFilesV0Module.extractFile`.
 #[derive(Debug, Clone, Deserialize)]
@@ -129,6 +158,7 @@ pub enum OperationAction {
 /// `KyrosFilesV0Module.modifyOperation`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct OperationQuery {
+    #[allow(dead_code)] // There are never operations to name.
     pub id: String,
 }
 
@@ -204,6 +234,7 @@ pub enum UploadSessionStatus {
     Finalizing,
     Cancelled,
     Finalized,
+    #[allow(dead_code)] // An expired session is gone rather than shown.
     Expired,
 }
 
@@ -227,4 +258,960 @@ pub struct UploadSessionResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct GetUploadSessionResponse {
     pub session: Option<UploadSessionResponse>,
+}
+
+/// How long an upload session lives without a request.
+const SESSION_IDLE_S: i64 = 3600;
+
+/// One upload session: files staged out of the server folder until it is finalized.
+#[derive(Debug, Clone)]
+struct Session {
+    server_id: String,
+    scope: UploadScope,
+    /// Who opened it; `None` for the local CLI.
+    user_id: Option<String>,
+    status: UploadSessionStatus,
+    created_at: i64,
+    updated_at: i64,
+    last_upload_at: Option<i64>,
+    /// The name each file was sent with, and where it waits.
+    files: Vec<(String, PathBuf)>,
+    bytes: u64,
+}
+
+impl Session {
+    fn expires_at(&self) -> i64 {
+        self.updated_at + SESSION_IDLE_S
+    }
+
+    fn response(&self, upload_id: &str) -> UploadSessionResponse {
+        UploadSessionResponse {
+            upload_id: upload_id.to_owned(),
+            status: self.status,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            last_upload_at: self.last_upload_at,
+            expires_at: self.expires_at(),
+            entry_count: self.files.len() as u32,
+            uploaded_byte_count: self.bytes,
+        }
+    }
+
+    fn open(&self) -> bool {
+        matches!(
+            self.status,
+            UploadSessionStatus::Active | UploadSessionStatus::Uploading
+        )
+    }
+}
+
+/// Every open upload session, by id. Sessions live in memory: a Core restart ends them.
+#[derive(Default)]
+pub struct Uploads {
+    sessions: Mutex<HashMap<String, Session>>,
+}
+
+impl Uploads {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Session>> {
+        let mut sessions = self.sessions.lock().expect("not poisoned");
+        let now = now();
+        sessions
+            .retain(|_, session| !session.open() || session.expires_at() > now);
+        sessions
+    }
+}
+
+fn not_found(path: &str) -> ApiError {
+    ApiError::new(ErrorCode::NotFound, format!("There is no {path}."))
+}
+
+fn folder(state: &AppState, id: &str) -> Result<Arc<Folder>, ApiError> {
+    Ok(Arc::new(Folder::open(&state.servers.paths().server(id))?))
+}
+
+/// A path the App sent, checked. `None` is the server folder itself.
+fn api_path(path: &str) -> Result<Option<String>, ApiError> {
+    folder::from_api(path).map_err(|error| {
+        ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+    })
+}
+
+/// A path that must name something inside the folder, not the folder itself.
+fn inner_path(path: &str) -> Result<String, ApiError> {
+    api_path(path)?.ok_or_else(|| {
+        ApiError::new(ErrorCode::InvalidRequest, "Name a file or folder.")
+    })
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    tokio::task::spawn_blocking(work).await.map_err(|error| {
+        ApiError::new(ErrorCode::Internal, error.to_string())
+    })?
+}
+
+fn unix(time: std::io::Result<cap_std::time::SystemTime>) -> i64 {
+    time.ok()
+        .map(cap_std::time::SystemTime::into_std)
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_secs() as i64)
+}
+
+/// `GET /modrinth/v0/servers/{id}/fs`: where the file routes are. They check the session
+/// themselves, so the token is empty.
+pub async fn auth(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<JwtAuth>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let host = headers
+        .get(header::HOST)
+        .and_then(|host| host.to_str().ok())
+        .unwrap_or("localhost");
+    Ok(Json(JwtAuth {
+        url: format!("{host}/servers/{id}"),
+        token: String::new(),
+    }))
+}
+
+/// `GET fs/list`: one page of a folder, folders first.
+pub async fn list(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<ListQuery>,
+) -> Result<Json<DirectoryResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let path = api_path(&query.path)?;
+    let folder = folder(&state, &id)?;
+    let mut items = blocking(move || {
+        let dir = match &path {
+            Some(path) => folder.dir().open_dir(path),
+            None => folder.dir().try_clone(),
+        }
+        .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
+        let mut items = Vec::new();
+        for entry in dir.entries()?.filter_map(Result::ok) {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let Ok(meta) = entry.metadata() else { continue };
+            let kind = if meta.file_type().is_symlink() {
+                DirectoryItemType::Symlink
+            } else if meta.is_dir() {
+                DirectoryItemType::Directory
+            } else {
+                DirectoryItemType::File
+            };
+            let count = (kind == DirectoryItemType::Directory)
+                .then(|| {
+                    entry
+                        .open_dir()
+                        .ok()?
+                        .entries()
+                        .ok()
+                        .map(|entries| entries.count() as u64)
+                })
+                .flatten();
+            items.push(DirectoryItem {
+                path: format!(
+                    "/{}",
+                    path.as_ref()
+                        .map_or(name.clone(), |path| format!("{path}/{name}"))
+                ),
+                name,
+                kind,
+                modified: unix(meta.modified()),
+                created: unix(meta.created()),
+                size: (kind == DirectoryItemType::File).then(|| meta.len()),
+                count,
+                target: None,
+            });
+        }
+        Ok(items)
+    })
+    .await?;
+    items.sort_by(|a, b| {
+        (a.kind != DirectoryItemType::Directory)
+            .cmp(&(b.kind != DirectoryItemType::Directory))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    let total = items.len() as u64;
+    let size = query.page_size.clamp(1, 1000) as usize;
+    let page = query.page.max(1);
+    let items = items
+        .into_iter()
+        .skip((page as usize - 1) * size)
+        .take(size)
+        .collect();
+    Ok(Json(DirectoryResponse {
+        items,
+        total,
+        current: page,
+    }))
+}
+
+/// `GET fs/download`: a file, streamed.
+pub async fn download(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+) -> Result<Response, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let path = inner_path(&query.path)?;
+    let folder = folder(&state, &id)?;
+    let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+    let file = blocking(move || {
+        let file = folder.dir().open(&path).map_err(|_| not_found(&path))?;
+        if !file.metadata()?.is_file() {
+            return Err(not_found(&path));
+        }
+        Ok(file.into_std())
+    })
+    .await?;
+    let length = file.metadata().map(|meta| meta.len()).unwrap_or_default();
+    let stream =
+        tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (header::CONTENT_LENGTH, length.to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", name.replace('"', "")),
+            ),
+        ],
+        Body::from_stream(stream),
+    )
+        .into_response())
+}
+
+/// Stream a request body into a staged file, at most [`MAX_UPLOAD`] bytes.
+async fn stage_body(
+    state: &AppState,
+    id: &str,
+    body: Body,
+) -> Result<PathBuf, ApiError> {
+    let staged = state
+        .servers
+        .paths()
+        .staging(id)
+        .join(format!("body-{}", uuid::Uuid::new_v4()));
+    if let Some(parent) = staged.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let result = async {
+        let mut file = tokio::fs::File::create(&staged).await?;
+        let mut stream = body.into_data_stream();
+        let mut written = 0u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| {
+                ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+            })?;
+            written += chunk.len() as u64;
+            if written > MAX_UPLOAD {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    "Uploads are at most 4 GB.",
+                ));
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        Ok(())
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&staged).await;
+    }
+    result.map(|()| staged)
+}
+
+/// Write a staged file into the folder, then remove it.
+async fn place(
+    folder: Arc<Folder>,
+    path: String,
+    staged: PathBuf,
+) -> Result<(), ApiError> {
+    let result = blocking({
+        let staged = staged.clone();
+        move || {
+            folder.write(&path, &mut std::fs::File::open(&staged)?)?;
+            Ok(())
+        }
+    })
+    .await;
+    let _ = tokio::fs::remove_file(&staged).await;
+    result
+}
+
+/// Refuse to replace a server-owned file that exists.
+fn refuse_owned(folder: &Folder, path: &str) -> Result<(), ApiError> {
+    if folder::is_server_owned(path, &folder.level_name())
+        && folder.exists(path)
+    {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            format!(
+                "{path} belongs to the server; uploads never replace it. Edit it instead."
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// `POST fs/create`: a folder, or a file with the body as its contents. Never replaces a
+/// server-owned file.
+pub async fn create(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<CreateQuery>,
+    body: Body,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let path = inner_path(&query.path)?;
+    let folder = folder(&state, &id)?;
+    match query.kind {
+        CreateKind::Directory => {
+            blocking(move || Ok(folder.create_dir_all(&path)?)).await?;
+        }
+        CreateKind::File => {
+            refuse_owned(&folder, &path)?;
+            let staged = stage_body(&state, &id, body).await?;
+            place(folder, path, staged).await?;
+        }
+    }
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `PUT fs/update`: replace a file's contents with the body. An explicit edit, so it may change a
+/// server-owned file.
+pub async fn update(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+    body: Body,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let path = inner_path(&query.path)?;
+    let folder = folder(&state, &id)?;
+    let staged = stage_body(&state, &id, body).await?;
+    place(folder, path, staged).await?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST fs/move`. Never onto something that exists.
+pub async fn rename(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<MoveRequest>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let from = inner_path(&request.source)?;
+    let to = inner_path(&request.destination)?;
+    let folder = folder(&state, &id)?;
+    blocking(move || {
+        if !folder.exists(&from) {
+            return Err(not_found(&from));
+        }
+        if folder.exists(&to) {
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
+                format!("{to} already exists."),
+            ));
+        }
+        Ok(folder.rename(&from, &to)?)
+    })
+    .await?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE fs/delete`. A folder with something in it needs `recursive`.
+pub async fn delete(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<DeleteQuery>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let path = inner_path(&query.path)?;
+    let folder = folder(&state, &id)?;
+    blocking(move || {
+        let meta = folder
+            .dir()
+            .symlink_metadata(&path)
+            .map_err(|_| not_found(&path))?;
+        if meta.is_dir() && !query.recursive {
+            folder.dir().remove_dir(&path).map_err(|_| {
+                ApiError::new(
+                    ErrorCode::Conflict,
+                    format!("{path} is not empty."),
+                )
+            })?;
+        } else {
+            folder.remove(&path)?;
+        }
+        Ok(())
+    })
+    .await?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST v1/fs/unarchive`: unpack a zip in the server folder into `trg`. `dry` only lists the
+/// files that exist already; otherwise they are replaced when `override` says so, except
+/// server-owned ones, which are never replaced. A pack's name is reported so the App can offer to
+/// install it as one.
+pub async fn unarchive(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<UnarchiveQuery>,
+) -> Result<Json<ExtractResult>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    let source = inner_path(&query.src)?;
+    let target = api_path(&query.trg)?;
+    let folder = folder(&state, &id)?;
+    let result = blocking(move || {
+        let file = folder
+            .dir()
+            .open(&source)
+            .map_err(|_| not_found(&source))?
+            .into_std();
+        let mut zip = zip::ZipArchive::new(file).map_err(|error| {
+            ApiError::from(crate::content::Error::from(ArchiveError::from(
+                error,
+            )))
+        })?;
+        let modpack_name =
+            pack::read_index(&mut zip).ok().map(|index| index.name);
+        let level = folder.level_name();
+        let destination = |entry: &str| match &target {
+            Some(target) => format!("{target}/{entry}"),
+            None => entry.to_owned(),
+        };
+        let entries =
+            archive::entries(&mut zip).map_err(crate::content::Error::from)?;
+        let conflicting_files: Vec<String> = entries
+            .iter()
+            .filter(|(_, is_dir)| !is_dir)
+            .map(|(entry, _)| destination(entry))
+            .filter(|path| folder.exists(path))
+            .map(|path| format!("/{path}"))
+            .collect();
+        if !query.dry {
+            archive::extract(&folder, &mut zip, |entry| {
+                let path = destination(entry);
+                let exists = folder.exists(&path);
+                let owned = folder::is_server_owned(&path, &level);
+                (!exists || (query.overwrite && !owned)).then_some(path)
+            })
+            .map_err(crate::content::Error::from)?;
+        }
+        Ok(ExtractResult {
+            modpack_name,
+            conflicting_files,
+        })
+    })
+    .await?;
+    if !query.dry {
+        activity::log(&state.db, &caller, Some(&id), Action::ContentChanged)
+            .await;
+    }
+    Ok(Json(result))
+}
+
+/// `POST v1/fs/ops/{action}`: unpacking finishes within its request, so there is never an
+/// operation left to dismiss or cancel.
+pub async fn operation(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, _action)): Path<(String, OperationAction)>,
+    Query(_query): Query<OperationQuery>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST v1/worlds/{wid}/files/stat`.
+pub async fn stat(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<FileStatRequest>,
+) -> Result<Json<FileStatResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let path = api_path(&request.path)?;
+    let folder = folder(&state, &id)?;
+    let response = blocking(move || {
+        let meta = match &path {
+            Some(path) => folder.dir().symlink_metadata(path),
+            None => folder.dir().dir_metadata(),
+        }
+        .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
+        let time = |time: std::io::Result<cap_std::time::SystemTime>| {
+            DateTime::<Utc>::from_timestamp(unix(time), 0).unwrap_or_default()
+        };
+        let name = path
+            .as_deref()
+            .and_then(|path| path.rsplit('/').next())
+            .unwrap_or_default()
+            .to_owned();
+        Ok(FileStatResponse {
+            name,
+            full_path: format!("/{}", path.unwrap_or_default()),
+            size_bytes: meta.len(),
+            kind: if meta.file_type().is_symlink() {
+                DescendantType::Symlink
+            } else if meta.is_dir() {
+                DescendantType::Directory
+            } else if meta.is_file() {
+                DescendantType::Regular
+            } else {
+                DescendantType::Other
+            },
+            mtime: time(meta.modified()),
+            ctime: time(meta.created()),
+        })
+    })
+    .await?;
+    Ok(Json(response))
+}
+
+/// Add `dir` to `zip` under `prefix`, skipping links.
+fn zip_tree(
+    zip: &mut zip::ZipWriter<std::fs::File>,
+    dir: &cap_std::fs::Dir,
+    prefix: &str,
+) -> Result<(), ApiError> {
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .large_file(true);
+    for entry in dir.entries()?.filter_map(Result::ok) {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let kind = entry.file_type()?;
+        let path = format!("{prefix}{name}");
+        if kind.is_dir() {
+            zip.add_directory(format!("{path}/"), options)
+                .map_err(zip_error)?;
+            zip_tree(zip, &entry.open_dir()?, &format!("{path}/"))?;
+        } else if kind.is_file() {
+            zip.start_file(&path, options).map_err(zip_error)?;
+            std::io::copy(&mut entry.open()?, zip)?;
+        }
+    }
+    Ok(())
+}
+
+fn zip_error(error: zip::result::ZipError) -> ApiError {
+    ApiError::new(ErrorCode::Internal, error.to_string())
+}
+
+/// `POST v1/worlds/{wid}/files/zip`: zip a folder into `<folder>.zip`, or paths inside `parent`
+/// into `target`. Answers with one `application/json-seq` record once the zip is written.
+pub async fn zip(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<ZipRequest>,
+) -> Result<Response, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let (parent, include, target) = match request {
+        ZipRequest::Directory { path } => {
+            let path = inner_path(&path)?;
+            let (parent, name) = path
+                .rsplit_once('/')
+                .map_or((None, path.clone()), |(parent, name)| {
+                    (Some(parent.to_owned()), name.to_owned())
+                });
+            (parent, vec![name], format!("{path}.zip"))
+        }
+        ZipRequest::ManyPaths {
+            parent,
+            include,
+            target,
+        } => {
+            let include = include
+                .iter()
+                .map(|name| folder::clean(name.trim_matches('/')))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| {
+                    ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+                })?;
+            (api_path(&parent)?, include, inner_path(&target)?)
+        }
+    };
+    let folder = folder(&state, &id)?;
+    refuse_owned(&folder, &target)?;
+    let staged = state
+        .servers
+        .paths()
+        .staging(&id)
+        .join(format!("zip-{}", uuid::Uuid::new_v4()));
+    tokio::fs::create_dir_all(staged.parent().expect("inside staging")).await?;
+    let result = blocking({
+        let staged = staged.clone();
+        let folder = Arc::clone(&folder);
+        move || {
+            let base = match &parent {
+                Some(parent) => folder.dir().open_dir(parent),
+                None => folder.dir().try_clone(),
+            }
+            .map_err(|_| not_found(parent.as_deref().unwrap_or("folder")))?;
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&staged)?);
+            for name in &include {
+                let meta =
+                    base.symlink_metadata(name).map_err(|_| not_found(name))?;
+                if meta.is_dir() {
+                    zip.add_directory(
+                        format!("{name}/"),
+                        zip::write::SimpleFileOptions::default(),
+                    )
+                    .map_err(zip_error)?;
+                    zip_tree(
+                        &mut zip,
+                        &base.open_dir(name)?,
+                        &format!("{name}/"),
+                    )?;
+                } else if meta.is_file() {
+                    zip.start_file(
+                        name,
+                        zip::write::SimpleFileOptions::default()
+                            .large_file(true),
+                    )
+                    .map_err(zip_error)?;
+                    std::io::copy(&mut base.open(name)?, &mut zip)?;
+                }
+            }
+            zip.finish().map_err(zip_error)?;
+            folder.write(&target, &mut std::fs::File::open(&staged)?)?;
+            Ok(())
+        }
+    })
+    .await;
+    let _ = tokio::fs::remove_file(&staged).await;
+    let record = match result {
+        Ok(()) => ZipProgress {
+            progress: 1.0,
+            done: Some(true),
+            error: None,
+        },
+        Err(error) => ZipProgress {
+            progress: 0.0,
+            done: Some(true),
+            error: Some(error.description),
+        },
+    };
+    let body = format!(
+        "\u{1e}{}\n",
+        serde_json::to_string(&record).expect("serializes")
+    );
+    Ok(
+        ([(header::CONTENT_TYPE, "application/json-seq")], body)
+            .into_response(),
+    )
+}
+
+/// `POST v1/worlds/{wid}/{scope}/upload-session`: open a session for the caller, ending any open
+/// one they had for this world and scope.
+pub async fn open_session(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, scope)): Path<(String, String, UploadScope)>,
+) -> Result<Json<UploadSessionResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let upload_id = uuid::Uuid::new_v4().to_string();
+    let now = now();
+    let session = Session {
+        server_id: id.clone(),
+        scope,
+        user_id: caller.user_id().map(str::to_owned),
+        status: UploadSessionStatus::Active,
+        created_at: now,
+        updated_at: now,
+        last_upload_at: None,
+        files: Vec::new(),
+        bytes: 0,
+    };
+    let response = session.response(&upload_id);
+    let ended: Vec<Session> = {
+        let mut sessions = state.uploads.lock();
+        let mine: Vec<String> = sessions
+            .iter()
+            .filter(|(_, other)| {
+                other.open()
+                    && other.server_id == id
+                    && other.scope == scope
+                    && other.user_id.as_deref() == caller.user_id()
+            })
+            .map(|(other, _)| other.clone())
+            .collect();
+        let ended = mine
+            .iter()
+            .filter_map(|other| sessions.remove(other))
+            .collect();
+        sessions.insert(upload_id, session);
+        ended
+    };
+    discard(&ended).await;
+    Ok(Json(response))
+}
+
+/// Remove what ended sessions staged.
+async fn discard(sessions: &[Session]) {
+    for session in sessions {
+        for (_, staged) in &session.files {
+            let _ = tokio::fs::remove_file(staged).await;
+        }
+    }
+}
+
+/// The caller's open session `upload_id` on this server and scope.
+fn session(
+    state: &AppState,
+    caller: &Caller,
+    id: &str,
+    scope: UploadScope,
+    upload_id: &str,
+) -> Result<Session, ApiError> {
+    state
+        .uploads
+        .lock()
+        .get(upload_id)
+        .filter(|session| {
+            session.server_id == id
+                && session.scope == scope
+                && session.user_id.as_deref() == caller.user_id()
+        })
+        .cloned()
+        .ok_or_else(|| {
+            ApiError::new(ErrorCode::NotFound, "There is no such upload.")
+        })
+}
+
+/// `GET v1/worlds/{wid}/{scope}/upload-session`: the caller's open session, if any.
+pub async fn get_session(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, scope)): Path<(String, String, UploadScope)>,
+) -> Result<Json<GetUploadSessionResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let session = state
+        .uploads
+        .lock()
+        .iter()
+        .find(|(_, session)| {
+            session.open()
+                && session.server_id == id
+                && session.scope == scope
+                && session.user_id.as_deref() == caller.user_id()
+        })
+        .map(|(upload_id, session)| session.response(upload_id));
+    Ok(Json(GetUploadSessionResponse { session }))
+}
+
+/// `POST v1/worlds/{wid}/{scope}/upload-session/{upload}/files`: stage the `file` parts. Each
+/// part's file name is where it goes: a path in the server folder for `files`, a file name for
+/// `content`.
+pub async fn upload_files(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, scope, upload_id)): Path<(
+        String,
+        String,
+        UploadScope,
+        String,
+    )>,
+    mut form: Multipart,
+) -> Result<Json<UploadSessionResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let before = session(&state, &caller, &id, scope, &upload_id)?;
+    if !before.open() {
+        return Err(ApiError::new(ErrorCode::Conflict, "This upload is over."));
+    }
+    let staging = state
+        .servers
+        .paths()
+        .staging(&id)
+        .join(format!("session-{upload_id}"));
+    let mut added = Vec::new();
+    let mut budget = MAX_UPLOAD.saturating_sub(before.bytes);
+    let result = async {
+        while let Some(mut field) =
+            form.next_field().await.map_err(|error| {
+                ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+            })?
+        {
+            let Some(name) = field.file_name().map(str::to_owned) else {
+                continue;
+            };
+            // Checked now, so a bad name fails before it is stored.
+            match scope {
+                UploadScope::Files => {
+                    inner_path(&name)?;
+                }
+                UploadScope::Content => {
+                    folder::clean(&name).map_err(|error| {
+                        ApiError::new(
+                            ErrorCode::InvalidRequest,
+                            error.to_string(),
+                        )
+                    })?;
+                }
+            }
+            let staged = staging.join(uuid::Uuid::new_v4().to_string());
+            stage_field(&mut field, &staged, budget).await?;
+            let size = tokio::fs::metadata(&staged).await?.len();
+            budget = budget.saturating_sub(size);
+            added.push((name, staged, size));
+        }
+        Ok::<_, ApiError>(())
+    }
+    .await;
+    if let Err(error) = result {
+        for (_, staged, _) in &added {
+            let _ = tokio::fs::remove_file(staged).await;
+        }
+        return Err(error);
+    }
+    let mut sessions = state.uploads.lock();
+    let session = sessions.get_mut(&upload_id).ok_or_else(|| {
+        ApiError::new(ErrorCode::NotFound, "There is no such upload.")
+    })?;
+    let now = now();
+    for (name, staged, size) in added {
+        session.files.push((name, staged));
+        session.bytes += size;
+    }
+    session.status = UploadSessionStatus::Uploading;
+    session.updated_at = now;
+    session.last_upload_at = Some(now);
+    Ok(Json(session.response(&upload_id)))
+}
+
+/// `POST .../upload-session/{upload}/finalize`: put every staged file in place. Files go where
+/// their names say, never over a server-owned file; content goes through the content model.
+pub async fn finalize_session(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, scope, upload_id)): Path<(
+        String,
+        String,
+        UploadScope,
+        String,
+    )>,
+) -> Result<Json<UploadSessionResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let session = session(&state, &caller, &id, scope, &upload_id)?;
+    if !session.open() {
+        return Err(ApiError::new(ErrorCode::Conflict, "This upload is over."));
+    }
+    let set_status = |status| {
+        if let Some(session) = state.uploads.lock().get_mut(&upload_id) {
+            session.status = status;
+            session.updated_at = now();
+        }
+    };
+    set_status(UploadSessionStatus::Finalizing);
+    let result = async {
+        match scope {
+            UploadScope::Files => {
+                let folder = folder(&state, &id)?;
+                for (name, _) in &session.files {
+                    refuse_owned(&folder, &inner_path(name)?)?;
+                }
+                for (name, staged) in &session.files {
+                    place(
+                        Arc::clone(&folder),
+                        inner_path(name)?,
+                        staged.clone(),
+                    )
+                    .await?;
+                }
+            }
+            UploadScope::Content => {
+                let _busy = state.content.busy(&id)?;
+                for (name, staged) in &session.files {
+                    addons::upload(&state.content, &id, name, staged).await?;
+                }
+            }
+        }
+        Ok::<_, ApiError>(())
+    }
+    .await;
+    discard(std::slice::from_ref(&session)).await;
+    let _ = tokio::fs::remove_dir(
+        state
+            .servers
+            .paths()
+            .staging(&id)
+            .join(format!("session-{upload_id}")),
+    )
+    .await;
+    match result {
+        Ok(()) => {
+            set_status(UploadSessionStatus::Finalized);
+            activity::log(
+                &state.db,
+                &caller,
+                Some(&id),
+                Action::ContentChanged,
+            )
+            .await;
+        }
+        Err(error) => {
+            set_status(UploadSessionStatus::Cancelled);
+            return Err(error);
+        }
+    }
+    let response = state
+        .uploads
+        .lock()
+        .get(&upload_id)
+        .map(|session| session.response(&upload_id))
+        .ok_or_else(|| {
+            ApiError::new(ErrorCode::NotFound, "There is no such upload.")
+        })?;
+    Ok(Json(response))
+}
+
+/// `DELETE .../upload-session/{upload}`: cancel it and remove what it staged.
+pub async fn cancel_session(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, scope, upload_id)): Path<(
+        String,
+        String,
+        UploadScope,
+        String,
+    )>,
+) -> Result<Json<UploadSessionResponse>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let mut session = session(&state, &caller, &id, scope, &upload_id)?;
+    discard(std::slice::from_ref(&session)).await;
+    session.status = UploadSessionStatus::Cancelled;
+    session.updated_at = now();
+    session.files.clear();
+    let response = session.response(&upload_id);
+    state.uploads.lock().insert(upload_id, session);
+    Ok(Json(response))
 }

@@ -195,7 +195,7 @@ fn set_port(dir: &Path, port: i64) -> io::Result<()> {
 }
 
 /// The key of a `server.properties` line, or `None` for comments and blank lines.
-fn property_key(line: &str) -> Option<&str> {
+pub fn property_key(line: &str) -> Option<&str> {
     let line = line.trim_start();
     if line.is_empty() || line.starts_with(['#', '!']) {
         return None;

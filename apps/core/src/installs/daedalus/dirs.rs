@@ -33,11 +33,6 @@ impl SharedDirs {
         }
     }
 
-    /// `{data_dir}/meta` — the shared store root.
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
     /// `{data_dir}/meta/libraries` — the maven-pathed shared library tree.
     pub fn libraries_dir(&self) -> PathBuf {
         self.root.join("libraries")

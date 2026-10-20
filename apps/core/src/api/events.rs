@@ -123,8 +123,17 @@ async fn console_socket(
     }
     let (sender, mut lines) = mpsc::channel(256);
     console::follow(path, end, sender);
+    let mut installs = state.content.events.subscribe();
     loop {
         tokio::select! {
+            event = installs.recv() => {
+                if let Ok((server, event)) = event
+                    && server == id
+                    && send(&mut socket, &event).await.is_err()
+                {
+                    return;
+                }
+            }
             line = lines.recv() => {
                 let Some(line) = line else { return };
                 if send(&mut socket, &log(line)).await.is_err() {

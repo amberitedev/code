@@ -77,6 +77,7 @@ mod tests {
                 "backups",
                 "content_files",
                 "core",
+                "packs",
                 "pairing",
                 "runs",
                 "servers",

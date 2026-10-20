@@ -27,8 +27,9 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},
-    installs::{self, ModLoader},
-    servers::{Phase, ServerError, records},
+    content,
+    installs::ModLoader,
+    servers::{Phase, ServerError, launch, records},
 };
 
 /// Query of GET `/modrinth/v0/servers`. Mirrors Archon.Servers.v0.GetServersOptions.
@@ -618,8 +619,9 @@ pub async fn power(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /modrinth/v0/servers/{id}/reinstall`: install a loader on a stopped server. Never
-/// erases: `hard` is refused. Answers when the install is done.
+/// `POST /modrinth/v0/servers/{id}/reinstall`: install a loader on a stopped server, as a bare
+/// install through the content routes does, but answering once it is done. Never erases: `hard`
+/// is refused.
 pub async fn reinstall(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -645,35 +647,20 @@ pub async fn reinstall(
             "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper, and never erases a server.",
         ));
     };
-    let row = records::get(&state.db, &id)
-        .await?
-        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let busy = state.content.busy(&id)?;
     let hold = state.servers.hold(&id)?;
-    let installed = installs::install(
-        &state.servers,
+    content::records::unlink(&state.db, &id).await?;
+    content::install::loader(
+        &state.content,
         &hold,
-        &crate::installs::download::client()
-            .map_err(color_eyre::Report::from)
-            .map_err(ServerError::from)?,
-        &row,
+        &state.content.progress(&id),
         loader,
         &game_version,
         loader_version.as_deref(),
         false,
-        &|_| {},
-    )
-    .await
-    .map_err(|error| {
-        ApiError::new(ErrorCode::Internal, format!("{error:#}"))
-    })?;
-    records::set_installed(
-        &state.db,
-        &id,
-        loader.as_str(),
-        &game_version,
-        installed.as_deref(),
     )
     .await?;
+    drop((hold, busy));
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -772,4 +759,91 @@ pub async fn ws_auth(
         url: format!("{host}/servers/{id}/ws"),
         token: String::new(),
     }))
+}
+
+/// The hosting API's full view of a server, with its one world, whose id is the server's.
+async fn server_full(
+    state: &AppState,
+    row: records::ServerRow,
+) -> Result<ServerFull, ApiError> {
+    let created_at: i64 =
+        sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
+            .bind(&row.id)
+            .fetch_one(&state.db)
+            .await?;
+    let created_at =
+        DateTime::<Utc>::from_timestamp(created_at, 0).unwrap_or_default();
+    let id = Uuid::parse_str(&row.id).unwrap_or_default();
+    let paths = state.servers.paths();
+    let invocation = launch::args(paths, &row)
+        .ok()
+        .map(|args| launch::invocation(&args));
+    let content = match (&row.loader, &row.game_version) {
+        (Some(loader), Some(game_version)) => Some(WorldContentInfo {
+            modloader: loader.clone(),
+            modloader_version: row.loader_version.clone().unwrap_or_default(),
+            game_version: game_version.clone(),
+            java_version: launch::java_major(paths, &state.content.http, &row)
+                .await
+                .ok(),
+            original_invocation: invocation.clone(),
+            invocation,
+        }),
+        _ => None,
+    };
+    Ok(ServerFull {
+        id,
+        name: row.name.clone(),
+        subdomain: String::new(),
+        specs: ServerResources {
+            cpu: std::thread::available_parallelism()
+                .map_or(1, |cpus| cpus.get() as u32),
+            memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
+            storage_mb: 0,
+            swap_mb: 0,
+        },
+        sftp_username: String::new(),
+        sftp_password: String::new(),
+        tags: Vec::new(),
+        location: ServerLocation::Unassigned,
+        worlds: vec![WorldFull {
+            id,
+            name: row.name,
+            created_at,
+            is_active: true,
+            download_method: WorldDownloadMethod::Unavailable,
+            backups: [],
+            content,
+            readiness: WorldReadiness {
+                data_synchronized_fetched: true,
+            },
+        }],
+    })
+}
+
+/// `GET /v1/servers`: every server the caller has a role on.
+pub async fn list_v1(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ServerFull>>, ApiError> {
+    let mut servers = Vec::new();
+    for row in records::list(&state.db).await? {
+        if caller.level(&state.db, &row.id).await?.is_some() {
+            servers.push(server_full(&state, row).await?);
+        }
+    }
+    Ok(Json(servers))
+}
+
+/// `GET /v1/servers/{id}`.
+pub async fn get_v1(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ServerFull>, ApiError> {
+    caller.require(&state.db, &id, Level::Viewer).await?;
+    let row = records::get(&state.db, &id)
+        .await?
+        .ok_or(ServerError::NotFound(id))?;
+    Ok(Json(server_full(&state, row).await?))
 }
