@@ -5,7 +5,11 @@
 //!
 //! Core never runs these itself: servers and installers run them as `copal-servers`.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{Arc, LazyLock, Mutex},
+};
 
 use daedalus::minecraft::VersionInfo;
 use serde::{Deserialize, Serialize};
@@ -120,9 +124,19 @@ pub fn installed(paths: &Paths, major: u32) -> Option<PathBuf> {
     binary.is_file().then_some(binary)
 }
 
-/// One Java install at a time, so two servers starting on a missing major, or a start and the
-/// patch check, never unpack the same release over each other.
-static INSTALLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One install at a time per major, so two servers starting on a missing major, or a start and
+/// the patch check, never unpack the same release over each other.
+fn installing(major: u32) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: LazyLock<Mutex<HashMap<u32, Arc<tokio::sync::Mutex<()>>>>> =
+        LazyLock::new(Mutex::default);
+    Arc::clone(
+        LOCKS
+            .lock()
+            .expect("not poisoned")
+            .entry(major)
+            .or_default(),
+    )
+}
 
 /// The Java binary for `major`, downloaded first when missing.
 pub async fn ensure(
@@ -133,7 +147,8 @@ pub async fn ensure(
     if let Some(binary) = installed(paths, major) {
         return Ok(binary);
     }
-    let _installing = INSTALLING.lock().await;
+    let lock = installing(major);
+    let _installing = lock.lock().await;
     // Another start may have installed it while this one waited.
     if let Some(binary) = installed(paths, major) {
         return Ok(binary);
@@ -175,13 +190,61 @@ async fn latest(
         .ok_or(JavaError::Unavailable(major))
 }
 
-/// Download and unpack `package` beside any older release, then point `current.json` at it.
+/// Point `current.json` at the published release `release` of `major`, if it is there. A
+/// release folder appears only whole (it is renamed into place once unpacked) and is never
+/// changed after, so one that is there is used as it is.
+fn use_published(
+    paths: &Paths,
+    major: u32,
+    release: &str,
+    sha256: &str,
+) -> std::io::Result<Option<PathBuf>> {
+    let folder = paths.java().join(major.to_string()).join(release);
+    if !folder.is_dir() {
+        return Ok(None);
+    }
+    let Some(binary) = find_binary(&folder) else {
+        return Ok(None);
+    };
+    shim::write_json(
+        &current_path(paths, major),
+        &Current {
+            release: release.to_owned(),
+            binary: binary.clone(),
+            sha256: sha256.to_owned(),
+        },
+    )?;
+    Ok(Some(folder.join(binary)))
+}
+
+/// The Java binary in an unpacked release, relative to it.
+fn find_binary(release: &Path) -> Option<PathBuf> {
+    let name = if cfg!(windows) { "java.exe" } else { "java" };
+    let found = walkdir::WalkDir::new(release)
+        .into_iter()
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry.file_type().is_file()
+                && entry.file_name() == name
+                && entry.path().parent().is_some_and(|p| p.ends_with("bin"))
+        })?;
+    Some(found.path().strip_prefix(release).ok()?.to_path_buf())
+}
+
+/// Download and unpack `package` beside any older release, then point `current.json` at it. A
+/// release already published is reused, never replaced: a server may run from it.
 async fn install(
     paths: &Paths,
     http: &reqwest::Client,
     major: u32,
     package: &Package,
 ) -> Result<PathBuf, JavaError> {
+    let release = package.name.trim_end_matches(".zip").to_owned();
+    if let Some(binary) =
+        use_published(paths, major, &release, &package.sha256_hash)?
+    {
+        return Ok(binary);
+    }
     info!(major, release = %package.name, "installing Java");
     let folder = paths.java().join(major.to_string());
     tokio::fs::create_dir_all(&folder).await?;
@@ -200,7 +263,6 @@ async fn install(
         },
     )
     .await?;
-    let release = package.name.trim_end_matches(".zip").to_owned();
     let sha256 = package.sha256_hash.clone();
     let paths = paths.clone();
     tokio::task::spawn_blocking(move || {
@@ -209,26 +271,11 @@ async fn install(
         zip::ZipArchive::new(std::fs::File::open(&archive)?)
             .and_then(|mut zip| zip.extract(staged.path()))
             .map_err(|error| unusable(error.to_string()))?;
-        let binary_name = if cfg!(windows) { "java.exe" } else { "java" };
-        let binary = walkdir::WalkDir::new(staged.path())
-            .into_iter()
-            .filter_map(Result::ok)
-            .find(|entry| {
-                entry.file_type().is_file()
-                    && entry.file_name() == binary_name
-                    && entry.path().parent().is_some_and(|p| p.ends_with("bin"))
-            })
-            .ok_or_else(|| unusable("it holds no Java binary".into()))?
-            .into_path();
-        let binary = binary
-            .strip_prefix(staged.path())
-            .expect("found inside")
-            .to_path_buf();
+        let binary = find_binary(staged.path())
+            .ok_or_else(|| unusable("it holds no Java binary".into()))?;
         executable(staged.path())?;
         let destination = folder.join(&release);
-        if destination.exists() {
-            std::fs::remove_dir_all(&destination)?;
-        }
+        // Published releases are never replaced; the lock means none appeared meanwhile.
         std::fs::rename(staged.keep(), &destination)?;
         #[cfg(unix)]
         {
@@ -284,7 +331,8 @@ pub async fn update_all(paths: &Paths, http: &reqwest::Client) {
         .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
         .collect();
     for major in majors {
-        let _installing = INSTALLING.lock().await;
+        let lock = installing(major);
+        let _installing = lock.lock().await;
         let Some(current) = read_current(paths, major) else {
             continue;
         };
@@ -352,6 +400,22 @@ mod tests {
         assert_eq!(required_java_version("1.20.5"), 21);
         assert_eq!(required_java_version("1.21.1"), 21);
         assert_eq!(required_java_version("26.1"), 25);
+    }
+
+    #[test]
+    fn a_published_release_is_reused_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let name = if cfg!(windows) { "java.exe" } else { "java" };
+        let bin = paths.java().join("21").join("zulu21").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join(name), "running").unwrap();
+        let binary =
+            use_published(&paths, 21, "zulu21", "abc").unwrap().unwrap();
+        assert_eq!(binary, bin.join(name));
+        assert_eq!(std::fs::read_to_string(&binary).unwrap(), "running");
+        assert_eq!(installed(&paths, 21), Some(bin.join(name)));
+        assert_eq!(use_published(&paths, 21, "zulu22", "abc").unwrap(), None);
     }
 
     #[test]
