@@ -40,6 +40,11 @@ const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long auto-update waits for servers to finish starting or stopping.
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
+/// The most Core reads of each answer before it has checked a signature, so a hostile server
+/// cannot fill its memory.
+const MAX_LIST_PAGE: usize = 1024 * 1024;
+const MAX_MANIFEST: usize = 64 * 1024;
+const MAX_SIGNATURE: usize = 4 * 1024;
 /// Pages of the releases list read at most, 100 releases each.
 const MAX_PAGES: usize = 5;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -71,6 +76,8 @@ pub enum UpdateError {
     MissingAsset(String),
     #[error("the download does not match the signed manifest")]
     Mismatch,
+    #[error("the release server sent more than {0} bytes for one answer")]
+    TooLarge(usize),
     #[error(transparent)]
     Manifest(#[from] ManifestError),
     #[error("could not reach the release server: {0}")]
@@ -96,6 +103,27 @@ fn may_replace(
     } else {
         Ok(())
     }
+}
+
+/// Read an answer as it streams in, refusing it once it passes `cap` bytes.
+async fn read_capped(
+    mut response: reqwest::Response,
+    cap: usize,
+) -> Result<Vec<u8>, UpdateError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > cap as u64)
+    {
+        return Err(UpdateError::TooLarge(cap));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > cap {
+            return Err(UpdateError::TooLarge(cap));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// The last check's answer.
@@ -357,8 +385,11 @@ impl Updater {
                 .asset(name)
                 .ok_or_else(|| UpdateError::MissingAsset(name.into()))
         };
-        let manifest = self.fetch(asset(release::MANIFEST)?).await?;
-        let signature = self.fetch(asset(release::SIGNATURE)?).await?;
+        let manifest =
+            self.fetch(asset(release::MANIFEST)?, MAX_MANIFEST).await?;
+        let signature = self
+            .fetch(asset(release::SIGNATURE)?, MAX_SIGNATURE)
+            .await?;
         let manifest = Manifest::verify(
             &manifest,
             &String::from_utf8_lossy(&signature),
@@ -396,7 +427,16 @@ impl Updater {
                 .get("link")
                 .and_then(|link| link.to_str().ok())
                 .and_then(release::next_page);
-            releases.extend(response.json::<Vec<Release>>().await?);
+            let page = read_capped(response, MAX_LIST_PAGE).await?;
+            releases.extend(
+                serde_json::from_slice::<Vec<Release>>(&page).map_err(
+                    |error| {
+                        UpdateError::Manifest(ManifestError::Invalid(
+                            error.to_string(),
+                        ))
+                    },
+                )?,
+            );
             if release::resolve(&releases, channel).is_some() {
                 break;
             }
@@ -404,16 +444,19 @@ impl Updater {
         Ok(releases)
     }
 
-    async fn fetch(&self, url: &str) -> Result<bytes::Bytes, UpdateError> {
-        Ok(self
+    async fn fetch(
+        &self,
+        url: &str,
+        cap: usize,
+    ) -> Result<Vec<u8>, UpdateError> {
+        let response = self
             .http
             .get(url)
             .timeout(METADATA_TIMEOUT)
             .send()
             .await?
-            .error_for_status()?
-            .bytes()
-            .await?)
+            .error_for_status()?;
+        read_capped(response, cap).await
     }
 
     /// Download a version into `versions/<version>/` and check it against the manifest. An
@@ -499,6 +542,50 @@ mod tests {
 
     fn version(text: &str) -> Version {
         Version::parse(text).unwrap()
+    }
+
+    /// Answer one request with `body`, saying its length only when `say_length`.
+    async fn serve_once(body: Vec<u8>, say_length: bool) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request).await;
+            let length = if say_length {
+                format!("Content-Length: {}\r\n", body.len())
+            } else {
+                String::new()
+            };
+            let head =
+                format!("HTTP/1.1 200 OK\r\n{length}Connection: close\r\n\r\n");
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(&body).await;
+        });
+        format!("http://{address}/")
+    }
+
+    #[tokio::test]
+    async fn answers_past_their_cap_are_refused_before_they_are_read_whole() {
+        let http = reqwest::Client::new();
+        for say_length in [true, false] {
+            let url =
+                serve_once(vec![b'x'; MAX_SIGNATURE + 1], say_length).await;
+            let response = http.get(url).send().await.unwrap();
+            assert!(matches!(
+                read_capped(response, MAX_SIGNATURE).await,
+                Err(UpdateError::TooLarge(MAX_SIGNATURE))
+            ));
+        }
+        let url = serve_once(b"small".to_vec(), false).await;
+        let response = http.get(url).send().await.unwrap();
+        assert_eq!(
+            read_capped(response, MAX_SIGNATURE).await.unwrap(),
+            b"small"
+        );
     }
 
     #[test]
