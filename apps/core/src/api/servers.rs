@@ -27,7 +27,8 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},
-    servers::{Phase, ServerError, launch::NotReady, records},
+    installs::{self, ModLoader},
+    servers::{Phase, ServerError, records},
 };
 
 /// Query of GET `/modrinth/v0/servers`. Mirrors Archon.Servers.v0.GetServersOptions.
@@ -428,6 +429,7 @@ impl From<ServerError> for ApiError {
             ServerError::AlreadyRunning
             | ServerError::NotRunning
             | ServerError::Starting
+            | ServerError::Installing
             | ServerError::Unmanaged
             | ServerError::NoPorts
             | ServerError::NotReady(_)
@@ -457,6 +459,7 @@ async fn server(
         Some(Phase::Starting) => ServerPowerState::Starting,
         Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
         Some(Phase::Stopping) => ServerPowerState::Stopping,
+        Some(Phase::Installing) => ServerPowerState::Offline,
         None => match records::last_outcome(&state.db, &row.id).await? {
             Some(records::Outcome::Crashed) => ServerPowerState::Crashed,
             _ => ServerPowerState::Offline,
@@ -480,7 +483,9 @@ async fn server(
         game: Game::Minecraft,
         backup_quota: 0,
         used_backup_quota: 0,
-        status: if row.game_version.is_some() {
+        status: if state.servers.phase(&row.id) == Some(Phase::Installing) {
+            ServerStatus::Installing
+        } else if row.game_version.is_some() {
             ServerStatus::Available
         } else {
             ServerStatus::Installing
@@ -613,8 +618,8 @@ pub async fn power(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /modrinth/v0/servers/{id}/reinstall`: Vanilla only, and never erasing, until step 4.
-/// Answers when the install is done.
+/// `POST /modrinth/v0/servers/{id}/reinstall`: install a loader on a stopped server. Never
+/// erases: `hard` is refused. Answers when the install is done.
 pub async fn reinstall(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -623,20 +628,52 @@ pub async fn reinstall(
     Json(request): Json<ReinstallRequest>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
-    let unsupported =
-        || ApiError::from(ServerError::from(NotReady::Unsupported));
     let ReinstallRequest::Loader {
         loader,
+        loader_version,
         game_version: Some(game_version),
-        ..
     } = request
     else {
-        return Err(unsupported());
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "Install packs through the content routes.",
+        ));
     };
-    if query.hard || !loader.eq_ignore_ascii_case("vanilla") {
-        return Err(unsupported());
-    }
-    state.servers.install_vanilla(&id, &game_version).await?;
+    let Some(loader) = ModLoader::parse(&loader).filter(|_| !query.hard) else {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper, and never erases a server.",
+        ));
+    };
+    let row = records::get(&state.db, &id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let hold = state.servers.hold(&id)?;
+    let installed = installs::install(
+        &state.servers,
+        &hold,
+        &crate::installs::download::client()
+            .map_err(color_eyre::Report::from)
+            .map_err(ServerError::from)?,
+        &row,
+        loader,
+        &game_version,
+        loader_version.as_deref(),
+        false,
+        &|_| {},
+    )
+    .await
+    .map_err(|error| {
+        ApiError::new(ErrorCode::Internal, format!("{error:#}"))
+    })?;
+    records::set_installed(
+        &state.db,
+        &id,
+        loader.as_str(),
+        &game_version,
+        installed.as_deref(),
+    )
+    .await?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }

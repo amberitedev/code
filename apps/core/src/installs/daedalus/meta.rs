@@ -9,7 +9,7 @@
 use daedalus::minecraft::VersionManifest;
 use daedalus::modded::{DUMMY_REPLACE_STRING, LoaderVersion, Manifest};
 
-use crate::installs::ModLoader;
+use crate::installs::{ModLoader, download};
 
 /// Base URL of the Modrinth launcher-meta mirror (matches app-lib's
 /// `MODRINTH_LAUNCHER_META_URL`).
@@ -17,8 +17,8 @@ const LAUNCHER_META_URL: &str = "https://launcher-meta.modrinth.com/";
 
 #[derive(Debug, thiserror::Error)]
 pub enum MetaError {
-    #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Download(#[from] download::DownloadError),
     #[error("unknown game version: {0}")]
     UnknownGameVersion(String),
     #[error("no loader version found for {loader} on {game_version}")]
@@ -30,7 +30,7 @@ pub enum MetaError {
 
 /// The launcher-meta path segment for a loader. Note NeoForge is `neo`, matching
 /// app-lib's `ModLoader::as_meta_str`.
-pub fn meta_loader_str(loader: &ModLoader) -> &'static str {
+pub fn meta_loader_str(loader: ModLoader) -> &'static str {
     match loader {
         ModLoader::Vanilla | ModLoader::Paper => "vanilla",
         ModLoader::Forge => "forge",
@@ -48,13 +48,7 @@ pub async fn fetch_minecraft_manifest(
         "{LAUNCHER_META_URL}minecraft/v{}/manifest.json",
         daedalus::minecraft::CURRENT_FORMAT_VERSION
     );
-    Ok(http
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?)
+    Ok(download::json(http, &url).await?)
 }
 
 /// Fetch a loader's manifest (its supported game versions + loader versions).
@@ -63,13 +57,7 @@ pub async fn fetch_loader_manifest(
     meta_loader: &str,
 ) -> Result<Manifest, MetaError> {
     let url = format!("{LAUNCHER_META_URL}{meta_loader}/v0/manifest.json");
-    Ok(http
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?)
+    Ok(download::json(http, &url).await?)
 }
 
 /// Resolve the daedalus `Version` (game version metadata) for `game_version`.

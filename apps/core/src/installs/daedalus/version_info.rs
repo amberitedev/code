@@ -13,13 +13,14 @@ use daedalus::minecraft::{Version as GameVersion, VersionInfo};
 use daedalus::modded::{self, LoaderVersion, PartialVersionInfo};
 
 use super::dirs::SharedDirs;
+use crate::installs::download;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VersionInfoError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Download(#[from] download::DownloadError),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -58,31 +59,18 @@ pub async fn download_version_info(
         // Fall through and refetch on a corrupt cache entry.
     }
 
-    let mut info: VersionInfo = http
-        .get(&version.url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let mut info: VersionInfo = download::json(http, &version.url).await?;
 
     if let Some(loader) = loader {
-        let partial: PartialVersionInfo = http
-            .get(&loader.url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let partial: PartialVersionInfo =
+            download::json(http, &loader.url).await?;
         info = modded::merge_partial_version(partial, info);
     }
 
     info.id = version_id.clone();
 
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(&path, serde_json::to_vec(&info)?).await?;
+    // Whole, so a server reading it at start never sees half a file.
+    download::write_whole(&path, &serde_json::to_vec(&info)?).await?;
 
     Ok(info)
 }

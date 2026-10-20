@@ -41,6 +41,8 @@ CREATE TABLE servers (
     memory_mb INTEGER NOT NULL,
     -- Advanced override; null means the Java Core manages for this version.
     java_path TEXT,
+    -- The managed Java major the owner chose; null means the one the Minecraft version needs.
+    java_version INTEGER,
     -- The owner accepted the Minecraft EULA for this server, so Core writes eula=true. Step 8
     -- replaces it with one acceptance per Core.
     eula_accepted INTEGER NOT NULL DEFAULT 0
