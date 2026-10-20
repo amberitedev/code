@@ -76,6 +76,11 @@ fn platform_name(loader: ModLoader) -> ContentPlatform {
     }
 }
 
+/// Where a pack install stages its downloads. Uploads and addons stage beside it.
+fn pack_staging(content: &Content, server_id: &str) -> PathBuf {
+    content.paths.staging(server_id).join("pack")
+}
+
 /// Install `loader` on the held server. A server with something installed is copied first,
 /// unless this is a repair (`verify`), which changes no versions.
 pub async fn loader(
@@ -147,7 +152,7 @@ pub async fn pack(
         records::set_pack_error(&content.db, id, Some(&format!("{error:#}")))
             .await?;
     }
-    let _ = tokio::fs::remove_dir_all(content.paths.staging(id)).await;
+    let _ = tokio::fs::remove_dir_all(pack_staging(content, id)).await;
     result
 }
 
@@ -202,12 +207,6 @@ async fn install_pack(
             == Some(platform.game_version.as_str())
         && (platform.loader_version.is_none()
             || server.loader_version == platform.loader_version);
-    if server.game_version.is_some() && !repair {
-        backups::pre_update(&content.paths, id).await?;
-    }
-    if !same_platform || repair {
-        install_platform(content, hold, progress, &platform, repair).await?;
-    }
 
     // Every download first: a failure here changes nothing.
     let folder = Arc::new(Folder::open(&content.paths.server(id))?);
@@ -232,6 +231,13 @@ async fn install_pack(
         .map_err(std::io::Error::other)?
     };
     let staged = stage_downloads(content, id, &index, &steps, progress).await?;
+
+    if server.game_version.is_some() && !repair {
+        backups::pre_update(&content.paths, id).await?;
+    }
+    if !same_platform || repair {
+        install_platform(content, hold, progress, &platform, repair).await?;
+    }
 
     let summary = index.summary.clone();
     records::set_pack(
@@ -383,7 +389,7 @@ async fn stage_downloads(
     steps: &[Step],
     progress: &Progress,
 ) -> Result<HashMap<usize, PathBuf>, Error> {
-    let staging = content.paths.staging(server_id);
+    let staging = pack_staging(content, server_id);
     let _ = tokio::fs::remove_dir_all(&staging).await;
     tokio::fs::create_dir_all(&staging).await?;
     let needed: Vec<usize> = steps
@@ -656,7 +662,7 @@ pub async fn decide(
             if replace {
                 let mut staged = HashMap::new();
                 if let Source::Download(n) = want.source {
-                    let staging = content.paths.staging(server_id);
+                    let staging = pack_staging(content, server_id);
                     tokio::fs::create_dir_all(&staging).await?;
                     let target = staging.join(n.to_string());
                     fetch_index_file(
@@ -672,7 +678,7 @@ pub async fn decide(
                     place(&folder, &archive_path, path, &want.source, &staged)
                         .await;
                 let _ =
-                    tokio::fs::remove_dir_all(content.paths.staging(server_id))
+                    tokio::fs::remove_dir_all(pack_staging(content, server_id))
                         .await;
                 placed?;
             }

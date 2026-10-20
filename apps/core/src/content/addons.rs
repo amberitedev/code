@@ -290,7 +290,7 @@ async fn place_version(
         })
         .cloned()
         .collect();
-    {
+    let placed = {
         let folder = Arc::clone(folder);
         let path = path.clone();
         let old = old.clone();
@@ -304,9 +304,10 @@ async fn place_version(
             Ok(())
         })
         .await
-        .map_err(std::io::Error::other)??;
-    }
+        .map_err(std::io::Error::other)
+    };
     let _ = tokio::fs::remove_file(&staging).await;
+    placed??;
     for row in old {
         // A pack file's row stays, so the pack does not put it back.
         if row.origin == Origin::Added {

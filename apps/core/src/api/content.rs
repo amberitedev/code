@@ -695,7 +695,6 @@ pub async fn add_many(
         Ok::<_, content::Error>(())
     }
     .await;
-    let _ = tokio::fs::remove_dir_all(state.servers.paths().staging(&id)).await;
     result?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
@@ -887,7 +886,6 @@ pub async fn update_many(
         Ok::<_, content::Error>(())
     }
     .await;
-    let _ = tokio::fs::remove_dir_all(state.servers.paths().staging(&id)).await;
     result?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
