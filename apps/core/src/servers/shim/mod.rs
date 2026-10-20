@@ -119,7 +119,17 @@ pub enum Message {
     Stop,
     /// Kill Java now.
     Kill,
+    /// Send `save-off` for a backup. The shim sends `save-on` itself after `seconds`, at most
+    /// [`MAX_SAVE_HOLD_S`], unless Core releases it first; a second hold starts the time again.
+    HoldSaves {
+        seconds: u64,
+    },
+    /// Send `save-on` now, ending a hold.
+    ReleaseSaves,
 }
+
+/// The longest autosave stays off for a backup, whatever Core asked.
+pub const MAX_SAVE_HOLD_S: u64 = 600;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Envelope {

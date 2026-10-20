@@ -31,7 +31,6 @@ use crate::{
         events::{ContentPlatform, InstallProgressKey},
         properties::PropertiesFields,
     },
-    backups,
     installs::{
         self, ModLoader,
         daedalus::SharedDirs,
@@ -96,7 +95,7 @@ pub async fn loader(
         .await?
         .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
     if server.game_version.is_some() && !verify {
-        backups::pre_update(&content.paths, id).await?;
+        content.backups.pre_update(id).await?;
     }
     let key = InstallProgressKey::Platform {
         platform: platform_name(loader),
@@ -234,7 +233,7 @@ async fn install_pack(
     let staged = stage_downloads(content, id, &index, &steps, progress).await?;
 
     if server.game_version.is_some() && !repair {
-        backups::pre_update(&content.paths, id).await?;
+        content.backups.pre_update(id).await?;
     }
     if !same_platform || repair {
         install_platform(content, hold, progress, &platform, repair).await?;

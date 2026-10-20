@@ -9,7 +9,7 @@
 pub mod access;
 pub mod activity;
 pub mod backend;
-mod backups;
+pub mod backups;
 pub mod content;
 pub mod error;
 pub mod events;
@@ -55,6 +55,7 @@ pub struct AppState {
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::Access>,
     pub content: Arc<crate::content::Content>,
+    pub backups: Arc<crate::backups::Backups>,
     pub uploads: files::Uploads,
 }
 
@@ -95,6 +96,31 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(startup::get_v1).patch(startup::patch_v1),
         )
         .route("/servers/{id}/java", put(startup::set_java_path))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/backups-queue",
+            get(backups::list).post(backups::create),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/delete-many", post(backups::delete_many))
+        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}", delete(backups::delete))
+        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}/restore", post(backups::restore))
+        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}/retry", post(backups::retry))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/backups-queue/history/{kind}/{operation}/{action}",
+            post(backups::history),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/select-download", get(backups::select_download))
+        .route(
+            "/servers/{id}/backups/schedule",
+            get(backups::get_schedule).put(backups::set_schedule),
+        )
+        .route(
+            "/servers/{id}/modrinth/v0/backups/{bid}/download/authorize",
+            get(backups::authorize_backup),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/files/download-full-zip/authorize",
+            get(backups::authorize_world),
+        )
         .route(
             "/v1/servers/{id}/worlds/{wid}/properties",
             get(properties::get).patch(properties::patch),
@@ -155,6 +181,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/servers/{id}/v1/fs/unarchive", post(files::unarchive))
         .route("/servers/{id}/v1/worlds/{wid}/files/zip", post(files::zip))
+        // Downloads stream for as long as they take.
+        .route(
+            "/servers/{id}/modrinth/v0/backups/{bid}/download",
+            get(backups::download_backup),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/files/download-full-zip",
+            get(backups::download_world),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap (`content::MAX_UPLOAD`).
         .route(

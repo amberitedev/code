@@ -74,6 +74,8 @@ mod tests {
                 "access",
                 "activity",
                 "backend_owed",
+                "backup_operations",
+                "backup_schedules",
                 "backups",
                 "content_files",
                 "core",

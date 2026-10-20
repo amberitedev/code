@@ -486,6 +486,21 @@ impl Servers {
         .await
     }
 
+    /// Turn autosave off for a backup for at most `seconds`; the shim turns it back on then if
+    /// [`Servers::release_saves`] never comes.
+    pub async fn hold_saves(
+        &self,
+        id: &str,
+        seconds: u64,
+    ) -> Result<(), ServerError> {
+        self.tell(id, Message::HoldSaves { seconds }).await
+    }
+
+    /// Turn autosave back on after [`Servers::hold_saves`].
+    pub async fn release_saves(&self, id: &str) -> Result<(), ServerError> {
+        self.tell(id, Message::ReleaseSaves).await
+    }
+
     /// Stop the server, wait for its shim to exit, and start it again.
     pub async fn restart(&self, id: &str) -> Result<(), ServerError> {
         self.stop(id).await?;
@@ -525,9 +540,13 @@ impl Servers {
         self.deleted.lock().expect("not poisoned").remove(id);
     }
 
-    /// Remove a held server's world and run files, once its row is gone.
+    /// Remove a held server's world, run files, and backups, once its row is gone.
     pub fn delete_folders(&self, id: &str) -> Result<(), ServerError> {
-        for folder in [self.paths.server(id), self.paths.run(id)] {
+        for folder in [
+            self.paths.server(id),
+            self.paths.run(id),
+            self.paths.backups().join(id),
+        ] {
             match std::fs::remove_dir_all(&folder) {
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                     return Err(error.into());

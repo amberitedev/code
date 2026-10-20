@@ -84,16 +84,24 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
     .await?;
     let access = Arc::new(access::Access::new(keys));
     let servers = Servers::open(paths.clone(), db.clone()).await?;
+    let backups = crate::backups::Backups::open(
+        paths.clone(),
+        db.clone(),
+        Arc::clone(&servers),
+    )
+    .await?;
     let content = crate::content::Content::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
+        Arc::clone(&backups),
     )?;
     let state = Arc::new(api::AppState {
         db: db.clone(),
         servers,
         access: Arc::clone(&access),
         content,
+        backups,
         uploads: api::files::Uploads::default(),
     });
     let router = api::router(Arc::clone(&state));

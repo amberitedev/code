@@ -101,6 +101,9 @@ pub enum Action {
     BackupRestored {
         backup_id: Uuid,
     },
+    BackupDeleted {
+        backup_id: Uuid,
+    },
     BackupDownloaded {
         backup_id: Uuid,
     },
