@@ -143,7 +143,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 
 		const url = this.buildUrl(path, baseUrl, options.version)
 
-		const defaultHeaders = await this.buildDefaultHeaders()
+		const defaultHeaders = await this.defaultHeadersFor(options)
 
 		// Merge options with defaults
 		const mergedOptions: RequestOptions = {
@@ -192,7 +192,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		}
 
 		const url = this.buildUrl(path, baseUrl, options.version)
-		const defaultHeaders = await this.buildDefaultHeaders()
+		const defaultHeaders = await this.defaultHeadersFor(options)
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
 			retry: false,
@@ -378,6 +378,19 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			startTime: Date.now(),
 			metadata,
 		}
+	}
+
+	/** The default headers for one request, without an inherited `Authorization` when it asks. */
+	protected async defaultHeadersFor(
+		options: Pick<RequestOptions, 'ownAuthorization'>,
+	): Promise<Record<string, string>> {
+		const headers = await this.buildDefaultHeaders()
+		if (options.ownAuthorization) {
+			for (const name of Object.keys(headers)) {
+				if (name.toLowerCase() === 'authorization') delete headers[name]
+			}
+		}
+		return headers
 	}
 
 	/**

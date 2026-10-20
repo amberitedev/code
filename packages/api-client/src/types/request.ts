@@ -75,6 +75,14 @@ export type RequestOptions = {
 	 */
 	skipAuth?: boolean
 
+	/**
+	 * Send only the `Authorization` header this request sets itself. An `Authorization` default
+	 * from `ClientConfig.headers`, in any letter case, is left off. Core requests set it, with
+	 * `skipAuth`, so the account token never reaches a Core.
+	 * @default false
+	 */
+	ownAuthorization?: boolean
+
 	/** Explicit source for public creator profiles when accounts are self-hosted. */
 	accountSource?: 'modrinth' | 'self-hosted'
 

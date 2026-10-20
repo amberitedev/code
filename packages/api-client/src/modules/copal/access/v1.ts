@@ -118,9 +118,10 @@ export class CopalAccessV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Call a Core route with this device's session, or none for sign-in. `skipAuth` is always set,
-	 * so no auth feature ever attaches the account token to a Core. The first path segment goes in
-	 * `version`, which is how the client builds a URL on a custom base.
+	 * Call a Core route with this device's session, or none for sign-in. The account token never
+	 * goes along: `skipAuth` keeps every auth feature off, and `ownAuthorization` leaves off an
+	 * `Authorization` from the client's default headers. The first path segment goes in `version`,
+	 * which is how the client builds a URL on a custom base.
 	 */
 	private core<T>(
 		url: string,
@@ -138,6 +139,7 @@ export class CopalAccessV1Module extends AbstractModule {
 			version,
 			retry: false,
 			skipAuth: true,
+			ownAuthorization: true,
 			headers: {
 				...(token === null ? {} : { Authorization: `Bearer ${token}` }),
 				...(ticket ? { [TICKET_HEADER]: ticket } : {}),
