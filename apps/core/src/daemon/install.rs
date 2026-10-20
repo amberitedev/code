@@ -101,12 +101,14 @@ impl InstallRecord {
 /// `copal install`. `owner` names the account that may use the CLI; by default the one that
 /// ran install (through `sudo`, the one that ran `sudo`). Refuses while a server runs, like
 /// uninstall: it replaces the binary shims run from and resets the accounts' passwords.
-pub fn install(owner: Option<&str>) -> Result<()> {
+pub fn install(owner: Option<&str>, allow_downgrade: bool) -> Result<()> {
     require_admin()?;
     refuse_data_dir_override("install")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
-    refuse_older_than_active(&paths)?;
+    if !allow_downgrade {
+        refuse_older_than_active(&paths)?;
+    }
 
     // Core must not run while its binary is replaced and its folders change hands. The binary
     // goes first, so a replacement that fails has not touched any account or password.
@@ -120,7 +122,8 @@ pub fn install(owner: Option<&str>) -> Result<()> {
     };
     println!("Program: {}", exe.display());
     // The program just installed runs, not a version an earlier install updated to. It is at
-    // least as new as that one (see `refuse_older_than_active`).
+    // least as new as that one (see `refuse_older_than_active`), unless the owner allowed the
+    // downgrade.
     crate::update::versions::save(&paths, None)?;
     let created = accounts::create()?;
     println!("Accounts: {CORE} and {SERVERS}, without interactive sign-in");
@@ -225,7 +228,7 @@ fn refuse_older_than_active(paths: &Paths) -> Result<()> {
             .is_ok_and(|active| active > current)
     {
         bail!(
-            "Core has updated itself to {}, newer than this copal ({current}). Run install with copal {} or newer",
+            "Core has updated itself to {}, newer than this copal ({current}), and may have changed its database past what {current} can open. Run install with copal {} or newer, or pass --allow-downgrade to install {current} anyway",
             state.active,
             state.active
         );

@@ -32,6 +32,9 @@ enum Command {
         /// The account that may use the copal CLI. Defaults to the one running install.
         #[arg(long)]
         owner: Option<String>,
+        /// Install this copal even when Core has updated itself to a newer version.
+        #[arg(long)]
+        allow_downgrade: bool,
     },
     /// Remove the service, the accounts, and the firewall rules. Run as admin.
     Uninstall {
@@ -70,9 +73,10 @@ fn main() -> color_eyre::Result<()> {
             .build()
     };
     match Cli::parse().command {
-        Command::Install { owner } => {
-            daemon::install::install(owner.as_deref())
-        }
+        Command::Install {
+            owner,
+            allow_downgrade,
+        } => daemon::install::install(owner.as_deref(), allow_downgrade),
         Command::Uninstall { remove_data } => {
             daemon::install::uninstall(remove_data)
         }
