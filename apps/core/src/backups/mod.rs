@@ -21,11 +21,20 @@ pub async fn pre_update(paths: &Paths, server_id: &str) -> io::Result<PathBuf> {
     tokio::task::spawn_blocking(move || {
         let server = Folder::open(&source)?;
         let level = server.level_name();
-        let destination = folder.join(format!(
-            "pre-update-{}",
-            chrono::Utc::now().format("%Y%m%dT%H%M%S%.3f")
-        ));
-        std::fs::create_dir_all(&destination)?;
+        // Names sort by time; two copies in the same instant get the next free name.
+        std::fs::create_dir_all(&folder)?;
+        let mut stamp =
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+        let destination = loop {
+            let candidate = folder.join(format!("pre-update-{stamp:020}"));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    stamp += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         for world in [
             level.clone(),
             format!("{level}_nether"),
