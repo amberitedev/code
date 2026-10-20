@@ -3,8 +3,8 @@
 //! - `GET /update`: [`UpdateStatus`].
 //! - `PATCH /update`: [`UpdateSettings`] in, [`UpdateStatus`] out.
 //! - `POST /update/check`: look up the newest release now. [`UpdateStatus`].
-//! - `POST /update/apply`: dangerous. [`ApplyUpdate`] in, [`Restarting`] out; Core restarts
-//!   into the new version right after answering.
+//! - `POST /update/apply`: dangerous. [`ApplyUpdate`] in (`{}` for the usual update),
+//!   [`Restarting`] out; Core restarts into the new version right after answering.
 //! - `POST /update/rollback`: dangerous. Back to the previous version, with the database from
 //!   before the update. [`Restarting`].
 
@@ -56,7 +56,7 @@ pub struct UpdateSettings {
     pub auto_update: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct ApplyUpdate {
     /// Install the channel's release even when it is older. Only the copal CLI may.
     #[serde(default)]
@@ -121,9 +121,8 @@ pub async fn check(
 pub async fn apply(
     Dangerous(caller): Dangerous,
     State(state): State<Arc<AppState>>,
-    request: Option<Json<ApplyUpdate>>,
+    Json(request): Json<ApplyUpdate>,
 ) -> Result<Json<Restarting>, ApiError> {
-    let request = request.map(|Json(request)| request).unwrap_or_default();
     if request.allow_downgrade && caller != Caller::Local {
         return Err(UpdateError::DowngradeRemote.into());
     }

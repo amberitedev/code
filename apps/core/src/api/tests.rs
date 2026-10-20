@@ -581,7 +581,13 @@ async fn updating_core_is_the_owners_dangerous_action() {
     assert_eq!(update["auto_update"], false);
 
     let (status, error) = core
-        .call(Method::POST, "/update/apply", Some(&owner), None, None)
+        .call(
+            Method::POST,
+            "/update/apply",
+            Some(&owner),
+            None,
+            Some(json!({})),
+        )
         .await;
     assert_eq!(
         (status, error["error"].as_str()),
