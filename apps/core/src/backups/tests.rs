@@ -223,3 +223,47 @@ async fn a_download_link_works_once() {
     assert_eq!(grant.target, Target::World);
     assert!(setup.backups.take(&token).is_none());
 }
+
+#[tokio::test]
+async fn a_cancelled_operation_never_runs_and_a_claimed_one_cannot_be_cancelled()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::new(dir.path());
+    folders::create(&paths, None).unwrap();
+    let db = db::memory().await;
+    // No engine runs here, so nothing claims the operations but the test.
+    let servers = Servers::open(paths, db.clone()).await.unwrap();
+    let server = servers.create("A").await.unwrap().id;
+    let queue = |name: &'static str| {
+        let db = db.clone();
+        let server = server.clone();
+        async move {
+            let backup = records::Backup {
+                id: Uuid::new_v4().to_string(),
+                server_id: server,
+                name: name.into(),
+                kind: Kind::Manual,
+                state: records::State::Queued,
+                created_at: now(),
+            };
+            let id = records::queue_backup(&db, &backup, None).await.unwrap();
+            records::operation(&db, id).await.unwrap().unwrap()
+        }
+    };
+
+    let cancelled = queue("cancelled").await;
+    assert!(records::cancel(&db, &server, cancelled.id).await.unwrap());
+    assert!(!records::start(&db, &cancelled).await.unwrap());
+
+    let claimed = queue("claimed").await;
+    assert!(records::start(&db, &claimed).await.unwrap());
+    assert!(!records::cancel(&db, &server, claimed.id).await.unwrap());
+    assert_eq!(
+        records::operation(&db, claimed.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        OpState::Running
+    );
+}

@@ -173,21 +173,33 @@ pub async fn operations(
     .await
 }
 
-/// Mark an operation, and for a create its backup, as running.
-pub async fn start(db: &SqlitePool, operation: &Operation) -> sqlx::Result<()> {
+/// Claim a queued operation for running: mark it, and for a create its backup, as running.
+/// `false` when it is no longer queued (cancelled meanwhile); it must not run then.
+pub async fn start(
+    db: &SqlitePool,
+    operation: &Operation,
+) -> sqlx::Result<bool> {
     let mut tx = db.begin().await?;
-    sqlx::query("UPDATE backup_operations SET state = 'running', started_at = ? WHERE id = ?")
-        .bind(now())
-        .bind(operation.id)
-        .execute(&mut *tx)
-        .await?;
+    let claimed = sqlx::query(
+        "UPDATE backup_operations SET state = 'running', started_at = ?          WHERE id = ? AND state = 'queued'",
+    )
+    .bind(now())
+    .bind(operation.id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        == 1;
+    if !claimed {
+        return Ok(false);
+    }
     if operation.kind == OpKind::Create {
         sqlx::query("UPDATE backups SET state = 'running' WHERE id = ?")
             .bind(&operation.backup_id)
             .execute(&mut *tx)
             .await?;
     }
-    tx.commit().await
+    tx.commit().await?;
+    Ok(true)
 }
 
 /// Record how an operation ended. A create's backup becomes done with its size, or failed.
@@ -332,29 +344,32 @@ pub async fn ack(
     Ok(result.rows_affected() == 1)
 }
 
-/// Cancel a queued operation. A cancelled create takes its backup with it.
+/// Cancel a queued operation, only while it is still queued: one the engine claimed runs. A
+/// cancelled create takes its backup with it.
 pub async fn cancel(
     db: &SqlitePool,
     server_id: &str,
     id: i64,
 ) -> sqlx::Result<bool> {
-    let Some(operation) = operation(db, id)
-        .await?
-        .filter(|op| op.server_id == server_id && op.state == OpState::Queued)
-    else {
+    let mut tx = db.begin().await?;
+    let cancelled: Option<(String, OpKind)> = sqlx::query_as(
+        "UPDATE backup_operations SET state = 'cancelled', ended_at = ?          WHERE id = ? AND server_id = ? AND state = 'queued' RETURNING backup_id, kind",
+    )
+    .bind(now())
+    .bind(id)
+    .bind(server_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((backup_id, kind)) = cancelled else {
         return Ok(false);
     };
-    if operation.kind == OpKind::Create {
-        delete_backup(db, &operation.backup_id).await?;
-    } else {
-        sqlx::query(
-            "UPDATE backup_operations SET state = 'cancelled', ended_at = ? WHERE id = ?",
-        )
-        .bind(now())
-        .bind(id)
-        .execute(db)
-        .await?;
+    if kind == OpKind::Create {
+        sqlx::query("DELETE FROM backups WHERE id = ?")
+            .bind(&backup_id)
+            .execute(&mut *tx)
+            .await?;
     }
+    tx.commit().await?;
     Ok(true)
 }
 

@@ -323,10 +323,15 @@ impl Backups {
     }
 
     async fn run(&self, operation: Operation) {
-        if let Err(error) = records::start(&self.db, &operation).await {
-            warn!(%error, "could not start a backup operation");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            return;
+        match records::start(&self.db, &operation).await {
+            Ok(true) => {}
+            // Cancelled since it was read.
+            Ok(false) => return,
+            Err(error) => {
+                warn!(%error, "could not start a backup operation");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                return;
+            }
         }
         let task = match operation.kind {
             OpKind::Create => BackupTask::Create,
