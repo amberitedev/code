@@ -13,6 +13,7 @@ export class ArchonServersV1Module extends AbstractModule {
 			api: 'archon',
 			version: 'local',
 			method: 'DELETE',
+			dangerous: true,
 		})
 	}
 

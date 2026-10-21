@@ -48,6 +48,14 @@ describe('self-hosted account routing through the complete client chain', () => 
 			expect(new Headers(request.options.headers).has('authorization')).toBe(false)
 		}
 	})
+	it('sends a Core no account token: its own session is added outside the page', async () => {
+		const request = await prepared('/servers', {
+			api: 'http://127.0.0.1:5000',
+			version: 'modrinth/v0',
+		})
+		expect(request.url).toBe('http://127.0.0.1:5000/modrinth/v0/servers')
+		expect(new Headers(request.options.headers).has('authorization')).toBe(false)
+	})
 	it('retains the explicit token used to bootstrap login', async () => {
 		const request = await prepared('/user', {
 			skipAuth: true,

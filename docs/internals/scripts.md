@@ -29,8 +29,8 @@ already in the worktree.
 - `vp run dev:backend`: Starts the Worker and account website without Apps.
 - `vp run dev:app 1 2`: Starts only those App scenarios and their shared frontend. Start
   `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
-- `vp run dev:core`: Starts only Core. It checks account tokens with the Worker, so start
-  `dev:backend` too.
+- `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
+  against the Worker's public key, so start `dev:backend` too.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -38,7 +38,9 @@ Scenario numbers passed after the task name override `defaultScenarios` in `dev.
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
-packaged build does not allow yet.
+packaged build does not allow yet. The App signs in to a Core with a ticket on its first request
+and keeps that session in the OS keychain; set `AMBERITE_CORE_PROXY_LOG=1` before starting an App
+to log the head of every request its Core proxy sends, with the session token left out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
 shared files persist in `.data/backend`.

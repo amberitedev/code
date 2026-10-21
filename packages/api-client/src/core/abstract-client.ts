@@ -6,6 +6,7 @@ import type { UploadMetadata, UploadProgress, UploadRequestOptions } from '../ty
 import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
 import type { AbstractSyncClient } from './abstract-sync'
+import { CoreSessionFeature } from '../features/core-session'
 import { AbstractUploadClient } from './abstract-upload-client'
 import type { AbstractWebSocketClient } from './abstract-websocket'
 import { ModrinthApiError, ModrinthServerError } from './errors'
@@ -46,6 +47,11 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return this.config.connectCore
 	}
 
+	/** See `ClientConfig.coreSessions`. */
+	public get coreSessions(): ClientConfig['coreSessions'] {
+		return this.config.coreSessions
+	}
+
 	public readonly copal!: InferredClientModules['copal']
 	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
@@ -65,6 +71,8 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			...config,
 		}
 		this.features = config.features ?? []
+		// Innermost, so a ticket is fetched for each attempt as it is sent.
+		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
 	}
 

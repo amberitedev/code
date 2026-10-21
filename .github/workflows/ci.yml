@@ -128,4 +128,5 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo binstall --no-confirm --force cargo-shear && cargo shear
       - run: cargo check -p theseus_gui --features browser-bridge --locked
+      - run: cargo test -p theseus_gui --bin theseus_gui --locked cores
       - run: cargo test -p amberite-browser-bridge --locked

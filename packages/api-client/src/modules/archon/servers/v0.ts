@@ -92,11 +92,16 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id/ws
 	 */
 	public async getWebSocketAuth(serverId: string): Promise<Archon.Websocket.v0.WSAuth> {
-		return this.client.request<Archon.Websocket.v0.WSAuth>(`/servers/${serverId}/ws`, {
+		const auth = await this.client.request<Archon.Websocket.v0.WSAuth>(`/servers/${serverId}/ws`, {
 			api: 'archon',
 			version: 'modrinth/v0',
 			method: 'GET',
 		})
+		if (!this.client.selfHostedHosting) return auth
+		// A Core names the address it was reached at, without a scheme. That is the App's local
+		// proxy to it, which speaks plain HTTP, so the socket goes there over plain ws.
+		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
+		return { ...auth, url: `${base.replace(/^http/, 'ws')}/servers/${serverId}/ws` }
 	}
 
 	/**

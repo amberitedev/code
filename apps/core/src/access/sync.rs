@@ -61,6 +61,21 @@ pub async fn owe(
     Ok(())
 }
 
+/// Forget the owner and everything that came from them, in the caller's transaction: their key,
+/// owed calls, every session, and every role they gave. Send [`Changed::Everyone`] once it
+/// commits. Used when the backend says this Core was removed, and by `DELETE /pairing`.
+pub async fn unpair(conn: &mut SqliteConnection) -> sqlx::Result<()> {
+    for statement in [
+        "UPDATE core SET owner_user_id = NULL, backend_key = NULL WHERE id = 1",
+        "DELETE FROM backend_owed",
+        "DELETE FROM sessions",
+        "DELETE FROM access",
+    ] {
+        sqlx::query(statement).execute(&mut *conn).await?;
+    }
+    Ok(())
+}
+
 /// Where the App reaches this Core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Addresses {
@@ -258,6 +273,10 @@ impl Sync {
         addresses: &watch::Receiver<Addresses>,
     ) -> Lost {
         loop {
+            // The owner removed this Core from its account through the API: pair again.
+            if matches!(pairing::paired(&self.db).await, Ok(false)) {
+                return Lost::Removed;
+            }
             let wait = match self.send_due(key, addresses).await {
                 Ok(wait) => wait,
                 Err(lost) => return lost,
@@ -418,14 +437,7 @@ impl Sync {
     async fn unpair(&self) {
         let cleared = async {
             let mut tx = self.db.begin().await?;
-            for statement in [
-                "UPDATE core SET owner_user_id = NULL, backend_key = NULL WHERE id = 1",
-                "DELETE FROM backend_owed",
-                "DELETE FROM sessions",
-                "DELETE FROM access",
-            ] {
-                sqlx::query(statement).execute(&mut *tx).await?;
-            }
+            unpair(&mut tx).await?;
             tx.commit().await
         };
         match cleared.await {
