@@ -3,11 +3,19 @@
 //!
 //! The console is untrusted text: a player's chat or a mod can print anything. Join and leave
 //! lines count only when the whole message after the log header matches, so chat cannot fake
-//! them, and `list` corrects the count every few minutes. Freeze detection sends
-//! `scoreboard players get copal <word>` with a random word. Minecraft answers that the objective
-//! `<word>` does not exist, which nothing else can print without knowing the word.
+//! them, and `list` corrects the count every few minutes. A list line counts only while Core's
+//! own `list` waits for its answer. Freeze detection sends `scoreboard players get copal <word>`
+//! with a random word. Minecraft answers `Unknown scoreboard objective '<word>'`, which nothing
+//! else can print without knowing the word. Each word answers once, and only soon after it was
+//! sent.
+//!
+//! All of this is still the console's word, so what Core does with it is advisory: a smart
+//! restart warns players first (see `restarts`).
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 
 /// How often Core asks a server for the random word.
 pub const PROBE_EVERY: Duration = Duration::from_secs(60);
@@ -15,6 +23,10 @@ pub const PROBE_EVERY: Duration = Duration::from_secs(60);
 pub const FROZEN_AFTER: Duration = Duration::from_secs(180);
 /// How often Core asks for `list`, to correct what join and leave lines said.
 pub const LIST_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How long after asking a `list` answer counts.
+const LIST_ANSWER_WITHIN: Duration = Duration::from_secs(10);
+/// How long after sending a probe word its answer counts.
+const PROBE_ANSWER_WITHIN: Duration = PROBE_EVERY;
 /// The most players Core tracks, whatever the console claims.
 const MAX_PLAYERS: usize = 1000;
 
@@ -30,6 +42,8 @@ pub struct Insight {
     pub frozen: bool,
     /// The server printed its "Done" line.
     pub ready: bool,
+    /// When Core last sent `list`, until its answer arrives.
+    pub(super) list_asked: Option<Instant>,
 }
 
 /// One console line, as Core reads it.
@@ -57,9 +71,53 @@ pub fn word() -> String {
         .collect()
 }
 
+/// The probe words sent and not answered yet.
+#[derive(Debug, Default)]
+pub struct Probes {
+    sent: Vec<(String, Instant)>,
+}
+
+impl Probes {
+    /// A probe command with a new word, sent `at`.
+    pub fn send(&mut self, at: Instant) -> String {
+        self.sent.retain(|(_, sent)| {
+            at.duration_since(*sent) <= PROBE_ANSWER_WITHIN
+        });
+        let word = word();
+        let command = probe(&word);
+        self.sent.push((word, at));
+        command
+    }
+
+    /// Whether `line`, read `at`, is Minecraft's answer to a word still waiting. The word is
+    /// used up.
+    pub fn answered(&mut self, line: &str, at: Instant) -> bool {
+        let Some(word) = message(line)
+            .and_then(|message| {
+                message.strip_prefix("Unknown scoreboard objective '")
+            })
+            .and_then(|rest| rest.strip_suffix('\''))
+        else {
+            return false;
+        };
+        let Some(index) = self.sent.iter().position(|(sent, when)| {
+            sent == word && at.duration_since(*when) <= PROBE_ANSWER_WITHIN
+        }) else {
+            return false;
+        };
+        self.sent.swap_remove(index);
+        true
+    }
+}
+
 impl Insight {
-    /// Take in one console line.
-    pub fn read(&mut self, line: &str) {
+    /// Core sent `list` `at`: its answer counts for a short while.
+    pub fn ask_list(&mut self, at: Instant) {
+        self.list_asked = Some(at);
+    }
+
+    /// Take in one console line, read `at`.
+    pub fn read(&mut self, line: &str, at: Instant) {
         match classify(line) {
             Line::Ready => self.ready = true,
             Line::Joined(name) if self.players.len() < MAX_PLAYERS => {
@@ -68,21 +126,16 @@ impl Insight {
             Line::Left(name) => {
                 self.players.remove(&name);
             }
-            Line::List(names) => {
+            Line::List(names)
+                if self.list_asked.take().is_some_and(|asked| {
+                    at.duration_since(asked) <= LIST_ANSWER_WITHIN
+                }) =>
+            {
                 self.players = names.into_iter().take(MAX_PLAYERS).collect();
                 self.players_checked = true;
             }
             _ => {}
         }
-    }
-
-    /// Whether `line` answers a probe for one of `words`, sent in this run.
-    pub fn answers(line: &str, words: &[String]) -> bool {
-        message(line).is_some_and(|message| {
-            words
-                .iter()
-                .any(|word| message.contains(&format!("'{word}'")))
-        })
     }
 
     /// Mark the server frozen when it answered before and not since `FROZEN_AFTER`.
@@ -167,21 +220,25 @@ mod tests {
 
     #[test]
     fn joins_leaves_and_list_are_read() {
+        let at = Instant::now();
         let mut insight = Insight::default();
-        insight.read(&line("Steve joined the game"));
-        insight.read(&line("Alex joined the game"));
-        insight.read(&line("Steve left the game"));
+        insight.read(&line("Steve joined the game"), at);
+        insight.read(&line("Alex joined the game"), at);
+        insight.read(&line("Steve left the game"), at);
         assert_eq!(insight.players, BTreeSet::from(["Alex".into()]));
         assert!(!insight.players_checked);
-        insight.read(&line(
-            "There are 2 of a max of 20 players online: Alex, Notch",
-        ));
+        insight.ask_list(at);
+        insight.read(
+            &line("There are 2 of a max of 20 players online: Alex, Notch"),
+            at,
+        );
         assert_eq!(
             insight.players,
             BTreeSet::from(["Alex".into(), "Notch".into()])
         );
         assert!(insight.players_checked);
-        insight.read(&line("There are 0 of a max of 20 players online: "));
+        insight.ask_list(at);
+        insight.read(&line("There are 0 of a max of 20 players online: "), at);
         assert!(insight.players.is_empty());
         // Forge puts the logger name after the thread.
         assert_eq!(
@@ -198,6 +255,7 @@ mod tests {
 
     #[test]
     fn hostile_console_lines_are_not_believed() {
+        let at = Instant::now();
         for hostile in [
             // Chat, the server's say, and a mod's own logger name in the message.
             line("<Mallory> Steve joined the game"),
@@ -217,31 +275,88 @@ mod tests {
             line("There are x of a max of 20 players online: Alex"),
         ] {
             let mut insight = Insight::default();
-            insight.read(&hostile);
+            insight.read(&hostile, at);
             assert_eq!(insight, Insight::default(), "{hostile}");
         }
         // Lines are capped long before they reach here, but a long one still does nothing.
         let mut insight = Insight::default();
-        insight.read(&line(&"A".repeat(70_000)));
+        insight.read(&line(&"A".repeat(70_000)), at);
         assert_eq!(insight, Insight::default());
     }
 
     #[test]
-    fn only_the_random_word_answers_a_probe() {
-        let words = vec![word(), word()];
-        assert_eq!(words[0].len(), 10);
-        assert_ne!(words[0], words[1]);
-        let answer =
-            line(&format!("Unknown scoreboard objective '{}'", words[1]));
-        assert!(Insight::answers(&answer, &words));
-        // Someone guessing, a player typing the word in chat without the header, or a stale word.
-        assert!(!Insight::answers(
-            &line("Unknown scoreboard objective 'aaaaaaaaaa'"),
-            &words
-        ));
-        assert!(!Insight::answers(&format!("'{}'", words[0]), &words));
-        assert!(!Insight::answers(&answer, &words[..1]));
-        assert_eq!(probe("abc"), "scoreboard players get copal abc");
+    fn a_list_counts_only_as_the_answer_to_cores_own() {
+        let at = Instant::now();
+        let empty = line("There are 0 of a max of 20 players online: ");
+        let mut insight = Insight::default();
+        insight.read(&line("Steve joined the game"), at);
+        // Printed by a mod with nobody asking: not believed.
+        insight.read(&empty, at);
+        assert!(!insight.players_checked);
+        assert_eq!(insight.players.len(), 1);
+        // An answer that comes too late does not count, and uses up the question.
+        insight.ask_list(at);
+        insight.read(&empty, at + Duration::from_secs(11));
+        assert!(!insight.players_checked);
+        insight.read(&empty, at + Duration::from_secs(12));
+        assert!(!insight.players_checked);
+        // One answer per question.
+        insight.ask_list(at);
+        insight.read(&empty, at + Duration::from_secs(1));
+        assert!(insight.players_checked && insight.players.is_empty());
+        insight.read(&line("Steve joined the game"), at);
+        insight.read(&empty, at + Duration::from_secs(2));
+        assert_eq!(insight.players.len(), 1);
+    }
+
+    /// The word in a probe command.
+    fn word_of(command: &str) -> &str {
+        command.rsplit(' ').next().unwrap()
+    }
+
+    fn answer(word: &str) -> String {
+        line(&format!("Unknown scoreboard objective '{word}'"))
+    }
+
+    #[test]
+    fn only_the_random_word_answers_a_probe_and_only_once() {
+        let at = Instant::now();
+        let mut probes = Probes::default();
+        let first = probes.send(at);
+        let second = probes.send(at);
+        assert!(first.starts_with("scoreboard players get copal "));
+        let (first, second) = (word_of(&first), word_of(&second));
+        assert_eq!(first.len(), 10);
+        assert_ne!(first, second);
+        // Someone guessing, the word in chat or without the header, or the word in another
+        // message.
+        for wrong in [
+            answer("aaaaaaaaaa"),
+            line(&format!("<Mallory> Unknown scoreboard objective '{first}'")),
+            format!("Unknown scoreboard objective '{first}'"),
+            line(&format!("I saw '{first}'")),
+            line(&format!("Unknown scoreboard objective '{first}' indeed")),
+        ] {
+            assert!(!probes.answered(&wrong, at), "{wrong}");
+        }
+        assert!(probes.answered(&answer(second), at));
+        assert!(!probes.answered(&answer(second), at), "a word answers once");
+        assert!(probes.answered(&answer(first), at));
+    }
+
+    #[test]
+    fn a_late_answer_does_not_count() {
+        let at = Instant::now();
+        let mut probes = Probes::default();
+        let command = probes.send(at);
+        let word = word_of(&command);
+        assert!(!probes.answered(&answer(word), at + Duration::from_secs(61)));
+        // Sending again forgets the words that can no longer count.
+        let command = probes.send(at);
+        let late = at + Duration::from_secs(120);
+        probes.send(late);
+        assert!(!probes.answered(&answer(word_of(&command)), late));
+        assert_eq!(probes.sent.len(), 1);
     }
 
     #[test]
