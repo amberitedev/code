@@ -1027,3 +1027,48 @@ async fn updating_core_is_the_owners_dangerous_action() {
     let (status, _) = core.send(request).await;
     assert_eq!(status, StatusCode::CONFLICT, "nothing to roll back to");
 }
+
+#[tokio::test]
+async fn removing_the_core_from_its_account_ends_every_session() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let editor = core.sign_in("editor").await;
+    let remove = |token, ticket| {
+        core.call(Method::DELETE, "/pairing", Some(token), ticket, None)
+    };
+    let theirs = core.ticket("editor");
+    assert_eq!(
+        remove(&editor, Some(&theirs)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(remove(&owner, None).await.0, StatusCode::UNAUTHORIZED);
+
+    let mut changes = core.state.access.changed.subscribe();
+    let ticket = core.ticket("owner");
+    assert_eq!(
+        remove(&owner, Some(&ticket)).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(changes.recv().await.unwrap(), access::Changed::Everyone);
+    for (what, sql) in [
+        (
+            "owner",
+            "SELECT COUNT(*) FROM core WHERE owner_user_id IS NOT NULL",
+        ),
+        ("sessions", "SELECT COUNT(*) FROM sessions"),
+        ("roles", "SELECT COUNT(*) FROM access"),
+    ] {
+        assert_eq!(core.count(sql).await, 0, "{what} left");
+    }
+    assert_eq!(
+        core.count(
+            "SELECT COUNT(*) FROM activity WHERE action = 'core_removed'"
+        )
+        .await,
+        1
+    );
+    let (status, _) = core
+        .call(Method::GET, "/access/me", Some(&owner), None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

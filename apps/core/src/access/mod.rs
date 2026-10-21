@@ -259,7 +259,8 @@ impl FromRequestParts<Arc<AppState>> for Caller {
 }
 
 /// The owner doing something dangerous: inviting, removing, or changing a role; deleting a
-/// server; revoking someone else's session; updating or rolling back Core. Over HTTPS this
+/// server; revoking someone else's session; updating or rolling back Core; removing Core from
+/// its account. Over HTTPS this
 /// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none. Restoring a backup
 /// takes it too when its route lands.
 pub struct Dangerous(pub Caller);

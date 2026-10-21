@@ -208,6 +208,11 @@ struct Package {
     sha256_hash: String,
 }
 
+/// The package Azul is asked for, as its file name ends. Windows gets the ZIP; Linux and macOS get
+/// the tar.gz, the only one Azul publishes for every architecture there (Linux arm64 has no ZIP)
+/// and the one that keeps file modes and links.
+const ARCHIVE: &str = if cfg!(windows) { ".zip" } else { ".tar.gz" };
+
 async fn latest(
     http: &reqwest::Client,
     major: u32,
@@ -223,8 +228,10 @@ async fn latest(
         "windows" => "windows",
         _ => "linux",
     };
+    let archive_type = ARCHIVE.trim_start_matches('.');
+    // Without `crac_supported=false` the tar.gz answer can be a CRaC build.
     let url = format!(
-        "https://api.azul.com/metadata/v1/zulu/packages?arch={arch}&java_version={major}&os={os}&archive_type=zip&javafx_bundled=false&java_package_type=jre&availability_types=CA&release_status=ga&latest=true&include_fields=sha256_hash&page_size=1"
+        "https://api.azul.com/metadata/v1/zulu/packages?arch={arch}&java_version={major}&os={os}&archive_type={archive_type}&javafx_bundled=false&crac_supported=false&java_package_type=jre&availability_types=CA&release_status=ga&latest=true&include_fields=sha256_hash&page_size=1"
     );
     let packages: Vec<Package> = download::json(http, &url).await?;
     packages
@@ -282,7 +289,7 @@ async fn install(
     major: u32,
     package: &Package,
 ) -> Result<PathBuf, JavaError> {
-    let release = package.name.trim_end_matches(".zip").to_owned();
+    let release = package.name.trim_end_matches(ARCHIVE).to_owned();
     if let Some(binary) =
         use_published(paths, major, &release, &package.sha256_hash)?
     {
@@ -292,7 +299,7 @@ async fn install(
     let folder = paths.java().join(major.to_string());
     tokio::fs::create_dir_all(&folder).await?;
     let archive = tempfile::Builder::new()
-        .suffix(".zip")
+        .suffix(ARCHIVE)
         .tempfile_in(&folder)?
         .into_temp_path();
     download::file(
@@ -311,9 +318,17 @@ async fn install(
     tokio::task::spawn_blocking(move || {
         let unusable = |reason: String| JavaError::Archive { major, reason };
         let staged = tempfile::tempdir_in(&folder)?;
+        #[cfg(windows)]
         zip::ZipArchive::new(std::fs::File::open(&archive)?)
             .and_then(|mut zip| zip.extract(staged.path()))
             .map_err(|error| unusable(error.to_string()))?;
+        // tar 0.4.45 or later: an older one could change modes outside `staged` (GHSA-j4xf-2g29-59ph).
+        #[cfg(unix)]
+        tar::Archive::new(flate2::read::GzDecoder::new(std::fs::File::open(
+            &archive,
+        )?))
+        .unpack(staged.path())
+        .map_err(|error| unusable(error.to_string()))?;
         let binary = find_binary(staged.path())
             .ok_or_else(|| unusable("it holds no Java binary".into()))?;
         executable(staged.path())?;

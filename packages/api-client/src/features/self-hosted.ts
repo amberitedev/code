@@ -3,12 +3,14 @@ import type { RequestContext } from '../types/request'
 
 export interface SelfHostedConfig extends FeatureConfig {
 	baseUrl: string
-	/** Whether a URL is on a listed Core. Those requests carry the account token; Core checks it with the backend. */
-	isCoreUrl?: (url: string) => boolean
 	token: () => Promise<string | undefined>
 }
 
-/** Routes private accounts and sharing without sending their sessions to public content services. */
+/**
+ * Routes private accounts and sharing without sending their sessions to public content services.
+ * Every other request, including those to a Core, goes without an account token: a Core gets
+ * this device's own session for it from the platform instead (see `copal.access_v1`).
+ */
 export class SelfHostedFeature extends AbstractFeature {
 	declare protected config: SelfHostedConfig
 
@@ -40,15 +42,12 @@ export async function routeSelfHostedRequest(
 		(context.options.api === 'labrinth' &&
 			context.options.accountSource !== 'modrinth' &&
 			isAccountPath(context.path))
-	const hostingRequest = config.isCoreUrl?.(context.url) ?? false
 	const skipAuth = context.options.skipAuth
 	context.options.skipAuth = true
 	const headers = new Headers(context.options.headers)
-	if (privateRequest || hostingRequest) {
-		if (privateRequest) {
-			const source = new URL(context.url)
-			context.url = new URL(source.pathname + source.search, config.baseUrl).toString()
-		}
+	if (privateRequest) {
+		const source = new URL(context.url)
+		context.url = new URL(source.pathname + source.search, config.baseUrl).toString()
 		if (!headers.has('authorization') && !skipAuth) {
 			const token = await config.token()
 			if (token) headers.set('authorization', `Bearer ${token}`)

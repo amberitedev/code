@@ -36,7 +36,15 @@ fn arguments_parse_into_commands() {
     assert!(matches!(
         cli.command,
         Command::Update(UpdateCommand::Apply {
-            allow_downgrade: true
+            allow_downgrade: true,
+            retry: false,
+        })
+    ));
+    assert!(matches!(
+        parse("update apply --retry").unwrap().command,
+        Command::Update(UpdateCommand::Apply {
+            allow_downgrade: false,
+            retry: true,
         })
     ));
     assert!(matches!(
@@ -91,8 +99,7 @@ fn errors_print_as_json_in_cores_shape() {
             "the server is not running",
         ))
         .into();
-    let json: serde_json::Value =
-        serde_json::from_str(&super::json_for(&error)).unwrap();
+    let json = super::json_for(&error);
     assert_eq!(json["error"], "conflict");
     assert_eq!(json["description"], "the server is not running");
 }

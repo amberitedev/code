@@ -112,4 +112,6 @@ pub enum Action {
     CoreUpdated {
         version: String,
     },
+    /// The owner removed this Core from their account.
+    CoreRemoved,
 }

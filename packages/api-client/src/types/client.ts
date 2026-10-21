@@ -1,4 +1,5 @@
 import type { AbstractFeature } from '../core/abstract-feature'
+import type { Copal } from '../modules/copal/types'
 import type { RequestContext } from './request'
 
 export type MaybePromise<T> = T | Promise<T>
@@ -26,6 +27,27 @@ export type RequestHooks = {
 }
 
 /**
+ * Why the platform could not sign in to a Core: the error Core answered with, or `status` null
+ * when it did not answer.
+ */
+export type CoreCallError = { status: number | null; error: string; description: string }
+
+/** See `ClientConfig.coreSessions`. Each call rejects with a `CoreCallError`. */
+export interface CoreSessions {
+	/** Trade `ticket` for a session on the Core `coreId` at `address`, replacing any held. */
+	signIn(
+		coreId: string,
+		address: string,
+		fingerprint: string,
+		ticket: string,
+	): Promise<Copal.Session>
+	/** End this device's session on the Core, when it answers, and forget it either way. */
+	signOut(coreId: string): Promise<void>
+	/** Whether this device holds a session for the Core. It may have ended there since. */
+	exists(coreId: string): Promise<boolean>
+}
+
+/**
  * Client configuration
  */
 export interface ClientConfig {
@@ -36,11 +58,18 @@ export interface ClientConfig {
 	selfHostedHosting?: boolean
 
 	/**
-	 * Opens a connection to a Core that serves HTTPS with its own certificate, trusting only the
-	 * certificate with this SHA-256 fingerprint. Returns the base URL requests to that Core go to.
-	 * Without it, a Core is reached at its address directly.
+	 * Opens a connection to the Core `coreId` at `address`, which serves HTTPS with its own
+	 * certificate, trusting only the certificate with this SHA-256 fingerprint. Returns the base URL
+	 * requests to that Core go to; requests there carry this device's session for it (see
+	 * `coreSessions`). Without it, a Core is reached at its address directly.
 	 */
-	connectCore?: (address: string, fingerprint: string) => Promise<string>
+	connectCore?: (coreId: string, address: string, fingerprint: string) => Promise<string>
+
+	/**
+	 * This device's sessions on Cores, held by the platform outside the page: the page never sees
+	 * a session token, and `connectCore` adds it to each request. See `copal.access_v1`.
+	 */
+	coreSessions?: CoreSessions
 
 	/**
 	 * User agent string or provider for requests

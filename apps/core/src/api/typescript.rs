@@ -56,6 +56,7 @@ fn declarations() -> String {
         startup::JavaPath::decl(&cfg),
         backups::BackupSchedule::decl(&cfg),
         update::UpdateStatus::decl(&cfg),
+        crate::update::versions::FailedTrial::decl(&cfg),
         crate::update::release::Channel::decl(&cfg),
         update::UpdateSettings::decl(&cfg),
         update::ApplyUpdate::decl(&cfg),

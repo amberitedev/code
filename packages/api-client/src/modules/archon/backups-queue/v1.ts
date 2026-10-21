@@ -99,7 +99,7 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 	): Promise<void> {
 		await this.client.request<void>(
 			`/servers/${serverId}/worlds/${worldId}/backups-queue/${backupId}/restore`,
-			{ api: 'archon', version: 1, method: 'POST', body: request },
+			{ api: 'archon', version: 1, method: 'POST', body: request, dangerous: true },
 		)
 	}
 

@@ -11,15 +11,18 @@ license = "GPL-3.0-only"
 aes-gcm = { workspace = true }
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
 base64 = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
 daedalus = { workspace = true }
 dashmap = { workspace = true }
 either = { workspace = true }
 enumset = { workspace = true, features = ["serde"] }
 hkdf = { workspace = true }
-hyper = { workspace = true, features = ["server"] }
-hyper-util = { workspace = true }
+http-body-util = "0.1.3"
+hyper = { workspace = true, features = ["client", "http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
+keyring = { workspace = true }
 native-dialog = { workspace = true }
 p256 = { workspace = true, features = ["ecdh"] }
 paste = { workspace = true }
@@ -41,13 +44,14 @@ tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 theseus = { workspace = true, features = ["tauri"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
 tokio-rustls = "0.26.4"
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
+whoami = { workspace = true }
 
 [dependencies.amberite-browser-bridge]
 path = "../../packages/browser-bridge"
@@ -56,6 +60,10 @@ optional = true
 [dependencies.tauri]
 workspace = true
 features = ["devtools", "macos-private-api", "protocol-asset"]
+
+[dev-dependencies]
+rcgen = "0.14.7"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
 tauri-build = { workspace = true, features = ["codegen"] }

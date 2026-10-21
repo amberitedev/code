@@ -137,12 +137,12 @@ pub fn safe(text: &str) -> String {
 /// An error as `--json` prints it, in the shape of Core's own errors: `error` is a code and
 /// `description` is ready to show. Core's code when Core refused, `core_unreachable` when it
 /// could not be reached, `invalid_arguments` for the command line, `failed` otherwise.
-pub fn json_error(code: &str, description: &str) -> String {
-    serde_json::json!({ "error": code, "description": description }).to_string()
+pub fn json_error(code: &str, description: &str) -> Value {
+    serde_json::json!({ "error": code, "description": description })
 }
 
 /// The `--json` form of an error a command returned.
-pub fn json_for(error: &color_eyre::Report) -> String {
+pub fn json_for(error: &color_eyre::Report) -> Value {
     if let Some(client::Refused(refused)) = error.downcast_ref() {
         let code = serde_json::to_value(refused.error)
             .ok()

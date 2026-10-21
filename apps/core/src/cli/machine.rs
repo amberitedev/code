@@ -15,7 +15,7 @@ use crate::{
         logs::CoreLogs,
         update::{ApplyUpdate, Restarting, UpdateSettings, UpdateStatus},
     },
-    update::{launcher, release::Channel},
+    update::{launcher, release::Channel, versions::FailedTrial},
 };
 
 #[derive(Debug, Subcommand)]
@@ -28,6 +28,9 @@ pub enum UpdateCommand {
         /// Install the channel's release even when it is older than this Core.
         #[arg(long)]
         allow_downgrade: bool,
+        /// Install the channel's release even when it was tried here and rolled back.
+        #[arg(long)]
+        retry: bool,
     },
     /// Show or change the release channel.
     Channel { channel: Option<Channel> },
@@ -67,12 +70,7 @@ pub async fn status(client: &Client) -> Result<Output> {
     {
         lines.push(format!("Copal {latest} is available: copal update apply"));
     }
-    if let Some(failed) = &update.failed {
-        lines.push(format!(
-            "The update to {failed} did not start, so Core went back to {}",
-            health.version
-        ));
-    }
+    lines.extend(failed_update(&update));
     if let Some(memory_mb) = machine.memory_mb {
         lines.push(format!(
             "Memory: the servers may use {} of this machine's {memory_mb} MB",
@@ -136,9 +134,18 @@ pub async fn update(client: &Client, command: UpdateCommand) -> Result<Output> {
                 client.post("/update/check", &()).await?;
             Ok(Output::new(describe(&status), &status))
         }
-        UpdateCommand::Apply { allow_downgrade } => {
+        UpdateCommand::Apply {
+            allow_downgrade,
+            retry,
+        } => {
             let restarting: Restarting = client
-                .post("/update/apply", &ApplyUpdate { allow_downgrade })
+                .post(
+                    "/update/apply",
+                    &ApplyUpdate {
+                        allow_downgrade,
+                        retry,
+                    },
+                )
                 .await?;
             Ok(restarted(client, restarting.version).await)
         }
@@ -192,8 +199,28 @@ fn describe(status: &UpdateStatus) -> String {
             "Copal {latest} is available (this is {}): copal update apply",
             status.version
         ),
-        _ => format!("Copal {} is up to date", status.version),
+        _ => failed_update(status).unwrap_or_else(|| {
+            format!("Copal {} is up to date", status.version)
+        }),
     }
+}
+
+/// The update that was tried and rolled back, while it is still newer than the running
+/// version: what happened, and how to try it again.
+fn failed_update(status: &UpdateStatus) -> Option<String> {
+    let failed = status.failed.as_deref()?;
+    let newer = semver::Version::parse(failed).ok()?
+        > semver::Version::parse(&status.version).ok()?;
+    if !newer {
+        return None;
+    }
+    let how = status
+        .failed_reason
+        .map_or("did not prove healthy", FailedTrial::describe);
+    Some(format!(
+        "Copal {failed} was tried and rolled back: it {how}. Core stays on {} until a newer release; to try {failed} again: copal update apply --retry",
+        status.version
+    ))
 }
 
 /// How a restart into another version went, as the CLI saw it.
@@ -226,10 +253,21 @@ async fn restarted(client: &Client, requested: String) -> Output {
         Some(_) => RestartOutcome::WentBack,
         None => RestartOutcome::Unreachable,
     };
+    // The launcher records how a trial failed; ask the version that took over.
+    let how = match outcome {
+        RestartOutcome::WentBack => client
+            .get::<UpdateStatus>("/update")
+            .await
+            .ok()
+            .filter(|status| status.failed.as_deref() == Some(&*requested))
+            .and_then(|status| status.failed_reason),
+        _ => None,
+    }
+    .map_or("did not prove healthy", FailedTrial::describe);
     let text = match (outcome, &running) {
         (RestartOutcome::Running, _) => format!("Core {requested} is running"),
         (RestartOutcome::WentBack, Some(running)) => format!(
-            "Core {requested} did not start, so the launcher went back to {running}. See copal logs"
+            "Copal {requested} {how}, so the launcher went back to {running}. See copal logs"
         ),
         _ => format!(
             "Core did not answer after restarting into {requested}. See the service's log"

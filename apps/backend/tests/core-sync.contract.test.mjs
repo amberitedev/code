@@ -201,15 +201,17 @@ test('state reports write only what changed', async () => {
 	})
 })
 
-test('only the owner invites', async () => {
+test('every invite is from the owner', async () => {
 	await withCore('core-invites', async ({ backend, call }) => {
 		await backend.db
 			.prepare("INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend','x')")
 			.run()
 		const invite = { server_id: 'server', server_name: 'Server', role: 'editor', user: 'other' }
-		const byFriend = await call('POST', '/core/access', { ...invite, invited_by: 'friend' })
-		assert.equal(byFriend.status, 403)
-		assert.equal((await call('POST', '/core/access', invite)).status, 200)
+		// A Core cannot name anyone else as the inviter.
+		assert.equal(
+			(await call('POST', '/core/access', { ...invite, invited_by: 'friend' })).status,
+			200,
+		)
 		const notification = await backend.db
 			.prepare("SELECT body FROM notifications WHERE user_id = 'other'")
 			.first()
@@ -222,5 +224,23 @@ test('only the owner invites', async () => {
 				.prepare("SELECT 1 FROM core_access WHERE core_id = 'core' AND user_id = 'other'")
 				.first(),
 		)
+	})
+})
+
+test('the old Core routes are gone, and a removed Core is told so on every route it calls', async () => {
+	await withCore('core-old-routes', async ({ call }) => {
+		for (const [method, path] of [
+			['POST', '/core/address'],
+			['DELETE', '/core/auth'],
+			['POST', '/core/reachability'],
+			['PUT', '/core/servers'],
+		])
+			assert.equal((await call(method, path, {})).status, 404, `${method} ${path}`)
+
+		assert.equal((await call('DELETE', '/cores/core', undefined, 'mra_owner')).status, 204)
+		const invite = { server_id: 'server', server_name: 'Server', role: 'editor', user: 'other' }
+		assert.equal((await call('POST', '/core/access', invite)).status, 410)
+		const revoke = { server_id: 'server', user_id: 'other' }
+		assert.equal((await call('DELETE', '/core/access', revoke)).status, 410)
 	})
 })

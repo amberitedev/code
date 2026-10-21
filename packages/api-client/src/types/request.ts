@@ -83,6 +83,13 @@ export type RequestOptions = {
 	 */
 	ownAuthorization?: boolean
 
+	/**
+	 * A dangerous action on a Core, such as deleting a server: it carries a fresh ticket in
+	 * `X-Amberite-Ticket`, fetched right before each attempt. See `CoreSessionFeature`.
+	 * @default false
+	 */
+	dangerous?: boolean
+
 	/** Explicit source for public creator profiles when accounts are self-hosted. */
 	accountSource?: 'modrinth' | 'self-hosted'
 
