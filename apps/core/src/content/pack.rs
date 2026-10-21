@@ -208,13 +208,15 @@ pub fn wanted<R: Read + Seek>(
         )?;
     }
     let entries = archive::entries(archive)?;
+    // One budget for every override: a small pack must not inflate past it entry by entry.
+    let mut budget = archive::MAX_UNPACKED;
     for prefix in ["overrides/", "server-overrides/"] {
         for (n, (path, is_dir)) in entries.iter().enumerate() {
             let Some(path) = path.strip_prefix(prefix).filter(|_| !is_dir)
             else {
                 continue;
             };
-            let (sha1, size) = archive::entry_sha1(archive, n)?;
+            let (sha1, size) = archive::entry_sha1(archive, n, &mut budget)?;
             add(
                 path.to_owned(),
                 Wanted {

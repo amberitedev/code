@@ -74,10 +74,19 @@ pub fn entries<R: Read + Seek>(
 pub fn extract<R: Read + Seek>(
     folder: &Folder,
     archive: &mut zip::ZipArchive<R>,
+    place: impl FnMut(&str) -> Option<String>,
+) -> Result<Vec<Placed>, ArchiveError> {
+    extract_within(folder, archive, MAX_UNPACKED, place)
+}
+
+/// [`extract`], unpacking at most `budget` bytes in all.
+fn extract_within<R: Read + Seek>(
+    folder: &Folder,
+    archive: &mut zip::ZipArchive<R>,
+    mut budget: u64,
     mut place: impl FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Placed>, ArchiveError> {
     let entries = entries(archive)?;
-    let mut budget = MAX_UNPACKED;
     let mut placed = Vec::new();
     for (index, (path, is_dir)) in entries.into_iter().enumerate() {
         let Some(target) = place(&path) else {
@@ -88,12 +97,24 @@ pub fn extract<R: Read + Seek>(
             continue;
         }
         let entry = archive.by_index(index)?;
-        let mut reader = Hashing::new(entry.take(budget + 1));
-        let written = folder.write(&target, &mut reader)?;
-        if written > budget {
-            let _ = folder.remove(&target);
-            return Err(ArchiveError::TooLarge);
-        }
+        let mut reader = Hashing::new(AtMost {
+            inner: entry,
+            left: budget,
+        });
+        // Past the budget the read fails, so the write never replaces what was there.
+        let written = match folder.write(&target, &mut reader) {
+            Err(error)
+                if error.get_ref().is_some_and(|inner| {
+                    matches!(
+                        inner.downcast_ref::<ArchiveError>(),
+                        Some(ArchiveError::TooLarge)
+                    )
+                }) =>
+            {
+                return Err(ArchiveError::TooLarge);
+            }
+            written => written?,
+        };
         budget -= written;
         placed.push(Placed {
             path: target,
@@ -104,18 +125,35 @@ pub fn extract<R: Read + Seek>(
 }
 
 /// The SHA-1 and size of one entry, read without unpacking it. The size is what the entry
-/// actually inflates to, not what the archive claims; past [`MAX_UNPACKED`] it is refused.
+/// actually inflates to, not what the archive claims, and is taken from `budget`, shared by
+/// every entry read: inflating past what is left stops at once.
 pub fn entry_sha1<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     index: usize,
+    budget: &mut u64,
 ) -> Result<(String, u64), ArchiveError> {
-    let mut reader =
-        Hashing::new(archive.by_index(index)?.take(MAX_UNPACKED + 1));
+    let mut reader = Hashing::new(archive.by_index(index)?.take(*budget + 1));
     let size = io::copy(&mut reader, &mut io::sink())?;
-    if size > MAX_UNPACKED {
-        return Err(ArchiveError::TooLarge);
-    }
+    *budget = budget.checked_sub(size).ok_or(ArchiveError::TooLarge)?;
     Ok((reader.finish(), size))
+}
+
+/// Reads at most `left` more bytes and fails the read past them, so a `Folder::write` of it fails
+/// before its file is renamed over anything already there.
+pub struct AtMost<R> {
+    pub inner: R,
+    pub left: u64,
+}
+
+impl<R: Read> Read for AtMost<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.left = self
+            .left
+            .checked_sub(read as u64)
+            .ok_or_else(|| io::Error::other(ArchiveError::TooLarge))?;
+        Ok(read)
+    }
 }
 
 /// Hashes what passes through it.
@@ -219,6 +257,47 @@ mod tests {
         assert!(matches!(
             extract(&folder, &mut zip, |path| Some(path.to_owned())),
             Err(ArchiveError::Entry { .. })
+        ));
+    }
+
+    #[test]
+    fn an_entry_past_the_budget_leaves_the_file_it_would_replace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("config")).unwrap();
+        std::fs::write(dir.path().join("config/a.toml"), "original").unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        let mut zip = archive(|writer| {
+            file(writer, "config/a.toml", &[b'x'; 20]);
+        });
+        let error =
+            extract_within(&folder, &mut zip, 10, |path| Some(path.to_owned()))
+                .unwrap_err();
+        assert!(matches!(error, ArchiveError::TooLarge), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config/a.toml")).unwrap(),
+            "original"
+        );
+        // Nor is its half-written copy left beside it.
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("config"))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn hashing_entries_draws_on_one_budget() {
+        let mut zip = archive(|writer| {
+            file(writer, "overrides/a", &[b'a'; 10]);
+            file(writer, "overrides/b", &[b'b'; 10]);
+        });
+        let mut budget = 15;
+        assert_eq!(entry_sha1(&mut zip, 0, &mut budget).unwrap().1, 10);
+        assert_eq!(budget, 5);
+        assert!(matches!(
+            entry_sha1(&mut zip, 1, &mut budget),
+            Err(ArchiveError::TooLarge)
         ));
     }
 

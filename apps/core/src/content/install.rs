@@ -639,7 +639,7 @@ async fn place(
                     .map_err(super::archive::ArchiveError::from)?;
                 folder.write(
                     &path,
-                    &mut AtMost {
+                    &mut super::archive::AtMost {
                         inner: entry,
                         left: size,
                     },
@@ -650,23 +650,6 @@ async fn place(
     })
     .await
     .map_err(std::io::Error::other)?
-}
-
-/// Reads at most `left` more bytes and fails the read past them, so a write of it stops before
-/// its file is renamed over anything.
-struct AtMost<R> {
-    inner: R,
-    left: u64,
-}
-
-impl<R: std::io::Read> std::io::Read for AtMost<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let read = self.inner.read(buf)?;
-        self.left = self.left.checked_sub(read as u64).ok_or_else(|| {
-            std::io::Error::other("the entry is larger than the pack said")
-        })?;
-        Ok(read)
-    }
 }
 
 /// Write the settings an install came with into `server.properties`.
