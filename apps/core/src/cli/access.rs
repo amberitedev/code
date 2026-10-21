@@ -101,10 +101,10 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
         AccessCommand::Sessions { user } => {
             let mut sessions: Vec<Session> = client.get("/sessions").await?;
             if let Some(user) = user {
-                let user = user.to_lowercase();
+                let name = user.to_lowercase();
                 sessions.retain(|session| {
                     session.user.id == user
-                        || session.user.name.to_lowercase() == user
+                        || session.user.name.to_lowercase() == name
                 });
             }
             let text = if sessions.is_empty() {
