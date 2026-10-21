@@ -5,13 +5,14 @@ use std::time::Duration;
 use axum::http::Method;
 use clap::{ArgGroup, Subcommand};
 use color_eyre::eyre::{Result, bail};
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::{Client, Output, Switch, on_off};
 use crate::{
     api::{
+        console::SendCommand,
         eula::Eula,
         performance::{Memory, Performance},
         servers::{
@@ -168,18 +169,10 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         ServersCommand::Console(ConsoleCommand::Send { server, command }) => {
             let server = find(client, &server).await?;
             let command = command.join(" ");
-            let mut console =
-                client.console(&server.server_id.to_string()).await?;
-            console
-                .send(Message::text(
-                    serde_json::json!({ "event": "command", "cmd": command })
-                        .to_string(),
-                ))
-                .await?;
-            console.close(None).await?;
+            send(client, &server, &command).await?;
             Ok(Output::new(
                 format!("Sent to {}: {command}", server.name),
-                &serde_json::json!({ "server_id": server.server_id, "command": command }),
+                &SendCommand { command },
             ))
         }
         ServersCommand::Console(ConsoleCommand::Attach { .. }) => {
@@ -413,6 +406,18 @@ async fn wait_offline(client: &Client, server: &Server) -> Result<Output> {
     }
 }
 
+/// Send one console command and wait for Core to say it passed it on.
+async fn send(client: &Client, server: &Server, command: &str) -> Result<()> {
+    client
+        .post(
+            &format!("/servers/{}/console", server.server_id),
+            &SendCommand {
+                command: command.to_owned(),
+            },
+        )
+        .await
+}
+
 /// A console event, with only what the CLI shows.
 #[derive(Debug, Deserialize)]
 struct Event {
@@ -421,7 +426,9 @@ struct Event {
 }
 
 /// `copal servers console attach`: print the console as it comes, and send each line typed.
-/// With `--json`, each event is printed as Core sent it.
+/// With `--json`, each event is printed as Core sent it. Console text is the server's and its
+/// mods', so it is escaped before it reaches the terminal (see `safe`). A line Core refuses
+/// says why on stderr.
 pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
     let server = find(client, server).await?;
     let mut console = client.console(&server.server_id.to_string()).await?;
@@ -438,6 +445,9 @@ pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
             }
         }
     });
+    // One future for the whole session: a Ctrl+C that arrives while a line prints still counts.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
     loop {
         tokio::select! {
             message = console.next() => match message {
@@ -448,7 +458,7 @@ pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
                         serde_json::from_str(&text)
                         && event == "log"
                     {
-                        println!("{message}");
+                        println!("{}", super::safe(&message));
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => {
@@ -459,13 +469,13 @@ pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
                 Some(Err(error)) => return Err(error.into()),
             },
             Some(line) = lines.recv() => {
-                console
-                    .send(Message::text(
-                        serde_json::json!({ "event": "command", "cmd": line }).to_string(),
-                    ))
-                    .await?;
+                if !line.trim().is_empty()
+                    && let Err(error) = send(client, &server, &line).await
+                {
+                    eprintln!("Not sent: {error}");
+                }
             }
-            _ = tokio::signal::ctrl_c() => return Ok(()),
+            _ = &mut ctrl_c => return Ok(()),
         }
     }
 }

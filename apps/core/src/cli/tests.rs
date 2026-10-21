@@ -69,6 +69,35 @@ fn arguments_parse_into_commands() {
 }
 
 #[test]
+fn console_text_cannot_drive_the_terminal() {
+    let hostile = "ok\u{1b}[2J\u{1b}]0;owned\u{7}\r\u{9b}31m\tdone\nnext";
+    let shown = super::safe(hostile);
+    assert!(
+        !shown
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t')
+    );
+    assert_eq!(
+        shown,
+        "ok\\u{1b}[2J\\u{1b}]0;owned\\u{7}\\u{d}\\u{9b}31m\tdone\nnext"
+    );
+}
+
+#[test]
+fn errors_print_as_json_in_cores_shape() {
+    let error: color_eyre::Report =
+        super::client::Refused(crate::api::error::ApiError::new(
+            crate::api::error::ErrorCode::Conflict,
+            "the server is not running",
+        ))
+        .into();
+    let json: serde_json::Value =
+        serde_json::from_str(&super::json_for(&error)).unwrap();
+    assert_eq!(json["error"], "conflict");
+    assert_eq!(json["description"], "the server is not running");
+}
+
+#[test]
 fn bad_arguments_are_refused() {
     for args in [
         "servers java survival",
@@ -202,6 +231,15 @@ async fn server_commands_round_trip() {
     .err()
     .unwrap();
     assert!(error.to_string().contains("EULA"), "{error}");
+    // Core says why it did not pass a command on, and the command fails.
+    let error = super::servers::run(
+        &client,
+        parse("servers console send survival say hi").unwrap_servers(),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(error.to_string().contains("not running"), "{error}");
 }
 
 #[tokio::test]
