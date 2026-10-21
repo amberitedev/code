@@ -44,6 +44,8 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+# The CLI's console client, at the version axum uses.
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
 tokio-util = { workspace = true, features = ["io"] }
 toml = { workspace = true }
 tower-http = { version = "0.6.6", features = ["timeout", "trace"] }

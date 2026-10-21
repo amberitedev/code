@@ -8,8 +8,8 @@
 use ts_rs::{Config, TS};
 
 use super::{
-    access, activity, backend, backups, content, error, sessions, startup,
-    update,
+    access, activity, backend, backups, console, content, error, eula, logs,
+    performance, sessions, startup, update,
 };
 
 const PATH: &str = concat!(
@@ -60,6 +60,15 @@ fn declarations() -> String {
         update::UpdateSettings::decl(&cfg),
         update::ApplyUpdate::decl(&cfg),
         update::Restarting::decl(&cfg),
+        eula::Eula::decl(&cfg),
+        logs::LogsQuery::decl(&cfg),
+        logs::CoreLogs::decl(&cfg),
+        performance::Performance::decl(&cfg),
+        performance::Memory::decl(&cfg),
+        console::SendCommand::decl(&cfg),
+        crate::servers::restarts::Restarts::decl(&cfg),
+        crate::servers::restarts::Schedule::decl(&cfg),
+        crate::servers::restarts::Weekday::decl(&cfg),
     ]
     .map(|declaration| format!("export {declaration}\n"))
     .join("\n")

@@ -81,6 +81,7 @@ mod tests {
                 "core",
                 "packs",
                 "pairing",
+                "restarts",
                 "runs",
                 "servers",
                 "sessions",
