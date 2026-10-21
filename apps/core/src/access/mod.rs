@@ -55,6 +55,8 @@ pub struct Access {
     pub changed: broadcast::Sender<Changed>,
     /// Wakes backend sync when a call is owed.
     pub owed: Arc<Notify>,
+    /// Asks the pairing loop for a fresh code (`copal pair`).
+    pub new_code: Notify,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -72,6 +74,7 @@ impl Access {
             keys,
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
+            new_code: Notify::new(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }

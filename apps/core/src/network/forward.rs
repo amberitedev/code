@@ -278,8 +278,14 @@ impl Network {
         if !current() {
             return;
         }
-        if !diagnosis.usable() {
-            info!("{}", diagnosis.render(&facts));
+        // Checks repeat every few minutes; the log says what changed, not the same advice again.
+        let previous = reports.get(key).map(|report| &report.diagnosis);
+        if changed(previous, &diagnosis) {
+            if !diagnosis.usable() {
+                info!("{}", diagnosis.render(&facts));
+            } else if previous.is_some() {
+                info!("{}: {}", facts.what, diagnosis.title);
+            }
         }
         reports.insert(
             key.into(),
@@ -425,6 +431,14 @@ impl Network {
     }
 }
 
+/// Whether a check found something other than the one before it: another case or another
+/// cause.
+fn changed(previous: Option<&Diagnosis>, now: &Diagnosis) -> bool {
+    previous.is_none_or(|previous| {
+        previous.case != now.case || previous.title != now.title
+    })
+}
+
 async fn save(db: &SqlitePool, key: &str, mapping: &Mapping) {
     let result = sqlx::query(
         "INSERT INTO port_mappings (key, mapping) VALUES (?, ?) \
@@ -469,6 +483,34 @@ async fn listening(port: u16) -> bool {
 mod tests {
     use super::*;
     use crate::db;
+
+    #[test]
+    fn the_same_result_is_logged_once() {
+        use crate::network::diagnosis::Case;
+
+        let result = |case, title: &str| Diagnosis {
+            case,
+            title: title.into(),
+            checks: Vec::new(),
+            found: Vec::new(),
+            fix: Vec::new(),
+        };
+        let no_upnp =
+            result(Case::NoProtocol, "The router does not forward ports");
+        assert!(changed(None, &no_upnp), "the first check is logged");
+        // The same advice again, with other checks behind it, is not.
+        let mut again = no_upnp.clone();
+        again.found.push("tried again".into());
+        assert!(!changed(Some(&no_upnp), &again));
+        assert!(changed(
+            Some(&no_upnp),
+            &result(Case::NoProtocol, "The router refused the port")
+        ));
+        assert!(changed(
+            Some(&no_upnp),
+            &result(Case::Unverified, "The router does not forward ports")
+        ));
+    }
 
     #[tokio::test]
     async fn a_mapping_only_the_router_can_remove_waits_for_it() {
