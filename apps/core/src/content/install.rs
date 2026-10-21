@@ -217,11 +217,15 @@ async fn install_pack(
         tokio::task::spawn_blocking(move || {
             let level = folder.level_name();
             let sha1 = |path: &str| folder.sha1(path).ok().flatten();
+            let disabled = |path: &str| {
+                folder.exists(&format!("{path}{}", super::addons::DISABLED))
+            };
             pack::plan(
                 &rows,
                 &wanted,
                 &pack::Disk {
                     sha1: &sha1,
+                    disabled: &disabled,
                     level_name: &level,
                     case_insensitive,
                 },

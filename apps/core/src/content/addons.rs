@@ -22,7 +22,8 @@ use crate::{
     servers::records as servers_records,
 };
 
-const DISABLED: &str = ".disabled";
+/// Added to an addon's file name to disable it.
+pub const DISABLED: &str = ".disabled";
 /// Dependencies followed for one add, however deep.
 const MAX_DEPENDENCIES: usize = 64;
 
