@@ -1,6 +1,7 @@
 //! What Core knows about a server beyond its power state, and about the machine.
 //!
-//! - `GET /servers/{id}/insight`: [`ServerInsight`]. Viewers and up.
+//! - `GET /servers/{id}/insight`: [`ServerInsight`]. Viewers and up; the console lines of a
+//!   crash are for editors and up.
 //! - `POST /servers/{id}/reachability`: check the server's port again, answering once checked.
 //!   [`ServerInsight`]. Editors and up.
 //! - `GET /machine`: [`Machine`]. Owner only.
@@ -41,7 +42,7 @@ pub struct ServerInsight {
     pub answered_at: Option<i64>,
     /// Core stopped starting the server again after it crashed 3 times in 10 minutes.
     pub crash_restart_stopped: bool,
-    /// The last crash, with the console lines before it.
+    /// The last crash, with the console lines before it for editors and up.
     pub last_crash: Option<Crash>,
     /// Whether players can join from the internet. Null while the server does not run or has
     /// not been checked yet.
@@ -53,7 +54,9 @@ pub struct Crash {
     /// Unix seconds.
     pub at: i64,
     pub exit_code: Option<i32>,
-    pub last_lines: String,
+    /// The console lines before the crash. Null for viewers: they can hold chat, addresses,
+    /// and anything a mod printed, which the console route keeps to editors.
+    pub last_lines: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -143,9 +146,11 @@ pub fn archon(state: &AppState, server_id: &str) -> Option<Reachability> {
     })
 }
 
+/// What `level` may see of a server.
 async fn insight(
     state: &AppState,
     id: &str,
+    level: Level,
 ) -> Result<ServerInsight, ApiError> {
     let last_crash: Option<(i64, Option<i32>, Option<String>)> = sqlx::query_as(
         "SELECT ended_at, exit_code, last_lines FROM runs \
@@ -164,7 +169,8 @@ async fn insight(
         last_crash: last_crash.map(|(at, exit_code, last_lines)| Crash {
             at,
             exit_code,
-            last_lines: last_lines.unwrap_or_default(),
+            last_lines: (level >= Level::Editor)
+                .then(|| last_lines.unwrap_or_default()),
         }),
         reachability: state.network.report(id).map(Into::into),
     })
@@ -176,8 +182,8 @@ pub async fn get(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ServerInsight>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
-    Ok(Json(insight(&state, &id).await?))
+    let level = caller.require(&state.db, &id, Level::Viewer).await?;
+    Ok(Json(insight(&state, &id, level).await?))
 }
 
 /// `POST /servers/{id}/reachability`.
@@ -186,14 +192,14 @@ pub async fn check(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ServerInsight>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    let level = caller.require(&state.db, &id, Level::Editor).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }
     Arc::clone(&state.network)
         .check(Arc::clone(&state.servers), id.clone())
         .await;
-    Ok(Json(insight(&state, &id).await?))
+    Ok(Json(insight(&state, &id, level).await?))
 }
 
 /// `GET /machine`.

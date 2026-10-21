@@ -386,9 +386,17 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
             "  last crash: {}, exit code {code}",
             super::local_time(crash.at)
         ));
-        let last: Vec<&str> = crash.last_lines.lines().collect();
+        // A crash's lines are the server's console, escaped as `console attach` does.
+        let last: Vec<&str> = crash
+            .last_lines
+            .as_deref()
+            .map_or_else(Vec::new, |text| text.lines().collect());
         let start = last.len().saturating_sub(5);
-        lines.extend(last[start..].iter().map(|line| format!("    {line}")));
+        lines.extend(
+            last[start..]
+                .iter()
+                .map(|line| format!("    {}", super::safe(line))),
+        );
     }
     if let Some(reach) = &insight.reachability {
         let state = match reach.state {

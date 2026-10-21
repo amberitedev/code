@@ -272,6 +272,35 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
 }
 
 #[tokio::test]
+async fn a_crashs_console_lines_are_kept_from_viewers() {
+    let core = core().await;
+    sqlx::query(
+        "INSERT INTO runs (id, server_id, started_at, ended_at, outcome, exit_code, last_lines) \
+         VALUES ('run', ?, 1, 2, 'crashed', 1, '<Steve> my address is 10.0.0.5')",
+    )
+    .bind(&core.server)
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    let insight = format!("/servers/{}/insight", core.server);
+    let viewer = core.sign_in("viewer").await;
+    let (status, seen) = core
+        .call(Method::GET, &insight, Some(&viewer), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(seen["last_crash"]["exit_code"], 1);
+    assert_eq!(seen["last_crash"]["last_lines"], Value::Null);
+    let editor = core.sign_in("editor").await;
+    let (_, seen) = core
+        .call(Method::GET, &insight, Some(&editor), None, None)
+        .await;
+    assert_eq!(
+        seen["last_crash"]["last_lines"],
+        "<Steve> my address is 10.0.0.5"
+    );
+}
+
+#[tokio::test]
 async fn dangerous_actions_need_a_fresh_ticket_of_the_owner() {
     let core = core().await;
     let owner = core.sign_in("owner").await;

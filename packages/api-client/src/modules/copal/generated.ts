@@ -332,7 +332,7 @@ answered_at: number | null,
  */
 crash_restart_stopped: boolean, 
 /**
- * The last crash, with the console lines before it.
+ * The last crash, with the console lines before it for editors and up.
  */
 last_crash: Crash | null, 
 /**
@@ -345,7 +345,12 @@ export type Crash = {
 /**
  * Unix seconds.
  */
-at: number, exit_code: number | null, last_lines: string, };
+at: number, exit_code: number | null, 
+/**
+ * The console lines before the crash. Null for viewers: they can hold chat, addresses,
+ * and anything a mod printed, which the console route keeps to editors.
+ */
+last_lines: string | null, };
 
 export type ReachabilityReport = { state: Reach, 
 /**
@@ -405,7 +410,8 @@ crash: boolean,
  */
 schedule: Schedule | null, 
 /**
- * Experimental: restart once nobody is online and the server has run this many hours.
+ * Experimental: restart once nobody is online and the server has run this many hours,
+ * after a minute's warning in the game.
  */
 smart_after_hours: number | null, };
 
