@@ -44,6 +44,38 @@ const DEFAULT_MEMORY_MB: i64 = 2048;
 const COLUMNS: &str = "id, name, game_version, loader, loader_version, port, memory_mb, \
                        java_path, eula_accepted";
 
+/// Whether no other program on this machine holds `port`. Minecraft listens on every interface,
+/// TCP for the game and UDP for query and voice mods, so Core tries to bind the same: TCP and
+/// UDP, IPv4 and, where the machine has it, IPv6. A port is taken when a bind fails because it
+/// is in use or reserved; a bind the OS cannot do at all, such as IPv6 on a machine without it,
+/// says nothing about the port.
+pub fn port_free(port: u16) -> bool {
+    use std::{
+        io::ErrorKind,
+        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket},
+    };
+
+    [
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+    ]
+    .into_iter()
+    .map(|ip| SocketAddr::new(ip, port))
+    .flat_map(|address| {
+        [
+            TcpListener::bind(address).err(),
+            UdpSocket::bind(address).err(),
+        ]
+    })
+    .flatten()
+    .all(|error| {
+        !matches!(
+            error.kind(),
+            ErrorKind::AddrInUse | ErrorKind::PermissionDenied
+        )
+    })
+}
+
 pub async fn list(db: &SqlitePool) -> sqlx::Result<Vec<ServerRow>> {
     sqlx::query_as(&format!(
         "SELECT {COLUMNS} FROM servers ORDER BY created_at, id"
@@ -59,11 +91,12 @@ pub async fn get(db: &SqlitePool, id: &str) -> sqlx::Result<Option<ServerRow>> {
         .await
 }
 
-/// Create an unconfigured server on the lowest free port of the server range. `None` when
-/// every port is taken.
+/// Create an unconfigured server on the lowest port of the server range that no server has and
+/// `free` accepts ([`port_free`] outside tests). `None` when every port is taken.
 pub async fn create(
     db: &SqlitePool,
     name: &str,
+    free: impl Fn(u16) -> bool,
 ) -> sqlx::Result<Option<ServerRow>> {
     // Two creates at once can pick the same port; `port` is UNIQUE, so the later one picks again.
     loop {
@@ -71,8 +104,9 @@ pub async fn create(
             .fetch_all(db)
             .await?;
         let Some(port) = SERVER_PORTS
+            .filter(|port| !used.contains(&i64::from(*port)) && free(*port))
             .map(i64::from)
-            .find(|port| !used.contains(port))
+            .next()
         else {
             return Ok(None);
         };
@@ -293,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn a_run_is_recorded_once_with_its_crash_lines() {
         let db = db::memory().await;
-        let server = create(&db, "A").await.unwrap().unwrap();
+        let server = create(&db, "A", |_| true).await.unwrap().unwrap();
         assert_eq!(server.port, i64::from(*SERVER_PORTS.start()));
         start_run(&db, &server.id, "run", 1).await.unwrap();
         assert_eq!(
@@ -348,11 +382,34 @@ mod tests {
     #[tokio::test]
     async fn new_servers_take_the_next_free_port() {
         let db = db::memory().await;
-        let first = create(&db, "A").await.unwrap().unwrap();
-        let second = create(&db, "B").await.unwrap().unwrap();
+        let first = create(&db, "A", |_| true).await.unwrap().unwrap();
+        let second = create(&db, "B", |_| true).await.unwrap().unwrap();
         assert_eq!(second.port, first.port + 1);
         assert!(!second.eula_accepted);
         assert!(accept_eula(&db, &second.id).await.unwrap());
         assert!(get(&db, &second.id).await.unwrap().unwrap().eula_accepted);
+    }
+
+    #[tokio::test]
+    async fn ports_another_program_holds_are_skipped() {
+        let db = db::memory().await;
+        let start = *SERVER_PORTS.start();
+        let taken = [start, start + 1];
+        let server = create(&db, "A", |port| !taken.contains(&port))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(server.port, i64::from(start + 2));
+        assert!(create(&db, "B", |_| false).await.unwrap().is_none());
+    }
+
+    #[test]
+    fn a_port_in_use_is_not_free() {
+        // A TCP listener on every IPv4 interface, as another program's server would hold.
+        let tcp = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+        assert!(!port_free(tcp.local_addr().unwrap().port()));
+        // UDP alone counts too: query and voice mods use it.
+        let udp = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        assert!(!port_free(udp.local_addr().unwrap().port()));
     }
 }

@@ -658,7 +658,8 @@ mod tests {
     #[tokio::test]
     async fn settings_default_until_set() {
         let db = db::memory().await;
-        let server = records::create(&db, "A").await.unwrap().unwrap();
+        let server =
+            records::create(&db, "A", |_| true).await.unwrap().unwrap();
         assert_eq!(get(&db, &server.id).await.unwrap(), Restarts::default());
         let changed = Restarts {
             crash: false,
