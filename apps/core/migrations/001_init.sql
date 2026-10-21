@@ -196,3 +196,18 @@ CREATE TABLE restarts (
     -- Restart once nobody is online and the server has run this many hours. Null: off.
     smart_after_hours INTEGER
 );
+
+-- A server's own JVM flags, instead of the tuned ones. No row: the tuned flags.
+CREATE TABLE jvm_flags (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- JSON array of strings.
+    flags TEXT NOT NULL
+);
+
+-- Port mappings Core asked the router for, so a Core that restarts renews them instead of asking
+-- again (a PCP router knows a mapping by its nonce). Keyed by server id, or 'core' for the API.
+CREATE TABLE port_mappings (
+    key TEXT PRIMARY KEY,
+    -- JSON of `network::router::Mapping`.
+    mapping TEXT NOT NULL
+);

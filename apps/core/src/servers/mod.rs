@@ -3,24 +3,30 @@
 //! Core never starts Java itself. It writes a launch to `runs/<server>/` and starts a detached
 //! shim (see `shim`), which runs Java and outlives Core. [`Servers`] keeps track of which servers
 //! have a shim, adopts the shims it finds when Core starts, and records how every run ended.
+//! While a server runs, Core reads its console for players and freezes (see `watch`), restarts
+//! it after a crash, and tells [`Servers::events`] subscribers, such as port forwarding.
 
 pub mod console;
+pub mod insight;
 pub mod launch;
+pub mod memory;
 pub mod process;
 pub mod records;
 pub mod restarts;
 pub mod shim;
+mod watch;
 
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     process::Child,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
 };
 
 use color_eyre::eyre::Result;
 use sqlx::SqlitePool;
+use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::daemon::paths::Paths;
@@ -104,6 +110,27 @@ pub struct Servers {
     deleted: Mutex<HashSet<String>>,
     /// Servers killed while a restart waited for them to stop. The kill wins: they stay off.
     killed: Mutex<HashSet<String>>,
+    /// Itself, for the tasks a run starts.
+    me: Weak<Servers>,
+    /// Servers starting to run and runs ending.
+    pub events: broadcast::Sender<Lifecycle>,
+    /// What each running server's console said. See `watch`.
+    insight: Mutex<HashMap<String, watch::Watched>>,
+    /// Servers that crashed too often to start again. Cleared by the next start.
+    gave_up: Mutex<HashSet<String>>,
+    /// Crash restarts waiting to start: server to the run that crashed and the owner-action
+    /// generation it was queued under. See `watch`.
+    retries: Mutex<HashMap<String, (String, u64)>>,
+    /// How many owner actions each server has seen. Only taken while `live` is held.
+    owner_actions: Mutex<HashMap<String, u64>>,
+}
+
+/// A change in which servers run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lifecycle {
+    /// A run started, or Core adopted one.
+    Running(String),
+    Ended(String),
 }
 
 /// How long a new shim may take to start Java.
@@ -117,13 +144,19 @@ impl Servers {
     /// watching for runs that end and shims that appear.
     pub async fn open(paths: Paths, db: SqlitePool) -> Result<Arc<Self>> {
         let http = crate::installs::download::client()?;
-        let servers = Arc::new(Self {
+        let servers = Arc::new_cyclic(|me| Self {
             paths,
             db,
             http,
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
             killed: Mutex::default(),
+            me: me.clone(),
+            events: broadcast::channel(64).0,
+            insight: Mutex::default(),
+            gave_up: Mutex::default(),
+            retries: Mutex::default(),
+            owner_actions: Mutex::default(),
         });
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
@@ -171,7 +204,13 @@ impl Servers {
                     "a server runs under a shim this Core cannot use; it is left running"
                 ),
             }
-            self.live().entry(id).or_insert(Live { phase, child: None });
+            let running = phase == Phase::Running;
+            self.live()
+                .entry(id.clone())
+                .or_insert(Live { phase, child: None });
+            if running {
+                self.on_running(&id, true);
+            }
         }
         // A run younger than START_TIMEOUT may belong to a shim still starting. The cutoff also
         // keeps this from closing a run a start in progress has just recorded.
@@ -181,7 +220,7 @@ impl Servers {
             if !self.live().contains_key(&id)
                 && !shim::is_running(&self.paths, &id)
             {
-                self.finish(&id, cutoff).await;
+                self.finish(&id, cutoff, None).await;
             }
         }
         Ok(())
@@ -251,8 +290,13 @@ impl Servers {
                 }
                 // Recorded before the server leaves `live`, so a restart waiting on it cannot
                 // start the next run first.
-                self.finish(&id, i64::MAX).await;
-                self.live().remove(&id);
+                self.finish(&id, i64::MAX, None).await;
+                let generation = {
+                    let mut live = self.live();
+                    live.remove(&id);
+                    self.generation(&id)
+                };
+                self.ended(&id, generation).await;
             }
             if let Err(error) = self.scan().await {
                 warn!(%error, "could not look for running servers");
@@ -261,8 +305,8 @@ impl Servers {
     }
 
     /// Record the end of every open run of a server whose shim is gone, among those started
-    /// before `started_before`.
-    async fn finish(&self, id: &str, started_before: i64) {
+    /// before `started_before`, or only run `only`.
+    async fn finish(&self, id: &str, started_before: i64, only: Option<&str>) {
         let status: Option<ExitStatus> =
             shim::read_versioned(&self.paths.run_status(id)).ok();
         let runs = match records::open_runs(&self.db, id, started_before).await
@@ -273,7 +317,10 @@ impl Servers {
                 return;
             }
         };
-        for run_id in runs {
+        for run_id in runs
+            .into_iter()
+            .filter(|run| only.is_none_or(|only| run == only))
+        {
             let status =
                 status.as_ref().filter(|status| status.run_id == run_id);
             let (outcome, exit_code) = records::outcome(status);
@@ -303,13 +350,35 @@ impl Servers {
         }
     }
 
-    /// Start a server and wait until its shim runs Java.
+    /// Start a server and wait until its shim runs Java. Replaces a pending crash restart.
     pub async fn start(&self, id: &str) -> Result<(), ServerError> {
+        self.start_inner(id, None).await
+    }
+
+    /// [`start`](Self::start), or with `crashed`, the crash restart queued for that run, which
+    /// does nothing when it was cancelled meanwhile.
+    async fn start_inner(
+        &self,
+        id: &str,
+        crashed: Option<&str>,
+    ) -> Result<(), ServerError> {
         let server = records::get(&self.db, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
         {
             let mut live = self.live();
+            match crashed {
+                None => {
+                    self.owner_acted_locked(id);
+                }
+                // Taken under the lock owner actions take, so one that came first wins.
+                Some(run) => {
+                    let retry = self.retries().remove(id);
+                    if retry != Some((run.to_owned(), self.generation(id))) {
+                        return Ok(());
+                    }
+                }
+            }
             if live
                 .get(id)
                 .is_some_and(|live| live.phase == Phase::Installing)
@@ -332,32 +401,47 @@ impl Servers {
                 },
             );
         }
-        let result = self.launch(&server).await;
-        let mut live = self.live();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let result = self.launch(&server, &run_id).await;
         match result {
             Ok(()) => {
-                if let Some(live) = live.get_mut(id) {
-                    live.phase = Phase::Running;
-                }
+                self.set_phase(id, Phase::Running);
                 info!(server = %id, "started");
+                self.gave_up.lock().expect("not poisoned").remove(id);
+                self.on_running(id, false);
                 Ok(())
             }
-            // A shim that holds the lock but never answered keeps its server running.
+            // A shim that holds the lock but never answered keeps its server running. The
+            // watcher sees it end like any run.
             Err(error) if shim::is_running(&self.paths, id) => {
-                if let Some(live) = live.get_mut(id) {
-                    live.phase = Phase::Unmanaged(None);
-                }
+                self.set_phase(id, Phase::Unmanaged(None));
                 Err(error)
             }
             Err(error) => {
-                if let Some(mut child) =
-                    live.remove(id).and_then(|live| live.child)
-                {
-                    let _ = child.try_wait();
-                }
+                self.start_failed(id, &run_id).await;
                 Err(error)
             }
         }
+    }
+
+    /// A start that failed with no shim left: record how run `run_id` ended, if it got that
+    /// far, let go of the server, and handle a crash as any other. The watcher skips starting
+    /// servers, so this is the one place a crash while starting is seen. The end is recorded
+    /// while the start still holds the server, and only for this run, so it cannot close a run
+    /// a later start recorded.
+    async fn start_failed(&self, id: &str, run_id: &str) {
+        self.finish(id, i64::MAX, Some(run_id)).await;
+        let (child, generation) = {
+            let mut live = self.live();
+            (
+                live.remove(id).and_then(|live| live.child),
+                self.generation(id),
+            )
+        };
+        if let Some(mut child) = child {
+            let _ = child.try_wait();
+        }
+        self.after_crash(id, run_id, generation).await;
     }
 
     /// How the shim this Core started for a server exited, once it has.
@@ -374,6 +458,7 @@ impl Servers {
     async fn launch(
         &self,
         server: &records::ServerRow,
+        run_id: &str,
     ) -> Result<(), ServerError> {
         let id = server.id.as_str();
         if crate::api::eula::accepted_at(&self.db).await?.is_none() {
@@ -385,10 +470,9 @@ impl Servers {
             eula_accepted: true,
             ..server.clone()
         };
-        let run_id = uuid::Uuid::new_v4().to_string();
         // The lease keeps its Java until the shim runs it, when the launch spec does.
-        let (launch, _java) =
-            launch::prepare(&self.paths, &self.http, server, &run_id)
+        let (mut launch, _java) =
+            launch::prepare(&self.paths, &self.http, server, run_id)
                 .await
                 .map_err(|error| {
                     match error.downcast::<launch::NotReady>() {
@@ -396,6 +480,9 @@ impl Servers {
                         Err(error) => ServerError::Other(error),
                     }
                 })?;
+        if let Some(flags) = memory::flags(&self.db, id).await? {
+            memory::use_flags(&mut launch.args, flags);
+        }
         std::fs::create_dir_all(self.paths.run(id))?;
         // What an earlier run left must not be mistaken for this one's.
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
@@ -410,14 +497,14 @@ impl Servers {
         records::start_run(
             &self.db,
             id,
-            &run_id,
+            run_id,
             chrono::Utc::now().timestamp(),
         )
         .await?;
         let child = match shim::spawn(&self.paths, id) {
             Ok(child) => child,
             Err(error) => {
-                self.finish(id, i64::MAX).await;
+                self.finish(id, i64::MAX, Some(run_id)).await;
                 return Err(error.into());
             }
         };
@@ -429,7 +516,7 @@ impl Servers {
             // Checked first: a Java that already exited is not a successful start, whatever
             // run.json says.
             if let Some(exit) = self.reap(id)? {
-                self.finish(id, i64::MAX).await;
+                self.finish(id, i64::MAX, Some(run_id)).await;
                 let status: Option<ExitStatus> =
                     shim::read_versioned(&self.paths.run_status(id)).ok();
                 let shim_log = std::fs::read_to_string(self.paths.shim_log(id))
@@ -480,22 +567,33 @@ impl Servers {
         }
     }
 
-    /// Ask the server to stop. It stops when Java exits, however long that takes.
+    /// Ask the server to stop. It stops when Java exits, however long that takes. A server
+    /// waiting to start again after a crash stays stopped.
     pub async fn stop(&self, id: &str) -> Result<(), ServerError> {
-        self.tell(id, Message::Stop).await?;
+        let cancelled = self.owner_acted(id);
+        match self.tell(id, Message::Stop).await {
+            Err(ServerError::NotRunning) if cancelled => return Ok(()),
+            sent => sent?,
+        }
         self.set_phase(id, Phase::Stopping);
         Ok(())
     }
 
-    /// Kill the server's Java now.
+    /// Kill the server's Java now. A server waiting to start again after a crash stays stopped.
     pub async fn kill(&self, id: &str) -> Result<(), ServerError> {
+        let cancelled = self.owner_acted(id);
         // Recorded first: a restart waiting on this server checks it the moment the shim exits.
         self.killed.lock().expect("not poisoned").insert(id.into());
-        let sent = self.tell(id, Message::Kill).await;
-        if sent.is_err() {
-            self.killed.lock().expect("not poisoned").remove(id);
+        match self.tell(id, Message::Kill).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.killed.lock().expect("not poisoned").remove(id);
+                match error {
+                    ServerError::NotRunning if cancelled => Ok(()),
+                    error => Err(error),
+                }
+            }
         }
-        sent
     }
 
     /// A line for the server's console.
@@ -513,17 +611,21 @@ impl Servers {
         .await
     }
 
-    /// Wait, at most `timeout`, until no server is starting or stopping. The updater waits so
-    /// a restart of Core never lands in the middle of one.
+    /// Wait, at most `timeout`, until no server is starting, stopping, or waiting to start
+    /// again after a crash. The updater waits so a restart of Core never lands in the middle of
+    /// one.
     pub async fn settle(&self, timeout: Duration) {
         let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline
-            && self.live().values().any(|live| {
-                matches!(live.phase, Phase::Starting | Phase::Stopping)
-            })
-        {
+        while Instant::now() < deadline && self.unsettled() {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
+    }
+
+    fn unsettled(&self) -> bool {
+        !self.retries().is_empty()
+            || self.live().values().any(|live| {
+                matches!(live.phase, Phase::Starting | Phase::Stopping)
+            })
     }
 
     /// Stop the server, wait for its shim to exit, and start it again.
@@ -531,6 +633,39 @@ impl Servers {
     pub async fn restart(&self, id: &str) -> Result<(), ServerError> {
         self.killed.lock().expect("not poisoned").remove(id);
         self.stop(id).await?;
+        self.start_once_stopped(id).await
+    }
+
+    /// [`restart`](Self::restart) for run `run` only, from `watch`'s numbering. Core's own
+    /// restarts are planned for one run: the run is claimed, as stopping, under the lock a new
+    /// start needs, so a restart planned for one run never stops the next.
+    pub async fn restart_run(
+        &self,
+        id: &str,
+        run: u64,
+    ) -> Result<(), ServerError> {
+        {
+            let mut live = self.live();
+            let Some(this) =
+                live.get_mut(id).filter(|this| this.phase == Phase::Running)
+            else {
+                return Ok(());
+            };
+            if self.run_of(id) != Some(run) {
+                return Ok(());
+            }
+            this.phase = Phase::Stopping;
+        }
+        self.killed.lock().expect("not poisoned").remove(id);
+        if let Err(error) = self.tell(id, Message::Stop).await {
+            self.set_phase(id, Phase::Running);
+            return Err(error);
+        }
+        self.start_once_stopped(id).await
+    }
+
+    /// Wait for a stopping server's shim to exit, then start it, unless it was killed.
+    async fn start_once_stopped(&self, id: &str) -> Result<(), ServerError> {
         while self.phase(id).is_some() {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
@@ -558,6 +693,7 @@ impl Servers {
     /// while it runs. `release` undoes it when the deletion does not happen.
     pub fn hold_for_deletion(&self, id: &str) -> Result<(), ServerError> {
         let live = self.live();
+        self.owner_acted_locked(id);
         if live.contains_key(id) || shim::is_running(&self.paths, id) {
             return Err(ServerError::AlreadyRunning);
         }
@@ -587,6 +723,8 @@ impl Servers {
     /// taken, until the hold drops.
     pub fn hold(self: &Arc<Self>, id: &str) -> Result<Hold, ServerError> {
         let mut live = self.live();
+        // An install is the owner's action: a crash restart waiting to start is cancelled.
+        self.owner_acted_locked(id);
         match live.get(id).map(|live| live.phase) {
             Some(Phase::Installing) => return Err(ServerError::Installing),
             Some(_) => return Err(ServerError::AlreadyRunning),

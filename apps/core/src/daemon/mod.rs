@@ -10,7 +10,12 @@ pub mod service;
 #[cfg(windows)]
 pub mod win;
 
-use std::{fs::File, future::Future, net::SocketAddr, sync::Arc};
+use std::{
+    fs::File,
+    future::Future,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use tracing::{info, warn};
@@ -19,7 +24,10 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    access, api, db, network::tls::Identity, servers::Servers, update::Updater,
+    access, api, db,
+    network::{forward::Network, tls::Identity},
+    servers::Servers,
+    update::Updater,
 };
 use accounts::Accounts;
 use config::Config;
@@ -83,7 +91,9 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let paths = Paths::new(&config.data_dir);
     #[cfg(unix)]
     nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o027));
-    let owner = match InstallRecord::load(&paths)? {
+    let record = InstallRecord::load(&paths)?;
+    let installed = record.is_some();
+    let owner = match record {
         Some(record) => {
             let accounts = Accounts::find()?.ok_or_else(|| {
                 eyre!("the copal accounts are missing. Run copal install again")
@@ -135,6 +145,14 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.update_url.clone(),
     ));
     tokio::spawn(Arc::clone(&update).auto(Arc::clone(&servers)));
+    tokio::spawn(crate::servers::restarts::run(Arc::clone(&servers)));
+    let network = Arc::new(Network::new(
+        db.clone(),
+        config.port,
+        installed,
+        config.forward_ports,
+    ));
+    tokio::spawn(Arc::clone(&network).run(Arc::clone(&servers)));
     let state = Arc::new(api::AppState {
         db: db.clone(),
         servers,
@@ -142,6 +160,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         content,
         uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
+        network,
     });
     let router = api::router(Arc::clone(&state));
     match config.backend_url.clone() {
@@ -166,9 +185,26 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     }
 
     let address = SocketAddr::new(config.bind, config.port);
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
+    let listener = listen(address)
         .wrap_err_with(|| format!("could not listen on {address}"))?;
+    // On every IPv4 address by default, so on every IPv6 one too. A machine without IPv6 skips it.
+    let v6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), config.port);
+    let v6 = (config.bind == IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+        .then(|| listen(v6))
+        .and_then(|result| {
+            result
+                .inspect_err(|error| warn!(%error, "not listening on IPv6"))
+                .ok()
+        });
+    let v6_router = router.clone();
+    let serve_v6 = async {
+        match v6 {
+            Some(v6) => {
+                crate::network::tls::serve(v6, v6_router, &identity).await;
+            }
+            None => std::future::pending().await,
+        }
+    };
     info!(
         %address,
         data = %paths.root().display(),
@@ -179,6 +215,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     tokio::spawn(answer_once(paths.clone()));
     tokio::select! {
         () = crate::network::tls::serve(listener, router.clone(), &identity) => {}
+        () = serve_v6 => {}
         result = access::local::serve(&paths, &owner, router) => result?,
         () = update.restart.notified() => {
             info!("restarting into another version; servers keep running");
@@ -187,6 +224,27 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         () = stop => info!("stopping; servers keep running"),
     }
     Ok(Exit::Stopped)
+}
+
+/// A TCP listener on `address`. An IPv6 one takes IPv6 only, so it can sit next to the IPv4
+/// one on every OS.
+fn listen(address: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(address),
+        socket2::Type::STREAM,
+        None,
+    )?;
+    if address.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    // Lets a restarted Core take its port back at once. Windows lets another process share
+    // the port with it, so there it stays off.
+    #[cfg(unix)]
+    socket.set_reuse_address(true)?;
+    socket.bind(&address.into())?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+    tokio::net::TcpListener::from_std(socket.into())
 }
 
 /// Ask this Core for `/health` over the local socket, so the first answer, which writes the

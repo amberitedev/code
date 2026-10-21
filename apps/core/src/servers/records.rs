@@ -225,6 +225,34 @@ pub async fn last_outcome(
     .await
 }
 
+/// The server's last finished run.
+pub async fn last_ended(
+    db: &SqlitePool,
+    server_id: &str,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(
+        "SELECT id FROM runs WHERE server_id = ? AND ended_at IS NOT NULL \
+         ORDER BY ended_at DESC, started_at DESC LIMIT 1",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await
+}
+
+/// How run `run_id` ended, `None` while it runs or when there is no such run.
+pub async fn run_outcome(
+    db: &SqlitePool,
+    run_id: &str,
+) -> sqlx::Result<Option<Outcome>> {
+    Ok(sqlx::query_scalar(
+        "SELECT outcome FROM runs WHERE id = ? AND ended_at IS NOT NULL",
+    )
+    .bind(run_id)
+    .fetch_optional(db)
+    .await?
+    .flatten())
+}
+
 /// How a run ended, from the status file the shim wrote for it. Without one the shim died
 /// with Java, or the machine went down: a crash.
 pub fn outcome(status: Option<&ExitStatus>) -> (Outcome, Option<i32>) {
