@@ -62,7 +62,10 @@ tower = { version = "0.5.2", features = ["util"] }
 libc = "0.2.186"
 
 [target."cfg(unix)".dependencies]
-nix = { version = "0.30.1", features = ["fs", "signal", "user"] }
+# Java runtimes: Azul publishes Linux and macOS packages as tar.gz.
+flate2 = { workspace = true }
+nix ={ version = "0.30.1", features = ["fs", "signal", "user"] }
+tar = { workspace = true }
 
 [target."cfg(windows)".dependencies]
 windows-service = "0.8.1"

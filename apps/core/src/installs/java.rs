@@ -106,7 +106,9 @@ pub async fn java_requirement(
     )
 }
 
-/// Uses the same Azul Zulu ZIP packages as the launcher, owned by Core.
+/// Downloads an Azul Zulu JRE into `java/<version>`, owned by Core. Windows gets the ZIP package;
+/// Linux and macOS get the tar.gz one, the only one Azul publishes for every architecture there
+/// (Linux arm64 has no ZIP) and the one that keeps file modes and links.
 pub async fn download_java(
     http: &reqwest::Client,
     data_dir: &Path,
@@ -126,8 +128,10 @@ pub async fn download_java(
             return Err(format!("No Java download configured for {other}"));
         }
     };
+    let archive_type = if cfg!(windows) { "zip" } else { "tar.gz" };
+    // Without `crac_supported=false` the tar.gz answer can be a CRaC build.
     let url = format!(
-        "https://api.azul.com/metadata/v1/zulu/packages?arch={arch}&java_version={version}&os={}&archive_type=zip&javafx_bundled=false&java_package_type=jre&availability_types=CA&release_status=ga&latest=true&include_fields=sha256_hash&page_size=1",
+        "https://api.azul.com/metadata/v1/zulu/packages?arch={arch}&java_version={version}&os={}&archive_type={archive_type}&javafx_bundled=false&crac_supported=false&java_package_type=jre&availability_types=CA&release_status=ga&latest=true&include_fields=sha256_hash&page_size=1",
         std::env::consts::OS
     );
     info!(version, "Downloading Java runtime from Azul");
@@ -169,9 +173,14 @@ pub async fn download_java(
     let destination = parent.join(version.to_string());
     tokio::task::spawn_blocking(move || {
         let temp = tempfile::tempdir_in(&parent).map_err(|e| e.to_string())?;
-        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        #[cfg(windows)]
+        zip::ZipArchive::new(std::io::Cursor::new(bytes))
+            .and_then(|mut archive| archive.extract(temp.path()))
             .map_err(|e| e.to_string())?;
-        archive.extract(temp.path()).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        tar::Archive::new(flate2::read::GzDecoder::new(&bytes[..]))
+            .unpack(temp.path())
+            .map_err(|e| e.to_string())?;
         let binary = if cfg!(windows) { "java.exe" } else { "java" };
         let path = walkdir::WalkDir::new(temp.path())
             .into_iter()
