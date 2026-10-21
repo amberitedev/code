@@ -104,7 +104,7 @@ pub enum EndedBy {
 }
 
 /// A message on a shim's socket, one JSON object per line, inside an [`Envelope`]. The shim
-/// greets every connection with `Hello`; Core sends the rest.
+/// greets every connection with `Hello` and answers holds and releases; Core sends the rest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
@@ -126,6 +126,13 @@ pub enum Message {
     },
     /// Send `save-on` now, ending a hold.
     ReleaseSaves,
+    /// The shim's answer to `HoldSaves`: `save-off` is sent, and `save-on` follows after
+    /// `seconds` unless released first.
+    SavesHeld {
+        seconds: u64,
+    },
+    /// The shim's answer to `ReleaseSaves`: saving is on.
+    SavesReleased,
 }
 
 /// The longest autosave stays off for a backup, whatever Core asked.
@@ -322,6 +329,24 @@ impl Connection {
         stream.write_all(encode(message).as_bytes()).await?;
         stream.flush().await?;
         Ok(())
+    }
+
+    /// The shim's next message, waiting at most `limit`.
+    pub async fn recv(
+        &mut self,
+        limit: Duration,
+    ) -> Result<Message, ShimError> {
+        let mut line = String::new();
+        let read = tokio::time::timeout(
+            limit,
+            (&mut self.stream).take(64 * 1024).read_line(&mut line),
+        )
+        .await
+        .map_err(|_| io::Error::from(io::ErrorKind::TimedOut))??;
+        if read == 0 {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
+        }
+        decode(&line)?.map_err(ShimError::Incompatible)
     }
 }
 

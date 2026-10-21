@@ -41,6 +41,12 @@ pub enum Phase {
     Installing,
 }
 
+/// A shim answered with something else than the answer asked for.
+fn unexpected(message: Message) -> ServerError {
+    ShimError::Invalid(format!("{message:?} is not the answer asked for"))
+        .into()
+}
+
 /// Why a server action failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
@@ -486,19 +492,40 @@ impl Servers {
         .await
     }
 
-    /// Turn autosave off for a backup for at most `seconds`; the shim turns it back on then if
-    /// [`Servers::release_saves`] never comes.
+    /// Turn autosave off for a backup for at most `seconds`, once the shim confirms it; the shim
+    /// turns it back on then if [`Servers::release_saves`] never comes. Returns how long the
+    /// shim holds it, timed from before it was asked.
     pub async fn hold_saves(
         &self,
         id: &str,
         seconds: u64,
-    ) -> Result<(), ServerError> {
-        self.tell(id, Message::HoldSaves { seconds }).await
+    ) -> Result<Duration, ServerError> {
+        match self.ask(id, Message::HoldSaves { seconds }).await? {
+            Message::SavesHeld { seconds } => Ok(Duration::from_secs(seconds)),
+            other => Err(unexpected(other)),
+        }
     }
 
-    /// Turn autosave back on after [`Servers::hold_saves`].
+    /// Turn autosave back on after [`Servers::hold_saves`], once the shim confirms it.
     pub async fn release_saves(&self, id: &str) -> Result<(), ServerError> {
-        self.tell(id, Message::ReleaseSaves).await
+        match self.ask(id, Message::ReleaseSaves).await? {
+            Message::SavesReleased => Ok(()),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    /// Send a running server's shim a message and wait for its answer.
+    async fn ask(
+        &self,
+        id: &str,
+        message: Message,
+    ) -> Result<Message, ServerError> {
+        if self.phase(id) != Some(Phase::Running) {
+            return Err(ServerError::NotRunning);
+        }
+        let mut connection = Connection::open(&self.paths, id).await?;
+        connection.send(message).await?;
+        Ok(connection.recv(Duration::from_secs(10)).await?)
     }
 
     /// Stop the server, wait for its shim to exit, and start it again.
