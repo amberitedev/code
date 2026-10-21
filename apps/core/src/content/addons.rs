@@ -193,10 +193,8 @@ pub async fn add(
     };
     let kind = kind.unwrap_or_else(|| kind_of(&version, &target));
     let rows = records::files(&content.db, server_id).await?;
-    let mut provided: HashSet<String> = rows
-        .iter()
-        .filter_map(|row| row.project_id.clone())
-        .collect();
+    let folder = Arc::new(Folder::open(&content.paths.server(server_id))?);
+    let mut provided = provided(&rows, &|path| folder.exists(path));
     provided.remove(&version.project_id);
 
     let mut install = vec![version];
@@ -227,13 +225,24 @@ pub async fn add(
         }
     }
 
-    let folder = Arc::new(Folder::open(&content.paths.server(server_id))?);
     let dir = kind_folder(kind, &folder.level_name());
     for version in &install {
         place_version(content, server_id, &folder, &dir, version, &rows)
             .await?;
     }
     Ok(())
+}
+
+/// The projects this server already has: those of recorded files that are enabled and on disk.
+/// A disabled file's row keeps its enabled path, so it is not there.
+fn provided(
+    rows: &[ContentFile],
+    exists: &dyn Fn(&str) -> bool,
+) -> HashSet<String> {
+    rows.iter()
+        .filter(|row| exists(&row.path))
+        .filter_map(|row| row.project_id.clone())
+        .collect()
 }
 
 /// Download a version's file into `dir`, replacing an older file of the same project, and record
@@ -582,4 +591,33 @@ pub async fn updates(
         }
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_enabled_files_on_disk_provide_a_dependency() {
+        let row = |path: &str, project: &str| ContentFile {
+            path: path.into(),
+            origin: Origin::Added,
+            sha1: "x".into(),
+            project_id: Some(project.into()),
+            version_id: None,
+            pending: None,
+        };
+        let rows = [
+            row("mods/api.jar", "api"),
+            // Disabled: on disk as mods/lib.jar.disabled.
+            row("mods/lib.jar", "lib"),
+            // Deleted.
+            row("mods/gone.jar", "gone"),
+        ];
+        let on_disk = ["mods/api.jar", "mods/lib.jar.disabled"];
+        assert_eq!(
+            provided(&rows, &|path| on_disk.contains(&path)),
+            HashSet::from(["api".to_owned()])
+        );
+    }
 }
