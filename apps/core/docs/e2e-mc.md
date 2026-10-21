@@ -352,8 +352,8 @@ Open, for a decision:
 7. **A pack update can change the Minecraft version, and an older pack can go over a newer
    world.** The update takes the project's newest version for any game version
    (`src/api/content.rs:1106`, `versions(&project_id, &[], None)`): 26.2.0-7.35 went to
-   26.3.0-7.36, so Minecraft 26.2 became 26.3. Installing TVE for 26.2 over a world 26.3 had made
-   was accepted without a warning, and Minecraft 26.2 loaded it.
+   26.3.0-7.36, so Minecraft 26.2 became 26.3. Installing TVE for 26.2 over the 26.3 world was
+   accepted without a warning; Minecraft 26.2 loaded it.
 8. **PR 44 edited the shipped `001_init.sql`.** A Core installed from earlier `core-rewrite`
    failed at every start ("migration 1 was previously applied but has been modified"), restarting
    every 5 s, with the reason only in the journal. Harmless before release; from here on, a
@@ -408,7 +408,7 @@ It leaves `tmp/neoforge_installer…/` and `neoforge-26.3.0.95-installer.jar.log
 folder.
 
 **Pack install (12:48-12:49).** The Vanilla Experience (`EnFnYkUj`, 1.3 MB, 132 mods, server side
-required) at `26.2.0-7.35` (`tYfSFTpy`) onto the Fabric server, whose world 26.3 had made:
+required) at `26.2.0-7.35` (`tYfSFTpy`) onto the Fabric server, whose world was made by 26.3:
 `{"content_variant": "modpack", "spec": {"platform": "modrinth", "project_id": "EnFnYkUj",
 "version_id": "tYfSFTpy"}, "soft_override": true}` → 202. It failed in 6 s, in Core's log only:
 `install failed … error=level.dat_old is not a plain file`; the pack's `error` field in `GET
@@ -466,7 +466,7 @@ Then the tunnel and the backend were stopped, and the dev secret and session fil
 (One `POST /local/servers` over the socket answered nothing once, just before; it worked on the
 next try and did not happen again.)
 
-**Backups and restore (13:03-13:08), after PR 44 merged.** Merged `core-rewrite` (`f2dabeb`) into
+**Backups and restore (13:03-13:08), after PR 44 merged and before the restore-help fix.** Merged `core-rewrite` (`f2dabeb`) into
 `core-12-e2e-2` and built it on mc with `--locked` (2 min 46 s). `sudo copal install` over the
 existing data: Core then failed at every start, restarting every 5 s, with `migration 1 was
 previously applied but has been modified` in the journal. PR 44 changed `001_init.sql`. So
