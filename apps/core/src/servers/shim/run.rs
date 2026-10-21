@@ -14,7 +14,8 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 use super::{
-    EndedBy, ExitStatus, Launch, Message, PROTOCOL, RunRecord, decode, encode,
+    EndedBy, ExitStatus, Launch, MAX_SAVE_HOLD_S, Message, PROTOCOL, RunRecord,
+    decode, encode,
     java::{self, Java, Killer, RunAs},
     read_versioned, try_lock, write_json,
 };
@@ -93,6 +94,7 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
         stdin: Mutex::new(stdin),
         killer,
         ended_by: Mutex::new(EndedBy::Exit),
+        saves: Arc::default(),
     });
     let server = tokio::spawn(serve(listener, Arc::clone(&shared)));
     let pid = std::process::id();
@@ -168,10 +170,12 @@ struct Shared {
     stdin: Mutex<Box<dyn Write + Send>>,
     killer: Killer,
     ended_by: Mutex<EndedBy>,
+    saves: Arc<SaveHold>,
 }
 
 impl Shared {
-    fn act(&self, message: Message) {
+    /// Carry out one of Core's messages, and return the answer it gets, if any.
+    fn act(self: &Arc<Self>, message: Message) -> Option<Message> {
         let result = match message {
             Message::Command { line } => {
                 self.write(line.lines().next().unwrap_or_default())
@@ -188,11 +192,28 @@ impl Shared {
                 *self.ended_by.lock().expect("not poisoned") = EndedBy::Kill;
                 self.killer.kill()
             }
-            Message::Hello { .. } => Ok(()),
+            Message::HoldSaves { seconds } => {
+                let seconds = seconds.min(MAX_SAVE_HOLD_S);
+                let shared = Arc::clone(self);
+                let held = self
+                    .saves
+                    .hold(Duration::from_secs(seconds), move |line| {
+                        shared.write(line)
+                    });
+                return answer(held.map(|()| Message::SavesHeld { seconds }));
+            }
+            Message::ReleaseSaves => {
+                let released = self.saves.release(|line| self.write(line));
+                return answer(released.map(|()| Message::SavesReleased));
+            }
+            Message::Hello { .. }
+            | Message::SavesHeld { .. }
+            | Message::SavesReleased => Ok(()),
         };
         if let Err(error) = result {
             eprintln!("{error}");
         }
+        None
     }
 
     fn write(&self, line: &str) -> std::io::Result<()> {
@@ -200,6 +221,72 @@ impl Shared {
         stdin.write_all(line.as_bytes())?;
         stdin.write_all(b"\n")?;
         stdin.flush()
+    }
+}
+
+/// The answer to a hold or release, or nothing when it failed (Core then gives up waiting).
+fn answer(result: std::io::Result<Message>) -> Option<Message> {
+    result.map_err(|error| eprintln!("{error}")).ok()
+}
+
+/// Autosave turned off for a backup. Core turns it back on; if Core never comes back, the hold
+/// runs out and the shim does, so saving is never left off.
+///
+/// Every change of the hold is made together with its console line, under one lock: a release
+/// on one connection and a hold on another, or a hold running out, can never leave the last
+/// line Java got disagreeing with the state.
+#[derive(Default)]
+struct SaveHold {
+    /// Which hold is current, and whether one is.
+    state: Mutex<(u64, bool)>,
+}
+
+impl SaveHold {
+    /// Send `save-off` through `write`, and `save-on` after `limit` unless released or held again
+    /// before then.
+    fn hold(
+        self: &Arc<Self>,
+        limit: Duration,
+        write: impl Fn(&str) -> std::io::Result<()> + Send + 'static,
+    ) -> std::io::Result<()> {
+        let generation = {
+            let mut state = self.state.lock().expect("not poisoned");
+            write("save-off")?;
+            state.0 += 1;
+            state.1 = true;
+            state.0
+        };
+        let hold = Arc::clone(self);
+        std::thread::spawn(move || {
+            std::thread::sleep(limit);
+            if let Err(error) = hold.end(Some(generation), &write) {
+                eprintln!("{error}");
+            }
+        });
+        Ok(())
+    }
+
+    /// Send `save-on` now if saving is held off.
+    fn release(
+        &self,
+        write: impl Fn(&str) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        self.end(None, write)
+    }
+
+    /// End the hold `generation`, or whichever is current, sending `save-on` if one ends.
+    fn end(
+        &self,
+        generation: Option<u64>,
+        write: impl Fn(&str) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let mut state = self.state.lock().expect("not poisoned");
+        if state.1 && generation.is_none_or(|generation| generation == state.0)
+        {
+            write("save-on")?;
+            state.1 = false;
+        }
+        Ok(())
     }
 }
 
@@ -240,9 +327,14 @@ async fn connection(stream: Box<dyn Stream>, shared: Arc<Shared>) {
         match decode(&line) {
             Ok(Ok(message)) => {
                 let shared = Arc::clone(&shared);
-                let _ =
+                let reply =
                     tokio::task::spawn_blocking(move || shared.act(message))
                         .await;
+                if let Ok(Some(reply)) = reply
+                    && writer.write_all(encode(reply).as_bytes()).await.is_err()
+                {
+                    return;
+                }
             }
             Ok(Err(version)) => {
                 eprintln!("ignored a message of shim protocol {version}");
@@ -305,4 +397,93 @@ fn pump(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recorder() -> (
+        Arc<Mutex<Vec<String>>>,
+        impl Fn(&str) -> std::io::Result<()> + Send + Sync + Clone + 'static,
+    ) {
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&lines);
+        (lines, move |line: &str| {
+            sink.lock().unwrap().push(line.to_owned());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn holds_and_releases_from_many_connections_end_with_saving_on() {
+        let saves = Arc::new(SaveHold::default());
+        let (lines, write) = recorder();
+        let threads: Vec<_> = (0..16)
+            .map(|_| {
+                let saves = Arc::clone(&saves);
+                let write = write.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..50 {
+                        saves
+                            .hold(Duration::from_secs(60), write.clone())
+                            .unwrap();
+                        saves.release(write.clone()).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let lines = lines.lock().unwrap();
+        // Java got the lines in the order the hold changed: never two `save-on` in a row, and
+        // the last says saving is on, as the state does.
+        assert!(lines.windows(2).all(|pair| pair != ["save-on", "save-on"]));
+        assert_eq!(lines.last().unwrap(), "save-on");
+        assert!(!saves.state.lock().unwrap().1);
+    }
+
+    #[test]
+    fn a_hold_turns_saving_off_until_released() {
+        let saves = Arc::new(SaveHold::default());
+        let (lines, write) = recorder();
+        saves.hold(Duration::from_secs(60), write.clone()).unwrap();
+        saves.release(write.clone()).unwrap();
+        // A second release has nothing to end.
+        saves.release(write).unwrap();
+        assert_eq!(*lines.lock().unwrap(), ["save-off", "save-on"]);
+    }
+
+    #[test]
+    fn a_hold_core_never_releases_runs_out() {
+        let saves = Arc::new(SaveHold::default());
+        let (lines, write) = recorder();
+        saves
+            .hold(Duration::from_millis(50), write.clone())
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(*lines.lock().unwrap(), ["save-off", "save-on"]);
+        // Releasing afterwards sends nothing more.
+        saves.release(write).unwrap();
+        assert_eq!(lines.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_second_hold_starts_the_time_again() {
+        let saves = Arc::new(SaveHold::default());
+        let (lines, write) = recorder();
+        saves
+            .hold(Duration::from_millis(50), write.clone())
+            .unwrap();
+        saves.hold(Duration::from_secs(60), write.clone()).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            *lines.lock().unwrap(),
+            ["save-off", "save-off"],
+            "the first limit is gone"
+        );
+        saves.release(write).unwrap();
+        assert_eq!(lines.lock().unwrap().last().unwrap(), "save-on");
+    }
 }

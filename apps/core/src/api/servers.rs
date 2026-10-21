@@ -433,6 +433,7 @@ impl From<ServerError> for ApiError {
             | ServerError::NotRunning
             | ServerError::Starting
             | ServerError::Installing
+            | ServerError::BackingUp
             | ServerError::Unmanaged
             | ServerError::NoPorts
             | ServerError::Eula
@@ -815,7 +816,7 @@ async fn server_full(
             name: row.name,
             created_at,
             is_active: true,
-            download_method: WorldDownloadMethod::Unavailable,
+            download_method: WorldDownloadMethod::DirectNodeDownload,
             backups: [],
             content,
             readiness: WorldReadiness {

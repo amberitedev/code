@@ -371,8 +371,19 @@ impl Folder {
 
     /// Move `from` to `to`, creating the folders above `to`.
     pub fn rename(&self, from: &str, to: &str) -> io::Result<()> {
+        self.move_to(from, self, to)
+    }
+
+    /// Move `from` in this folder to `to` in `other`, creating the folders above `to`. Both must
+    /// be on one disk: it is a rename.
+    pub fn move_to(
+        &self,
+        from: &str,
+        other: &Folder,
+        to: &str,
+    ) -> io::Result<()> {
         let (from_dir, from_name) = self.parent(from)?;
-        let (to_dir, to_name) = self.parent_creating(to)?;
+        let (to_dir, to_name) = other.parent_creating(to)?;
         from_dir.rename(from_name, &to_dir, to_name)
     }
 }

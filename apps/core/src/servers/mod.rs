@@ -48,6 +48,12 @@ pub enum Phase {
     Installing,
 }
 
+/// A shim answered with something else than the answer asked for.
+fn unexpected(message: Message) -> ServerError {
+    ShimError::Invalid(format!("{message:?} is not the answer asked for"))
+        .into()
+}
+
 /// Why a server action failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
@@ -61,6 +67,10 @@ pub enum ServerError {
     Starting,
     #[error("the server is installing; it can start once that is done")]
     Installing,
+    #[error(
+        "a backup is copying the server's world; stop or restart it once the backup is done"
+    )]
+    BackingUp,
     #[error(
         "Core cannot reach this server's shim, so the server keeps running on its own. Stop it from the game, then start it again"
     )]
@@ -110,6 +120,8 @@ pub struct Servers {
     deleted: Mutex<HashSet<String>>,
     /// Servers killed while a restart waited for them to stop. The kill wins: they stay off.
     killed: Mutex<HashSet<String>>,
+    /// Running servers a hot backup is copying (see [`Servers::copying`]).
+    copying: Mutex<HashSet<String>>,
     /// Itself, for the tasks a run starts.
     me: Weak<Servers>,
     /// Servers starting to run and runs ending.
@@ -133,6 +145,24 @@ pub enum Lifecycle {
     Ended(String),
 }
 
+/// A running server taken by a hot backup until dropped: stopping or restarting it is refused,
+/// since its shutdown save would rewrite the world under the copy, and a start waits. A kill
+/// still works; it saves nothing.
+pub struct Copying {
+    servers: Arc<Servers>,
+    id: String,
+}
+
+impl Drop for Copying {
+    fn drop(&mut self) {
+        self.servers
+            .copying
+            .lock()
+            .expect("not poisoned")
+            .remove(&self.id);
+    }
+}
+
 /// How long a new shim may take to start Java.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -151,6 +181,7 @@ impl Servers {
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
             killed: Mutex::default(),
+            copying: Mutex::default(),
             me: me.clone(),
             events: broadcast::channel(64).0,
             insight: Mutex::default(),
@@ -362,6 +393,11 @@ impl Servers {
         id: &str,
         crashed: Option<&str>,
     ) -> Result<(), ServerError> {
+        // A server that exited during a hot backup, such as a crash restart, starts once the
+        // copy is done. A copy ends within the shim's ten-minute hold.
+        while self.is_copying(id) {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
         let server = records::get(&self.db, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
@@ -567,9 +603,28 @@ impl Servers {
         }
     }
 
+    /// Take a running server for a hot backup's copy (see [`Copying`]).
+    pub fn copying(self: &Arc<Self>, id: &str) -> Copying {
+        self.copying
+            .lock()
+            .expect("not poisoned")
+            .insert(id.to_owned());
+        Copying {
+            servers: Arc::clone(self),
+            id: id.to_owned(),
+        }
+    }
+
+    fn is_copying(&self, id: &str) -> bool {
+        self.copying.lock().expect("not poisoned").contains(id)
+    }
+
     /// Ask the server to stop. It stops when Java exits, however long that takes. A server
-    /// waiting to start again after a crash stays stopped.
+    /// waiting to start again after a crash stays stopped. Refused while a hot backup copies it.
     pub async fn stop(&self, id: &str) -> Result<(), ServerError> {
+        if self.is_copying(id) {
+            return Err(ServerError::BackingUp);
+        }
         let cancelled = self.owner_acted(id);
         match self.tell(id, Message::Stop).await {
             Err(ServerError::NotRunning) if cancelled => return Ok(()),
@@ -611,6 +666,42 @@ impl Servers {
         .await
     }
 
+    /// Turn autosave off for a backup for at most `seconds`, once the shim confirms it; the shim
+    /// turns it back on then if [`Servers::release_saves`] never comes. Returns how long the
+    /// shim holds it, timed from before it was asked.
+    pub async fn hold_saves(
+        &self,
+        id: &str,
+        seconds: u64,
+    ) -> Result<Duration, ServerError> {
+        match self.ask(id, Message::HoldSaves { seconds }).await? {
+            Message::SavesHeld { seconds } => Ok(Duration::from_secs(seconds)),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    /// Turn autosave back on after [`Servers::hold_saves`], once the shim confirms it.
+    pub async fn release_saves(&self, id: &str) -> Result<(), ServerError> {
+        match self.ask(id, Message::ReleaseSaves).await? {
+            Message::SavesReleased => Ok(()),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    /// Send a running server's shim a message and wait for its answer.
+    async fn ask(
+        &self,
+        id: &str,
+        message: Message,
+    ) -> Result<Message, ServerError> {
+        if self.phase(id) != Some(Phase::Running) {
+            return Err(ServerError::NotRunning);
+        }
+        let mut connection = Connection::open(&self.paths, id).await?;
+        connection.send(message).await?;
+        Ok(connection.recv(Duration::from_secs(10)).await?)
+    }
+
     /// Wait, at most `timeout`, until no server is starting, stopping, or waiting to start
     /// again after a crash. The updater waits so a restart of Core never lands in the middle of
     /// one.
@@ -644,6 +735,9 @@ impl Servers {
         id: &str,
         run: u64,
     ) -> Result<(), ServerError> {
+        if self.is_copying(id) {
+            return Err(ServerError::BackingUp);
+        }
         {
             let mut live = self.live();
             let Some(this) =
@@ -706,9 +800,13 @@ impl Servers {
         self.deleted.lock().expect("not poisoned").remove(id);
     }
 
-    /// Remove a held server's world and run files, once its row is gone.
+    /// Remove a held server's world, run files, and backups, once its row is gone.
     pub fn delete_folders(&self, id: &str) -> Result<(), ServerError> {
-        for folder in [self.paths.server(id), self.paths.run(id)] {
+        for folder in [
+            self.paths.server(id),
+            self.paths.run(id),
+            self.paths.backups().join(id),
+        ] {
             match std::fs::remove_dir_all(&folder) {
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                     return Err(error.into());
@@ -1002,7 +1100,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_shim_of_another_protocol_is_left_running() {
+    async fn a_server_a_hot_backup_copies_cannot_be_stopped_or_restarted() {
+        let (_dir, servers) = servers().await;
+        let server = servers.create("A").await.unwrap();
+        let copying = servers.copying(&server.id);
+        assert!(matches!(
+            servers.stop(&server.id).await,
+            Err(ServerError::BackingUp)
+        ));
+        assert!(matches!(
+            servers.restart(&server.id).await,
+            Err(ServerError::BackingUp)
+        ));
+        // Core's own planned restarts too.
+        assert!(matches!(
+            servers.restart_run(&server.id, 1).await,
+            Err(ServerError::BackingUp)
+        ));
+        drop(copying);
+        assert!(matches!(
+            servers.stop(&server.id).await,
+            Err(ServerError::NotRunning)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_shim_of_an_older_protocol_is_left_running() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
@@ -1011,15 +1134,15 @@ mod tests {
         let _shim = shim::try_lock(&paths, &server.id).unwrap().unwrap();
         std::fs::write(
             paths.run_record(&server.id),
-            r#"{"v":2,"run_id":"newer","pid":1}"#,
+            r#"{"v":1,"run_id":"older","pid":1}"#,
         )
         .unwrap();
 
         let servers = Servers::open(paths, db).await.unwrap();
-        assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(2))));
+        assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(1))));
         assert!(matches!(
             servers.stop(&server.id).await,
-            Err(ServerError::Shim(ShimError::Incompatible(2)))
+            Err(ServerError::Shim(ShimError::Incompatible(1)))
         ));
         assert!(matches!(
             servers.start(&server.id).await,

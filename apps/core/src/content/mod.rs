@@ -36,6 +36,7 @@ use crate::{
             WsEvent,
         },
     },
+    backups::Backups,
     daemon::paths::Paths,
     installs::{self, download},
     servers::{Hold, ServerError, Servers},
@@ -67,6 +68,8 @@ pub enum Error {
     #[error(transparent)]
     Download(#[from] download::DownloadError),
     #[error(transparent)]
+    Backup(#[from] crate::backups::Error),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Database(#[from] sqlx::Error),
@@ -93,9 +96,12 @@ pub struct Content {
     /// Pack content, from allowed hosts only. See `hosts`.
     pub downloads: reqwest::Client,
     pub modrinth: modrinth::Modrinth,
+    /// Updates back the world up first.
+    pub backups: Arc<Backups>,
     activity: Mutex<HashMap<String, Activity>>,
     busy: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    /// Install progress and results, by server. Console sockets pass them on.
+    /// Install progress and results, by server, on the channel backups use. Console sockets
+    /// pass them on.
     pub events: broadcast::Sender<(String, WsEvent)>,
 }
 
@@ -110,6 +116,7 @@ impl Content {
         paths: Paths,
         db: SqlitePool,
         servers: Arc<Servers>,
+        backups: Arc<Backups>,
     ) -> color_eyre::Result<Arc<Self>> {
         let http = download::client()?;
         let content = Arc::new(Self {
@@ -121,7 +128,8 @@ impl Content {
             servers,
             activity: Mutex::default(),
             busy: Mutex::default(),
-            events: broadcast::channel(256).0,
+            events: backups.events.clone(),
+            backups,
         });
         let java = Arc::clone(&content);
         tokio::spawn(async move {
