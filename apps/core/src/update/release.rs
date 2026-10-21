@@ -50,6 +50,7 @@ pub const TARGET: Option<&str> = if cfg!(all(windows, target_arch = "x86_64")) {
     Deserialize,
     TS,
     sqlx::Type,
+    clap::ValueEnum,
 )]
 #[serde(rename_all = "lowercase")]
 #[sqlx(rename_all = "lowercase")]

@@ -9,12 +9,16 @@
 pub mod access;
 pub mod activity;
 pub mod backend;
-mod backups;
+pub mod backups;
+pub mod console;
 pub mod content;
 pub mod error;
+pub mod eula;
 pub mod events;
 pub mod files;
 mod health;
+pub mod logs;
+pub mod performance;
 pub mod properties;
 pub mod servers;
 pub mod sessions;
@@ -81,6 +85,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/update", get(update::get).patch(update::settings))
         .route("/update/check", post(update::check))
         .route("/update/rollback", post(update::rollback))
+        .route("/eula", get(eula::get).post(eula::post))
+        .route("/logs", get(logs::get))
+        .route("/servers/{id}/performance", get(performance::get))
+        .route("/servers/{id}/memory", put(performance::set_memory))
+        .route("/servers/{id}/restarts", put(performance::set_restarts))
+        .route("/servers/{id}/console", post(console::send))
         .route("/modrinth/v0/servers", get(servers::list))
         .route("/modrinth/v0/servers/{id}", get(servers::get))
         .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
