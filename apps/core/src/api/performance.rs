@@ -73,6 +73,8 @@ pub async fn set_memory(
     Json(request): Json<Memory>,
 ) -> Result<Json<Performance>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
+    // The owner passes `require` for any id, so a missing server is found here, before a write.
+    performance(&state, &id).await?;
     if request.memory_mb < MIN_MEMORY_MB {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -96,6 +98,7 @@ pub async fn set_restarts(
     Json(request): Json<Restarts>,
 ) -> Result<Json<Performance>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
+    performance(&state, &id).await?;
     if request.smart_after_hours == Some(0) {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
