@@ -481,3 +481,25 @@ async fn only_a_reported_save_counts_as_flushed() {
     drop(sender);
     assert!(!saved(&mut lines, Duration::from_secs(5)).await);
 }
+
+#[test]
+fn a_manifest_naming_a_root_twice_is_refused() {
+    let manifest = |worlds: &[&str], settings: &[&str]| Manifest {
+        v: 1,
+        worlds: worlds.iter().map(|name| (*name).to_owned()).collect(),
+        settings: settings.iter().map(|name| (*name).to_owned()).collect(),
+    };
+    assert!(manifest(&["world"], &["ops.json"]).check().is_ok());
+    for (worlds, settings) in [
+        (&["world"][..], &["ops.json", "ops.json"][..]),
+        // One file where case does not count.
+        (&["world"][..], &["ops.json", "OPS.json"][..]),
+        // The settings file inside the world folder.
+        (&["ops.json"][..], &["ops.json"][..]),
+    ] {
+        assert!(
+            manifest(worlds, settings).check().is_err(),
+            "{worlds:?} {settings:?}"
+        );
+    }
+}

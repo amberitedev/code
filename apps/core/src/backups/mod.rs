@@ -763,6 +763,22 @@ impl Manifest {
         {
             return Err(refuse("names settings Core would not keep"));
         }
+        // Each root once, none inside another, compared without case as Windows and macOS do:
+        // a root swapped twice would overwrite its own rollback copy.
+        let roots: Vec<String> =
+            self.roots().map(|root| folder::fold_case(root)).collect();
+        let overlap = roots.iter().enumerate().any(|(n, a)| {
+            roots.iter().skip(n + 1).any(|b| {
+                a == b
+                    || a.strip_prefix(b.as_str())
+                        .is_some_and(|r| r.starts_with('/'))
+                    || b.strip_prefix(a.as_str())
+                        .is_some_and(|r| r.starts_with('/'))
+            })
+        });
+        if overlap {
+            return Err(refuse("names a file or folder twice"));
+        }
         Ok(())
     }
 
