@@ -272,7 +272,7 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
 }
 
 #[tokio::test]
-async fn a_crashs_console_lines_are_kept_from_viewers() {
+async fn crash_console_lines_are_kept_from_viewers() {
     let core = core().await;
     sqlx::query(
         "INSERT INTO runs (id, server_id, started_at, ended_at, outcome, exit_code, last_lines) \
