@@ -22,8 +22,9 @@ pub struct Refused(pub ApiError);
 
 /// Core could not be reached over the local socket.
 #[derive(Debug, thiserror::Error)]
+// `source` is printed as the cause by `{:#}`, so the message does not repeat it.
 #[error(
-    "Core is not running, or this account may not use it (could not open {path}): {source}"
+    "Core is not running, or this account may not use it (could not open {path})"
 )]
 pub struct Unreachable {
     path: String,
