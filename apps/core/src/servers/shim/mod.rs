@@ -39,8 +39,9 @@ use crate::{
     daemon::paths::Paths,
 };
 
-/// The version of the files and messages below. Change it whenever their meaning changes.
-pub const PROTOCOL: u32 = 1;
+/// The version of the files and messages below. Change it whenever their meaning changes. 2: the
+/// shim answers `HoldSaves` and `ReleaseSaves`.
+pub const PROTOCOL: u32 = 2;
 
 /// What Core asks a shim to run, in `launch.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,10 +388,13 @@ mod tests {
                 line: "say hi".into()
             }
         );
-        let newer = r#"{"v":2,"type":"hello","run_id":"x","new_field":true}"#;
-        assert_eq!(decode(newer).unwrap().unwrap_err(), 2);
-        let unknown = r#"{"v":2,"type":"something_new"}"#;
-        assert_eq!(decode(unknown).unwrap().unwrap_err(), 2);
+        let newer = r#"{"v":3,"type":"hello","run_id":"x","new_field":true}"#;
+        assert_eq!(decode(newer).unwrap().unwrap_err(), 3);
+        let unknown = r#"{"v":3,"type":"something_new"}"#;
+        assert_eq!(decode(unknown).unwrap().unwrap_err(), 3);
+        // A shim from before holds were answered is another protocol, so Core never waits on it.
+        let older = r#"{"v":1,"type":"hello","run_id":"x"}"#;
+        assert_eq!(decode(older).unwrap().unwrap_err(), 1);
     }
 
     #[test]
@@ -399,10 +403,10 @@ mod tests {
         let path = dir.path().join("run.json");
         write_json(&path, &record()).unwrap();
         assert_eq!(read_versioned::<RunRecord>(&path).unwrap(), record());
-        std::fs::write(&path, r#"{"v":2,"something":"else"}"#).unwrap();
+        std::fs::write(&path, r#"{"v":1,"something":"else"}"#).unwrap();
         assert!(matches!(
             read_versioned::<RunRecord>(&path),
-            Err(ShimError::Incompatible(2))
+            Err(ShimError::Incompatible(1))
         ));
     }
 

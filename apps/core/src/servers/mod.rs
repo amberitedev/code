@@ -909,7 +909,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_shim_of_another_protocol_is_left_running() {
+    async fn a_shim_of_an_older_protocol_is_left_running() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
@@ -917,15 +917,15 @@ mod tests {
         let _shim = shim::try_lock(&paths, &server.id).unwrap().unwrap();
         std::fs::write(
             paths.run_record(&server.id),
-            r#"{"v":2,"run_id":"newer","pid":1}"#,
+            r#"{"v":1,"run_id":"older","pid":1}"#,
         )
         .unwrap();
 
         let servers = Servers::open(paths, db).await.unwrap();
-        assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(2))));
+        assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(1))));
         assert!(matches!(
             servers.stop(&server.id).await,
-            Err(ServerError::Shim(ShimError::Incompatible(2)))
+            Err(ServerError::Shim(ShimError::Incompatible(1)))
         ));
         assert!(matches!(
             servers.start(&server.id).await,

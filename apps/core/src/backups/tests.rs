@@ -462,3 +462,22 @@ async fn a_world_file_a_restore_would_refuse_fails_the_backup() {
     assert!(setup.backups.wait(operation).await.is_err());
     assert!(!setup.backups.file(&setup.server, &id).exists());
 }
+
+#[tokio::test]
+async fn only_a_reported_save_counts_as_flushed() {
+    let (sender, mut lines) = tokio::sync::mpsc::channel(8);
+    sender
+        .send("[Server thread/INFO]: Saved the game".to_owned())
+        .await
+        .unwrap();
+    assert!(saved(&mut lines, Duration::from_secs(5)).await);
+    // Still saving when the time is up.
+    sender
+        .send("[Server thread/INFO]: Saving the game".to_owned())
+        .await
+        .unwrap();
+    assert!(!saved(&mut lines, Duration::from_millis(50)).await);
+    // The log ended without a save.
+    drop(sender);
+    assert!(!saved(&mut lines, Duration::from_secs(5)).await);
+}

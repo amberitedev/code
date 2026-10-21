@@ -498,7 +498,13 @@ impl Backups {
                     )?;
                 (false, Some(hold))
             }
-            Some(Phase::Starting | Phase::Stopping | Phase::Unmanaged(_)) => {
+            Some(Phase::Unmanaged(_)) => {
+                return Err(Error::Conflict(
+                    "Another Copal version started this server, so Core cannot hold its saves. Restart it, then back it up."
+                        .into(),
+                ));
+            }
+            Some(Phase::Starting | Phase::Stopping) => {
                 return Err(Error::Conflict(
                     "The server is starting or stopping; back it up once it runs or has stopped."
                         .into(),
@@ -536,19 +542,13 @@ impl Backups {
         }
         let wait =
             SAVE_WAIT.min(deadline.saturating_duration_since(Instant::now()));
-        let saved = tokio::time::timeout(wait, async {
-            while let Some(line) = lines.recv().await {
-                if line.contains("Saved the game")
-                    || line.contains("Saved the world")
-                {
-                    return true;
-                }
-            }
-            false
-        })
-        .await;
-        if !matches!(saved, Ok(true)) {
-            warn!(server = %server_id, "the server did not report its save; copying anyway");
+        // Copying while the flush still writes could keep a half-written region file. The
+        // caller turns saving back on either way.
+        if !saved(&mut lines, wait).await {
+            return Err(Error::Conflict(format!(
+                "The server did not finish saving within {} seconds, so no backup was made; try again.",
+                wait.as_secs()
+            )));
         }
         Ok(deadline)
     }
@@ -663,6 +663,24 @@ impl Backups {
             .remove(token)
             .filter(|grant| grant.expires > Instant::now())
     }
+}
+
+/// Whether the console reports a finished save within `wait`.
+async fn saved(
+    lines: &mut tokio::sync::mpsc::Receiver<String>,
+    wait: Duration,
+) -> bool {
+    let reported = async {
+        while let Some(line) = lines.recv().await {
+            if line.contains("Saved the game")
+                || line.contains("Saved the world")
+            {
+                return true;
+            }
+        }
+        false
+    };
+    matches!(tokio::time::timeout(wait, reported).await, Ok(true))
 }
 
 /// Tell console sockets how far an operation is.
