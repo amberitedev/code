@@ -132,10 +132,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/content/modpack/update",
             get(content::modpack).post(content::update_modpack),
         )
-        .route(
-            "/servers/{id}/content/edited",
-            get(content::edited).post(content::decide),
-        )
         .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
         .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))
         .route("/servers/{id}/modrinth/v0/fs/move", post(files::rename))
@@ -163,7 +159,12 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/modrinth/v0/servers/{id}/reinstall",
             post(servers::reinstall),
         )
-        // Adding and updating addons download them first.
+        // Adding and updating addons download them first, as does taking the pack's version of
+        // an edited file.
+        .route(
+            "/servers/{id}/content/edited",
+            get(content::edited).post(content::decide),
+        )
         .route("/v1/servers/{id}/worlds/{wid}/addons", get(content::list).post(content::add))
         .route("/v1/servers/{id}/worlds/{wid}/addons/install-many", post(content::add_many))
         .route(
