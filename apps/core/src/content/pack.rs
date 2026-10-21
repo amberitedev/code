@@ -135,20 +135,26 @@ pub fn platform(index: &Index) -> Result<Platform, PackError> {
     })
 }
 
-/// Whether Minecraft `version` is older than `than`, by their release numbers (`1.20.1`,
-/// `26.3`; a `-pre1` suffix counts as its release). `None` when either is not a release number,
-/// such as a snapshot.
-pub fn older_minecraft(version: &str, than: &str) -> Option<bool> {
+/// How Minecraft `version` orders against `than` when both are releases (`1.20.1`, `26.3`),
+/// by their numbers. `None` when either is not: a snapshot (`24w14a`), a pre-release or a
+/// release candidate (`1.21-pre1`, `1.21-rc1`). Those cannot be strictly ordered here, and a
+/// pre-release of 1.21 is older than 1.21 itself, so a caller that guards against going back a
+/// version treats `None` as possibly older.
+pub fn release_order(version: &str, than: &str) -> Option<std::cmp::Ordering> {
     let numbers = |version: &str| -> Option<Vec<u32>> {
-        let release = version.split('-').next()?;
-        let mut numbers = release
+        let mut numbers = version
             .split('.')
-            .map(|part| part.parse().ok())
+            .map(|part| {
+                part.bytes()
+                    .all(|byte| byte.is_ascii_digit())
+                    .then(|| part.parse().ok())
+                    .flatten()
+            })
             .collect::<Option<Vec<u32>>>()?;
         numbers.resize(3.max(numbers.len()), 0);
         Some(numbers)
     };
-    Some(numbers(version)? < numbers(than)?)
+    Some(numbers(version)?.cmp(&numbers(than)?))
 }
 
 /// Where the pack gets a file from.
@@ -489,12 +495,15 @@ mod tests {
 
     #[test]
     fn minecraft_versions_compare_by_release() {
-        assert_eq!(older_minecraft("26.2", "26.3"), Some(true));
-        assert_eq!(older_minecraft("1.20.1", "1.20"), Some(false));
-        assert_eq!(older_minecraft("1.20", "1.20.0"), Some(false));
-        assert_eq!(older_minecraft("1.9", "1.10"), Some(true));
-        assert_eq!(older_minecraft("1.21-pre1", "1.21"), Some(false));
-        assert_eq!(older_minecraft("24w14a", "1.21"), None);
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        assert_eq!(release_order("26.2", "26.3"), Some(Less));
+        assert_eq!(release_order("1.20.1", "1.20"), Some(Greater));
+        assert_eq!(release_order("1.20", "1.20.0"), Some(Equal));
+        assert_eq!(release_order("1.9", "1.10"), Some(Less));
+        // Not releases: no strict order, on either side.
+        assert_eq!(release_order("1.21-pre1", "1.21"), None);
+        assert_eq!(release_order("1.21", "1.21-rc1"), None);
+        assert_eq!(release_order("24w14a", "1.21"), None);
     }
 
     fn row(path: &str, origin: Origin, sha1: &str) -> ContentFile {

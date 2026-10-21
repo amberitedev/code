@@ -293,19 +293,31 @@ async fn install_pack(
 }
 
 /// The Minecraft version a pack for `pack` moves a server on `server` from and to, or why it may
-/// not: an older one is refused unless `force`, since a world does not go back a version safely.
+/// not: one that is not a newer release is refused unless `force`, since a world does not go
+/// back a version safely. That includes any snapshot, pre-release or release candidate on
+/// either side, which cannot be strictly ordered (a pre-release of 1.21 is older than 1.21).
 fn game_version_change(
     server: Option<&str>,
     pack: &str,
     force: bool,
 ) -> Result<Option<GameVersionChange>, Error> {
+    use std::cmp::Ordering;
     let Some(server) = server.filter(|server| *server != pack) else {
         return Ok(None);
     };
-    if !force && pack::older_minecraft(pack, server) == Some(true) {
-        return Err(Error::Invalid(format!(
-            "This pack is for Minecraft {pack}, older than the {server} this server's world is from, and a world does not go back a version safely. Install it with force to do it anyway."
-        )));
+    match pack::release_order(pack, server) {
+        Some(Ordering::Greater | Ordering::Equal) => {}
+        _ if force => {}
+        Some(Ordering::Less) => {
+            return Err(Error::Invalid(format!(
+                "This pack is for Minecraft {pack}, older than the {server} this server's world is from, and a world does not go back a version safely. Install it with force to do it anyway."
+            )));
+        }
+        None => {
+            return Err(Error::Invalid(format!(
+                "This pack is for Minecraft {pack} and this server's world is from {server}. A snapshot or pre-release cannot be ordered against a release, and a world does not go back a version safely. Install it with force to do it anyway."
+            )));
+        }
     }
     Ok(Some(GameVersionChange {
         from: server.to_owned(),
@@ -854,5 +866,16 @@ mod tests {
                 .map(|change| change.to),
             Some("26.2".into())
         );
+        // A pre-release or snapshot pack over a release needs force too.
+        for pack in ["1.21-pre1", "24w14a"] {
+            assert!(
+                matches!(
+                    game_version_change(Some("1.21"), pack, false),
+                    Err(Error::Invalid(_))
+                ),
+                "{pack}"
+            );
+            assert!(game_version_change(Some("1.21"), pack, true).is_ok());
+        }
     }
 }
