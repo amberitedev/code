@@ -289,23 +289,31 @@ fn program_path() -> PathBuf {
     }
 }
 
-/// Copy this binary to `program_path`, unless it already runs from there.
+/// Copy this binary to `program_path`, unless it already runs from there. On Linux and macOS it
+/// is 0755 whatever mode the build gave it, so only root can change it.
 fn install_binary() -> Result<PathBuf> {
     let target = program_path();
     let current = std::env::current_exe()?;
-    if dunce::canonicalize(&current).ok() == dunce::canonicalize(&target).ok() {
-        return Ok(target);
+    if dunce::canonicalize(&current).ok() != dunce::canonicalize(&target).ok() {
+        let dir = target.parent().expect("the program has a folder");
+        std::fs::create_dir_all(dir)?;
+        let staged = dir.join("copal.new");
+        std::fs::copy(&current, &staged)?;
+        std::fs::rename(&staged, &target).wrap_err_with(|| {
+            format!(
+                "could not replace {}. A running server still uses it; stop every server and run install again",
+                target.display()
+            )
+        })?;
     }
-    let dir = target.parent().expect("the program has a folder");
-    std::fs::create_dir_all(dir)?;
-    let staged = dir.join("copal.new");
-    std::fs::copy(&current, &staged)?;
-    std::fs::rename(&staged, &target).wrap_err_with(|| {
-        format!(
-            "could not replace {}. A running server still uses it; stop every server and run install again",
-            target.display()
-        )
-    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            &target,
+            std::fs::Permissions::from_mode(0o755),
+        )?;
+    }
     Ok(target)
 }
 
