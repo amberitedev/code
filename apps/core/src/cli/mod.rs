@@ -98,6 +98,8 @@ pub enum Command {
 pub struct Output {
     pub text: String,
     pub json: Value,
+    /// The command did not do what was asked. It still prints, then exits non-zero.
+    pub failed: bool,
 }
 
 impl Output {
@@ -105,12 +107,60 @@ impl Output {
         Self {
             text: text.into(),
             json: serde_json::to_value(json).expect("answers serialize"),
+            failed: false,
+        }
+    }
+
+    pub fn failed(text: impl Into<String>, json: &impl Serialize) -> Self {
+        Self {
+            failed: true,
+            ..Self::new(text, json)
         }
     }
 }
 
-/// Run a command that talks to Core, and print its output.
-pub async fn run(command: Command, json: bool) -> Result<()> {
+/// Text a server or a mod wrote, made safe to print: every control character but newline and
+/// tab is shown escaped, so console output cannot move the cursor, clear the screen, or change
+/// the terminal. `--json` escapes by itself.
+pub fn safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() && c != '\n' && c != '\t' {
+                c.escape_unicode().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
+/// An error as `--json` prints it, in the shape of Core's own errors: `error` is a code and
+/// `description` is ready to show. Core's code when Core refused, `core_unreachable` when it
+/// could not be reached, `invalid_arguments` for the command line, `failed` otherwise.
+pub fn json_error(code: &str, description: &str) -> String {
+    serde_json::json!({ "error": code, "description": description }).to_string()
+}
+
+/// The `--json` form of an error a command returned.
+pub fn json_for(error: &color_eyre::Report) -> String {
+    if let Some(client::Refused(refused)) = error.downcast_ref() {
+        let code = serde_json::to_value(refused.error)
+            .ok()
+            .and_then(|code| code.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "failed".into());
+        return json_error(&code, &refused.description);
+    }
+    let code = if error.downcast_ref::<client::Unreachable>().is_some() {
+        "core_unreachable"
+    } else {
+        "failed"
+    };
+    json_error(code, &format!("{error:#}"))
+}
+
+/// Run a command that talks to Core, and print its output. False when the command printed
+/// that it failed.
+pub async fn run(command: Command, json: bool) -> Result<bool> {
     let client = Client::new();
     let output = match command {
         Command::Status => machine::status(&client).await?,
@@ -119,7 +169,11 @@ pub async fn run(command: Command, json: bool) -> Result<()> {
         Command::Eula { accept } => machine::eula(&client, accept).await?,
         Command::Servers(servers::ServersCommand::Console(
             servers::ConsoleCommand::Attach { server },
-        )) => return servers::attach(&client, &server, json).await,
+        )) => {
+            return servers::attach(&client, &server, json)
+                .await
+                .map(|()| true);
+        }
         Command::Servers(command) => servers::run(&client, command).await?,
         Command::Backups(command) => backups::run(&client, command).await?,
         Command::Access(command) => access::run(&client, command).await?,
@@ -133,10 +187,12 @@ pub async fn run(command: Command, json: bool) -> Result<()> {
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&output.json)?);
+    } else if output.failed {
+        eprintln!("{}", output.text);
     } else if !output.text.is_empty() {
         println!("{}", output.text);
     }
-    Ok(())
+    Ok(!output.failed)
 }
 
 /// `on` or `off`.

@@ -15,6 +15,21 @@ use crate::{
     daemon::{config, paths::Paths},
 };
 
+/// Core answered with an error.
+#[derive(Debug, thiserror::Error)]
+#[error("{}", .0.description)]
+pub struct Refused(pub ApiError);
+
+/// Core could not be reached over the local socket.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Core is not running, or this account may not use it (could not open {path}): {source}"
+)]
+pub struct Unreachable {
+    path: String,
+    source: std::io::Error,
+}
+
 /// One connection per request.
 pub struct Client {
     paths: Paths,
@@ -79,7 +94,7 @@ impl Client {
         }
         if !status.is_success() {
             match serde_json::from_slice::<ApiError>(&body) {
-                Ok(error) => bail!("{}", error.description),
+                Ok(error) => return Err(Refused(error).into()),
                 Err(_) => bail!(
                     "Core answered {status}: {}",
                     String::from_utf8_lossy(&body).trim()
@@ -119,11 +134,12 @@ impl Client {
     }
 
     async fn connect(&self) -> Result<Box<dyn Stream>> {
-        local::connect(&self.paths).await.wrap_err_with(|| {
-            format!(
-                "Core is not running, or this account may not use it (could not open {})",
-                self.paths.local_socket().display()
-            )
+        local::connect(&self.paths).await.map_err(|source| {
+            Unreachable {
+                path: self.paths.local_socket().display().to_string(),
+                source,
+            }
+            .into()
         })
     }
 }
