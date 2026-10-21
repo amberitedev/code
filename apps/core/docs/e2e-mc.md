@@ -304,3 +304,200 @@ without `retry`.
 **Left on mc for phase 2:** `/home/ubuntu/copal-e2e` (clone, target dir, minisign and the
 throwaway key, publish script; 2.6 GB) and `~/.cargo/registry` (302 MB). They are removed at the
 end of phase 2.
+
+## Phase 2: loaders, content, crash restart, tickets, backups
+
+`core-rewrite` at `c60b069` (steps 1 to 4 and 6 to 8, and the App's switch to tickets), with
+step 5 (backups) added when it merged. Fixes are on `core-12-e2e-2`.
+
+### Findings
+
+Fixed on `core-12-e2e-2`:
+
+1. **`Cargo.lock` did not match the manifests**, so every `--locked` build failed, the release
+   workflow's included (`winx` wanted `bitflags 2.13.2`). One line.
+2. **A file Core may not read was called "not a plain file".** `open_plain` mapped every failed
+   open of an existing entry to that message, which hid finding 5. It now says "Core may not read
+   world/level.dat_old". `src/content/folder.rs`, with a test.
+3. **`copal backups schedule` used another shape than Core.** The CLI had its own
+   `every_hours` struct, while the API answers and takes `interval_hours` (0 is off). It always
+   printed "no scheduled backups", and setting one failed with 422. It now uses
+   `api::backups::BackupSchedule`. `src/cli/backups.rs`.
+4. **`copal backups restore --help` promised the current world is backed up first.** It is
+   replaced and not kept (finding 6). The help says so now.
+
+Open, for a decision:
+
+5. **Core cannot read the world files Java writes, so backups and pack installs fail on Linux.**
+   This is the big one. Minecraft writes `world/level.dat` and `level.dat_old` as 0600, owned by
+   `copal-servers`; `copal` reads servers' files through the group, which has no access to them.
+   Once a server has started:
+   - every hot backup fails (`save-all flush` rewrites `level.dat` right before the copy), and a
+     cold one fails too, in `Backups::copy` reading the world (`src/backups/mod.rs:1042`);
+   - every pack install and pack update fails, because each makes a pre-update backup first
+     (`src/content/install.rs:98`, `:241`; `Backups::pre_update`, `src/backups/mod.rs:357`).
+
+   The API answers 202 and the CLI exits 0; the failure is only in Core's log, the backup's
+   `error` status, and the pack's `error` field. Java sets 0600 explicitly, so a umask or a default
+   ACL cannot fix it. Suggestion: read the world through the account that owns it. Core may
+   already run any program as `copal-servers` through `/usr/local/lib/copal/run-as-servers`;
+   before copying, it could run `chmod -R g+rX` on the world folders that way (cheap, and nothing
+   new can be read: the world belongs to the mod's account anyway), or stream the files out with
+   `tar` run the same way. Giving the service `CAP_DAC_READ_SEARCH` would also work but lets Core
+   read every file on the machine. Windows should not be affected (the folder's inherited ACL applies to what Java writes), but this run did not check it.
+
+6. **A restore throws away the world it replaces.** On success the moved-aside world is deleted
+   (`src/backups/mod.rs:1181`). The plan does not promise a pre-restore backup, but a mistaken
+   restore cannot be undone. Either keep it as a backup, or make the App say it plainly.
+7. **A pack update can change the Minecraft version, and an older pack can go over a newer
+   world.** The update takes the project's newest version for any game version
+   (`src/api/content.rs:1106`, `versions(&project_id, &[], None)`): 26.2.0-7.35 went to
+   26.3.0-7.36, so Minecraft 26.2 became 26.3. Installing TVE for 26.2 over a world 26.3 had made
+   was accepted without a warning, and Minecraft 26.2 loaded it.
+8. **PR 44 edited the shipped `001_init.sql`.** A Core installed from earlier `core-rewrite`
+   failed at every start ("migration 1 was previously applied but has been modified"), restarting
+   every 5 s, with the reason only in the journal. Harmless before release; from here on, a
+   schema change needs a new migration file.
+9. **Failed background work is hard to see from the CLI.** `copal backups create` returns at
+   once; a failed backup shows `error` in `backups list` with no reason. A failed pack install is
+   the same through the API.
+10. **The pairing code of an installed Core is only in the journal.** Core prints it with
+    `println!` (`src/access/pairing.rs:63`); with the service that goes to `journalctl -u copal`,
+    not to `copal logs` or `copal status`.
+11. **Small ones:** NeoForge's installer leaves `tmp/neoforge_installer…/` and its log in the
+    server folder. A restore does not bring back empty folders (`datapacks/`, `players/`). On a
+    machine whose router has no UPnP, Core's log repeats the multi-line reachability advice on
+    every check.
+
+What worked:
+
+- **Loaders:** Fabric, Paper, and NeoForge each installed and reached "Done" on Minecraft 26.3.
+  NeoForge's installer ran as `copal-servers`.
+- **Pack update:** an edited config was left alone and stayed listed as edited.
+- **Crash restart:** a crashed server restarted twice, then stopped at the cap with its crash
+  report.
+- **Pairing and tickets against the real backend:** pairing, the ticket-to-session exchange over
+  TLS with the fingerprint matching the backend's, `ticket_required` and `ticket_reused`, and the
+  state report with LAN and public addresses.
+- **Restore:** a restored world matched its backup byte for byte.
+- **Cleanup:** uninstall left ufw and ports exactly as found.
+
+### Log
+
+#### 2026-10-21
+
+**Baseline (12:42).** ufw identical to phase 1's `ufw-before.txt`; the same listening ports; the
+NeoForge server still pid 1824701. The `core-rewrite` clone on mc moved to `c60b069`; `cargo build
+--release -p copal`: 2 min 50 s, no warnings. `sudo copal install`: same output as phase 1;
+`copal eula --accept`.
+
+**Loaders (12:46-12:48), on Minecraft 26.3 (the newest release).** Created with `POST
+/local/servers`, then `POST /v1/servers/{id}/worlds/{id}/content` with `{"content_variant":
+"bare", "loader": ..., "version": "", "game_version": "26.3"}` (empty version = newest).
+
+| Server   | Install        | Start to "Done"         | Stop  | Port  |
+| -------- | -------------- | ----------------------- | ----- | ----- |
+| Fabric   | 0.19.5, 10 s   | 16 s ("Done (3.592s)")  | 1.0 s | 25565 |
+| Paper    | build 210, 2 s | 23 s ("Done (16.431s)") | 1.5 s | 25567 |
+| NeoForge | 26.3.0.95, 9 s | 17 s ("Done (3.035s)")  | 3.0 s | 25568 |
+
+Java 25 was installed once (tar.gz) and shared. Every stop recorded `ended_by: stop`, exit 0.
+Paper skipped 25566, the NeoForge server's port. NeoForge's installer ran as `copal-servers`:
+`run.sh`, `user_jvm_args.txt`, `libraries/` and the installer log are owned by `copal-servers`.
+It leaves `tmp/neoforge_installer…/` and `neoforge-26.3.0.95-installer.jar.log` in the server
+folder.
+
+**Pack install (12:48-12:49).** The Vanilla Experience (`EnFnYkUj`, 1.3 MB, 132 mods, server side
+required) at `26.2.0-7.35` (`tYfSFTpy`) onto the Fabric server, whose world 26.3 had made:
+`{"content_variant": "modpack", "spec": {"platform": "modrinth", "project_id": "EnFnYkUj",
+"version_id": "tYfSFTpy"}, "soft_override": true}` → 202. It failed in 6 s, in Core's log only:
+`install failed … error=level.dat_old is not a plain file`; the pack's `error` field in `GET
+.../addons` said the same. Cause: before a pack install Core copies the world aside
+(`backups::pre_update`), and Minecraft writes `world/level.dat` and `level.dat_old` as 0600 owned
+by `copal-servers`, which `copal` cannot read. The failed copy left `backups/<id>/pre-update-1`
+with an empty `world/`.
+
+To go on, as admin: `sudo -u copal-servers chmod -R g+rX servers/<id>/world`. The install then
+took 6 s: TVE 26.2.0-7.35, Fabric 0.19.3, Minecraft 26.2, 132 addons. Core did not warn that 26.2
+is older than the world. The server started and reached "Done" in 16 s; Minecraft 26.2 loaded the
+26.3 world without a word.
+
+**Edit and pack update (12:50).** Through the files API, as the App does: `GET
+/servers/{id}/modrinth/v0/fs/download?path=/config/areas.json5`, a comment line appended, `PUT
+.../fs/update?path=/config/areas.json5` → 204. `GET /servers/{id}/content/edited` → `[{"path":
+"config/areas.json5", "deleted": false, "pending": null}]`. Stopped the server; `GET
+.../content/modpack/update` → `has_update: Znom14dQ` (26.3.0-7.36). `POST` it → 202, and it
+failed the same way (`level.dat_old`, which Minecraft had rewritten as 0600). After the same
+`chmod` by hand it took 6 s: TVE 26.3.0-7.36, Minecraft 26.3, Fabric 0.19.5, 131 addons. The
+edited file kept its SHA-1 (`dc532bf5…`) and is still listed as edited, with no pending decision
+(the pack did not change it). `backups/<id>/` keeps `pre-update-3` and `pre-update-4`.
+
+**Crash restart (12:51-12:52).** Started the Fabric server (crash restart on by default), then
+`kill -9` its Java three times, each once it was up:
+
+- kill 1 (12:51:25): Core started it again 6 s later;
+- kill 2 (12:51:47): again after 6 s;
+- kill 3 (12:52:09): left stopped. `servers list`: `crashed`; `servers info`: "crashed 3 times
+  in 10 minutes, so Core left it stopped", last crash exit code 137 with its console lines; Core
+  log `outcome=Crashed exit_code=Some(137)` and the warning.
+
+**Pairing and tickets (12:53-12:57).** On this PC, `vp run dev:backend` (Worker on
+`127.0.0.1:8941`, its own ticket key and `keys.json`), then `ssh -N -R 8787:127.0.0.1:8941 mc`.
+On mc, `config.toml` got `backend_url = "http://127.0.0.1:8787"` and Core was restarted.
+
+- The pairing code went to stdout only, so with the service it is in `journalctl -u copal`
+  ("enter MZUX-D576"), not in `copal logs` or `copal status`.
+- `POST /_dev/session {"username": "scenario_1"}` with the dev secret → an `mra_` session.
+  `POST /cores/approve {"code": "MZUX-D576"}` → 200 `{id: c5c82ae6-…, name: minecraftservers}`.
+  Core: "Signed in as scenario_1", "connected to the backend".
+- `GET /v3/cores` → address `https://10.0.0.225:16662`, public address
+  `https://129.159.130.127:16662` (found by Core itself), version 0.1.0, `owned: true`,
+  `cert_fingerprint 7583060e…`, the SHA-256 of the certificate `openssl s_client` got from
+  `127.0.0.1:16662`.
+- `POST /cores/{id}/ticket` → a JWT; Core's `POST /sessions {"ticket", "device_name": "e2e-mc"}`
+  over TLS → a session for scenario_1, 30 days. The same ticket again → `ticket_reused`.
+- `GET /v1/servers` with the session → the three servers.
+- `DELETE /local/servers/{deltest}` with the session and no ticket → 401 `ticket_required`; with
+  a fresh ticket in `X-Amberite-Ticket` → 204; that ticket again → 401 `ticket_reused`.
+- No session → 401 `unauthorized`; an `Origin` header → 403 "Browsers cannot call a Core".
+- `copal access sessions` lists the session (scenario_1, e2e-mc).
+
+Then the tunnel and the backend were stopped, and the dev secret and session files on mc deleted.
+(One `POST /local/servers` over the socket answered nothing once, just before; it worked on the
+next try and did not happen again.)
+
+**Backups and restore (13:03-13:08), after PR 44 merged.** Merged `core-rewrite` (`f2dabeb`) into
+`core-12-e2e-2` and built it on mc with `--locked` (2 min 46 s). `sudo copal install` over the
+existing data: Core then failed at every start, restarting every 5 s, with `migration 1 was
+previously applied but has been modified` in the journal. PR 44 changed `001_init.sql`. So
+`uninstall --remove-data` and a fresh install; a new Vanilla 26.3 server `bk`.
+
+- **Hot backup, server running:** `copal backups create bk` printed "Backing up bk (<id>)", exit 0. The console showed "Automatic saving is now disabled", "Saved the game", "Automatic saving is
+  now enabled"; then `backups list` showed `error`, with the reason only in Core's log: `Core may
+not read world/level.dat_old`. `save-all flush` rewrites `level.dat` as 0600 just before the
+  copy, so no hand-made `chmod` can help a hot backup.
+- **Cold backup:** stopped the server, made the world group-readable by hand as before, recorded
+  the SHA-256 of its 25 files, `copal backups create bk` → `done` in about a second, a 2.2 MB zip
+  in `backups/<id>/`, 0640 `copal`. The server's first start afterwards also made a "Scheduled
+  backup" (daily by default; it was due).
+- **Change, then restore:** started the server, `time set 18000`, `save-all flush`, stopped, and
+  added `world/e2e-marker` as `copal-servers`: 8 files differed from the backup. `chmod` by hand
+  again, `copal backups restore bk 8800c191` → "Restoring … on bk", done within a second. Every
+  one of the 25 files matched the backup's SHA-256, and the marker was gone. Restored files are
+  0660 `copal:copal-servers`. The empty `datapacks/` and `players/` folders did not come back
+  (Minecraft makes them again). The replaced world was not kept anywhere, although `copal
+backups restore --help` said it is backed up first.
+- **Schedule:** `GET /servers/{id}/backups/schedule` → `{"interval_hours": 24, "keep": 7}`, but
+  `copal backups schedule bk` said "no scheduled backups", and `--every 6` failed with 422
+  `missing field interval_hours`: the CLI used its own struct with `every_hours`. Fixed; rebuilt
+  and reinstalled: `schedule bk` → "every 24 hours, keeping the last 7"; `--every 6 --keep 3`,
+  `--off`, and back to 24/7 each answered as set. The installed binary is 0755.
+
+**Cleanup (13:09).** `copal servers list` showed only `bk` stopped. `sudo copal uninstall
+--remove-data`: service, firewall rules, accounts, data folder removed; no `copal` or
+`copal-servers` processes; `/etc/sudoers.d/copal`, `/usr/local/lib/copal`, and the unit gone.
+`ufw status verbose` and the listening sockets are identical to the very first baseline. The
+NeoForge server is still pid 1824701. Deleted `/home/ubuntu/copal-e2e` (clone, target dir,
+minisign, logs; 5.3 GB) and `~/.cargo` (491 MB). Not touched: `~/.rustup` (1.8 GB of toolchains),
+and the `. "$HOME/.cargo/env"` lines rustup added to `~/.bashrc` and `~/.profile`, which now make
+a login shell print `.profile: line 28: /home/ubuntu/.cargo/env: No such file or directory`.
