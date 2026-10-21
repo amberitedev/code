@@ -1196,3 +1196,29 @@ async fn keeping_fewer_scheduled_backups_is_the_owners_dangerous_action() {
         .await;
     assert_eq!(kept, json!({ "interval_hours": 1, "keep": 1 }));
 }
+
+#[tokio::test]
+async fn a_pack_update_takes_an_empty_body_sent_as_json() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    let uri =
+        format!("/v1/servers/{server}/worlds/{server}/content/modpack/update");
+    // The App's client sends `Content-Type: application/json` with no body. The server follows
+    // no pack, so getting past the body means 404.
+    let send = |body: &'static str| {
+        Request::builder()
+            .method(Method::POST)
+            .uri(&uri)
+            .header("authorization", format!("Bearer {editor}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let (status, _) = core.send(send("")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = core.send(send(r#"{"force":true}"#)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = core.send(send("{")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

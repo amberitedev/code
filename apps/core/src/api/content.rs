@@ -1106,13 +1106,24 @@ pub async fn modpack(
 /// `POST .../content/modpack/update`: update a Modrinth pack to its newest version, in the
 /// background. Files the owner edited are left alone (see `/servers/{id}/content/edited`). A
 /// newest version for an older Minecraft is refused unless the body says `force`.
+///
+/// The body is read by hand: the App's client sends `Content-Type: application/json` on every
+/// request, with no body here, which axum's optional `Json` would refuse.
 pub async fn update_modpack(
     caller: Caller,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
-    body: Option<Json<UpdateModpack>>,
+    body: bytes::Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let force = body.is_some_and(|Json(body)| body.force);
+    let force = if body.is_empty() {
+        false
+    } else {
+        serde_json::from_slice::<UpdateModpack>(&body)
+            .map_err(|error| {
+                ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+            })?
+            .force
+    };
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let pack = records::pack(&state.db, &id).await?.ok_or_else(|| {
