@@ -555,8 +555,11 @@ mod tests {
         std::fs::create_dir(dir.path().join("world")).unwrap();
         let level = dir.path().join("world/level.dat");
         std::fs::write(&level, "").unwrap();
-        std::fs::set_permissions(&level, std::fs::Permissions::from_mode(0))
-            .unwrap();
+        std::fs::set_permissions(
+            &level,
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
         let folder = Folder::open(dir.path()).unwrap();
         let error = folder.open_file("world/level.dat").unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
