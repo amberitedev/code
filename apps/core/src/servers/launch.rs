@@ -47,13 +47,14 @@ fn installed(server: &ServerRow) -> Result<(ModLoader, &str), NotReady> {
     }
 }
 
-/// Everything the shim needs to start `server`. Writes `eula.txt` and the port first.
+/// Everything the shim needs to start `server`, and the lease on its Java (see `java::Lease`).
+/// Writes `eula.txt` and the port first.
 pub async fn prepare(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
     run_id: &str,
-) -> Result<Launch> {
+) -> Result<(Launch, Option<java::Lease>)> {
     installed(server)?;
     if !server.eula_accepted {
         return Err(NotReady::Eula.into());
@@ -69,16 +70,17 @@ pub async fn prepare(
     )?;
     set_port(&dir, server.port)?;
 
-    let java = java_for(paths, http, server).await?;
+    let (java, lease) = java_for(paths, http, server).await?;
     let memory = server.memory_mb;
-    Ok(Launch {
+    let launch = Launch {
         v: PROTOCOL,
         run_id: run_id.to_owned(),
         java,
         args: args(paths, server)?,
         dir,
         memory_limit_mb: memory_limit(memory),
-    })
+    };
+    Ok((launch, lease))
 }
 
 /// The arguments after `java`: memory, the temporary folder, and what the loader starts from.
@@ -149,12 +151,13 @@ pub async fn java_for(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
-) -> Result<PathBuf> {
+) -> Result<(PathBuf, Option<java::Lease>)> {
     if let Some(path) = &server.java_path {
-        return Ok(PathBuf::from(path));
+        return Ok((PathBuf::from(path), None));
     }
     let major = java_major(paths, http, server).await?;
-    Ok(java::ensure(paths, http, major).await?)
+    let (binary, lease) = java::ensure(paths, http, major).await?;
+    Ok((binary, Some(lease)))
 }
 
 /// The command line as people read it: `java` and the arguments, quoted where needed.

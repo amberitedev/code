@@ -193,7 +193,9 @@ async fn install_pack(
         }
     };
     let archive_path = dirs.pack(&sha1);
-    let (index, wanted) = read_pack(&archive_path).await?;
+    let folder = Arc::new(Folder::open(&content.paths.server(id))?);
+    let case_insensitive = folder.case_insensitive()?;
+    let (index, wanted) = read_pack(&archive_path, case_insensitive).await?;
     let platform = pack::platform(&index)?;
 
     let server = servers_records::get(&content.db, id)
@@ -207,7 +209,6 @@ async fn install_pack(
             || server.loader_version == platform.loader_version);
 
     // Every download first: a failure here changes nothing.
-    let folder = Arc::new(Folder::open(&content.paths.server(id))?);
     let rows = records::files(&content.db, id).await?;
     let steps = {
         let folder = Arc::clone(&folder);
@@ -221,7 +222,7 @@ async fn install_pack(
                 &pack::Disk {
                     sha1: &sha1,
                     level_name: &level,
-                    case_insensitive: pack::CASE_INSENSITIVE,
+                    case_insensitive,
                 },
                 repair,
             )
@@ -366,6 +367,7 @@ fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
 /// A pack's index and the files it wants, read from the `.mrpack` at `path`.
 pub async fn read_pack(
     path: &Path,
+    case_insensitive: bool,
 ) -> Result<(Index, BTreeMap<String, Wanted>), Error> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -373,8 +375,7 @@ pub async fn read_pack(
         let mut archive = zip::ZipArchive::new(file)
             .map_err(super::archive::ArchiveError::from)?;
         let index = pack::read_index(&mut archive)?;
-        let wanted =
-            pack::wanted(&index, &mut archive, pack::CASE_INSENSITIVE)?;
+        let wanted = pack::wanted(&index, &mut archive, case_insensitive)?;
         Ok((index, wanted))
     })
     .await
@@ -525,6 +526,15 @@ async fn apply(
             Step::Record(row) => {
                 records::put(&content.db, server_id, &row).await?
             }
+            // A path that became the server's since the plan is only forgotten.
+            Step::Delete(row)
+                if super::folder::is_server_owned(
+                    &row.path,
+                    &folder.level_name(),
+                ) =>
+            {
+                records::remove(&content.db, server_id, &row.path).await?
+            }
             Step::Delete(row) => match sha1_now(folder, &row.path).await? {
                 Some(sha1) if sha1 == row.sha1 => {
                     let folder = Arc::clone(folder);
@@ -628,7 +638,7 @@ async fn place(
                     .map_err(super::archive::ArchiveError::from)?;
                 folder.write(
                     &path,
-                    &mut AtMost {
+                    &mut super::archive::AtMost {
                         inner: entry,
                         left: size,
                     },
@@ -639,23 +649,6 @@ async fn place(
     })
     .await
     .map_err(std::io::Error::other)?
-}
-
-/// Reads at most `left` more bytes and fails the read past them, so a write of it stops before
-/// its file is renamed over anything.
-struct AtMost<R> {
-    inner: R,
-    left: u64,
-}
-
-impl<R: std::io::Read> std::io::Read for AtMost<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let read = self.inner.read(buf)?;
-        self.left = self.left.checked_sub(read as u64).ok_or_else(|| {
-            std::io::Error::other("the entry is larger than the pack said")
-        })?;
-        Ok(read)
-    }
 }
 
 /// Write the settings an install came with into `server.properties`.
@@ -748,7 +741,8 @@ pub async fn decide(
                 )?;
             let archive_path =
                 SharedDirs::new(content.paths.root()).pack(&pack.sha1);
-            let (index, wanted) = read_pack(&archive_path).await?;
+            let (index, wanted) =
+                read_pack(&archive_path, folder.case_insensitive()?).await?;
             let want = wanted.get(path).ok_or_else(|| {
                 Error::NotFound(format!("The pack has no {path}."))
             })?;

@@ -1223,14 +1223,17 @@ pub async fn upload_modpack(
         })?;
         let stored = dirs.pack(&sha1);
         tokio::fs::rename(&path, &stored).await?;
-        // A file that is not a pack is refused now, not in the background.
-        content_install::read_pack(&stored).await.map_err(|error| {
-            let stored = stored.clone();
-            tokio::spawn(async move {
-                let _ = tokio::fs::remove_file(stored).await;
-            });
-            ApiError::from(error)
-        })?;
+        // A file that is not a pack is refused now, not in the background. Spellings that
+        // collide are checked at install, against the server's own disk.
+        content_install::read_pack(&stored, false)
+            .await
+            .map_err(|error| {
+                let stored = stored.clone();
+                tokio::spawn(async move {
+                    let _ = tokio::fs::remove_file(stored).await;
+                });
+                ApiError::from(error)
+            })?;
         Ok::<_, ApiError>(sha1)
     }
     .await;

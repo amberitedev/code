@@ -392,12 +392,16 @@ impl Servers {
             ..server.clone()
         };
         let run_id = uuid::Uuid::new_v4().to_string();
-        let launch = launch::prepare(&self.paths, &self.http, server, &run_id)
-            .await
-            .map_err(|error| match error.downcast::<launch::NotReady>() {
-                Ok(not_ready) => ServerError::NotReady(not_ready),
-                Err(error) => ServerError::Other(error),
-            })?;
+        // The lease keeps its Java until the shim runs it, when the launch spec does.
+        let (launch, _java) =
+            launch::prepare(&self.paths, &self.http, server, &run_id)
+                .await
+                .map_err(|error| {
+                    match error.downcast::<launch::NotReady>() {
+                        Ok(not_ready) => ServerError::NotReady(not_ready),
+                        Err(error) => ServerError::Other(error),
+                    }
+                })?;
         std::fs::create_dir_all(self.paths.run(id))?;
         // What an earlier run left must not be mistaken for this one's.
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
