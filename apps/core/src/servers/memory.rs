@@ -171,7 +171,8 @@ mod tests {
     #[tokio::test]
     async fn flags_are_set_and_reset() {
         let db = db::memory().await;
-        let server = records::create(&db, "A").await.unwrap().unwrap();
+        let server =
+            records::create(&db, "A", |_| true).await.unwrap().unwrap();
         assert_eq!(flags(&db, &server.id).await.unwrap(), None);
         let own = vec!["-XX:+UseZGC".to_owned()];
         set_flags(&db, &server.id, Some(&own)).await.unwrap();
