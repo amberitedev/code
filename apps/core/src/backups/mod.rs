@@ -630,6 +630,7 @@ impl Backups {
     /// start meanwhile.
     async fn run_restore(&self, operation: &Operation) -> Result<(), Error> {
         let server_id = &operation.server_id;
+        self.back_up_before_restore(server_id).await?;
         let hold =
             self.servers.hold(server_id).map_err(|error| match error {
                 ServerError::AlreadyRunning => Error::Conflict(
@@ -654,6 +655,31 @@ impl Backups {
             self.stuck.lock().expect("not poisoned").push(hold);
         }
         result
+    }
+
+    /// Back the current world up before a restore replaces it, as a pre-update backup under the
+    /// same retention, so a mistaken restore can be undone. Run here, in the queue's own turn:
+    /// the queue runs one operation at a time and this restore is it. No backup, no restore.
+    async fn back_up_before_restore(
+        &self,
+        server_id: &str,
+    ) -> Result<(), Error> {
+        let (_, id) = self
+            .create(server_id, "Before restore", Kind::PreUpdate, None)
+            .await?;
+        let operation =
+            records::operation(&self.db, id).await?.ok_or_else(|| {
+                Error::NotFound("The backup before the restore is gone.".into())
+            })?;
+        Box::pin(self.run(operation)).await;
+        match records::operation(&self.db, id).await? {
+            Some(done) if done.state == OpState::Done => Ok(()),
+            done => Err(Error::Conflict(format!(
+                "The current world could not be backed up, so nothing was restored: {}",
+                done.and_then(|op| op.error)
+                    .unwrap_or_else(|| "the backup was cancelled".into())
+            ))),
+        }
     }
 
     /// Back up servers whose schedule is due, every minute.

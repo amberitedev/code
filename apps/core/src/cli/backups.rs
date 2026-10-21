@@ -23,7 +23,8 @@ pub enum BackupsCommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Put a backup back over the server's world. The current world is backed up first.
+    /// Put a backup back over the server's world. The current world is backed up first, as a
+    /// "Before restore" backup, and nothing is restored if that fails.
     Restore { server: String, backup: String },
     /// Show or change how often a server is backed up and how many backups it keeps.
     Schedule {

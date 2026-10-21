@@ -927,10 +927,12 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     core.state
         .backups
         .wait(
+            // The restore, not the backup it makes of the world first.
             crate::backups::records::operations(&core.state.db, &server)
                 .await
                 .unwrap()
-                .last()
+                .iter()
+                .find(|op| op.kind == crate::backups::records::OpKind::Restore)
                 .unwrap()
                 .id,
         )

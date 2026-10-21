@@ -598,3 +598,58 @@ async fn a_world_file_written_as_0600_is_still_backed_up() {
     let zip = setup.backups.file(&setup.server, &id);
     assert!(entries(&zip).contains(&"world/level.dat".to_owned()));
 }
+
+#[tokio::test]
+async fn a_restore_backs_up_the_world_it_replaces_first() {
+    let setup = setup().await;
+    let id = backed_up(&setup).await;
+    let dir = setup.paths.server(&setup.server);
+    std::fs::write(dir.join("world").join("level.dat"), "since").unwrap();
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    setup.backups.wait(restore).await.unwrap();
+    let before = records::backups(&setup.db, &setup.server)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|backup| backup.name == "Before restore")
+        .unwrap();
+    assert_eq!(before.kind, Kind::PreUpdate);
+    assert_eq!(before.state, records::State::Done);
+    let mut level = String::new();
+    zip::ZipArchive::new(
+        std::fs::File::open(setup.backups.file(&setup.server, &before.id))
+            .unwrap(),
+    )
+    .unwrap()
+    .by_name("world/level.dat")
+    .unwrap()
+    .read_to_string(&mut level)
+    .unwrap();
+    assert_eq!(level, "since");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn no_restore_happens_when_the_world_cannot_be_backed_up_first() {
+    let setup = setup().await;
+    let id = backed_up(&setup).await;
+    let dir = setup.paths.server(&setup.server);
+    std::fs::write(dir.join("world").join("level.dat"), "since").unwrap();
+    // A name a backup refuses, so the backup before the restore fails.
+    std::fs::write(dir.join("world").join("bad:name"), "x").unwrap();
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    let error = setup.backups.wait(restore).await.unwrap_err();
+    assert!(error.contains("nothing was restored"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("world").join("level.dat")).unwrap(),
+        "since"
+    );
+}
