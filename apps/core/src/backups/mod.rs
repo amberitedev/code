@@ -912,6 +912,9 @@ impl Manifest {
 struct Listing {
     manifest: Manifest,
     files: Vec<(String, u64)>,
+    /// Every folder in the worlds, the worlds included, so a restore brings back empty ones
+    /// (`datapacks/`, `players/`) too.
+    folders: Vec<String>,
 }
 
 /// List what a backup of `folder` holds: the worlds, then the settings. Links are skipped. A
@@ -920,10 +923,14 @@ struct Listing {
 fn files(folder: &Folder) -> Result<Listing, Error> {
     let worlds = worlds(folder);
     let mut files = Vec::new();
+    let mut folders = Vec::new();
     for world in &worlds {
         restorable(world)?;
         match folder.open_dir(Some(world)) {
-            Ok(dir) => walk(&dir, world, &mut files)?,
+            Ok(dir) => {
+                folders.push(world.clone());
+                walk(&dir, world, &mut files, &mut folders)?;
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
@@ -937,14 +944,18 @@ fn files(folder: &Folder) -> Result<Listing, Error> {
             settings.push(name.to_owned());
         }
     }
-    check_count(files.len())?;
+    check_count(files.len() + folders.len())?;
     let manifest = Manifest {
         v: 1,
         worlds: worlds.into(),
         settings,
     };
     manifest.check()?;
-    Ok(Listing { manifest, files })
+    Ok(Listing {
+        manifest,
+        files,
+        folders,
+    })
 }
 
 /// Refuse a path a restore would refuse.
@@ -957,7 +968,7 @@ fn restorable(path: &str) -> Result<(), Error> {
     }
 }
 
-/// Refuse more files than a restore unpacks (the manifest is one more).
+/// Refuse more entries, files and folders, than a restore unpacks (the manifest is one more).
 fn check_count(files: usize) -> Result<(), Error> {
     if files + 1 > archive::MAX_ENTRIES {
         return Err(Error::Conflict(format!(
@@ -972,6 +983,7 @@ fn walk(
     dir: &cap_std::fs::Dir,
     prefix: &str,
     files: &mut Vec<(String, u64)>,
+    folders: &mut Vec<String>,
 ) -> Result<(), Error> {
     for entry in dir.entries()? {
         let entry = entry?;
@@ -991,11 +1003,13 @@ fn walk(
         }
         restorable(&path)?;
         if kind.is_dir() {
-            walk(&folder::open_child(dir, &name, &path)?, &path, files)?;
+            let child = folder::open_child(dir, &name, &path)?;
+            folders.push(path.clone());
+            walk(&child, &path, files, folders)?;
         } else if kind.is_file() {
             files.push((path, entry.metadata()?.len()));
         }
-        check_count(files.len())?;
+        check_count(files.len() + folders.len())?;
     }
     Ok(())
 }
@@ -1065,6 +1079,9 @@ fn write_zip(
     zip.write_all(
         &serde_json::to_vec(&listing.manifest).map_err(io::Error::other)?,
     )?;
+    for name in &listing.folders {
+        zip.add_directory(format!("{name}/"), SimpleFileOptions::default())?;
+    }
     let mut done = 0u64;
     let mut buffer = vec![0; 256 * 1024];
     for (name, size) in &listing.files {

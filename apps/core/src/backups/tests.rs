@@ -72,7 +72,9 @@ async fn a_backup_holds_the_world_and_settings_and_restores_them() {
         [
             "copal-backup.json",
             "server.properties",
+            "world/",
             "world/level.dat",
+            "world/region/",
             "world/region/r.0.0.mca"
         ]
     );
@@ -652,4 +654,24 @@ async fn no_restore_happens_when_the_world_cannot_be_backed_up_first() {
         std::fs::read_to_string(dir.join("world").join("level.dat")).unwrap(),
         "since"
     );
+}
+
+#[tokio::test]
+async fn empty_folders_of_a_world_come_back_with_it() {
+    let setup = setup().await;
+    let dir = setup.paths.server(&setup.server);
+    for empty in ["world/datapacks", "world/players"] {
+        std::fs::create_dir_all(dir.join(empty)).unwrap();
+    }
+    let id = backed_up(&setup).await;
+    std::fs::remove_dir_all(dir.join("world")).unwrap();
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    setup.backups.wait(restore).await.unwrap();
+    assert!(dir.join("world/datapacks").is_dir());
+    assert!(dir.join("world/players").is_dir());
+    assert!(dir.join("world/level.dat").is_file());
 }
