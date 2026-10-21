@@ -3,7 +3,7 @@
 //! A Core serves HTTPS with a certificate it made itself, so nothing else can vouch for it. The
 //! handshake signature is still checked, so the other side must hold that certificate's key.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -25,6 +25,9 @@ use rustls::{
 use sha2::{Digest, Sha256};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
+
+/// How long a call the App makes itself, such as sign-in, may take in all.
+const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One Core's address and the certificate it must present there.
 pub struct Target {
@@ -96,24 +99,30 @@ impl Target {
         Ok(sender)
     }
 
-    /// Send one request with a JSON body on its own connection and read the whole answer.
+    /// Send one request with a JSON body on its own connection and read the whole answer, giving
+    /// up after [`CALL_TIMEOUT`].
     pub async fn call(
         &self,
         request: Request<Full<Bytes>>,
     ) -> Result<(StatusCode, Bytes), String> {
-        let mut sender = self.open().await?;
-        let response = sender
-            .send_request(request)
+        let call = async {
+            let mut sender = self.open().await?;
+            let response = sender
+                .send_request(request)
+                .await
+                .map_err(|error| error.to_string())?;
+            let status = response.status();
+            let body = response
+                .into_body()
+                .collect()
+                .await
+                .map_err(|error| error.to_string())?
+                .to_bytes();
+            Ok((status, body))
+        };
+        tokio::time::timeout(CALL_TIMEOUT, call)
             .await
-            .map_err(|error| error.to_string())?;
-        let status = response.status();
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .map_err(|error| error.to_string())?
-            .to_bytes();
-        Ok((status, body))
+            .map_err(|_| "no answer in time".to_string())?
     }
 
     /// `host:port`, as a `Host` header names it.

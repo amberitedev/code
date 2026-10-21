@@ -170,12 +170,23 @@ async fn core_sign_in(
     else {
         return Err(CoreError::unreachable("no session token in the answer"));
     };
+    // The ticket was fetched for whoever was signed in then. A session for anyone but `account`,
+    // as after an account switch mid sign-in, is ended and never kept.
+    if signed["session"]["user"]["id"].as_str() != Some(account.as_str()) {
+        end_session(&target, &token).await;
+        return Err(CoreError {
+            status: None,
+            error: "invalid_request".into(),
+            description: "The account changed while signing in. Try again."
+                .into(),
+        });
+    }
     sessions.store(&Key { account, core_id }, token).await;
     Ok(signed["session"].take())
 }
 
-/// Sign `account` out of the Core: end the session there when the Core answers through an open
-/// proxy, then forget the token either way.
+/// Sign `account` out of the Core: end the session there through the first of its open proxies
+/// that answers, then forget the token either way.
 #[tauri::command]
 async fn core_sign_out(
     core_id: String,
@@ -185,28 +196,40 @@ async fn core_sign_out(
 ) -> Result<(), String> {
     let key = Key { account, core_id };
     if let Some(token) = sessions.token(&key).await {
-        let proxy = tunnels
+        let proxies: Vec<Arc<Proxy>> = tunnels
             .0
             .lock()
             .await
             .iter()
-            .find(|(tunnel, _)| tunnel.key == key)
-            .map(|(_, (_, proxy))| Arc::clone(proxy));
-        if let Some(proxy) = proxy {
-            let request = Request::builder()
-                .method(Method::DELETE)
-                .uri("/sessions/current")
-                .header(HOST, proxy.target.authority())
-                .header(AUTHORIZATION, format!("Bearer {token}"))
-                .body(Full::<Bytes>::default())
-                .expect("a valid request");
-            if let Err(problem) = proxy.target.call(request).await {
-                tracing::debug!(%problem, "could not end a Core session there");
+            .filter(|(tunnel, _)| tunnel.key == key)
+            .map(|(_, (_, proxy))| Arc::clone(proxy))
+            .collect();
+        for proxy in proxies {
+            if end_session(&proxy.target, &token).await {
+                break;
             }
         }
     }
     sessions.forget(&key).await;
     Ok(())
+}
+
+/// End the session `token` on the Core. False when the Core did not answer.
+async fn end_session(target: &Target, token: &str) -> bool {
+    let request = Request::builder()
+        .method(Method::DELETE)
+        .uri("/sessions/current")
+        .header(HOST, target.authority())
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Full::<Bytes>::default())
+        .expect("a valid request");
+    match target.call(request).await {
+        Ok(_) => true,
+        Err(problem) => {
+            tracing::debug!(%problem, "could not end a Core session there");
+            false
+        }
+    }
 }
 
 /// Whether `account` holds a session for the Core. It may still have expired there.

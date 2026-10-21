@@ -7,7 +7,9 @@ use http_body_util::{BodyExt, Empty};
 use hyper::{
     HeaderMap, Response,
     body::Incoming,
-    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION, ORIGIN, UPGRADE},
+    header::{
+        ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION, COOKIE, ORIGIN, UPGRADE,
+    },
     service::service_fn,
 };
 use hyper_util::rt::TokioIo;
@@ -141,6 +143,7 @@ async fn the_session_replaces_whatever_the_webview_sent() {
         get(port, "/health")
             .header(ORIGIN, APP)
             .header(AUTHORIZATION, ACCOUNT_TOKEN)
+            .header(COOKIE, "set-by=another-local-site")
             .body(Empty::new())
             .unwrap(),
     )
@@ -151,6 +154,7 @@ async fn the_session_replaces_whatever_the_webview_sent() {
     assert_eq!(seen[AUTHORIZATION], "Bearer core-session");
     assert_eq!(seen.get_all(AUTHORIZATION).iter().count(), 1);
     assert!(!seen.contains_key(ORIGIN), "Core refuses any Origin");
+    assert!(!seen.contains_key(COOKIE));
 }
 
 #[tokio::test]
@@ -183,6 +187,13 @@ async fn only_the_app_can_use_the_proxy() {
         let response = send(port, request.body(Empty::new()).unwrap()).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
+    // Not even the App may sign in through the proxy: the answer holds a raw token.
+    let sign_in = get(port, "/sessions")
+        .method(Method::POST)
+        .header(ORIGIN, APP)
+        .body(Empty::new())
+        .unwrap();
+    assert_eq!(send(port, sign_in).await.status(), StatusCode::FORBIDDEN);
     // Nothing reached the Core: the next report is this request's.
     send(
         port,

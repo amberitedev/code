@@ -22,7 +22,7 @@ use hyper::{
         ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
         ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE,
         ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
-        AUTHORIZATION, CONTENT_TYPE, HeaderValue, ORIGIN, UPGRADE,
+        AUTHORIZATION, CONTENT_TYPE, COOKIE, HeaderValue, ORIGIN, UPGRADE,
     },
     server::conn::http1,
     service::service_fn,
@@ -35,7 +35,7 @@ use super::{
     tls::Target,
 };
 
-/// Set to log the head of every request the proxy sends to a Core, with the session token left
+/// Set to print the head of every request the proxy sends to a Core, with the session token left
 /// out, and whether the WebView had sent an `Authorization` of its own.
 const LOG_VAR: &str = "AMBERITE_CORE_PROXY_LOG";
 static LOG: LazyLock<bool> =
@@ -86,6 +86,15 @@ async fn handle(
             "Only the Amberite App can use this address.",
         ));
     };
+    // A session is only ever made through `core_sign_in`, which keeps its token out of the
+    // WebView. Here the answer would hand the WebView a raw token.
+    if request.method() == Method::POST && request.uri().path() == "/sessions" {
+        return Ok(error(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Sign in to a Core through the App.",
+        ));
+    }
     if request.method() == Method::OPTIONS
         && request
             .headers()
@@ -100,8 +109,10 @@ async fn handle(
 
     let headers = request.headers_mut();
     let webview_authorization = headers.remove(AUTHORIZATION).is_some();
-    // Core refuses any request with an `Origin`: only a browser sends one.
+    // Core refuses any request with an `Origin`: only a browser sends one. Cookies are the
+    // browser's for every port on this computer, and Core uses none.
     headers.remove(ORIGIN);
+    headers.remove(COOKIE);
     if let Some(token) = proxy.sessions.token(&proxy.key).await
         && let Ok(value) = HeaderValue::try_from(format!("Bearer {token}"))
     {
@@ -260,11 +271,11 @@ fn log(request: &Request<Incoming>, webview_authorization: bool) {
             }
         })
         .collect();
-    tracing::info!(
-        method = %request.method(),
-        uri = %request.uri(),
-        webview_authorization,
-        headers = headers.join(" | "),
-        "core proxy request"
+    // Printed rather than traced: it is asked for by name, whatever the log filter is.
+    eprintln!(
+        "core proxy request {} {} webview_authorization={webview_authorization} headers: {}",
+        request.method(),
+        request.uri(),
+        headers.join(" | "),
     );
 }
