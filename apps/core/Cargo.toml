@@ -64,7 +64,7 @@ libc = "0.2.186"
 [target."cfg(unix)".dependencies]
 # Java runtimes: Azul publishes Linux and macOS packages as tar.gz.
 flate2 = { workspace = true }
-nix ={ version = "0.30.1", features = ["fs", "signal", "user"] }
+nix = { version = "0.30.1", features = ["fs", "signal", "user"] }
 tar = { workspace = true }
 
 [target."cfg(windows)".dependencies]
