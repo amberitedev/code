@@ -119,13 +119,35 @@ mod platform {
     /// Give everything inside `path` to `copal` and `group`. Data kept from an earlier install
     /// belongs to accounts that no longer exist. Links are skipped, never followed; install
     /// refuses to run while a server runs, so nothing swaps entries during the walk.
-    fn chown_tree(path: &Path, uid: u32, group: u32) -> Result<()> {
+    ///
+    /// With `group_writes` (`servers/`), the group also gets read and write on every entry.
+    /// Minecraft writes files such as `level.dat` as 0600, so once `copal` owns them the group
+    /// is the only way `copal-servers` can still open its own world.
+    fn chown_tree(
+        path: &Path,
+        uid: u32,
+        group: u32,
+        group_writes: bool,
+    ) -> Result<()> {
         for entry in
             walkdir::WalkDir::new(path).min_depth(1).follow_links(false)
         {
             let entry = entry?;
-            if !entry.path_is_symlink() {
-                lchown(entry.path(), Some(uid), Some(group))?;
+            if entry.path_is_symlink() {
+                continue;
+            }
+            lchown(entry.path(), Some(uid), Some(group))?;
+            if group_writes {
+                let mode = entry.metadata()?.permissions().mode() & 0o7777;
+                let group_mode = if entry.file_type().is_dir() {
+                    0o2070
+                } else {
+                    0o060
+                };
+                std::fs::set_permissions(
+                    entry.path(),
+                    std::fs::Permissions::from_mode(mode | group_mode),
+                )?;
             }
         }
         Ok(())
@@ -145,7 +167,45 @@ mod platform {
         };
         chown(path, Some(accounts.core.uid), Some(group))?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
-        chown_tree(path, accounts.core.uid, group)
+        chown_tree(
+            path,
+            accounts.core.uid,
+            group,
+            servers == ServersAccess::ReadWrite,
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::unix::fs::PermissionsExt;
+
+        use super::chown_tree;
+
+        #[test]
+        fn a_reinstall_leaves_server_files_open_to_the_group() {
+            let dir = tempfile::tempdir().unwrap();
+            let world = dir.path().join("world");
+            std::fs::create_dir(&world).unwrap();
+            let level = world.join("level.dat");
+            std::fs::write(&level, "").unwrap();
+            std::fs::set_permissions(
+                &level,
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o7777
+            };
+            let (uid, gid) = (
+                nix::unistd::getuid().as_raw(),
+                nix::unistd::getgid().as_raw(),
+            );
+            chown_tree(dir.path(), uid, gid, false).unwrap();
+            assert_eq!(mode(&level), 0o600);
+            chown_tree(dir.path(), uid, gid, true).unwrap();
+            assert_eq!(mode(&level), 0o660);
+            assert_eq!(mode(&world) & 0o2070, 0o2070);
+        }
     }
 }
 
