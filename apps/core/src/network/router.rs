@@ -2,7 +2,9 @@
 //!
 //! PCP and NAT-PMP are tried first because they are simpler and report clear errors; UPnP is the
 //! most common and is tried last. Every mapping is TCP and has a finite lease, so one that is never
-//! removed (a crash) still goes away by itself.
+//! removed (a crash) still goes away by itself. A [`Mapping`] is plain data that Core keeps across
+//! restarts: a PCP router knows a mapping by the nonce it was made with, so only that nonce renews
+//! or removes it.
 
 use std::{
     fmt::{self, Write as _},
@@ -12,13 +14,15 @@ use std::{
 };
 
 use crab_nat::{
-    GatewayAddress, InternetProtocol, PortMappingOptions, TimeoutConfig, natpmp,
+    InternetProtocol, PortMappingOptions, PortMappingType, TimeoutConfig,
+    natpmp, pcp,
 };
 use igd_next::{
     AddPortError, PortMappingProtocol, SearchOptions,
     aio::Gateway,
     aio::tokio::{Tokio, search_gateway},
 };
+use serde::{Deserialize, Serialize};
 
 /// How long the router keeps a mapping without hearing from Core again.
 const LEASE_SECONDS: u32 = 3600;
@@ -53,16 +57,69 @@ impl fmt::Display for Protocol {
 pub struct Router {
     local_ip: Ipv4Addr,
     /// Set when the gateway answered PCP or NAT-PMP.
-    pmp: Option<(GatewayAddress, Protocol)>,
+    pmp: Option<(Ipv4Addr, Protocol)>,
     upnp: Option<Gateway<Tokio>>,
 }
 
-/// One port the router agreed to forward to this machine.
+/// One port the router agreed to forward to this machine, with what renewing or removing it
+/// takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mapping {
     pub internal: u16,
     pub external: u16,
-    /// Kept for PCP and NAT-PMP, which renew and delete through it.
-    pmp: Option<crab_nat::PortMapping>,
+    via: Via,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "protocol", rename_all = "snake_case")]
+enum Via {
+    Pcp {
+        gateway: Ipv4Addr,
+        /// This machine, as the router saw it.
+        client: IpAddr,
+        nonce: pcp::Nonce,
+        external_ip: IpAddr,
+    },
+    NatPmp {
+        gateway: Ipv4Addr,
+    },
+    Upnp,
+}
+
+impl Mapping {
+    fn granted(
+        gateway: Ipv4Addr,
+        internal: u16,
+        mapping: &crab_nat::PortMapping,
+    ) -> Self {
+        let via = match mapping.mapping_type() {
+            PortMappingType::NatPmp => Via::NatPmp { gateway },
+            PortMappingType::Pcp {
+                client,
+                nonce,
+                external_ip,
+            } => Via::Pcp {
+                gateway,
+                client,
+                nonce,
+                external_ip,
+            },
+        };
+        Self {
+            internal,
+            external: mapping.external_port().get(),
+            via,
+        }
+    }
+
+    /// What PCP and NAT-PMP are asked for: the same outside port, for another lease.
+    fn options(&self) -> PortMappingOptions {
+        PortMappingOptions {
+            external_port: NonZeroU16::new(self.external),
+            lifetime_seconds: Some(LEASE_SECONDS),
+            timeout_config: Some(PMP_TIMEOUT),
+        }
+    }
 }
 
 /// The gateway this machine sends internet traffic through, if it can be found.
@@ -74,8 +131,10 @@ impl Router {
     /// Look for a router that speaks any forwarding protocol. `None` when nothing answers.
     pub async fn discover(local_ip: Ipv4Addr) -> Option<Self> {
         let pmp = async {
-            let gateway = GatewayAddress::from(default_gateway()?);
-            match natpmp::external_address(gateway, Some(PMP_TIMEOUT)).await {
+            let gateway = default_gateway()?;
+            match natpmp::external_address(gateway.into(), Some(PMP_TIMEOUT))
+                .await
+            {
                 Ok(_) => Some((gateway, Protocol::NatPmp)),
                 // A PCP-only router answers a NAT-PMP question with "wrong version".
                 Err(natpmp::Failure::UnsupportedVersion(_)) => {
@@ -118,7 +177,8 @@ impl Router {
     pub async fn wan_ip(&self) -> Option<IpAddr> {
         if let Some((gateway, Protocol::NatPmp)) = self.pmp
             && let Ok(ip) =
-                natpmp::external_address(gateway, Some(PMP_TIMEOUT)).await
+                natpmp::external_address(gateway.into(), Some(PMP_TIMEOUT))
+                    .await
         {
             return Some(IpAddr::V4(ip));
         }
@@ -141,7 +201,7 @@ impl Router {
             (self.pmp, NonZeroU16::new(internal))
         {
             match crab_nat::PortMapping::new(
-                gateway,
+                gateway.into(),
                 IpAddr::V4(self.local_ip),
                 InternetProtocol::Tcp,
                 port,
@@ -154,11 +214,7 @@ impl Router {
             .await
             {
                 Ok(mapping) => {
-                    return Ok(Mapping {
-                        internal,
-                        external: mapping.external_port().get(),
-                        pmp: Some(mapping),
-                    });
+                    return Ok(Mapping::granted(gateway, internal, &mapping));
                 }
                 Err(error) => refusal = format!("{protocol}: {error}"),
             }
@@ -169,7 +225,7 @@ impl Router {
                     return Ok(Mapping {
                         internal,
                         external,
-                        pmp: None,
+                        via: Via::Upnp,
                     });
                 }
                 Err(error) => {
@@ -207,34 +263,102 @@ impl Router {
         }
     }
 
-    /// Extend a mapping's lease. Also restores it when the router restarted and forgot it.
+    /// Extend a mapping's lease, also one an earlier Core made. Also restores it when the
+    /// router restarted and forgot it.
     pub async fn renew(&self, mapping: &mut Mapping) -> Result<(), String> {
-        match (&mut mapping.pmp, &self.upnp) {
-            (Some(pmp), _) => {
-                pmp.renew().await.map_err(|error| error.to_string())?;
-                mapping.external = pmp.external_port().get();
-                Ok(())
-            }
-            (None, Some(upnp)) => self
-                .upnp_add(upnp, mapping.internal, mapping.external)
+        let internal = NonZeroU16::new(mapping.internal)
+            .ok_or_else(|| "a mapping of port 0".to_owned())?;
+        match mapping.via {
+            Via::Pcp {
+                gateway,
+                client,
+                nonce,
+                external_ip,
+            } => {
+                let renewed = pcp::port_mapping(
+                    pcp::BaseMapRequest::new(
+                        gateway.into(),
+                        client,
+                        InternetProtocol::Tcp,
+                        internal,
+                    ),
+                    Some(nonce),
+                    Some(external_ip),
+                    mapping.options(),
+                )
                 .await
-                .map_err(|error| error.to_string()),
-            (None, None) => Err("the router no longer answers".into()),
+                .map_err(|error| format!("PCP: {error}"))?;
+                *mapping =
+                    Mapping::granted(gateway, mapping.internal, &renewed);
+            }
+            Via::NatPmp { gateway } => {
+                let renewed = natpmp::port_mapping(
+                    gateway.into(),
+                    InternetProtocol::Tcp,
+                    internal,
+                    mapping.options(),
+                )
+                .await
+                .map_err(|error| format!("NAT-PMP: {error}"))?;
+                *mapping =
+                    Mapping::granted(gateway, mapping.internal, &renewed);
+            }
+            Via::Upnp => match &self.upnp {
+                Some(upnp) => self
+                    .upnp_add(upnp, mapping.internal, mapping.external)
+                    .await
+                    .map_err(|error| format!("UPnP: {error}"))?,
+                None => return Err("the router no longer answers UPnP".into()),
+            },
         }
+        Ok(())
     }
 
-    /// Ask the router to stop forwarding. Failure is ignored: the lease ends by itself.
-    pub async fn remove(&self, mapping: Mapping) {
-        match (mapping.pmp, &self.upnp) {
-            (Some(pmp), _) => {
-                let _ = pmp.try_drop().await;
-            }
-            (None, Some(upnp)) => {
-                let _ = upnp
-                    .remove_port(PortMappingProtocol::TCP, mapping.external)
+    /// Ask the router to stop forwarding. PCP and NAT-PMP need only the mapping; UPnP needs
+    /// the router Core found. Failure is ignored: the lease ends by itself.
+    pub async fn remove(router: Option<&Self>, mapping: Mapping) {
+        let internal = NonZeroU16::new(mapping.internal);
+        match mapping.via {
+            Via::Pcp {
+                gateway,
+                client,
+                nonce,
+                ..
+            } => {
+                if let Some(internal_port) = internal {
+                    let _ = pcp::try_drop_mapping(
+                        gateway.into(),
+                        client,
+                        nonce,
+                        pcp::DropMappingRange::Single {
+                            protocol: InternetProtocol::Tcp,
+                            internal_port,
+                        },
+                        Some(PMP_TIMEOUT),
+                    )
                     .await;
+                }
             }
-            (None, None) => {}
+            Via::NatPmp { gateway } => {
+                if internal.is_some() {
+                    let _ = natpmp::try_drop_mapping(
+                        gateway.into(),
+                        InternetProtocol::Tcp,
+                        internal,
+                        Some(PMP_TIMEOUT),
+                    )
+                    .await;
+                }
+            }
+            Via::Upnp => {
+                if let Some(upnp) =
+                    router.and_then(|router| router.upnp.as_ref())
+                {
+                    let _ = upnp
+                        .remove_port(PortMappingProtocol::TCP, mapping.external)
+                        .await;
+                }
+            }
         }
     }
 }
@@ -301,10 +425,7 @@ mod tests {
         let mapped = fake_router().await;
         let router = Router {
             local_ip: Ipv4Addr::LOCALHOST,
-            pmp: Some((
-                GatewayAddress::from(Ipv4Addr::LOCALHOST),
-                Protocol::NatPmp,
-            )),
+            pmp: Some((Ipv4Addr::LOCALHOST, Protocol::NatPmp)),
             upnp: None,
         };
         assert_eq!(router.protocols(), "NAT-PMP");
@@ -314,15 +435,18 @@ mod tests {
         );
 
         // The router grants a different outside port than the one asked for; Core takes it.
-        let mut mapping = router.map(25565, 25565).await.unwrap();
+        let mapping = router.map(25565, 25565).await.unwrap();
         assert_eq!((mapping.internal, mapping.external), (25565, 25566));
         assert_eq!(mapped.lock().unwrap().get(&25565), Some(&(25566, 1)));
 
+        // A Core that restarted renews the mapping it saved, without finding the router first.
+        let saved = serde_json::to_string(&mapping).unwrap();
+        let mut mapping: Mapping = serde_json::from_str(&saved).unwrap();
         router.renew(&mut mapping).await.unwrap();
         assert_eq!(mapping.external, 25566);
         assert_eq!(mapped.lock().unwrap().get(&25565), Some(&(25566, 2)));
 
-        router.remove(mapping).await;
+        Router::remove(None, mapping).await;
         assert!(mapped.lock().unwrap().is_empty());
     }
 }

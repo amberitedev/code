@@ -178,3 +178,11 @@ CREATE TABLE jvm_flags (
     -- JSON array of strings.
     flags TEXT NOT NULL
 );
+
+-- Port mappings Core asked the router for, so a Core that restarts renews them instead of asking
+-- again (a PCP router knows a mapping by its nonce). Keyed by server id, or 'core' for the API.
+CREATE TABLE port_mappings (
+    key TEXT PRIMARY KEY,
+    -- JSON of `network::router::Mapping`.
+    mapping TEXT NOT NULL
+);

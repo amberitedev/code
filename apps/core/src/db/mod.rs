@@ -79,6 +79,7 @@ mod tests {
                 "core",
                 "jvm_flags",
                 "pairing",
+                "port_mappings",
                 "restarts",
                 "runs",
                 "servers",

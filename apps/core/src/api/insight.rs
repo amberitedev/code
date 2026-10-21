@@ -190,7 +190,9 @@ pub async fn check(
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }
-    Arc::clone(&state.network).check(id.clone()).await;
+    Arc::clone(&state.network)
+        .check(Arc::clone(&state.servers), id.clone())
+        .await;
     Ok(Json(insight(&state, &id).await?))
 }
 
