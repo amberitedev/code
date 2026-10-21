@@ -84,7 +84,11 @@ impl Client {
             .header(header::HOST, "copal")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Full::new(body))?;
-        let response = sender.send_request(request).await?;
+        // Core drops a connection from an account other than `copal` and the owner without a
+        // word, which reads here as a broken pipe or a closed connection.
+        let response = sender.send_request(request).await.wrap_err(
+            "Core closed the connection without answering. Only the account that installed Copal may use the copal CLI",
+        )?;
         let status = response.status();
         let body = response.into_body().collect().await?.to_bytes();
         if status == axum::http::StatusCode::NOT_FOUND && body.is_empty() {
