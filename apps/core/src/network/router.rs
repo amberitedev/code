@@ -18,7 +18,7 @@ use crab_nat::{
     natpmp, pcp,
 };
 use igd_next::{
-    AddPortError, PortMappingProtocol, SearchOptions,
+    AddPortError, PortMappingProtocol, RemovePortError, SearchOptions,
     aio::Gateway,
     aio::tokio::{Tokio, search_gateway},
 };
@@ -112,6 +112,12 @@ impl Mapping {
         }
     }
 
+    /// Whether only the router Core found can remove it. A UPnP mapping goes through the
+    /// router's control endpoint; PCP and NAT-PMP ones carry their gateway.
+    pub fn needs_router(&self) -> bool {
+        self.via == Via::Upnp
+    }
+
     /// What PCP and NAT-PMP are asked for: the same outside port, for another lease.
     fn options(&self) -> PortMappingOptions {
         PortMappingOptions {
@@ -158,6 +164,17 @@ impl Router {
             pmp,
             upnp,
         })
+    }
+
+    /// Whether `mapping` was made through this router, so renewing it here is the way to keep
+    /// it, rather than asking for a new one.
+    pub fn serves(&self, mapping: &Mapping) -> bool {
+        match mapping.via {
+            Via::Pcp { gateway, .. } | Via::NatPmp { gateway } => {
+                self.pmp.is_some_and(|(found, _)| found == gateway)
+            }
+            Via::Upnp => self.upnp.is_some(),
+        }
     }
 
     /// The protocols this router answered, for display.
@@ -314,9 +331,12 @@ impl Router {
         Ok(())
     }
 
-    /// Ask the router to stop forwarding. PCP and NAT-PMP need only the mapping; UPnP needs
-    /// the router Core found. Failure is ignored: the lease ends by itself.
-    pub async fn remove(router: Option<&Self>, mapping: Mapping) {
+    /// Ask the router to stop forwarding, and whether the mapping is gone or will go by itself.
+    /// A PCP or NAT-PMP mapping ends with its lease once Core stops renewing it, so it counts as
+    /// gone whatever the router answers. A UPnP one may never end (some routers take only
+    /// permanent ones), so it is gone once the router removes it or says it has no such mapping,
+    /// which takes the router Core found.
+    pub async fn remove(router: Option<&Self>, mapping: &Mapping) -> bool {
         let internal = NonZeroU16::new(mapping.internal);
         match mapping.via {
             Via::Pcp {
@@ -351,15 +371,21 @@ impl Router {
                 }
             }
             Via::Upnp => {
-                if let Some(upnp) =
-                    router.and_then(|router| router.upnp.as_ref())
-                {
-                    let _ = upnp
-                        .remove_port(PortMappingProtocol::TCP, mapping.external)
-                        .await;
-                }
+                let Some(upnp) = router.and_then(|router| router.upnp.as_ref())
+                else {
+                    return false;
+                };
+                return matches!(
+                    upnp.remove_port(
+                        PortMappingProtocol::TCP,
+                        mapping.external
+                    )
+                    .await,
+                    Ok(()) | Err(RemovePortError::NoSuchPortMapping)
+                );
             }
         }
+        true
     }
 }
 
@@ -446,7 +472,7 @@ mod tests {
         assert_eq!(mapping.external, 25566);
         assert_eq!(mapped.lock().unwrap().get(&25565), Some(&(25566, 2)));
 
-        Router::remove(None, mapping).await;
+        assert!(Router::remove(None, &mapping).await);
         assert!(mapped.lock().unwrap().is_empty());
     }
 }

@@ -40,6 +40,8 @@ const RENEW_EVERY: Duration = Duration::from_secs(20 * 60);
 const RECONCILE_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How long Core waits before looking for a router again after none answered.
 const SEARCH_AGAIN: Duration = Duration::from_secs(5 * 60);
+/// Requests in a row the router may fail before Core looks for it again.
+const FAILURES_BEFORE_SEARCH: u32 = 3;
 /// How long a server may take to open its port before it is checked anyway.
 const LISTEN_WAIT: Duration = Duration::from_secs(120);
 
@@ -67,7 +69,43 @@ pub struct Network {
 struct Routing {
     router: Option<Router>,
     searched: Option<Instant>,
+    /// This machine's address and gateway when the router was found. Another one means
+    /// another network.
+    found_on: Option<(Ipv4Addr, Option<Ipv4Addr>)>,
+    /// Requests the router failed in a row.
+    failures: u32,
+    /// Every mapping Core made and has not seen go: those of running servers, and those of
+    /// stopped servers the router could not be asked to remove yet.
     mappings: HashMap<String, Mapping>,
+    /// Keys whose renewal failed. Their mapping is kept, nonce and all, and renewed again at
+    /// the next reconcile.
+    renew: HashSet<String>,
+}
+
+impl Routing {
+    /// Look for the router when there is none, when this machine moved to another network, or
+    /// after it failed [`FAILURES_BEFORE_SEARCH`] requests in a row.
+    async fn find(&mut self, local: Ipv4Addr) {
+        let here = (local, router::default_gateway());
+        if self.router.is_some()
+            && (self.found_on != Some(here)
+                || self.failures >= FAILURES_BEFORE_SEARCH)
+        {
+            info!("looking for the router again");
+            self.router = None;
+            self.searched = None;
+        }
+        let search = self.router.is_none()
+            && self
+                .searched
+                .is_none_or(|searched| searched.elapsed() > SEARCH_AGAIN);
+        if search {
+            self.router = Router::discover(local).await;
+            self.searched = Some(Instant::now());
+            self.found_on = Some(here);
+            self.failures = 0;
+        }
+    }
 }
 
 /// Whether the run a check started for still runs. Core's own API always does.
@@ -137,7 +175,17 @@ impl Network {
     /// forward and check the ports not forwarded yet. With `all`, renew and check every port.
     async fn reconcile(self: &Arc<Self>, servers: &Arc<Servers>, all: bool) {
         let running: HashSet<String> = servers.running().into_iter().collect();
-        let mapped: HashSet<String> =
+        // A mapping whose renewal failed counts as not forwarded yet.
+        let mapped: HashSet<String> = {
+            let routing = self.routing.lock().await;
+            routing
+                .mappings
+                .keys()
+                .filter(|key| !routing.renew.contains(*key))
+                .cloned()
+                .collect()
+        };
+        let pending: Vec<String> =
             self.routing.lock().await.mappings.keys().cloned().collect();
         let reported: Vec<String> = self
             .reports
@@ -146,7 +194,7 @@ impl Network {
             .keys()
             .cloned()
             .collect();
-        for key in mapped.iter().chain(&reported) {
+        for key in pending.iter().chain(&reported) {
             if key != CORE && !running.contains(key) {
                 self.close(key).await;
             }
@@ -252,16 +300,13 @@ impl Network {
         current: Current<'_>,
     ) -> Option<RouterFacts> {
         let mut routing = self.routing.lock().await;
-        let search = routing.router.is_none()
-            && routing
-                .searched
-                .is_none_or(|searched| searched.elapsed() > SEARCH_AGAIN);
-        if search {
-            routing.router = Router::discover(local).await;
-            routing.searched = Some(Instant::now());
-        }
+        routing.find(local).await;
         let Routing {
-            router, mappings, ..
+            router,
+            mappings,
+            renew,
+            failures,
+            ..
         } = &mut *routing;
         let Some(router) = router.as_ref() else {
             return Some(RouterFacts::NoProtocol {
@@ -272,27 +317,40 @@ impl Network {
         if !current() {
             return None;
         }
-        let mapping = match mappings.remove(key) {
+        // Renewing restores a mapping the router forgot. A failed renewal may still have
+        // renewed it with only the answer lost, and a new mapping would clash with that one,
+        // so the mapping is kept to renew again; only one made through another router is
+        // replaced.
+        let (result, kept) = match mappings.remove(key) {
             Some(mut mapping) => match router.renew(&mut mapping).await {
-                Ok(()) => Ok(mapping),
-                // The router forgot it, or this is another router: ask again.
-                Err(error) => {
-                    warn!(%key, %error, "could not renew a port mapping");
-                    router.map(port, port).await
+                Ok(()) => (Ok(mapping), None),
+                Err(error) if router.serves(&mapping) => {
+                    (Err(error), Some(mapping))
                 }
+                Err(_) => (router.map(port, port).await, None),
             },
-            None => router.map(port, port).await,
+            None => (router.map(port, port).await, None),
         };
-        let granted = mapping
+        let granted = result
             .as_ref()
             .map(|mapping| mapping.external)
             .map_err(Clone::clone);
-        match mapping {
-            Ok(mapping) => {
+        match (result, kept) {
+            (Ok(mapping), _) => {
+                *failures = 0;
+                renew.remove(key);
                 save(&self.db, key, &mapping).await;
                 mappings.insert(key.into(), mapping);
             }
-            Err(refusal) => {
+            (Err(error), Some(mapping)) => {
+                *failures += 1;
+                renew.insert(key.into());
+                mappings.insert(key.into(), mapping);
+                warn!(%key, %error, "could not renew a port mapping; trying again soon");
+            }
+            (Err(refusal), None) => {
+                *failures += 1;
+                renew.remove(key);
                 forget(&self.db, key).await;
                 warn!(port, %refusal, "the router refused to forward");
             }
@@ -305,14 +363,29 @@ impl Network {
         })
     }
 
-    /// A server stopped: its mapping and report go.
+    /// A server stopped: its report goes, and its mapping once the router removed it. A
+    /// mapping only the router can remove stays, saved, until it can be asked: each reconcile
+    /// tries again.
     async fn close(&self, key: &str) {
         self.reports.lock().expect("not poisoned").remove(key);
         let mut routing = self.routing.lock().await;
-        if let Some(mapping) = routing.mappings.remove(key) {
-            Router::remove(routing.router.as_ref(), mapping).await;
+        routing.renew.remove(key);
+        let Some(mapping) = routing.mappings.remove(key) else {
+            forget(&self.db, key).await;
+            return;
+        };
+        // After a restart Core may know the mapping before it found the router.
+        if mapping.needs_router()
+            && self.on
+            && let Some(local) = public_ip::local_ipv4()
+        {
+            routing.find(local).await;
         }
-        forget(&self.db, key).await;
+        if Router::remove(routing.router.as_ref(), &mapping).await {
+            forget(&self.db, key).await;
+        } else {
+            routing.mappings.insert(key.into(), mapping);
+        }
     }
 
     /// The mappings an earlier Core made, so they are renewed instead of made again.
@@ -398,7 +471,7 @@ mod tests {
     use crate::db;
 
     #[tokio::test]
-    async fn a_mapping_outlives_core_until_its_server_stops() {
+    async fn a_mapping_only_the_router_can_remove_waits_for_it() {
         let db = db::memory().await;
         let mapping: Mapping = serde_json::from_str(
             r#"{"internal":25565,"external":25565,"via":{"protocol":"upnp"}}"#,
@@ -412,14 +485,18 @@ mod tests {
             network.routing.lock().await.mappings.get("server"),
             Some(&mapping)
         );
-        // With no router found, UPnP cannot be asked; the lease ends by itself.
+        // Its server stopped, but no router was found to ask. A UPnP mapping may be permanent,
+        // so it is kept, saved, for the next try.
         network.close("server").await;
-        assert!(network.routing.lock().await.mappings.is_empty());
+        assert_eq!(
+            network.routing.lock().await.mappings.get("server"),
+            Some(&mapping)
+        );
         let left: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM port_mappings")
                 .fetch_one(&db)
                 .await
                 .unwrap();
-        assert_eq!(left, 0);
+        assert_eq!(left, 1);
     }
 }
