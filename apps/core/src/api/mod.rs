@@ -11,16 +11,16 @@ pub mod activity;
 pub mod backend;
 pub mod backups;
 pub mod console;
-mod content;
+pub mod content;
 pub mod error;
 pub mod eula;
-mod events;
-mod files;
+pub mod events;
+pub mod files;
 mod health;
 pub mod insight;
 pub mod logs;
 pub mod performance;
-mod properties;
+pub mod properties;
 pub mod servers;
 pub mod sessions;
 mod startup;
@@ -52,7 +52,7 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a connection may sit without a request, or take to send one's headers.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Bodies are capped at this; upload routes, when they land, stream to disk with their own cap.
+/// Bodies are capped at this; upload routes stream to disk with their own cap.
 const MAX_BODY: usize = 10 * 1024 * 1024;
 
 /// What every route can reach.
@@ -60,6 +60,8 @@ pub struct AppState {
     pub db: SqlitePool,
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::Access>,
+    pub content: Arc<crate::content::Content>,
+    pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
 }
@@ -101,6 +103,49 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/local/servers", post(servers::create))
         .route("/local/servers/{id}", delete(servers::delete))
         .route("/local/servers/{id}/eula", post(servers::accept_eula))
+        .route("/v1/servers", get(servers::list_v1))
+        .route("/v1/servers/{id}", get(servers::get_v1))
+        .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
+        .route(
+            "/modrinth/v0/servers/{id}/startup",
+            get(startup::get_v0).post(startup::update_v0),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/options/startup",
+            get(startup::get_v1).patch(startup::patch_v1),
+        )
+        .route("/servers/{id}/java", put(startup::set_java_path))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/properties",
+            get(properties::get).patch(properties::patch),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/addons/delete", post(content::delete))
+        .route("/v1/servers/{id}/worlds/{wid}/addons/delete-many", post(content::delete_many))
+        .route("/v1/servers/{id}/worlds/{wid}/addons/disable", post(content::disable))
+        .route("/v1/servers/{id}/worlds/{wid}/addons/enable", post(content::enable))
+        .route("/v1/servers/{id}/worlds/{wid}/addons/disable-many", post(content::disable_many))
+        .route("/v1/servers/{id}/worlds/{wid}/addons/enable-many", post(content::enable_many))
+        .route("/v1/servers/{id}/worlds/{wid}/content", post(content::install))
+        .route("/v1/servers/{id}/worlds/{wid}/content/repair", post(content::repair))
+        .route("/v1/servers/{id}/worlds/{wid}/content/unlink-modpack", post(content::unlink))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/content/modpack/update",
+            get(content::modpack).post(content::update_modpack),
+        )
+        .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
+        .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))
+        .route("/servers/{id}/modrinth/v0/fs/move", post(files::rename))
+        .route("/servers/{id}/modrinth/v0/fs/delete", delete(files::delete))
+        .route("/servers/{id}/v1/fs/ops/{action}", post(files::operation))
+        .route("/servers/{id}/v1/worlds/{wid}/files/stat", post(files::stat))
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session",
+            get(files::get_session).post(files::open_session),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}",
+            delete(files::cancel_session),
+        )
         // Applies to the routes above only.
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -114,7 +159,42 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/modrinth/v0/servers/{id}/reinstall",
             post(servers::reinstall),
         )
+        // Adding and updating addons download them first, as does taking the pack's version of
+        // an edited file.
+        .route(
+            "/servers/{id}/content/edited",
+            get(content::edited).post(content::decide),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/addons", get(content::list).post(content::add))
+        .route("/v1/servers/{id}/worlds/{wid}/addons/install-many", post(content::add_many))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/update",
+            get(content::get_update).post(content::update),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/addons/update-many", post(content::update_many))
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/finalize",
+            post(files::finalize_session),
+        )
+        .route("/servers/{id}/v1/fs/unarchive", post(files::unarchive))
+        .route("/servers/{id}/v1/worlds/{wid}/files/zip", post(files::zip))
         .layer(DefaultBodyLimit::max(MAX_BODY))
+        // Uploads stream to disk with their own cap (`content::MAX_UPLOAD`).
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/content/upload-modpack-file",
+            post(content::upload_modpack),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/content/upload-addon-file",
+            post(content::upload_addons),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/files",
+            post(files::upload_files),
+        )
+        .route("/servers/{id}/modrinth/v0/fs/create", post(files::create))
+        .route("/servers/{id}/modrinth/v0/fs/update", put(files::update))
+        .layer(DefaultBodyLimit::disable())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }

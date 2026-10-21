@@ -211,6 +211,11 @@ impl Paths {
         self.run(server_id).join("console.log")
     }
 
+    /// Downloads for a pack install, kept out of the server folder until all of them arrived.
+    pub fn staging(&self, server_id: &str) -> PathBuf {
+        self.run(server_id).join("staging")
+    }
+
     /// The shim's own messages.
     pub fn shim_log(&self, server_id: &str) -> PathBuf {
         self.run(server_id).join("shim.log")
@@ -264,6 +269,7 @@ mod tests {
             paths.run_status("a"),
             paths.console_log("a"),
             paths.shim_log("a"),
+            paths.staging("a"),
             paths.logs(),
             paths.server("a"),
             paths.meta(),

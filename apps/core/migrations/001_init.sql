@@ -48,6 +48,8 @@ CREATE TABLE servers (
     memory_mb INTEGER NOT NULL,
     -- Advanced override; null means the Java Core manages for this version.
     java_path TEXT,
+    -- The managed Java major the owner chose; null means the one the Minecraft version needs.
+    java_version INTEGER,
     -- The owner accepted the Minecraft EULA for this server, so Core writes eula=true. Step 8
     -- replaces it with one acceptance per Core.
     eula_accepted INTEGER NOT NULL DEFAULT 0
@@ -157,7 +159,30 @@ CREATE TABLE content_files (
     sha1 TEXT NOT NULL,
     project_id TEXT,
     version_id TEXT,
+    -- A pack update found this file edited and left it alone: the new pack `changed` it or
+    -- `removed` it. Cleared when the App says keep or replace.
+    pending TEXT CHECK (pending IN ('changed', 'removed')),
     PRIMARY KEY (server_id, path)
+);
+
+-- The pack a server follows. Unlinking deletes the row and keeps the files.
+CREATE TABLE packs (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- The Modrinth project and version, or null for a pack file the App uploaded.
+    project_id TEXT,
+    version_id TEXT,
+    -- As the pack's index names them.
+    name TEXT NOT NULL,
+    version_number TEXT NOT NULL,
+    summary TEXT,
+    -- SHA-1 of the .mrpack, kept in `meta/packs/`.
+    sha1 TEXT NOT NULL,
+    -- The App instance the pack came from, when the App shares one.
+    instance_id TEXT,
+    instance_name TEXT,
+    -- Why the last install, update, or repair failed. Cleared by the next one that works, or by
+    -- unlinking.
+    error TEXT
 );
 
 -- When a server restarts by itself. A server without a row has the defaults: crash restart on,

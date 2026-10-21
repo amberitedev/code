@@ -138,9 +138,18 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
         .await
         .unwrap();
+    let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+    let content = crate::content::Content::open(
+        paths.clone(),
+        db.clone(),
+        Arc::clone(&servers),
+    )
+    .unwrap();
     let state = Arc::new(AppState {
-        servers: Servers::open(paths.clone(), db.clone()).await.unwrap(),
+        servers,
         access: Arc::new(Access::new(keys)),
+        content,
+        uploads: api::files::Uploads::default(),
         update: Arc::new(Updater::new(
             paths.clone(),
             db.clone(),

@@ -9,7 +9,7 @@
 use daedalus::minecraft::VersionManifest;
 use daedalus::modded::{DUMMY_REPLACE_STRING, LoaderVersion, Manifest};
 
-use crate::installs::ModLoader;
+use crate::installs::{ModLoader, download};
 
 /// Base URL of the Modrinth launcher-meta mirror (matches app-lib's
 /// `MODRINTH_LAUNCHER_META_URL`).
@@ -17,8 +17,8 @@ const LAUNCHER_META_URL: &str = "https://launcher-meta.modrinth.com/";
 
 #[derive(Debug, thiserror::Error)]
 pub enum MetaError {
-    #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Download(#[from] download::DownloadError),
     #[error("unknown game version: {0}")]
     UnknownGameVersion(String),
     #[error("no loader version found for {loader} on {game_version}")]
@@ -30,7 +30,7 @@ pub enum MetaError {
 
 /// The launcher-meta path segment for a loader. Note NeoForge is `neo`, matching
 /// app-lib's `ModLoader::as_meta_str`.
-pub fn meta_loader_str(loader: &ModLoader) -> &'static str {
+pub fn meta_loader_str(loader: ModLoader) -> &'static str {
     match loader {
         ModLoader::Vanilla | ModLoader::Paper => "vanilla",
         ModLoader::Forge => "forge",
@@ -48,13 +48,7 @@ pub async fn fetch_minecraft_manifest(
         "{LAUNCHER_META_URL}minecraft/v{}/manifest.json",
         daedalus::minecraft::CURRENT_FORMAT_VERSION
     );
-    Ok(http
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?)
+    Ok(download::json(http, &url).await?)
 }
 
 /// Fetch a loader's manifest (its supported game versions + loader versions).
@@ -62,14 +56,21 @@ pub async fn fetch_loader_manifest(
     http: &reqwest::Client,
     meta_loader: &str,
 ) -> Result<Manifest, MetaError> {
-    let url = format!("{LAUNCHER_META_URL}{meta_loader}/v0/manifest.json");
-    Ok(http
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?)
+    use daedalus::modded::{
+        CURRENT_FABRIC_FORMAT_VERSION, CURRENT_FORGE_FORMAT_VERSION,
+        CURRENT_NEOFORGE_FORMAT_VERSION, CURRENT_QUILT_FORMAT_VERSION,
+    };
+    // Each loader's manifest has its own format version.
+    let format = match meta_loader {
+        "fabric" => CURRENT_FABRIC_FORMAT_VERSION,
+        "forge" => CURRENT_FORGE_FORMAT_VERSION,
+        "quilt" => CURRENT_QUILT_FORMAT_VERSION,
+        "neo" => CURRENT_NEOFORGE_FORMAT_VERSION,
+        _ => 0,
+    };
+    let url =
+        format!("{LAUNCHER_META_URL}{meta_loader}/v{format}/manifest.json");
+    Ok(download::json(http, &url).await?)
 }
 
 /// Resolve the daedalus `Version` (game version metadata) for `game_version`.
@@ -88,7 +89,7 @@ pub fn find_game_version(
 /// Pick a loader version for the given game version from a loader manifest.
 ///
 /// `requested` accepts a concrete loader version id, `"latest"`, or `"stable"`.
-/// `None` is treated as `"latest"`. Mirrors app-lib's
+/// `None` is the newest stable one, as the App picks. Mirrors app-lib's
 /// `get_loader_version_from_profile` selection logic, including the
 /// `DUMMY_REPLACE_STRING` game-version substitution loaders use in their ids.
 pub fn resolve_loader_version(
@@ -96,7 +97,7 @@ pub fn resolve_loader_version(
     game_version: &str,
     requested: Option<&str>,
 ) -> Result<LoaderVersion, MetaError> {
-    let requested = requested.unwrap_or("latest");
+    let requested = requested.unwrap_or("stable");
 
     let game = manifest
         .game_versions
@@ -108,6 +109,15 @@ pub fn resolve_loader_version(
             loader: "<unknown>".to_string(),
             game_version: game_version.to_string(),
         })?;
+    // Newer manifests share one loader list between the versions of a group.
+    let loaders = match &game.version_group {
+        Some(group) => manifest
+            .version_groups
+            .iter()
+            .find(|candidate| candidate.id == *group)
+            .map_or(&[][..], |group| group.loaders.as_slice()),
+        None => game.loaders.as_slice(),
+    };
 
     let filter = |it: &&LoaderVersion| match requested {
         "latest" => true,
@@ -115,12 +125,12 @@ pub fn resolve_loader_version(
         id => it.id == id,
     };
 
-    game.loaders
+    loaders
         .iter()
         .find(filter)
         .or_else(|| {
             if requested == "stable" {
-                game.loaders.first()
+                loaders.first()
             } else {
                 None
             }

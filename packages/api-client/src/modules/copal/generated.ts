@@ -204,6 +204,30 @@ export type Remove = { user_id: string, server_id: string, keep_core: boolean, }
 
 export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "report_state" };
 
+export type EditedFiles = { files: Array<EditedFile>, };
+
+export type EditedFile = { 
+/**
+ * Relative to the server folder, with forward slashes.
+ */
+path: string, 
+/**
+ * The owner deleted it (or disabled it) rather than changed it.
+ */
+deleted: boolean, 
+/**
+ * What the last pack update wants for it, waiting on a [`Decision`]; null when nothing waits.
+ */
+pending: PendingChange | null, };
+
+export type PendingChange = "changed" | "removed";
+
+export type Decision = { path: string, choice: Choice, };
+
+export type Choice = "keep" | "replace";
+
+export type JavaPath = { path: string | null, };
+
 export type UpdateStatus = { 
 /**
  * The running version.

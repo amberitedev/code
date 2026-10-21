@@ -1,12 +1,12 @@
 //! Preparing a server to start: its folder, `eula.txt`, its port in `server.properties`, Java,
-//! and the command line the shim runs. Only Vanilla so far; the other loaders are step 4.
+//! and the command line the shim runs, for every loader.
 
 use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::Result;
 
 use super::{
     records::ServerRow,
@@ -16,8 +16,11 @@ use crate::{
     daemon::{folders, paths::Paths},
     installs::{
         ModLoader,
-        daedalus::{self, SharedDirs, launch::build_launch_tokens},
-        java,
+        daedalus::{
+            SharedDirs, launch::build_launch_tokens,
+            version_info::merged_version_id,
+        },
+        forge, java,
     },
 };
 
@@ -26,48 +29,30 @@ use crate::{
 pub enum NotReady {
     #[error("nothing is installed on this server yet")]
     NotInstalled,
-    #[error("only Vanilla servers can start so far")]
-    Unsupported,
     #[error(
         "accept the Minecraft EULA for this server first: copal servers eula <id>"
     )]
     Eula,
 }
 
-/// Install Vanilla `game_version` into the shared store, with the Java it needs.
-pub async fn install_vanilla(
-    paths: &Paths,
-    http: &reqwest::Client,
-    game_version: &str,
-) -> Result<()> {
-    daedalus::install_shared(
-        http,
-        paths.root(),
-        &ModLoader::Vanilla,
-        game_version,
-        None,
-        None,
-        std::env::consts::ARCH,
-    )
-    .await?;
-    managed_java(paths, http, game_version).await?;
-    Ok(())
+/// What is installed on a server, or why nothing is.
+fn installed(server: &ServerRow) -> Result<(ModLoader, &str), NotReady> {
+    let loader = server.loader.as_deref().and_then(ModLoader::parse);
+    match (loader, server.game_version.as_deref()) {
+        (Some(loader), Some(game_version)) => Ok((loader, game_version)),
+        _ => Err(NotReady::NotInstalled),
+    }
 }
 
-/// Everything the shim needs to start `server`. Writes `eula.txt` and the port first.
+/// Everything the shim needs to start `server`, and the lease on its Java (see `java::Lease`).
+/// Writes `eula.txt` and the port first.
 pub async fn prepare(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
     run_id: &str,
-) -> Result<Launch> {
-    let game_version = server
-        .game_version
-        .as_deref()
-        .ok_or(NotReady::NotInstalled)?;
-    if server.loader.as_deref() != Some("vanilla") {
-        return Err(NotReady::Unsupported.into());
-    }
+) -> Result<(Launch, Option<java::Lease>)> {
+    installed(server)?;
     if !server.eula_accepted {
         return Err(NotReady::Eula.into());
     }
@@ -75,73 +60,122 @@ pub async fn prepare(
     let dir = paths.server(&server.id);
     folders::create_server_folder(&dir)?;
     folders::create_server_folder(&dir.join("tmp"))?;
-    write_server_file(&dir.join("eula.txt"), b"eula=true\n")?;
+    write_server_file(
+        &dir.join("eula.txt"),
+        b"eula=true
+",
+    )?;
     set_port(&dir, server.port)?;
 
-    let java = match &server.java_path {
-        Some(path) => PathBuf::from(path),
-        None => managed_java(paths, http, game_version).await?,
-    };
-    let dirs = SharedDirs::new(paths.root());
-    let info = tokio::fs::read(dirs.version_info_path(game_version)).await?;
-    let tokens = build_launch_tokens(
-        &dirs,
-        &serde_json::from_slice(&info)?,
-        game_version,
-        &ModLoader::Vanilla,
-        std::env::consts::ARCH,
-    )?
-    .ok_or(NotReady::Unsupported)?;
-
+    let (java, lease) = java_for(paths, http, server).await?;
     let memory = server.memory_mb;
+    let launch = Launch {
+        v: PROTOCOL,
+        run_id: run_id.to_owned(),
+        java,
+        args: args(paths, server)?,
+        dir,
+        memory_limit_mb: memory_limit(memory),
+    };
+    Ok((launch, lease))
+}
+
+/// The arguments after `java`: memory, the temporary folder, and what the loader starts from.
+pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
+    let (loader, game_version) = installed(server)?;
+    let dir = paths.server(&server.id);
+    let memory = server.memory_mb;
+    // The heap and tuned flags first: `memory::use_flags` replaces those in place.
     let mut args = super::memory::jvm(memory);
     args.extend([
         format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
         // `copal-servers` has no home folder.
         format!("-Duser.home={}", dir.display()),
     ]);
-    args.extend(tokens);
-    Ok(Launch {
-        v: PROTOCOL,
-        run_id: run_id.to_owned(),
-        java,
-        args,
-        dir,
-        memory_limit_mb: memory_limit(memory),
-    })
+    let dirs = SharedDirs::new(paths.root());
+    let loader_version = server.loader_version.as_deref().unwrap_or_default();
+    match loader {
+        ModLoader::Vanilla | ModLoader::Fabric | ModLoader::Quilt => {
+            let version_id =
+                merged_version_id(game_version, loader, Some(loader_version));
+            let info = std::fs::read(dirs.version_info_path(&version_id))
+                .map_err(|_| NotReady::NotInstalled)?;
+            let tokens = build_launch_tokens(
+                &dirs,
+                &serde_json::from_slice(&info)?,
+                &version_id,
+                loader,
+                std::env::consts::ARCH,
+            )?
+            .ok_or(NotReady::NotInstalled)?;
+            args.extend(tokens);
+        }
+        ModLoader::Paper => {
+            let jar = dirs.paper_jar(game_version, loader_version);
+            if !jar.is_file() {
+                return Err(NotReady::NotInstalled.into());
+            }
+            args.extend([
+                "-jar".into(),
+                jar.to_string_lossy().into_owned(),
+                "--nogui".into(),
+            ]);
+        }
+        ModLoader::Forge | ModLoader::NeoForge => args.extend(
+            forge::launch_args(&dir, loader, game_version, loader_version)?,
+        ),
+    }
+    Ok(args)
+}
+
+/// The Java major `server` runs on: the one the owner chose, or the one its Minecraft version
+/// needs.
+pub async fn java_major(
+    paths: &Paths,
+    http: &reqwest::Client,
+    server: &ServerRow,
+) -> Result<u32> {
+    if let Some(major) = server.java_version {
+        return Ok(u32::try_from(major)?);
+    }
+    let (_, game_version) = installed(server)?;
+    Ok(java::java_requirement(http, paths.root(), game_version).await)
+}
+
+/// The Java `server` runs with: its custom path, or the managed Java of its major, downloaded
+/// when missing.
+pub async fn java_for(
+    paths: &Paths,
+    http: &reqwest::Client,
+    server: &ServerRow,
+) -> Result<(PathBuf, Option<java::Lease>)> {
+    if let Some(path) = &server.java_path {
+        return Ok((PathBuf::from(path), None));
+    }
+    let major = java_major(paths, http, server).await?;
+    let (binary, lease) = java::ensure(paths, http, major).await?;
+    Ok((binary, Some(lease)))
+}
+
+/// The command line as people read it: `java` and the arguments, quoted where needed.
+pub fn invocation(args: &[String]) -> String {
+    std::iter::once("java")
+        .chain(args.iter().map(String::as_str))
+        .map(|arg| {
+            if arg.contains(char::is_whitespace) {
+                format!("\"{arg}\"")
+            } else {
+                arg.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The job object's cap on Windows: the heap, plus room for what Java keeps outside it.
-fn memory_limit(heap_mb: i64) -> u64 {
+pub fn memory_limit(heap_mb: i64) -> u64 {
     let heap = heap_mb.max(0) as u64;
     heap + (heap / 2).max(1024)
-}
-
-/// The Java a Minecraft version needs, downloaded into `java/` when missing.
-async fn managed_java(
-    paths: &Paths,
-    http: &reqwest::Client,
-    game_version: &str,
-) -> Result<PathBuf> {
-    let (major, _) =
-        java::java_requirement(http, paths.root(), game_version, None).await;
-    let binary = if cfg!(windows) { "java.exe" } else { "java" };
-    let installed = walkdir::WalkDir::new(paths.java().join(major.to_string()))
-        .into_iter()
-        .filter_map(Result::ok)
-        .find(|entry| {
-            entry.file_name() == binary
-                && entry
-                    .path()
-                    .parent()
-                    .is_some_and(|dir| dir.ends_with("bin"))
-        });
-    match installed {
-        Some(entry) => Ok(entry.into_path()),
-        None => java::download_java(http, paths.root(), major)
-            .await
-            .map_err(|error| eyre!("could not install Java {major}: {error}")),
-    }
 }
 
 /// Set `server-port` in `server.properties`, keeping every other line.
@@ -162,7 +196,7 @@ fn set_port(dir: &Path, port: i64) -> io::Result<()> {
 }
 
 /// The key of a `server.properties` line, or `None` for comments and blank lines.
-fn property_key(line: &str) -> Option<&str> {
+pub fn property_key(line: &str) -> Option<&str> {
     let line = line.trim_start();
     if line.is_empty() || line.starts_with(['#', '!']) {
         return None;
@@ -172,8 +206,9 @@ fn property_key(line: &str) -> Option<&str> {
 }
 
 /// Files in a server folder are written by mods too: never follow a link they planted, and
-/// read at most 1 MB.
-fn read_server_file(path: &Path) -> io::Result<String> {
+/// read at most 1 MB. Only for files directly in a folder Core made, such as the server folder
+/// itself: a link in a folder above the file is not checked.
+pub fn read_server_file(path: &Path) -> io::Result<String> {
     let mut text = String::new();
     no_follow(std::fs::File::options().read(true))
         .open(path)
@@ -184,8 +219,8 @@ fn read_server_file(path: &Path) -> io::Result<String> {
 }
 
 /// Create or replace a file in a server folder. It is truncated only once the open handle is
-/// known to be a plain file, never through a link.
-fn write_server_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+/// known to be a plain file, never through a link. Same limits as [`read_server_file`].
+pub fn write_server_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut options = std::fs::File::options();
     options.write(true).create(true).truncate(false);
     #[cfg(unix)]

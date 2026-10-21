@@ -4,39 +4,37 @@
 //! `launcher::args` classpath helpers, specialised for the server:
 //!
 //! * Each library is written by its maven path into the ONE shared
-//!   `libraries/` tree and deduped — `if path.exists() && !force { return }` —
-//!   so a library is downloaded at most once across every installation.
+//!   `libraries/` tree and deduped, so a library is downloaded at most once
+//!   across every installation. Repair re-hashes what is there and replaces
+//!   only what does not match, whole, never deleting a file a server may use.
 //! * Natives are skipped entirely: a dedicated server never loads LWJGL/GLFW
 //!   natives, so we neither download nor classpath them.
 //! * Classpaths are built from absolute, canonicalised paths so the JVM finds
 //!   every jar regardless of the process working directory (which stays the
 //!   per-instance data dir).
 
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use daedalus::get_path_from_artifact;
 use daedalus::minecraft::{Library, LibraryDownloads};
 use dunce::canonicalize;
 use futures::stream::{self, TryStreamExt};
-use sha1::Digest;
 
 use super::dirs::SharedDirs;
 use super::rules::{classpath_separator, parse_rules};
+use crate::installs::download::{self, FileDownload, Hash};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Download(#[from] download::DownloadError),
     #[error("maven path: {0}")]
     Maven(String),
-    #[error("sha1 mismatch for {name}: expected {expected}, got {actual}")]
-    HashMismatch {
-        name: String,
-        expected: String,
-        actual: String,
-    },
 }
 
 /// Number of libraries downloaded concurrently.
@@ -44,19 +42,29 @@ const CONCURRENCY: usize = 8;
 
 /// Download every applicable library into the shared `libraries/` store,
 /// skipping natives and anything excluded by host OS rules. Existing files are
-/// left untouched unless `force` is set.
+/// kept; with `verify` (repair) they are re-hashed and replaced when they do
+/// not match. `progress` is told the share of libraries done.
 pub async fn download_libraries(
     http: &reqwest::Client,
     dirs: &SharedDirs,
     libraries: &[Library],
     java_arch: &str,
-    force: bool,
+    verify: bool,
+    progress: &(dyn Fn(f64) + Sync),
 ) -> Result<(), LibraryError> {
     tokio::fs::create_dir_all(dirs.libraries_dir()).await?;
+    let done = AtomicUsize::new(0);
+    let total = libraries.len().max(1);
 
     stream::iter(libraries.iter().map(Ok::<&Library, LibraryError>))
-        .try_for_each_concurrent(CONCURRENCY, |library| async move {
-            download_one(http, dirs, library, java_arch, force).await
+        .try_for_each_concurrent(CONCURRENCY, |library| {
+            let done = &done;
+            async move {
+                download_one(http, dirs, library, java_arch, verify).await?;
+                let done = done.fetch_add(1, Ordering::Relaxed) + 1;
+                progress(done as f64 / total as f64);
+                Ok(())
+            }
         })
         .await
 }
@@ -66,7 +74,7 @@ async fn download_one(
     dirs: &SharedDirs,
     library: &Library,
     java_arch: &str,
-    force: bool,
+    verify: bool,
 ) -> Result<(), LibraryError> {
     if let Some(rules) = &library.rules
         && !parse_rules(rules, java_arch)
@@ -87,14 +95,6 @@ async fn download_one(
         .map_err(|e| LibraryError::Maven(format!("{}: {e}", library.name)))?;
     let path = dirs.libraries_dir().join(&artifact_path);
 
-    if path.exists() && !force {
-        return Ok(());
-    }
-
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
     // Prefer the explicit artifact download (with sha1), else fall back to a
     // constructed maven URL (best-effort, matching app-lib/PrismLauncher).
     if let Some(LibraryDownloads {
@@ -103,87 +103,61 @@ async fn download_one(
     }) = &library.downloads
         && !artifact.url.is_empty()
     {
-        let bytes = fetch_verified(
+        if path.exists()
+            && (!verify
+                || download::has_hash(&path, Hash::Sha1(&artifact.sha1)).await)
+        {
+            return Ok(());
+        }
+        download::file(
             http,
             &artifact.url,
-            Some(&artifact.sha1),
-            &library.name,
+            &path,
+            &FileDownload {
+                hash: Hash::Sha1(&artifact.sha1),
+                limit: None,
+                progress: &download::quiet,
+            },
         )
         .await?;
-        tokio::fs::write(&path, &bytes).await?;
         return Ok(());
     }
 
+    if path.exists() {
+        return Ok(());
+    }
     let base = library
         .url
         .as_deref()
         .unwrap_or("https://libraries.minecraft.net/");
     let url = format!("{base}{artifact_path}");
-    match fetch_verified(http, &url, None, &library.name).await {
-        Ok(bytes) => {
-            tokio::fs::write(&path, &bytes).await?;
-        }
-        Err(e) => {
-            tracing::debug!(
-                "optional library {} could not be fetched from {url}: {e}",
-                library.name
-            );
-        }
+    let fetched = download::file(
+        http,
+        &url,
+        &path,
+        &FileDownload {
+            hash: Hash::Unknown,
+            limit: None,
+            progress: &download::quiet,
+        },
+    )
+    .await;
+    if let Err(e) = fetched {
+        tracing::debug!(
+            "optional library {} could not be fetched from {url}: {e}",
+            library.name
+        );
     }
     Ok(())
 }
 
-async fn fetch_verified(
-    http: &reqwest::Client,
-    url: &str,
-    sha1: Option<&str>,
-    name: &str,
-) -> Result<bytes::Bytes, LibraryError> {
-    let bytes = http
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    if let Some(expected) = sha1 {
-        let actual = hex::encode(sha1::Sha1::digest(&bytes));
-        if !expected.is_empty() && actual != expected {
-            return Err(LibraryError::HashMismatch {
-                name: name.to_string(),
-                expected: expected.to_string(),
-                actual,
-            });
-        }
-    }
-    Ok(bytes)
-}
-
-/// Absolute path of a single library jar inside the shared store. When
-/// `allow_not_exist` is set, a missing file yields the (non-canonical) joined
-/// path rather than an error — used for processor classpaths that reference a
-/// jar produced by an earlier processor step.
-pub fn lib_path(
-    libraries_dir: &Path,
-    name: &str,
-    allow_not_exist: bool,
-) -> Result<String, LibraryError> {
+/// Absolute path of a single library jar inside the shared store.
+fn lib_path(libraries_dir: &Path, name: &str) -> Result<String, LibraryError> {
     let joined = libraries_dir.join(
         get_path_from_artifact(name)
             .map_err(|e| LibraryError::Maven(format!("{name}: {e}")))?,
     );
-    let resolved = match canonicalize(&joined) {
-        Ok(p) => p,
-        Err(e)
-            if e.kind() == std::io::ErrorKind::NotFound && allow_not_exist =>
-        {
-            joined
-        }
-        Err(e) => {
-            return Err(LibraryError::Io(e));
-        }
-    };
-    Ok(resolved.to_string_lossy().to_string())
+    Ok(canonicalize(&joined)?.to_string_lossy().to_string())
 }
 
 /// Build a classpath string from the merged libraries plus any extra entries
@@ -214,7 +188,7 @@ pub fn build_classpath(
         if library.natives_os_key_and_classifiers(java_arch).is_some() {
             continue;
         }
-        entries.push(lib_path(libraries_dir, &library.name, false)?);
+        entries.push(lib_path(libraries_dir, &library.name)?);
     }
 
     let sep = classpath_separator(java_arch);
@@ -224,18 +198,4 @@ pub fn build_classpath(
         .filter(|e| seen.insert(e.clone()))
         .collect();
     Ok(unique.join(sep))
-}
-
-/// Classpath built from a list of maven coordinates (used for processor
-/// invocations). Missing jars are allowed since some are produced mid-run.
-pub fn classpath_from_artifacts(
-    libraries_dir: &Path,
-    artifacts: &[String],
-    java_arch: &str,
-) -> Result<String, LibraryError> {
-    let cps = artifacts
-        .iter()
-        .map(|a| lib_path(libraries_dir, a, true))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(cps.join(classpath_separator(java_arch)))
 }

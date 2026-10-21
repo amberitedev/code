@@ -1,23 +1,21 @@
 //! Server installs: the shared Daedalus store for Vanilla, Fabric, and Quilt, the vendor installer
-//! for Forge and NeoForge, Paper's jar, and the Java runtimes Core manages.
-
-#![allow(dead_code)] // Wired in step 4: installs and content.
+//! for Forge and NeoForge, Paper's jar, and the Java runtimes Core manages. Everything shared
+//! lives in `meta/` and `java/`, which servers may read but not write.
 
 pub mod daedalus;
+pub mod download;
 pub mod forge;
 pub mod java;
 pub mod paper;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
-use forge::{
-    LaunchConfig, LaunchStyle, install_with_installer, write_launch_config,
-};
+use crate::servers::{Hold, ServerError, Servers, launch, records::ServerRow};
+use daedalus::SharedDirs;
 
-/// The server software a server runs.
+/// The server software a server runs, as `servers.loader` stores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModLoader {
@@ -29,116 +27,188 @@ pub enum ModLoader {
     Quilt,
 }
 
-impl std::fmt::Display for ModLoader {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+impl ModLoader {
+    pub fn as_str(self) -> &'static str {
+        match self {
             Self::Vanilla => "vanilla",
             Self::Paper => "paper",
             Self::Fabric => "fabric",
             Self::Forge => "forge",
             Self::NeoForge => "neoforge",
             Self::Quilt => "quilt",
-        })
+        }
     }
+
+    /// From `servers.loader`, or a loader name in any case.
+    pub fn parse(name: &str) -> Option<Self> {
+        [
+            Self::Vanilla,
+            Self::Paper,
+            Self::Fabric,
+            Self::Forge,
+            Self::NeoForge,
+            Self::Quilt,
+        ]
+        .into_iter()
+        .find(|loader| loader.as_str().eq_ignore_ascii_case(name))
+    }
+}
+
+impl std::fmt::Display for ModLoader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Whether `version` is plainly a version: letters, digits, dots, and dashes, starting with a
+/// letter or digit, with no `..`. Game and loader versions go into vendor URLs and store paths,
+/// so a value like `47.2.0?x=/../../pwn` must never reach either.
+pub fn plain_version(version: &str) -> bool {
+    !version.is_empty()
+        && version.len() <= 64
+        && version.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && !version.contains("..")
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
-    #[error("io: {0}")]
+    #[error("{0:?} is not a version")]
+    BadVersion(String),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
-    #[error("paper: {0}")]
+    #[error(transparent)]
+    Java(#[from] java::JavaError),
+    #[error(transparent)]
     Paper(#[from] paper::PaperError),
-    #[error("installer: {0}")]
+    #[error(transparent)]
     Installer(#[from] forge::InstallerError),
-    #[error("shared store: {0}")]
-    Shared(#[from] self::daedalus::SharedError),
+    #[error(transparent)]
+    Shared(#[from] daedalus::SharedError),
+    #[error(transparent)]
+    Server(#[from] ServerError),
+    #[error(transparent)]
+    Other(#[from] color_eyre::Report),
 }
 
-/// Install the server for a build and write a `launch.json` to `installation_dir`.
-///
-/// Routing by loader:
-/// * Vanilla / Fabric / Quilt → the global shared store (`{data_dir}/meta`),
-///   writing `LaunchStyle::Modular` with absolute launch tokens.
-/// * Forge / NeoForge → the vendor installer, which configures the
-///   installation dir and writes a `Jar`/`ArgsFile` launch style.
-/// * Paper → a single URL-based jar written into the installation dir.
-///
-/// `data_dir` is the Core data root used to locate the shared store.
-/// `installation_dir` receives the build's `launch.json`; step 4 places it, since
-/// the data folder table has no shared `installations/` folder and the Forge
-/// installer may write only inside a server folder. For installer-based loaders
-/// the Java process is invoked, so `java_path` should be provided (falls back to
-/// `"java"`).
+/// Install `loader` for `game_version` on a held server, with the Java it needs, and return the
+/// loader version installed (`None` for Vanilla, the build for Paper). `requested` is a loader
+/// version, `latest`, `stable`, or `None` for the newest. `verify` (repair) re-checks every file
+/// already there instead of trusting it. Nothing in the shared store is deleted, so other servers
+/// keep running. `progress` is told the share done.
 pub async fn install(
+    servers: &Servers,
+    hold: &Hold,
     http: &reqwest::Client,
-    loader: &ModLoader,
+    server: &ServerRow,
+    loader: ModLoader,
     game_version: &str,
-    loader_version: Option<&str>,
-    installation_dir: &Path,
-    data_dir: &Path,
-    java_path: Option<&Path>,
-) -> Result<PathBuf, InstallError> {
-    let java = java_path.unwrap_or_else(|| Path::new("java"));
-    let java_arch = std::env::consts::ARCH;
-
-    match loader {
+    requested: Option<&str>,
+    verify: bool,
+    progress: &(dyn Fn(f64) + Sync),
+) -> Result<Option<String>, InstallError> {
+    if let Some(bad) = std::iter::once(game_version)
+        .chain(requested)
+        .find(|version| !plain_version(version))
+    {
+        return Err(InstallError::BadVersion(bad.to_owned()));
+    }
+    let paths = servers.paths();
+    let dirs = SharedDirs::new(paths.root());
+    let target = ServerRow {
+        loader: Some(loader.as_str().into()),
+        game_version: Some(game_version.into()),
+        ..server.clone()
+    };
+    progress(0.0);
+    // Held until the install is done, so the patch check keeps the Java the installer runs.
+    let (java, _lease) = launch::java_for(paths, http, &target).await?;
+    progress(0.2);
+    let rest = |share: f64| progress(0.2 + share * 0.8);
+    let installed = match loader {
         ModLoader::Vanilla | ModLoader::Fabric | ModLoader::Quilt => {
-            let args = self::daedalus::install_shared(
+            daedalus::install_shared(
                 http,
-                data_dir,
+                &dirs,
                 loader,
                 game_version,
-                loader_version,
-                java_path,
-                java_arch,
+                requested,
+                verify,
+                &rest,
             )
-            .await?;
-            write_launch_config(
-                installation_dir,
-                &LaunchConfig {
-                    style: LaunchStyle::Modular { args },
-                },
-            )
-            .await?;
-            Ok(installation_dir.join("launch.json"))
-        }
-        ModLoader::Forge | ModLoader::NeoForge => {
-            // Installer-based: let the installer download and configure everything.
-            install_with_installer(
-                http,
-                loader,
-                game_version,
-                loader_version,
-                installation_dir,
-                java,
-            )
-            .await?;
-            Ok(installation_dir.join("server.jar")) // path is nominal; actual jar set in launch.json
+            .await?
         }
         ModLoader::Paper => {
-            let info = paper::latest_build(http, game_version).await?;
-            let dest = installation_dir.join(&info.filename);
-            info!("Downloading server JAR from {}", info.url);
-            let bytes = http
-                .get(&info.url)
-                .send()
-                .await?
-                .error_for_status()?
-                .bytes()
-                .await?;
-            tokio::fs::write(&dest, &bytes).await?;
-            info!("Server JAR written to {}", dest.display());
-            // launch.json is how the server is started from this jar.
-            write_launch_config(
-                installation_dir,
-                &LaunchConfig {
-                    style: LaunchStyle::Jar { jar: info.filename },
+            let received = std::sync::atomic::AtomicU64::new(0);
+            let build = paper::install(
+                http,
+                &dirs,
+                game_version,
+                requested,
+                verify,
+                &|update| {
+                    if let download::Progress::Bytes {
+                        bytes,
+                        total: Some(total),
+                    } = update
+                    {
+                        let done = received.fetch_add(
+                            bytes,
+                            std::sync::atomic::Ordering::Relaxed,
+                        ) + bytes;
+                        rest(done as f64 / total.max(1) as f64);
+                    }
                 },
             )
             .await?;
-            Ok(dest)
+            Some(build)
         }
-    }
+        ModLoader::Forge | ModLoader::NeoForge => {
+            let version =
+                forge::resolve(http, loader, game_version, requested).await?;
+            let installer =
+                forge::installer(http, &dirs, loader, game_version, &version)
+                    .await?;
+            rest(0.1);
+            run_vendor_installer(servers, hold, &installer, java).await?;
+            forge::launch_args(
+                &paths.server(hold.id()),
+                loader,
+                game_version,
+                &version,
+            )?;
+            Some(version)
+        }
+    };
+    progress(1.0);
+    Ok(installed)
+}
+
+/// Run a Forge or NeoForge installer in the server folder as `copal-servers`. The installer
+/// writes its log beside itself, so it runs from a copy in the server folder, removed after.
+async fn run_vendor_installer(
+    servers: &Servers,
+    hold: &Hold,
+    installer: &Path,
+    java: std::path::PathBuf,
+) -> Result<(), InstallError> {
+    let dir = servers.paths().server(hold.id());
+    let name = installer
+        .file_name()
+        .expect("installers have a file name")
+        .to_owned();
+    let copy = dir.join(&name);
+    let bytes = tokio::fs::read(installer).await?;
+    launch::write_server_file(&copy, &bytes)?;
+    let result = servers
+        .run_installer(
+            hold,
+            java,
+            forge::installer_args(Path::new(&name), &dir),
+        )
+        .await;
+    let _ = std::fs::remove_file(&copy);
+    Ok(result?)
 }
