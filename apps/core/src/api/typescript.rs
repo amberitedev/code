@@ -8,7 +8,8 @@
 use ts_rs::{Config, TS};
 
 use super::{
-    access, activity, backend, error, eula, logs, performance, sessions, update,
+    access, activity, backend, console, error, eula, logs, performance,
+    sessions, update,
 };
 
 const PATH: &str = concat!(
@@ -57,6 +58,7 @@ fn declarations() -> String {
         logs::CoreLogs::decl(&cfg),
         performance::Performance::decl(&cfg),
         performance::Memory::decl(&cfg),
+        console::SendCommand::decl(&cfg),
         crate::servers::restarts::Restarts::decl(&cfg),
         crate::servers::restarts::Schedule::decl(&cfg),
         crate::servers::restarts::Weekday::decl(&cfg),

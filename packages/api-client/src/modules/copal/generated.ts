@@ -289,6 +289,12 @@ memory_mb: number, restarts: Restarts, };
 
 export type Memory = { memory_mb: number, };
 
+export type SendCommand = { 
+/**
+ * One line, as typed into the server console, such as `say hello`.
+ */
+command: string, };
+
 export type Restarts = { 
 /**
  * Start the server again after a crash. On by default.
