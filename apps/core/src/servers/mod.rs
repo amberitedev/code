@@ -113,8 +113,11 @@ pub struct Servers {
     insight: Mutex<HashMap<String, watch::Watched>>,
     /// Servers that crashed too often to start again. Cleared by the next start.
     gave_up: Mutex<HashSet<String>>,
-    /// Crash restarts waiting to start: server to the run that crashed. See `watch`.
-    retries: Mutex<HashMap<String, String>>,
+    /// Crash restarts waiting to start: server to the run that crashed and the owner-action
+    /// generation it was queued under. See `watch`.
+    retries: Mutex<HashMap<String, (String, u64)>>,
+    /// How many owner actions each server has seen. Only taken while `live` is held.
+    owner_actions: Mutex<HashMap<String, u64>>,
 }
 
 /// A change in which servers run.
@@ -151,6 +154,7 @@ impl Servers {
             insight: Mutex::default(),
             gave_up: Mutex::default(),
             retries: Mutex::default(),
+            owner_actions: Mutex::default(),
         });
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
@@ -214,7 +218,7 @@ impl Servers {
             if !self.live().contains_key(&id)
                 && !shim::is_running(&self.paths, &id)
             {
-                self.finish(&id, cutoff).await;
+                self.finish(&id, cutoff, None).await;
             }
         }
         Ok(())
@@ -282,9 +286,13 @@ impl Servers {
                 }
                 // Recorded before the server leaves `live`, so a restart waiting on it cannot
                 // start the next run first.
-                self.finish(&id, i64::MAX).await;
-                self.live().remove(&id);
-                self.ended(&id).await;
+                self.finish(&id, i64::MAX, None).await;
+                let generation = {
+                    let mut live = self.live();
+                    live.remove(&id);
+                    self.generation(&id)
+                };
+                self.ended(&id, generation).await;
             }
             if let Err(error) = self.scan().await {
                 warn!(%error, "could not look for running servers");
@@ -293,8 +301,8 @@ impl Servers {
     }
 
     /// Record the end of every open run of a server whose shim is gone, among those started
-    /// before `started_before`.
-    async fn finish(&self, id: &str, started_before: i64) {
+    /// before `started_before`, or only run `only`.
+    async fn finish(&self, id: &str, started_before: i64, only: Option<&str>) {
         let status: Option<ExitStatus> =
             shim::read_versioned(&self.paths.run_status(id)).ok();
         let runs = match records::open_runs(&self.db, id, started_before).await
@@ -305,7 +313,10 @@ impl Servers {
                 return;
             }
         };
-        for run_id in runs {
+        for run_id in runs
+            .into_iter()
+            .filter(|run| only.is_none_or(|only| run == only))
+        {
             let status =
                 status.as_ref().filter(|status| status.run_id == run_id);
             let (outcome, exit_code) = records::outcome(status);
@@ -352,11 +363,17 @@ impl Servers {
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
         {
             let mut live = self.live();
-            let retry = self.retries().remove(id);
-            if let Some(run) = crashed
-                && retry.as_deref() != Some(run)
-            {
-                return Ok(());
+            match crashed {
+                None => {
+                    self.owner_acted_locked(id);
+                }
+                // Taken under the lock owner actions take, so one that came first wins.
+                Some(run) => {
+                    let retry = self.retries().remove(id);
+                    if retry != Some((run.to_owned(), self.generation(id))) {
+                        return Ok(());
+                    }
+                }
             }
             // The lock also covers a shim this Core does not know, such as one a crashed Core
             // started a moment before it died.
@@ -391,10 +408,6 @@ impl Servers {
                 Err(error)
             }
             Err(error) => {
-                let child = self.live().remove(id).and_then(|live| live.child);
-                if let Some(mut child) = child {
-                    let _ = child.try_wait();
-                }
                 self.start_failed(id, &run_id).await;
                 Err(error)
             }
@@ -402,11 +415,23 @@ impl Servers {
     }
 
     /// A start that failed with no shim left: record how run `run_id` ended, if it got that
-    /// far, and handle a crash as any other. The watcher skips starting servers, so this is the
-    /// one place a crash while starting is seen.
+    /// far, let go of the server, and handle a crash as any other. The watcher skips starting
+    /// servers, so this is the one place a crash while starting is seen. The end is recorded
+    /// while the start still holds the server, and only for this run, so it cannot close a run
+    /// a later start recorded.
     async fn start_failed(&self, id: &str, run_id: &str) {
-        self.finish(id, i64::MAX).await;
-        self.after_crash(id, run_id).await;
+        self.finish(id, i64::MAX, Some(run_id)).await;
+        let (child, generation) = {
+            let mut live = self.live();
+            (
+                live.remove(id).and_then(|live| live.child),
+                self.generation(id),
+            )
+        };
+        if let Some(mut child) = child {
+            let _ = child.try_wait();
+        }
+        self.after_crash(id, run_id, generation).await;
     }
 
     /// How the shim this Core started for a server exited, once it has.
@@ -468,7 +493,7 @@ impl Servers {
         let child = match shim::spawn(&self.paths, id) {
             Ok(child) => child,
             Err(error) => {
-                self.finish(id, i64::MAX).await;
+                self.finish(id, i64::MAX, Some(run_id)).await;
                 return Err(error.into());
             }
         };
@@ -480,7 +505,7 @@ impl Servers {
             // Checked first: a Java that already exited is not a successful start, whatever
             // run.json says.
             if let Some(exit) = self.reap(id)? {
-                self.finish(id, i64::MAX).await;
+                self.finish(id, i64::MAX, Some(run_id)).await;
                 let status: Option<ExitStatus> =
                     shim::read_versioned(&self.paths.run_status(id)).ok();
                 let shim_log = std::fs::read_to_string(self.paths.shim_log(id))
@@ -533,7 +558,7 @@ impl Servers {
     /// Ask the server to stop. It stops when Java exits, however long that takes. A server
     /// waiting to start again after a crash stays stopped.
     pub async fn stop(&self, id: &str) -> Result<(), ServerError> {
-        let cancelled = self.cancel_retry(id);
+        let cancelled = self.owner_acted(id);
         match self.tell(id, Message::Stop).await {
             Err(ServerError::NotRunning) if cancelled => return Ok(()),
             sent => sent?,
@@ -544,7 +569,7 @@ impl Servers {
 
     /// Kill the server's Java now. A server waiting to start again after a crash stays stopped.
     pub async fn kill(&self, id: &str) -> Result<(), ServerError> {
-        let cancelled = self.cancel_retry(id);
+        let cancelled = self.owner_acted(id);
         // Recorded first: a restart waiting on this server checks it the moment the shim exits.
         self.killed.lock().expect("not poisoned").insert(id.into());
         match self.tell(id, Message::Kill).await {
@@ -596,6 +621,39 @@ impl Servers {
     pub async fn restart(&self, id: &str) -> Result<(), ServerError> {
         self.killed.lock().expect("not poisoned").remove(id);
         self.stop(id).await?;
+        self.start_once_stopped(id).await
+    }
+
+    /// [`restart`](Self::restart) for run `run` only, from `watch`'s numbering. Core's own
+    /// restarts are planned for one run: the run is claimed, as stopping, under the lock a new
+    /// start needs, so a restart planned for one run never stops the next.
+    pub async fn restart_run(
+        &self,
+        id: &str,
+        run: u64,
+    ) -> Result<(), ServerError> {
+        {
+            let mut live = self.live();
+            let Some(this) =
+                live.get_mut(id).filter(|this| this.phase == Phase::Running)
+            else {
+                return Ok(());
+            };
+            if self.run_of(id) != Some(run) {
+                return Ok(());
+            }
+            this.phase = Phase::Stopping;
+        }
+        self.killed.lock().expect("not poisoned").remove(id);
+        if let Err(error) = self.tell(id, Message::Stop).await {
+            self.set_phase(id, Phase::Running);
+            return Err(error);
+        }
+        self.start_once_stopped(id).await
+    }
+
+    /// Wait for a stopping server's shim to exit, then start it, unless it was killed.
+    async fn start_once_stopped(&self, id: &str) -> Result<(), ServerError> {
         while self.phase(id).is_some() {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
@@ -623,7 +681,7 @@ impl Servers {
     /// while it runs. `release` undoes it when the deletion does not happen.
     pub fn hold_for_deletion(&self, id: &str) -> Result<(), ServerError> {
         let live = self.live();
-        self.cancel_retry(id);
+        self.owner_acted_locked(id);
         if live.contains_key(id) || shim::is_running(&self.paths, id) {
             return Err(ServerError::AlreadyRunning);
         }
@@ -658,7 +716,7 @@ impl Servers {
         records::get(&self.db, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
-        self.cancel_retry(id);
+        self.owner_acted(id);
         if self.phase(id).is_some() {
             return Err(ServerError::AlreadyRunning);
         }

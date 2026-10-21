@@ -298,11 +298,13 @@ struct Bound {
 }
 
 impl Bound {
-    /// The server's run and settings now, `None` when it does not run.
+    /// The server's run and settings now, `None` when it does not run. The run is read after
+    /// the settings, so a restart while they are read is seen.
     async fn now(servers: &Servers, id: &str) -> Option<Self> {
+        let settings = get(&servers.db, id).await.ok()?;
         Some(Self {
             run: servers.run_of(id)?,
-            settings: get(&servers.db, id).await.ok()?,
+            settings,
         })
     }
 }
@@ -364,7 +366,7 @@ async fn countdown(
         return;
     }
     info!(server = %id, ?why, "restarting");
-    if let Err(error) = servers.restart(id).await {
+    if let Err(error) = servers.restart_run(id, bound.run).await {
         warn!(server = %id, %error, ?why, "a restart failed");
     }
 }
@@ -613,6 +615,20 @@ mod tests {
         .await;
         assert!(ended.is_ok());
         assert_eq!(servers.phase(&id), Some(Phase::Running), "not restarted");
+    }
+
+    #[tokio::test]
+    async fn a_restart_planned_for_one_run_never_stops_the_next() {
+        let (_dir, servers, id, lock) = running().await;
+        let planned = servers.run_of(&id).unwrap();
+        drop(lock);
+        let _lock = servers.pretend_running(&id);
+        servers.restart_run(&id, planned).await.unwrap();
+        assert_eq!(servers.phase(&id), Some(Phase::Running), "left alone");
+        // The run it is for is claimed. Its shim cannot be reached here, so it is let go.
+        let current = servers.run_of(&id).unwrap();
+        assert!(servers.restart_run(&id, current).await.is_err());
+        assert_eq!(servers.phase(&id), Some(Phase::Running));
     }
 
     #[test]

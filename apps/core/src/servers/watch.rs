@@ -65,11 +65,12 @@ impl Servers {
     }
 
     /// A run ended: forget its console, tell subscribers, and start it again after a crash.
-    pub(super) async fn ended(&self, id: &str) {
+    /// `generation` is the server's owner-action count as it left `live`.
+    pub(super) async fn ended(&self, id: &str, generation: u64) {
         self.watched().remove(id);
         let _ = self.events.send(Lifecycle::Ended(id.into()));
         if let Ok(Some(run)) = records::last_ended(&self.db, id).await {
-            self.after_crash(id, &run).await;
+            self.after_crash(id, &run, generation).await;
         }
     }
 
@@ -77,8 +78,21 @@ impl Servers {
         self.insight.lock().expect("not poisoned")
     }
 
-    pub(super) fn retries(&self) -> MutexGuard<'_, HashMap<String, String>> {
+    pub(super) fn retries(
+        &self,
+    ) -> MutexGuard<'_, HashMap<String, (String, u64)>> {
         self.retries.lock().expect("not poisoned")
+    }
+
+    /// How many owner actions the server has seen. Crash processing takes it as a run ends and
+    /// queues nothing when it moved meanwhile.
+    pub(super) fn generation(&self, id: &str) -> u64 {
+        self.owner_actions
+            .lock()
+            .expect("not poisoned")
+            .get(id)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// What a running server's console said, `None` when it does not run.
@@ -108,15 +122,29 @@ impl Servers {
             .collect()
     }
 
-    /// Drop the server's pending crash restart. Every owner action does, so a server someone
-    /// stopped, started, or is changing does not start again by itself. Whether there was one.
-    pub(super) fn cancel_retry(&self, id: &str) -> bool {
+    /// Count an owner action on the server and drop its pending crash restart. Every owner
+    /// action does, so a server someone stopped, started, or is changing does not start again
+    /// by itself. Whether a restart was pending.
+    pub(super) fn owner_acted(&self, id: &str) -> bool {
+        let _live = self.live();
+        self.owner_acted_locked(id)
+    }
+
+    /// [`owner_acted`](Self::owner_acted), with `live` already held.
+    pub(super) fn owner_acted_locked(&self, id: &str) -> bool {
+        *self
+            .owner_actions
+            .lock()
+            .expect("not poisoned")
+            .entry(id.into())
+            .or_default() += 1;
         self.retries().remove(id).is_some()
     }
 
     /// After run `run` ended: if it crashed, start the server again in [`CRASH_DELAY`], unless
     /// crash restart is off for it or it crashed [`CRASH_LIMIT`] times in [`CRASH_WINDOW`]. Then
-    /// it stays stopped, with its crash report in its runs.
+    /// it stays stopped, with its crash report in its runs. `generation` is the server's
+    /// owner-action count when the run ended: an owner action or a start since then wins.
     ///
     /// Boxed, with `Send` spelled out: a crash restart can crash in turn, and the compiler
     /// cannot see through that cycle of futures by itself.
@@ -124,6 +152,7 @@ impl Servers {
         &'a self,
         id: &'a str,
         run: &'a str,
+        generation: u64,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             if records::run_outcome(&self.db, run).await.ok().flatten()
@@ -141,15 +170,25 @@ impl Servers {
             .fetch_one(&self.db)
             .await
             .unwrap_or(CRASH_LIMIT);
-            if !may_restart_after_crash(recent) {
-                warn!(
-                    server = %id,
-                    "crashed {recent} times in 10 minutes; left stopped with its crash report"
-                );
-                self.gave_up.lock().expect("not poisoned").insert(id.into());
-                return;
+            {
+                // Under the lock starts and owner actions take.
+                let live = self.live();
+                if live.contains_key(id) || self.generation(id) != generation {
+                    return;
+                }
+                if !may_restart_after_crash(recent) {
+                    warn!(
+                        server = %id,
+                        "crashed {recent} times in 10 minutes; left stopped with its crash report"
+                    );
+                    self.gave_up
+                        .lock()
+                        .expect("not poisoned")
+                        .insert(id.into());
+                    return;
+                }
+                self.retries().insert(id.into(), (run.into(), generation));
             }
-            self.retries().insert(id.into(), run.into());
             let Some(me) = self.me.upgrade() else { return };
             let (id, run) = (id.to_owned(), run.to_owned());
             tokio::spawn(async move {
@@ -169,7 +208,9 @@ impl Servers {
         id: &str,
         run: &str,
     ) -> Option<Result<(), ServerError>> {
-        if self.retries().get(id).map(String::as_str) != Some(run) {
+        if self.retries().get(id).map(|(queued, _)| queued.as_str())
+            != Some(run)
+        {
             return None;
         }
         if !self.crash_restart_on(id).await {
@@ -324,10 +365,14 @@ mod tests {
         crashed(&db, &server, now() - 3600).await;
         crashed(&db, &server, now() - 120).await;
         let run = crashed(&db, &server, now() - 60).await;
-        servers.after_crash(&server, &run).await;
+        servers
+            .after_crash(&server, &run, servers.generation(&server))
+            .await;
         assert!(!servers.gave_up(&server), "two recent crashes start again");
         let run = crashed(&db, &server, now()).await;
-        servers.after_crash(&server, &run).await;
+        servers
+            .after_crash(&server, &run, servers.generation(&server))
+            .await;
         assert!(servers.gave_up(&server));
 
         // With crash restart off, Core never tries, so it never gives up either.
@@ -344,7 +389,9 @@ mod tests {
         .unwrap();
         for ago in [30, 20, 10] {
             let run = crashed(&db, &other, now() - ago).await;
-            servers.after_crash(&other, &run).await;
+            servers
+                .after_crash(&other, &run, servers.generation(&other))
+                .await;
         }
         assert!(!servers.gave_up(&other));
         assert!(servers.retries().get(&other).is_none());
@@ -373,7 +420,7 @@ mod tests {
             Some(Outcome::Crashed)
         );
         assert_eq!(
-            servers.retries().get(&server).map(String::as_str),
+            servers.retries().get(&server).map(|(run, _)| run.as_str()),
             Some("boot")
         );
         // The watcher never saw the run, and the scan finds nothing open: one restart.
@@ -382,12 +429,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_failed_start_closes_only_its_own_run() {
+        let (_dir, servers) = servers().await;
+        let db = servers.db.clone();
+        let server = servers.create("A").await.unwrap().id;
+        records::start_run(&db, &server, "boot", now())
+            .await
+            .unwrap();
+        // A run the cleanup must not touch, as a start right after would record.
+        records::start_run(&db, &server, "next", now())
+            .await
+            .unwrap();
+        servers.start_failed(&server, "boot").await;
+        assert_eq!(
+            records::run_outcome(&db, "boot").await.unwrap(),
+            Some(Outcome::Crashed)
+        );
+        assert_eq!(
+            records::open_runs(&db, &server, i64::MAX).await.unwrap(),
+            ["next"]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_owner_action_while_a_crash_is_handled_wins() {
+        let (_dir, servers) = servers().await;
+        let db = servers.db.clone();
+        let server = servers.create("A").await.unwrap().id;
+        let run = crashed(&db, &server, now()).await;
+        // The run ended at this count; the owner starts the server while Core reads its runs.
+        let generation = servers.generation(&server);
+        assert!(matches!(
+            servers.start(&server).await,
+            Err(ServerError::Eula)
+        ));
+        servers.after_crash(&server, &run, generation).await;
+        assert!(servers.retries().is_empty(), "the old run queues nothing");
+
+        // A retry queued before an owner action is not used after it.
+        let generation = servers.generation(&server);
+        servers.after_crash(&server, &run, generation).await;
+        assert_eq!(servers.retries().len(), 1);
+        *servers
+            .owner_actions
+            .lock()
+            .unwrap()
+            .entry(server.clone())
+            .or_default() += 1;
+        assert!(matches!(servers.retry(&server, &run).await, Some(Ok(()))));
+        assert!(servers.retries().is_empty());
+    }
+
+    #[tokio::test]
     async fn a_queued_crash_restart_is_bound_to_its_run() {
         let (_dir, servers) = servers().await;
         let db = servers.db.clone();
         let server = servers.create("A").await.unwrap().id;
         let run = crashed(&db, &server, now()).await;
-        servers.after_crash(&server, &run).await;
+        servers
+            .after_crash(&server, &run, servers.generation(&server))
+            .await;
         // Pending until it runs, so an update waits for it.
         assert!(servers.unsettled());
 
@@ -401,7 +502,9 @@ mod tests {
         ));
 
         // A retry for another run does nothing.
-        servers.after_crash(&server, &run).await;
+        servers
+            .after_crash(&server, &run, servers.generation(&server))
+            .await;
         assert!(servers.retry(&server, "another").await.is_none());
 
         // Crash restart turned off meanwhile.
@@ -422,7 +525,9 @@ mod tests {
         restarts::set(&db, &server, &Restarts::default())
             .await
             .unwrap();
-        servers.after_crash(&server, &run).await;
+        servers
+            .after_crash(&server, &run, servers.generation(&server))
+            .await;
         assert!(matches!(
             servers.retry(&server, &run).await,
             Some(Err(ServerError::Eula))
