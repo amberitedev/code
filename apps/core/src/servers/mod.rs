@@ -475,6 +475,19 @@ impl Servers {
         .await
     }
 
+    /// Wait, at most `timeout`, until no server is starting or stopping. The updater waits so
+    /// a restart of Core never lands in the middle of one.
+    pub async fn settle(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline
+            && self.live().values().any(|live| {
+                matches!(live.phase, Phase::Starting | Phase::Stopping)
+            })
+        {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
     /// Stop the server, wait for its shim to exit, and start it again.
     pub async fn restart(&self, id: &str) -> Result<(), ServerError> {
         self.stop(id).await?;

@@ -70,15 +70,15 @@ src/
 **Data folder.** The isolation story is this table. It is written in step 1 so step 2 cannot get it
 wrong.
 
-| Folder | Owner | `copal-servers` | Holds |
-| --- | --- | --- | --- |
-| `db/` | `copal` | no access | database, sessions, Core's backend key, TLS key |
-| `backups/` | `copal` | no access | every backup |
-| `versions/` | `copal` | no access | installed Core versions |
-| `sockets/` | `copal` | no access | shim command sockets |
-| `runs/<server>/` | `copal` | no access | pid, run id, status, `console.log` |
-| `servers/<id>/` | `copal` | read and write | world, mods, config: the only place a mod can write |
-| `meta/`, `java/` | `copal` | read only | server jars, libraries, Java runtimes |
+| Folder           | Owner   | `copal-servers` | Holds                                               |
+| ---------------- | ------- | --------------- | --------------------------------------------------- |
+| `db/`            | `copal` | no access       | database, sessions, Core's backend key, TLS key     |
+| `backups/`       | `copal` | no access       | every backup                                        |
+| `versions/`      | `copal` | no access       | installed Core versions                             |
+| `sockets/`       | `copal` | no access       | shim command sockets                                |
+| `runs/<server>/` | `copal` | no access       | pid, run id, status, `console.log`                  |
+| `servers/<id>/`  | `copal` | read and write  | world, mods, config: the only place a mod can write |
+| `meta/`, `java/` | `copal` | read only       | server jars, libraries, Java runtimes               |
 
 ## Running as a service
 
@@ -91,8 +91,8 @@ wrong.
   - opens the firewall once for Core's port and the server port range (Windows Firewall, ufw,
     firewalld). Core never runs a firewall tool later, so it needs no permission to;
   - registers Core as a service running as `copal`: systemd on Linux, a Windows Service, a launchd
-    daemon on macOS. The OS starts Core at boot and restarts it if it crashes. On Windows the
-    service's permissions let `copal` restart it, which the updater needs.
+    daemon on macOS. The service runs the launcher (see Updates), which runs Core. The OS starts
+    it at boot and restarts it if it crashes.
 - `copal uninstall` removes the service, the accounts, the firewall rules, and, on request, the
   data.
 - `copal run` runs Core in the foreground, for development and manual use.
@@ -250,17 +250,17 @@ this property, so the backend stays small and every Core keeps working with it d
 **Roles, per server.** The owner is per Core and has everything. Friends never see the Core, only
 the servers they were given.
 
-| On a server | Viewer | Editor | Owner |
-| --- | --- | --- | --- |
-| See status, players, content list, backup list | yes | yes | yes |
-| Start, stop, restart, kill | | yes | yes |
-| Console: read and send | | yes | yes |
-| Upload files and mods, pack updates, settings, memory, Java path (runs code) | | yes | yes |
-| Create and download backups, download the world | | yes | yes |
-| Restore a backup (ticket) | | | yes |
-| Invite, remove, change roles (ticket) | | | yes |
-| Delete the server (ticket) | | | yes |
-| On the Core: create servers, EULA, settings, update Core, sessions, activity log | | | yes |
+| On a server                                                                      | Viewer | Editor | Owner |
+| -------------------------------------------------------------------------------- | ------ | ------ | ----- |
+| See status, players, content list, backup list                                   | yes    | yes    | yes   |
+| Start, stop, restart, kill                                                       |        | yes    | yes   |
+| Console: read and send                                                           |        | yes    | yes   |
+| Upload files and mods, pack updates, settings, memory, Java path (runs code)     |        | yes    | yes   |
+| Create and download backups, download the world                                  |        | yes    | yes   |
+| Restore a backup (ticket)                                                        |        |        | yes   |
+| Invite, remove, change roles (ticket)                                            |        |        | yes   |
+| Delete the server (ticket)                                                       |        |        | yes   |
+| On the Core: create servers, EULA, settings, update Core, sessions, activity log |        |        | yes   |
 
 Viewers do not get the console; it carries chat and player IPs. Editors run code on the host
 machine, and the App says so when inviting. Every route checks the role on every call. There is no
@@ -405,8 +405,9 @@ A self-updater that feels native, because it is one of the most important parts.
   60 seconds. No marker, the launcher points back at the previous version, which is kept. The
   database file is copied aside before migrating; rolling back restores it. No other automatic
   rollback.
-- On Windows the service's permissions let `copal` restart it. On Linux the unit uses
-  `Restart=always` and Core just exits.
+- The launcher runs the active version as its child and starts it again when it exits to update,
+  on every OS and in development, so an update never needs the service manager: Core just exits.
+  `copal run` is the launcher; the service manager restarts it only if it dies itself.
 
 ## CLI
 
@@ -469,10 +470,10 @@ Built in this order. Real servers are started at the marked checkpoints, not onl
    code removed.
 2. **Service and processes:** `copal install` (accounts, rights, firewall, service) and `run`, the
    shim as `copal` with state in `runs/`, Java as `copal-servers`, run id and lock, versioned
-   protocol, adoption, console, run outcomes, stopping, the local socket. *Checkpoint on a real
+   protocol, adoption, console, run outcomes, stopping, the local socket. _Checkpoint on a real
    Windows and Linux machine: start, restart Core, adopt, stop, force-kill; TLS up; a process
    running as `copal-servers` cannot read `db/` or open another server's socket; macOS if a Mac is
-   around.*
+   around._
 3. **Access.** Backend first, on `main`: ticket endpoint, public key file, change-only state
    report, full-replace `PUT /core/access`, owner-only invites. These are additive and the current
    Core ignores them. Then Core: sessions, per-server roles, dangerous actions, activity log,
@@ -481,11 +482,11 @@ Built in this order. Real servers are started at the marked checkpoints, not onl
    fallback.
 4. **Installs and content:** Java, Forge and Paper fixes, download allowlist and redirect checks,
    archive checks, installers as `copal-servers`, the single content model, edited files.
-   *Checkpoint: one server per loader, plus a pack update with an edited config.*
+   _Checkpoint: one server per loader, plus a pack update with an edited config._
 5. **Backups:** engine, shim-held hot backups, schedule, retention, pre-update retention,
    download.
-6. **Updater and releases:** four targets, signing, channels, the five guards. *Checkpoint: update
-   Core with servers running.*
+6. **Updater and releases:** four targets, signing, channels, the five guards. _Checkpoint: update
+   Core with servers running._
 7. **CLI:** the full command set.
 8. **Reliability and insight:** crash restart, freeze detection, players, memory and flags,
    scheduled and smart restarts, EULA, reachability reporting, IPv6.

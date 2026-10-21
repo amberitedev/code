@@ -23,6 +23,7 @@ mod startup;
 mod tests;
 #[cfg(test)]
 mod typescript;
+pub mod update;
 
 use std::{sync::Arc, time::Duration};
 
@@ -54,6 +55,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::Access>,
+    pub update: Arc<crate::update::Updater>,
 }
 
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
@@ -74,6 +76,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             delete(access::remove).patch(access::change_role),
         )
         .route("/activity", get(activity::list))
+        .route("/update", get(update::get).patch(update::settings))
+        .route("/update/check", post(update::check))
+        .route("/update/rollback", post(update::rollback))
         .route("/modrinth/v0/servers", get(servers::list))
         .route("/modrinth/v0/servers/{id}", get(servers::get))
         .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
@@ -86,8 +91,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
         ))
-        // Starting a server answers once Java runs, and an install once it is done.
+        // Starting a server answers once Java runs, and an install or update once it is done.
         .route("/modrinth/v0/servers/{id}/power", post(servers::power))
+        .route("/update/apply", post(update::apply))
         .route(
             "/modrinth/v0/servers/{id}/reinstall",
             post(servers::reinstall),

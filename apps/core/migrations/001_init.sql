@@ -15,7 +15,11 @@ CREATE TABLE core (
     -- The backend's ticket keys as it last published them (`api::backend::PublicKeys` JSON), and
     -- when they were fetched. Kept so tickets verify while the backend is down.
     ticket_keys TEXT,
-    ticket_keys_at INTEGER
+    ticket_keys_at INTEGER,
+    -- The release channel the updater follows: 'stable', 'beta', or 'alpha'.
+    update_channel TEXT NOT NULL DEFAULT 'stable' CHECK (update_channel IN ('stable', 'beta', 'alpha')),
+    -- Install updates as they come out. Off: only when the owner asks.
+    auto_update INTEGER NOT NULL DEFAULT 1
 );
 
 -- The pairing code this Core is showing, shared by every copal process on this data folder. One row.

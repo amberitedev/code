@@ -18,13 +18,16 @@ use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
-use crate::{access, api, db, network::tls::Identity, servers::Servers};
+use crate::{
+    access, api, db, network::tls::Identity, servers::Servers, update::Updater,
+};
 use accounts::Accounts;
 use config::Config;
 use install::InstallRecord;
 use paths::Paths;
 
-/// `copal run`. `service` is set by the Windows service manager, which starts Core that way.
+/// `copal run`: the launcher (see `update::launcher`), which runs Core as its child. `service`
+/// is set by the Windows service manager, which starts Copal that way.
 pub fn run(service: bool) -> Result<()> {
     if service {
         #[cfg(windows)]
@@ -34,12 +37,48 @@ pub fn run(service: bool) -> Result<()> {
             "--service is for the Windows service manager; systemd and launchd use copal run"
         );
     }
-    tokio::runtime::Runtime::new()?.block_on(serve(exit_requested()))
+    let paths = Paths::new(config::data_dir());
+    #[cfg(unix)]
+    nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o027));
+    logging(&paths, "launcher");
+    let code = tokio::runtime::Runtime::new()?.block_on(
+        crate::update::launcher::run(&paths, false, exit_requested()),
+    )?;
+    std::process::exit(code)
 }
 
-/// Run Core until `stop` resolves: adopt running servers, then serve the API over HTTPS and the
-/// local socket. Servers keep running after Core stops.
-pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
+/// How Core ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exit {
+    Stopped,
+    /// An update or rollback: the launcher starts the active version.
+    Restart,
+}
+
+/// `copal core`: Core itself, as the launcher runs it. It stops when its stdin closes, which is
+/// how the launcher stops it, or on Ctrl+C.
+pub fn core() -> Result<()> {
+    // A thread of its own: a blocking read must not hold the runtime open at exit.
+    let (closed, stdin_closed) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+        let _ = closed.send(());
+    });
+    let stop = async {
+        tokio::select! {
+            _ = stdin_closed => {}
+            () = exit_requested() => {}
+        }
+    };
+    match tokio::runtime::Runtime::new()?.block_on(serve(stop))? {
+        Exit::Stopped => Ok(()),
+        Exit::Restart => std::process::exit(crate::update::launcher::RESTART),
+    }
+}
+
+/// Run Core until `stop` resolves or an update asks for a restart: adopt running servers, then
+/// serve the API over HTTPS and the local socket. Servers keep running after Core stops.
+pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
     #[cfg(unix)]
@@ -66,7 +105,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
         None => accounts::current_id()?,
     };
     folders::create(&paths, None)?;
-    logging(&paths);
+    logging(&paths, "copal");
     let _lock = lock(&paths)?;
 
     let db = db::open(&paths.database()).await?;
@@ -84,10 +123,18 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
     .await?;
     let access = Arc::new(access::Access::new(keys));
     let servers = Servers::open(paths.clone(), db.clone()).await?;
+    let update = Arc::new(Updater::new(
+        paths.clone(),
+        db.clone(),
+        http.clone(),
+        config.update_url.clone(),
+    ));
+    tokio::spawn(Arc::clone(&update).auto(Arc::clone(&servers)));
     let state = Arc::new(api::AppState {
         db: db.clone(),
         servers,
         access: Arc::clone(&access),
+        update: Arc::clone(&update),
     });
     let router = api::router(Arc::clone(&state));
     match config.backend_url.clone() {
@@ -122,19 +169,38 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<()> {
         "Copal {} is running",
         env!("CARGO_PKG_VERSION")
     );
+    tokio::spawn(answer_once(paths.clone()));
     tokio::select! {
         () = crate::network::tls::serve(listener, router.clone(), &identity) => {}
         result = access::local::serve(&paths, &owner, router) => result?,
+        () = update.restart.notified() => {
+            info!("restarting into another version; servers keep running");
+            return Ok(Exit::Restart);
+        }
         () = stop => info!("stopping; servers keep running"),
     }
-    Ok(())
+    Ok(Exit::Stopped)
 }
 
-/// Log to the console and to a file in `logs/` that starts over daily, keeping a week.
-fn logging(paths: &Paths) {
+/// Ask this Core for `/health` over the local socket, so the first answer, which writes the
+/// health marker, comes even when nobody else asks.
+async fn answer_once(paths: Paths) {
+    let client = crate::cli::Client::at(paths);
+    for _ in 0..20 {
+        if client.get::<serde_json::Value>("/health").await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    warn!("Core could not reach its own local socket");
+}
+
+/// Log to the console and to a file in `logs/` named `prefix` that starts over daily, keeping a
+/// week.
+fn logging(paths: &Paths, prefix: &str) {
     let file = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("copal")
+        .filename_prefix(prefix)
         .filename_suffix("log")
         .max_log_files(7)
         .build(paths.logs())
