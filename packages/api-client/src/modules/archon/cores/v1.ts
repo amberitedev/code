@@ -153,15 +153,26 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Accept an invite to a server on someone else's Core. An invite is already access, so
-	 * accepting is signing in. The invite is what made that Core reachable, so the list is fetched
-	 * again to find it.
+	 * Accept or decline an invite to a server on someone else's Core. An invite is already access,
+	 * so accepting is signing in and declining is leaving the server. The invite is what made that
+	 * Core reachable, so the list is fetched again to find it.
 	 */
-	public async acceptInvite(coreId: string, serverId: string): Promise<void> {
+	public async respondToInvite(
+		coreId: string,
+		serverId: string,
+		action: 'accept' | 'decline',
+	): Promise<void> {
 		const core = (await this.list()).find((candidate) => candidate.id === coreId)
 		if (!core) throw new ModrinthApiError('This invite is no longer available', { statusCode: 404 })
-		await this.client.copal.access_v1.ensureSession(core)
-		this.serverCores.set(serverId, core.id)
+		if (action === 'accept') {
+			await this.client.copal.access_v1.ensureSession(core)
+			this.serverCores.set(serverId, core.id)
+			return
+		}
+		await this.client.copal.access_v1.leave(core.id, serverId)
+		// Declining the only server on that Core takes the Core out of the list.
+		this.serverCores.delete(serverId)
+		this.cores = null
 	}
 
 	/** The listed Core a request URL goes to, if any. */
