@@ -186,7 +186,11 @@ pub async fn patch(
             .map(|(key, value)| (key, Some(value)))
             .collect();
     changes.extend(body.custom);
+    // Read, patched, and written under the lock installs and file edits take, so neither lands
+    // between the read and the write and is lost.
+    let busy = state.content.busy(&id)?;
     properties::patch(&dir, &changes)?;
+    drop(busy);
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
     Ok(Json(fields(properties::read(&dir)?)))
 }
