@@ -12,14 +12,15 @@ use color_eyre::eyre::{Result, bail};
 /// Ports Core hands to servers, lowest first. The firewall is opened for all of them at install.
 pub const SERVER_PORTS: RangeInclusive<u16> = 25565..=25664;
 
-/// What the firewall does with a port. Filled by the reachability diagnosis (step 8).
-#[allow(dead_code)] // Wired in step 8: reachability reporting.
+/// What the firewall does with a port, as far as the reachability diagnosis can tell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Firewall {
     /// No firewall is on, or it allows the port.
     #[default]
     Open,
-    /// A firewall is on and does not allow the port. `fix` is the steps to open it.
+    /// A firewall is on and does not allow the port. `fix` is the steps to open it. Core never
+    /// runs a firewall tool, so it cannot tell yet; the diagnosis is ready for when it can.
+    #[allow(dead_code)]
     Blocked { found: String, fix: Vec<String> },
     /// A firewall is on and Core cannot tell whether it allows the port.
     Unsure { found: String, fix: Vec<String> },

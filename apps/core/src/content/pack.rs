@@ -258,6 +258,8 @@ pub enum Step {
 pub struct Disk<'a> {
     /// The SHA-1 of the file at a path, `None` when there is none.
     pub sha1: &'a dyn Fn(&str) -> Option<String>,
+    /// Whether the owner disabled the file at a path: `<path>.disabled` is there instead.
+    pub disabled: &'a dyn Fn(&str) -> bool,
     /// The world folder, for the deny-list.
     pub level_name: &'a str,
     /// Paths that differ only in case are one file (see `Folder::case_insensitive`).
@@ -358,6 +360,15 @@ pub fn plan(
                 ..row.clone()
             })
         };
+        // The owner disabled it: left alone, like a file they removed, even by repair.
+        if on_disk.is_none() && (disk.disabled)(path) {
+            if let Some(row) = row {
+                let pending =
+                    (row.sha1 != want.sha1).then_some(Pending::Changed);
+                steps.push(keep(row, &row.sha1, row.origin, pending));
+            }
+            continue;
+        }
         let step = match (row, on_disk.as_deref()) {
             // Already the pack's file.
             (Some(row), Some(sha1)) if sha1 == want.sha1 => {
@@ -512,6 +523,12 @@ mod tests {
             &Disk {
                 sha1: &|path| {
                     on_disk.get(&fold(path, case_insensitive)).cloned()
+                },
+                disabled: &|path| {
+                    on_disk.contains_key(&fold(
+                        &format!("{path}.disabled"),
+                        case_insensitive,
+                    ))
                 },
                 level_name: "world",
                 case_insensitive,
@@ -697,6 +714,27 @@ mod tests {
                 expected: None,
                 before: None,
             }]
+        );
+    }
+
+    #[test]
+    fn a_pack_file_the_owner_disabled_stays_disabled_even_on_repair() {
+        let rows = [row("mods/m.jar", Origin::Pack, "m1")];
+        let disabled = [("mods/m.jar.disabled", "m1")];
+        for repair in [false, true] {
+            assert_eq!(
+                run(&rows, &[("mods/m.jar", "m1")], &disabled, repair),
+                [Step::Record(rows[0].clone())],
+                "repair {repair}"
+            );
+        }
+        // A new version waits for the owner, still disabled.
+        assert_eq!(
+            run(&rows, &[("mods/m.jar", "m2")], &disabled, true),
+            [Step::Record(ContentFile {
+                pending: Some(Pending::Changed),
+                ..rows[0].clone()
+            })]
         );
     }
 

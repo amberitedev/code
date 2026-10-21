@@ -1216,6 +1216,9 @@ pub async fn finalize_session(
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
+    // The content lock first: while another change has it this answers 409 and the session
+    // stays open for a retry, its files kept.
+    let (folder, busy) = changing(&state, &id)?;
     // Taken in one step, so a second finalize finds the session over.
     let (files, dir) =
         state
@@ -1228,7 +1231,6 @@ pub async fn finalize_session(
     let result = async {
         match scope {
             UploadScope::Files => {
-                let (folder, busy) = changing(&state, &id)?;
                 for (name, _) in &files {
                     refuse_owned(&folder, &inner_path(name)?)?;
                 }
@@ -1243,7 +1245,6 @@ pub async fn finalize_session(
                 }
             }
             UploadScope::Content => {
-                let _busy = state.content.busy(&id)?;
                 for (name, staged) in &files {
                     addons::upload(&state.content, &id, name, staged).await?;
                 }

@@ -309,9 +309,17 @@ lines: Array<string>, };
 
 export type Performance = { 
 /**
- * The most memory Java may use.
+ * The most memory Java may use. Java starts with less and grows to it.
  */
-memory_mb: number, restarts: Restarts, };
+memory_mb: number, 
+/**
+ * The JVM flags the server starts with.
+ */
+flags: Array<string>, 
+/**
+ * `flags` are the server's own rather than Core's tuned ones.
+ */
+custom_flags: boolean, restarts: Restarts, };
 
 export type Memory = { memory_mb: number, };
 
@@ -320,6 +328,103 @@ export type SendCommand = {
  * One line, as typed into the server console, such as `say hello`.
  */
 command: string, };
+
+export type JvmFlags = { 
+/**
+ * The server's own flags, each starting with `-`. Null goes back to the tuned ones.
+ */
+flags: Array<string> | null, };
+
+export type ServerInsight = { 
+/**
+ * Who is online, from join and leave lines. Empty while the server does not run.
+ */
+players: Array<string>, 
+/**
+ * `list` answered this run, so `players` is checked, not only what join and leave lines
+ * said.
+ */
+players_checked: boolean, 
+/**
+ * The server stopped answering Core's probe, so it is probably frozen. Offer a restart.
+ */
+frozen: boolean, 
+/**
+ * Unix seconds of the server's last answer to the probe.
+ */
+answered_at: number | null, 
+/**
+ * Core stopped starting the server again after it crashed 3 times in 10 minutes.
+ */
+crash_restart_stopped: boolean, 
+/**
+ * The last crash, with the console lines before it for editors and up.
+ */
+last_crash: Crash | null, 
+/**
+ * Whether players can join from the internet. Null while the server does not run or has
+ * not been checked yet.
+ */
+reachability: ReachabilityReport | null, };
+
+export type Crash = { 
+/**
+ * Unix seconds.
+ */
+at: number, exit_code: number | null, 
+/**
+ * The console lines before the crash. Null for viewers: they can hold chat, addresses,
+ * and anything a mod printed, which the console route keeps to editors.
+ */
+last_lines: string | null, };
+
+export type ReachabilityReport = { state: Reach, 
+/**
+ * The cause in one line.
+ */
+title: string, 
+/**
+ * The one thing to do next, when there is something.
+ */
+next_step: string | null, 
+/**
+ * Each test, in order.
+ */
+checks: Array<ReachabilityCheck>, found: Array<string>, 
+/**
+ * Every step of the fix, `next_step` first.
+ */
+fix: Array<string>, 
+/**
+ * Unix seconds.
+ */
+checked_at: number, };
+
+export type Reach = "reachable" | "unverified" | "unreachable";
+
+export type ReachabilityCheck = { 
+/**
+ * Null when the test was not run or could not tell.
+ */
+passed: boolean | null, text: string, };
+
+export type Machine = { 
+/**
+ * This machine's memory. Null when the OS does not say.
+ */
+memory_mb: number | null, 
+/**
+ * The memory every server together may use.
+ */
+assigned_mb: number, 
+/**
+ * Set when the servers together may use more than the machine has.
+ */
+warning: string | null, 
+/**
+ * Whether the App can reach Core's API from the internet.
+ */
+api_reachability: ReachabilityReport | null, };
 
 export type Restarts = { 
 /**
@@ -331,7 +436,8 @@ crash: boolean,
  */
 schedule: Schedule | null, 
 /**
- * Experimental: restart once nobody is online and the server has run this many hours.
+ * Experimental: restart once nobody is online and the server has run this many hours,
+ * after a minute's warning in the game.
  */
 smart_after_hours: number | null, };
 

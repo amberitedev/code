@@ -151,6 +151,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
             reqwest::Client::new(),
             String::new(),
         )),
+        network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
     });
     let router = api::router(Arc::clone(&state));

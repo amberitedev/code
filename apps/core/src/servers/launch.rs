@@ -35,9 +35,6 @@ pub enum NotReady {
     Eula,
 }
 
-/// The heap a server starts with. It grows to `memory_mb` as needed.
-const START_HEAP_MB: i64 = 512;
-
 /// What is installed on a server, or why nothing is.
 fn installed(server: &ServerRow) -> Result<(ModLoader, &str), NotReady> {
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
@@ -88,13 +85,13 @@ pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
     let (loader, game_version) = installed(server)?;
     let dir = paths.server(&server.id);
     let memory = server.memory_mb;
-    let mut args = vec![
-        format!("-Xms{}M", START_HEAP_MB.min(memory)),
-        format!("-Xmx{memory}M"),
+    // The heap and tuned flags first: `memory::use_flags` replaces those in place.
+    let mut args = super::memory::jvm(memory);
+    args.extend([
         format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
         // `copal-servers` has no home folder.
         format!("-Duser.home={}", dir.display()),
-    ];
+    ]);
     let dirs = SharedDirs::new(paths.root());
     let loader_version = server.loader_version.as_deref().unwrap_or_default();
     match loader {

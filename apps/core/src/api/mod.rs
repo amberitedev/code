@@ -17,6 +17,7 @@ pub mod eula;
 pub mod events;
 pub mod files;
 mod health;
+pub mod insight;
 pub mod logs;
 pub mod performance;
 pub mod properties;
@@ -63,6 +64,7 @@ pub struct AppState {
     pub backups: Arc<crate::backups::Backups>,
     pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
+    pub network: Arc<crate::network::forward::Network>,
 }
 
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
@@ -92,6 +94,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/servers/{id}/memory", put(performance::set_memory))
         .route("/servers/{id}/restarts", put(performance::set_restarts))
         .route("/servers/{id}/console", post(console::send))
+        .route("/servers/{id}/flags", put(performance::set_flags))
+        .route("/servers/{id}/insight", get(insight::get))
+        .route("/machine", get(insight::machine))
         .route("/modrinth/v0/servers", get(servers::list))
         .route("/modrinth/v0/servers/{id}", get(servers::get))
         .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
@@ -153,10 +158,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/content/modpack/update",
             get(content::modpack).post(content::update_modpack),
         )
-        .route(
-            "/servers/{id}/content/edited",
-            get(content::edited).post(content::decide),
-        )
         .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
         .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))
         .route("/servers/{id}/modrinth/v0/fs/move", post(files::rename))
@@ -179,11 +180,17 @@ pub fn router(state: Arc<AppState>) -> Router {
         // Starting a server answers once Java runs, and an install or update once it is done.
         .route("/modrinth/v0/servers/{id}/power", post(servers::power))
         .route("/update/apply", post(update::apply))
+        .route("/servers/{id}/reachability", post(insight::check))
         .route(
             "/modrinth/v0/servers/{id}/reinstall",
             post(servers::reinstall),
         )
-        // Adding and updating addons download them first.
+        // Adding and updating addons download them first, as does taking the pack's version of
+        // an edited file.
+        .route(
+            "/servers/{id}/content/edited",
+            get(content::edited).post(content::decide),
+        )
         .route("/v1/servers/{id}/worlds/{wid}/addons", get(content::list).post(content::add))
         .route("/v1/servers/{id}/worlds/{wid}/addons/install-many", post(content::add_many))
         .route(

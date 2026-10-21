@@ -2702,6 +2702,7 @@ dependencies = [
  "serde_json",
  "sha1 0.10.6",
  "sha2",
+ "socket2 0.6.5",
  "sqlx",
  "tempfile",
  "thiserror 2.0.21",
