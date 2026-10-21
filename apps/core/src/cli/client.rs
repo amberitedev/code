@@ -30,6 +30,18 @@ pub struct Unreachable {
     source: std::io::Error,
 }
 
+/// What to say when Core drops the connection unanswered, which is how it refuses an account.
+/// Root is refused too, so under `sudo` the way out is to run the command without it.
+fn refused_message() -> String {
+    let only = "Only the account that installed Copal may use the copal CLI";
+    match std::env::var("SUDO_USER") {
+        Ok(user) if !user.is_empty() => format!(
+            "Core closed the connection without answering. {only}, and not through sudo: run it again without sudo, as that account (was it {user}?)"
+        ),
+        _ => format!("Core closed the connection without answering. {only}"),
+    }
+}
+
 /// One connection per request.
 pub struct Client {
     paths: Paths,
@@ -86,9 +98,10 @@ impl Client {
             .body(Full::new(body))?;
         // Core drops a connection from an account other than `copal` and the owner without a
         // word, which reads here as a broken pipe or a closed connection.
-        let response = sender.send_request(request).await.wrap_err(
-            "Core closed the connection without answering. Only the account that installed Copal may use the copal CLI",
-        )?;
+        let response = sender
+            .send_request(request)
+            .await
+            .wrap_err_with(refused_message)?;
         let status = response.status();
         let body = response.into_body().collect().await?.to_bytes();
         if status == axum::http::StatusCode::NOT_FOUND && body.is_empty() {
