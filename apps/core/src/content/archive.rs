@@ -103,14 +103,19 @@ pub fn extract<R: Read + Seek>(
     Ok(placed)
 }
 
-/// The SHA-1 of one entry, read without unpacking it.
+/// The SHA-1 and size of one entry, read without unpacking it. The size is what the entry
+/// actually inflates to, not what the archive claims; past [`MAX_UNPACKED`] it is refused.
 pub fn entry_sha1<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     index: usize,
-) -> Result<String, ArchiveError> {
-    let mut reader = Hashing::new(archive.by_index(index)?.take(MAX_UNPACKED));
-    io::copy(&mut reader, &mut io::sink())?;
-    Ok(reader.finish())
+) -> Result<(String, u64), ArchiveError> {
+    let mut reader =
+        Hashing::new(archive.by_index(index)?.take(MAX_UNPACKED + 1));
+    let size = io::copy(&mut reader, &mut io::sink())?;
+    if size > MAX_UNPACKED {
+        return Err(ArchiveError::TooLarge);
+    }
+    Ok((reader.finish(), size))
 }
 
 /// Hashes what passes through it.

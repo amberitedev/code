@@ -8,7 +8,6 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -223,6 +222,7 @@ async fn install_pack(
                 &pack::Disk {
                     sha1: &sha1,
                     level_name: &level,
+                    case_insensitive: pack::CASE_INSENSITIVE,
                 },
                 repair,
             )
@@ -230,6 +230,7 @@ async fn install_pack(
         .await
         .map_err(std::io::Error::other)?
     };
+    pack::check_budget(&steps)?;
     let staged = stage_downloads(content, id, &index, &steps, progress).await?;
 
     if server.game_version.is_some() && !repair {
@@ -373,7 +374,8 @@ pub async fn read_pack(
         let mut archive = zip::ZipArchive::new(file)
             .map_err(super::archive::ArchiveError::from)?;
         let index = pack::read_index(&mut archive)?;
-        let wanted = pack::wanted(&index, &mut archive)?;
+        let wanted =
+            pack::wanted(&index, &mut archive, pack::CASE_INSENSITIVE)?;
         Ok((index, wanted))
     })
     .await
@@ -477,7 +479,9 @@ async fn fetch_index_file(
     Err(last)
 }
 
-/// Carry out a plan, recording every file as it is placed.
+/// Carry out a plan, recording every file as it is placed. Each file is hashed again right
+/// before it is replaced or deleted: one that changed since the plan was made is left as it is
+/// and marked pending, the way the plan treats an edit it saw.
 async fn apply(
     content: &Content,
     server_id: &str,
@@ -489,9 +493,23 @@ async fn apply(
 ) -> Result<(), Error> {
     for step in steps {
         match step {
-            Step::Place { path, wanted, row } => {
-                place(folder, archive_path, &path, &wanted.source, staged)
-                    .await?;
+            Step::Place {
+                path,
+                wanted,
+                row,
+                expected,
+                before,
+            } => {
+                let now = sha1_now(folder, &path).await?;
+                if now != expected {
+                    if let Some(theirs) =
+                        changed_meanwhile(&path, row.is_some(), before, now)
+                    {
+                        records::put(&content.db, server_id, &theirs).await?;
+                    }
+                    continue;
+                }
+                place(folder, archive_path, &path, &wanted, staged).await?;
                 if let Some(mut row) = row {
                     if let Source::Download(n) = wanted.source
                         && let Some((project, version)) = index.files[n]
@@ -508,14 +526,26 @@ async fn apply(
             Step::Record(row) => {
                 records::put(&content.db, server_id, &row).await?
             }
-            Step::Delete(path) => {
-                let folder = Arc::clone(folder);
-                let target = path.clone();
-                tokio::task::spawn_blocking(move || folder.remove(&target))
-                    .await
-                    .map_err(std::io::Error::other)??;
-                records::remove(&content.db, server_id, &path).await?;
-            }
+            Step::Delete(row) => match sha1_now(folder, &row.path).await? {
+                Some(sha1) if sha1 == row.sha1 => {
+                    let folder = Arc::clone(folder);
+                    let target = row.path.clone();
+                    tokio::task::spawn_blocking(move || folder.remove(&target))
+                        .await
+                        .map_err(std::io::Error::other)??;
+                    records::remove(&content.db, server_id, &row.path).await?;
+                }
+                None => {
+                    records::remove(&content.db, server_id, &row.path).await?
+                }
+                Some(_) => {
+                    let row = ContentFile {
+                        pending: Some(Pending::Removed),
+                        ..row
+                    };
+                    records::put(&content.db, server_id, &row).await?;
+                }
+            },
             Step::Forget(path) => {
                 records::remove(&content.db, server_id, &path).await?
             }
@@ -524,17 +554,59 @@ async fn apply(
     Ok(())
 }
 
-/// Write one file the pack wants: a staged download, or an entry of the pack's own archive.
+/// The row to keep for a file a place step found changed since the plan: what was recorded,
+/// now pending; or, for a file nobody recorded, the owner's file with its hash, pending. `None`
+/// for a server-owned file someone made meanwhile, which is theirs.
+fn changed_meanwhile(
+    path: &str,
+    tracked: bool,
+    before: Option<ContentFile>,
+    now: Option<String>,
+) -> Option<ContentFile> {
+    let theirs = match (before, now) {
+        (Some(before), _) => before,
+        (None, Some(sha1)) if tracked => ContentFile {
+            path: path.to_owned(),
+            origin: Origin::Added,
+            sha1,
+            project_id: None,
+            version_id: None,
+            pending: None,
+        },
+        _ => return None,
+    };
+    Some(ContentFile {
+        pending: Some(Pending::Changed),
+        ..theirs
+    })
+}
+
+/// The SHA-1 of the file at `path` as it is now.
+async fn sha1_now(
+    folder: &Arc<Folder>,
+    path: &str,
+) -> Result<Option<String>, Error> {
+    let folder = Arc::clone(folder);
+    let path = path.to_owned();
+    Ok(tokio::task::spawn_blocking(move || folder.sha1(&path))
+        .await
+        .map_err(std::io::Error::other)??)
+}
+
+/// Write one file the pack wants: a staged download, or an entry of the pack's own archive. An
+/// entry that inflates past the size it was planned with is refused before it replaces
+/// anything, so the budget checked before the install holds.
 async fn place(
     folder: &Arc<Folder>,
     archive_path: &Path,
     path: &str,
-    source: &Source,
+    wanted: &Wanted,
     staged: &HashMap<usize, PathBuf>,
 ) -> Result<(), Error> {
     let folder = Arc::clone(folder);
     let path = path.to_owned();
-    let source = match source {
+    let size = wanted.size;
+    let source = match &wanted.source {
         Source::Download(n) => {
             Err(staged.get(n).cloned().ok_or_else(|| {
                 Error::Invalid(format!("{path} was not downloaded."))
@@ -552,17 +624,39 @@ async fn place(
                 let mut archive =
                     zip::ZipArchive::new(std::fs::File::open(archive_path)?)
                         .map_err(super::archive::ArchiveError::from)?;
-                let mut entry = archive
+                let entry = archive
                     .by_index(entry)
-                    .map_err(super::archive::ArchiveError::from)?
-                    .take(super::archive::MAX_UNPACKED);
-                folder.write(&path, &mut entry)?;
+                    .map_err(super::archive::ArchiveError::from)?;
+                folder.write(
+                    &path,
+                    &mut AtMost {
+                        inner: entry,
+                        left: size,
+                    },
+                )?;
             }
         }
         Ok(())
     })
     .await
     .map_err(std::io::Error::other)?
+}
+
+/// Reads at most `left` more bytes and fails the read past them, so a write of it stops before
+/// its file is renamed over anything.
+struct AtMost<R> {
+    inner: R,
+    left: u64,
+}
+
+impl<R: std::io::Read> std::io::Read for AtMost<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.left = self.left.checked_sub(read as u64).ok_or_else(|| {
+            std::io::Error::other("the entry is larger than the pack said")
+        })?;
+        Ok(read)
+    }
 }
 
 /// Write the settings an install came with into `server.properties`.
@@ -675,8 +769,7 @@ pub async fn decide(
                     staged.insert(n, target);
                 }
                 let placed =
-                    place(&folder, &archive_path, path, &want.source, &staged)
-                        .await;
+                    place(&folder, &archive_path, path, want, &staged).await;
                 let _ =
                     tokio::fs::remove_dir_all(pack_staging(content, server_id))
                         .await;

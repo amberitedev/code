@@ -32,6 +32,12 @@ pub enum PackError {
         "the pack lists {0}, which cannot be downloaded from an allowed host"
     )]
     Host(String),
+    #[error("the pack lists both {0} and {1}, which are the same file here")]
+    Collision(String, String),
+    #[error(
+        "the pack would unpack more than {} GB", archive::MAX_UNPACKED / 1024 / 1024 / 1024
+    )]
+    TooLarge,
 }
 
 /// `modrinth.index.json`.
@@ -143,6 +149,20 @@ pub enum Source {
 pub struct Wanted {
     pub sha1: String,
     pub source: Source,
+    /// Its size in bytes, as the index lists it or the archive holds it.
+    pub size: u64,
+}
+
+/// Whether this OS treats `Config/a.toml` and `config/a.toml` as one file.
+pub const CASE_INSENSITIVE: bool = cfg!(any(windows, target_os = "macos"));
+
+/// A path as the file system compares it.
+pub fn fold(path: &str, case_insensitive: bool) -> String {
+    if case_insensitive {
+        path.to_lowercase()
+    } else {
+        path.to_owned()
+    }
 }
 
 /// Every file a server running `index` should have, by path. Client-only files are left out, and
@@ -150,8 +170,20 @@ pub struct Wanted {
 pub fn wanted<R: Read + Seek>(
     index: &Index,
     archive: &mut zip::ZipArchive<R>,
+    case_insensitive: bool,
 ) -> Result<BTreeMap<String, Wanted>, PackError> {
     let mut wanted = BTreeMap::new();
+    // Two spellings of one file are refused; the same spelling twice is an override.
+    let mut spellings: HashMap<String, String> = HashMap::new();
+    let mut add = |path: String, want: Wanted| match spellings
+        .insert(fold(&path, case_insensitive), path.clone())
+    {
+        Some(other) if other != path => Err(PackError::Collision(other, path)),
+        _ => {
+            wanted.insert(path, want);
+            Ok(())
+        }
+    };
     for (n, file) in index.files.iter().enumerate() {
         if file
             .env
@@ -168,13 +200,14 @@ pub fn wanted<R: Read + Seek>(
         if !usable {
             return Err(PackError::Host(path));
         }
-        wanted.insert(
+        add(
             path,
             Wanted {
                 sha1: file.hashes.sha1.to_ascii_lowercase(),
                 source: Source::Download(n),
+                size: file.file_size,
             },
-        );
+        )?;
     }
     let entries = archive::entries(archive)?;
     for prefix in ["overrides/", "server-overrides/"] {
@@ -183,13 +216,15 @@ pub fn wanted<R: Read + Seek>(
             else {
                 continue;
             };
-            wanted.insert(
+            let (sha1, size) = archive::entry_sha1(archive, n)?;
+            add(
                 path.to_owned(),
                 Wanted {
-                    sha1: archive::entry_sha1(archive, n)?,
+                    sha1,
                     source: Source::Override(n),
+                    size,
                 },
-            );
+            )?;
         }
     }
     Ok(wanted)
@@ -199,17 +234,23 @@ pub fn wanted<R: Read + Seek>(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
     /// Write the pack's file, then record `row`. `row` is `None` for a server-owned file, which
-    /// is placed only where none exists and then belongs to the server.
+    /// is placed only where none exists and then belongs to the server. Done only if the file
+    /// on disk still has the hash `expected` (`None`: no file) when its turn comes; otherwise
+    /// someone changed it meanwhile and it is left as theirs, `before` marked pending.
     Place {
         path: String,
         wanted: Wanted,
         row: Option<ContentFile>,
+        expected: Option<String>,
+        before: Option<ContentFile>,
     },
     /// The file is right as it is; record `row`.
     Record(ContentFile),
-    /// Delete the file and its row: the pack dropped it and nobody edited it.
-    Delete(String),
-    /// Forget the row: the pack dropped a file that is already gone.
+    /// Delete the file and its row: the pack dropped it and nobody edited it. Done only if the
+    /// file still has the row's hash when its turn comes.
+    Delete(ContentFile),
+    /// Forget the row: the pack dropped a file that is already gone, or the row names a file
+    /// another row now names with the pack's new spelling.
     Forget(String),
 }
 
@@ -219,6 +260,24 @@ pub struct Disk<'a> {
     pub sha1: &'a dyn Fn(&str) -> Option<String>,
     /// The world folder, for the deny-list.
     pub level_name: &'a str,
+    /// Paths that differ only in case are one file ([`CASE_INSENSITIVE`]).
+    pub case_insensitive: bool,
+}
+
+/// The most a set of steps writes, refused past [`archive::MAX_UNPACKED`] before anything is
+/// written: one budget for the whole install.
+pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
+    let total = steps
+        .iter()
+        .map(|step| match step {
+            Step::Place { wanted, .. } => wanted.size,
+            _ => 0,
+        })
+        .fold(0u64, u64::saturating_add);
+    if total > archive::MAX_UNPACKED {
+        return Err(PackError::TooLarge);
+    }
+    Ok(total)
 }
 
 /// What installing `wanted` over the files on disk does, given the rows recorded for them.
@@ -226,15 +285,19 @@ pub struct Disk<'a> {
 /// A pack file the owner edited (its hash on disk is not the one recorded, or it is gone) is
 /// never touched: when the new pack changes or drops it, the row is marked pending instead. A
 /// file nobody recorded that is in the way is the owner's too. Repair (`repair`) also restores
-/// pack files that are missing. Server-owned files are placed only where none exists.
+/// pack files that are missing. Server-owned files are placed only where none exists. Rows and
+/// wanted paths are matched the way the file system compares paths.
 pub fn plan(
     rows: &[ContentFile],
     wanted: &BTreeMap<String, Wanted>,
     disk: &Disk,
     repair: bool,
 ) -> Vec<Step> {
-    let rows: HashMap<&str, &ContentFile> =
-        rows.iter().map(|row| (row.path.as_str(), row)).collect();
+    let key = |path: &str| fold(path, disk.case_insensitive);
+    let rows: HashMap<String, &ContentFile> =
+        rows.iter().map(|row| (key(&row.path), row)).collect();
+    let wanted_keys: std::collections::HashSet<String> =
+        wanted.keys().map(|path| key(path)).collect();
     let pack_row = |path: &str, wanted: &Wanted, pending| ContentFile {
         path: path.to_owned(),
         origin: Origin::Pack,
@@ -246,13 +309,25 @@ pub fn plan(
     let mut steps = Vec::new();
     for (path, want) in wanted {
         let on_disk = (disk.sha1)(path);
-        let row = rows.get(path.as_str()).copied();
+        let row = rows.get(&key(path)).copied();
+        // The pack spells a file it already placed another way: the row follows the new
+        // spelling, and the old one is only forgotten, never deleted, since it is this file.
+        if let Some(row) = row.filter(|row| row.path != *path) {
+            steps.push(Step::Forget(row.path.clone()));
+        }
+        let row = row.map(|row| ContentFile {
+            path: path.clone(),
+            ..row.clone()
+        });
+        let row = row.as_ref();
         if folder::is_server_owned(path, disk.level_name) {
             if on_disk.is_none() {
                 steps.push(Step::Place {
                     path: path.clone(),
                     wanted: want.clone(),
                     row: None,
+                    expected: None,
+                    before: None,
                 });
             }
             if row.is_some() {
@@ -272,6 +347,8 @@ pub fn plan(
                     .and_then(|row| row.version_id.clone()),
                 ..pack_row(path, want, None)
             }),
+            expected: on_disk.clone(),
+            before: row.cloned(),
         };
         let keep = |row: &ContentFile, sha1: &str, origin, pending| {
             Step::Record(ContentFile {
@@ -329,43 +406,47 @@ pub fn plan(
         steps.push(step);
     }
     for row in rows.values() {
-        if row.origin != Origin::Pack || wanted.contains_key(&row.path) {
+        if row.origin != Origin::Pack || wanted_keys.contains(&key(&row.path)) {
             continue;
         }
         steps.push(match (disk.sha1)(&row.path) {
             None => Step::Forget(row.path.clone()),
-            Some(sha1) if sha1 == row.sha1 => Step::Delete(row.path.clone()),
+            Some(sha1) if sha1 == row.sha1 => Step::Delete((*row).clone()),
             Some(_) => Step::Record(ContentFile {
                 pending: Some(Pending::Removed),
                 ..(*row).clone()
             }),
         });
     }
-    steps.sort_by(|a, b| step_path(a).cmp(step_path(b)));
+    // Forgetting an old spelling comes before recording the new one.
+    steps.sort_by(|a, b| {
+        step_path(a).cmp(step_path(b)).then_with(|| {
+            matches!(b, Step::Forget(_)).cmp(&matches!(a, Step::Forget(_)))
+        })
+    });
     steps
 }
 
 fn step_path(step: &Step) -> &str {
     match step {
-        Step::Place { path, .. } | Step::Delete(path) | Step::Forget(path) => {
-            path
-        }
-        Step::Record(row) => &row.path,
+        Step::Place { path, .. } | Step::Forget(path) => path,
+        Step::Delete(row) | Step::Record(row) => &row.path,
     }
 }
 
-/// Pack files the owner edited since the pack placed them, or deleted: their hash on disk is not
-/// the one recorded.
+/// Files the owner must know about: pack files they edited since the pack placed them, or
+/// deleted (the hash on disk is not the one recorded), and every file waiting on a decision,
+/// whatever its origin or hash.
 pub fn edited<'a>(
     rows: &'a [ContentFile],
     sha1: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<(&'a ContentFile, Option<String>)> {
     rows.iter()
-        .filter(|row| row.origin == Origin::Pack)
         .filter_map(|row| {
             let on_disk = sha1(&row.path);
-            (on_disk.as_deref() != Some(row.sha1.as_str()))
-                .then_some((row, on_disk))
+            let changed = row.origin == Origin::Pack
+                && on_disk.as_deref() != Some(row.sha1.as_str());
+            (changed || row.pending.is_some()).then_some((row, on_disk))
         })
         .collect()
 }
@@ -389,6 +470,7 @@ mod tests {
         Wanted {
             sha1: sha1.into(),
             source: Source::Download(0),
+            size: 1,
         }
     }
 
@@ -398,30 +480,59 @@ mod tests {
         on_disk: &[(&str, &str)],
         repair: bool,
     ) -> Vec<Step> {
+        run_on(rows, wanted, on_disk, repair, false)
+    }
+
+    /// As [`run`], on a file system that compares paths without case when `case_insensitive`.
+    fn run_on(
+        rows: &[ContentFile],
+        wanted: &[(&str, &str)],
+        on_disk: &[(&str, &str)],
+        repair: bool,
+        case_insensitive: bool,
+    ) -> Vec<Step> {
         let wanted = wanted
             .iter()
             .map(|(path, sha1)| ((*path).to_owned(), want(sha1)))
             .collect();
         let on_disk: HashMap<String, String> = on_disk
             .iter()
-            .map(|(path, sha1)| ((*path).to_owned(), (*sha1).to_owned()))
+            .map(|(path, sha1)| {
+                (fold(path, case_insensitive), (*sha1).to_owned())
+            })
             .collect();
         plan(
             rows,
             &wanted,
             &Disk {
-                sha1: &|path| on_disk.get(path).cloned(),
+                sha1: &|path| {
+                    on_disk.get(&fold(path, case_insensitive)).cloned()
+                },
                 level_name: "world",
+                case_insensitive,
             },
             repair,
         )
     }
 
+    /// The pack's file placed where there was none and no row.
     fn placed(path: &str, sha1: &str) -> Step {
+        replaced(path, sha1, None, None)
+    }
+
+    /// The pack's file placed over `on_disk`, which `before` recorded.
+    fn replaced(
+        path: &str,
+        sha1: &str,
+        on_disk: Option<&str>,
+        before: Option<&ContentFile>,
+    ) -> Step {
         Step::Place {
             path: path.into(),
             wanted: want(sha1),
             row: Some(row(path, Origin::Pack, sha1)),
+            expected: on_disk.map(str::to_owned),
+            before: before.cloned(),
         }
     }
 
@@ -473,10 +584,10 @@ mod tests {
                     pending: Some(Pending::Changed),
                     ..rows[0].clone()
                 }),
-                placed("config/same.toml", "s2"),
+                replaced("config/same.toml", "s2", Some("s1"), Some(&rows[1])),
                 Step::Record(rows[3].clone()),
                 placed("mods/new.jar", "n1"),
-                Step::Delete("mods/old.jar".into()),
+                Step::Delete(rows[2].clone()),
             ]
         );
     }
@@ -528,7 +639,7 @@ mod tests {
         );
         assert_eq!(
             run(&rows, &[("mods/m.jar", "m1")], &[], true),
-            [placed("mods/m.jar", "m1")]
+            [replaced("mods/m.jar", "m1", None, Some(&rows[0]))]
         );
     }
 
@@ -578,8 +689,89 @@ mod tests {
                 path: "ops.json".into(),
                 wanted: want("o1"),
                 row: None,
+                expected: None,
+                before: None,
             }]
         );
+    }
+
+    #[test]
+    fn a_pack_that_respells_a_file_moves_its_row_without_deleting_it() {
+        let rows = [row("Config/A.toml", Origin::Pack, "a1")];
+        // One file on Windows and macOS: the row follows the new spelling.
+        assert_eq!(
+            run_on(
+                &rows,
+                &[("config/a.toml", "a1")],
+                &[("Config/A.toml", "a1")],
+                false,
+                true,
+            ),
+            [
+                Step::Forget("Config/A.toml".into()),
+                Step::Record(row("config/a.toml", Origin::Pack, "a1")),
+            ]
+        );
+        // Two files on Linux: the old one goes, the new one is placed.
+        assert_eq!(
+            run_on(
+                &rows,
+                &[("config/a.toml", "a1")],
+                &[("Config/A.toml", "a1")],
+                false,
+                false,
+            ),
+            [Step::Delete(rows[0].clone()), placed("config/a.toml", "a1"),]
+        );
+    }
+
+    #[test]
+    fn two_spellings_of_one_file_refuse_the_pack_where_case_does_not_count() {
+        use std::io::Write;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("modrinth.index.json", options).unwrap();
+        writer
+            .write_all(
+                br#"{"formatVersion":1,"game":"minecraft","versionId":"1","name":"p"}"#,
+            )
+            .unwrap();
+        for name in ["overrides/config/A.toml", "overrides/config/a.toml"] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(b"x").unwrap();
+        }
+        let mut archive =
+            zip::ZipArchive::new(writer.finish().unwrap()).unwrap();
+        let index = read_index(&mut archive).unwrap();
+        assert!(matches!(
+            wanted(&index, &mut archive, true),
+            Err(PackError::Collision(..))
+        ));
+        let both = wanted(&index, &mut archive, false).unwrap();
+        assert_eq!(both.len(), 2);
+        assert_eq!(both["config/a.toml"].size, 1);
+    }
+
+    #[test]
+    fn one_budget_covers_the_whole_install() {
+        let place = |size| Step::Place {
+            path: "mods/m.jar".into(),
+            wanted: Wanted { size, ..want("m1") },
+            row: None,
+            expected: None,
+            before: None,
+        };
+        let half = archive::MAX_UNPACKED / 2;
+        assert_eq!(
+            check_budget(&[place(half), place(half)]).unwrap(),
+            archive::MAX_UNPACKED
+        );
+        // Each file fits on its own; together they do not.
+        assert!(matches!(
+            check_budget(&[place(half), place(half), place(1)]),
+            Err(PackError::TooLarge)
+        ));
     }
 
     #[test]
@@ -589,11 +781,17 @@ mod tests {
             row("config/b.toml", Origin::Pack, "b1"),
             row("config/c.toml", Origin::Pack, "c1"),
             row("mods/mine.jar", Origin::Added, "x1"),
+            // The owner's file the pack also wants: pending, whatever its hash.
+            ContentFile {
+                pending: Some(Pending::Changed),
+                ..row("mods/theirs.jar", Origin::Added, "t1")
+            },
         ];
         let on_disk = HashMap::from([
             ("config/a.toml", "a1"),
             ("config/b.toml", "owner"),
             ("mods/mine.jar", "changed"),
+            ("mods/theirs.jar", "t1"),
         ]);
         let edited = edited(&rows, &|path| {
             on_disk.get(path).map(|sha1| (*sha1).to_owned())
@@ -604,7 +802,11 @@ mod tests {
             .collect();
         assert_eq!(
             paths,
-            [("config/b.toml", Some("owner")), ("config/c.toml", None)]
+            [
+                ("config/b.toml", Some("owner")),
+                ("config/c.toml", None),
+                ("mods/theirs.jar", Some("t1")),
+            ]
         );
     }
 }
