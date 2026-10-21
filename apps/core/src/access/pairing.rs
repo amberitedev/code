@@ -3,7 +3,8 @@
 //! An unpaired Core asks the backend for a code and the key it will use, prints the code, and
 //! polls. The owner enters the code in the App, which approves it with their account; from then
 //! on the key works. The App never talks to the Core during pairing. The code being shown is kept
-//! in the `pairing` table, so every copal process on one data folder shows the same code.
+//! in the `pairing` table, so every copal process on one data folder shows the same code, and
+//! `copal status` reads it there. `copal pair` drops it and wakes the loop for a fresh one.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +12,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
+use tokio::sync::Notify;
 use tracing::warn;
 
 /// Wait between attempts to reach the backend.
@@ -25,6 +27,46 @@ pub struct Pairing<'a> {
     /// Where the App reaches this Core, and the certificate it pins there.
     pub address: &'a str,
     pub cert_fingerprint: &'a str,
+    /// Woken when the owner asks for a fresh code.
+    pub new_code: &'a Notify,
+}
+
+/// The code an unpaired Core shows, as the App takes it.
+pub struct Shown {
+    /// Like `MZUX-D576`.
+    pub code: String,
+    /// Unix seconds.
+    pub expires_at: i64,
+}
+
+/// What the owner does with `code`, shown until `expires_at`.
+pub fn instructions(code: &str, expires_at: i64) -> String {
+    format!(
+        "Open Amberite, go to Settings > Cores > Add Core, and enter {code}.\nOr open amberite://approve/{code} on a computer with Amberite.\nThe code works for {} minutes.",
+        ((expires_at - now()).max(0) + 59) / 60
+    )
+}
+
+/// The code this Core shows now, `None` while it has none.
+pub async fn shown(db: &SqlitePool) -> sqlx::Result<Option<Shown>> {
+    let row: Option<(String, i64)> = sqlx::query_as(
+        "SELECT code, expires_at FROM pairing WHERE id = 1 AND expires_at > ?",
+    )
+    .bind(now())
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|(code, expires_at)| Shown {
+        code: display_code(&code),
+        expires_at,
+    }))
+}
+
+/// Drop the code being shown, so the pairing loop asks for a new one once woken.
+pub async fn drop_code(db: &SqlitePool) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM pairing WHERE id = 1")
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 /// A sign-in waiting for approval: the code being shown and the key that works once it is
@@ -54,22 +96,34 @@ pub async fn pair(state: &Pairing<'_>) {
                         "\nThis Core cannot sign in yet: {problem}\nRetrying in {} seconds.\n",
                         RETRY.as_secs()
                     );
+                    // Also in Core's log, where `copal status` sends the owner.
+                    warn!("no pairing code yet: {problem}");
                     tokio::time::sleep(RETRY).await;
                     continue;
                 }
             },
         };
-        let shown = display_code(&pending.code);
         println!(
-            "\nOpen Amberite, go to Settings > Cores > Add Core, and enter {shown}.\nOr open amberite://approve/{shown} on a computer with Amberite.\nThe code works for {} minutes.\n",
-            ((pending.expires_at - now()).max(0) + 59) / 60
+            "\n{}\n",
+            instructions(&display_code(&pending.code), pending.expires_at)
         );
 
         let interval =
             Duration::from_secs(pending.poll_interval.clamp(1, 60) as u64);
         let mut last_problem = String::new();
         loop {
-            tokio::time::sleep(interval).await;
+            tokio::select! {
+                () = tokio::time::sleep(interval) => {}
+                () = state.new_code.notified() => {}
+            }
+            // `copal pair` dropped this code, or another copal process replaced it.
+            if pending.expires_at > now()
+                && current_code(state)
+                    .await
+                    .is_none_or(|current| current.code != pending.code)
+            {
+                break;
+            }
             match poll(state, &pending.key).await {
                 Poll::Approved(account) => {
                     if let Err(error) =

@@ -306,6 +306,17 @@ url: string,
  */
 accepted_at: number | null, };
 
+export type PairingStatus = { paired: boolean, 
+/**
+ * The code to enter in the App, like `MZUX-D576`. Null once paired, and while Core is still
+ * getting one from Amberite.
+ */
+code: string | null, 
+/**
+ * Unix seconds.
+ */
+expires_at: number | null, };
+
 export type LogsQuery = { 
 /**
  * At most 1000. 100 when left out.
