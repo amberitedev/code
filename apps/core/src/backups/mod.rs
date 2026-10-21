@@ -11,9 +11,11 @@
 //! grows past the size listed fails the backup rather than filling the disk.
 //!
 //! Every backup holds `copal-backup.json`, naming the world folders and settings files it speaks
-//! for. A restore unpacks and checks the whole backup beside the server's files first, then swaps
-//! exactly those in, and puts the old ones back if the swap fails. A backup is checked by the
-//! rules a restore applies before it counts as made.
+//! for. A restore reads and checks the whole backup first, moves exactly those roots aside into
+//! a folder of its own in `backups/<server>/`, which servers cannot reach, unpacks the backup in
+//! their place, and puts the old ones back if that fails. Its journal lets a Core that stopped
+//! midway put them back when it starts, before the server can. A backup is checked by the rules
+//! a restore applies before it counts as made.
 //!
 //! Each server has a schedule (default: daily, keeping 7). Pre-update backups keep their own last
 //! 2, so updates never evict the scheduled ones; manual backups are kept until deleted.
@@ -65,6 +67,8 @@ const SAVE_WAIT: Duration = Duration::from_secs(120);
 const HOLD_MARGIN: Duration = Duration::from_secs(30);
 /// What a backup holds, inside it.
 const MANIFEST: &str = "copal-backup.json";
+/// A restore's journal, in its folder.
+const JOURNAL: &str = "swap.json";
 /// Pre-update backups kept per server.
 const KEEP_PRE_UPDATE: u32 = 2;
 /// How often the schedule is checked.
@@ -122,6 +126,9 @@ pub struct Backups {
     /// Held while copying a server, for a backup or a download of its world.
     copying: tokio::sync::Mutex<()>,
     grants: Mutex<HashMap<String, Grant>>,
+    /// Servers a restore could not put back, held so they never start on a half-restored world
+    /// until someone looks (the old files are in the restore's folder).
+    stuck: Mutex<Vec<crate::servers::Hold>>,
 }
 
 impl Backups {
@@ -140,7 +147,9 @@ impl Backups {
             finished: broadcast::channel(64).0,
             copying: tokio::sync::Mutex::new(()),
             grants: Mutex::default(),
+            stuck: Mutex::default(),
         });
+        backups.recover_restores().await;
         for operation in records::fail_interrupted(&backups.db).await? {
             if operation.kind == OpKind::Create {
                 let _ = std::fs::remove_file(
@@ -160,6 +169,65 @@ impl Backups {
             .backups()
             .join(server_id)
             .join(format!("{backup_id}.zip"))
+    }
+
+    /// Where a restore keeps what it moved aside.
+    fn restore_folder(&self, server_id: &str) -> PathBuf {
+        self.paths
+            .backups()
+            .join(server_id)
+            .join(format!("restore-{}", Uuid::new_v4().simple()))
+    }
+
+    /// Undo every restore a stopped Core left midway, holding its server meanwhile. A server
+    /// whose restore cannot be undone stays held.
+    async fn recover_restores(&self) {
+        let Ok(servers) = std::fs::read_dir(self.paths.backups()) else {
+            return;
+        };
+        for server in servers.filter_map(Result::ok) {
+            let Ok(server_id) = server.file_name().into_string() else {
+                continue;
+            };
+            let Ok(entries) = std::fs::read_dir(server.path()) else {
+                continue;
+            };
+            for entry in entries.filter_map(Result::ok) {
+                let stage = entry.path();
+                let is_restore = entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("restore-"));
+                if !is_restore || !stage.is_dir() {
+                    continue;
+                }
+                let hold = match self.servers.hold(&server_id) {
+                    Ok(hold) => hold,
+                    Err(error) => {
+                        warn!(server = %server_id, %error, "could not hold a server to undo its restore");
+                        continue;
+                    }
+                };
+                let root = self.paths.server(&server_id);
+                let undone = tokio::task::spawn_blocking(move || {
+                    let folder = Folder::open(&root)?;
+                    undo(&folder, &stage)
+                })
+                .await
+                .map_err(io::Error::other)
+                .map_err(Error::from)
+                .and_then(|result| result);
+                match undone {
+                    Ok(()) => {
+                        info!(server = %server_id, "undid a restore Core stopped during")
+                    }
+                    Err(error) => {
+                        warn!(server = %server_id, %error, "could not undo a restore; the server stays stopped and its old files are in backups");
+                        self.stuck.lock().expect("not poisoned").push(hold);
+                    }
+                }
+            }
+        }
     }
 
     /// Half-written zips and world downloads a stopped Core left behind.
@@ -559,7 +627,7 @@ impl Backups {
     /// start meanwhile.
     async fn run_restore(&self, operation: &Operation) -> Result<(), Error> {
         let server_id = &operation.server_id;
-        let _hold =
+        let hold =
             self.servers.hold(server_id).map_err(|error| match error {
                 ServerError::AlreadyRunning => Error::Conflict(
                     "Stop the server before restoring a backup.".into(),
@@ -570,9 +638,19 @@ impl Backups {
         let zip = self.file(server_id, &operation.backup_id);
         let root = self.paths.server(server_id);
         let folder = Arc::new(Folder::open(&root)?);
-        tokio::task::spawn_blocking(move || restore(&folder, &root, &zip))
-            .await
-            .map_err(io::Error::other)?
+        let stage = self.restore_folder(server_id);
+        let result = tokio::task::spawn_blocking({
+            let stage = stage.clone();
+            move || restore(&folder, &root, &stage, &zip)
+        })
+        .await
+        .map_err(io::Error::other)?;
+        // Its folder outlives a restore only when what it moved aside could not be put back.
+        if result.is_err() && stage.exists() {
+            warn!(server = %server_id, stage = %stage.display(), "a failed restore could not put the old files back; the server stays stopped");
+            self.stuck.lock().expect("not poisoned").push(hold);
+        }
+        result
     }
 
     /// Back up servers whose schedule is due, every minute.
@@ -998,13 +1076,39 @@ fn write_zip(
     Ok(())
 }
 
-/// Replace the worlds and settings in `folder` (at `root`) with those in the backup at `zip`.
+/// How far a restore got, in its journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Step {
+    /// Moving the roots aside: those in `old/` were moved, the rest are as they were.
+    Aside,
+    /// Unpacking: every root is the backup's, or partly so, and the old ones are in `old/`.
+    Unpack,
+    Done,
+}
+
+/// A restore's journal: the roots it replaces and how far it got. Written before each step.
+#[derive(Debug, Serialize, Deserialize)]
+struct Journal {
+    v: u32,
+    roots: Vec<String>,
+    step: Step,
+}
+
+/// Replace the worlds and settings in `folder` (at `root`) with those in the backup at `zip`,
+/// keeping what it replaces in `stage` until it is done.
 ///
-/// The backup is unpacked whole into a folder of its own beside them, which checks every entry
-/// against its manifest and every file against its checksum, before anything is replaced. Then
-/// each root the manifest names is moved aside and the backup's moved in. If that fails partway
-/// the old roots are moved back; should even that fail, they stay in the restore folder.
-fn restore(folder: &Folder, root: &Path, zip: &Path) -> Result<(), Error> {
+/// Every entry is read through first, which checks it against the manifest and its checksum
+/// against the archive, before anything moves. Then each root the manifest names is moved into
+/// `stage/old/`, a folder only Core can reach on the same disk, and the backup is unpacked in
+/// their place. If that fails the old roots are moved back; if even that fails, `stage` is kept
+/// with its journal, and [`undo`] finishes the job.
+fn restore(
+    folder: &Folder,
+    root: &Path,
+    stage: &Path,
+    zip: &Path,
+) -> Result<(), Error> {
     let mut archive = zip::ZipArchive::new(std::fs::File::open(zip)?)?;
     let entries = archive::entries(&mut archive).map_err(|error| {
         io::Error::new(io::ErrorKind::InvalidData, error.to_string())
@@ -1029,66 +1133,96 @@ fn restore(folder: &Folder, root: &Path, zip: &Path) -> Result<(), Error> {
             "This backup holds {path}, which it does not name."
         )));
     }
-    let size: u64 = (0..archive.len())
-        .filter_map(|index| {
-            archive.by_index_raw(index).ok().map(|entry| entry.size())
-        })
-        .sum();
+    let mut size = 0u64;
+    for index in 0..archive.len() {
+        // Read to the end, so a damaged entry fails its checksum now.
+        size += io::copy(&mut archive.by_index(index)?, &mut io::sink())?;
+    }
     enough_space(size, space::free(root)?)?;
 
-    let stage = format!(".copal-restore-{}", Uuid::new_v4());
-    let new = format!("{stage}/new");
-    let old = format!("{stage}/old");
-    let unpacked = (|| -> Result<(), Error> {
-        folder.create_dir_all(&new)?;
+    std::fs::create_dir_all(stage)?;
+    let aside = Folder::open(stage)?;
+    let roots: Vec<String> = manifest.roots().cloned().collect();
+    let journal = |step| -> io::Result<()> {
+        crate::servers::shim::write_json(
+            &stage.join(JOURNAL),
+            &Journal {
+                v: 1,
+                roots: roots.clone(),
+                step,
+            },
+        )
+    };
+    let result = (|| -> Result<(), Error> {
+        journal(Step::Aside)?;
+        for path in &roots {
+            if folder.exists(path) {
+                folder.move_to(path, &aside, &format!("old/{path}"))?;
+            }
+        }
+        journal(Step::Unpack)?;
         for (index, (path, is_dir)) in entries.iter().enumerate() {
             if path == MANIFEST {
                 continue;
             }
-            let target = format!("{new}/{path}");
             if *is_dir {
-                folder.create_dir_all(&target)?;
+                folder.create_dir_all(path)?;
             } else {
-                folder.write(&target, &mut archive.by_index(index)?)?;
+                folder.write(path, &mut archive.by_index(index)?)?;
             }
         }
+        journal(Step::Done)?;
         Ok(())
     })();
-    if let Err(error) = unpacked {
-        let _ = folder.remove(&stage);
-        return Err(error);
+    // Windows cannot remove a folder that is open.
+    drop(aside);
+    match result {
+        Ok(()) => {
+            if let Err(error) = std::fs::remove_dir_all(stage) {
+                warn!(stage = %stage.display(), %error, "could not remove a finished restore's folder");
+            }
+            Ok(())
+        }
+        Err(error) => {
+            if let Err(undo_error) = undo(folder, stage) {
+                warn!(stage = %stage.display(), error = %undo_error, "could not put back what a failed restore moved aside");
+            }
+            Err(error)
+        }
     }
+}
 
-    // Each move done so far, to undo in reverse: (from, to).
-    let mut moved: Vec<(String, String)> = Vec::new();
-    let swapped = (|| -> io::Result<()> {
-        for path in manifest.roots() {
-            if folder.exists(path) {
-                let aside = format!("{old}/{path}");
-                folder.rename(path, &aside)?;
-                moved.push((path.clone(), aside));
+/// Put back what the restore in `stage` moved aside, by its journal, and remove `stage`. Run on
+/// a restore that failed, and on start for one a stopped Core left midway. `stage` is kept when
+/// this fails.
+fn undo(folder: &Folder, stage: &Path) -> Result<(), Error> {
+    let journal: Journal = match std::fs::read(stage.join(JOURNAL)) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
+            Error::Conflict(format!(
+                "The restore's journal is unreadable: {error}"
+            ))
+        })?,
+        // Stopped before the journal: nothing was moved.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            std::fs::remove_dir_all(stage)?;
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if journal.step != Step::Done {
+        let aside = Folder::open(stage)?;
+        for path in &journal.roots {
+            let kept = format!("old/{path}");
+            // While unpacking, what is at a root is the backup's, or a part of it.
+            if journal.step == Step::Unpack {
+                folder.remove(path)?;
             }
-            let restored = format!("{new}/{path}");
-            if folder.exists(&restored) {
-                folder.rename(&restored, path)?;
-                moved.push((restored, path.clone()));
+            if aside.exists(&kept) {
+                aside.move_to(&kept, folder, path)?;
             }
         }
-        Ok(())
-    })();
-    if let Err(error) = swapped {
-        let undone = moved
-            .iter()
-            .rev()
-            .all(|(from, to)| folder.rename(to, from).is_ok());
-        if undone {
-            let _ = folder.remove(&stage);
-        } else {
-            warn!(stage = %stage, "a restore failed and could not put everything back; the old files are in its folder");
-        }
-        return Err(error.into());
     }
-    folder.remove(&stage)?;
+    std::fs::remove_dir_all(stage)?;
     Ok(())
 }
 

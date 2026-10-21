@@ -280,15 +280,21 @@ async fn backed_up(setup: &Setup) -> String {
     id
 }
 
-/// Whether a restore left its folder behind.
-fn restore_left_behind(dir: &Path) -> bool {
-    std::fs::read_dir(dir).unwrap().any(|entry| {
-        entry
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".copal-restore-")
-    })
+/// Whether a restore left its folder behind, or anything of it in the server folder.
+fn restore_left_behind(setup: &Setup) -> bool {
+    let named = |dir: PathBuf, prefix: &str| {
+        std::fs::read_dir(dir).is_ok_and(|mut entries| {
+            entries.any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(prefix)
+            })
+        })
+    };
+    named(setup.paths.backups().join(&setup.server), "restore-")
+        || named(setup.paths.server(&setup.server), ".copal-restore-")
 }
 
 #[tokio::test]
@@ -321,7 +327,7 @@ async fn a_damaged_backup_changes_nothing_when_restored() {
         std::fs::read_to_string(dir.join("world/region/r.0.0.mca")).unwrap(),
         "chunks"
     );
-    assert!(!restore_left_behind(&dir));
+    assert!(!restore_left_behind(&setup));
 }
 
 #[tokio::test]
@@ -357,7 +363,7 @@ async fn a_restore_replaces_only_the_worlds_and_settings_it_names() {
     assert!(!dir.join("config/world_nether").exists());
     // The world folder of the old name is not the backup's to touch.
     assert!(dir.join("world/level.dat").exists());
-    assert!(!restore_left_behind(&dir));
+    assert!(!restore_left_behind(&setup));
 }
 
 #[tokio::test]
@@ -502,4 +508,78 @@ fn a_manifest_naming_a_root_twice_is_refused() {
             "{worlds:?} {settings:?}"
         );
     }
+}
+
+/// A restore folder as a Core that stopped at `step` left it: the world moved aside, and while
+/// unpacking, part of the backup's world in its place.
+fn interrupted(setup: &Setup, step: Step) -> PathBuf {
+    let server = Folder::open(&setup.paths.server(&setup.server)).unwrap();
+    let stage = setup
+        .paths
+        .backups()
+        .join(&setup.server)
+        .join("restore-interrupted");
+    std::fs::create_dir_all(&stage).unwrap();
+    let aside = Folder::open(&stage).unwrap();
+    server.move_to("world", &aside, "old/world").unwrap();
+    // By the time it unpacks, every root that existed is aside.
+    if step == Step::Unpack {
+        server
+            .move_to("server.properties", &aside, "old/server.properties")
+            .unwrap();
+        server.write("world/level.dat", &mut &b"half"[..]).unwrap();
+    }
+    drop(aside);
+    crate::servers::shim::write_json(
+        &stage.join(JOURNAL),
+        &Journal {
+            v: 1,
+            roots: vec![
+                "world".into(),
+                "world_nether".into(),
+                "world_the_end".into(),
+                "server.properties".into(),
+            ],
+            step,
+        },
+    )
+    .unwrap();
+    stage
+}
+
+#[tokio::test]
+async fn a_restore_core_stopped_during_is_undone_before_the_server_can_start() {
+    for step in [Step::Aside, Step::Unpack] {
+        let setup = setup().await;
+        let stage = interrupted(&setup, step);
+        setup.backups.recover_restores().await;
+        let dir = setup.paths.server(&setup.server);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("world").join("level.dat"))
+                .unwrap(),
+            "level",
+            "{step:?}"
+        );
+        assert!(dir.join("world/region/r.0.0.mca").exists(), "{step:?}");
+        // A root the restore had not reached is left as it was.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("server.properties")).unwrap(),
+            "motd=Hi\n"
+        );
+        assert!(!stage.exists(), "{step:?}");
+        // Nothing holds the server any more.
+        assert!(setup.backups.stuck.lock().unwrap().is_empty());
+        drop(setup.backups.servers.hold(&setup.server).unwrap());
+    }
+}
+
+#[tokio::test]
+async fn a_restore_that_cannot_be_undone_keeps_its_server_stopped() {
+    let setup = setup().await;
+    let stage = interrupted(&setup, Step::Unpack);
+    std::fs::write(stage.join(JOURNAL), "not a journal").unwrap();
+    setup.backups.recover_restores().await;
+    assert!(stage.join("old/world/level.dat").exists());
+    assert_eq!(setup.backups.stuck.lock().unwrap().len(), 1);
+    assert!(setup.backups.servers.hold(&setup.server).is_err());
 }
