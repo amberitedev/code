@@ -8,7 +8,8 @@
 //! `GET|PUT /servers/{id}/backups/schedule` and `.../backups/{bid}/download/authorize`.
 //!
 //! Viewers see the list and the schedule. Editors create backups, download them and the world,
-//! and set the schedule. Restoring and deleting are the owner's, with a fresh ticket.
+//! and set the schedule. Restoring and deleting are the owner's, with a fresh ticket, and so is
+//! keeping fewer scheduled backups, which deletes the oldest at the next one.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -16,7 +17,7 @@ use axum::{
     Json,
     body::Body,
     extract::{Path, Query, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
@@ -710,11 +711,14 @@ pub async fn get_schedule(
 }
 
 /// `PUT /servers/{id}/backups/schedule`: at most every hour and at least monthly, keeping 1 to
-/// 100; an interval of 0 turns scheduled backups off.
+/// 100; an interval of 0 turns scheduled backups off. Editors set it; keeping fewer than now is
+/// the owner's, with a fresh ticket, since the next scheduled backup then deletes the oldest,
+/// as deleting them by hand would need.
 pub async fn set_schedule(
     caller: Caller,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<BackupSchedule>,
 ) -> Result<Json<BackupSchedule>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -727,6 +731,12 @@ pub async fn set_schedule(
     servers_records::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let current = records::schedule(&state.db, &id).await?;
+    let caller = if body.keep < current.keep {
+        Dangerous::check(&state, caller, &headers).await?.0
+    } else {
+        caller
+    };
     records::set_schedule(
         &state.db,
         &id,
