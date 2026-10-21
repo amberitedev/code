@@ -19,7 +19,7 @@ Fixed on `core-10-e2e`:
 
 1. **Java could not be installed on Linux arm64, so no server could be created there.** Core asked
    Azul for a ZIP JRE, and Azul publishes none for Linux arm64 (only tar.gz). `copal servers
-   create` failed with "No Java 21 runtime available for this platform". Linux and macOS now ask
+create` failed with "No Java 21 runtime available for this platform". Linux and macOS now ask
    for the tar.gz package with `crac_supported=false` (without it Azul answers with a CRaC build)
    and unpack it with `tar`/`flate2`; Windows keeps the ZIP. Java 21 then installed in 7 s and ran
    as `copal-servers`. `src/installs/java.rs`.
@@ -32,45 +32,43 @@ Fixed on `core-10-e2e`:
    Verified on mc: a world with a 0600 `level.dat` owned by `copal-servers` came out 0660
    `copal:copal-servers` and the server started. `src/daemon/folders.rs`, with a test.
 3. **Every CLI error printed color-eyre's source location and backtrace hint** (`Location:
-   apps/core/src/cli/client.rs:97`, `Backtrace omitted. Run with RUST_BACKTRACE=1`). Errors now
+apps/core/src/cli/client.rs:97`, `Backtrace omitted. Run with RUST_BACKTRACE=1`). Errors now
    print as one line: `Error: there is no server nope. See copal servers list`. `src/main.rs`.
 4. **An account other than the owner got only "Broken pipe (os error 32)".** Core drops such
    connections without a word, which is right, but the CLI did not say why. It now says "Core
    closed the connection without answering. Only the account that installed Copal may use the
    copal CLI". `src/cli/client.rs`.
 
-Open (not fixed, for a decision):
+Found here, decided by the owner, and fixed on `core-10-e2e`:
 
-5. **New servers can be given a port another program is using.** `records::create`
-   (`src/servers/records.rs:64`) takes the lowest port in 25565-25664 that no Copal server has,
-   without checking the machine. The second server on mc got 25566, the live NeoForge server's
-   port. Starting it would fail to bind (no harm to the other server, but a confusing failure). A
-   bind check at create, or at start with a clear error, would close it.
-6. **A failed create leaves a server the CLI cannot fix or remove.** `copal servers create`
-   (`src/cli/servers.rs:113`) creates the record, then installs; when the install fails the
-   server stays with nothing installed, `copal servers start` says "nothing is installed on this
-   server yet", and the CLI has neither a reinstall nor a delete. The local API has both
-   (`POST /modrinth/v0/servers/{id}/reinstall`, `DELETE /local/servers/{id}`), used here with
-   curl. Either create removes the record when its install fails, or the CLI gets `servers
-   delete`.
-7. **`copal status` still offers an update that just failed.** After 0.3.0 failed its trial,
-   status printed both "Copal 0.3.0 is available: copal update apply" and "The update to 0.3.0
-   did not start, so Core went back to 0.2.0" (`src/cli/machine.rs:62-73`). The second line is
-   also slightly wrong: 0.3.0 started and served, it did not prove healthy within a minute.
-8. **A killed run shows as "stopped" in the CLI.** Core records the outcome correctly (`outcome=
-   Killed exit_code=137` in its log, `ended_by: kill` in `runs/<id>/status.json`), but `servers
-   list` shows `stopped`, because the Modrinth power states have no "killed". Crashed runs do show
-   `crashed`. Fine if the App shows the outcome elsewhere.
-9. **`sudo copal ...` is refused like any other account.** Only the owner's uid and `copal` may
-   open the socket (`src/access/local.rs:69`), so root cannot use the CLI either. That matches
-   the plan; noted because an admin will try `sudo copal status` first.
+5. **New servers could be given a port another program is using.** `records::create` took the
+   lowest port in 25565-25664 that no Copal server had, without checking the machine, so the
+   second server on mc got 25566, the live NeoForge server's port. Creating a server now also
+   skips every port in the range that this machine will not let Core bind: TCP and UDP, on IPv4
+   and (where the machine has it) IPv6, because Minecraft listens on all of them.
+   `src/servers/records.rs`, with tests.
+6. **A failed create left a server the CLI could not fix or remove.** The record stayed with
+   nothing installed, and the CLI had no delete (the local API's `DELETE /local/servers/{id}`
+   worked with curl). There is now `copal servers delete <server>`, and a failed `servers create`
+   exits non-zero with "Created server <id>, but installing Minecraft <version> failed:
+   <error>" and the delete command to run. `src/cli/servers.rs`.
+7. **`copal status` offered an update that had just failed, and said it "did not start".** The
+   launcher now records how a trial failed (`failed_reason` in `versions/state.json`: never
+   started, exited before it answered, or no answer within a minute; older launchers leave it
+   out). `/update` reports it, `update_available` is false for the release that failed, and
+   `copal update apply` (and auto-update) refuse it unless the owner passes `--retry`. Status
+   says "Copal 0.3.0 was tried and rolled back: it started, but did not answer within a minute",
+   and how to retry. `src/update/`, `src/api/update.rs`, `src/cli/machine.rs`.
+8. **A killed run showed as "stopped".** Core recorded it correctly; the Core-only
+   `power_state` now has `killed` too, and `servers list` shows it. `src/api/servers.rs`,
+   `packages/api-client` types.
+9. **`sudo copal ...` is refused like any other account.** Kept, as the plan says. When the
+   refused CLI runs under sudo (`SUDO_USER` set), it now says to run it again without sudo, as
+   the account that installed Copal. `src/cli/client.rs`.
 10. **When Core itself crashes, the whole service restarts.** A SIGKILLed `copal core` makes the
     launcher exit, and systemd starts it again after `RestartSec=5`; Core was back and had
-    adopted the server 19 s later. The plan only promises restarts for `RESTART` exits, so this
-    is as designed; restarting Core inside the launcher would make it faster.
-11. **The installed program is mode 0775** (`/usr/local/lib/copal/copal`, root:root), copied
-    with the build's mode. Only root is in group root here, so it does not matter in practice;
-    0755 would be tidier (`install_binary`, `src/daemon/install.rs:293`).
+    adopted the server 19 s later. As designed; left as is.
+11. **The installed program was mode 0775**, copied with the build's mode. Install now sets 0755. `src/daemon/install.rs`.
 
 Everything else in the phase worked as the plan says. The details are in the log below.
 
@@ -119,7 +117,7 @@ Service: systemd unit copal.service enabled and started
 - `id`: `copal` 996 (also in group `copal-servers`), `copal-servers` 997. `getent passwd`: home
   `/nonexistent`, shell `/usr/sbin/nologin`; `getent shadow`: password `!` for both.
 - `systemctl status copal`: active, `copal run` (launcher) with child `copal core`. Unit: `User=
-  copal`, `KillMode=process`, `Restart=always`, `RestartSec=5`, `UMask=0027`.
+copal`, `KillMode=process`, `Restart=always`, `RestartSec=5`, `UMask=0027`.
 - `ls -la /var/lib/copal`: root 755 `copal:copal`; `db backups versions sockets runs logs` 700
   `copal:copal`; `servers meta java` 2750 `copal:copal-servers`; `copal.sock` 0666 (access is
   checked by peer uid). `db/`: `copal.db` 0640, `install.toml` and `tls-key.der` 0600.
@@ -161,16 +159,16 @@ run` (copal) → `copal core` (copal) → `copal shim --data-dir /var/lib/copal 
 
 **Isolation (05:06), as `copal-servers`.**
 
-| Attempt                                                | Result  |
-| ------------------------------------------------------ | ------- |
-| `cat db/copal.db`, `ls db/`                            | denied  |
-| `ls backups/`, `ls versions/`, `ls runs/`, `ls sockets/` | denied  |
-| `cat runs/<id>/console.log`                            | denied  |
-| connect `sockets/<id>.sock` (its own server's)         | denied (EACCES) |
-| connect `copal.sock`                                   | reset by Core |
-| `ls meta/`                                             | allowed |
-| `touch meta/x`, `touch java/x`, `touch servers/x`      | denied  |
-| `touch servers/<id>/probe`                             | allowed |
+| Attempt                                                                                       | Result            |
+| --------------------------------------------------------------------------------------------- | ----------------- |
+| `cat db/copal.db`, `ls db/`                                                                   | denied            |
+| `ls backups/`, `ls versions/`, `ls runs/`, `ls sockets/`                                      | denied            |
+| `cat runs/<id>/console.log`                                                                   | denied            |
+| connect `sockets/<id>.sock` (its own server's)                                                | denied (EACCES)   |
+| connect `copal.sock`                                                                          | reset by Core     |
+| `ls meta/`                                                                                    | allowed           |
+| `touch meta/x`, `touch java/x`, `touch servers/x`                                             | denied            |
+| `touch servers/<id>/probe`                                                                    | allowed           |
 | `sudo -n true` as `copal-servers`; `sudo -n -u root` or `-u copal-servers /bin/sh` as `copal` | password required |
 
 **Second server (05:06).** `copal servers create beta --version 1.21.1` → created on **port
@@ -278,6 +276,30 @@ Data folder: removed /var/lib/copal
 `/usr/local/lib/copal`, `/var/lib/copal`. No processes left under uid 996 or 997. `ufw status
 verbose` and `ufw show added` are identical to before install. Listening sockets are identical to
 the baseline once the release server was stopped. The NeoForge server is still on pid 1824701.
+**Fixes 5 to 11 on mc (12:02).** Release build of `core-10-e2e` at `c2f8c4d` (2 min 1 s), clippy
+clean, `cargo test -p copal`: 114 passed. `sudo rel/copal-pr install`; `stat` on
+`/usr/local/lib/copal/copal` → `755 root:root`.
+
+- `copal eula --accept`, run straight after install, failed with "Core is not running ... No
+  such file or directory": the service had started but not yet opened its socket. A second later
+  it answered. The error also printed its cause twice, which is fixed in `src/cli/client.rs`.
+- `sudo copal logs` → "Only the account that installed Copal may use the copal CLI, and not
+  through sudo: run it again without sudo, as that account (was it ubuntu?)".
+- `copal servers create one` → port 25565. `create two` → **port 25567**: 25566, the NeoForge
+  server's, was skipped.
+- `copal servers create broken --version 9.9.9` → exit 1 with "Created server 41ba8868-…, but
+  installing Minecraft 9.9.9 failed: meta: unknown game version: 9.9.9: unknown game version:
+  9.9.9" and "Delete it with: copal servers delete 41ba8868-…". (The doubled cause comes from
+  Core's own error text for the install, not the CLI.)
+- `copal servers delete broken` → "Deleted broken (41ba8868-…)", exit 0; `delete two` the same.
+- `copal servers start one`, then `kill one` after 20 s → "one is killed"; `servers list` shows
+  `killed`, and `--json` gives `"power_state": "killed"`.
+- `sudo copal uninstall --remove-data`: accounts, folders, and program gone; `ufw status
+verbose` and the listening sockets are identical to the baseline; NeoForge still on pid 1824701.
+
+The update fixes (7) are covered by tests rather than a second signed-release run: the launcher
+records the reason, `/update` reports it, and a failed release is neither offered nor applied
+without `retry`.
 
 **Left on mc for phase 2:** `/home/ubuntu/copal-e2e` (clone, target dir, minisign and the
 throwaway key, publish script; 2.6 GB) and `~/.cargo/registry` (302 MB). They are removed at the
