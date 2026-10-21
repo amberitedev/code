@@ -455,10 +455,25 @@ impl From<sqlx::Error> for ApiError {
 
 // Every route below checks the caller's role on the server, or that they own the Core.
 
-/// What the hosting API shows for a server row.
+/// The Modrinth scope bits a level reads as (`serverPermissionBits` in `@modrinth/ui`), so the
+/// App shows each role only what it may do. The owner is `SERVER_ADMIN`; editors read, power,
+/// console, files, setup, backups, and advanced settings; viewers read. Every value survives JSON
+/// as a JavaScript number, which `u64::MAX` does not: it reads as 2^64, no bits at all.
+fn permissions(level: Level) -> u64 {
+    const BASE_READ: u64 = 1 << 63;
+    match level {
+        Level::Owner => !0 << 15,
+        // BASE_READ down to ADVANCED, bits 63 to 57.
+        Level::Editor => 0b111_1111 << 57,
+        Level::Viewer => BASE_READ,
+    }
+}
+
+/// What the hosting API shows for a server row, to a caller with `level` on it.
 async fn server(
     state: &AppState,
     row: records::ServerRow,
+    level: Level,
 ) -> Result<Server, ApiError> {
     let power_state = match state.servers.phase(&row.id) {
         Some(Phase::Starting) => ServerPowerState::Starting,
@@ -509,7 +524,7 @@ async fn server(
         node: None,
         flows: Flows { intro: false },
         is_medal: false,
-        current_user_permissions: u64::MAX,
+        current_user_permissions: permissions(level),
         locked_since: None,
         linked_instance: None,
         power_state: Some(power_state),
@@ -537,8 +552,8 @@ pub async fn list(
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
     for row in records::list(&state.db).await? {
-        if caller.level(&state.db, &row.id).await?.is_some() {
-            servers.push(server(&state, row).await?);
+        if let Some(level) = caller.level(&state.db, &row.id).await? {
+            servers.push(server(&state, row, level).await?);
         }
     }
     let count = servers.len() as u32;
@@ -560,11 +575,11 @@ pub async fn get(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    let level = caller.require(&state.db, &id, Level::Viewer).await?;
     let row = records::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
-    Ok(Json(server(&state, row).await?))
+    Ok(Json(server(&state, row, level).await?))
 }
 
 /// `POST /local/servers`: an unconfigured server. Linked instances are step 4. Owner only.

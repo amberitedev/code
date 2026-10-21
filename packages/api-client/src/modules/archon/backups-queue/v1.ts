@@ -73,6 +73,8 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 				api: 'archon',
 				version: 1,
 				method: 'DELETE',
+				// On a Core, deleting a backup takes a fresh ticket: backups are what undo damage.
+				dangerous: true,
 			},
 		)
 	}
@@ -86,6 +88,7 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 				version: 1,
 				method: 'POST',
 				body: { backup_ids: backupIds } satisfies Archon.BackupsQueue.v1.DeleteManyBackupRequest,
+				dangerous: true,
 			},
 		)
 	}

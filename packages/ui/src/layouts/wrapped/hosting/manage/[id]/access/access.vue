@@ -262,7 +262,8 @@ const members = computed<ServerAccessMember[]>(() =>
 				},
 				role,
 				joinedAt: serverUser.added_on ?? null,
-				pending: !serverUser.added_on,
+				// A Core grants access with the invite: nobody there is ever pending.
+				pending: !client.selfHostedHosting && !serverUser.added_on,
 				inviteResendAvailableAt: reinviteAvailableAt
 					? new Date(reinviteAvailableAt).toISOString()
 					: undefined,

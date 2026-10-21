@@ -121,6 +121,15 @@ export class CopalAccessV1Module extends AbstractModule {
 	}
 
 	/**
+	 * Give up your own role on a server. No ticket: it only takes away what this device's session
+	 * could do. Every session you have on the Core ends; the App signs in again for what is left.
+	 */
+	public async leave(coreId: string, serverId: string): Promise<void> {
+		const { user } = await this.me(coreId)
+		await this.core(coreId, member(serverId, user.id), { method: 'DELETE' })
+	}
+
+	/**
 	 * Tell the Core it is being removed from its account: it ends every session and shows a new
 	 * pairing code. Owner only. `archon.cores_v1.revoke` calls this before the backend forgets the
 	 * Core.
