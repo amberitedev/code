@@ -33,7 +33,7 @@ pub struct Java {
     pub waiter: Waiter,
 }
 
-pub use platform::{Killer, Waiter, share_with_core, spawn};
+pub use platform::{Killer, Waiter, remove_as_servers, share_with_core, spawn};
 
 #[cfg(unix)]
 mod platform {
@@ -81,6 +81,28 @@ mod platform {
             "could not let Core read {}: {}",
             dir.display(),
             reason.join("; ")
+        )))
+    }
+
+    /// Remove `path` and everything in it as `copal-servers`, for what a server's account wrote
+    /// in folders only it may change, such as an installer's temporary files.
+    pub fn remove_as_servers(path: &std::path::Path) -> io::Result<()> {
+        let output = as_servers()
+            .args(["rm", "-rf", "--"])
+            .arg(path)
+            .stdin(Stdio::null())
+            .output()?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(io::Error::other(format!(
+            "could not remove {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .filter(|line| !line.starts_with("copal-pid "))
+                .collect::<Vec<_>>()
+                .join("; ")
         )))
     }
 
@@ -223,6 +245,14 @@ mod platform {
     /// let Core read it.
     pub fn share_with_core(_dir: &Path) -> io::Result<()> {
         Ok(())
+    }
+
+    /// Never needed on Windows, where Core may remove what servers write.
+    pub fn remove_as_servers(path: &Path) -> io::Result<()> {
+        Err(io::Error::other(format!(
+            "could not remove {}",
+            path.display()
+        )))
     }
 
     use std::{
