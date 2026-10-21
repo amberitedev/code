@@ -39,7 +39,7 @@ use super::{
 use crate::{
     access::{Caller, Level, activity, now},
     content::{
-        addons,
+        Busy, addons,
         archive::{self, ArchiveError},
         folder::{self, Folder},
         pack,
@@ -384,6 +384,16 @@ fn folder(state: &AppState, id: &str) -> Result<Arc<Folder>, ApiError> {
     Ok(Arc::new(Folder::open(&state.servers.paths().server(id))?))
 }
 
+/// The folder, taken for a change: the same lock installs hold, so an edit never lands between
+/// an install's plan and its writes. Hold the lock until the change is done.
+fn changing(
+    state: &AppState,
+    id: &str,
+) -> Result<(Arc<Folder>, Busy), ApiError> {
+    let busy = state.content.busy(id)?;
+    Ok((folder(state, id)?, busy))
+}
+
 /// A path the App sent, checked. `None` is the server folder itself.
 fn api_path(path: &str) -> Result<Option<String>, ApiError> {
     folder::from_api(path).map_err(|error| {
@@ -603,6 +613,30 @@ async fn place(
     result
 }
 
+/// Take the folder for a change and write a staged file into it; the staged file is removed
+/// either way. `owned` lets it replace a server-owned file.
+async fn place_changing(
+    state: &AppState,
+    id: &str,
+    path: String,
+    staged: PathBuf,
+    owned: bool,
+) -> Result<(), ApiError> {
+    let taken = changing(state, id).and_then(|(folder, busy)| {
+        if !owned {
+            refuse_owned(&folder, &path)?;
+        }
+        Ok((folder, busy))
+    });
+    match taken {
+        Ok((folder, _busy)) => place(folder, path, staged).await,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&staged).await;
+            Err(error)
+        }
+    }
+}
+
 /// Refuse to replace a server-owned file that exists.
 fn refuse_owned(folder: &Folder, path: &str) -> Result<(), ApiError> {
     if folder::is_server_owned(path, &folder.level_name())
@@ -629,15 +663,14 @@ pub async fn create(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let path = inner_path(&query.path)?;
-    let folder = folder(&state, &id)?;
     match query.kind {
         CreateKind::Directory => {
+            let (folder, _busy) = changing(&state, &id)?;
             blocking(move || Ok(folder.create_dir_all(&path)?)).await?;
         }
         CreateKind::File => {
-            refuse_owned(&folder, &path)?;
             let staged = stage_body(&state, &id, body).await?;
-            place(folder, path, staged).await?;
+            place_changing(&state, &id, path, staged, false).await?;
         }
     }
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
@@ -655,9 +688,8 @@ pub async fn update(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let path = inner_path(&query.path)?;
-    let folder = folder(&state, &id)?;
     let staged = stage_body(&state, &id, body).await?;
-    place(folder, path, staged).await?;
+    place_changing(&state, &id, path, staged, true).await?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -672,7 +704,7 @@ pub async fn rename(
     caller.require(&state.db, &id, Level::Editor).await?;
     let from = inner_path(&request.source)?;
     let to = inner_path(&request.destination)?;
-    let folder = folder(&state, &id)?;
+    let (folder, _busy) = changing(&state, &id)?;
     blocking(move || {
         if !folder.exists(&from) {
             return Err(not_found(&from));
@@ -699,7 +731,7 @@ pub async fn delete(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let path = inner_path(&query.path)?;
-    let folder = folder(&state, &id)?;
+    let (folder, _busy) = changing(&state, &id)?;
     blocking(move || {
         let meta = folder.metadata(&path).map_err(|_| not_found(&path))?;
         if meta.is_dir() && !query.recursive {
@@ -732,7 +764,7 @@ pub async fn unarchive(
     caller.require(&state.db, &id, Level::Editor).await?;
     let source = inner_path(&query.src)?;
     let target = api_path(&query.trg)?;
-    let folder = folder(&state, &id)?;
+    let (folder, _busy) = changing(&state, &id)?;
     let result = blocking(move || {
         let file = folder
             .open_file(&source)
@@ -911,7 +943,7 @@ pub async fn zip(
             (api_path(&parent)?, include, inner_path(&target)?)
         }
     };
-    let folder = folder(&state, &id)?;
+    let (folder, _busy) = changing(&state, &id)?;
     refuse_owned(&folder, &target)?;
     let staged = state
         .servers
@@ -1169,7 +1201,7 @@ pub async fn finalize_session(
     let result = async {
         match scope {
             UploadScope::Files => {
-                let folder = folder(&state, &id)?;
+                let (folder, _busy) = changing(&state, &id)?;
                 for (name, _) in &files {
                     refuse_owned(&folder, &inner_path(name)?)?;
                 }
