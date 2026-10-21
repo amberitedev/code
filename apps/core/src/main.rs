@@ -50,7 +50,9 @@ fn main() -> ExitCode {
             if json {
                 println!("{}", cli::json_for(&error));
             } else {
-                eprintln!("Error: {error:?}");
+                // The message and its causes on one line, without color-eyre's source location
+                // and backtrace hint, which mean nothing to someone running the CLI.
+                eprintln!("Error: {error:#}");
             }
             ExitCode::FAILURE
         }

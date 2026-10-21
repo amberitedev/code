@@ -22,7 +22,7 @@ use color_eyre::eyre::{Result, WrapErr};
 use tokio::process::{Child, Command};
 use tracing::{error, info, warn};
 
-use super::versions;
+use super::versions::{self, FailedTrial};
 use crate::daemon::paths::Paths;
 
 /// The exit code with which Core asks to be started again, now as the active version.
@@ -97,13 +97,19 @@ pub async fn run(
             {
                 passed(paths)?;
             } else {
+                let reason = if exited.is_some() {
+                    FailedTrial::Exited
+                } else {
+                    FailedTrial::NoAnswer
+                };
                 error!(
                     version,
-                    "the new version did not answer within a minute; going back to the previous one"
+                    "the new version {}; going back to the previous one",
+                    reason.describe()
                 );
                 drop(stdin);
                 let _ = child.kill().await;
-                fail(paths)?;
+                fail(paths, reason)?;
                 continue;
             }
         }
@@ -127,7 +133,7 @@ fn start(paths: &Paths, service: bool) -> Result<(Child, Option<String>)> {
                     %error,
                     "the new version would not start; going back to the previous one"
                 );
-                fail(paths)?;
+                fail(paths, FailedTrial::NotStarted)?;
             }
             Err(error) => {
                 return Err(error).wrap_err_with(|| {
@@ -229,7 +235,7 @@ fn passed(paths: &Paths) -> Result<()> {
 }
 
 /// The version on trial failed: put the database back and return to the previous version.
-fn fail(paths: &Paths) -> Result<()> {
+fn fail(paths: &Paths, reason: FailedTrial) -> Result<()> {
     let Some(state) = versions::load(paths)? else {
         return Ok(());
     };
@@ -242,7 +248,7 @@ fn fail(paths: &Paths) -> Result<()> {
             .wrap_err("could not put the database back")?;
     }
     let back = state
-        .failed_trial()
+        .failed_trial(reason)
         .filter(|back| versions::binary(paths, &back.active).exists());
     versions::save(paths, back.as_ref())?;
     Ok(())
@@ -384,7 +390,7 @@ mod tests {
         // A relaunch mid-trial must not copy the migrated database over the saved one.
         prepare(&paths).unwrap();
 
-        fail(&paths).unwrap();
+        fail(&paths, FailedTrial::Exited).unwrap();
         assert_eq!(
             std::fs::read_to_string(paths.database()).unwrap(),
             "0.1.0 schema"
@@ -392,6 +398,7 @@ mod tests {
         let state = versions::load(&paths).unwrap().unwrap();
         assert_eq!(state.active, "0.1.0");
         assert_eq!(state.failed.as_deref(), Some("0.2.0"));
+        assert_eq!(state.failed_reason, Some(FailedTrial::Exited));
         assert_eq!(prepare(&paths).unwrap().1, None);
     }
 }

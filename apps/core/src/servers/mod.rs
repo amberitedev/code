@@ -680,7 +680,7 @@ impl Servers {
         &self,
         name: &str,
     ) -> Result<records::ServerRow, ServerError> {
-        let server = records::create(&self.db, name)
+        let server = records::create(&self.db, name, records::port_free)
             .await?
             .ok_or(ServerError::NoPorts)?;
         crate::daemon::folders::create_server_folder(
@@ -927,7 +927,8 @@ mod tests {
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
         let db = db::memory().await;
-        let server = records::create(&db, "A").await.unwrap().unwrap();
+        let server =
+            records::create(&db, "A", |_| true).await.unwrap().unwrap();
         // The dead Core recorded the run and wrote the launch; its shim has not started yet.
         let now = chrono::Utc::now().timestamp();
         records::start_run(&db, &server.id, "late", now)
@@ -1005,7 +1006,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = records::create(&db, "A").await.unwrap().unwrap();
+        let server =
+            records::create(&db, "A", |_| true).await.unwrap().unwrap();
         let _shim = shim::try_lock(&paths, &server.id).unwrap().unwrap();
         std::fs::write(
             paths.run_record(&server.id),
@@ -1030,7 +1032,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = records::create(&db, "A").await.unwrap().unwrap();
+        let server =
+            records::create(&db, "A", |_| true).await.unwrap().unwrap();
         records::start_run(&db, &server.id, "killed", 1)
             .await
             .unwrap();

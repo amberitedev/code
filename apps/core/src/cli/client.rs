@@ -22,12 +22,29 @@ pub struct Refused(pub ApiError);
 
 /// Core could not be reached over the local socket.
 #[derive(Debug, thiserror::Error)]
+// `source` is printed as the cause by `{:#}`, so the message does not repeat it.
 #[error(
-    "Core is not running, or this account may not use it (could not open {path}): {source}"
+    "Core is not running, or this account may not use it (could not open {path})"
 )]
 pub struct Unreachable {
     path: String,
     source: std::io::Error,
+}
+
+/// What to say when Core drops the connection unanswered. That is how it refuses an account
+/// other than the owner's, root included, but a Core that stops mid-request looks the same, so
+/// the message says what Core does rather than claiming a refusal. Under `sudo` the way out is
+/// to run the command without it.
+fn refused_message() -> String {
+    let closed = "Core closed the connection without answering. It does that for every account but the one that installed Copal";
+    match std::env::var("SUDO_USER") {
+        Ok(user) if !user.is_empty() => format!(
+            "{closed}, root included: run it again without sudo, as that account (was it {user}?)"
+        ),
+        _ => format!(
+            "{closed}; if that is not this account, use that one. Otherwise see copal logs"
+        ),
+    }
 }
 
 /// One connection per request.
@@ -84,7 +101,12 @@ impl Client {
             .header(header::HOST, "copal")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Full::new(body))?;
-        let response = sender.send_request(request).await?;
+        // Core drops a connection from an account other than `copal` and the owner without a
+        // word, which reads here as a broken pipe or a closed connection.
+        let response = sender
+            .send_request(request)
+            .await
+            .wrap_err_with(refused_message)?;
         let status = response.status();
         let body = response.into_body().collect().await?.to_bytes();
         if status == axum::http::StatusCode::NOT_FOUND && body.is_empty() {

@@ -119,13 +119,50 @@ mod platform {
     /// Give everything inside `path` to `copal` and `group`. Data kept from an earlier install
     /// belongs to accounts that no longer exist. Links are skipped, never followed; install
     /// refuses to run while a server runs, so nothing swaps entries during the walk.
-    fn chown_tree(path: &Path, uid: u32, group: u32) -> Result<()> {
+    ///
+    /// With `group_writes` (`servers/`), the group also gets read and write on every entry.
+    /// Minecraft writes files such as `level.dat` as 0600, so once `copal` owns them the group
+    /// is the only way `copal-servers` can still open its own world.
+    ///
+    /// A file with more than one hard link is skipped too, and named in install's output. A
+    /// mod can hard-link a file it may read, such as one in `java/` or `meta/`, into its server
+    /// folder (where the OS allows it, as on macOS); changing that inode here would change the
+    /// shared file as well.
+    fn chown_tree(
+        path: &Path,
+        uid: u32,
+        group: u32,
+        group_writes: bool,
+    ) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
         for entry in
             walkdir::WalkDir::new(path).min_depth(1).follow_links(false)
         {
             let entry = entry?;
-            if !entry.path_is_symlink() {
-                lchown(entry.path(), Some(uid), Some(group))?;
+            if entry.path_is_symlink() {
+                continue;
+            }
+            let metadata = entry.metadata()?;
+            if metadata.is_file() && metadata.nlink() > 1 {
+                println!(
+                    "Data folder: left {} as it was, because it has other hard links",
+                    entry.path().display()
+                );
+                continue;
+            }
+            lchown(entry.path(), Some(uid), Some(group))?;
+            if group_writes {
+                let mode = metadata.permissions().mode() & 0o7777;
+                let group_mode = if entry.file_type().is_dir() {
+                    0o2070
+                } else {
+                    0o060
+                };
+                std::fs::set_permissions(
+                    entry.path(),
+                    std::fs::Permissions::from_mode(mode | group_mode),
+                )?;
             }
         }
         Ok(())
@@ -145,7 +182,70 @@ mod platform {
         };
         chown(path, Some(accounts.core.uid), Some(group))?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
-        chown_tree(path, accounts.core.uid, group)
+        chown_tree(
+            path,
+            accounts.core.uid,
+            group,
+            servers == ServersAccess::ReadWrite,
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::unix::fs::PermissionsExt;
+
+        use super::chown_tree;
+
+        #[test]
+        fn a_reinstall_leaves_server_files_open_to_the_group() {
+            let dir = tempfile::tempdir().unwrap();
+            let world = dir.path().join("world");
+            std::fs::create_dir(&world).unwrap();
+            let level = world.join("level.dat");
+            std::fs::write(&level, "").unwrap();
+            std::fs::set_permissions(
+                &level,
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o7777
+            };
+            let (uid, gid) = (
+                nix::unistd::getuid().as_raw(),
+                nix::unistd::getgid().as_raw(),
+            );
+            chown_tree(dir.path(), uid, gid, false).unwrap();
+            assert_eq!(mode(&level), 0o600);
+            chown_tree(dir.path(), uid, gid, true).unwrap();
+            assert_eq!(mode(&level), 0o660);
+            assert_eq!(mode(&world) & 0o2070, 0o2070);
+        }
+
+        #[test]
+        fn a_file_hard_linked_from_elsewhere_is_left_alone() {
+            // `shared` stands for a file in `java/` or `meta/` that a mod linked into its folder.
+            let outside = tempfile::tempdir().unwrap();
+            let shared = outside.path().join("shared");
+            std::fs::write(&shared, "").unwrap();
+            std::fs::set_permissions(
+                &shared,
+                std::fs::Permissions::from_mode(0o640),
+            )
+            .unwrap();
+            let server = tempfile::tempdir().unwrap();
+            std::fs::hard_link(&shared, server.path().join("linked")).unwrap();
+            chown_tree(
+                server.path(),
+                nix::unistd::getuid().as_raw(),
+                nix::unistd::getgid().as_raw(),
+                true,
+            )
+            .unwrap();
+            let mode = std::fs::metadata(&shared).unwrap().permissions().mode()
+                & 0o7777;
+            assert_eq!(mode, 0o640);
+        }
     }
 }
 

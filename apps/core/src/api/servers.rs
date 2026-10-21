@@ -146,7 +146,8 @@ pub struct Reachability {
     pub cause: Option<String>,
 }
 
-/// Mirrors the `power_state` union of Archon.Servers.v0.Server.
+/// Mirrors the Core-only `power_state` of Archon.Servers.v0.Server. `Offline`, `Crashed`, and
+/// `Killed` say how the last run ended: stopped (or never run), crashed, or force-killed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerPowerState {
@@ -155,6 +156,7 @@ pub enum ServerPowerState {
     Running,
     Stopping,
     Crashed,
+    Killed,
 }
 
 /// The App instance a server follows. Mirrors Archon.Servers.v0.LinkedInstance.
@@ -464,7 +466,8 @@ async fn server(
         Some(Phase::Installing) => ServerPowerState::Offline,
         None => match records::last_outcome(&state.db, &row.id).await? {
             Some(records::Outcome::Crashed) => ServerPowerState::Crashed,
-            _ => ServerPowerState::Offline,
+            Some(records::Outcome::Killed) => ServerPowerState::Killed,
+            Some(records::Outcome::Stopped) | None => ServerPowerState::Offline,
         },
     };
     let owner_id: Option<String> =

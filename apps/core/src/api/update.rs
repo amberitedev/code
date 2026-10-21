@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, activity, fresh_ticket},
-    update::{UpdateError, release::Channel},
+    update::{UpdateError, release::Channel, versions::FailedTrial},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -45,8 +45,11 @@ pub struct UpdateStatus {
     pub check_error: Option<String>,
     /// The version a rollback goes back to.
     pub previous: Option<String>,
-    /// The last version that failed to start and was rolled back from.
+    /// The last version that was tried here, failed its trial, and was rolled back from. While
+    /// it is the newest release, `update_available` is false and applying it needs `retry`.
     pub failed: Option<String>,
+    /// How `failed` failed. Null when an older launcher did not record it.
+    pub failed_reason: Option<FailedTrial>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
@@ -63,6 +66,10 @@ pub struct ApplyUpdate {
     #[serde(default)]
     #[ts(as = "Option<bool>", optional)]
     pub allow_downgrade: bool,
+    /// Install the channel's release even when it already failed its trial on this Core.
+    #[serde(default)]
+    #[ts(as = "Option<bool>", optional)]
+    pub retry: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -76,6 +83,7 @@ impl From<UpdateError> for ApiError {
         let code = match &error {
             UpdateError::Downgrade(..)
             | UpdateError::UpToDate(_)
+            | UpdateError::FailedBefore(..)
             | UpdateError::OnTrial
             | UpdateError::NothingToRollBackTo => ErrorCode::Conflict,
             UpdateError::DowngradeRemote => ErrorCode::Forbidden,
@@ -138,7 +146,7 @@ pub async fn apply(
     }
     let version = state
         .update
-        .apply(request.allow_downgrade)
+        .apply(request.allow_downgrade, request.retry)
         .await?
         .to_string();
     activity::log(
