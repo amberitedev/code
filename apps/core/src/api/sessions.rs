@@ -43,7 +43,7 @@ pub struct SignedIn {
     pub session: Session,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Session {
     /// Public id for listing and revoking. Not the token.
     pub id: String,

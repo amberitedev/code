@@ -43,7 +43,16 @@ pub const MAX_DIRECTORY: i64 = 1000;
 
 /// A role on one server. The owner has every role on every server and is never a member.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, sqlx::Type,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    TS,
+    sqlx::Type,
+    clap::ValueEnum,
 )]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
@@ -63,7 +72,7 @@ pub struct User {
     pub avatar_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Member {
     pub user: User,
     pub role: Role,
@@ -71,7 +80,7 @@ pub struct Member {
     pub added_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ServerAccess {
     /// Null until the Core is paired.
     pub owner: Option<User>,
@@ -85,7 +94,7 @@ pub struct Invite {
     pub role: Role,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ChangeRole {
     pub role: Role,
 }

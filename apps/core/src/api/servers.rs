@@ -430,6 +430,7 @@ impl From<ServerError> for ApiError {
             | ServerError::Starting
             | ServerError::Unmanaged
             | ServerError::NoPorts
+            | ServerError::Eula
             | ServerError::NotReady(_)
             | ServerError::Shim(_) => ErrorCode::Conflict,
             ServerError::StartFailed(_) | ServerError::Other(_) => {

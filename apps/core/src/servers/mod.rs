@@ -8,6 +8,7 @@ pub mod console;
 pub mod launch;
 pub mod process;
 pub mod records;
+pub mod restarts;
 pub mod shim;
 
 use std::{
@@ -55,6 +56,10 @@ pub enum ServerError {
     Unmanaged,
     #[error("Core is out of server ports")]
     NoPorts,
+    #[error(
+        "accept the Minecraft EULA (https://aka.ms/MinecraftEULA) first: copal eula --accept"
+    )]
+    Eula,
     #[error(transparent)]
     NotReady(#[from] launch::NotReady),
     #[error("{0}")]
@@ -92,6 +97,8 @@ pub struct Servers {
     live: Mutex<HashMap<String, Live>>,
     /// Servers held for deletion, which never start again. Only taken while `live` is held.
     deleted: Mutex<HashSet<String>>,
+    /// Servers killed while a restart waited for them to stop. The kill wins: they stay off.
+    killed: Mutex<HashSet<String>>,
 }
 
 /// How long a new shim may take to start Java.
@@ -114,6 +121,7 @@ impl Servers {
             http,
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
+            killed: Mutex::default(),
         });
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
@@ -358,6 +366,15 @@ impl Servers {
         server: &records::ServerRow,
     ) -> Result<(), ServerError> {
         let id = server.id.as_str();
+        if crate::api::eula::accepted_at(&self.db).await?.is_none() {
+            return Err(ServerError::Eula);
+        }
+        // The owner accepted for every server; `launch` writes `eula.txt` from the server's flag.
+        records::accept_eula(&self.db, id).await?;
+        let server = &records::ServerRow {
+            eula_accepted: true,
+            ..server.clone()
+        };
         let run_id = uuid::Uuid::new_v4().to_string();
         let launch = launch::prepare(&self.paths, &self.http, server, &run_id)
             .await
@@ -457,7 +474,13 @@ impl Servers {
 
     /// Kill the server's Java now.
     pub async fn kill(&self, id: &str) -> Result<(), ServerError> {
-        self.tell(id, Message::Kill).await
+        // Recorded first: a restart waiting on this server checks it the moment the shim exits.
+        self.killed.lock().expect("not poisoned").insert(id.into());
+        let sent = self.tell(id, Message::Kill).await;
+        if sent.is_err() {
+            self.killed.lock().expect("not poisoned").remove(id);
+        }
+        sent
     }
 
     /// A line for the server's console.
@@ -489,10 +512,15 @@ impl Servers {
     }
 
     /// Stop the server, wait for its shim to exit, and start it again.
+    /// A kill while it waits cancels the start.
     pub async fn restart(&self, id: &str) -> Result<(), ServerError> {
+        self.killed.lock().expect("not poisoned").remove(id);
         self.stop(id).await?;
         while self.phase(id).is_some() {
             tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        if self.killed.lock().expect("not poisoned").remove(id) {
+            return Ok(());
         }
         self.start(id).await
     }
@@ -589,7 +617,7 @@ mod tests {
         )
         .await
         .unwrap();
-        records::accept_eula(&servers.db, &server.id).await.unwrap();
+        crate::api::eula::accept(&servers.db).await.unwrap();
         // A mod points `tmp` at a store it may only read.
         let store = dir.path().join("java");
         std::fs::set_permissions(

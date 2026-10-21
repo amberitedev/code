@@ -19,7 +19,10 @@ CREATE TABLE core (
     -- The release channel the updater follows: 'stable', 'beta', or 'alpha'.
     update_channel TEXT NOT NULL DEFAULT 'stable' CHECK (update_channel IN ('stable', 'beta', 'alpha')),
     -- Install updates as they come out. Off: only when the owner asks.
-    auto_update INTEGER NOT NULL DEFAULT 1
+    auto_update INTEGER NOT NULL DEFAULT 1,
+    -- When the owner accepted the Minecraft EULA, once for every server. Null: not yet, and no
+    -- server starts.
+    eula_accepted_at INTEGER
 );
 
 -- The pairing code this Core is showing, shared by every copal process on this data folder. One row.
@@ -155,4 +158,16 @@ CREATE TABLE content_files (
     project_id TEXT,
     version_id TEXT,
     PRIMARY KEY (server_id, path)
+);
+
+-- When a server restarts by itself. A server without a row has the defaults: crash restart on,
+-- nothing scheduled, no smart restarts.
+CREATE TABLE restarts (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- Start the server again after a crash.
+    crash INTEGER NOT NULL DEFAULT 1,
+    -- JSON of `servers::restarts::Schedule`, null for none.
+    schedule TEXT,
+    -- Restart once nobody is online and the server has run this many hours. Null: off.
+    smart_after_hours INTEGER
 );

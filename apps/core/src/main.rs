@@ -13,81 +13,71 @@ mod network;
 mod servers;
 mod update;
 
-use std::path::PathBuf;
+use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, error::ErrorKind};
 
-/// Copal runs and manages Minecraft servers on this machine.
-#[derive(Parser)]
-#[command(name = "copal", version)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
+use cli::{Cli, Command};
+
+fn main() -> ExitCode {
+    // Read before parsing, so a command line clap refuses still answers in JSON.
+    let json = std::env::args_os().any(|arg| arg == "--json");
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if json
+                && !matches!(
+                    error.kind(),
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                ) =>
+        {
+            println!(
+                "{}",
+                cli::json_error(
+                    "invalid_arguments",
+                    error.render().to_string().trim()
+                )
+            );
+            return ExitCode::from(2);
+        }
+        Err(error) => error.exit(),
+    };
+    let _ = color_eyre::install();
+    match run(cli) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(error) => {
+            if json {
+                println!("{}", cli::json_for(&error));
+            } else {
+                eprintln!("Error: {error:?}");
+            }
+            ExitCode::FAILURE
+        }
+    }
 }
 
-#[derive(Subcommand)]
-enum Command {
-    /// Install Copal as a service on this machine. Run once, as admin.
-    Install {
-        /// The account that may use the copal CLI. Defaults to the one running install.
-        #[arg(long)]
-        owner: Option<String>,
-        /// Install this copal even when Core has updated itself to a newer version.
-        #[arg(long)]
-        allow_downgrade: bool,
-    },
-    /// Remove the service, the accounts, and the firewall rules. Run as admin.
-    Uninstall {
-        /// Also delete the data folder: every server, world, and backup.
-        #[arg(long)]
-        remove_data: bool,
-    },
-    /// Run Core in the foreground.
-    Run {
-        /// Set by the Windows service manager.
-        #[arg(long, hide = true)]
-        service: bool,
-    },
-    /// Core itself, as `copal run` starts it. Not for people.
-    #[command(hide = true)]
-    Core,
-    /// Show whether Core runs and what its servers are doing.
-    Status,
-    /// Create and control servers.
-    #[command(subcommand)]
-    Servers(cli::ServersCommand),
-    /// Supervise one run of a server. Core starts this; it is not for people.
-    #[command(hide = true)]
-    Shim {
-        #[arg(long)]
-        data_dir: PathBuf,
-        server: String,
-    },
-}
-
-fn main() -> color_eyre::Result<()> {
-    color_eyre::install()?;
+/// Run a command. False when it printed that it failed.
+fn run(Cli { json, command }: Cli) -> color_eyre::Result<bool> {
     let small_runtime = || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
     };
-    match Cli::parse().command {
+    match command {
         Command::Install {
             owner,
             allow_downgrade,
-        } => daemon::install::install(owner.as_deref(), allow_downgrade),
+        } => daemon::install::install(owner.as_deref(), allow_downgrade)
+            .map(|()| true),
         Command::Uninstall { remove_data } => {
-            daemon::install::uninstall(remove_data)
+            daemon::install::uninstall(remove_data).map(|()| true)
         }
-        Command::Run { service } => daemon::run(service),
-        Command::Core => daemon::core(),
-        Command::Status => small_runtime()?.block_on(cli::status()),
-        Command::Servers(command) => {
-            small_runtime()?.block_on(cli::servers(command))
-        }
-        Command::Shim { data_dir, server } => {
-            small_runtime()?.block_on(servers::shim::main(data_dir, server))
-        }
+        Command::Run { service } => daemon::run(service).map(|()| true),
+        Command::Core => daemon::core().map(|()| true),
+        Command::Shim { data_dir, server } => small_runtime()?
+            .block_on(servers::shim::main(data_dir, server))
+            .map(|()| true),
+        command => small_runtime()?.block_on(cli::run(command, json)),
     }
 }
