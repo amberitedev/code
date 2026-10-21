@@ -199,6 +199,14 @@ pub fn open_plain(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Err(error);
         }
+        // Java writes some files, such as `level.dat`, that only `copal-servers` may read. Say
+        // so, instead of calling them something other than a plain file.
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("Core may not read {path}"),
+            ));
+        }
         Err(error) if dir.symlink_metadata(name).is_ok() => {
             let _ = error;
             return Err(not_plain());
@@ -522,6 +530,26 @@ mod tests {
         );
         folder.remove("config").unwrap();
         assert!(!folder.exists("config"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_core_may_not_read_says_so() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root reads everything, so there is nothing to check.
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("world")).unwrap();
+        let level = dir.path().join("world/level.dat");
+        std::fs::write(&level, "").unwrap();
+        std::fs::set_permissions(&level, std::fs::Permissions::from_mode(0))
+            .unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        let error = folder.open_file("world/level.dat").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("may not read"));
     }
 
     #[cfg(unix)]
