@@ -60,8 +60,23 @@ impl std::fmt::Display for ModLoader {
     }
 }
 
+/// Whether `version` is plainly a version: letters, digits, dots, and dashes, starting with a
+/// letter or digit, with no `..`. Game and loader versions go into vendor URLs and store paths,
+/// so a value like `47.2.0?x=/../../pwn` must never reach either.
+pub fn plain_version(version: &str) -> bool {
+    !version.is_empty()
+        && version.len() <= 64
+        && version.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && !version.contains("..")
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
+    #[error("{0:?} is not a version")]
+    BadVersion(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -94,6 +109,12 @@ pub async fn install(
     verify: bool,
     progress: &(dyn Fn(f64) + Sync),
 ) -> Result<Option<String>, InstallError> {
+    if let Some(bad) = std::iter::once(game_version)
+        .chain(requested)
+        .find(|version| !plain_version(version))
+    {
+        return Err(InstallError::BadVersion(bad.to_owned()));
+    }
     let paths = servers.paths();
     let dirs = SharedDirs::new(paths.root());
     let target = ServerRow {

@@ -25,6 +25,17 @@ pub enum InstallerError {
         "the {0} installer finished but left nothing to start the server with"
     )]
     NoLaunch(ModLoader),
+    #[error("{0:?} is not a version")]
+    BadVersion(String),
+}
+
+/// `version`, unless it is not plainly one (see [`super::plain_version`]).
+fn checked(version: &str) -> Result<&str, InstallerError> {
+    if super::plain_version(version) {
+        Ok(version)
+    } else {
+        Err(InstallerError::BadVersion(version.to_owned()))
+    }
 }
 
 /// The loader version to install: `requested`, or the recommended (then latest) Forge build, or
@@ -38,7 +49,7 @@ pub async fn resolve(
     let requested =
         requested.filter(|version| !matches!(*version, "latest" | "stable"));
     if let Some(version) = requested {
-        return Ok(version.to_owned());
+        return Ok(checked(version)?.to_owned());
     }
     if loader == ModLoader::NeoForge {
         let manifest = meta::fetch_loader_manifest(http, "neo").await?;
@@ -78,6 +89,7 @@ pub async fn installer(
     game_version: &str,
     version: &str,
 ) -> Result<PathBuf, InstallerError> {
+    let (game_version, version) = (checked(game_version)?, checked(version)?);
     let (name, url) = match loader {
         ModLoader::NeoForge => {
             let name = format!("neoforge-{version}-installer.jar");
@@ -205,6 +217,31 @@ fn old_forge_jar(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_version_that_is_not_plainly_one_never_reaches_a_url_or_path() {
+        for good in [
+            "47.2.0",
+            "1.20.1-47.2.0",
+            "21.1.77",
+            "20.2.3-beta",
+            "24w14a",
+        ] {
+            assert_eq!(checked(good).unwrap(), good);
+        }
+        for bad in [
+            "47.2.0?x=/../../../../pwn",
+            "..",
+            "../47.2.0",
+            "47.2.0/../x",
+            r"47.2.0\x",
+            ".hidden",
+            "",
+            "47 2",
+        ] {
+            assert!(checked(bad).is_err(), "{bad}");
+        }
+    }
 
     fn names(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
