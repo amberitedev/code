@@ -431,6 +431,7 @@ impl From<ServerError> for ApiError {
             | ServerError::NotRunning
             | ServerError::Starting
             | ServerError::Installing
+            | ServerError::BackingUp
             | ServerError::Unmanaged
             | ServerError::NoPorts
             | ServerError::Eula

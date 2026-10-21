@@ -511,6 +511,8 @@ impl Backups {
                 ));
             }
         };
+        // Held from before the save until saving is on again.
+        let _copying = hot.then(|| self.servers.copying(server_id));
         let save = async {
             if hot {
                 self.hold_and_save(server_id).await.map(Some)

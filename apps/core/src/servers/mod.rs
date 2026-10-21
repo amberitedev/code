@@ -62,6 +62,10 @@ pub enum ServerError {
     #[error("the server is installing; it can start once that is done")]
     Installing,
     #[error(
+        "a backup is copying the server's world; stop or restart it once the backup is done"
+    )]
+    BackingUp,
+    #[error(
         "Core cannot reach this server's shim, so the server keeps running on its own. Stop it from the game, then start it again"
     )]
     Unmanaged,
@@ -110,6 +114,26 @@ pub struct Servers {
     deleted: Mutex<HashSet<String>>,
     /// Servers killed while a restart waited for them to stop. The kill wins: they stay off.
     killed: Mutex<HashSet<String>>,
+    /// Running servers a hot backup is copying (see [`Servers::copying`]).
+    copying: Mutex<HashSet<String>>,
+}
+
+/// A running server taken by a hot backup until dropped: stopping or restarting it is refused,
+/// since its shutdown save would rewrite the world under the copy, and a start waits. A kill
+/// still works; it saves nothing.
+pub struct Copying {
+    servers: Arc<Servers>,
+    id: String,
+}
+
+impl Drop for Copying {
+    fn drop(&mut self) {
+        self.servers
+            .copying
+            .lock()
+            .expect("not poisoned")
+            .remove(&self.id);
+    }
 }
 
 /// How long a new shim may take to start Java.
@@ -130,6 +154,7 @@ impl Servers {
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
             killed: Mutex::default(),
+            copying: Mutex::default(),
         });
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
@@ -311,6 +336,11 @@ impl Servers {
 
     /// Start a server and wait until its shim runs Java.
     pub async fn start(&self, id: &str) -> Result<(), ServerError> {
+        // A server that exited during a hot backup, such as a crash restart, starts once the
+        // copy is done. A copy ends within the shim's ten-minute hold.
+        while self.is_copying(id) {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
         let server = records::get(&self.db, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
@@ -486,8 +516,28 @@ impl Servers {
         }
     }
 
-    /// Ask the server to stop. It stops when Java exits, however long that takes.
+    /// Take a running server for a hot backup's copy (see [`Copying`]).
+    pub fn copying(self: &Arc<Self>, id: &str) -> Copying {
+        self.copying
+            .lock()
+            .expect("not poisoned")
+            .insert(id.to_owned());
+        Copying {
+            servers: Arc::clone(self),
+            id: id.to_owned(),
+        }
+    }
+
+    fn is_copying(&self, id: &str) -> bool {
+        self.copying.lock().expect("not poisoned").contains(id)
+    }
+
+    /// Ask the server to stop. It stops when Java exits, however long that takes. Refused while
+    /// a hot backup copies it.
     pub async fn stop(&self, id: &str) -> Result<(), ServerError> {
+        if self.is_copying(id) {
+            return Err(ServerError::BackingUp);
+        }
         self.tell(id, Message::Stop).await?;
         self.set_phase(id, Phase::Stopping);
         Ok(())
@@ -905,6 +955,26 @@ mod tests {
         assert!(matches!(
             servers.start(&server.id).await,
             Err(ServerError::AlreadyRunning)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_server_a_hot_backup_copies_cannot_be_stopped_or_restarted() {
+        let (_dir, servers) = servers().await;
+        let server = servers.create("A").await.unwrap();
+        let copying = servers.copying(&server.id);
+        assert!(matches!(
+            servers.stop(&server.id).await,
+            Err(ServerError::BackingUp)
+        ));
+        assert!(matches!(
+            servers.restart(&server.id).await,
+            Err(ServerError::BackingUp)
+        ));
+        drop(copying);
+        assert!(matches!(
+            servers.stop(&server.id).await,
+            Err(ServerError::NotRunning)
         ));
     }
 
