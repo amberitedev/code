@@ -474,9 +474,13 @@ impl Servers {
 
     /// Kill the server's Java now.
     pub async fn kill(&self, id: &str) -> Result<(), ServerError> {
-        self.tell(id, Message::Kill).await?;
+        // Recorded first: a restart waiting on this server checks it the moment the shim exits.
         self.killed.lock().expect("not poisoned").insert(id.into());
-        Ok(())
+        let sent = self.tell(id, Message::Kill).await;
+        if sent.is_err() {
+            self.killed.lock().expect("not poisoned").remove(id);
+        }
+        sent
     }
 
     /// A line for the server's console.
