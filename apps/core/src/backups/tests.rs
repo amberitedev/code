@@ -1,6 +1,6 @@
 //! The engine against a real in-memory database and a server folder on disk.
 
-use std::io::Read;
+use std::io::{Read, Write};
 
 use super::*;
 use crate::{daemon::folders, db, servers::records as servers_records};
@@ -70,6 +70,7 @@ async fn a_backup_holds_the_world_and_settings_and_restores_them() {
     assert_eq!(
         entries(&zip),
         [
+            "copal-backup.json",
             "server.properties",
             "world/level.dat",
             "world/region/r.0.0.mca"
@@ -266,4 +267,198 @@ async fn a_cancelled_operation_never_runs_and_a_claimed_one_cannot_be_cancelled(
             .state,
         OpState::Running
     );
+}
+
+/// Make a backup of the set-up server and wait for it.
+async fn backed_up(setup: &Setup) -> String {
+    let (id, operation) = setup
+        .backups
+        .create(&setup.server, "x", Kind::Manual, None)
+        .await
+        .unwrap();
+    setup.backups.wait(operation).await.unwrap();
+    id
+}
+
+/// Whether a restore left its folder behind.
+fn restore_left_behind(dir: &Path) -> bool {
+    std::fs::read_dir(dir).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".copal-restore-")
+    })
+}
+
+#[tokio::test]
+async fn a_damaged_backup_changes_nothing_when_restored() {
+    let setup = setup().await;
+    let id = backed_up(&setup).await;
+    // Damage the stored region file's bytes, so its checksum fails only once it is unpacked.
+    let zip = setup.backups.file(&setup.server, &id);
+    let mut bytes = std::fs::read(&zip).unwrap();
+    let at = bytes
+        .windows(6)
+        .position(|window| window == b"chunks")
+        .unwrap();
+    bytes[at] = b'X';
+    std::fs::write(&zip, bytes).unwrap();
+    let dir = setup.paths.server(&setup.server);
+    std::fs::write(dir.join("world").join("level.dat"), "now").unwrap();
+
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    assert!(setup.backups.wait(restore).await.is_err());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("world").join("level.dat")).unwrap(),
+        "now"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("world/region/r.0.0.mca")).unwrap(),
+        "chunks"
+    );
+    assert!(!restore_left_behind(&dir));
+}
+
+#[tokio::test]
+async fn a_restore_replaces_only_the_worlds_and_settings_it_names() {
+    let setup = setup().await;
+    let dir = setup.paths.server(&setup.server);
+    // The world is inside config, beside a config file a restore must not touch.
+    std::fs::write(dir.join("server.properties"), "level-name=config/world\n")
+        .unwrap();
+    std::fs::create_dir_all(dir.join("config/world")).unwrap();
+    std::fs::write(dir.join("config/world/level.dat"), "level").unwrap();
+    std::fs::write(dir.join("config/other.toml"), "keep").unwrap();
+    let id = backed_up(&setup).await;
+    std::fs::write(dir.join("config/world/level.dat"), "changed").unwrap();
+    std::fs::create_dir_all(dir.join("config/world_nether")).unwrap();
+    std::fs::write(dir.join("config/world_nether/made-since"), "x").unwrap();
+
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    setup.backups.wait(restore).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config/world/level.dat")).unwrap(),
+        "level"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config/other.toml")).unwrap(),
+        "keep"
+    );
+    // The backup speaks for the nether too, which did not exist then.
+    assert!(!dir.join("config/world_nether").exists());
+    // The world folder of the old name is not the backup's to touch.
+    assert!(dir.join("world/level.dat").exists());
+    assert!(!restore_left_behind(&dir));
+}
+
+#[tokio::test]
+async fn a_backup_naming_more_than_it_may_is_refused_before_anything_changes() {
+    let setup = setup().await;
+    let id = backed_up(&setup).await;
+    let zip = setup.backups.file(&setup.server, &id);
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(&zip).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    writer.start_file(MANIFEST, options).unwrap();
+    writer
+        .write_all(br#"{"v":1,"worlds":["world"],"settings":[]}"#)
+        .unwrap();
+    writer.start_file("mods/a.jar", options).unwrap();
+    writer.write_all(b"replaced").unwrap();
+    writer.finish().unwrap();
+
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    assert!(setup.backups.wait(restore).await.is_err());
+    let dir = setup.paths.server(&setup.server);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("mods").join("a.jar")).unwrap(),
+        "mod"
+    );
+    assert!(dir.join("world").join("level.dat").exists());
+}
+
+#[tokio::test]
+async fn files_are_listed_after_the_save_so_what_it_wrote_is_kept() {
+    let setup = setup().await;
+    let dir = setup.paths.server(&setup.server);
+    let folder = Arc::new(Folder::open(&dir).unwrap());
+    let destination = setup.paths.backups().join("after-save.zip");
+    let flushed = dir.join("world").join("region").join("r.1.0.mca");
+    copy(folder, &destination, |_| {}, async {
+        // What `save-all flush` writes.
+        std::fs::write(&flushed, "flushed").unwrap();
+        Ok(None)
+    })
+    .await
+    .unwrap();
+    assert!(entries(&destination).contains(&"world/region/r.1.0.mca".into()));
+}
+
+#[tokio::test]
+async fn a_copy_that_would_outlast_the_hold_fails_and_leaves_nothing() {
+    let setup = setup().await;
+    let folder =
+        Arc::new(Folder::open(&setup.paths.server(&setup.server)).unwrap());
+    let destination = setup.paths.backups().join("late.zip");
+    let result = copy(folder, &destination, |_| {}, async {
+        Ok(Some(Instant::now()))
+    })
+    .await;
+    assert!(matches!(result, Err(Error::Conflict(_))));
+    assert!(!destination.exists());
+    assert!(!destination.with_extension("zip.part").exists());
+}
+
+#[tokio::test]
+async fn a_file_that_grows_past_its_listed_size_fails_the_copy() {
+    let setup = setup().await;
+    let folder = Folder::open(&setup.paths.server(&setup.server)).unwrap();
+    let mut listing = files(&folder).unwrap();
+    // As if a mod grew the region file between the listing and the copy.
+    for (name, size) in &mut listing.files {
+        if name.ends_with(".mca") {
+            *size -= 1;
+        }
+    }
+    let path = setup.paths.backups().join("grown.zip");
+    assert!(matches!(
+        write_zip(&folder, &listing, &path, None, &|_| {}),
+        Err(Error::Conflict(_))
+    ));
+}
+
+#[test]
+fn names_and_counts_a_restore_refuses_fail_the_backup() {
+    // Fine on Linux, but a name Windows would change: a restore refuses it.
+    assert!(restorable("world/bad:name").is_err());
+    assert!(restorable("world/region/r.0.0.mca").is_ok());
+    assert!(check_count(archive::MAX_ENTRIES - 1).is_ok());
+    assert!(check_count(archive::MAX_ENTRIES).is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_world_file_a_restore_would_refuse_fails_the_backup() {
+    let setup = setup().await;
+    let dir = setup.paths.server(&setup.server);
+    std::fs::write(dir.join("world").join("bad:name"), "x").unwrap();
+    let (id, operation) = setup
+        .backups
+        .create(&setup.server, "x", Kind::Manual, None)
+        .await
+        .unwrap();
+    assert!(setup.backups.wait(operation).await.is_err());
+    assert!(!setup.backups.file(&setup.server, &id).exists());
 }
