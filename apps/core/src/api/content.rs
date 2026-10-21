@@ -1061,6 +1061,7 @@ pub async fn unlink(
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     records::unlink(&state.db, &id).await?;
+    state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }

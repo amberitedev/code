@@ -153,6 +153,11 @@ impl Content {
             .unwrap_or_default()
     }
 
+    /// Forget why the last background install failed, once what failed is gone.
+    pub fn clear_error(&self, server_id: &str) {
+        self.update(server_id, |activity| activity.error = None);
+    }
+
     fn update(
         &self,
         server_id: &str,
