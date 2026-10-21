@@ -19,6 +19,7 @@ mod files;
 mod health;
 pub mod insight;
 pub mod logs;
+mod pairing;
 pub mod performance;
 mod properties;
 pub mod servers;
@@ -82,6 +83,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             delete(access::remove).patch(access::change_role),
         )
         .route("/activity", get(activity::list))
+        .route("/pairing", delete(pairing::remove))
         .route("/update", get(update::get).patch(update::settings))
         .route("/update/check", post(update::check))
         .route("/update/rollback", post(update::rollback))
