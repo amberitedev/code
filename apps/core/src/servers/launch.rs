@@ -34,9 +34,6 @@ pub enum NotReady {
     Eula,
 }
 
-/// The heap a server starts with. It grows to `memory_mb` as needed.
-const START_HEAP_MB: i64 = 512;
-
 /// Install Vanilla `game_version` into the shared store, with the Java it needs.
 pub async fn install_vanilla(
     paths: &Paths,
@@ -97,13 +94,12 @@ pub async fn prepare(
     .ok_or(NotReady::Unsupported)?;
 
     let memory = server.memory_mb;
-    let mut args = vec![
-        format!("-Xms{}M", START_HEAP_MB.min(memory)),
-        format!("-Xmx{memory}M"),
+    let mut args = super::memory::jvm(memory);
+    args.extend([
         format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
         // `copal-servers` has no home folder.
         format!("-Duser.home={}", dir.display()),
-    ];
+    ]);
     args.extend(tokens);
     Ok(Launch {
         v: PROTOCOL,

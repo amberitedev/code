@@ -36,6 +36,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+# Listening on IPv6 next to IPv4.
+socket2 = "0.6.5"
 sqlx = { workspace = true, features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
@@ -77,6 +79,7 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_System_Pipes",
   "Win32_System_Registry",
   "Win32_System_Services",
+  "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Shell",
 ] }

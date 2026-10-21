@@ -28,6 +28,9 @@ pub struct Config {
     /// `COPAL_UPDATE_URL`. The list of Copal releases, in the shape of GitHub's releases API.
     /// Releases are trusted by their signature, not by where they come from.
     pub update_url: String,
+    /// `COPAL_FORWARD_PORTS`. Ask the router to forward Core's port and each running server's.
+    /// On by default; off leaves the router alone.
+    pub forward_ports: bool,
 }
 
 /// `config.toml`. Every field is optional.
@@ -38,6 +41,7 @@ struct File {
     bind: Option<IpAddr>,
     backend_url: Option<String>,
     update_url: Option<String>,
+    forward_ports: Option<bool>,
 }
 
 impl Config {
@@ -66,6 +70,12 @@ impl Config {
         if let Some(url) = env("COPAL_UPDATE_URL") {
             config.update_url = url;
         }
+        if let Some(forward) = env("COPAL_FORWARD_PORTS") {
+            config.forward_ports = !matches!(
+                forward.to_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            );
+        }
         config.backend_url = config
             .backend_url
             .map(|url| url.trim_end_matches('/').to_owned());
@@ -81,6 +91,7 @@ impl Config {
             update_url: file
                 .update_url
                 .unwrap_or_else(|| crate::update::RELEASES.into()),
+            forward_ports: file.forward_ports.unwrap_or(true),
         }
     }
 }
@@ -137,6 +148,7 @@ mod tests {
                 bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                 backend_url: None,
                 update_url: crate::update::RELEASES.into(),
+                forward_ports: true,
             }
         );
     }

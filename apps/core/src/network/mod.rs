@@ -1,8 +1,9 @@
-//! Reaching Core and its servers from outside: TLS for the API, UPnP port mappings, and the
-//! reachability diagnosis.
+//! Reaching Core and its servers from outside: TLS for the API, port mappings that belong to
+//! servers (`forward`), and the reachability diagnosis.
 
 pub mod diagnosis;
 pub mod firewall;
+pub mod forward;
 pub mod public_ip;
 pub mod router;
 pub mod tls;
