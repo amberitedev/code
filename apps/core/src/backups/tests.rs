@@ -583,3 +583,18 @@ async fn a_restore_that_cannot_be_undone_keeps_its_server_stopped() {
     assert_eq!(setup.backups.stuck.lock().unwrap().len(), 1);
     assert!(setup.backups.servers.hold(&setup.server).is_err());
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_world_file_written_as_0600_is_still_backed_up() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let setup = setup().await;
+    let level = setup.paths.server(&setup.server).join("world/level.dat");
+    // As Minecraft writes it.
+    std::fs::set_permissions(&level, std::fs::Permissions::from_mode(0o600))
+        .unwrap();
+    let id = backed_up(&setup).await;
+    let zip = setup.backups.file(&setup.server, &id);
+    assert!(entries(&zip).contains(&"world/level.dat".to_owned()));
+}

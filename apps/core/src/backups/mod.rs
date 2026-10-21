@@ -582,11 +582,14 @@ impl Backups {
         // Held from before the save until saving is on again.
         let _copying = hot.then(|| self.servers.copying(server_id));
         let save = async {
-            if hot {
-                self.hold_and_save(server_id).await.map(Some)
+            let deadline = if hot {
+                Some(self.hold_and_save(server_id).await?)
             } else {
-                Ok(None)
-            }
+                None
+            };
+            // After the save, which rewrites level.dat as 0600, and before the files are listed.
+            self.servers.share_with_core(server_id).await?;
+            Ok(deadline)
         };
         let result = copy(folder, destination, progress, save).await;
         if hot && let Err(error) = self.servers.release_saves(server_id).await {
