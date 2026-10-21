@@ -78,6 +78,7 @@ mod tests {
                 "content_files",
                 "core",
                 "jvm_flags",
+                "packs",
                 "pairing",
                 "port_mappings",
                 "restarts",

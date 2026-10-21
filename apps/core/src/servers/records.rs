@@ -16,6 +16,7 @@ pub struct ServerRow {
     pub port: i64,
     pub memory_mb: i64,
     pub java_path: Option<String>,
+    pub java_version: Option<i64>,
     pub eula_accepted: bool,
 }
 
@@ -42,7 +43,7 @@ pub struct Ended {
 const DEFAULT_MEMORY_MB: i64 = 2048;
 
 const COLUMNS: &str = "id, name, game_version, loader, loader_version, port, memory_mb, \
-                       java_path, eula_accepted";
+                       java_path, java_version, eula_accepted";
 
 pub async fn list(db: &SqlitePool) -> sqlx::Result<Vec<ServerRow>> {
     sqlx::query_as(&format!(
@@ -112,6 +113,25 @@ pub async fn set_installed(
     .bind(loader)
     .bind(game_version)
     .bind(loader_version)
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Set the Java a server runs with: a custom path, or a managed major other than the one its
+/// Minecraft version needs. `None` for both is Core's choice.
+pub async fn set_java(
+    db: &SqlitePool,
+    id: &str,
+    java_path: Option<&str>,
+    java_version: Option<i64>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE servers SET java_path = ?, java_version = ? WHERE id = ?",
+    )
+    .bind(java_path)
+    .bind(java_version)
     .bind(id)
     .execute(db)
     .await?;

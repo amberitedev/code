@@ -13,25 +13,29 @@ use daedalus::minecraft::{Version as GameVersion, VersionInfo};
 use daedalus::modded::{self, LoaderVersion, PartialVersionInfo};
 
 use super::dirs::SharedDirs;
+use crate::installs::ModLoader;
+use crate::installs::download;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VersionInfoError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Download(#[from] download::DownloadError),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
 }
 
-/// The merged version id: `{game_version}` for vanilla, otherwise
-/// `{game_version}-{loader_version}`.
+/// The merged version id the store keys a build by: `{game_version}` for Vanilla, otherwise
+/// `{game_version}-{loader}-{loader_version}`, since two loaders can share a version number
+/// (Fabric and Quilt 0.17.0 on 1.19.2).
 pub fn merged_version_id(
     game_version: &str,
-    loader: Option<&LoaderVersion>,
+    loader: ModLoader,
+    loader_version: Option<&str>,
 ) -> String {
-    match loader {
-        Some(l) => format!("{game_version}-{}", l.id),
+    match loader_version.filter(|_| loader != ModLoader::Vanilla) {
+        Some(version) => format!("{game_version}-{loader}-{version}"),
         None => game_version.to_string(),
     }
 }
@@ -44,10 +48,15 @@ pub async fn download_version_info(
     http: &reqwest::Client,
     dirs: &SharedDirs,
     version: &GameVersion,
-    loader: Option<&LoaderVersion>,
+    loader: Option<(ModLoader, &LoaderVersion)>,
     force: bool,
 ) -> Result<VersionInfo, VersionInfoError> {
-    let version_id = merged_version_id(&version.id, loader);
+    let version_id = merged_version_id(
+        &version.id,
+        loader.map_or(ModLoader::Vanilla, |(loader, _)| loader),
+        loader.map(|(_, version)| version.id.as_str()),
+    );
+    let loader = loader.map(|(_, version)| version);
     let path = dirs.version_info_path(&version_id);
 
     if path.exists() && !force {
@@ -58,31 +67,37 @@ pub async fn download_version_info(
         // Fall through and refetch on a corrupt cache entry.
     }
 
-    let mut info: VersionInfo = http
-        .get(&version.url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let mut info: VersionInfo = download::json(http, &version.url).await?;
 
     if let Some(loader) = loader {
-        let partial: PartialVersionInfo = http
-            .get(&loader.url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let partial: PartialVersionInfo =
+            download::json(http, &loader.url).await?;
         info = modded::merge_partial_version(partial, info);
     }
 
     info.id = version_id.clone();
 
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(&path, serde_json::to_vec(&info)?).await?;
+    // Whole, so a server reading it at start never sees half a file.
+    download::write_whole(&path, &serde_json::to_vec(&info)?).await?;
 
     Ok(info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_loaders_on_one_version_number_never_share_metadata() {
+        let fabric =
+            merged_version_id("1.19.2", ModLoader::Fabric, Some("0.17.0"));
+        let quilt =
+            merged_version_id("1.19.2", ModLoader::Quilt, Some("0.17.0"));
+        assert_eq!(fabric, "1.19.2-fabric-0.17.0");
+        assert_eq!(quilt, "1.19.2-quilt-0.17.0");
+        assert_eq!(
+            merged_version_id("1.19.2", ModLoader::Vanilla, None),
+            "1.19.2"
+        );
+    }
 }

@@ -1,69 +1,93 @@
-//! Paper: one jar per build, downloaded from PaperMC.
+//! Paper: one jar per build, from PaperMC's Fill API, kept in the shared store and run in place.
+//! A server records its build as its loader version, so it stays on that build until it is
+//! updated to a newer one.
 
 use serde::Deserialize;
 
+use super::{
+    daedalus::SharedDirs,
+    download::{self, FileDownload, Hash},
+};
+
 #[derive(Debug, thiserror::Error)]
 pub enum PaperError {
-    #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Download(#[from] download::DownloadError),
     #[error("Paper has no stable build for Minecraft {0}")]
     NoBuild(String),
-}
-
-/// Where to download a Paper jar, and the file name PaperMC gives it.
-#[derive(Debug, Clone)]
-pub struct PaperJar {
-    pub url: String,
-    pub filename: String,
-}
-
-#[derive(Deserialize)]
-struct BuildsResponse {
-    builds: Vec<Build>,
+    #[error("Paper has no build {build} for Minecraft {game_version}")]
+    UnknownBuild { game_version: String, build: String },
 }
 
 #[derive(Deserialize)]
 struct Build {
-    build: i64,
+    id: u64,
     channel: String,
     downloads: Downloads,
 }
 
 #[derive(Deserialize)]
 struct Downloads {
-    application: Download,
+    #[serde(rename = "server:default")]
+    server: Download,
 }
 
 #[derive(Deserialize)]
 struct Download {
-    name: String,
+    url: String,
+    checksums: Checksums,
 }
 
-/// The latest stable Paper build for `game_version`.
-pub async fn latest_build(
+#[derive(Deserialize)]
+struct Checksums {
+    sha256: String,
+}
+
+/// Download Paper `build` for `game_version` into the shared store, or the newest stable build
+/// when `build` is `None` or `latest`. Returns the build installed. A build already there is
+/// kept unless `verify` (repair) asks for it again.
+pub async fn install(
     http: &reqwest::Client,
+    dirs: &SharedDirs,
     game_version: &str,
-) -> Result<PaperJar, PaperError> {
-    let builds_url = format!(
-        "https://api.papermc.io/v2/projects/paper/versions/{game_version}/builds"
+    build: Option<&str>,
+    verify: bool,
+    progress: &(dyn Fn(download::Progress) + Sync),
+) -> Result<String, PaperError> {
+    let url = format!(
+        "https://fill.papermc.io/v3/projects/paper/versions/{game_version}/builds"
     );
-    let response: BuildsResponse = http
-        .get(&builds_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
+    let builds: Vec<Build> = download::json(http, &url).await?;
+    let chosen =
+        match build.filter(|build| !matches!(*build, "latest" | "stable")) {
+            Some(wanted) => builds
+                .into_iter()
+                .find(|candidate| candidate.id.to_string() == wanted)
+                .ok_or_else(|| PaperError::UnknownBuild {
+                    game_version: game_version.into(),
+                    build: wanted.into(),
+                })?,
+            None => builds
+                .into_iter()
+                .filter(|candidate| candidate.channel == "STABLE")
+                .max_by_key(|candidate| candidate.id)
+                .ok_or_else(|| PaperError::NoBuild(game_version.into()))?,
+        };
+    let build = chosen.id.to_string();
+    let path = dirs.paper_jar(game_version, &build);
+    let hash = Hash::Sha256(&chosen.downloads.server.checksums.sha256);
+    if !path.exists() || (verify && !download::has_hash(&path, hash).await) {
+        download::file(
+            http,
+            &chosen.downloads.server.url,
+            &path,
+            &FileDownload {
+                hash,
+                limit: Some(512 * 1024 * 1024),
+                progress,
+            },
+        )
         .await?;
-    // "default" is PaperMC's stable channel.
-    let entry = response
-        .builds
-        .iter()
-        .rfind(|build| build.channel == "default")
-        .ok_or_else(|| PaperError::NoBuild(game_version.into()))?;
-    let build = entry.build;
-    let filename = entry.downloads.application.name.clone();
-    Ok(PaperJar {
-        url: format!("{builds_url}/{build}/downloads/{filename}"),
-        filename,
-    })
+    }
+    Ok(build)
 }

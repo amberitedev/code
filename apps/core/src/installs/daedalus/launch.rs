@@ -33,7 +33,7 @@ pub fn build_launch_tokens(
     dirs: &SharedDirs,
     version_info: &VersionInfo,
     version_id: &str,
-    loader: &ModLoader,
+    loader: ModLoader,
     java_arch: &str,
 ) -> Result<Option<Vec<String>>, LibraryError> {
     let server_jar = dirs.server_jar_path(version_id);
@@ -45,7 +45,7 @@ pub fn build_launch_tokens(
             "--nogui".to_string(),
         ])),
         ModLoader::Fabric | ModLoader::Quilt => {
-            let main = if matches!(loader, ModLoader::Fabric) {
+            let main = if loader == ModLoader::Fabric {
                 FABRIC_SERVER_MAIN
             } else {
                 QUILT_SERVER_MAIN

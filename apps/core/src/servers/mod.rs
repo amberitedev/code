@@ -18,6 +18,7 @@ mod watch;
 
 use std::{
     collections::{HashMap, HashSet},
+    path::PathBuf,
     process::Child,
     sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
@@ -43,6 +44,8 @@ pub enum Phase {
     /// A shim Core cannot talk to, left running: another Copal version started it (its shim
     /// protocol, when known). Stopping it from the game console, then starting it, upgrades it.
     Unmanaged(Option<u32>),
+    /// Held while its loader or pack installs (see [`Hold`]). It cannot start until that ends.
+    Installing,
 }
 
 /// Why a server action failed.
@@ -56,6 +59,8 @@ pub enum ServerError {
     NotRunning,
     #[error("the server is still starting")]
     Starting,
+    #[error("the server is installing; it can start once that is done")]
+    Installing,
     #[error(
         "Core cannot reach this server's shim, so the server keeps running on its own. Stop it from the game, then start it again"
     )]
@@ -138,10 +143,7 @@ impl Servers {
     /// Adopt every server whose shim still runs, record how the others' runs ended, and start
     /// watching for runs that end and shims that appear.
     pub async fn open(paths: Paths, db: SqlitePool) -> Result<Arc<Self>> {
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(Duration::from_secs(15))
-            .build()?;
+        let http = crate::installs::download::client()?;
         let servers = Arc::new_cyclic(|me| Self {
             paths,
             db,
@@ -270,7 +272,9 @@ impl Servers {
             let ids: Vec<String> = self
                 .live()
                 .iter()
-                .filter(|(_, live)| live.phase != Phase::Starting)
+                .filter(|(_, live)| {
+                    !matches!(live.phase, Phase::Starting | Phase::Installing)
+                })
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in ids {
@@ -375,6 +379,12 @@ impl Servers {
                     }
                 }
             }
+            if live
+                .get(id)
+                .is_some_and(|live| live.phase == Phase::Installing)
+            {
+                return Err(ServerError::Installing);
+            }
             // The lock also covers a shim this Core does not know, such as one a crashed Core
             // started a moment before it died.
             if live.contains_key(id) || shim::is_running(&self.paths, id) {
@@ -460,7 +470,8 @@ impl Servers {
             eula_accepted: true,
             ..server.clone()
         };
-        let mut launch =
+        // The lease keeps its Java until the shim runs it, when the launch spec does.
+        let (mut launch, _java) =
             launch::prepare(&self.paths, &self.http, server, run_id)
                 .await
                 .map_err(|error| {
@@ -541,6 +552,7 @@ impl Servers {
         match self.phase(id) {
             None => Err(ServerError::NotRunning),
             Some(Phase::Starting) => Err(ServerError::Starting),
+            Some(Phase::Installing) => Err(ServerError::Installing),
             Some(Phase::Unmanaged(Some(version))) => {
                 Err(ShimError::Incompatible(version).into())
             }
@@ -707,24 +719,136 @@ impl Servers {
         Ok(())
     }
 
-    /// Install Vanilla `game_version` on a stopped server.
-    pub async fn install_vanilla(
-        &self,
-        id: &str,
-        game_version: &str,
-    ) -> Result<(), ServerError> {
-        records::get(&self.db, id)
-            .await?
-            .ok_or_else(|| ServerError::NotFound(id.into()))?;
-        self.owner_acted(id);
-        if self.phase(id).is_some() {
-            return Err(ServerError::AlreadyRunning);
+    /// Hold a stopped server while its content changes: it cannot start, and no second hold is
+    /// taken, until the hold drops.
+    pub fn hold(self: &Arc<Self>, id: &str) -> Result<Hold, ServerError> {
+        let mut live = self.live();
+        // An install is the owner's action: a crash restart waiting to start is cancelled.
+        self.owner_acted_locked(id);
+        match live.get(id).map(|live| live.phase) {
+            Some(Phase::Installing) => return Err(ServerError::Installing),
+            Some(_) => return Err(ServerError::AlreadyRunning),
+            None if shim::is_running(&self.paths, id) => {
+                return Err(ServerError::AlreadyRunning);
+            }
+            None => {}
         }
-        launch::install_vanilla(&self.paths, &self.http, game_version).await?;
-        records::set_installed(&self.db, id, "vanilla", game_version, None)
-            .await?;
-        info!(server = %id, game_version, "installed Vanilla");
-        Ok(())
+        if self.deleted.lock().expect("not poisoned").contains(id) {
+            return Err(ServerError::NotFound(id.into()));
+        }
+        live.insert(
+            id.into(),
+            Live {
+                phase: Phase::Installing,
+                child: None,
+            },
+        );
+        Ok(Hold {
+            servers: Arc::clone(self),
+            id: id.into(),
+        })
+    }
+
+    /// Run an installer, such as Forge's, through a shim like a server run: as `copal-servers`,
+    /// in the server folder, its output in `console.log`. Waits for it to exit; fails unless it
+    /// exits with 0. Not recorded as a run.
+    pub async fn run_installer(
+        &self,
+        hold: &Hold,
+        java: PathBuf,
+        args: Vec<String>,
+    ) -> Result<(), ServerError> {
+        let id = hold.id.as_str();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let dir = self.paths.server(id);
+        crate::daemon::folders::create_server_folder(&dir)?;
+        crate::daemon::folders::create_server_folder(&dir.join("tmp"))?;
+        std::fs::create_dir_all(self.paths.run(id))?;
+        for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
+            match std::fs::remove_file(stale) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+        let mut full_args = vec![
+            "-Xmx1G".to_owned(),
+            format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
+            format!("-Duser.home={}", dir.display()),
+        ];
+        full_args.extend(args);
+        shim::write_json(
+            &self.paths.launch_spec(id),
+            &shim::Launch {
+                v: shim::PROTOCOL,
+                run_id: run_id.clone(),
+                java,
+                args: full_args,
+                dir,
+                memory_limit_mb: launch::memory_limit(1024),
+            },
+        )?;
+        let mut child = shim::spawn(&self.paths, id)?;
+        tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .map_err(std::io::Error::other)??;
+        let status =
+            shim::read_versioned::<ExitStatus>(&self.paths.run_status(id))
+                .ok()
+                .filter(|status| status.run_id == run_id);
+        match status {
+            Some(ExitStatus {
+                exit_code: Some(0), ..
+            }) => Ok(()),
+            status => {
+                let lines = console::tail(&self.paths.console_log(id), 5)
+                    .map(|(lines, _)| {
+                        lines.join(
+                            "
+",
+                        )
+                    })
+                    .unwrap_or_default();
+                let reason = status
+                    .as_ref()
+                    .and_then(|status| status.error.clone())
+                    .or_else(|| {
+                        status.and_then(|status| status.exit_code).map(|code| {
+                            format!("the installer exited with {code}")
+                        })
+                    })
+                    .unwrap_or_else(|| "the installer did not finish".into());
+                Err(ServerError::StartFailed(format!(
+                    "{reason}
+{lines}"
+                )))
+            }
+        }
+    }
+}
+
+/// A server held for an install. See [`Servers::hold`].
+pub struct Hold {
+    servers: Arc<Servers>,
+    id: String,
+}
+
+impl Hold {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        let mut live = self.servers.live();
+        if live
+            .get(&self.id)
+            .is_some_and(|live| live.phase == Phase::Installing)
+        {
+            live.remove(&self.id);
+        }
     }
 }
 
