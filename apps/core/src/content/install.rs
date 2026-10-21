@@ -16,6 +16,8 @@ use std::{
 };
 
 use futures::{StreamExt, TryStreamExt};
+
+use crate::api::events::GameVersionChange;
 use tracing::{info, warn};
 
 use super::{
@@ -134,7 +136,8 @@ pub async fn pack(
     progress: &Progress,
     source: PackSource,
     properties: Option<PropertiesFields>,
-) -> Result<(), Error> {
+    force: bool,
+) -> Result<Option<GameVersionChange>, Error> {
     let id = hold.id();
     let current = records::pack(&content.db, id).await?;
     let result = install_pack(
@@ -144,6 +147,7 @@ pub async fn pack(
         source,
         current.as_ref(),
         properties,
+        force,
     )
     .await;
     if let Err(error) = &result {
@@ -154,6 +158,9 @@ pub async fn pack(
     result
 }
 
+/// Install a pack. One for an older Minecraft than the server's world is refused unless `force`:
+/// a world does not go back a version safely. Returns the Minecraft version the server moved
+/// from and to, when it did.
 async fn install_pack(
     content: &Content,
     hold: &Hold,
@@ -161,7 +168,8 @@ async fn install_pack(
     source: PackSource,
     current: Option<&Pack>,
     properties: Option<PropertiesFields>,
-) -> Result<(), Error> {
+    force: bool,
+) -> Result<Option<GameVersionChange>, Error> {
     let id = hold.id();
     let dirs = SharedDirs::new(content.paths.root());
     let repair = matches!(source, PackSource::Current);
@@ -201,6 +209,11 @@ async fn install_pack(
     let server = servers_records::get(&content.db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
+    let game_version_change = game_version_change(
+        server.game_version.as_deref(),
+        &platform.game_version,
+        force,
+    )?;
     let same_platform = server.loader.as_deref()
         == Some(platform.loader.as_str())
         && server.game_version.as_deref()
@@ -273,7 +286,31 @@ async fn install_pack(
     }
     identify(content, id).await;
     info!(server = %id, pack = %index.name, version = %index.version_id, "pack installed");
-    Ok(())
+    if let Some(change) = &game_version_change {
+        info!(server = %id, from = %change.from, to = %change.to, "the pack moved the server to another Minecraft");
+    }
+    Ok(game_version_change)
+}
+
+/// The Minecraft version a pack for `pack` moves a server on `server` from and to, or why it may
+/// not: an older one is refused unless `force`, since a world does not go back a version safely.
+fn game_version_change(
+    server: Option<&str>,
+    pack: &str,
+    force: bool,
+) -> Result<Option<GameVersionChange>, Error> {
+    let Some(server) = server.filter(|server| *server != pack) else {
+        return Ok(None);
+    };
+    if !force && pack::older_minecraft(pack, server) == Some(true) {
+        return Err(Error::Invalid(format!(
+            "This pack is for Minecraft {pack}, older than the {server} this server's world is from, and a world does not go back a version safely. Install it with force to do it anyway."
+        )));
+    }
+    Ok(Some(GameVersionChange {
+        from: server.to_owned(),
+        to: pack.to_owned(),
+    }))
 }
 
 /// Install the loader a pack runs on.
@@ -786,4 +823,36 @@ pub async fn decide(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_older_minecraft_needs_force_and_a_newer_one_is_reported() {
+        assert_eq!(game_version_change(None, "26.3", false).unwrap(), None);
+        assert_eq!(
+            game_version_change(Some("26.3"), "26.3", false).unwrap(),
+            None
+        );
+        let newer = GameVersionChange {
+            from: "26.2".into(),
+            to: "26.3".into(),
+        };
+        assert_eq!(
+            game_version_change(Some("26.2"), "26.3", false).unwrap(),
+            Some(newer)
+        );
+        assert!(matches!(
+            game_version_change(Some("26.3"), "26.2", false),
+            Err(Error::Invalid(_))
+        ));
+        assert_eq!(
+            game_version_change(Some("26.3"), "26.2", true)
+                .unwrap()
+                .map(|change| change.to),
+            Some("26.2".into())
+        );
+    }
 }

@@ -135,6 +135,22 @@ pub fn platform(index: &Index) -> Result<Platform, PackError> {
     })
 }
 
+/// Whether Minecraft `version` is older than `than`, by their release numbers (`1.20.1`,
+/// `26.3`; a `-pre1` suffix counts as its release). `None` when either is not a release number,
+/// such as a snapshot.
+pub fn older_minecraft(version: &str, than: &str) -> Option<bool> {
+    let numbers = |version: &str| -> Option<Vec<u32>> {
+        let release = version.split('-').next()?;
+        let mut numbers = release
+            .split('.')
+            .map(|part| part.parse().ok())
+            .collect::<Option<Vec<u32>>>()?;
+        numbers.resize(3.max(numbers.len()), 0);
+        Some(numbers)
+    };
+    Some(numbers(version)? < numbers(than)?)
+}
+
 /// Where the pack gets a file from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
@@ -470,6 +486,16 @@ pub fn edited<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minecraft_versions_compare_by_release() {
+        assert_eq!(older_minecraft("26.2", "26.3"), Some(true));
+        assert_eq!(older_minecraft("1.20.1", "1.20"), Some(false));
+        assert_eq!(older_minecraft("1.20", "1.20.0"), Some(false));
+        assert_eq!(older_minecraft("1.9", "1.10"), Some(true));
+        assert_eq!(older_minecraft("1.21-pre1", "1.21"), Some(false));
+        assert_eq!(older_minecraft("24w14a", "1.21"), None);
+    }
 
     fn row(path: &str, origin: Origin, sha1: &str) -> ContentFile {
         ContentFile {

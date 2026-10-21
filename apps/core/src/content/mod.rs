@@ -32,8 +32,8 @@ use crate::{
     api::{
         content::Installing,
         events::{
-            InstallProgressItem, InstallProgressKey, InstallationResult,
-            WsEvent,
+            GameVersionChange, InstallProgressItem, InstallProgressKey,
+            InstallationResult, WsEvent,
         },
     },
     backups::Backups,
@@ -199,7 +199,7 @@ impl Content {
         work: F,
     ) where
         F: FnOnce(Arc<Self>, Hold, Progress) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<(), Error>> + Send,
+        Fut: Future<Output = Result<Option<GameVersionChange>, Error>> + Send,
     {
         let server_id = hold.id().to_owned();
         self.update(&server_id, |activity| {
@@ -216,7 +216,10 @@ impl Content {
             };
             let result = work(Arc::clone(&content), hold, progress).await;
             drop(busy);
-            let error = result.err().map(|error| format!("{error:#}"));
+            let (game_version, error) = match result {
+                Ok(change) => (change, None),
+                Err(error) => (None, Some(format!("{error:#}"))),
+            };
             match &error {
                 None => {
                     info!(server = %server_id, ?installing, "install finished")
@@ -234,7 +237,7 @@ impl Content {
             content.emit(
                 &server_id,
                 WsEvent::InstallationResult(match error {
-                    None => InstallationResult::Ok,
+                    None => InstallationResult::Ok { game_version },
                     Some(reason) => InstallationResult::Err {
                         reason: Some(reason),
                     },
