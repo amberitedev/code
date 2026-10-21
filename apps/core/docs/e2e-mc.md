@@ -21,7 +21,7 @@ Fixed on `core-10-e2e`:
    Azul for a ZIP JRE, and Azul publishes none for Linux arm64 (only tar.gz). `copal servers
 create` failed with "No Java 21 runtime available for this platform". Linux and macOS now ask
    for the tar.gz package with `crac_supported=false` (without it Azul answers with a CRaC build)
-   and unpack it with `tar`/`flate2`; Windows keeps the ZIP. Java 21 then installed in 7 s and ran
+   and unpack the gzipped tar; Windows keeps the ZIP. Java 21 then installed in 7 s and ran
    as `copal-servers`. `src/installs/java.rs`.
 2. **Running `copal install` again made every existing world unreadable.** Install chowns
    everything under `servers/` to `copal` and keeps the file modes. Minecraft writes `level.dat`
@@ -287,11 +287,11 @@ clean, `cargo test -p copal`: 114 passed. `sudo rel/copal-pr install`; `stat` on
   through sudo: run it again without sudo, as that account (was it ubuntu?)".
 - `copal servers create one` → port 25565. `create two` → **port 25567**: 25566, the NeoForge
   server's, was skipped.
-- `copal servers create broken --version 9.9.9` → exit 1 with "Created server 41ba8868-…, but
+- `copal servers create broken --version 9.9.9` → exit 1 with "Created server <id>, but
   installing Minecraft 9.9.9 failed: meta: unknown game version: 9.9.9: unknown game version:
-  9.9.9" and "Delete it with: copal servers delete 41ba8868-…". (The doubled cause comes from
+  9.9.9" and "Delete it with: copal servers delete <id>". (The doubled cause comes from
   Core's own error text for the install, not the CLI.)
-- `copal servers delete broken` → "Deleted broken (41ba8868-…)", exit 0; `delete two` the same.
+- `copal servers delete broken` → "Deleted broken (<id>)", exit 0; `delete two` the same.
 - `copal servers start one`, then `kill one` after 20 s → "one is killed"; `servers list` shows
   `killed`, and `--json` gives `"power_state": "killed"`.
 - `sudo copal uninstall --remove-data`: accounts, folders, and program gone; `ufw status
