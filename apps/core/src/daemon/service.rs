@@ -1,6 +1,7 @@
 //! Core as an OS service running as `copal`: a Windows Service, a systemd unit, or a launchd
-//! daemon. The OS starts it at boot and starts it again whenever it exits. Stopping the service
-//! stops Core only; shims and their servers keep running.
+//! daemon. The service runs the launcher (`copal run`, see `update::launcher`), which runs Core
+//! and restarts it after an update. The OS starts the launcher at boot and again whenever it
+//! exits. Stopping the service stops Core only; shims and their servers keep running.
 
 use std::path::Path;
 
@@ -64,17 +65,13 @@ mod platform {
     use super::NAME;
     use crate::daemon::{
         accounts::CORE,
-        win::{SecurityDescriptor, account_sid, check},
+        win::{SecurityDescriptor, check},
     };
 
-    /// The default service permissions, plus start, stop, and query for `copal`, so the updater
-    /// can restart Core.
-    fn permissions(core_sid: &str) -> String {
-        format!(
-            "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)\
-             (A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPLOCRRC;;;{core_sid})"
-        )
-    }
+    /// The default service permissions, set explicitly so a registration from an older Copal,
+    /// which let `copal` stop and start the service, loses that. The launcher restarts Core
+    /// itself, so `copal` needs no control over the service.
+    const PERMISSIONS: &str = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)         (A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)";
 
     pub fn register(exe: &Path, core_password: Option<&str>) -> Result<String> {
         let manager = ServiceManager::local_computer(
@@ -122,8 +119,7 @@ mod platform {
         })?;
         // Restart after any exit with an error, not only after a crash.
         service.set_failure_actions_on_non_crash_failures(true)?;
-        let descriptor =
-            SecurityDescriptor::from_sddl(&permissions(&account_sid(CORE)?))?;
+        let descriptor = SecurityDescriptor::from_sddl(PERMISSIONS)?;
         // SAFETY: a valid service handle and descriptor.
         check(unsafe {
             SetServiceObjectSecurity(
@@ -132,7 +128,7 @@ mod platform {
                 descriptor.as_ptr(),
             )
         })
-        .wrap_err("could not let copal restart the service")?;
+        .wrap_err("could not set the service's permissions")?;
         service
             .start::<&str>(&[])
             .wrap_err("the service did not start")?;
@@ -195,10 +191,10 @@ mod platform {
     }
 
     fn service_main(_arguments: Vec<OsString>) {
+        let paths =
+            crate::daemon::paths::Paths::new(crate::daemon::config::data_dir());
         // A service has no console, so the file log starts before anything can fail.
-        crate::daemon::logging(&crate::daemon::paths::Paths::new(
-            crate::daemon::config::data_dir(),
-        ));
+        crate::daemon::logging(&paths, "launcher");
         let stop = Arc::new(Notify::new());
         let stop_requested = Arc::clone(&stop);
         let Ok(status) = service_control_handler::register(
@@ -235,12 +231,16 @@ mod platform {
         let result = tokio::runtime::Runtime::new()
             .map_err(Into::into)
             .and_then(|runtime| {
-                runtime.block_on(crate::daemon::serve(async move {
-                    stop.notified().await;
-                }))
+                runtime.block_on(crate::update::launcher::run(
+                    &paths,
+                    true,
+                    async move { stop.notified().await },
+                ))
             });
+        // Any other exit makes the service manager start Copal again.
         let exit_code = match result {
-            Ok(()) => ServiceExitCode::Win32(0),
+            Ok(0) => ServiceExitCode::Win32(0),
+            Ok(code) => ServiceExitCode::ServiceSpecific(code as u32),
             Err(error) => {
                 tracing::error!("{error:?}");
                 ServiceExitCode::ServiceSpecific(1)
@@ -288,7 +288,8 @@ mod platform {
         exe: &Path,
         _core_password: Option<&str>,
     ) -> Result<String> {
-        // KillMode=process: stopping or updating Core never touches the shims it started.
+        // KillMode=process: stopping the service signals only the launcher, which closes Core's
+        // stdin to stop it, and never touches the shims Core started.
         let unit = format!(
             "[Unit]\n\
              Description=Copal, Amberite's Minecraft server manager\n\

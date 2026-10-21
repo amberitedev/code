@@ -25,6 +25,9 @@ pub struct Config {
     /// `ACCOUNT_API_URL`. The Amberite backend. `None` until the hosted backend has an address;
     /// a Core without one serves its API but cannot pair or sync.
     pub backend_url: Option<String>,
+    /// `COPAL_UPDATE_URL`. The list of Copal releases, in the shape of GitHub's releases API.
+    /// Releases are trusted by their signature, not by where they come from.
+    pub update_url: String,
 }
 
 /// `config.toml`. Every field is optional.
@@ -34,6 +37,7 @@ struct File {
     port: Option<u16>,
     bind: Option<IpAddr>,
     backend_url: Option<String>,
+    update_url: Option<String>,
 }
 
 impl Config {
@@ -59,6 +63,9 @@ impl Config {
         if let Some(url) = env("ACCOUNT_API_URL") {
             config.backend_url = Some(url);
         }
+        if let Some(url) = env("COPAL_UPDATE_URL") {
+            config.update_url = url;
+        }
         config.backend_url = config
             .backend_url
             .map(|url| url.trim_end_matches('/').to_owned());
@@ -71,6 +78,9 @@ impl Config {
             port: file.port.unwrap_or(16662),
             bind: file.bind.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
             backend_url: file.backend_url,
+            update_url: file
+                .update_url
+                .unwrap_or_else(|| crate::update::RELEASES.into()),
         }
     }
 }
@@ -126,6 +136,7 @@ mod tests {
                 port: 16662,
                 bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                 backend_url: None,
+                update_url: crate::update::RELEASES.into(),
             }
         );
     }

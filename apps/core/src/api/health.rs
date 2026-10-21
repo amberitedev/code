@@ -1,5 +1,6 @@
 //! `GET /health`: whether Core is up, and which Core it is. The App probes it to pick between a
-//! Core's local and internet address.
+//! Core's local and internet address, and Core asks it of itself on start: the first answer
+//! writes the health marker that ends an update's trial (see `update::launcher`).
 
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ pub async fn get(
     let core_id = db::core_id(&state.db)
         .await
         .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+    state.update.answered();
     Ok(Json(Health {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),

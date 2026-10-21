@@ -1,46 +1,149 @@
 name: Copal release
 
+# On a copal-v<version> tag: build Copal for the four release targets, write one manifest with
+# every binary's SHA-256, sign it with minisign, and publish the GitHub release Core updates from
+# (see apps/core/src/update/release.rs).
+#
+# The version picks the channel: 1.2.0 is stable, 1.2.0-beta.N beta, 1.2.0-alpha.N alpha.
+# COPAL_MINISIGN_KEY is an unencrypted minisign secret key (minisign -G -W); its public half is
+# PUBLIC_KEY in release.rs, and the release job refuses a key that does not match it.
+
 on:
   push:
     tags:
       - copal-v*
-  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release-linux-x64:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/core
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      matrix:
+        include:
+          - target: windows-x64
+            runner: windows-latest
+            binary: copal.exe
+            asset: copal-windows-x64.exe
+          - target: macos-arm64
+            runner: macos-latest
+            binary: copal
+            asset: copal-macos-arm64
+          # The oldest supported Ubuntu, so the binary runs on older glibc too.
+          - target: linux-x64
+            runner: ubuntu-22.04
+            binary: copal
+            asset: copal-linux-x64
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+            binary: copal
+            asset: copal-linux-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
         with:
-          cache: true
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+          cache: false
+      - name: Check the tag against the crate version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#copal-v}"
+          crate="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "copal") | .version')"
+          if [ "$version" != "$crate" ]; then
+            echo "::error::The tag is $version but apps/core/Cargo.toml says $crate"
+            exit 1
+          fi
+          case "$version" in
+            *-beta | *-beta.* | *-alpha | *-alpha.*) ;;
+            *-*) echo "::error::$version is on no channel. Use 1.2.0, 1.2.0-beta.N, or 1.2.0-alpha.N"; exit 1 ;;
+          esac
+      - run: cargo build -p copal --release --locked
+      - name: Stage the binary
+        shell: bash
+        run: |
+          mkdir dist
+          cp "target/release/${{ matrix.binary }}" "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          node-version-file: .nvmrc
-      - run: corepack enable
-      - name: Verify release version
+          name: ${{ matrix.target }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Sign and publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write the manifest
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#copal-v}"
-          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
-          [ "$VERSION" = "$CARGO_VERSION" ] || { echo "Tag version $VERSION does not match Cargo version $CARGO_VERSION"; exit 1; }
-      - run: cargo build --release --locked
-      - name: Package release archive
+          python3 - <<'EOF'
+          import hashlib, json, os
+
+          version = os.environ["VERSION"].removeprefix("copal-v")
+          pre = version.partition("-")[2]
+          channel = "stable" if not pre else pre.partition(".")[0]
+          files = []
+          for target, name in [
+              ("windows-x64", "copal-windows-x64.exe"),
+              ("macos-arm64", "copal-macos-arm64"),
+              ("linux-x64", "copal-linux-x64"),
+              ("linux-arm64", "copal-linux-arm64"),
+          ]:
+              data = open(f"dist/{name}", "rb").read()
+              files.append({
+                  "target": target,
+                  "name": name,
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "size": len(data),
+              })
+          manifest = {"version": version, "channel": channel, "files": files}
+          with open("dist/copal-manifest.json", "w") as out:
+              json.dump(manifest, out, indent=2)
+          EOF
+          cat dist/copal-manifest.json
+      - name: Sign the manifest
+        env:
+          COPAL_MINISIGN_KEY: ${{ secrets.COPAL_MINISIGN_KEY }}
         run: |
-          mkdir -p dist
-          cp target/release/copal dist/copal
-          tar -C dist -czf copal-linux-x64.tar.gz copal
-          sha256sum copal-linux-x64.tar.gz > SHA256SUMS
-          VERSION="${GITHUB_REF_NAME#copal-v}"
-          node scripts/package-npm.mjs target/release/copal "$VERSION"
-          pnpm --dir ../../packages/copal-linux-x64 pack --pack-destination dist
-      - name: Create GitHub Release
+          sudo apt-get update -q
+          sudo apt-get install -y -q minisign
+          key="$RUNNER_TEMP/copal.key"
+          printf '%s\n' "$COPAL_MINISIGN_KEY" > "$key"
+          minisign -S -s "$key" -m dist/copal-manifest.json -t "copal ${GITHUB_REF_NAME#copal-v}"
+          rm "$key"
+          public="$(sed -n 's|^    "\(RW[A-Za-z0-9+/=]*\)";$|\1|p' apps/core/src/update/release.rs)"
+          minisign -V -P "$public" -m dist/copal-manifest.json
+          installer="$(sed -n 's|^public_key="\(RW[A-Za-z0-9+/=]*\)"$|\1|p' apps/core/scripts/install.sh)"
+          if [ "$installer" != "$public" ]; then
+            echo "::error::apps/core/scripts/install.sh pins another key than release.rs"
+            exit 1
+          fi
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" copal-linux-x64.tar.gz SHA256SUMS dist/amberitedev-copal-linux-x64-*.tgz --generate-notes --verify-tag
+          version="${GITHUB_REF_NAME#copal-v}"
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+          # Never "latest": that marks the Modrinth App's newest release, which the App updates from.
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Copal $version" \
+            --generate-notes \
+            --verify-tag \
+            --latest=false \
+            $prerelease

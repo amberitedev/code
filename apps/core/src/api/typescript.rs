@@ -9,6 +9,7 @@ use ts_rs::{Config, TS};
 
 use super::{
     access, activity, backend, backups, content, error, sessions, startup,
+    update,
 };
 
 const PATH: &str = concat!(
@@ -54,6 +55,11 @@ fn declarations() -> String {
         content::Choice::decl(&cfg),
         startup::JavaPath::decl(&cfg),
         backups::BackupSchedule::decl(&cfg),
+        update::UpdateStatus::decl(&cfg),
+        crate::update::release::Channel::decl(&cfg),
+        update::UpdateSettings::decl(&cfg),
+        update::ApplyUpdate::decl(&cfg),
+        update::Restarting::decl(&cfg),
     ]
     .map(|declaration| format!("export {declaration}\n"))
     .join("\n")
