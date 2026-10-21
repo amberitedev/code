@@ -7,7 +7,8 @@
 //! - `PATCH /servers/{id}/access/{user_id}`: change a role. [`ChangeRole`] in, [`Member`] out.
 //!   Owner only, dangerous.
 //! - `DELETE /servers/{id}/access/{user_id}`: remove someone; their sessions and console streams
-//!   end. Owner only, dangerous.
+//!   end. Owner only, dangerous. A member may also remove themselves, to leave the server, with
+//!   no ticket: that only takes away what their own session could do.
 //!
 //! A dangerous action carries a fresh ticket in the `X-Amberite-Ticket` header, so every route
 //! asks for it the same way whatever its method and body. Invites and removals are also owed to
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
@@ -32,7 +33,9 @@ use super::{
     error::{ApiError, ErrorCode},
 };
 use crate::{
-    access::{Caller, Dangerous, Level, activity, now, sync::owe},
+    access::{
+        Caller, Dangerous, Level, activity, fresh_ticket, now, sync::owe,
+    },
     servers::{ServerError, records},
 };
 
@@ -306,11 +309,17 @@ pub async fn change_role(
 
 /// `DELETE /servers/{id}/access/{user_id}`. Every session the user has on this Core ends, and
 /// with them their console streams; their App signs in again with a ticket for what is left.
+/// Removing someone else is the owner's dangerous action; removing yourself is leaving.
 pub async fn remove(
-    Dangerous(caller): Dangerous,
+    caller: Caller,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, user_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
+    if caller.user_id() != Some(user_id.as_str()) {
+        caller.require_owner()?;
+        fresh_ticket(&state, &caller, &headers).await?;
+    }
     let mut tx = state.db.begin().await?;
     let removed =
         sqlx::query("DELETE FROM access WHERE server_id = ? AND user_id = ?")

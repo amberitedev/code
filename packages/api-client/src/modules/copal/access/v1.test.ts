@@ -24,15 +24,23 @@ const CORE: Archon.Cores.v1.Core = {
 	last_seen: '',
 }
 
-type Sent = { url: string; method: string; headers: Record<string, string> }
+type Sent = {
+	url: string
+	method: string
+	headers: Record<string, string>
+	body?: unknown
+	params?: RequestOptions['params']
+}
 
 /**
  * The real request pipeline against a fake backend and Core. The backend lists `CORE` and numbers
- * its tickets; the Core answers each request with the next entry of `answers`, or `{}`.
+ * its tickets; the Core answers a URL in `routes` with its entry, and any other request with the
+ * next entry of `answers`, or `{}`.
  */
 class FakeClient extends GenericModrinthClient {
 	public sent: Sent[] = []
 	public answers: unknown[] = []
+	public routes: Record<string, unknown> = {}
 	public signIns: string[][] = []
 	public hasSession = false
 	private tickets = 0
@@ -62,10 +70,16 @@ class FakeClient extends GenericModrinthClient {
 	}
 
 	protected async executeRequest<T>(url: string, options: RequestOptions): Promise<T> {
-		this.sent.push({ url, method: options.method ?? 'GET', headers: { ...options.headers } })
+		this.sent.push({
+			url,
+			method: options.method ?? 'GET',
+			headers: { ...options.headers },
+			body: options.body,
+			params: options.params,
+		})
 		if (url === `${ACCOUNTS}/v3/cores`) return [CORE] as T
 		if (url.endsWith('/ticket')) return { ticket: `ticket-${++this.tickets}` } as T
-		const answer = this.answers.shift()
+		const answer = url in this.routes ? this.routes[url] : this.answers.shift()
 		if (answer instanceof Error) throw answer
 		return (answer ?? {}) as T
 	}
@@ -169,5 +183,152 @@ describe('copal access', () => {
 			expect(Object.values(headers).some((value) => value.includes(ACCOUNT))).toBe(false)
 		const ticket = api.sent.find((request) => request.url.endsWith('/ticket'))
 		expect(header(ticket!.headers, 'Authorization')).toBe(`Bearer ${ACCOUNT}`)
+	})
+})
+
+const EDITOR_SCOPES =
+	'BASE_READ | POWER_ACTIONS | EXEC_COMMANDS | FILES_WRITE | SETUP | BACKUPS | ADVANCED'
+const ACCESS = {
+	owner: { id: 'owner', name: 'Owner', avatar_url: null },
+	members: [
+		{
+			user: { id: 'friend', name: 'Friend', avatar_url: null },
+			role: 'editor',
+			added_at: 1_700_000_000,
+		},
+	],
+}
+
+function forbidden() {
+	return new ModrinthApiError('HTTP 403', {
+		statusCode: 403,
+		responseData: { error: 'forbidden', description: '' },
+	})
+}
+
+describe('the server access page on a Core', () => {
+	it('lists the owner and members in the hosting shapes, none of them pending', async () => {
+		const api = new FakeClient()
+		api.answers = [ACCESS]
+		expect(await api.archon.server_users_v1.list(SERVER)).toEqual([
+			{
+				user: { id: 'owner', username: 'Owner', avatar_url: null },
+				added_on: null,
+				permissions: 'SERVER_ADMIN',
+			},
+			{
+				user: { id: 'friend', username: 'Friend', avatar_url: null },
+				added_on: new Date(1_700_000_000_000).toISOString(),
+				permissions: EDITOR_SCOPES,
+			},
+		])
+		expect(api.toCore().map((request) => request.url)).toEqual([
+			`${PROXY}/servers/${SERVER}/access`,
+		])
+	})
+
+	it('shows a member only themselves', async () => {
+		const api = new FakeClient()
+		api.answers = [
+			forbidden(),
+			{
+				user: ACCESS.members[0].user,
+				owner: false,
+				servers: [{ server_id: SERVER, role: 'viewer' }],
+			},
+		]
+		expect(await api.archon.server_users_v1.list(SERVER)).toEqual([
+			{
+				user: { id: 'friend', username: 'Friend', avatar_url: null },
+				added_on: null,
+				permissions: 'BASE_READ',
+			},
+		])
+	})
+
+	it('invites, changes roles, and removes with a ticket each, and leaves without one', async () => {
+		const api = new FakeClient()
+		api.answers = [{ id: 'other', username: 'Other', avatar_url: null }]
+		const users = api.archon.server_users_v1
+		await users.add(SERVER, { user_id: 'other', role: 'Editor' })
+		await users.update(SERVER, 'other', 'Viewer')
+		await users.delete(SERVER, 'other')
+		api.answers = [{ user: ACCESS.members[0].user, owner: false, servers: [] }]
+		await users.leave(SERVER)
+
+		const calls = api.toCore().map((request) => ({
+			call: `${request.method} ${request.url.slice(PROXY.length)}`,
+			ticket: header(request.headers, 'X-Amberite-Ticket'),
+			body: request.body,
+		}))
+		expect(calls).toEqual([
+			{
+				call: `POST /servers/${SERVER}/access`,
+				ticket: 'ticket-1',
+				body: { user: { id: 'other', name: 'Other', avatar_url: null }, role: 'editor' },
+			},
+			{
+				call: `PATCH /servers/${SERVER}/access/other`,
+				ticket: 'ticket-2',
+				body: { role: 'viewer' },
+			},
+			{ call: `DELETE /servers/${SERVER}/access/other`, ticket: 'ticket-3', body: undefined },
+			{ call: 'GET /access/me', ticket: undefined, body: undefined },
+			{ call: `DELETE /servers/${SERVER}/access/friend`, ticket: undefined, body: undefined },
+		])
+	})
+
+	it('declining an invite leaves the server', async () => {
+		const api = new FakeClient()
+		api.answers = [{ user: ACCESS.members[0].user, owner: false, servers: [] }]
+		await api.archon.cores_v1.respondToInvite(CORE.id, SERVER, 'decline')
+		expect(api.toCore().at(-1)?.method).toBe('DELETE')
+		expect(api.toCore().at(-1)?.url).toBe(`${PROXY}/servers/${SERVER}/access/friend`)
+	})
+
+	it("reads a server's activity as its action log", async () => {
+		const api = new FakeClient()
+		const at = 1_700_000_000
+		api.routes[`${PROXY}/activity`] = {
+			entries: [
+				{
+					id: 5,
+					at,
+					user: ACCESS.owner,
+					server_id: SERVER,
+					action: { type: 'invited', user_id: 'friend', role: 'editor' },
+				},
+				{ id: 4, at, user: null, server_id: SERVER, action: { type: 'server_started' } },
+			],
+			next_before: 4,
+		}
+		api.routes[`${PROXY}/servers/${SERVER}/access`] = ACCESS
+		const log = await api.archon.actions_v1.list(SERVER, { limit: 2 })
+
+		expect(log.next_offset).toBe(4)
+		expect(log.data.map((entry) => [entry.actor, entry.action])).toEqual([
+			[
+				{ type: 'user', user_id: 'owner' },
+				{ action: 'user_invited', metadata: { user_id: 'friend', permissions: EDITOR_SCOPES } },
+			],
+			[{ type: 'user', user_id: 'core-cli' }, { action: 'server_started' }],
+		])
+		expect(log.users.friend.username).toBe('Friend')
+		const activity = api.sent.find((request) => request.url === `${PROXY}/activity`)
+		expect(activity?.params).toEqual({ server_id: SERVER, limit: 2, before: undefined })
+
+		await api.archon.actions_v1.list(SERVER, { limit: 2, offset: 4 })
+		expect(api.sent.findLast((request) => request.url === `${PROXY}/activity`)?.params).toEqual({
+			server_id: SERVER,
+			limit: 2,
+			before: 4,
+		})
+	})
+
+	it('gives a member an empty action log', async () => {
+		const api = new FakeClient()
+		api.routes[`${PROXY}/activity`] = forbidden()
+		api.routes[`${PROXY}/servers/${SERVER}/access`] = forbidden()
+		expect((await api.archon.actions_v1.list(SERVER)).data).toEqual([])
 	})
 })

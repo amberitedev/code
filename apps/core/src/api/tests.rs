@@ -1072,3 +1072,77 @@ async fn removing_the_core_from_its_account_ends_every_session() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn a_member_leaves_a_server_without_a_ticket() {
+    let core = core().await;
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    let path = |user: &str| format!("/servers/{}/access/{user}", core.server);
+
+    let (status, _) = core
+        .call(Method::DELETE, &path("viewer"), Some(&editor), None, None)
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "only the owner removes others"
+    );
+
+    let mut changes = core.state.access.changed.subscribe();
+    let (status, _) = core
+        .call(Method::DELETE, &path("viewer"), Some(&viewer), None, None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        changes.recv().await.unwrap(),
+        access::Changed::User("viewer".into())
+    );
+    assert_eq!(
+        core.count("SELECT COUNT(*) FROM access WHERE user_id = 'viewer'")
+            .await,
+        0
+    );
+    assert_eq!(
+        core.count("SELECT COUNT(*) FROM sessions WHERE user_id = 'viewer'")
+            .await,
+        0
+    );
+    assert_eq!(
+        core.count(
+            "SELECT COUNT(*) FROM backend_owed WHERE call LIKE '%\"remove\"%'"
+        )
+        .await,
+        1
+    );
+    let (status, _) = core
+        .call(Method::DELETE, &path("viewer"), Some(&viewer), None, None)
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "the session ended with it"
+    );
+}
+
+#[tokio::test]
+async fn each_role_is_shown_its_own_permissions() {
+    let core = core().await;
+    let uri = format!("/modrinth/v0/servers/{}", core.server);
+    for (user, expected) in [
+        ("owner", 0xFFFF_FFFF_FFFF_8000),
+        ("editor", 0xFE00_0000_0000_0000),
+        ("viewer", 1 << 63),
+    ] {
+        let token = core.sign_in(user).await;
+        let (_, server) =
+            core.call(Method::GET, &uri, Some(&token), None, None).await;
+        assert_eq!(
+            server["current_user_permissions"].as_u64(),
+            Some(expected),
+            "{user}"
+        );
+        // The App reads this as a JavaScript number: it must survive a double exactly.
+        assert_eq!(expected as f64 as u64, expected);
+    }
+}
