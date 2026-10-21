@@ -32,6 +32,9 @@ enum Command {
         /// The account that may use the copal CLI. Defaults to the one running install.
         #[arg(long)]
         owner: Option<String>,
+        /// Install this copal even when Core has updated itself to a newer version.
+        #[arg(long)]
+        allow_downgrade: bool,
     },
     /// Remove the service, the accounts, and the firewall rules. Run as admin.
     Uninstall {
@@ -45,6 +48,9 @@ enum Command {
         #[arg(long, hide = true)]
         service: bool,
     },
+    /// Core itself, as `copal run` starts it. Not for people.
+    #[command(hide = true)]
+    Core,
     /// Show whether Core runs and what its servers are doing.
     Status,
     /// Create and control servers.
@@ -67,13 +73,15 @@ fn main() -> color_eyre::Result<()> {
             .build()
     };
     match Cli::parse().command {
-        Command::Install { owner } => {
-            daemon::install::install(owner.as_deref())
-        }
+        Command::Install {
+            owner,
+            allow_downgrade,
+        } => daemon::install::install(owner.as_deref(), allow_downgrade),
         Command::Uninstall { remove_data } => {
             daemon::install::uninstall(remove_data)
         }
         Command::Run { service } => daemon::run(service),
+        Command::Core => daemon::core(),
         Command::Status => small_runtime()?.block_on(cli::status()),
         Command::Servers(command) => {
             small_runtime()?.block_on(cli::servers(command))

@@ -24,6 +24,7 @@ use crate::{
     daemon::{folders, paths::Paths},
     db,
     servers::Servers,
+    update::Updater,
 };
 
 struct Core {
@@ -46,7 +47,7 @@ async fn core() -> Core {
         .execute(&db)
         .await
         .unwrap();
-    let servers = Servers::open(paths, db.clone()).await.unwrap();
+    let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
     let server = servers.create("A").await.unwrap().id;
     for (user, role) in [("editor", "editor"), ("viewer", "viewer")] {
         sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, ?, 0)")
@@ -68,12 +69,19 @@ async fn core() -> Core {
         Arc::clone(&servers),
     )
     .unwrap();
+    let update = Arc::new(Updater::new(
+        paths,
+        db.clone(),
+        reqwest::Client::new(),
+        String::new(),
+    ));
     let state = Arc::new(AppState {
         servers,
         access: Arc::new(Access::new(keys)),
         db,
         content,
         uploads: super::files::Uploads::default(),
+        update,
     });
     Core {
         _dir: dir,
@@ -772,4 +780,80 @@ async fn an_upload_over_a_pack_file_counts_as_the_owners_edit() {
         )
         .await;
     assert_eq!(edited["files"][0]["path"], "mods/a.jar");
+}
+
+#[tokio::test]
+async fn updating_core_is_the_owners_dangerous_action() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let editor = core.sign_in("editor").await;
+    let (status, _) = core
+        .call(Method::GET, "/update", Some(&editor), None, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Turning auto-update off is plain; a new channel or turning it on takes a ticket.
+    let patch = |body| {
+        core.call(Method::PATCH, "/update", Some(&owner), None, Some(body))
+    };
+    let (status, update) = patch(json!({ "auto_update": false })).await;
+    assert_eq!(
+        (status, &update["auto_update"]),
+        (StatusCode::OK, &json!(false))
+    );
+    for risky in [
+        json!({ "channel": "alpha" }),
+        json!({ "auto_update": true }),
+    ] {
+        let (status, error) = patch(risky).await;
+        assert_eq!(
+            (status, error["error"].as_str()),
+            (StatusCode::UNAUTHORIZED, Some("ticket_required"))
+        );
+    }
+    let (status, update) = core
+        .call(
+            Method::PATCH,
+            "/update",
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            Some(json!({ "channel": "beta" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(update["channel"], "beta");
+    assert_eq!(update["auto_update"], false);
+
+    let (status, error) = core
+        .call(
+            Method::POST,
+            "/update/apply",
+            Some(&owner),
+            None,
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("ticket_required"))
+    );
+    let (status, _) = core
+        .call(
+            Method::POST,
+            "/update/apply",
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            Some(json!({ "allow_downgrade": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "only the CLI downgrades");
+
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/update/rollback")
+        .body(Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(Local);
+    let (status, _) = core.send(request).await;
+    assert_eq!(status, StatusCode::CONFLICT, "nothing to roll back to");
 }

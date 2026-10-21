@@ -191,18 +191,21 @@ async fn wait_offline(client: &Client, id: &str) -> Result<ServerPowerState> {
 }
 
 /// HTTP over the local socket, one connection per request.
-struct Client {
+pub struct Client {
     paths: Paths,
 }
 
 impl Client {
     fn new() -> Result<Self> {
-        Ok(Self {
-            paths: Paths::new(config::data_dir()),
-        })
+        Ok(Self::at(Paths::new(config::data_dir())))
     }
 
-    async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+    /// A client for the Core on the data folder `paths`.
+    pub fn at(paths: Paths) -> Self {
+        Self { paths }
+    }
+
+    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let body = self.send(Method::GET, path, Bytes::new()).await?;
         Ok(serde_json::from_slice(&body)?)
     }

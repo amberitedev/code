@@ -7,7 +7,9 @@
 
 use ts_rs::{Config, TS};
 
-use super::{access, activity, backend, content, error, sessions, startup};
+use super::{
+    access, activity, backend, content, error, sessions, startup, update,
+};
 
 const PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -51,6 +53,11 @@ fn declarations() -> String {
         content::Decision::decl(&cfg),
         content::Choice::decl(&cfg),
         startup::JavaPath::decl(&cfg),
+        update::UpdateStatus::decl(&cfg),
+        crate::update::release::Channel::decl(&cfg),
+        update::UpdateSettings::decl(&cfg),
+        update::ApplyUpdate::decl(&cfg),
+        update::Restarting::decl(&cfg),
     ]
     .map(|declaration| format!("export {declaration}\n"))
     .join("\n")
