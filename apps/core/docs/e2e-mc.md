@@ -501,3 +501,86 @@ NeoForge server is still pid 1824701. Deleted `/home/ubuntu/copal-e2e` (clone, t
 minisign, logs; 5.3 GB) and `~/.cargo` (491 MB). Not touched: `~/.rustup` (1.8 GB of toolchains),
 and the `. "$HOME/.cargo/env"` lines rustup added to `~/.bashrc` and `~/.profile`, which now make
 a login shell print `.profile: line 28: /home/ubuntu/.cargo/env: No such file or directory`.
+
+## Phase 3: the phase 2 fixes, checked
+
+`core-rewrite` at `9cbe554` (PR 54, the fixes for phase 2's findings 5 to 11). One short pass.
+
+### Findings
+
+1. **Fixed on `core-17-e2e-3`: the App's pack update got 400.** PR 54 gave `POST
+.../content/modpack/update` an optional `Json` body for `force`. axum refuses an empty body
+   sent as `Content-Type: application/json`, and `packages/api-client` sends that header on
+   every request (`abstract-client.ts`, `buildDefaultHeaders`), so `updateModpack()` answered
+   "Failed to parse the request body as JSON: EOF". The handler now reads the body itself: empty
+   means no options. `src/api/content.rs`, with a test.
+2. **Every finding PR 54 fixed held on the real machine:**
+   - hot and cold backups of a server whose world has 0600 files;
+   - a "Before restore" backup that holds the replaced world;
+   - pack install and update with their "Before update" backups;
+   - a Minecraft move reported, and an older pack refused without `force`;
+   - reasons in `copal servers info`;
+   - migrations `001` and `002` reopening an existing database.
+3. **Small, open:**
+   - `copal backups list` labels every automated backup "(scheduled)", including "Before
+     restore" and "Before update".
+   - `copal status` showed the pairing code only about 55 s after Core started; until then it
+     says Core is still getting a code.
+   - sudo logs each server start to the journal with Java's full command line, many lines of
+     class path; a `Defaults:copal !syslog` line in the sudoers file would quiet it.
+
+### Log
+
+#### 2026-10-21
+
+**Build and install (14:17-14:21).** rustup again (minimal profile, `--no-modify-path`), a fresh
+`--depth 1` clone of `core-rewrite` (`9cbe554`), `cargo build --release --locked -p copal`: 4 min
+48 s, no warnings. ufw and the listening ports saved as this pass's baseline. `sudo copal install`
+now ends with "Run copal status for the code that makes this Core yours in Amberite."
+
+**Fabric server (14:22).** Fabric 0.19.5 on Minecraft 26.2, "Done" 16 s after start; `time set
+6000`. Its `world/level.dat` and `level.dat_old` are 0600 `copal-servers`, as in phase 2.
+
+**Hot backup while running (14:22).** `copal backups create fab --name hot` → `done` within a
+second. The console: "Automatic saving is now disabled", "Saved the game", "Automatic saving is
+now enabled". `level.dat` is now 0640, readable by the group.
+
+**Cold backup, change, restore (14:23).** Stopped, recorded the SHA-256 of the world's 30 files,
+`copal backups create fab --name cold` → `done`. Started, `time set 18000`, `save-all flush`,
+stopped, added `world/e2e-marker`: 8 files differed. `copal backups restore fab <cold>` → a
+"Before restore" backup (automated) first, then the restore. Every one of the 30 files matched
+the cold backup, the marker was gone, and the empty `datapacks/` and `players/` folders came back.
+The "Before restore" zip holds `world/e2e-marker`, so it is the world that was replaced.
+
+**Pack install and update (14:24-14:25).** TVE 26.2.0-7.35 on the 26.2 server → done in 8 s, 132
+addons, after a "Before update" backup. `POST .../content/modpack/update` with
+`content-type: application/json` and no body → **400** "Failed to parse the request body as JSON:
+EOF while parsing a value" (finding 1). The same request without the header → 202, done in 8 s:
+TVE 26.3.0-7.36, Fabric 0.19.5, Minecraft 26.3, 131 addons, another "Before update" backup. Core
+logged "the pack moved the server to another Minecraft from=26.2 to=26.3". The server started and
+reached "Done" in 16 s.
+
+**Failed installs (14:25).** An unknown version id (`ZZZZZZZZ`) → 202, then `copal servers info
+fab` printed "last install failed: https://api.modrinth.com/v2/version/ZZZZZZZZ answered 404 Not
+Found". No backup failed, so `copal backups list` had no reason to show; it listed the backups.
+TVE 26.2.0-7.35 over the now 26.3 world without `force` → `servers info`: "This pack is for
+Minecraft 26.2, older than the 26.3 this server's world is from, and a world does not go back a
+version safely. Install it with force to do it anyway." The pack stayed at 26.3.0-7.36.
+
+**Restart and pairing code (14:26).** `vp run dev:backend` on this PC and `ssh -R 8787:…` again,
+`backend_url` in `config.toml`, `sudo systemctl restart copal`. Core opened the existing database:
+`_sqlx_migrations` holds `1 init` and `2 backup queue`, and the server and its backups were all
+there. `copal status` first said "This Core is not paired yet and is still getting a code from
+Amberite. copal logs says why."; about 55 s after the start it said "This Core is not paired yet.
+Open Amberite, go to Settings > Cores > Add Core, and enter 37JL-NY32." Then the tunnel and the
+backend were stopped.
+
+**The fix, on mc.** Built `core-17-e2e-3` (2 min 49 s), `sudo copal install` over the same
+data, and the pack update with `content-type: application/json` and no body → 202; the install
+finished with no failure in `servers info`.
+
+**Cleanup.** `sudo copal uninstall --remove-data`; no `copal` accounts, processes,
+sudoers file, program, unit, or data folder left. ufw and the listening ports are identical to
+this pass's baseline; the NeoForge server is still pid 1824701. Deleted `~/copal-e2e-3` (1.2 GB)
+and `~/.cargo` (491 MB) again. `~/.rustup` and rustup's lines in `~/.bashrc` and `~/.profile` are
+as phase 2 left them.
