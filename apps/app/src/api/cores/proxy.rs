@@ -5,17 +5,23 @@
 //! and the session token is added here, so the WebView never holds it. Console sockets are
 //! upgraded through the proxy too: a browser `WebSocket` cannot set headers at all.
 //!
-//! Only the App may use the address. Every request from the WebView carries its `Origin`
+//! Only the App may use the address. Its first path segment is a capability: 32 random bytes in
+//! hex, made for each proxy and given only to the WebView, in the base URL `core_connect`
+//! returns. A request without it, from a process on this computer that found the port or anything
+//! else, gets 404 and nothing is signed. This matters because a Core often runs on the same PC,
+//! where a mod runs as another OS user. The capability is stripped before the request goes on.
+//!
+//! The `Origin` must also be the App's. Every request from the WebView carries one
 //! (`tauri-plugin-http` adds it, browsers always send it on XHR and WebSockets), so a request from
 //! any other origin, or with none, is refused before it is signed. That includes a web page that
-//! finds the port, and one that rebinds a DNS name to this computer.
+//! learned the address, and one that rebinds a DNS name to this computer.
 
 use std::{convert::Infallible, sync::Arc, sync::LazyLock};
 
 use bytes::Bytes;
 use http_body_util::{Either, Full};
 use hyper::{
-    Method, Request, Response, StatusCode,
+    Method, Request, Response, StatusCode, Uri,
     body::Incoming,
     client::conn::http1::SendRequest,
     header::{
@@ -28,6 +34,7 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::TokioIo;
+use rand::{RngCore, rngs::OsRng};
 use tokio::{io::copy_bidirectional, net::TcpListener, sync::Mutex};
 
 use super::{
@@ -46,6 +53,15 @@ pub struct Proxy {
     pub target: Target,
     pub sessions: Arc<Sessions>,
     pub key: Key,
+    /// The first path segment every request must start with. See [`capability`].
+    pub capability: String,
+}
+
+/// A new capability: 32 random bytes from the OS, in hex.
+pub fn capability() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 type Reply = Response<Either<Incoming, Full<Bytes>>>;
@@ -74,6 +90,10 @@ async fn handle(
     upstream: Upstream,
     mut request: Request<Incoming>,
 ) -> Result<Reply, Infallible> {
+    let Some(uri) = without_capability(request.uri(), &proxy.capability) else {
+        return Ok(error(StatusCode::NOT_FOUND, "not_found", "Not found."));
+    };
+    *request.uri_mut() = uri;
     let Some(origin) = request
         .headers()
         .get(ORIGIN)
@@ -139,6 +159,28 @@ async fn handle(
         .headers_mut()
         .insert(ACCESS_CONTROL_ALLOW_ORIGIN, origin);
     Ok(response)
+}
+
+/// The URI with its first path segment taken off, when that segment is `capability`. Compared in
+/// constant time, so the answer's timing says nothing about how much of a guess was right.
+fn without_capability(uri: &Uri, capability: &str) -> Option<Uri> {
+    let rest = uri.path().strip_prefix('/')?;
+    let (segment, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let (given, expected) = (segment.as_bytes(), capability.as_bytes());
+    let differs = given
+        .iter()
+        .zip(expected)
+        .fold(given.len() ^ expected.len(), |differs, (a, b)| {
+            differs | usize::from(a ^ b)
+        });
+    if differs != 0 {
+        return None;
+    }
+    let path_and_query = match uri.query() {
+        Some(query) => format!("/{path}?{query}"),
+        None => format!("/{path}"),
+    };
+    Uri::try_from(path_and_query).ok()
 }
 
 /// The App's own origins. Development builds also serve it from loopback: the Vite dev server and

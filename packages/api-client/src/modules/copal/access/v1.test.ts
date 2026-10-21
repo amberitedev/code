@@ -9,8 +9,8 @@ import type { Archon } from '../../archon/types'
 
 const ACCOUNTS = 'https://accounts.example'
 const ACCOUNT = 'mra_account'
-/** The local proxy `connectCore` opens for the Core. */
-const PROXY = 'http://127.0.0.1:5000'
+/** The local proxy `connectCore` opens for the Core, with its capability path. */
+const PROXY = 'http://127.0.0.1:5000/c0ffee'
 const SERVER = '00000000-0000-4000-8000-000000000001'
 const CORE: Archon.Cores.v1.Core = {
 	id: 'core',
@@ -330,5 +330,23 @@ describe('the server access page on a Core', () => {
 		api.routes[`${PROXY}/activity`] = forbidden()
 		api.routes[`${PROXY}/servers/${SERVER}/access`] = forbidden()
 		expect((await api.archon.actions_v1.list(SERVER)).data).toEqual([])
+	})
+})
+
+describe('URLs a Core names', () => {
+	it('keep the proxy base, with its capability, for the console and the files', async () => {
+		const api = new FakeClient()
+		// Core names the host it was reached at, without the capability.
+		api.answers = [
+			{ url: `127.0.0.1:5000/servers/${SERVER}/ws`, token: '' },
+			{ url: `127.0.0.1:5000/servers/${SERVER}`, token: '' },
+		]
+		const socket = await api.archon.servers_v0.getWebSocketAuth(SERVER)
+		expect(socket.url).toBe(`ws://127.0.0.1:5000/c0ffee/servers/${SERVER}/ws`)
+
+		const files = await api.archon.servers_v0.getFilesystemAuth(SERVER)
+		expect(files.url).toBe(`${PROXY}/servers/${SERVER}`)
+		await api.kyros.files_v0.downloadFileWithAuth(files, '/server.properties')
+		expect(api.sent.at(-1)?.url).toBe(`${PROXY}/servers/${SERVER}/modrinth/v0/fs/download`)
 	})
 })

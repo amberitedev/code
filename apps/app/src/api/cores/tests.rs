@@ -30,10 +30,16 @@ use super::*;
 
 const APP: &str = "tauri://localhost";
 const ACCOUNT_TOKEN: &str = "Bearer mra_the_account_session";
+/// The proxies' capability in these tests. A real one comes from `proxy::capability`.
+const CAPABILITY: &str =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-/// A Core on a random port that reports the headers of every request it gets. `/ws` switches
-/// protocols and echoes what it is sent. Returns its address, fingerprint, and the reports.
-async fn core() -> (String, String, mpsc::UnboundedReceiver<HeaderMap>) {
+/// What the stand-in Core saw of one request: its path and query, and its headers.
+type Seen = (String, HeaderMap);
+
+/// A Core on a random port that reports every request it gets. `/ws` switches protocols and
+/// echoes what it is sent. Returns its address, fingerprint, and the reports.
+async fn core() -> (String, String, mpsc::UnboundedReceiver<Seen>) {
     let made = rcgen::generate_simple_self_signed(vec!["amberite-core".into()])
         .unwrap();
     let cert = made.cert.der().to_vec();
@@ -67,7 +73,11 @@ async fn core() -> (String, String, mpsc::UnboundedReceiver<HeaderMap>) {
                     service_fn(move |mut request: Request<Incoming>| {
                         let seen = seen.clone();
                         async move {
-                            seen.send(request.headers().clone()).unwrap();
+                            seen.send((
+                                request.uri().to_string(),
+                                request.headers().clone(),
+                            ))
+                            .unwrap();
                             if request.uri().path() != "/ws" {
                                 return Ok::<_, Infallible>(Response::new(
                                     Full::<Bytes>::from("ok"),
@@ -109,6 +119,7 @@ async fn proxy(address: &str, fingerprint: &str, token: Option<&str>) -> u16 {
         target: Target::new(address, fingerprint).unwrap(),
         sessions: Arc::new(Sessions::cached(&key, token)),
         key,
+        capability: CAPABILITY.into(),
     });
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -127,7 +138,13 @@ async fn send(port: u16, request: Request<Empty<Bytes>>) -> Response<Incoming> {
     sender.send_request(request).await.unwrap()
 }
 
+/// A request to `path` on the Core, through the proxy's capability, as the WebView sends it.
 fn get(port: u16, path: &str) -> hyper::http::request::Builder {
+    bare(port, &format!("/{CAPABILITY}{path}"))
+}
+
+/// A request for exactly `path` on the proxy, capability or not.
+fn bare(port: u16, path: &str) -> hyper::http::request::Builder {
     Request::builder()
         .uri(path)
         .header(HOST, format!("127.0.0.1:{port}"))
@@ -150,7 +167,8 @@ async fn the_session_replaces_whatever_the_webview_sent() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[ACCESS_CONTROL_ALLOW_ORIGIN], APP);
-    let seen = reports.recv().await.unwrap();
+    let (path, seen) = reports.recv().await.unwrap();
+    assert_eq!(path, "/health", "the capability is not passed on");
     assert_eq!(seen[AUTHORIZATION], "Bearer core-session");
     assert_eq!(seen.get_all(AUTHORIZATION).iter().count(), 1);
     assert!(!seen.contains_key(ORIGIN), "Core refuses any Origin");
@@ -171,7 +189,7 @@ async fn without_a_session_nothing_is_signed() {
             .unwrap(),
     )
     .await;
-    assert!(!reports.recv().await.unwrap().contains_key(AUTHORIZATION));
+    assert!(!reports.recv().await.unwrap().1.contains_key(AUTHORIZATION));
 }
 
 #[tokio::test]
@@ -203,7 +221,7 @@ async fn only_the_app_can_use_the_proxy() {
             .unwrap(),
     )
     .await;
-    let seen = reports.recv().await.unwrap();
+    let seen = reports.recv().await.unwrap().1;
     assert_eq!(seen[AUTHORIZATION], "Bearer core-session");
     assert!(reports.try_recv().is_err());
 }
@@ -225,7 +243,7 @@ async fn a_console_socket_upgrades_with_the_session() {
     .await;
     assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
     assert_eq!(
-        reports.recv().await.unwrap()[AUTHORIZATION],
+        reports.recv().await.unwrap().1[AUTHORIZATION],
         "Bearer core-session"
     );
     let mut socket =
@@ -258,6 +276,75 @@ async fn one_local_connection_carries_several_requests() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         response.into_body().collect().await.unwrap();
-        reports.recv().await.unwrap();
+        reports.recv().await.unwrap().1;
     }
+}
+
+#[tokio::test]
+async fn without_the_capability_nothing_is_signed_or_sent() {
+    let (address, fingerprint, mut reports) = core().await;
+    let port = proxy(&address, &fingerprint, Some("core-session")).await;
+
+    let wrong = format!("/{}/health", "0".repeat(CAPABILITY.len()));
+    let short = format!("/{}/health", &CAPABILITY[..CAPABILITY.len() - 1]);
+    let longer = format!("/{CAPABILITY}0/health");
+    for path in [
+        "/health",
+        "/",
+        wrong.as_str(),
+        short.as_str(),
+        longer.as_str(),
+    ] {
+        // Even with the App's Origin: any local process can send that.
+        let response = send(
+            port,
+            bare(port, path)
+                .header(ORIGIN, APP)
+                .body(Empty::new())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+    let upgrade = bare(port, "/ws")
+        .header(ORIGIN, APP)
+        .header(CONNECTION, "upgrade")
+        .header(UPGRADE, "websocket")
+        .body(Empty::new())
+        .unwrap();
+    assert_eq!(send(port, upgrade).await.status(), StatusCode::NOT_FOUND);
+    // Nothing reached the Core.
+    send(
+        port,
+        get(port, "/health")
+            .header(ORIGIN, APP)
+            .body(Empty::new())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reports.recv().await.unwrap().0, "/health");
+    assert!(reports.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn the_query_survives_the_capability() {
+    let (address, fingerprint, mut reports) = core().await;
+    let port = proxy(&address, &fingerprint, None).await;
+    let request = get(port, "/fs/list?path=%2Fworld&page=2")
+        .header(ORIGIN, APP)
+        .body(Empty::new())
+        .unwrap();
+    send(port, request).await;
+    assert_eq!(
+        reports.recv().await.unwrap().0,
+        "/fs/list?path=%2Fworld&page=2"
+    );
+}
+
+#[test]
+fn each_capability_is_32_fresh_random_bytes() {
+    let (one, other) = (proxy::capability(), proxy::capability());
+    assert_eq!(one.len(), 64);
+    assert!(one.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_ne!(one, other);
 }

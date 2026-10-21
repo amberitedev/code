@@ -95,9 +95,9 @@ impl CoreError {
     }
 }
 
-/// Returns the local address (`http://127.0.0.1:<port>`) that reaches the Core `core_id` at
-/// `address` (`https://host:port`), trusting only the certificate with this SHA-256
-/// `fingerprint`, and signing requests with `account`'s session there, when it has one.
+/// Returns the local base URL (`http://127.0.0.1:<port>/<capability>`, see `proxy`) that reaches
+/// the Core `core_id` at `address` (`https://host:port`), trusting only the certificate with this
+/// SHA-256 `fingerprint`, and signing requests with `account`'s session there, when it has one.
 #[tauri::command]
 async fn core_connect(
     core_id: String,
@@ -120,6 +120,7 @@ async fn core_connect(
         target: Target::new(&tunnel.address, &tunnel.fingerprint)?,
         sessions: Arc::clone(&sessions),
         key: tunnel.key.clone(),
+        capability: proxy::capability(),
     });
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -129,7 +130,7 @@ async fn core_connect(
         .map_err(|error| error.to_string())?
         .port();
     tokio::spawn(proxy::serve(listener, Arc::clone(&proxy)));
-    let local = format!("http://127.0.0.1:{port}");
+    let local = format!("http://127.0.0.1:{port}/{}", proxy.capability);
     open.insert(tunnel, (local.clone(), proxy));
     Ok(local)
 }
