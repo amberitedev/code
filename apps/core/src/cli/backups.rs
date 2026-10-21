@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{Client, Output, servers};
+use crate::api::backups::BackupSchedule;
 
 #[derive(Debug, Subcommand)]
 pub enum BackupsCommand {
@@ -89,15 +90,6 @@ struct BackupRequest {
 #[derive(Debug, Serialize, Deserialize)]
 struct Created {
     id: Uuid,
-}
-
-/// A server's backup schedule. Step 5 has no type for it yet; this is the shape the CLI sends to
-/// `GET|PUT /servers/{id}/backups/schedule`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupSchedule {
-    /// Null: no scheduled backups.
-    pub every_hours: Option<u32>,
-    pub keep: u32,
 }
 
 pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
@@ -181,8 +173,11 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 format!("/servers/{}/backups/schedule", server.server_id);
             let mut schedule: BackupSchedule = client.get(&path).await?;
             if every.is_some() || off || keep.is_some() {
-                if every.is_some() || off {
-                    schedule.every_hours = every;
+                // An interval of 0 turns scheduled backups off.
+                if let Some(hours) = every {
+                    schedule.interval_hours = hours;
+                } else if off {
+                    schedule.interval_hours = 0;
                 }
                 if let Some(keep) = keep {
                     schedule.keep = keep;
@@ -190,12 +185,12 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 schedule =
                     client.call(Method::PUT, &path, Some(&schedule)).await?;
             }
-            let text = match schedule.every_hours {
-                Some(hours) => format!(
+            let text = match schedule.interval_hours {
+                0 => format!("{}: no scheduled backups", server.name),
+                hours => format!(
                     "{}: every {hours} hours, keeping the last {}",
                     server.name, schedule.keep
                 ),
-                None => format!("{}: no scheduled backups", server.name),
             };
             Ok(Output::new(text, &schedule))
         }

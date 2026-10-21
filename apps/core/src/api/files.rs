@@ -546,11 +546,16 @@ pub async fn download(
     let folder = folder(&state, &id)?;
     let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
     let file = blocking(move || {
-        let file = folder
-            .open_file(&path)
-            .ok()
-            .flatten()
-            .ok_or_else(|| not_found(&path))?;
+        // A link or something other than a file reads as missing, as before; any other error,
+        // such as a file Core may not read, says what it is.
+        let file = match folder.open_file(&path) {
+            Ok(Some(file)) => file,
+            Ok(None) => return Err(not_found(&path)),
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                return Err(not_found(&path));
+            }
+            Err(error) => return Err(error.into()),
+        };
         Ok(file.into_std())
     })
     .await?;

@@ -72,6 +72,7 @@ fn arguments_parse_into_commands() {
         panic!("not console send");
     };
     assert_eq!(command, ["say", "hello", "there"]);
+    assert!(matches!(parse("pair").unwrap().command, Command::Pair));
     // The json flag works after the command too.
     assert!(parse("backups list survival --json").unwrap().json);
 }
@@ -196,6 +197,57 @@ async fn core_commands_round_trip() {
     let status = super::machine::status(&client).await.unwrap();
     assert_eq!(status.json["update"]["channel"], "alpha");
     assert!(status.text.contains("No servers yet"), "{}", status.text);
+}
+
+/// Store `code` as the one Core shows, as the pairing loop does once Amberite gives it one.
+async fn show_code(db: &sqlx::SqlitePool, code: &str) {
+    sqlx::query(
+        "INSERT INTO pairing (id, code, key, expires_at, poll_interval) \
+         VALUES (1, ?, 'amc_test', unixepoch() + 600, 5) \
+         ON CONFLICT (id) DO UPDATE SET code = excluded.code",
+    )
+    .bind(code)
+    .execute(db)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn an_unpaired_core_shows_its_code() {
+    let (_dir, state, client) = core().await;
+    let status = super::machine::status(&client).await.unwrap();
+    assert!(
+        status.text.contains("still getting a code"),
+        "{}",
+        status.text
+    );
+    show_code(&state.db, "mzuxd576").await;
+    let status = super::machine::status(&client).await.unwrap();
+    assert!(status.text.contains("enter MZUX-D576"), "{}", status.text);
+    assert!(status.text.contains("copal pair"), "{}", status.text);
+    assert_eq!(status.json["pairing"]["code"], "MZUX-D576");
+
+    // `copal pair` wakes the pairing loop, played here, and prints the code it gets.
+    let loop_state = Arc::clone(&state);
+    let pairing_loop = tokio::spawn(async move {
+        loop_state.access.new_code.notified().await;
+        show_code(&loop_state.db, "abcd2345").await;
+    });
+    let pair = super::machine::pair(&client).await.unwrap();
+    assert!(pair.text.contains("enter ABCD-2345"), "{}", pair.text);
+    pairing_loop.await.unwrap();
+
+    // Once paired, both say so.
+    sqlx::query(
+        "UPDATE core SET owner_user_id = 'owner', backend_key = 'amc_test'",
+    )
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let status = super::machine::status(&client).await.unwrap();
+    assert!(!status.text.contains("not paired"), "{}", status.text);
+    let error = super::machine::pair(&client).await.err().unwrap();
+    assert!(error.to_string().contains("already paired"), "{error}");
 }
 
 #[tokio::test]

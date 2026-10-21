@@ -162,7 +162,9 @@ pub fn install(owner: Option<&str>, allow_downgrade: bool) -> Result<()> {
         Ok(line) => println!("Service: {line}"),
         Err(error) => bail!("could not register the service: {error:#}"),
     }
-    println!("\nCopal is installed.");
+    println!(
+        "\nCopal is installed. Run copal status for the code that makes this Core yours in Amberite."
+    );
     Ok(())
 }
 

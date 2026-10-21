@@ -9,7 +9,7 @@ use ts_rs::{Config, TS};
 
 use super::{
     access, activity, backend, backups, console, content, error, eula, events,
-    insight, logs, performance, sessions, startup, update,
+    insight, logs, pairing, performance, sessions, startup, update,
 };
 
 const PATH: &str = concat!(
@@ -63,6 +63,7 @@ fn declarations() -> String {
         update::ApplyUpdate::decl(&cfg),
         update::Restarting::decl(&cfg),
         eula::Eula::decl(&cfg),
+        pairing::PairingStatus::decl(&cfg),
         logs::LogsQuery::decl(&cfg),
         logs::CoreLogs::decl(&cfg),
         performance::Performance::decl(&cfg),

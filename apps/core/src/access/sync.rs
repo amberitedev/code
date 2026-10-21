@@ -121,6 +121,7 @@ pub async fn run(sync: Arc<Sync>) {
             core_id: &sync.core_id,
             address: &address,
             cert_fingerprint: &sync.cert_fingerprint,
+            new_code: &sync.access.new_code,
         })
         .await;
         let Some(key) = sync.key().await else {

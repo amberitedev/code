@@ -1148,3 +1148,51 @@ async fn each_role_is_shown_its_own_permissions() {
         assert_eq!(expected as f64 as u64, expected);
     }
 }
+
+#[tokio::test]
+async fn keeping_fewer_scheduled_backups_is_the_owners_dangerous_action() {
+    let core = core().await;
+    let server = core.server.clone();
+    let owner = core.sign_in("owner").await;
+    let editor = core.sign_in("editor").await;
+    let schedule = format!("/servers/{server}/backups/schedule");
+    let put = |token, ticket: Option<String>, interval: u32, keep: u32| {
+        let core = &core;
+        let schedule = &schedule;
+        async move {
+            core.call(
+                Method::PUT,
+                schedule,
+                Some(token),
+                ticket.as_deref(),
+                Some(json!({ "interval_hours": interval, "keep": keep })),
+            )
+            .await
+        }
+    };
+
+    // Raising how many are kept, or changing how often, stays the editor's.
+    let (status, body) = put(&editor, None, 6, 10).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = put(&editor, None, 1, 10).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Keeping fewer deletes the oldest at the next backup: the owner's, with a ticket.
+    let (status, _) = put(&editor, Some(core.ticket("editor")), 1, 1).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, error) = put(&owner, None, 1, 1).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("ticket_required"))
+    );
+    let (_, kept) = core
+        .call(Method::GET, &schedule, Some(&editor), None, None)
+        .await;
+    assert_eq!(kept, json!({ "interval_hours": 1, "keep": 10 }));
+    let (status, _) = put(&owner, Some(core.ticket("owner")), 1, 1).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, kept) = core
+        .call(Method::GET, &schedule, Some(&editor), None, None)
+        .await;
+    assert_eq!(kept, json!({ "interval_hours": 1, "keep": 1 }));
+}

@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{Client, Output, Switch, local_time, on_off, servers};
 use crate::{
+    access::pairing,
     api::{
         eula::Eula,
         insight::{Machine, Reach},
         logs::CoreLogs,
+        pairing::PairingStatus,
         update::{ApplyUpdate, Restarting, UpdateSettings, UpdateStatus},
     },
     update::{launcher, release::Channel, versions::FailedTrial},
@@ -55,16 +57,21 @@ pub async fn status(client: &Client) -> Result<Output> {
         health: Health,
         update: UpdateStatus,
         machine: Machine,
+        pairing: PairingStatus,
         servers: Vec<crate::api::servers::Server>,
     }
     let health: Health = client.get("/health").await?;
     let update: UpdateStatus = client.get("/update").await?;
     let machine: Machine = client.get("/machine").await?;
+    let pairing: PairingStatus = client.get("/pairing").await?;
     let servers = servers::list(client).await?;
     let mut lines = vec![format!(
         "Core {} is running (id {})",
         health.version, health.core_id
     )];
+    if !pairing.paired {
+        lines.push(pairing_text(&pairing));
+    }
     if update.update_available
         && let Some(latest) = &update.latest
     {
@@ -94,9 +101,28 @@ pub async fn status(client: &Client) -> Result<Output> {
             health,
             update,
             machine,
+            pairing,
             servers,
         },
     ))
+}
+
+/// `copal pair`.
+pub async fn pair(client: &Client) -> Result<Output> {
+    let status: PairingStatus = client.post("/pairing/code", &()).await?;
+    Ok(Output::new(pairing_text(&status), &status))
+}
+
+/// What `status` and `pair` say about pairing.
+fn pairing_text(status: &PairingStatus) -> String {
+    match (&status.code, status.expires_at) {
+        _ if status.paired => "This Core is paired".into(),
+        (Some(code), Some(expires_at)) => format!(
+            "This Core is not paired yet.\n{}\nFor a new code: copal pair",
+            pairing::instructions(code, expires_at)
+        ),
+        _ => "This Core is not paired yet and is still getting a code from Amberite. copal logs says why.".into(),
+    }
 }
 
 /// `copal logs`.

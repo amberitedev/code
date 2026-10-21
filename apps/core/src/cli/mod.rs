@@ -68,6 +68,8 @@ pub enum Command {
     },
     /// Show whether Core runs, its version, and what its servers are doing.
     Status,
+    /// Get a fresh pairing code, to enter in Amberite to make this Core yours.
+    Pair,
     /// Show the end of Core's own log.
     Logs {
         /// How many lines, up to 1000.
@@ -164,6 +166,7 @@ pub async fn run(command: Command, json: bool) -> Result<bool> {
     let client = Client::new();
     let output = match command {
         Command::Status => machine::status(&client).await?,
+        Command::Pair => machine::pair(&client).await?,
         Command::Logs { lines } => machine::logs(&client, lines).await?,
         Command::Update(command) => machine::update(&client, command).await?,
         Command::Eula { accept } => machine::eula(&client, accept).await?,

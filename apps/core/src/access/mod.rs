@@ -55,6 +55,8 @@ pub struct Access {
     pub changed: broadcast::Sender<Changed>,
     /// Wakes backend sync when a call is owed.
     pub owed: Arc<Notify>,
+    /// Asks the pairing loop for a fresh code (`copal pair`).
+    pub new_code: Notify,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -72,6 +74,7 @@ impl Access {
             keys,
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
+            new_code: Notify::new(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }
@@ -260,9 +263,8 @@ impl FromRequestParts<Arc<AppState>> for Caller {
 
 /// The owner doing something dangerous: inviting, removing, or changing a role; deleting a
 /// server; revoking someone else's session; updating or rolling back Core; removing Core from
-/// its account. Over HTTPS this
-/// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none. Restoring a backup
-/// takes it too when its route lands.
+/// its account; restoring or deleting a backup, or keeping fewer scheduled ones. Over HTTPS this
+/// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none.
 pub struct Dangerous(pub Caller);
 
 impl FromRequestParts<Arc<AppState>> for Dangerous {
@@ -273,8 +275,20 @@ impl FromRequestParts<Arc<AppState>> for Dangerous {
         state: &Arc<AppState>,
     ) -> Result<Self, ApiError> {
         let caller = Caller::from_request_parts(parts, state).await?;
+        Self::check(state, caller, &parts.headers).await
+    }
+}
+
+impl Dangerous {
+    /// The extractor's checks, for a route where only some changes are dangerous, such as
+    /// keeping fewer scheduled backups.
+    pub async fn check(
+        state: &AppState,
+        caller: Caller,
+        headers: &HeaderMap,
+    ) -> Result<Self, ApiError> {
         caller.require_owner()?;
-        fresh_ticket(state, &caller, &parts.headers).await?;
+        fresh_ticket(state, &caller, headers).await?;
         Ok(Self(caller))
     }
 }
