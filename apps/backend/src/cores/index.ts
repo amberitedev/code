@@ -1,5 +1,3 @@
-import { connect } from 'cloudflare:sockets'
-
 import { findUser, requireUser, tokenFrom } from '../common/auth'
 import { digest, randomId } from '../common/crypto'
 import {
@@ -21,9 +19,9 @@ import { issueTicket } from './tickets'
 // owner, and polls. The owner enters the code in the App, which approves it with their session;
 // from then on the key works and the Core is listed under that account. The App never talks to the
 // Core during sign-in and the account session never leaves the App. After that the backend only
-// keeps the account's list of Cores and their addresses, and tests on request whether a Core can be
-// reached from the internet. A Core reports its state on start and on change, never on a timer, and
-// a report that changes nothing writes nothing: D1 writes are the free tier's scarcest resource.
+// keeps the account's list of Cores and their addresses. A Core reports its state on start and on
+// change, never on a timer, and a report that changes nothing writes nothing: D1 writes are the
+// free tier's scarcest resource.
 //
 // A Core's owner can invite other accounts to manage its servers. The Core keeps who has which
 // role on which server and is the only authority on it; the backend keeps a copy of which accounts
@@ -44,10 +42,6 @@ const REQUEST_WINDOW_MS = 10 * 60_000
 // The code's alphabet: no i, o, 0 or 1, so it reads the same in any font.
 const CODE_ALPHABET = 'abcdefghjklmnpqrstuvwxyz23456789'
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
-// Outside tests one Core may ask for within `CHECK_WINDOW_MS`. Counted in memory, per isolate.
-const MAX_CHECKS = 30
-const CHECK_WINDOW_MS = 10 * 60_000
-const CHECK_TIMEOUT_MS = 5_000
 // Invites one Core may send within `INVITE_WINDOW_MS`.
 const MAX_INVITES = 30
 const INVITE_WINDOW_MS = 10 * 60_000
@@ -331,13 +325,6 @@ async function approveCode(request: Request, env: Env) {
 	return json(stored)
 }
 
-/** Core: sign itself out. Its key stops working and it leaves the owner's list. */
-async function signOut(request: Request, env: Env) {
-	const core = await requireCore(request, env)
-	await env.DB.prepare('DELETE FROM cores WHERE id = ?').bind(core.id).run()
-	return new Response(null, { status: 204 })
-}
-
 /** What a state report may change on a Core's row. */
 const STATE_FIELDS = ['address', 'public_address', 'cert_fingerprint', 'version'] as const
 type CoreState = Pick<CoreRow, (typeof STATE_FIELDS)[number]>
@@ -388,95 +375,6 @@ async function reportState(request: Request, env: Env) {
 	return new Response(null, { status: 204 })
 }
 
-/**
- * The Core on `main`: where it is now, sent on start and every few minutes. Replaced by
- * `reportState` and deleted when the new Core reaches `main`; until then it writes only what
- * changed, so the old Core's timer costs requests but no writes. A Core that does not serve HTTPS
- * yet keeps the certificate it reported before.
- */
-async function reportAddress(request: Request, env: Env) {
-	const core = await requireCore(request, env)
-	const body = await readJson(request)
-	const publicAddress = body.public_address == null ? null : coreAddress(body, 'public_address')
-	if (publicAddress && !publicAddress.startsWith('https:'))
-		throw new ApiError(400, 'invalid_address', 'A public Core address must use HTTPS')
-	await writeState(env, core, {
-		address: coreAddress(body),
-		public_address: publicAddress,
-		cert_fingerprint: certFingerprint(body) ?? core.cert_fingerprint,
-		version: body.version == null ? core.version : stringField(body, 'version', 32),
-	})
-	return json({ id: core.id, owner_id: core.owner_id })
-}
-
-/** Try to open a TCP connection. `detail` says how it failed, ready to show. */
-async function tcpConnects(
-	hostname: string,
-	port: number,
-): Promise<{ reachable: boolean; detail: string }> {
-	let socket: Socket | undefined
-	let timer: ReturnType<typeof setTimeout> | undefined
-	try {
-		socket = connect({ hostname, port })
-		const timedOut = new Promise<false>((resolve) => {
-			timer = setTimeout(() => resolve(false), CHECK_TIMEOUT_MS)
-		})
-		const opened = await Promise.race([socket.opened.then(() => true as const), timedOut])
-		return opened
-			? { reachable: true, detail: '' }
-			: {
-					reachable: false,
-					detail: `no answer within ${CHECK_TIMEOUT_MS / 1000} seconds, the connection was dropped on the way`,
-				}
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error)
-		return { reachable: false, detail: `the connection was refused or reset (${reason})` }
-	} finally {
-		clearTimeout(timer)
-		void socket?.close().catch(() => undefined)
-	}
-}
-
-// Reachability tests per Core in this isolate's current window. An isolate does not live forever,
-// so this is a soft limit, enough to keep a Core from using the backend to knock on its own ports
-// in a loop, and it costs no D1 writes.
-const checks = new Map<string, { count: number; windowStart: number }>()
-
-function countCheck(coreId: string, now: number): number {
-	for (const [id, window] of checks)
-		if (window.windowStart <= now - CHECK_WINDOW_MS) checks.delete(id)
-	const window = checks.get(coreId) ?? { count: 0, windowStart: now }
-	window.count++
-	checks.set(coreId, window)
-	return window.count
-}
-
-/**
- * Core, signed in: test whether a port on this Core can be reached from the internet, when its
- * owner asks. The connection only ever goes to the address this request came from, so it cannot
- * be used to probe anyone else. `outside` is false when that address is a private one: this
- * backend is then on the Core's own network (local development) and its answer says nothing about
- * the internet.
- */
-async function checkReachability(request: Request, env: Env) {
-	const core = await requireCore(request, env)
-	const port = (await readJson(request)).port
-	if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535)
-		throw new ApiError(400, 'invalid_input', 'Invalid port')
-	if (countCheck(core.id, Date.now()) > MAX_CHECKS)
-		throw new ApiError(429, 'too_many_checks', 'Too many reachability tests. Try again later.')
-
-	// Cloudflare sets CF-Connecting-IP itself, so a caller cannot choose it. The local Worker only
-	// listens on this computer and passes the header through untouched, so it is not read there.
-	const local = env.LOCAL_DEV === 'true'
-	const address = local ? '127.0.0.1' : request.headers.get('CF-Connecting-IP')
-	if (!address) throw new ApiError(500, 'internal_error', 'The caller address is unknown')
-	const outside = !isPrivateHost(address)
-	// A private caller is only ever tested in local development, where it exercises this route.
-	if (!outside && !local) return json({ address, outside, reachable: false, detail: '' })
-	return json({ address, outside, ...(await tcpConnects(address, port)) })
-}
-
 /** The Core a request's key belongs to, or null for a key no Core has. */
 async function findCore(request: Request, env: Env): Promise<CoreRow | null> {
 	const key = tokenFrom(request)
@@ -486,15 +384,9 @@ async function findCore(request: Request, env: Env): Promise<CoreRow | null> {
 		.first<CoreRow>()
 }
 
-/** The Core a request's key belongs to. The Core on `main` reads 401 as "removed". */
-async function requireCore(request: Request, env: Env): Promise<CoreRow> {
-	return (await findCore(request, env)) ?? unauthorized()
-}
-
 /**
- * The Core a request's key belongs to, on the routes the new Core calls on start. A key that
- * belonged to a Core that was since removed from its account gets 410, so the Core un-pairs on
- * that answer and on no other.
+ * The Core a request's key belongs to. A key that belonged to a Core that was since removed from
+ * its account gets 410, so the Core un-pairs on that answer and on no other.
  */
 async function requireListedCore(request: Request, env: Env): Promise<CoreRow> {
 	const core = await findCore(request, env)
@@ -514,19 +406,16 @@ const INVITE_FILTER =
 /**
  * Core, signed in: its owner invited an account to one of its servers. The account may reach this
  * Core from now on, and gets the invite as a notification. `user` is an id or a username; the
- * answer says who it is, so the Core can show their name. Only the owner invites: `invited_by`,
- * which the new Core leaves out, must be the owner when it is sent.
+ * answer says who it is, so the Core can show their name. Only the owner invites, so the invite
+ * is always from the owner.
  */
 async function grantAccess(request: Request, env: Env) {
-	const core = await requireCore(request, env)
+	const core = await requireListedCore(request, env)
 	const body = await readJson(request)
 	const serverId = stringField(body, 'server_id', 64)
 	const serverName = stringField(body, 'server_name', MAX_SERVER_NAME)
 	const role = stringField(body, 'role', 16)
-	const invitedBy = core.owner_id
 	const username = stringField(body, 'user', 64)
-	if (body.invited_by != null && body.invited_by !== core.owner_id)
-		throw new ApiError(403, 'forbidden', "Only the Core's owner can invite")
 
 	// Counted before the account is looked up, so a Core cannot use this to test names either.
 	const now = Date.now()
@@ -543,10 +432,7 @@ async function grantAccess(request: Request, env: Env) {
 	const user = await findUser(env, username)
 	if (!user) throw new ApiError(404, 'not_found', 'Not found')
 	if (user.id === core.owner_id) invalid('The owner already has full access')
-	if (
-		(await blockedEitherWay(env, user.id, invitedBy)) ||
-		(await blockedEitherWay(env, user.id, core.owner_id))
-	)
+	if (await blockedEitherWay(env, user.id, core.owner_id))
 		invalid("You've blocked the other user or have been blocked by them!")
 	await env.DB.batch([
 		env.DB.prepare(
@@ -565,7 +451,7 @@ async function grantAccess(request: Request, env: Env) {
 		server_id: serverId,
 		server_name: serverName,
 		role,
-		invited_by: invitedBy,
+		invited_by: core.owner_id,
 	})
 	return json({ id: user.id, username: user.username, avatar_url: user.avatar_url })
 }
@@ -602,7 +488,7 @@ async function replaceAccess(request: Request, env: Env) {
  * and unless `keep_core` says it still has another server there, so is its way to this Core.
  */
 async function revokeAccess(request: Request, env: Env) {
-	const core = await requireCore(request, env)
+	const core = await requireListedCore(request, env)
 	const body = await readJson(request)
 	const userId = stringField(body, 'user_id', 64)
 	await env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`)
@@ -620,10 +506,7 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 		method = request.method
 	if (path === '/core/auth/code' && method === 'POST') return requestCode(request, env)
 	if (path === '/core/auth/poll' && method === 'POST') return pollCode(request, env)
-	if (path === '/core/auth' && method === 'DELETE') return signOut(request, env)
 	if (path === '/core/state' && method === 'POST') return reportState(request, env)
-	if (path === '/core/address' && method === 'POST') return reportAddress(request, env)
-	if (path === '/core/reachability' && method === 'POST') return checkReachability(request, env)
 	if (path === '/core/access' && method === 'PUT') return replaceAccess(request, env)
 	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
 	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)

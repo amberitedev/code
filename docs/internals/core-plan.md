@@ -321,7 +321,7 @@ and certificate, nothing about roles. The owner is known from sign-in and never 
 
 - Sync: Core keeps a small "owed to the backend" list of calls it still has to make, retried with
   backoff. On every start and reconnect it also sends its whole directory list in one `PUT` that
-  replaces the backend's copy, the way `/core/servers` already works. A full replace cannot drift.
+  replaces the backend's copy, the way the state report replaces its server list. A full replace cannot drift.
 - Invite: the owner invites a user to a server with a role, with a fresh ticket. Core adds the row
   and owes the backend one call: this user may reach me, notify them. Accepting is just connecting.
   Only the owner may invite; today's backend lets anyone with access do it, and that goes.

@@ -33,7 +33,6 @@ test('Core re-invites replace notifications and deliver them even when access al
 			server_id: 'server',
 			server_name: 'Server',
 			role: 'moderator',
-			invited_by: 'owner',
 			user: 'friend',
 		}
 		await backend.db
@@ -42,7 +41,6 @@ test('Core re-invites replace notifications and deliver them even when access al
 			.run()
 		assert.equal((await call('POST', invite, 'mra_owner')).status, 401)
 		assert.equal((await call('GET', undefined, 'amc_test', '/cores')).status, 401)
-		assert.equal((await call('POST', { ...invite, invited_by: 'stranger' })).status, 403)
 		await backend.db
 			.prepare(
 				"INSERT INTO auth_flows (id,kind,user_id,expires) VALUES ('expired-flow','login_2fa','friend','2020-01-01')",
