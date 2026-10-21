@@ -123,7 +123,8 @@ pub async fn install(
         ..server.clone()
     };
     progress(0.0);
-    let java = launch::java_for(paths, http, &target).await?;
+    // Held until the install is done, so the patch check keeps the Java the installer runs.
+    let (java, _lease) = launch::java_for(paths, http, &target).await?;
     progress(0.2);
     let rest = |share: f64| progress(0.2 + share * 0.8);
     let installed = match loader {

@@ -138,23 +138,66 @@ fn installing(major: u32) -> Arc<tokio::sync::Mutex<()>> {
     )
 }
 
-/// The Java binary for `major`, downloaded first when missing.
+/// Java binaries a start or an installer resolved and has not handed to its shim yet, with how
+/// many hold each. The patch check never removes a release one of them is in.
+static LEASES: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
+    LazyLock::new(Mutex::default);
+
+/// A Java binary kept from removal until dropped. Hold it until the shim that runs it is
+/// running: from then on its launch spec keeps the release.
+#[must_use]
+pub struct Lease {
+    binary: PathBuf,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let mut leases = LEASES.lock().expect("not poisoned");
+        if let Some(count) = leases.get_mut(&self.binary) {
+            *count -= 1;
+            if *count == 0 {
+                leases.remove(&self.binary);
+            }
+        }
+    }
+}
+
+/// Lease `binary`, unless it is gone. Checked under the lease lock, which removal also holds, so
+/// a release is either removed before this or kept.
+fn lease(binary: &Path) -> Option<Lease> {
+    let mut leases = LEASES.lock().expect("not poisoned");
+    if !binary.is_file() {
+        return None;
+    }
+    *leases.entry(binary.to_owned()).or_default() += 1;
+    Some(Lease {
+        binary: binary.to_owned(),
+    })
+}
+
+/// The Java binary for `major`, downloaded first when missing, leased (see [`Lease`]).
 pub async fn ensure(
     paths: &Paths,
     http: &reqwest::Client,
     major: u32,
-) -> Result<PathBuf, JavaError> {
-    if let Some(binary) = installed(paths, major) {
-        return Ok(binary);
+) -> Result<(PathBuf, Lease), JavaError> {
+    let leased = |binary: PathBuf| lease(&binary).map(|lease| (binary, lease));
+    if let Some(found) = installed(paths, major).and_then(leased) {
+        return Ok(found);
     }
     let lock = installing(major);
     let _installing = lock.lock().await;
     // Another start may have installed it while this one waited.
-    if let Some(binary) = installed(paths, major) {
-        return Ok(binary);
+    if let Some(found) = installed(paths, major).and_then(leased) {
+        return Ok(found);
     }
     let package = latest(http, major).await?;
-    install(paths, http, major, &package).await
+    let binary = install(paths, http, major, &package).await?;
+    // Removal runs under the lock this holds, so the new release is there.
+    leased(binary).ok_or_else(|| JavaError::Archive {
+        major,
+        reason: "its binary vanished once installed".into(),
+    })
 }
 
 /// One Azul package, as their metadata API lists it.
@@ -356,7 +399,8 @@ pub async fn update_all(paths: &Paths, http: &reqwest::Client) {
     }
 }
 
-/// Remove every release of `major` but the current one and those a running server started with.
+/// Remove every release of `major` but the current one, those a running server started with, and
+/// those a start or installer holds a [`Lease`] on.
 fn remove_unused(paths: &Paths, major: u32) {
     let Some(current) = read_current(paths, major) else {
         return;
@@ -375,9 +419,12 @@ fn remove_unused(paths: &Paths, major: u32) {
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
         let name = entry.file_name();
+        // Held across the check and the removal, so no lease is taken in between.
+        let leases = LEASES.lock().expect("not poisoned");
         if !path.is_dir()
             || name.to_str() == Some(current.release.as_str())
             || in_use.iter().any(|java| java.starts_with(&path))
+            || leases.keys().any(|java| java.starts_with(&path))
         {
             continue;
         }
@@ -454,5 +501,34 @@ mod tests {
         assert!(!folder.join("old").exists());
         assert!(folder.join("new").exists());
         assert!(folder.join("running").exists());
+    }
+
+    #[test]
+    fn a_release_a_start_has_leased_is_kept_until_the_lease_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let folder = paths.java().join("17");
+        for release in ["starting", "new"] {
+            std::fs::create_dir_all(folder.join(release).join("bin")).unwrap();
+            std::fs::write(folder.join(release).join("bin/java"), "").unwrap();
+        }
+        shim::write_json(
+            &current_path(&paths, 17),
+            &Current {
+                release: "new".into(),
+                binary: "bin/java".into(),
+                sha256: String::new(),
+            },
+        )
+        .unwrap();
+        // A start resolved the release before the patch check published "new".
+        let leased = lease(&folder.join("starting").join("bin/java")).unwrap();
+        remove_unused(&paths, 17);
+        assert!(folder.join("starting").exists());
+        drop(leased);
+        remove_unused(&paths, 17);
+        assert!(!folder.join("starting").exists());
+        // A release already removed cannot be leased.
+        assert!(lease(&folder.join("starting").join("bin/java")).is_none());
     }
 }
