@@ -16,6 +16,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::daemon::paths::Paths;
 
@@ -31,9 +32,34 @@ pub struct State {
     /// Set by a manual rollback: put back the database copied before the update.
     #[serde(default)]
     pub restore_database: bool,
-    /// The last version that failed its health check and was rolled back from. Auto-update
-    /// skips it.
+    /// The last version that failed its health check and was rolled back from. Neither
+    /// auto-update nor `copal update apply` installs it again unless asked to retry.
     pub failed: Option<String>,
+    /// How `failed` failed. Launchers from before this field leave it out.
+    pub failed_reason: Option<FailedTrial>,
+}
+
+/// How a version on trial failed, as the launcher saw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum FailedTrial {
+    /// The OS would not run its binary.
+    NotStarted,
+    /// It ran, and exited before it answered a request.
+    Exited,
+    /// It ran, and did not answer a request within a minute.
+    NoAnswer,
+}
+
+impl FailedTrial {
+    /// What happened, for a person, after "Copal <version>".
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::NotStarted => "never started: this machine would not run it",
+            Self::Exited => "started, then exited before it answered",
+            Self::NoAnswer => "started, but did not answer within a minute",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,8 +70,9 @@ pub struct Trial {
 }
 
 impl State {
-    /// Switch from `current` to `next`, which still has to prove healthy.
-    pub fn update(current: &str, next: &str, failed: Option<String>) -> Self {
+    /// Switch from `current` to `next`, which still has to prove healthy. The last failure, if
+    /// `earlier` recorded one, is kept.
+    pub fn update(current: &str, next: &str, earlier: Option<&Self>) -> Self {
         Self {
             active: next.into(),
             previous: Some(current.into()),
@@ -53,19 +80,21 @@ impl State {
                 database_saved: false,
             }),
             restore_database: false,
-            failed,
+            failed: earlier.and_then(|earlier| earlier.failed.clone()),
+            failed_reason: earlier.and_then(|earlier| earlier.failed_reason),
         }
     }
 
     /// Go back to `previous` after the active version failed its trial. `None` when there is
     /// nothing to go back to.
-    pub fn failed_trial(self) -> Option<Self> {
+    pub fn failed_trial(self, reason: FailedTrial) -> Option<Self> {
         Some(Self {
             active: self.previous?,
             previous: None,
             trial: None,
             restore_database: false,
             failed: Some(self.active),
+            failed_reason: Some(reason),
         })
     }
 
@@ -77,6 +106,7 @@ impl State {
             trial: None,
             restore_database: true,
             failed: self.failed,
+            failed_reason: self.failed_reason,
         })
     }
 }
@@ -269,15 +299,26 @@ mod tests {
     fn a_failed_trial_goes_back_and_remembers_the_failure() {
         let state = State::update("0.1.0", "0.2.0", None);
         assert_eq!(
-            state.failed_trial(),
+            state.failed_trial(FailedTrial::NoAnswer),
             Some(State {
                 active: "0.1.0".into(),
                 previous: None,
                 trial: None,
                 restore_database: false,
                 failed: Some("0.2.0".into()),
+                failed_reason: Some(FailedTrial::NoAnswer),
             })
         );
+    }
+
+    #[test]
+    fn a_state_from_a_launcher_without_failure_reasons_still_loads() {
+        let state: State = serde_json::from_str(
+            r#"{"active":"0.2.0","previous":null,"trial":null,"restore_database":false,"failed":"0.3.0"}"#,
+        )
+        .unwrap();
+        assert_eq!(state.failed.as_deref(), Some("0.3.0"));
+        assert_eq!(state.failed_reason, None);
     }
 
     #[test]

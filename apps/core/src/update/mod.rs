@@ -66,6 +66,10 @@ pub enum UpdateError {
     DowngradeRemote,
     #[error("Copal {0} is already running")]
     UpToDate(Version),
+    #[error(
+        "Copal {0} was tried here and Core went back: it {1}. To try it again: copal update apply --retry"
+    )]
+    FailedBefore(Version, &'static str),
     #[error("there is no Copal release on the {0:?} channel")]
     NoRelease(Channel),
     #[error("Core is still checking its last update. Try again in a minute")]
@@ -103,6 +107,13 @@ fn may_replace(
     } else {
         Ok(())
     }
+}
+
+/// Whether `version` is the release that last failed its trial here.
+fn failed_before(version: &Version, failed: Option<&str>) -> bool {
+    failed.is_some_and(|failed| {
+        Version::parse(failed).ok().as_ref() == Some(version)
+    })
 }
 
 /// Read an answer as it streams in, refusing it once it passes `cap` bytes.
@@ -233,20 +244,21 @@ impl Updater {
         let checked = self.checked.lock().expect("not poisoned").clone();
         let state = versions::load(&self.paths)?;
         let version = current();
+        let failed = state.as_ref().and_then(|state| state.failed.clone());
         Ok(UpdateStatus {
             version: version.to_string(),
             target: release::TARGET.map(Into::into),
             channel,
             auto_update,
-            update_available: checked
-                .latest
-                .as_ref()
-                .is_some_and(|latest| latest > &version),
+            update_available: checked.latest.as_ref().is_some_and(|latest| {
+                latest > &version && !failed_before(latest, failed.as_deref())
+            }),
             latest: checked.latest.map(|latest| latest.to_string()),
             checked_at: checked.at,
             check_error: checked.error,
             previous: state.as_ref().and_then(|state| state.previous.clone()),
-            failed: state.and_then(|state| state.failed),
+            failed,
+            failed_reason: state.and_then(|state| state.failed_reason),
         })
     }
 
@@ -271,9 +283,11 @@ impl Updater {
 
     /// Install the newest release on the channel and restart into it. Returns its version.
     /// `allow_downgrade` lets an older release replace this one; only the CLI may pass it.
+    /// `retry` installs the release even when it already failed its trial here.
     pub async fn apply(
         &self,
         allow_downgrade: bool,
+        retry: bool,
     ) -> Result<Version, UpdateError> {
         let _busy = self.busy.lock().await;
         let state = versions::load(&self.paths)?;
@@ -284,6 +298,18 @@ impl Updater {
         let candidate = self.candidate(channel).await?;
         let current = current();
         may_replace(&candidate.version, &current, allow_downgrade)?;
+        if !retry
+            && let Some(state) = &state
+            && failed_before(&candidate.version, state.failed.as_deref())
+        {
+            return Err(UpdateError::FailedBefore(
+                candidate.version,
+                state.failed_reason.map_or(
+                    "it did not prove healthy",
+                    versions::FailedTrial::describe,
+                ),
+            ));
+        }
         self.install(&candidate).await?;
         let paths = self.paths.clone();
         let running = current.to_string();
@@ -298,7 +324,7 @@ impl Updater {
             Some(&versions::State::update(
                 &current.to_string(),
                 &next,
-                state.and_then(|state| state.failed),
+                state.as_ref(),
             )),
         )?;
         info!(from = %current, to = %next, "updated; restarting into the new version");
@@ -335,11 +361,10 @@ impl Updater {
         loop {
             match self.check().await {
                 Ok(status) => {
-                    let skip = status.latest.is_some()
-                        && status.latest == status.failed;
-                    if status.auto_update && status.update_available && !skip {
+                    // `update_available` is false for a release that failed its trial here.
+                    if status.auto_update && status.update_available {
                         servers.settle(SETTLE_TIMEOUT).await;
-                        if let Err(error) = self.apply(false).await {
+                        if let Err(error) = self.apply(false, false).await {
                             warn!(%error, "could not update");
                         }
                     }
@@ -586,6 +611,13 @@ mod tests {
             read_capped(response, MAX_SIGNATURE).await.unwrap(),
             b"small"
         );
+    }
+
+    #[test]
+    fn a_release_that_failed_here_is_known_by_its_version() {
+        assert!(failed_before(&version("0.3.0"), Some("0.3.0")));
+        assert!(!failed_before(&version("0.4.0"), Some("0.3.0")));
+        assert!(!failed_before(&version("0.3.0"), None));
     }
 
     #[test]

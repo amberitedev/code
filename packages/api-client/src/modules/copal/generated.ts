@@ -239,9 +239,16 @@ check_error: string | null,
  */
 previous: string | null, 
 /**
- * The last version that failed to start and was rolled back from.
+ * The last version that was tried here, failed its trial, and was rolled back from. While
+ * it is the newest release, `update_available` is false and applying it needs `retry`.
  */
-failed: string | null, };
+failed: string | null, 
+/**
+ * How `failed` failed. Null when an older launcher did not record it.
+ */
+failed_reason: FailedTrial | null, };
+
+export type FailedTrial = "not_started" | "exited" | "no_answer";
 
 export type Channel = "stable" | "beta" | "alpha";
 
@@ -251,7 +258,11 @@ export type ApplyUpdate = {
 /**
  * Install the channel's release even when it is older. Only the copal CLI may.
  */
-allow_downgrade?: boolean, };
+allow_downgrade?: boolean, 
+/**
+ * Install the channel's release even when it already failed its trial on this Core.
+ */
+retry?: boolean, };
 
 export type Restarting = { 
 /**

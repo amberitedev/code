@@ -36,7 +36,15 @@ fn arguments_parse_into_commands() {
     assert!(matches!(
         cli.command,
         Command::Update(UpdateCommand::Apply {
-            allow_downgrade: true
+            allow_downgrade: true,
+            retry: false,
+        })
+    ));
+    assert!(matches!(
+        parse("update apply --retry").unwrap().command,
+        Command::Update(UpdateCommand::Apply {
+            allow_downgrade: false,
+            retry: true,
         })
     ));
     assert!(matches!(
