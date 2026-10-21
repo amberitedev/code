@@ -280,6 +280,9 @@ struct Session {
     /// The name each file was sent with, and where it waits.
     files: Vec<(String, PathBuf)>,
     bytes: u64,
+    /// Held by the upload in progress: uploads to one session take turns, so each streams
+    /// against what the ones before it left of the cap, not all against the same remainder.
+    turn: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Session {
@@ -385,12 +388,12 @@ fn folder(state: &AppState, id: &str) -> Result<Arc<Folder>, ApiError> {
 }
 
 /// The folder, taken for a change: the same lock installs hold, so an edit never lands between
-/// an install's plan and its writes. Hold the lock until the change is done.
+/// an install's plan and its writes. Do the change through [`locked`].
 fn changing(
     state: &AppState,
     id: &str,
-) -> Result<(Arc<Folder>, Busy), ApiError> {
-    let busy = state.content.busy(id)?;
+) -> Result<(Arc<Folder>, Arc<Busy>), ApiError> {
+    let busy = Arc::new(state.content.busy(id)?);
     Ok((folder(state, id)?, busy))
 }
 
@@ -414,6 +417,20 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(work).await.map_err(|error| {
         ApiError::new(ErrorCode::Internal, error.to_string())
     })?
+}
+
+/// As [`blocking`], keeping the content lock until `work` itself ends: a request that times out
+/// stops waiting, but the work it started holds the lock to the end.
+async fn locked<T: Send + 'static>(
+    busy: &Arc<Busy>,
+    work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let busy = Arc::clone(busy);
+    blocking(move || {
+        let _busy = busy;
+        work()
+    })
+    .await
 }
 
 fn unix(time: std::io::Result<cap_std::time::SystemTime>) -> i64 {
@@ -595,13 +612,14 @@ async fn stage_body(
     result.map(|()| staged)
 }
 
-/// Write a staged file into the folder, then remove it.
+/// Write a staged file into the folder taken by `busy`, then remove it.
 async fn place(
     folder: Arc<Folder>,
+    busy: &Arc<Busy>,
     path: String,
     staged: PathBuf,
 ) -> Result<(), ApiError> {
-    let result = blocking({
+    let result = locked(busy, {
         let staged = staged.clone();
         move || {
             folder.write(&path, &mut std::fs::File::open(&staged)?)?;
@@ -629,7 +647,7 @@ async fn place_changing(
         Ok((folder, busy))
     });
     match taken {
-        Ok((folder, _busy)) => place(folder, path, staged).await,
+        Ok((folder, busy)) => place(folder, &busy, path, staged).await,
         Err(error) => {
             let _ = tokio::fs::remove_file(&staged).await;
             Err(error)
@@ -665,8 +683,8 @@ pub async fn create(
     let path = inner_path(&query.path)?;
     match query.kind {
         CreateKind::Directory => {
-            let (folder, _busy) = changing(&state, &id)?;
-            blocking(move || Ok(folder.create_dir_all(&path)?)).await?;
+            let (folder, busy) = changing(&state, &id)?;
+            locked(&busy, move || Ok(folder.create_dir_all(&path)?)).await?;
         }
         CreateKind::File => {
             let staged = stage_body(&state, &id, body).await?;
@@ -704,8 +722,8 @@ pub async fn rename(
     caller.require(&state.db, &id, Level::Editor).await?;
     let from = inner_path(&request.source)?;
     let to = inner_path(&request.destination)?;
-    let (folder, _busy) = changing(&state, &id)?;
-    blocking(move || {
+    let (folder, busy) = changing(&state, &id)?;
+    locked(&busy, move || {
         if !folder.exists(&from) {
             return Err(not_found(&from));
         }
@@ -731,8 +749,8 @@ pub async fn delete(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let path = inner_path(&query.path)?;
-    let (folder, _busy) = changing(&state, &id)?;
-    blocking(move || {
+    let (folder, busy) = changing(&state, &id)?;
+    locked(&busy, move || {
         let meta = folder.metadata(&path).map_err(|_| not_found(&path))?;
         if meta.is_dir() && !query.recursive {
             folder.remove_empty_dir(&path).map_err(|_| {
@@ -764,8 +782,8 @@ pub async fn unarchive(
     caller.require(&state.db, &id, Level::Editor).await?;
     let source = inner_path(&query.src)?;
     let target = api_path(&query.trg)?;
-    let (folder, _busy) = changing(&state, &id)?;
-    let result = blocking(move || {
+    let (folder, busy) = changing(&state, &id)?;
+    let result = locked(&busy, move || {
         let file = folder
             .open_file(&source)
             .ok()
@@ -943,7 +961,7 @@ pub async fn zip(
             (api_path(&parent)?, include, inner_path(&target)?)
         }
     };
-    let (folder, _busy) = changing(&state, &id)?;
+    let (folder, busy) = changing(&state, &id)?;
     refuse_owned(&folder, &target)?;
     let staged = state
         .servers
@@ -951,7 +969,7 @@ pub async fn zip(
         .staging(&id)
         .join(format!("zip-{}", uuid::Uuid::new_v4()));
     tokio::fs::create_dir_all(staged.parent().expect("inside staging")).await?;
-    let result = blocking({
+    let result = locked(&busy, {
         let staged = staged.clone();
         let folder = Arc::clone(&folder);
         move || {
@@ -1042,6 +1060,7 @@ pub async fn open_session(
             .join(format!("session-{upload_id}")),
         files: Vec::new(),
         bytes: 0,
+        turn: Arc::default(),
     };
     let response = session.response(&upload_id);
     let ended: Vec<PathBuf> = {
@@ -1101,6 +1120,14 @@ pub async fn upload_files(
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
+    let turn =
+        state
+            .uploads
+            .change(&caller, &id, scope, &upload_id, |session| {
+                Ok(Arc::clone(&session.turn))
+            })?;
+    let _turn = turn.lock_owned().await;
+    // Read once it is this upload's turn: what the uploads before it committed counts.
     let (dir, budget) =
         state
             .uploads
@@ -1201,13 +1228,14 @@ pub async fn finalize_session(
     let result = async {
         match scope {
             UploadScope::Files => {
-                let (folder, _busy) = changing(&state, &id)?;
+                let (folder, busy) = changing(&state, &id)?;
                 for (name, _) in &files {
                     refuse_owned(&folder, &inner_path(name)?)?;
                 }
                 for (name, staged) in &files {
                     place(
                         Arc::clone(&folder),
+                        &busy,
                         inner_path(name)?,
                         staged.clone(),
                     )
