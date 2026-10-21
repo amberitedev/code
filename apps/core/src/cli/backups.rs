@@ -24,8 +24,8 @@ pub enum BackupsCommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Put a backup back over the server's world. The current world is replaced and not kept:
-    /// back it up first if you may want it.
+    /// Put a backup back over the server's world. The current world is backed up first, as a
+    /// "Before restore" backup, and nothing is restored if that fails.
     Restore { server: String, backup: String },
     /// Show or change how often a server is backed up and how many backups it keeps.
     Schedule {
@@ -50,6 +50,30 @@ pub struct Backup {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub status: String,
     pub automated: bool,
+    /// Its creates and restores, oldest first.
+    #[serde(default)]
+    pub history: Vec<Operation>,
+}
+
+/// One entry of a backup's `history` in `api::backups::BackupQueueBackup`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Operation {
+    pub operation_type: String,
+    pub state: String,
+    pub error: Option<String>,
+}
+
+impl Backup {
+    /// Why its last operation failed, when it did: `create` or `restore`, and the reason Core
+    /// recorded.
+    pub fn failure(&self) -> Option<String> {
+        let last = self.history.last().filter(|op| op.state == "failed")?;
+        Some(format!(
+            "{} failed: {}",
+            last.operation_type,
+            last.error.as_deref().unwrap_or("no reason was recorded")
+        ))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,7 +104,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 backups
                     .iter()
                     .map(|backup| {
-                        format!(
+                        let line = format!(
                             "{}  {}  {:<11} {}{}",
                             backup.id,
                             backup
@@ -90,7 +114,14 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                             backup.status,
                             backup.name,
                             if backup.automated { " (scheduled)" } else { "" }
-                        )
+                        );
+                        // The reason is Core's text, which may quote file names: escaped.
+                        match backup.failure() {
+                            Some(failure) => {
+                                format!("{line}\n    {}", super::safe(&failure))
+                            }
+                            None => line,
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join("\n")

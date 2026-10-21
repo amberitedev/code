@@ -376,15 +376,26 @@ pub struct SyncContentError {
 }
 
 /// Serializes as `"result": "ok"` or `"result": "err"` next to the event tag. Mirrors
-/// Archon.Websocket.v0.WSInstallationResultOkEvent and WSInstallationResultErrEvent.
+/// Archon.Websocket.v0.WSInstallationResultOkEvent and WSInstallationResultErrEvent, with
+/// Amberite's `game_version` on a pack install that moved the server to another Minecraft.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "result", rename_all = "lowercase")]
 pub enum InstallationResult {
-    Ok,
+    Ok {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        game_version: Option<GameVersionChange>,
+    },
     Err {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+}
+
+/// The Minecraft version a pack install moved a server from and to. Amberite-only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+pub struct GameVersionChange {
+    pub from: String,
+    pub to: String,
 }
 
 /// Mirrors the `install_type` union of Archon.Websocket.v0.InstallProgressFileKey.

@@ -301,6 +301,9 @@ pub enum InstallWorldContent {
         soft_override: bool,
         #[serde(default)]
         properties: Option<PropertiesFields>,
+        /// Amberite: install a pack for an older Minecraft than the server's world anyway.
+        #[serde(default)]
+        force: bool,
     },
     Bare {
         loader: Modloader,
@@ -321,6 +324,17 @@ pub struct ModpackUploadQuery {
     #[allow(dead_code)] // As above.
     #[serde(default)]
     pub soft_override: bool,
+    /// Amberite: as `force` in `InstallWorldContent::Modpack`.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Optional body of POST `.../content/modpack/update`. Amberite-only.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdateModpack {
+    /// Update even when the newest version is for an older Minecraft than the server's world.
+    #[serde(default)]
+    pub force: bool,
 }
 
 /// The JSON `instance` part of the multipart body of POST `.../content/upload-modpack-file`, sent
@@ -947,12 +961,15 @@ pub async fn install(
                             &properties,
                         )?;
                     }
-                    Ok(())
+                    Ok(None)
                 },
             );
         }
         InstallWorldContent::Modpack {
-            spec, properties, ..
+            spec,
+            properties,
+            force,
+            ..
         } => {
             let ModpackSpec::Modrinth {
                 project_id,
@@ -974,6 +991,7 @@ pub async fn install(
                     version_id,
                 },
                 properties,
+                force,
             );
         }
     }
@@ -987,6 +1005,7 @@ fn spawn_pack(
     busy: Busy,
     source: PackSource,
     properties: Option<PropertiesFields>,
+    force: bool,
 ) {
     state.content.spawn(
         hold,
@@ -994,7 +1013,7 @@ fn spawn_pack(
         Installing::Modpack,
         move |content, hold, progress| async move {
             content_install::pack(
-                &content, &hold, &progress, source, properties,
+                &content, &hold, &progress, source, properties, force,
             )
             .await
         },
@@ -1016,7 +1035,8 @@ pub async fn repair(
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let (hold, busy) = begin(&state, &id)?;
     if records::pack(&state.db, &id).await?.is_some() {
-        spawn_pack(&state, hold, busy, PackSource::Current, None);
+        // The pack the server already follows: no other Minecraft.
+        spawn_pack(&state, hold, busy, PackSource::Current, None, true);
     } else {
         let (Some(loader), Some(game_version)) = (
             server.loader.as_deref().and_then(ModLoader::parse),
@@ -1043,6 +1063,7 @@ pub async fn repair(
                     true,
                 )
                 .await
+                .map(|()| None)
             },
         );
     }
@@ -1083,12 +1104,15 @@ pub async fn modpack(
 }
 
 /// `POST .../content/modpack/update`: update a Modrinth pack to its newest version, in the
-/// background. Files the owner edited are left alone (see `/servers/{id}/content/edited`).
+/// background. Files the owner edited are left alone (see `/servers/{id}/content/edited`). A
+/// newest version for an older Minecraft is refused unless the body says `force`.
 pub async fn update_modpack(
     caller: Caller,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
+    body: Option<Json<UpdateModpack>>,
 ) -> Result<StatusCode, ApiError> {
+    let force = body.is_some_and(|Json(body)| body.force);
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let pack = records::pack(&state.db, &id).await?.ok_or_else(|| {
@@ -1121,6 +1145,7 @@ pub async fn update_modpack(
             version_id: latest.id,
         },
         None,
+        force,
     );
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::ACCEPTED)
@@ -1180,7 +1205,7 @@ pub async fn upload_modpack(
     caller: Caller,
     State(state): State<Arc<AppState>>,
     Path((id, wid)): Path<(String, String)>,
-    Query(_query): Query<ModpackUploadQuery>,
+    Query(query): Query<ModpackUploadQuery>,
     mut form: Multipart,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -1250,6 +1275,7 @@ pub async fn upload_modpack(
             instance: instance.map(|instance| (instance.id, instance.name)),
         },
         properties,
+        query.force,
     );
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::ACCEPTED)

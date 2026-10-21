@@ -72,7 +72,9 @@ async fn a_backup_holds_the_world_and_settings_and_restores_them() {
         [
             "copal-backup.json",
             "server.properties",
+            "world/",
             "world/level.dat",
+            "world/region/",
             "world/region/r.0.0.mca"
         ]
     );
@@ -582,4 +584,94 @@ async fn a_restore_that_cannot_be_undone_keeps_its_server_stopped() {
     assert!(stage.join("old/world/level.dat").exists());
     assert_eq!(setup.backups.stuck.lock().unwrap().len(), 1);
     assert!(setup.backups.servers.hold(&setup.server).is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_world_file_written_as_0600_is_still_backed_up() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let setup = setup().await;
+    let level = setup.paths.server(&setup.server).join("world/level.dat");
+    // As Minecraft writes it.
+    std::fs::set_permissions(&level, std::fs::Permissions::from_mode(0o600))
+        .unwrap();
+    let id = backed_up(&setup).await;
+    let zip = setup.backups.file(&setup.server, &id);
+    assert!(entries(&zip).contains(&"world/level.dat".to_owned()));
+}
+
+#[tokio::test]
+async fn a_restore_backs_up_the_world_it_replaces_first() {
+    let setup = setup().await;
+    let id = backed_up(&setup).await;
+    let dir = setup.paths.server(&setup.server);
+    std::fs::write(dir.join("world").join("level.dat"), "since").unwrap();
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    setup.backups.wait(restore).await.unwrap();
+    let before = records::backups(&setup.db, &setup.server)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|backup| backup.name == "Before restore")
+        .unwrap();
+    assert_eq!(before.kind, Kind::PreUpdate);
+    assert_eq!(before.state, records::State::Done);
+    let mut level = String::new();
+    zip::ZipArchive::new(
+        std::fs::File::open(setup.backups.file(&setup.server, &before.id))
+            .unwrap(),
+    )
+    .unwrap()
+    .by_name("world/level.dat")
+    .unwrap()
+    .read_to_string(&mut level)
+    .unwrap();
+    assert_eq!(level, "since");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn no_restore_happens_when_the_world_cannot_be_backed_up_first() {
+    let setup = setup().await;
+    let id = backed_up(&setup).await;
+    let dir = setup.paths.server(&setup.server);
+    std::fs::write(dir.join("world").join("level.dat"), "since").unwrap();
+    // A name a backup refuses, so the backup before the restore fails.
+    std::fs::write(dir.join("world").join("bad:name"), "x").unwrap();
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    let error = setup.backups.wait(restore).await.unwrap_err();
+    assert!(error.contains("nothing was restored"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("world").join("level.dat")).unwrap(),
+        "since"
+    );
+}
+
+#[tokio::test]
+async fn empty_folders_of_a_world_come_back_with_it() {
+    let setup = setup().await;
+    let dir = setup.paths.server(&setup.server);
+    for empty in ["world/datapacks", "world/players"] {
+        std::fs::create_dir_all(dir.join(empty)).unwrap();
+    }
+    let id = backed_up(&setup).await;
+    std::fs::remove_dir_all(dir.join("world")).unwrap();
+    let restore = setup
+        .backups
+        .restore(&setup.server, &id, None)
+        .await
+        .unwrap();
+    setup.backups.wait(restore).await.unwrap();
+    assert!(dir.join("world/datapacks").is_dir());
+    assert!(dir.join("world/players").is_dir());
+    assert!(dir.join("world/level.dat").is_file());
 }

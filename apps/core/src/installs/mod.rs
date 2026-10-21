@@ -210,5 +210,82 @@ async fn run_vendor_installer(
         )
         .await;
     let _ = std::fs::remove_file(&copy);
-    Ok(result?)
+    result?;
+    // Kept when it fails: its log says why.
+    remove_installer_leftovers(&dir, &name.to_string_lossy()).await;
+    Ok(())
+}
+
+/// What a vendor installer leaves in the server folder: its log beside the jar, and its
+/// temporary folders in `tmp/`. Removed through the folder, so a link a mod planted is never
+/// followed; on Linux what the installer's account made and only it may remove goes through
+/// that account. Best effort.
+async fn remove_installer_leftovers(dir: &Path, installer: &str) {
+    let dir = dir.to_owned();
+    let log = format!("{installer}.log");
+    let removed =
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            let folder = crate::content::folder::Folder::open(&dir)?;
+            let mut leftovers = vec![log];
+            if let Ok(tmp) = folder.open_dir(Some("tmp")) {
+                for entry in tmp.entries()?.filter_map(Result::ok) {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if leftover_name(&name) {
+                        leftovers.push(format!("tmp/{name}"));
+                    }
+                }
+            }
+            for path in leftovers {
+                if let Err(error) = folder.remove(&path) {
+                    if error.kind() != std::io::ErrorKind::PermissionDenied {
+                        return Err(error);
+                    }
+                    crate::servers::shim::java::remove_as_servers(
+                        &dir.join(&path),
+                    )?;
+                }
+            }
+            Ok(())
+        })
+        .await;
+    if let Err(error) = removed
+        .map_err(std::io::Error::other)
+        .and_then(|result| result)
+    {
+        tracing::warn!(%error, "could not remove what the installer left behind");
+    }
+}
+
+/// A temporary folder of the Forge or NeoForge installer, by name.
+fn leftover_name(name: &str) -> bool {
+    name.starts_with("neoforge_installer")
+        || name.starts_with("forge_installer")
+}
+
+#[cfg(test)]
+mod leftover_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_successful_installer_leaves_nothing_of_its_own_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let installer = "neoforge-21.1.77-installer.jar";
+        std::fs::write(dir.path().join(format!("{installer}.log")), "log")
+            .unwrap();
+        std::fs::create_dir_all(
+            dir.path().join("tmp/neoforge_installer123/libs"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("tmp/neoforge_installer123/libs/a"),
+            "x",
+        )
+        .unwrap();
+        // The server's own temporary files stay.
+        std::fs::write(dir.path().join("tmp/server.tmp"), "keep").unwrap();
+        remove_installer_leftovers(dir.path(), installer).await;
+        assert!(!dir.path().join(format!("{installer}.log")).exists());
+        assert!(!dir.path().join("tmp/neoforge_installer123").exists());
+        assert!(dir.path().join("tmp/server.tmp").exists());
+    }
 }

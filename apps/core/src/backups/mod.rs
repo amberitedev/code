@@ -582,11 +582,14 @@ impl Backups {
         // Held from before the save until saving is on again.
         let _copying = hot.then(|| self.servers.copying(server_id));
         let save = async {
-            if hot {
-                self.hold_and_save(server_id).await.map(Some)
+            let deadline = if hot {
+                Some(self.hold_and_save(server_id).await?)
             } else {
-                Ok(None)
-            }
+                None
+            };
+            // After the save, which rewrites level.dat as 0600, and before the files are listed.
+            self.servers.share_with_core(server_id).await?;
+            Ok(deadline)
         };
         let result = copy(folder, destination, progress, save).await;
         if hot && let Err(error) = self.servers.release_saves(server_id).await {
@@ -627,6 +630,7 @@ impl Backups {
     /// start meanwhile.
     async fn run_restore(&self, operation: &Operation) -> Result<(), Error> {
         let server_id = &operation.server_id;
+        self.back_up_before_restore(server_id).await?;
         let hold =
             self.servers.hold(server_id).map_err(|error| match error {
                 ServerError::AlreadyRunning => Error::Conflict(
@@ -651,6 +655,31 @@ impl Backups {
             self.stuck.lock().expect("not poisoned").push(hold);
         }
         result
+    }
+
+    /// Back the current world up before a restore replaces it, as a pre-update backup under the
+    /// same retention, so a mistaken restore can be undone. Run here, in the queue's own turn:
+    /// the queue runs one operation at a time and this restore is it. No backup, no restore.
+    async fn back_up_before_restore(
+        &self,
+        server_id: &str,
+    ) -> Result<(), Error> {
+        let (_, id) = self
+            .create(server_id, "Before restore", Kind::PreUpdate, None)
+            .await?;
+        let operation =
+            records::operation(&self.db, id).await?.ok_or_else(|| {
+                Error::NotFound("The backup before the restore is gone.".into())
+            })?;
+        Box::pin(self.run(operation)).await;
+        match records::operation(&self.db, id).await? {
+            Some(done) if done.state == OpState::Done => Ok(()),
+            done => Err(Error::Conflict(format!(
+                "The current world could not be backed up, so nothing was restored: {}",
+                done.and_then(|op| op.error)
+                    .unwrap_or_else(|| "the backup was cancelled".into())
+            ))),
+        }
     }
 
     /// Back up servers whose schedule is due, every minute.
@@ -883,6 +912,9 @@ impl Manifest {
 struct Listing {
     manifest: Manifest,
     files: Vec<(String, u64)>,
+    /// Every folder in the worlds, the worlds included, so a restore brings back empty ones
+    /// (`datapacks/`, `players/`) too.
+    folders: Vec<String>,
 }
 
 /// List what a backup of `folder` holds: the worlds, then the settings. Links are skipped. A
@@ -891,10 +923,14 @@ struct Listing {
 fn files(folder: &Folder) -> Result<Listing, Error> {
     let worlds = worlds(folder);
     let mut files = Vec::new();
+    let mut folders = Vec::new();
     for world in &worlds {
         restorable(world)?;
         match folder.open_dir(Some(world)) {
-            Ok(dir) => walk(&dir, world, &mut files)?,
+            Ok(dir) => {
+                folders.push(world.clone());
+                walk(&dir, world, &mut files, &mut folders)?;
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
@@ -908,14 +944,18 @@ fn files(folder: &Folder) -> Result<Listing, Error> {
             settings.push(name.to_owned());
         }
     }
-    check_count(files.len())?;
+    check_count(files.len() + folders.len())?;
     let manifest = Manifest {
         v: 1,
         worlds: worlds.into(),
         settings,
     };
     manifest.check()?;
-    Ok(Listing { manifest, files })
+    Ok(Listing {
+        manifest,
+        files,
+        folders,
+    })
 }
 
 /// Refuse a path a restore would refuse.
@@ -928,7 +968,7 @@ fn restorable(path: &str) -> Result<(), Error> {
     }
 }
 
-/// Refuse more files than a restore unpacks (the manifest is one more).
+/// Refuse more entries, files and folders, than a restore unpacks (the manifest is one more).
 fn check_count(files: usize) -> Result<(), Error> {
     if files + 1 > archive::MAX_ENTRIES {
         return Err(Error::Conflict(format!(
@@ -943,6 +983,7 @@ fn walk(
     dir: &cap_std::fs::Dir,
     prefix: &str,
     files: &mut Vec<(String, u64)>,
+    folders: &mut Vec<String>,
 ) -> Result<(), Error> {
     for entry in dir.entries()? {
         let entry = entry?;
@@ -962,11 +1003,13 @@ fn walk(
         }
         restorable(&path)?;
         if kind.is_dir() {
-            walk(&folder::open_child(dir, &name, &path)?, &path, files)?;
+            let child = folder::open_child(dir, &name, &path)?;
+            folders.push(path.clone());
+            walk(&child, &path, files, folders)?;
         } else if kind.is_file() {
             files.push((path, entry.metadata()?.len()));
         }
-        check_count(files.len())?;
+        check_count(files.len() + folders.len())?;
     }
     Ok(())
 }
@@ -1036,6 +1079,9 @@ fn write_zip(
     zip.write_all(
         &serde_json::to_vec(&listing.manifest).map_err(io::Error::other)?,
     )?;
+    for name in &listing.folders {
+        zip.add_directory(format!("{name}/"), SimpleFileOptions::default())?;
+    }
     let mut done = 0u64;
     let mut buffer = vec![0; 256 * 1024];
     for (name, size) in &listing.files {

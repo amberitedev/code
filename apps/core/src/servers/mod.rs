@@ -603,6 +603,20 @@ impl Servers {
         }
     }
 
+    /// Let Core read every file the server's account wrote in its folder, such as the 0600
+    /// `level.dat` Minecraft writes (see `shim::java::share_with_core`). Nothing to do in
+    /// development, where servers run as Core's own account.
+    pub async fn share_with_core(&self, id: &str) -> Result<(), ServerError> {
+        if crate::daemon::install::InstallRecord::load(&self.paths)?.is_none() {
+            return Ok(());
+        }
+        let dir = self.paths.server(id);
+        tokio::task::spawn_blocking(move || shim::java::share_with_core(&dir))
+            .await
+            .map_err(std::io::Error::other)??;
+        Ok(())
+    }
+
     /// Take a running server for a hot backup's copy (see [`Copying`]).
     pub fn copying(self: &Arc<Self>, id: &str) -> Copying {
         self.copying

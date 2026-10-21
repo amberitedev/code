@@ -390,3 +390,65 @@ impl UnwrapServers for Result<Cli, clap::Error> {
         }
     }
 }
+
+#[tokio::test]
+async fn failed_backups_and_installs_say_why() {
+    let (_dir, state, client) = core().await;
+    let server = state.servers.create("Survival").await.unwrap().id;
+    let backup = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO backups (id, server_id, name, kind, state, created_at) \
+         VALUES (?, ?, 'Nightly', 'scheduled', 'failed', 0)",
+    )
+    .bind(&backup)
+    .bind(&server)
+    .execute(&state.db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO backup_operations (backup_id, server_id, kind, state, queued_at, error) \
+         VALUES (?, ?, 'create', 'failed', 0, 'Core may not read world/level.dat')",
+    )
+    .bind(&backup)
+    .bind(&server)
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let list = super::backups::run(
+        &client,
+        BackupsCommand::List {
+            server: "survival".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        list.text
+            .contains("create failed: Core may not read world/level.dat"),
+        "{}",
+        list.text
+    );
+
+    sqlx::query(
+        "INSERT INTO packs (server_id, name, version_number, sha1, error) \
+         VALUES (?, 'Pack', '1', 'abc', 'the pack is for Minecraft 26.2')",
+    )
+    .bind(&server)
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let info = super::servers::run(
+        &client,
+        ServersCommand::Info {
+            server: "survival".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        info.text
+            .contains("last install failed: the pack is for Minecraft 26.2"),
+        "{}",
+        info.text
+    );
+}

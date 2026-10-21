@@ -230,6 +230,8 @@ export type JavaPath = { path: string | null, };
 
 export type BackupSchedule = { interval_hours: number, keep: number, };
 
+export type GameVersionChange = { from: string, to: string, };
+
 export type UpdateStatus = { 
 /**
  * The running version.

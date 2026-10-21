@@ -33,7 +33,7 @@ pub struct Java {
     pub waiter: Waiter,
 }
 
-pub use platform::{Killer, Waiter, spawn};
+pub use platform::{Killer, Waiter, remove_as_servers, share_with_core, spawn};
 
 #[cfg(unix)]
 mod platform {
@@ -59,6 +59,95 @@ mod platform {
         let mut command = Command::new("sudo");
         command.args(["-n", "-u", SERVERS, "--", HELPER]);
         command
+    }
+
+    /// Let Core read what a server wrote in `dir`: every file and folder `copal-servers` owns
+    /// there gets group read, and folders group search. Minecraft writes `level.dat` as 0600,
+    /// which Core, reading servers' files through the group, cannot back up otherwise. Only the
+    /// owner may change a mode, so this runs as `copal-servers`; links are left alone. Nothing
+    /// becomes readable that the server's own account could not already hand Core.
+    pub fn share_with_core(dir: &std::path::Path) -> io::Result<()> {
+        let output = share_command(dir).stdin(Stdio::null()).output()?;
+        if output.status.success() {
+            return Ok(());
+        }
+        // The helper's first line is its pid.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reason: Vec<&str> = stderr
+            .lines()
+            .filter(|line| !line.starts_with("copal-pid "))
+            .collect();
+        Err(io::Error::other(format!(
+            "could not let Core read {}: {}",
+            dir.display(),
+            reason.join("; ")
+        )))
+    }
+
+    /// Remove `path` and everything in it as `copal-servers`, for what a server's account wrote
+    /// in folders only it may change, such as an installer's temporary files.
+    pub fn remove_as_servers(path: &std::path::Path) -> io::Result<()> {
+        let output = as_servers()
+            .args(["rm", "-rf", "--"])
+            .arg(path)
+            .stdin(Stdio::null())
+            .output()?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(io::Error::other(format!(
+            "could not remove {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .filter(|line| !line.starts_with("copal-pid "))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )))
+    }
+
+    fn share_command(dir: &std::path::Path) -> Command {
+        let mut command = as_servers();
+        command
+            .arg("find")
+            .arg(dir)
+            .args(["-user", SERVERS, "!", "-type", "l"])
+            .args(["-exec", "chmod", "g+rX", "{}", "+"]);
+        command
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn sharing_changes_only_what_the_servers_account_owns_and_never_a_link() {
+        let command =
+            share_command(std::path::Path::new("/srv/copal/servers/a"));
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(command.get_program(), "sudo");
+        assert_eq!(
+            args,
+            [
+                "-n",
+                "-u",
+                SERVERS,
+                "--",
+                HELPER,
+                "find",
+                "/srv/copal/servers/a",
+                "-user",
+                SERVERS,
+                "!",
+                "-type",
+                "l",
+                "-exec",
+                "chmod",
+                "g+rX",
+                "{}",
+                "+",
+            ]
+        );
     }
 
     pub fn spawn(launch: &Launch, run_as: &RunAs) -> io::Result<Java> {
@@ -152,6 +241,20 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
+    /// Nothing to do on Windows: what a server writes inherits its folder's permissions, which
+    /// let Core read it.
+    pub fn share_with_core(_dir: &Path) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Never needed on Windows, where Core may remove what servers write.
+    pub fn remove_as_servers(path: &Path) -> io::Result<()> {
+        Err(io::Error::other(format!(
+            "could not remove {}",
+            path.display()
+        )))
+    }
+
     use std::{
         fs::File, io, os::windows::io::FromRawHandle, path::Path, ptr,
         sync::Arc,
