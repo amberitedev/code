@@ -84,7 +84,7 @@ pub async fn status(client: &Client) -> Result<Output> {
 /// `copal logs`.
 pub async fn logs(client: &Client, lines: usize) -> Result<Output> {
     let logs: CoreLogs = client.get(&format!("/logs?lines={lines}")).await?;
-    Ok(Output::new(logs.lines.join("\n"), &logs))
+    Ok(Output::new(super::safe(&logs.lines.join("\n")), &logs))
 }
 
 /// `copal eula`.
@@ -120,16 +120,7 @@ pub async fn update(client: &Client, command: UpdateCommand) -> Result<Output> {
             let restarting: Restarting = client
                 .post("/update/apply", &ApplyUpdate { allow_downgrade })
                 .await?;
-            let running = wait_for(client, &restarting.version).await;
-            let text = if running == restarting.version {
-                format!("Core {running} is running")
-            } else {
-                format!(
-                    "Core {} did not start, so Core went back to {running}",
-                    restarting.version
-                )
-            };
-            Ok(Output::new(text, &restarting))
+            Ok(restarted(client, restarting.version).await)
         }
         UpdateCommand::Channel { channel } => {
             let status = settings(
@@ -159,11 +150,7 @@ pub async fn update(client: &Client, command: UpdateCommand) -> Result<Output> {
         UpdateCommand::Rollback => {
             let restarting: Restarting =
                 client.post("/update/rollback", &()).await?;
-            let running = wait_for(client, &restarting.version).await;
-            Ok(Output::new(
-                format!("Core {running} is running"),
-                &restarting,
-            ))
+            Ok(restarted(client, restarting.version).await)
         }
     }
 }
@@ -189,18 +176,69 @@ fn describe(status: &UpdateStatus) -> String {
     }
 }
 
+/// How a restart into another version went, as the CLI saw it.
+#[derive(Debug, Serialize)]
+pub struct Restarted {
+    /// The version Core restarted into.
+    pub requested: String,
+    /// The version that answered last, `None` when none did.
+    pub running: Option<String>,
+    pub outcome: RestartOutcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartOutcome {
+    /// `requested` answers.
+    Running,
+    /// Another version answers: the launcher went back to it.
+    WentBack,
+    /// No version answered in time.
+    Unreachable,
+}
+
+/// Wait while Core restarts into `requested`, and say how it went. Anything but `requested`
+/// answering in the end is a failure.
+async fn restarted(client: &Client, requested: String) -> Output {
+    let running = wait_for(client, &requested).await;
+    let outcome = match &running {
+        Some(running) if *running == requested => RestartOutcome::Running,
+        Some(_) => RestartOutcome::WentBack,
+        None => RestartOutcome::Unreachable,
+    };
+    let text = match (outcome, &running) {
+        (RestartOutcome::Running, _) => format!("Core {requested} is running"),
+        (RestartOutcome::WentBack, Some(running)) => format!(
+            "Core {requested} did not start, so the launcher went back to {running}. See copal logs"
+        ),
+        _ => format!(
+            "Core did not answer after restarting into {requested}. See the service's log"
+        ),
+    };
+    let restarted = Restarted {
+        requested,
+        running,
+        outcome,
+    };
+    if outcome == RestartOutcome::Running {
+        Output::new(text, &restarted)
+    } else {
+        Output::failed(text, &restarted)
+    }
+}
+
 /// Wait while Core restarts, until it answers as `version` or its trial is over, and return the
-/// version that answers.
-async fn wait_for(client: &Client, version: &str) -> String {
-    let mut seen = String::new();
+/// version that answered last.
+async fn wait_for(client: &Client, version: &str) -> Option<String> {
+    let mut seen = None;
     let checks = launcher::HEALTH_TIMEOUT.as_secs() + 30;
     for _ in 0..checks {
         tokio::time::sleep(Duration::from_secs(1)).await;
         if let Ok(health) = client.get::<Health>("/health").await {
             if health.version == version {
-                return health.version;
+                return Some(health.version);
             }
-            seen = health.version;
+            seen = Some(health.version);
         }
     }
     seen
