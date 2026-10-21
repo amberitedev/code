@@ -251,6 +251,30 @@ impl Servers {
 }
 
 #[cfg(test)]
+impl Servers {
+    /// Pretend a new run of the server started, as far as Core's own records go. Holding the
+    /// returned shim lock keeps the watcher from ending it.
+    pub(super) fn pretend_running(&self, id: &str) -> std::fs::File {
+        let lock = super::shim::try_lock(&self.paths, id).unwrap().unwrap();
+        self.live().insert(
+            id.into(),
+            super::Live {
+                phase: Phase::Running,
+                child: None,
+            },
+        );
+        self.on_running(id, true);
+        lock
+    }
+
+    pub(super) fn pretend_online(&self, id: &str, name: &str) {
+        if let Some(watched) = self.watched().get_mut(id) {
+            watched.insight.players.insert(name.into());
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{daemon::paths::Paths, db, servers::restarts::Restarts};

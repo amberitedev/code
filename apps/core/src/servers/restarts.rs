@@ -1,7 +1,8 @@
 //! When a server restarts by itself: after a crash, on a schedule, or when it is empty and has
 //! run long enough (smart restarts). The settings are per server, in the `restarts` table; a
 //! server without a row has the defaults. Crash restarts are in `watch`; [`run`] does the other
-//! two.
+//! two, each with an in-game countdown that belongs to one run of the server under the settings
+//! it started with, and stops as soon as either changes.
 
 use std::{
     collections::HashSet,
@@ -20,8 +21,13 @@ use crate::access::now;
 
 /// How many seconds before a scheduled restart players are warned in the game.
 pub const WARNINGS: [i64; 3] = [300, 60, 10];
+/// The same for a smart restart. Who is online comes from the console, which can be wrong, so
+/// a smart restart warns too, and stops when anyone joins.
+const SMART_WARNINGS: [i64; 2] = [60, 10];
 /// How often [`run`] looks at the schedules.
 const TICK: Duration = Duration::from_secs(15);
+/// How often a countdown checks that it still holds.
+const STEP: i64 = 1;
 
 /// A server's restart settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -30,7 +36,8 @@ pub struct Restarts {
     pub crash: bool,
     /// A restart at a set time, with an in-game countdown.
     pub schedule: Option<Schedule>,
-    /// Experimental: restart once nobody is online and the server has run this many hours.
+    /// Experimental: restart once nobody is online and the server has run this many hours,
+    /// after a minute's warning in the game.
     pub smart_after_hours: Option<u32>,
 }
 
@@ -175,11 +182,13 @@ impl From<Weekday> for chrono::Weekday {
 }
 
 /// The first time `schedule` names after `after`, in `after`'s time zone. A time the clock skips
-/// that day, at a daylight saving change, moves to the next day it exists.
+/// at a daylight saving change does not happen that day, so the next day it does happen counts:
+/// the next day for a daily restart, the next week for a weekly one. `None` when nothing comes
+/// within three weeks, which no real time zone does.
 pub fn next<Tz: TimeZone>(
     schedule: Schedule,
     after: &DateTime<Tz>,
-) -> DateTime<Tz> {
+) -> Option<DateTime<Tz>> {
     let (day, at) = match schedule {
         Schedule::Daily { at } => (None, at),
         Schedule::Weekly { on, at } => (Some(chrono::Weekday::from(on)), at),
@@ -188,14 +197,13 @@ pub fn next<Tz: TimeZone>(
         .expect("a checked time of day");
     let zone = after.timezone();
     let today = after.date_naive();
-    (0..=8)
+    (0..=21)
         .filter_map(|offset| today.checked_add_days(Days::new(offset)))
         .filter(|date| day.is_none_or(|day| date.weekday() == day))
         .filter_map(|date| {
             zone.from_local_datetime(&date.and_time(time)).earliest()
         })
         .find(|candidate| candidate > after)
-        .expect("a matching day comes within a week")
 }
 
 /// Whether a smart restart is due: the server ran `after_hours` and `list` says nobody is on.
@@ -220,7 +228,8 @@ fn warning(left: i64) -> String {
 /// When the server's current run started, in unix seconds.
 async fn run_started_at(db: &SqlitePool, server_id: &str) -> Option<i64> {
     sqlx::query_scalar(
-        "SELECT started_at FROM runs WHERE server_id = ? AND ended_at IS NULL          ORDER BY started_at DESC LIMIT 1",
+        "SELECT started_at FROM runs WHERE server_id = ? AND ended_at IS NULL \
+         ORDER BY started_at DESC LIMIT 1",
     )
     .bind(server_id)
     .fetch_optional(db)
@@ -240,13 +249,15 @@ pub async fn run(servers: Arc<Servers>) {
             if busy.lock().expect("not poisoned").contains(&id) {
                 continue;
             }
-            let Ok(settings) = get(&servers.db, &id).await else {
+            let Some(bound) = Bound::now(&servers, &id).await else {
                 continue;
             };
-            let at = settings.schedule.map(|schedule| {
-                next(schedule, &chrono::Local::now()).timestamp()
-            });
-            let smart = match settings.smart_after_hours {
+            let at = bound
+                .settings
+                .schedule
+                .and_then(|schedule| next(schedule, &chrono::Local::now()))
+                .map(|at| at.timestamp());
+            let smart = match bound.settings.smart_after_hours {
                 Some(hours) => {
                     let uptime = run_started_at(&servers.db, &id)
                         .await
@@ -257,45 +268,104 @@ pub async fn run(servers: Arc<Servers>) {
                 }
                 None => false,
             };
-            let at = match at {
-                Some(at) if at - now() <= WARNINGS[0] => at,
-                _ if smart => now(),
+            let (at, why) = match at {
+                Some(at) if at - now() <= WARNINGS[0] => (at, Why::Schedule),
+                _ if smart => (now() + SMART_WARNINGS[0], Why::Smart),
                 _ => continue,
             };
             busy.lock().expect("not poisoned").insert(id.clone());
             let (servers, busy) = (Arc::clone(&servers), Arc::clone(&busy));
             tokio::spawn(async move {
-                countdown(&servers, &id, at).await;
+                countdown(&servers, &id, at, why, &bound).await;
                 busy.lock().expect("not poisoned").remove(&id);
             });
         }
     }
 }
 
-/// Warn the players at each of [`WARNINGS`] still ahead of `at`, then restart the server. Gives
-/// up when it stops running in the meantime.
-async fn countdown(servers: &Servers, id: &str, at: i64) {
-    for left in WARNINGS {
-        let wait = at - left - now();
-        if wait < 0 {
+/// Why a countdown runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Why {
+    Schedule,
+    Smart,
+}
+
+/// What a countdown belongs to: one run of the server, under the settings it started with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Bound {
+    run: u64,
+    settings: Restarts,
+}
+
+impl Bound {
+    /// The server's run and settings now, `None` when it does not run.
+    async fn now(servers: &Servers, id: &str) -> Option<Self> {
+        Some(Self {
+            run: servers.run_of(id)?,
+            settings: get(&servers.db, id).await.ok()?,
+        })
+    }
+}
+
+/// Whether a countdown still holds: the run it is for still runs, under the same settings, and
+/// for a smart restart, nobody is online.
+async fn holds(servers: &Servers, id: &str, why: Why, bound: &Bound) -> bool {
+    servers.phase(id) == Some(Phase::Running)
+        && Bound::now(servers, id).await.as_ref() == Some(bound)
+        && (why == Why::Schedule
+            || servers
+                .insight(id)
+                .is_some_and(|insight| insight.players.is_empty()))
+}
+
+/// Wait until `until`, unix seconds, while the countdown holds. Whether it still does.
+async fn wait_until(
+    servers: &Servers,
+    id: &str,
+    why: Why,
+    bound: &Bound,
+    until: i64,
+) -> bool {
+    loop {
+        if !holds(servers, id, why, bound).await {
+            return false;
+        }
+        let left = until - now();
+        if left <= 0 {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_secs(left.min(STEP) as u64)).await;
+    }
+}
+
+/// Warn the players at each warning still ahead of `at`, then restart the server. Stops,
+/// without a restart, as soon as the countdown no longer holds.
+async fn countdown(
+    servers: &Servers,
+    id: &str,
+    at: i64,
+    why: Why,
+    bound: &Bound,
+) {
+    let warnings: &[i64] = match why {
+        Why::Schedule => &WARNINGS,
+        Why::Smart => &SMART_WARNINGS,
+    };
+    for &left in warnings {
+        if at - left < now() {
             continue;
         }
-        tokio::time::sleep(Duration::from_secs(wait as u64)).await;
-        if servers.phase(id) != Some(Phase::Running) {
+        if !wait_until(servers, id, why, bound, at - left).await {
             return;
         }
         let _ = servers.command(id, &warning(left)).await;
     }
-    let wait = at - now();
-    if wait > 0 {
-        tokio::time::sleep(Duration::from_secs(wait as u64)).await;
-    }
-    if servers.phase(id) != Some(Phase::Running) {
+    if !wait_until(servers, id, why, bound, at).await {
         return;
     }
-    info!(server = %id, "restarting on its schedule");
+    info!(server = %id, ?why, "restarting");
     if let Err(error) = servers.restart(id).await {
-        warn!(server = %id, %error, "a scheduled restart failed");
+        warn!(server = %id, %error, ?why, "a restart failed");
     }
 }
 
@@ -334,16 +404,16 @@ mod tests {
             at: "04:00".parse().unwrap(),
         };
         assert_eq!(
-            next(daily, &utc("2026-10-20T03:59:00Z")),
+            next(daily, &utc("2026-10-20T03:59:00Z")).unwrap(),
             utc("2026-10-20T04:00:00Z")
         );
         assert_eq!(
-            next(daily, &utc("2026-10-20T04:00:00Z")),
+            next(daily, &utc("2026-10-20T04:00:00Z")).unwrap(),
             utc("2026-10-21T04:00:00Z"),
             "the restart that just ran is not due again"
         );
         assert_eq!(
-            next(daily, &utc("2026-12-31T23:00:00Z")),
+            next(daily, &utc("2026-12-31T23:00:00Z")).unwrap(),
             utc("2027-01-01T04:00:00Z")
         );
     }
@@ -356,7 +426,7 @@ mod tests {
             at: "05:30".parse().unwrap(),
         };
         assert_eq!(
-            next(sunday, &utc("2026-10-20T12:00:00Z")),
+            next(sunday, &utc("2026-10-20T12:00:00Z")).unwrap(),
             utc("2026-10-25T05:30:00Z")
         );
         let tuesday = Schedule::Weekly {
@@ -364,20 +434,185 @@ mod tests {
             at: "05:30".parse().unwrap(),
         };
         assert_eq!(
-            next(tuesday, &utc("2026-10-20T05:00:00Z")),
+            next(tuesday, &utc("2026-10-20T05:00:00Z")).unwrap(),
             utc("2026-10-20T05:30:00Z")
         );
         assert_eq!(
-            next(tuesday, &utc("2026-10-20T06:00:00Z")),
+            next(tuesday, &utc("2026-10-20T06:00:00Z")).unwrap(),
             utc("2026-10-27T05:30:00Z")
         );
         // In the machine's own zone, the wall-clock time holds.
         let zone = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
         let after = zone.with_ymd_and_hms(2026, 10, 20, 12, 0, 0).unwrap();
         assert_eq!(
-            next(sunday, &after),
+            next(sunday, &after).unwrap(),
             zone.with_ymd_and_hms(2026, 10, 25, 5, 30, 0).unwrap()
         );
+    }
+
+    /// Central Europe in spring 2026: at 02:00 on Sunday 29 March the clock goes to 03:00, so
+    /// 02:00 to 03:00 does not happen that day.
+    #[derive(Debug, Clone, Copy)]
+    struct Spring;
+
+    impl Spring {
+        fn change() -> chrono::NaiveDateTime {
+            "2026-03-29T02:00:00".parse().unwrap()
+        }
+        fn winter() -> chrono::FixedOffset {
+            chrono::FixedOffset::east_opt(3600).unwrap()
+        }
+        fn summer() -> chrono::FixedOffset {
+            chrono::FixedOffset::east_opt(2 * 3600).unwrap()
+        }
+    }
+
+    impl TimeZone for Spring {
+        type Offset = chrono::FixedOffset;
+
+        fn from_offset(_: &Self::Offset) -> Self {
+            Self
+        }
+
+        fn offset_from_local_date(
+            &self,
+            _: &chrono::NaiveDate,
+        ) -> chrono::MappedLocalTime<Self::Offset> {
+            unimplemented!("next only asks for times")
+        }
+
+        fn offset_from_local_datetime(
+            &self,
+            local: &chrono::NaiveDateTime,
+        ) -> chrono::MappedLocalTime<Self::Offset> {
+            if *local < Self::change() {
+                chrono::MappedLocalTime::Single(Self::winter())
+            } else if *local < Self::change() + chrono::TimeDelta::hours(1) {
+                chrono::MappedLocalTime::None
+            } else {
+                chrono::MappedLocalTime::Single(Self::summer())
+            }
+        }
+
+        fn offset_from_utc_date(&self, _: &chrono::NaiveDate) -> Self::Offset {
+            unimplemented!("next only asks for times")
+        }
+
+        fn offset_from_utc_datetime(
+            &self,
+            utc: &chrono::NaiveDateTime,
+        ) -> Self::Offset {
+            if *utc < Self::change() - chrono::TimeDelta::hours(1) {
+                Self::winter()
+            } else {
+                Self::summer()
+            }
+        }
+    }
+
+    #[test]
+    fn a_time_the_clock_skips_moves_to_its_next_day() {
+        let at = |text: &str| {
+            Spring
+                .from_local_datetime(&text.parse().unwrap())
+                .single()
+                .unwrap()
+        };
+        // On Friday, the only Sunday within the week is the one without 02:30.
+        let sunday = Schedule::Weekly {
+            on: Weekday::Sunday,
+            at: "02:30".parse().unwrap(),
+        };
+        assert_eq!(
+            next(sunday, &at("2026-03-27T12:00:00")),
+            Some(at("2026-04-05T02:30:00"))
+        );
+        let daily = Schedule::Daily {
+            at: "02:30".parse().unwrap(),
+        };
+        assert_eq!(
+            next(daily, &at("2026-03-28T12:00:00")),
+            Some(at("2026-03-30T02:30:00"))
+        );
+        // A time outside the gap that day is untouched.
+        let after_gap = Schedule::Weekly {
+            on: Weekday::Sunday,
+            at: "04:00".parse().unwrap(),
+        };
+        assert_eq!(
+            next(after_gap, &at("2026-03-27T12:00:00")),
+            Some(at("2026-03-29T04:00:00"))
+        );
+    }
+
+    /// A server Core takes to be running, and the lock that keeps it so.
+    async fn running()
+    -> (tempfile::TempDir, Arc<Servers>, String, std::fs::File) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::daemon::paths::Paths::new(dir.path());
+        crate::daemon::folders::create(&paths, None).unwrap();
+        let servers = Servers::open(paths, db::memory().await).await.unwrap();
+        let id = servers.create("A").await.unwrap().id;
+        let lock = servers.pretend_running(&id);
+        (dir, servers, id, lock)
+    }
+
+    #[tokio::test]
+    async fn a_countdown_belongs_to_one_run_and_its_settings() {
+        let (_dir, servers, id, lock) = running().await;
+        let bound = Bound::now(&servers, &id).await.unwrap();
+        assert!(holds(&servers, &id, Why::Schedule, &bound).await);
+        // The settings changed: a new countdown follows them, this one stops.
+        let daily = Restarts {
+            schedule: Some(Schedule::Daily {
+                at: "04:00".parse().unwrap(),
+            }),
+            ..Restarts::default()
+        };
+        set(&servers.db, &id, &daily).await.unwrap();
+        assert!(!holds(&servers, &id, Why::Schedule, &bound).await);
+        set(&servers.db, &id, &Restarts::default()).await.unwrap();
+        assert!(holds(&servers, &id, Why::Schedule, &bound).await);
+        // Another run of the same server is not the run it was for.
+        drop(lock);
+        let _lock = servers.pretend_running(&id);
+        assert!(!holds(&servers, &id, Why::Schedule, &bound).await);
+        // A smart restart also stops once someone is online.
+        let bound = Bound::now(&servers, &id).await.unwrap();
+        assert!(holds(&servers, &id, Why::Smart, &bound).await);
+        servers.pretend_online(&id, "Steve");
+        assert!(!holds(&servers, &id, Why::Smart, &bound).await);
+        assert!(holds(&servers, &id, Why::Schedule, &bound).await);
+    }
+
+    #[tokio::test]
+    async fn a_countdown_that_no_longer_holds_ends_without_a_restart() {
+        let (_dir, servers, id, _lock) = running().await;
+        let bound = Bound::now(&servers, &id).await.unwrap();
+        // One that holds keeps counting down.
+        let waiting = tokio::time::timeout(
+            Duration::from_millis(1500),
+            countdown(&servers, &id, now() + 300, Why::Schedule, &bound),
+        )
+        .await;
+        assert!(waiting.is_err());
+        set(
+            &servers.db,
+            &id,
+            &Restarts {
+                crash: false,
+                ..Restarts::default()
+            },
+        )
+        .await
+        .unwrap();
+        let ended = tokio::time::timeout(
+            Duration::from_secs(3),
+            countdown(&servers, &id, now() + 300, Why::Schedule, &bound),
+        )
+        .await;
+        assert!(ended.is_ok());
+        assert_eq!(servers.phase(&id), Some(Phase::Running), "not restarted");
     }
 
     #[test]
