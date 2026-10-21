@@ -125,9 +125,9 @@ jobs:
           printf '%s\n' "$COPAL_MINISIGN_KEY" > "$key"
           minisign -S -s "$key" -m dist/copal-manifest.json -t "copal ${GITHUB_REF_NAME#copal-v}"
           rm "$key"
-          public="$(sed -n 's/^    "\(RW[A-Za-z0-9+/=]*\)";$/\1/p' apps/core/src/update/release.rs)"
+          public="$(sed -n 's|^    "\(RW[A-Za-z0-9+/=]*\)";$|\1|p' apps/core/src/update/release.rs)"
           minisign -V -P "$public" -m dist/copal-manifest.json
-          installer="$(sed -n 's/^public_key="\(RW[A-Za-z0-9+/=]*\)"$/\1/p' apps/core/scripts/install.sh)"
+          installer="$(sed -n 's|^public_key="\(RW[A-Za-z0-9+/=]*\)"$|\1|p' apps/core/scripts/install.sh)"
           if [ "$installer" != "$public" ]; then
             echo "::error::apps/core/scripts/install.sh pins another key than release.rs"
             exit 1
