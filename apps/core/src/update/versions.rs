@@ -118,6 +118,10 @@ pub fn save(paths: &Paths, state: Option<&State>) -> io::Result<()> {
     let path = paths.version_state();
     let Some(state) = state else {
         remove_file(&path)?;
+        // A fresh install clears the state before the data folder exists: nothing to sync.
+        if !paths.versions().exists() {
+            return Ok(());
+        }
         return sync_dir(&paths.versions());
     };
     std::fs::create_dir_all(paths.versions())?;
@@ -312,6 +316,13 @@ mod tests {
         assert_eq!(load(&paths).unwrap(), Some(state));
         save(&paths, None).unwrap();
         assert_eq!(load(&paths).unwrap(), None);
+    }
+
+    #[test]
+    fn clearing_the_state_before_the_folders_exist_is_fine() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("fresh"));
+        save(&paths, None).unwrap();
     }
 
     #[test]
