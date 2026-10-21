@@ -194,7 +194,9 @@ async fn install_pack(
         }
     };
     let archive_path = dirs.pack(&sha1);
-    let (index, wanted) = read_pack(&archive_path).await?;
+    let folder = Arc::new(Folder::open(&content.paths.server(id))?);
+    let case_insensitive = folder.case_insensitive()?;
+    let (index, wanted) = read_pack(&archive_path, case_insensitive).await?;
     let platform = pack::platform(&index)?;
 
     let server = servers_records::get(&content.db, id)
@@ -208,7 +210,6 @@ async fn install_pack(
             || server.loader_version == platform.loader_version);
 
     // Every download first: a failure here changes nothing.
-    let folder = Arc::new(Folder::open(&content.paths.server(id))?);
     let rows = records::files(&content.db, id).await?;
     let steps = {
         let folder = Arc::clone(&folder);
@@ -222,7 +223,7 @@ async fn install_pack(
                 &pack::Disk {
                     sha1: &sha1,
                     level_name: &level,
-                    case_insensitive: pack::CASE_INSENSITIVE,
+                    case_insensitive,
                 },
                 repair,
             )
@@ -367,6 +368,7 @@ fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
 /// A pack's index and the files it wants, read from the `.mrpack` at `path`.
 pub async fn read_pack(
     path: &Path,
+    case_insensitive: bool,
 ) -> Result<(Index, BTreeMap<String, Wanted>), Error> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -374,8 +376,7 @@ pub async fn read_pack(
         let mut archive = zip::ZipArchive::new(file)
             .map_err(super::archive::ArchiveError::from)?;
         let index = pack::read_index(&mut archive)?;
-        let wanted =
-            pack::wanted(&index, &mut archive, pack::CASE_INSENSITIVE)?;
+        let wanted = pack::wanted(&index, &mut archive, case_insensitive)?;
         Ok((index, wanted))
     })
     .await
@@ -525,6 +526,15 @@ async fn apply(
             }
             Step::Record(row) => {
                 records::put(&content.db, server_id, &row).await?
+            }
+            // A path that became the server's since the plan is only forgotten.
+            Step::Delete(row)
+                if super::folder::is_server_owned(
+                    &row.path,
+                    &folder.level_name(),
+                ) =>
+            {
+                records::remove(&content.db, server_id, &row.path).await?
             }
             Step::Delete(row) => match sha1_now(folder, &row.path).await? {
                 Some(sha1) if sha1 == row.sha1 => {
@@ -749,7 +759,8 @@ pub async fn decide(
                 )?;
             let archive_path =
                 SharedDirs::new(content.paths.root()).pack(&pack.sha1);
-            let (index, wanted) = read_pack(&archive_path).await?;
+            let (index, wanted) =
+                read_pack(&archive_path, folder.case_insensitive()?).await?;
             let want = wanted.get(path).ok_or_else(|| {
                 Error::NotFound(format!("The pack has no {path}."))
             })?;

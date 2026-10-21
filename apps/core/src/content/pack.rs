@@ -153,13 +153,11 @@ pub struct Wanted {
     pub size: u64,
 }
 
-/// Whether this OS treats `Config/a.toml` and `config/a.toml` as one file.
-pub const CASE_INSENSITIVE: bool = cfg!(any(windows, target_os = "macos"));
-
-/// A path as the file system compares it.
+/// A path as the file system compares it: folded when it treats `Config/a.toml` and
+/// `config/a.toml` as one file (see `Folder::case_insensitive`), exact otherwise.
 pub fn fold(path: &str, case_insensitive: bool) -> String {
     if case_insensitive {
-        path.to_lowercase()
+        folder::fold_case(path)
     } else {
         path.to_owned()
     }
@@ -260,7 +258,7 @@ pub struct Disk<'a> {
     pub sha1: &'a dyn Fn(&str) -> Option<String>,
     /// The world folder, for the deny-list.
     pub level_name: &'a str,
-    /// Paths that differ only in case are one file ([`CASE_INSENSITIVE`]).
+    /// Paths that differ only in case are one file (see `Folder::case_insensitive`).
     pub case_insensitive: bool,
 }
 
@@ -407,6 +405,11 @@ pub fn plan(
     }
     for row in rows.values() {
         if row.origin != Origin::Pack || wanted_keys.contains(&key(&row.path)) {
+            continue;
+        }
+        // The path became the server's (its world was renamed to it): never deleted.
+        if folder::is_server_owned(&row.path, disk.level_name) {
+            steps.push(Step::Forget(row.path.clone()));
             continue;
         }
         steps.push(match (disk.sha1)(&row.path) {
@@ -692,6 +695,16 @@ mod tests {
                 expected: None,
                 before: None,
             }]
+        );
+    }
+
+    #[test]
+    fn a_dropped_file_that_is_now_inside_the_world_is_forgotten_not_deleted() {
+        // The pack placed `world/data.dat`; then level-name was set to `world`.
+        let rows = [row("world/data.dat", Origin::Pack, "d1")];
+        assert_eq!(
+            run(&rows, &[], &[("world/data.dat", "d1")], false),
+            [Step::Forget("world/data.dat".into())]
         );
     }
 

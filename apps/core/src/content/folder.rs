@@ -85,6 +85,22 @@ pub fn from_api(path: &str) -> Result<Option<String>, PathError> {
 /// Files that belong to the server, not to its content: settings, the operator and ban lists,
 /// the EULA, and the worlds. Pack overrides and uploads never replace them; the App edits them
 /// on purpose through the file and properties routes. Matched without case, because Windows does.
+/// A path as a case-insensitive file system compares it: each character by its simple
+/// uppercase mapping, the way NTFS and APFS fold names (`ß` stays `ß`; `İ` and `i̇` differ).
+pub fn fold_case(path: &str) -> String {
+    path.chars()
+        .map(|c| {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
+        .collect()
+}
+
+/// Whether a server-owned file is at `path` for a server whose world is `level_name`. Compared
+/// without case on every OS: protecting `World/` on Linux too costs nothing.
 pub fn is_server_owned(path: &str, level_name: &str) -> bool {
     const FILES: [&str; 11] = [
         "server.properties",
@@ -99,18 +115,19 @@ pub fn is_server_owned(path: &str, level_name: &str) -> bool {
         "banned-ips.txt",
         "usercache.json",
     ];
-    let path = path.to_ascii_lowercase();
-    if FILES.contains(&path.as_str()) {
+    let path = fold_case(path);
+    if FILES.iter().any(|file| fold_case(file) == path) {
         return true;
     }
-    let level = level_name.trim_matches('/').to_ascii_lowercase();
+    let level = level_name.trim_matches('/');
     [
-        level.clone(),
+        level.to_owned(),
         format!("{level}_nether"),
         format!("{level}_the_end"),
     ]
     .iter()
-    .any(|world| path == *world || path.starts_with(&format!("{world}/")))
+    .map(|world| fold_case(world))
+    .any(|world| path == world || path.starts_with(&format!("{world}/")))
 }
 
 /// The world folder `server.properties` names, `world` by default.
@@ -204,6 +221,16 @@ impl Folder {
             dir: Dir::open_ambient_dir(root, ambient_authority())?,
             root: root.to_owned(),
         })
+    }
+
+    /// Whether this folder's file system treats names that differ only in case as one, found by
+    /// making a file and looking for it under another case.
+    pub fn case_insensitive(&self) -> io::Result<bool> {
+        let probe = format!(".copal-case-{}", uuid::Uuid::new_v4().simple());
+        self.dir.create(&probe)?;
+        let found = self.dir.symlink_metadata(probe.to_uppercase()).is_ok();
+        self.dir.remove_file(&probe)?;
+        Ok(found)
     }
 
     /// The world folder this server uses.
@@ -442,6 +469,14 @@ mod tests {
             assert!(!is_server_owned(content, "world"), "{content}");
         }
         assert!(is_server_owned("Survival/level.dat", "survival"));
+        // Folded the way Windows and macOS fold names, not only ASCII.
+        assert!(is_server_owned("w\u{f6}rld/level.dat", "W\u{d6}RLD"));
+        assert!(is_server_owned("SERVER.PROPERTIES", "world"));
+        assert_ne!(
+            fold_case("config/\u{130}.toml"),
+            fold_case("config/i\u{307}.toml")
+        );
+        assert_eq!(fold_case("stra\u{df}e"), "STRA\u{df}E");
         assert!(!is_server_owned("world/level.dat", "survival"));
     }
 
@@ -536,6 +571,18 @@ mod tests {
         std::os::unix::fs::symlink(dir.path(), outer.path().join("server"))
             .unwrap();
         assert!(Folder::open(&outer.path().join("server")).is_err());
+    }
+
+    #[test]
+    fn case_insensitivity_is_found_on_the_disk_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        let insensitive = folder.case_insensitive().unwrap();
+        if cfg!(windows) || cfg!(target_os = "linux") {
+            assert_eq!(insensitive, cfg!(windows));
+        }
+        // The probe leaves nothing behind.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[cfg(unix)]
