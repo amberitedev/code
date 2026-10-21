@@ -152,20 +152,15 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 )
                 .await;
             // The server exists from here on, so a failed install names it and how to remove it.
+            // `--json` keeps the shape of every other failure, with the server's id added.
             if let Err(error) = installed {
-                #[derive(Serialize)]
-                struct NotInstalled {
-                    id: String,
-                    error: String,
-                }
+                let mut json = super::json_for(&error);
+                json["id"] = id.clone().into();
                 return Ok(Output::failed(
                     format!(
                         "Created server {id}, but installing Minecraft {version} failed: {error:#}\nDelete it with: copal servers delete {id}"
                     ),
-                    &NotInstalled {
-                        id,
-                        error: format!("{error:#}"),
-                    },
+                    &json,
                 ));
             }
             if accept_eula {

@@ -99,8 +99,7 @@ fn errors_print_as_json_in_cores_shape() {
             "the server is not running",
         ))
         .into();
-    let json: serde_json::Value =
-        serde_json::from_str(&super::json_for(&error)).unwrap();
+    let json = super::json_for(&error);
     assert_eq!(json["error"], "conflict");
     assert_eq!(json["description"], "the server is not running");
 }
