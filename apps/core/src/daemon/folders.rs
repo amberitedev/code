@@ -123,12 +123,19 @@ mod platform {
     /// With `group_writes` (`servers/`), the group also gets read and write on every entry.
     /// Minecraft writes files such as `level.dat` as 0600, so once `copal` owns them the group
     /// is the only way `copal-servers` can still open its own world.
+    ///
+    /// A file with more than one hard link is skipped too, and named in install's output. A
+    /// mod can hard-link a file it may read, such as one in `java/` or `meta/`, into its server
+    /// folder (where the OS allows it, as on macOS); changing that inode here would change the
+    /// shared file as well.
     fn chown_tree(
         path: &Path,
         uid: u32,
         group: u32,
         group_writes: bool,
     ) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
         for entry in
             walkdir::WalkDir::new(path).min_depth(1).follow_links(false)
         {
@@ -136,9 +143,17 @@ mod platform {
             if entry.path_is_symlink() {
                 continue;
             }
+            let metadata = entry.metadata()?;
+            if metadata.is_file() && metadata.nlink() > 1 {
+                println!(
+                    "Data folder: left {} as it was, because it has other hard links",
+                    entry.path().display()
+                );
+                continue;
+            }
             lchown(entry.path(), Some(uid), Some(group))?;
             if group_writes {
-                let mode = entry.metadata()?.permissions().mode() & 0o7777;
+                let mode = metadata.permissions().mode() & 0o7777;
                 let group_mode = if entry.file_type().is_dir() {
                     0o2070
                 } else {
@@ -205,6 +220,31 @@ mod platform {
             chown_tree(dir.path(), uid, gid, true).unwrap();
             assert_eq!(mode(&level), 0o660);
             assert_eq!(mode(&world) & 0o2070, 0o2070);
+        }
+
+        #[test]
+        fn a_file_hard_linked_from_elsewhere_is_left_alone() {
+            // `shared` stands for a file in `java/` or `meta/` that a mod linked into its folder.
+            let outside = tempfile::tempdir().unwrap();
+            let shared = outside.path().join("shared");
+            std::fs::write(&shared, "").unwrap();
+            std::fs::set_permissions(
+                &shared,
+                std::fs::Permissions::from_mode(0o640),
+            )
+            .unwrap();
+            let server = tempfile::tempdir().unwrap();
+            std::fs::hard_link(&shared, server.path().join("linked")).unwrap();
+            chown_tree(
+                server.path(),
+                nix::unistd::getuid().as_raw(),
+                nix::unistd::getgid().as_raw(),
+                true,
+            )
+            .unwrap();
+            let mode = std::fs::metadata(&shared).unwrap().permissions().mode()
+                & 0o7777;
+            assert_eq!(mode, 0o640);
         }
     }
 }
