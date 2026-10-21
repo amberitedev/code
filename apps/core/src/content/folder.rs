@@ -281,7 +281,7 @@ impl Folder {
     /// has the old file open keeps reading the old one.
     pub fn write(&self, path: &str, reader: &mut impl Read) -> io::Result<u64> {
         let (dir, name) = self.parent_creating(path)?;
-        let staged = staging(name);
+        let staged = staging();
         let result = (|| {
             let mut file = dir.create(&staged)?;
             let written = io::copy(reader, &mut file)?;
@@ -369,9 +369,10 @@ impl Folder {
     }
 }
 
-/// A unique name beside the file `name` for writing it whole.
-fn staging(name: &str) -> String {
-    format!(".{name}.{}.part", uuid::Uuid::new_v4())
+/// A unique name beside a file for writing it whole. Short whatever the file is called, so a name
+/// near the 255-byte limit can still be written.
+fn staging() -> String {
+    format!(".{}.part", uuid::Uuid::new_v4().simple())
 }
 
 /// Unix: Core's umask keeps what it creates from its group, but servers must be able to change
@@ -571,6 +572,15 @@ mod tests {
         std::os::unix::fs::symlink(dir.path(), outer.path().join("server"))
             .unwrap();
         assert!(Folder::open(&outer.path().join("server")).is_err());
+    }
+
+    #[test]
+    fn a_name_near_the_length_limit_is_written_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        let name = format!("world/{}.dat", "r".repeat(236));
+        folder.write(&name, &mut &b"region"[..]).unwrap();
+        assert_eq!(std::fs::read(dir.path().join(&name)).unwrap(), b"region");
     }
 
     #[test]
