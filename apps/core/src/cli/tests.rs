@@ -121,15 +121,8 @@ fn bad_arguments_are_refused() {
     }
 }
 
-/// A Core with no backend serving the router on a local socket in a temporary folder, plus a
-/// stand-in for step 5's backup list.
+/// A Core with no backend serving the router on a local socket in a temporary folder.
 async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
-    use axum::{Json, routing::get};
-
-    use crate::api::backups::{
-        BackupQueueBackup, BackupStatus, BackupsQueueResponse,
-    };
-
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
@@ -139,16 +132,25 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
         .await
         .unwrap();
     let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+    let backups = crate::backups::Backups::open(
+        paths.clone(),
+        db.clone(),
+        Arc::clone(&servers),
+    )
+    .await
+    .unwrap();
     let content = crate::content::Content::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
+        Arc::clone(&backups),
     )
     .unwrap();
     let state = Arc::new(AppState {
         servers,
         access: Arc::new(Access::new(keys)),
         content,
+        backups,
         uploads: api::files::Uploads::default(),
         update: Arc::new(Updater::new(
             paths.clone(),
@@ -159,22 +161,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
     });
-    let backups = || async {
-        Json(BackupsQueueResponse {
-            active_operations: Vec::new(),
-            backups: vec![BackupQueueBackup {
-                id: uuid::Uuid::nil(),
-                name: "Before the update".into(),
-                created_at: chrono::Utc::now(),
-                status: BackupStatus::Done,
-                locked: false,
-                automated: true,
-                history: Vec::new(),
-            }],
-        })
-    };
-    let router = api::router(Arc::clone(&state))
-        .route("/v1/servers/{id}/worlds/{wid}/backups-queue", get(backups));
+    let router = api::router(Arc::clone(&state));
     let owner = accounts::current_id().unwrap();
     let socket = paths.clone();
     tokio::spawn(async move {
@@ -313,7 +300,17 @@ async fn access_commands_round_trip() {
 #[tokio::test]
 async fn backup_commands_read_what_the_backup_routes_send() {
     let (_dir, state, client) = core().await;
-    state.servers.create("Survival").await.unwrap();
+    let server = state.servers.create("Survival").await.unwrap().id;
+    // A pre-update backup that finished, as the engine records one.
+    sqlx::query(
+        "INSERT INTO backups (id, server_id, name, kind, state, created_at) \
+         VALUES (?, ?, 'Before the update', 'pre_update', 'done', 0)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(&server)
+    .execute(&state.db)
+    .await
+    .unwrap();
     let list = super::backups::run(
         &client,
         BackupsCommand::List {

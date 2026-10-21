@@ -63,10 +63,18 @@ async fn core() -> Core {
         .await
         .unwrap();
     keys.set(&signer.public_keys()).await;
+    let backups = crate::backups::Backups::open(
+        servers.paths().clone(),
+        db.clone(),
+        Arc::clone(&servers),
+    )
+    .await
+    .unwrap();
     let content = crate::content::Content::open(
         servers.paths().clone(),
         db.clone(),
         Arc::clone(&servers),
+        Arc::clone(&backups),
     )
     .unwrap();
     let update = Arc::new(Updater::new(
@@ -81,6 +89,7 @@ async fn core() -> Core {
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
         content,
+        backups,
         uploads: super::files::Uploads::default(),
         update,
     });
@@ -810,6 +819,137 @@ async fn an_upload_over_a_pack_file_counts_as_the_owners_edit() {
         )
         .await;
     assert_eq!(edited["files"][0]["path"], "mods/a.jar");
+}
+
+#[tokio::test]
+async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session()
+ {
+    let core = core().await;
+    let server = core.server.clone();
+    let owner = core.sign_in("owner").await;
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    let queue = format!("/v1/servers/{server}/worlds/{server}/backups-queue");
+
+    let name = Some(json!({ "name": "First" }));
+    let (status, _) = core
+        .call(Method::POST, &queue, Some(&viewer), None, name.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "viewers only see backups");
+    let (status, created) = core
+        .call(Method::POST, &queue, Some(&editor), None, name.clone())
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let backup = created["id"].as_str().unwrap().to_owned();
+    let operation =
+        crate::backups::records::operations(&core.state.db, &server)
+            .await
+            .unwrap()[0]
+            .id;
+    core.state.backups.wait(operation).await.unwrap();
+    let (_, list) = core
+        .call(Method::GET, &queue, Some(&viewer), None, None)
+        .await;
+    assert_eq!(list["backups"][0]["status"], "done");
+    assert_eq!(list["backups"][0]["history"][0]["state"], "completed");
+
+    let restore = format!("{queue}/{backup}/restore");
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &restore,
+            Some(&editor),
+            Some(&core.ticket("editor")),
+            name.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "only the owner restores");
+    let (status, error) = core
+        .call(Method::POST, &restore, Some(&owner), None, name.clone())
+        .await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("ticket_required"))
+    );
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &restore,
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            name,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    // A link token works once, for the backup it names.
+    let download =
+        format!("/servers/{server}/modrinth/v0/backups/{backup}/download");
+    let (status, _) = core
+        .call(
+            Method::GET,
+            &format!("{download}/authorize"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, token) = core
+        .call(
+            Method::GET,
+            &format!("{download}/authorize"),
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let link = format!("{download}?auth={}", token["token"].as_str().unwrap());
+    let request = || Request::builder().uri(&link).body(Body::empty()).unwrap();
+    let response = core.router.clone().oneshot(request()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(bytes.starts_with(b"PK"), "a zip");
+    let (status, _) = core.send(request()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "a second use");
+    let (status, _) = core
+        .call(Method::GET, &download, Some(&viewer), None, None)
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a viewer's session does not download"
+    );
+
+    // Deleting a backup is the owner's too.
+    let delete = format!("{queue}/{backup}");
+    core.state
+        .backups
+        .wait(
+            crate::backups::records::operations(&core.state.db, &server)
+                .await
+                .unwrap()
+                .last()
+                .unwrap()
+                .id,
+        )
+        .await
+        .unwrap();
+    let (status, _) = core
+        .call(Method::DELETE, &delete, Some(&editor), None, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = core
+        .call(
+            Method::DELETE,
+            &delete,
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
