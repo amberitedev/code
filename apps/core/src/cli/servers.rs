@@ -39,6 +39,8 @@ pub enum ServersCommand {
         #[arg(long)]
         accept_eula: bool,
     },
+    /// Delete a stopped server: its world, files, and settings. There is no undo.
+    Delete { server: String },
     /// Start a server.
     Start { server: String },
     /// Stop a server, waiting until it has saved and exited.
@@ -139,7 +141,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 )
                 .await?;
             let id = created.id.to_string();
-            client
+            let installed = client
                 .post::<()>(
                     &format!("/modrinth/v0/servers/{id}/reinstall?hard=false"),
                     &ReinstallRequest::Loader {
@@ -148,7 +150,24 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                         game_version: Some(version.clone()),
                     },
                 )
-                .await?;
+                .await;
+            // The server exists from here on, so a failed install names it and how to remove it.
+            if let Err(error) = installed {
+                #[derive(Serialize)]
+                struct NotInstalled {
+                    id: String,
+                    error: String,
+                }
+                return Ok(Output::failed(
+                    format!(
+                        "Created server {id}, but installing Minecraft {version} failed: {error:#}\nDelete it with: copal servers delete {id}"
+                    ),
+                    &NotInstalled {
+                        id,
+                        error: format!("{error:#}"),
+                    },
+                ));
+            }
             if accept_eula {
                 client.post::<Eula>("/eula", &()).await?;
             }
@@ -157,6 +176,20 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                     "Created server {id} with Minecraft {version}. Start it with: copal servers start {id}"
                 ),
                 &created,
+            ))
+        }
+        ServersCommand::Delete { server } => {
+            let server = find(client, &server).await?;
+            client
+                .call::<()>(
+                    Method::DELETE,
+                    &format!("/local/servers/{}", server.server_id),
+                    None::<&()>,
+                )
+                .await?;
+            Ok(Output::new(
+                format!("Deleted {} ({})", server.name, server.server_id),
+                &server,
             ))
         }
         ServersCommand::Start { server } => {
@@ -481,6 +514,7 @@ fn state_name(state: ServerPowerState) -> &'static str {
         ServerPowerState::Running => "running",
         ServerPowerState::Stopping => "stopping",
         ServerPowerState::Crashed => "crashed",
+        ServerPowerState::Killed => "killed",
     }
 }
 

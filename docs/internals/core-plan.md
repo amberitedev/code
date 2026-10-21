@@ -416,8 +416,8 @@ backend down. Content management (mods, packs) stays in the App.
 
 - Core: `install`, `uninstall`, `run`, `status`, `logs`, `update` (check, apply, channel, rollback),
   `eula`
-- Servers: `list`, `start`, `stop`, `kill`, `restart`, `console` (attach, send), `memory`, `java`,
-  `restarts`
+- Servers: `list`, `create`, `delete`, `start`, `stop`, `kill`, `restart`, `console` (attach, send),
+  `memory`, `java`, `restarts`
 - Backups: `list`, `create`, `restore`, `schedule`
 - Access: `list`, `role`, `remove`, `sessions`, `revoke`
 
