@@ -370,7 +370,12 @@ mod tests {
     fn paths_that_leave_or_change_meaning_are_refused() {
         assert_eq!(clean("mods/a.jar").unwrap(), "mods/a.jar");
         // Four bytes, but not four letters: never sliced inside a character.
-        for name in ["a\u{20ac}", "a\u{6a21}", "\u{6a21}\u{7ec4}.jar"] {
+        for name in [
+            "aa\u{e9}.jar",
+            "a\u{20ac}",
+            "a\u{6a21}",
+            "\u{6a21}\u{7ec4}.jar",
+        ] {
             assert_eq!(clean(name).unwrap(), name);
         }
         assert_eq!(
