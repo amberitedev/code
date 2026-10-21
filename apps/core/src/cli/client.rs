@@ -31,15 +31,19 @@ pub struct Unreachable {
     source: std::io::Error,
 }
 
-/// What to say when Core drops the connection unanswered, which is how it refuses an account.
-/// Root is refused too, so under `sudo` the way out is to run the command without it.
+/// What to say when Core drops the connection unanswered. That is how it refuses an account
+/// other than the owner's, root included, but a Core that stops mid-request looks the same, so
+/// the message says what Core does rather than claiming a refusal. Under `sudo` the way out is
+/// to run the command without it.
 fn refused_message() -> String {
-    let only = "Only the account that installed Copal may use the copal CLI";
+    let closed = "Core closed the connection without answering. It does that for every account but the one that installed Copal";
     match std::env::var("SUDO_USER") {
         Ok(user) if !user.is_empty() => format!(
-            "Core closed the connection without answering. {only}, and not through sudo: run it again without sudo, as that account (was it {user}?)"
+            "{closed}, root included: run it again without sudo, as that account (was it {user}?)"
         ),
-        _ => format!("Core closed the connection without answering. {only}"),
+        _ => format!(
+            "{closed}; if that is not this account, use that one. Otherwise see copal logs"
+        ),
     }
 }
 
