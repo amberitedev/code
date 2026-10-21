@@ -1432,9 +1432,10 @@ async function respondToServerInvite(notification, action) {
 
 	const coreId = notification.body?.core_id
 	if (typeof coreId === 'string') {
-		// The server is on someone else's Core, which the invite made reachable.
+		// The server is on someone else's Core, which the invite made reachable. The invite is
+		// already access: accepting signs in to that Core, and declining only dismisses it.
 		try {
-			await tauriApiClient.archon.cores_v1.respondToInvite(coreId, serverId, action)
+			if (action === 'accept') await tauriApiClient.archon.cores_v1.acceptInvite(coreId, serverId)
 		} catch (error) {
 			// The invite, its server, or its Core is gone, so it should not be offered again.
 			if (error instanceof ModrinthApiError && error.statusCode === 404)
