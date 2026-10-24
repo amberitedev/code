@@ -56,7 +56,12 @@ function copyDevelopmentData(): void {
 		const from = NodePath.join(source, entry)
 		const to = NodePath.join(data, entry)
 		if (!NodeFS.existsSync(from) || NodeFS.existsSync(to)) continue
-		NodeFS.cpSync(from, to, { recursive: true })
+		// Copied beside the target and moved into place, so a failed copy is retried next run
+		// instead of being mistaken for finished data.
+		const partial = `${to}.partial`
+		NodeFS.rmSync(partial, { recursive: true, force: true })
+		NodeFS.cpSync(from, partial, { recursive: true })
+		NodeFS.renameSync(partial, to)
 		console.log(`[setup] copied ${entry} from ${source}`)
 	}
 }
@@ -95,10 +100,13 @@ function run(command: string, args: ReadonlyArray<string>): Promise<number> {
 
 function writeStatus(status: 'running' | 'done' | 'failed'): void {
 	const finishedAt = status === 'running' ? undefined : new Date().toISOString()
+	// Replaced whole, so an agent reading it mid-write never sees half a file.
+	const partial = `${statusPath}.partial`
 	NodeFS.writeFileSync(
-		statusPath,
+		partial,
 		`${JSON.stringify({ status, startedAt, finishedAt }, null, '\t')}\n`,
 	)
+	NodeFS.renameSync(partial, statusPath)
 }
 
 function primaryWorktree(cwd: string): string {

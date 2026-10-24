@@ -381,7 +381,7 @@ async function main(): Promise<void> {
 		let program: string | undefined
 		if (spec.build) {
 			setBuildFailed(spec.label, false)
-			program = await ensureProgram(paths.worktree, spec, spec.build, builds)
+			program = await ensureProgram(paths.worktree, spec, spec.build, builds, () => stopping)
 			if (stopping || starts.get(spec.label) !== token) return
 			if (!program) {
 				setBuildFailed(spec.label, true)
@@ -824,6 +824,7 @@ async function ensureProgram(
 	spec: ProcessSpec,
 	build: ProgramBuild,
 	builds: Set<NodeChildProcess.ChildProcess>,
+	stopped: () => boolean,
 ): Promise<string | undefined> {
 	const cache = NodePath.join(build.targetDir, 'dev-bin')
 	const cached = (key: string) => NodePath.join(cache, key, build.program)
@@ -831,7 +832,8 @@ async function ensureProgram(
 	if (NodeFS.existsSync(cached(key))) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
 	} else {
-		const unlock = await lockBuilds(cache, spec.label)
+		const unlock = await lockBuilds(cache, spec.label, stopped)
+		if (!unlock) return undefined
 		try {
 			// Another runner may have built it while this one waited.
 			while (!NodeFS.existsSync(cached(key))) {
@@ -974,7 +976,12 @@ async function runCargo(
  * finished program at the same path for all of them, so a second build finishing before the copy
  * would hand this checkout the other one's program.
  */
-async function lockBuilds(cache: string, label: string): Promise<() => void> {
+/** Takes the build lock for `cache`, or gives up with `undefined` once the runner is stopping. */
+async function lockBuilds(
+	cache: string,
+	label: string,
+	stopped: () => boolean,
+): Promise<(() => void) | undefined> {
 	NodeFS.mkdirSync(cache, { recursive: true })
 	const lock = NodePath.join(cache, BUILD_LOCK)
 	const owner = NodePath.join(lock, 'pid')
@@ -1002,6 +1009,7 @@ async function lockBuilds(cache: string, label: string): Promise<() => void> {
 		if (!waited) runnerLog('info', `${label} waiting for another build to finish`)
 		waited = true
 		await new Promise((resolve) => setTimeout(resolve, 1_000))
+		if (stopped()) return undefined
 	}
 	NodeFS.writeFileSync(owner, String(process.pid))
 	return () => NodeFS.rmSync(lock, { recursive: true, force: true })
@@ -1426,6 +1434,15 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 		runnerLog(
 			'error',
 			'Already running with App windows hidden. Run node scripts/dev-runner.ts down first.',
+		)
+		process.exitCode = 1
+		return
+	}
+	const liveScenarios = live?.scenarios.map((scenario) => scenario.number).join(' ')
+	if (live && (live.mode !== input.mode || liveScenarios !== input.scenarios.join(' '))) {
+		runnerLog(
+			'error',
+			`Already running ${[live.mode, liveScenarios].filter(Boolean).join(' ')}. Run node scripts/dev-runner.ts down first.`,
 		)
 		process.exitCode = 1
 		return

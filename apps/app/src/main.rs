@@ -157,7 +157,8 @@ fn main() {
     */
 
     let mut tauri_context = tauri::generate_context!();
-    if let Some(dev_url) = dev::config().and_then(|config| config.dev_url.clone())
+    if let Some(dev_url) =
+        dev::config().and_then(|config| config.dev_url.clone())
     {
         tauri_context.config_mut().build.dev_url = Some(dev_url);
     }

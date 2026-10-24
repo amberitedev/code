@@ -58,7 +58,7 @@ describe.sequential('Amberite Tauri API inventory', () => {
 		expect(appMain).toContain('#[cfg(all(debug_assertions, feature = "browser-bridge"))]')
 		expect(appPackage).toMatch(/tauri dev --features [\w,-]*browser-bridge/)
 		expect(devRunner).toMatch(
-			/["']tauri["'],\s*["']dev["'],\s*["']--features["'],\s*["']browser-bridge["']/,
+			/["']build["'],[\s\S]*?["']theseus_gui["'],[\s\S]*?["']--features["'],\s*["']browser-bridge["']/,
 		)
 		expect(appPackage).not.toMatch(/"build"\s*:\s*"[^"]*browser-bridge/)
 	})
