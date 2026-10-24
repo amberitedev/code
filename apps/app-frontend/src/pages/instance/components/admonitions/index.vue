@@ -2,9 +2,9 @@
 	<StackedAdmonitions v-bind="$attrs" :items="stackItems" class="w-full">
 		<template #item="{ item, dismissible }">
 			<InstanceAdmonitionsLinkedServerFailed
-				v-if="item.kind === 'linked-server-failed'"
+				v-if="item.kind === 'linked-server-failed' && failedServer"
 				:instance="instance"
-				:servers="failedServers"
+				:server="failedServer"
 			/>
 			<InstanceAdmonitionsSharedInstanceStale
 				v-else-if="item.kind === 'shared-instance-stale'"
@@ -34,7 +34,7 @@ import { StackedAdmonitions } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 
 import type { SharedInstanceUnavailableReason } from '@/helpers/install'
-import { useLinkedServers } from '@/helpers/linked-servers'
+import { useInstanceServer } from '@/helpers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 import InstanceAdmonitionsLinkedServerFailed from './linked-server-failed.vue'
@@ -75,14 +75,14 @@ const showSharedInstancePublishAdmonition = computed(
 		props.instance.shared_instance?.role === 'owner' &&
 		props.instance.shared_instance.status === 'stale',
 )
-const { servers: linkedServers } = useLinkedServers(() => props.instance.id)
-const failedServers = computed(() =>
-	linkedServers.value.filter((server) => server.linked_instance.state === 'failed'),
+const { server } = useInstanceServer(() => props.instance.id)
+const failedServer = computed(() =>
+	server.value?.linked_instance.state === 'failed' ? server.value : undefined,
 )
 const stackItems = computed<InstanceAdmonitionItem[]>(() => {
 	const items: InstanceAdmonitionItem[] = []
 
-	if (failedServers.value.length > 0) {
+	if (failedServer.value) {
 		items.push({
 			id: 'linked-server-failed',
 			type: 'critical',

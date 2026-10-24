@@ -6,8 +6,7 @@
 	>
 		{{
 			formatMessage(messages.linkedServerFailedBody, {
-				count: servers.length,
-				name: servers[0]?.name,
+				name: server.name,
 			})
 		}}
 		<template #actions>
@@ -25,10 +24,10 @@ import type { GameInstance } from '@/helpers/types'
 
 import { instanceAdmonitionsMessages as messages } from './messages'
 
-/** Shown while a server linked to this instance failed to take it, e.g. the upload never arrived. */
+/** Shown while the instance's server failed to take it, e.g. the upload never arrived. */
 defineProps<{
 	instance: GameInstance
-	servers: LinkedServer[]
+	server: LinkedServer
 }>()
 
 const { formatMessage } = useVIntl()

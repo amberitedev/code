@@ -11,8 +11,7 @@ export const instanceAdmonitionsMessages = defineMessages({
 	},
 	linkedServerFailedBody: {
 		id: 'app.instance.admonitions.linked-server.failed-body',
-		defaultMessage:
-			'{count, plural, one {{name} could not be updated} other {# servers could not be updated}} from this instance. Push the update to try again.',
+		defaultMessage: '{name} could not be updated from this instance. Push the update to try again.',
 	},
 	sharedInstanceChangesBody: {
 		id: 'app.instance.admonitions.shared-instance.changes-body',
