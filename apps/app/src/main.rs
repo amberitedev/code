@@ -54,6 +54,9 @@ async fn initialize_state(
 #[tracing::instrument(skip_all)]
 #[tauri::command]
 fn show_window(app: tauri::AppHandle) {
+    if dev::config().is_some_and(|config| config.hide_window) {
+        return;
+    }
     let win = app.get_window("main").unwrap();
     if let Err(e) = win.show() {
         DialogBuilder::message()
@@ -153,7 +156,11 @@ fn main() {
 
     */
 
-    let tauri_context = tauri::generate_context!();
+    let mut tauri_context = tauri::generate_context!();
+    if let Some(dev_url) = dev::config().and_then(|config| config.dev_url.clone())
+    {
+        tauri_context.config_mut().build.dev_url = Some(dev_url);
+    }
 
     let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
 

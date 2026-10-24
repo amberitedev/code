@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
+	bridgeUrlFromLine,
 	createProcessSpecs,
 	createRuntimeEnvironment,
 	findFirstAvailableOffset,
@@ -8,6 +9,7 @@ import {
 	parseInput,
 	portsForOffset,
 	processLabelsForMode,
+	programKey,
 	resolveStartOffset,
 	scenarioUsername,
 } from './dev-runner.ts'
@@ -148,15 +150,43 @@ describe('dev runner modes', () => {
 		expect(processLabelsForMode('dev:backend')).toEqual(['backend', 'account-web'])
 		expect(processLabelsForMode('dev:core')).toEqual(['core'])
 	})
+
+	it('leaves out the account sign-in website when asked', async () => {
+		expect(processLabelsForMode('dev', false)).toEqual(['backend', 'core', 'app-frontend'])
+		const checked: number[] = []
+		await findFirstAvailableOffset({
+			accountWeb: false,
+			checkPort: async (port) => {
+				checked.push(port)
+				return true
+			},
+			mode: 'dev',
+			startOffset: 0,
+		})
+		expect(checked).toEqual([1420, 8787, 16662])
+	})
 })
 
 describe('dev runner scenarios', () => {
 	it('uses dev.json defaults when no scenario is passed', () => {
 		expect(parseInput(['dev'], [2, 4])).toEqual({
+			accountWeb: true,
 			dryRun: false,
+			hideWindows: false,
 			mode: 'dev',
 			scenarios: [2, 4],
 		})
+	})
+
+	it('reads the options a background start passes', () => {
+		expect(parseInput(['dev', '2', '--no-account-web', '--hide-windows'], [1])).toEqual({
+			accountWeb: false,
+			dryRun: false,
+			hideWindows: true,
+			mode: 'dev',
+			scenarios: [2],
+		})
+		expect(() => parseInput(['dev', '--nope'], [1])).toThrow('Unknown option --nope')
 	})
 
 	it('accepts several scenarios and removes duplicates', () => {
@@ -166,7 +196,9 @@ describe('dev runner scenarios', () => {
 
 	it('does not attach scenarios to backend-only modes', () => {
 		expect(parseInput(['dev:core'], [1])).toEqual({
+			accountWeb: true,
 			dryRun: false,
+			hideWindows: false,
 			mode: 'dev:core',
 			scenarios: [],
 		})
@@ -189,8 +221,10 @@ describe('dev runner scenarios', () => {
 			worktree: process.cwd(),
 		}
 		const specs = createProcessSpecs({
+			accountWeb: true,
 			branch: 'feature',
 			env: {},
+			hideWindows: true,
 			mode: 'dev',
 			paths,
 			ports: portsForOffset(0),
@@ -207,27 +241,22 @@ describe('dev runner scenarios', () => {
 		])
 		const apps = specs.filter((spec) => spec.label.startsWith('app:'))
 		for (const app of apps) {
-			const config = JSON.parse(app.args[app.args.indexOf('--config') + 1]!)
-			expect(config.app.security.csp['img-src']).toContain('http://127.0.0.1:8787')
-			expect(config.app.security.capabilities).toEqual([
-				'core',
-				'plugins',
-				{
-					identifier: 'local-account-backend',
-					windows: ['main'],
-					permissions: [
-						{
-							identifier: 'http:default',
-							allow: [
-								{ url: 'http://127.0.0.1:8787/*' },
-								{ url: 'http://*:*/*' },
-								{ url: 'https://*:*/*' },
-							],
-						},
-					],
-				},
-			])
+			// Ports reach the App when it starts, so one build serves every checkout.
+			expect(JSON.parse(app.args.at(-1)!)).toMatchObject({
+				backendUrl: 'http://127.0.0.1:8787',
+				devUrl: 'http://localhost:1420',
+				hideWindow: true,
+			})
+			expect(JSON.stringify(app.build)).not.toContain('1420')
+			expect(app.build?.inputs).toEqual(
+				expect.arrayContaining(['Cargo.lock', 'apps/app', 'packages/browser-bridge']),
+			)
 		}
+		expect(apps[0]!.build).toEqual(apps[1]!.build)
+		// Core compiles this crate from outside its own folder.
+		expect(specs.find((spec) => spec.label === 'core')?.build?.inputs).toEqual(
+			expect.arrayContaining(['apps/core', 'Cargo.toml', 'packages/daedalus']),
+		)
 		const cwd = process.cwd().replaceAll('\\', '/')
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
 			`${cwd}/.data/scenarios/1`,
@@ -237,5 +266,38 @@ describe('dev runner scenarios', () => {
 			'scenario_1',
 			'scenario_3',
 		])
+	})
+})
+
+describe('dev runner program cache', () => {
+	const build = {
+		cargoArgs: ['build'],
+		cwd: process.cwd(),
+		env: {},
+		ignoredInputs: [],
+		inputs: ['scripts/dev-runner.ts'],
+		program: 'program',
+		targetDir: `${process.cwd()}/target`,
+	}
+
+	it('keys a program by its inputs, not by where it is built', () => {
+		const key = programKey(process.cwd(), build)
+		expect(programKey(process.cwd(), { ...build, targetDir: '/elsewhere' })).toBe(key)
+		expect(
+			programKey(process.cwd(), { ...build, inputs: ['scripts/dev-runner.test.ts'] }),
+		).not.toBe(key)
+		expect(programKey(process.cwd(), { ...build, env: { TAURI_CONFIG: '{}' } })).not.toBe(key)
+		expect(programKey(process.cwd(), { ...build, cargoArgs: ['build', '--release'] })).not.toBe(key)
+	})
+})
+
+describe('dev runner readiness', () => {
+	it('reads the browser bridge URL from the line the App prints', () => {
+		expect(
+			bridgeUrlFromLine(
+				'2026-10-11T15:33:26.147268Z  INFO amberite_browser_bridge: Amberite browser bridge ready url=http://127.0.0.1:64463',
+			),
+		).toBe('http://127.0.0.1:64463')
+		expect(bridgeUrlFromLine('Browser bridge Vite WebSocket proxy failed')).toBeUndefined()
 	})
 })

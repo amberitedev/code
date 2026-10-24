@@ -12,6 +12,11 @@ pub struct DevAppConfig {
     pub data_dir: String,
     pub backend_url: Option<String>,
     pub username: Option<String>,
+    /// Where the frontend is served. One dev build then works with any checkout's ports.
+    pub dev_url: Option<tauri::Url>,
+    /// Keeps the native window off the desktop; the App is used through the browser bridge.
+    #[serde(default)]
+    pub hide_window: bool,
 }
 
 static CONFIG: OnceLock<Option<DevAppConfig>> = OnceLock::new();

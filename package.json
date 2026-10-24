@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"prepare": "vp config --no-agent && pnpm i18n:coverage",
+		"setup": "node scripts/setup-worktree.ts",
 		"dev": "node scripts/dev-runner.ts dev",
 		"dev:app": "node scripts/dev-runner.ts dev:app",
 		"dev:backend": "node scripts/dev-runner.ts dev:backend",
