@@ -1,0 +1,133 @@
+#!/usr/bin/env node
+
+// Prepares a checkout for work: dependencies, development data, and the App library's environment
+// file. T3 Code runs this when it creates a worktree (see t3.json); it is safe to run again by hand.
+// Progress is recorded in .data/setup.json so an agent that starts before this finishes can tell
+// "still running" from "never ran".
+
+import * as NodeChildProcess from 'node:child_process'
+import * as NodeFS from 'node:fs'
+import * as NodePath from 'node:path'
+
+// Local Minecraft, account, and server state. Everything else in the primary .data is scratch.
+const DATA_ENTRIES = ['backend', 'core', 'scenarios'] as const
+const ENV_FILE = NodePath.join('packages', 'app-lib', '.env')
+
+const worktree = git(['rev-parse', '--show-toplevel'], process.cwd())
+const primary = primaryWorktree(worktree)
+const data = NodePath.join(worktree, '.data')
+const statusPath = NodePath.join(data, 'setup.json')
+const startedAt = new Date().toISOString()
+
+NodeFS.mkdirSync(data, { recursive: true })
+writeStatus('running')
+
+// The install is the slow part, so the copies run while it works.
+const install = installDependencies()
+
+try {
+	if (!samePath(worktree, primary)) {
+		copyDevelopmentData()
+		copyEnvFile()
+	}
+	for (const path of [
+		NodePath.join(data, 'core'),
+		...[1, 2, 3, 4].map((scenario) => NodePath.join(data, 'scenarios', String(scenario))),
+	]) {
+		NodeFS.mkdirSync(path, { recursive: true })
+	}
+} catch (error) {
+	// A failed copy must not hide the install result, or stop the install from finishing.
+	console.error(`[setup] ${error instanceof Error ? error.message : String(error)}`)
+	process.exitCode = 1
+}
+
+if (!(await install)) process.exitCode = 1
+writeStatus(process.exitCode ? 'failed' : 'done')
+console.log(
+	process.exitCode
+		? '[setup] failed. Fix the error above, then run: node scripts/setup-worktree.ts'
+		: '[setup] done',
+)
+
+function copyDevelopmentData(): void {
+	const source = NodePath.join(primary, '.data')
+	for (const entry of DATA_ENTRIES) {
+		const from = NodePath.join(source, entry)
+		const to = NodePath.join(data, entry)
+		if (!NodeFS.existsSync(from) || NodeFS.existsSync(to)) continue
+		// Copied beside the target and moved into place, so a failed copy is retried next run
+		// instead of being mistaken for finished data.
+		const partial = `${to}.partial`
+		NodeFS.rmSync(partial, { recursive: true, force: true })
+		NodeFS.cpSync(from, partial, { recursive: true })
+		NodeFS.renameSync(partial, to)
+		console.log(`[setup] copied ${entry} from ${source}`)
+	}
+}
+
+// A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.
+function copyEnvFile(): void {
+	const from = NodePath.join(primary, ENV_FILE)
+	const to = NodePath.join(worktree, ENV_FILE)
+	if (!NodeFS.existsSync(from) || NodeFS.existsSync(to)) return
+	NodeFS.copyFileSync(from, to)
+	console.log(`[setup] copied ${ENV_FILE}`)
+}
+
+// Install scripts write the shared .git/config, so two worktrees set up at once can collide.
+// One retry clears that.
+async function installDependencies(): Promise<boolean> {
+	for (const attempt of [1, 2]) {
+		if ((await run('vp', ['i'])) === 0) return true
+		console.error(`[setup] vp i failed${attempt === 1 ? '; retrying once' : ''}`)
+	}
+	return false
+}
+
+function run(command: string, args: ReadonlyArray<string>): Promise<number> {
+	return new Promise((resolve) => {
+		// The shell resolves vp.cmd on Windows.
+		const child = NodeChildProcess.spawn([command, ...args].join(' '), {
+			cwd: worktree,
+			shell: true,
+			stdio: 'inherit',
+		})
+		child.once('error', () => resolve(1))
+		child.once('close', (code) => resolve(code ?? 1))
+	})
+}
+
+function writeStatus(status: 'running' | 'done' | 'failed'): void {
+	const finishedAt = status === 'running' ? undefined : new Date().toISOString()
+	// Replaced whole, so an agent reading it mid-write never sees half a file.
+	const partial = `${statusPath}.partial`
+	NodeFS.writeFileSync(
+		partial,
+		`${JSON.stringify({ status, startedAt, finishedAt }, null, '\t')}\n`,
+	)
+	NodeFS.renameSync(partial, statusPath)
+}
+
+function primaryWorktree(cwd: string): string {
+	const output = git(['worktree', 'list', '--porcelain'], cwd)
+	const first = output
+		.split(/\r?\n/)
+		.find((line) => line.startsWith('worktree '))
+		?.slice('worktree '.length)
+	return NodePath.resolve(first ?? cwd)
+}
+
+function git(args: ReadonlyArray<string>, cwd: string): string {
+	const result = NodeChildProcess.spawnSync('git', args, { cwd, encoding: 'utf8' })
+	if (result.status !== 0) throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`)
+	return result.stdout.trim()
+}
+
+function samePath(left: string, right: string): boolean {
+	const normalize = (path: string) => {
+		const resolved = NodePath.resolve(path)
+		return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+	}
+	return normalize(left) === normalize(right)
+}

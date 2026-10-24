@@ -58,10 +58,26 @@ somewhere else. Before calling frontend work done, check which of these apply:
 
 ## Dev servers
 
-- `vp i` installs dependencies. Worktrees get this from the `t3.json` setup script, which also copies
-  the primary checkout's `.data/`. If module resolution or development data looks broken, setup
-  probably did not run.
-- `vp run dev` starts the local backend, the account sign-in website, one
+- Worktree setup (`node scripts/setup-worktree.ts`, run by `t3.json`) installs dependencies and copies
+  the primary checkout's test data. It takes a few minutes and is often still running when you
+  start. Do not wait for it: reading and editing code needs none of it, so begin the work straight
+  away. Look at `.data/setup.json` only when you first need to run something: `running` means it is
+  not ready yet (never run `vp i` beside it), `failed` or a missing file means run the script again.
+- `node scripts/dev-runner.ts up 1 2` starts the whole stack in the background and returns when it is ready,
+  printing each App's browser bridge URL. `node scripts/dev-runner.ts status` prints the same at any time and
+  `node scripts/dev-runner.ts down` stops it. The log is `.data/dev.log`. Apps started this way have no window
+  on the desktop; add `--show-windows` when a person needs to see them.
+- The App and Core are built once per distinct set of Rust inputs and shared by every checkout. A
+  checkout whose Rust matches something already built is ready in about 30 seconds and compiles
+  nothing. Otherwise the start compiles first: about a minute and a half after a small Rust edit
+  in a checkout that has built before, three to four minutes the first time a checkout builds
+  after another one did. `up` stops at once and prints the compiler errors when the Rust does not
+  compile, so it is also the check for Rust changes. It gives up waiting after 9 minutes; run it
+  again to keep waiting.
+- Nothing watches Rust files. After a Rust edit, run `down` then `up`, which rebuilds because the
+  inputs changed.
+- `vp run dev` is the same stack in the foreground, for a person at a terminal, with App windows and the
+  account sign-in website. It starts the local backend, one
   Core, and the App scenarios selected by `dev.json`. Pass scenario numbers to run several isolated
   Apps against the same backends: `vp run dev 1 2 3`.
 - The backend runs locally through `wrangler dev --local`. No Cloudflare account, billing, or cloud
@@ -70,11 +86,46 @@ somewhere else. Before calling frontend work done, check which of these apply:
   `scenarios/<number>/` is the complete persistent state of one App installation. Do not point a
   worktree at another checkout's live state.
 - Ports derive from the worktree path and stay stable across restarts when available. Read the real
-  ports from the `[dev-runner]` output or `.data/runtime.json`, because occupied ports shift.
+  ports and bridge URLs from `node scripts/dev-runner.ts status` or `.data/runtime.json`, because occupied ports
+  shift and bridge ports change on every start.
 - `vp run dev:app`, `vp run dev:core`, and `vp run dev:backend` start only that part of the
   environment.
-- If you start a process, record its PID and stop exactly that process. Never kill by a broad process
-  name or path; several worktrees may be running at once.
+- Stop what you started with `node scripts/dev-runner.ts down`, which stops only this checkout's runner. Never kill
+  by a broad process name or path; several worktrees may be running at once.
+- Changes that only touch the backend or Core do not need an App: `node scripts/dev-runner.ts up dev:backend` starts
+  in seconds and compiles no Rust.
+
+## Driving the App
+
+Each running App serves itself to a browser at its bridge URL, with every native call going to the
+real App. That is how agents click through it and take screenshots; no computer use is involved.
+
+For any change a person can see, do this without asking: start the App, open it through the bridge,
+use the screen you changed, and screenshot it. Scenario Apps hold only local test accounts, so their
+screenshots may be uploaded for a pull request. Computer use on the real desktop still needs the
+developer's go-ahead.
+
+1. `node scripts/dev-runner.ts up 1` (or `1 2` for two accounts), then take the bridge URL from its output.
+2. In T3 Code, `preview_open` that URL, then use `preview_click`, `preview_type`, and
+   `preview_evaluate` to work the UI. Open one tab per App and pass its `tabId` on every call.
+3. `preview_snapshot` with `save: true` writes a PNG and returns its path. Read that file to look at
+   the screen. For a pull request, upload it with the `file-upload` skill and embed the URL.
+4. `node scripts/dev-runner.ts down` when you are finished.
+
+- Take the "before" screenshot before you edit; the App reloads UI changes on its own, so the
+  "after" is the same tab a moment later. Motion and timing changes get a short recording
+  (`preview_recording_start` / `preview_recording_stop`) instead.
+- The first load of a tab takes around 20 seconds and shows a blank page meanwhile. Wait for the
+  sidebar before judging or screenshotting.
+
+- Each App signs itself in at startup as its scenario account (`scenario_<number>`), so screens
+  behind an account work straight away. Nothing needs signing in by hand.
+- Calls made through `preview_evaluate` are cut off after 15 seconds. Start long work and poll for
+  the result instead of awaiting it.
+- Open only bridge URLs in the preview. The raw App URL has no native calls, and the account sign-in
+  website hangs the preview tools.
+- Only the native window shows window chrome, system dialogs, and drag and drop from the desktop.
+  Those need a person or computer use, and an App started with `--show-windows`.
 
 Full command, state, and port behavior: `docs/internals/scripts.md`.
 
@@ -105,17 +156,15 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - You usually do not need to build or compile. CI checks every push, and `vp run dev` compiles what
   it runs. When you do need the compiler, such as for a large Rust change, run `cargo check` scoped
   to the crate you changed (`-p <crate>` or that crate's directory). Release builds (`cargo build
-  --release`, `vp build`) and app bundles are slow and rarely tell you anything a check would not.
+--release`, `vp build`) and app bundles are slow and rarely tell you anything a check would not.
 - You usually do not need repo-wide checks (`vp check`, `vp run -r test`, `vp run -r typecheck`).
   CI runs the full suite. Run one when your change really reaches across the repo, and prefer the
   narrowest command that covers it.
 - Do not add backend tests by default. Add them when the developer asks or when the behavior is
   stable enough that a focused regression test is useful.
-- Upon request, user-visible App changes get one integrated pass against the real App and real
-  backends. Use the browser bridge to access the App for normal workflows, and its desktop window
-  only when behavior depends on Tauri or the native shell. The primary agent does this once after
-  integrating. Subagents do not start their own dev servers. Ask permission before computer use or
-  opening a browser.
+- User-visible App changes get one pass against the real App through the browser bridge (see
+  "Driving the App"). The primary agent does this once after integrating; subagents do not start
+  their own dev stacks. Ask before computer use.
 
 ## Pull requests
 
@@ -152,4 +201,5 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 
 ## Additional tips
 
-- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
+- Don't use computer use unless the user explicitly agrees or requests it. The browser bridge is
+  not computer use and needs no permission.
