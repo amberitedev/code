@@ -1,6 +1,5 @@
-import { requireUser, tokenFrom } from '../common/auth'
-import { digest } from '../common/crypto'
-import { ApiError, json, readJson, routePath, stringField, unauthorized } from '../common/http'
+import { requireUser } from '../common/auth'
+import { ApiError, json, routePath, stringField } from '../common/http'
 import type { Env } from '../common/types'
 
 // Servers visible to friends. A Core lists the servers whose "Visible to friends" setting is on,
@@ -88,23 +87,6 @@ export async function writeServers(
 }
 
 /**
- * Core on `main`, signed in: replace the servers this Core shows to friends. The Core sends its
- * whole list whenever anything in it changes, so a server missing from the list stops being
- * visible. The new Core sends the list in its state report instead.
- */
-async function replaceServers(request: Request, env: Env) {
-	const key = tokenFrom(request)
-	if (!key.startsWith('amc_')) unauthorized()
-	const servers = parseServers((await readJson(request)).servers)
-	const core = await env.DB.prepare('SELECT id,owner_id FROM cores WHERE key_hash = ?')
-		.bind(await digest(key))
-		.first<{ id: string; owner_id: string }>()
-	if (!core) unauthorized()
-	await writeServers(env, core, servers)
-	return new Response(null, { status: 204 })
-}
-
-/**
  * App: the servers other people host for a shared instance. Only given to the people the instance
  * is shared with. The caller's own Cores are left out; the App reads those from the Core itself.
  */
@@ -141,7 +123,6 @@ async function listServers(request: Request, env: Env, instanceId: string) {
 export async function handleVisibleServers(request: Request, env: Env): Promise<Response | null> {
 	const path = routePath(request),
 		method = request.method
-	if (path === '/core/servers' && method === 'PUT') return replaceServers(request, env)
 	const instance = path.match(/^\/v1\/instances\/([^/]+)\/servers$/)
 	if (instance && method === 'GET')
 		return listServers(request, env, decodeURIComponent(instance[1]))

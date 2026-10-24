@@ -1,310 +1,229 @@
-//! Terminal command surface for installing and operating a local Copal Core.
+//! The `copal` command line. `install`, `uninstall`, `run`, and the hidden `core` and `shim` work
+//! on this machine directly; every other command talks to the running Core over the local socket
+//! (see `client`), so it works the same on every OS and with the backend down.
+//!
+//! The CLI is for the machine and for controlling servers. Content (mods, packs) stays in the
+//! App. Every command prints text for a person, or with `--json` the JSON Core answered.
 
-pub(crate) mod admin;
-mod install;
-mod interactive;
-mod metadata;
-mod service;
-mod update;
+mod access;
+mod backups;
+pub mod client;
+mod machine;
+mod servers;
+#[cfg(test)]
+mod tests;
 
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
-use color_eyre::eyre::{bail, Result};
+use std::path::PathBuf;
 
-/// Copal installs, runs, diagnoses, and updates a self-hosted Core.
+use clap::{Parser, Subcommand};
+use color_eyre::eyre::Result;
+use serde::Serialize;
+use serde_json::Value;
+
+pub use client::Client;
+
+/// Copal runs and manages Minecraft servers on this machine.
 #[derive(Debug, Parser)]
-#[command(name = "copal", version, arg_required_else_help = false)]
-pub(crate) struct Cli {
-    /// Emit machine-readable output where the command supports it.
-    #[arg(long, global = true, default_value = "table")]
-    format: OutputFormat,
-    /// Reduce non-essential output.
-    #[arg(short, long, global = true)]
-    quiet: bool,
-    /// Include diagnostic detail in failures.
-    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
-    verbose: u8,
+#[command(name = "copal", version)]
+pub struct Cli {
+    /// Print the JSON Core answered, for scripts.
+    #[arg(long, global = true)]
+    pub json: bool,
     #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum OutputFormat {
-    Table,
-    Json,
+    pub command: Command,
 }
 
 #[derive(Debug, Subcommand)]
-enum Command {
-    /// Start the Core HTTP server. This is the default command.
-    Run,
-    /// Validate Core configuration, migrations, and database connectivity.
-    Check,
-    /// Apply pending database migrations and exit.
-    Migrate,
-    /// Sign this Core in to an Amberite account: shows a code to approve in the App.
-    Auth,
-    /// Sign this Core out of its account. Its servers and files stay.
-    Logout,
-    /// Print the Copal version.
-    Version,
-    /// Install Copal as a local system service.
-    Install(install::InstallArgs),
-    /// Inspect or control the installed Copal service.
-    Service(service::ServiceArgs),
-    /// Show a concise operational status report.
+pub enum Command {
+    /// Install Copal as a service on this machine. Run once, as admin.
+    Install {
+        /// The account that may use the copal CLI. Defaults to the one running install.
+        #[arg(long)]
+        owner: Option<String>,
+        /// Install this copal even when Core has updated itself to a newer version.
+        #[arg(long)]
+        allow_downgrade: bool,
+    },
+    /// Remove the service, the accounts, and the firewall rules. Run as admin.
+    Uninstall {
+        /// Also delete the data folder: every server, world, and backup.
+        #[arg(long)]
+        remove_data: bool,
+    },
+    /// Run Core in the foreground.
+    Run {
+        /// Set by the Windows service manager.
+        #[arg(long, hide = true)]
+        service: bool,
+    },
+    /// Core itself, as `copal run` starts it. Not for people.
+    #[command(hide = true)]
+    Core,
+    /// Supervise one run of a server. Core starts this; it is not for people.
+    #[command(hide = true)]
+    Shim {
+        #[arg(long)]
+        data_dir: PathBuf,
+        server: String,
+    },
+    /// Show whether Core runs, its version, and what its servers are doing.
     Status,
-    /// Collect local installation and service diagnostics.
-    Diagnose,
-    /// Check for or install a Copal release.
-    Update(update::UpdateArgs),
-    /// Generate shell completions.
-    Completion(CompletionArgs),
-    /// Open the prompt-assisted operational menu.
-    Menu,
-    /// Emergency instance controls for a running local Core.
-    Instance(InstanceArgs),
-    /// Remove locally installed service integration without deleting Core data.
-    Uninstall(UninstallArgs),
-}
-
-#[derive(Debug, Args)]
-struct CompletionArgs {
-    #[arg(value_enum)]
-    shell: Shell,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum Shell {
-    Bash,
-    Elvish,
-    Fish,
-    PowerShell,
-    Zsh,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct InstanceArgs {
+    /// Get a fresh pairing code, to enter in Amberite to make this Core yours.
+    Pair,
+    /// Show the end of Core's own log.
+    Logs {
+        /// How many lines, up to 1000.
+        #[arg(short = 'n', long, default_value_t = 100)]
+        lines: usize,
+    },
+    /// Update Core, or change how it updates.
     #[command(subcommand)]
-    command: InstanceCommand,
+    Update(machine::UpdateCommand),
+    /// Show or accept the Minecraft EULA, once for every server on this Core.
+    Eula {
+        /// Accept the EULA (https://aka.ms/MinecraftEULA).
+        #[arg(long)]
+        accept: bool,
+    },
+    /// Create and control servers.
+    #[command(subcommand)]
+    Servers(servers::ServersCommand),
+    /// List, make, and restore backups.
+    #[command(subcommand)]
+    Backups(backups::BackupsCommand),
+    /// Who may use each server, and their sessions.
+    #[command(subcommand)]
+    Access(access::AccessCommand),
 }
 
-#[derive(Debug, Subcommand)]
-pub(crate) enum InstanceCommand {
-    /// List instances known to the locally running Core.
-    List,
-    /// Show one instance's status.
-    Status { id: String },
-    /// Start one or more instances.
-    Start {
-        id: Option<String>,
-        /// Select one or more instances interactively.
-        #[arg(long)]
-        select: bool,
-        /// Confirm a non-interactive start.
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Request a graceful stop for one instance.
-    Stop {
-        id: Option<String>,
-        /// Select one or more instances interactively.
-        #[arg(long)]
-        select: bool,
-        /// Confirm a non-interactive stop.
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Restart one or more instances.
-    Restart {
-        id: Option<String>,
-        /// Select one or more instances interactively.
-        #[arg(long)]
-        select: bool,
-        /// Confirm a non-interactive restart.
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Force-kill a running instance. Use only when a graceful stop fails.
-    Kill {
-        id: String,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Re-download server files for an offline instance.
-    Repair {
-        id: String,
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// Access an instance console.
-    Console {
-        id: String,
-        /// Send one command to a running instance without attaching.
-        #[arg(long)]
-        send: Option<String>,
-    },
+/// What a command prints: `text` for a person, `json` with `--json`.
+pub struct Output {
+    pub text: String,
+    pub json: Value,
+    /// The command did not do what was asked. It still prints, then exits non-zero.
+    pub failed: bool,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct UninstallArgs {
-    /// Also remove the Core data directory. This is irreversible.
-    #[arg(long)]
-    purge_data: bool,
-    /// Confirm a destructive uninstall in non-interactive use.
-    #[arg(short = 'y', long)]
-    yes: bool,
-}
-
-pub(crate) async fn execute(cli: Cli) -> Result<()> {
-    match cli.command.unwrap_or(Command::Run) {
-        Command::Run => {
-            crate::init_tracing();
-            crate::run_server().await
+impl Output {
+    pub fn new(text: impl Into<String>, json: &impl Serialize) -> Self {
+        Self {
+            text: text.into(),
+            json: serde_json::to_value(json).expect("answers serialize"),
+            failed: false,
         }
-        Command::Check => check().await,
-        Command::Migrate => migrate().await,
-        Command::Auth => auth().await,
-        Command::Logout => logout().await,
-        Command::Version => {
-            println!("copal {}", env!("CARGO_PKG_VERSION"));
-            Ok(())
+    }
+
+    pub fn failed(text: impl Into<String>, json: &impl Serialize) -> Self {
+        Self {
+            failed: true,
+            ..Self::new(text, json)
         }
-        Command::Install(args) => install::execute(args).await,
-        Command::Service(args) => service::execute(args, cli.format).await,
-        Command::Status => service::status(cli.format).await,
-        Command::Diagnose => service::diagnose(cli.format).await,
-        Command::Update(args) => update::execute(args).await,
-        Command::Completion(args) => completion(args.shell),
-        Command::Menu => interactive::menu().await,
-        Command::Instance(args) => {
-            interactive::instance(args.command, cli.format).await
-        }
-        Command::Uninstall(args) => install::uninstall(args).await,
     }
 }
 
-async fn migrate() -> Result<()> {
-    crate::init_tracing();
-    let config = crate::config::Config::from_env()?;
-    tokio::fs::create_dir_all(&config.data_dir).await?;
-    let db_path = config.data_dir.join("data.db");
-    let pool = crate::infrastructure::db::connect(&db_path).await?;
-    crate::infrastructure::db::migrate(&pool).await?;
-    println!("Migrations applied successfully.");
-    Ok(())
+/// Text a server or a mod wrote, made safe to print: every control character but newline and
+/// tab is shown escaped, so console output cannot move the cursor, clear the screen, or change
+/// the terminal. `--json` escapes by itself.
+pub fn safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() && c != '\n' && c != '\t' {
+                c.escape_unicode().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
-/// The Core's state for a second process next to a running Core, or on its own. Sign-in needs
-/// the database, the certificate, and the backend address, nothing that listens.
-async fn open_state(
-) -> Result<std::sync::Arc<crate::application::state::AppState>> {
-    let config = crate::config::Config::from_env()?;
-    tokio::fs::create_dir_all(&config.data_dir).await?;
-    let db_path = config.data_dir.join("data.db");
-    let pool = crate::infrastructure::db::connect(&db_path).await?;
-    crate::infrastructure::db::migrate(&pool).await?;
-    crate::application::state::AppState::new(config, pool).await
+/// An error as `--json` prints it, in the shape of Core's own errors: `error` is a code and
+/// `description` is ready to show. Core's code when Core refused, `core_unreachable` when it
+/// could not be reached, `invalid_arguments` for the command line, `failed` otherwise.
+pub fn json_error(code: &str, description: &str) -> Value {
+    serde_json::json!({ "error": code, "description": description })
 }
 
-/// `copal auth`: the same sign-in a Core without an owner runs on start. A running Core shows
-/// the same code and picks the approval up too.
-async fn auth() -> Result<()> {
-    let state = open_state().await?;
-    if let Some(owner) = state.owner().await? {
-        println!(
-            "This Core is already signed in (account {}). Run `copal logout` first to sign in as someone else.",
-            owner.user_id
-        );
-        return Ok(());
+/// The `--json` form of an error a command returned.
+pub fn json_for(error: &color_eyre::Report) -> Value {
+    if let Some(client::Refused(refused)) = error.downcast_ref() {
+        let code = serde_json::to_value(refused.error)
+            .ok()
+            .and_then(|code| code.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "failed".into());
+        return json_error(&code, &refused.description);
     }
-    crate::application::auth_service::sign_in(&state, true).await;
-    Ok(())
-}
-
-/// `copal logout`: revoke the key and forget the owner. A running Core notices within a few
-/// minutes and shows a sign-in code again.
-async fn logout() -> Result<()> {
-    let state = open_state().await?;
-    if state.owner().await?.is_none() {
-        println!("This Core is not signed in.");
-        return Ok(());
-    }
-    crate::application::auth_service::sign_out(&state).await?;
-    println!(
-        "Signed out. Servers and files stay. A running Core shows a new code within five minutes."
-    );
-    Ok(())
-}
-
-async fn check() -> Result<()> {
-    crate::init_tracing();
-    let config = crate::config::Config::from_env()?;
-    tokio::fs::create_dir_all(&config.data_dir).await?;
-    let db_path = config.data_dir.join("data.db");
-    let pool = crate::infrastructure::db::connect(&db_path).await?;
-    crate::infrastructure::db::migrate(&pool).await?;
-    let owner: Option<String> =
-        sqlx::query_scalar("SELECT user_id FROM core_owner WHERE id = 1")
-            .fetch_optional(&pool)
-            .await?;
-    println!("Config  : OK (data_dir = {})", config.data_dir.display());
-    println!("Database: OK ({})", db_path.display());
-    println!(
-        "Owner   : {}",
-        owner
-            .as_deref()
-            .unwrap_or("none, run copal auth or start Core to sign in")
-    );
-    Ok(())
-}
-
-fn completion(shell: Shell) -> Result<()> {
-    let mut command = Cli::command();
-    match shell {
-        Shell::Bash => clap_complete::generate(
-            clap_complete::Shell::Bash,
-            &mut command,
-            "copal",
-            &mut std::io::stdout(),
-        ),
-        Shell::Elvish => clap_complete::generate(
-            clap_complete::Shell::Elvish,
-            &mut command,
-            "copal",
-            &mut std::io::stdout(),
-        ),
-        Shell::Fish => clap_complete::generate(
-            clap_complete::Shell::Fish,
-            &mut command,
-            "copal",
-            &mut std::io::stdout(),
-        ),
-        Shell::PowerShell => clap_complete::generate(
-            clap_complete::Shell::PowerShell,
-            &mut command,
-            "copal",
-            &mut std::io::stdout(),
-        ),
-        Shell::Zsh => clap_complete::generate(
-            clap_complete::Shell::Zsh,
-            &mut command,
-            "copal",
-            &mut std::io::stdout(),
-        ),
-    };
-    Ok(())
-}
-
-pub(crate) fn require_confirmation(yes: bool, prompt: &str) -> Result<()> {
-    if yes {
-        return Ok(());
-    }
-    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        bail!("{prompt} Re-run with --yes to confirm in non-interactive mode.");
-    }
-    if inquire::Confirm::new(prompt).with_default(false).prompt()? {
-        Ok(())
+    let code = if error.downcast_ref::<client::Unreachable>().is_some() {
+        "core_unreachable"
     } else {
-        bail!("Operation cancelled.")
+        "failed"
+    };
+    json_error(code, &format!("{error:#}"))
+}
+
+/// Run a command that talks to Core, and print its output. False when the command printed
+/// that it failed.
+pub async fn run(command: Command, json: bool) -> Result<bool> {
+    let client = Client::new();
+    let output = match command {
+        Command::Status => machine::status(&client).await?,
+        Command::Pair => machine::pair(&client).await?,
+        Command::Logs { lines } => machine::logs(&client, lines).await?,
+        Command::Update(command) => machine::update(&client, command).await?,
+        Command::Eula { accept } => machine::eula(&client, accept).await?,
+        Command::Servers(servers::ServersCommand::Console(
+            servers::ConsoleCommand::Attach { server },
+        )) => {
+            return servers::attach(&client, &server, json)
+                .await
+                .map(|()| true);
+        }
+        Command::Servers(command) => servers::run(&client, command).await?,
+        Command::Backups(command) => backups::run(&client, command).await?,
+        Command::Access(command) => access::run(&client, command).await?,
+        Command::Install { .. }
+        | Command::Uninstall { .. }
+        | Command::Run { .. }
+        | Command::Core
+        | Command::Shim { .. } => {
+            unreachable!("main runs the commands that do not talk to Core")
+        }
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&output.json)?);
+    } else if output.failed {
+        eprintln!("{}", output.text);
+    } else if !output.text.is_empty() {
+        println!("{}", output.text);
     }
+    Ok(!output.failed)
+}
+
+/// `on` or `off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Switch {
+    On,
+    Off,
+}
+
+impl From<Switch> for bool {
+    fn from(switch: Switch) -> Self {
+        switch == Switch::On
+    }
+}
+
+/// `true` as `on`, for showing settings.
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+/// A unix time as the machine's local date and time.
+fn local_time(unix: i64) -> String {
+    chrono::DateTime::from_timestamp(unix, 0).map_or_else(
+        || unix.to_string(),
+        |time| {
+            time.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        },
+    )
 }

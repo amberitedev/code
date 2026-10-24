@@ -31,8 +31,8 @@ again. `.data/setup.json` records whether it is `running`, `done`, or `failed`.
 - `vp run dev:backend`: Starts the Worker and account website without Apps.
 - `vp run dev:app 1 2`: Starts only those App scenarios and their shared frontend. Start
   `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
-- `vp run dev:core`: Starts only Core. It checks account tokens with the Worker, so start
-  `dev:backend` too.
+- `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
+  against the Worker's public key, so start `dev:backend` too.
 - `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every service answers
   and every App has printed its browser bridge URL, then prints them. It writes to `.data/dev.log`
   and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
@@ -53,15 +53,13 @@ Scenario numbers passed after the task name override `defaultScenarios` in `dev.
 
 The runner builds the App and Core with `cargo build` and never runs them from the build output.
 Each program is copied to `<target>/dev-bin/<key>/` and run from there, where `<target>` is the
-primary checkout's `target` for the App and `apps/core/target` for Core, shared by every worktree.
+primary checkout's `target`, shared by every worktree. Both are members of the root Cargo workspace.
 The key is a hash of everything that goes into the build:
 
-- App: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, every workspace member
-  and path dependency named in `Cargo.toml`, `apps/app-frontend/package.json` (the App's version),
-  `packages/app-lib/.env`, the variables named in that file and `.env.prod`, the Cargo arguments, and
-  `apps/app/tauri-local.conf.json`.
-- Core: `apps/core`, every path dependency named in its `Cargo.toml` (`packages/daedalus`), and the
-  root `.cargo` and `Cargo.toml`, which those crates inherit from.
+- Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, every workspace member
+  and path dependency named in `Cargo.toml`, and the Cargo arguments.
+- App, also: `apps/app-frontend/package.json` (the App's version), `packages/app-lib/.env`, the
+  variables named in that file and `.env.prod`, and `apps/app/tauri-local.conf.json`.
 
 Files are hashed by content as Git would store it, including edits and new files that are not
 committed, so the same Rust in two checkouts gives the same key. When the key already has a program,
@@ -84,7 +82,9 @@ as changed, and Cargo compiles those again. Third-party crates and compiler cach
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
-packaged build does not allow yet.
+packaged build does not allow yet. The App signs in to a Core with a ticket on its first request
+and keeps that session in the OS keychain; set `AMBERITE_CORE_PROXY_LOG=1` before starting an App
+to log the head of every request its Core proxy sends, with the session token left out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
 shared files persist in `.data/backend`.

@@ -718,8 +718,11 @@ export namespace Archon {
 
 				/** Core only. The App instance this server follows, if any. */
 				linked_instance?: LinkedInstance | null
-				/** Core only. Lets a list show running servers without opening a socket each. */
-				power_state?: 'offline' | 'starting' | 'running' | 'stopping' | 'crashed'
+				/**
+				 * Core only. Lets a list show running servers without opening a socket each. When the
+				 * server is down, how its last run ended: `offline` (stopped), `crashed`, or `killed`.
+				 */
+				power_state?: 'offline' | 'starting' | 'running' | 'stopping' | 'crashed' | 'killed'
 				/** Core only. Null while the server is not running. */
 				reachability?: Reachability | null
 			}

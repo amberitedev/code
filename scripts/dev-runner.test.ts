@@ -255,7 +255,7 @@ describe('dev runner scenarios', () => {
 		expect(apps[0]!.build).toEqual(apps[1]!.build)
 		// Core compiles this crate from outside its own folder.
 		expect(specs.find((spec) => spec.label === 'core')?.build?.inputs).toEqual(
-			expect.arrayContaining(['apps/core', 'Cargo.toml', 'packages/daedalus']),
+			expect.arrayContaining(['apps/core', 'Cargo.lock', 'packages/daedalus']),
 		)
 		const cwd = process.cwd().replaceAll('\\', '/')
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([

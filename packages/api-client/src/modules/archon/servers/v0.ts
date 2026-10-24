@@ -80,11 +80,16 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id/fs
 	 */
 	public async getFilesystemAuth(serverId: string): Promise<Archon.Servers.v0.JWTAuth> {
-		return this.client.request<Archon.Servers.v0.JWTAuth>(`/servers/${serverId}/fs`, {
+		const auth = await this.client.request<Archon.Servers.v0.JWTAuth>(`/servers/${serverId}/fs`, {
 			api: 'archon',
 			version: 'modrinth/v0',
 			method: 'GET',
 		})
+		if (!this.client.selfHostedHosting) return auth
+		// As for the console socket: the files are under the base this request went to, which on
+		// a Core is the App's local proxy, with its scheme and its capability path.
+		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
+		return { ...auth, url: `${base}/servers/${serverId}` }
 	}
 
 	/**
@@ -92,11 +97,17 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id/ws
 	 */
 	public async getWebSocketAuth(serverId: string): Promise<Archon.Websocket.v0.WSAuth> {
-		return this.client.request<Archon.Websocket.v0.WSAuth>(`/servers/${serverId}/ws`, {
+		const auth = await this.client.request<Archon.Websocket.v0.WSAuth>(`/servers/${serverId}/ws`, {
 			api: 'archon',
 			version: 'modrinth/v0',
 			method: 'GET',
 		})
+		if (!this.client.selfHostedHosting) return auth
+		// A Core names the host it was reached at, without a scheme or path. On a Core that host is
+		// the App's local proxy, which speaks plain HTTP and needs its capability path, so the
+		// socket goes to the base this request went to, over plain ws.
+		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
+		return { ...auth, url: `${base.replace(/^http/, 'ws')}/servers/${serverId}/ws` }
 	}
 
 	/**

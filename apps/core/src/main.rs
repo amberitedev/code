@@ -1,108 +1,85 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
+//! Copal, Amberite's self-hosted Minecraft server manager. The target design is
+//! `docs/internals/core-plan.md`.
 
-use clap::Parser;
-use tracing::info;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-
-mod application;
+mod access;
+mod api;
+mod backups;
 mod cli;
-mod config;
-mod domain;
-mod infrastructure;
+mod content;
+mod daemon;
+mod db;
+mod installs;
 mod network;
-mod ports;
-mod presentation;
+mod servers;
+mod update;
 
-#[tokio::main]
-async fn main() -> color_eyre::eyre::Result<()> {
-    color_eyre::install()?;
+use std::process::ExitCode;
 
-    cli::execute(cli::Cli::parse()).await
-}
+use clap::{Parser, error::ErrorKind};
 
-pub(crate) fn init_tracing() {
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(
-            EnvFilter::from_default_env()
-                .add_directive("copal=info".parse().unwrap()),
-        )
-        .init();
-}
+use cli::{Cli, Command};
 
-pub(crate) async fn run_server() -> color_eyre::eyre::Result<()> {
-    let config = config::Config::from_env()?;
-    tokio::fs::create_dir_all(&config.data_dir).await?;
-
-    let db_path = config.data_dir.join("data.db");
-    let pool = infrastructure::db::connect(&db_path).await?;
-
-    infrastructure::db::migrate(&pool).await?;
-
-    let port = config.port;
-    let bind_host = config.bind_host.clone();
-    let state = application::state::AppState::new(config, pool).await?;
-
-    #[cfg(unix)]
-    tokio::spawn(cli::admin::serve(Arc::clone(&state)));
-
-    tokio::spawn(application::instance_service::restore_instances(
-        Arc::clone(&state),
-    ));
-    tokio::spawn(application::server_source_service::resume(Arc::clone(
-        &state,
-    )));
-    tokio::spawn(gc_ws_tickets(Arc::clone(&state)));
-    tokio::spawn(application::auth_service::run(Arc::clone(&state)));
-    tokio::spawn(application::visible_servers::run(Arc::clone(&state)));
-    let stop = tokio_util::sync::CancellationToken::new();
-    let forwarding =
-        tokio::spawn(network::run(Arc::clone(&state), stop.clone()));
-    let router = presentation::router::create_router(Arc::clone(&state));
-    let host: IpAddr = bind_host.parse()?;
-    let addr = SocketAddr::new(host, port);
-
-    info!("Copal listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    tokio::select! {
-        () = network::tls::serve(listener, router, &state.tls) => {}
-        () = exit_requested() => {}
-    }
-
-    // Give the router its ports back before leaving.
-    stop.cancel();
-    let _ =
-        tokio::time::timeout(tokio::time::Duration::from_secs(15), forwarding)
-            .await;
-    Ok(())
-}
-
-/// Resolves when Core is asked to stop: Ctrl+C, or a service manager's stop on Unix.
-async fn exit_requested() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = terminate.recv() => {}
+fn main() -> ExitCode {
+    // Read before parsing, so a command line clap refuses still answers in JSON.
+    let json = std::env::args_os().any(|arg| arg == "--json");
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if json
+                && !matches!(
+                    error.kind(),
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                ) =>
+        {
+            println!(
+                "{}",
+                cli::json_error(
+                    "invalid_arguments",
+                    error.render().to_string().trim()
+                )
+            );
+            return ExitCode::from(2);
+        }
+        Err(error) => error.exit(),
+    };
+    let _ = color_eyre::install();
+    match run(cli) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(error) => {
+            if json {
+                println!("{}", cli::json_for(&error));
+            } else {
+                // The message and its causes on one line, without color-eyre's source location
+                // and backtrace hint, which mean nothing to someone running the CLI.
+                eprintln!("Error: {error:#}");
             }
-            return;
+            ExitCode::FAILURE
         }
     }
-    let _ = tokio::signal::ctrl_c().await;
 }
 
-/// SEC-02: Drain expired WebSocket tickets every 5 minutes to prevent unbounded growth.
-async fn gc_ws_tickets(state: Arc<application::state::AppState>) {
-    use std::time::Instant;
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
-        state
-            .ws_tickets
-            .retain(|_, t| t.expires_at > Instant::now());
+/// Run a command. False when it printed that it failed.
+fn run(Cli { json, command }: Cli) -> color_eyre::Result<bool> {
+    let small_runtime = || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+    };
+    match command {
+        Command::Install {
+            owner,
+            allow_downgrade,
+        } => daemon::install::install(owner.as_deref(), allow_downgrade)
+            .map(|()| true),
+        Command::Uninstall { remove_data } => {
+            daemon::install::uninstall(remove_data).map(|()| true)
+        }
+        Command::Run { service } => daemon::run(service).map(|()| true),
+        Command::Core => daemon::core().map(|()| true),
+        Command::Shim { data_dir, server } => small_runtime()?
+            .block_on(servers::shim::main(data_dir, server))
+            .map(|()| true),
+        command => small_runtime()?.block_on(cli::run(command, json)),
     }
 }

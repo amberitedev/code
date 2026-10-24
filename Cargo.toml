@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/app",
   "apps/app-playground",
+  "apps/core",
   "apps/daedalus_client",
   "apps/labrinth",
   "packages/amberite-lib",
@@ -209,7 +210,7 @@ sqlx-tracing = { path = "packages/sqlx-tracing" }
 strum = "0.27.2"
 syn = { version = "2.0" }
 sysinfo = { version = "0.37.2", default-features = false }
-tar = "0.4.44"
+tar = "0.4.45"
 tauri = "2.11.5"
 tauri-build = "2.6.3"
 tauri-plugin-deep-link = "2.4.3"

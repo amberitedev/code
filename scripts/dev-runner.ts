@@ -589,14 +589,6 @@ export function createProcessSpecs(input: {
 	const labels = processLabelsForMode(input.mode, input.accountWeb)
 	const backendUrl = `http://127.0.0.1:${input.ports.backend}`
 	const coreDir = NodePath.join(input.paths.worktree, 'apps', 'core')
-	// Core is its own Cargo workspace, so it has its own build output.
-	const coreTargetDir =
-		input.env.CARGO_TARGET_DIR ?? NodePath.join(input.paths.primary, 'apps', 'core', 'target')
-	// Crates Core compiles from outside its own folder.
-	const coreManifest = NodeFS.readFileSync(NodePath.join(coreDir, 'Cargo.toml'), 'utf8')
-	const coreCrates = [...coreManifest.matchAll(/\bpath = "([^"]+)"/g)].map((match) =>
-		NodePath.posix.join('apps/core', match[1]!),
-	)
 	const coreEnv = {
 		...input.env,
 		ALLOWED_ORIGIN: `http://localhost:${input.ports.app}`,
@@ -653,17 +645,15 @@ export function createProcessSpecs(input: {
 			label: 'app-frontend',
 		},
 		core: {
-			args: [],
+			args: ['run'],
 			build: {
-				cargoArgs: ['build'],
+				cargoArgs: ['build', '--package', 'copal'],
 				cwd: coreDir,
 				env: {},
 				ignoredInputs: [],
-				// Cargo also applies the `.cargo` settings of the folders above Core, and the crates
-				// outside Core take their edition, dependency versions and lints from the root manifest.
-				inputs: ['apps/core', '.cargo', 'Cargo.toml', ...new Set(coreCrates)],
+				inputs: workspaceInputs(input.paths),
 				program: programFile('copal'),
-				targetDir: coreTargetDir,
+				targetDir: workspaceTargetDir(input.paths, input.env),
 			},
 			cwd: coreDir,
 			env: coreEnv,
@@ -728,9 +718,6 @@ function createAppProcessSpec(input: {
 function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBuild {
 	const appDir = NodePath.join(paths.worktree, 'apps', 'app')
 	const appLibDir = NodePath.join(paths.worktree, 'packages', 'app-lib')
-	const manifest = NodeFS.readFileSync(NodePath.join(paths.worktree, 'Cargo.toml'), 'utf8')
-	const members = /^members = \[([^\]]*)\]/m.exec(manifest)?.[1] ?? ''
-	const crates = [...members.matchAll(/"([^"]+)"/g), ...manifest.matchAll(/\bpath = "([^"]+)"/g)]
 	// The App library's build passes these to the compiler: from `.env`, or from the
 	// environment when that file is missing.
 	const compiled = Object.keys({
@@ -755,21 +742,36 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 			),
 		},
 		ignoredInputs: [NodePath.join(appLibDir, '.env')],
-		// When unsure whether the build reads something, list it: a stale program is the worst
-		// outcome. Every workspace crate counts, and the App's version comes from the frontend.
-		inputs: [
-			'Cargo.toml',
-			'Cargo.lock',
-			'rust-toolchain.toml',
-			'.cargo',
-			'apps/app-frontend/package.json',
-			...new Set(crates.map((match) => match[1]!)),
-		],
+		// The App's version comes from the frontend.
+		inputs: [...workspaceInputs(paths), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
-		// Every checkout compiles into the primary checkout's build output. A new worktree then
-		// reuses the dependencies already compiled there and never grows its own target folder.
-		targetDir: env.CARGO_TARGET_DIR ?? NodePath.join(paths.primary, 'target'),
+		targetDir: workspaceTargetDir(paths, env),
 	}
+}
+
+/**
+ * What a program in the root Cargo workspace (the App and Core) may read. When unsure whether a
+ * build reads something, list it: a stale program is the worst outcome. Every workspace crate counts.
+ */
+function workspaceInputs(paths: WorktreePaths): ReadonlyArray<string> {
+	const manifest = NodeFS.readFileSync(NodePath.join(paths.worktree, 'Cargo.toml'), 'utf8')
+	const members = /^members = \[([^\]]*)\]/m.exec(manifest)?.[1] ?? ''
+	const crates = [...members.matchAll(/"([^"]+)"/g), ...manifest.matchAll(/\bpath = "([^"]+)"/g)]
+	return [
+		'Cargo.toml',
+		'Cargo.lock',
+		'rust-toolchain.toml',
+		'.cargo',
+		...new Set(crates.map((match) => match[1]!)),
+	]
+}
+
+/**
+ * Every checkout compiles the workspace into the primary checkout's build output. A new worktree
+ * then reuses the dependencies already compiled there and never grows its own target folder.
+ */
+function workspaceTargetDir(paths: WorktreePaths, env: NodeJS.ProcessEnv): string {
+	return env.CARGO_TARGET_DIR ?? NodePath.join(paths.primary, 'target')
 }
 
 function programFile(name: string): string {

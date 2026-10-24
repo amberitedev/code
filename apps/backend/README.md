@@ -59,12 +59,17 @@ sends every request the App's sharing client sends and checks the files in R2.
 
 ## Cores
 
-A Core pairs with a code its owner approves in the App, then calls the backend with its own `amc_`
-key. It reports its state with `POST /core/state` on start and when something changes, never on a
-timer, and a report that changes nothing writes nothing. `PUT /core/access` replaces the Core's
-access directory, the accounts that may be told where it is. The Core is the only authority on
-roles; the backend never sees them. A Core removed from its account gets `410 core_removed` from
-both calls and un-pairs.
+A Core pairs with a code its owner approves in the App (`POST /core/auth/code`, then
+`POST /core/auth/poll`), then calls the backend with its own `amc_` key. It reports its state,
+including the servers it shows to friends, with `POST /core/state` on start and when something
+changes, never on a timer, and a report that changes nothing writes nothing. `PUT /core/access`
+replaces the Core's access directory, the accounts that may be told where it is, and
+`POST /core/access` and `DELETE /core/access` add or drop one account as the owner invites or
+removes it. The Core is the only authority on roles; the backend never sees them. A Core removed
+from its account gets `410 core_removed` from every one of these calls and un-pairs.
+
+The App removes a Core by telling the Core first, with a ticket, and then calling
+`DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.
 
 `POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner or an account in that
 Core's directory: an Ed25519 JWT with `iss`, `sub`, `name`, `avatar_url`, `aud` (the Core id),

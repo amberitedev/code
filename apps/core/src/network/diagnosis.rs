@@ -4,7 +4,10 @@
 //! This is pure. The measuring happens in the parent module; everything here can be tested
 //! without a router.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    fmt::Write as _,
+    net::{IpAddr, Ipv4Addr},
+};
 
 use super::{firewall::Firewall, is_private};
 
@@ -43,6 +46,8 @@ pub enum RouterFacts {
 
 /// The result of asking the backend to connect from the internet.
 #[derive(Debug, Clone)]
+// The backend's test from the internet is a later step; until then every check is NotChecked.
+#[allow(dead_code)]
 pub enum Outside {
     Reachable {
         ip: IpAddr,
@@ -127,18 +132,18 @@ impl Diagnosis {
                 Mark::Fail => "FAIL",
                 Mark::Skip => "--  ",
             };
-            out.push_str(&format!("    [{mark}] {}\n", check.text));
+            let _ = writeln!(out, "    [{mark}] {}", check.text);
         }
         if !self.found.is_empty() {
             out.push_str("\n  What was found\n");
             for line in &self.found {
-                out.push_str(&format!("    {line}\n"));
+                let _ = writeln!(out, "    {line}");
             }
         }
         if !self.fix.is_empty() {
             out.push_str("\n  How to fix it\n");
             for (index, step) in self.fix.iter().enumerate() {
-                out.push_str(&format!("    {}. {step}\n", index + 1));
+                let _ = writeln!(out, "    {}. {step}", index + 1);
             }
         }
         out
@@ -190,7 +195,9 @@ pub fn diagnose(facts: &Facts) -> Diagnosis {
     match &facts.router {
         RouterFacts::NoNat => check(
             Mark::Pass,
-            format!("This computer's address {local} is a public one: no router to ask"),
+            format!(
+                "This computer's address {local} is a public one: no router to ask"
+            ),
         ),
         RouterFacts::NoProtocol { gateway } => check(
             Mark::Fail,
@@ -207,7 +214,9 @@ pub fn diagnose(facts: &Facts) -> Diagnosis {
         } => {
             check(
                 Mark::Pass,
-                format!("Ask the router to forward ports: it answers over {protocols}"),
+                format!(
+                    "Ask the router to forward ports: it answers over {protocols}"
+                ),
             );
             match wan_ip {
                 Some(ip) => check(
@@ -220,13 +229,16 @@ pub fn diagnose(facts: &Facts) -> Diagnosis {
                 ),
                 None => check(
                     Mark::Skip,
-                    "Ask the router for its internet address: it did not say".into(),
+                    "Ask the router for its internet address: it did not say"
+                        .into(),
                 ),
             }
             match mapping {
                 Ok(external) => check(
                     Mark::Pass,
-                    format!("Ask the router to forward outside port {external} to {local}:{port}: granted"),
+                    format!(
+                        "Ask the router to forward outside port {external} to {local}:{port}: granted"
+                    ),
                 ),
                 Err(refusal) => check(
                     Mark::Fail,
@@ -373,13 +385,12 @@ fn decide(facts: &Facts, manual_forward: &str) -> Verdict {
                     ],
                 );
             }
-            if let (Some(wan), Some(seen)) = (wan_ip, outside_ip) {
-                if *wan != seen {
+            if let (Some(wan), Some(seen)) = (wan_ip, outside_ip)
+                && *wan != seen {
                     return shared_address(format!(
                         "The router says its internet address is {wan}, but the internet sees this computer as {seen}. Something between them rewrites the address: usually the provider sharing addresses, sometimes a VPN on this computer."
                     ));
                 }
-            }
             match (mapping, &facts.outside) {
                 (Err(refusal), _) => (
                     Case::Refused,

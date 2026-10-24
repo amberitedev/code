@@ -10,8 +10,11 @@ const LOCAL_ANSWER_MS = 2500
 const FAILURE_REFETCH_MS = 60_000
 
 /** What is needed to reach a Core: its addresses and the certificate to trust there. */
-type CoreLocation = Pick<Archon.Cores.v1.Core, 'address' | 'cert_fingerprint'> &
+type CoreLocation = Pick<Archon.Cores.v1.Core, 'id' | 'address' | 'cert_fingerprint'> &
 	Partial<Pick<Archon.Cores.v1.Core, 'public_address'>>
+
+/** Where requests to a Core go (`base`), and the Core address that reaches (`address`). */
+type Route = { base: string; address: string }
 
 const APPROVAL_MESSAGES: Record<Archon.Cores.v1.ApprovalFailure, string> = {
 	wrong_code: 'Code invalid. Please check your Core and try again.',
@@ -35,8 +38,8 @@ export class CoreApprovalError extends Error {
 /**
  * The Cores the account may reach: the ones signed in to it, and the ones it was invited to manage
  * a server on. The backend keeps the list and each Core's address; hosting calls go to a Core
- * directly. Several Cores are treated as one: their servers form one list, and a request for a
- * server is sent to the Core that has it.
+ * directly, with this device's session there (see `copal.access_v1`). Several Cores are treated as
+ * one: their servers form one list, and a request for a server is sent to the Core that has it.
  *
  * A Core signs in on its own: it shows a code, and `approve` here is what binds it to the account.
  * The App never contacts a Core before it is listed.
@@ -45,12 +48,12 @@ export class ArchonCoresV1Module extends AbstractModule {
 	private cores: Promise<Archon.Cores.v1.Core[]> | null = null
 	/** When the list was last dropped because a Core did not answer. See `servers`. */
 	private droppedAfterFailureAt = 0
-	/** Base URLs that may receive the account token: the listed Cores. */
-	private addresses = new Set<string>()
-	/** Core id to the base URL its requests go to. See `route`. */
-	private routes = new Map<string, string>()
-	/** Server id to the address of the Core that has it. */
-	private serverAddresses = new Map<string, string>()
+	/** The Cores of the last list. */
+	private listed: Archon.Cores.v1.Core[] = []
+	/** Core id to where its requests go. See `route`. */
+	private routes = new Map<string, Route>()
+	/** Server id to the id of the Core that has it. */
+	private serverCores = new Map<string, string>()
 
 	public getModuleID(): string {
 		return 'archon_cores_v1'
@@ -65,11 +68,14 @@ export class ArchonCoresV1Module extends AbstractModule {
 			.request<Archon.Cores.v1.Core[]>('/cores', { api: 'labrinth', version: 3, method: 'GET' })
 			.then(async (list) => {
 				const settled = await Promise.allSettled(list.map((core) => this.route(core)))
-				const routes = settled.map((result, index) =>
-					result.status === 'fulfilled' ? result.value : list[index].address,
+				this.routes = new Map(
+					list.map((core, index) => {
+						const result = settled[index]
+						const plain = { base: core.address, address: core.address }
+						return [core.id, result.status === 'fulfilled' ? result.value : plain]
+					}),
 				)
-				this.routes = new Map(list.map((core, index) => [core.id, routes[index]]))
-				this.addresses = new Set(routes)
+				this.listed = list
 				return list
 			})
 		cores.catch(() => {
@@ -117,11 +123,17 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Take a Core off the account. Its key stops working at once, and the Core signs itself out on
-	 * its next call to the backend, so this works even while the Core is off. Its servers and files
-	 * stay.
+	 * Take a Core off the account. The Core is told first, with a fresh ticket: it ends every
+	 * session and shows a new pairing code. Then the backend forgets it and its key stops working.
+	 * A Core that cannot be told learns on its next call to the backend, so this works even while
+	 * the Core is off. Its servers and files stay.
 	 */
 	public async revoke(core: Archon.Cores.v1.Core): Promise<void> {
+		const access = this.client.copal.access_v1
+		await access.unpair(core.id).catch((error) => {
+			console.warn(`Core ${core.id} was not told it was removed; it learns from the backend`, error)
+		})
+		await access.signOut(core.id).catch(() => undefined)
 		await this.client
 			.request(`/cores/${encodeURIComponent(core.id)}`, {
 				api: 'labrinth',
@@ -132,16 +144,18 @@ export class ArchonCoresV1Module extends AbstractModule {
 				// Already gone, which is what was asked for.
 				if (!(error instanceof ModrinthApiError && error.statusCode === 404)) throw error
 			})
-		for (const [serverId, address] of this.serverAddresses) {
-			if (address === this.base(core)) this.serverAddresses.delete(serverId)
+		for (const [serverId, coreId] of this.serverCores) {
+			if (coreId === core.id) this.serverCores.delete(serverId)
 		}
-		this.addresses.delete(this.base(core))
+		this.routes.delete(core.id)
+		this.listed = this.listed.filter((listed) => listed.id !== core.id)
 		this.cores = null
 	}
 
 	/**
-	 * Accept or decline an invite to manage a server on someone else's Core. The invite is what
-	 * made that Core reachable, so the list is fetched again to find it.
+	 * Accept or decline an invite to a server on someone else's Core. An invite is already access,
+	 * so accepting is signing in and declining is leaving the server. The invite is what made that
+	 * Core reachable, so the list is fetched again to find it.
 	 */
 	public async respondToInvite(
 		coreId: string,
@@ -150,22 +164,50 @@ export class ArchonCoresV1Module extends AbstractModule {
 	): Promise<void> {
 		const core = (await this.list()).find((candidate) => candidate.id === coreId)
 		if (!core) throw new ModrinthApiError('This invite is no longer available', { statusCode: 404 })
-		await this.client.request(`/servers/${serverId}/invites/${action}`, {
-			api: `${this.base(core)}/hosting`,
-			version: 1,
-			method: 'POST',
-		})
-		if (action === 'accept') this.serverAddresses.set(serverId, this.base(core))
-		// Declining the only invite takes the Core out of the list.
-		else this.cores = null
+		if (action === 'accept') {
+			await this.client.copal.access_v1.ensureSession(core)
+			this.serverCores.set(serverId, core.id)
+			return
+		}
+		await this.client.copal.access_v1.leave(core.id, serverId)
+		// Declining the only server on that Core takes the Core out of the list.
+		this.serverCores.delete(serverId)
+		this.cores = null
 	}
 
-	/** Whether `url` is on a listed Core, which is allowed to receive the account token. */
-	public isCoreUrl(url: string): boolean {
-		for (const address of this.addresses) {
-			if (url.startsWith(address)) return true
-		}
-		return false
+	/** The listed Core a request URL goes to, if any. */
+	public coreForUrl(url: string): Archon.Cores.v1.Core | undefined {
+		return this.listed.find((core) => {
+			const base = this.routes.get(core.id)?.base
+			return base !== undefined && (url === base || url.startsWith(`${base}/`))
+		})
+	}
+
+	/** The listed Core with this id. */
+	public async core(coreId: string): Promise<Archon.Cores.v1.Core> {
+		const core = (await this.known()).find((candidate) => candidate.id === coreId)
+		if (!core) throw new ModrinthApiError('This Core is not listed', { statusCode: 404 })
+		return core
+	}
+
+	/** The listed Core that has `serverId`. */
+	public async coreOf(serverId: string): Promise<Archon.Cores.v1.Core> {
+		const cores = await this.known()
+		if (cores.length > 1 && !this.serverCores.has(serverId)) await this.servers()
+		const coreId = this.serverCores.get(serverId) ?? cores[0]?.id
+		const core = cores.find((candidate) => candidate.id === coreId)
+		if (!core) throw new ModrinthApiError('No Core is signed in', { statusCode: 404 })
+		return core
+	}
+
+	/** The base URL requests to a listed Core go to. */
+	public async url(coreId: string): Promise<string> {
+		return this.base(await this.core(coreId))
+	}
+
+	/** The address of a Core its requests reach: its local or its internet address. */
+	public address(core: Archon.Cores.v1.Core): string {
+		return this.routes.get(core.id)?.address ?? core.address
 	}
 
 	/** The hosting API base URL for a request: the Core that has the server the request names. */
@@ -181,11 +223,11 @@ export class ArchonCoresV1Module extends AbstractModule {
 			cores.length > 1 &&
 			`${version ?? ''} ${path} ${JSON.stringify(params ?? {})}`.match(SERVER_ID)
 		if (serverId) {
-			if (!this.serverAddresses.has(serverId[0])) await this.servers()
-			const address = this.serverAddresses.get(serverId[0])
-			if (address) return `${address}/hosting`
+			if (!this.serverCores.has(serverId[0])) await this.servers()
+			const core = cores.find((candidate) => candidate.id === this.serverCores.get(serverId[0]))
+			if (core) return this.base(core)
 		}
-		return `${this.base(cores[0])}/hosting`
+		return this.base(cores[0])
 	}
 
 	/**
@@ -201,7 +243,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 		const results = await Promise.allSettled(
 			cores.map((core) =>
 				this.client.request<Archon.Servers.v0.ServerGetResponse>('/servers', {
-					api: `${this.base(core)}/hosting`,
+					api: this.base(core),
 					version: 'modrinth/v0',
 					method: 'GET',
 					params: { limit: options?.limit ?? 100, offset: options?.offset ?? 0 },
@@ -220,7 +262,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 				return
 			}
 			for (const server of result.value.servers) {
-				this.serverAddresses.set(server.server_id, this.base(cores[index]))
+				this.serverCores.set(server.server_id, cores[index].id)
 				merged.servers.push(server)
 			}
 			Object.assign(merged.users, result.value.users)
@@ -251,12 +293,12 @@ export class ArchonCoresV1Module extends AbstractModule {
 		},
 	): Promise<{ id: string }> {
 		const server = await this.client.request<{ id: string }>('/servers', {
-			api: `${this.base(core)}/hosting`,
+			api: this.base(core),
 			version: 'local',
 			method: 'POST',
 			body: { name, instance },
 		})
-		this.serverAddresses.set(server.id, this.base(core))
+		this.serverCores.set(server.id, core.id)
 		return server
 	}
 
@@ -264,28 +306,31 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return this.cores ?? this.list()
 	}
 
-	/** The base URL requests to a listed Core go to. */
 	private base(core: Archon.Cores.v1.Core): string {
-		return this.routes.get(core.id) ?? core.address
+		return this.routes.get(core.id)?.base ?? core.address
 	}
 
 	/**
-	 * Work out the base URL for a Core. Its local address is used when it answers, which is the
+	 * Work out where requests to a Core go. Its local address is used when it answers, which is the
 	 * case at home; otherwise its address on the internet. An HTTPS address goes through
-	 * `connectCore`, which trusts only that Core's certificate.
+	 * `connectCore`, which trusts only that Core's certificate and signs requests with this
+	 * device's session there.
 	 */
-	private async route(core: CoreLocation): Promise<string> {
+	private async route(core: CoreLocation): Promise<Route> {
 		const connect = this.client.connectCore
-		const open = (address: string) =>
-			connect && core.cert_fingerprint && address.startsWith('https:')
-				? connect(address, core.cert_fingerprint)
-				: Promise.resolve(address)
+		const open = async (address: string): Promise<Route> => ({
+			address,
+			base:
+				connect && core.cert_fingerprint && address.startsWith('https:')
+					? await connect(core.id, address, core.cert_fingerprint)
+					: address,
+		})
 		const local = await open(core.address)
 		if (!core.public_address) return local
 		const answered = await Promise.race([
 			this.client
 				.request('', {
-					api: local,
+					api: local.base,
 					version: 'health',
 					method: 'GET',
 					skipAuth: true,

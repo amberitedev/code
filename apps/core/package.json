@@ -4,10 +4,11 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "cargo run",
-		"build": "cargo build --release",
-		"check": "cargo check",
-		"test": "cargo test --lib",
-		"lint": "cargo fmt --check && cargo clippy --all-targets"
+		"dev": "cargo run -p copal -- run",
+		"build": "cargo build -p copal --release",
+		"check": "cargo check -p copal",
+		"test": "cargo test -p copal",
+		"lint": "cargo fmt -p copal --check && cargo clippy -p copal --all-targets",
+		"types": "cargo test -p copal -- --ignored write_typescript"
 	}
 }

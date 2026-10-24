@@ -1,9 +1,9 @@
 # Networking & Remote Access — Design Notes (future work)
 
 Captured design ideas for exposing self-hosted Copal instances to the
-internet. None of this is implemented yet; it records intent and trade-offs so
-we don't lose the reasoning. See the TODOs in
-`src/application/instance_status_service.rs` (`start_instance`).
+internet. It records intent and trade-offs so we don't lose the reasoning. The
+target design, including what was decided here, is
+`docs/internals/core-plan.md`.
 
 ## Problem
 
@@ -22,17 +22,20 @@ mechanisms below exists.
 ## Access mechanisms (ranked by effort/value)
 
 ### 1. UPnP automatic port mapping
+
 - Ask the router to open/forward the server port automatically at instance start.
 - Crate: `igd2`. Best-effort; many routers disable UPnP.
 - Lowest friction when it works; silently no-ops when the router refuses.
 
 ### 2. playit.gg tunnel (fallback when no inbound connectivity)
+
 - Used **only when a direct/UPnP connection can't be established**. Runs in the
   background and sets up a tunnel for the user automatically (user is aware but
   it's largely hands-off). See https://playit.gg/api-docs
 - Good universal fallback behind strict NAT/CGNAT.
 
 ### 3. Cloudflare Tunnel (preferred long-term, free)
+
 - `cloudflared` tunnel: no router login required, no inbound port forwarding,
   generous free tier with effectively no limits for this use.
 - Especially valuable when the user is locked out of their hosting account /
@@ -40,6 +43,7 @@ mechanisms below exists.
 - Could back per-server public addressing without touching the firewall at all.
 
 ### 4. Optional firewall control
+
 - Core could manage the OS firewall directly. On Windows this is comparatively
   safe (you can't permanently lock yourself out). On managed/remote hosts it's
   risky (lockout). Would also require auto-assigning the server port at creation

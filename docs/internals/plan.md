@@ -177,19 +177,17 @@ How it works (`apps/core/src/network`):
   number first and takes whatever the router grants; if a port is refused, or granted but fails
   the outside test, it tries up to two other outside ports.
 - Mappings have a one hour lease and are renewed every five minutes, which also restores them
-  after a router restart. They are removed when a server stops and when Core exits. Every minute
-  Core checks for a changed home address or a different network and starts over when it sees one.
+  after a router restart. They are removed when a server stops, never when Core exits, because
+  servers outlive Core. Every few minutes Core checks for a changed home address or a different
+  network and starts over when it sees one.
 - Firewall: on Windows one inbound rule, "Amberite Core", covers Core's port and server ports
   25565 to 25664. Core asks for administrator rights once with the normal Windows prompt and never
   again, whatever the answer; after a refusal it prints the command to run. On Linux Core handles
   ufw and firewalld: it opens ports itself when it runs as root and prints the command otherwise.
   On macOS it only reports that the firewall is on. Hand-written nftables or iptables rules are
   not read.
-- Outside test: a granted mapping is not proof. Core calls the backend's `/core/reachability`
-  with its key and a port; the backend opens a TCP connection to that port on the address the
-  request came from, never any other, and answers yes or no. A Core may ask 30 times in 10
-  minutes. A backend on the Core's own network (local development) says so instead of answering,
-  and Core then reports the port as not proven.
+- Outside test: a granted mapping is not proof. The backend no longer tests ports; see the Network
+  section of `core-plan.md`.
 - Diagnosis: whenever the answer for a port changes, Core prints what it tested, what it found,
   and the steps to fix it. It tells these apart: the server is not listening; the local firewall
   blocks it; the router answers no forwarding protocol; the router refused; two routers in a row;
