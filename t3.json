@@ -3,9 +3,15 @@
 	"scripts": [
 		{
 			"name": "Setup Worktree",
-			"command": "vp i && node scripts/setup-dev-data.ts && ln -sf $T3CODE_PROJECT_ROOT/packages/app-lib/.env packages/app-lib/.env",
+			"command": "node scripts/setup-worktree.ts",
 			"icon": "configure",
 			"runOnWorktreeCreate": true
+		},
+		{
+			"name": "Dev",
+			"command": "vp run dev",
+			"icon": "play",
+			"runOnWorktreeCreate": false
 		}
 	]
 }

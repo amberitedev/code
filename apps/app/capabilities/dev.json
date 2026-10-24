@@ -1,0 +1,12 @@
+{
+	"identifier": "dev",
+	"description": "Dev builds only. Paired Cores report their own address, so it is not known up front.",
+	"local": true,
+	"windows": ["main"],
+	"permissions": [
+		{
+			"identifier": "http:default",
+			"allow": [{ "url": "http://*:*/*" }, { "url": "https://*:*/*" }]
+		}
+	]
+}
