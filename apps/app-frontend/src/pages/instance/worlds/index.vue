@@ -252,7 +252,7 @@ import {
 	unreachableCause,
 	useCanManageHostedServer,
 	useHostedServers,
-	useLinkedServers,
+	useInstanceServer,
 } from '@/helpers/linked-servers'
 import { get_game_versions } from '@/helpers/tags'
 import { useWorldPins, worldPinKey } from '@/helpers/world-pins'
@@ -385,11 +385,14 @@ function play() {
 const selectedFilters = ref<string[]>([])
 const searchFilter = ref('')
 
-const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
-// Always offered: creating a server asks for a Core first when the account has none, and says so
-// when the Core cannot be reached.
+const { server: linkedServer } = useInstanceServer(() => instance.value.id)
+// Offered until the instance has its one server: creating it asks for a Core first when the
+// account has none, and says so when the Core cannot be reached.
 const canCreateServer = computed(
-	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
+	() =>
+		!instance.value.quarantined &&
+		instance.value.install_stage === 'installed' &&
+		!linkedServer.value,
 )
 // Servers other people host for this shared instance. A signed-out or wrong account gets none,
 // and neither does an instance that was deleted or that this account lost access to.
@@ -422,13 +425,15 @@ function serverRow(key: string, name: string, address: string): ServerWorld {
 	}
 }
 
+function linkedRow(linked: LinkedServer): WorldRow {
+	const key = `linked:${linked.server_id}`
+	return { key, linked, world: serverRow(key, linked.name, serverAddress(linked)) }
+}
+
 /** Every row: pinned ones in their dragged order, then the rest by most recently played. */
 const rows = computed<WorldRow[]>(() => {
 	const all: WorldRow[] = [
-		...linkedServers.value.map((linked) => {
-			const key = `linked:${linked.server_id}`
-			return { key, linked, world: serverRow(key, linked.name, serverAddress(linked)) }
-		}),
+		...(linkedServer.value ? [linkedRow(linkedServer.value)] : []),
 		...hostedServers.value.map((hosted) => {
 			const key = `hosted:${hosted.core_id}:${hosted.server_id}`
 			return { key, hosted, world: serverRow(key, hosted.name, hosted.address) }
@@ -688,8 +693,8 @@ async function initWorldsTab() {
 	gameVersions.value = resolvedGameVersions
 	protocolVersionReady.value = true
 
-	// Not only when the instance has worlds of its own: linked servers registered themselves in
-	// `serverData` before the protocol was known and are still waiting for their first ping.
+	// Not only when the instance has worlds of its own: its server registered itself in
+	// `serverData` before the protocol was known and is still waiting for its first ping.
 	void refreshServers(worlds.value, serverData.value, protocolVersion.value)
 }
 
@@ -705,11 +710,12 @@ async function refreshServer(address: string) {
 	await refreshServerData(serverData.value[address], protocolVersion.value, address)
 }
 
-// Ping linked servers like the rest, and again whenever one starts, stops, or moves.
+// Ping the instance's server like the rest, and again whenever it starts, stops, or moves.
 watch(
-	() => linkedServers.value.map((server) => `${serverAddress(server)}|${server.power_state}`),
+	() =>
+		linkedServer.value && `${serverAddress(linkedServer.value)}|${linkedServer.value.power_state}`,
 	() => {
-		for (const server of linkedServers.value) void refreshServer(serverAddress(server))
+		if (linkedServer.value) void refreshServer(serverAddress(linkedServer.value))
 	},
 	{ immediate: true },
 )

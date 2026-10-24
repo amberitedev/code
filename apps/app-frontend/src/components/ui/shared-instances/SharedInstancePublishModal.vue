@@ -80,12 +80,12 @@ type SharedInstancePublishState = 'idle' | 'reviewing' | 'publishing'
 
 /**
  * The review every push goes through. It lists what changed and only lets a push happen when
- * something did. A shared instance publishes to friends; an instance with linked servers also
- * offers "Push and restart" and emits `push-servers` for the caller to update them.
+ * something did. A shared instance publishes to friends; an instance with a server also
+ * offers "Push and restart" and emits `push-servers` for the caller to update it.
  */
 const props = defineProps<{
 	instance: GameInstance
-	servers?: LinkedServer[]
+	server?: LinkedServer
 }>()
 
 const emit = defineEmits<{
@@ -105,11 +105,9 @@ const configFilePaths = ref<string[]>([])
 const includedConfigPaths = ref<string[]>([])
 const excludedConfigPaths = ref<string[]>([])
 const state = ref<SharedInstancePublishState>('idle')
-const hasServers = computed(() => (props.servers?.length ?? 0) > 0)
+const hasServers = computed(() => !!props.server)
 // A server that failed to take the instance can always be pushed to again.
-const serverFailed = computed(
-	() => props.servers?.some((server) => server.linked_instance.state === 'failed') ?? false,
-)
+const serverFailed = computed(() => props.server?.linked_instance.state === 'failed')
 // A server that could not be compared may be behind, so it can be pushed to as well.
 const serverUnchecked = ref(false)
 const sharesWithFriends = computed(() => props.instance.shared_instance?.role === 'owner')
@@ -161,14 +159,13 @@ async function show(e?: MouseEvent) {
 		let serverDiffs: ContentDiffItem[] = []
 		if (friendDiffs.length === 0) {
 			serverUnchecked.value = false
-			for (const server of props.servers ?? []) {
+			if (props.server) {
 				try {
-					serverDiffs = await diffInstanceAgainstServer(props.instance.id, server)
+					serverDiffs = await diffInstanceAgainstServer(props.instance.id, props.server)
 				} catch (error) {
-					console.error(`Failed to compare with server ${server.server_id}`, error)
+					console.error(`Failed to compare with server ${props.server.server_id}`, error)
 					serverUnchecked.value = true
 				}
-				if (serverDiffs.length > 0) break
 			}
 		}
 		publishDiffs.value = friendDiffs.length > 0 ? friendDiffs : serverDiffs

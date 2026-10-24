@@ -1,6 +1,6 @@
 <template>
 	<Button
-		v-if="servers.length > 0 || publishesToFriends"
+		v-if="server || publishesToFriends"
 		:type="primary ? 'colored' : 'outlined'"
 		:color="primary ? 'blue' : undefined"
 		size="lg"
@@ -16,7 +16,7 @@
 	<SharedInstancePublishModal
 		ref="publishModal"
 		:instance="instance"
-		:servers="servers"
+		:server="server"
 		@published="emit('published')"
 		@push-servers="pushToServers"
 		@state-change="publishState = $event"
@@ -61,14 +61,14 @@ import {
 	playersOnline,
 	pushPackToServer,
 	serversQueryKey,
-	useLinkedServers,
+	useInstanceServer,
 } from '@/helpers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 /**
  * The one "Push update" button of an instance. It always opens the review, which is where the
- * push is chosen: "Push update", plus "Push and restart" when the instance has linked servers.
- * Renders nothing for an instance that has neither friends nor servers to push to.
+ * push is chosen: "Push update", plus "Push and restart" when the instance has a server.
+ * Renders nothing for an instance that has neither friends nor a server to push to.
  */
 const props = defineProps<{
 	instance: GameInstance
@@ -84,7 +84,7 @@ const emit = defineEmits<{
 const { formatMessage } = useVIntl()
 const { addNotification } = injectNotificationManager()
 const queryClient = useQueryClient()
-const { servers } = useLinkedServers(() => props.instance.id)
+const { server } = useInstanceServer(() => props.instance.id)
 
 const publishModal = ref<InstanceType<typeof SharedInstancePublishModal>>()
 const playersModal = ref<InstanceType<typeof NewModal>>()
@@ -107,11 +107,10 @@ function review(event?: MouseEvent) {
 /** Called once the review is confirmed. A restart first asks when players are online. */
 async function pushToServers(restart: boolean) {
 	if (restart) {
-		// Busy while the servers are asked, so a second click cannot open another review.
+		// Busy while the server is asked, so a second click cannot open another review.
 		checkingPlayers.value = true
 		try {
-			const counts = await Promise.all(servers.value.map(playersOnline))
-			playersOnlineCount.value = counts.reduce((sum, count) => sum + count, 0)
+			playersOnlineCount.value = server.value ? await playersOnline(server.value) : 0
 		} finally {
 			checkingPlayers.value = false
 		}
@@ -129,40 +128,32 @@ function answerPlayers(restart: boolean) {
 }
 
 async function upload(restart: boolean) {
-	const targets = servers.value
-	if (targets.length === 0 || pushing.value) return
+	const target = server.value
+	if (!target || pushing.value) return
 	pushing.value = true
 	try {
 		const pack = await exportInstancePack(props.instance.id)
-		const failed: string[] = []
-		let problem = ''
-		for (const server of targets) {
-			try {
-				await pushPackToServer(
-					pack,
-					{ id: props.instance.id, name: props.instance.name },
-					server.server_id,
-					{ restart },
-				)
-			} catch (error) {
-				console.error(`Failed to push to server ${server.server_id}`, error)
-				failed.push(server.name)
-				problem ||= coreProblem(error)
-			}
-		}
-		if (failed.length > 0) {
+		try {
+			await pushPackToServer(
+				pack,
+				{ id: props.instance.id, name: props.instance.name },
+				target.server_id,
+				{ restart },
+			)
+		} catch (error) {
+			console.error(`Failed to push to server ${target.server_id}`, error)
 			addNotification({
 				type: 'error',
 				title: formatMessage(messages.pushFailedTitle),
-				text: `${formatMessage(messages.pushFailedText, { servers: failed.join(', ') })} ${problem}`,
+				text: `${formatMessage(messages.pushFailedText, { server: target.name })} ${coreProblem(error)}`,
 			})
-		} else {
-			addNotification({
-				type: 'success',
-				title: formatMessage(messages.pushedTitle),
-				text: formatMessage(restart ? messages.pushedRestartText : messages.pushedText),
-			})
+			return
 		}
+		addNotification({
+			type: 'success',
+			title: formatMessage(messages.pushedTitle),
+			text: formatMessage(restart ? messages.pushedRestartText : messages.pushedText),
+		})
 	} catch (error) {
 		addNotification({
 			type: 'error',
@@ -215,7 +206,7 @@ const messages = defineMessages({
 	},
 	pushFailedText: {
 		id: 'instance.linked-servers.push-failed.text',
-		defaultMessage: 'Could not update {servers}.',
+		defaultMessage: 'Could not update {server}.',
 	},
 })
 </script>

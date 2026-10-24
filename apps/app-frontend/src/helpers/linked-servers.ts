@@ -81,47 +81,46 @@ export function useServers() {
 }
 
 /**
- * The servers that follow an instance, on the Core this App is connected to. Empty when there
- * is no Core or it cannot be reached.
+ * The instance's server on the Core this App is connected to. An instance has at most one, so
+ * this is undefined when it has none, or when there is no Core or it cannot be reached.
  */
-export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined>) {
+export function useInstanceServer(instanceId: MaybeRefOrGetter<string | undefined>) {
 	const query = useServers()
-	const servers = computed(() => {
+	const server = computed(() => {
 		const id = toValue(instanceId)
-		return (query.data.value?.servers ?? []).filter(
+		return (query.data.value?.servers ?? []).find(
 			(server): server is LinkedServer => !!id && server.linked_instance?.id === id,
 		)
 	})
-	return { servers, query }
+	return { server, query }
 }
 
 /**
- * Keeps the Core's record of which shared instance a linked server belongs to in step with the
- * instance. The Core lists a server for friends only under that shared instance, so sharing or
- * unsharing an instance reaches its servers through here. Call once, from the instance page.
+ * Keeps the Core's record of which shared instance the instance's server belongs to in step with
+ * the instance. The Core lists a server for friends only under that shared instance, so sharing or
+ * unsharing an instance reaches its server through here. Call once, from the instance page.
  */
 export function useSharedInstanceLink(instance: MaybeRefOrGetter<GameInstance | undefined>) {
 	const queryClient = useQueryClient()
-	const { servers } = useLinkedServers(() => toValue(instance)?.id)
-	const sending = new Set<string>()
+	const { server } = useInstanceServer(() => toValue(instance)?.id)
+	let sending = false
 	watch(
 		() => {
 			const sharedId = toValue(instance)?.shared_instance?.id ?? null
-			return servers.value
-				.filter((server) => server.linked_instance.shared_instance_id !== sharedId)
-				.map((server) => ({ serverId: server.server_id, sharedId }))
+			const current = server.value
+			return current && current.linked_instance.shared_instance_id !== sharedId
+				? { serverId: current.server_id, sharedId }
+				: undefined
 		},
 		async (stale) => {
-			for (const { serverId, sharedId } of stale) {
-				if (sending.has(serverId)) continue
-				sending.add(serverId)
-				// On failure the next server list still differs, which tries again.
-				await apiClient.archon.servers_v1
-					.setLinkedInstance(serverId, { shared_instance: { id: sharedId } })
-					.then(() => queryClient.invalidateQueries({ queryKey: serversQueryKey }))
-					.catch((error) => console.error('Failed to tell the Core about sharing', error))
-				sending.delete(serverId)
-			}
+			if (!stale || sending) return
+			sending = true
+			// On failure the next server list still differs, which tries again.
+			await apiClient.archon.servers_v1
+				.setLinkedInstance(stale.serverId, { shared_instance: { id: stale.sharedId } })
+				.then(() => queryClient.invalidateQueries({ queryKey: serversQueryKey }))
+				.catch((error) => console.error('Failed to tell the Core about sharing', error))
+			sending = false
 		},
 		{ immediate: true },
 	)
