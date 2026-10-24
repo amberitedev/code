@@ -4,6 +4,7 @@ import * as NodeChildProcess from 'node:child_process'
 import * as NodeCrypto from 'node:crypto'
 import * as NodeFS from 'node:fs'
 import * as NodeNet from 'node:net'
+import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
@@ -67,11 +68,15 @@ type RunnerInput = {
 }
 /**
  * A Rust program the runner builds itself. It is built once per distinct set of inputs, copied
- * into `<targetDir>/dev-bin/<key>/`, and run from that copy. A checkout whose Rust matches
- * something already built starts without Cargo, and a running program never blocks a build.
+ * into `<cacheDir>/<key>/`, and run from that copy. A checkout whose Rust matches something
+ * already built starts without Cargo, and a running program never blocks a build.
  */
 export type ProgramBuild = {
+	/** Programs built by every checkout, shared. Its lock lets one build run at a time. */
+	readonly cacheDir: string
 	readonly cargoArgs: ReadonlyArray<string>
+	/** The primary checkout, whose `target` is cloned into `targetDir` before the first build. */
+	readonly cloneFrom?: string
 	/** Where Cargo runs. It takes the toolchain and `.cargo` settings from here. */
 	readonly cwd: string
 	/** Settings the build reads. They change the program, so they are part of its key. */
@@ -653,7 +658,7 @@ export function createProcessSpecs(input: {
 				ignoredInputs: [],
 				inputs: workspaceInputs(input.paths),
 				program: programFile('copal'),
-				targetDir: workspaceTargetDir(input.paths, input.env),
+				...workspaceBuildDirs(input.paths, input.env),
 			},
 			cwd: coreDir,
 			env: coreEnv,
@@ -745,7 +750,7 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 		// The App's version comes from the frontend.
 		inputs: [...workspaceInputs(paths), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
-		targetDir: workspaceTargetDir(paths, env),
+		...workspaceBuildDirs(paths, env),
 	}
 }
 
@@ -767,11 +772,42 @@ function workspaceInputs(paths: WorktreePaths): ReadonlyArray<string> {
 }
 
 /**
- * Every checkout compiles the workspace into the primary checkout's build output. A new worktree
- * then reuses the dependencies already compiled there and never grows its own target folder.
+ * Where a checkout compiles the workspace. On a drive that clones files without copying them
+ * (a Windows Dev Drive), each worktree gets its own build output, cloned from the primary
+ * checkout's, so worktrees keep their own compiler caches and take almost no extra space.
+ * Elsewhere every checkout compiles into the primary checkout's build output, so a new worktree
+ * still reuses the dependencies compiled there.
  */
-function workspaceTargetDir(paths: WorktreePaths, env: NodeJS.ProcessEnv): string {
-	return env.CARGO_TARGET_DIR ?? NodePath.join(paths.primary, 'target')
+function workspaceBuildDirs(
+	paths: WorktreePaths,
+	env: NodeJS.ProcessEnv,
+): Pick<ProgramBuild, 'cacheDir' | 'cloneFrom' | 'targetDir'> {
+	const shared = env.CARGO_TARGET_DIR ?? NodePath.join(paths.primary, 'target')
+	const cacheDir = NodePath.join(shared, 'dev-bin')
+	if (env.CARGO_TARGET_DIR || !clonesFiles(paths)) return { cacheDir, targetDir: shared }
+	return { cacheDir, cloneFrom: paths.primary, targetDir: NodePath.join(paths.worktree, 'target') }
+}
+
+let clonesFilesResult: boolean | undefined
+/** Whether this worktree and the primary checkout share a drive that clones files: ReFS. */
+function clonesFiles(paths: WorktreePaths): boolean {
+	if (clonesFilesResult !== undefined) return clonesFilesResult
+	clonesFilesResult = false
+	if (process.platform !== 'win32') return clonesFilesResult
+	// T3 Code reaches its worktrees through a junction, so compare where the files really are.
+	const worktree = NodeFS.realpathSync.native(paths.worktree)
+	const primary = NodeFS.realpathSync.native(paths.primary)
+	const drive = NodePath.parse(worktree).root.slice(0, 1).toUpperCase()
+	if (worktree === primary || NodePath.parse(primary).root.slice(0, 1).toUpperCase() !== drive) {
+		return clonesFilesResult
+	}
+	const result = NodeChildProcess.spawnSync(
+		'powershell',
+		['-NoProfile', '-Command', `(Get-Volume -DriveLetter ${drive}).FileSystem`],
+		{ encoding: 'utf8', windowsHide: true },
+	)
+	clonesFilesResult = result.stdout.trim() === 'ReFS'
+	return clonesFilesResult
 }
 
 function programFile(name: string): string {
@@ -828,7 +864,7 @@ async function ensureProgram(
 	builds: Set<NodeChildProcess.ChildProcess>,
 	stopped: () => boolean,
 ): Promise<string | undefined> {
-	const cache = NodePath.join(build.targetDir, 'dev-bin')
+	const cache = build.cacheDir
 	const cached = (key: string) => NodePath.join(cache, key, build.program)
 	let key = programKey(worktree, build)
 	if (NodeFS.existsSync(cached(key))) {
@@ -840,7 +876,8 @@ async function ensureProgram(
 			// Another runner may have built it while this one waited.
 			while (!NodeFS.existsSync(cached(key))) {
 				runnerLog('info', `${spec.label} building ${build.program} (${key})`)
-				if (!markCheckoutCratesChanged(worktree, spec, build)) return undefined
+				if (build.cloneFrom) cloneBuildOutput(worktree, spec, build, build.cloneFrom)
+				else if (!markCheckoutCratesChanged(worktree, spec, build)) return undefined
 				if (!(await runCargo(spec, build, builds, build.cargoArgs))) return undefined
 				const builtKey = programKey(worktree, build)
 				// An input edited during the build makes this program a mix. Build again.
@@ -916,6 +953,79 @@ function markCheckoutCratesChanged(
 	return true
 }
 
+/**
+ * Gives a worktree its own build output by cloning the primary checkout's, then makes the clone
+ * look built from this worktree: Cargo trusts file times, and build scripts record absolute paths.
+ * Crates whose files match the primary's are then up to date; changed ones compile again.
+ */
+function cloneBuildOutput(
+	worktree: string,
+	spec: ProcessSpec,
+	build: ProgramBuild,
+	primary: string,
+): void {
+	const from = NodePath.join(primary, 'target')
+	if (NodeFS.existsSync(build.targetDir) || !NodeFS.existsSync(from)) return
+	runnerLog('info', `${spec.label} cloning the build output of ${primary}`)
+	const partial = `${build.targetDir}.partial`
+	NodeFS.rmSync(partial, { recursive: true, force: true })
+	NodeFS.cpSync(from, partial, {
+		filter: (path) => path !== build.cacheDir && !path.endsWith('.checkout'),
+		preserveTimestamps: true,
+		recursive: true,
+	})
+	const buildScripts = NodePath.join(partial, 'debug', 'build')
+	const paths = [primary, worktree].map((path) => `${path}${NodePath.sep}`)
+	const [primaryEscaped, worktreeEscaped] = paths.map((path) => path.replaceAll('\\', '\\\\'))
+	for (const folder of NodeFS.existsSync(buildScripts) ? NodeFS.readdirSync(buildScripts) : []) {
+		for (const name of ['output', 'root-output']) {
+			const file = NodePath.join(buildScripts, folder, name)
+			if (!NodeFS.existsSync(file)) continue
+			const text = NodeFS.readFileSync(file, 'utf8')
+			const rewritten = text
+				.replaceAll(primaryEscaped!, worktreeEscaped!)
+				.replaceAll(paths[0]!, paths[1]!)
+			if (rewritten === text) continue
+			// Rewritten in place with its old time, or Cargo would run the build script again.
+			const { atime, mtime } = NodeFS.statSync(file)
+			NodeFS.writeFileSync(file, rewritten)
+			NodeFS.utimesSync(file, atime, mtime)
+		}
+	}
+	NodeFS.renameSync(partial, build.targetDir)
+
+	const blobs = (checkout: string) =>
+		new Map(
+			git(['ls-files', '-s', '-z', '--', ...build.inputs], checkout)
+				.split('\0')
+				.flatMap((entry) => {
+					const [details, file] = entry.split('\t')
+					return details && file ? [[file, details.split(' ')[1]!] as const] : []
+				}),
+		)
+	const edited = (checkout: string) =>
+		new Set(git(['ls-files', '-m', '-z', '--', ...build.inputs], checkout).split('\0'))
+	const primaryBlobs = blobs(primary)
+	const changed = new Set([...edited(primary), ...edited(worktree)])
+	const sameFiles = [...blobs(worktree)]
+		.filter(([file, blob]) => primaryBlobs.get(file) === blob && !changed.has(file))
+		.map(([file]) => file)
+	for (const file of build.ignoredInputs) {
+		const original = NodePath.join(primary, NodePath.relative(worktree, file))
+		if (
+			NodeFS.existsSync(file) &&
+			NodeFS.existsSync(original) &&
+			NodeFS.readFileSync(file).equals(NodeFS.readFileSync(original))
+		) {
+			sameFiles.push(NodePath.relative(worktree, file))
+		}
+	}
+	for (const file of sameFiles) {
+		const { atime, mtime } = NodeFS.statSync(NodePath.join(primary, file))
+		NodeFS.utimesSync(NodePath.join(worktree, file), atime, mtime)
+	}
+}
+
 /** Whether Cargo succeeded. */
 async function runCargo(
 	spec: ProcessSpec,
@@ -944,6 +1054,13 @@ async function runCargo(
 			windowsHide: true,
 		})
 		builds.add(child)
+		// Compiles started by any checkout run behind whatever the person is doing. Windows gives
+		// the compiler processes Cargo starts the same priority.
+		try {
+			if (child.pid) NodeOS.setPriority(child.pid, NodeOS.constants.priority.PRIORITY_BELOW_NORMAL)
+		} catch {
+			// Already finished.
+		}
 		const failure: string[] = []
 		const rememberFailure = (line: string) => {
 			if (/Access is denied|failed to remove file/.test(line)) failure.push(line)
@@ -974,11 +1091,10 @@ async function runCargo(
 }
 
 /**
- * One build and copy at a time per build output. Checkouts share that output, and Cargo puts the
- * finished program at the same path for all of them, so a second build finishing before the copy
- * would hand this checkout the other one's program.
+ * One build at a time across every checkout, or gives up with `undefined` once the runner is
+ * stopping. Checkouts that share a build output need it: Cargo puts the finished program at the
+ * same path for all of them. It also keeps several compiles from taking the whole machine.
  */
-/** Takes the build lock for `cache`, or gives up with `undefined` once the runner is stopping. */
 async function lockBuilds(
 	cache: string,
 	label: string,

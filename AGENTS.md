@@ -69,9 +69,9 @@ somewhere else. Before calling frontend work done, check which of these apply:
   on the desktop; add `--show-windows` when a person needs to see them.
 - The App and Core are built once per distinct set of Rust inputs and shared by every checkout. A
   checkout whose Rust matches something already built is ready in about 30 seconds and compiles
-  nothing. Otherwise the start compiles first: about a minute and a half after a small Rust edit
-  in a checkout that has built before, three to four minutes the first time a checkout builds
-  after another one did. `up` stops at once and prints the compiler errors when the Rust does not
+  nothing. Otherwise the start compiles first, one build at a time across all checkouts: about a
+  minute after a small Rust edit in a checkout that has built before. The first build in a worktree
+  takes a few minutes, or compiles only what that worktree changed on a Dev Drive. `up` stops at once and prints the compiler errors when the Rust does not
   compile, so it is also the check for Rust changes. It gives up waiting after 9 minutes; run it
   again to keep waiting.
 - Nothing watches Rust files. After a Rust edit, run `down` then `up`, which rebuilds because the

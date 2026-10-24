@@ -53,7 +53,7 @@ Scenario numbers passed after the task name override `defaultScenarios` in `dev.
 
 The runner builds the App and Core with `cargo build` and never runs them from the build output.
 Each program is copied to `<target>/dev-bin/<key>/` and run from there, where `<target>` is the
-primary checkout's `target`, shared by every worktree. Both are members of the root Cargo workspace.
+primary checkout's `target`; every worktree shares those programs. Both are members of the root Cargo workspace.
 The key is a hash of everything that goes into the build:
 
 - Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, every workspace member
@@ -74,11 +74,28 @@ Nothing watches Rust files. After a Rust edit, restart with `down` then `up`, or
 `rs core` in the foreground runner; the key has changed, so the runner builds first. If a build
 fails, the process stays stopped until the next restart.
 
-Builds into one shared output run one at a time. Cargo decides what to recompile from file times
-alone, so a crate last compiled from another checkout can look finished here. When the previous
-build of a program came from a different checkout, the runner marks the crates that live in the repo
-as changed, and Cargo compiles those again. Third-party crates and compiler caches are kept. An older checkout that still runs its App from
-`target/debug` holds that file open; the runner renames it aside and builds again.
+Builds run one at a time across every checkout, at below-normal priority, so several agents
+restarting after Rust edits queue up instead of taking the whole machine.
+
+Where a checkout compiles depends on its drive:
+
+- On a Windows Dev Drive (ReFS), when the worktree and the primary checkout are on the same drive,
+  each worktree compiles into its own `target`. Before its first build, the runner clones the
+  primary checkout's `target` into it. The clone is instant and shares disk space with the original
+  until files change. The runner then gives every input file that matches the primary checkout the
+  primary's file time, and rewrites the absolute paths build scripts recorded, so Cargo treats
+  unchanged crates as built and compiles only what this worktree changed. The worktree keeps its own
+  compiler caches, so later edits there compile incrementally.
+- Everywhere else, checkouts compile into the primary checkout's `target`. Cargo decides what to
+  recompile from file times alone, so a crate last compiled from another checkout can look finished
+  here. When the previous build of a program came from a different checkout, the runner marks the
+  crates that live in the repo as changed, and Cargo compiles those again. Third-party crates and
+  compiler caches are kept.
+
+A clone is only as current as the primary checkout's build: keep the primary checkout on recent
+`main` and run `up` there after pulling, or worktrees compile what changed since. An older checkout
+that still runs its App from `target/debug` holds that file open; the runner renames it aside and
+builds again.
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
