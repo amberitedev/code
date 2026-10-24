@@ -188,7 +188,14 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - `packages/api-client` - typed client for Modrinth, the backend, and Core.
 - `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly
   asked.
-- `docs/internals` - `plan.md` holds product goals and decisions; `scripts.md` covers dev commands.
+- `docs/internals` - `plan.md` holds product goals and decisions; `scripts.md` covers dev commands;
+  `ui.md` holds the rules for how the App's UI behaves.
+
+## Work tracking
+
+Work lives in Linear, team `AMB`. Labels, statuses, the issue template, and Linear operations are in
+`docs/agents/issue-tracker.md`. `/start` runs one session on the next issue, `/triage` sorts issues,
+and `/to-tickets` turns a plan into issues.
 
 ## Taste
 

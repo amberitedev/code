@@ -1,4 +1,0 @@
-interface:
-  display_name: "Prototype UI"
-  short_description: "Plan and build interactive UI prototypes"
-  default_prompt: "Use $prototype to clarify, build, and iterate on a high-fidelity interactive Amberite UI before production implementation."
