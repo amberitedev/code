@@ -854,20 +854,11 @@
   "collection.aria-label.upload-icon": {
     "message": "Nahrát ikonu"
   },
-  "collection.button.edit-icon": {
-    "message": "Upravit ikonu"
-  },
   "collection.button.remove-icon": {
     "message": "Odebrat ikonu"
   },
   "collection.button.remove-project": {
     "message": "Odstranit projekt"
-  },
-  "collection.button.replace-icon": {
-    "message": "Nahradit ikonu"
-  },
-  "collection.button.select-icon": {
-    "message": "Vybrat ikonu"
   },
   "collection.button.unfollow-project": {
     "message": "Přestat sledovat projekt"
@@ -883,9 +874,6 @@
   },
   "collection.description.following": {
     "message": "Automaticky generovaná kolekce všech projektů, které sledujete."
-  },
-  "collection.editing": {
-    "message": "Upravit kolekci"
   },
   "collection.error.not-found": {
     "message": "Kolekce nenalezena"
@@ -920,17 +908,11 @@
   "conversation-thread.action.approve": {
     "message": "Schválit"
   },
-  "conversation-thread.action.approve-with-reply": {
-    "message": "Schválit s odpovědí"
-  },
   "conversation-thread.action.close-with-reply": {
     "message": "Uzavřít s odpovědí"
   },
   "conversation-thread.action.reject": {
     "message": "Zamítnout"
-  },
-  "conversation-thread.action.reject-with-reply": {
-    "message": "Zamítnout s odpovědí"
   },
   "conversation-thread.action.reopen-thread": {
     "message": "Znovuotevřít vlákno"
@@ -965,9 +947,6 @@
   "conversation-thread.action.withhold": {
     "message": "Pozastavit"
   },
-  "conversation-thread.action.withhold-with-reply": {
-    "message": "Pozastavit s odpovědí"
-  },
   "conversation-thread.closed-thread.description": {
     "message": "Toto vlákno je uzavřené a nelze do něj posílat nové zprávy."
   },
@@ -976,9 +955,6 @@
   },
   "conversation-thread.error.reopening-report": {
     "message": "Chyba při opětovném otevření reportu"
-  },
-  "conversation-thread.error.sending-message": {
-    "message": "Chyba při odeslání zprávy"
   },
   "conversation-thread.reply-editor.placeholder.reply": {
     "message": "Odpovědět vláknu..."
@@ -1195,24 +1171,6 @@
   },
   "create.project.visibility-unlisted": {
     "message": "Neveřejné"
-  },
-  "dashboard.affiliate-links.create.button": {
-    "message": "Vytvořit partnerský odkaz"
-  },
-  "dashboard.affiliate-links.error.title": {
-    "message": "Error při načítáni partnerských odkazů"
-  },
-  "dashboard.affiliate-links.header": {
-    "message": "Vaše partnerské odkazy"
-  },
-  "dashboard.affiliate-links.revoke-confirm.body": {
-    "message": "Tímto trvale zrušíte partnerský kód {id} a všechny již sdílené odkazy s tímto kódem přestanou být platné."
-  },
-  "dashboard.affiliate-links.revoke-confirm.button": {
-    "message": "Odvolat"
-  },
-  "dashboard.affiliate-links.revoke-confirm.title": {
-    "message": "Jste si jistý, že chcete zrušit svůj partnerský odkaz „{title}“?"
   },
   "dashboard.analytics.from-projects": {
     "message": "{count, plural, one {z # projektu} few {ze # projektů} other {z # projektů}}"
@@ -2300,9 +2258,6 @@
   "project.actions.dont-show-again": {
     "message": "Znovu nezobrazovat"
   },
-  "project.actions.review-project": {
-    "message": "Zkontrolovat projekt"
-  },
   "project.actions.servers-promo.description": {
     "message": "Modrinth Hosting je nejjednodušší způsob, jak hrát s přáteli bez starostí!"
   },
@@ -2989,12 +2944,6 @@
   },
   "settings.pats.modal.create.title": {
     "message": "Vytvořit osobní přístupový token"
-  },
-  "settings.pats.modal.delete.action": {
-    "message": "Vymazat tento token"
-  },
-  "settings.pats.modal.delete.description": {
-    "message": "Toto vymaže tento token navždy (jako opravdu navždy)."
   },
   "settings.sidebar.label.developer": {
     "message": "Vývojář"

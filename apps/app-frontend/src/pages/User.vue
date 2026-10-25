@@ -44,18 +44,20 @@ import {
 	Button,
 	commonMessages,
 	defineMessages,
-	injectNotificationManager,
-	provideUserProfile,
-	provideAuth,
 	injectAuth,
-	UserProfilePageLayout,
+	injectNotificationManager,
+	provideAuth,
+	provideUserProfile,
 	useLoadingBarToken,
+	UserProfilePageLayout,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, inject, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { config } from '@/config'
+import { injectSettingsActions } from '@/features/settings/settings-actions'
 import {
 	block_user,
 	change_user_avatar,
@@ -68,12 +70,9 @@ import {
 	patch_user,
 	unblock_user,
 } from '@/helpers/users'
-import { apiClient } from '@/services/api-client'
-import { config } from '@/config'
-
-import { appSettingsModalOpenProfileKey } from '@/providers/app-settings-modal'
-import { useBreadcrumb } from '@/providers/breadcrumbs'
+import { apiClient } from '@/platform/modrinth-client'
 import { injectContentInstall } from '@/providers/content-install'
+import { useBreadcrumb } from '@/shared/breadcrumbs'
 
 const route = useRoute()
 const isPublicProfile = computed(
@@ -94,7 +93,7 @@ function publicProfileRequest<T>(path: string, version = 3) {
 	})
 }
 const router = useRouter()
-const openProfileSettings = inject(appSettingsModalOpenProfileKey, () => {})
+const { openProfile: openProfileSettings } = injectSettingsActions()
 const queryClient = useQueryClient()
 const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()

@@ -464,6 +464,15 @@
   "app.features-settings.sync-across-devices.title": {
     "message": "Sync features across devices"
   },
+  "app.file-download.canceling": {
+    "message": "Canceling download…"
+  },
+  "app.file-download.preparing": {
+    "message": "Preparing download…"
+  },
+  "app.file-download.waiting": {
+    "message": "Waiting for the server…"
+  },
   "app.home.jump-back-in.actions.label": {
     "message": "Instance actions"
   },
@@ -1307,6 +1316,12 @@
   "app.modal.install-to-play.shared-instance-unknown-files-description": {
     "message": "This shared instance contains files that aren’t published on Modrinth. We strongly recommend only installing files from sources you trust."
   },
+  "app.modal.install-to-play.unavailable-description": {
+    "message": "The modpack version this server uses can't be downloaded right now. It may be unpublished or under review. Try again later, or contact the server owner."
+  },
+  "app.modal.install-to-play.unavailable-header": {
+    "message": "This server's modpack isn't available"
+  },
   "app.modal.install-to-play.unknown-files-description": {
     "message": "This server modpack contains files that aren’t published on Modrinth. We strongly recommend only installing files from sources you trust."
   },
@@ -1646,9 +1661,6 @@
   "app.settings.default-instance-options.height.title": {
     "message": "Height"
   },
-  "app.settings.default-instance-options.java-and-memory.title": {
-    "message": "Java and memory"
-  },
   "app.settings.default-instance-options.java-arguments.description": {
     "message": "Arguments passed to Java when launching an instance."
   },
@@ -1657,9 +1669,6 @@
   },
   "app.settings.default-instance-options.java-arguments.title": {
     "message": "Java arguments"
-  },
-  "app.settings.default-instance-options.launch-hooks.title": {
-    "message": "Launch hooks"
   },
   "app.settings.default-instance-options.memory-allocation.description": {
     "message": "Maximum memory available to each instance."
@@ -1693,9 +1702,6 @@
   },
   "app.settings.default-instance-options.width.title": {
     "message": "Width"
-  },
-  "app.settings.default-instance-options.window.title": {
-    "message": "Window"
   },
   "app.settings.default-instance-options.wrapper-hook.description": {
     "message": "Command used to wrap the Minecraft launch process."
@@ -2750,14 +2756,8 @@
   "app.settings.resource-management.app-cache.confirm.description": {
     "message": "The app may load more slowly until the cache is rebuilt."
   },
-  "app.settings.resource-management.app-cache.confirm.title": {
-    "message": "Purge the app cache?"
-  },
   "app.settings.resource-management.app-cache.description": {
     "message": "Clear cached data and download it again from Modrinth. The app may load more slowly until the cache is rebuilt."
-  },
-  "app.settings.resource-management.app-cache.purge": {
-    "message": "Purge cache"
   },
   "app.settings.resource-management.app-cache.title": {
     "message": "App cache"
@@ -2834,9 +2834,6 @@
   "app.settings.resource-management.store.description": {
     "message": "Save space by reusing game installs, mods and packs across your instances."
   },
-  "app.settings.resource-management.store.empty": {
-    "message": "Install mods or packs to see your storage usage here."
-  },
   "app.settings.resource-management.store.issues": {
     "message": "View {count, plural, one {# issue} other {# issues}}"
   },
@@ -2876,8 +2873,11 @@
   "app.settings.resource-management.store.verified": {
     "message": "Verification complete"
   },
-  "app.settings.sidebar.label.instances": {
-    "message": "Instances"
+  "app.settings.sidebar.label.instance-defaults": {
+    "message": "Instance defaults"
+  },
+  "app.settings.sidebar.label.system": {
+    "message": "System"
   },
   "app.settings.synced-options.choose-sync-source.command-history-description": {
     "message": "Choose which instance to copy your command history from. This history is only used for the initial sync, and you can edit it from any instance afterward."
@@ -3110,20 +3110,47 @@
   "app.settings.tabs.features": {
     "message": "Features"
   },
+  "app.settings.tabs.java-and-memory": {
+    "message": "Java and memory"
+  },
   "app.settings.tabs.java-installations": {
     "message": "Java installations"
   },
   "app.settings.tabs.language": {
     "message": "Language"
   },
+  "app.settings.tabs.launch-hooks": {
+    "message": "Launch hooks"
+  },
   "app.settings.tabs.privacy": {
     "message": "Privacy"
   },
-  "app.settings.tabs.resource-management": {
-    "message": "Resource management"
+  "app.settings.tabs.resources": {
+    "message": "Resources"
   },
-  "app.settings.tabs.synced-options": {
-    "message": "Synced settings"
+  "app.settings.tabs.syncing": {
+    "message": "Syncing"
+  },
+  "app.settings.tabs.troubleshooting": {
+    "message": "Troubleshooting"
+  },
+  "app.settings.tabs.window": {
+    "message": "Window"
+  },
+  "app.settings.troubleshooting.clear-cache": {
+    "message": "Clear cache"
+  },
+  "app.settings.troubleshooting.clear-cache.confirm.title": {
+    "message": "Clear the app cache?"
+  },
+  "app.shared-instance-publish.preparing": {
+    "message": "Preparing update…"
+  },
+  "app.shared-instance-publish.pushed": {
+    "message": "Update pushed"
+  },
+  "app.shared-instance-publish.uploading": {
+    "message": "Pushing update…"
   },
   "app.sidebar.playing-as": {
     "message": "Playing as"
@@ -3965,6 +3992,9 @@
   "instance.server-modal.resource-pack": {
     "message": "Resource pack"
   },
+  "instance.settings.defaults.open-app-settings": {
+    "message": "Manage default settings"
+  },
   "instance.settings.sharing.active-invites.actions": {
     "message": "Actions"
   },
@@ -4003,6 +4033,12 @@
   },
   "instance.settings.sharing.revoke-invite.header": {
     "message": "Revoke invite"
+  },
+  "instance.settings.sidebar.label.game": {
+    "message": "Game"
+  },
+  "instance.settings.sidebar.label.instance": {
+    "message": "Instance"
   },
   "instance.settings.synced-options.data-override": {
     "message": "Turn off this override to edit synced data."
@@ -4121,8 +4157,11 @@
   "instance.settings.tabs.general.update-channel.select": {
     "message": "Select update channel"
   },
-  "instance.settings.tabs.hooks.description": {
-    "message": "Run instance-specific system commands before and after launching the game."
+  "instance.settings.tabs.hooks.default-settings-description": {
+    "message": "Your instance uses the default launch hooks unless you override them here."
+  },
+  "instance.settings.tabs.hooks.label": {
+    "message": "Launch hooks"
   },
   "instance.settings.tabs.hooks.post-exit": {
     "message": "Post-exit"
@@ -4184,17 +4223,8 @@
   "instance.settings.tabs.installation.locked": {
     "message": "Installation settings are unavailable while this instance is locked."
   },
-  "instance.settings.tabs.java.custom-environment-variables": {
-    "message": "Set environment variables separately for this instance."
-  },
-  "instance.settings.tabs.java.custom-java-arguments": {
-    "message": "Set Java arguments separately for this instance."
-  },
-  "instance.settings.tabs.java.custom-java-installation": {
-    "message": "Choose a different Java installation for this instance."
-  },
-  "instance.settings.tabs.java.custom-memory-allocation": {
-    "message": "Set the memory allocation separately for this instance."
+  "instance.settings.tabs.java.default-settings-description": {
+    "message": "Your instance uses the default Java and memory settings unless you override them here."
   },
   "instance.settings.tabs.java.enter-environment-variables": {
     "message": "Enter environmental variables..."
@@ -4220,8 +4250,8 @@
   "instance.settings.tabs.java.java-path-placeholder": {
     "message": "/path/to/java"
   },
-  "instance.settings.tabs.settings-overrides": {
-    "message": "Sync overrides"
+  "instance.settings.tabs.java.label": {
+    "message": "Java and memory"
   },
   "instance.settings.tabs.sharing": {
     "message": "Sharing"
@@ -4283,11 +4313,14 @@
   "instance.settings.tabs.synced-options.shared-settings.description": {
     "message": "Enable an override to keep a synced setting separate for this instance."
   },
+  "instance.settings.tabs.syncing": {
+    "message": "Syncing"
+  },
   "instance.settings.tabs.window": {
     "message": "Custom window settings"
   },
-  "instance.settings.tabs.window.custom-window-settings": {
-    "message": "Configure fullscreen and launch resolution separately for this instance."
+  "instance.settings.tabs.window.default-settings-description": {
+    "message": "Your instance uses the default window settings unless you override them here."
   },
   "instance.settings.tabs.window.fullscreen": {
     "message": "Fullscreen"
@@ -4304,6 +4337,9 @@
   "instance.settings.tabs.window.height.enter": {
     "message": "Enter height..."
   },
+  "instance.settings.tabs.window.label": {
+    "message": "Window"
+  },
   "instance.settings.tabs.window.width": {
     "message": "Width"
   },
@@ -4315,6 +4351,9 @@
   },
   "instance.shared-instance.error.title": {
     "message": "Something has gone wrong"
+  },
+  "instance.shared-instance.file-not-allowed.title": {
+    "message": "File type not allowed"
   },
   "instance.shared-instance.network-error.text": {
     "message": "Unable to connect to shared instances API"
@@ -4328,23 +4367,38 @@
   "instance.shared-instance.publish-review.added-label": {
     "message": "Added"
   },
-  "instance.shared-instance.publish-review.admonition-header": {
-    "message": "Push update to players"
+  "instance.shared-instance.publish-review.changes-description": {
+    "message": "Review the changes we've detected since your last update. These will automatically be included when you push."
   },
-  "instance.shared-instance.publish-review.config-title-v2": {
-    "message": "Select config files"
+  "instance.shared-instance.publish-review.changes-tab": {
+    "message": "Changes"
   },
-  "instance.shared-instance.publish-review.description": {
-    "message": "Review the content changes and choose any config files to include in this update."
+  "instance.shared-instance.publish-review.file-type-not-allowed": {
+    "message": "You're not allowed to push this file type."
+  },
+  "instance.shared-instance.publish-review.files-description": {
+    "message": "You can also include individual files alongside the detected changes. Select any additional files you'd like to publish."
+  },
+  "instance.shared-instance.publish-review.files-tab": {
+    "message": "Files"
   },
   "instance.shared-instance.publish-review.header": {
-    "message": "Review changes"
+    "message": "Push update"
   },
   "instance.shared-instance.publish-review.publish-button": {
     "message": "Push update"
   },
   "instance.shared-instance.publish-review.removed-label": {
     "message": "Removed"
+  },
+  "instance.shared-instance.publish-review.storage-over-limit": {
+    "message": "{size} over the limit. Deselect some files to push this update."
+  },
+  "instance.shared-instance.publish-review.storage-title": {
+    "message": "Storage allowance"
+  },
+  "instance.shared-instance.publish-review.storage-usage": {
+    "message": "{used} of {limit}"
   },
   "instance.shared-instance.tooltip": {
     "message": "This instance's content is being managed by someone else."

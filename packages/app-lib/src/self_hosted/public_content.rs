@@ -50,8 +50,15 @@ pub(crate) async fn versions_by_hash(
 
 fn is_firewall_rejection(error: &crate::Error) -> bool {
     // JSON API permission errors use LabrinthError and must not trigger this fallback.
-    matches!(error.raw.as_ref(), crate::ErrorKind::FetchError(error)
-        if error.status() == Some(StatusCode::FORBIDDEN))
+    fetch_status(error) == Some(StatusCode::FORBIDDEN)
+}
+
+/// The HTTP status of a plain (non-JSON) fetch failure.
+fn fetch_status(error: &crate::Error) -> Option<StatusCode> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<reqwest::Error>())
+        .and_then(reqwest::Error::status)
 }
 
 async fn optional_version(
@@ -67,14 +74,10 @@ async fn optional_version(
     {
         Ok(version) => Ok(Some(version)),
         Err(error)
-            if matches!(error.raw.as_ref(), crate::ErrorKind::FetchError(error)
-            if error.status() == Some(StatusCode::NOT_FOUND)) =>
-        {
-            Ok(None)
-        }
-        Err(error)
-            if matches!(error.raw.as_ref(), crate::ErrorKind::LabrinthError(error)
-            if error.status == Some(404)) =>
+            if fetch_status(&error) == Some(StatusCode::NOT_FOUND)
+                || error
+                    .downcast_ref::<crate::LabrinthError>()
+                    .is_some_and(|error| error.status == Some(404)) =>
         {
             Ok(None)
         }

@@ -20,7 +20,7 @@ use crate::queue::email::EmailQueue;
 use crate::queue::session::AuthQueue;
 use crate::routes::ApiError;
 use crate::routes::internal::session::{AuthSession, issue_auth_sessions};
-use crate::util::captcha::check_hcaptcha;
+use crate::util::captcha::check_turnstile;
 use crate::util::error::ApiContext as _;
 use crate::util::error::Context;
 use crate::util::ext::get_image_ext;
@@ -54,7 +54,7 @@ use sha2::Sha256;
 use std::collections::HashMap;
 use std::str::FromStr;
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 use validator::Validate;
@@ -329,6 +329,7 @@ impl TempUser {
             is_subscribed_to_newsletter: sign_up_newsletter,
             eligibility_verified_at: Some(Utc::now()),
             lock: None,
+            restriction: None,
         }
         .insert(transaction)
         .await
@@ -1135,6 +1136,7 @@ pub struct AuthorizationInit {
     pub token: Option<String>,
     /// If the user is already logged in, and is linking a PayPal account,
     /// this will be set to the user's auth token from the frontend.
+    /// Only first-party session tokens may authorize linking.
     pub auth_token: Option<String>,
 }
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
@@ -1170,7 +1172,11 @@ pub async fn init(
     // This can happen when linking to a PayPal account (logging in) when already
     // logged in.
     let existing_user_id = if let Some(auth_token) = &info.auth_token {
-        get_user_record_from_bearer_token(
+        if !auth_token.starts_with("mra_") {
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+
+        let (scopes, user) = get_user_record_from_bearer_token(
             &req,
             Some(auth_token),
             &**client,
@@ -1178,15 +1184,19 @@ pub async fn init(
             &session_queue,
             false,
         )
-        .await
-        .ok()
-        .flatten()
-        .map(|(_scopes, user)| user.id)
+        .await?
+        .ok_or_else(|| AuthenticationError::InvalidCredentials)?;
+
+        if !scopes.contains(Scopes::USER_AUTH_WRITE) {
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+
+        Some(user.id)
     } else {
         None
     };
 
-    info!(
+    debug!(
         ?existing_user_id,
         auth_token_present = %info.auth_token.is_some(),
         "Starting authentication flow"
@@ -1342,11 +1352,6 @@ pub async fn auth_callback(
             .await
             .wrap_err("failed to get user from provider")?;
 
-        let user_id_opt = provider
-            .get_user_id(&oauth_user.id, &**client)
-            .await
-            .wrap_err("failed to get user ID from provider")?;
-
         let mut transaction = client
             .begin()
             .await
@@ -1365,6 +1370,22 @@ pub async fn auth_callback(
 
             if DBUserLock::exists(existing_user_id, &mut transaction).await? {
                 return Err(AuthenticationError::AccountLocked);
+            }
+
+            crate::database::advisory_lock::AdvisoryLock::PayPalAccount(
+                oauth_user.id.clone(),
+            )
+            .acquire(&mut transaction)
+            .await
+            .wrap_err("failed to lock PayPal account for linking")?;
+
+            let linked_user_id = provider
+                .get_user_id(&oauth_user.id, &mut transaction)
+                .await
+                .wrap_err("failed to get linked user ID from PayPal")?;
+
+            if linked_user_id.is_some_and(|id| id != existing_user_id) {
+                return Err(AuthenticationError::ProviderAlreadyLinked);
             }
 
             sqlx::query!(
@@ -1397,6 +1418,11 @@ pub async fn auth_callback(
                 .append_header(("Location", url.as_str()))
                 .json(serde_json::json!({ "url": url })));
         }
+
+        let user_id_opt = provider
+            .get_user_id(&oauth_user.id, &**client)
+            .await
+            .wrap_err("failed to get user ID from provider")?;
 
         if let Some(id) = user_id {
             if user_id_opt.is_some() {
@@ -1618,7 +1644,7 @@ pub async fn create_oauth_account(
     validate_account_consent(new_account.account_consent)
         .wrap_api_err("validating account consent")?;
 
-    if !check_hcaptcha(&req, &new_account.challenge)
+    if !check_turnstile(&req, &new_account.challenge, &redis)
         .await
         .wrap_api_err("checking captcha response")?
     {
@@ -2151,6 +2177,7 @@ impl ReadyAccountRegisterFlow {
             is_subscribed_to_newsletter: register_flow.sign_up_newsletter,
             eligibility_verified_at: Some(Utc::now()),
             lock: None,
+            restriction: None,
         }
         .insert(transaction)
         .await;
@@ -2251,9 +2278,13 @@ pub async fn create_account_with_password(
     validate_account_consent(new_account.account_consent)
         .wrap_api_err("validating account consent")?;
 
-    if !check_hcaptcha(&req, new_account.challenge.as_deref().unwrap_or(""))
-        .await
-        .wrap_api_err("checking captcha response")?
+    if !check_turnstile(
+        &req,
+        new_account.challenge.as_deref().unwrap_or(""),
+        &redis,
+    )
+    .await
+    .wrap_api_err("checking captcha response")?
     {
         return Err(ApiError::Request(eyre::eyre!(
             "captcha validation failed"
@@ -2313,7 +2344,7 @@ pub async fn login_password(
     redis: Data<RedisPool>,
     login: web::Json<Login>,
 ) -> Result<HttpResponse, ApiError> {
-    if !check_hcaptcha(&req, &login.challenge)
+    if !check_turnstile(&req, &login.challenge, &redis)
         .await
         .wrap_api_err("checking captcha response")?
     {
@@ -2876,7 +2907,7 @@ pub async fn reset_password_begin(
     reset_password: web::Json<ResetPassword>,
     email: web::Data<EmailQueue>,
 ) -> Result<HttpResponse, ApiError> {
-    if !check_hcaptcha(&req, &reset_password.challenge)
+    if !check_turnstile(&req, &reset_password.challenge, &redis)
         .await
         .wrap_api_err("checking captcha response")?
     {

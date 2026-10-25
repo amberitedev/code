@@ -9,11 +9,11 @@ license = "GPL-3.0-only"
 
 [dependencies]
 aes-gcm = { workspace = true }
+anyhow = { workspace = true }
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
 base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
-daedalus = { workspace = true }
 dashmap = { workspace = true }
 either = { workspace = true }
 enumset = { workspace = true, features = ["serde"] }
@@ -42,8 +42,8 @@ tauri-plugin-os = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
+tempfile = { workspace = true }
 theseus = { workspace = true, features = ["tauri"] }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
 tokio-rustls = "0.26.4"
 tokio-util = { workspace = true, features = ["rt"] }

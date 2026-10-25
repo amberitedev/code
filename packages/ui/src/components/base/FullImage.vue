@@ -4,7 +4,7 @@
 		:src="src ?? undefined"
 		v-bind="$attrs"
 		@contextmenu="onContextMenu"
-		@dragstart="onDragStart"
+		@pointerdown="onPointerDown"
 	/>
 </template>
 
@@ -64,13 +64,11 @@ function onContextMenu(event: MouseEvent) {
 	])
 }
 
-function onDragStart(event: DragEvent) {
-	if (!props.rawSrc || !event.dataTransfer) return
-
-	const filename = props.rawSrc.split('/').pop()?.split('?')[0] || 'image'
-
-	event.dataTransfer.setData('DownloadURL', `application/octet-stream:${filename}:${props.rawSrc}`)
-	event.dataTransfer.setData('text/uri-list', props.rawSrc)
-	event.dataTransfer.setData('text/plain', props.rawSrc)
+function onPointerDown(event: PointerEvent) {
+	if (!props.rawSrc || event.button !== 0) return
+	swapImageSrc(event.currentTarget as HTMLImageElement, props.rawSrc, [
+		{ target: window, type: 'pointerup', capture: true },
+		{ target: event.currentTarget as HTMLImageElement, type: 'dragend' },
+	])
 }
 </script>

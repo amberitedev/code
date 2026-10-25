@@ -23,7 +23,8 @@ use scalar_api_reference::actix_web::config as scalar_config;
 use serde_json::json;
 use std::ffi::CStr;
 use std::sync::Arc;
-use tracing::{Instrument, info, info_span};
+use std::time::{Duration, Instant};
+use tracing::{Instrument, info, info_span, warn};
 use tracing_actix_web::TracingLogger;
 use utoipa::OpenApi;
 use utoipa::PartialSchema;
@@ -37,6 +38,9 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[unsafe(export_name = "malloc_conf")]
 pub static MALLOC_CONF: &CStr = c"prof:true,prof_active:true,lg_prof_sample:19";
+
+/// Matches the Kubernetes default probe `timeoutSeconds`.
+const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct Pepper {
@@ -180,8 +184,6 @@ async fn app() -> std::io::Result<()> {
 
     let gotenberg_client = GotenbergClient::from_env(redis_pool.clone())
         .expect("Failed to create Gotenberg client");
-    let muralpay = labrinth::queue::payouts::create_muralpay_client()
-        .expect("Failed to create MuralPay client");
 
     if let Some(task) = args.run_background_task {
         info!("Running task {task:?} and exiting");
@@ -196,7 +198,6 @@ async fn app() -> std::io::Result<()> {
             stripe_client,
             anrok_client.clone(),
             email_queue,
-            muralpay,
         )
         .await
         .map_err(std::io::Error::other)?;
@@ -212,7 +213,7 @@ async fn app() -> std::io::Result<()> {
         .build()
         .expect("Failed to create prometheus metrics middleware");
 
-    database::register_and_set_metrics(&pool, &prometheus.registry)
+    database::register_and_set_metrics(&pool, &ro_pool, &prometheus.registry)
         .await
         .expect("Failed to register database metrics");
     redis_pool
@@ -269,9 +270,17 @@ async fn app() -> std::io::Result<()> {
                     http.authenticated = %req.headers().get("Authorization").is_some()
                 );
 
+                let is_health_probe = req
+                    .headers()
+                    .get("User-Agent")
+                    .and_then(|h| h.to_str().ok())
+                    .is_some_and(|ua| ua.starts_with("kube-probe"));
+                let path = req.path().to_string();
+                let started_at = Instant::now();
+
                 let fut = srv.call(req);
                 async move {
-                    fut.await.inspect(|resp| {
+                    let result = fut.await.inspect(|resp| {
                         let _span = info_span!(
                             "HTTP response",
                             http.status = %resp.response().status().as_u16(),
@@ -280,7 +289,33 @@ async fn app() -> std::io::Result<()> {
                         resp.response()
                             .error()
                             .inspect(|err| log_error(err));
-                    })
+                    });
+
+                    if is_health_probe {
+                        let elapsed = started_at.elapsed();
+                        let elapsed_ms = elapsed.as_millis() as u64;
+                        match &result {
+                            Ok(resp)
+                                if !resp.status().is_success()
+                                    || elapsed > HEALTH_PROBE_TIMEOUT =>
+                            {
+                                warn!(
+                                    path,
+                                    elapsed_ms,
+                                    status = resp.status().as_u16(),
+                                    "Health probe failed"
+                                )
+                            }
+                            Ok(_) => {}
+                            Err(err) => warn!(
+                                path,
+                                elapsed_ms,
+                                "Health probe failed: {err:#}"
+                            ),
+                        }
+                    }
+
+                    result
                 }
                 .instrument(span)
             })
@@ -362,6 +397,8 @@ async fn app() -> std::io::Result<()> {
     .bind(&ENV.BIND_ADDR)?
     .run()
     .await
+    .inspect(|()| info!("Actix HTTP server stopped"))
+    .inspect_err(|err| tracing::error!("Actix HTTP server failed: {err:#}"))
 }
 
 fn openapi_json_service(

@@ -1,3 +1,4 @@
+use crate::ErrorKind;
 use crate::state::DirectoryInfo;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions,
@@ -10,8 +11,8 @@ pub(crate) async fn connect(
     app_identifier: &str,
 ) -> crate::Result<Pool<Sqlite>> {
     let settings_dir = DirectoryInfo::initial_settings_dir_path(app_identifier)
-        .ok_or(crate::ErrorKind::FSError(
-            "Could not find valid config dir".to_string(),
+        .ok_or(ErrorKind::FSError(
+            "could not find valid config dir".to_string(),
         ))?;
 
     crate::util::io::create_dir_all(&settings_dir).await?;
@@ -22,7 +23,13 @@ pub(crate) async fn connect(
 }
 
 async fn connect_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
-    super::db_backup::maybe_backup_existing_app_db(db_path).await?;
+    if let Err(err) =
+        super::db_backup::maybe_backup_existing_app_db(db_path).await
+    {
+        tracing::warn!(
+            "Continuing without a pre-migration app database backup: {err}"
+        );
+    }
     open_migrated_app_db(db_path).await
 }
 

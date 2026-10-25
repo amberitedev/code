@@ -20,7 +20,7 @@ import {
 	useSharedInstanceErrors,
 } from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
-import { apiClient } from '@/services/api-client'
+import { apiClient } from '@/platform/modrinth-client'
 
 import { instanceKeys } from './query-options'
 

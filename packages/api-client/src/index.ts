@@ -52,7 +52,7 @@ export { clearNodeAuthState, nodeAuthState, setNodeAuthState } from './state/nod
 export * from './types'
 export { withJWTRetry } from './utils/jwt-retry'
 export { getBackupDownloadUrl, getNodeWebSocketUrl } from './utils/node-url'
-export { pingWebSocketUrl, type WebSocketPingOptions } from './utils/pingtest'
+export { WebSocketPinger, type WebSocketPingOptions } from './utils/pingtest'
 export {
 	type ParsedSseEvent,
 	type ParsedSseItem,

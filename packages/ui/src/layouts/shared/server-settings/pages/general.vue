@@ -163,13 +163,15 @@
 				<!-- Info -->
 				<div class="flex flex-col gap-2.5 pb-10">
 					<div class="text-lg m-0 font-semibold text-contrast">Info</div>
-					<div class="flex flex-col gap-2.5 rounded-xl bg-surface-2 p-4">
-						<div
-							v-for="property in infoProperties"
-							:key="property.name"
-							class="flex items-start justify-between gap-4"
-						>
-							<template v-if="property.value !== 'Unknown'">
+					<div
+						class="flex flex-col gap-2.5 rounded-[20px] p-4"
+						:class="isApp ? 'bg-surface-3' : 'bg-surface-2'"
+					>
+						<template v-for="property in infoProperties" :key="property.name">
+							<div
+								v-if="property.value !== 'Unknown'"
+								class="flex items-start justify-between gap-4"
+							>
 								<span class="mt-1">{{ property.name }}</span>
 								<CopyCode v-if="property.type === 'copy'" :text="property.value" />
 								<div
@@ -179,8 +181,8 @@
 									<span v-for="line in property.lines" :key="line">{{ line }}</span>
 								</div>
 								<span v-else class="text-right text-sm break-words">{{ property.value }}</span>
-							</template>
-						</div>
+							</div>
+						</template>
 					</div>
 				</div>
 			</div>
@@ -220,6 +222,7 @@ import {
 const { addNotification } = injectNotificationManager()
 const client = injectModrinthClient()
 const { server: data, serverId, busyReasons } = injectModrinthServerContext()
+const { isApp } = injectServerSettings()
 const { featureFlags } = injectPageContext()
 const queryClient = useQueryClient()
 const { canUseAdvancedSettings, canWriteFiles, permissionDeniedMessage } = useServerPermissions()

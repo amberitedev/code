@@ -16,20 +16,20 @@ import {
 	useGhostReveal,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
 import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
 import { openAddCoreModal, useCores } from '@/composables/use-cores'
+import { injectSettingsActions } from '@/features/settings/settings-actions'
 import { coreOffline, coreProblem, useServers } from '@/helpers/linked-servers'
-import { appSettingsModalOpenCoresKey } from '@/providers/app-settings-modal'
 
 const client = injectModrinthClient()
 const auth = injectAuth()
 const { addNotification } = injectNotificationManager()
 const instanceSource = injectInstanceServerSource(null)
-const openCoreSettings = inject(appSettingsModalOpenCoresKey, () => {})
+const { openCores: openCoreSettings } = injectSettingsActions()
 const router = useRouter()
 const queryClient = useQueryClient()
 const searchInput = ref('')

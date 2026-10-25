@@ -20,13 +20,12 @@ If you're not a developer and you've stumbled upon this repository, you can acce
 
 This repository contains several projects. For detailed development information, please refer to their respective guides:
 
-| Project       | Directory              | Guide                                                     |
-| ------------- | ---------------------- | --------------------------------------------------------- |
-| Website       | `apps/frontend`        | [Guide](https://docs.modrinth.com/contributing/knossos/)  |
-| App           | `apps/app`             | [Guide](https://docs.modrinth.com/contributing/theseus/)  |
-| API           | `apps/labrinth`        | [Guide](https://docs.modrinth.com/contributing/labrinth/) |
-| Meta          | `apps/daedalus_client` | [Guide](https://docs.modrinth.com/contributing/daedalus/) |
-| Documentation | `apps/docs`            | [Guide](https://docs.modrinth.com/contributing/docs/)     |
+| Project       | Directory       | Guide                                                     |
+| ------------- | --------------- | --------------------------------------------------------- |
+| Website       | `apps/frontend` | [Guide](https://docs.modrinth.com/contributing/knossos/)  |
+| App           | `apps/app`      | [Guide](https://docs.modrinth.com/contributing/theseus/)  |
+| API           | `apps/labrinth` | [Guide](https://docs.modrinth.com/contributing/labrinth/) |
+| Documentation | `apps/docs`     | [Guide](https://docs.modrinth.com/contributing/docs/)     |
 
 Shared libraries live in `packages/`.
 
