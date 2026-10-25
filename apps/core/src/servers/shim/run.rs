@@ -266,6 +266,16 @@ impl HealthCheck {
         }
         false
     }
+
+    /// Label `line` when it answers the check waiting. Java output that already starts with
+    /// the label is marked, so only the shim can write it.
+    fn label(&self, line: &mut Vec<u8>) {
+        if self.answered_by(line) {
+            line.splice(0..0, HEALTH_CHECK.bytes());
+        } else if line.starts_with(HEALTH_CHECK.as_bytes()) {
+            line.splice(0..0, *b"[Java] ");
+        }
+    }
 }
 
 /// Autosave turned off for a backup. Core turns it back on; if Core never comes back, the hold
@@ -431,9 +441,7 @@ fn pump(
             if !line.ends_with(b"\n") {
                 line.push(b'\n');
             }
-            if health_check.answered_by(&line) {
-                line.splice(0..0, HEALTH_CHECK.bytes());
-            }
+            health_check.label(&mut line);
             if let Err(error) =
                 console.lock().expect("not poisoned").write(&line)
             {
@@ -458,6 +466,25 @@ mod tests {
         ));
         assert!(check.answered_by(list));
         assert!(!check.answered_by(list), "one answer per check");
+    }
+
+    #[test]
+    fn java_cannot_write_the_label_itself() {
+        let check = HealthCheck::default();
+        check.ask();
+        let answer = "[12:00:00] [Server thread/INFO]: There are 0 of a max of 20 players online: \n";
+        let mut line = format!("{HEALTH_CHECK}{answer}").into_bytes();
+        check.label(&mut line);
+        let line = console::decode(&line);
+        assert_eq!(insight::classify(&line), Line::Other);
+        assert!(console::for_people(&line));
+        // The check still waits for the real answer.
+        let mut real = answer.as_bytes().to_vec();
+        check.label(&mut real);
+        assert!(matches!(
+            insight::classify(&console::decode(&real)),
+            Line::Checked(_)
+        ));
     }
 
     fn recorder() -> (
