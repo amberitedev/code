@@ -1,6 +1,6 @@
 //! The shim: `copal shim`, this binary in another mode. Core starts one per server run, fully
 //! detached, running as `copal`. The shim starts Java as `copal-servers` as its own child, writes
-//! Java's output to `console.log`, passes Core's commands to Java's stdin over a socket only
+//! Java's output to `console.log` (labeling the answer to Core's health check), passes Core's commands to Java's stdin over a socket only
 //! `copal` can open, and writes how Java ended to `status.json`. It outlives Core, so a Core that
 //! stops, crashes, or updates leaves the server running.
 //!
@@ -40,8 +40,8 @@ use crate::{
 };
 
 /// The version of the files and messages below. Change it whenever their meaning changes. 2: the
-/// shim answers `HoldSaves` and `ReleaseSaves`.
-pub const PROTOCOL: u32 = 2;
+/// shim answers `HoldSaves` and `ReleaseSaves`. 3: the shim runs `HealthCheck`.
+pub const PROTOCOL: u32 = 3;
 
 /// What Core asks a shim to run, in `launch.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +116,9 @@ pub enum Message {
     Command {
         line: String,
     },
+    /// Send `list` for Core's health check and label its answer in `console.log` (see
+    /// `insight`).
+    HealthCheck,
     /// Send `stop` to Java and remember that Core asked.
     Stop,
     /// Kill Java now.
@@ -388,10 +391,10 @@ mod tests {
                 line: "say hi".into()
             }
         );
-        let newer = r#"{"v":3,"type":"hello","run_id":"x","new_field":true}"#;
-        assert_eq!(decode(newer).unwrap().unwrap_err(), 3);
-        let unknown = r#"{"v":3,"type":"something_new"}"#;
-        assert_eq!(decode(unknown).unwrap().unwrap_err(), 3);
+        let newer = r#"{"v":4,"type":"hello","run_id":"x","new_field":true}"#;
+        assert_eq!(decode(newer).unwrap().unwrap_err(), 4);
+        let unknown = r#"{"v":4,"type":"something_new"}"#;
+        assert_eq!(decode(unknown).unwrap().unwrap_err(), 4);
         // A shim from before holds were answered is another protocol, so Core never waits on it.
         let older = r#"{"v":1,"type":"hello","run_id":"x"}"#;
         assert_eq!(decode(older).unwrap().unwrap_err(), 1);

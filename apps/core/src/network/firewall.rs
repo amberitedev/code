@@ -2,8 +2,9 @@
 //! server port range, and `copal uninstall` closes it again. Core never runs a firewall tool
 //! after that, so it needs no permission to.
 //!
-//! Windows: one inbound rule named "Amberite Core". Linux: ufw and firewalld rules. macOS: the
-//! application firewall decides per program and is off by default; install leaves it alone.
+//! Windows: one inbound rule named "Amberite Core", for private networks only, so public Wi-Fi
+//! stays closed. Linux: ufw and firewalld rules. macOS: the application firewall decides per
+//! program and is off by default; install leaves it alone.
 
 use std::{ops::RangeInclusive, process::Command};
 
@@ -83,7 +84,7 @@ mod platform {
                 "action=allow",
                 "protocol=TCP",
                 &format!("localport={ports}"),
-                "profile=any",
+                "profile=private",
             ],
         )?;
         Ok(vec![format!(

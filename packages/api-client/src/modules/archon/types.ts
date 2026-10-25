@@ -725,6 +725,8 @@ export namespace Archon {
 				power_state?: 'offline' | 'starting' | 'running' | 'stopping' | 'crashed' | 'killed'
 				/** Core only. Null while the server is not running. */
 				reachability?: Reachability | null
+				/** Core only. Who is online, from Core's health check. Null while the server is not running. */
+				players?: string[] | null
 			}
 
 			export type LinkedInstance = {

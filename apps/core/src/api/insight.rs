@@ -31,14 +31,16 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ServerInsight {
-    /// Who is online, from join and leave lines. Empty while the server does not run.
+    /// Who is online, from Core's health check and join and leave lines. Empty while the server
+    /// does not run.
     pub players: Vec<String>,
-    /// `list` answered this run, so `players` is checked, not only what join and leave lines
-    /// said.
+    /// The health check answered this run, so `players` is checked, not only what join and
+    /// leave lines said.
     pub players_checked: bool,
-    /// The server stopped answering Core's probe, so it is probably frozen. Offer a restart.
+    /// The server stopped answering Core's health check, so it is probably frozen. Offer a
+    /// restart.
     pub frozen: bool,
-    /// Unix seconds of the server's last answer to the probe.
+    /// Unix seconds of the server's last answer to the health check.
     pub answered_at: Option<i64>,
     /// Core stopped starting the server again after it crashed 3 times in 10 minutes.
     pub crash_restart_stopped: bool,

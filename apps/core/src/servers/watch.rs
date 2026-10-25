@@ -1,5 +1,5 @@
-//! What Core does while a server runs: read its console for players, probe it for freezes (see
-//! `insight`), and start it again after a crash.
+//! What Core does while a server runs: read its console for players, check its health for
+//! freezes (see `insight`), and start it again after a crash.
 
 use std::{
     collections::HashMap,
@@ -8,7 +8,7 @@ use std::{
         Arc, MutexGuard,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use tokio::sync::mpsc;
@@ -16,9 +16,10 @@ use tracing::{info, warn};
 
 use super::{
     Lifecycle, Phase, ServerError, Servers, console,
-    insight::{self, Insight, Probes},
+    insight::{self, Insight},
     records::{self, Outcome},
     restarts,
+    shim::Message,
 };
 use crate::access::now;
 
@@ -229,37 +230,27 @@ impl Servers {
             .is_ok_and(|restarts| restarts.crash)
     }
 
-    /// Follow run `run`'s console until it ends: players from its lines, a probe every minute,
-    /// and `list` once it is ready and every few minutes after.
+    /// Follow run `run`'s console until it ends: players from its lines, and Core's health
+    /// check once it is ready and every [`insight::CHECK_EVERY`] after.
     async fn follow(self: Arc<Self>, id: String, run: u64) {
         let path = self.paths.console_log(&id);
         let end = console::tail(&path, 0).map_or(0, |(_, end)| end);
         let (sender, mut lines) = mpsc::channel(256);
         console::follow(path, end, sender);
-        let mut probe = tokio::time::interval(insight::PROBE_EVERY);
-        let mut list = tokio::time::interval(insight::LIST_EVERY);
-        let mut probes = Probes::default();
+        let mut check = tokio::time::interval(insight::CHECK_EVERY);
         loop {
             let ask = tokio::select! {
                 line = lines.recv() => {
                     let Some(line) = line else { return };
-                    let at = Instant::now();
                     let mut watched = self.watched();
                     let Some(this) = watched.get_mut(&id).filter(|this| this.run == run) else {
                         return;
                     };
                     let was_ready = this.insight.ready;
-                    this.insight.read(&line, at);
-                    if probes.answered(&line, at) {
-                        this.insight.answered_at = Some(now());
-                        this.insight.frozen = false;
-                    }
-                    (!was_ready && this.insight.ready).then(|| {
-                        this.insight.ask_list(at);
-                        "list".to_owned()
-                    })
+                    this.insight.read(&line, now());
+                    !was_ready && this.insight.ready
                 }
-                _ = probe.tick() => {
+                _ = check.tick() => {
                     let mut watched = self.watched();
                     let Some(this) = watched.get_mut(&id).filter(|this| this.run == run) else {
                         return;
@@ -269,23 +260,11 @@ impl Servers {
                     if this.insight.frozen && !was_frozen {
                         warn!(server = %id, "stopped answering; marked frozen");
                     }
-                    this.insight.ready.then(|| probes.send(Instant::now()))
-                }
-                _ = list.tick() => {
-                    let mut watched = self.watched();
-                    let Some(this) = watched.get_mut(&id).filter(|this| this.run == run) else {
-                        return;
-                    };
-                    this.insight.ready.then(|| {
-                        this.insight.ask_list(Instant::now());
-                        "list".to_owned()
-                    })
+                    this.insight.ready
                 }
             };
-            if let Some(command) = ask
-                && self.phase(&id) == Some(Phase::Running)
-            {
-                let _ = self.command(&id, &command).await;
+            if ask && self.phase(&id) == Some(Phase::Running) {
+                let _ = self.tell(&id, Message::HealthCheck).await;
             }
         }
     }

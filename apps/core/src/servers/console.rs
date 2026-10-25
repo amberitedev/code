@@ -17,6 +17,15 @@ pub const MAX_LINE: usize = 64 * 1024;
 /// When `console.log` grows past this, the shim starts it over and Core follows the new start.
 pub const MAX_LOG: u64 = 32 * 1024 * 1024;
 
+/// Starts the lines that answer Core's own health check (see `insight`). They stay in
+/// `console.log` with this label and are left out of the console the App shows.
+pub const HEALTH_CHECK: &str = "[Core health check] ";
+
+/// Whether a console line is meant for people: not the answer to Core's health check.
+pub fn for_people(line: &str) -> bool {
+    !line.starts_with(HEALTH_CHECK)
+}
+
 /// How often a follower looks for new output.
 const POLL: Duration = Duration::from_millis(250);
 

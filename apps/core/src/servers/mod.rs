@@ -356,10 +356,13 @@ impl Servers {
                 status.as_ref().filter(|status| status.run_id == run_id);
             let (outcome, exit_code) = records::outcome(status);
             let last_lines = (outcome == Outcome::Crashed).then(|| {
-                let mut lines =
+                let mut lines: Vec<String> =
                     console::tail(&self.paths.console_log(id), CRASH_LINES)
                         .map(|(lines, _)| lines)
-                        .unwrap_or_default();
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|line| console::for_people(line))
+                        .collect();
                 lines.extend(status.and_then(|status| status.error.clone()));
                 lines.join("\n")
             });

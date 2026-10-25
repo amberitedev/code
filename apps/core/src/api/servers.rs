@@ -227,6 +227,9 @@ pub struct Server {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power_state: Option<ServerPowerState>,
     pub reachability: Option<Reachability>,
+    /// Who is online, from Core's health check (see `servers::insight`). `None` while the
+    /// server does not run.
+    pub players: Option<Vec<String>>,
 }
 
 /// Response of GET `/modrinth/v0/servers/{id}/fs`: where the file API is and the token for it.
@@ -529,6 +532,10 @@ async fn server(
         linked_instance: None,
         power_state: Some(power_state),
         reachability: super::insight::archon(state, &row.id),
+        players: state
+            .servers
+            .insight(&row.id)
+            .map(|insight| insight.players.into_iter().collect()),
     })
 }
 
