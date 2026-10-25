@@ -37,8 +37,8 @@ const BACKLOG: usize = 200;
 /// How often an open console checks that its session has not expired.
 const RECHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// `GET /servers/{id}/ws`: the console. Sends the last lines and every new one as `log` events
-/// and passes `command` messages to the server. Editors and the owner only: it carries chat and
+/// `GET /servers/{id}/ws`: the console. Sends the last lines and every new one as `log` events,
+/// leaving out the answers to Core's health check, and passes `command` messages to the server. Editors and the owner only: it carries chat and
 /// player IPs. The upgrade request carries the session; the first message must still be `auth`,
 /// as the hosting API has it, but its token is not read. The stream closes when its session ends
 /// or its user loses the role, and when the session expires.
@@ -116,7 +116,7 @@ async fn console_socket(
     recheck.tick().await;
     let path = state.servers.paths().console_log(&id);
     let (backlog, end) = console::tail(&path, BACKLOG).unwrap_or_default();
-    for line in backlog {
+    for line in backlog.into_iter().filter(|line| console::for_people(line)) {
         if send(&mut socket, &log(line)).await.is_err() {
             return;
         }
@@ -136,7 +136,7 @@ async fn console_socket(
             }
             line = lines.recv() => {
                 let Some(line) = line else { return };
-                if send(&mut socket, &log(line)).await.is_err() {
+                if console::for_people(&line) && send(&mut socket, &log(line)).await.is_err() {
                     return;
                 }
             }

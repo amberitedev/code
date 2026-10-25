@@ -14,7 +14,6 @@ import { apiClient } from '@/platform/modrinth-client'
 
 import { export_instance_mrpack, get_content_items } from './instance'
 import type { GameInstance } from './types'
-import { get_server_status } from './worlds'
 
 export type LinkedServer = Archon.Servers.v0.Server & {
 	linked_instance: Archon.Servers.v0.LinkedInstance
@@ -200,14 +199,9 @@ export function unreachableCause(server: Archon.Servers.v0.Server) {
 	return server.reachability.cause ?? undefined
 }
 
-/** Players on a running server right now, from a status ping. Zero when it cannot be reached. */
-export async function playersOnline(server: Archon.Servers.v0.Server) {
-	if (!isServerRunning(server)) return 0
-	try {
-		return (await get_server_status(serverAddress(server))).players?.online ?? 0
-	} catch {
-		return 0
-	}
+/** Players on a running server, as Core's health check last saw them. */
+export function playersOnline(server: Archon.Servers.v0.Server) {
+	return server.players?.length ?? 0
 }
 
 /**

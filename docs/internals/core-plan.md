@@ -165,10 +165,12 @@ owner can force-kill.
 **Crash restart.** On by default, a per-server setting. After 3 crashes in 10 minutes Core stops
 trying and leaves the crash report.
 
-**Freeze detection.** Core sends a cheap command through the shim on an interval and watches for
-its output. The reply must echo a random word, so a mod cannot fake "I am alive" cheaply. If the
-server stops answering for a while, it is marked frozen and the API offers a restart. Players
-online come from join and leave lines in the console, checked with `list`.
+**Health check.** Every 10 seconds Core asks the shim for a health check: the shim sends `list`
+and labels its answer `[Core health check]` in `console.log`. Only labeled answers count, and the
+App's console leaves them out. Each answer sets who is online, which the App reads from the server
+list instead of pinging the server, and shows the server still answers. If it stops answering for
+a while, it is marked frozen and the API offers a restart. Join and leave lines update the players
+between checks.
 
 **Restarts.** Two per-server settings, shown by the App under performance:
 

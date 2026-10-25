@@ -181,7 +181,7 @@ How it works (`apps/core/src/network`):
   servers outlive Core. Every few minutes Core checks for a changed home address or a different
   network and starts over when it sees one.
 - Firewall: on Windows one inbound rule, "Amberite Core", covers Core's port and server ports
-  25565 to 25664. Core asks for administrator rights once with the normal Windows prompt and never
+  25565 to 25664 on private networks only, so public Wi-Fi stays closed. Core asks for administrator rights once with the normal Windows prompt and never
   again, whatever the answer; after a refusal it prints the command to run. On Linux Core handles
   ufw and firewalld: it opens ports itself when it runs as root and prints the command otherwise.
   On macOS it only reports that the firewall is on. Hand-written nftables or iptables rules are

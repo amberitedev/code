@@ -23,7 +23,8 @@ use crate::{
     access::local::{Listener, Stream},
     daemon::{install::InstallRecord, paths::Paths},
     servers::{
-        console::{MAX_LINE, MAX_LOG, read_line},
+        console::{self, HEALTH_CHECK, MAX_LINE, MAX_LOG, read_line},
+        insight::{self, Line},
         process,
     },
 };
@@ -84,9 +85,10 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
         }
     };
     eprintln!("run {}: Java runs as pid {java_pid}", launch.run_id);
+    let health_check = Arc::new(HealthCheck::default());
     let pumps = [
-        pump(stdout, Arc::clone(&console)),
-        pump(stderr, Arc::clone(&console)),
+        pump(stdout, Arc::clone(&console), Arc::clone(&health_check)),
+        pump(stderr, Arc::clone(&console), Arc::clone(&health_check)),
     ];
 
     let shared = Arc::new(Shared {
@@ -95,6 +97,7 @@ pub async fn main(data_dir: PathBuf, server_id: String) -> Result<()> {
         killer,
         ended_by: Mutex::new(EndedBy::Exit),
         saves: Arc::default(),
+        health_check,
     });
     let server = tokio::spawn(serve(listener, Arc::clone(&shared)));
     let pid = std::process::id();
@@ -171,6 +174,7 @@ struct Shared {
     killer: Killer,
     ended_by: Mutex<EndedBy>,
     saves: Arc<SaveHold>,
+    health_check: Arc<HealthCheck>,
 }
 
 impl Shared {
@@ -187,6 +191,10 @@ impl Shared {
                 }
                 drop(ended_by);
                 self.write("stop")
+            }
+            Message::HealthCheck => {
+                self.health_check.ask();
+                self.write("list")
             }
             Message::Kill => {
                 *self.ended_by.lock().expect("not poisoned") = EndedBy::Kill;
@@ -227,6 +235,47 @@ impl Shared {
 /// The answer to a hold or release, or nothing when it failed (Core then gives up waiting).
 fn answer(result: std::io::Result<Message>) -> Option<Message> {
     result.map_err(|error| eprintln!("{error}")).ok()
+}
+
+/// Core's health check: `list`, whose answer the shim labels with [`HEALTH_CHECK`] in the console
+/// so Core can trust it and the App can leave it out. One answer per check, within
+/// [`insight::ANSWER_WITHIN`].
+#[derive(Default)]
+struct HealthCheck {
+    asked: Mutex<Option<Instant>>,
+}
+
+impl HealthCheck {
+    fn ask(&self) {
+        *self.asked.lock().expect("not poisoned") = Some(Instant::now());
+    }
+
+    /// Whether `line` answers the check waiting, which it then uses up.
+    fn answered_by(&self, line: &[u8]) -> bool {
+        let mut asked = self.asked.lock().expect("not poisoned");
+        let waiting =
+            asked.is_some_and(|at| at.elapsed() <= insight::ANSWER_WITHIN);
+        if waiting
+            && matches!(
+                insight::classify(&console::decode(line)),
+                Line::List(_)
+            )
+        {
+            *asked = None;
+            return true;
+        }
+        false
+    }
+
+    /// Label `line` when it answers the check waiting. Java output that already starts with
+    /// the label is marked, so only the shim can write it.
+    fn label(&self, line: &mut Vec<u8>) {
+        if self.answered_by(line) {
+            line.splice(0..0, HEALTH_CHECK.bytes());
+        } else if line.starts_with(HEALTH_CHECK.as_bytes()) {
+            line.splice(0..0, *b"[Java] ");
+        }
+    }
 }
 
 /// Autosave turned off for a backup. Core turns it back on; if Core never comes back, the hold
@@ -373,10 +422,12 @@ impl Console {
     }
 }
 
-/// Copy one of Java's output streams to the console, line by line, on a thread of its own.
+/// Copy one of Java's output streams to the console, line by line, on a thread of its own,
+/// labeling the answer to Core's health check.
 fn pump(
     stream: Box<dyn Read + Send>,
     console: Arc<Mutex<Console>>,
+    health_check: Arc<HealthCheck>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
@@ -390,6 +441,7 @@ fn pump(
             if !line.ends_with(b"\n") {
                 line.push(b'\n');
             }
+            health_check.label(&mut line);
             if let Err(error) =
                 console.lock().expect("not poisoned").write(&line)
             {
@@ -402,6 +454,38 @@ fn pump(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_list_answer_to_a_health_check_is_labeled_once() {
+        let list = b"[12:00:00] [Server thread/INFO]: There are 0 of a max of 20 players online: \n";
+        let check = HealthCheck::default();
+        assert!(!check.answered_by(list), "nobody asked");
+        check.ask();
+        assert!(!check.answered_by(
+            b"[12:00:00] [Server thread/INFO]: Steve joined the game\n"
+        ));
+        assert!(check.answered_by(list));
+        assert!(!check.answered_by(list), "one answer per check");
+    }
+
+    #[test]
+    fn java_cannot_write_the_label_itself() {
+        let check = HealthCheck::default();
+        check.ask();
+        let answer = "[12:00:00] [Server thread/INFO]: There are 0 of a max of 20 players online: \n";
+        let mut line = format!("{HEALTH_CHECK}{answer}").into_bytes();
+        check.label(&mut line);
+        let line = console::decode(&line);
+        assert_eq!(insight::classify(&line), Line::Other);
+        assert!(console::for_people(&line));
+        // The check still waits for the real answer.
+        let mut real = answer.as_bytes().to_vec();
+        check.label(&mut real);
+        assert!(matches!(
+            insight::classify(&console::decode(&real)),
+            Line::Checked(_)
+        ));
+    }
 
     fn recorder() -> (
         Arc<Mutex<Vec<String>>>,
