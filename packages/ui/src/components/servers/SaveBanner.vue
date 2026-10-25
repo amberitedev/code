@@ -3,24 +3,25 @@
 		<FloatingActionBar :shown="props.isVisible" :inline="!!saveBanner">
 			<p class="m-0 font-semibold text-sm md:text-base">You have unsaved changes.</p>
 			<div class="ml-auto flex gap-2">
-				<Button type="quiet" :disabled="props.isUpdating" @click="props.reset"
+				<Button type="quiet" :disabled="props.isUpdating || saved" @click="handleReset"
 					><HistoryIcon /> Reset</Button
 				>
 				<Button
 					:type="props.restart ? 'base' : 'colored'"
 					:color="props.restart ? undefined : 'brand'"
-					:disabled="props.isUpdating"
-					@click="props.save"
+					:disabled="props.isUpdating || saved"
+					@click="handleSave"
 				>
 					<SpinnerIcon v-if="props.isUpdating" class="animate-spin" />
+					<CheckIcon v-else-if="saved" />
 					<SaveIcon v-else />
-					{{ props.isUpdating ? 'Saving...' : 'Save' }}
+					{{ saveButtonLabel }}
 				</Button>
 				<Button
 					v-if="props.restart"
 					type="colored"
 					color="brand"
-					:disabled="props.isUpdating || isTransitioning"
+					:disabled="props.isUpdating || isTransitioning || saved"
 					@click="saveAndPower"
 				>
 					<SpinnerIcon v-if="props.isUpdating || isTransitioning" class="animate-spin" />
@@ -32,29 +33,57 @@
 </template>
 
 <script setup lang="ts">
-import { HistoryIcon, SaveIcon, SpinnerIcon } from '@modrinth/assets'
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { CheckIcon, HistoryIcon, SaveIcon, SpinnerIcon } from '@modrinth/assets'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { Button } from '#ui/components/base/buttons'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
+import { defineMessage, useVIntl } from '#ui/composables/i18n'
 import { injectServerSettings } from '#ui/layouts/shared/server-settings/providers/server-settings'
 import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
 
 const props = defineProps<{
 	isUpdating: boolean
 	restart?: boolean
-	save: () => void | Promise<void>
+	save: () => void | boolean | Promise<void | boolean>
 	reset: () => void
 	isVisible: boolean
 	serverId: string
 }>()
 
+const { formatMessage } = useVIntl()
+const savedMessage = defineMessage({
+	id: 'hosting.save-banner.saved',
+	defaultMessage: 'Saved',
+})
+
 const saveBanner = injectServerSettings(null)?.saveBanner
+
+const saveRequested = ref(false)
+const saved = ref(false)
+
+const saveButtonLabel = computed(() => {
+	if (props.isUpdating) return 'Saving...'
+	if (saved.value) return formatMessage(savedMessage)
+	return 'Save'
+})
+
+function handleSave() {
+	saveRequested.value = true
+	return props.save()
+}
+
+function handleReset() {
+	saveRequested.value = false
+	props.reset()
+}
 
 watch(
 	() => props.isVisible,
 	(shown) => {
 		if (saveBanner) saveBanner.shown.value = shown
+		saved.value = !shown && saveRequested.value
+		saveRequested.value = false
 	},
 	{ immediate: true },
 )
@@ -81,7 +110,7 @@ const powerButtonLabel = computed(() => {
 
 const saveAndPower = async () => {
 	try {
-		await props.save()
+		if ((await handleSave()) === false) return
 	} catch {
 		return
 	}

@@ -56,6 +56,12 @@
 			:user="user"
 			:user-id="userId"
 		/>
+		<RestrictUserModal
+			v-if="variant === 'web' && isStaffViewing"
+			ref="restrictUserModal"
+			:user="user"
+			:user-id="userId"
+		/>
 
 		<NewModal
 			v-if="variant === 'web' && isAdminViewing"
@@ -98,6 +104,7 @@
 		<NewModal
 			v-if="variant === 'web' && isStaffViewing"
 			ref="userDetailsModal"
+			:width="'500px'"
 			:header="formatMessage(messages.userDetailsTitle)"
 		>
 			<div class="flex flex-col gap-3">
@@ -228,8 +235,6 @@
 					:edit-profile-link="editProfileLink"
 					:is-modrinth-user="isModrinthUser"
 					:is-official-account="isOfficialAccount"
-					:show-affiliate-badge="isAdminViewing && isAffiliate"
-					:is-affiliate="isAffiliate"
 					:is-self="isSelf"
 					:is-admin="isAdminViewing"
 					:is-staff="isStaffViewing"
@@ -243,7 +248,6 @@
 					@copy-id="copyId"
 					@copy-permalink="copyPermalink"
 					@open-billing="openPath(`/admin/billing/${user.id}`)"
-					@toggle-affiliate="toggleAffiliate"
 					@open-info="openUserDetails"
 					@open-shared-instances="openPath(`/admin/shared-instances/${user.id}`)"
 					@open-analytics="
@@ -251,6 +255,7 @@
 					"
 					@edit-user="editUserModal?.show()"
 					@toggle-lock="toggleLock"
+					@restrict="restrictUserModal?.show()"
 					@revoke-sessions="revokeSessionsModal?.show()"
 					@force-password-reset="forcePasswordResetModal?.show()"
 					@reset2fa="reset2faModal?.show()"
@@ -508,6 +513,7 @@ import EditUserModal from './components/edit-user-modal.vue'
 import ForcePasswordResetModal from './components/force-password-reset-modal.vue'
 import LockUserModal from './components/lock-user-modal.vue'
 import Reset2faModal from './components/reset-2fa-modal.vue'
+import RestrictUserModal from './components/restrict-user-modal.vue'
 import { blockedUsersQueryKey, injectUserProfile } from './providers'
 import { hasActivePride26Midas, hasPride26Badge, projectUserSorting } from './utils'
 
@@ -938,7 +944,6 @@ function canSeeProjectStatus(project: Labrinth.Projects.v3.Project) {
 }
 
 const canSeeCollectionStatus = computed(() => isSelf.value || isStaffViewing.value)
-const isAffiliate = computed(() => Boolean((user.value?.badges ?? 0) & UserBadge.AFFILIATE))
 const hasMidas = computed(
 	() => Boolean((user.value?.badges ?? 0) & UserBadge.MIDAS) || hasActivePride26Midas(user.value),
 )
@@ -1088,6 +1093,7 @@ const editUserModal = ref<InstanceType<typeof EditUserModal> | null>(null)
 const lockUserModal = ref<InstanceType<typeof LockUserModal> | null>(null)
 const forcePasswordResetModal = ref<InstanceType<typeof ForcePasswordResetModal> | null>(null)
 const reset2faModal = ref<InstanceType<typeof Reset2faModal> | null>(null)
+const restrictUserModal = ref<InstanceType<typeof RestrictUserModal> | null>(null)
 const blockUserModal = ref<ModalRef | null>(null)
 const revokeSessionsModal = ref<ModalRef | null>(null)
 const isBlockingUser = ref(false)
@@ -1226,13 +1232,5 @@ async function confirmRevokeSessions(): Promise<void> {
 	} finally {
 		isRevokingSessions.value = false
 	}
-}
-
-async function toggleAffiliate(): Promise<void> {
-	if (!user.value) return
-	await userProfile.patchUser(user.value.id, {
-		badges: user.value.badges ^ UserBadge.AFFILIATE,
-	})
-	await queryClient.invalidateQueries({ queryKey: userQueryKey.value })
 }
 </script>

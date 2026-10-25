@@ -8,6 +8,7 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { queryOptions, useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useResizeObserver } from '@vueuse/core'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { computed, onUnmounted, ref, watch } from 'vue'
@@ -65,9 +66,16 @@ const gameVersions = computed(() => gameVersionsQuery.data.value ?? [])
 
 const MAX_JUMP_BACK_IN = 5
 const MAX_NEW_INSTANCES = 3
-const ITEM_DRAG_DISTANCE = 92
+const ROW_DRAG_DISTANCE = 92
 const STORAGE_KEY = 'modrinth-jump-back-in-count'
 const SHOWN_COUNT_STORAGE_KEY = 'amberite-jump-in-shown-count'
+
+const itemsGrid = ref<HTMLElement>()
+const columnCount = ref(1)
+useResizeObserver(itemsGrid, () => {
+	if (!itemsGrid.value) return
+	columnCount.value = getComputedStyle(itemsGrid.value).gridTemplateColumns.split(' ').length
+})
 
 const storedVisibleCount = Number.parseInt(localStorage.getItem(STORAGE_KEY) ?? '', 10)
 const visibleItemLimit = ref(
@@ -76,16 +84,19 @@ const visibleItemLimit = ref(
 		: MAX_JUMP_BACK_IN,
 )
 const maxVisibleItems = computed(() => Math.min(jumpBackInItems.value.length, MAX_JUMP_BACK_IN))
-const visibleItemCount = computed(() => Math.min(visibleItemLimit.value, maxVisibleItems.value))
+const minVisibleItems = computed(() => Math.min(columnCount.value, maxVisibleItems.value))
+const visibleItemCount = computed(() =>
+	Math.max(minVisibleItems.value, Math.min(visibleItemLimit.value, maxVisibleItems.value)),
+)
 const visibleJumpBackInItems = computed(() =>
 	jumpBackInItems.value.slice(0, visibleItemCount.value),
 )
-const canResize = computed(() => maxVisibleItems.value > 1)
+const canResize = computed(() => maxVisibleItems.value > minVisibleItems.value)
 const resizing = ref(false)
 const showOverdrag = ref(false)
 
 function setVisibleItemLimit(count: number) {
-	const clamped = Math.max(1, Math.min(count, maxVisibleItems.value))
+	const clamped = Math.max(minVisibleItems.value, Math.min(count, maxVisibleItems.value))
 	if (clamped >= maxVisibleItems.value) {
 		visibleItemLimit.value = MAX_JUMP_BACK_IN
 		localStorage.removeItem(STORAGE_KEY)
@@ -95,9 +106,15 @@ function setVisibleItemLimit(count: number) {
 	}
 }
 
-function adjustVisibleItemLimit(delta: number) {
-	const target = visibleItemCount.value + delta
-	if (target < 1 || target > maxVisibleItems.value) {
+function getRowResizeTarget(count: number, rowDelta: number) {
+	return rowDelta < 0
+		? (Math.ceil(count / columnCount.value) + rowDelta) * columnCount.value
+		: count + rowDelta * columnCount.value
+}
+
+function adjustVisibleItemLimit(rowDelta: number) {
+	const target = getRowResizeTarget(visibleItemCount.value, rowDelta)
+	if (target < minVisibleItems.value || target > maxVisibleItems.value) {
 		flashOverdrag()
 	}
 	setVisibleItemLimit(target)
@@ -140,8 +157,9 @@ function onResizePointerDown(event: PointerEvent) {
 
 function onResizePointerMove(event: PointerEvent) {
 	if (!resizing.value) return
-	const target = dragStartCount + Math.round((event.clientY - dragStartY) / ITEM_DRAG_DISTANCE)
-	const isOverdragging = target < 1 || target > maxVisibleItems.value
+	const rowDelta = Math.round((event.clientY - dragStartY) / ROW_DRAG_DISTANCE)
+	const target = getRowResizeTarget(dragStartCount, rowDelta)
+	const isOverdragging = target < minVisibleItems.value || target > maxVisibleItems.value
 	if (isOverdragging && !wasOverdragging) {
 		flashOverdrag()
 	}
@@ -431,6 +449,7 @@ onUnmounted(() => {
 		</template>
 		<!-- Collapsing snaps the layout; only the content's opacity animates. -->
 		<div
+			ref="itemsGrid"
 			class="grid-when-huge relative flex w-full flex-col gap-3 transition-opacity duration-200 ease-out motion-reduce:transition-none [.accordion-content:not(.open)_&]:opacity-0"
 		>
 			<template v-if="loading">
@@ -517,17 +536,17 @@ onUnmounted(() => {
 				tabindex="0"
 				aria-orientation="horizontal"
 				:aria-label="formatMessage(messages.resize)"
-				:aria-valuemin="1"
+				:aria-valuemin="minVisibleItems"
 				:aria-valuemax="maxVisibleItems"
 				:aria-valuenow="visibleItemCount"
-				class="group/resize relative inset-x-0 bottom-0 flex h-6 -mt-3 w-1/3 mx-auto cursor-ns-resize touch-none select-none items-center justify-center"
+				class="group/resize relative col-span-full inset-x-0 bottom-0 flex h-6 -mt-3 w-1/3 mx-auto cursor-ns-resize touch-none select-none items-center justify-center"
 				@pointerdown="onResizePointerDown"
 				@pointermove="onResizePointerMove"
 				@pointerup="endResize"
 				@pointercancel="endResize"
 				@keydown.up.prevent="adjustVisibleItemLimit(-1)"
 				@keydown.down.prevent="adjustVisibleItemLimit(1)"
-				@keydown.home.prevent="setVisibleItemLimit(1)"
+				@keydown.home.prevent="setVisibleItemLimit(minVisibleItems)"
 				@keydown.end.prevent="setVisibleItemLimit(maxVisibleItems)"
 			>
 				<div class="flex flex-col gap-0.5">

@@ -104,3 +104,4 @@ packages/tooling-config/script-utils/import-sort.js
 
 # Worktree-local Core state
 /apps/core/.copal/
+references/

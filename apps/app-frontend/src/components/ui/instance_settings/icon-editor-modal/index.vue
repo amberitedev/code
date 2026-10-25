@@ -459,11 +459,7 @@ const messages = defineMessages({
 								class="col-span-6 my-2.5 mx-1 w-full border-0 border-t border-solid border-surface-5"
 							/>
 							<button
-								v-tooltip="{
-									// @ts-expect-error the tooltip directive only reads `text`, so upstream's options show nothing
-									content: formatMessage(option.name),
-									delay: { show: 500, hide: 0 },
-								}"
+								v-tooltip="{ text: formatMessage(option.name), delay: 500 }"
 								class="icon-option icon-outline relative aspect-square cursor-pointer overflow-hidden rounded-[20px] border-0 bg-transparent p-0"
 								:class="{ 'icon-outline-selected': selectedSymbol === option.id }"
 								:aria-label="formatMessage(option.name)"

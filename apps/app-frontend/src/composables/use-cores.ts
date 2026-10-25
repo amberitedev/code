@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
-import { apiClient } from '@/services/api-client'
+import { apiClient } from '@/platform/modrinth-client'
 
 export const coresQueryKey = ['cores']
 

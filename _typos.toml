@@ -6,12 +6,11 @@ extend-exclude = [
   "packages/utils/",
   "packages/ui/",
   "packages/blog/",
-  # contains licenses like `CC-BY-ND-4.0`
-  "packages/moderation/src/data/stages/license.ts",
-  "packages/moderation/src/utils.ts",
   # contains payment card IDs like `IY1VMST1MOXS` which are flagged
   "apps/labrinth/src/queue/payouts/mod.rs",
-  "apps/app-frontend/src/components/ui/settings/instances/game-settings-modal/languages.ts",
+  "apps/app-frontend/src/features/settings/syncing/game-settings-modal/languages.ts",
+  # vendored
+  "packages/toasty",
 ]
 
 [default]
@@ -33,16 +32,10 @@ gam = "gam"
 consts = "consts"
 # short for "Copy"
 Cpy = "Cpy"
-# prefix used to match configuration-related error messages
-configur = "configur"
-
+# NoDerivatives in SPDX license identifiers
 ND = "ND"
 
 [default.extend-identifiers]
-# Universal Plug and Play
-UPnP = "UPnP"
-# Built-in Administrators in Windows SDDL strings
-BA = "BA"
 # BTA dependency project name
 HalpLibe = "HalpLibe"
 # Constant from the `zip` crate

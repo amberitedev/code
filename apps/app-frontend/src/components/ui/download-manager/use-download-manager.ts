@@ -26,13 +26,24 @@ import { injectAppEvents } from '@/providers/app-events'
 
 import { debugInfoExports, type DebugInfoExportTask } from './debug-info-export'
 import { createDownloadTransferTracker } from './download-transfer'
+import {
+	externalFileDownloads,
+	type ExternalFileDownloadTask,
+	getExternalFileDownloadRate,
+} from './external-file-downloads'
 import { createInstallJobProgressTracker } from './install-job-progress'
+import {
+	getSharedInstancePublishRate,
+	sharedInstancePublishes,
+	type SharedInstancePublishTask,
+} from './shared-instance-publishes'
 import { storeVerificationTask } from './store-verification'
 import { useInstallJobDisplay } from './use-install-job-display'
 
 export interface DownloadManagerJob {
 	id: string
-	kind?: 'debug-export'
+	kind?: 'external-file' | 'debug-export' | 'shared-instance-publish'
+	serverId?: string
 	createdAt?: string
 	instanceId: string | null
 	status: InstallJobSnapshot['status']
@@ -69,6 +80,13 @@ const verificationMessages = defineMessages({
 	},
 })
 
+const fileMessages = defineMessages({
+	preparing: { id: 'app.file-download.preparing', defaultMessage: 'Preparing download…' },
+	waiting: { id: 'app.file-download.waiting', defaultMessage: 'Waiting for the server…' },
+	canceling: { id: 'app.file-download.canceling', defaultMessage: 'Canceling download…' },
+	canceled: { id: 'app.action-bar.install.summary.canceled', defaultMessage: 'Canceled' },
+})
+
 const debugExportMessages = defineMessages({
 	canceled: { id: 'app.action-bar.install.summary.canceled', defaultMessage: 'Canceled' },
 	title: {
@@ -79,6 +97,21 @@ const debugExportMessages = defineMessages({
 	exporting: { id: 'app.debug-export.exporting', defaultMessage: 'Exporting…' },
 	finishing: { id: 'app.debug-export.finishing', defaultMessage: 'Finishing…' },
 	canceling: { id: 'app.debug-export.canceling', defaultMessage: 'Canceling export…' },
+})
+
+const publishMessages = defineMessages({
+	preparing: {
+		id: 'app.shared-instance-publish.preparing',
+		defaultMessage: 'Preparing update…',
+	},
+	uploading: {
+		id: 'app.shared-instance-publish.uploading',
+		defaultMessage: 'Pushing update…',
+	},
+	pushed: {
+		id: 'app.shared-instance-publish.pushed',
+		defaultMessage: 'Update pushed',
+	},
 })
 
 function getIconUrl(icon: string | null | undefined): string | null {
@@ -167,13 +200,19 @@ export function useDownloadManager() {
 		const task = storeVerificationTask.value
 		return task ? [buildVerificationRow(task)] : []
 	})
+	const fileRows = computed(() => [...externalFileDownloads.value.values()].map(buildFileRow))
 	const debugExportRows = computed(() =>
 		[...debugInfoExports.value.values()].map(buildDebugExportRow),
+	)
+	const publishRows = computed(() =>
+		[...sharedInstancePublishes.value.values()].map(buildPublishRow),
 	)
 	const allRows = computed(() => [
 		...rows.value,
 		...verificationRows.value,
+		...fileRows.value,
 		...debugExportRows.value,
+		...publishRows.value,
 	])
 
 	const activeJobs = computed(() =>
@@ -197,10 +236,16 @@ export function useDownloadManager() {
 	)
 	const rate = computed(() =>
 		display.formatRate(
-			activeJobs.value.reduce(
-				(total, job) => total + (transfer.get(job.id, now.value).rate ?? 0),
-				0,
-			),
+			activeJobs.value.reduce((total, job) => {
+				const file = externalFileDownloads.value.get(job.id)
+				const publish = sharedInstancePublishes.value.get(job.id)
+				const fileRate = file
+					? getExternalFileDownloadRate(file, now.value)
+					: publish
+						? getSharedInstancePublishRate(publish)
+						: null
+				return total + (fileRate ?? transfer.get(job.id, now.value).rate ?? 0)
+			}, 0),
 		),
 	)
 
@@ -239,6 +284,115 @@ export function useDownloadManager() {
 					: '',
 			waiting: task.stage !== 'exporting' || !task.totalBytes,
 			eta: '',
+			canRetry: false,
+			canCopyDetails: !!task.error,
+			copied: copiedJobs.value.has(task.id),
+			busy: busyJobs.value.has(task.id),
+		}
+	}
+
+	function buildPublishRow(task: SharedInstancePublishTask): DownloadManagerJob {
+		const rate = getSharedInstancePublishRate(task)
+		const uploading = task.totalBytes > 0
+		const progress = uploading ? Math.min(0.99, task.uploadedBytes / task.totalBytes) : 0
+		return {
+			id: task.id,
+			kind: 'shared-instance-publish',
+			createdAt: task.createdAt,
+			instanceId: task.instanceId,
+			status: task.status,
+			paused: false,
+			canceling: false,
+			canPause: false,
+			canCancel: false,
+			title: task.instanceName,
+			iconUrl: getIconUrl(task.iconPath),
+			text:
+				task.error ??
+				formatMessage(
+					task.status === 'succeeded'
+						? publishMessages.pushed
+						: uploading
+							? publishMessages.uploading
+							: publishMessages.preparing,
+				),
+			finishedAt: task.finishedAt,
+			progress,
+			overallProgress: task.status === 'succeeded' ? 1 : progress,
+			progressLabel:
+				task.status === 'running' && uploading
+					? [
+							`${formatBytes(task.uploadedBytes)} / ${formatBytes(task.totalBytes)}`,
+							display.formatRate(rate),
+						]
+							.filter(Boolean)
+							.join(' · ')
+					: '',
+			waiting: !uploading,
+			eta:
+				rate && uploading ? display.formatEta((task.totalBytes - task.uploadedBytes) / rate) : '',
+			canRetry: false,
+			canCopyDetails: !!task.error || (appSettings.alwaysShowCopyDetails && !!task.details),
+			copied: copiedJobs.value.has(task.id),
+			busy: busyJobs.value.has(task.id),
+		}
+	}
+
+	function buildFileRow(task: ExternalFileDownloadTask): DownloadManagerJob {
+		const rate = getExternalFileDownloadRate(task, now.value)
+		const progress = task.totalBytes ? Math.min(0.99, task.downloadedBytes / task.totalBytes) : 0
+		const text =
+			task.error ??
+			formatMessage(
+				task.canceling
+					? fileMessages.canceling
+					: task.status === 'canceled'
+						? fileMessages.canceled
+						: task.status === 'succeeded'
+							? commonMessages.savedLabel
+							: task.stage === 'preparing'
+								? fileMessages.preparing
+								: task.stage === 'waiting'
+									? fileMessages.waiting
+									: task.stage === 'saving'
+										? commonMessages.savingButton
+										: commonMessages.downloadingButton,
+			)
+
+		return {
+			id: task.id,
+			kind: 'external-file',
+			serverId: task.serverId,
+			createdAt: task.createdAt,
+			instanceId: null,
+			status: task.status,
+			paused: false,
+			canceling: task.canceling,
+			canPause: false,
+			canCancel: task.status === 'running' && task.stage !== 'saving',
+			title: task.serverName ?? task.filename,
+			iconUrl: null,
+			text,
+			taskType: task.filename,
+			finishedAt: task.finishedAt,
+			progress,
+			overallProgress: task.status === 'succeeded' ? 1 : progress,
+			progressLabel:
+				task.status === 'running' && (task.stage === 'downloading' || task.stage === 'saving')
+					? [
+							task.totalBytes
+								? `${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}`
+								: formatBytes(task.downloadedBytes),
+							display.formatRate(rate),
+						]
+							.filter(Boolean)
+							.join(' · ')
+					: '',
+			waiting: task.stage !== 'downloading' || !task.totalBytes,
+			eta:
+				rate && task.totalBytes
+					? display.formatEta((task.totalBytes - task.downloadedBytes) / rate)
+					: '',
 			canRetry: false,
 			canCopyDetails: !!task.error,
 			copied: copiedJobs.value.has(task.id),
@@ -387,6 +541,11 @@ export function useDownloadManager() {
 			await runAction(id, debugExport.cancel)
 			return
 		}
+		const file = externalFileDownloads.value.get(id)
+		if (file) {
+			await runAction(id, file.cancel)
+			return
+		}
 		if (!jobs.value.get(id)?.can_cancel) return
 		await runJobAction(id, () => install_job_cancel(id))
 	}
@@ -401,6 +560,16 @@ export function useDownloadManager() {
 		const debugExport = debugInfoExports.value.get(id)
 		if (debugExport) {
 			if (debugExport.status !== 'running') debugInfoExports.value.delete(id)
+			return
+		}
+		const file = externalFileDownloads.value.get(id)
+		if (file) {
+			if (file.status !== 'running') externalFileDownloads.value.delete(id)
+			return
+		}
+		const publish = sharedInstancePublishes.value.get(id)
+		if (publish) {
+			if (publish.status !== 'running') sharedInstancePublishes.value.delete(id)
 			return
 		}
 		if (storeVerificationTask.value?.id === id) {
@@ -424,10 +593,13 @@ export function useDownloadManager() {
 
 	async function copyDetails(id: string) {
 		await runAction(id, async () => {
-			const debugExport = debugInfoExports.value.get(id)
-			const details = debugExport
-				? (debugExport.error ?? '')
-				: await install_job_support_details(id)
+			const publish = sharedInstancePublishes.value.get(id)
+			const file = externalFileDownloads.value.get(id) ?? debugInfoExports.value.get(id)
+			const details = publish
+				? (publish.details ?? publish.error ?? '')
+				: file
+					? (file.error ?? '')
+					: await install_job_support_details(id)
 			if (disposed) return
 			await navigator.clipboard.writeText(details)
 			if (disposed) return
