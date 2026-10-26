@@ -43,6 +43,9 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 				method: 'PATCH',
 				body: request,
 				params: acknowledgeRotation ? { ar: 'true' } : undefined,
+				// Acknowledged, the change deletes the rotated backups: on a Core that takes a fresh
+				// ticket, as deleting them by hand does.
+				dangerous: acknowledgeRotation,
 			},
 		)
 	}

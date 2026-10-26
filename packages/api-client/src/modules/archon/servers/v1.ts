@@ -1,4 +1,5 @@
 import { AbstractModule } from '../../../core/abstract-module'
+import { coreNodeUrl } from '../../../utils/node-url'
 import type { Archon } from '../types'
 
 export class ArchonServersV1Module extends AbstractModule {
@@ -35,11 +36,12 @@ export class ArchonServersV1Module extends AbstractModule {
 	 * GET /v1/servers
 	 */
 	public async list(): Promise<Archon.Servers.v1.ServerFull[]> {
-		return this.client.request<Archon.Servers.v1.ServerFull[]>('/servers', {
+		const servers = await this.client.request<Archon.Servers.v1.ServerFull[]>('/servers', {
 			api: 'archon',
 			version: 1,
 			method: 'GET',
 		})
+		return Promise.all(servers.map((server) => this.located(server)))
 	}
 
 	/**
@@ -47,11 +49,28 @@ export class ArchonServersV1Module extends AbstractModule {
 	 * GET /v1/servers/:server_id
 	 */
 	public async get(serverId: string): Promise<Archon.Servers.v1.ServerFull> {
-		return this.client.request<Archon.Servers.v1.ServerFull>(`/servers/${serverId}`, {
+		const server = await this.client.request<Archon.Servers.v1.ServerFull>(`/servers/${serverId}`, {
 			api: 'archon',
 			version: 1,
 			method: 'GET',
 		})
+		return this.located(server)
+	}
+
+	/**
+	 * A Core server's location is the Core itself, reached as this request was: its downloads go
+	 * to `url_host`. See `coreNodeUrl`.
+	 */
+	private async located(
+		server: Archon.Servers.v1.ServerFull,
+	): Promise<Archon.Servers.v1.ServerFull> {
+		if (!this.client.selfHostedHosting || server.location.status !== 'assigned') return server
+		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${server.id}`)
+		const location_metadata = {
+			...server.location.location_metadata,
+			url_host: coreNodeUrl(base, server.id),
+		}
+		return { ...server, location: { status: 'assigned', location_metadata } }
 	}
 
 	/**

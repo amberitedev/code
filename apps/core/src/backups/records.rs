@@ -373,11 +373,14 @@ pub async fn cancel(
     Ok(true)
 }
 
-/// A server's schedule: hours between scheduled backups (0 is off), and how many to keep.
+/// A server's schedule: hours between scheduled backups, how many to keep (its automatic slots;
+/// 0 turns scheduled backups off), and when the schedule last came due with nothing new to back
+/// up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Schedule {
     pub interval_hours: u32,
     pub keep: u32,
+    pub skipped_at: Option<i64>,
 }
 
 impl Default for Schedule {
@@ -385,6 +388,7 @@ impl Default for Schedule {
         Self {
             interval_hours: 24,
             keep: 7,
+            skipped_at: None,
         }
     }
 }
@@ -393,20 +397,24 @@ pub async fn schedule(
     db: &SqlitePool,
     server_id: &str,
 ) -> sqlx::Result<Schedule> {
-    let row: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT interval_hours, keep FROM backup_schedules WHERE server_id = ?",
+    let row: Option<(i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT interval_hours, keep, skipped_at FROM backup_schedules WHERE server_id = ?",
     )
     .bind(server_id)
     .fetch_optional(db)
     .await?;
     Ok(
-        row.map_or_else(Schedule::default, |(interval, keep)| Schedule {
-            interval_hours: u32::try_from(interval).unwrap_or_default(),
-            keep: u32::try_from(keep).unwrap_or_default(),
+        row.map_or_else(Schedule::default, |(interval, keep, skipped_at)| {
+            Schedule {
+                interval_hours: u32::try_from(interval).unwrap_or_default(),
+                keep: u32::try_from(keep).unwrap_or_default(),
+                skipped_at,
+            }
         }),
     )
 }
 
+/// Set how often and how many; when the schedule last skipped stays.
 pub async fn set_schedule(
     db: &SqlitePool,
     server_id: &str,
@@ -425,17 +433,85 @@ pub async fn set_schedule(
     Ok(())
 }
 
-/// When the server's last scheduled backup was queued, whatever came of it.
+/// Record that the schedule came due at `at` and found nothing new to back up.
+pub async fn set_skipped(
+    db: &SqlitePool,
+    server_id: &str,
+    at: i64,
+) -> sqlx::Result<()> {
+    let default = Schedule::default();
+    sqlx::query(
+        "INSERT INTO backup_schedules (server_id, interval_hours, keep, skipped_at) \
+         VALUES (?, ?, ?, ?) ON CONFLICT (server_id) DO UPDATE SET skipped_at = excluded.skipped_at",
+    )
+    .bind(server_id)
+    .bind(i64::from(default.interval_hours))
+    .bind(i64::from(default.keep))
+    .bind(at)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The server's newest scheduled backup: how it stands, and when its last create was queued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastScheduled {
+    pub backup_id: String,
+    pub state: State,
+    pub queued_at: i64,
+}
+
 pub async fn last_scheduled(
     db: &SqlitePool,
     server_id: &str,
-) -> sqlx::Result<Option<i64>> {
-    sqlx::query_scalar(
-        "SELECT MAX(created_at) FROM backups WHERE server_id = ? AND kind = 'scheduled'",
+) -> sqlx::Result<Option<LastScheduled>> {
+    let row: Option<(String, State, i64)> = sqlx::query_as(
+        "SELECT b.id, b.state, COALESCE(MAX(o.queued_at), b.created_at) FROM backups b \
+         LEFT JOIN backup_operations o ON o.backup_id = b.id AND o.kind = 'create' \
+         WHERE b.server_id = ? AND b.kind = 'scheduled' \
+         GROUP BY b.id ORDER BY b.created_at DESC, b.rowid DESC LIMIT 1",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|(backup_id, state, queued_at)| LastScheduled {
+        backup_id,
+        state,
+        queued_at,
+    }))
+}
+
+/// Rename a backup. `false` when the server has no such backup.
+pub async fn rename(
+    db: &SqlitePool,
+    server_id: &str,
+    id: &str,
+    name: &str,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE backups SET name = ? WHERE server_id = ? AND id = ?",
+    )
+    .bind(name)
+    .bind(server_id)
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// How many manual backups the server has or is making: the manual slots in use.
+pub async fn manual_in_use(
+    db: &SqlitePool,
+    server_id: &str,
+) -> sqlx::Result<u32> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM backups WHERE server_id = ? AND kind = 'manual' \
+         AND state IN ('queued', 'running', 'done')",
     )
     .bind(server_id)
     .fetch_one(db)
-    .await
+    .await?;
+    Ok(u32::try_from(count).unwrap_or(u32::MAX))
 }
 
 /// When a run of the server last ended, or `None` if none has.

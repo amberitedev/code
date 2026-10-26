@@ -1,5 +1,6 @@
 import { AbstractModule } from '../../../core/abstract-module'
 import type { UploadHandle, UploadProgress } from '../../../types/upload'
+import { coreNodeUrl } from '../../../utils/node-url'
 import type { Archon } from '../types'
 
 export class ArchonServersV0Module extends AbstractModule {
@@ -12,11 +13,15 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id
 	 */
 	public async get(serverId: string): Promise<Archon.Servers.v0.Server> {
-		return this.client.request<Archon.Servers.v0.Server>(`/servers/${serverId}`, {
+		const server = await this.client.request<Archon.Servers.v0.Server>(`/servers/${serverId}`, {
 			api: 'archon',
 			method: 'GET',
 			version: 'modrinth/v0',
 		})
+		if (!this.client.selfHostedHosting) return server
+		// The node is the Core itself, reached as this request was. See `coreNodeUrl`.
+		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
+		return { ...server, node: { token: '', instance: coreNodeUrl(base, serverId) } }
 	}
 
 	/**
@@ -53,10 +58,8 @@ export class ArchonServersV0Module extends AbstractModule {
 			method: 'GET',
 		})
 		if (!this.client.selfHostedHosting) return auth
-		// As for the console socket: the files are under the base this request went to, which on
-		// a Core is the App's local proxy, with its scheme and its capability path.
 		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
-		return { ...auth, url: `${base}/servers/${serverId}` }
+		return { ...auth, url: coreNodeUrl(base, serverId) }
 	}
 
 	/**

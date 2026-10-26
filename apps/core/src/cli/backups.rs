@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{Client, Output, servers};
-use crate::api::backups::BackupSchedule;
 
 #[derive(Debug, Subcommand)]
 pub enum BackupsCommand {
@@ -27,19 +26,51 @@ pub enum BackupsCommand {
     /// Put a backup back over the server's world. The current world is backed up first, as a
     /// "Before restore" backup, and nothing is restored if that fails.
     Restore { server: String, backup: String },
-    /// Show or change how often a server is backed up and how many backups it keeps.
+    /// Show or change how often a server is backed up and how many of its backup slots the
+    /// scheduled backups take; the other slots are for manual backups.
     Schedule {
         server: String,
         /// Back up every this many hours.
         #[arg(long, conflicts_with = "off")]
         every: Option<u32>,
-        /// No scheduled backups.
-        #[arg(long)]
+        /// No scheduled backups: every slot is for manual backups.
+        #[arg(long, conflicts_with = "keep")]
         off: bool,
-        /// How many scheduled backups to keep.
+        /// How many scheduled backups to keep, each in a slot of its own.
         #[arg(long)]
         keep: Option<u32>,
     },
+}
+
+/// `api::backups::BackupsQueueWithOptionsResponse`, the parts the CLI shows.
+#[derive(Debug, Serialize, Deserialize)]
+struct WithOptions {
+    options: Options,
+    next_auto_backup_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// `api::backups::WorldBackupOptions`.
+#[derive(Debug, Serialize, Deserialize)]
+struct Options {
+    split_automatic: u32,
+    split_manual: u32,
+    limit: u32,
+    interval: u32,
+}
+
+/// `api::backups::PatchWorldBackupOptions`.
+#[derive(Debug, Serialize)]
+struct Patch {
+    split_automatic: u32,
+    split_manual: u32,
+    interval: u32,
+}
+
+/// `api::backups::PatchWorldBackupOptionsResponse`.
+#[derive(Debug, Deserialize)]
+struct Patched {
+    #[serde(default)]
+    backup_ids: Vec<Uuid>,
 }
 
 /// One backup in `api::backups::BackupsQueueResponse`.
@@ -169,30 +200,62 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
             keep,
         } => {
             let server = servers::find(client, &server).await?;
-            let path =
-                format!("/servers/{}/backups/schedule", server.server_id);
-            let mut schedule: BackupSchedule = client.get(&path).await?;
+            let path = format!("{}/with-options", queue(&server.server_id));
+            let mut current: WithOptions = client.get(&path).await?;
+            let mut deleted = 0;
             if every.is_some() || off || keep.is_some() {
-                // An interval of 0 turns scheduled backups off.
-                if let Some(hours) = every {
-                    schedule.interval_hours = hours;
-                } else if off {
-                    schedule.interval_hours = 0;
-                }
-                if let Some(keep) = keep {
-                    schedule.keep = keep;
-                }
-                schedule =
-                    client.call(Method::PUT, &path, Some(&schedule)).await?;
+                let split_automatic = if off {
+                    0
+                } else {
+                    keep.unwrap_or(current.options.split_automatic)
+                };
+                let Some(split_manual) =
+                    current.options.limit.checked_sub(split_automatic)
+                else {
+                    bail!(
+                        "a server has {} backup slots in all",
+                        current.options.limit
+                    );
+                };
+                // The owner at the keyboard: scheduled backups past the new slots go now.
+                let patched: Patched = client
+                    .call(
+                        Method::PATCH,
+                        &format!("{path}?ar=true"),
+                        Some(&Patch {
+                            split_automatic,
+                            split_manual,
+                            interval: every.unwrap_or(current.options.interval),
+                        }),
+                    )
+                    .await?;
+                deleted = patched.backup_ids.len();
+                current = client.get(&path).await?;
             }
-            let text = match schedule.interval_hours {
-                0 => format!("{}: no scheduled backups", server.name),
-                hours => format!(
-                    "{}: every {hours} hours, keeping the last {}",
-                    server.name, schedule.keep
+            let options = &current.options;
+            let mut text = match (
+                options.split_automatic,
+                current.next_auto_backup_at,
+            ) {
+                (0, _) | (_, None) => format!(
+                    "{}: no scheduled backups; {} manual slots",
+                    server.name, options.split_manual
+                ),
+                (keep, Some(next)) => format!(
+                    "{}: every {} hours, keeping the last {keep} ({} manual slots); next {}",
+                    server.name,
+                    options.interval,
+                    options.split_manual,
+                    next.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M")
                 ),
             };
-            Ok(Output::new(text, &schedule))
+            if deleted > 0 {
+                text.push_str(&format!(
+                    "\ndeleted {deleted} older scheduled backup{}",
+                    if deleted == 1 { "" } else { "s" }
+                ));
+            }
+            Ok(Output::new(text, &current))
         }
     }
 }

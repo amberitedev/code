@@ -119,7 +119,7 @@ user: User | null,
  */
 server_id: string | null, action: Action, };
 
-export type Action = { "type": "invited", user_id: string, role: Role, } | { "type": "role_changed", user_id: string, role: Role, } | { "type": "removed", user_id: string, } | { "type": "signed_in", session_id: string, device_name: string, } | { "type": "session_revoked", session_id: string, } | { "type": "server_created" } | { "type": "server_deleted" } | { "type": "server_started" } | { "type": "server_stopped" } | { "type": "server_restarted" } | { "type": "server_killed" } | { "type": "console_command", command: string, } | { "type": "settings_changed" } | { "type": "content_changed" } | { "type": "backup_created", backup_id: string, } | { "type": "backup_restored", backup_id: string, } | { "type": "backup_deleted", backup_id: string, } | { "type": "backup_downloaded", backup_id: string, } | { "type": "world_downloaded" } | { "type": "eula_accepted" } | { "type": "core_updated", version: string, } | { "type": "core_removed" };
+export type Action = { "type": "invited", user_id: string, role: Role, } | { "type": "role_changed", user_id: string, role: Role, } | { "type": "removed", user_id: string, } | { "type": "signed_in", session_id: string, device_name: string, } | { "type": "session_revoked", session_id: string, } | { "type": "server_created" } | { "type": "server_deleted" } | { "type": "server_started" } | { "type": "server_stopped" } | { "type": "server_restarted" } | { "type": "server_killed" } | { "type": "console_command", command: string, } | { "type": "settings_changed" } | { "type": "content_changed" } | { "type": "backup_created", backup_id: string, } | { "type": "backup_restored", backup_id: string, } | { "type": "backup_deleted", backup_id: string, } | { "type": "backup_renamed", backup_id: string, } | { "type": "backup_downloaded", backup_id: string, } | { "type": "world_downloaded" } | { "type": "eula_accepted" } | { "type": "core_updated", version: string, } | { "type": "core_removed" };
 
 export type TicketClaims = { 
 /**
@@ -227,8 +227,6 @@ export type Decision = { path: string, choice: Choice, };
 export type Choice = "keep" | "replace";
 
 export type JavaPath = { path: string | null, };
-
-export type BackupSchedule = { interval_hours: number, keep: number, };
 
 export type GameVersionChange = { from: string, to: string, };
 
