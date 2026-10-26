@@ -64,9 +64,12 @@ export function setupFileDownloadProvider(client: AbstractModrinthClient) {
 			try {
 				const url = await authorizeDownloadUrl(client, file)
 				if (cancelled) return false
+				// A Core download goes through the App's local proxy, which serves only the App:
+				// the native download names the App's origin, as the WebView's own requests do.
+				const headers = client.selfHostedHosting ? { Origin: window.location.origin } : {}
 				const savedFilename = await invoke<string>('plugin:files|files_save_external', {
 					saveId,
-					request: { url },
+					request: { url, headers },
 					onProgress,
 				})
 				task.succeed(savedFilename)

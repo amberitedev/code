@@ -8,8 +8,8 @@
 use ts_rs::{Config, TS};
 
 use super::{
-    access, activity, backend, backups, console, content, error, eula, events,
-    insight, logs, pairing, performance, sessions, startup, update,
+    access, activity, backend, console, content, error, eula, events, insight,
+    logs, pairing, performance, sessions, startup, update,
 };
 
 const PATH: &str = concat!(
@@ -54,7 +54,6 @@ fn declarations() -> String {
         content::Decision::decl(&cfg),
         content::Choice::decl(&cfg),
         startup::JavaPath::decl(&cfg),
-        backups::BackupSchedule::decl(&cfg),
         events::GameVersionChange::decl(&cfg),
         update::UpdateStatus::decl(&cfg),
         crate::update::versions::FailedTrial::decl(&cfg),

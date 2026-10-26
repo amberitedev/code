@@ -1,9 +1,10 @@
 //! A server's files, under `/servers/{id}`: `modrinth/v0/fs/` list, download, create, update, move,
 //! and delete; `v1/worlds/{wid}/files/stat` and `.../files/zip`; `v1/fs/unarchive`;
-//! `v1/fs/ops/{action}`; and the upload sessions at `v1/worlds/{wid}/{scope}/upload-session`
-//! (create, get, files, finalize, cancel). Mirrors `Kyros.Files` and `Kyros.UploadSessions` in
-//! `packages/api-client/src/modules/kyros/types.ts`. Also `GET /modrinth/v0/servers/{id}/fs`,
-//! where the App learns the base of these routes.
+//! `v1/fs/ops/{action}`; `v1/worlds/{wid}/files/contents-raw` and its `authorize`, the download
+//! a browser follows with a link token; and the upload sessions at
+//! `v1/worlds/{wid}/{scope}/upload-session` (create, get, files, finalize, cancel). Mirrors
+//! `Kyros.Files` and `Kyros.UploadSessions` in `packages/api-client/src/modules/kyros/types.ts`.
+//! Also `GET /modrinth/v0/servers/{id}/fs`, where the App learns the base of these routes.
 //!
 //! Editors and the owner only: the files hold the world and every setting. Every path goes
 //! through `content::folder`, so nothing reaches outside the server folder, links included.
@@ -32,12 +33,14 @@ use tokio::io::AsyncWriteExt;
 use super::{
     AppState,
     activity::Action,
+    backups::{DownloadQuery, DownloadToken, expired_link},
     content::{MAX_UPLOAD, stage_field, world},
     error::{ApiError, ErrorCode},
     servers::JwtAuth,
 };
 use crate::{
     access::{Caller, Level, activity, now},
+    backups::Target,
     content::{
         Busy, addons,
         archive::{self, ArchiveError},
@@ -543,7 +546,52 @@ pub async fn download(
 ) -> Result<Response, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let path = inner_path(&query.path)?;
-    let folder = folder(&state, &id)?;
+    stream_file(&state, &id, path).await
+}
+
+/// `GET v1/worlds/{wid}/files/contents-raw/authorize`: a link token for one file, for a download
+/// that cannot send the session.
+pub async fn authorize_file(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Query(query): Query<PathQuery>,
+) -> Result<Json<DownloadToken>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    let path = inner_path(&query.path)?;
+    let token = state.backups.grant(caller, &id, Target::File(path));
+    Ok(Json(DownloadToken { token }))
+}
+
+/// `GET v1/worlds/{wid}/files/contents-raw`: the file its link token was made for, streamed.
+/// The token names the file, so this takes no session; `fs/download` is the route for one.
+pub async fn download_file(
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<Response, ApiError> {
+    world(&id, &wid)?;
+    let grant = query
+        .token
+        .as_deref()
+        .and_then(|token| state.backups.take(token))
+        .filter(|grant| grant.server_id == id)
+        .ok_or_else(expired_link)?;
+    let Target::File(path) = grant.target else {
+        return Err(expired_link());
+    };
+    grant.caller.require(&state.db, &id, Level::Editor).await?;
+    stream_file(&state, &id, path).await
+}
+
+/// A file of the server, streamed as an attachment.
+async fn stream_file(
+    state: &AppState,
+    id: &str,
+    path: String,
+) -> Result<Response, ApiError> {
+    let folder = folder(state, id)?;
     let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
     let file = blocking(move || {
         // A link or something other than a file reads as missing, as before; any other error,

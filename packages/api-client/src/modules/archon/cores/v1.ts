@@ -1,6 +1,7 @@
 import { AbstractModule } from '../../../core/abstract-module'
 import { ModrinthApiError } from '../../../core/errors'
 import type { RequestOptions } from '../../../types/request'
+import { coreNodeUrl } from '../../../utils/node-url'
 import type { Archon } from '../types'
 
 const SERVER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
@@ -263,7 +264,9 @@ export class ArchonCoresV1Module extends AbstractModule {
 			}
 			for (const server of result.value.servers) {
 				this.serverCores.set(server.server_id, cores[index].id)
-				merged.servers.push(server)
+				// The node is the Core itself, reached as the list was. See `coreNodeUrl`.
+				const instance = coreNodeUrl(this.base(cores[index]), server.server_id)
+				merged.servers.push({ ...server, node: { token: '', instance } })
 			}
 			Object.assign(merged.users, result.value.users)
 		})

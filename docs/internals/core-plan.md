@@ -232,9 +232,12 @@ One queued backup engine. The second backup API is removed.
 - Backups run while the server is up: Core asks the shim to hold `save-off` for at most ten
   minutes, runs `save-all flush`, copies, then releases. If Core never comes back, the shim sends
   `save-on` itself. The shim outlives Core, so autosave can never be left off.
-- Each server has a schedule and retention. Default: daily, keeping the last 7. Pre-update backups
-  keep their own retention (last 2) so they do not evict the daily ones. The API is general; it
-  gets matched to the App's UI once that exists.
+- Each server has 15 backup slots, split between scheduled and manual backups as the App's backup
+  settings show them. Default: daily, keeping the last 7, leaving 8 manual slots. The schedule
+  comes due every interval; Core backs up when the server runs or ran since it last looked, and
+  otherwise records that it looked, so the next time it reports is one it keeps. A failed
+  scheduled backup is tried again within the hour. Pre-update backups keep their own retention
+  (last 2), outside the slots, so they do not evict the scheduled ones.
 - Core checks free disk space first and cleans up after a failed backup.
 - Backups and the current world can be downloaded through an authenticated route.
 - Mods that write outside the save cycle can still produce a slightly inconsistent hot backup.

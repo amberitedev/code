@@ -112,6 +112,14 @@ async fn console_socket(
     {
         return;
     }
+    // The App treats the server page as ready once it knows what is installing, so it is told
+    // straight away, even when that is nothing.
+    let installing = WsEvent::InstallProgress {
+        items: state.content.activity(&id).items,
+    };
+    if send(&mut socket, &installing).await.is_err() {
+        return;
+    }
     let mut recheck = tokio::time::interval(RECHECK_EVERY);
     recheck.tick().await;
     let path = state.servers.paths().console_log(&id);

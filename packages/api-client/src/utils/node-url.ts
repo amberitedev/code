@@ -17,11 +17,12 @@ export function getNodeWebSocketUrl(url: string): string {
 	return `wss://${url}`
 }
 
-/** Download links accept an explicit local origin while retaining upstream HTTPS defaults. */
-export function getBackupDownloadUrl(nodeUrl: string, backupId: string, token: string): string {
-	const url = new URL(
-		`${getNodeBaseUrl(nodeUrl)}/modrinth/v0/backups/${encodeURIComponent(backupId)}/download`,
-	)
-	url.searchParams.set('auth', token)
-	return url.toString()
+/**
+ * Where a Core serves a server's node routes (files, downloads, the console socket): under
+ * `/servers/{id}` of the base its requests go to, which is the App's local proxy, with its scheme
+ * and its capability path. A Core names the host it was reached at instead, which the App cannot
+ * use, so the client puts this in its place.
+ */
+export function coreNodeUrl(base: string, serverId: string): string {
+	return `${base.replace(/\/$/, '')}/servers/${serverId}`
 }

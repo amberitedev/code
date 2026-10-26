@@ -21,11 +21,6 @@ export {
 export { ModrinthApiError, ModrinthServerError } from './core/errors'
 export { type AuthConfig, AuthFeature } from './features/auth'
 export {
-	type SelfHostedConfig,
-	SelfHostedFeature,
-	routeSelfHostedRequest,
-} from './features/self-hosted'
-export {
 	type CircuitBreakerConfig,
 	CircuitBreakerFeature,
 	type CircuitBreakerState,
@@ -35,6 +30,11 @@ export {
 export { type NodeAuth, type NodeAuthConfig, NodeAuthFeature } from './features/node-auth'
 export { PANEL_VERSION, PanelVersionFeature } from './features/panel-version'
 export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features/retry'
+export {
+	routeSelfHostedRequest,
+	type SelfHostedConfig,
+	SelfHostedFeature,
+} from './features/self-hosted'
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
 export { CoreApprovalError } from './modules/archon/cores/v1'
@@ -51,7 +51,7 @@ export { XHRUploadClient } from './platform/xhr-upload-client'
 export { clearNodeAuthState, nodeAuthState, setNodeAuthState } from './state/node-auth'
 export * from './types'
 export { withJWTRetry } from './utils/jwt-retry'
-export { getBackupDownloadUrl, getNodeWebSocketUrl } from './utils/node-url'
+export { getNodeWebSocketUrl } from './utils/node-url'
 export { WebSocketPinger, type WebSocketPingOptions } from './utils/pingtest'
 export {
 	type ParsedSseEvent,

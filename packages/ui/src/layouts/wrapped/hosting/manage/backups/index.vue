@@ -382,7 +382,7 @@ const isDownloadingFiles = ref(false)
 async function downloadFiles() {
 	const node = server.value.node
 	const currentWorldId = worldId.value
-	if (client.selfHostedHosting || !node || !currentWorldId || isDownloadingFiles.value) return
+	if (!node || !currentWorldId || isDownloadingFiles.value) return
 
 	isDownloadingFiles.value = true
 	try {
@@ -396,8 +396,7 @@ const createMenuOptions = computed<ButtonMenuOption[]>(() => [
 	{
 		id: 'download-files',
 		label: formatMessage(commonMessages.downloadFilesButton),
-		disabled:
-			client.selfHostedHosting || !server.value.node || !worldId.value || isDownloadingFiles.value,
+		disabled: !server.value.node || !worldId.value || isDownloadingFiles.value,
 		action: downloadFiles,
 	},
 ])

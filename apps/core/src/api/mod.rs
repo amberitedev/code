@@ -37,7 +37,7 @@ use axum::{
     Router,
     extract::DefaultBodyLimit,
     http::StatusCode,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use color_eyre::eyre::{Result, eyre};
 use hyper_util::{
@@ -123,6 +123,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/backups-queue",
             get(backups::list).post(backups::create),
         )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/backups-queue/with-options",
+            get(backups::list_with_options).patch(backups::patch_options),
+        )
         .route("/v1/servers/{id}/worlds/{wid}/backups-queue/delete-many", post(backups::delete_many))
         .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}", delete(backups::delete))
         .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}/restore", post(backups::restore))
@@ -131,18 +135,19 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/backups-queue/history/{kind}/{operation}/{action}",
             post(backups::history),
         )
+        .route("/v1/servers/{id}/worlds/{wid}/backups/{bid}", patch(backups::rename))
         .route("/v1/servers/{id}/worlds/{wid}/select-download", get(backups::select_download))
         .route(
-            "/servers/{id}/backups/schedule",
-            get(backups::get_schedule).put(backups::set_schedule),
-        )
-        .route(
-            "/servers/{id}/modrinth/v0/backups/{bid}/download/authorize",
+            "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download/authorize",
             get(backups::authorize_backup),
         )
         .route(
             "/servers/{id}/v1/worlds/{wid}/files/download-full-zip/authorize",
             get(backups::authorize_world),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/files/contents-raw/authorize",
+            get(files::authorize_file),
         )
         .route(
             "/v1/servers/{id}/worlds/{wid}/properties",
@@ -209,12 +214,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/servers/{id}/v1/worlds/{wid}/files/zip", post(files::zip))
         // Downloads stream for as long as they take.
         .route(
-            "/servers/{id}/modrinth/v0/backups/{bid}/download",
+            "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download",
             get(backups::download_backup),
         )
         .route(
             "/servers/{id}/v1/worlds/{wid}/files/download-full-zip",
             get(backups::download_world),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/files/contents-raw",
+            get(files::download_file),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap (`content::MAX_UPLOAD`).

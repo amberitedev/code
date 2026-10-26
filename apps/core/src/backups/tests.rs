@@ -118,6 +118,7 @@ async fn each_kind_keeps_its_own_count() {
         records::Schedule {
             interval_hours: 24,
             keep: 3,
+            skipped_at: None,
         },
     )
     .await
@@ -147,19 +148,10 @@ async fn each_kind_keeps_its_own_count() {
     assert_eq!(files, kept.len());
 }
 
-#[tokio::test]
-async fn a_schedule_backs_up_only_a_world_that_may_have_changed() {
-    let setup = setup().await;
-    let backups = &setup.backups;
-    backups.queue_due().await.unwrap();
-    assert!(
-        records::backups(&setup.db, &setup.server)
-            .await
-            .unwrap()
-            .is_empty(),
-        "never ran"
-    );
+const DAY: i64 = 24 * 3600;
 
+/// The server ran and stopped a moment ago.
+async fn ran(setup: &Setup) {
     servers_records::start_run(&setup.db, &setup.server, "run", now() - 100)
         .await
         .unwrap();
@@ -175,6 +167,36 @@ async fn a_schedule_backs_up_only_a_world_that_may_have_changed() {
     )
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn a_schedule_backs_up_only_a_world_that_may_have_changed() {
+    let setup = setup().await;
+    let backups = &setup.backups;
+    backups.queue_due().await.unwrap();
+    assert!(
+        records::backups(&setup.db, &setup.server)
+            .await
+            .unwrap()
+            .is_empty(),
+        "never ran"
+    );
+    let skipped = records::schedule(&setup.db, &setup.server)
+        .await
+        .unwrap()
+        .skipped_at
+        .expect("the check is recorded");
+    assert_eq!(
+        backups.next_scheduled(&setup.server).await.unwrap(),
+        Some(skipped + DAY),
+        "due again an interval after the check"
+    );
+
+    // The schedule came due two days ago, and the server ran since.
+    records::set_skipped(&setup.db, &setup.server, now() - 2 * DAY)
+        .await
+        .unwrap();
+    ran(&setup).await;
     backups.queue_due().await.unwrap();
     let queued = records::backups(&setup.db, &setup.server).await.unwrap();
     assert_eq!(queued.len(), 1);
@@ -191,6 +213,69 @@ async fn a_schedule_backs_up_only_a_world_that_may_have_changed() {
         1,
         "not again within the interval"
     );
+    let last = records::last_scheduled(&setup.db, &setup.server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        backups.next_scheduled(&setup.server).await.unwrap(),
+        Some(last.queued_at + DAY)
+    );
+}
+
+#[tokio::test]
+async fn a_failed_scheduled_backup_is_tried_again_within_the_hour() {
+    let setup = setup().await;
+    let backups = &setup.backups;
+    records::set_skipped(&setup.db, &setup.server, now() - 2 * DAY)
+        .await
+        .unwrap();
+    ran(&setup).await;
+    // Nothing to copy from: the backup fails.
+    let folder = setup.paths.server(&setup.server);
+    let aside = setup.paths.server("aside");
+    std::fs::rename(&folder, &aside).unwrap();
+    backups.queue_due().await.unwrap();
+    let operation =
+        records::operations(&setup.db, &setup.server).await.unwrap()[0].id;
+    assert!(backups.wait(operation).await.is_err());
+    let failed = records::last_scheduled(&setup.db, &setup.server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.state, records::State::Failed);
+    assert_eq!(
+        backups.next_scheduled(&setup.server).await.unwrap(),
+        Some(failed.queued_at + RETRY_FAILED),
+        "sooner than the interval"
+    );
+    backups.queue_due().await.unwrap();
+    assert_eq!(
+        records::operations(&setup.db, &setup.server)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "not yet"
+    );
+
+    // An hour on, with the folder back, the same backup is made again.
+    std::fs::rename(&aside, &folder).unwrap();
+    sqlx::query("UPDATE backup_operations SET queued_at = queued_at - 3600")
+        .execute(&setup.db)
+        .await
+        .unwrap();
+    backups.queue_due().await.unwrap();
+    let operations =
+        records::operations(&setup.db, &setup.server).await.unwrap();
+    assert_eq!(operations.len(), 2);
+    assert_eq!(operations[1].backup_id, failed.backup_id);
+    backups.wait(operations[1].id).await.unwrap();
+    let backup = records::backup(&setup.db, &setup.server, &failed.backup_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(backup.state, records::State::Done);
 }
 
 #[tokio::test]

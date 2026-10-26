@@ -17,8 +17,13 @@
 //! midway put them back when it starts, before the server can. A backup is checked by the rules
 //! a restore applies before it counts as made.
 //!
-//! Each server has a schedule (default: daily, keeping 7). Pre-update backups keep their own last
-//! 2, so updates never evict the scheduled ones; manual backups are kept until deleted.
+//! Each server has [`SLOTS`] backup slots, split between scheduled and manual backups as the App's
+//! backup settings show them (default: daily, keeping 7, leaving 8 manual slots). The schedule
+//! comes due every interval; Core then backs up when the server runs or ran since it last looked,
+//! and otherwise records that it looked, so the next time it reports is one it keeps. A failed
+//! scheduled backup is tried again within the hour. Pre-update backups keep their own last 2,
+//! outside the slots, so updates and restores never evict the scheduled ones; manual backups are
+//! kept until deleted.
 
 pub mod records;
 mod space;
@@ -69,8 +74,12 @@ const HOLD_MARGIN: Duration = Duration::from_secs(30);
 const MANIFEST: &str = "copal-backup.json";
 /// A restore's journal, in its folder.
 const JOURNAL: &str = "swap.json";
+/// Backup slots per server, scheduled and manual together: what the App's backups page shows.
+pub const SLOTS: u32 = 15;
 /// Pre-update backups kept per server.
 const KEEP_PRE_UPDATE: u32 = 2;
+/// How soon a failed scheduled backup is tried again, when the interval is longer.
+const RETRY_FAILED: i64 = 3600;
 /// How often the schedule is checked.
 const SCHEDULE_TICK: Duration = Duration::from_secs(60);
 /// How long a download link works, once.
@@ -102,6 +111,8 @@ pub enum Target {
     /// The server's worlds as they are now.
     World,
     Backup(String),
+    /// One file of the server, by its cleaned path.
+    File(String),
 }
 
 /// A download link someone with access asked for: single use, for a few minutes.
@@ -248,7 +259,8 @@ impl Backups {
         }
     }
 
-    /// Queue a backup of a server. Returns the backup's id and its create operation's.
+    /// Queue a backup of a server. Returns the backup's id and its create operation's. A manual
+    /// backup needs a free manual slot.
     pub async fn create(
         &self,
         server_id: &str,
@@ -256,6 +268,18 @@ impl Backups {
         kind: Kind,
         user_id: Option<&str>,
     ) -> Result<(String, i64), Error> {
+        if kind == Kind::Manual {
+            let manual_slots = SLOTS.saturating_sub(
+                records::schedule(&self.db, server_id).await?.keep,
+            );
+            if records::manual_in_use(&self.db, server_id).await?
+                >= manual_slots
+            {
+                return Err(Error::Conflict(format!(
+                    "All {manual_slots} manual backup slots are in use; delete a backup, or give manual backups more slots in the backup settings."
+                )));
+            }
+        }
         let backup = records::Backup {
             id: Uuid::new_v4().to_string(),
             server_id: server_id.to_owned(),
@@ -682,9 +706,12 @@ impl Backups {
         }
     }
 
-    /// Back up servers whose schedule is due, every minute.
+    /// Act on schedules that have come due, every minute from a minute after start.
     async fn schedule(self: Arc<Self>) {
-        let mut tick = tokio::time::interval(SCHEDULE_TICK);
+        let mut tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + SCHEDULE_TICK,
+            SCHEDULE_TICK,
+        );
         loop {
             tick.tick().await;
             if let Err(error) = self.queue_due().await {
@@ -693,8 +720,10 @@ impl Backups {
         }
     }
 
-    /// Queue a scheduled backup of each server that is due one: its interval has passed since the
-    /// last, and it ran since then, so its world may have changed.
+    /// Act on each server whose schedule has come due (see [`Self::due`]): try a failed backup
+    /// again, back the server up when it runs or ran since Core last looked, or record that
+    /// Core looked and found nothing new. A server that is starting, stopping, installing, or
+    /// busy with another backup operation is left for the next check.
     pub async fn queue_due(&self) -> Result<(), Error> {
         let servers: Vec<String> = sqlx::query_scalar(
             "SELECT id FROM servers WHERE game_version IS NOT NULL",
@@ -703,27 +732,32 @@ impl Backups {
         .await?;
         let now = now();
         for server_id in servers {
-            let schedule = records::schedule(&self.db, &server_id).await?;
-            if schedule.interval_hours == 0
+            let Some(due) = self.due(&server_id).await? else {
+                continue;
+            };
+            if now < due.at
                 || records::server_busy(&self.db, &server_id).await?
             {
-                continue;
-            }
-            let last = records::last_scheduled(&self.db, &server_id).await?;
-            if last.is_some_and(|last| {
-                now - last < i64::from(schedule.interval_hours) * 3600
-            }) {
                 continue;
             }
             let phase = self.servers.phase(&server_id);
             if phase.is_some_and(|phase| phase != Phase::Running) {
                 continue;
             }
-            let running = phase == Some(Phase::Running);
+            if let Some(failed) = due
+                .last
+                .as_ref()
+                .filter(|last| last.state == records::State::Failed)
+            {
+                self.retry(&server_id, &failed.backup_id, None).await?;
+                continue;
+            }
             let ran_since = records::last_run_end(&self.db, &server_id)
                 .await?
-                .is_some_and(|ended| last.is_none_or(|last| ended > last));
-            if running || ran_since {
+                .is_some_and(|ended| {
+                    due.anchor.is_none_or(|anchor| ended > anchor)
+                });
+            if phase == Some(Phase::Running) || ran_since {
                 self.create(
                     &server_id,
                     "Scheduled backup",
@@ -731,9 +765,65 @@ impl Backups {
                     None,
                 )
                 .await?;
+            } else {
+                records::set_skipped(&self.db, &server_id, now).await?;
             }
         }
         Ok(())
+    }
+
+    /// When a server's schedule next comes due, and what it is due from: `None` when scheduled
+    /// backups are off. The anchor is the later of the last scheduled backup and the last time
+    /// the schedule came due with nothing new; a failed scheduled backup comes due again sooner.
+    async fn due(&self, server_id: &str) -> Result<Option<Due>, Error> {
+        let schedule = records::schedule(&self.db, server_id).await?;
+        if schedule.keep == 0 {
+            return Ok(None);
+        }
+        let interval = i64::from(schedule.interval_hours) * 3600;
+        let last = records::last_scheduled(&self.db, server_id).await?;
+        let after_backup = last.as_ref().map(|last| {
+            let wait = if last.state == records::State::Failed {
+                interval.min(RETRY_FAILED)
+            } else {
+                interval
+            };
+            (last.queued_at, last.queued_at + wait)
+        });
+        let after_skip = schedule
+            .skipped_at
+            .map(|skipped| (skipped, skipped + interval));
+        let (anchor, at) = match (after_backup, after_skip) {
+            (Some(backup), Some(skip)) => {
+                if skip.0 > backup.0 {
+                    skip
+                } else {
+                    backup
+                }
+            }
+            (Some(either), None) | (None, Some(either)) => either,
+            (None, None) => {
+                return Ok(Some(Due {
+                    at: now(),
+                    anchor: None,
+                    last,
+                }));
+            }
+        };
+        Ok(Some(Due {
+            at,
+            anchor: Some(anchor),
+            last,
+        }))
+    }
+
+    /// When the server's next scheduled backup is due, or `None` when they are off. What the
+    /// App shows as the next automatic backup.
+    pub async fn next_scheduled(
+        &self,
+        server_id: &str,
+    ) -> Result<Option<i64>, Error> {
+        Ok(self.due(server_id).await?.map(|due| due.at))
     }
 
     /// A single-use link for `target`, valid for five minutes.
@@ -772,6 +862,16 @@ impl Backups {
             .remove(token)
             .filter(|grant| grant.expires > Instant::now())
     }
+}
+
+/// A server's schedule, come due or not yet. See [`Backups::due`].
+struct Due {
+    /// When it comes due.
+    at: i64,
+    /// What it is due from: the last scheduled backup or skipped check. `None` when the schedule
+    /// has never acted, so it is due now.
+    anchor: Option<i64>,
+    last: Option<records::LastScheduled>,
 }
 
 /// Whether the console reports a finished save within `wait`.

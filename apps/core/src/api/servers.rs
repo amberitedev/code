@@ -195,7 +195,8 @@ pub struct Flows {
 }
 
 /// Response of GET `/modrinth/v0/servers/{id}`, and an item of GET `/modrinth/v0/servers`.
-/// `current_user_permissions` is a Modrinth scope bitset. The SFTP fields, `datacenter`,
+/// `current_user_permissions` is a Modrinth scope bitset. `node` is this Core, as the host the
+/// request reached, under `/servers/{id}` (see `files::auth`). The SFTP fields, `datacenter`,
 /// `suspension_reason`, `notices`, and `is_medal` are Modrinth hosting fields Core fills with
 /// constants. Mirrors Archon.Servers.v0.Server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,9 +310,9 @@ pub enum WorldDownloadMethod {
     Unavailable,
 }
 
-/// Response of GET `/v1/servers/{id}`, and an item of GET `/v1/servers`. `subdomain`, `specs`,
-/// the SFTP fields, `tags`, and `location` are Modrinth hosting fields Core fills with constants.
-/// Mirrors Archon.Servers.v1.ServerFull.
+/// Response of GET `/v1/servers/{id}`, and an item of GET `/v1/servers`. `location` is this
+/// Core, as `node` is above. `subdomain`, `specs`, the SFTP fields, and `tags` are Modrinth
+/// hosting fields Core fills with constants. Mirrors Archon.Servers.v1.ServerFull.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerFull {
     pub id: Uuid,
@@ -472,11 +473,21 @@ fn permissions(level: Level) -> u64 {
     }
 }
 
-/// What the hosting API shows for a server row, to a caller with `level` on it.
+/// The host a request reached Core at, which is where the App finds the server's node routes.
+fn host(headers: &HeaderMap) -> &str {
+    headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .unwrap_or("localhost")
+}
+
+/// What the hosting API shows for a server row, to a caller with `level` on it, reached at
+/// `host`.
 async fn server(
     state: &AppState,
     row: records::ServerRow,
     level: Level,
+    host: &str,
 ) -> Result<Server, ApiError> {
     let power_state = match state.servers.phase(&row.id) {
         Some(Phase::Starting) => ServerPowerState::Starting,
@@ -524,7 +535,10 @@ async fn server(
         sftp_host: String::new(),
         datacenter: String::new(),
         notices: Vec::new(),
-        node: None,
+        node: Some(NodeInfo {
+            token: String::new(),
+            instance: format!("{host}/servers/{}", row.id),
+        }),
         flows: Flows { intro: false },
         is_medal: false,
         current_user_permissions: permissions(level),
@@ -556,11 +570,12 @@ fn loader(stored: &str) -> Option<Loader> {
 pub async fn list(
     caller: Caller,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
     for row in records::list(&state.db).await? {
         if let Some(level) = caller.level(&state.db, &row.id).await? {
-            servers.push(server(&state, row, level).await?);
+            servers.push(server(&state, row, level, host(&headers)).await?);
         }
     }
     let count = servers.len() as u32;
@@ -580,13 +595,14 @@ pub async fn list(
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
     let level = caller.require(&state.db, &id, Level::Viewer).await?;
     let row = records::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
-    Ok(Json(server(&state, row, level).await?))
+    Ok(Json(server(&state, row, level, host(&headers)).await?))
 }
 
 /// `POST /local/servers`: an unconfigured server. Linked instances are step 4. Owner only.
@@ -778,20 +794,19 @@ pub async fn ws_auth(
     Path(id): Path<String>,
 ) -> Result<Json<WsAuth>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
-    let host = headers
-        .get(HOST)
-        .and_then(|host| host.to_str().ok())
-        .unwrap_or("localhost");
+    let host = host(&headers);
     Ok(Json(WsAuth {
         url: format!("{host}/servers/{id}/ws"),
         token: String::new(),
     }))
 }
 
-/// The hosting API's full view of a server, with its one world, whose id is the server's.
+/// The hosting API's full view of a server reached at `host`, with its one world, whose id is
+/// the server's.
 async fn server_full(
     state: &AppState,
     row: records::ServerRow,
+    host: &str,
 ) -> Result<ServerFull, ApiError> {
     let created_at: i64 =
         sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
@@ -832,7 +847,15 @@ async fn server_full(
         sftp_username: String::new(),
         sftp_password: String::new(),
         tags: Vec::new(),
-        location: ServerLocation::Unassigned,
+        location: ServerLocation::Assigned {
+            location_metadata: LocationMetadata {
+                region: String::new(),
+                region_should_be_user_displayed: false,
+                hostname: host.to_owned(),
+                url_host: format!("{host}/servers/{}", row.id),
+                is_decommissioned_node: false,
+            },
+        },
         worlds: vec![WorldFull {
             id,
             name: row.name,
@@ -852,11 +875,12 @@ async fn server_full(
 pub async fn list_v1(
     caller: Caller,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<ServerFull>>, ApiError> {
     let mut servers = Vec::new();
     for row in records::list(&state.db).await? {
         if caller.level(&state.db, &row.id).await?.is_some() {
-            servers.push(server_full(&state, row).await?);
+            servers.push(server_full(&state, row, host(&headers)).await?);
         }
     }
     Ok(Json(servers))
@@ -866,11 +890,12 @@ pub async fn list_v1(
 pub async fn get_v1(
     caller: Caller,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<ServerFull>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     let row = records::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
-    Ok(Json(server_full(&state, row).await?))
+    Ok(Json(server_full(&state, row, host(&headers)).await?))
 }
