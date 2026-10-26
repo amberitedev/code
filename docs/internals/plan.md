@@ -40,10 +40,10 @@ UI. Our backend answers the same API, with our accounts, and stores uploaded fil
 custom on top.
 
 - Shared exactly as Modrinth does: links for anything on Modrinth; real files for content that is
-  not (mod jars, resource packs, shaders, datapacks); and the config bundle the owner picks when
-  pushing.
+  not (mod jars, resource packs, shaders, datapacks); and the config files the owner picks when
+  pushing, each under its path in the instance. Files are uploaded in zstd-compressed batches.
 - Limits, much tighter than Modrinth's and easy to change: 25 MB per file, 20 uploaded files per
-  version, 5 MB config bundle, 100 MB stored per shared instance. An unchanged file is stored once.
+  version, 100 MB stored per shared instance. An unchanged file is stored once.
 - A file over a limit fails the push the way Modrinth's flow already reports a rejected upload.
 - The five latest versions are kept. Files are deleted from R2 when their version is pruned.
 - R2 runs locally through wrangler's emulation. No Cloudflare account, card, or hosting yet.
