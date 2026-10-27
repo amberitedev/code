@@ -129,6 +129,7 @@ import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { handleSevereError } from '@/composables/use-error.js'
 import { useInstanceConsole } from '@/composables/useInstanceConsole'
 import InstanceSettingsModal from '@/features/instances/settings-modal/index.vue'
+import { useSharedInstanceLink } from '@/features/servers/linked-servers'
 import { trackEvent } from '@/helpers/analytics'
 import { toError } from '@/helpers/errors'
 import {
@@ -148,7 +149,6 @@ import {
 	run,
 	sync_content_files,
 } from '@/helpers/instance'
-import { useSharedInstanceLink } from '@/helpers/linked-servers'
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
 import { createInstanceShortcut, showInstanceInFolder } from '@/helpers/utils.js'

@@ -12,9 +12,9 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
-import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
-import { coresQueryKey, openAddCoreModal, useCores } from '@/composables/use-cores'
-import { coreOffline, serversQueryKey, useServers } from '@/helpers/linked-servers'
+import AccountRequired from '@/features/cores/account-required.vue'
+import { coresQueryKey, openAddCoreModal, useCores } from '@/features/cores/use-cores'
+import { coreOffline, serversQueryKey, useServers } from '@/features/servers/linked-servers'
 
 const client = injectModrinthClient()
 const auth = injectAuth()

@@ -5,10 +5,10 @@ import { Button, injectModrinthClient, NewModal } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { coresQueryKey, registerAddCoreModal } from '@/composables/use-cores'
+import { coresQueryKey, registerAddCoreModal } from '@/features/cores/use-cores'
 
 // The one "Add Core" modal, mounted once in App.vue. Open it with `openAddCoreModal` or
-// `ensureCore` from `@/composables/use-cores`. The user types the code their Core shows, sees
+// `ensureCore` from `@/features/cores/use-cores`. The user types the code their Core shows, sees
 // which machine is asking, and approves it; the Core then signs in on its own.
 
 const client = injectModrinthClient()

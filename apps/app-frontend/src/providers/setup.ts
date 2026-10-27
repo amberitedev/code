@@ -1,6 +1,7 @@
 import type { AbstractModrinthClient } from '@modrinth/api-client'
 import type { AbstractPopupNotificationManager, AbstractWebNotificationManager } from '@modrinth/ui'
 
+import { setupInstanceServerSourceProvider } from '@/features/servers/instance-server-source'
 import type { InstanceIconConfig } from '@/helpers/types'
 
 import type { AppEvents } from './app-events'
@@ -11,7 +12,6 @@ import { setupFileDropProvider } from './setup/file-drop'
 import { setupFilePickerProvider } from './setup/file-picker'
 import { setupImageViewerEditorProvider } from './setup/image-viewer-editor'
 import { setupInstanceImportProvider } from './setup/instance-import'
-import { setupInstanceServerSourceProvider } from './setup/instance-server-source'
 import { setupTagsProvider } from './setup/tags'
 import { setupUserCountryProvider } from './setup/user-country'
 

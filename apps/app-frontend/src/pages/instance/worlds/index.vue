@@ -229,7 +229,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Draggable from 'vuedraggable'
 
-import CreateServerFromInstanceModal from '@/components/ui/linked-servers/CreateServerFromInstanceModal.vue'
 import AddServerModal from '@/components/ui/world/modal/AddServerModal.vue'
 import ConfirmRemoveWorldModal from '@/components/ui/world/modal/ConfirmRemoveWorldModal.vue'
 import DesyncServerModal from '@/components/ui/world/modal/DesyncServerModal.vue'
@@ -239,9 +238,8 @@ import UpdateBeforeJoinModal from '@/components/ui/world/modal/UpdateBeforeJoinM
 import WorldItem from '@/components/ui/world/WorldItem.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { handleSevereError } from '@/composables/use-error.js'
-import { trackEvent } from '@/helpers/analytics'
-import { get_project, get_project_v3 } from '@/helpers/cache.js'
-import { set_synced_option } from '@/helpers/instance'
+import { useWorldPins, worldPinKey } from '@/features/instances/worlds/world-pins'
+import CreateServerFromInstanceModal from '@/features/servers/create-server-from-instance-modal.vue'
 import {
 	coreOffline,
 	type HostedServer,
@@ -253,9 +251,11 @@ import {
 	useCanManageHostedServer,
 	useHostedServers,
 	useLinkedServers,
-} from '@/helpers/linked-servers'
+} from '@/features/servers/linked-servers'
+import { trackEvent } from '@/helpers/analytics'
+import { get_project, get_project_v3 } from '@/helpers/cache.js'
+import { set_synced_option } from '@/helpers/instance'
 import { get_game_versions } from '@/helpers/tags'
-import { useWorldPins, worldPinKey } from '@/helpers/world-pins'
 import {
 	delete_world,
 	desync_server,

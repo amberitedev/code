@@ -5,10 +5,10 @@ import { injectModrinthClient, ServersManagePageIndex } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
+import LocalServers from '@/features/servers/local-servers.vue'
 import { useRootBreadcrumb } from '@/shared/breadcrumbs'
 
 import { config } from '../config'
-import LocalServers from './hosting/LocalServers.vue'
 
 const stripePublishableKey = (config.stripePublishableKey as string) || ''
 

@@ -62,7 +62,7 @@ import {
 	pushPackToServer,
 	serversQueryKey,
 	useLinkedServers,
-} from '@/helpers/linked-servers'
+} from '@/features/servers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 /**

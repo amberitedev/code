@@ -194,8 +194,8 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
-import InstancePushButton from '@/components/ui/linked-servers/InstancePushButton.vue'
 import ModrinthAccountRequiredModal from '@/components/ui/modal/ModrinthAccountRequiredModal.vue'
+import InstancePushButton from '@/features/servers/instance-push-button.vue'
 import { isSharedInstancesApiError } from '@/helpers/install'
 import { edit } from '@/helpers/instance'
 import type { ModrinthAuthFlow } from '@/helpers/mr_auth.ts'

@@ -18,7 +18,7 @@ import { Admonition, useVIntl } from '@modrinth/ui'
 import { computed } from 'vue'
 
 import { findRunningSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
-import InstancePushButton from '@/components/ui/linked-servers/InstancePushButton.vue'
+import InstancePushButton from '@/features/servers/instance-push-button.vue'
 import type { GameInstance } from '@/helpers/types'
 
 import { instanceAdmonitionsMessages as messages } from './messages'
