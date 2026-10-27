@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream'
+import { Readable, pipeline } from 'node:stream'
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { createZstdDecompress } from 'node:zlib'
 
@@ -22,8 +22,11 @@ export function decodedBody(request: Request): ReadableStream<Uint8Array> {
 	if (encoding !== 'zstd') throw new ApiError(415, 'invalid_input', 'Unsupported content encoding')
 	// The Workers and Node stream types describe the same object; only Node's zlib knows zstd.
 	const compressed = body as unknown as NodeReadableStream<Uint8Array>
-	const decompressed = Readable.toWeb(Readable.fromWeb(compressed).pipe(createZstdDecompress()))
-	return decompressed as unknown as ReadableStream<Uint8Array>
+	const decompressor = createZstdDecompress()
+	// A pipeline, unlike pipe(), fails the decompressor when the client gives up, so a read after
+	// an aborted upload errors instead of waiting forever.
+	pipeline(Readable.fromWeb(compressed), decompressor, () => undefined)
+	return Readable.toWeb(decompressor) as unknown as ReadableStream<Uint8Array>
 }
 
 export function multipartBoundary(contentType: string | null): string {
@@ -91,7 +94,10 @@ class ByteBuffer {
 	/** Appends the next chunk, or returns false once the stream has ended. */
 	private async fill(): Promise<boolean> {
 		if (this.ended) return false
-		const { done, value } = await this.reader.read()
+		// A read fails only when the body stops early or is not valid zstd: both are the client's.
+		const { done, value } = await this.reader.read().catch(() => {
+			throw malformed()
+		})
 		if (done) {
 			this.ended = true
 			return false

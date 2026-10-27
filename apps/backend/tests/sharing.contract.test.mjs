@@ -219,6 +219,14 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			)
 			assert.equal((await upload(id, version.version, [bad])).status, status)
 		}
+		const garbage = await send(
+			`http://local.test/v1/instances/${id}/versions/${refused.version.version}/files`,
+			'POST',
+			'owner',
+			Buffer.from('not zstd at all'),
+			batch([]).headers,
+		)
+		assert.equal(garbage.status, 400, 'a body that is not zstd is the client’s mistake')
 
 		// Members list and invite links.
 		const members = await ok(await call(`/instances/${id}/users`))
