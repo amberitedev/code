@@ -4,22 +4,17 @@ use super::install::*;
 use super::report::{PublishReport, PublishReportFile};
 use super::types::*;
 use super::*;
+use crate::self_hosted::pool::{self, crypto};
 use async_walkdir::{Filtering, WalkDir};
-use futures::{FutureExt, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use sha2::Digest;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-/// Set by the shared instances backend when it rejects an upload by file type.
-const FILE_NOT_ALLOWED_HEADER: &str = "x-file-not-allowed";
-const UPLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
+/// Files hashed or encrypted at once.
 const UPLOAD_CONCURRENCY: usize = 4;
-const UPLOAD_BATCH_MAX_FILES: usize = 256;
-const UPLOAD_BATCH_MIN_BYTES: u64 = 16 * 1024 * 1024;
-/// Total file size the shared instances backend accepts in one batch.
-const UPLOAD_BATCH_MAX_BYTES: u64 = 450 * 1024 * 1024;
-const UPLOAD_BATCH_ATTEMPTS: usize = 2;
+/// The Core confirms a stored version to the backend on its own, so a push waits up to a minute.
+const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
+const CONFIRM_ATTEMPTS: usize = 30;
 
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
@@ -809,16 +804,8 @@ pub(super) async fn publish_current_content(
             crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
         )));
     }
-    let external_file_data = hashed_files
-        .iter()
-        .map(|file| ExternalFileData {
-            file_name: file.file_name.clone(),
-            file_type: file.file_type.clone(),
-        })
-        .collect::<Vec<_>>();
     let version_request = json!({
         "modrinth_ids": modrinth_ids,
-        "external_files": external_file_data,
         "modpack_id": modpack_id,
         "game_version": metadata.applied_content_set.game_version.clone(),
         "loader": metadata.applied_content_set.loader.as_str(),
@@ -828,16 +815,88 @@ pub(super) async fn publish_current_content(
             .clone()
             .unwrap_or_default(),
     });
-    let response =
-        request_json_optional_unavailable::<InstanceVersionResponse>(
-            "create_instance_version",
-            Method::POST,
-            &format!("/instances/{shared_instance_id}/versions"),
-            Some(version_request),
-            state,
-            SharedInstancesRequestAuth::AmberiteSession,
-        )
+
+    // The encrypted files wait in a folder of their own until the Core has them.
+    let folder = state
+        .directories
+        .caches_dir()
+        .join("pool")
+        .join(uuid::Uuid::new_v4().to_string());
+    let result = push_version(
+        instance_id,
+        &metadata,
+        shared_instance_id,
+        version_request,
+        &hashed_files,
+        &folder,
+        on_progress,
+        report,
+        state,
+    )
+    .await;
+    if let Err(error) = tokio::fs::remove_dir_all(&folder).await
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(
+            folder = %folder.display(),
+            error = %error,
+            "Could not remove a push's encrypted files"
+        );
+    }
+    result
+}
+
+/// Encrypts the files, creates the version, stores the files on the Core the backend picks, and
+/// waits until the Core has confirmed them.
+#[allow(clippy::too_many_arguments)]
+async fn push_version(
+    instance_id: &str,
+    metadata: &crate::state::InstanceMetadata,
+    shared_instance_id: &str,
+    mut version_request: serde_json::Value,
+    hashed_files: &[HashedExternalFile],
+    folder: &std::path::Path,
+    on_progress: &(dyn Fn(u64, u64) + Send + Sync),
+    report: &mut PublishReport,
+    state: &State,
+) -> crate::Result<i32> {
+    let keys = file_keys(shared_instance_id, hashed_files, state).await?;
+    crate::util::io::create_dir_all(folder).await?;
+    // Collected first so the stream holds plain futures, not a borrowing closure, which keeps
+    // the push future Send for Tauri commands.
+    let encryptions = hashed_files
+        .iter()
+        .zip(&keys)
+        .map(|(file, key)| pool::encrypt_file(key, file.content.path(), folder))
+        .collect::<Vec<_>>();
+    let objects = futures::stream::iter(encryptions)
+        .buffered(UPLOAD_CONCURRENCY)
+        .try_collect::<Vec<_>>()
         .await?;
+    report.step(format!("Encrypted {} files", objects.len()));
+
+    let root = hex::encode(crypto::root(objects.iter().map(|o| o.object)));
+    let external_files = hashed_files
+        .iter()
+        .zip(&keys)
+        .zip(&objects)
+        .map(|((file, key), object)| ExternalFileData {
+            file_name: file.file_name.clone(),
+            file_type: file.file_type.clone(),
+            size: file.size,
+            sha256: hex::encode(file.sha256),
+            object: hex::encode(object.object),
+            object_size: object.size,
+            key: (!crypto::is_content_type(&file.file_type))
+                .then(|| hex::encode(key)),
+        })
+        .collect::<Vec<_>>();
+    version_request["external_files"] = json!(external_files);
+    version_request["root"] = json!(root);
+
+    let response =
+        create_remote_version(shared_instance_id, version_request, state)
+            .await?;
     let response = match response {
         SharedInstanceRemoteResponse::Available(response) => response,
         SharedInstanceRemoteResponse::Unavailable(reason) => {
@@ -855,38 +914,100 @@ pub(super) async fn publish_current_content(
         }
     };
     report.created_version = Some(response.version);
-    report.requested_files = Some(
-        response
-            .external_files
-            .iter()
-            .map(|file| file.file_name.clone())
-            .collect(),
-    );
-    report.step(format!(
-        "Created version {} ({} files requested for upload)",
-        response.version,
-        response.external_files.len()
-    ));
-
-    if !response.external_files.is_empty() {
-        upload_external_files(
-            shared_instance_id,
-            response.version,
-            &hashed_files,
-            &response.external_files,
-            on_progress,
-            state,
-        )
-        .await?;
-        report.step("Uploaded requested files");
-    } else if !response.ready {
-        tracing::debug!(
-            "Shared instance version {} was not ready but had no external files",
-            response.version
-        );
+    report.step(format!("Created version {}", response.version));
+    if response.ready {
+        return Ok(response.version);
     }
 
-    Ok(response.version)
+    if let Some(store) = &response.store {
+        let sent = pool::store_version(
+            &store.core,
+            &store.ticket,
+            &root,
+            &objects,
+            on_progress,
+        )
+        .await?;
+        report.requested_files = Some(
+            external_files
+                .iter()
+                .filter(|file| sent.contains(&file.object))
+                .map(|file| file.file_name.clone())
+                .collect(),
+        );
+        report.step(format!("Stored {} files on the Core", sent.len()));
+    }
+
+    for _ in 0..CONFIRM_ATTEMPTS {
+        tokio::time::sleep(CONFIRM_INTERVAL).await;
+        if get_remote_version(shared_instance_id, response.version, state)
+            .await?
+            .is_some_and(|version| version.ready)
+        {
+            report.step("The Core confirmed the files");
+            return Ok(response.version);
+        }
+    }
+    Err(crate::ErrorKind::PoolPushUnconfirmed.into())
+}
+
+/// Each file's key. Content files derive theirs from P. Other files keep the key an earlier
+/// version gave the same P, so an unchanged file stays the same object, and get a new random
+/// key otherwise. A push that crashed after creating its version left it unconfirmed one past
+/// the latest ready one; its keys win, so pushing the same files again gives the same root and
+/// resumes that upload instead of waiting for it to expire.
+async fn file_keys(
+    shared_instance_id: &str,
+    files: &[HashedExternalFile],
+    state: &State,
+) -> crate::Result<Vec<[u8; 32]>> {
+    let mut versions = Vec::new();
+    if let SharedInstanceRemoteResponse::Available(latest) =
+        get_latest_remote_version_optional_unavailable(
+            shared_instance_id,
+            state,
+        )
+        .await?
+    {
+        if latest.ready
+            && let Some(pending) = get_remote_version(
+                shared_instance_id,
+                latest.version + 1,
+                state,
+            )
+            .await?
+        {
+            versions.push(pending);
+        }
+        versions.push(latest);
+    }
+    let mut previous = HashMap::new();
+    for file in versions
+        .into_iter()
+        .flat_map(|version| version.external_files)
+    {
+        if let (Some(p), Some(key)) = (
+            file.sha256.as_deref().and_then(pool::parse_hash),
+            file.key.as_deref().and_then(pool::parse_hash),
+        ) {
+            previous.entry(p).or_insert(key);
+        }
+    }
+
+    Ok(files
+        .iter()
+        .map(|file| {
+            if crypto::is_content_type(&file.file_type) {
+                return crypto::content_key(&file.sha256);
+            }
+            *previous.entry(file.sha256).or_insert_with(|| {
+                use rand::RngCore;
+                let mut key = [0; 32];
+                rand::rngs::OsRng.fill_bytes(&mut key);
+                key
+            })
+        })
+        .collect())
 }
 
 pub(super) async fn collect_shareable_files(
@@ -1062,13 +1183,15 @@ pub(super) fn ensure_shareable_link(link: &InstanceLink) -> crate::Result<()> {
     Ok(())
 }
 
-/// A publish candidate with its content, size and SHA-512.
+/// A publish candidate with its content, size, SHA-512 (for the publish report) and SHA-256,
+/// which is the pool's P.
 pub(super) struct HashedExternalFile {
     file_name: String,
     file_type: String,
     content: crate::state::content_store::ReadableContent,
     size: u64,
     sha512: String,
+    sha256: [u8; 32],
     executable: bool,
 }
 
@@ -1097,6 +1220,7 @@ async fn hash_external_file(
     let content = external_file_source(instance_path, candidate, state).await?;
     let mut file = tokio::fs::File::open(content.path()).await?;
     let mut hasher = sha2::Sha512::new();
+    let mut sha256 = sha2::Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024];
     let mut head = Vec::with_capacity(FILE_SCAN_HEAD_SIZE);
     let mut size = 0_u64;
@@ -1106,6 +1230,7 @@ async fn hash_external_file(
             break;
         }
         hasher.update(&buffer[..read]);
+        sha256.update(&buffer[..read]);
         let remaining = FILE_SCAN_HEAD_SIZE - head.len();
         head.extend_from_slice(&buffer[..read.min(remaining)]);
         size += read as u64;
@@ -1117,327 +1242,9 @@ async fn hash_external_file(
         content,
         size,
         sha512: format!("{:x}", hasher.finalize()),
+        sha256: sha256.finalize().into(),
         executable: is_executable_content(&head),
     })
-}
-
-pub(super) async fn upload_external_files(
-    shared_instance_id: &str,
-    version: i32,
-    files: &[HashedExternalFile],
-    uploads: &[ExternalFileResponse],
-    on_progress: &(dyn Fn(u64, u64) + Send + Sync),
-    state: &State,
-) -> crate::Result<()> {
-    let mut sources = Vec::with_capacity(uploads.len());
-    for upload in uploads {
-        let file = files
-            .iter()
-            .find(|file| {
-                file.file_name == upload.file_name
-                    && file.file_type == upload.file_type
-            })
-            .ok_or(crate::ErrorKind::InputError(format!(
-                "shared instance service requested unknown external file {}",
-                upload.file_name
-            )))?;
-        sources.push((upload, file));
-    }
-    sources.sort_by_key(|(_, file)| file.size);
-    let total = sources
-        .iter()
-        .fold(0_u64, |total, (_, file)| total.saturating_add(file.size));
-
-    let (single, batched): (Vec<_>, Vec<_>) = sources
-        .into_iter()
-        .partition(|(_, file)| file.size > UPLOAD_BATCH_MAX_BYTES);
-    let batch_bytes = (total / UPLOAD_CONCURRENCY as u64)
-        .clamp(UPLOAD_BATCH_MIN_BYTES, UPLOAD_BATCH_MAX_BYTES);
-    let mut batches = Vec::<Vec<&HashedExternalFile>>::new();
-    let mut current_bytes = 0_u64;
-    for (_, file) in batched {
-        match batches.last_mut() {
-            Some(batch)
-                if batch.len() < UPLOAD_BATCH_MAX_FILES
-                    && current_bytes + file.size <= batch_bytes =>
-            {
-                current_bytes += file.size;
-                batch.push(file);
-            }
-            _ => {
-                current_bytes = file.size;
-                batches.push(vec![file]);
-            }
-        }
-    }
-
-    let batch_path =
-        format!("/instances/{shared_instance_id}/versions/{version}/files");
-    let uploaded = Arc::new(AtomicU64::new(0));
-    on_progress(0, total);
-    let uploads = batches
-        .into_iter()
-        .map(|batch| {
-            upload_external_file_batch(
-                &batch_path,
-                batch,
-                uploaded.clone(),
-                state,
-            )
-            .boxed()
-        })
-        .chain(single.into_iter().map(|(upload, file)| {
-            upload_external_file(upload, file, uploaded.clone(), state).boxed()
-        }))
-        .collect::<Vec<_>>();
-    let uploads = futures::stream::iter(uploads)
-        .buffer_unordered(UPLOAD_CONCURRENCY)
-        .try_collect::<()>();
-    tokio::pin!(uploads);
-    let mut ticker = tokio::time::interval(UPLOAD_PROGRESS_INTERVAL);
-    loop {
-        tokio::select! {
-            result = &mut uploads => break result?,
-            _ = ticker.tick() => on_progress(
-                uploaded.load(Ordering::Relaxed).min(total),
-                total,
-            ),
-        }
-    }
-    on_progress(total, total);
-
-    Ok(())
-}
-
-async fn upload_external_file_batch(
-    path: &str,
-    files: Vec<&HashedExternalFile>,
-    uploaded: Arc<AtomicU64>,
-    state: &State,
-) -> crate::Result<()> {
-    let url = service_url(&service_base_url()?, path);
-    let mut attempt = 1;
-    loop {
-        let sent = Arc::new(AtomicU64::new(0));
-        let result = send_external_file_batch(
-            path,
-            &url,
-            &files,
-            uploaded.clone(),
-            sent.clone(),
-            state,
-        )
-        .await;
-        let retry = match &result {
-            Ok(response) => response.status().is_server_error(),
-            Err(_) => true,
-        };
-        if !retry || attempt == UPLOAD_BATCH_ATTEMPTS {
-            let response = result?;
-            return handle_external_file_batch_response(path, &files, response)
-                .await;
-        }
-        uploaded.fetch_sub(sent.load(Ordering::Relaxed), Ordering::Relaxed);
-        tracing::warn!(
-            path,
-            attempt,
-            file_count = files.len(),
-            "Retrying shared instance external file batch upload"
-        );
-        attempt += 1;
-    }
-}
-
-async fn send_external_file_batch(
-    path: &str,
-    url: &str,
-    files: &[&HashedExternalFile],
-    uploaded: Arc<AtomicU64>,
-    sent: Arc<AtomicU64>,
-    state: &State,
-) -> crate::Result<reqwest::Response> {
-    use futures::stream::BoxStream;
-    use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderValue};
-
-    let boundary = format!("modrinth-{}", uuid::Uuid::new_v4().simple());
-    let manifest = serde_json::to_vec(&json!({
-        "files": files
-            .iter()
-            .map(|file| json!({
-                "file_name": file.file_name,
-                "file_type": file.file_type,
-                "file_size": file.size,
-                "sha512": file.sha512,
-            }))
-            .collect::<Vec<_>>(),
-    }))?;
-
-    let chunk =
-        |data: Vec<u8>| -> BoxStream<'static, std::io::Result<bytes::Bytes>> {
-            futures::stream::once(futures::future::ready(Ok(data.into())))
-                .boxed()
-        };
-    let part_header = |name: &str, content_type: &str| {
-        chunk(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\nContent-Type: {content_type}\r\n\r\n"
-            )
-            .into_bytes(),
-        )
-    };
-
-    let mut parts = vec![
-        part_header("manifest", "application/json"),
-        chunk(manifest),
-        chunk(b"\r\n".to_vec()),
-    ];
-    for file in files {
-        let file_path = file.content.path().to_path_buf();
-        let uploaded = uploaded.clone();
-        let sent = sent.clone();
-        parts.push(part_header("file", "application/octet-stream"));
-        parts.push(
-            futures::stream::once(tokio::fs::File::open(file_path))
-                .map_ok(|reader| {
-                    tokio_util::io::ReaderStream::with_capacity(
-                        reader,
-                        64 * 1024,
-                    )
-                })
-                .try_flatten()
-                .inspect_ok(move |read| {
-                    let len = read.len() as u64;
-                    uploaded.fetch_add(len, Ordering::Relaxed);
-                    sent.fetch_add(len, Ordering::Relaxed);
-                })
-                .boxed(),
-        );
-        parts.push(chunk(b"\r\n".to_vec()));
-    }
-    parts.push(chunk(format!("--{boundary}--\r\n").into_bytes()));
-
-    let encoder = async_compression::tokio::bufread::ZstdEncoder::new(
-        tokio_util::io::StreamReader::new(
-            futures::stream::iter(parts).flatten(),
-        ),
-    );
-    let body = reqwest::Body::wrap_stream(
-        tokio_util::io::ReaderStream::with_capacity(encoder, 64 * 1024),
-    );
-
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_str(&format!(
-            "multipart/form-data; boundary={boundary}"
-        ))
-        .context("invalid multipart boundary")?,
-    );
-    headers.insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
-
-    let size = files.iter().map(|file| file.size).sum::<u64>();
-    send_body_request_to_url(
-        "upload_external_files",
-        Method::POST,
-        path,
-        url,
-        body,
-        None,
-        headers,
-        state,
-    )
-    .await
-    .context(format!(
-        "uploading {} external files ({size} bytes)",
-        files.len()
-    ))
-}
-
-async fn handle_external_file_batch_response(
-    path: &str,
-    files: &[&HashedExternalFile],
-    response: reqwest::Response,
-) -> crate::Result<()> {
-    if response.status() == reqwest::StatusCode::BAD_REQUEST
-        && response.headers().contains_key(FILE_NOT_ALLOWED_HEADER)
-    {
-        let message = response.text().await.unwrap_or_default();
-        let file_name = files
-            .iter()
-            .map(|file| file.file_name.as_str())
-            .filter(|file_name| message.ends_with(file_name))
-            .max_by_key(|file_name| file_name.len())
-            .map(str::to_string)
-            .unwrap_or(message);
-        bail!(crate::ErrorKind::SharedInstanceFileNotAllowed(file_name));
-    }
-    if !response.status().is_success() {
-        return shared_instances_request_error(
-            "upload_external_files",
-            Method::POST,
-            path,
-            response,
-        )
-        .await;
-    }
-
-    Ok(())
-}
-
-async fn upload_external_file(
-    upload: &ExternalFileResponse,
-    file: &HashedExternalFile,
-    uploaded: Arc<AtomicU64>,
-    state: &State,
-) -> crate::Result<()> {
-    let HashedExternalFile {
-        content,
-        size,
-        sha512: file_sha512,
-        ..
-    } = file;
-    let upload_url = url::Url::parse(&upload.url)
-        .context("invalid shared instance external file upload URL")?;
-    let reader = tokio::fs::File::open(content.path()).await?;
-    let body = reqwest::Body::wrap_stream(
-        tokio_util::io::ReaderStream::with_capacity(reader, 64 * 1024)
-            .inspect_ok(move |chunk| {
-                uploaded.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-            }),
-    );
-    let response = send_body_request_to_url(
-        "upload_external_file",
-        Method::PUT,
-        upload_url.path(),
-        &upload.url,
-        body,
-        Some(*size),
-        file_sha512_headers(Some(file_sha512))?,
-        state,
-    )
-    .await
-    .context(format!(
-        "uploading external file {} ({size} bytes, sha512 {file_sha512})",
-        upload.file_name
-    ))?;
-    if response.status() == reqwest::StatusCode::BAD_REQUEST
-        && response.headers().contains_key(FILE_NOT_ALLOWED_HEADER)
-    {
-        bail!(crate::ErrorKind::SharedInstanceFileNotAllowed(
-            upload.file_name.clone(),
-        ));
-    }
-    if !response.status().is_success() {
-        return shared_instances_request_error(
-            "upload_external_file",
-            Method::PUT,
-            upload_url.path(),
-            response,
-        )
-        .await;
-    }
-
-    Ok(())
 }
 
 async fn external_file_source(

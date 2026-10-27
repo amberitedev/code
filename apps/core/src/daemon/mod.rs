@@ -132,6 +132,15 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     )
     .await?;
     let access = Arc::new(access::Access::new(keys));
+    let storage = Arc::new(crate::store::Storage::new(
+        db.clone(),
+        paths.clone(),
+        core_id.clone(),
+        config.backend_url.clone(),
+        installed,
+        Arc::clone(&access.owed),
+    ));
+    storage.start();
     let servers = Servers::open(paths.clone(), db.clone()).await?;
     let backups = crate::backups::Backups::open(
         paths.clone(),
@@ -169,6 +178,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
         network,
+        storage: Arc::clone(&storage),
     });
     let router = api::router(Arc::clone(&state));
     match config.backend_url.clone() {
@@ -182,6 +192,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
                 port: config.port,
                 bind: config.bind,
                 access: Arc::clone(&access),
+                storage,
             })));
             tokio::spawn(
                 async move { state.access.keys.refresh_daily().await },

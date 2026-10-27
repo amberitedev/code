@@ -494,16 +494,15 @@ fn shared_instance_external_file_data(
     file: ExternalFileResponse,
 ) -> crate::Result<SharedInstanceExternalFileData> {
     let file_size =
-        file.file_size.ok_or(crate::ErrorKind::InputError(format!(
-            "shared instance external file {} is missing its size",
-            file.file_name
-        )))?;
-    let file_size = u64::try_from(file_size).context(
-        crate::ErrorKind::InputError(format!(
-            "shared instance external file {} has an invalid size",
-            file.file_name
-        )),
-    )?;
+        file.plain_size()
+            .ok_or(crate::ErrorKind::InputError(format!(
+                "shared instance external file {} is missing its size",
+                file.file_name
+            )))?;
+    let pool = match file.object.as_deref() {
+        Some(object) => Some(std::sync::Arc::new(pool_file(&file, object)?)),
+        None => None,
+    };
 
     Ok(SharedInstanceExternalFileData {
         file_name: file.file_name,
@@ -512,6 +511,50 @@ fn shared_instance_external_file_data(
         file_size,
         sha1: file.sha1,
         sha256: file.sha256,
+        pool,
+    })
+}
+
+fn pool_file(
+    file: &ExternalFileResponse,
+    object: &str,
+) -> crate::Result<crate::self_hosted::pool::PoolFile> {
+    use crate::self_hosted::pool::{crypto, parse_hash};
+
+    // A version whose files are in the pool but has no holders cannot be fetched.
+    let access = file
+        .pool
+        .clone()
+        .ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
+    let invalid = || {
+        crate::ErrorKind::InputError(format!(
+            "shared instance file {} has an invalid pool entry",
+            file.file_name
+        ))
+    };
+    let key = match file.key.as_deref() {
+        Some(key) => Some(parse_hash(key).ok_or_else(invalid)?),
+        None if crypto::is_content_type(&file.file_type) => None,
+        None => return Err(invalid().into()),
+    };
+
+    let object_size = file
+        .object_size
+        .filter(|size| {
+            Some(*size) == file.plain_size().map(crypto::object_size)
+        })
+        .ok_or_else(invalid)?;
+
+    Ok(crate::self_hosted::pool::PoolFile {
+        object: parse_hash(object).ok_or_else(invalid)?,
+        object_size,
+        key,
+        sha256: file
+            .sha256
+            .as_deref()
+            .and_then(parse_hash)
+            .ok_or_else(invalid)?,
+        access,
     })
 }
 

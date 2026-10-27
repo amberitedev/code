@@ -25,6 +25,7 @@ pub mod properties;
 pub mod servers;
 pub mod sessions;
 mod startup;
+pub mod storage;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -37,7 +38,7 @@ use axum::{
     Router,
     extract::DefaultBodyLimit,
     http::StatusCode,
-    routing::{delete, get, patch, post, put},
+    routing::{any, delete, get, patch, post, put},
 };
 use color_eyre::eyre::{Result, eyre};
 use hyper_util::{
@@ -66,6 +67,7 @@ pub struct AppState {
     pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
+    pub storage: Arc<crate::store::Storage>,
 }
 
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
@@ -91,6 +93,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/update", get(update::get).patch(update::settings))
         .route("/update/check", post(update::check))
         .route("/update/rollback", post(update::rollback))
+        .route("/storage", get(storage::get).patch(storage::settings))
         .route("/eula", get(eula::get).post(eula::post))
         .route("/logs", get(logs::get))
         .route("/servers/{id}/performance", get(performance::get))
@@ -241,6 +244,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/servers/{id}/modrinth/v0/fs/create", post(files::create))
         .route("/servers/{id}/modrinth/v0/fs/update", put(files::update))
+        // The pool's store streams uploads and downloads of any size, with its own caps.
+        .route("/store/{*rest}", any(storage::forward))
         .layer(DefaultBodyLimit::disable())
         .with_state(state)
         .layer(TraceLayer::new_for_http())

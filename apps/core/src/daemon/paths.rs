@@ -26,7 +26,7 @@ pub struct Folder {
 
 /// Every top-level folder. `runs/` and `servers/` hold one folder per server, which inherits the
 /// access of its parent.
-pub const FOLDERS: [Folder; 9] = [
+pub const FOLDERS: [Folder; 10] = [
     Folder {
         name: "db",
         servers: ServersAccess::None,
@@ -51,6 +51,11 @@ pub const FOLDERS: [Folder; 9] = [
         name: "runs",
         servers: ServersAccess::None,
         holds: "per server: pid, run id, status, console.log",
+    },
+    Folder {
+        name: "store",
+        servers: ServersAccess::None,
+        holds: "encrypted shared files of the pool. See `store`",
     },
     Folder {
         name: "logs",
@@ -225,6 +230,11 @@ impl Paths {
         self.root.join("logs")
     }
 
+    /// The store's own folder. See `store::objects`.
+    pub fn store(&self) -> PathBuf {
+        self.root.join("store")
+    }
+
     /// One server's folder: the only place `copal-servers` can write.
     pub fn server(&self, server_id: &str) -> PathBuf {
         self.root.join("servers").join(server_id)
@@ -271,6 +281,7 @@ mod tests {
             paths.shim_log("a"),
             paths.staging("a"),
             paths.logs(),
+            paths.store(),
             paths.server("a"),
             paths.meta(),
             paths.java(),

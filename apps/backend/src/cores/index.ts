@@ -13,6 +13,7 @@ import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
 import { MAX_SERVER_NAME, parseServers, writeServers } from './servers'
+import { reportStorage } from './storage'
 import { issueTicket } from './tickets'
 
 // Core sign-in. A signed-out Core asks for a code and the key it will use, shows the code to its
@@ -507,6 +508,8 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 	if (path === '/core/auth/code' && method === 'POST') return requestCode(request, env)
 	if (path === '/core/auth/poll' && method === 'POST') return pollCode(request, env)
 	if (path === '/core/state' && method === 'POST') return reportState(request, env)
+	if (path === '/core/storage' && method === 'POST')
+		return reportStorage(request, env, await requireListedCore(request, env))
 	if (path === '/core/access' && method === 'PUT') return replaceAccess(request, env)
 	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
 	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)

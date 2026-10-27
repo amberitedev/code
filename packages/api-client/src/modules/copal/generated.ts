@@ -127,6 +127,10 @@ export type TicketClaims = {
  */
 iss: string, 
 /**
+ * Always `session`. Core refuses any other kind for sign-in.
+ */
+kind: string, 
+/**
  * The user id.
  */
 sub: string, name: string, avatar_url: string | null, 
@@ -202,7 +206,55 @@ user: string, server_id: string, server_name: string, role: Role, };
 
 export type Remove = { user_id: string, server_id: string, keep_core: boolean, };
 
-export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "report_state" };
+export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "report_state" } | { "type": "report_storage" };
+
+export type StorageReport = { 
+/**
+ * The owner offers storage for shared files.
+ */
+enabled: boolean, 
+/**
+ * Core is installed as a service.
+ */
+service: boolean, cap: number, used: number, 
+/**
+ * Free on the store's disk.
+ */
+free: number, 
+/**
+ * What it may serve a day, and has served today (UTC).
+ */
+egress_cap: number, egress_today: number, 
+/**
+ * Every version the store holds whole.
+ */
+versions: Array<HeldVersion>, };
+
+export type HeldVersion = { 
+/**
+ * R, the version's root hash.
+ */
+root: string, 
+/**
+ * The bytes of its objects.
+ */
+bytes: number, };
+
+export type StorageAnswer = { 
+/**
+ * Roots to stop holding.
+ */
+drop: Array<string>, 
+/**
+ * Versions to copy from another Core.
+ */
+pull: Array<PullOrder>, };
+
+export type PullOrder = { root: string, 
+/**
+ * A pull ticket naming the source Core.
+ */
+ticket: string, };
 
 export type EditedFiles = { files: Array<EditedFile>, };
 
@@ -295,6 +347,42 @@ export type Restarting = {
  * The version Core restarts into.
  */
 version: string, };
+
+export type StorageSettings = { 
+/**
+ * Offer storage for other people's shared files.
+ */
+enabled?: boolean, 
+/**
+ * The most the store may hold.
+ */
+cap?: number, 
+/**
+ * The most it may serve a day.
+ */
+egress_cap?: number, };
+
+export type StorageStatus = { enabled: boolean, cap: number, egress_cap: number, 
+/**
+ * What the stored versions take, counting each object once.
+ */
+used: number, 
+/**
+ * Free on the store's disk.
+ */
+free: number, 
+/**
+ * Served today, UTC.
+ */
+egress_today: number, 
+/**
+ * Core is installed as a service. The pool places shares only on Cores that are.
+ */
+service: boolean, 
+/**
+ * Versions the store holds.
+ */
+versions: number, };
 
 export type Eula = { 
 /**

@@ -276,3 +276,136 @@ writes, or a small VPS at about the same price.
 - The sizes: 1 GB per share, 3 GB per user, 10 GB launch cap, 20 GB default volunteer cap, 50 GB
   daily egress. Set, then revisited from usage.
 - The domain.
+
+## Protocol
+
+The exact shapes every side is built against. The backend (`apps/backend/src/sharing`), the
+store (`apps/core/src/store`), and the App (`packages/app-lib/src/self_hosted/pool`) share this
+text and nothing else.
+
+### Hashes and encryption
+
+- Hashes are SHA-256, written as 64 lowercase hex characters.
+- **P** is the hash of the plain file. **C** is the hash of the encrypted object. **R** is the
+  hash of the concatenation of the version's distinct C values as raw 32-byte values, sorted
+  ascending bytewise (the same order as sorting the hex strings). A version with no files has
+  R = SHA-256 of nothing, `e3b0c442…b855`.
+- Content files are `file_type` in `mod`, `resourcepack`, `shader`, `datapack`. Their key is
+  `HKDF-SHA256(ikm = P as raw bytes, salt = empty, info = "amberite-shared-file-v1")`, 32 bytes.
+  Every other `file_type` (`config`, `configs`) gets a random 32-byte key, carried in the manifest
+  as `key`, 64 hex characters. A content file carries no `key`.
+- Cipher: XChaCha20-Poly1305. The plain file is cut into chunks of 1 MiB (1,048,576 bytes); the
+  last chunk is shorter or empty, and an empty file is one empty last chunk. Chunk `i` (from 0)
+  uses the 24-byte nonce `i` as a big-endian 64-bit integer followed by 16 zero bytes, and the
+  associated data is one byte: `1` for the last chunk, `0` otherwise. The object is the chunks'
+  ciphertexts in order, each plaintext length plus 16. So `object_size = size + 16 × max(1,
+ceil(size / 1 MiB))`. Encryption is deterministic given the key, so the same plain file and key
+  always give the same C, and an upload can be retried by encrypting again.
+- A reader verifies each chunk's tag as it arrives, requires every chunk but the last to be
+  exactly 1 MiB + 16 bytes, requires the last to carry the flag, and finally checks P.
+
+### Manifest
+
+`external_files[]` on the backend's version routes:
+
+```
+{ file_name, file_type, size, sha256, object, object_size, key? }
+```
+
+`size` and `object_size` are plain and encrypted byte counts, `sha256` is P, `object` is C.
+`url` is also present for upstream code that expects it and is `pool:<C>`; nothing fetches it.
+
+`POST /v1/instances/:id/versions` (owner) takes the upstream fields plus `external_files` as above
+and `root` (R), up to 4,096 files and a 4 MiB body. The backend recomputes R, requires `key`
+exactly on non-content files, sums distinct `object_size` into the version's bytes, and checks the
+limits. It stores the manifest in R2 as `manifests/<instance>/<version>`, one D1 row, and answers:
+
+```
+{ ...manifest, version, ready: false, root, store: { core, ticket, expires } }
+```
+
+`core` is `{ id, address, public_address, cert_fingerprint }`. A version with no files is ready
+at once and has no `store`. Errors, as `code`: `no_storage` (503, no eligible Core),
+`push_in_flight` (409, an unconfirmed version younger than an hour exists), `share_too_large`
+(413, over 1 GiB), `storage_quota` (413, over the owner's 3 GiB across shares).
+
+`GET /v1/instances/:id/versions[/:n]` (member) answers the same manifest with `version`, `ready`,
+`root`, and:
+
+- `pool: { holders: [core…], ticket }` when ready and the version has files: the confirmed
+  holders and a fetch ticket for R, good for six hours.
+- `store` again for the owner while the version is unconfirmed, with a fresh store ticket, so a
+  crashed push resumes.
+- `reports: { content: n }` for the owner: how many members reported bytes that decrypt to the
+  wrong P on this version.
+
+`POST /v1/instances/:id/versions/:n/reports` (member) takes `{ core_id, kind }`, `kind` being
+`object` (bytes did not hash to C: the Core's fault) or `content` (decrypted to the wrong P: the
+manifest's fault). One row per member, version and kind. 204.
+
+### Tickets
+
+All tickets are Ed25519 JWTs (`alg: EdDSA`, `kid` in the header) with `iss: "amberite"`, `iat`,
+`exp`, a random `jti`, and a `kind`. A Core rejects a ticket whose `kind` is not the route's.
+
+| kind      | aud                      | claims                                | life                  |
+| --------- | ------------------------ | ------------------------------------- | --------------------- |
+| `session` | the Core id              | `sub`, `name`, `avatar_url`           | 5 minutes, single use |
+| `store`   | the home Core id         | `root`, `bytes` (the version's bytes) | 1 hour                |
+| `fetch`   | array of holder Core ids | `root`                                | 6 hours               |
+| `pull`    | the replica Core id      | `root`, `source: { core, ticket }`    | 24 hours              |
+
+A store ticket is reusable until it expires, because a resumed upload needs it; it names one
+root and a byte cap, so reuse cannot store anything else. The design above says single-use; this
+is the decision taken while building.
+
+### Store routes
+
+The store listens on `127.0.0.1` only. The Core forwards every request under `/store/` to it
+unchanged, adding `X-Forwarded-For` with the caller's address, and streams the answer back. Every
+store route takes `Authorization: Bearer <ticket>`.
+
+- `POST /store/versions/{root}/have`, store ticket. Body `{ objects: [C…] }`. Answers
+  `{ missing: [C…], complete }`, `complete` being whether the version's list is already stored.
+- `POST /store/versions/{root}`, store ticket. Body: an uncompressed tar stream. The first entry
+  is `version.json`, `{ objects: [{ hash, size }…] }` sorted by hash, whose hashes must give
+  `root` and whose sizes must sum to at most the ticket's `bytes`. Each later entry is named by
+  its C and holds that object; the store hashes it as it arrives, writes it to a temporary name,
+  and renames it into place only when the hash matches. Entries the store already holds are
+  skipped. When every listed object is present the list is stored and the answer is
+  `{ complete: true }`; otherwise `{ complete: false, missing: [C…] }` and the owner sends the
+  rest with the same ticket.
+- `GET /store/versions/{root}`, fetch ticket. The stored list, `{ objects: [{ hash, size }…] }`.
+- `GET /store/versions/{root}/objects/{C}`, fetch ticket. The object's bytes, `Content-Length`
+  set, `Range: bytes=<from>-` honoured with 206. C must be in the version's list.
+- `POST /store/versions/{root}/pull`, pull ticket. The store fetches the list and the objects it
+  lacks from `source` with the fetch ticket inside, pinned to the source's certificate, and
+  answers `{ complete }`.
+
+Errors are `{ error, description }` like the Core's: `ticket_invalid`, `ticket_expired`,
+`ticket_wrong_core`, `ticket_wrong_kind`, `not_found`, `disk_full` (507), `egress_spent` (429),
+`rate_limited` (429), `invalid_request`, `conflict`.
+
+The store also serves admin routes under `/admin/` that the Core never forwards and that take a
+token the Core hands the store when it starts it: `GET /admin/status` (`{ cap, used, free,
+egress_cap, egress_today, versions: [{ root, bytes }] }`), `POST /admin/drop` (`{ roots }`), and
+`POST /admin/config` (`{ cap, egress_cap }`). A dropped list keeps its objects six hours, the
+fetch ticket life, before the store deletes those no other list references.
+
+### Core and backend
+
+`POST /core/storage` (Core key) reports storage, after every completed upload and once a day:
+
+```
+{ enabled, service, cap, used, free, egress_cap, egress_today, versions: [{ root, bytes }] }
+```
+
+`service` is whether this Core is installed as a service. The backend answers
+`{ drop: [root…], pull: [{ root, ticket }…] }`. It writes holdings only where they changed, and
+confirms every version whose home is this Core and whose root it now holds. A Core is eligible
+for new shares when `enabled`, `service`, its public address is not private, `used < cap`, and
+it reported within two days. In local development (`LOCAL_DEV`) `service` and the public address
+are not required.
+
+The Core's hosting API has `GET /storage` and `PATCH /storage` (owner), `StorageSettings`:
+`{ enabled, cap, egress_cap }`, which the App's Settings, Cores page shows and changes.

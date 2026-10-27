@@ -1,5 +1,6 @@
 //! Backend sync. The backend is a phone book and a notifier: Core tells it where this Core is and
-//! who may reach it, on start and on change, never on a timer.
+//! who may reach it, on start and on change, never on a timer. Storage reports (see
+//! `store::supervisor`) are the exception: they also go once a day.
 //!
 //! A call that must reach the backend is owed: [`owe`] stores it in `backend_owed` in the same
 //! transaction as the change, and [`run`] sends it, retrying with backoff until the backend
@@ -21,8 +22,9 @@ use tracing::{info, warn};
 
 use super::{Access, Changed, now, pairing};
 use crate::{
-    api::backend::{AccessDirectory, OwedCall, StateReport},
+    api::backend::{AccessDirectory, OwedCall, StateReport, StorageAnswer},
     network::public_ip,
+    store::Storage,
 };
 
 /// How often Core looks for a new address.
@@ -40,11 +42,12 @@ pub struct Sync {
     pub port: u16,
     pub bind: IpAddr,
     pub access: Arc<Access>,
+    pub storage: Arc<Storage>,
 }
 
 /// Owe the backend `call`, in the transaction of the change that needs it. Wake sync with
-/// `Access::owed` once it commits. A state report already owed is not owed twice: it sends the
-/// state as it is when it goes.
+/// `Access::owed` once it commits. A report already owed is not owed twice: it sends the state
+/// as it is when it goes.
 pub async fn owe(
     conn: &mut SqliteConnection,
     call: &OwedCall,
@@ -55,7 +58,7 @@ pub async fn owe(
     )
     .bind(serde_json::to_string(call).expect("calls serialize"))
     .bind(now())
-    .bind(matches!(call, OwedCall::ReportState))
+    .bind(matches!(call, OwedCall::ReportState | OwedCall::ReportStorage))
     .execute(conn)
     .await?;
     Ok(())
@@ -386,6 +389,20 @@ impl Sync {
                 )
                 .await
             }
+            OwedCall::ReportStorage => {
+                // A store that does not answer owes a report again once it runs.
+                let Some(report) = self.storage.report().await else {
+                    return Ok(());
+                };
+                let answer: StorageAnswer = self
+                    .request(key, Method::POST, "/core/storage", &report)
+                    .await?
+                    .json()
+                    .await
+                    .map_err(|error| Failure::Refused(error.to_string()))?;
+                self.storage.answer(answer);
+                Ok(())
+            }
         }
     }
 
@@ -396,6 +413,17 @@ impl Sync {
         path: &str,
         body: &impl Serialize,
     ) -> Result<(), Failure> {
+        self.request(key, method, path, body).await.map(drop)
+    }
+
+    /// Send one call and return the backend's answer when it succeeded.
+    async fn request(
+        &self,
+        key: &str,
+        method: Method,
+        path: &str,
+        body: &impl Serialize,
+    ) -> Result<reqwest::Response, Failure> {
         let response = self
             .http
             .request(method, format!("{}{path}", self.backend_url))
@@ -409,7 +437,7 @@ impl Sync {
             })?;
         let status = response.status();
         if status.is_success() {
-            return Ok(());
+            return Ok(response);
         }
         if status == StatusCode::GONE {
             return Err(Failure::Lost(Lost::Removed));
@@ -532,7 +560,16 @@ mod tests {
         let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
             .await
             .unwrap();
+        let dir = tempfile::tempdir().unwrap();
         Sync {
+            storage: Arc::new(Storage::new(
+                db.clone(),
+                crate::daemon::paths::Paths::new(dir.path()),
+                core_id.clone(),
+                None,
+                false,
+                Arc::new(tokio::sync::Notify::new()),
+            )),
             db,
             http: reqwest::Client::new(),
             backend_url: url,

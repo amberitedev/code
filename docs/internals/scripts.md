@@ -104,7 +104,8 @@ and keeps that session in the OS keychain; set `AMBERITE_CORE_PROXY_LOG=1` befor
 to log the head of every request its Core proxy sends, with the session token left out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
-shared files persist in `.data/backend`.
+shared version manifests persist in `.data/backend`. Shared files themselves are in the dev Core's
+store, `.data/core/store`.
 The runner applies local migrations first. It generates a persistent secret in
 `.data/backend/dev-secret` and passes it through `.data/backend/.dev.vars`, never command-line
 arguments. It also makes a local ticket key in `.data/backend/ticket-key.json`, passes it as
@@ -132,7 +133,7 @@ Each checkout owns a gitignored `.data/`:
 
 ```text
 .data/
-├── backend/         persistent local D1, Durable Objects, shared files (R2), and dev secrets
+├── backend/         persistent local D1, Durable Objects, manifests (R2), and dev secrets
 ├── core/            shared Core state
 ├── scenarios/
 │   ├── 1/           one complete App installation

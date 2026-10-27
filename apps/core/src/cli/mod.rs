@@ -1,4 +1,4 @@
-//! The `copal` command line. `install`, `uninstall`, `run`, and the hidden `core` and `shim` work
+//! The `copal` command line. `install`, `uninstall`, `run`, and the hidden `core`, `shim`, and `store` work
 //! on this machine directly; every other command talks to the running Core over the local socket
 //! (see `client`), so it works the same on every OS and with the backend down.
 //!
@@ -10,6 +10,7 @@ mod backups;
 pub mod client;
 mod machine;
 mod servers;
+mod storage;
 #[cfg(test)]
 mod tests;
 
@@ -66,6 +67,9 @@ pub enum Command {
         data_dir: PathBuf,
         server: String,
     },
+    /// The shared file pool's store. Core starts this; it is not for people.
+    #[command(hide = true)]
+    Store(crate::store::Args),
     /// Show whether Core runs, its version, and what its servers are doing.
     Status,
     /// Get a fresh pairing code, to enter in Amberite to make this Core yours.
@@ -94,6 +98,8 @@ pub enum Command {
     /// Who may use each server, and their sessions.
     #[command(subcommand)]
     Access(access::AccessCommand),
+    /// Show or change the storage this Core offers for other people's shared files.
+    Storage(storage::StorageArgs),
 }
 
 /// What a command prints: `text` for a person, `json` with `--json`.
@@ -180,11 +186,13 @@ pub async fn run(command: Command, json: bool) -> Result<bool> {
         Command::Servers(command) => servers::run(&client, command).await?,
         Command::Backups(command) => backups::run(&client, command).await?,
         Command::Access(command) => access::run(&client, command).await?,
+        Command::Storage(args) => storage::run(&client, args).await?,
         Command::Install { .. }
         | Command::Uninstall { .. }
         | Command::Run { .. }
         | Command::Core
-        | Command::Shim { .. } => {
+        | Command::Shim { .. }
+        | Command::Store(_) => {
             unreachable!("main runs the commands that do not talk to Core")
         }
     };

@@ -29,6 +29,7 @@ base64 = { workspace = true }
 bon = { workspace = true }
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true, features = ["serde"] }
+chacha20poly1305 = { workspace = true }
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 dashmap = { workspace = true, features = ["serde"] }
@@ -46,7 +47,9 @@ futures = { workspace = true, features = ["alloc", "async-await"] }
 futures-lite = { workspace = true }
 governor = { workspace = true }
 heck = { workspace = true }
+hex = { workspace = true }
 hickory-resolver = { workspace = true }
+hkdf = { workspace = true }
 httpdate = { workspace = true }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 indexmap = { workspace = true }
@@ -84,6 +87,7 @@ reqwest = { workspace = true, features = [
   "stream",
 ] }
 rgb = { workspace = true }
+rustls = { workspace = true, features = ["ring"] }
 same-file = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde-binhum = { workspace = true }
@@ -103,6 +107,7 @@ sqlx = { workspace = true, features = [
 ] }
 sysinfo = { workspace = true, features = ["disk", "system"] }
 tauri = { workspace = true, features = ["unstable"], optional = true }
+tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [

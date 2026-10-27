@@ -1,13 +1,16 @@
-//! The backend's public ticket keys. Stored in the database so tickets verify while the backend is
-//! down, refreshed once a day, and refetched when a ticket names a key Core does not know, at most
-//! once every ten minutes.
+//! The backend's public ticket keys. Stored so tickets verify while the backend is down,
+//! refreshed once a day, and refetched when a ticket names a key Core does not know, at most once
+//! every ten minutes. Core stores them in its database; the store process, which has no database,
+//! in a file of its own (see [`Keys::load_file`]).
 
 use std::{
     collections::HashMap,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -21,11 +24,26 @@ const RETRY: Duration = Duration::from_secs(3600);
 const UNKNOWN_KID_EVERY: Duration = Duration::from_secs(600);
 
 pub struct Keys {
-    db: SqlitePool,
+    stored: Stored,
     http: reqwest::Client,
     /// `{backend}/core/keys.json`. `None` without a backend: only stored keys are used.
     url: Option<String>,
     state: Mutex<State>,
+}
+
+/// Where the keys are kept between runs.
+enum Stored {
+    Db(SqlitePool),
+    /// A JSON [`KeysFile`].
+    File(PathBuf),
+}
+
+/// The store's `keys.json`.
+#[derive(Default, Serialize, Deserialize)]
+struct KeysFile {
+    fetched_at: i64,
+    #[serde(flatten)]
+    keys: PublicKeys,
 }
 
 struct State {
@@ -55,16 +73,51 @@ impl Keys {
             .and_then(|json| serde_json::from_str(&json).ok())
             .map(|keys| parse(&keys))
             .unwrap_or_default();
-        Ok(Self {
-            db,
+        Ok(Self::new(
+            Stored::Db(db),
+            http,
+            backend_url,
+            keys,
+            fetched_at.unwrap_or(0),
+        ))
+    }
+
+    /// The keys stored in `path`, a JSON file that need not exist yet.
+    pub fn load_file(
+        path: PathBuf,
+        http: reqwest::Client,
+        backend_url: Option<&str>,
+    ) -> Self {
+        let file: KeysFile = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        Self::new(
+            Stored::File(path),
+            http,
+            backend_url,
+            parse(&file.keys),
+            file.fetched_at,
+        )
+    }
+
+    fn new(
+        stored: Stored,
+        http: reqwest::Client,
+        backend_url: Option<&str>,
+        keys: HashMap<String, [u8; 32]>,
+        fetched_at: i64,
+    ) -> Self {
+        Self {
+            stored,
             http,
             url: backend_url.map(|url| format!("{url}/core/keys.json")),
             state: Mutex::new(State {
                 keys,
-                fetched_at: fetched_at.unwrap_or(0),
+                fetched_at,
                 refetched: None,
             }),
-        })
+        }
     }
 
     /// The key named `kid`. An unknown id refetches the keys first, unless that happened in the
@@ -129,24 +182,42 @@ impl Keys {
             .await
             .map_err(|error| error.to_string())?;
         let mut state = self.state.lock().await;
-        self.store(&mut state, &keys)
-            .await
-            .map_err(|error| error.to_string())
+        self.store(&mut state, &keys).await
     }
 
     async fn store(
         &self,
         state: &mut State,
         keys: &PublicKeys,
-    ) -> sqlx::Result<()> {
+    ) -> Result<(), String> {
         let fetched_at = now();
-        sqlx::query(
-            "UPDATE core SET ticket_keys = ?, ticket_keys_at = ? WHERE id = 1",
-        )
-        .bind(serde_json::to_string(keys).expect("keys serialize"))
-        .bind(fetched_at)
-        .execute(&self.db)
-        .await?;
+        match &self.stored {
+            Stored::Db(db) => {
+                sqlx::query(
+                    "UPDATE core SET ticket_keys = ?, ticket_keys_at = ? WHERE id = 1",
+                )
+                .bind(serde_json::to_string(keys).expect("keys serialize"))
+                .bind(fetched_at)
+                .execute(db)
+                .await
+                .map_err(|error| error.to_string())?;
+            }
+            Stored::File(path) => {
+                let file = KeysFile {
+                    fetched_at,
+                    keys: keys.clone(),
+                };
+                let json = serde_json::to_vec(&file).expect("keys serialize");
+                // Written aside and renamed, so a crash never leaves half a file.
+                let part = path.with_extension("json.part");
+                tokio::fs::write(&part, json)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                tokio::fs::rename(&part, path)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+        }
         state.keys = parse(keys);
         state.fetched_at = fetched_at;
         debug!(count = state.keys.len(), "stored the ticket keys");
@@ -196,5 +267,25 @@ mod tests {
         let again = Keys::load(db, http, None).await.unwrap();
         assert_eq!(again.get("one").await, Some([7; 32]));
         assert_eq!(again.get("two").await, None);
+    }
+
+    #[tokio::test]
+    async fn file_keys_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys.json");
+        let http = reqwest::Client::new();
+        let keys = Keys::load_file(path.clone(), http.clone(), None);
+        assert_eq!(keys.get("one").await, None);
+        keys.set(&PublicKeys {
+            keys: vec![PublicKey {
+                kty: "OKP".into(),
+                crv: "Ed25519".into(),
+                kid: "one".into(),
+                x: URL_SAFE_NO_PAD.encode([7; 32]),
+            }],
+        })
+        .await;
+        let again = Keys::load_file(path, http, None);
+        assert_eq!(again.get("one").await, Some([7; 32]));
     }
 }

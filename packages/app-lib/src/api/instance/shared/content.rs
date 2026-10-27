@@ -72,11 +72,7 @@ fn ensure_config_limits(
         .filter(|file| file.file_type == CONFIG_FILE_TYPE)
     {
         count += 1;
-        size = size.saturating_add(
-            file.file_size
-                .and_then(|size| u64::try_from(size).ok())
-                .unwrap_or(u64::MAX),
-        );
+        size = size.saturating_add(file.plain_size().unwrap_or(u64::MAX));
     }
     if count > MAX_SHARED_FILES || size > MAX_SHARED_FILES_TOTAL_SIZE {
         bail!(crate::ErrorKind::InputError(
@@ -101,8 +97,7 @@ mod tests {
             file_type: file_type.to_string(),
             url: url.to_string(),
             file_size: Some(1),
-            sha1: None,
-            sha256: None,
+            ..Default::default()
         }
     }
 

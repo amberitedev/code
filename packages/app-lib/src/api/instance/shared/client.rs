@@ -1,7 +1,10 @@
 use super::install::*;
 use super::*;
 use crate::ErrorKind;
+use crate::self_hosted::pool::PoolAccess;
+use crate::self_hosted::pool::store::PoolCore;
 use anyhow::{Context, anyhow, bail};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SharedInstancesRequestAuth {
@@ -53,10 +56,20 @@ pub(super) enum ExternalFileSource {
     SharedFile(std::path::PathBuf),
 }
 
+/// A pushed file's manifest entry, as the Protocol in `docs/internals/pool.md` names it.
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct ExternalFileData {
     pub(super) file_name: String,
     pub(super) file_type: String,
+    pub(super) size: u64,
+    /// P.
+    pub(super) sha256: String,
+    /// C.
+    pub(super) object: String,
+    pub(super) object_size: u64,
+    /// Only non-content files carry a key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) key: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -108,20 +121,84 @@ pub(super) struct InstanceVersionResponse {
     pub(super) game_version: String,
     pub(super) loader: ModLoader,
     pub(super) loader_version: String,
+    /// R, the hash that names this version in the pool.
+    #[serde(default)]
+    pub(super) root: Option<String>,
+    /// Where members fetch the files, once the version is ready.
+    #[serde(default)]
+    pub(super) pool: Option<RemotePoolAccess>,
+    /// Where the owner stores the files while the version is unconfirmed.
+    #[serde(default)]
+    pub(super) store: Option<StoreGrant>,
+}
+
+impl InstanceVersionResponse {
+    /// Gives each file the pool access of the version it came from, since a member's config
+    /// files are gathered from several versions.
+    fn with_pool_access(mut self, shared_instance_id: &str) -> Self {
+        if let (Some(pool), Some(root)) = (&self.pool, &self.root) {
+            let access = Arc::new(PoolAccess {
+                root: root.clone(),
+                holders: pool.holders.clone(),
+                ticket: pool.ticket.clone(),
+                shared_instance_id: shared_instance_id.to_string(),
+                version: self.version,
+            });
+            for file in &mut self.external_files {
+                file.pool = Some(Arc::clone(&access));
+            }
+        }
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub(super) struct RemotePoolAccess {
+    pub(super) holders: Vec<PoolCore>,
+    pub(super) ticket: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct StoreGrant {
+    pub(super) core: PoolCore,
+    pub(super) ticket: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 pub(super) struct ExternalFileResponse {
     pub(super) file_name: String,
     pub(super) file_type: String,
+    /// `pool:<C>` for pool files, which nothing fetches.
+    #[serde(default)]
     pub(super) url: String,
     #[serde(default)]
     pub(super) file_size: Option<i64>,
+    #[serde(default)]
+    pub(super) size: Option<u64>,
     #[serde(default)]
     pub(super) sha1: Option<String>,
     /// Amberite's backend reports SHA-256, which the integrity checks verify.
     #[serde(default)]
     pub(super) sha256: Option<String>,
+    /// C, for files in the pool.
+    #[serde(default)]
+    pub(super) object: Option<String>,
+    #[serde(default)]
+    pub(super) object_size: Option<u64>,
+    #[serde(default)]
+    pub(super) key: Option<String>,
+    /// Filled in from the version, see [`InstanceVersionResponse::with_pool_access`].
+    #[serde(skip)]
+    pub(super) pool: Option<Arc<PoolAccess>>,
+}
+
+impl ExternalFileResponse {
+    /// The plain size, which the pool's manifest calls `size` and upstream `file_size`.
+    pub(super) fn plain_size(&self) -> Option<u64> {
+        self.size.or_else(|| {
+            self.file_size.and_then(|size| u64::try_from(size).ok())
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -364,15 +441,25 @@ pub(super) async fn get_latest_remote_version_optional_unavailable_with_auth(
     state: &State,
     auth: SharedInstancesRequestAuth,
 ) -> crate::Result<SharedInstanceRemoteResponse<InstanceVersionResponse>> {
-    request_json_optional_unavailable(
-        "get_latest_instance_version",
-        Method::GET,
-        &format!("/instances/{shared_instance_id}/versions"),
-        None,
-        state,
-        auth,
+    Ok(
+        match request_json_optional_unavailable::<InstanceVersionResponse>(
+            "get_latest_instance_version",
+            Method::GET,
+            &format!("/instances/{shared_instance_id}/versions"),
+            None,
+            state,
+            auth,
+        )
+        .await?
+        {
+            SharedInstanceRemoteResponse::Available(version) => {
+                SharedInstanceRemoteResponse::Available(
+                    version.with_pool_access(shared_instance_id),
+                )
+            }
+            unavailable => unavailable,
+        },
     )
-    .await
 }
 
 /// Returns `None` for versions that never became ready.
@@ -381,7 +468,7 @@ pub(super) async fn get_remote_version(
     version: i32,
     state: &State,
 ) -> crate::Result<Option<InstanceVersionResponse>> {
-    match request_json_optional_unavailable(
+    match request_json_optional_unavailable::<InstanceVersionResponse>(
         "get_instance_version",
         Method::GET,
         &format!("/instances/{shared_instance_id}/versions/{version}"),
@@ -391,7 +478,9 @@ pub(super) async fn get_remote_version(
     )
     .await?
     {
-        SharedInstanceRemoteResponse::Available(version) => Ok(Some(version)),
+        SharedInstanceRemoteResponse::Available(version) => {
+            Ok(Some(version.with_pool_access(shared_instance_id)))
+        }
         SharedInstanceRemoteResponse::Unavailable(
             SharedInstanceUnavailableReason::Deleted,
         ) => Ok(None),
@@ -612,6 +701,111 @@ where
         auth,
     )
     .await?;
+    decode_optional_unavailable(operation, method, path, response, state, auth)
+        .await
+}
+
+/// Creates a version. The pool's refusals come back as their own error kinds, named by the
+/// backend's `code`, so the App can say what happened.
+pub(super) async fn create_remote_version(
+    shared_instance_id: &str,
+    body: serde_json::Value,
+    state: &State,
+) -> crate::Result<SharedInstanceRemoteResponse<InstanceVersionResponse>> {
+    let operation = "create_instance_version";
+    let method = Method::POST;
+    let path = format!("/instances/{shared_instance_id}/versions");
+    let response =
+        send_request(operation, method.clone(), &path, Some(body), state)
+            .await?;
+    if matches!(
+        response.status(),
+        StatusCode::CONFLICT
+            | StatusCode::PAYLOAD_TOO_LARGE
+            | StatusCode::SERVICE_UNAVAILABLE
+    ) {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if let Some(kind) = pool_error_kind(&body) {
+            return Err(kind.into());
+        }
+        bail!(
+            "shared instances API request {operation} {method} {path} failed with status {status}"
+        );
+    }
+    decode_optional_unavailable(
+        operation,
+        method,
+        &path,
+        response,
+        state,
+        SharedInstancesRequestAuth::AmberiteSession,
+    )
+    .await
+}
+
+fn pool_error_kind(body: &str) -> Option<ErrorKind> {
+    #[derive(Deserialize)]
+    struct Body {
+        code: String,
+        #[serde(default)]
+        description: String,
+    }
+    let body = serde_json::from_str::<Body>(body).ok()?;
+    Some(match body.code.as_str() {
+        "no_storage" => ErrorKind::PoolNoStorage,
+        "push_in_flight" => ErrorKind::PoolPushInFlight,
+        "share_too_large" | "storage_quota" => {
+            ErrorKind::PoolTooLarge(body.description)
+        }
+        _ => return None,
+    })
+}
+
+/// Tells the backend a holder served a bad file. Best effort: the install goes on either way.
+pub(crate) async fn report_pool_failure(
+    shared_instance_id: &str,
+    version: i32,
+    core_id: &str,
+    kind: &str,
+) {
+    let result = async {
+        let state = State::get().await?;
+        request_empty(
+            "report_pool_failure",
+            Method::POST,
+            &format!(
+                "/instances/{shared_instance_id}/versions/{version}/reports"
+            ),
+            Some(json!({ "core_id": core_id, "kind": kind })),
+            &state,
+        )
+        .await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(
+            shared_instance_id,
+            version,
+            core_id,
+            kind,
+            error = %error,
+            "Could not report a shared file failure"
+        );
+    }
+}
+
+async fn decode_optional_unavailable<T>(
+    operation: &'static str,
+    method: Method,
+    path: &str,
+    response: reqwest::Response,
+    state: &State,
+    auth: SharedInstancesRequestAuth,
+) -> crate::Result<SharedInstanceRemoteResponse<T>>
+where
+    T: DeserializeOwned,
+{
     if let Some(reason) =
         SharedInstanceUnavailableReason::from_status(response.status())
     {

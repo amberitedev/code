@@ -71,7 +71,8 @@ pub(crate) const CONFIG_FILE_TYPE: &str = "config";
 pub(crate) const CONFIG_SYNC_ENABLED: bool = true;
 pub(crate) const CONFIG_DIRECTORY: &str = "config";
 pub(crate) const MAX_SHARED_FILES: usize = 4096;
-pub(crate) const MAX_SHARED_FILES_TOTAL_SIZE: u64 = 500 * 1024 * 1024;
+/// The pool's limit per share.
+pub(crate) const MAX_SHARED_FILES_TOTAL_SIZE: u64 = 1024 * 1024 * 1024;
 pub(crate) const MAX_CONFIG_BUNDLE_ENTRIES: usize = 4096;
 pub(crate) const MAX_CONFIG_BUNDLE_FILE_SIZE: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_CONFIG_BUNDLE_TOTAL_SIZE: u64 = 512 * 1024 * 1024;
@@ -216,6 +217,7 @@ mod publish;
 mod report;
 mod types;
 
+pub(crate) use self::client::report_pool_failure;
 pub(crate) use self::install::check_shared_instance_availability_before_launch;
 pub(crate) use self::publish::sync_shared_instance_icon;
 

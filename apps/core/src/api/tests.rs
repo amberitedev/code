@@ -77,6 +77,14 @@ async fn core() -> Core {
         Arc::clone(&backups),
     )
     .unwrap();
+    let storage = Arc::new(crate::store::Storage::new(
+        db.clone(),
+        paths.clone(),
+        core_id.clone(),
+        None,
+        false,
+        Arc::new(tokio::sync::Notify::new()),
+    ));
     let update = Arc::new(Updater::new(
         paths,
         db.clone(),
@@ -92,6 +100,7 @@ async fn core() -> Core {
         backups,
         uploads: super::files::Uploads::default(),
         update,
+        storage,
     });
     Core {
         _dir: dir,
@@ -1381,4 +1390,48 @@ async fn a_pack_update_takes_an_empty_body_sent_as_json() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _) = core.send(send("{")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let editor = core.sign_in("editor").await;
+    let (status, _) = core
+        .call(Method::GET, "/storage", Some(&editor), None, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, storage) = core
+        .call(Method::GET, "/storage", Some(&owner), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(storage["enabled"], true);
+    assert_eq!(storage["egress_cap"], 50u64 << 30);
+    assert!(storage["cap"].as_u64().unwrap() >= 10 << 30);
+
+    let change = json!({ "enabled": false, "cap": 5u64 << 30 });
+    let (status, storage) = core
+        .call(Method::PATCH, "/storage", Some(&owner), None, Some(change))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(storage["enabled"], false);
+    assert_eq!(storage["cap"], 5u64 << 30);
+    assert_eq!(storage["egress_cap"], 50u64 << 30, "absent settings stay");
+    let (status, _) = core
+        .call(
+            Method::PATCH,
+            "/storage",
+            Some(&owner),
+            None,
+            Some(json!({ "cap": -1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Anyone may reach the store, which checks its own tickets; while it is off, nobody can.
+    let (status, error) = core
+        .call(Method::GET, "/store/versions/x", None, None, None)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error["error"], "conflict");
 }

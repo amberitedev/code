@@ -1,7 +1,8 @@
 # Local accounts and sharing backend
 
-One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files are objects in
-an R2 bucket, keyed by shared instance and SHA-256, which wrangler emulates locally. There are no
+One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files live on Cores
+(see `docs/internals/pool.md`); the Worker keeps each version's manifest in an R2 bucket, which
+wrangler emulates locally, and never carries a file byte. There are no
 remote bindings or deployment scripts. The root development runner supplies local secrets and keeps
 persistent state under the worktree's `.data/`.
 
@@ -55,7 +56,7 @@ running local backend. Its private account data persists in `.data/backend-proof
 running it again after a backend restart also proves persistence. It does not start a server.
 
 `pnpm test` in `apps/backend` runs the contract tests in wrangler's local runtime. The sharing test
-sends every request the App's sharing client sends and checks the files in R2.
+sends every request the App's sharing client and a Core's storage report send.
 
 ## Cores
 
@@ -72,9 +73,14 @@ The App removes a Core by telling the Core first, with a ticket, and then callin
 `DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.
 
 `POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner or an account in that
-Core's directory: an Ed25519 JWT with `iss`, `sub`, `name`, `avatar_url`, `aud` (the Core id),
-`iat`, `exp` five minutes later, and a random `jti`. It writes nothing. The Core verifies it against
-`public/core/keys.json`, served as a static asset at `/core/keys.json` so it costs no requests.
+Core's directory: an Ed25519 JWT with `iss`, `kind: "session"`, `sub`, `name`, `avatar_url`,
+`aud` (the Core id), `iat`, `exp` five minutes later, and a random `jti`. It writes nothing. The
+Core verifies it against `public/core/keys.json`, served as a static asset at `/core/keys.json` so
+it costs no requests. The pool's `store`, `fetch`, and `pull` tickets are signed the same way; see
+`docs/internals/pool.md`.
+
+`POST /core/storage` is a Core's storage report: what its store holds and how much room it has.
+The answer lists versions to drop and to pull.
 
 ### Ticket keys
 

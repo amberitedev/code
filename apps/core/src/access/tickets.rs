@@ -32,37 +32,74 @@ fn decode<T: DeserializeOwned>(part: &str) -> Option<T> {
     serde_json::from_slice(&URL_SAFE_NO_PAD.decode(part).ok()?).ok()
 }
 
-/// The claims of a ticket the backend signed for this Core, checked at `now`. It is not used up
-/// until [`spend`].
+/// A ticket split into its parts, its signature not yet checked. Core's sign-in and the store
+/// (`store::tickets`) both start here and differ only in the claims they then require.
+pub struct Unverified<'a> {
+    /// The key id the header names.
+    pub kid: String,
+    signed: &'a str,
+    claims: &'a str,
+    signature: &'a str,
+}
+
+impl<'a> Unverified<'a> {
+    /// Split `ticket`, refusing anything that is not an EdDSA JWT. The error is a description.
+    pub fn parse(ticket: &'a str) -> Result<Self, &'static str> {
+        let mut parts = ticket.split('.');
+        let (Some(header), Some(claims), Some(signature), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err("That is not a ticket.");
+        };
+        let Header { alg, kid } =
+            decode(header).ok_or("That is not a ticket.")?;
+        // Pinned: a ticket names its algorithm, and only EdDSA is ever accepted.
+        if alg != "EdDSA" {
+            return Err("Tickets are signed with EdDSA only.");
+        }
+        Ok(Self {
+            kid,
+            signed: &ticket[..header.len() + 1 + claims.len()],
+            claims,
+            signature,
+        })
+    }
+
+    /// The claims, once the signature checks out against `key`.
+    pub fn verify(
+        &self,
+        key: &[u8; 32],
+    ) -> Result<serde_json::Value, &'static str> {
+        let signature = URL_SAFE_NO_PAD
+            .decode(self.signature)
+            .map_err(|_| "The ticket's signature is unreadable.")?;
+        UnparsedPublicKey::new(&ED25519, key)
+            .verify(self.signed.as_bytes(), &signature)
+            .map_err(|_| "The ticket's signature is wrong.")?;
+        decode(self.claims).ok_or("The ticket's claims are unreadable.")
+    }
+}
+
+/// The claims of a sign-in ticket the backend signed for this Core, checked at `now`. It is not
+/// used up until [`spend`].
 pub async fn verify(
     keys: &Keys,
     ticket: &str,
     core_id: &str,
     now: i64,
 ) -> Result<TicketClaims, ApiError> {
-    let mut parts = ticket.split('.');
-    let (Some(header), Some(claims), Some(signature), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return Err(invalid("That is not a ticket."));
-    };
-    let Header { alg, kid } =
-        decode(header).ok_or_else(|| invalid("That is not a ticket."))?;
-    // Pinned: a ticket names its algorithm, and only EdDSA is ever accepted.
-    if alg != "EdDSA" {
-        return Err(invalid("Tickets are signed with EdDSA only."));
-    }
-    let key = keys.get(&kid).await.ok_or_else(|| {
+    let unverified = Unverified::parse(ticket).map_err(invalid)?;
+    let key = keys.get(&unverified.kid).await.ok_or_else(|| {
         invalid("The ticket is signed with a key this Core does not know.")
     })?;
-    let signature = URL_SAFE_NO_PAD
-        .decode(signature)
-        .map_err(|_| invalid("The ticket's signature is unreadable."))?;
-    UnparsedPublicKey::new(&ED25519, key)
-        .verify(format!("{header}.{claims}").as_bytes(), &signature)
-        .map_err(|_| invalid("The ticket's signature is wrong."))?;
-    let claims: TicketClaims = decode(claims)
-        .ok_or_else(|| invalid("The ticket's claims are unreadable."))?;
+    let claims = unverified.verify(&key).map_err(invalid)?;
+    // Pool tickets (`store::tickets`) are signed with the same keys and must never sign in.
+    if claims.get("kind").and_then(serde_json::Value::as_str) != Some("session")
+    {
+        return Err(invalid("That ticket is not for signing in."));
+    }
+    let claims: TicketClaims = serde_json::from_value(claims)
+        .map_err(|_| invalid("The ticket's claims are unreadable."))?;
 
     if claims.iss != ISSUER {
         return Err(invalid("The ticket is from another issuer."));
@@ -156,15 +193,24 @@ pub mod test_support {
 
         /// A ticket with `alg` in its header and these claims.
         pub fn sign_as(&self, alg: &str, claims: &TicketClaims) -> String {
-            let encode = |value: serde_json::Value| {
+            self.sign_value(alg, &serde_json::to_value(claims).unwrap())
+        }
+
+        /// A ticket with any claims, such as the store's.
+        pub fn sign_value(
+            &self,
+            alg: &str,
+            claims: &serde_json::Value,
+        ) -> String {
+            let encode = |value: &serde_json::Value| {
                 URL_SAFE_NO_PAD.encode(value.to_string())
             };
             let signed = format!(
                 "{}.{}",
                 encode(
-                    serde_json::json!({ "alg": alg, "typ": "JWT", "kid": self.kid })
+                    &serde_json::json!({ "alg": alg, "typ": "JWT", "kid": self.kid })
                 ),
-                encode(serde_json::to_value(claims).unwrap())
+                encode(claims)
             );
             let signature = self.pair.sign(signed.as_bytes());
             format!("{signed}.{}", URL_SAFE_NO_PAD.encode(signature))
@@ -179,6 +225,7 @@ pub mod test_support {
     pub fn claims(user: &str, core: &str, iat: i64) -> TicketClaims {
         TicketClaims {
             iss: ISSUER.into(),
+            kind: "session".into(),
             sub: user.into(),
             name: format!("{user} name"),
             avatar_url: None,
@@ -250,13 +297,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn issuer_and_core_are_checked() {
+    async fn issuer_kind_and_core_are_checked() {
         let signer = Signer::new("k1");
         let keys = keys(&signer).await;
         let mut other_issuer = claims("u1", "core", NOW);
         other_issuer.iss = "someone".into();
         assert_eq!(
             error(&keys, &signer.sign(&other_issuer), NOW).await,
+            ErrorCode::TicketInvalid
+        );
+        let mut pool = claims("u1", "core", NOW);
+        pool.kind = "fetch".into();
+        assert_eq!(
+            error(&keys, &signer.sign(&pool), NOW).await,
+            ErrorCode::TicketInvalid,
+            "a pool ticket never signs in"
+        );
+        let mut no_kind =
+            serde_json::to_value(claims("u1", "core", NOW)).unwrap();
+        no_kind.as_object_mut().unwrap().remove("kind");
+        assert_eq!(
+            error(&keys, &signer.sign_value("EdDSA", &no_kind), NOW).await,
             ErrorCode::TicketInvalid
         );
         let other_core = claims("u1", "another-core", NOW);
