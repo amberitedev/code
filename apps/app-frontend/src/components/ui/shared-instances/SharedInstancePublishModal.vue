@@ -142,6 +142,7 @@ import {
 import { computed, ref } from 'vue'
 
 import { trackSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
+import { diffInstanceAgainstServer, type LinkedServer } from '@/features/servers/linked-servers'
 import { getErrorMessage, isSharedInstanceUnavailableError } from '@/helpers/install'
 import {
 	get_shared_instance_publish_preview,
@@ -149,7 +150,6 @@ import {
 	publish_shared_instance,
 	type SharedInstancePublishFile,
 } from '@/helpers/instance'
-import { diffInstanceAgainstServer, type LinkedServer } from '@/helpers/linked-servers'
 import {
 	sharedInstanceErrorMessages,
 	useSharedInstanceErrors,

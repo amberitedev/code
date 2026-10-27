@@ -19,11 +19,11 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import AccountRequired from '@/components/ui/cores/AccountRequired.vue'
-import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
-import { openAddCoreModal, useCores } from '@/composables/use-cores'
+import AccountRequired from '@/features/cores/account-required.vue'
+import ChooseCoreModal from '@/features/cores/choose-core-modal.vue'
+import { openAddCoreModal, useCores } from '@/features/cores/use-cores'
+import { coreOffline, coreProblem, useServers } from '@/features/servers/linked-servers'
 import { injectSettingsActions } from '@/features/settings/settings-actions'
-import { coreOffline, coreProblem, useServers } from '@/helpers/linked-servers'
 
 const client = injectModrinthClient()
 const auth = injectAuth()

@@ -1,7 +1,7 @@
 import { provideInstanceServerSource } from '@modrinth/ui'
 
+import { exportInstancePack, pushPackToServer } from '@/features/servers/linked-servers'
 import { getInstanceIconUrl, list } from '@/helpers/instance'
-import { exportInstancePack, pushPackToServer } from '@/helpers/linked-servers'
 
 /** Lets the hosting screens create and update a server from one of this App's instances. */
 export function setupInstanceServerSourceProvider() {

@@ -33,8 +33,8 @@
 import { StackedAdmonitions } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 
+import { useLinkedServers } from '@/features/servers/linked-servers'
 import type { SharedInstanceUnavailableReason } from '@/helpers/install'
-import { useLinkedServers } from '@/helpers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 import InstanceAdmonitionsLinkedServerFailed from './linked-server-failed.vue'

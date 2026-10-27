@@ -4,21 +4,21 @@ import { installTooltipDirective } from '@modrinth/ui'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { createApp } from 'vue'
 
+import { config } from '@/config'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 
-import { config } from '@/config'
-
 async function bootstrap() {
 	if (import.meta.env.DEV) {
-		const { initializeDevRuntime } = await import('@/dev/runtime')
+		const { initializeDevRuntime } = await import('@/app/runtime/dev-config')
 		await initializeDevRuntime()
 	}
 	const [{ default: App }, { default: router }] = await Promise.all([
-		import('@/App.vue'), import('@/routes'),
+		import('@/App.vue'),
+		import('@/routes'),
 	])
 	debugStartup('Frontend entry module evaluated')
 	const app = createApp(App)

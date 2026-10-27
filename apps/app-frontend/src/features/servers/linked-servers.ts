@@ -10,10 +10,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { join, tempDir } from '@tauri-apps/api/path'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
+import { export_instance_mrpack, get_content_items } from '@/helpers/instance'
+import type { GameInstance } from '@/helpers/types'
 import { apiClient } from '@/platform/modrinth-client'
-
-import { export_instance_mrpack, get_content_items } from './instance'
-import type { GameInstance } from './types'
 
 export type LinkedServer = Archon.Servers.v0.Server & {
 	linked_instance: Archon.Servers.v0.LinkedInstance

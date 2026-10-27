@@ -19,8 +19,8 @@
 <script setup lang="ts">
 import { Admonition, useVIntl } from '@modrinth/ui'
 
-import InstancePushButton from '@/components/ui/linked-servers/InstancePushButton.vue'
-import type { LinkedServer } from '@/helpers/linked-servers'
+import InstancePushButton from '@/features/servers/instance-push-button.vue'
+import type { LinkedServer } from '@/features/servers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 import { instanceAdmonitionsMessages as messages } from './messages'

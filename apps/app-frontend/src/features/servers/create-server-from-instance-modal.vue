@@ -24,14 +24,14 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { nextTick, ref } from 'vue'
 
-import ChooseCoreModal from '@/components/ui/cores/ChooseCoreModal.vue'
-import { getInstanceIconUrl } from '@/helpers/instance'
+import ChooseCoreModal from '@/features/cores/choose-core-modal.vue'
 import {
 	coreProblem,
 	exportInstancePack,
 	pushPackToServer,
 	serversQueryKey,
-} from '@/helpers/linked-servers'
+} from '@/features/servers/linked-servers'
+import { getInstanceIconUrl } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
 
 /**

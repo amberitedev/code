@@ -155,7 +155,7 @@ import {
 } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 
-import InstancePushButton from '@/components/ui/linked-servers/InstancePushButton.vue'
+import InstancePushButton from '@/features/servers/instance-push-button.vue'
 
 import { injectInstancePage } from '../instance-context'
 import { injectSharedInstanceManagement } from './shared-instance-management-context'

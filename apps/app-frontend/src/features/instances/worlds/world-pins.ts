@@ -1,7 +1,7 @@
 import { useStorage } from '@vueuse/core'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 
-import type { World } from './worlds'
+import type { World } from '@/helpers/worlds'
 
 type InstancePins = {
 	/** Row keys in the order the user dragged them. */
