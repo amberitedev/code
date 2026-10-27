@@ -106,8 +106,8 @@ sqlx = { workspace = true, features = [
   "uuid",
 ] }
 sysinfo = { workspace = true, features = ["disk", "system"] }
-tauri = { workspace = true, features = ["unstable"], optional = true }
 tar = { workspace = true }
+tauri = { workspace = true, features = ["unstable"], optional = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
