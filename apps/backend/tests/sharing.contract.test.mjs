@@ -410,13 +410,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			const version = await ok(await push(share.id, [big]))
 			shares.push({ id: share.id, root: version.root, big })
 		}
+		// Versions still uploading count too, so pushes to several shares at once cannot pass.
+		const full = await ok(await call('/instances', 'POST', { name: 'Full' }))
+		await code(await push(full.id, [file('one.jar', 'mod', 1)]), 413, 'storage_quota')
 		await ok(
 			await report(
 				'core',
 				shares.map((share) => ({ root: share.root, bytes: GB })),
 			),
 		)
-		const full = await ok(await call('/instances', 'POST', { name: 'Full' }))
 		await code(await push(full.id, [file('one.jar', 'mod', 1)]), 413, 'storage_quota')
 		assert.equal(
 			(await push(shares[0].id, [shares[0].big])).status,

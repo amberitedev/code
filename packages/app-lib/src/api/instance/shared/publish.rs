@@ -873,6 +873,21 @@ async fn push_version(
         .buffered(UPLOAD_CONCURRENCY)
         .try_collect::<Vec<_>>()
         .await?;
+    // A file written to between hashing and encrypting would reach the Core with a P that its
+    // bytes no longer match, and every member's install would fail on it.
+    if let Some(file) =
+        hashed_files
+            .iter()
+            .zip(&objects)
+            .find_map(|(file, object)| {
+                (object.plain != file.sha256).then_some(file)
+            })
+    {
+        bail!(crate::ErrorKind::InputError(format!(
+            "{} changed while it was being pushed. Push again.",
+            file.file_name
+        )));
+    }
     report.step(format!("Encrypted {} files", objects.len()));
 
     let root = hex::encode(crypto::root(objects.iter().map(|o| o.object)));

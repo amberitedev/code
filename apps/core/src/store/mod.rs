@@ -224,37 +224,45 @@ impl Store {
             .filter(|entry| missing.contains(&entry.hash))
             .map(|entry| entry.size)
             .sum();
-        let (used, pending) = {
-            let index = self.index();
-            (
-                index.used_with(Some(&list)),
-                index.pending.contains_key(root),
-            )
+        // The cap check and the reservation are one step under the index lock, so concurrent
+        // uploads count each other. A later failure takes the reservation back.
+        let cap = self.caps().cap;
+        let list = Arc::new(list);
+        let reserved = {
+            let mut index = self.index();
+            if index.used_with(Some(&list)) > cap {
+                return Err(StoreError::new(
+                    Code::DiskFull,
+                    "This Core's storage for shared files is full.",
+                ));
+            }
+            (!index.pending.contains_key(root)).then(|| {
+                let at = now();
+                index.pending.insert(root.clone(), (at, Arc::clone(&list)));
+                at
+            })
         };
-        if used > self.caps().cap {
-            return Err(StoreError::new(
-                Code::DiskFull,
-                "This Core's storage for shared files is full.",
-            ));
-        }
-        if crate::backups::space::free(self.layout.root())?
-            < needed + DISK_RESERVE
-        {
+        let unreserve = || {
+            if reserved.is_some() {
+                self.index().pending.remove(root);
+            }
+        };
+        let free = crate::backups::space::free(self.layout.root())
+            .inspect_err(|_| unreserve())?;
+        if free < needed + DISK_RESERVE {
+            unreserve();
             return Err(StoreError::new(
                 Code::DiskFull,
                 "This Core's disk is full.",
             ));
         }
-        if !pending {
-            let at = now();
+        if let Some(at) = reserved {
             objects::write_atomic(
                 &self.layout.list(root, ListState::Pending(at)),
-                &serde_json::to_vec(&list).expect("lists serialize"),
+                &serde_json::to_vec(list.as_ref()).expect("lists serialize"),
             )
-            .await?;
-            self.index()
-                .pending
-                .insert(root.clone(), (at, Arc::new(list)));
+            .await
+            .inspect_err(|_| unreserve())?;
         }
         Ok(missing)
     }

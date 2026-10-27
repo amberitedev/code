@@ -105,6 +105,16 @@ impl VersionList {
                 "The version's objects are not sorted by hash, or repeat.",
             );
         }
+        // The root names hashes only, so the sizes are the sender's word: a total that
+        // overflows would wrap past every cap.
+        if self
+            .objects
+            .iter()
+            .try_fold(0u64, |sum, entry| sum.checked_add(entry.size))
+            .is_none()
+        {
+            return Err("The version's objects are too large.");
+        }
         if self.root() != *root {
             return Err("The version's objects do not hash to its root.");
         }
@@ -489,6 +499,11 @@ mod tests {
         repeated.objects.push(repeated.objects[1].clone());
         assert!(repeated.check(&repeated.root()).is_err());
         assert!(list.check(&Hash::parse(&"0".repeat(64)).unwrap()).is_err());
+        // Sizes that wrap past u64 would slip under every cap.
+        let mut huge = list.clone();
+        huge.objects[0].size = 1 << 63;
+        huge.objects[1].size = (1 << 63) + 5;
+        assert!(huge.check(&huge.root()).is_err());
     }
 
     #[test]

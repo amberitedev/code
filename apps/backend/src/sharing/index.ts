@@ -410,11 +410,23 @@ async function createVersion(
 			.run()
 		item = { ...item, home }
 	}
-	const next = await env.DB.prepare(
-		'SELECT COALESCE(MAX(version),0)+1 AS version FROM shared_versions WHERE instance_id = ?',
+	// The number is allocated in the insert itself, so two pushes at once never share one. The
+	// row starts unready, so nobody reads it before its manifest is in R2; a failed write takes
+	// the row back.
+	const version = await env.DB.prepare(
+		'INSERT INTO shared_versions (instance_id,version,root,bytes,ready,created) SELECT ?1,COALESCE(MAX(version),0)+1,?2,?3,0,?4 FROM shared_versions WHERE instance_id = ?1 RETURNING *',
 	)
-		.bind(item.id)
-		.first<{ version: number }>()
+		.bind(item.id, manifest.root, bytes, now())
+		.first<Version>()
+	if (!version) throw new ApiError(500, 'database_error', 'Could not create shared version')
+	try {
+		await env.FILES.put(manifestKey(item.id, version.version), JSON.stringify(manifest))
+	} catch (error) {
+		await env.DB.prepare('DELETE FROM shared_versions WHERE instance_id = ? AND version = ?')
+			.bind(item.id, version.version)
+			.run()
+		throw error
+	}
 	// Ready at once with no files, or when the home already holds these exact objects.
 	const held =
 		bytes && home
@@ -422,24 +434,9 @@ async function createVersion(
 					.bind(home, manifest.root)
 					.first()
 			: null
-	const version: Version = {
-		instance_id: item.id,
-		version: next?.version ?? 1,
-		root: manifest.root,
-		bytes,
-		ready: !bytes || held ? 1 : 0,
-		created: now(),
-	}
-	// The manifest goes first, so a row never points at a manifest that is not there.
-	await env.FILES.put(manifestKey(item.id, version.version), JSON.stringify(manifest))
-	await env.DB.prepare(
-		'INSERT INTO shared_versions (instance_id,version,root,bytes,ready,created) VALUES (?,?,?,?,?,?)',
-	)
-		.bind(item.id, version.version, version.root, version.bytes, version.ready, version.created)
-		.run()
-	if (version.ready) {
-		await notifyReadyInvites(env, item.id)
-		await pruneVersions(env, item.id)
+	if (!bytes || held) {
+		await versionReady(env, item.id, version.version)
+		version.ready = 1
 	}
 	return versionResponse(env, item, version, userId)
 }

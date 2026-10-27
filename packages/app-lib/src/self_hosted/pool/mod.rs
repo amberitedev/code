@@ -55,6 +55,11 @@ pub fn parse_hash(text: &str) -> Option<[u8; 32]> {
 const PIPE_SIZE: usize = 256 * 1024;
 /// Further tries at one holder after a dropped connection, each from where the last stopped.
 const RESUME_ATTEMPTS: usize = 2;
+/// Waits at one holder that answered it is busy (its fetch slots or the per-address rate), with
+/// the wait doubling up to [`RATE_LIMIT_MAX_WAIT`]: about three minutes in all, which covers the
+/// store's one-minute rate window during a large install.
+const RATE_LIMIT_WAITS: u32 = 8;
+const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(30);
 
 /// Fetches one file from the first holder that serves it correctly. `sink` gets the plain bytes
 /// and is called afresh for each holder. It must fail unless it reads the file's full size: the
@@ -79,6 +84,7 @@ where
             let mut writer = writer;
             let mut decryptor = Decryptor::new(&key, file.object, file.sha256);
             let mut attempt = 0;
+            let mut waits = 0;
             loop {
                 match fetch_once(
                     core,
@@ -91,6 +97,16 @@ where
                 )
                 .await
                 {
+                    Err(PoolFetchError::Http(StoreError::RateLimited))
+                        if waits < RATE_LIMIT_WAITS =>
+                    {
+                        tokio::time::sleep(
+                            Duration::from_secs(1 << waits)
+                                .min(RATE_LIMIT_MAX_WAIT),
+                        )
+                        .await;
+                        waits += 1;
+                    }
                     Err(error)
                         if attempt < RESUME_ATTEMPTS
                             && is_transient(&error) =>
@@ -185,6 +201,8 @@ pub(crate) struct PoolObject {
     pub object: [u8; 32],
     pub size: u64,
     pub path: PathBuf,
+    /// P of the plaintext that was encrypted, which the push compares to the P it hashed.
+    pub plain: [u8; 32],
 }
 
 /// Encrypts `source` into `folder`, named by its C once that is known.
@@ -196,10 +214,15 @@ pub(crate) async fn encrypt_file(
     let part = folder.join(format!("{}.part", uuid::Uuid::new_v4()));
     let reader = tokio::fs::File::open(source).await?;
     let writer = tokio::fs::File::create(&part).await?;
-    let (object, size) = crypto::encrypt(key, reader, writer).await?;
-    let path = folder.join(hex::encode(object));
+    let encrypted = crypto::encrypt(key, reader, writer).await?;
+    let path = folder.join(hex::encode(encrypted.object));
     tokio::fs::rename(&part, &path).await?;
-    Ok(PoolObject { object, size, path })
+    Ok(PoolObject {
+        object: encrypted.object,
+        size: encrypted.size,
+        path,
+        plain: encrypted.plain,
+    })
 }
 
 /// Uploads rounds of whatever the Core still lacks until it holds the whole version.

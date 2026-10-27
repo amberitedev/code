@@ -1,3 +1,4 @@
+import { isPrivateHost } from '../common/address'
 import { ApiError } from '../common/http'
 import type { Env } from '../common/types'
 import { type Holder, fetchTicket, storeTicket } from '../cores/tickets'
@@ -106,8 +107,9 @@ const HOLDER_COLUMNS = 'id, address, public_address, cert_fingerprint'
 type Candidate = Holder & { owner_id: string; room: number }
 
 /**
- * Cores that may take a new share: storage on, running as a service with a public address (not
- * required in local development), room under their cap, and a storage report within two days.
+ * Cores that may take a new share: storage on, running as a service with a public address that is
+ * not on a private network (neither required in local development), room under their cap, and a
+ * storage report within two days.
  */
 async function eligibleCores(env: Env): Promise<Candidate[]> {
 	const local = env.LOCAL_DEV === 'true'
@@ -116,7 +118,10 @@ async function eligibleCores(env: Env): Promise<Candidate[]> {
 	)
 		.bind(new Date(Date.now() - REPORT_FRESH_MS).toISOString(), local ? 1 : 0)
 		.all<Candidate>()
-	return rows.results
+	if (local) return rows.results
+	return rows.results.filter(
+		(core) => core.public_address && !isPrivateHost(new URL(core.public_address).hostname),
+	)
 }
 
 /**
@@ -187,8 +192,10 @@ export async function storeGrant(env: Env, homeId: string, root: string, bytes: 
 }
 
 /**
- * What the owner's other shares hold, so the new version keeps the account under its quota: the
- * sum of every share's latest version, minus this share's, which the new version replaces.
+ * What the owner's other shares hold, so the new version keeps the account under its quota. Each
+ * share counts its latest ready version or a version still being uploaded, whichever is larger,
+ * so pushes to several shares at once cannot each see the others as empty. This share is left
+ * out: the new version replaces it.
  */
 export async function otherSharesBytes(
 	env: Env,
@@ -196,9 +203,14 @@ export async function otherSharesBytes(
 	instanceId: string,
 ): Promise<number> {
 	const row = await env.DB.prepare(
-		'SELECT COALESCE(SUM(v.bytes),0) AS total FROM shared_instances i JOIN shared_versions v ON v.instance_id = i.id AND v.version = (SELECT MAX(version) FROM shared_versions WHERE instance_id = i.id AND ready = 1) WHERE i.owner_id = ? AND i.id != ?',
+		`SELECT COALESCE(SUM(share),0) AS total FROM (
+			SELECT MAX(v.bytes) AS share FROM shared_instances i JOIN shared_versions v ON v.instance_id = i.id
+			WHERE i.owner_id = ?1 AND i.id != ?2 AND (
+				v.version = (SELECT MAX(version) FROM shared_versions WHERE instance_id = i.id AND ready = 1)
+				OR (v.ready = 0 AND v.created > ?3))
+			GROUP BY i.id)`,
 	)
-		.bind(ownerId, instanceId)
+		.bind(ownerId, instanceId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
 		.first<{ total: number }>()
 	return row?.total ?? 0
 }

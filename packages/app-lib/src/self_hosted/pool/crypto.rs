@@ -65,15 +65,23 @@ async fn read_up_to(
     Ok(buffer)
 }
 
-/// Encrypts a plain file into its object, returning C and the object's size. Deterministic for a
-/// given key, so a retried upload can encrypt again.
+/// What [`encrypt`] produced: C, the object's size, and P of the plaintext it actually read.
+pub struct Encrypted {
+    pub object: [u8; 32],
+    pub size: u64,
+    pub plain: [u8; 32],
+}
+
+/// Encrypts a plain file into its object. Deterministic for a given key, so a retried upload can
+/// encrypt again.
 pub async fn encrypt(
     key: &[u8; 32],
     mut reader: impl AsyncRead + Unpin,
     mut writer: impl AsyncWrite + Unpin,
-) -> std::io::Result<([u8; 32], u64)> {
+) -> std::io::Result<Encrypted> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let mut hasher = Sha256::new();
+    let mut plain = Sha256::new();
     let mut size = 0;
     let mut chunk = 0;
     let mut current = read_up_to(&mut reader, CHUNK).await?;
@@ -85,6 +93,7 @@ pub async fn encrypt(
             Vec::new()
         };
         let last = next.is_empty();
+        plain.update(&current);
         let object = cipher
             .encrypt(
                 &nonce(chunk),
@@ -99,7 +108,11 @@ pub async fn encrypt(
         size += object.len() as u64;
         if last {
             writer.flush().await?;
-            return Ok((hasher.finalize().into(), size));
+            return Ok(Encrypted {
+                object: hasher.finalize().into(),
+                size,
+                plain: plain.finalize().into(),
+            });
         }
         chunk += 1;
         current = next;
@@ -210,9 +223,10 @@ mod tests {
 
     async fn encrypted(plain: &[u8]) -> ([u8; 32], Vec<u8>) {
         let mut object = Vec::new();
-        let (c, size) = encrypt(&KEY, plain, &mut object).await.unwrap();
-        assert_eq!(size, object.len() as u64);
-        (c, object)
+        let encrypted = encrypt(&KEY, plain, &mut object).await.unwrap();
+        assert_eq!(encrypted.size, object.len() as u64);
+        assert_eq!(encrypted.plain, <[u8; 32]>::from(Sha256::digest(plain)));
+        (encrypted.object, object)
     }
 
     async fn decrypt(
