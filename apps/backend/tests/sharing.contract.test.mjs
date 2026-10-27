@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import test from 'node:test'
+import { zstdCompressSync } from 'node:zlib'
 
 import { startBackend } from './worker.mjs'
 
@@ -8,12 +9,47 @@ import { startBackend } from './worker.mjs'
 // same method, path, body and headers, and every response is checked for the fields that code reads.
 const MB = 1024 * 1024
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const sha512 = (bytes) => createHash('sha512').update(bytes).digest('hex')
 const manifest = {
 	modrinth_ids: ['AABBCCDD'],
 	modpack_id: null,
 	game_version: '1.21.1',
 	loader: 'fabric',
 	loader_version: '0.16.9',
+}
+
+/**
+ * `send_external_file_batch`: a zstd-compressed multipart body whose first part is the JSON manifest
+ * and whose `file` parts follow in manifest order. A file may carry a wrong `sha512` on purpose.
+ */
+function batch(files) {
+	const boundary = `modrinth-${randomBytes(8).toString('hex')}`
+	const part = (name, type, bytes) =>
+		Buffer.concat([
+			Buffer.from(
+				`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: ${type}\r\n\r\n`,
+			),
+			bytes,
+			Buffer.from('\r\n'),
+		])
+	const listed = files.map((file) => ({
+		file_name: file.file_name,
+		file_type: file.file_type,
+		file_size: file.bytes.length,
+		sha512: file.sha512 ?? sha512(file.bytes),
+	}))
+	const body = Buffer.concat([
+		part('manifest', 'application/json', Buffer.from(JSON.stringify({ files: listed }))),
+		...files.map((file) => part('file', 'application/octet-stream', file.bytes)),
+		Buffer.from(`--${boundary}--\r\n`),
+	])
+	return {
+		body: zstdCompressSync(body),
+		headers: {
+			'content-type': `multipart/form-data; boundary=${boundary}`,
+			'content-encoding': 'zstd',
+		},
+	}
 }
 
 test('sharing API as the App uses it, with files in R2', async () => {
@@ -43,13 +79,18 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			assert.ok(response.ok, `expected success, got ${response.status}`)
 			return response.status === 204 ? null : response.json()
 		}
-		// `upload_external_files`: PUT the bytes to the URL the version returned.
-		const put = (url, bytes, user = 'owner') =>
-			send(url, 'PUT', user, bytes, {
-				'content-type': 'application/octet-stream',
-				'x-file-sha512': createHash('sha512').update(bytes).digest('hex'),
-			})
-		// `publish_current_content`: create the version, then upload each external file in order.
+		// `upload_external_files`: POST one batch of files to the version.
+		const upload = (id, version, external, user = 'owner') => {
+			const { body, headers } = batch(external)
+			return send(
+				`http://local.test/v1/instances/${id}/versions/${version}/files`,
+				'POST',
+				user,
+				body,
+				headers,
+			)
+		}
+		// `publish_current_content`: create the version, then upload the files it lists in one batch.
 		const publish = async (id, external) => {
 			const version = await ok(
 				await call(`/instances/${id}/versions`, 'POST', {
@@ -57,16 +98,17 @@ test('sharing API as the App uses it, with files in R2', async () => {
 					external_files: external.map(({ file_name, file_type }) => ({ file_name, file_type })),
 				}),
 			)
-			assert.equal(version.external_files.length, external.length)
-			for (const upload of version.external_files) {
-				const source = external.find(
-					(file) => file.file_name === upload.file_name && file.file_type === upload.file_type,
-				)
-				assert.equal(new URL(upload.url).origin, 'http://local.test', 'uploads stay on the API')
-				const response = await put(upload.url, source.bytes)
-				if (!response.ok) return { version, failed: response.status }
-			}
-			return { version }
+			assert.deepEqual(
+				version.external_files.map((file) => [file.file_name, file.file_type]),
+				external.map((file) => [file.file_name, file.file_type]),
+				'every file is requested for upload',
+			)
+			for (const file of version.external_files)
+				assert.equal(new URL(file.url).origin, 'http://local.test', 'uploads stay on the API')
+			if (!external.length) return { version }
+			const response = await upload(id, version.version, external)
+			if (!response.ok) return { version, failed: response.status, response }
+			return { version, result: await response.json() }
 		}
 		const stored = async (id) =>
 			(await files.list({ prefix: `${id}/` })).objects.map((object) => object.key).sort()
@@ -92,21 +134,32 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			(await db.prepare('SELECT COUNT(*) AS count FROM notifications').first()).count
 		assert.equal(await notifications(), 0, 'no invitation before there is something to install')
 
-		// Publish a version with a config bundle and a file that is not on Modrinth.
+		// Publish a mod that is not on Modrinth, a resource pack, and config files under their paths.
 		const jar = { file_name: 'private-mod.jar', file_type: 'mod', bytes: randomBytes(300_000) }
-		const bundle = { file_name: 'config.zip', file_type: 'configs', bytes: randomBytes(20_000) }
-		const first = await publish(id, [jar, bundle])
-		assert.equal(first.failed, undefined)
+		const pack = { file_name: 'look.zip', file_type: 'resourcepack', bytes: randomBytes(50_000) }
+		const config = {
+			file_name: 'config/private-mod/client.toml',
+			file_type: 'config',
+			bytes: Buffer.from('enabled = true\n'),
+		}
+		const options = { file_name: 'options.txt', file_type: 'config', bytes: Buffer.from('fov:0\n') }
+		const first = await publish(id, [jar, pack, config, options])
+		assert.equal(first.failed, undefined, `batch failed with ${first.failed}`)
 		assert.equal(first.version.version, 1)
 		assert.equal(first.version.ready, false)
-		assert.equal((await put(first.version.external_files[0].url, jar.bytes)).status, 409)
+		assert.equal(first.result.ready, true)
 		assert.equal(await notifications(), 1, 'the friend is invited once the version is complete')
 		assert.deepEqual(
 			await stored(id),
-			[`${id}/${sha256(jar.bytes)}`, `${id}/${sha256(bundle.bytes)}`].sort(),
+			[jar, pack, config, options].map((file) => `${id}/${sha256(file.bytes)}`).sort(),
+		)
+		assert.equal(
+			(await upload(id, 1, [jar])).status,
+			409,
+			'a complete version takes no more uploads',
 		)
 
-		// The friend sees the invite, accepts it, and downloads both files.
+		// The friend sees the invite, accepts it, and downloads every file.
 		assert.equal(
 			(await ok(await call(`/instances/${id}`, 'GET', undefined, 'friend'))).name,
 			'Proof pack',
@@ -121,9 +174,11 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			{ ...latest, external_files: undefined },
 			{ ...manifest, version: 1, ready: true, external_files: undefined },
 		)
-		for (const source of [jar, bundle]) {
-			const file = latest.external_files.find((entry) => entry.file_type === source.file_type)
-			assert.equal(file.file_name, source.file_name)
+		for (const source of [jar, pack, config, options]) {
+			const file = latest.external_files.find(
+				(entry) => entry.file_type === source.file_type && entry.file_name === source.file_name,
+			)
+			assert.ok(file, `${source.file_name} is listed`)
 			assert.equal(file.file_size, source.bytes.length)
 			assert.equal(file.sha256, sha256(source.bytes))
 			const download = await send(file.url, 'GET', 'friend')
@@ -133,6 +188,45 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			assert.equal((await send(file.url, 'GET', 'stranger')).status, 401)
 			assert.equal((await send(file.url, 'GET')).status, 401)
 		}
+
+		// A program is refused by content, naming the file the way the App reads it. The files before
+		// it in the batch are kept, so a retried batch only has to carry the rest.
+		const program = {
+			file_name: 'mods/helper.jar',
+			file_type: 'config',
+			bytes: Buffer.concat([Buffer.from('MZ'), randomBytes(1000)]),
+		}
+		const refused = await publish(id, [config, program, jar])
+		assert.equal(refused.failed, 400)
+		assert.equal(refused.response.headers.get('x-file-not-allowed'), 'true')
+		assert.ok((await refused.response.text()).endsWith(program.file_name))
+		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, 1)
+		assert.equal((await upload(id, refused.version.version, [config, jar])).status, 200)
+		assert.equal(
+			(await ok(await call(`/instances/${id}/versions/${refused.version.version}`))).ready,
+			false,
+		)
+		for (const [bad, status] of [
+			[{ ...jar, sha512: sha512(pack.bytes) }, 400],
+			[{ ...jar, file_name: '../escape.jar' }, 400],
+			[pack, 400],
+		]) {
+			const version = await ok(
+				await call(`/instances/${id}/versions`, 'POST', {
+					...manifest,
+					external_files: [{ file_name: jar.file_name, file_type: jar.file_type }],
+				}),
+			)
+			assert.equal((await upload(id, version.version, [bad])).status, status)
+		}
+		const garbage = await send(
+			`http://local.test/v1/instances/${id}/versions/${refused.version.version}/files`,
+			'POST',
+			'owner',
+			Buffer.from('not zstd at all'),
+			batch([]).headers,
+		)
+		assert.equal(garbage.status, 400, 'a body that is not zstd is the client’s mistake')
 
 		// Members list and invite links.
 		const members = await ok(await call(`/instances/${id}/users`))
@@ -186,22 +280,28 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			404,
 		)
 
-		// An unchanged file is stored once. The sixth version prunes the first and its file.
-		const changed = { ...bundle, bytes: randomBytes(20_000) }
-		for (let version = 2; version <= 5; version++) {
+		// An unchanged file is stored once. The sixth complete version prunes the first and its files,
+		// along with the uploads abandoned in between.
+		const changed = { ...config, bytes: Buffer.from('enabled = false\n') }
+		const pushed = []
+		for (let push = 0; push < 4; push++) {
 			const result = await publish(id, [jar, changed])
 			assert.equal(result.failed, undefined)
-			assert.equal(result.version.version, version)
+			pushed.push(result.version.version)
 		}
-		assert.equal((await stored(id)).length, 3)
-		assert.ok(await files.head(`${id}/${sha256(bundle.bytes)}`))
-		await publish(id, [jar, changed])
+		assert.equal((await stored(id)).length, 5)
+		assert.ok(await files.head(`${id}/${sha256(config.bytes)}`))
+		const sixth = await publish(id, [jar, changed])
 		const current = await ok(await call(`/instances/${id}/versions`))
-		assert.equal(current.version, 6)
+		assert.equal(current.version, sixth.version.version)
 		assert.equal(current.ready, true)
 		assert.equal((await call(`/instances/${id}/versions/1`)).status, 404)
-		assert.equal((await ok(await call(`/instances/${id}/versions/2`))).version, 2)
-		assert.equal(await files.head(`${id}/${sha256(bundle.bytes)}`), null)
+		assert.equal((await call(`/instances/${id}/versions/${refused.version.version}`)).status, 404)
+		assert.equal(
+			(await ok(await call(`/instances/${id}/versions/${pushed[0]}`))).version,
+			pushed[0],
+		)
+		assert.equal(await files.head(`${id}/${sha256(config.bytes)}`), null)
 		assert.deepEqual(
 			await stored(id),
 			[`${id}/${sha256(jar.bytes)}`, `${id}/${sha256(changed.bytes)}`].sort(),
@@ -209,7 +309,7 @@ test('sharing API as the App uses it, with files in R2', async () => {
 		assert.equal(
 			(
 				await send(
-					latest.external_files.find((file) => file.file_type === 'configs').url,
+					latest.external_files.find((file) => file.file_name === config.file_name).url,
 					'GET',
 					'owner',
 				)
@@ -224,8 +324,6 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			bytes: Buffer.alloc(25 * MB + 1, 1),
 		}
 		assert.equal((await publish(id, [tooLarge])).failed, 413)
-		const largeBundle = { ...bundle, bytes: Buffer.alloc(5 * MB + 1, 2) }
-		assert.equal((await publish(id, [jar, largeBundle])).failed, 413)
 		assert.equal(
 			(
 				await call(`/instances/${id}/versions`, 'POST', {
@@ -238,10 +336,10 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			).status,
 			413,
 		)
-		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, 6)
+		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, current.version)
 		assert.equal((await ok(await call(`/instances/${id}/versions`))).ready, true)
 		await publish(id, [jar])
-		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, 9)
+		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, current.version + 2)
 		assert.deepEqual(
 			(
 				await db
@@ -276,7 +374,7 @@ test('sharing API as the App uses it, with files in R2', async () => {
 		assert.deepEqual(await stored(full.id), [])
 		assert.equal((await stored(id)).length, 2, 'other instances keep their files')
 
-		// A ready version loses its object: download discovers it, then the owner repairs it.
+		// A ready version loses its object: a download discovers it, and the next push repairs it.
 		const repair = await ok(await call('/instances', 'POST', { name: 'Repair' }))
 		await publish(repair.id, [jar])
 		await publish(repair.id, [jar])
@@ -289,10 +387,10 @@ test('sharing API as the App uses it, with files in R2', async () => {
 			const broken = await ok(await call(`/instances/${repair.id}/versions/${version}`))
 			assert.equal(broken.ready, false)
 			assert.equal(broken.external_files[0].sha256, undefined)
-			assert.ok(broken.external_files[0].url.includes('/uploads/'))
+			assert.ok(broken.external_files[0].url.endsWith(`/versions/${version}/files`))
 		}
-		const pending = await ok(await call(`/instances/${repair.id}/versions`))
-		assert.equal((await ok(await put(pending.external_files[0].url, jar.bytes))).ready, true)
+		const repaired = await publish(repair.id, [jar])
+		assert.equal(repaired.result.ready, true)
 		assert.equal((await ok(await call(`/instances/${repair.id}/versions`))).ready, true)
 		await ok(await call(`/instances/${repair.id}`, 'DELETE'))
 	} finally {

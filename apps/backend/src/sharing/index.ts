@@ -5,13 +5,17 @@ import { notificationResponse } from '../common/notifications'
 import type { Env } from '../common/types'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
+import { decodedBody, drainBody, multipartBoundary, multipartParts } from './batch'
 
-// Limits are deliberately tight and easy to change.
+// Limits are deliberately tight and easy to change. The App's publish modal shows
+// MAX_INSTANCE_SIZE as its storage limit; keep the two in step.
 const MAX_FILE_SIZE = 25 * 1024 * 1024
-const MAX_CONFIG_BUNDLE_SIZE = 5 * 1024 * 1024
 const MAX_VERSION_FILES = 20
 const MAX_INSTANCE_SIZE = 100 * 1024 * 1024
+const MAX_MANIFEST_SIZE = 64 * 1024
 const KEPT_VERSIONS = 5
+/** Tells the App which file an upload was refused for. The body ends with the file name. */
+const FILE_NOT_ALLOWED_HEADER = 'x-file-not-allowed'
 
 type Instance = {
 	id: string
@@ -53,11 +57,67 @@ const fileMissing = () =>
 	new ApiError(404, 'not_found', 'Shared file was not found', 'file_missing')
 const hex = (bytes: ArrayBuffer) =>
 	Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+const digest = async (algorithm: 'SHA-256' | 'SHA-512', bytes: Uint8Array) =>
+	hex(await crypto.subtle.digest(algorithm, bytes as Uint8Array<ArrayBuffer>))
 
 function string(value: unknown, field: string, max = 256): string {
 	if (typeof value !== 'string' || value.length > max || !value.trim())
 		throw new ApiError(400, 'invalid_input', `Invalid ${field}`)
 	return value
+}
+
+/**
+ * A shared file's name is its path inside the instance, such as `config/foo.toml`, or a bare file
+ * name for content files. Slashes separate; nothing may escape the instance folder.
+ */
+function fileName(value: unknown): string {
+	const name = string(value, 'file_name', 1024)
+	if (
+		/[\\\u0000-\u001f]/.test(name) ||
+		name.split('/').some((part) => part === '' || part === '.' || part === '..')
+	)
+		throw new ApiError(400, 'invalid_input', 'Invalid file path')
+	return name
+}
+
+function fileType(value: unknown): string {
+	const type = string(value, 'file_type', 64)
+	if (!/^[a-z0-9_-]+$/.test(type)) throw new ApiError(400, 'invalid_input', 'Invalid file_type')
+	return type
+}
+
+// Leading bytes of programs and installers. The App hides these from the files it offers to
+// share and checks content the same way before publishing; this is the backend's own check.
+const EXECUTABLE_SIGNATURES: readonly number[][] = [
+	[0x4d, 0x5a], // MZ: Windows executables and DLLs
+	[0x7f, 0x45, 0x4c, 0x46], // ELF
+	[0xfe, 0xed, 0xfa, 0xce], // Mach-O, every byte order and width
+	[0xfe, 0xed, 0xfa, 0xcf],
+	[0xce, 0xfa, 0xed, 0xfe],
+	[0xcf, 0xfa, 0xed, 0xfe],
+	[0xca, 0xfe, 0xba, 0xbe], // Mach-O universal binaries and Java classes
+	[0x00, 0x61, 0x73, 0x6d], // WebAssembly
+	[0x64, 0x65, 0x78, 0x0a], // Android dex and dey
+	[0x64, 0x65, 0x79, 0x0a],
+	[0x23, 0x21], // #! scripts
+	[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], // MSI installers
+	[0x4d, 0x53, 0x43, 0x46], // Windows cabinets
+	[0xed, 0xab, 0xee, 0xdb], // RPM packages
+	[0x43, 0x72, 0x32, 0x34], // Chrome extensions
+	[0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a, 0x64, 0x65, 0x62, 0x69, 0x61, 0x6e], // Debian packages
+]
+
+function isExecutable(bytes: Uint8Array): boolean {
+	return EXECUTABLE_SIGNATURES.some((signature) =>
+		signature.every((byte, index) => bytes[index] === byte),
+	)
+}
+
+function fileNotAllowed(name: string): Response {
+	return new Response(`This file type cannot be shared: ${name}`, {
+		status: 400,
+		headers: { 'Content-Type': 'text/plain', [FILE_NOT_ALLOWED_HEADER]: 'true' },
+	})
 }
 
 function strings(value: unknown, field: string, max = 250): string[] {
@@ -131,7 +191,7 @@ async function files(env: Env, item: Pick<Version, 'instance_id' | 'version'>): 
 	).results
 }
 
-/** An uploaded file points at its download; one still missing points at its upload. */
+/** An uploaded file points at its download; one still missing points at the batch upload. */
 function fileResponse(request: Request, file: File) {
 	const origin = new URL(request.url).origin
 	return {
@@ -139,7 +199,7 @@ function fileResponse(request: Request, file: File) {
 		file_type: file.file_type,
 		url: file.sha256
 			? `${origin}/v1/instances/${file.instance_id}/files/${file.sha256}/${encodeURIComponent(file.file_name)}`
-			: `${origin}/v1/uploads/${file.id}`,
+			: `${origin}/v1/instances/${file.instance_id}/versions/${file.version}/files`,
 		file_size: file.size ?? undefined,
 		sha256: file.sha256 ?? undefined,
 	}
@@ -257,16 +317,11 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 
 /**
  * Marks a version ready once every file it lists is uploaded and its R2 object exists. A file whose
- * object is gone goes back to awaiting upload, so the version lists its upload URL again; those
- * files are returned as `missing`.
+ * object is gone goes back to awaiting upload, so the next batch for this version can store it.
  */
-async function finalizeVersion(
-	env: Env,
-	id: string,
-	version: number,
-): Promise<{ ready: boolean; missing: File[] }> {
+async function finalizeVersion(env: Env, id: string, version: number): Promise<boolean> {
 	const listed = await files(env, { instance_id: id, version })
-	if (listed.some((file) => !file.sha256)) return { ready: false, missing: [] }
+	if (listed.some((file) => !file.sha256)) return false
 	const hashes = [...new Set(listed.flatMap((file) => file.sha256 ?? []))]
 	const gone = (
 		await Promise.all(
@@ -275,20 +330,14 @@ async function finalizeVersion(
 	).flat()
 	if (gone.length) {
 		// A version that is already ready keeps its rows: its files cannot be uploaded again.
-		const reset = await env.DB.prepare(
+		await env.DB.prepare(
 			`UPDATE shared_files SET sha256 = NULL, size = NULL WHERE instance_id = ?1 AND version = ?2
 			AND sha256 IN (${gone.map((_, index) => `?${index + 3}`).join(',')})
 			AND EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND version = ?2 AND ready = 0)`,
 		)
 			.bind(id, version, ...gone)
 			.run()
-		if (!reset.meta.changes) return { ready: false, missing: [] }
-		return {
-			ready: false,
-			missing: listed
-				.filter((file) => file.sha256 && gone.includes(file.sha256))
-				.map((file) => ({ ...file, sha256: null, size: null })),
-		}
+		return false
 	}
 	const result = await env.DB.prepare(
 		`UPDATE shared_versions SET ready = 1 WHERE instance_id = ?1 AND version = ?2 AND ready = 0
@@ -296,10 +345,10 @@ async function finalizeVersion(
 	)
 		.bind(id, version)
 		.run()
-	if (!result.meta.changes) return { ready: false, missing: [] }
+	if (!result.meta.changes) return false
 	await notifyReadyInvites(env, id)
 	await pruneVersions(env, id)
-	return { ready: true, missing: [] }
+	return true
 }
 
 async function createVersion(
@@ -333,13 +382,9 @@ async function createVersion(
 	const seen = new Set<string>()
 	const external = body.external_files.map((value) => {
 		const file = object(value)
-		const file_name = string(file.file_name, 'file_name')
-		const file_type = string(file.file_type, 'file_type')
-		if (/[\\/\u0000-\u001f]/.test(file_name) || file_name === '.' || file_name === '..')
-			throw new ApiError(400, 'invalid_input', 'File names cannot contain paths')
-		if (!['mod', 'resourcepack', 'shader', 'datapack', 'configs'].includes(file_type))
-			throw new ApiError(400, 'invalid_input', 'Unsupported shared file type')
-		const name = `${file_type}/${file_name}`
+		const file_name = fileName(file.file_name)
+		const file_type = fileType(file.file_type)
+		const name = `${file_type}:${file_name}`
 		if (seen.has(name)) throw new ApiError(400, 'invalid_input', 'Duplicate external file')
 		seen.add(name)
 		return { id: crypto.randomUUID(), file_name, file_type }
@@ -360,36 +405,50 @@ async function createVersion(
 	])
 	const version = result[result.length - 1]?.results[0]
 	if (!version) throw new ApiError(500, 'database_error', 'Could not create shared version')
-	const { ready } = await finalizeVersion(env, item.id, version.version)
+	const ready = await finalizeVersion(env, item.id, version.version)
 	return json(await versionResponse(env, request, { ...version, ready: ready ? 1 : 0 }))
 }
 
+type BatchEntry = { file: File; file_size: number; sha512: string }
+
+/** The manifest part of a batch: which of the version's files follow, with their size and hash. */
+function batchManifest(bytes: Uint8Array, listed: File[]): BatchEntry[] {
+	let value: unknown
+	try {
+		value = JSON.parse(new TextDecoder().decode(bytes))
+	} catch {
+		throw new ApiError(400, 'invalid_input', 'Invalid batch manifest')
+	}
+	const entries = object(value).files
+	if (!Array.isArray(entries) || entries.length > MAX_VERSION_FILES)
+		throw new ApiError(400, 'invalid_input', 'Invalid batch manifest')
+	const seen = new Set<File>()
+	return entries.map((item) => {
+		const entry = object(item)
+		const file_name = fileName(entry.file_name)
+		const file_type = fileType(entry.file_type)
+		const file = listed.find((row) => row.file_name === file_name && row.file_type === file_type)
+		if (!file || seen.has(file))
+			throw new ApiError(400, 'invalid_input', `${file_name} is not part of this version`)
+		seen.add(file)
+		const { file_size, sha512 } = entry
+		if (typeof file_size !== 'number' || !Number.isSafeInteger(file_size) || file_size < 0)
+			throw new ApiError(400, 'invalid_input', 'Invalid file_size')
+		if (file_size > MAX_FILE_SIZE)
+			throw new ApiError(413, 'invalid_input', `${file_name} is larger than a shared file may be`)
+		if (typeof sha512 !== 'string' || !/^[a-f0-9]{128}$/i.test(sha512))
+			throw new ApiError(400, 'invalid_input', 'Invalid sha512')
+		return { file, file_size, sha512: sha512.toLowerCase() }
+	})
+}
+
 /**
- * Stores one file of a version. A hash the instance already holds is not stored again. Answers
- * whether the version became ready, and which of its files have to be uploaded again because their
- * stored object is gone.
+ * Stores one uploaded file of a version. A hash the instance already holds is not stored again. The
+ * same bytes may be stored twice for the same file, so a batch the App retries after a failure
+ * succeeds for the files that already made it.
  */
-async function upload(request: Request, env: Env, fileId: string): Promise<Response> {
-	const user = await requireUser(request, env)
-	if (request.method !== 'PUT')
-		throw new ApiError(405, 'method_not_allowed', 'Unsupported upload operation')
-	const file = await env.DB.prepare('SELECT * FROM shared_files WHERE id = ?')
-		.bind(fileId)
-		.first<File>()
-	if (!file) throw new ApiError(404, 'not_found', 'Upload was not found', 'upload_not_found')
-	const item = await instance(env, file.instance_id)
-	owner(item, user.id)
-	await requireSharing(env, user.id)
-	if (item.quarantine) throw quarantined()
-	if (file.sha256) throw new ApiError(409, 'conflict', 'This file was already uploaded')
-	const bytes = await readBytes(
-		request,
-		file.file_type === 'configs' ? MAX_CONFIG_BUNDLE_SIZE : MAX_FILE_SIZE,
-	)
-	const expected = request.headers.get('x-file-sha512')
-	if (expected && expected !== hex(await crypto.subtle.digest('SHA-512', bytes)))
-		throw new ApiError(400, 'upload_failed', 'Upload does not match its hash')
-	const sha256 = hex(await crypto.subtle.digest('SHA-256', bytes))
+async function storeFile(env: Env, item: Instance, file: File, bytes: Uint8Array): Promise<void> {
+	const sha256 = await digest('SHA-256', bytes)
 	// Only what finalizing this version keeps counts: this version and the ready ones that survive
 	// pruning. A hash held only by a version about to be pruned is stored and counted again.
 	const stored = await env.DB.prepare(
@@ -401,9 +460,13 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 		throw new ApiError(413, 'invalid_input', 'Shared instance storage is full')
 	const key = objectKey(item.id, sha256)
 	// Reserve the hash before R2 stores it, so a concurrent orphan sweep sees its reference.
-	await env.DB.prepare('UPDATE shared_files SET sha256 = ?, size = ? WHERE id = ?')
+	const reserved = await env.DB.prepare(
+		'UPDATE shared_files SET sha256 = ?1, size = ?2 WHERE id = ?3 AND (sha256 IS NULL OR sha256 = ?1)',
+	)
 		.bind(sha256, bytes.byteLength, file.id)
 		.run()
+	if (!reserved.meta.changes)
+		throw new ApiError(409, 'conflict', `${file.file_name} was already uploaded`)
 	try {
 		if (!(await env.FILES.head(key))) await env.FILES.put(key, bytes)
 	} catch (error) {
@@ -415,8 +478,65 @@ async function upload(request: Request, env: Env, fileId: string): Promise<Respo
 			.run()
 		throw error
 	}
-	const { ready, missing } = await finalizeVersion(env, item.id, file.version)
-	return json({ ready, missing_files: missing.map((entry) => fileResponse(request, entry)) })
+}
+
+/**
+ * Stores a batch of a version's files: a zstd-compressed multipart body with a JSON manifest first
+ * and the files after it, in manifest order. Each file is checked against the manifest and refused
+ * when it is a program, naming the file in `x-file-not-allowed`. Answers whether the version is
+ * complete.
+ */
+async function uploadBatch(
+	request: Request,
+	env: Env,
+	item: Instance,
+	version: Version,
+): Promise<Response> {
+	try {
+		return await storeBatch(request, env, item, version)
+	} catch (error) {
+		await drainBody(request)
+		throw error
+	}
+}
+
+async function storeBatch(
+	request: Request,
+	env: Env,
+	item: Instance,
+	version: Version,
+): Promise<Response> {
+	if (version.ready) throw new ApiError(409, 'conflict', 'This version is already complete')
+	const boundary = multipartBoundary(request.headers.get('content-type'))
+	const listed = await files(env, version)
+	let manifest: BatchEntry[] | undefined
+	const parts = multipartParts(decodedBody(request), boundary, (index) => {
+		if (index === 0) return MAX_MANIFEST_SIZE
+		const entry = manifest?.[index - 1]
+		if (!entry) throw new ApiError(400, 'invalid_input', 'More files than the manifest lists')
+		return entry.file_size
+	})
+	let received = 0
+	// Leaving the loop early drains the rest of the body before the response goes out.
+	for await (const part of parts) {
+		if (!manifest) {
+			if (part.name !== 'manifest')
+				throw new ApiError(400, 'invalid_input', 'The manifest must come first')
+			manifest = batchManifest(part.bytes, listed)
+			continue
+		}
+		const entry = manifest[received++]
+		if (!entry || part.name !== 'file') throw new ApiError(400, 'invalid_input', 'Unexpected part')
+		if (part.bytes.byteLength !== entry.file_size)
+			throw new ApiError(400, 'upload_failed', `${entry.file.file_name} is not its declared size`)
+		if ((await digest('SHA-512', part.bytes)) !== entry.sha512)
+			throw new ApiError(400, 'upload_failed', `${entry.file.file_name} does not match its hash`)
+		if (isExecutable(part.bytes)) return fileNotAllowed(entry.file.file_name)
+		await storeFile(env, item, entry.file, part.bytes)
+	}
+	if (!manifest || received < manifest.length)
+		throw new ApiError(400, 'invalid_input', 'The batch ended before every file was sent')
+	return json({ ready: await finalizeVersion(env, item.id, version.version) })
 }
 
 /** Serves an uploaded file to a member, who authenticates like any other sharing request. */
@@ -655,14 +775,11 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
 	if (
 		parts[0] !== 'v1' ||
-		!['instances', 'invites', 'uploads', 'blacklist', 'moderation', 'icons'].includes(
-			parts[1] ?? '',
-		)
+		!['instances', 'invites', 'blacklist', 'moderation', 'icons'].includes(parts[1] ?? '')
 	)
 		return null
 	const [, route, id, section, child] = parts
 	if (route === 'invites' && id && request.method === 'GET') return previewInvite(env, id)
-	if (route === 'uploads' && id && !section) return upload(request, env, id)
 	if (route === 'icons' && id && request.method === 'GET') {
 		const row = await env.DB.prepare(
 			'SELECT icon_data,icon_type FROM shared_instances WHERE icon = ?',
@@ -715,13 +832,14 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			parts[7] &&
 			request.method === 'DELETE'
 		) {
+			// A shared file's name may be a path, so it spans the rest of the URL.
 			await env.DB.prepare('UPDATE shared_instances SET quarantine = 1 WHERE id = ?')
 				.bind(section)
 				.run()
 			await env.DB.prepare(
 				'DELETE FROM shared_files WHERE instance_id = ? AND version = ? AND file_name = ?',
 			)
-				.bind(section, Number(parts[5]), parts[7])
+				.bind(section, Number(parts[5]), parts.slice(7).join('/'))
 				.run()
 			await sweepFiles(env, section)
 			return empty()
@@ -787,19 +905,20 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	if (section === 'versions') {
 		if (item.quarantine) throw quarantined()
 		if (request.method === 'POST' && !child) return createVersion(request, env, item, user.id)
-		if (request.method === 'GET') {
-			if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
-				throw new ApiError(400, 'invalid_input', 'Invalid shared version')
-			const version = child
-				? await env.DB.prepare(
-						'SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?',
-					)
-						.bind(id, Number(child))
-						.first<Version>()
-				: await latestVersion(env, id)
-			if (!version)
-				throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+		if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
+			throw new ApiError(400, 'invalid_input', 'Invalid shared version')
+		const version = child
+			? await env.DB.prepare('SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?')
+					.bind(id, Number(child))
+					.first<Version>()
+			: await latestVersion(env, id)
+		if (!version)
+			throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+		if (request.method === 'GET' && parts.length <= 5)
 			return json(await versionResponse(env, request, version))
+		if (request.method === 'POST' && parts[5] === 'files' && parts.length === 6) {
+			owner(item, user.id)
+			return uploadBatch(request, env, item, version)
 		}
 	}
 	if (section === 'files' && child && ['GET', 'HEAD'].includes(request.method))

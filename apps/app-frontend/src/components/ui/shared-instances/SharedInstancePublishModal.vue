@@ -160,7 +160,9 @@ import { apiClient } from '@/platform/modrinth-client'
 
 type SharedInstancePublishState = 'idle' | 'reviewing' | 'publishing'
 
-const STORAGE_LIMIT_BYTES = 2 * 1024 ** 3
+// Amberite's backend stores at most this much per shared instance (`MAX_INSTANCE_SIZE` in
+// `apps/backend/src/sharing`).
+const STORAGE_LIMIT_BYTES = 100 * 1024 ** 2
 const STORAGE_WARNING_RATIO = 0.75
 
 /**
