@@ -117,6 +117,9 @@ developer's go-ahead.
   (`preview_recording_start` / `preview_recording_stop`) instead.
 - The first load of a tab takes around 20 seconds and shows a blank page meanwhile. Wait for the
   sidebar before judging or screenshotting.
+- A second tab that T3 Code is not showing does not lay out: `innerText` reads as empty and
+  `preview_click` on its toasts and modals times out. Read `textContent` and click through the DOM
+  with `preview_evaluate` there.
 
 - Each App signs itself in at startup as its scenario account (`scenario_<number>`), so screens
   behind an account work straight away. Nothing needs signing in by hand.

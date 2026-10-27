@@ -151,6 +151,32 @@ overwriting existing state.
 `runtime.json` holds the runner's PID, the ports, and each scenario's `bridgeUrl` while the stack is
 running. The PID and bridge URLs are removed when it stops.
 
+### Regenerating the sharing dataset
+
+In the default dataset scenario 1 owns a shared instance that scenario 2 has joined: scenario 1's
+Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-account warning (a
+member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
+by copying; test data never leaves a worktree on its own.
+
+1. `node scripts/dev-runner.ts up 1 2` and open both bridge URLs.
+2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
+   Delete instance). Such a record points at a shared instance the backend no longer has, and the
+   locked Share tab offers no other way out.
+3. In App 1, open the Share tab of the instance to share and click Invite friends. This creates the
+   shared instance on the backend and publishes the instance's current content. Type `scenario_2`
+   and click Add. The accounts are not friends yet, so this first Add only sends a friend request:
+   sharing invites need friendship by default.
+4. In App 2, accept the friend request (the "1 friend request" button in the sidebar).
+5. In App 1, Add `scenario_2` again. The member table shows the invite as Pending.
+6. In App 2, accept the invite toast and click Install. Wait until the install finishes (the
+   download indicator in the top bar), which leaves the instance in App 2's library as a member of
+   the shared instance.
+7. `node scripts/dev-runner.ts down`. With the primary checkout's stack stopped too, replace the
+   primary's `.data/backend`, `.data/core`, and `.data/scenarios` with the worktree's.
+
+Publishing uploads only files that are not on Modrinth: loose mods, selected configs, and the like.
+The default instance has none, so its push needs no uploads at all.
+
 ## Ports and multiple instances
 
 Base ports are App `1420`, account website `3100`, Worker `8787`, and Core `16662`. Linked worktrees
