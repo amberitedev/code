@@ -34,9 +34,13 @@ consts = "consts"
 Cpy = "Cpy"
 # NoDerivatives in SPDX license identifiers
 ND = "ND"
+# Built-in Administrators SID in Windows SDDL strings
+BA = "BA"
 
 [default.extend-identifiers]
 # BTA dependency project name
 HalpLibe = "HalpLibe"
 # Constant from the `zip` crate
 ZIP64_BYTES_THR = "ZIP64_BYTES_THR"
+# Universal Plug and Play, used for router port forwarding
+UPnP = "UPnP"
