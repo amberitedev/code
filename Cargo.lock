@@ -14541,7 +14541,6 @@ version = "1.0.0-local"
 dependencies = [
  "anyhow",
  "ariadne",
- "async-compression",
  "async-minecraft-ping",
  "async-recursion",
  "async-trait",
