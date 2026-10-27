@@ -153,9 +153,10 @@ running. The PID and bridge URLs are removed when it stops.
 
 ### Regenerating the sharing dataset
 
-In the default dataset scenario 1 owns a shared instance that scenario 2 has joined, so the Share
-tab opens normally in both Apps. Rebuild it in a worktree, through the Apps, and hand it over by
-copying; test data never leaves a worktree on its own.
+In the default dataset scenario 1 owns a shared instance that scenario 2 has joined: scenario 1's
+Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-account warning (a
+member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
+by copying; test data never leaves a worktree on its own.
 
 1. `node scripts/dev-runner.ts up 1 2` and open both bridge URLs.
 2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
