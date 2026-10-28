@@ -479,6 +479,7 @@ pub enum FriendPayload {
     UserOffline { id: String },
     StatusUpdate { user_status: FriendStatusPayload },
     StatusSync,
+    FriendRequestRejected { from: String },
 }
 
 #[derive(Serialize, Deserialize, Clone)]

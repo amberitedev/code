@@ -1,5 +1,6 @@
 import { requireUser } from '../common/auth'
 import { ApiError, json, routePath, stringField } from '../common/http'
+import { notifyMembers } from '../common/notifications'
 import type { Env } from '../common/types'
 
 // Servers visible to friends. A Core lists the servers whose "Visible to friends" setting is on,
@@ -44,7 +45,8 @@ export function parseServers(servers: unknown): VisibleServer[] {
 
 /**
  * Make `servers` the whole list this Core shows to friends, writing only the rows that changed. A
- * server whose instance the Core's owner does not share is left out.
+ * server whose instance the Core's owner does not share is left out. The members of every instance
+ * whose list changed are told, so their App fetches it again.
  */
 export async function writeServers(
 	env: Env,
@@ -58,32 +60,38 @@ export async function writeServers(
 		.all<VisibleServer>()
 	const before = new Map(stored.results.map((row) => [row.id, row]))
 	const wanted = new Set(servers.map((server) => server.id))
+	const removed = stored.results.filter((row) => !wanted.has(row.id))
+	const changed = servers.filter((server) => {
+		const old = before.get(server.id)
+		return (
+			!old ||
+			old.name !== server.name ||
+			old.address !== server.address ||
+			old.instance !== server.instance
+		)
+	})
 	const remove = (id: string) =>
 		env.DB.prepare('DELETE FROM visible_servers WHERE core_id = ? AND server_id = ?').bind(
 			core.id,
 			id,
 		)
 	const statements = [
-		...stored.results.filter((row) => !wanted.has(row.id)).map((row) => remove(row.id)),
-		...servers
-			.filter((server) => {
-				const old = before.get(server.id)
-				return (
-					!old ||
-					old.name !== server.name ||
-					old.address !== server.address ||
-					old.instance !== server.instance
-				)
-			})
-			// A changed row goes first, so one whose instance is no longer shared is not kept stale.
-			.flatMap((server) => [
-				remove(server.id),
-				env.DB.prepare(
-					`INSERT OR REPLACE INTO visible_servers (instance_id,core_id,server_id,name,address) SELECT ?1,?3,?4,?5,?6 WHERE ${sharedWith('?2')}`,
-				).bind(server.instance, core.owner_id, core.id, server.id, server.name, server.address),
-			]),
+		...removed.map((row) => remove(row.id)),
+		// A changed row goes first, so one whose instance is no longer shared is not kept stale.
+		...changed.flatMap((server) => [
+			remove(server.id),
+			env.DB.prepare(
+				`INSERT OR REPLACE INTO visible_servers (instance_id,core_id,server_id,name,address) SELECT ?1,?3,?4,?5,?6 WHERE ${sharedWith('?2')}`,
+			).bind(server.instance, core.owner_id, core.id, server.id, server.name, server.address),
+		]),
 	]
-	if (statements.length) await env.DB.batch(statements)
+	if (!statements.length) return
+	await env.DB.batch(statements)
+	const touched = [...removed, ...changed, ...changed.map((server) => before.get(server.id))]
+	const instances = new Set(touched.flatMap((row) => (row ? [row.instance] : [])))
+	await Promise.all(
+		[...instances].map((id) => notifyMembers(env, id, 'shared_instance_servers', core.owner_id)),
+	)
 }
 
 /**

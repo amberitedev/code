@@ -23,15 +23,37 @@ export async function requireSession(
 	env: Env,
 	refresh = false,
 ): Promise<SessionRow> {
+	return authenticate<SessionRow>(
+		request,
+		env,
+		'SELECT s.*, EXISTS(SELECT 1 FROM user_locks l WHERE l.user_id = s.user_id) AS locked FROM sessions s WHERE s.token_hash = ?',
+		refresh,
+	)
+}
+
+/**
+ * The row `query` reads for a request's token: a session's, with its expiry and whether its
+ * account is locked. Every authenticated request pays for this, so it is one statement.
+ */
+async function authenticate<Row extends { expires: string; refresh_expires: string }>(
+	request: Request,
+	env: Env,
+	query: string,
+	refresh = false,
+): Promise<Row> {
 	const token = tokenFrom(request)
 	if (!token.startsWith('mra_')) unauthorized()
-	const session = await env.DB.prepare('SELECT * FROM sessions WHERE token_hash = ?')
+	const row = await env.DB.prepare(query)
 		.bind(await digest(token))
-		.first<SessionRow>()
-	if (!session || (refresh ? session.refresh_expires : session.expires) <= new Date().toISOString())
+		.first<Row & { locked: number }>()
+	if (!row || (refresh ? row.refresh_expires : row.expires) <= new Date().toISOString())
 		unauthorized()
-	await requireUnlocked(env, session.user_id)
-	return session
+	if (row.locked) accountLocked()
+	return row
+}
+
+function accountLocked(): never {
+	throw new ApiError(403, 'account_locked', 'Your account is locked and cannot perform this action')
 }
 
 export async function accountLock(env: Env, userId: string) {
@@ -41,21 +63,15 @@ export async function accountLock(env: Env, userId: string) {
 }
 
 export async function requireUnlocked(env: Env, userId: string) {
-	if (await accountLock(env, userId))
-		throw new ApiError(
-			403,
-			'account_locked',
-			'Your account is locked and cannot perform this action',
-		)
+	if (await accountLock(env, userId)) accountLocked()
 }
 
 export async function requireUser(request: Request, env: Env): Promise<UserRow> {
-	const session = await requireSession(request, env)
-	const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?')
-		.bind(session.user_id)
-		.first<UserRow>()
-	if (!user) unauthorized()
-	return user
+	return authenticate<UserRow & { expires: string; refresh_expires: string }>(
+		request,
+		env,
+		'SELECT u.*, s.expires, s.refresh_expires, EXISTS(SELECT 1 FROM user_locks l WHERE l.user_id = u.id) AS locked FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?',
+	)
 }
 
 export function publicUser(user: UserRow, full = false) {

@@ -1,7 +1,7 @@
 import { requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, json, readBytes, readJson } from '../common/http'
-import { notificationResponse } from '../common/notifications'
+import { notificationResponse, notifyMembers } from '../common/notifications'
 import type { Env } from '../common/types'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
@@ -222,16 +222,20 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
 	if (unused.length) await env.FILES.delete(unused)
 }
 
-/** Keeps the latest complete versions and drops uploads abandoned before the newest one. */
+/**
+ * Keeps the latest complete versions and drops uploads abandoned before the newest one, with
+ * their manifests. Deletes by name, so a push does not pay for listing the instance's manifests.
+ */
 async function pruneVersions(env: Env, id: string): Promise<void> {
-	await env.DB.prepare(
+	const { results } = await env.DB.prepare(
 		`DELETE FROM shared_versions WHERE instance_id = ?1 AND (
 			version < (SELECT MIN(version) FROM (SELECT version FROM shared_versions WHERE instance_id = ?1 AND ready = 1 ORDER BY version DESC LIMIT ?2))
-			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_versions WHERE instance_id = ?1 AND ready = 1)))`,
+			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_versions WHERE instance_id = ?1 AND ready = 1)))
+		RETURNING version`,
 	)
 		.bind(id, KEPT_VERSIONS)
-		.run()
-	await sweepFiles(env, id)
+		.all<{ version: number }>()
+	if (results.length) await env.FILES.delete(results.map((row) => manifestKey(id, row.version)))
 }
 
 async function notifyReadyInvites(env: Env, id: string): Promise<void> {
@@ -544,14 +548,16 @@ async function invites(
 				.run()
 			if (!result.meta.changes)
 				throw new ApiError(404, 'not_found', 'Pending invite was not found', 'invite_not_found')
+			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
 		if (request.method === 'DELETE') {
-			await env.DB.prepare(
+			const declined = await env.DB.prepare(
 				'DELETE FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
 			)
 				.bind(item.id, userId)
 				.run()
+			if (declined.meta.changes) await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
 	}
@@ -574,6 +580,7 @@ async function invites(
 			),
 		])
 		await member(env, item, userId)
+		await notifyMembers(env, item.id, 'shared_instance_users', userId)
 		return empty()
 	}
 	owner(item, userId)
@@ -639,7 +646,7 @@ async function users(
 		if (ids.some((id) => id !== userId)) owner(item, userId)
 		if (ids.includes(item.owner_id))
 			throw new ApiError(400, 'invalid_input', 'The owner cannot leave their own instance')
-		if (ids.length)
+		if (ids.length) {
 			await env.DB.batch(
 				ids.map((id) =>
 					env.DB.prepare('DELETE FROM shared_members WHERE instance_id = ? AND user_id = ?').bind(
@@ -648,6 +655,8 @@ async function users(
 					),
 				),
 			)
+			await notifyMembers(env, item.id, 'shared_instance_users', userId)
+		}
 		return empty()
 	}
 	owner(item, userId)
@@ -672,6 +681,7 @@ async function users(
 			.run()
 	}
 	await notifyReadyInvites(env, item.id)
+	await notifyMembers(env, item.id, 'shared_instance_users', userId)
 	return empty()
 }
 
@@ -698,7 +708,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			{
 				headers: {
 					'Content-Type': row.icon_type ?? 'image/png',
-					'Cache-Control': 'private, max-age=3600',
+					// Every upload gets a new URL, so a fetched icon never changes.
+					'Cache-Control': 'private, max-age=31536000, immutable',
 				},
 			},
 		)

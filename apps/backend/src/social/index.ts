@@ -42,18 +42,34 @@ async function requireOwner(request: Request, env: Env, target: UserRow) {
 		throw new ApiError(401, 'invalid_credentials', 'You do not have permission to edit this user!')
 	return user
 }
-async function notify(env: Env, userId: string, message: unknown) {
+async function notify(env: Env, userId: string, ...messages: unknown[]) {
 	// Persisted social state remains authoritative if a live connection disappears.
-	await notifyUser(env, userId, message).catch((error: unknown) =>
+	await notifyUser(env, userId, ...messages).catch((error: unknown) =>
 		console.error('Social notification failed', error),
 	)
 }
 
-async function visibleUser(request: Request, env: Env, target: UserRow) {
-	const viewer = await requireUser(request, env).catch((error: unknown) => {
+/**
+ * `userId` ended a friendship or request with `targetId`. The target's App drops them from its
+ * list and presence; this account's App already took the target off its list and only forgets
+ * the target's presence.
+ */
+async function unfriended(env: Env, userId: string, targetId: string) {
+	await Promise.all([
+		notify(env, targetId, { type: 'friend_request_rejected', from: userId }),
+		notify(env, userId, { type: 'user_offline', id: targetId }),
+	])
+}
+
+/** The signed-in account looking at a profile, or null for a visitor. */
+async function viewerOf(request: Request, env: Env) {
+	return requireUser(request, env).catch((error: unknown) => {
 		if (error instanceof ApiError && [401, 403].includes(error.status)) return null
 		throw error
 	})
+}
+
+async function visibleUser(env: Env, viewer: UserRow | null, target: UserRow) {
 	const staff = viewer?.role === 'admin' || viewer?.role === 'moderator'
 	const lock = staff ? await accountLock(env, target.id) : null
 	return { ...publicUser(target, viewer?.role === 'admin'), ...(lock ? { lock } : {}) }
@@ -78,14 +94,18 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 		)
 	}
 	if (path === '/users' && method === 'GET') {
-		const users = await Promise.all(idsQuery(url).map((id) => findUser(env, id)))
-		return json(
-			await Promise.all(
-				users
-					.filter((user): user is UserRow => user !== null)
-					.map((user) => visibleUser(request, env, user)),
-			),
-		)
+		const ids = idsQuery(url)
+		if (!ids.length) return json([])
+		// Each App asks for every user it shows here, so this is one query whatever the count.
+		const [viewer, users] = await Promise.all([
+			viewerOf(request, env),
+			env.DB.prepare(
+				'SELECT * FROM users WHERE id IN (SELECT value FROM json_each(?1)) OR username IN (SELECT value FROM json_each(?1))',
+			)
+				.bind(JSON.stringify(ids))
+				.all<UserRow>(),
+		])
+		return json(await Promise.all(users.results.map((user) => visibleUser(env, viewer, user))))
 	}
 	if (path === '/friends' && method === 'GET') {
 		const user = await requireUser(request, env)
@@ -104,14 +124,12 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 			target = await findUser(env, decodeURIComponent(friendMatch[1]))
 		if (!target) throw notFound()
 		if (method === 'DELETE') {
-			await env.DB.prepare(
+			const deleted = await env.DB.prepare(
 				'DELETE FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)',
 			)
 				.bind(user.id, target.id, target.id, user.id)
 				.run()
-			await notify(env, target.id, { type: 'friend_request_rejected', from: user.id })
-			await notify(env, user.id, { type: 'user_offline', id: target.id })
-			await notify(env, target.id, { type: 'user_offline', id: user.id })
+			if (deleted.meta.changes) await unfriended(env, user.id, target.id)
 			return empty()
 		}
 		if (user.id === target.id) invalid('You cannot add yourself as a friend!')
@@ -128,11 +146,20 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 			await env.DB.prepare('UPDATE friends SET accepted = 1 WHERE user_id = ? AND friend_id = ?')
 				.bind(existing.user_id, existing.friend_id)
 				.run()
-			await Promise.all(
-				[user.id, target.id].map(async (id) =>
-					notify(env, id, { type: 'friend_statuses', statuses: await friendsStatuses(env, id) }),
-				),
+			// Upstream sends each side only the other's presence. The request's sender is also told
+			// of the accept, which they would otherwise only see on their next friends list fetch.
+			const [mine, theirs] = await Promise.all(
+				[user.id, target.id].map((id) => env.FRIENDS.getByName(id).status()),
 			)
+			await Promise.all([
+				notify(
+					env,
+					target.id,
+					{ type: 'friend_request', from: user.id },
+					...(mine ? [{ type: 'status_update', status: mine }] : []),
+				),
+				theirs && notify(env, user.id, { type: 'status_update', status: theirs }),
+			])
 		} else {
 			const privacy = preferences(target).social.friend_privacy
 			if (!target.allow_friend_requests || privacy === 'none')
@@ -176,7 +203,7 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 				.bind(user.id, target.id)
 				.run()
 		else {
-			await env.DB.batch([
+			const [, unfriend] = await env.DB.batch([
 				env.DB.prepare('INSERT OR IGNORE INTO blocks (user_id,blocked_id) VALUES (?,?)').bind(
 					user.id,
 					target.id,
@@ -185,8 +212,7 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 					'DELETE FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)',
 				).bind(user.id, target.id, target.id, user.id),
 			])
-			await notify(env, user.id, { type: 'user_offline', id: target.id })
-			await notify(env, target.id, { type: 'user_offline', id: user.id })
+			if (unfriend?.meta.changes) await unfriended(env, user.id, target.id)
 		}
 		return empty()
 	}
@@ -214,7 +240,8 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 		const target = await findUser(env, decodeURIComponent(userMatch[1])),
 			action = userMatch[2]
 		if (!target) throw notFound()
-		if (!action && method === 'GET') return json(await visibleUser(request, env, target))
+		if (!action && method === 'GET')
+			return json(await visibleUser(env, await viewerOf(request, env), target))
 		if (
 			['projects', 'organizations', 'collections', 'follows', 'all-projects'].includes(action) &&
 			method === 'GET'
@@ -267,6 +294,7 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 					.all<{ id: string }>()
 			).results
 			await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(target.id).run()
+			await env.FRIENDS.getByName(target.id).revalidateSessions()
 			for (const instance of instances) await sweepFiles(env, instance.id)
 			return empty()
 		}

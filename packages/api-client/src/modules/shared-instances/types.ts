@@ -1,4 +1,14 @@
 export namespace SharedInstances {
+	/**
+	 * Sent live to the members of a shared instance when its member list (`shared_instance_users`)
+	 * or the servers other members host for it (`shared_instance_servers`) changed, so an open page
+	 * fetches it again. It arrives over the friends socket shaped like a notification, but is not
+	 * stored and has no id.
+	 */
+	export type LiveEvent = {
+		body: { type: 'shared_instance_users' | 'shared_instance_servers'; shared_instance_id: string }
+	}
+
 	export namespace Invites {
 		export namespace v1 {
 			export type UserManager = {

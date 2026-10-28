@@ -57,3 +57,32 @@ export async function addNotification(
 	).catch((error: unknown) => console.error('Live notification failed', error))
 	return id
 }
+
+/** What a {@link notifyMembers} event says changed. Typed for the App in `SharedInstances.LiveEvent`. */
+export type MembersEvent = 'shared_instance_users' | 'shared_instance_servers'
+
+/**
+ * Tells the online Apps of a shared instance's members that its member list or hosted servers
+ * changed, so an open page fetches it again instead of polling. The event is shaped like a
+ * notification so the App's socket passes it on, but it is not stored and has no id. `except` is
+ * the account whose own action this was; its App already knows.
+ */
+export async function notifyMembers(
+	env: Env,
+	instanceId: string,
+	type: MembersEvent,
+	except: string | null = null,
+): Promise<void> {
+	const { results } = await env.DB.prepare(
+		'SELECT user_id FROM shared_members WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
+	)
+		.bind(instanceId, except)
+		.all<{ user_id: string }>()
+	await Promise.all(
+		results.map(({ user_id }) =>
+			notifyUser(env, user_id, { body: { type, shared_instance_id: instanceId } }).catch(
+				(error: unknown) => console.error('Live event failed', error),
+			),
+		),
+	)
+}

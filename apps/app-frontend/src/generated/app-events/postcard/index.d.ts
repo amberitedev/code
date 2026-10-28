@@ -121,6 +121,7 @@ export type FriendPayload =
 	| { tag: 'user_offline'; value: { id: string } }
 	| { tag: 'status_update'; value: { user_status: FriendStatusPayload } }
 	| { tag: 'status_sync' }
+	| { tag: 'friend_request_rejected'; value: { from: string } }
 export type FriendStatusPayload = {
 	user_id: string
 	profile_name: string | undefined

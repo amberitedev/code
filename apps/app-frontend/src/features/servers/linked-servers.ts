@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { join, tempDir } from '@tauri-apps/api/path'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
+import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { export_instance_mrpack, get_content_items } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
 import { apiClient } from '@/platform/modrinth-client'
@@ -129,17 +130,23 @@ export type HostedServer = SharedInstances.Instances.v1.HostedServer
 
 /**
  * The servers other people host for a shared instance and show to its members. Empty when the
- * instance is not shared. Checked again every few seconds so a server that was hidden, renamed,
- * or moved shows up without a restart.
+ * instance is not shared. Fetched again when the backend says the list changed, so a server that
+ * was hidden, renamed, or moved shows up without a restart.
  */
 export function useHostedServers(sharedInstanceId: MaybeRefOrGetter<string | undefined>) {
+	const queryClient = useQueryClient()
+	const queryKey = computed(() => ['shared-instance-servers', toValue(sharedInstanceId)] as const)
 	const query = useQuery({
-		queryKey: computed(() => ['shared-instance-servers', toValue(sharedInstanceId)] as const),
+		queryKey,
 		queryFn: () => apiClient.sharedinstances.instances_v1.getServers(toValue(sharedInstanceId)!),
 		enabled: () => !!toValue(sharedInstanceId),
-		refetchInterval: 15_000,
 		retry: false,
 	})
+	useSharedInstanceEvent(
+		'shared_instance_servers',
+		sharedInstanceId,
+		() => void queryClient.invalidateQueries({ queryKey: queryKey.value }),
+	)
 	const servers = computed(() => (toValue(sharedInstanceId) ? (query.data.value ?? []) : []))
 	return { servers, query }
 }
