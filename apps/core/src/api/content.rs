@@ -1134,14 +1134,18 @@ async fn install_instance(
                         records::set_pending(&state.db, &id, &pending).await?;
                     forget_pack(&state, replaced).await;
                     if restart {
-                        state.servers.stop(&id).await?;
+                        match state.servers.stop(&id).await {
+                            // It stopped on its own while the version was fetched.
+                            Err(ServerError::NotRunning) => {}
+                            result => result?,
+                        }
                     }
                     Ok::<_, content::Error>(())
                 }
                 .await;
                 match result {
                     // The server may have stopped while the version was fetched.
-                    Ok(()) => apply_pending(&state, &id).await,
+                    Ok(()) => apply_pending(state, id).await,
                     Err(error) => {
                         tracing::warn!(server = %id, %error, "could not take a pushed version");
                         let _ = records::set_pack_error(
@@ -1161,11 +1165,11 @@ async fn install_instance(
 
 /// Apply the version waiting for a server, when one waits and the server is stopped. Starts the
 /// server again afterwards when the push asked for a restart.
-pub async fn apply_pending(state: &AppState, id: &str) {
+/// Another change to the server's content is waited for, so it never costs the version.
+pub async fn apply_pending(state: Arc<AppState>, id: String) {
+    let id = id.as_str();
+    let busy = state.content.busy_wait(id).await;
     let Ok(Some(pending)) = records::pending(&state.db, id).await else {
-        return;
-    };
-    let Ok(busy) = state.content.busy(id) else {
         return;
     };
     let Ok(hold) = state.servers.hold(id) else {
@@ -1225,12 +1229,12 @@ pub async fn apply_pending_on_stop(state: Arc<AppState>) {
         .await
         .unwrap_or_default()
     {
-        apply_pending(&state, &id).await;
+        tokio::spawn(apply_pending(Arc::clone(&state), id));
     }
     loop {
         match events.recv().await {
             Ok(crate::servers::Lifecycle::Ended(id)) => {
-                apply_pending(&state, &id).await;
+                tokio::spawn(apply_pending(Arc::clone(&state), id));
             }
             Ok(_) | Err(RecvError::Lagged(_)) => {}
             Err(RecvError::Closed) => return,

@@ -153,6 +153,20 @@ impl Content {
             .map_err(|_| Error::Busy)
     }
 
+    /// Take a server's content for a change, waiting for the change that has it to finish.
+    pub async fn busy_wait(&self, server_id: &str) -> Busy {
+        let lock = Arc::clone(
+            self.busy
+                .lock()
+                .expect("not poisoned")
+                .entry(server_id.to_owned())
+                .or_default(),
+        );
+        Busy {
+            _guard: lock.lock_owned().await,
+        }
+    }
+
     pub fn activity(&self, server_id: &str) -> Activity {
         self.activity
             .lock()
