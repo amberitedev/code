@@ -1,17 +1,38 @@
-//! Forge and NeoForge through the vendor installer. Core fetches the installer into the shared
-//! store; the server's shim runs it as `copal-servers` inside the server folder, because it runs
-//! code (see `Servers::run_installer`). What it leaves behind says how to start the server.
+//! Forge and NeoForge. Versions come from launcher-meta, picked by the App's rule.
+//!
+//! Every NeoForge build, and Forge from 1.17, installs from launcher-meta's server-side data. Core
+//! downloads the libraries into the shared store. The install steps (Forge's "processors") run
+//! as `copal-servers` in a work folder inside the server folder, because they run code (see
+//! `Servers::run_installer`). Core checks what they made against the hashes launcher-meta
+//! publishes, then moves it into the store. The server starts from the store, so a build is
+//! installed once for every server on it.
+//!
+//! Older Forge has no server start launcher-meta can describe. It still runs the vendor
+//! installer in the server folder and starts from what that leaves behind.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Read,
+    path::{Path, PathBuf},
+};
 
-use serde::Deserialize;
+use minecraft_meta_manifest::{
+    fabriclike::LoaderVersion,
+    profile::{DUMMY_REPLACE_STRING, ProfileMetadata},
+};
 
 use super::{
     ModLoader,
-    daedalus::{SharedDirs, meta},
     download::{self, FileDownload, Hash},
+    shared::{
+        self, SharedDirs,
+        libraries::{self, LibraryError, maven_path},
+        meta,
+        rules::classpath_separator,
+        version_info::{self, merged_version_id},
+    },
 };
-use crate::servers::launch::read_server_file;
+use crate::servers::{Hold, ServerError, Servers};
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstallerError {
@@ -19,14 +40,28 @@ pub enum InstallerError {
     Download(#[from] download::DownloadError),
     #[error(transparent)]
     Metadata(#[from] meta::MetaError),
-    #[error("Forge has no build for Minecraft {0}")]
-    NoBuild(String),
+    #[error(transparent)]
+    Shared(#[from] shared::SharedError),
+    #[error("version info: {0}")]
+    VersionInfo(#[from] version_info::VersionInfoError),
+    #[error("library: {0}")]
+    Library(#[from] LibraryError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Server(#[from] ServerError),
     #[error(
         "the {0} installer finished but left nothing to start the server with"
     )]
     NoLaunch(ModLoader),
     #[error("{0:?} is not a version")]
     BadVersion(String),
+    #[error("the install step {0} has no main class")]
+    NoMainClass(String),
+    #[error("the install made a damaged {0}")]
+    Damaged(String),
+    #[error("the install did not make {0}, which the server starts with")]
+    Incomplete(String),
 }
 
 /// `version`, unless it is not plainly one (see [`super::plain_version`]).
@@ -38,46 +73,18 @@ fn checked(version: &str) -> Result<&str, InstallerError> {
     }
 }
 
-/// The loader version to install: `requested`, or the recommended (then latest) Forge build, or
-/// the newest NeoForge build for `game_version`.
+/// The loader version to install, from launcher-meta: `requested`, or the App's default for
+/// `None`. A version launcher-meta does not list fails here, before anything downloads.
 pub async fn resolve(
     http: &reqwest::Client,
     loader: ModLoader,
     game_version: &str,
     requested: Option<&str>,
-) -> Result<String, InstallerError> {
-    let requested =
-        requested.filter(|version| !matches!(*version, "latest" | "stable"));
-    if let Some(version) = requested {
-        return Ok(checked(version)?.to_owned());
-    }
-    if loader == ModLoader::NeoForge {
-        let manifest = meta::fetch_loader_manifest(http, "neo").await?;
-        return Ok(meta::resolve_loader_version(
-            &manifest,
-            game_version,
-            None,
-        )?
-        .id);
-    }
-    #[derive(Deserialize)]
-    struct Promotions {
-        promos: std::collections::HashMap<String, String>,
-    }
-    let promotions: Promotions = download::json(
-        http,
-        "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json",
-    )
-    .await?;
-    let promoted = |kind| {
-        promotions
-            .promos
-            .get(&format!("{game_version}-{kind}"))
-            .cloned()
-    };
-    promoted("recommended")
-        .or_else(|| promoted("latest"))
-        .ok_or_else(|| InstallerError::NoBuild(game_version.into()))
+) -> Result<LoaderVersion, InstallerError> {
+    let version =
+        meta::loader_version(http, loader, game_version, requested).await?;
+    checked(&version.id)?;
+    Ok(version)
 }
 
 /// Fetch the installer for `version` into the shared store, unless it is there. Checked against
@@ -132,6 +139,348 @@ pub async fn installer(
     Ok(path)
 }
 
+/// The Java arguments this platform's server starts with, as the installer ships them
+/// (`data/win_args.txt` or `data/unix_args.txt`), or `None` for Forge before 1.17, which has
+/// none. Read from the jar; nothing in it runs.
+pub async fn server_args(
+    installer: &Path,
+) -> Result<Option<String>, InstallerError> {
+    let installer = installer.to_owned();
+    let name = if cfg!(windows) {
+        "data/win_args.txt"
+    } else {
+        "data/unix_args.txt"
+    };
+    let read = tokio::task::spawn_blocking(move || {
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&installer)?)
+            .map_err(std::io::Error::other)?;
+        let Ok(entry) = zip.by_name(name) else {
+            return Ok(None);
+        };
+        let mut text = String::new();
+        entry.take(1024 * 1024).read_to_string(&mut text)?;
+        Ok::<_, std::io::Error>(Some(text))
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    Ok(read)
+}
+
+/// Install `version` from launcher-meta into the shared store and record how it starts. `args`
+/// is the installer's [`server_args`]. A build another server already installed is reused unless
+/// `verify` (repair) checks it again. `work` is an empty folder inside the server folder where
+/// the install steps run; the caller removes it. `progress` is told the share done.
+#[allow(clippy::too_many_arguments)]
+pub async fn install_from_meta(
+    servers: &Servers,
+    hold: &Hold,
+    http: &reqwest::Client,
+    dirs: &SharedDirs,
+    loader: ModLoader,
+    game_version: &str,
+    version: &LoaderVersion,
+    installer: &Path,
+    args: &str,
+    java: &Path,
+    work: &Path,
+    verify: bool,
+    progress: &(dyn Fn(f64) + Sync),
+) -> Result<(), InstallerError> {
+    let id = merged_version_id(game_version, loader, Some(&version.id));
+    let catalog = meta::fetch_minecraft_manifest(http).await?;
+    let game = meta::find_game_version(&catalog, game_version)?;
+    let vanilla = version_info::vanilla(http, dirs, &game, verify).await?;
+    shared::download_server_jar(http, dirs, &vanilla, game_version, verify)
+        .await?;
+    let mut profile: ProfileMetadata =
+        download::json(http, version.url.as_str()).await?;
+    for library in &mut profile.libraries {
+        library.name = library.name.replace(DUMMY_REPLACE_STRING, game_version);
+    }
+    progress(0.1);
+    libraries::download_libraries(
+        http,
+        dirs,
+        &profile.libraries,
+        std::env::consts::ARCH,
+        verify,
+        &|share| progress(0.1 + share * 0.4),
+    )
+    .await?;
+    if !verify && dirs.server_args_path(&id).is_file() {
+        progress(1.0);
+        return Ok(());
+    }
+
+    let steps = Steps::new(dirs, &profile, game_version, installer, work)?;
+    let processors: Vec<_> = profile
+        .processors
+        .iter()
+        .flatten()
+        .filter(|processor| {
+            processor
+                .sides
+                .as_ref()
+                .is_none_or(|sides| sides.iter().any(|side| side == "server"))
+        })
+        .collect();
+    let sep = classpath_separator(std::env::consts::ARCH);
+    for (done, processor) in processors.iter().enumerate() {
+        let classpath = std::iter::once(&processor.jar)
+            .chain(&processor.classpath)
+            .map(|name| steps.store_path(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        let main = main_class(&classpath[0]).await?.ok_or_else(|| {
+            InstallerError::NoMainClass(processor.jar.clone())
+        })?;
+        let mut command =
+            vec!["-cp".to_owned(), join_paths(&classpath, sep), main];
+        for arg in &processor.args {
+            command.push(steps.argument(arg)?);
+        }
+        servers
+            .run_installer(hold, java.to_owned(), command)
+            .await?;
+        progress(0.5 + (done + 1) as f64 / processors.len() as f64 * 0.4);
+    }
+    steps.check_hashes().await?;
+    store_outputs(&steps.made, &steps.store).await?;
+
+    let libraries_dir = dunce::canonicalize(&steps.store)?;
+    let (tokens, referenced) =
+        absolute_args(args, &libraries_dir.to_string_lossy(), sep);
+    if let Some(missing) = referenced
+        .iter()
+        .find(|path| !libraries_dir.join(path).is_file())
+    {
+        return Err(InstallerError::Incomplete(missing.clone()));
+    }
+    // Written last, so it is there only once the build is complete.
+    download::write_whole(
+        &dirs.server_args_path(&id),
+        tokens.join("\n").as_bytes(),
+    )
+    .await?;
+    progress(1.0);
+    Ok(())
+}
+
+/// The values a Forge install step's arguments refer to, for the server side. A library
+/// launcher-meta lists is read from the shared store. Anything else an argument names is made by
+/// a step, so it is written to the work folder until Core moves it into the store.
+struct Steps {
+    store: PathBuf,
+    made: PathBuf,
+    listed: HashSet<String>,
+    data: HashMap<String, String>,
+}
+
+impl Steps {
+    fn new(
+        dirs: &SharedDirs,
+        profile: &ProfileMetadata,
+        game_version: &str,
+        installer: &Path,
+        work: &Path,
+    ) -> Result<Self, InstallerError> {
+        let path = |path: &Path| path.to_string_lossy().into_owned();
+        let made = work.join("libraries");
+        let mut steps = Self {
+            store: dirs.libraries_dir(),
+            listed: profile
+                .libraries
+                .iter()
+                .filter(|library| library.downloadable)
+                .map(|library| library.name.clone())
+                .collect(),
+            data: HashMap::from([
+                ("SIDE".to_owned(), "server".to_owned()),
+                (
+                    "MINECRAFT_JAR".to_owned(),
+                    path(&dirs.server_jar_path(game_version)),
+                ),
+                ("MINECRAFT_VERSION".to_owned(), game_version.to_owned()),
+                ("ROOT".to_owned(), path(work)),
+                ("INSTALLER".to_owned(), path(installer)),
+                ("LIBRARY_DIR".to_owned(), path(&made)),
+            ]),
+            made,
+        };
+        for (key, entry) in profile.data.iter().flatten() {
+            let value = steps.value(&entry.server)?;
+            steps.data.insert(key.clone(), value);
+        }
+        Ok(steps)
+    }
+
+    /// A data value: `[coordinates]` is a library's path, `'text'` is the text.
+    fn value(&self, value: &str) -> Result<String, InstallerError> {
+        if let Some(name) = value
+            .strip_prefix('[')
+            .and_then(|name| name.strip_suffix(']'))
+        {
+            return Ok(self.library(name)?.to_string_lossy().into_owned());
+        }
+        Ok(value
+            .strip_prefix('\'')
+            .and_then(|text| text.strip_suffix('\''))
+            .unwrap_or(value)
+            .to_owned())
+    }
+
+    /// Where a library is: in the store if launcher-meta lists it, else in the work folder.
+    fn library(&self, name: &str) -> Result<PathBuf, InstallerError> {
+        let root = if self.listed.contains(name) {
+            &self.store
+        } else {
+            &self.made
+        };
+        Ok(root.join(maven_path(name)?))
+    }
+
+    /// A library on a step's classpath, which launcher-meta always lists.
+    fn store_path(&self, name: &str) -> Result<PathBuf, InstallerError> {
+        Ok(self.store.join(maven_path(name)?))
+    }
+
+    /// An install step argument: a library, or text with `{KEY}` replaced by its data value
+    /// anywhere in it, such as `{ROOT}/libraries/`. app-lib's `get_processor_arguments`.
+    fn argument(&self, arg: &str) -> Result<String, InstallerError> {
+        if arg.starts_with('[') {
+            return self.value(arg);
+        }
+        let mut arg = arg.to_owned();
+        for (key, value) in &self.data {
+            arg = arg.replace(&format!("{{{key}}}"), value);
+        }
+        Ok(arg)
+    }
+
+    /// Every made file launcher-meta publishes a hash for (`KEY` beside `KEY_SHA`) must match it.
+    async fn check_hashes(&self) -> Result<(), InstallerError> {
+        for (key, sha1) in &self.data {
+            let Some(made) = key
+                .strip_suffix("_SHA")
+                .and_then(|key| self.data.get(key))
+                .map(PathBuf::from)
+                .filter(|path| path.starts_with(&self.made) && path.is_file())
+            else {
+                continue;
+            };
+            if !download::has_hash(&made, Hash::Sha1(sha1)).await {
+                let name = made.strip_prefix(&self.made).unwrap_or(&made);
+                return Err(InstallerError::Damaged(
+                    name.to_string_lossy().into_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The `Main-Class` of a jar's manifest. app-lib's `get_processor_main_class`.
+async fn main_class(jar: &Path) -> Result<Option<String>, InstallerError> {
+    let jar = jar.to_owned();
+    let found = tokio::task::spawn_blocking(move || {
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&jar)?)
+            .map_err(std::io::Error::other)?;
+        let mut manifest = String::new();
+        zip.by_name("META-INF/MANIFEST.MF")
+            .map_err(std::io::Error::other)?
+            .take(1024 * 1024)
+            .read_to_string(&mut manifest)?;
+        Ok::<_, std::io::Error>(manifest.lines().find_map(|line| {
+            line.strip_prefix("Main-Class:")
+                .map(|class| class.trim().to_owned())
+        }))
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    Ok(found)
+}
+
+fn join_paths(paths: &[PathBuf], sep: &str) -> String {
+    paths
+        .iter()
+        .map(|path| path.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
+/// Move everything the install steps put under `made` into the store, each file whole. A file
+/// the store already has with the same bytes is left alone, so a running server never sees it
+/// change.
+async fn store_outputs(
+    made: &Path,
+    store: &Path,
+) -> Result<(), InstallerError> {
+    let root = made.to_owned();
+    let files = tokio::task::spawn_blocking(move || {
+        walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .filter_map(|entry| {
+                let relative =
+                    entry.path().strip_prefix(&root).ok()?.to_owned();
+                Some((entry.into_path(), relative))
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(std::io::Error::other)?;
+    for (path, relative) in files {
+        let bytes = tokio::fs::read(&path).await?;
+        let target = store.join(&relative);
+        if tokio::fs::read(&target)
+            .await
+            .is_ok_and(|have| have == bytes)
+        {
+            continue;
+        }
+        download::write_whole(&target, &bytes).await?;
+    }
+    Ok(())
+}
+
+/// The installer's server arguments, one token each, with every `libraries/` path made absolute
+/// into `libraries`; and those paths, relative to it. `sep` separates the entries of a module
+/// path or classpath.
+fn absolute_args(
+    args: &str,
+    libraries: &str,
+    sep: &str,
+) -> (Vec<String>, Vec<String>) {
+    let mut referenced = Vec::new();
+    let tokens = args
+        .split_whitespace()
+        .map(|token| {
+            let (prefix, value) = match token.split_once('=') {
+                Some((key, value)) if key.starts_with("-D") => {
+                    (&token[..=key.len()], value)
+                }
+                _ => ("", token),
+            };
+            let value = value
+                .split(sep)
+                .map(|part| {
+                    if part == "libraries" {
+                        libraries.to_owned()
+                    } else if let Some(path) = part.strip_prefix("libraries/") {
+                        referenced.push(path.to_owned());
+                        format!("{libraries}/{path}")
+                    } else {
+                        part.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(sep);
+            format!("{prefix}{value}")
+        })
+        .collect();
+    (tokens, referenced)
+}
+
 /// The arguments that run `installer` into `dir`.
 pub fn installer_args(installer: &Path, dir: &Path) -> Vec<String> {
     vec![
@@ -143,20 +492,22 @@ pub fn installer_args(installer: &Path, dir: &Path) -> Vec<String> {
 }
 
 /// The arguments that start an installed Forge or NeoForge server in `dir`, after the memory
-/// flags. Forge 1.17 and later and every NeoForge start from the args file their start script
-/// names: `run.bat` on Windows, `run.sh` elsewhere. Older Forge has no script and starts from
-/// the jar its installer wrote.
+/// flags. A build installed from launcher-meta starts from the arguments recorded in the shared
+/// store. Older Forge starts from the jar its installer wrote in the server folder.
 pub fn launch_args(
+    dirs: &SharedDirs,
     dir: &Path,
     loader: ModLoader,
     game_version: &str,
     version: &str,
 ) -> Result<Vec<String>, InstallerError> {
-    let script = if cfg!(windows) { "run.bat" } else { "run.sh" };
-    if let Ok(text) = read_server_file(&dir.join(script))
-        && let Some(args) = args_file(&text)
-    {
-        return Ok(vec![args.to_owned(), "--nogui".into()]);
+    let id = merged_version_id(game_version, loader, Some(version));
+    if let Ok(args) = std::fs::read_to_string(dirs.server_args_path(&id)) {
+        return Ok(args
+            .lines()
+            .map(str::to_owned)
+            .chain(["--nogui".to_owned()])
+            .collect());
     }
     let names: Vec<String> = std::fs::read_dir(dir)
         .map(|entries| {
@@ -175,13 +526,6 @@ pub fn launch_args(
         }
         _ => Err(InstallerError::NoLaunch(loader)),
     }
-}
-
-/// The `@libraries/.../*_args.txt` a start script passes to Java.
-fn args_file(script: &str) -> Option<&str> {
-    script.split_whitespace().find(|token| {
-        token.starts_with("@libraries/") && token.ends_with("_args.txt")
-    })
 }
 
 /// The jar an installer before Forge 1.17 wrote, among the file names in the server folder. Its
@@ -277,31 +621,57 @@ mod tests {
     }
 
     #[test]
-    fn the_start_script_of_this_platform_names_the_args_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("run.sh"),
-            "#!/usr/bin/env sh\njava @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.2.0/unix_args.txt \"$@\"\n",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path().join("run.bat"),
-            "java @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.2.0/win_args.txt %*\r\npause\r\n",
-        )
-        .unwrap();
-        let args =
-            launch_args(dir.path(), ModLoader::Forge, "1.20.1", "47.2.0")
-                .unwrap();
-        let expected = if cfg!(windows) {
-            "@libraries/net/minecraftforge/forge/1.20.1-47.2.0/win_args.txt"
-        } else {
-            "@libraries/net/minecraftforge/forge/1.20.1-47.2.0/unix_args.txt"
-        };
-        assert_eq!(args, [expected, "--nogui"]);
+    fn the_installer_arguments_point_into_the_shared_store() {
+        let args = "-p libraries/cpw/a.jar:libraries/org/b.jar\n--add-modules ALL-MODULE-PATH\n-DignoreList=a.jar,b.jar\n-Dfml.gameLayerLibraries=\n-DlibraryDirectory=libraries\n-DlegacyClassPath=libraries/net/c.jar:libraries/net/d.jar\ncpw.mods.bootstraplauncher.BootstrapLauncher\n--launchTarget forgeserver\n";
+        let (tokens, referenced) =
+            absolute_args(args, "/data/meta/libraries", ":");
+        assert_eq!(
+            tokens,
+            [
+                "-p",
+                "/data/meta/libraries/cpw/a.jar:/data/meta/libraries/org/b.jar",
+                "--add-modules",
+                "ALL-MODULE-PATH",
+                "-DignoreList=a.jar,b.jar",
+                "-Dfml.gameLayerLibraries=",
+                "-DlibraryDirectory=/data/meta/libraries",
+                "-DlegacyClassPath=/data/meta/libraries/net/c.jar:/data/meta/libraries/net/d.jar",
+                "cpw.mods.bootstraplauncher.BootstrapLauncher",
+                "--launchTarget",
+                "forgeserver",
+            ]
+        );
+        assert_eq!(
+            referenced,
+            ["cpw/a.jar", "org/b.jar", "net/c.jar", "net/d.jar"]
+        );
+    }
+
+    #[test]
+    fn a_build_installed_from_launcher_meta_starts_from_the_store() {
+        let data = tempfile::tempdir().unwrap();
+        let dirs = SharedDirs::new(data.path());
+        let path = dirs.server_args_path("1.21.1-neoforge-21.1.265");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "-p\n/m/libraries/a.jar\nMain").unwrap();
+        let server = tempfile::tempdir().unwrap();
+        assert_eq!(
+            launch_args(
+                &dirs,
+                server.path(),
+                ModLoader::NeoForge,
+                "1.21.1",
+                "21.1.265"
+            )
+            .unwrap(),
+            ["-p", "/m/libraries/a.jar", "Main", "--nogui"]
+        );
     }
 
     #[test]
     fn an_old_forge_folder_starts_from_its_jar() {
+        let data = tempfile::tempdir().unwrap();
+        let dirs = SharedDirs::new(data.path());
         let dir = tempfile::tempdir().unwrap();
         for name in [
             "forge-1.12.2-14.23.5.2860.jar",
@@ -310,12 +680,24 @@ mod tests {
             std::fs::write(dir.path().join(name), "").unwrap();
         }
         assert_eq!(
-            launch_args(dir.path(), ModLoader::Forge, "1.12.2", "14.23.5.2860")
-                .unwrap(),
+            launch_args(
+                &dirs,
+                dir.path(),
+                ModLoader::Forge,
+                "1.12.2",
+                "14.23.5.2860"
+            )
+            .unwrap(),
             ["-jar", "forge-1.12.2-14.23.5.2860.jar", "--nogui"]
         );
         assert!(matches!(
-            launch_args(dir.path(), ModLoader::NeoForge, "1.21.1", "21.1.77"),
+            launch_args(
+                &dirs,
+                dir.path(),
+                ModLoader::NeoForge,
+                "1.21.1",
+                "21.1.77"
+            ),
             Err(InstallerError::NoLaunch(_))
         ));
     }

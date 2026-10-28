@@ -240,7 +240,7 @@ impl Paths {
         self.root.join("servers").join(server_id)
     }
 
-    /// The shared Daedalus store. See `installs::daedalus::SharedDirs`.
+    /// The shared install store. See `installs::shared::SharedDirs`.
     #[allow(dead_code)] // Wired in step 4: installs reach the store through this.
     pub fn meta(&self) -> PathBuf {
         self.root.join("meta")

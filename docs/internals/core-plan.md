@@ -21,8 +21,9 @@ rethink of the same day (reviewed by GPT-6.1 Sol; the points taken are folded in
   as `copal-servers`. A malicious mod owns the servers on that machine. It cannot reach Core's
   database, keys, backups, binaries, or the owner's files. No Docker.
 - Servers run detached from Core and keep running when Core stops, crashes, or updates.
-- Forge and NeoForge keep the vendor installer. Vanilla, Fabric, and Quilt use the shared Daedalus
-  store. Paper stays: it fits dedicated SMP-style servers.
+- Vanilla, Fabric, Quilt, NeoForge, and Forge from 1.17 install into one shared store from
+  launcher-meta, read with the `minecraft-meta-manifest` types the App uses. Forge before 1.17
+  keeps the vendor installer. Paper stays: it fits dedicated SMP-style servers.
 - Java is managed by Core only, with a per-server custom path override.
 - No shared storage for mods across servers, no sleep-when-empty, no RCON.
 - The owner accepts the Minecraft EULA once; Core does not start servers before that.
@@ -45,7 +46,7 @@ src/
   main.rs        CLI entry; `copal run` starts the daemon
   daemon/        startup, config, service integration, shutdown
   servers/       server records, lifecycle, shim, console, restarts
-  installs/      Daedalus store, Forge/NeoForge installer, Paper, Java
+  installs/      shared store, Forge/NeoForge, Paper, Java
   content/       pack sync, files on disk, origins
   backups/
   access/        tickets, sessions, roles, local socket, activity log, backend sync
@@ -186,10 +187,14 @@ warns when servers together are set above it.
 
 ## Installs
 
-- **Vanilla, Fabric, Quilt:** the shared Daedalus store in `{data}/meta/` (libraries, server jars,
-  merged version JSON), installed once and reused by every server on the same version.
-- **Forge, NeoForge:** the vendor installer, run as `copal-servers`. Fix old Forge (before 1.17)
-  jar detection, and use `run.bat` on Windows.
+- **Vanilla, Fabric, Quilt:** the shared store in `{data}/meta/` (libraries, server jars, merged
+  version JSON), installed once and reused by every server on the same version.
+- **NeoForge, Forge from 1.17:** launcher-meta's server-side data. Core puts the libraries in the
+  shared store, runs the install steps as `copal-servers` in a work folder, checks what they made
+  against launcher-meta's hashes, and moves it into the store. A build installs once for every
+  server on it.
+- **Forge before 1.17:** the vendor installer, run as `copal-servers` in the server folder, which
+  starts from the jar it writes.
 - **Paper:** keep it, and support updating to a newer Paper build instead of pinning the one from
   install time.
 - Repairing a shared install never removes files while a server is using it.

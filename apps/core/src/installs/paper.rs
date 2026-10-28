@@ -5,8 +5,8 @@
 use serde::Deserialize;
 
 use super::{
-    daedalus::SharedDirs,
     download::{self, FileDownload, Hash},
+    shared::SharedDirs,
 };
 
 #[derive(Debug, thiserror::Error)]

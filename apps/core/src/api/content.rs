@@ -39,7 +39,7 @@ use crate::{
         pack,
         records::{self, ContentFile, Origin},
     },
-    installs::{ModLoader, daedalus::SharedDirs},
+    installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
 };
 

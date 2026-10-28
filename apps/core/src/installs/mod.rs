@@ -1,19 +1,20 @@
-//! Server installs: the shared Daedalus store for Vanilla, Fabric, and Quilt, the vendor installer
-//! for Forge and NeoForge, Paper's jar, and the Java runtimes Core manages. Everything shared
-//! lives in `meta/` and `java/`, which servers may read but not write.
+//! Server installs: the shared store for Vanilla, Fabric, Quilt, and Forge and NeoForge from
+//! launcher-meta, the vendor installer for Forge before 1.17, Paper's jar, and the Java runtimes
+//! Core manages. Everything shared lives in `meta/` and `java/`, which servers may read but not
+//! write.
 
-pub mod daedalus;
 pub mod download;
 pub mod forge;
 pub mod java;
 pub mod paper;
+pub mod shared;
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::servers::{Hold, ServerError, Servers, launch, records::ServerRow};
-use daedalus::SharedDirs;
+use shared::SharedDirs;
 
 /// The server software a server runs, as `servers.loader` stores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -86,7 +87,7 @@ pub enum InstallError {
     #[error(transparent)]
     Installer(#[from] forge::InstallerError),
     #[error(transparent)]
-    Shared(#[from] daedalus::SharedError),
+    Shared(#[from] shared::SharedError),
     #[error(transparent)]
     Server(#[from] ServerError),
     #[error(transparent)]
@@ -129,7 +130,7 @@ pub async fn install(
     let rest = |share: f64| progress(0.2 + share * 0.8);
     let installed = match loader {
         ModLoader::Vanilla | ModLoader::Fabric | ModLoader::Quilt => {
-            daedalus::install_shared(
+            shared::install_shared(
                 http,
                 &dirs,
                 loader,
@@ -168,18 +169,44 @@ pub async fn install(
         ModLoader::Forge | ModLoader::NeoForge => {
             let version =
                 forge::resolve(http, loader, game_version, requested).await?;
-            let installer =
-                forge::installer(http, &dirs, loader, game_version, &version)
-                    .await?;
-            rest(0.1);
-            run_vendor_installer(servers, hold, &installer, java).await?;
-            forge::launch_args(
-                &paths.server(hold.id()),
+            let installer = forge::installer(
+                http,
+                &dirs,
                 loader,
                 game_version,
-                &version,
-            )?;
-            Some(version)
+                &version.id,
+            )
+            .await?;
+            rest(0.1);
+            let dir = paths.server(hold.id());
+            if let Some(args) = forge::server_args(&installer).await? {
+                let work = dir.join("tmp").join(WORK_FOLDER);
+                crate::daemon::folders::create_server_folder(&dir)?;
+                crate::daemon::folders::create_server_folder(&dir.join("tmp"))?;
+                crate::daemon::folders::create_server_folder(&work)?;
+                let installed = forge::install_from_meta(
+                    servers,
+                    hold,
+                    http,
+                    &dirs,
+                    loader,
+                    game_version,
+                    &version,
+                    &installer,
+                    &args,
+                    &java,
+                    &work,
+                    verify,
+                    &|share| rest(0.1 + share * 0.9),
+                )
+                .await;
+                remove_installer_leftovers(&dir, None).await;
+                installed?;
+            } else {
+                run_vendor_installer(servers, hold, &installer, java).await?;
+            }
+            forge::launch_args(&dirs, &dir, loader, game_version, &version.id)?;
+            Some(version.id)
         }
     };
     progress(1.0);
@@ -212,21 +239,24 @@ async fn run_vendor_installer(
     let _ = std::fs::remove_file(&copy);
     result?;
     // Kept when it fails: its log says why.
-    remove_installer_leftovers(&dir, &name.to_string_lossy()).await;
+    remove_installer_leftovers(&dir, Some(&name.to_string_lossy())).await;
     Ok(())
 }
 
-/// What a vendor installer leaves in the server folder: its log beside the jar, and its
-/// temporary folders in `tmp/`. Removed through the folder, so a link a mod planted is never
-/// followed; on Linux what the installer's account made and only it may remove goes through
-/// that account. Best effort.
-async fn remove_installer_leftovers(dir: &Path, installer: &str) {
+/// The folder in the server's `tmp/` where Forge's install steps from launcher-meta run.
+const WORK_FOLDER: &str = "forge_installer_copal";
+
+/// What an install leaves in the server folder: the vendor installer's log beside its jar, and
+/// the temporary folders in `tmp/` it and the install steps work in. Removed through the folder,
+/// so a link a mod planted is never followed; on Linux what the installer's account made and
+/// only it may remove goes through that account. Best effort.
+async fn remove_installer_leftovers(dir: &Path, installer: Option<&str>) {
     let dir = dir.to_owned();
-    let log = format!("{installer}.log");
+    let log = installer.map(|installer| format!("{installer}.log"));
     let removed =
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             let folder = crate::content::folder::Folder::open(&dir)?;
-            let mut leftovers = vec![log];
+            let mut leftovers: Vec<String> = log.into_iter().collect();
             if let Ok(tmp) = folder.open_dir(Some("tmp")) {
                 for entry in tmp.entries()?.filter_map(Result::ok) {
                     let name = entry.file_name().to_string_lossy().into_owned();
@@ -256,7 +286,8 @@ async fn remove_installer_leftovers(dir: &Path, installer: &str) {
     }
 }
 
-/// A temporary folder of the Forge or NeoForge installer, by name.
+/// A temporary folder of the Forge or NeoForge installer, or of the install steps
+/// ([`WORK_FOLDER`]), by name.
 fn leftover_name(name: &str) -> bool {
     name.starts_with("neoforge_installer")
         || name.starts_with("forge_installer")
@@ -283,7 +314,7 @@ mod leftover_tests {
         .unwrap();
         // The server's own temporary files stay.
         std::fs::write(dir.path().join("tmp/server.tmp"), "keep").unwrap();
-        remove_installer_leftovers(dir.path(), installer).await;
+        remove_installer_leftovers(dir.path(), Some(installer)).await;
         assert!(!dir.path().join(format!("{installer}.log")).exists());
         assert!(!dir.path().join("tmp/neoforge_installer123").exists());
         assert!(dir.path().join("tmp/server.tmp").exists());

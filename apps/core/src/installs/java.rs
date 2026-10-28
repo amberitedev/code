@@ -11,13 +11,13 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use daedalus::minecraft::VersionInfo;
+use minecraft_meta_manifest::minecraft::VersionManifest;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use super::{
-    daedalus::{SharedDirs, meta, version_info},
     download::{self, FileDownload, Hash},
+    shared::{SharedDirs, meta, version_info},
 };
 use crate::{daemon::paths::Paths, servers::shim};
 
@@ -69,15 +69,15 @@ pub async fn java_requirement(
     let dirs = SharedDirs::new(data_dir);
     if let Ok(bytes) =
         tokio::fs::read(dirs.version_info_path(game_version)).await
-        && let Ok(info) = serde_json::from_slice::<VersionInfo>(&bytes)
+        && let Ok(info) = serde_json::from_slice::<VersionManifest>(&bytes)
         && let Some(java) = info.java_version
     {
         return java.major_version;
     }
     let fetched = async {
-        let manifest = meta::fetch_minecraft_manifest(http).await.ok()?;
-        let version = meta::find_game_version(&manifest, game_version).ok()?;
-        version_info::download_version_info(http, &dirs, &version, None, false)
+        let catalog = meta::fetch_minecraft_manifest(http).await.ok()?;
+        let version = meta::find_game_version(&catalog, game_version).ok()?;
+        version_info::vanilla(http, &dirs, &version, false)
             .await
             .ok()?
             .java_version
