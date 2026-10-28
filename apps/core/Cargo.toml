@@ -7,8 +7,6 @@ description = "Copal, Amberite's self-hosted Minecraft server manager"
 repository.workspace = true
 
 [dependencies]
-# Decrypts the share versions a server applies (`content::shared`).
-amberite-pool = { workspace = true }
 axum = { version = "0.8.4", features = ["multipart", "ws"] }
 base64 = { workspace = true }
 bytes = { workspace = true }
@@ -41,6 +39,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+# Decrypts the share versions a server applies (`content::shared`).
+sharing-types = { workspace = true }
 # Listening on IPv6 next to IPv4.
 socket2 = "0.6.5"
 sqlx = { workspace = true, features = ["macros", "migrate", "runtime-tokio", "sqlite"] }

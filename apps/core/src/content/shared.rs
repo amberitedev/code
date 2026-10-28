@@ -9,10 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
-use amberite_pool::Decryptor;
 use futures::TryStreamExt;
 use serde::Deserialize;
 use sha1::Digest;
+use sharing_types::Decryptor;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::StreamReader;
 use tracing::warn;
@@ -139,7 +139,7 @@ async fn fetch(
     let plain = hash(&file.sha256)?;
     let key = match &file.key {
         Some(key) => hash(key)?,
-        None => amberite_pool::content_key(&plain),
+        None => sharing_types::content_key(&plain),
     };
     let mut last = format!("{} is on no holder of the version.", file.path);
     for holder in &pool.holders {

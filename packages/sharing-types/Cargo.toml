@@ -1,9 +1,10 @@
 [package]
-name = "amberite-pool"
+name = "sharing-types"
 edition.workspace = true
 
-# The shared file pool's encryption (`docs/internals/pool.md`, Protocol), used by the App to
-# push and install shares and by Core to apply a share version to a server.
+# What the App and Core share about sharing: today the pool's encryption
+# (`docs/internals/pool.md`, Protocol), used by the App to push and install shares and by Core
+# to apply a share version to a server.
 [dependencies]
 chacha20poly1305 = { workspace = true }
 hkdf = { workspace = true }

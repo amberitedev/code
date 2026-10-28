@@ -473,18 +473,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "amberite-pool"
-version = "0.0.0"
-dependencies = [
- "chacha20poly1305",
- "hex",
- "hkdf 0.12.4",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "tokio",
-]
-
-[[package]]
 name = "ambient-authority"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3215,7 +3203,6 @@ dependencies = [
 name = "copal"
 version = "0.1.0"
 dependencies = [
- "amberite-pool",
  "axum",
  "base64 0.22.1",
  "bytes",
@@ -3247,6 +3234,7 @@ dependencies = [
  "serde_json",
  "sha1 0.10.6",
  "sha2 0.10.9",
+ "sharing-types",
  "socket2 0.6.5",
  "sqlx",
  "tar",
@@ -13012,6 +13000,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharing-types"
+version = "0.0.0"
+dependencies = [
+ "chacha20poly1305",
+ "hex",
+ "hkdf 0.12.4",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "shell-words"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14542,7 +14542,6 @@ dependencies = [
 name = "theseus"
 version = "1.0.0-local"
 dependencies = [
- "amberite-pool",
  "anyhow",
  "ariadne",
  "async-minecraft-ping",
@@ -14611,6 +14610,7 @@ dependencies = [
  "serde_with",
  "sha1_smol",
  "sha2 0.10.9",
+ "sharing-types",
  "shlex 1.3.0",
  "sqlx",
  "sysinfo",

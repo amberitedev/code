@@ -4,7 +4,7 @@
 
 pub mod store;
 
-pub use amberite_pool as crypto;
+pub use sharing_types as crypto;
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
