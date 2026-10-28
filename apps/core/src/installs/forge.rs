@@ -10,6 +10,7 @@
 //! Older Forge has no server start launcher-meta can describe. It still runs the vendor
 //! installer in the server folder and starts from what that leaves behind.
 
+use sha1::Digest;
 use std::{
     collections::{HashMap, HashSet},
     io::Read,
@@ -243,8 +244,7 @@ pub async fn install_from_meta(
             .await?;
         progress(0.5 + (done + 1) as f64 / processors.len() as f64 * 0.4);
     }
-    steps.check_hashes().await?;
-    store_outputs(&steps.made, &steps.store).await?;
+    store_outputs(&steps).await?;
 
     let libraries_dir = dunce::canonicalize(&steps.store)?;
     let (tokens, referenced) =
@@ -356,26 +356,26 @@ impl Steps {
         Ok(arg)
     }
 
-    /// Every made file launcher-meta publishes a hash for (`KEY` beside `KEY_SHA`) must match it.
-    async fn check_hashes(&self) -> Result<(), InstallerError> {
-        for (key, sha1) in &self.data {
-            let Some(made) = key
-                .strip_suffix("_SHA")
-                .and_then(|key| self.data.get(key))
-                .map(PathBuf::from)
-                .filter(|path| path.starts_with(&self.made) && path.is_file())
-            else {
-                continue;
-            };
-            if !download::has_hash(&made, Hash::Sha1(sha1)).await {
-                let name = made.strip_prefix(&self.made).unwrap_or(&made);
-                return Err(InstallerError::Damaged(
-                    name.to_string_lossy().into_owned(),
-                ));
-            }
-        }
-        Ok(())
+    /// The hash launcher-meta publishes for each file a step makes (`KEY` beside `KEY_SHA`), by
+    /// its path under the work folder's `libraries/`.
+    fn published(&self) -> HashMap<String, String> {
+        self.data
+            .iter()
+            .filter_map(|(key, sha1)| {
+                let made = self.data.get(key.strip_suffix("_SHA")?)?;
+                let relative = Path::new(made).strip_prefix(&self.made).ok()?;
+                Some((slashed(relative), sha1.to_ascii_lowercase()))
+            })
+            .collect()
     }
+}
+
+/// A relative path with `/` between its parts, on every platform.
+fn slashed(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// The `Main-Class` of a jar's manifest. app-lib's `get_processor_main_class`.
@@ -407,31 +407,53 @@ fn join_paths(paths: &[PathBuf], sep: &str) -> String {
         .join(sep)
 }
 
-/// Move everything the install steps put under `made` into the store, each file whole. A file
-/// the store already has with the same bytes is left alone, so a running server never sees it
-/// change.
-async fn store_outputs(
-    made: &Path,
-    store: &Path,
-) -> Result<(), InstallerError> {
-    let root = made.to_owned();
+/// Move what the install steps made into the store, each file whole. The steps run as
+/// `copal-servers`, which can still change their work folder, so every file is read once,
+/// through the folder so a planted link is never followed, and the bytes read are the ones
+/// checked against launcher-meta's hash and stored. A library launcher-meta lists is never
+/// replaced: Core downloaded and checked it itself. A file the store already has with the same
+/// bytes is left alone, so a running server never sees it change.
+async fn store_outputs(steps: &Steps) -> Result<(), InstallerError> {
+    let published = steps.published();
+    let listed = steps
+        .listed
+        .iter()
+        .map(|name| maven_path(name))
+        .collect::<Result<HashSet<_>, _>>()?;
+    let made = steps.made.clone();
     let files = tokio::task::spawn_blocking(move || {
-        walkdir::WalkDir::new(&root)
+        walkdir::WalkDir::new(&made)
             .into_iter()
             .filter_map(Result::ok)
             .filter(|entry| entry.file_type().is_file())
             .filter_map(|entry| {
-                let relative =
-                    entry.path().strip_prefix(&root).ok()?.to_owned();
-                Some((entry.into_path(), relative))
+                Some(slashed(entry.path().strip_prefix(&made).ok()?))
             })
             .collect::<Vec<_>>()
     })
     .await
     .map_err(std::io::Error::other)?;
-    for (path, relative) in files {
-        let bytes = tokio::fs::read(&path).await?;
-        let target = store.join(&relative);
+    for relative in files.into_iter().filter(|file| !listed.contains(file)) {
+        let (made, path) = (steps.made.clone(), relative.clone());
+        let bytes = tokio::task::spawn_blocking(move || {
+            let mut bytes = Vec::new();
+            let file = crate::content::folder::Folder::open(&made)?
+                .open_file(&path)?
+                .ok_or_else(|| {
+                    std::io::Error::from(std::io::ErrorKind::NotFound)
+                })?;
+            file.into_std().read_to_end(&mut bytes)?;
+            Ok::<_, std::io::Error>(bytes)
+        })
+        .await
+        .map_err(std::io::Error::other)??;
+        if let Some(sha1) = published.get(&relative) {
+            let digest = sha1::Sha1::digest(&bytes);
+            if hex::encode(digest) != *sha1 {
+                return Err(InstallerError::Damaged(relative));
+            }
+        }
+        let target = steps.store.join(&relative);
         if tokio::fs::read(&target)
             .await
             .is_ok_and(|have| have == bytes)
@@ -699,6 +721,46 @@ mod tests {
                 "21.1.77"
             ),
             Err(InstallerError::NoLaunch(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn what_the_steps_made_is_checked_before_it_reaches_the_store() {
+        let work = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let made = work.path().join("libraries");
+        let write = |path: PathBuf, text: &str| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        let patched = made.join("net/a/1/a-1.jar");
+        write(patched.clone(), "patched");
+        // A step may write over a library launcher-meta lists; the store keeps Core's copy.
+        write(made.join("org/listed/1/listed-1.jar"), "planted");
+        write(store.path().join("org/listed/1/listed-1.jar"), "downloaded");
+        let mut steps = Steps {
+            store: store.path().to_owned(),
+            made: made.clone(),
+            listed: HashSet::from(["org:listed:1".to_owned()]),
+            data: HashMap::from([
+                ("PATCHED".to_owned(), patched.to_string_lossy().into_owned()),
+                (
+                    "PATCHED_SHA".to_owned(),
+                    hex::encode(sha1::Sha1::digest(b"patched")),
+                ),
+            ]),
+        };
+        store_outputs(&steps).await.unwrap();
+        let read = |path: &str| {
+            std::fs::read_to_string(store.path().join(path)).unwrap()
+        };
+        assert_eq!(read("net/a/1/a-1.jar"), "patched");
+        assert_eq!(read("org/listed/1/listed-1.jar"), "downloaded");
+
+        steps.data.insert("PATCHED_SHA".to_owned(), "0".repeat(40));
+        assert!(matches!(
+            store_outputs(&steps).await,
+            Err(InstallerError::Damaged(path)) if path == "net/a/1/a-1.jar"
         ));
     }
 }

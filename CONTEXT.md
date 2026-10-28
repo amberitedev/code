@@ -1,7 +1,8 @@
 # Amberite instances and servers
 
 Everything a player sets up is an instance, and every instance lives in one library. Hosting an
-instance gives it a server; the server is part of the instance, never a separate thing beside it.
+instance gives it a server, which is part of the instance, not a separate thing beside it. A server
+can also stand alone, created on its own.
 
 ## Language
 
