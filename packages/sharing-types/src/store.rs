@@ -318,8 +318,10 @@ impl StoreClient {
                     .get(format!("{address}/store/versions/{root}/objects/{c}"))
                     .bearer_auth(ticket);
                 if from > 0 {
-                    request
-                        .header(reqwest::header::RANGE, format!("bytes={from}-"))
+                    request.header(
+                        reqwest::header::RANGE,
+                        format!("bytes={from}-"),
+                    )
                 } else {
                     request
                 }
@@ -443,10 +445,9 @@ impl StoreClient {
         let response = self
             .object(core, file.ticket, file.root, object, from)
             .await?;
-        if response
-            .content_length()
-            .is_some_and(|length| length != file.object_size.saturating_sub(from))
-        {
+        if response.content_length().is_some_and(|length| {
+            length != file.object_size.saturating_sub(from)
+        }) {
             return Err(DecryptError::WrongObject.into());
         }
         let body = tokio_util::io::StreamReader::new(
