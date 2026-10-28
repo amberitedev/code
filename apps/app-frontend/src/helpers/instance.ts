@@ -3,7 +3,7 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { Labrinth } from '@modrinth/api-client'
+import type { Archon, Labrinth } from '@modrinth/api-client'
 import type { ContentItem, ContentOwner } from '@modrinth/ui'
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
@@ -792,4 +792,18 @@ export async function unlink_shared_instance(instanceId: string): Promise<void> 
 
 export async function unpublish_shared_instance(instanceId: string): Promise<void> {
 	return await invoke('plugin:instance|instance_share_unpublish', { instanceId })
+}
+
+/** The instance's share, created with its first version when it has none, so it can run servers. */
+export async function ensure_shared_instance(
+	instanceId: string,
+): Promise<SharedInstanceAttachment> {
+	return await invoke('plugin:instance|instance_share_ensure', { instanceId })
+}
+
+/** The share's latest version, as a server's Core takes it (`content_variant: 'instance'`). */
+export async function get_shared_instance_server_pack(
+	instanceId: string,
+): Promise<Archon.Content.v1.SharedVersion> {
+	return await invoke('plugin:instance|instance_share_server_pack', { instanceId })
 }

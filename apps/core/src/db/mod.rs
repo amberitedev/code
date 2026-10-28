@@ -114,6 +114,7 @@ mod tests {
                 "jvm_flags",
                 "packs",
                 "pairing",
+                "pending_packs",
                 "port_mappings",
                 "restarts",
                 "runs",
@@ -148,7 +149,7 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(applied, [1, 2, 3, 4]);
+        assert_eq!(applied, [1, 2, 3, 4, 5]);
         sqlx::query("SELECT COUNT(*) FROM backup_operations, backup_schedules")
             .execute(&pool)
             .await
@@ -209,7 +210,7 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(applied, [1, 2, 3, 4]);
+        assert_eq!(applied, [1, 2, 3, 4, 5]);
         // And again, as every later start does.
         migrate(&pool).await.unwrap();
     }

@@ -1403,6 +1403,27 @@ pub(super) async fn shared_instance_for_invites(
     user_count: usize,
     state: &State,
 ) -> crate::Result<(crate::state::InstanceMetadata, SharedInstanceAttachment)> {
+    tracing::debug!(instance_id, user_count, "Sharing instance for invite");
+    let (metadata, attachment) =
+        owned_shared_instance(instance_id, state).await?;
+
+    ensure_owner(&attachment)?;
+    update_remote_instance_icon(
+        &attachment.id,
+        metadata.instance.icon_path.as_deref(),
+        state,
+    )
+    .await?;
+
+    Ok((metadata, attachment))
+}
+
+/// The instance's share, created and published as its owner's when it has none: before the
+/// first invite, or before the instance's first server.
+pub(super) async fn owned_shared_instance(
+    instance_id: &str,
+    state: &State,
+) -> crate::Result<(crate::state::InstanceMetadata, SharedInstanceAttachment)> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
@@ -1412,18 +1433,13 @@ pub(super) async fn shared_instance_for_invites(
                 instance_id,
                 shared_instance_id = %attachment.id,
                 role = attachment.role.as_str(),
-                user_count,
-                "Using existing shared instance attachment for invite"
+                "Using existing shared instance attachment"
             );
             attachment
         }
         None => {
             ensure_shareable_link(&metadata.link)?;
-            tracing::info!(
-                instance_id,
-                user_count,
-                "Creating shared instance before first invite"
-            );
+            tracing::info!(instance_id, "Creating shared instance");
             let remote = create_remote_instance(
                 shared_instance_name(metadata.instance.name.clone()),
                 state,
@@ -1465,14 +1481,6 @@ pub(super) async fn shared_instance_for_invites(
             )?
         }
     };
-
-    ensure_owner(&attachment)?;
-    update_remote_instance_icon(
-        &attachment.id,
-        metadata.instance.icon_path.as_deref(),
-        state,
-    )
-    .await?;
 
     Ok((metadata, attachment))
 }

@@ -39,6 +39,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+# Decrypts the share versions a server applies (`content::shared`).
+sharing-types = { workspace = true }
 # Listening on IPv6 next to IPv4.
 socket2 = "0.6.5"
 sqlx = { workspace = true, features = ["macros", "migrate", "runtime-tokio", "sqlite"] }

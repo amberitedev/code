@@ -1,4 +1,4 @@
-import type { Archon, UploadProgress } from '@modrinth/api-client'
+import type { Archon } from '@modrinth/api-client'
 
 import { createContext } from '.'
 
@@ -15,9 +15,10 @@ export interface ServerInstanceOption {
 export interface InstanceServerSourceProvider {
 	listInstances: () => Promise<ServerInstanceOption[]>
 	/**
-	 * Exports the instance and uploads it to the server. The first push installs it and links
-	 * the server to the instance; later pushes update it. With `restart`, a running server is
-	 * restarted to apply the update now instead of on its next stop.
+	 * Has the server apply the latest version of the instance's share, which its Core fetches
+	 * itself. The first push installs it and links the server to the instance; later pushes
+	 * update it. With `restart`, a running server is restarted to apply the update now instead
+	 * of on its next stop.
 	 */
 	pushInstance: (args: {
 		serverId: string
@@ -25,7 +26,6 @@ export interface InstanceServerSourceProvider {
 		instanceId: string
 		properties?: Archon.Content.v1.PropertiesFields
 		restart?: boolean
-		onProgress?: (progress: UploadProgress) => void
 	}) => Promise<void>
 }
 

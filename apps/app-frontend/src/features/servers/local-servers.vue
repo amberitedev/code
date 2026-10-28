@@ -117,13 +117,9 @@ async function install(serverId: string, config: CreationFlowContextValue) {
 			properties,
 		})
 	} else if (config.setupType.value === 'modpack' && config.modpackFile.value) {
-		await client.archon.content_v1.uploadInstance(
-			serverId,
-			worldId,
-			config.modpackFile.value,
-			null,
-			{ properties },
-		).promise
+		await client.archon.content_v1.uploadModpackFile(serverId, worldId, config.modpackFile.value, {
+			properties,
+		}).promise
 	} else if (config.setupType.value === 'modpack' && config.modpackSelection.value) {
 		await client.archon.content_v1.installContent(serverId, worldId, {
 			content_variant: 'modpack',

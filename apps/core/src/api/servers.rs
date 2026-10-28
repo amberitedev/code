@@ -1,8 +1,7 @@
 //! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`, `name`,
 //! `fs`, `ws`, and `reinstall` routes; `GET /v1/servers`, `GET /v1/servers/{id}`,
 //! `GET /v1/servers/{id}/worlds/{wid}/select-download`, `DELETE /v1/servers/{id}/flows/intro`; and
-//! Amberite's `POST /local/servers`, `DELETE /local/servers/{id}`, and
-//! `PATCH /local/servers/{id}/linked-instance`. Mirrors `Archon.Servers` in
+//! Amberite's `POST /local/servers` and `DELETE /local/servers/{id}`. Mirrors `Archon.Servers` in
 //! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
 //! and `createServer` in `archon/cores/v1.ts`).
 
@@ -168,6 +167,8 @@ pub struct LinkedInstance {
     pub error: Option<String>,
     pub visible_to_friends: bool,
     pub shared_instance_id: Option<String>,
+    /// The version of the instance's share the server runs.
+    pub version: Option<i64>,
 }
 
 /// Mirrors Archon.Servers.v0.Notice.
@@ -543,7 +544,7 @@ async fn server(
         is_medal: false,
         current_user_permissions: permissions(level),
         locked_since: None,
-        linked_instance: None,
+        linked_instance: linked_instance(state, &row.id).await?,
         power_state: Some(power_state),
         reachability: super::insight::archon(state, &row.id),
         players: state
@@ -551,6 +552,28 @@ async fn server(
             .insight(&row.id)
             .map(|insight| insight.players.into_iter().collect()),
     })
+}
+
+/// The App instance a server follows, when its pack is a version of that instance's share.
+async fn linked_instance(
+    state: &AppState,
+    id: &str,
+) -> Result<Option<LinkedInstance>, ApiError> {
+    let Some(pack) = content::records::pack(&state.db, id).await? else {
+        return Ok(None);
+    };
+    let Some(linked) = content::install::linked(&pack) else {
+        return Ok(None);
+    };
+    Ok(Some(LinkedInstance {
+        id: linked.id,
+        name: linked.name,
+        state: super::content::linked_state(state, id, &pack).await?,
+        error: pack.error,
+        visible_to_friends: false,
+        shared_instance_id: Some(linked.shared_instance_id),
+        version: Some(linked.version),
+    }))
 }
 
 /// `servers.loader` as the hosting API names it.

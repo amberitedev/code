@@ -55,14 +55,23 @@ pub enum PackSource {
         project_id: String,
         version_id: String,
     },
-    /// An `.mrpack` the App uploaded, already in the shared store. `instance` is the App
-    /// instance it came from (id, name).
+    /// An `.mrpack` already in the shared store: one the App uploaded, or one Core wrote from a
+    /// share version (`content::shared`), whose instance is `instance`.
     Stored {
         sha1: String,
-        instance: Option<(String, String)>,
+        instance: Option<Linked>,
     },
     /// The pack the server follows now: repair.
     Current,
+}
+
+/// The App instance a pack came from, and the version of its share the pack is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Linked {
+    pub id: String,
+    pub name: String,
+    pub shared_instance_id: String,
+    pub version: i64,
 }
 
 fn platform_name(loader: ModLoader) -> ContentPlatform {
@@ -195,9 +204,7 @@ async fn install_pack(
                 Error::Invalid("This server follows no pack to repair.".into())
             })?;
             let project = pack.project_id.clone().zip(pack.version_id.clone());
-            let instance =
-                pack.instance_id.clone().zip(pack.instance_name.clone());
-            (pack.sha1.clone(), project, instance)
+            (pack.sha1.clone(), project, linked(pack))
         }
     };
     let archive_path = dirs.pack(&sha1);
@@ -268,8 +275,12 @@ async fn install_pack(
             version_number: index.version_id.clone(),
             summary,
             sha1: sha1.clone(),
-            instance_id: instance.as_ref().map(|(id, _)| id.clone()),
-            instance_name: instance.as_ref().map(|(_, name)| name.clone()),
+            instance_id: instance.as_ref().map(|linked| linked.id.clone()),
+            instance_name: instance.as_ref().map(|linked| linked.name.clone()),
+            shared_instance_id: instance
+                .as_ref()
+                .map(|linked| linked.shared_instance_id.clone()),
+            shared_version: instance.as_ref().map(|linked| linked.version),
             error: None,
         },
     )
@@ -290,6 +301,16 @@ async fn install_pack(
         info!(server = %id, from = %change.from, to = %change.to, "the pack moved the server to another Minecraft");
     }
     Ok(game_version_change)
+}
+
+/// The instance and share version a pack row follows, when it came from an App instance.
+pub fn linked(pack: &Pack) -> Option<Linked> {
+    Some(Linked {
+        id: pack.instance_id.clone()?,
+        name: pack.instance_name.clone()?,
+        shared_instance_id: pack.shared_instance_id.clone()?,
+        version: pack.shared_version?,
+    })
 }
 
 /// The Minecraft version a pack for `pack` moves a server on `server` from and to, or why it may

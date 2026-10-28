@@ -1,0 +1,32 @@
+[package]
+name = "sharing-types"
+edition.workspace = true
+
+# What the App and Core share about sharing (`docs/internals/pool.md`): the pool's encryption and
+# the client for a Core's store routes. The App uses both to push and install shares; Core uses
+# them to apply a share version to a server.
+[dependencies]
+bytes = { workspace = true }
+chacha20poly1305 = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+hkdf = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+# The ring backend avoids aws-lc-sys's CMake build on Windows, as in Core.
+rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "time"] }
+tokio-util = { workspace = true, features = ["io"] }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "time"] }
+
+[lints]
+workspace = true

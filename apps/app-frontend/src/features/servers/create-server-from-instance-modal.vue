@@ -27,8 +27,7 @@ import { nextTick, ref } from 'vue'
 import ChooseCoreModal from '@/features/cores/choose-core-modal.vue'
 import {
 	coreProblem,
-	exportInstancePack,
-	pushPackToServer,
+	pushInstanceToServer,
 	serversQueryKey,
 } from '@/features/servers/linked-servers'
 import { getInstanceIconUrl } from '@/helpers/instance'
@@ -72,7 +71,7 @@ async function show() {
 }
 
 /**
- * The server exists as soon as the Core makes it, linked to the instance. If the upload then
+ * The server exists as soon as the Core makes it, linked to the instance. If setting it up then
  * fails the server stays, and pushing an update from the instance sends it again.
  */
 async function create(ctx: CreationFlowContextValue) {
@@ -89,10 +88,9 @@ async function create(ctx: CreationFlowContextValue) {
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)
 		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
 		try {
-			const pack = await exportInstancePack(instance.id)
-			await pushPackToServer(pack, instance, id, { properties: ctx.buildProperties() })
+			await pushInstanceToServer(instance, id, { properties: ctx.buildProperties() })
 		} catch (error) {
-			console.error('Failed to upload the instance to its new server', error)
+			console.error('Failed to send the instance to its new server', error)
 			addNotification({
 				type: 'error',
 				title: formatMessage(messages.uploadFailedTitle),

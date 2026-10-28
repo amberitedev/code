@@ -525,6 +525,44 @@ export namespace Archon {
 						soft_override: boolean
 						properties?: PropertiesFields | null
 				  }
+				| {
+						/**
+						 * Core only. Applies a version of an App instance's share, which Core fetches
+						 * from the pool itself. A running server takes it when it next stops, or with
+						 * `restart` is stopped, updated, and started again.
+						 */
+						content_variant: 'instance'
+						instance: { id: string; name: string }
+						share: SharedVersion
+						properties?: PropertiesFields | null
+						restart?: boolean
+				  }
+
+			/** Core only. A share version as the App reads it from the backend. */
+			export type SharedVersion = {
+				shared_instance_id: string
+				version: number
+				/** `modrinth.index.json` for the files on Modrinth. */
+				index: unknown
+				pool: {
+					root: string
+					holders: {
+						id: string
+						address: string
+						public_address?: string | null
+						cert_fingerprint: string
+					}[]
+					ticket: string
+				} | null
+				/** The files in the pool, by their path in the server folder. */
+				files: {
+					path: string
+					object: string
+					object_size: number
+					sha256: string
+					key: string | null
+				}[]
+			}
 
 			export type AddonDiffVersion = {
 				id: string
@@ -737,8 +775,10 @@ export namespace Archon {
 				error: string | null
 				/** "Visible to friends": the people the instance is shared with see and join it. */
 				visible_to_friends: boolean
-				/** The shared instance behind the instance, as the App last told the Core. */
+				/** The instance's share, whose versions the server applies. */
 				shared_instance_id: string | null
+				/** The version of the share the server runs. */
+				version: number | null
 			}
 
 			/** The parts of a linked server's sharing settings to change. */

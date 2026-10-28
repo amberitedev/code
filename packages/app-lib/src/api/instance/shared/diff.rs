@@ -20,17 +20,26 @@ pub(super) async fn shared_instance_update_diffs(
     let after_configuration = remote_configuration(version);
     let modpack_unlinked = before_configuration.modpack_version_id.is_some()
         && after_configuration.modpack_version_id.is_none();
-    let (version_ids, external_files, current_external_sha1s) =
+    let (mut before_ids, external_files, current_external_sha1s) =
         current_shared_content(metadata, modpack_unlinked, state).await?;
+    let (mut after_ids, after_files) = remote_shared_content(version)?;
+    // Players never run server-only mods, so a change to one is for the instance's servers and
+    // prompts no member.
+    let server_only = super::server::server_only_versions(
+        before_ids.iter().chain(&after_ids),
+        state,
+    )
+    .await?;
+    before_ids.retain(|id| !server_only.contains(id));
+    after_ids.retain(|id| !server_only.contains(id));
     let before = SharedContentSnapshot {
-        version_ids,
+        version_ids: before_ids,
         external_files,
         configuration: before_configuration,
     };
-    let (version_ids, external_files) = remote_shared_content(version)?;
     let after = SharedContentSnapshot {
-        version_ids,
-        external_files,
+        version_ids: after_ids,
+        external_files: after_files,
         configuration: after_configuration,
     };
 

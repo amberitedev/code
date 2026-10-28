@@ -1,12 +1,11 @@
 //! The pool's file encryption, exactly as `docs/internals/pool.md` (Protocol) writes it down. The
-//! backend and the store check the same values, so nothing here may change on its own.
+//! backend and the store check the same values, so nothing here may change on its own. The App
+//! encrypts and decrypts with it; Core decrypts the versions it applies to its servers.
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-
-use super::store::StoreError;
 
 /// Plain bytes per chunk.
 pub const CHUNK: usize = 1024 * 1024;
@@ -120,7 +119,7 @@ pub async fn encrypt(
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum PoolFetchError {
+pub enum DecryptError {
     /// The bytes are not the object that was asked for: the Core's fault.
     #[error("the Core sent bytes that are not the shared file")]
     WrongObject,
@@ -129,8 +128,6 @@ pub enum PoolFetchError {
     WrongContent,
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Http(#[from] StoreError),
 }
 
 /// Decrypts and verifies one object. Keeps its place between [`Decryptor::run`] calls, so a
@@ -172,7 +169,7 @@ impl Decryptor {
         &mut self,
         mut reader: impl AsyncRead + Unpin,
         mut writer: impl AsyncWrite + Unpin,
-    ) -> Result<(), PoolFetchError> {
+    ) -> Result<(), DecryptError> {
         let mut current = read_up_to(&mut reader, OBJECT_CHUNK).await?;
         loop {
             let next = if current.len() == OBJECT_CHUNK {
@@ -190,16 +187,16 @@ impl Decryptor {
                         aad: &[u8::from(last)],
                     },
                 )
-                .map_err(|_| PoolFetchError::WrongObject)?;
+                .map_err(|_| DecryptError::WrongObject)?;
             self.object.update(&current);
             self.plain.update(&plain);
             self.chunk += 1;
             if last {
                 if self.object.clone().finalize()[..] != self.expected_object {
-                    return Err(PoolFetchError::WrongObject);
+                    return Err(DecryptError::WrongObject);
                 }
                 if self.plain.clone().finalize()[..] != self.expected_plain {
-                    return Err(PoolFetchError::WrongContent);
+                    return Err(DecryptError::WrongContent);
                 }
                 writer.write_all(&plain).await?;
                 writer.flush().await?;
@@ -233,7 +230,7 @@ mod tests {
         object: &[u8],
         c: [u8; 32],
         p: [u8; 32],
-    ) -> Result<Vec<u8>, PoolFetchError> {
+    ) -> Result<Vec<u8>, DecryptError> {
         let mut out = Vec::new();
         Decryptor::new(&KEY, c, p).run(object, &mut out).await?;
         Ok(out)
@@ -288,7 +285,7 @@ mod tests {
             tampered[index] ^= 1;
             assert!(matches!(
                 decrypt(&tampered, c, sha256(&plain)).await,
-                Err(PoolFetchError::WrongObject)
+                Err(DecryptError::WrongObject)
             ));
         }
     }
@@ -306,7 +303,7 @@ mod tests {
         reordered.extend_from_slice(&object[2 * OBJECT_CHUNK..]);
         assert!(matches!(
             decrypt(&reordered, c, p).await,
-            Err(PoolFetchError::WrongObject)
+            Err(DecryptError::WrongObject)
         ));
     }
 
@@ -318,7 +315,7 @@ mod tests {
         let result = Decryptor::new(&KEY, c, [0; 32])
             .run(&object[..], &mut out)
             .await;
-        assert!(matches!(result, Err(PoolFetchError::WrongContent)));
+        assert!(matches!(result, Err(DecryptError::WrongContent)));
         // The held-back last chunk never reaches the writer.
         assert!(out.is_empty());
     }

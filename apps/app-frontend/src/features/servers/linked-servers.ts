@@ -1,18 +1,9 @@
-import {
-	type Archon,
-	ModrinthApiError,
-	type SharedInstances,
-	type UploadProgress,
-} from '@modrinth/api-client'
-import type { ContentDiffItem } from '@modrinth/ui'
+import { type Archon, ModrinthApiError, type SharedInstances } from '@modrinth/api-client'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
-import { join, tempDir } from '@tauri-apps/api/path'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
 import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
-import { export_instance_mrpack, get_content_items } from '@/helpers/instance'
-import type { GameInstance } from '@/helpers/types'
+import { ensure_shared_instance, get_shared_instance_server_pack } from '@/helpers/instance'
 import { apiClient } from '@/platform/modrinth-client'
 
 export type LinkedServer = Archon.Servers.v0.Server & {
@@ -92,38 +83,6 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 		)
 	})
 	return { servers, query }
-}
-
-/**
- * Keeps the Core's record of which shared instance a linked server belongs to in step with the
- * instance. The Core lists a server for friends only under that shared instance, so sharing or
- * unsharing an instance reaches its servers through here. Call once, from the instance page.
- */
-export function useSharedInstanceLink(instance: MaybeRefOrGetter<GameInstance | undefined>) {
-	const queryClient = useQueryClient()
-	const { servers } = useLinkedServers(() => toValue(instance)?.id)
-	const sending = new Set<string>()
-	watch(
-		() => {
-			const sharedId = toValue(instance)?.shared_instance?.id ?? null
-			return servers.value
-				.filter((server) => server.linked_instance.shared_instance_id !== sharedId)
-				.map((server) => ({ serverId: server.server_id, sharedId }))
-		},
-		async (stale) => {
-			for (const { serverId, sharedId } of stale) {
-				if (sending.has(serverId)) continue
-				sending.add(serverId)
-				// On failure the next server list still differs, which tries again.
-				await apiClient.archon.servers_v1
-					.setLinkedInstance(serverId, { shared_instance: { id: sharedId } })
-					.then(() => queryClient.invalidateQueries({ queryKey: serversQueryKey }))
-					.catch((error) => console.error('Failed to tell the Core about sharing', error))
-				sending.delete(serverId)
-			}
-		},
-		{ immediate: true },
-	)
 }
 
 export type HostedServer = SharedInstances.Instances.v1.HostedServer
@@ -211,91 +170,35 @@ export function playersOnline(server: Archon.Servers.v0.Server) {
 }
 
 /**
- * Exports the instance as a `.mrpack` with its mods and config. Modrinth content is listed by
- * reference and anything else is packed in, so custom mods reach the server too.
+ * Has a server apply the latest version of the instance's share. The server follows the instance
+ * through its share like one more member: its Core fetches the files from the pool itself, so
+ * nothing is uploaded from here. The first push installs the instance and links the server to
+ * it. A running server takes the version when it next stops, unless `restart` is set.
  */
-export async function exportInstancePack(instanceId: string): Promise<File> {
-	// One file per instance, overwritten by the next push.
-	const path = await join(
-		await tempDir(),
-		`amberite-server-${instanceId.replace(/[^a-zA-Z0-9-]/g, '_')}.mrpack`,
-	)
-	await export_instance_mrpack(instanceId, path, ['mods', 'config'], [])
-	const bytes = await invoke<number[]>('plugin:files|file_read_dragged_file', { path })
-	return new File([new Uint8Array(bytes)], 'instance.mrpack')
-}
-
-/**
- * Sends an exported instance to a server on the Core. The first push installs it and links the
- * server; later pushes update it. A running server takes the update on its next stop unless
- * `restart` is set.
- */
-export async function pushPackToServer(
-	pack: File,
+export async function pushInstanceToServer(
 	instance: { id: string; name: string },
 	serverId: string,
-	options: {
-		properties?: Archon.Content.v1.PropertiesFields
-		restart?: boolean
-		onProgress?: (progress: UploadProgress) => void
-	} = {},
+	options: { properties?: Archon.Content.v1.PropertiesFields; restart?: boolean } = {},
 ) {
+	await ensure_shared_instance(instance.id)
+	const share = await get_shared_instance_server_pack(instance.id)
 	// A Core server has one world, with the server's own id.
 	const worldId = serverId
-	await apiClient.archon.content_v1.uploadInstance(serverId, worldId, pack, instance, {
+	await apiClient.archon.content_v1.installContent(serverId, worldId, {
+		content_variant: 'instance',
+		instance,
+		share,
 		properties: options.properties,
-		onProgress: options.onProgress,
-	}).promise
-	if (options.restart) await apiClient.archon.content_v1.updateModpack(serverId, worldId)
+		restart: options.restart,
+	})
 }
 
-/**
- * What a push would change on a server: the instance's enabled mods compared with the mods the
- * server last took from it. Config changes are not detected.
- */
-export async function diffInstanceAgainstServer(
-	instanceId: string,
-	server: Archon.Servers.v0.Server,
-): Promise<ContentDiffItem[]> {
-	const [items, content] = await Promise.all([
-		get_content_items(instanceId),
-		apiClient.archon.content_v1.getAddons(server.server_id, server.server_id, {
-			from_modpack: true,
-		}),
-	])
-	const wanted = items.filter((item) => item.project_type === 'mod' && item.enabled)
-	const onServer = (content.addons ?? []).filter((addon) => addon.kind === 'mod')
-	// Modrinth content is matched by project, so a new version is an update, not add plus remove.
-	const key = (projectId: string | null | undefined, fileName: string) => projectId ?? fileName
-	const serverByKey = new Map(
-		onServer.map((addon) => [key(addon.project_id, addon.filename), addon]),
+/** Whether a server runs something other than the share's latest version. */
+export function isServerBehind(server: LinkedServer, sharedInstanceId: string, version: number) {
+	const linked = server.linked_instance
+	return (
+		linked.state === 'failed' ||
+		linked.shared_instance_id !== sharedInstanceId ||
+		linked.version !== version
 	)
-	const wantedKeys = new Set<string>()
-	const diffs: ContentDiffItem[] = []
-	for (const item of wanted) {
-		const hasProject = item.project.id !== item.file_name
-		const itemKey = key(hasProject ? item.project.id : null, item.file_name)
-		wantedKeys.add(itemKey)
-		const existing = serverByKey.get(itemKey)
-		const names = { projectName: item.project.title, fileName: item.file_name }
-		if (!existing) {
-			diffs.push({ type: 'added', ...names, newVersionName: item.version?.version_number })
-		} else if (existing.filename !== item.file_name) {
-			diffs.push({
-				type: 'updated',
-				...names,
-				currentVersionName: existing.version?.name ?? existing.filename,
-				newVersionName: item.version?.version_number ?? item.file_name,
-			})
-		}
-	}
-	for (const addon of onServer) {
-		if (wantedKeys.has(key(addon.project_id, addon.filename))) continue
-		diffs.push({
-			type: 'removed',
-			projectName: addon.name ?? addon.filename,
-			fileName: addon.filename,
-		})
-	}
-	return diffs
 }

@@ -28,7 +28,6 @@ base64 = { workspace = true }
 bon = { workspace = true }
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true, features = ["serde"] }
-chacha20poly1305 = { workspace = true }
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 dashmap = { workspace = true, features = ["serde"] }
@@ -48,7 +47,6 @@ governor = { workspace = true }
 heck = { workspace = true }
 hex = { workspace = true }
 hickory-resolver = { workspace = true }
-hkdf = { workspace = true }
 httpdate = { workspace = true }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 indexmap = { workspace = true }
@@ -86,7 +84,6 @@ reqwest = { workspace = true, features = [
   "stream",
 ] }
 rgb = { workspace = true }
-rustls = { workspace = true, features = ["ring"] }
 same-file = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde-binhum = { workspace = true }
@@ -95,6 +92,7 @@ serde_json = { workspace = true }
 serde_with = { workspace = true }
 sha1_smol = { workspace = true }
 sha2 = { workspace = true }
+sharing-types = { workspace = true }
 shlex = { workspace = true }
 sqlx = { workspace = true, features = [
   "json",
@@ -105,7 +103,6 @@ sqlx = { workspace = true, features = [
   "uuid",
 ] }
 sysinfo = { workspace = true, features = ["disk", "system"] }
-tar = { workspace = true }
 tauri = { workspace = true, features = ["unstable"], optional = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
