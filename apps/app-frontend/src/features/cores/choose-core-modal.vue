@@ -3,11 +3,12 @@ import type { Archon } from '@modrinth/api-client'
 import { Button, injectModrinthClient, injectNotificationManager, NewModal } from '@modrinth/ui'
 import { ref } from 'vue'
 
-import { ensureCore } from '@/features/cores/use-cores'
+import { injectCoreActions } from '@/features/cores/use-cores'
 
 // Decides which Core a new server goes on. Mount it where servers are created and call `pick`.
 
 const client = injectModrinthClient()
+const { ensureCore } = injectCoreActions()
 const { addNotification } = injectNotificationManager()
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const cores = ref<Archon.Cores.v1.Core[]>([])

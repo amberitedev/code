@@ -1,3 +1,4 @@
+import { createContext } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
@@ -21,28 +22,33 @@ export function useCores() {
 	return { ...query, cores, ownCores }
 }
 
-// The one "Add Core" modal is mounted in App.vue and registers itself here.
-let showAddCoreModal: ((code?: string) => Promise<boolean>) | null = null
-
-export function registerAddCoreModal(show: ((code?: string) => Promise<boolean>) | null) {
-	showAddCoreModal = show
+/**
+ * Opens "Add Core" from anywhere in the app. App.vue mounts the one modal and provides these.
+ *
+ * `openAddCore` fills in the code when an `amberite://approve/<code>` link brought it up, and
+ * resolves true once a Core is added, false if the modal is closed.
+ *
+ * `ensureCore` is called before anything that creates a server. It resolves true right away when
+ * the account has a Core of its own (being invited to someone else's does not count); otherwise it
+ * opens "Add Core" and resolves true only once one is added. It throws when the account's Cores
+ * cannot be loaded, so a failed lookup never asks for a Core.
+ */
+export interface CoreActions {
+	openAddCore: (code?: string) => Promise<boolean>
+	ensureCore: () => Promise<boolean>
 }
 
-/**
- * Open "Add Core", with the code filled in when an `amberite://approve/<code>` link brought it up.
- * Resolves true once a Core is added, false if the modal is closed.
- */
-export function openAddCoreModal(code?: string): Promise<boolean> {
-	return showAddCoreModal?.(code) ?? Promise.resolve(false)
-}
+export const [injectCoreActions, provideCoreActions] = createContext<CoreActions>(
+	'root',
+	'coreActions',
+)
 
-/**
- * Call before anything that creates a server. Resolves true right away when the account has a Core
- * of its own (being invited to someone else's does not count); otherwise opens "Add Core" and
- * resolves true only once one is added. Throws when the account's Cores cannot be loaded, so a
- * failed lookup never asks for a Core.
- */
-export async function ensureCore(): Promise<boolean> {
-	const cores = await apiClient.archon.cores_v1.list()
-	return cores.some((core) => core.owned) || openAddCoreModal()
+export function createCoreActions(openAddCore: CoreActions['openAddCore']): CoreActions {
+	return {
+		openAddCore,
+		ensureCore: async () => {
+			const cores = await apiClient.archon.cores_v1.list()
+			return cores.some((core) => core.owned) || openAddCore()
+		},
+	}
 }

@@ -13,9 +13,9 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
 import AccountRequired from '@/features/cores/account-required.vue'
-import CoreStorage from '@/features/settings/account/core-storage.vue'
-import { coresQueryKey, openAddCoreModal, useCores } from '@/features/cores/use-cores'
+import { coresQueryKey, injectCoreActions, useCores } from '@/features/cores/use-cores'
 import { coreOffline, serversQueryKey, useServers } from '@/features/servers/linked-servers'
+import CoreStorage from '@/features/settings/account/core-storage.vue'
 
 const client = injectModrinthClient()
 const auth = injectAuth()
@@ -25,6 +25,7 @@ const formatRelativeTime = useRelativeTime()
 // Both are kept fresh from the App root, so this page has its answer the moment it opens.
 // Only the account's own Cores are managed here, not ones it was invited to.
 const { ownCores: cores, data, isFetching, error, refetch } = useCores()
+const { openAddCore } = injectCoreActions()
 const { data: servers } = useServers()
 
 /** Whether a Core answered the last server check. Undefined before the first check finishes. */
@@ -85,7 +86,7 @@ async function remove() {
 				<h2 class="m-0 text-lg font-semibold text-contrast">Cores</h2>
 				<p class="m-0 text-secondary">A Core runs your servers on a computer you control.</p>
 			</div>
-			<Button type="colored" color="brand" @click="openAddCoreModal()">
+			<Button type="colored" color="brand" @click="openAddCore()">
 				<LinkIcon aria-hidden="true" /> Add Core
 			</Button>
 		</div>

@@ -21,7 +21,7 @@ import { useRouter } from 'vue-router'
 
 import AccountRequired from '@/features/cores/account-required.vue'
 import ChooseCoreModal from '@/features/cores/choose-core-modal.vue'
-import { openAddCoreModal, useCores } from '@/features/cores/use-cores'
+import { injectCoreActions, useCores } from '@/features/cores/use-cores'
 import { coreOffline, coreProblem, useServers } from '@/features/servers/linked-servers'
 import { injectSettingsActions } from '@/features/settings/settings-actions'
 
@@ -36,6 +36,7 @@ const searchInput = ref('')
 const setupModal = ref<InstanceType<typeof CreationFlowModal>>()
 const chooseCore = ref<InstanceType<typeof ChooseCoreModal>>()
 const coresQuery = useCores()
+const { openAddCore } = injectCoreActions()
 // Only once the account's Cores are known, so a slow or failed lookup never asks for a Core.
 const needsCore = computed(() => coresQuery.isSuccess.value && coresQuery.cores.value.length === 0)
 // The Core the new server goes on, chosen before setup opens.
@@ -238,7 +239,7 @@ async function browseModpacks() {
 				description="A Core runs your servers on a computer you control."
 			>
 				<template #actions>
-					<Button type="colored" color="brand" size="lg" @click="openAddCoreModal()">
+					<Button type="colored" color="brand" size="lg" @click="openAddCore()">
 						<LinkIcon /> Add Core
 					</Button>
 				</template>
