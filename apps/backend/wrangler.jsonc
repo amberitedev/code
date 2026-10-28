@@ -8,8 +8,16 @@
 	// Served without running the Worker, so they cost no requests. `core/keys.json` is the public
 	// half of the ticket keys; see README.md.
 	"assets": { "directory": "./public" },
-	"durable_objects": { "bindings": [{ "name": "FRIENDS", "class_name": "FriendsHub" }] },
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FriendsHub"] }],
+	"durable_objects": {
+		"bindings": [
+			{ "name": "FRIENDS", "class_name": "FriendsHub" },
+			{ "name": "CORE_SIGN_IN", "class_name": "CoreSignIn" },
+		],
+	},
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["FriendsHub"] },
+		{ "tag": "v2", "new_sqlite_classes": ["CoreSignIn"] },
+	],
 	"compatibility_flags": ["nodejs_compat"],
 	"r2_buckets": [{ "binding": "FILES", "bucket_name": "shared-files" }],
 	"d1_databases": [

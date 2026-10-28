@@ -14,13 +14,15 @@ import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
 import { MAX_SERVER_NAME, parseServers, writeServers } from './servers'
+import { waitForApproval } from './sign-in'
 import { reportStorage } from './storage'
 import { issueTicket } from './tickets'
 
 // Core sign-in. A signed-out Core asks for a code and the key it will use, shows the code to its
-// owner, and polls. The owner enters the code in the App, which approves it with their session;
-// from then on the key works and the Core is listed under that account. The App never talks to the
-// Core during sign-in and the account session never leaves the App. After that the backend only
+// owner, and waits on a WebSocket that approval closes (`sign-in.ts`), polling only to read the
+// answer. The owner enters the code in the App, which approves it with their session; from then
+// on the key works and the Core is listed under that account. The App never talks to the Core
+// during sign-in and the account session never leaves the App. After that the backend only
 // keeps the account's list of Cores and their addresses. A Core reports its state on start and on
 // change, never on a timer, and a report that changes nothing writes nothing: D1 writes are the
 // free tier's scarcest resource.
@@ -306,6 +308,10 @@ async function approveCode(request: Request, env: Env) {
 		throw new ApiError(409, 'already_signed_in', 'That Core belongs to another account')
 	}
 	await env.DB.prepare('DELETE FROM core_auth_codes WHERE code = ?').bind(row.code).run()
+	// A Core that cannot be woken still learns of the approval when its code would expire.
+	await env.CORE_SIGN_IN.getByName(stored.id)
+		.approved()
+		.catch((error: unknown) => console.error('Could not wake the Core', error))
 	return json(stored)
 }
 
@@ -490,6 +496,7 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 		method = request.method
 	if (path === '/core/auth/code' && method === 'POST') return requestCode(request, env)
 	if (path === '/core/auth/poll' && method === 'POST') return pollCode(request, env)
+	if (path === '/core/auth/wait' && method === 'GET') return waitForApproval(request, env)
 	if (path === '/core/state' && method === 'POST') return reportState(request, env)
 	if (path === '/core/storage' && method === 'POST')
 		return reportStorage(request, env, await requireListedCore(request, env))

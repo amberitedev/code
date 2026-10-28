@@ -6,6 +6,7 @@ import { handleVisibleServers } from './cores/servers'
 import { handleSharing } from './sharing'
 import { handleSocial } from './social'
 import { handleFriendsSocket } from './social/socket'
+export { CoreSignIn } from './cores/sign-in'
 export { FriendsHub } from './social/socket'
 
 function corsOrigin(request: Request, env: Env): string | null {
