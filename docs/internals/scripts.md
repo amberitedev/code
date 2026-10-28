@@ -85,7 +85,9 @@ Where a checkout compiles depends on its drive:
   until files change. The runner then gives every input file that matches the primary checkout the
   primary's file time, and rewrites the absolute paths build scripts recorded, so Cargo treats
   unchanged crates as built and compiles only what this worktree changed. The worktree keeps its own
-  compiler caches, so later edits there compile incrementally.
+  compiler caches, so later edits there compile incrementally. Cargo never deletes old output, and
+  every file it writes stops being shared, so the worktree's `target` slowly grows. Before a build,
+  once it is 10 GB bigger than the primary's, the runner deletes it and clones it again.
 - Everywhere else, checkouts compile into the primary checkout's `target`. Cargo decides what to
   recompile from file times alone, so a crate last compiled from another checkout can look finished
   here. When the previous build of a program came from a different checkout, the runner marks the

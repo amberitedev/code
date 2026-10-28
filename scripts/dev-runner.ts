@@ -26,6 +26,8 @@ const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 const UP_WAIT_MS = 9 * 60_000
 // One cached program per distinct set of Rust inputs. Older ones are deleted.
 const CACHED_PROGRAMS = 6
+// How much bigger than the primary's a worktree's build output grows before it starts over.
+const BUILD_GROWTH_LIMIT = 10 * 2 ** 30
 const BUILD_LOCK_STALE_MS = 60 * 60_000
 const BUILD_LOCK = 'building'
 const BRIDGE_READY = /browser bridge ready.*?url=(http:\/\/[\d.]+:\d+)/
@@ -774,7 +776,7 @@ function workspaceInputs(paths: WorktreePaths): ReadonlyArray<string> {
 /**
  * Where a checkout compiles the workspace. On a drive that clones files without copying them
  * (a Windows Dev Drive), each worktree gets its own build output, cloned from the primary
- * checkout's, so worktrees keep their own compiler caches and take almost no extra space.
+ * checkout's, so worktrees keep their own compiler caches and take little extra space.
  * Elsewhere every checkout compiles into the primary checkout's build output, so a new worktree
  * still reuses the dependencies compiled there.
  */
@@ -957,6 +959,11 @@ function markCheckoutCratesChanged(
  * Gives a worktree its own build output by cloning the primary checkout's, then makes the clone
  * look built from this worktree: Cargo trusts file times, and build scripts record absolute paths.
  * Crates whose files match the primary's are then up to date; changed ones compile again.
+ *
+ * Cargo never deletes old output, and every file a build writes stops being shared with the
+ * primary. So once a worktree's build output outgrows the primary's by `BUILD_GROWTH_LIMIT`, it is
+ * deleted and cloned again. That build compiles this worktree's changes without their compiler
+ * caches, and the worktree is back to taking almost no space.
  */
 function cloneBuildOutput(
 	worktree: string,
@@ -965,7 +972,24 @@ function cloneBuildOutput(
 	primary: string,
 ): void {
 	const from = NodePath.join(primary, 'target')
-	if (NodeFS.existsSync(build.targetDir) || !NodeFS.existsSync(from)) return
+	if (!NodeFS.existsSync(from)) return
+	if (NodeFS.existsSync(build.targetDir)) {
+		const growth = folderSize(build.targetDir) - folderSize(from, build.cacheDir)
+		if (growth < BUILD_GROWTH_LIMIT) return
+		const old = `${build.targetDir}.old`
+		try {
+			NodeFS.rmSync(old, { recursive: true, force: true })
+			NodeFS.renameSync(build.targetDir, old)
+		} catch {
+			// Something still has a file open, such as an older App run from it. Build there.
+			return
+		}
+		runnerLog(
+			'info',
+			`${spec.label} deleting its build output, ${(growth / 2 ** 30).toFixed(1)} GB over the primary's`,
+		)
+		NodeFS.rmSync(old, { recursive: true, force: true })
+	}
 	runnerLog('info', `${spec.label} cloning the build output of ${primary}`)
 	const partial = `${build.targetDir}.partial`
 	NodeFS.rmSync(partial, { recursive: true, force: true })
@@ -1024,6 +1048,16 @@ function cloneBuildOutput(
 		const { atime, mtime } = NodeFS.statSync(NodePath.join(primary, file))
 		NodeFS.utimesSync(NodePath.join(worktree, file), atime, mtime)
 	}
+}
+
+/** The total size in bytes of the files in a folder, leaving out `skip`. */
+function folderSize(folder: string, skip?: string): number {
+	return NodeFS.readdirSync(folder, { withFileTypes: true }).reduce((total, entry) => {
+		const path = NodePath.join(folder, entry.name)
+		if (path === skip) return total
+		if (entry.isDirectory()) return total + folderSize(path, skip)
+		return entry.isFile() ? total + NodeFS.statSync(path).size : total
+	}, 0)
 }
 
 /** Whether Cargo succeeded. */
