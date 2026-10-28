@@ -22,7 +22,6 @@ const expectedRuntimeImports: Record<string, ReadonlyArray<string>> = {
 	'@tauri-apps/api/app': ['getVersion'],
 	'@tauri-apps/api/core': ['Channel', 'convertFileSrc', 'invoke'],
 	'@tauri-apps/api/event': ['listen'],
-	'@tauri-apps/api/path': ['join', 'tempDir'],
 	'@tauri-apps/api/webview': ['getCurrentWebview'],
 	'@tauri-apps/api/window': ['getCurrentWindow'],
 	'@tauri-apps/plugin-dialog': ['open', 'save'],
