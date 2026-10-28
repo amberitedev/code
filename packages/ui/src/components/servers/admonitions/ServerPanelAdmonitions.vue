@@ -285,7 +285,7 @@ async function onBackupCancel(item: BackupAdmonitionEntry) {
 	cancellingIds.add(item.key)
 	try {
 		if (item.operationId == null) {
-			await client.archon.backups_v1.delete(ctx.serverId, ctx.worldId.value!, item.backupId)
+			await client.archon.backups_queue_v1.delete(ctx.serverId, ctx.worldId.value!, item.backupId)
 		} else if (item.type === 'create') {
 			await client.archon.backups_queue_v1.cancelCreate(
 				ctx.serverId,
