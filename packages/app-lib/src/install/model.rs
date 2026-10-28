@@ -257,6 +257,9 @@ pub struct SharedInstanceExternalFileData {
     /// Amberite's backend reports SHA-256, which the integrity checks verify.
     #[serde(default)]
     pub sha256: Option<String>,
+    /// Set when the file lives in the shared file pool, which replaces `url`.
+    #[serde(default)]
+    pub(crate) pool: Option<std::sync::Arc<crate::self_hosted::pool::PoolFile>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

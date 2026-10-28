@@ -2,4 +2,5 @@
 //! Public content requests continue to use Modrinth's existing endpoints.
 pub mod accounts;
 pub(crate) mod integrity;
+pub(crate) mod pool;
 pub(crate) mod public_content;

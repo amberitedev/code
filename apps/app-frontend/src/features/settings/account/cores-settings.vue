@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
 import AccountRequired from '@/features/cores/account-required.vue'
+import CoreStorage from '@/features/settings/account/core-storage.vue'
 import { coresQueryKey, openAddCoreModal, useCores } from '@/features/cores/use-cores'
 import { coreOffline, serversQueryKey, useServers } from '@/features/servers/linked-servers'
 
@@ -101,28 +102,31 @@ async function remove() {
 			<div
 				v-for="core in cores"
 				:key="core.id"
-				class="flex items-center justify-between gap-4 border-0 border-t border-solid border-surface-5 py-3 first:border-t-0"
+				class="flex flex-col border-0 border-t border-solid border-surface-5 first:border-t-0"
 			>
-				<div class="flex min-w-0 flex-col gap-1">
-					<span class="truncate font-semibold text-contrast">{{ core.name }}</span>
-					<span class="flex min-w-0 items-center gap-1.5 text-sm text-secondary">
-						<template v-if="isOnline(core) !== undefined">
-							<span
-								class="size-2 shrink-0 rounded-full"
-								:class="isOnline(core) ? 'bg-green' : 'bg-red'"
-								aria-hidden="true"
-							/>
-							{{ isOnline(core) ? 'Online' : 'Offline' }} ·
-						</template>
-						<span class="truncate">
-							{{ core.address }} · Added {{ formatRelativeTime(core.created) }}
+				<div class="flex items-center justify-between gap-4 py-3">
+					<div class="flex min-w-0 flex-col gap-1">
+						<span class="truncate font-semibold text-contrast">{{ core.name }}</span>
+						<span class="flex min-w-0 items-center gap-1.5 text-sm text-secondary">
+							<template v-if="isOnline(core) !== undefined">
+								<span
+									class="size-2 shrink-0 rounded-full"
+									:class="isOnline(core) ? 'bg-green' : 'bg-red'"
+									aria-hidden="true"
+								/>
+								{{ isOnline(core) ? 'Online' : 'Offline' }} ·
+							</template>
+							<span class="truncate">
+								{{ core.address }} · Added {{ formatRelativeTime(core.created) }}
+							</span>
 						</span>
-					</span>
+					</div>
+					<Button :disabled="removingId !== null" @click="askRemove(core)">
+						<UnlinkIcon aria-hidden="true" />
+						{{ removingId === core.id ? 'Removing' : 'Remove' }}
+					</Button>
 				</div>
-				<Button :disabled="removingId !== null" @click="askRemove(core)">
-					<UnlinkIcon aria-hidden="true" />
-					{{ removingId === core.id ? 'Removing' : 'Remove' }}
-				</Button>
+				<CoreStorage v-if="isOnline(core)" :core="core" />
 			</div>
 		</div>
 	</div>

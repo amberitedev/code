@@ -26,7 +26,7 @@
 //! kept until deleted.
 
 pub mod records;
-mod space;
+pub mod space;
 
 use std::{
     collections::HashMap,

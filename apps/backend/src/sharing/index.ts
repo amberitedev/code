@@ -5,17 +5,27 @@ import { notificationResponse } from '../common/notifications'
 import type { Env } from '../common/types'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
-import { decodedBody, drainBody, multipartBoundary, multipartParts } from './batch'
+import {
+	EMPTY_ROOT,
+	MAX_MANIFEST_BODY,
+	MAX_SHARE_BYTES,
+	MAX_USER_BYTES,
+	MAX_VERSION_FILES,
+	type ManifestFile,
+	UNCONFIRMED_TTL_MS,
+	confirmedHolders,
+	manifestFile,
+	manifestKey,
+	otherSharesBytes,
+	pickHome,
+	poolAccess,
+	root,
+	storeGrant,
+	versionBytes,
+} from './pool'
 
-// Limits are deliberately tight and easy to change. The App's publish modal shows
-// MAX_INSTANCE_SIZE as its storage limit; keep the two in step.
-const MAX_FILE_SIZE = 25 * 1024 * 1024
-const MAX_VERSION_FILES = 20
-const MAX_INSTANCE_SIZE = 100 * 1024 * 1024
-const MAX_MANIFEST_SIZE = 64 * 1024
+// Sharing metadata, as Modrinth's App expects it. The files themselves live on Cores; see pool.ts.
 const KEPT_VERSIONS = 5
-/** Tells the App which file an upload was refused for. The body ends with the file name. */
-const FILE_NOT_ALLOWED_HEADER = 'x-file-not-allowed'
 
 type Instance = {
 	id: string
@@ -23,42 +33,32 @@ type Instance = {
 	name: string
 	icon: string | null
 	quarantine: number
+	home: string | null
+	replica: string | null
 }
 type Version = {
 	instance_id: string
 	version: number
-	manifest: string
+	root: string
+	bytes: number
 	ready: number
-}
-type File = {
-	id: string
-	instance_id: string
-	version: number
-	file_name: string
-	file_type: string
-	// Set once the file is uploaded. The R2 object is `<instance id>/<sha256>`.
-	sha256: string | null
-	size: number | null
+	created: string
 }
 type Link = { id: string; instance_id: string; expiration: string; max_uses: number; uses: number }
+/** The manifest as R2 holds it: the upstream fields, the pool's file entries, and R. */
 type Manifest = {
 	modrinth_ids: string[]
 	modpack_id: string | null
 	game_version: string
 	loader: string
 	loader_version: string
+	root: string
+	external_files: ManifestFile[]
 }
 const empty = () => new Response(null, { status: 204 })
 const now = () => new Date().toISOString()
-const objectKey = (instanceId: string, sha256: string) => `${instanceId}/${sha256}`
 const quarantined = () =>
 	new ApiError(403, 'forbidden', 'Shared instance is quarantined', 'quarantined')
-const fileMissing = () =>
-	new ApiError(404, 'not_found', 'Shared file was not found', 'file_missing')
-const hex = (bytes: ArrayBuffer) =>
-	Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
-const digest = async (algorithm: 'SHA-256' | 'SHA-512', bytes: Uint8Array) =>
-	hex(await crypto.subtle.digest(algorithm, bytes as Uint8Array<ArrayBuffer>))
 
 function string(value: unknown, field: string, max = 256): string {
 	if (typeof value !== 'string' || value.length > max || !value.trim())
@@ -84,40 +84,6 @@ function fileType(value: unknown): string {
 	const type = string(value, 'file_type', 64)
 	if (!/^[a-z0-9_-]+$/.test(type)) throw new ApiError(400, 'invalid_input', 'Invalid file_type')
 	return type
-}
-
-// Leading bytes of programs and installers. The App hides these from the files it offers to
-// share and checks content the same way before publishing; this is the backend's own check.
-const EXECUTABLE_SIGNATURES: readonly number[][] = [
-	[0x4d, 0x5a], // MZ: Windows executables and DLLs
-	[0x7f, 0x45, 0x4c, 0x46], // ELF
-	[0xfe, 0xed, 0xfa, 0xce], // Mach-O, every byte order and width
-	[0xfe, 0xed, 0xfa, 0xcf],
-	[0xce, 0xfa, 0xed, 0xfe],
-	[0xcf, 0xfa, 0xed, 0xfe],
-	[0xca, 0xfe, 0xba, 0xbe], // Mach-O universal binaries and Java classes
-	[0x00, 0x61, 0x73, 0x6d], // WebAssembly
-	[0x64, 0x65, 0x78, 0x0a], // Android dex and dey
-	[0x64, 0x65, 0x79, 0x0a],
-	[0x23, 0x21], // #! scripts
-	[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], // MSI installers
-	[0x4d, 0x53, 0x43, 0x46], // Windows cabinets
-	[0xed, 0xab, 0xee, 0xdb], // RPM packages
-	[0x43, 0x72, 0x32, 0x34], // Chrome extensions
-	[0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a, 0x64, 0x65, 0x62, 0x69, 0x61, 0x6e], // Debian packages
-]
-
-function isExecutable(bytes: Uint8Array): boolean {
-	return EXECUTABLE_SIGNATURES.some((signature) =>
-		signature.every((byte, index) => bytes[index] === byte),
-	)
-}
-
-function fileNotAllowed(name: string): Response {
-	return new Response(`This file type cannot be shared: ${name}`, {
-		status: 400,
-		headers: { 'Content-Type': 'text/plain', [FILE_NOT_ALLOWED_HEADER]: 'true' },
-	})
 }
 
 function strings(value: unknown, field: string, max = 250): string[] {
@@ -181,38 +147,43 @@ async function requireSharing(env: Env, userId: string): Promise<void> {
 		throw new ApiError(403, 'forbidden', 'This account cannot use sharing', 'blacklisted')
 }
 
-async function files(env: Env, item: Pick<Version, 'instance_id' | 'version'>): Promise<File[]> {
-	return (
-		await env.DB.prepare(
-			'SELECT * FROM shared_files WHERE instance_id = ? AND version = ? ORDER BY rowid',
+/** The manifest of a version, read from R2 as text so the Worker never parses it. */
+async function manifestText(env: Env, item: Pick<Version, 'instance_id' | 'version'>) {
+	const object = await env.FILES.get(manifestKey(item.instance_id, item.version))
+	if (!object)
+		throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+	return object.text()
+}
+
+/**
+ * A version as the App reads it: the stored manifest, spliced as text, plus what the pool adds.
+ * A member of a ready version gets the confirmed holders and a fetch ticket; the owner of an
+ * unconfirmed one gets the home and a store ticket, so a crashed push resumes; the owner also
+ * sees how many members reported broken files.
+ */
+async function versionResponse(env: Env, item: Instance, version: Version, userId: string) {
+	const manifest = await manifestText(env, version)
+	const extra: Record<string, unknown> = { version: version.version, ready: version.ready === 1 }
+	if (version.root !== EMPTY_ROOT) {
+		if (version.ready) {
+			const holders = await confirmedHolders(env, [item.home, item.replica], version.root)
+			extra.pool = await poolAccess(env, holders, version.root)
+		} else if (item.owner_id === userId && item.home) {
+			extra.store = await storeGrant(env, item.home, version.root, version.bytes)
+		}
+	}
+	if (item.owner_id === userId) {
+		const reports = await env.DB.prepare(
+			"SELECT COUNT(*) AS content FROM shared_reports WHERE instance_id = ? AND version = ? AND kind = 'content'",
 		)
-			.bind(item.instance_id, item.version)
-			.all<File>()
-	).results
-}
-
-/** An uploaded file points at its download; one still missing points at the batch upload. */
-function fileResponse(request: Request, file: File) {
-	const origin = new URL(request.url).origin
-	return {
-		file_name: file.file_name,
-		file_type: file.file_type,
-		url: file.sha256
-			? `${origin}/v1/instances/${file.instance_id}/files/${file.sha256}/${encodeURIComponent(file.file_name)}`
-			: `${origin}/v1/instances/${file.instance_id}/versions/${file.version}/files`,
-		file_size: file.size ?? undefined,
-		sha256: file.sha256 ?? undefined,
+			.bind(item.id, version.version)
+			.first<{ content: number }>()
+		extra.reports = { content: reports?.content ?? 0 }
 	}
-}
-
-async function versionResponse(env: Env, request: Request, item: Version) {
-	const manifest = JSON.parse(item.manifest) as Manifest
-	return {
-		...manifest,
-		version: item.version,
-		ready: item.ready === 1,
-		external_files: (await files(env, item)).map((file) => fileResponse(request, file)),
-	}
+	// The manifest text is an object; the dynamic fields are spliced in after its last field.
+	return new Response(`${manifest.trimEnd().slice(0, -1)},${JSON.stringify(extra).slice(1)}`, {
+		headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+	})
 }
 
 /** The newest complete version, or the one being uploaded when none is complete yet. */
@@ -228,26 +199,24 @@ async function latestVersion(env: Env, id: string): Promise<Version> {
 }
 
 /**
- * Deletes the instance's R2 objects that no remaining version uses, complete or still uploading.
- * Called after the rows are gone, so it clears everything once the instance itself is deleted.
- * R2 is listed before the rows are read, so an object whose row was written in between is kept.
+ * Deletes the instance's manifests that no remaining version row uses. Called after the rows are
+ * gone, so it clears everything once the instance itself is deleted. The Cores holding the files
+ * learn what to drop at their next storage report.
  */
 export async function sweepFiles(env: Env, id: string): Promise<void> {
 	const stored: string[] = []
 	let cursor: string | undefined
 	do {
-		const page = await env.FILES.list({ prefix: `${id}/`, cursor })
+		const page = await env.FILES.list({ prefix: `manifests/${id}/`, cursor })
 		stored.push(...page.objects.map((object) => object.key))
 		cursor = page.truncated ? page.cursor : undefined
 	} while (cursor)
 	const used = new Set(
 		(
-			await env.DB.prepare(
-				'SELECT DISTINCT sha256 FROM shared_files WHERE instance_id = ? AND sha256 IS NOT NULL',
-			)
+			await env.DB.prepare('SELECT version FROM shared_versions WHERE instance_id = ?')
 				.bind(id)
-				.all<{ sha256: string }>()
-		).results.map((row) => objectKey(id, row.sha256)),
+				.all<{ version: number }>()
+		).results.map((row) => manifestKey(id, row.version)),
 	)
 	const unused = stored.filter((key) => !used.has(key))
 	if (unused.length) await env.FILES.delete(unused)
@@ -316,41 +285,26 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 }
 
 /**
- * Marks a version ready once every file it lists is uploaded and its R2 object exists. A file whose
- * object is gone goes back to awaiting upload, so the next batch for this version can store it.
+ * A version became ready: its home Core confirmed it holds the files. Invites waiting on
+ * something to install go out, and older versions are pruned.
  */
-async function finalizeVersion(env: Env, id: string, version: number): Promise<boolean> {
-	const listed = await files(env, { instance_id: id, version })
-	if (listed.some((file) => !file.sha256)) return false
-	const hashes = [...new Set(listed.flatMap((file) => file.sha256 ?? []))]
-	const gone = (
-		await Promise.all(
-			hashes.map(async (sha256) => ((await env.FILES.head(objectKey(id, sha256))) ? [] : [sha256])),
-		)
-	).flat()
-	if (gone.length) {
-		// A version that is already ready keeps its rows: its files cannot be uploaded again.
-		await env.DB.prepare(
-			`UPDATE shared_files SET sha256 = NULL, size = NULL WHERE instance_id = ?1 AND version = ?2
-			AND sha256 IN (${gone.map((_, index) => `?${index + 3}`).join(',')})
-			AND EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND version = ?2 AND ready = 0)`,
-		)
-			.bind(id, version, ...gone)
-			.run()
-		return false
-	}
+export async function versionReady(env: Env, id: string, version: number): Promise<void> {
 	const result = await env.DB.prepare(
-		`UPDATE shared_versions SET ready = 1 WHERE instance_id = ?1 AND version = ?2 AND ready = 0
-		AND NOT EXISTS (SELECT 1 FROM shared_files WHERE instance_id = ?1 AND version = ?2 AND sha256 IS NULL)`,
+		'UPDATE shared_versions SET ready = 1 WHERE instance_id = ? AND version = ? AND ready = 0',
 	)
 		.bind(id, version)
 		.run()
-	if (!result.meta.changes) return false
+	if (!result.meta.changes) return
 	await notifyReadyInvites(env, id)
 	await pruneVersions(env, id)
-	return true
 }
 
+/**
+ * The owner's App pushed: it sends the manifest with every file already encrypted and named, and
+ * gets back the home Core and a store ticket to upload to. The version is ready once that Core
+ * confirms. A push with the same files as an unconfirmed version resumes it; one with other files
+ * waits until that version is confirmed or an hour old.
+ */
 async function createVersion(
 	request: Request,
 	env: Env,
@@ -358,18 +312,15 @@ async function createVersion(
 	userId: string,
 ): Promise<Response> {
 	owner(item, userId)
-	const body = await readJson(request)
-	const manifest: Manifest = {
-		modrinth_ids: strings(body.modrinth_ids ?? [], 'modrinth_ids', 1000),
-		modpack_id:
-			body.modpack_id === undefined || body.modpack_id === null
-				? null
-				: string(body.modpack_id, 'modpack_id'),
-		game_version: string(body.game_version, 'game_version'),
-		loader: string(body.loader, 'loader'),
-		loader_version: typeof body.loader_version === 'string' ? body.loader_version : '',
+	const text = new TextDecoder().decode(await readBytes(request, MAX_MANIFEST_BODY))
+	let body: Record<string, unknown>
+	try {
+		body = object(JSON.parse(text))
+	} catch {
+		throw new ApiError(400, 'invalid_input', 'Invalid JSON')
 	}
-	if (!['vanilla', 'fabric', 'forge', 'quilt', 'neoforge'].includes(manifest.loader))
+	const loader = string(body.loader, 'loader')
+	if (!['vanilla', 'fabric', 'forge', 'quilt', 'neoforge'].includes(loader))
 		throw new ApiError(400, 'invalid_input', 'Invalid loader')
 	if (!Array.isArray(body.external_files))
 		throw new ApiError(400, 'invalid_input', 'Invalid external_files')
@@ -377,201 +328,155 @@ async function createVersion(
 		throw new ApiError(
 			413,
 			'invalid_input',
-			`A version can upload at most ${MAX_VERSION_FILES} files`,
+			`A version can have at most ${MAX_VERSION_FILES} files`,
 		)
 	const seen = new Set<string>()
 	const external = body.external_files.map((value) => {
-		const file = object(value)
-		const file_name = fileName(file.file_name)
-		const file_type = fileType(file.file_type)
+		const entry = object(value)
+		const file_name = fileName(entry.file_name)
+		const file_type = fileType(entry.file_type)
 		const name = `${file_type}:${file_name}`
 		if (seen.has(name)) throw new ApiError(400, 'invalid_input', 'Duplicate external file')
 		seen.add(name)
-		return { id: crypto.randomUUID(), file_name, file_type }
+		return manifestFile(entry, file_name, file_type)
 	})
-	// One D1 batch allocates the monotonic version and all file rows atomically.
-	const result = await env.DB.batch<Version>([
-		env.DB.prepare(
-			'INSERT INTO shared_versions (instance_id,version,manifest,created) SELECT ?1,COALESCE(MAX(version),0)+1,?2,?3 FROM shared_versions WHERE instance_id = ?1',
-		).bind(item.id, JSON.stringify(manifest), now()),
-		...external.map((file) =>
-			env.DB.prepare(
-				'INSERT INTO shared_files (id,instance_id,version,file_name,file_type) SELECT ?1,?2,MAX(version),?3,?4 FROM shared_versions WHERE instance_id = ?2',
-			).bind(file.id, item.id, file.file_name, file.file_type),
-		),
-		env.DB.prepare(
-			'SELECT * FROM shared_versions WHERE instance_id = ? ORDER BY version DESC LIMIT 1',
-		).bind(item.id),
-	])
-	const version = result[result.length - 1]?.results[0]
-	if (!version) throw new ApiError(500, 'database_error', 'Could not create shared version')
-	const ready = await finalizeVersion(env, item.id, version.version)
-	return json(await versionResponse(env, request, { ...version, ready: ready ? 1 : 0 }))
-}
-
-type BatchEntry = { file: File; file_size: number; sha512: string }
-
-/** The manifest part of a batch: which of the version's files follow, with their size and hash. */
-function batchManifest(bytes: Uint8Array, listed: File[]): BatchEntry[] {
-	let value: unknown
-	try {
-		value = JSON.parse(new TextDecoder().decode(bytes))
-	} catch {
-		throw new ApiError(400, 'invalid_input', 'Invalid batch manifest')
+	const manifest: Manifest = {
+		modrinth_ids: strings(body.modrinth_ids ?? [], 'modrinth_ids', 1000),
+		modpack_id:
+			body.modpack_id === undefined || body.modpack_id === null
+				? null
+				: string(body.modpack_id, 'modpack_id'),
+		game_version: string(body.game_version, 'game_version'),
+		loader,
+		loader_version: typeof body.loader_version === 'string' ? body.loader_version : '',
+		root: await root(external.map((file) => file.object)),
+		external_files: external,
 	}
-	const entries = object(value).files
-	if (!Array.isArray(entries) || entries.length > MAX_VERSION_FILES)
-		throw new ApiError(400, 'invalid_input', 'Invalid batch manifest')
-	const seen = new Set<File>()
-	return entries.map((item) => {
-		const entry = object(item)
-		const file_name = fileName(entry.file_name)
-		const file_type = fileType(entry.file_type)
-		const file = listed.find((row) => row.file_name === file_name && row.file_type === file_type)
-		if (!file || seen.has(file))
-			throw new ApiError(400, 'invalid_input', `${file_name} is not part of this version`)
-		seen.add(file)
-		const { file_size, sha512 } = entry
-		if (typeof file_size !== 'number' || !Number.isSafeInteger(file_size) || file_size < 0)
-			throw new ApiError(400, 'invalid_input', 'Invalid file_size')
-		if (file_size > MAX_FILE_SIZE)
-			throw new ApiError(413, 'invalid_input', `${file_name} is larger than a shared file may be`)
-		if (typeof sha512 !== 'string' || !/^[a-f0-9]{128}$/i.test(sha512))
-			throw new ApiError(400, 'invalid_input', 'Invalid sha512')
-		return { file, file_size, sha512: sha512.toLowerCase() }
-	})
-}
-
-/**
- * Stores one uploaded file of a version. A hash the instance already holds is not stored again. The
- * same bytes may be stored twice for the same file, so a batch the App retries after a failure
- * succeeds for the files that already made it.
- */
-async function storeFile(env: Env, item: Instance, file: File, bytes: Uint8Array): Promise<void> {
-	const sha256 = await digest('SHA-256', bytes)
-	// Only what finalizing this version keeps counts: this version and the ready ones that survive
-	// pruning. A hash held only by a version about to be pruned is stored and counted again.
-	const stored = await env.DB.prepare(
-		'SELECT COALESCE(SUM(size),0) AS size, COALESCE(MAX(sha256 = ?1),0) AS present FROM (SELECT DISTINCT sha256,size FROM shared_files WHERE instance_id = ?2 AND sha256 IS NOT NULL AND (version = ?3 OR version IN (SELECT version FROM shared_versions WHERE instance_id = ?2 AND ready = 1 ORDER BY version DESC LIMIT ?4)))',
-	)
-		.bind(sha256, item.id, file.version, KEPT_VERSIONS - 1)
-		.first<{ size: number; present: number }>()
-	if (!stored?.present && (stored?.size ?? 0) + bytes.byteLength > MAX_INSTANCE_SIZE)
-		throw new ApiError(413, 'invalid_input', 'Shared instance storage is full')
-	const key = objectKey(item.id, sha256)
-	// Reserve the hash before R2 stores it, so a concurrent orphan sweep sees its reference.
-	const reserved = await env.DB.prepare(
-		'UPDATE shared_files SET sha256 = ?1, size = ?2 WHERE id = ?3 AND (sha256 IS NULL OR sha256 = ?1)',
-	)
-		.bind(sha256, bytes.byteLength, file.id)
-		.run()
-	if (!reserved.meta.changes)
-		throw new ApiError(409, 'conflict', `${file.file_name} was already uploaded`)
-	try {
-		if (!(await env.FILES.head(key))) await env.FILES.put(key, bytes)
-	} catch (error) {
-		// A failed write must leave this upload retryable.
-		await env.DB.prepare(
-			'UPDATE shared_files SET sha256 = NULL, size = NULL WHERE id = ? AND sha256 = ?',
+	if (external.length && body.root !== manifest.root)
+		throw new ApiError(400, 'invalid_input', 'root does not match the files')
+	const bytes = versionBytes(external)
+	if (bytes > MAX_SHARE_BYTES)
+		throw new ApiError(
+			413,
+			'invalid_input',
+			'A shared instance can hold at most 1 GB of files',
+			'share_too_large',
 		)
-			.bind(file.id, sha256)
+	if (bytes && bytes + (await otherSharesBytes(env, userId, item.id)) > MAX_USER_BYTES)
+		throw new ApiError(
+			413,
+			'invalid_input',
+			'Your shared instances can hold at most 3 GB of files together',
+			'storage_quota',
+		)
+
+	// One push at a time: an unconfirmed version younger than its store ticket is still being
+	// uploaded, unless this push is the same version again, which resumes it.
+	const pending = await env.DB.prepare(
+		'SELECT * FROM shared_versions WHERE instance_id = ? AND ready = 0 ORDER BY version DESC LIMIT 1',
+	)
+		.bind(item.id)
+		.first<Version>()
+	if (pending) {
+		const fresh = Date.parse(pending.created) > Date.now() - UNCONFIRMED_TTL_MS
+		if (fresh && pending.root === manifest.root) {
+			await env.FILES.put(manifestKey(item.id, pending.version), JSON.stringify(manifest))
+			return versionResponse(env, item, pending, userId)
+		}
+		if (fresh)
+			throw new ApiError(
+				409,
+				'conflict',
+				'Another push of this instance is still uploading. Try again when it finishes.',
+				'push_in_flight',
+			)
+		await env.DB.prepare('DELETE FROM shared_versions WHERE instance_id = ? AND version = ?')
+			.bind(item.id, pending.version)
+			.run()
+	}
+
+	let home = item.home
+	if (bytes && !home) {
+		home = await pickHome(env, userId)
+		if (!home)
+			throw new ApiError(
+				503,
+				'no_storage',
+				'No storage is available for shared files right now. Try again later.',
+				'no_storage',
+			)
+		await env.DB.prepare('UPDATE shared_instances SET home = ? WHERE id = ? AND home IS NULL')
+			.bind(home, item.id)
+			.run()
+		item = { ...item, home }
+	}
+	// The number is allocated in the insert itself, so two pushes at once never share one, and
+	// the insert refuses while another version is still uploading, so two pushes cannot both get
+	// a store ticket. The row starts unready, so nobody reads it before its manifest is in R2; a
+	// failed write takes the row back.
+	const version = await env.DB.prepare(
+		'INSERT INTO shared_versions (instance_id,version,root,bytes,ready,created) SELECT ?1,COALESCE(m,0)+1,?2,?3,0,?4 FROM (SELECT MAX(version) AS m FROM shared_versions WHERE instance_id = ?1) WHERE NOT EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND ready = 0 AND created > ?5) RETURNING *',
+	)
+		.bind(
+			item.id,
+			manifest.root,
+			bytes,
+			now(),
+			new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString(),
+		)
+		.first<Version>()
+	if (!version)
+		throw new ApiError(
+			409,
+			'conflict',
+			'Another push of this instance is still uploading. Try again when it finishes.',
+			'push_in_flight',
+		)
+	try {
+		await env.FILES.put(manifestKey(item.id, version.version), JSON.stringify(manifest))
+	} catch (error) {
+		await env.DB.prepare('DELETE FROM shared_versions WHERE instance_id = ? AND version = ?')
+			.bind(item.id, version.version)
 			.run()
 		throw error
 	}
+	// Ready at once with no files, or when the home already holds these exact objects.
+	const held =
+		bytes && home
+			? await env.DB.prepare('SELECT 1 FROM core_holdings WHERE core_id = ? AND root = ?')
+					.bind(home, manifest.root)
+					.first()
+			: null
+	if (!bytes || held) {
+		await versionReady(env, item.id, version.version)
+		version.ready = 1
+	}
+	return versionResponse(env, item, version, userId)
 }
 
 /**
- * Stores a batch of a version's files: a zstd-compressed multipart body with a JSON manifest first
- * and the files after it, in manifest order. Each file is checked against the manifest and refused
- * when it is a program, naming the file in `x-file-not-allowed`. Answers whether the version is
- * complete.
+ * A member says a version's bytes were wrong. `object`: a Core served bytes that did not hash to
+ * their name. `content`: they decrypted to the wrong file, which only a new push fixes. The report
+ * stays with the reporter and is shown to the owner; nothing is marked broken for everyone.
  */
-async function uploadBatch(
+async function reportVersion(
 	request: Request,
 	env: Env,
 	item: Instance,
 	version: Version,
+	userId: string,
 ): Promise<Response> {
-	try {
-		return await storeBatch(request, env, item, version)
-	} catch (error) {
-		await drainBody(request)
-		throw error
-	}
-}
-
-async function storeBatch(
-	request: Request,
-	env: Env,
-	item: Instance,
-	version: Version,
-): Promise<Response> {
-	if (version.ready) throw new ApiError(409, 'conflict', 'This version is already complete')
-	const boundary = multipartBoundary(request.headers.get('content-type'))
-	const listed = await files(env, version)
-	let manifest: BatchEntry[] | undefined
-	const parts = multipartParts(decodedBody(request), boundary, (index) => {
-		if (index === 0) return MAX_MANIFEST_SIZE
-		const entry = manifest?.[index - 1]
-		if (!entry) throw new ApiError(400, 'invalid_input', 'More files than the manifest lists')
-		return entry.file_size
-	})
-	let received = 0
-	// Leaving the loop early drains the rest of the body before the response goes out.
-	for await (const part of parts) {
-		if (!manifest) {
-			if (part.name !== 'manifest')
-				throw new ApiError(400, 'invalid_input', 'The manifest must come first')
-			manifest = batchManifest(part.bytes, listed)
-			continue
-		}
-		const entry = manifest[received++]
-		if (!entry || part.name !== 'file') throw new ApiError(400, 'invalid_input', 'Unexpected part')
-		if (part.bytes.byteLength !== entry.file_size)
-			throw new ApiError(400, 'upload_failed', `${entry.file.file_name} is not its declared size`)
-		if ((await digest('SHA-512', part.bytes)) !== entry.sha512)
-			throw new ApiError(400, 'upload_failed', `${entry.file.file_name} does not match its hash`)
-		if (isExecutable(part.bytes)) return fileNotAllowed(entry.file.file_name)
-		await storeFile(env, item, entry.file, part.bytes)
-	}
-	if (!manifest || received < manifest.length)
-		throw new ApiError(400, 'invalid_input', 'The batch ended before every file was sent')
-	return json({ ready: await finalizeVersion(env, item.id, version.version) })
-}
-
-/** Serves an uploaded file to a member, who authenticates like any other sharing request. */
-async function download(
-	request: Request,
-	env: Env,
-	item: Instance,
-	sha256: string,
-): Promise<Response> {
-	if (item.quarantine) throw quarantined()
-	if (!/^[a-f0-9]{64}$/.test(sha256)) throw fileMissing()
-	const key = objectKey(item.id, sha256)
-	const object = await env.FILES.get(key)
-	if (!object) {
-		// A hash can be reused by several versions. Reset them together before clearing the hash.
-		await env.DB.batch([
-			env.DB.prepare(
-				'UPDATE shared_versions SET ready = 0 WHERE instance_id = ?1 AND version IN (SELECT version FROM shared_files WHERE instance_id = ?1 AND sha256 = ?2)',
-			).bind(item.id, sha256),
-			env.DB.prepare(
-				'UPDATE shared_files SET sha256 = NULL, size = NULL WHERE instance_id = ? AND sha256 = ?',
-			).bind(item.id, sha256),
-		])
-		throw fileMissing()
-	}
-	// The object is stored under the hash of its bytes, so the hash is what a client checks against.
-	return new Response(request.method === 'HEAD' ? null : object.body, {
-		headers: {
-			'Content-Type': 'application/octet-stream',
-			'Content-Length': String(object.size),
-			'Cache-Control': 'private, no-store',
-			ETag: `"${sha256}"`,
-			'x-file-sha256': sha256,
-		},
-	})
+	const body = await readJson(request)
+	const coreId = string(body.core_id, 'core_id', 64)
+	const kind = string(body.kind, 'kind', 16)
+	if (kind !== 'object' && kind !== 'content')
+		throw new ApiError(400, 'invalid_input', 'Invalid kind')
+	await env.DB.prepare(
+		'INSERT OR REPLACE INTO shared_reports (instance_id,version,user_id,core_id,kind,created) VALUES (?,?,?,?,?,?)',
+	)
+		.bind(item.id, version.version, userId, coreId, kind, now())
+		.run()
+	return empty()
 }
 
 // Invite links carry this code, so it is short: 12 characters from a 32-character alphabet (60 bits).
@@ -599,7 +504,7 @@ async function previewInvite(env: Env, id: string): Promise<Response> {
 	const link = await usableLink(env, id)
 	const item = await instance(env, link.instance_id)
 	const version = await latestVersion(env, item.id)
-	const manifest = JSON.parse(version.manifest) as Manifest
+	const manifest = JSON.parse(await manifestText(env, version)) as Manifest
 	const manager = await env.DB.prepare('SELECT id,username,avatar_url FROM users WHERE id = ?')
 		.bind(item.owner_id)
 		.first<{ id: string; username: string; avatar_url: string | null }>()
@@ -832,16 +737,10 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			parts[7] &&
 			request.method === 'DELETE'
 		) {
-			// A shared file's name may be a path, so it spans the rest of the URL.
+			// Files are opaque to the backend, so quarantining the instance is what it can do.
 			await env.DB.prepare('UPDATE shared_instances SET quarantine = 1 WHERE id = ?')
 				.bind(section)
 				.run()
-			await env.DB.prepare(
-				'DELETE FROM shared_files WHERE instance_id = ? AND version = ? AND file_name = ?',
-			)
-				.bind(section, Number(parts[5]), parts.slice(7).join('/'))
-				.run()
-			await sweepFiles(env, section)
 			return empty()
 		}
 	}
@@ -915,14 +814,10 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		if (!version)
 			throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
 		if (request.method === 'GET' && parts.length <= 5)
-			return json(await versionResponse(env, request, version))
-		if (request.method === 'POST' && parts[5] === 'files' && parts.length === 6) {
-			owner(item, user.id)
-			return uploadBatch(request, env, item, version)
-		}
+			return versionResponse(env, item, version, user.id)
+		if (request.method === 'POST' && parts[5] === 'reports' && parts.length === 6)
+			return reportVersion(request, env, item, version, user.id)
 	}
-	if (section === 'files' && child && ['GET', 'HEAD'].includes(request.method))
-		return download(request, env, item, child)
 	if (section === 'icon') {
 		owner(item, user.id)
 		if (request.method === 'PUT') {

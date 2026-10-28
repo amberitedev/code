@@ -11,6 +11,7 @@ mod db;
 mod installs;
 mod network;
 mod servers;
+mod store;
 mod update;
 
 use std::process::ExitCode;
@@ -79,6 +80,9 @@ fn run(Cli { json, command }: Cli) -> color_eyre::Result<bool> {
         Command::Core => daemon::core().map(|()| true),
         Command::Shim { data_dir, server } => small_runtime()?
             .block_on(servers::shim::main(data_dir, server))
+            .map(|()| true),
+        Command::Store(args) => tokio::runtime::Runtime::new()?
+            .block_on(store::main(args))
             .map(|()| true),
         command => small_runtime()?.block_on(cli::run(command, json)),
     }

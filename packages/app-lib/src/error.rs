@@ -127,6 +127,38 @@ pub enum ErrorKind {
     #[error("you are not allowed to share {0}")]
     SharedInstanceFileNotAllowed(String),
 
+    #[error(
+        "No storage is available for shared files right now. Try again later."
+    )]
+    PoolNoStorage,
+
+    #[error(
+        "Another push of this instance is still uploading. Try again when it finishes."
+    )]
+    PoolPushInFlight,
+
+    #[error("{0}")]
+    PoolTooLarge(String),
+
+    #[error("The Core storing these files is full. Try again later.")]
+    PoolDiskFull,
+
+    #[error(
+        "The Core storing these files has used up today's transfer allowance. Try again tomorrow."
+    )]
+    PoolEgressSpent,
+
+    #[error(
+        "The files were uploaded but the Core has not confirmed them yet. Push again in a minute."
+    )]
+    PoolPushUnconfirmed,
+
+    #[error("The shared files are broken. Ask the owner to push again.")]
+    PoolFilesBroken,
+
+    #[error("The shared files are not available right now. Try again later.")]
+    PoolFilesUnavailable,
+
     #[error("join handle error: {0}")]
     JoinError(#[from] tokio::task::JoinError),
 
@@ -299,6 +331,14 @@ impl ErrorKind {
             Self::SharedInstanceFileNotAllowed(_) => {
                 "shared_instance_file_not_allowed"
             }
+            Self::PoolNoStorage => "pool_no_storage",
+            Self::PoolPushInFlight => "pool_push_in_flight",
+            Self::PoolTooLarge(_) => "pool_too_large",
+            Self::PoolDiskFull => "pool_disk_full",
+            Self::PoolEgressSpent => "pool_egress_spent",
+            Self::PoolPushUnconfirmed => "pool_push_unconfirmed",
+            Self::PoolFilesBroken => "pool_files_broken",
+            Self::PoolFilesUnavailable => "pool_files_unavailable",
             Self::HashError(_, _) => "hash_error",
             Self::LoginCanceled => "login_canceled",
             Self::NotLoggedIn => "not_logged_in",

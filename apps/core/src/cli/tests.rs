@@ -128,7 +128,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
-    db::core_id(&db).await.unwrap();
+    let core_id = db::core_id(&db).await.unwrap();
     let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
         .await
         .unwrap();
@@ -160,6 +160,14 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
             String::new(),
         )),
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
+        storage: Arc::new(crate::store::Storage::new(
+            db.clone(),
+            paths.clone(),
+            core_id,
+            None,
+            false,
+            Arc::new(tokio::sync::Notify::new()),
+        )),
         db,
     });
     let router = api::router(Arc::clone(&state));

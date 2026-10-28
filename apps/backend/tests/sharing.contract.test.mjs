@@ -1,15 +1,21 @@
 import assert from 'node:assert/strict'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto'
 import test from 'node:test'
-import { zstdCompressSync } from 'node:zlib'
 
 import { startBackend } from './worker.mjs'
 
-// Every request here is one the App sends from `packages/app-lib/src/api/instance/shared`, with the
-// same method, path, body and headers, and every response is checked for the fields that code reads.
-const MB = 1024 * 1024
+// Every request here is one the App sends from `packages/app-lib/src/api/instance/shared` or a
+// Core sends from `apps/core/src/store/supervisor.rs`, with the same method, path and body, and
+// every response is checked for the fields that code reads. Files never reach the backend: the
+// App sends a manifest of encrypted objects and the Core reports which versions it holds.
+// See docs/internals/pool.md, "Protocol".
+
+const GB = 1024 ** 3
+const EMPTY_ROOT = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+const kid = 'test-key'
+const TICKET_KEY = JSON.stringify({ ...privateKey.export({ format: 'jwk' }), kid })
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
-const sha512 = (bytes) => createHash('sha512').update(bytes).digest('hex')
 const manifest = {
 	modrinth_ids: ['AABBCCDD'],
 	modpack_id: null,
@@ -18,56 +24,83 @@ const manifest = {
 	loader_version: '0.16.9',
 }
 
-/**
- * `send_external_file_batch`: a zstd-compressed multipart body whose first part is the JSON manifest
- * and whose `file` parts follow in manifest order. A file may carry a wrong `sha512` on purpose.
- */
-function batch(files) {
-	const boundary = `modrinth-${randomBytes(8).toString('hex')}`
-	const part = (name, type, bytes) =>
-		Buffer.concat([
-			Buffer.from(
-				`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: ${type}\r\n\r\n`,
-			),
-			bytes,
-			Buffer.from('\r\n'),
-		])
-	const listed = files.map((file) => ({
-		file_name: file.file_name,
-		file_type: file.file_type,
-		file_size: file.bytes.length,
-		sha512: file.sha512 ?? sha512(file.bytes),
-	}))
-	const body = Buffer.concat([
-		part('manifest', 'application/json', Buffer.from(JSON.stringify({ files: listed }))),
-		...files.map((file) => part('file', 'application/octet-stream', file.bytes)),
-		Buffer.from(`--${boundary}--\r\n`),
-	])
+/** The claims of a ticket, and whether the backend's key signed it. */
+function decode(ticket) {
+	const [header, claims, signature] = ticket.split('.')
+	const json = (part) => JSON.parse(Buffer.from(part, 'base64url').toString())
 	return {
-		body: zstdCompressSync(body),
-		headers: {
-			'content-type': `multipart/form-data; boundary=${boundary}`,
-			'content-encoding': 'zstd',
-		},
+		claims: json(claims),
+		valid: verify(
+			null,
+			Buffer.from(`${header}.${claims}`),
+			publicKey,
+			Buffer.from(signature, 'base64url'),
+		),
 	}
 }
 
-test('sharing API as the App uses it, with files in R2', async () => {
-	const backend = await startBackend('sharing-contract')
+/** A file as the App's push describes it, with `size` plain bytes behind a random object name. */
+function file(file_name, file_type, size, key = file_type === 'config') {
+	const object = sha256(randomBytes(32))
+	return {
+		file_name,
+		file_type,
+		size,
+		sha256: sha256(randomBytes(16)),
+		object,
+		object_size: size + 16 * Math.max(1, Math.ceil(size / 1_048_576)),
+		...(key ? { key: randomBytes(32).toString('hex') } : {}),
+	}
+}
+
+/** R: the hash of the distinct object hashes, sorted, as raw bytes. */
+function root(files) {
+	const objects = [...new Set(files.map((entry) => entry.object))].sort()
+	return sha256(Buffer.concat(objects.map((object) => Buffer.from(object, 'hex'))))
+}
+
+const bytes = (files) => {
+	const seen = new Map(files.map((entry) => [entry.object, entry.object_size]))
+	return [...seen.values()].reduce((sum, size) => sum + size, 0)
+}
+
+test('sharing API as the App and Cores use it, with files in the pool', async () => {
+	const backend = await startBackend('sharing-contract', { TICKET_KEY })
 	try {
 		const { db, files } = backend
-		for (const user of ['owner', 'friend', 'stranger']) await backend.account(user)
+		for (const user of ['owner', 'friend', 'stranger', 'other']) await backend.account(user)
 		await db
 			.prepare('INSERT INTO friends (user_id,friend_id,accepted,created) VALUES (?,?,1,?)')
 			.bind('owner', 'friend', new Date().toISOString())
 			.run()
+		// The owner's own Core, and a second Core owned by someone else. Neither has reported
+		// its storage yet, so neither can take a share.
+		for (const [id, owner, key] of [
+			['core', 'owner', 'amc_core'],
+			['core2', 'other', 'amc_core2'],
+		])
+			await db
+				.prepare(
+					'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) VALUES (?,?,?,?,?,?,?,?)',
+				)
+				.bind(
+					id,
+					owner,
+					id,
+					`https://192.168.1.${id === 'core' ? 2 : 3}:16662`,
+					'f'.repeat(64),
+					createHash('sha256').update(key).digest('hex'),
+					'2026-01-01',
+					'2026-01-01',
+				)
+				.run()
 		const send = (url, method, user, body, headers = {}) =>
 			backend.fetch(url, {
 				method,
-				headers: { ...(user ? { authorization: `Bearer mra_${user}` } : {}), ...headers },
+				headers: { ...(user ? { authorization: `Bearer ${user}` } : {}), ...headers },
 				body,
 			})
-		const call = (path, method = 'GET', body, user = 'owner') =>
+		const call = (path, method = 'GET', body, user = 'mra_owner') =>
 			send(
 				`http://local.test/v1${path}`,
 				method,
@@ -76,323 +109,335 @@ test('sharing API as the App uses it, with files in R2', async () => {
 				body ? { 'content-type': 'application/json' } : {},
 			)
 		const ok = async (response) => {
-			assert.ok(response.ok, `expected success, got ${response.status}`)
+			if (!response.ok)
+				assert.fail(`expected success, got ${response.status} ${await response.text()}`)
 			return response.status === 204 ? null : response.json()
 		}
-		// `upload_external_files`: POST one batch of files to the version.
-		const upload = (id, version, external, user = 'owner') => {
-			const { body, headers } = batch(external)
-			return send(
-				`http://local.test/v1/instances/${id}/versions/${version}/files`,
+		const code = async (response, status, code) => {
+			assert.equal(response.status, status)
+			assert.equal((await response.json()).code, code)
+		}
+		/** `create_remote_version`: the manifest with its files already encrypted and named. */
+		const push = (id, external, user = 'mra_owner') =>
+			call(
+				`/instances/${id}/versions`,
 				'POST',
+				{ ...manifest, external_files: external, root: root(external) },
 				user,
-				body,
-				headers,
 			)
-		}
-		// `publish_current_content`: create the version, then upload the files it lists in one batch.
-		const publish = async (id, external) => {
-			const version = await ok(
-				await call(`/instances/${id}/versions`, 'POST', {
-					...manifest,
-					external_files: external.map(({ file_name, file_type }) => ({ file_name, file_type })),
+		/** A Core's storage report, as `copal` sends it after an upload and once a day. */
+		const report = (core, versions, extra = {}) =>
+			send(
+				'http://local.test/core/storage',
+				'POST',
+				`amc_${core}`,
+				JSON.stringify({
+					enabled: true,
+					service: false,
+					cap: 20 * GB,
+					used: versions.reduce((sum, entry) => sum + entry.bytes, 0),
+					free: 100 * GB,
+					egress_cap: 50 * GB,
+					egress_today: 0,
+					versions: versions.map((entry) => ({ root: entry.root, bytes: entry.bytes })),
+					...extra,
 				}),
+				{ 'content-type': 'application/json' },
 			)
-			assert.deepEqual(
-				version.external_files.map((file) => [file.file_name, file.file_type]),
-				external.map((file) => [file.file_name, file.file_type]),
-				'every file is requested for upload',
-			)
-			for (const file of version.external_files)
-				assert.equal(new URL(file.url).origin, 'http://local.test', 'uploads stay on the API')
-			if (!external.length) return { version }
-			const response = await upload(id, version.version, external)
-			if (!response.ok) return { version, failed: response.status, response }
-			return { version, result: await response.json() }
-		}
-		const stored = async (id) =>
-			(await files.list({ prefix: `${id}/` })).objects.map((object) => object.key).sort()
+		const manifests = async (id) =>
+			(await files.list({ prefix: `manifests/${id}/` })).objects.map((object) => object.key).sort()
+		const notifications = async () =>
+			(await db.prepare('SELECT COUNT(*) AS count FROM notifications').first()).count
 
 		// Share an instance: create it, name it, give it an icon, invite a friend.
 		const { id } = await ok(await call('/instances', 'POST', { name: 'Proof' }))
-		assert.equal(typeof id, 'string')
 		await ok(await call(`/instances/${id}`, 'PATCH', { name: 'Proof pack' }))
 		const icon = randomBytes(64)
 		await ok(
-			await send(`http://local.test/v1/instances/${id}/icon`, 'PUT', 'owner', icon, {
+			await send(`http://local.test/v1/instances/${id}/icon`, 'PUT', 'mra_owner', icon, {
 				'content-type': 'application/octet-stream',
 			}),
 		)
 		const info = await ok(await call(`/instances/${id}`))
 		assert.equal(info.name, 'Proof pack')
-		assert.equal(info.quarantine, false)
 		assert.deepEqual(Buffer.from(await (await send(info.icon, 'GET')).arrayBuffer()), icon)
-		await ok(await call(`/instances/${id}/icon`, 'DELETE'))
-		assert.equal((await ok(await call(`/instances/${id}`))).icon, null)
 		await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend'] }))
-		const notifications = async () =>
-			(await db.prepare('SELECT COUNT(*) AS count FROM notifications').first()).count
 		assert.equal(await notifications(), 0, 'no invitation before there is something to install')
 
-		// Publish a mod that is not on Modrinth, a resource pack, and config files under their paths.
-		const jar = { file_name: 'private-mod.jar', file_type: 'mod', bytes: randomBytes(300_000) }
-		const pack = { file_name: 'look.zip', file_type: 'resourcepack', bytes: randomBytes(50_000) }
-		const config = {
-			file_name: 'config/private-mod/client.toml',
-			file_type: 'config',
-			bytes: Buffer.from('enabled = true\n'),
-		}
-		const options = { file_name: 'options.txt', file_type: 'config', bytes: Buffer.from('fov:0\n') }
-		const first = await publish(id, [jar, pack, config, options])
-		assert.equal(first.failed, undefined, `batch failed with ${first.failed}`)
-		assert.equal(first.version.version, 1)
-		assert.equal(first.version.ready, false)
-		assert.equal(first.result.ready, true)
-		assert.equal(await notifications(), 1, 'the friend is invited once the version is complete')
-		assert.deepEqual(
-			await stored(id),
-			[jar, pack, config, options].map((file) => `${id}/${sha256(file.bytes)}`).sort(),
-		)
-		assert.equal(
-			(await upload(id, 1, [jar])).status,
-			409,
-			'a complete version takes no more uploads',
-		)
+		// A version with only Modrinth content needs no Core and is ready at once.
+		const first = await ok(await push(id, []))
+		assert.equal(first.version, 1)
+		assert.equal(first.ready, true)
+		assert.equal(first.root, EMPTY_ROOT)
+		assert.deepEqual(first.external_files, [])
+		assert.equal(first.store, undefined)
+		assert.equal(first.pool, undefined)
+		assert.deepEqual(first.reports, { content: 0 })
+		assert.equal(await notifications(), 1, 'the friend is invited once a version is ready')
 
-		// The friend sees the invite, accepts it, and downloads every file.
-		assert.equal(
-			(await ok(await call(`/instances/${id}`, 'GET', undefined, 'friend'))).name,
-			'Proof pack',
-		)
-		assert.equal((await call(`/instances/${id}/versions`, 'GET', undefined, 'friend')).status, 401)
-		assert.equal((await call(`/instances/${id}`, 'GET', undefined, 'stranger')).status, 401)
-		await ok(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'friend'))
-		assert.deepEqual(await ok(await call('/instances', 'GET', undefined, 'friend')), [id])
-		const latest = await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'friend'))
-		assert.equal((await call(`/instances/${id}/versions/not-a-number`)).status, 400)
-		assert.deepEqual(
-			{ ...latest, external_files: undefined },
-			{ ...manifest, version: 1, ready: true, external_files: undefined },
-		)
-		for (const source of [jar, pack, config, options]) {
-			const file = latest.external_files.find(
-				(entry) => entry.file_type === source.file_type && entry.file_name === source.file_name,
-			)
-			assert.ok(file, `${source.file_name} is listed`)
-			assert.equal(file.file_size, source.bytes.length)
-			assert.equal(file.sha256, sha256(source.bytes))
-			const download = await send(file.url, 'GET', 'friend')
-			assert.equal(download.status, 200)
-			assert.equal(Number(download.headers.get('content-length')), file.file_size)
-			assert.equal(sha256(Buffer.from(await download.arrayBuffer())), file.sha256)
-			assert.equal((await send(file.url, 'GET', 'stranger')).status, 401)
-			assert.equal((await send(file.url, 'GET')).status, 401)
-		}
+		// A version with files needs a Core. None has reported storage yet.
+		const jar = file('private-mod.jar', 'mod', 300_000)
+		const config = file('config/private-mod/client.toml', 'config', 20)
+		await code(await push(id, [jar, config]), 503, 'no_storage')
+		assert.deepEqual(await ok(await report('core', [])), { drop: [], pull: [] })
 
-		// A program is refused by content, naming the file the way the App reads it. The files before
-		// it in the batch are kept, so a retried batch only has to carry the rest.
-		const program = {
-			file_name: 'mods/helper.jar',
-			file_type: 'config',
-			bytes: Buffer.concat([Buffer.from('MZ'), randomBytes(1000)]),
-		}
-		const refused = await publish(id, [config, program, jar])
-		assert.equal(refused.failed, 400)
-		assert.equal(refused.response.headers.get('x-file-not-allowed'), 'true')
-		assert.ok((await refused.response.text()).endsWith(program.file_name))
-		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, 1)
-		assert.equal((await upload(id, refused.version.version, [config, jar])).status, 200)
-		assert.equal(
-			(await ok(await call(`/instances/${id}/versions/${refused.version.version}`))).ready,
-			false,
-		)
-		for (const [bad, status] of [
-			[{ ...jar, sha512: sha512(pack.bytes) }, 400],
-			[{ ...jar, file_name: '../escape.jar' }, 400],
-			[pack, 400],
-		]) {
-			const version = await ok(
-				await call(`/instances/${id}/versions`, 'POST', {
-					...manifest,
-					external_files: [{ file_name: jar.file_name, file_type: jar.file_type }],
+		// The push: the backend keeps the manifest, picks the owner's Core, and hands out a store
+		// ticket. Nothing is ready until the Core confirms.
+		const second = await ok(await push(id, [jar, config]))
+		assert.equal(second.version, 2)
+		assert.equal(second.ready, false)
+		assert.equal(second.root, root([jar, config]))
+		assert.equal(second.pool, undefined)
+		assert.equal(second.store.core.id, 'core')
+		assert.equal(second.store.core.cert_fingerprint, 'f'.repeat(64))
+		assert.ok(Date.parse(second.store.expires) > Date.now() + 3_500_000)
+		const store = decode(second.store.ticket)
+		assert.ok(store.valid)
+		assert.equal(store.claims.kind, 'store')
+		assert.equal(store.claims.aud, 'core')
+		assert.equal(store.claims.root, second.root)
+		assert.equal(store.claims.bytes, bytes([jar, config]))
+		assert.equal(store.claims.exp - store.claims.iat, 3600)
+		assert.deepEqual(
+			second.external_files.map(
+				({ file_name, file_type, url, size, sha256, object, object_size, key }) => ({
+					file_name,
+					file_type,
+					url,
+					size,
+					sha256,
+					object,
+					object_size,
+					key,
 				}),
-			)
-			assert.equal((await upload(id, version.version, [bad])).status, status)
-		}
-		const garbage = await send(
-			`http://local.test/v1/instances/${id}/versions/${refused.version.version}/files`,
-			'POST',
-			'owner',
-			Buffer.from('not zstd at all'),
-			batch([]).headers,
+			),
+			[jar, config].map((entry) => ({ url: `pool:${entry.object}`, ...entry, key: entry.key })),
 		)
-		assert.equal(garbage.status, 400, 'a body that is not zstd is the client’s mistake')
-
-		// Members list and invite links.
-		const members = await ok(await call(`/instances/${id}/users`))
-		assert.equal(members.tokens, 0)
-		assert.deepEqual(members.users.map((user) => [user.id, user.join_type]).sort(), [
-			['friend', 'invite'],
-			['owner', 'owner'],
-		])
-		for (const user of members.users) {
-			assert.ok(!Number.isNaN(Date.parse(user.joined_at)))
-			assert.equal(user.last_played, null)
-		}
-		const link = await ok(
-			await call(`/instances/${id}/invites`, 'POST', { max_age: 3600, max_uses: 2 }),
-		)
-		const [listed] = await ok(await call(`/instances/${id}/invites`))
-		assert.deepEqual(
-			{ ...listed, expiration: undefined },
-			{ id: link.id, max_uses: 2, uses: 0, expiration: undefined },
-		)
-		assert.ok(Date.parse(listed.expiration) > Date.now())
-		assert.equal((await ok(await call(`/instances/${id}/users`))).tokens, 1)
-		const preview = await ok(await send(`http://local.test/v1/invites/${link.id}`, 'GET'))
-		assert.equal(preview.instance_id, id)
-		assert.equal(preview.instance_name, 'Proof pack')
-		assert.equal(preview.instance_icon, null)
-		assert.deepEqual(
-			preview.managers.map(({ type, id }) => ({ type, id })),
-			[{ type: 'user', id: 'owner' }],
-		)
-		await ok(await call(`/instances/${id}/invites/${link.id}`, 'POST', undefined, 'stranger'))
-		await ok(await call(`/instances/${id}/invites/${link.id}`, 'POST', undefined, 'stranger'))
-		assert.equal((await ok(await call(`/instances/${id}/invites`)))[0].uses, 1)
-		await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'stranger'))
-		await ok(await call(`/instances/${id}/invites/${link.id}`, 'DELETE'))
-		assert.equal((await send(`http://local.test/v1/invites/${link.id}`, 'GET')).status, 404)
-
-		// Leaving and removal revoke access to versions and files alike.
-		await ok(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['stranger'] }, 'stranger'))
+		assert.deepEqual(await manifests(id), [`manifests/${id}/1`, `manifests/${id}/2`])
 		assert.equal(
-			(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['owner'] }, 'friend')).status,
-			403,
+			(await db.prepare('SELECT home FROM shared_instances WHERE id = ?').bind(id).first()).home,
+			'core',
 		)
-		await ok(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['friend'] }))
-		assert.equal((await call(`/instances/${id}/versions`, 'GET', undefined, 'friend')).status, 401)
-		assert.equal((await send(latest.external_files[0].url, 'GET', 'friend')).status, 401)
-		await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend'] }))
-		await ok(await call(`/instances/${id}/invites/pending`, 'DELETE', undefined, 'friend'))
+		await ok(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'mra_friend'))
 		assert.equal(
-			(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'friend')).status,
-			404,
+			(await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))).version,
+			1,
+			'members get the latest ready version',
+		)
+		const unready = await ok(
+			await call(`/instances/${id}/versions/2`, 'GET', undefined, 'mra_friend'),
+		)
+		assert.equal(unready.ready, false)
+		assert.equal(unready.store, undefined, 'only the owner gets the store ticket')
+		assert.equal(unready.reports, undefined)
+
+		// Pushing the same files again resumes the upload; other files wait for it.
+		const resumed = await ok(await push(id, [jar, config]))
+		assert.equal(resumed.version, 2)
+		assert.notEqual(resumed.store.ticket, second.store.ticket)
+		await code(await push(id, [jar]), 409, 'push_in_flight')
+
+		// The Core confirms: the version is ready, and members get holders and a fetch ticket.
+		const held = [{ root: second.root, bytes: bytes([jar, config]) }]
+		assert.deepEqual(await ok(await report('core', held)), { drop: [], pull: [] })
+		const latest = await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))
+		assert.equal(latest.version, 2)
+		assert.equal(latest.ready, true)
+		assert.deepEqual(
+			{ ...latest, external_files: undefined, pool: undefined },
+			{
+				...manifest,
+				root: second.root,
+				version: 2,
+				ready: true,
+				external_files: undefined,
+				pool: undefined,
+			},
+		)
+		assert.deepEqual(
+			latest.pool.holders.map((core) => core.id),
+			['core'],
+		)
+		const fetch = decode(latest.pool.ticket)
+		assert.ok(fetch.valid)
+		assert.equal(fetch.claims.kind, 'fetch')
+		assert.deepEqual(fetch.claims.aud, ['core'])
+		assert.equal(fetch.claims.root, second.root)
+		assert.equal(fetch.claims.exp - fetch.claims.iat, 6 * 3600)
+		assert.equal(
+			latest.external_files.find((entry) => entry.file_type === 'config').key,
+			config.key,
+		)
+		assert.equal(latest.external_files.find((entry) => entry.file_type === 'mod').key, undefined)
+		assert.equal(
+			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_stranger')).status,
+			401,
 		)
 
-		// An unchanged file is stored once. The sixth complete version prunes the first and its files,
-		// along with the uploads abandoned in between.
-		const changed = { ...config, bytes: Buffer.from('enabled = false\n') }
-		const pushed = []
-		for (let push = 0; push < 4; push++) {
-			const result = await publish(id, [jar, changed])
-			assert.equal(result.failed, undefined)
-			pushed.push(result.version.version)
-		}
-		assert.equal((await stored(id)).length, 5)
-		assert.ok(await files.head(`${id}/${sha256(config.bytes)}`))
-		const sixth = await publish(id, [jar, changed])
-		const current = await ok(await call(`/instances/${id}/versions`))
-		assert.equal(current.version, sixth.version.version)
-		assert.equal(current.ready, true)
-		assert.equal((await call(`/instances/${id}/versions/1`)).status, 404)
-		assert.equal((await call(`/instances/${id}/versions/${refused.version.version}`)).status, 404)
-		assert.equal(
-			(await ok(await call(`/instances/${id}/versions/${pushed[0]}`))).version,
-			pushed[0],
+		// A member reports broken files; the owner sees it and nobody else.
+		await ok(
+			await call(
+				`/instances/${id}/versions/2/reports`,
+				'POST',
+				{ core_id: 'core', kind: 'content' },
+				'mra_friend',
+			),
 		)
-		assert.equal(await files.head(`${id}/${sha256(config.bytes)}`), null)
-		assert.deepEqual(
-			await stored(id),
-			[`${id}/${sha256(jar.bytes)}`, `${id}/${sha256(changed.bytes)}`].sort(),
+		await ok(
+			await call(
+				`/instances/${id}/versions/2/reports`,
+				'POST',
+				{ core_id: 'core', kind: 'content' },
+				'mra_friend',
+			),
 		)
+		assert.deepEqual((await ok(await call(`/instances/${id}/versions/2`))).reports, { content: 1 })
 		assert.equal(
 			(
-				await send(
-					latest.external_files.find((file) => file.file_name === config.file_name).url,
-					'GET',
-					'owner',
+				await call(
+					`/instances/${id}/versions/2/reports`,
+					'POST',
+					{ core_id: 'core', kind: 'odd' },
+					'mra_friend',
 				)
 			).status,
-			404,
+			400,
 		)
 
-		// Over-limit files fail their upload, and the last complete version stays current.
-		const tooLarge = {
-			file_name: 'huge.jar',
-			file_type: 'mod',
-			bytes: Buffer.alloc(25 * MB + 1, 1),
-		}
-		assert.equal((await publish(id, [tooLarge])).failed, 413)
+		// What a manifest may not say.
+		for (const [external, status] of [
+			[[{ ...jar, key: randomBytes(32).toString('hex') }], 400],
+			[[{ ...config, key: undefined }], 400],
+			[[{ ...jar, object_size: jar.object_size + 1 }], 400],
+			[[{ ...jar, file_name: '../escape.jar' }], 400],
+			[[jar, jar], 400],
+			[Array.from({ length: 4097 }, (_, index) => file(`${index}.jar`, 'mod', 1)), 413],
+		])
+			assert.equal((await push(id, external)).status, status, JSON.stringify(external[0]))
 		assert.equal(
 			(
 				await call(`/instances/${id}/versions`, 'POST', {
 					...manifest,
-					external_files: Array.from({ length: 21 }, (_, index) => ({
-						file_name: `${index}.jar`,
-						file_type: 'mod',
-					})),
+					external_files: [jar],
+					root: root([config]),
 				})
 			).status,
-			413,
+			400,
+			'the root must match the files',
 		)
-		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, current.version)
-		assert.equal((await ok(await call(`/instances/${id}/versions`))).ready, true)
-		await publish(id, [jar])
-		assert.equal((await ok(await call(`/instances/${id}/versions`))).version, current.version + 2)
-		assert.deepEqual(
-			(
-				await db
-					.prepare('SELECT version FROM shared_versions WHERE instance_id = ? AND ready = 0')
-					.bind(id)
-					.all()
-			).results,
-			[],
-			'abandoned uploads are dropped by the next complete version',
-		)
+		await code(await push(id, [file('huge.jar', 'mod', GB)]), 413, 'share_too_large')
 
-		// 100 MB per instance: four 25 MB files fit, one more byte does not.
-		const full = await ok(await call('/instances', 'POST', { name: 'Full' }))
-		const big = Array.from({ length: 4 }, (_, index) => ({
-			file_name: `${index}.jar`,
-			file_type: 'mod',
-			bytes: Buffer.alloc(25 * MB, index + 1),
-		}))
-		assert.equal((await publish(full.id, big)).failed, undefined)
-		assert.equal(
-			(await publish(full.id, big)).failed,
-			undefined,
-			'unchanged files take no more room',
-		)
-		const extra = { file_name: 'extra.jar', file_type: 'mod', bytes: Buffer.from('x') }
-		assert.equal((await publish(full.id, [...big, extra])).failed, 413)
-		assert.equal((await stored(full.id)).length, 4)
-
-		// Deleting the shared instance removes its files.
-		await ok(await call(`/instances/${full.id}`, 'DELETE'))
-		assert.equal((await call(`/instances/${full.id}`)).status, 404)
-		assert.deepEqual(await stored(full.id), [])
-		assert.equal((await stored(id)).length, 2, 'other instances keep their files')
-
-		// A ready version loses its object: a download discovers it, and the next push repairs it.
-		const repair = await ok(await call('/instances', 'POST', { name: 'Repair' }))
-		await publish(repair.id, [jar])
-		await publish(repair.id, [jar])
-		const beforeLoss = await ok(await call(`/instances/${repair.id}/versions`))
-		await files.delete(`${repair.id}/${sha256(jar.bytes)}`)
-		const missing = await send(beforeLoss.external_files[0].url, 'GET', 'owner')
-		assert.equal(missing.status, 404)
-		assert.equal((await missing.json()).code, 'file_missing')
-		for (const version of [1, 2]) {
-			const broken = await ok(await call(`/instances/${repair.id}/versions/${version}`))
-			assert.equal(broken.ready, false)
-			assert.equal(broken.external_files[0].sha256, undefined)
-			assert.ok(broken.external_files[0].url.endsWith(`/versions/${version}/files`))
+		// An unchanged file keeps its object. The sixth ready version prunes the first manifest,
+		// and the Core is told to drop the roots nothing needs any more.
+		const pushed = [second.root]
+		for (let push_ = 0; push_ < 5; push_++) {
+			const changed = file(config.file_name, 'config', 30 + push_)
+			const version = await ok(await push(id, [jar, changed]))
+			assert.equal(version.ready, false)
+			pushed.push(version.root)
+			const answer = await ok(
+				await report(
+					'core',
+					pushed.map((root) => ({ root, bytes: 1 })),
+				),
+			)
+			assert.deepEqual(answer.pull, [])
+			assert.deepEqual(answer.drop.sort(), pushed.slice(0, -1).sort(), 'only the newest root stays')
 		}
-		const repaired = await publish(repair.id, [jar])
-		assert.equal(repaired.result.ready, true)
-		assert.equal((await ok(await call(`/instances/${repair.id}/versions`))).ready, true)
-		await ok(await call(`/instances/${repair.id}`, 'DELETE'))
+		const current = await ok(await call(`/instances/${id}/versions`))
+		assert.equal(current.version, 7)
+		assert.equal(current.ready, true)
+		assert.equal((await call(`/instances/${id}/versions/1`)).status, 404)
+		assert.equal((await call(`/instances/${id}/versions/2`)).status, 404)
+		assert.equal((await ok(await call(`/instances/${id}/versions/3`))).version, 3)
+		assert.deepEqual(
+			await manifests(id),
+			[3, 4, 5, 6, 7].map((version) => `manifests/${id}/${version}`),
+		)
+
+		// A home that already holds the exact objects makes a version ready at once.
+		const again = await ok(await report('core', [{ root: current.root, bytes: 1 }]))
+		assert.deepEqual(again.drop, [])
+		const same = await ok(
+			await push(
+				id,
+				current.external_files.map(({ url: _url, ...entry }) => entry),
+			),
+		)
+		assert.equal(same.version, 8)
+		assert.equal(same.ready, true)
+		assert.equal(same.root, current.root)
+
+		// A replica that does not hold the newest version is told to pull it from the home.
+		await db.prepare('UPDATE shared_instances SET replica = ? WHERE id = ?').bind('core2', id).run()
+		const replica = await ok(await report('core2', []))
+		assert.equal(replica.pull.length, 1)
+		assert.equal(replica.pull[0].root, current.root)
+		const pull = decode(replica.pull[0].ticket)
+		assert.ok(pull.valid)
+		assert.equal(pull.claims.kind, 'pull')
+		assert.equal(pull.claims.aud, 'core2')
+		assert.equal(pull.claims.source.core.id, 'core')
+		assert.equal(pull.claims.source.core.cert_fingerprint, 'f'.repeat(64))
+		const inner = decode(pull.claims.source.ticket)
+		assert.equal(inner.claims.kind, 'fetch')
+		assert.deepEqual(inner.claims.aud, ['core'])
+		await ok(await report('core2', [{ root: current.root, bytes: 1 }]))
+		const both = await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))
+		assert.deepEqual(
+			both.pool.holders.map((core) => core.id),
+			['core', 'core2'],
+		)
+		assert.deepEqual(decode(both.pool.ticket).claims.aud, ['core', 'core2'])
+
+		// Leaving and removal revoke access to versions.
+		await ok(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['friend'] }))
+		assert.equal(
+			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend')).status,
+			401,
+		)
+
+		// Deleting a share removes its manifests.
+		await ok(await call(`/instances/${id}`, 'DELETE'))
+		assert.deepEqual(await manifests(id), [])
+
+		// 3 GB per account across shares, counted from ready versions.
+		// Each exactly 1 GiB once encrypted: 1,024 chunks of 16 tag bytes each.
+		const shares = []
+		for (const name of ['A', 'B', 'C']) {
+			const share = await ok(await call('/instances', 'POST', { name }))
+			const big = file(`${name}.jar`, 'mod', GB - 16 * 1024)
+			const version = await ok(await push(share.id, [big]))
+			shares.push({ id: share.id, root: version.root, big })
+		}
+		// Versions still uploading count too, so pushes to several shares at once cannot pass.
+		const full = await ok(await call('/instances', 'POST', { name: 'Full' }))
+		await code(await push(full.id, [file('one.jar', 'mod', 1)]), 413, 'storage_quota')
+		await ok(
+			await report(
+				'core',
+				shares.map((share) => ({ root: share.root, bytes: GB })),
+			),
+		)
+		await code(await push(full.id, [file('one.jar', 'mod', 1)]), 413, 'storage_quota')
+		assert.equal(
+			(await push(shares[0].id, [shares[0].big])).status,
+			200,
+			"replacing a share's own version is fine",
+		)
+
+		// Deleting a share removes its manifests; the Core drops its files at its next report.
+		await ok(await call(`/instances/${shares[2].id}`, 'DELETE'))
+		assert.equal((await call(`/instances/${shares[2].id}`)).status, 404)
+		assert.deepEqual(await manifests(shares[2].id), [])
+		const after = await ok(
+			await report(
+				'core',
+				shares.map((share) => ({ root: share.root, bytes: 1 })),
+			),
+		)
+		assert.ok(after.drop.includes(shares[2].root))
+		assert.ok(!after.drop.includes(shares[0].root))
 	} finally {
 		await backend.dispose()
 	}

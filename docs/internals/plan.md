@@ -13,7 +13,7 @@ Older planning files were merged into this one on 2026-10-10. They are in git hi
   the UI, not the UI.
 - **Backend** (`apps/backend`, Cloudflare Workers + D1): a runnable clone of Modrinth's labrinth
   minus content management. It owns accounts, sessions, friends, presence, and sharing metadata:
-  members, versions, where files are stored, and who may download them. Shared files live in R2 behind it. It runs locally with no Cloudflare account or billing.
+  members, versions, where files are stored, and who may download them. Shared files live on Cores (see `pool.md`); the backend keeps manifests in R2 and never carries a file byte. It runs locally with no Cloudflare account or billing.
 - **Core** (`apps/core`, also called Copal): the self-hosted server manager. It is a product, not
   the general backend.
 - **Modrinth** serves all public content. Shared versions reference Modrinth files by id.
@@ -35,20 +35,19 @@ Who talks to whom:
 There are no friend groups. You share an instance with friends, and sharing is not tied to a Core.
 Someone an instance is shared with does not control it; for now they can only propose changes.
 
-**Now: recreate Modrinth's sharing backend on R2.** The App keeps Modrinth's own sharing code and
-UI. Our backend answers the same API, with our accounts, and stores uploaded files in R2. Nothing
-custom on top.
+**Now: the shared file pool.** The App keeps Modrinth's own sharing code and UI. Our backend answers
+the same API with our accounts, and the files live in a pool of always-on Cores. The design and
+the exact protocol are in `pool.md`.
 
 - Shared exactly as Modrinth does: links for anything on Modrinth; real files for content that is
   not (mod jars, resource packs, shaders, datapacks); and the config files the owner picks when
-  pushing, each under its path in the instance. Files are uploaded in zstd-compressed batches.
-- Limits, much tighter than Modrinth's and easy to change: 25 MB per file, 20 uploaded files per
-  version, 100 MB stored per shared instance. An unchanged file is stored once.
-- A file over a limit fails the push the way Modrinth's flow already reports a rejected upload.
-- The five latest versions are kept. Files are deleted from R2 when their version is pruned.
-- R2 runs locally through wrangler's emulation. No Cloudflare account, card, or hosting yet.
-- The Amberite-only upload code is removed: the `sharing-storage` program, the two local storage
-  processes, local copies of pushed versions, and resumable uploads.
+  pushing, each under its path in the instance.
+- The owner's App encrypts every file and uploads it straight to the share's Core; members
+  download from it. The backend keeps the manifest and signs short-lived tickets.
+- Limits: 1 GB per shared instance, 3 GB per account across its shares, 4,096 files per version.
+- The five latest manifests are kept; Cores keep the files of the latest version only.
+- A push with no Core offering storage fails with a clear message. Storage is on by default on a
+  Core and is turned off, or its caps changed, in Settings, Cores.
 
 Later, in rough order of intent:
 
@@ -56,16 +55,14 @@ Later, in rough order of intent:
 - Pins, once a version history view exists. KubeJS scripts in the bundle.
 - Stop uploading files at all where possible: reference where a file already lives and make sure
   it stays there, so a shared version is about half a megabyte.
-- Large files not held in R2 are listed as needed and pulled from another App that has them.
-- If you own a Core, share to it directly so friends fetch from your Core. Further out, files on
-  other people's always-on Cores (never desktop Cores), contribution on by default with opt out
-  in settings, a NAS as overflow, and encryption so a Core owner cannot read others' files.
+- A second Core in the pool: replicas and re-homing, as `pool.md` describes for phase two.
+- The store under its own OS account on an installed Core.
 
 ## Privacy
 
-Files in R2 are readable by whoever operates the backend. Once files live on other people's Cores,
-a Core owner must not be able to read them; that needs encryption, which is deferred. Analytics
-can be opted out of.
+Shared files are encrypted before they leave the owner's App, so a Core owner cannot read what
+their Core stores. The backend holds the keys, as it already holds accounts. Analytics can be
+opted out of.
 
 ## Linked servers
 
@@ -208,7 +205,7 @@ How it works (`apps/core/src/network`):
 
 ## Current state, 2026-10-12
 
-- Accounts, friends, presence, and sharing on R2 between two Apps work locally.
+- Accounts, friends, presence, and sharing through the pool between two Apps work locally.
 - Core has login against our accounts, one API (hosting), and the engine that installs and updates
   a server from a pack. Convex, Core's second API, the legacy sync, and `apps/realtime` are gone.
   The last commit where everything worked on Convex is `762843d41`.
@@ -224,5 +221,3 @@ How it works (`apps/core/src/network`):
   local port the App opens for a Core that serves HTTPS).
 
 ## Open questions
-
-- Whether the free Workers plan is enough for R2, to check before hosting.

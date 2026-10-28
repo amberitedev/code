@@ -101,12 +101,31 @@ struct CurrentSharedInstanceExternalFile {
 }
 
 impl CurrentSharedInstanceExternalFile {
-    fn matches(&self, desired: &SharedInstanceExternalFileData) -> bool {
-        !self.missing
-            && desired
-                .sha1
-                .as_deref()
-                .is_some_and(|sha1| self.sha1.eq_ignore_ascii_case(sha1))
+    /// Whether the installed file is already the one wanted, so it need not be downloaded again.
+    /// Amberite's manifest carries SHA-256 instead of upstream's SHA-1, so the installed file is
+    /// hashed when there is no SHA-1 to compare.
+    async fn matches(
+        &self,
+        desired: &SharedInstanceExternalFileData,
+        instance_path: &std::path::Path,
+    ) -> crate::Result<bool> {
+        if self.missing {
+            return Ok(false);
+        }
+        if let Some(sha1) = desired.sha1.as_deref() {
+            return Ok(self.sha1.eq_ignore_ascii_case(sha1));
+        }
+        if desired.sha256.is_none() {
+            return Ok(false);
+        }
+        Ok(
+            !crate::self_hosted::integrity::installed_shared_file_changed(
+                instance_path,
+                Some(&self.relative_path),
+                desired.sha256.as_deref(),
+            )
+            .await?,
+        )
     }
 }
 
@@ -231,11 +250,18 @@ impl SharedInstanceApplyPlan {
             }
         }
 
+        let instance_path = state
+            .directories
+            .instances_dir()
+            .join(&metadata.instance.path);
         for desired in desired.external_files.into_values() {
             let key = (desired.file_type, desired.file.file_name.clone());
             match current.external_files.get(&key) {
-                Some(current) if current.matches(&desired.file) => {}
-                Some(_) => plan.external_updates.push(desired),
+                Some(current) => {
+                    if !current.matches(&desired.file, &instance_path).await? {
+                        plan.external_updates.push(desired);
+                    }
+                }
                 None => plan.external_additions.push(desired),
             }
         }
@@ -1050,62 +1076,21 @@ async fn install_shared_instance_external_file(
         )));
     }
 
-    let response = crate::self_hosted::integrity::download(&file.url).await?;
-
-    if !response.status().is_success() {
-        bail!(
-            "shared instance external file download failed with status {}",
-            response.status()
-        );
-    }
-
-    if response
-        .content_length()
-        .is_some_and(|content_length| content_length != file.file_size)
-    {
-        bail!(
-            "shared instance external file {} has an unexpected size",
-            file.file_name
-        );
-    }
-
-    let mut stream = response.bytes_stream();
-    let initial_capacity = usize::try_from(
-        file.file_size.min(MAX_SHARED_INSTANCE_INITIAL_BUFFER_SIZE),
-    )
-    .context(ErrorKind::InputError(format!(
-        "shared instance external file {} is too large",
-        file.file_name
-    )))?;
-    let mut bytes = Vec::with_capacity(initial_capacity);
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        let downloaded_size = (bytes.len() as u64)
-            .checked_add(chunk.len() as u64)
-            .ok_or(ErrorKind::InputError(format!(
-                "shared instance external file {} is too large",
-                file.file_name
-            )))?;
-        if downloaded_size > file.file_size {
-            bail!(
-                "shared instance external file {} has an unexpected size",
-                file.file_name
-            );
+    let bytes = match &file.pool {
+        Some(pool) => {
+            fetch_pooled_shared_instance_external_file(file, pool, downloaded)
+                .await?
         }
-        downloaded.add(chunk.len() as u64);
-        bytes.extend_from_slice(&chunk);
-    }
-
+        None => {
+            download_shared_instance_external_file(file, downloaded).await?
+        }
+    };
     if bytes.len() as u64 != file.file_size {
         bail!(
             "shared instance external file {} has an unexpected size",
             file.file_name
         );
     }
-    crate::self_hosted::integrity::verify_shared_file(
-        &bytes,
-        file.sha256.as_deref(),
-    )?;
     let bytes = bytes::Bytes::from(bytes);
 
     if file.file_type == CONFIG_BUNDLE_FILE_TYPE {
@@ -1140,6 +1125,88 @@ async fn install_shared_instance_external_file(
     Ok(())
 }
 
+fn shared_instance_initial_buffer_size(
+    file: &SharedInstanceExternalFileData,
+) -> crate::Result<usize> {
+    usize::try_from(file.file_size.min(MAX_SHARED_INSTANCE_INITIAL_BUFFER_SIZE))
+        .context(ErrorKind::InputError(format!(
+            "shared instance external file {} is too large",
+            file.file_name
+        )))
+}
+
+async fn fetch_pooled_shared_instance_external_file(
+    file: &SharedInstanceExternalFileData,
+    pool: &crate::self_hosted::pool::PoolFile,
+    downloaded: &DownloadedBytes,
+) -> crate::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+
+    let capacity = shared_instance_initial_buffer_size(file)?;
+    let limit = file.file_size.saturating_add(1);
+    crate::self_hosted::pool::fetch_file(
+        pool,
+        &|bytes| downloaded.add(bytes),
+        |reader| async move {
+            let mut bytes = Vec::with_capacity(capacity);
+            reader.take(limit).read_to_end(&mut bytes).await?;
+            Ok(bytes)
+        },
+    )
+    .await
+}
+
+async fn download_shared_instance_external_file(
+    file: &SharedInstanceExternalFileData,
+    downloaded: &DownloadedBytes,
+) -> crate::Result<Vec<u8>> {
+    let response = crate::self_hosted::integrity::download(&file.url).await?;
+
+    if !response.status().is_success() {
+        bail!(
+            "shared instance external file download failed with status {}",
+            response.status()
+        );
+    }
+
+    if response
+        .content_length()
+        .is_some_and(|content_length| content_length != file.file_size)
+    {
+        bail!(
+            "shared instance external file {} has an unexpected size",
+            file.file_name
+        );
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut bytes =
+        Vec::with_capacity(shared_instance_initial_buffer_size(file)?);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let downloaded_size = (bytes.len() as u64)
+            .checked_add(chunk.len() as u64)
+            .ok_or(ErrorKind::InputError(format!(
+                "shared instance external file {} is too large",
+                file.file_name
+            )))?;
+        if downloaded_size > file.file_size {
+            bail!(
+                "shared instance external file {} has an unexpected size",
+                file.file_name
+            );
+        }
+        downloaded.add(chunk.len() as u64);
+        bytes.extend_from_slice(&chunk);
+    }
+
+    crate::self_hosted::integrity::verify_shared_file(
+        &bytes,
+        file.sha256.as_deref(),
+    )?;
+    Ok(bytes)
+}
+
 /// Shared files can be up to the version's size limit, so they are streamed to
 /// disk rather than held in memory.
 async fn install_shared_instance_file(
@@ -1163,6 +1230,21 @@ async fn install_shared_instance_file(
     if shared_instance_file_is_current(writer, file, state).await? {
         downloaded.add(file.file_size);
         return Ok(());
+    }
+    if let Some(pool) = &file.pool {
+        return crate::self_hosted::pool::fetch_file(
+            pool,
+            &|bytes| downloaded.add(bytes),
+            |reader| {
+                writer.write_from_reader(
+                    state,
+                    &file.file_name,
+                    reader,
+                    file.file_size,
+                )
+            },
+        )
+        .await;
     }
 
     let response = crate::self_hosted::integrity::download(&file.url).await?;

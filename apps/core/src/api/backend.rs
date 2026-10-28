@@ -10,6 +10,8 @@
 //! - `POST /core/access`: this user may reach this Core; notify them. [`Grant`].
 //! - `DELETE /core/access`: withdraw the invite, and the directory entry unless `keep_core`.
 //!   [`Remove`].
+//! - `POST /core/storage`: what this Core's store holds and has room for, after uploads and
+//!   daily. [`StorageReport`] in, [`StorageAnswer`] out (see `store::supervisor`).
 //!
 //! Every call is authenticated with Core's own key, `Authorization: Bearer amc_...`. A key the
 //! backend no longer knows gets 410 `core_removed` from the state report and the directory
@@ -20,12 +22,15 @@ use ts_rs::TS;
 
 use super::access::Role;
 
-/// The claims of a ticket: an Ed25519-signed JWT (`alg: EdDSA`), valid for five minutes, for one
-/// Core and one use.
+/// The claims of a sign-in ticket: an Ed25519-signed JWT (`alg: EdDSA`), valid for five minutes,
+/// for one Core and one use. The pool's tickets are signed with the same keys and differ in
+/// `kind` (see `store::tickets`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TicketClaims {
     /// The backend's issuer name.
     pub iss: String,
+    /// Always `session`. Core refuses any other kind for sign-in.
+    pub kind: String,
     /// The user id.
     pub sub: String,
     pub name: String,
@@ -120,4 +125,50 @@ pub enum OwedCall {
     Remove(Remove),
     /// `POST /core/state` with the state at the time it is sent.
     ReportState,
+    /// `POST /core/storage` with the store's holdings at the time it is sent.
+    ReportStorage,
+}
+
+/// Body of `POST /core/storage`. Bytes throughout.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct StorageReport {
+    /// The owner offers storage for shared files.
+    pub enabled: bool,
+    /// Core is installed as a service.
+    pub service: bool,
+    pub cap: u64,
+    pub used: u64,
+    /// Free on the store's disk.
+    pub free: u64,
+    /// What it may serve a day, and has served today (UTC).
+    pub egress_cap: u64,
+    pub egress_today: u64,
+    /// Every version the store holds whole.
+    pub versions: Vec<HeldVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HeldVersion {
+    /// R, the version's root hash.
+    pub root: String,
+    /// The bytes of its objects.
+    pub bytes: u64,
+}
+
+/// What the backend answers a [`StorageReport`] with.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+pub struct StorageAnswer {
+    /// Roots to stop holding.
+    #[serde(default)]
+    pub drop: Vec<String>,
+    /// Versions to copy from another Core.
+    #[serde(default)]
+    pub pull: Vec<PullOrder>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PullOrder {
+    pub root: String,
+    /// A pull ticket naming the source Core.
+    pub ticket: String,
 }
