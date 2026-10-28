@@ -1079,7 +1079,9 @@ async fn install_instance(
     };
     match state.servers.hold(id) {
         Ok(hold) => {
-            records::clear_pending(&state.db, id).await?;
+            // A version still waiting from an earlier push is superseded by this one.
+            let waiting = records::clear_pending(&state.db, id).await?;
+            forget_pack(state, waiting).await;
             state.content.spawn(
                 hold,
                 busy,
@@ -1126,8 +1128,11 @@ async fn install_instance(
                         shared_instance_id: linked.shared_instance_id,
                         shared_version: linked.version,
                         start_after: restart,
+                        force,
                     };
-                    records::set_pending(&state.db, &id, &pending).await?;
+                    let replaced =
+                        records::set_pending(&state.db, &id, &pending).await?;
+                    forget_pack(&state, replaced).await;
                     if restart {
                         state.servers.stop(&id).await?;
                     }
@@ -1169,7 +1174,7 @@ pub async fn apply_pending(state: &AppState, id: &str) {
     if records::clear_pending(&state.db, id).await.is_err() {
         return;
     }
-    let start_after = pending.start_after;
+    let (start_after, force) = (pending.start_after, pending.force);
     let source = PackSource::Stored {
         sha1: pending.sha1,
         instance: Some(Linked {
@@ -1185,7 +1190,7 @@ pub async fn apply_pending(state: &AppState, id: &str) {
         Installing::Modpack,
         move |content, hold, progress| async move {
             let result = content_install::pack(
-                &content, &hold, &progress, source, None, false,
+                &content, &hold, &progress, source, None, force,
             )
             .await;
             if start_after {
@@ -1199,6 +1204,15 @@ pub async fn apply_pending(state: &AppState, id: &str) {
             result
         },
     );
+}
+
+/// Delete a pack file nothing uses any more, such as a waiting version a newer push replaced.
+async fn forget_pack(state: &AppState, sha1: Option<String>) {
+    let Some(sha1) = sha1 else { return };
+    if let Ok(false) = records::pack_in_use(&state.db, &sha1).await {
+        let dirs = SharedDirs::new(state.servers.paths().root());
+        let _ = tokio::fs::remove_file(dirs.pack(&sha1)).await;
+    }
 }
 
 /// Apply pushed versions as their servers stop, for as long as Core runs.

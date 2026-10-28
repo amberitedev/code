@@ -94,8 +94,9 @@ same versions members read, from the same place. Nothing is ever uploaded to a s
 - Each server records the version it applied. The owner sees when a server is behind the latest
   push, and server cards follow the applied version.
 - A push that only changes what servers use (server-only mods, server config) is still a normal
-  version, but members are not prompted. A member's App compares its version with the latest,
-  ignoring server-only files, and moves forward silently when nothing it needs changed.
+  version, but members are not prompted. A member's App compares its content with the latest
+  version, ignoring server-only mods, and offers no update when nothing it needs changed; it
+  takes that version with the next update that matters to it.
 - Anyone the instance is shared with can host from it, because a server only needs read access to
   the share's versions.
 - A server gets the configs a version carries, nothing more. Any other config it generates itself.

@@ -112,6 +112,14 @@ pub async fn get_shared_instance_server_pack(
             &state.api_semaphore
         ),
     )?;
+    if let Some(missing) = ids
+        .iter()
+        .find(|id| !versions.iter().any(|version| version.id == **id))
+    {
+        bail!(crate::ErrorKind::InputError(format!(
+            "shared instance version {missing} was not found"
+        )));
+    }
     let environments = environments
         .into_iter()
         .map(|version| (version.id, version.environment))
@@ -177,14 +185,13 @@ pub async fn get_shared_instance_server_pack(
         });
     }
     let pool = match (version.pool, version.root) {
-        (Some(pool), Some(root)) if !pool_files.is_empty() => {
-            Some(ServerPackPool {
-                root,
-                holders: pool.holders,
-                ticket: pool.ticket,
-            })
-        }
-        _ => None,
+        _ if pool_files.is_empty() => None,
+        (Some(pool), Some(root)) => Some(ServerPackPool {
+            root,
+            holders: pool.holders,
+            ticket: pool.ticket,
+        }),
+        _ => bail!(crate::ErrorKind::PoolFilesUnavailable),
     };
 
     let metadata = crate::state::get_instance(instance_id, &state.pool)

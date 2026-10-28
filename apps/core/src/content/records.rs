@@ -243,17 +243,22 @@ pub struct PendingPack {
     pub shared_instance_id: String,
     pub shared_version: i64,
     pub start_after: bool,
+    pub force: bool,
 }
 
-/// Wait for the server to stop with this pack, in place of any that waited before.
+/// Wait for the server to stop with this pack, in place of any that waited before. Returns the
+/// SHA-1 of the pack it replaced, whose file may now be unused.
 pub async fn set_pending(
     db: &SqlitePool,
     server_id: &str,
     pending: &PendingPack,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<Option<String>> {
+    let mut tx = db.begin().await?;
+    let replaced = pending_sha1(&mut *tx, server_id).await?;
     sqlx::query(
         "INSERT OR REPLACE INTO pending_packs (server_id, sha1, instance_id, instance_name, \
-         shared_instance_id, shared_version, start_after) VALUES (?, ?, ?, ?, ?, ?, ?)",
+         shared_instance_id, shared_version, start_after, force) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(server_id)
     .bind(&pending.sha1)
@@ -262,9 +267,21 @@ pub async fn set_pending(
     .bind(&pending.shared_instance_id)
     .bind(pending.shared_version)
     .bind(pending.start_after)
-    .execute(db)
+    .bind(pending.force)
+    .execute(&mut *tx)
     .await?;
-    Ok(())
+    tx.commit().await?;
+    Ok(replaced.filter(|sha1| *sha1 != pending.sha1))
+}
+
+async fn pending_sha1(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar("SELECT sha1 FROM pending_packs WHERE server_id = ?")
+        .bind(server_id)
+        .fetch_optional(db)
+        .await
 }
 
 pub async fn pending(
@@ -273,23 +290,24 @@ pub async fn pending(
 ) -> sqlx::Result<Option<PendingPack>> {
     sqlx::query_as(
         "SELECT sha1, instance_id, instance_name, shared_instance_id, shared_version, \
-         start_after FROM pending_packs WHERE server_id = ?",
+         start_after, force FROM pending_packs WHERE server_id = ?",
     )
     .bind(server_id)
     .fetch_optional(db)
     .await
 }
 
-/// Forget the waiting pack: it is being applied, or a newer push replaced it.
+/// Forget the waiting pack: it is being applied, or a newer push replaced it. Returns its SHA-1.
 pub async fn clear_pending(
     db: &SqlitePool,
     server_id: &str,
-) -> sqlx::Result<()> {
-    sqlx::query("DELETE FROM pending_packs WHERE server_id = ?")
-        .bind(server_id)
-        .execute(db)
-        .await?;
-    Ok(())
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(
+        "DELETE FROM pending_packs WHERE server_id = ? RETURNING sha1",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await
 }
 
 /// The servers with a pack waiting.

@@ -85,7 +85,10 @@ pub async fn pull(
 }
 
 /// `https://ip:port`, refused unless the IP is public or `allow_private` is set.
-fn address(address: &str, allow_private: bool) -> Result<url::Url, StoreError> {
+pub(crate) fn address(
+    address: &str,
+    allow_private: bool,
+) -> Result<url::Url, StoreError> {
     let invalid = |description: &str| {
         StoreError::new(Code::InvalidRequest, description.to_owned())
     };

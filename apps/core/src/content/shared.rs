@@ -134,6 +134,7 @@ async fn fetch(
     file: &PoolFile,
     path: &Path,
 ) -> Result<(), Error> {
+    let root = hash(&pool.root)?;
     let object = hash(&file.object)?;
     let plain = hash(&file.sha256)?;
     let key = match &file.key {
@@ -153,11 +154,20 @@ async fn fetch(
         for address in std::iter::once(&holder.address)
             .chain(holder.public_address.as_ref())
         {
+            // An `https://ip:port`, so the ticket only goes over TLS pinned to the holder. A
+            // private address is allowed: a holder on the Core's own network is reached there.
+            let base = match crate::store::pull::address(address, true) {
+                Ok(base) => base,
+                Err(error) => {
+                    last = error.description;
+                    continue;
+                }
+            };
             let url = format!(
                 "{}/store/versions/{}/objects/{}",
-                address.trim_end_matches('/'),
-                pool.root,
-                file.object
+                base.as_str().trim_end_matches('/'),
+                hex::encode(root),
+                hex::encode(object)
             );
             match fetch_from(
                 &client,

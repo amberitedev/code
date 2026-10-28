@@ -12,5 +12,7 @@ CREATE TABLE pending_packs (
     shared_instance_id TEXT NOT NULL,
     shared_version INTEGER NOT NULL,
     -- Start the server again once the pack is in: the push asked for a restart.
-    start_after INTEGER NOT NULL
+    start_after INTEGER NOT NULL,
+    -- Install it even for an older Minecraft than the world's, as the push asked.
+    force INTEGER NOT NULL
 );
