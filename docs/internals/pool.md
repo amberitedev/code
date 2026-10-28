@@ -126,6 +126,11 @@ already hold, the pool keeps serving with the backend down.
 
 ### Where a share lives
 
+> Decided 2026-10-28, not built yet: home on the owner's own Core when the instance has a server,
+> replicas now rather than in phase two, kept versions (an owner setting, five by default) keep their files on the Cores, usage
+> counts uploaded files across kept versions, and a Core with storage off keeps its owner's shares
+> only. `plan.md`, Sharing and storage, has the details; this document is updated when it ships.
+
 Every share lives whole on exactly two Cores, home and replica, and all its versions go to the same
 pair. An install is served by one Core, never assembled from pieces across many. The two holder
 slots exist in the schema from day one.
