@@ -292,9 +292,6 @@ const onCreate = async (config: CreationFlowContextValue) => {
 	// The server is created from an instance and keeps following it
 	if (config.instanceSelection.value && instanceSource) {
 		modalRef.value?.hide()
-		uploading.value = true
-		uploadedBytes.value = 0
-		totalBytes.value = 0
 
 		try {
 			await instanceSource.pushInstance({
@@ -302,10 +299,6 @@ const onCreate = async (config: CreationFlowContextValue) => {
 				worldId: worldId.value!,
 				instanceId: config.instanceSelection.value.id,
 				properties: config.buildProperties(),
-				onProgress: ({ loaded, total }) => {
-					uploadedBytes.value = loaded
-					totalBytes.value = total
-				},
 			})
 			server.value.status = 'installing'
 			await finalizeSetup()
@@ -317,7 +310,6 @@ const onCreate = async (config: CreationFlowContextValue) => {
 				type: 'error',
 			})
 			config.loading.value = false
-			uploading.value = false
 		}
 		return
 	}

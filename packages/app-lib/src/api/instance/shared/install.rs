@@ -215,10 +215,10 @@ pub async fn get_shared_instance_update_preview(
         }));
     }
 
-    let update_available = attachment
+    let newer = attachment
         .applied_version
         .is_none_or(|current| current < version.version);
-    let diffs = if update_available {
+    let diffs = if newer {
         let config_files = remote_shared_config_files(
             &attachment.id,
             attachment.applied_version,
@@ -232,11 +232,13 @@ pub async fn get_shared_instance_update_preview(
         Vec::new()
     };
 
+    // A newer version with nothing a player runs, such as one that only changed server-only
+    // mods, is not offered. The member takes it with the next update that matters to them.
     Ok(Some(SharedInstanceUpdatePreview {
         shared_instance_id: attachment.id,
         current_version: attachment.applied_version,
         latest_version: version.version,
-        update_available,
+        update_available: !diffs.is_empty(),
         diffs,
     }))
 }

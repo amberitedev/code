@@ -1,6 +1,6 @@
 import { provideInstanceServerSource } from '@modrinth/ui'
 
-import { exportInstancePack, pushPackToServer } from '@/features/servers/linked-servers'
+import { pushInstanceToServer } from '@/features/servers/linked-servers'
 import { getInstanceIconUrl, list } from '@/helpers/instance'
 
 /** Lets the hosting screens create and update a server from one of this App's instances. */
@@ -15,16 +15,14 @@ export function setupInstanceServerSourceProvider() {
 					iconUrl: getInstanceIconUrl(instance.icon_path) ?? undefined,
 				}))
 		},
-		async pushInstance({ serverId, instanceId, properties, restart, onProgress }) {
+		async pushInstance({ serverId, instanceId, properties, restart }) {
 			const instance = (await list()).find((candidate) => candidate.id === instanceId)
 			if (!instance) {
 				throw new Error('This instance is not on this device, so it cannot be pushed from here.')
 			}
-			const pack = await exportInstancePack(instance.id)
-			await pushPackToServer(pack, { id: instance.id, name: instance.name }, serverId, {
+			await pushInstanceToServer({ id: instance.id, name: instance.name }, serverId, {
 				properties,
 				restart,
-				onProgress,
 			})
 		},
 	})

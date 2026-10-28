@@ -133,6 +133,9 @@ pub struct Pack {
     pub sha1: String,
     pub instance_id: Option<String>,
     pub instance_name: Option<String>,
+    /// The share and version the pack is, for a pack from an App instance (`content::shared`).
+    pub shared_instance_id: Option<String>,
+    pub shared_version: Option<i64>,
     pub error: Option<String>,
 }
 
@@ -142,7 +145,7 @@ pub async fn pack(
 ) -> sqlx::Result<Option<Pack>> {
     sqlx::query_as(
         "SELECT project_id, version_id, name, version_number, summary, sha1, instance_id, \
-         instance_name, error FROM packs WHERE server_id = ?",
+         instance_name, shared_instance_id, shared_version, error FROM packs          WHERE server_id = ?",
     )
     .bind(server_id)
     .fetch_optional(db)
@@ -156,12 +159,15 @@ pub async fn set_pack(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO packs (server_id, project_id, version_id, name, version_number, summary, \
-         sha1, instance_id, instance_name, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         sha1, instance_id, instance_name, shared_instance_id, shared_version, error) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT (server_id) DO UPDATE SET project_id = excluded.project_id, \
          version_id = excluded.version_id, name = excluded.name, \
          version_number = excluded.version_number, summary = excluded.summary, \
          sha1 = excluded.sha1, instance_id = excluded.instance_id, \
-         instance_name = excluded.instance_name, error = excluded.error",
+         instance_name = excluded.instance_name, \
+         shared_instance_id = excluded.shared_instance_id, \
+         shared_version = excluded.shared_version, error = excluded.error",
     )
     .bind(server_id)
     .bind(&pack.project_id)
@@ -172,6 +178,8 @@ pub async fn set_pack(
     .bind(&pack.sha1)
     .bind(&pack.instance_id)
     .bind(&pack.instance_name)
+    .bind(&pack.shared_instance_id)
+    .bind(pack.shared_version)
     .bind(&pack.error)
     .execute(db)
     .await?;
@@ -192,10 +200,15 @@ pub async fn set_pack_error(
     Ok(())
 }
 
-/// Stop following the pack. Its files stay, as files someone added.
+/// Stop following the pack, and drop any waiting to apply. Its files stay, as files someone
+/// added.
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     let mut tx = db.begin().await?;
     sqlx::query("DELETE FROM packs WHERE server_id = ?")
+        .bind(server_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM pending_packs WHERE server_id = ?")
         .bind(server_id)
         .execute(&mut *tx)
         .await?;
@@ -208,13 +221,80 @@ pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     tx.commit().await
 }
 
-/// Whether any server's pack is the `.mrpack` with this SHA-1, so it must be kept.
+/// Whether any server's pack, or a pack waiting for its server to stop, is the `.mrpack` with
+/// this SHA-1, so it must be kept.
 pub async fn pack_in_use(db: &SqlitePool, sha1: &str) -> sqlx::Result<bool> {
     Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM packs WHERE sha1 = ?",
+        "SELECT (SELECT COUNT(*) FROM packs WHERE sha1 = ?1) \
+         + (SELECT COUNT(*) FROM pending_packs WHERE sha1 = ?1)",
     )
     .bind(sha1)
     .fetch_one(db)
     .await?
         > 0)
+}
+
+/// A row of `pending_packs`: a share version pushed while its server ran.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct PendingPack {
+    pub sha1: String,
+    pub instance_id: String,
+    pub instance_name: String,
+    pub shared_instance_id: String,
+    pub shared_version: i64,
+    pub start_after: bool,
+}
+
+/// Wait for the server to stop with this pack, in place of any that waited before.
+pub async fn set_pending(
+    db: &SqlitePool,
+    server_id: &str,
+    pending: &PendingPack,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO pending_packs (server_id, sha1, instance_id, instance_name, \
+         shared_instance_id, shared_version, start_after) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(server_id)
+    .bind(&pending.sha1)
+    .bind(&pending.instance_id)
+    .bind(&pending.instance_name)
+    .bind(&pending.shared_instance_id)
+    .bind(pending.shared_version)
+    .bind(pending.start_after)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn pending(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Option<PendingPack>> {
+    sqlx::query_as(
+        "SELECT sha1, instance_id, instance_name, shared_instance_id, shared_version, \
+         start_after FROM pending_packs WHERE server_id = ?",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await
+}
+
+/// Forget the waiting pack: it is being applied, or a newer push replaced it.
+pub async fn clear_pending(
+    db: &SqlitePool,
+    server_id: &str,
+) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM pending_packs WHERE server_id = ?")
+        .bind(server_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// The servers with a pack waiting.
+pub async fn servers_pending(db: &SqlitePool) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar("SELECT server_id FROM pending_packs")
+        .fetch_all(db)
+        .await
 }

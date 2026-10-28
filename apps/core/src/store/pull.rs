@@ -107,7 +107,7 @@ fn address(address: &str, allow_private: bool) -> Result<url::Url, StoreError> {
 
 /// A client that trusts exactly the certificate whose SHA-256 is `fingerprint`, follows no
 /// redirect, and uses no proxy.
-fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
+pub(crate) fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
     let fingerprint: [u8; 32] = hex::decode(fingerprint)
         .ok()
         .and_then(|bytes| bytes.try_into().ok())

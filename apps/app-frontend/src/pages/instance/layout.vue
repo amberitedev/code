@@ -129,7 +129,6 @@ import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { handleSevereError } from '@/composables/use-error.js'
 import { useInstanceConsole } from '@/composables/useInstanceConsole'
 import InstanceSettingsModal from '@/features/instances/settings-modal/index.vue'
-import { useSharedInstanceLink } from '@/features/servers/linked-servers'
 import { trackEvent } from '@/helpers/analytics'
 import { toError } from '@/helpers/errors'
 import {
@@ -407,7 +406,6 @@ const sharedInstanceState = createSharedInstanceContext(
 	notifySharedInstanceError,
 )
 provideSharedInstance(sharedInstanceState)
-useSharedInstanceLink(instance)
 const {
 	actionsLocked: sharedInstanceActionsLocked,
 	expectedUserId: sharedInstanceExpectedUserId,

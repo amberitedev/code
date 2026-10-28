@@ -2,8 +2,9 @@
 //! shared file and stores it on a Core; a member fetches it back from one of the version's
 //! holders and checks it twice, against C and then P.
 
-pub mod crypto;
 pub mod store;
+
+pub use amberite_pool as crypto;
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -16,8 +17,32 @@ use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::ErrorKind;
-use crypto::{Decryptor, PoolFetchError};
+use crypto::{DecryptError, Decryptor};
 use store::{ListedObject, PoolCore, StoreError};
+
+#[derive(Debug, thiserror::Error)]
+enum PoolFetchError {
+    /// The bytes are not the object that was asked for: the Core's fault.
+    #[error("the Core sent bytes that are not the shared file")]
+    WrongObject,
+    /// The object decrypts to a different file than the manifest names: the manifest's fault.
+    #[error("the shared file does not match its manifest")]
+    WrongContent,
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Http(#[from] StoreError),
+}
+
+impl From<DecryptError> for PoolFetchError {
+    fn from(error: DecryptError) -> Self {
+        match error {
+            DecryptError::WrongObject => Self::WrongObject,
+            DecryptError::WrongContent => Self::WrongContent,
+            DecryptError::Io(error) => Self::Io(error),
+        }
+    }
+}
 
 /// What a member needs to fetch one version's files.
 #[derive(Debug, Serialize, Deserialize)]
@@ -192,7 +217,7 @@ async fn fetch_once(
             .map_err(std::io::Error::other)
             .inspect_ok(|chunk| downloaded(chunk.len() as u64)),
     );
-    decryptor.run(body, writer).await
+    Ok(decryptor.run(body, writer).await?)
 }
 
 /// A file encrypted for a push, waiting in the push's folder under its C.

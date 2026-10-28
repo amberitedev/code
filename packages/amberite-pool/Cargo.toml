@@ -1,0 +1,19 @@
+[package]
+name = "amberite-pool"
+edition.workspace = true
+
+# The shared file pool's encryption (`docs/internals/pool.md`, Protocol), used by the App to
+# push and install shares and by Core to apply a share version to a server.
+[dependencies]
+chacha20poly1305 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
+
+[dev-dependencies]
+hex = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
+
+[lints]
+workspace = true

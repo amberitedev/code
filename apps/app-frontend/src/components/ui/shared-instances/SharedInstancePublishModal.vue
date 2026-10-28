@@ -9,7 +9,7 @@
 		scrollable
 	>
 		<div class="flex flex-col gap-4 px-6 py-4">
-			<Tabs v-if="sharesWithFriends" v-model:value="activeTab" :tabs="tabs" size="large" />
+			<Tabs v-if="publishes" v-model:value="activeTab" :tabs="tabs" size="large" />
 			<p class="m-0 text-base text-primary">
 				{{
 					formatMessage(
@@ -98,16 +98,6 @@
 					{{ formatMessage(commonMessages.cancelButton) }}
 				</Button>
 				<Button
-					v-if="hasServers"
-					type="outlined"
-					class="!border"
-					:disabled="confirmDisabled"
-					@click="confirmPublish(false)"
-				>
-					<UploadIcon />
-					{{ formatMessage(messages.publishButton) }}
-				</Button>
-				<Button
 					type="colored"
 					color="brand"
 					:disabled="confirmDisabled"
@@ -141,9 +131,10 @@ import {
 import { computed, ref } from 'vue'
 
 import { trackSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
-import { diffInstanceAgainstServer, type LinkedServer } from '@/features/servers/linked-servers'
+import { isServerBehind, type LinkedServer } from '@/features/servers/linked-servers'
 import { getErrorMessage, isSharedInstanceUnavailableError } from '@/helpers/install'
 import {
+	ensure_shared_instance,
 	get_shared_instance_publish_preview,
 	get_shared_instance_publish_support_details,
 	publish_shared_instance,
@@ -162,17 +153,25 @@ const STORAGE_WARNING_RATIO = 0.75
 
 /**
  * The review every push goes through. It lists what changed and only lets a push happen when
- * something did. A shared instance publishes to friends; an instance with linked servers also
- * offers "Push and restart" and emits `push-servers` for the caller to update them.
+ * something did, or when a server is behind. The push publishes one version of the instance's
+ * share, which friends and servers both read. With linked servers it is "Push and restart" and
+ * calls `pushServers` to have them apply it. An instance with servers gets a share here if it
+ * had none.
  */
 const props = defineProps<{
 	instance: GameInstance
 	servers?: LinkedServer[]
+	/** Whether to restart servers now (true), on their next stop (false), or cancel (null). */
+	askRestart?: () => Promise<boolean | null>
+	/**
+	 * Has the servers apply the share's latest version. A function, not an event: the push runs
+	 * on after the review closes, and an event from an unmounted component is dropped.
+	 */
+	pushServers?: (restart: boolean) => Promise<void>
 }>()
 
 const emit = defineEmits<{
 	published: []
-	'push-servers': [restart: boolean]
 	'state-change': [state: SharedInstancePublishState]
 }>()
 
@@ -189,15 +188,13 @@ const excludedFilePaths = ref<string[]>([])
 const activeTab = ref<TabsValue>('changes')
 const state = ref<SharedInstancePublishState>('idle')
 const hasServers = computed(() => (props.servers?.length ?? 0) > 0)
-// A server that failed to take the instance can always be pushed to again.
-const serverFailed = computed(
-	() => props.servers?.some((server) => server.linked_instance.state === 'failed') ?? false,
-)
-// A server that could not be compared may be behind, so it can be pushed to as well.
-const serverUnchecked = ref(false)
-const sharesWithFriends = computed(() => props.instance.shared_instance?.role === 'owner')
-// Whether the changes on screen are ones friends have not received yet.
-const friendsBehind = ref(false)
+// Whether this push publishes a version: only the share's owner does. A member who hosts a
+// server only has it apply the latest version.
+const publishes = ref(false)
+// Whether the changes on screen are not in the share's latest version yet.
+const unpublished = ref(false)
+// Whether a server runs something other than the share's latest version.
+const serversBehind = ref(false)
 const tabs = computed<TabsTab[]>(() => [
 	{ value: 'changes', label: formatMessage(messages.changesTab) },
 	{ value: 'files', label: formatMessage(messages.filesTab) },
@@ -229,8 +226,7 @@ const confirmDisabled = computed(
 		overStorageLimit.value ||
 		(publishDiffs.value.length === 0 &&
 			selectedFilePaths.value.length === 0 &&
-			!serverFailed.value &&
-			!serverUnchecked.value),
+			!serversBehind.value),
 )
 const storageBarScale = computed(() => Math.max(selectedSize.value, STORAGE_LIMIT_BYTES))
 const withinLimitPercent = computed(
@@ -253,45 +249,39 @@ async function show(e?: MouseEvent) {
 	setState('reviewing')
 	let reviewOpened = false
 	try {
-		let friendDiffs: ContentDiffItem[] = []
+		let diffs: ContentDiffItem[] = []
 		files.value = []
-		if (sharesWithFriends.value) {
+		const attachment =
+			props.instance.shared_instance ??
+			(hasServers.value ? await ensure_shared_instance(props.instance.id) : undefined)
+		publishes.value = attachment?.role === 'owner'
+		// A member's server can always be told to apply the latest version.
+		serversBehind.value = hasServers.value && !publishes.value
+		if (publishes.value) {
 			const preview = await get_shared_instance_publish_preview(props.instance.id)
 			if (!preview) {
 				// The local record is already detached, so there is nothing left to push to.
 				sharedInstanceState.setUnavailable('deleted')
 				notifySharedInstanceAvailability(sharedInstanceState.availability.value ?? 'deleted')
 				emit('published')
-				if (!hasServers.value) return
-			} else {
-				friendDiffs = preview.diffs.map((diff) => ({
-					type: diff.type,
-					projectName: diff.projectName ?? undefined,
-					fileName: diff.fileName ?? undefined,
-					currentVersionName: diff.currentVersionName ?? undefined,
-					newVersionName: diff.newVersionName ?? undefined,
-					fileCount: diff.configFileCount ?? undefined,
-					disabled: diff.disabled,
-				}))
-				files.value = preview.files
+				return
 			}
+			diffs = preview.diffs.map((diff) => ({
+				type: diff.type,
+				projectName: diff.projectName ?? undefined,
+				fileName: diff.fileName ?? undefined,
+				currentVersionName: diff.currentVersionName ?? undefined,
+				newVersionName: diff.newVersionName ?? undefined,
+				fileCount: diff.configFileCount ?? undefined,
+				disabled: diff.disabled,
+			}))
+			files.value = preview.files
+			serversBehind.value = (props.servers ?? []).some((server) =>
+				isServerBehind(server, preview.sharedInstanceId, preview.latestVersion),
+			)
 		}
-		friendsBehind.value = friendDiffs.length > 0
-		// Friends can be up to date while a server is not, so fall back to what the server lacks.
-		let serverDiffs: ContentDiffItem[] = []
-		if (friendDiffs.length === 0) {
-			serverUnchecked.value = false
-			for (const server of props.servers ?? []) {
-				try {
-					serverDiffs = await diffInstanceAgainstServer(props.instance.id, server)
-				} catch (error) {
-					console.error(`Failed to compare with server ${server.server_id}`, error)
-					serverUnchecked.value = true
-				}
-				if (serverDiffs.length > 0) break
-			}
-		}
-		publishDiffs.value = friendDiffs.length > 0 ? friendDiffs : serverDiffs
+		unpublished.value = diffs.length > 0
+		publishDiffs.value = diffs
 		includedFilePaths.value = []
 		excludedFilePaths.value = []
 		activeTab.value = 'changes'
@@ -307,10 +297,16 @@ async function show(e?: MouseEvent) {
 }
 
 /** Closes the review and runs the push in the background, where the task list shows it. */
-function confirmPublish(restart: boolean) {
+async function confirmPublish(restart: boolean) {
 	if (confirmDisabled.value) return
 
-	void publishChanges(restart)
+	let restartNow = restart
+	if (restart && props.askRestart) {
+		const answer = await props.askRestart()
+		if (answer === null) return
+		restartNow = answer
+	}
+	void publishChanges(restartNow)
 	modal.value?.hide()
 }
 
@@ -319,11 +315,11 @@ async function publishChanges(restart: boolean) {
 
 	setState('publishing')
 	try {
-		if (sharesWithFriends.value && (friendsBehind.value || selectedFilePaths.value.length > 0)) {
+		if (publishes.value && (unpublished.value || selectedFilePaths.value.length > 0)) {
 			if (!(await publishToFriends())) return
 			emit('published')
 		}
-		if (hasServers.value) emit('push-servers', restart)
+		if (hasServers.value) await props.pushServers?.(restart)
 	} finally {
 		setState('idle')
 	}

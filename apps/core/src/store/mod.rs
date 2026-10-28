@@ -8,7 +8,7 @@
 
 mod limits;
 mod objects;
-mod pull;
+pub(crate) mod pull;
 mod routes;
 pub mod supervisor;
 mod tar;

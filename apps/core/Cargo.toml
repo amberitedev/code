@@ -7,6 +7,8 @@ description = "Copal, Amberite's self-hosted Minecraft server manager"
 repository.workspace = true
 
 [dependencies]
+# Decrypts the share versions a server applies (`content::shared`).
+amberite-pool = { workspace = true }
 axum = { version = "0.8.4", features = ["multipart", "ws"] }
 base64 = { workspace = true }
 bytes = { workspace = true }

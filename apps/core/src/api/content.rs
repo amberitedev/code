@@ -35,9 +35,10 @@ use crate::{
     content::{
         self, Busy,
         addons::{self, Listed},
-        install::{self as content_install, PackSource},
+        install::{self as content_install, Linked, PackSource},
         pack,
-        records::{self, ContentFile, Origin},
+        records::{self, ContentFile, Origin, Pack, PendingPack},
+        shared::{self, SharedVersion},
     },
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
@@ -315,10 +316,23 @@ pub enum InstallWorldContent {
         #[serde(default)]
         properties: Option<PropertiesFields>,
     },
+    /// Amberite: apply a version of an App instance's share (`content::shared`). On a running
+    /// server it waits for the server to stop, or with `restart` stops it, applies, and starts
+    /// it again.
+    Instance {
+        instance: UploadedInstance,
+        share: SharedVersion,
+        #[serde(default)]
+        properties: Option<PropertiesFields>,
+        #[serde(default)]
+        restart: bool,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 /// Query of POST `.../content/upload-modpack-file`. Mirrors the `soft_override` param of
-/// `KyrosContentV1Module.uploadModpackFile` and `ArchonContentV1Module.uploadInstance`.
+/// `KyrosContentV1Module.uploadModpackFile` and `ArchonContentV1Module.uploadModpackFile`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModpackUploadQuery {
     #[allow(dead_code)] // As above.
@@ -337,9 +351,8 @@ pub struct UpdateModpack {
     pub force: bool,
 }
 
-/// The JSON `instance` part of the multipart body of POST `.../content/upload-modpack-file`, sent
-/// when the pack is an App instance. Its `properties` part is a `PropertiesFields`. Mirrors the
-/// `instance` argument of `ArchonContentV1Module.uploadInstance`.
+/// The App instance of an `instance` install. Mirrors the `instance` of
+/// Archon.Content.v1.InstallWorldContent.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedInstance {
     pub id: String,
@@ -572,8 +585,7 @@ async fn modpack_fields(
             }
             _ => (None, None, None),
         };
-    let installing =
-        state.content.activity(id).installing == Some(Installing::Modpack);
+    let linked_state = linked_state(state, id, &pack).await?;
     let spec = match (&pack.project_id, &pack.version_id) {
         (Some(project_id), Some(version_id)) => ModpackSpec::Modrinth {
             project_id: project_id.clone(),
@@ -614,15 +626,29 @@ async fn modpack_fields(
         downloads: project.as_ref().and_then(|project| project.downloads),
         followers: project.as_ref().and_then(|project| project.followers),
         instance_id: pack.instance_id.clone(),
-        state: Some(if installing {
+        state: Some(linked_state),
+        error: pack.error,
+    }))
+}
+
+/// Where a server is with the pack it follows: applying it, failed, waiting for the server to
+/// stop to apply a newer push, or up to date.
+pub async fn linked_state(
+    state: &AppState,
+    id: &str,
+    pack: &Pack,
+) -> Result<LinkedPackState, ApiError> {
+    Ok(
+        if state.content.activity(id).installing == Some(Installing::Modpack) {
             LinkedPackState::Applying
         } else if pack.error.is_some() {
             LinkedPackState::Failed
+        } else if records::pending(&state.db, id).await?.is_some() {
+            LinkedPackState::Pending
         } else {
             LinkedPackState::UpToDate
-        }),
-        error: pack.error,
-    }))
+        },
+    )
 }
 
 /// `GET .../addons`.
@@ -965,6 +991,18 @@ pub async fn install(
                 },
             );
         }
+        InstallWorldContent::Instance {
+            instance,
+            share,
+            properties,
+            restart,
+            force,
+        } => {
+            install_instance(
+                &state, &id, instance, share, properties, restart, force,
+            )
+            .await?;
+        }
         InstallWorldContent::Modpack {
             spec,
             properties,
@@ -1018,6 +1056,172 @@ fn spawn_pack(
             .await
         },
     );
+}
+
+/// Apply a share version to a server. A stopped server installs it now. A running one keeps
+/// running: Core fetches the version, then it waits for the server to stop, or with `restart`
+/// Core stops the server, and it applies then (see [`apply_pending`]).
+async fn install_instance(
+    state: &Arc<AppState>,
+    id: &str,
+    instance: UploadedInstance,
+    share: SharedVersion,
+    properties: Option<PropertiesFields>,
+    restart: bool,
+    force: bool,
+) -> Result<(), ApiError> {
+    let busy = state.content.busy(id)?;
+    let linked = Linked {
+        id: instance.id,
+        name: instance.name,
+        shared_instance_id: share.shared_instance_id.clone(),
+        version: share.version,
+    };
+    match state.servers.hold(id) {
+        Ok(hold) => {
+            records::clear_pending(&state.db, id).await?;
+            state.content.spawn(
+                hold,
+                busy,
+                Installing::Modpack,
+                move |content, hold, progress| async move {
+                    let sha1 =
+                        match shared::write_pack(&content, hold.id(), &share)
+                            .await
+                        {
+                            Ok(sha1) => sha1,
+                            Err(error) => {
+                                records::set_pack_error(
+                                    &content.db,
+                                    hold.id(),
+                                    Some(&format!("{error:#}")),
+                                )
+                                .await?;
+                                return Err(error);
+                            }
+                        };
+                    let source = PackSource::Stored {
+                        sha1,
+                        instance: Some(linked),
+                    };
+                    content_install::pack(
+                        &content, &hold, &progress, source, properties, force,
+                    )
+                    .await
+                },
+            );
+        }
+        Err(ServerError::AlreadyRunning) => {
+            let state = Arc::clone(state);
+            let id = id.to_owned();
+            tokio::spawn(async move {
+                let written =
+                    shared::write_pack(&state.content, &id, &share).await;
+                drop(busy);
+                let result = async {
+                    let pending = PendingPack {
+                        sha1: written?,
+                        instance_id: linked.id,
+                        instance_name: linked.name,
+                        shared_instance_id: linked.shared_instance_id,
+                        shared_version: linked.version,
+                        start_after: restart,
+                    };
+                    records::set_pending(&state.db, &id, &pending).await?;
+                    if restart {
+                        state.servers.stop(&id).await?;
+                    }
+                    Ok::<_, content::Error>(())
+                }
+                .await;
+                match result {
+                    // The server may have stopped while the version was fetched.
+                    Ok(()) => apply_pending(&state, &id).await,
+                    Err(error) => {
+                        tracing::warn!(server = %id, %error, "could not take a pushed version");
+                        let _ = records::set_pack_error(
+                            &state.db,
+                            &id,
+                            Some(&format!("{error:#}")),
+                        )
+                        .await;
+                    }
+                }
+            });
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+/// Apply the version waiting for a server, when one waits and the server is stopped. Starts the
+/// server again afterwards when the push asked for a restart.
+pub async fn apply_pending(state: &AppState, id: &str) {
+    let Ok(Some(pending)) = records::pending(&state.db, id).await else {
+        return;
+    };
+    let Ok(busy) = state.content.busy(id) else {
+        return;
+    };
+    let Ok(hold) = state.servers.hold(id) else {
+        return;
+    };
+    if records::clear_pending(&state.db, id).await.is_err() {
+        return;
+    }
+    let start_after = pending.start_after;
+    let source = PackSource::Stored {
+        sha1: pending.sha1,
+        instance: Some(Linked {
+            id: pending.instance_id,
+            name: pending.instance_name,
+            shared_instance_id: pending.shared_instance_id,
+            version: pending.shared_version,
+        }),
+    };
+    state.content.spawn(
+        hold,
+        busy,
+        Installing::Modpack,
+        move |content, hold, progress| async move {
+            let result = content_install::pack(
+                &content, &hold, &progress, source, None, false,
+            )
+            .await;
+            if start_after {
+                // Back up either way: a failed update changes nothing it could not finish.
+                let id = hold.id().to_owned();
+                drop(hold);
+                if let Err(error) = content.servers.start(&id).await {
+                    tracing::warn!(server = %id, %error, "could not start the server after its update");
+                }
+            }
+            result
+        },
+    );
+}
+
+/// Apply pushed versions as their servers stop, for as long as Core runs.
+pub async fn apply_pending_on_stop(state: Arc<AppState>) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    let mut events = state.servers.events.subscribe();
+    // Versions pushed before Core last stopped, to servers that are stopped now.
+    for id in records::servers_pending(&state.db)
+        .await
+        .unwrap_or_default()
+    {
+        apply_pending(&state, &id).await;
+    }
+    loop {
+        match events.recv().await {
+            Ok(crate::servers::Lifecycle::Ended(id)) => {
+                apply_pending(&state, &id).await;
+            }
+            Ok(_) | Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => return,
+        }
+    }
 }
 
 /// `POST .../content/repair`: check every file of the loader and the pack again, put back pack
@@ -1210,8 +1414,7 @@ fn bad_form(error: axum::extract::multipart::MultipartError) -> ApiError {
 }
 
 /// `POST /servers/{id}/v1/worlds/{wid}/content/upload-modpack-file`: install an uploaded
-/// `.mrpack`, such as an App instance, in the background. Parts: `file`, `properties` (JSON
-/// settings), and `instance` (JSON, when the pack is an App instance).
+/// `.mrpack` in the background. Parts: `file` and `properties` (JSON settings).
 pub async fn upload_modpack(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -1225,7 +1428,6 @@ pub async fn upload_modpack(
     let dirs = SharedDirs::new(state.servers.paths().root());
     let mut staged: Option<(PathBuf, String)> = None;
     let mut properties: Option<PropertiesFields> = None;
-    let mut instance: Option<UploadedInstance> = None;
     let result = async {
         while let Some(mut field) = form.next_field().await.map_err(bad_form)? {
             match field.name() {
@@ -1243,10 +1445,6 @@ pub async fn upload_modpack(
                 Some("properties") => {
                     let text = field.text().await.map_err(bad_form)?;
                     properties = serde_json::from_str(&text).ok();
-                }
-                Some("instance") => {
-                    let text = field.text().await.map_err(bad_form)?;
-                    instance = serde_json::from_str(&text).ok();
                 }
                 _ => {}
             }
@@ -1283,7 +1481,7 @@ pub async fn upload_modpack(
         busy,
         PackSource::Stored {
             sha1,
-            instance: instance.map(|instance| (instance.id, instance.name)),
+            instance: None,
         },
         properties,
         query.force,

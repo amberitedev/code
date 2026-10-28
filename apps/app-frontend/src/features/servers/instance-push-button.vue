@@ -21,15 +21,20 @@
 		ref="publishModal"
 		:instance="instance"
 		:servers="servers"
+		:ask-restart="askRestart"
+		:push-servers="pushToServers"
 		@published="emit('published')"
-		@push-servers="pushToServers"
 		@state-change="publishState = $event"
 	/>
-	<NewModal ref="playersModal" :header="formatMessage(messages.playersHeader)">
+	<NewModal
+		ref="playersModal"
+		:header="formatMessage(messages.playersHeader)"
+		:on-hide="() => settleRestart(null)"
+	>
 		<div class="flex max-w-[30rem] flex-col gap-6">
 			<p class="m-0">{{ formatMessage(messages.playersBody, { count: playersOnlineCount }) }}</p>
 			<div class="flex flex-wrap justify-end gap-2">
-				<Button type="outlined" class="!border" @click="playersModal?.hide()">
+				<Button type="outlined" class="!border" @click="answerPlayers(null)">
 					<XIcon aria-hidden="true" />
 					{{ formatMessage(commonMessages.cancelButton) }}
 				</Button>
@@ -62,18 +67,18 @@ import { findRunningSharedInstancePublish } from '@/components/ui/download-manag
 import SharedInstancePublishModal from '@/components/ui/shared-instances/SharedInstancePublishModal.vue'
 import {
 	coreProblem,
-	exportInstancePack,
 	playersOnline,
-	pushPackToServer,
+	pushInstanceToServer,
 	serversQueryKey,
 	useLinkedServers,
 } from '@/features/servers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
 
 /**
- * The one "Push update" button of an instance. It always opens the review, which is where the
- * push is chosen: "Push update", plus "Push and restart" when the instance has linked servers.
- * Renders nothing for an instance that has neither friends nor servers to push to.
+ * The one "Push update" button of an instance. It always opens the review, which publishes one
+ * version of the instance's share for friends and servers alike. With linked servers the push
+ * is "Push and restart", which asks first when players are online. Renders nothing for an
+ * instance that has neither friends nor servers to push to.
  */
 const props = defineProps<{
 	instance: GameInstance
@@ -116,35 +121,44 @@ function review(event?: MouseEvent) {
 	void publishModal.value?.show(event)
 }
 
-/** Called once the review is confirmed. A restart first asks when players are online. */
-async function pushToServers(restart: boolean) {
-	if (restart) {
-		playersOnlineCount.value = servers.value.reduce((sum, server) => sum + playersOnline(server), 0)
-		if (playersOnlineCount.value > 0) {
-			playersModal.value?.show()
-			return
-		}
-	}
-	await upload(restart)
+let restartAnswer: ((restart: boolean | null) => void) | undefined
+
+/**
+ * Asked when the review is confirmed, before anything is pushed: whether to restart servers
+ * with players on them now (true), apply on their next stop (false), or cancel (null).
+ */
+function askRestart(): Promise<boolean | null> {
+	playersOnlineCount.value = servers.value.reduce((sum, server) => sum + playersOnline(server), 0)
+	if (playersOnlineCount.value === 0) return Promise.resolve(true)
+	playersModal.value?.show()
+	return new Promise((resolve) => (restartAnswer = resolve))
 }
 
-function answerPlayers(restart: boolean) {
+function settleRestart(restart: boolean | null) {
+	restartAnswer?.(restart)
+	restartAnswer = undefined
+}
+
+function answerPlayers(restart: boolean | null) {
+	settleRestart(restart)
 	playersModal.value?.hide()
-	void upload(restart)
 }
 
-async function upload(restart: boolean) {
+/**
+ * Has every linked server apply the share's latest version. The review calls it after its
+ * publish, by which time this button may be gone (the banner holding it closes once the
+ * instance is up to date), so it relies on nothing that unmounting stops.
+ */
+async function pushToServers(restart: boolean) {
 	const targets = servers.value
 	if (targets.length === 0 || uploading.value) return
 	uploading.value = true
 	try {
-		const pack = await exportInstancePack(props.instance.id)
 		const failed: string[] = []
 		let problem = ''
 		for (const server of targets) {
 			try {
-				await pushPackToServer(
-					pack,
+				await pushInstanceToServer(
 					{ id: props.instance.id, name: props.instance.name },
 					server.server_id,
 					{ restart },

@@ -243,19 +243,14 @@ export class ArchonContentV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Core only. Uploads an App instance, exported as a `.mrpack`, to a server on the Core. The
-	 * first upload installs it and links the server to the instance; later uploads update it,
-	 * changing only what the instance changed. A running server keeps running and takes the
-	 * update when it next stops; call `updateModpack` to restart it now instead.
+	 * Core only. Uploads a `.mrpack` to a server on the Core and installs it.
 	 *
 	 * POST /servers/:server_id/v1/worlds/:world_id/content/upload-modpack-file
 	 */
-	public uploadInstance(
+	public uploadModpackFile(
 		serverId: string,
 		worldId: string,
 		pack: File | Blob,
-		/** `null` uploads a plain modpack file that is not linked to an instance. */
-		instance: { id: string; name: string } | null,
 		options?: {
 			/** World settings, used when the upload creates the server. */
 			properties?: Archon.Content.v1.PropertiesFields
@@ -263,9 +258,8 @@ export class ArchonContentV1Module extends AbstractModule {
 		},
 	): UploadHandle<void> {
 		const formData = new FormData()
-		formData.append('file', pack, instance ? 'instance.mrpack' : 'modpack.mrpack')
+		formData.append('file', pack, 'modpack.mrpack')
 		formData.append('properties', JSON.stringify(options?.properties ?? {}))
-		if (instance) formData.append('instance', JSON.stringify(instance))
 
 		return this.client.upload<void>(`/worlds/${worldId}/content/upload-modpack-file`, {
 			api: 'archon',

@@ -473,6 +473,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "amberite-pool"
+version = "0.0.0"
+dependencies = [
+ "chacha20poly1305",
+ "hex",
+ "hkdf 0.12.4",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "ambient-authority"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3203,6 +3215,7 @@ dependencies = [
 name = "copal"
 version = "0.1.0"
 dependencies = [
+ "amberite-pool",
  "axum",
  "base64 0.22.1",
  "bytes",
@@ -14529,6 +14542,7 @@ dependencies = [
 name = "theseus"
 version = "1.0.0-local"
 dependencies = [
+ "amberite-pool",
  "anyhow",
  "ariadne",
  "async-minecraft-ping",
@@ -14541,7 +14555,6 @@ dependencies = [
  "bon",
  "bytemuck",
  "bytes",
- "chacha20poly1305",
  "chardetng",
  "chrono",
  "cidre",
@@ -14563,7 +14576,6 @@ dependencies = [
  "heck 0.5.0",
  "hex",
  "hickory-resolver 0.25.2",
- "hkdf 0.12.4",
  "httpdate",
  "image",
  "indexmap 2.14.2",

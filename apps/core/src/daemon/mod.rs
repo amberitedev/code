@@ -181,6 +181,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         storage: Arc::clone(&storage),
     });
     let router = api::router(Arc::clone(&state));
+    tokio::spawn(api::content::apply_pending_on_stop(Arc::clone(&state)));
     match config.backend_url.clone() {
         Some(backend_url) => {
             tokio::spawn(access::sync::run(Arc::new(access::sync::Sync {

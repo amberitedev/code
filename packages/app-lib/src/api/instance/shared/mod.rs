@@ -215,6 +215,7 @@ mod install;
 mod invites;
 mod publish;
 mod report;
+mod server;
 mod types;
 
 pub(crate) use self::client::report_pool_failure;
@@ -237,6 +238,10 @@ pub use self::publish::{
     unlink_shared_instance, unpublish_shared_instance,
 };
 pub use self::report::get_shared_instance_publish_support_details;
+pub use self::server::{
+    SharedInstanceServerPack, ensure_shared_instance,
+    get_shared_instance_server_pack,
+};
 pub use self::types::{
     SharedInstanceExternalFilePreview, SharedInstanceInstallPreview,
     SharedInstanceInvite, SharedInstanceInviteInstallPreview,

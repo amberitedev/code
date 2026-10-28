@@ -45,6 +45,7 @@ the exact protocol are in `pool.md`.
 - The owner's App encrypts every file and uploads it straight to the share's Core; members
   download from it. The backend keeps the manifest and signs short-lived tickets.
 - Limits: 1 GB per shared instance, 3 GB per account across its shares, 4,096 files per version.
+  Files stored on your own Core do not count.
 - The five latest manifests are kept; Cores keep the files of the latest version only.
 - A push with no Core offering storage fails with a clear message. Storage is on by default on a
   Core and is turned off, or its caps changed, in Settings, Cores.
@@ -57,11 +58,18 @@ Later, in rough order of intent:
   it stays there, so a shared version is about half a megabyte.
 - A second Core in the pool: replicas and re-homing, as `pool.md` describes for phase two.
 - The store under its own OS account on an installed Core.
+- The store as its own package, separate from Core. Everything reaches it only through its API, so
+  the separation changes no consumer. Storing on your own Core, and an internal API between Core
+  and store, come with that change.
+- Limits tied to what you give: offer storage to others (for example 10 GB) and your own limit
+  follows from it.
 
 ## Privacy
 
 Shared files are encrypted before they leave the owner's App, so a Core owner cannot read what
-their Core stores. The backend holds the keys, as it already holds accounts. Analytics can be
+their Core stores. The backend holds the keys, as it already holds accounts. The one exception is
+a Core applying a version to a server: its owner has access to that share, so the Core is given
+the manifest and decrypts that version like a member's App. Analytics can be
 opted out of.
 
 ## Linked servers
@@ -70,17 +78,37 @@ A server is a hosted world of an instance. One instance can have many. A linked 
 loader, game version, and content from the instance and keeps its own world, files, backups, and
 its own additions (mods and datapacks added on the server itself).
 
-How it works: the App talks to the Core directly, and the backend is never involved. The App
-exports the instance as a `.mrpack` and uploads it to the Core through the hosting API. Core's
-engine installs it, and on a later upload applies only what changed. This works for instances
-that are not shared with anyone and uses none of our storage.
+How it works: a server is one more consumer of the instance's sharing, like a member. It reads the
+same versions members read, from the same place. Nothing is ever uploaded to a server directly.
+
+- Every instance with a linked server publishes versions through sharing, even when it is shared
+  with nobody. A push sends the manifest to the backend and only the new files to the store, as
+  any share push does.
+- Push and restart hands each server's Core the share's latest version as the backend gave it to
+  the App: a Modrinth pack index, the pool entries of the other files, and a fetch ticket. The
+  Core downloads Modrinth files from Modrinth and the rest through the store API, checks and
+  decrypts them as a member's App does, and applies only what changed. A running server takes it
+  when it stops, or is stopped, updated, and started again.
+- The Core reaches files only through the store API. How and where the store keeps files does
+  not matter to it, so the store can become its own package without changing this.
+- Each server records the version it applied. The owner sees when a server is behind the latest
+  push, and server cards follow the applied version.
+- A push that only changes what servers use (server-only mods, server config) is still a normal
+  version, but members are not prompted. A member's App compares its version with the latest,
+  ignoring server-only files, and moves forward silently when nothing it needs changed.
+- Anyone the instance is shared with can host from it, because a server only needs read access to
+  the share's versions.
+- A server gets the configs a version carries, nothing more. Any other config it generates itself.
+- An instance with a linked server is stored on its owner's own Core, even when that Core is not
+  eligible to store for others, and storage there does not count toward the sharing limits. This
+  is storage work and ships on its own; servers work with any placement, because the Core fetches
+  from wherever the backend points it.
 
 - Create a server from Instance > Worlds, which opens server setup at its last step (world
   settings), or pick "From instance" in server setup. Only on a Core you own.
-- Push: an instance with a linked server has the push buttons. "Push and restart" is the primary
-  action. If players are online it asks: restart now, apply on next stop, or cancel. "Push update"
-  is secondary and never restarts. If the instance is also shared, the same push also publishes to
-  friends. An instance with no friends and no server has no push button.
+- Push: an instance with a linked server has one push button, "Push and restart". If players are
+  online it asks: restart now, apply on next stop, or cancel. It publishes one version, which
+  friends and servers read. An instance with no friends and no server has no push button.
 - Core applies an update only while the server is stopped. A push to a running server waits and
   applies when it stops. Only the latest pushed state is applied.
 - If the Core is unreachable when pushing, the server is not updated; the App says so, and the
@@ -89,9 +117,10 @@ that are not shared with anyone and uses none of our storage.
   installed. Inherited content cannot be disabled yet.
 - An update removes only files the instance provided before. Additions made on the server are
   never touched.
-- Core reports the instance through the hosting API's existing content and modpack routes
-  (install content, unlink, update, the content list with its linked pack and from-pack flags), so
-  an instance is one more kind of pack source. There are no separate linked-server endpoints.
+- Core takes and reports the instance through the hosting API's existing content and modpack
+  routes (install content with `content_variant: 'instance'`, unlink, update, the content list
+  with its linked pack and from-pack flags), so an instance is one more kind of pack source. There
+  are no separate linked-server endpoints.
 - Worlds lists linked servers with a Linked tag, their state (running, offline, updating), and
   Manage. The server Content page shows the instance's content read-only in Modrinth's modpack
   card, titled with the instance's name, with the server's additions in a separate list. Unlink
@@ -99,8 +128,6 @@ that are not shared with anyone and uses none of our storage.
 
 Later:
 
-- Skip publishing to friends when a change only matters to the server (only server-side mods
-  changed), so server-only changes use no backend storage and prompt nobody.
 - Friends see an instance's servers in Worlds, from a small list of name and address kept with
   the shared instance.
 - Update progress in the Tasks panel. History views, overrides, branches, forced resource packs,
@@ -216,7 +243,7 @@ How it works (`apps/core/src/network`):
   `copal auth` and `copal logout`, and Settings, Cores. The dev setting that held the Core address
   is gone.
 - Linked servers are built: create a server from an instance, push updates to it, unlink it, and
-  delete it.
+  delete it. Servers follow the instance's share, as "Linked servers" describes.
 - Known gaps: an over-limit push shows a generic error; the App's network allowlist is opened to
   Core addresses only in the dev runner, not in a packaged build (a packaged build does allow the
   local port the App opens for a Core that serves HTTPS).

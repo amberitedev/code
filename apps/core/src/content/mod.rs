@@ -17,6 +17,7 @@ pub mod modrinth;
 pub mod pack;
 pub mod properties;
 pub mod records;
+pub mod shared;
 
 use std::{
     collections::HashMap,
