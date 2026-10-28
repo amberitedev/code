@@ -49,14 +49,36 @@ the exact protocol are in `pool.md`.
 - A push with no Core offering storage fails with a clear message. Storage is on by default on a
   Core and is turned off, or its caps changed, in Settings, Cores.
 
+**Next: storage, decided 2026-10-28, not built yet.** Replaces the matching lines above when it
+ships, after the full-manifest and linked-server work.
+
+- Every share is stored twice, a home and a replica. An instance with a server has its home on the
+  owner's own Core and its replica on a Core friends can reach. Without a server, or without a Core
+  of your own, both copies are on other Cores. The owner's App is the last backup: the next push
+  restores a share that lost its Cores.
+- Sharing works for everyone. Everyone gets an allowance on other people's storage. Turning storage
+  off on your Core means you run privately: your shares live only on your own Core and you use no
+  one else's. A Core that friends cannot reach is not much use anyway, since they cannot join its
+  servers either.
+- Usage is the size of the files you uploaded across the versions kept, each file counted once
+  however many copies exist. Modrinth files, manifests, and shares with no members (a server-only
+  instance) do not count. The limit numbers are tuned over time.
+- How many versions are kept, files included, is the owner's auto-cleanup setting: keep the last
+  five by default, any other number, or all of them. Older versions drop on their own. A push over
+  the limit is refused with "delete old versions to free space". Usage, the setting, and the kept
+  versions, with a way to delete them, are in Settings, Cores, beside each Core's storage.
+- Two packages: `sharing-types`, the share format and encryption the App and Core both use; and
+  `sharing-storage`, the storage process. It stays a child process of `copal` on the Core's address
+  and port, reports through the Core, and talks to it over a small local API. Its own OS account
+  comes with the installer.
+
 Later, in rough order of intent:
 
 - Show in the push UI which files are over a limit, before pushing.
 - Pins, once a version history view exists. KubeJS scripts in the bundle.
 - Stop uploading files at all where possible: reference where a file already lives and make sure
   it stays there, so a shared version is about half a megabyte.
-- A second Core in the pool: replicas and re-homing, as `pool.md` describes for phase two.
-- The store under its own OS account on an installed Core.
+- Re-homing when a Core holding a share goes away, as `pool.md` describes.
 
 ## Privacy
 
