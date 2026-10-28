@@ -20,7 +20,7 @@ pub(super) async fn shared_instance_update_diffs(
     let after_configuration = remote_configuration(version);
     let modpack_unlinked = before_configuration.modpack_version_id.is_some()
         && after_configuration.modpack_version_id.is_none();
-    let (version_ids, external_files, current_external_paths) =
+    let (version_ids, external_files, current_external_sha1s) =
         current_shared_content(metadata, modpack_unlinked, state).await?;
     let before = SharedContentSnapshot {
         version_ids,
@@ -44,11 +44,9 @@ pub(super) async fn shared_instance_update_diffs(
         state,
     )
     .await?;
+    // Upstream shows every external file in both as updated. Amberite's manifest carries each
+    // file's SHA-1, so a file the member already has is left out.
     if crate::self_hosted::accounts::enabled() {
-        let instance_path = state
-            .directories
-            .instances_dir()
-            .join(&metadata.instance.path);
         let mut unchanged_files = HashSet::new();
         let mut changed_files = HashSet::new();
         for file in &version.external_files {
@@ -57,15 +55,12 @@ pub(super) async fn shared_instance_update_diffs(
             if !key.is_ok_and(|key| before.external_files.contains(&key)) {
                 continue;
             }
-            let path = current_external_paths
+            let installed = current_external_sha1s
                 .get(&(file.file_name.clone(), file.file_type.clone()));
-            if !crate::self_hosted::integrity::installed_shared_file_changed(
-                &instance_path,
-                path.map(String::as_str),
-                file.sha256.as_deref(),
-            )
-            .await?
-            {
+            let unchanged = installed.zip(file.sha1.as_ref()).is_some_and(
+                |(installed, wanted)| installed.eq_ignore_ascii_case(wanted),
+            );
+            if unchanged {
                 unchanged_files.insert(file.file_name.clone());
             } else {
                 changed_files.insert(file.file_name.clone());
@@ -163,12 +158,18 @@ pub(super) async fn shared_instance_publish_diffs(
             }) else {
                 continue;
             };
-            if crate::self_hosted::integrity::shared_file_changed(
-                &instance_path.join(path),
-                remote.sha256.as_deref(),
+            let Some(remote_sha1) = remote.sha1.as_deref() else {
+                continue;
+            };
+            let changed = match crate::util::fetch::sha1_file_async(
+                instance_path.join(path),
             )
-            .await?
+            .await
             {
+                Ok((_, sha1)) => !sha1.eq_ignore_ascii_case(remote_sha1),
+                Err(_) => true,
+            };
+            if changed {
                 diffs.push(SharedInstanceUpdateDiff {
                     type_: SharedInstanceUpdateDiffType::Updated,
                     project_id: None,

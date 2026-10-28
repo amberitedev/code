@@ -25,6 +25,7 @@ import {
 } from './pool'
 
 // Sharing metadata, as Modrinth's App expects it. The files themselves live on Cores; see pool.ts.
+// Every version lists all of the share's files, so dropping older ones loses nothing.
 const KEPT_VERSIONS = 5
 
 type Instance = {
@@ -332,7 +333,8 @@ async function createVersion(
 		throw new ApiError(
 			413,
 			'invalid_input',
-			`A version can have at most ${MAX_VERSION_FILES} files`,
+			`A shared instance can hold at most ${MAX_VERSION_FILES} files`,
+			'too_many_files',
 		)
 	const seen = new Set<string>()
 	const external = body.external_files.map((value) => {

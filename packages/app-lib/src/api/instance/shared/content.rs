@@ -4,58 +4,54 @@ use super::client::{
 use super::*;
 use std::collections::BTreeMap;
 
-const CONFIG_VERSION_FETCH_CONCURRENCY: usize = 4;
-
-/// Config files are published as deltas, so a member needs every config
-/// uploaded after `applied_version`, keeping the newest upload of each path.
+/// The config files a member writes to reach `latest`. Every version lists all config files
+/// shared so far, so only those that changed since `applied_version` are written and the rest
+/// stay as the member has them, as when upstream published configs as deltas. Every config is
+/// written on a first install, or when the backend no longer keeps the applied version.
 pub(super) async fn remote_shared_config_files(
     shared_instance_id: &str,
     applied_version: Option<i32>,
     latest: &InstanceVersionResponse,
     state: &State,
 ) -> crate::Result<Vec<ExternalFileResponse>> {
-    use futures::{StreamExt, TryStreamExt};
-
-    let first = applied_version.map_or(1, |version| version.saturating_add(1));
-    let intermediate = futures::stream::iter(first..latest.version)
-        .map(|version| get_remote_version(shared_instance_id, version, state))
-        .buffered(CONFIG_VERSION_FETCH_CONCURRENCY)
-        .try_collect::<Vec<_>>()
-        .await?;
-
-    newest_config_files(
-        intermediate
-            .iter()
-            .flatten()
-            .chain((first <= latest.version).then_some(latest))
+    let applied = match applied_version {
+        Some(version) if version >= latest.version => return Ok(Vec::new()),
+        Some(version) => {
+            get_remote_version(shared_instance_id, version, state).await?
+        }
+        None => None,
+    };
+    changed_config_files(
+        &latest.external_files,
+        applied
+            .as_ref()
             .map(|version| version.external_files.as_slice()),
     )
 }
 
-/// Takes each version's external files in ascending version order. A legacy
-/// config bundle is a full snapshot, so it replaces every older config. The
-/// bundle comes first so newer individual files are written over it.
-///
-/// Limits apply per version, matching what a single publish may upload.
-fn newest_config_files<'a>(
-    versions: impl IntoIterator<Item = &'a [ExternalFileResponse]>,
+/// The config files of `latest` that are new or differ from `applied`. A legacy config bundle
+/// comes first so individual files are written over it.
+fn changed_config_files(
+    latest: &[ExternalFileResponse],
+    applied: Option<&[ExternalFileResponse]>,
 ) -> crate::Result<Vec<ExternalFileResponse>> {
+    ensure_config_limits(latest)?;
+    let applied = applied
+        .unwrap_or_default()
+        .iter()
+        .map(|file| ((&file.file_type, &file.file_name), &file.sha256))
+        .collect::<HashMap<_, _>>();
     let mut bundle = None;
     let mut files = BTreeMap::new();
-    for external_files in versions {
-        ensure_config_limits(external_files)?;
-        if let Some(newer) = external_files
-            .iter()
-            .find(|file| file.file_type == CONFIG_BUNDLE_FILE_TYPE)
-        {
-            bundle = Some(newer.clone());
-            files.clear();
-        }
-        for file in external_files
-            .iter()
-            .filter(|file| file.file_type == CONFIG_FILE_TYPE)
-        {
-            files.insert(file.file_name.clone(), file.clone());
+    for file in latest.iter().filter(|file| {
+        applied.get(&(&file.file_type, &file.file_name)) != Some(&&file.sha256)
+    }) {
+        match file.file_type.as_str() {
+            CONFIG_BUNDLE_FILE_TYPE => bundle = Some(file.clone()),
+            CONFIG_FILE_TYPE => {
+                files.insert(file.file_name.clone(), file.clone());
+            }
+            _ => {}
         }
     }
 
@@ -72,7 +68,11 @@ fn ensure_config_limits(
         .filter(|file| file.file_type == CONFIG_FILE_TYPE)
     {
         count += 1;
-        size = size.saturating_add(file.plain_size().unwrap_or(u64::MAX));
+        size = size.saturating_add(
+            file.file_size
+                .and_then(|size| u64::try_from(size).ok())
+                .unwrap_or(u64::MAX),
+        );
     }
     if count > MAX_SHARED_FILES || size > MAX_SHARED_FILES_TOTAL_SIZE {
         bail!(crate::ErrorKind::InputError(
@@ -90,102 +90,74 @@ mod tests {
     fn file(
         file_type: &str,
         file_name: &str,
-        url: &str,
+        sha256: &str,
     ) -> ExternalFileResponse {
         ExternalFileResponse {
             file_name: file_name.to_string(),
             file_type: file_type.to_string(),
-            url: url.to_string(),
             file_size: Some(1),
+            sha256: Some(sha256.to_string()),
             ..Default::default()
         }
     }
 
-    fn names(files: &[ExternalFileResponse]) -> Vec<(&str, &str, &str)> {
+    fn names(files: &[ExternalFileResponse]) -> Vec<(&str, &str)> {
         files
             .iter()
-            .map(|file| {
-                (
-                    file.file_type.as_str(),
-                    file.file_name.as_str(),
-                    file.url.as_str(),
-                )
-            })
+            .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
             .collect()
     }
 
     #[test]
-    fn newest_upload_of_each_path_wins() {
-        let v1 = [
-            file(CONFIG_FILE_TYPE, "config/a.toml", "v1"),
-            file(CONFIG_FILE_TYPE, "config/b.toml", "v1"),
+    fn only_configs_changed_since_the_applied_version_are_written() {
+        let applied = [
+            file(CONFIG_FILE_TYPE, "config/same.toml", "1"),
+            file(CONFIG_FILE_TYPE, "config/changed.toml", "1"),
         ];
-        let v2 = [file("mod", "extra.jar", "v2")];
-        let v3 = [file(CONFIG_FILE_TYPE, "config/a.toml", "v3")];
+        let latest = [
+            file("mod", "extra.jar", "2"),
+            file(CONFIG_FILE_TYPE, "config/same.toml", "1"),
+            file(CONFIG_FILE_TYPE, "config/changed.toml", "2"),
+            file(CONFIG_FILE_TYPE, "config/new.toml", "2"),
+        ];
 
-        let files = newest_config_files([&v1[..], &v2[..], &v3[..]]).unwrap();
+        let files = changed_config_files(&latest, Some(&applied)).unwrap();
 
         assert_eq!(
             names(&files),
             [
-                (CONFIG_FILE_TYPE, "config/a.toml", "v3"),
-                (CONFIG_FILE_TYPE, "config/b.toml", "v1"),
+                (CONFIG_FILE_TYPE, "config/changed.toml"),
+                (CONFIG_FILE_TYPE, "config/new.toml"),
             ]
         );
     }
 
     #[test]
-    fn bundle_replaces_older_configs_and_is_written_first() {
-        let v1 = [file(CONFIG_FILE_TYPE, "config/old.toml", "v1")];
-        let v2 = [
-            file(CONFIG_FILE_TYPE, "config/same.toml", "v2"),
-            file(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "v2"),
+    fn a_first_install_writes_every_config_with_the_bundle_first() {
+        let latest = [
+            file(CONFIG_FILE_TYPE, "config/a.toml", "1"),
+            file(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "1"),
         ];
-        let v3 = [file(CONFIG_FILE_TYPE, "config/new.toml", "v3")];
 
-        let files = newest_config_files([&v1[..], &v2[..], &v3[..]]).unwrap();
+        let files = changed_config_files(&latest, None).unwrap();
 
         assert_eq!(
             names(&files),
             [
-                (CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "v2"),
-                (CONFIG_FILE_TYPE, "config/new.toml", "v3"),
-                (CONFIG_FILE_TYPE, "config/same.toml", "v2"),
+                (CONFIG_BUNDLE_FILE_TYPE, "configs.zip"),
+                (CONFIG_FILE_TYPE, "config/a.toml"),
             ]
         );
     }
 
     #[test]
-    fn limits_apply_per_version() {
-        let mut half = file(CONFIG_FILE_TYPE, "config/a.toml", "v1");
+    fn limits_apply_to_the_version() {
+        let mut half = file(CONFIG_FILE_TYPE, "config/a.toml", "1");
         half.file_size = Some((MAX_SHARED_FILES_TOTAL_SIZE / 2 + 1) as i64);
         let mut other_half = half.clone();
         other_half.file_name = "config/b.toml".to_string();
-        let mut too_large = half.clone();
-        too_large.file_name = "config/c.toml".to_string();
 
-        assert!(
-            newest_config_files([
-                &[half.clone()][..],
-                &[other_half.clone()][..]
-            ])
-            .is_ok()
-        );
-        assert!(
-            newest_config_files([&[half, other_half, too_large][..]]).is_err()
-        );
-    }
-
-    #[test]
-    fn newest_bundle_wins() {
-        let v1 = [file(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "v1")];
-        let v2 = [file(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "v2")];
-
-        let files = newest_config_files([&v1[..], &v2[..]]).unwrap();
-
-        assert_eq!(
-            names(&files),
-            [(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "v2")]
-        );
+        assert!(changed_config_files(&[half.clone()], None).is_ok());
+        assert!(changed_config_files(&[half, other_half], None).is_err());
     }
 }

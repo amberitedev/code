@@ -494,11 +494,16 @@ fn shared_instance_external_file_data(
     file: ExternalFileResponse,
 ) -> crate::Result<SharedInstanceExternalFileData> {
     let file_size =
-        file.plain_size()
-            .ok_or(crate::ErrorKind::InputError(format!(
-                "shared instance external file {} is missing its size",
-                file.file_name
-            )))?;
+        file.file_size.ok_or(crate::ErrorKind::InputError(format!(
+            "shared instance external file {} is missing its size",
+            file.file_name
+        )))?;
+    let file_size = u64::try_from(file_size).context(
+        crate::ErrorKind::InputError(format!(
+            "shared instance external file {} has an invalid size",
+            file.file_name
+        )),
+    )?;
     let pool = match file.object.as_deref() {
         Some(object) => Some(std::sync::Arc::new(pool_file(&file, object)?)),
         None => None,
@@ -510,7 +515,6 @@ fn shared_instance_external_file_data(
         url: file.url,
         file_size,
         sha1: file.sha1,
-        sha256: file.sha256,
         pool,
     })
 }
@@ -541,7 +545,10 @@ fn pool_file(
     let object_size = file
         .object_size
         .filter(|size| {
-            Some(*size) == file.plain_size().map(crypto::object_size)
+            file.file_size
+                .and_then(|size| u64::try_from(size).ok())
+                .map(crypto::object_size)
+                == Some(*size)
         })
         .ok_or_else(invalid)?;
 

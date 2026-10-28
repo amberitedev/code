@@ -84,13 +84,16 @@ impl Store {
             .await
     }
 
-    /// Count a request against its address's rate. Core forwards with `X-Forwarded-For` set
-    /// to its caller; anything else reaching this port is local.
-    fn rate(
+    /// The fetch ticket for `root`. Only a refused ticket counts against its address's rate, so
+    /// members fetching with a valid one are never slowed; the egress cap and fetch slots bound
+    /// what a valid ticket can take. Core forwards with `X-Forwarded-For` set to its caller;
+    /// anything else reaching this port is local.
+    async fn fetch_ticket(
         &self,
         headers: &HeaderMap,
         extensions: &Extensions,
-    ) -> Result<(), StoreError> {
+        root: &Hash,
+    ) -> Result<Claims, StoreError> {
         let address = headers
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
@@ -102,14 +105,15 @@ impl Store {
                     .map(|info| info.0.ip())
             })
             .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
-        if self.limits.allow(address) {
-            Ok(())
-        } else {
-            Err(StoreError::new(
+        if self.limits.limited(address) {
+            return Err(StoreError::new(
                 Code::RateLimited,
-                "Too many requests from this address. Wait a minute.",
-            ))
+                "Too many refused requests from this address. Wait a minute.",
+            ));
         }
+        self.ticket(headers, tickets::FETCH, root)
+            .await
+            .inspect_err(|_| self.limits.refused(address))
     }
 
     fn admin(&self, headers: &HeaderMap) -> Result<(), StoreError> {
@@ -242,9 +246,8 @@ async fn list(
     headers: HeaderMap,
     extensions: Extensions,
 ) -> Result<Json<VersionList>, StoreError> {
-    store.rate(&headers, &extensions)?;
     let root = root_of(&root)?;
-    store.ticket(&headers, tickets::FETCH, &root).await?;
+    store.fetch_ticket(&headers, &extensions, &root).await?;
     let list = store
         .index()
         .servable(&root)
@@ -270,15 +273,14 @@ async fn object(
     headers: HeaderMap,
     extensions: Extensions,
 ) -> Result<Response, StoreError> {
-    store.rate(&headers, &extensions)?;
+    let root = root_of(&root)?;
+    store.fetch_ticket(&headers, &extensions, &root).await?;
     let slot = store.limits.fetch_slot().ok_or_else(|| {
         StoreError::new(
             Code::RateLimited,
             "This Core is serving as many downloads as it can. Try again shortly.",
         )
     })?;
-    let root = root_of(&root)?;
-    store.ticket(&headers, tickets::FETCH, &root).await?;
     let not_held = || not_found("That object is not in this version.");
     let object = Hash::parse(&object).ok_or_else(not_held)?;
     let list = store
@@ -848,43 +850,41 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn one_address_is_rate_limited() {
+    async fn only_refused_requests_count_against_an_address() {
         let f = fixture("core", 1 << 30, 1 << 30).await;
         let list = stored(&f, &[b"x"]).await;
         let root = list.root();
         let uri = format!("/store/versions/{root}");
         let fetch = f.ticket("fetch", &root, json!({}));
-        for _ in 0..crate::store::limits::REQUESTS_PER_MINUTE {
-            let (status, ..) = f
-                .call(
+        let get = |ticket: &str, address: &'static str| {
+            let (uri, ticket) = (uri.clone(), ticket.to_string());
+            let f = &f;
+            async move {
+                f.call(
                     Method::GET,
                     &uri,
-                    &fetch,
-                    &[("x-forwarded-for", "203.0.113.9")],
+                    &ticket,
+                    &[("x-forwarded-for", address)],
                     Body::empty(),
                 )
-                .await;
-            assert_eq!(status, StatusCode::OK);
+                .await
+                .0
+            }
+        };
+        let limit = crate::store::limits::REFUSALS_PER_MINUTE;
+        for _ in 0..=limit {
+            assert_eq!(get(&fetch, "203.0.113.9").await, StatusCode::OK);
         }
-        let (status, ..) = f
-            .call(
-                Method::GET,
-                &uri,
-                &fetch,
-                &[("x-forwarded-for", "203.0.113.9")],
-                Body::empty(),
-            )
-            .await;
-        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
-        let (status, ..) = f
-            .call(
-                Method::GET,
-                &uri,
-                &fetch,
-                &[("x-forwarded-for", "203.0.113.10")],
-                Body::empty(),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK);
+        for _ in 0..limit {
+            assert_eq!(
+                get("not a ticket", "203.0.113.10").await,
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        assert_eq!(
+            get(&fetch, "203.0.113.10").await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(get(&fetch, "203.0.113.9").await, StatusCode::OK);
     }
 }

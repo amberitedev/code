@@ -23,16 +23,23 @@ export const EMPTY_ROOT = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca4959
 /** Files encrypted with a key derived from their own content, so one copy serves every share. */
 const CONTENT_TYPES = new Set(['mod', 'resourcepack', 'shader', 'datapack'])
 const HASH = /^[0-9a-f]{64}$/
+const SHA1 = /^[0-9a-f]{40}$/
 
 export const manifestKey = (instanceId: string, version: number) =>
 	`manifests/${instanceId}/${version}`
 
+/**
+ * One `external_files` entry. The first fields are Modrinth's: `file_size` is the plain size and
+ * `sha1` is what a member's install compares to skip a file it already has. The rest are the
+ * pool's: P, C, the encrypted size, and the key of a non-content file.
+ */
 export type ManifestFile = {
 	file_name: string
 	file_type: string
 	/** `pool:<C>`, for upstream code that expects a URL; nothing fetches it. */
 	url: string
-	size: number
+	file_size: number
+	sha1: string
 	sha256: string
 	object: string
 	object_size: number
@@ -51,13 +58,13 @@ export function manifestFile(
 			throw new ApiError(400, 'invalid_input', `Invalid ${field} for ${file_name}`)
 		return value
 	}
-	const hash = (field: string) => {
+	const hash = (field: string, pattern = HASH) => {
 		const value = entry[field]
-		if (typeof value !== 'string' || !HASH.test(value))
+		if (typeof value !== 'string' || !pattern.test(value))
 			throw new ApiError(400, 'invalid_input', `Invalid ${field} for ${file_name}`)
 		return value
 	}
-	const size = count('size')
+	const size = count('file_size')
 	const object_size = count('object_size')
 	// Every chunk of 1 MiB, and the last one even when empty, carries a 16-byte tag.
 	if (object_size !== size + 16 * Math.max(1, Math.ceil(size / 1_048_576)))
@@ -67,7 +74,8 @@ export function manifestFile(
 		file_name,
 		file_type,
 		url: `pool:${object}`,
-		size,
+		file_size: size,
+		sha1: hash('sha1', SHA1),
 		sha256: hash('sha256'),
 		object,
 		object_size,
