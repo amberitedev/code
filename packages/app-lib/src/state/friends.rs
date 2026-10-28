@@ -209,7 +209,10 @@ impl FriendsSocket {
                                             ServerToClientMessage::FriendRequest { from } => {
                                                 let _ = emit_friend(FriendPayload::FriendRequest { from: from.to_string() }).await;
                                             }
-                                            ServerToClientMessage::FriendRequestRejected { .. } => {}, // TODO
+                                            ServerToClientMessage::FriendRequestRejected { from } => {
+                                                statuses.remove(&from);
+                                                let _ = emit_friend(FriendPayload::FriendRequestRejected { from: from.to_string() }).await;
+                                            },
 
                                             ServerToClientMessage::FriendSocketListening { .. } => {}, // TODO
                                             ServerToClientMessage::FriendSocketStoppedListening { .. } => {}, // TODO

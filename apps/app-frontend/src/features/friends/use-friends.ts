@@ -130,8 +130,16 @@ export function useFriends(options: {
 	}
 
 	useAppEvent('friend', async (event) => {
+		// Sent for a new request and when someone accepts ours.
 		if (event.event === 'friend_request') {
 			void queryClient.invalidateQueries({ queryKey: queryKey.value })
+			return
+		}
+		if (event.event === 'friend_request_rejected') {
+			const currentUserId = toValue(options.currentUserId)
+			queryClient.setQueryData<FriendWithUserData[]>(queryKey.value, (cachedFriends) =>
+				cachedFriends?.filter((friend) => getFriendUserId(friend, currentUserId) !== event.from),
+			)
 			return
 		}
 

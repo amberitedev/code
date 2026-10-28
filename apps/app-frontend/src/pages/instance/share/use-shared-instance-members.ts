@@ -2,6 +2,7 @@ import type { InvitePlayersUser } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref } from 'vue'
 
+import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { get_user_many } from '@/helpers/cache.js'
 import {
 	get_shared_instance_users,
@@ -63,14 +64,17 @@ export function useSharedInstanceMembers(options: {
 			options.isSignedIn.value && !!options.instance.value.id && !options.actionsLocked.value,
 		retry: false,
 		staleTime: Infinity,
-		// A declined or accepted invite changes the list on the backend without any event reaching
-		// the owner, so the open Share tab asks again every so often.
-		refetchInterval: 15_000,
 		refetchOnMount: 'always',
 		refetchOnReconnect: false,
 		refetchOnWindowFocus: false,
 	})
 	const rows = computed(() => query.data.value ?? [])
+	// Another member accepting, declining, joining, or leaving changes the list on the backend.
+	useSharedInstanceEvent(
+		'shared_instance_users',
+		() => options.instance.value.shared_instance?.id,
+		() => void queryClient.invalidateQueries({ queryKey: queryKey.value }),
+	)
 
 	const inviteMutation = useMutation({
 		mutationFn: ({ user, change }: InviteVariables) =>

@@ -496,6 +496,13 @@ function deserialize_FRIEND_PAYLOAD(d) {
 			return {
 				tag: 'status_sync',
 			}
+		case 4:
+			return {
+				tag: 'friend_request_rejected',
+				value: {
+					from: d.deserialize_string(),
+				},
+			}
 		default:
 			throw 'variant not implemented'
 	}

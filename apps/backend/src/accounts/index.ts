@@ -391,9 +391,12 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 	if (path.startsWith('/session/') && method === 'DELETE') {
 		const user = await requireUser(request, env)
 		const id = decodeURIComponent(path.slice('/session/'.length))
-		await env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND (id = ? OR token_hash = ?)')
+		const deleted = await env.DB.prepare(
+			'DELETE FROM sessions WHERE user_id = ? AND (id = ? OR token_hash = ?)',
+		)
 			.bind(user.id, id, await digest(id))
 			.run()
+		if (deleted.meta.changes) await env.FRIENDS.getByName(user.id).revalidateSessions()
 		return noContent()
 	}
 	if (path === '/auth/password/reset' && method === 'POST') {

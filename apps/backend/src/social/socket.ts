@@ -1,11 +1,17 @@
 import { DurableObject } from 'cloudflare:workers'
-import { areFriends, requireSession } from '../common/auth'
+import { requireSession } from '../common/auth'
 import type { Env } from '../common/types'
 
 type Presence = { user_id: string; profile_name: string | null; last_update: string }
 type Connection = { userId: string; sessionId: string; expires: string; presence: Presence }
 
-/** One object per account keeps all its installations online through Worker hibernation. */
+/**
+ * One object per account keeps all its installations online through Worker hibernation.
+ *
+ * A socket is trusted until its session's expiry, checked in memory. Revoking a session early
+ * (signing out, a lock, an admin reset, deleting the account) calls `revalidateSessions`, so no
+ * message or presence lookup has to ask D1 whether the session still exists.
+ */
 export class FriendsHub extends DurableObject<Env> {
 	async fetch(request: Request): Promise<Response> {
 		const session = await requireSession(request, this.env)
@@ -22,47 +28,42 @@ export class FriendsHub extends DurableObject<Env> {
 		}
 		pair[1].serializeAttachment(connection)
 		this.ctx.acceptWebSocket(pair[1])
-		await this.ctx.storage.put('userId', session.user_id)
 		await this.scheduleExpiry()
-		const friends = await this.friendIds(session.user_id)
-		const statuses = await Promise.all(friends.map((id) => this.env.FRIENDS.getByName(id).status()))
+		// The same call that tells each friend this account is online answers with their presence.
+		const statuses = await this.broadcast(session.user_id, {
+			type: 'status_update',
+			status: connection.presence,
+		})
 		pair[1].send(
 			JSON.stringify({
 				type: 'friend_statuses',
 				statuses: statuses.filter((status) => status !== null),
 			}),
 		)
-		await this.broadcast(session.user_id, { type: 'status_update', status: connection.presence })
 		return new Response(null, { status: 101, webSocket: pair[0] })
 	}
 
-	async status(): Promise<Presence | null> {
-		for (const socket of this.ctx.getWebSockets()) {
-			if (socket.readyState !== WebSocket.OPEN) continue
-			const connection = socket.deserializeAttachment() as Connection
-			if (await this.valid(connection)) return connection.presence
-			socket.close(4001, 'Session expired')
-		}
-		return null
+	/** This account's presence, or null when none of its installations is online. */
+	status(): Presence | null {
+		const [socket] = this.online()
+		return socket ? attachment(socket).presence : null
 	}
 
-	async notify(message: unknown): Promise<void> {
-		const text = JSON.stringify(message)
-		for (const socket of this.ctx.getWebSockets()) {
-			if (socket.readyState !== WebSocket.OPEN) continue
-			if (await this.valid(socket.deserializeAttachment() as Connection)) socket.send(text)
-			else socket.close(4001, 'Session expired')
-		}
+	/** Sends each message to every online installation of this account. */
+	notify(...messages: unknown[]): void {
+		const texts = messages.map((message) => JSON.stringify(message))
+		for (const socket of this.online()) for (const text of texts) socket.send(text)
 	}
 
-	async receivePresence(from: string, message: unknown): Promise<void> {
-		const userId = await this.ctx.storage.get<string>('userId')
-		if (userId && (await areFriends(this.env, userId, from))) await this.notify(message)
+	/** A friend's presence changed: passes it on and answers with this account's own. */
+	friendPresence(message: unknown): Presence | null {
+		this.notify(message)
+		return this.status()
 	}
 
 	async webSocketMessage(socket: WebSocket, raw: string | ArrayBuffer): Promise<void> {
-		const connection = socket.deserializeAttachment() as Connection
-		if (!(await this.valid(connection))) {
+		const connection = attachment(socket)
+		if (Date.parse(connection.expires) <= Date.now()) {
 			socket.close(4001, 'Session expired')
 			return
 		}
@@ -98,79 +99,98 @@ export class FriendsHub extends DurableObject<Env> {
 	}
 
 	async webSocketClose(socket: WebSocket): Promise<void> {
-		const connection = socket.deserializeAttachment() as Connection
+		const connection = attachment(socket)
 		socket.close()
-		if (!(await this.status()))
-			await this.broadcast(connection.userId, { type: 'user_offline', id: connection.userId })
+		if (!this.status()) await this.wentOffline(connection.userId)
 	}
 
 	async webSocketError(socket: WebSocket): Promise<void> {
 		await this.webSocketClose(socket)
 	}
 
+	/** Set for the earliest session expiry: closes the installations whose session ended. */
 	async alarm(): Promise<void> {
-		const userId = await this.ctx.storage.get<string>('userId')
-		if (userId && !(await this.status()))
-			await this.broadcast(userId, { type: 'user_offline', id: userId })
+		const now = Date.now()
+		const expired = this.ctx
+			.getWebSockets()
+			.filter(
+				(socket) =>
+					socket.readyState === WebSocket.OPEN && Date.parse(attachment(socket).expires) <= now,
+			)
+		for (const socket of expired) socket.close(4001, 'Session expired')
+		if (expired[0] && !this.status()) await this.wentOffline(attachment(expired[0]).userId)
 		await this.scheduleExpiry()
 	}
 
-	/** Close revoked installations immediately, including idle hibernating sockets. */
+	/** Closes the installations whose session was revoked, including idle hibernating sockets. */
 	async revalidateSessions(): Promise<void> {
-		const userId = await this.ctx.storage.get<string>('userId')
-		if (userId && !(await this.status()))
-			await this.broadcast(userId, { type: 'user_offline', id: userId })
-	}
-
-	private async valid(connection: Connection): Promise<boolean> {
-		if (Date.parse(connection.expires) <= Date.now()) return false
-		return Boolean(
-			await this.env.DB.prepare(
-				'SELECT id FROM sessions WHERE id = ? AND user_id = ? AND expires > ?',
-			)
-				.bind(connection.sessionId, connection.userId, new Date().toISOString())
-				.first(),
-		)
-	}
-
-	private async friendIds(userId: string): Promise<string[]> {
+		const sockets = this.online()
+		if (!sockets.length) return
 		const { results } = await this.env.DB.prepare(
-			'SELECT CASE WHEN user_id = ? THEN friend_id ELSE user_id END AS id FROM friends WHERE accepted = 1 AND (user_id = ? OR friend_id = ?)',
+			'SELECT id FROM sessions WHERE id IN (SELECT value FROM json_each(?)) AND expires > ?',
 		)
-			.bind(userId, userId, userId)
+			.bind(
+				JSON.stringify(sockets.map((socket) => attachment(socket).sessionId)),
+				new Date().toISOString(),
+			)
 			.all<{ id: string }>()
-		return results.map((row) => row.id)
+		const live = new Set(results.map((row) => row.id))
+		const revoked = sockets.filter((socket) => !live.has(attachment(socket).sessionId))
+		for (const socket of revoked) socket.close(4001, 'Session expired')
+		if (revoked[0] && !this.status()) await this.wentOffline(attachment(revoked[0]).userId)
 	}
 
-	private async broadcast(userId: string, message: unknown): Promise<void> {
-		await Promise.all(
-			(await this.friendIds(userId)).map((id) =>
-				this.env.FRIENDS.getByName(id).receivePresence(userId, message),
+	/** Open sockets whose session has not expired. */
+	private online(): WebSocket[] {
+		const now = Date.now()
+		return this.ctx
+			.getWebSockets()
+			.filter(
+				(socket) =>
+					socket.readyState === WebSocket.OPEN && Date.parse(attachment(socket).expires) > now,
+			)
+	}
+
+	private async wentOffline(userId: string): Promise<void> {
+		await this.broadcast(userId, { type: 'user_offline', id: userId })
+	}
+
+	/** Sends a presence message to every friend, and returns each friend's own presence. */
+	private async broadcast(userId: string, message: unknown): Promise<(Presence | null)[]> {
+		return Promise.all(
+			(await friendIds(this.env, userId)).map((id) =>
+				this.env.FRIENDS.getByName(id).friendPresence(message),
 			),
 		)
 	}
 
 	private async scheduleExpiry(): Promise<void> {
-		const expiries = this.ctx
-			.getWebSockets()
-			.filter((socket) => socket.readyState === WebSocket.OPEN)
-			.map((socket) => Date.parse((socket.deserializeAttachment() as Connection).expires))
-			.filter((expires) => expires > Date.now())
+		const expiries = this.online().map((socket) => Date.parse(attachment(socket).expires))
 		if (expiries.length) await this.ctx.storage.setAlarm(Math.min(...expiries))
 	}
 }
 
-export async function notifyUser(env: Env, userId: string, message: unknown): Promise<void> {
-	await env.FRIENDS.getByName(userId).notify(message)
+function attachment(socket: WebSocket): Connection {
+	return socket.deserializeAttachment() as Connection
 }
 
-export async function friendsStatuses(env: Env, userId: string): Promise<Presence[]> {
+async function friendIds(env: Env, userId: string): Promise<string[]> {
 	const { results } = await env.DB.prepare(
 		'SELECT CASE WHEN user_id = ? THEN friend_id ELSE user_id END AS id FROM friends WHERE accepted = 1 AND (user_id = ? OR friend_id = ?)',
 	)
 		.bind(userId, userId, userId)
 		.all<{ id: string }>()
-	const statuses = await Promise.all(results.map(({ id }) => env.FRIENDS.getByName(id).status()))
+	return results.map((row) => row.id)
+}
+
+export async function notifyUser(env: Env, userId: string, ...messages: unknown[]): Promise<void> {
+	await env.FRIENDS.getByName(userId).notify(...messages)
+}
+
+export async function friendsStatuses(env: Env, userId: string): Promise<Presence[]> {
+	const statuses = await Promise.all(
+		(await friendIds(env, userId)).map((id) => env.FRIENDS.getByName(id).status()),
+	)
 	return statuses.filter((status) => status !== null)
 }
 
