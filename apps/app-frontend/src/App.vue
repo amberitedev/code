@@ -88,7 +88,12 @@ import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts
 import { isDarkTheme, useTheme } from '@/composables/use-theme.ts'
 import { config } from '@/config'
 import AddCoreModal from '@/features/cores/add-core-modal.vue'
-import { coresQueryKey, openAddCoreModal, useCores } from '@/features/cores/use-cores'
+import {
+	coresQueryKey,
+	createCoreActions,
+	provideCoreActions,
+	useCores,
+} from '@/features/cores/use-cores'
 import { provideMinecraftAccounts } from '@/features/minecraft-accounts/context'
 import { useCoreWatch } from '@/features/servers/linked-servers'
 import AppSettingsModal from '@/features/settings/app-settings-modal/index.vue'
@@ -850,6 +855,14 @@ const settingsActions = provideSettingsActions({
 	openCores: () => appSettingsModal.value?.showCores(),
 })
 
+const addCoreModal = ref()
+const coreActions = provideCoreActions(
+	createCoreActions((code) => {
+		if (!addCoreModal.value) throw new Error('The Add Core modal is not mounted')
+		return addCoreModal.value.show(code)
+	}),
+)
+
 watch(incompatibilityWarningModal, (modal) => {
 	if (modal) {
 		setContentIncompatibilityWarningModal(modal)
@@ -1443,7 +1456,7 @@ async function handleCommand(e) {
 			await run(e.id).catch(handleError)
 		}
 	} else if (e.event === 'ApproveCore') {
-		await openAddCoreModal(e.code)
+		await coreActions.openAddCore(e.code)
 	} else if (e.event === 'InstallSharedInstanceInvite') {
 		await sharedInstanceInviteHandler.value?.installFromInviteId(e.invite_id)
 	} else if (e.event === 'InstallServer') {
@@ -1896,7 +1909,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</div>
 		</Transition>
 		<AppSettingsModal ref="appSettingsModal" />
-		<AddCoreModal />
+		<AddCoreModal ref="addCoreModal" />
 		<NewUpdateModal ref="newUpdateModal" />
 		<Suspense>
 			<ModrinthAccountRequiredModal ref="modrinthLoginModal" :request-auth="requestModrinthAuth" />

@@ -3,12 +3,12 @@ import type { Archon } from '@modrinth/api-client'
 import { RightArrowIcon } from '@modrinth/assets'
 import { Button, injectModrinthClient, NewModal } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
-import { coresQueryKey, registerAddCoreModal } from '@/features/cores/use-cores'
+import { coresQueryKey } from '@/features/cores/use-cores'
 
-// The one "Add Core" modal, mounted once in App.vue. Open it with `openAddCoreModal` or
-// `ensureCore` from `@/features/cores/use-cores`. The user types the code their Core shows, sees
+// The one "Add Core" modal, mounted once in App.vue. Open it through `injectCoreActions` from
+// `@/features/cores/use-cores`. The user types the code their Core shows, sees
 // which machine is asking, and approves it; the Core then signs in on its own.
 
 const client = injectModrinthClient()
@@ -47,8 +47,7 @@ watch(error, (message) => {
 	triggerErrorFeedback()
 })
 
-onMounted(() => registerAddCoreModal(show))
-onBeforeUnmount(() => registerAddCoreModal(null))
+defineExpose({ show })
 
 /** Open the modal. With `prefilled` (from an `amberite://approve` link) it looks the code up at once. */
 function show(prefilled = ''): Promise<boolean> {
