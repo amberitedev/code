@@ -189,8 +189,7 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - `convex`, `apps/realtime` - legacy, being removed. Do not build on them.
 - `packages/ui` - shared Modrinth and Amberite UI.
 - `packages/api-client` - typed client for Modrinth, the backend, and Core.
-- `packages/app-lib` - inherited launcher and platform library. Do not modify it unless explicitly
-  asked.
+- `packages/app-lib` - inherited launcher and platform library.
 - `docs/internals` - `plan.md` holds product goals and decisions; `scripts.md` covers dev commands;
   `ui.md` holds the rules for how the App's UI behaves.
 
