@@ -101,12 +101,31 @@ struct CurrentSharedInstanceExternalFile {
 }
 
 impl CurrentSharedInstanceExternalFile {
-    fn matches(&self, desired: &SharedInstanceExternalFileData) -> bool {
-        !self.missing
-            && desired
-                .sha1
-                .as_deref()
-                .is_some_and(|sha1| self.sha1.eq_ignore_ascii_case(sha1))
+    /// Whether the installed file is already the one wanted, so it need not be downloaded again.
+    /// Amberite's manifest carries SHA-256 instead of upstream's SHA-1, so the installed file is
+    /// hashed when there is no SHA-1 to compare.
+    async fn matches(
+        &self,
+        desired: &SharedInstanceExternalFileData,
+        instance_path: &std::path::Path,
+    ) -> crate::Result<bool> {
+        if self.missing {
+            return Ok(false);
+        }
+        if let Some(sha1) = desired.sha1.as_deref() {
+            return Ok(self.sha1.eq_ignore_ascii_case(sha1));
+        }
+        if desired.sha256.is_none() {
+            return Ok(false);
+        }
+        Ok(
+            !crate::self_hosted::integrity::installed_shared_file_changed(
+                instance_path,
+                Some(&self.relative_path),
+                desired.sha256.as_deref(),
+            )
+            .await?,
+        )
     }
 }
 
@@ -231,11 +250,18 @@ impl SharedInstanceApplyPlan {
             }
         }
 
+        let instance_path = state
+            .directories
+            .instances_dir()
+            .join(&metadata.instance.path);
         for desired in desired.external_files.into_values() {
             let key = (desired.file_type, desired.file.file_name.clone());
             match current.external_files.get(&key) {
-                Some(current) if current.matches(&desired.file) => {}
-                Some(_) => plan.external_updates.push(desired),
+                Some(current) => {
+                    if !current.matches(&desired.file, &instance_path).await? {
+                        plan.external_updates.push(desired);
+                    }
+                }
                 None => plan.external_additions.push(desired),
             }
         }
