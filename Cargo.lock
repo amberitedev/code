@@ -3212,7 +3212,6 @@ dependencies = [
  "clap 4.6.7",
  "color-eyre",
  "crab_nat",
- "daedalus",
  "dunce",
  "flate2",
  "futures",
@@ -3222,6 +3221,7 @@ dependencies = [
  "hyper-util",
  "igd-next",
  "libc",
+ "minecraft-meta-manifest",
  "minisign-verify",
  "netdev",
  "nix",
@@ -3623,16 +3623,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
 dependencies = [
  "cmov",
-]
-
-[[package]]
-name = "daedalus"
-version = "0.2.3"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]

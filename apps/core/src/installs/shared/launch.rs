@@ -6,14 +6,14 @@
 //! directory, so they are computed once at install time and persisted in the
 //! installation's `launch.json`.
 //!
-//! Server main classes differ from the client ones daedalus records: Fabric and
+//! Server main classes differ from the client ones launcher-meta records: Fabric and
 //! Quilt launch their `KnotServer` entrypoint with the loader libraries and the
 //! vanilla server jar on the classpath (exactly what their `*-server-launch`
 //! jars do), while vanilla is launched with a plain `-jar`.
 
 use std::path::Path;
 
-use daedalus::minecraft::VersionInfo;
+use minecraft_meta_manifest::minecraft::VersionManifest;
 
 use super::dirs::SharedDirs;
 use super::libraries::{LibraryError, build_classpath};
@@ -26,17 +26,17 @@ const FABRIC_SERVER_MAIN: &str =
 const QUILT_SERVER_MAIN: &str =
     "org.quiltmc.loader.impl.launch.knot.KnotServer";
 
-/// Build the launch tokens for a loader whose server launch daedalus models
-/// directly (Vanilla, Fabric, Quilt). Returns `None` for loaders handled by the
-/// vendor installer path (Forge/NeoForge/Paper).
+/// Build the launch tokens for a loader whose server launch launcher-meta models
+/// directly (Vanilla, Fabric, Quilt). Returns `None` for the others, which start
+/// from their own files (Forge/NeoForge/Paper).
 pub fn build_launch_tokens(
     dirs: &SharedDirs,
-    version_info: &VersionInfo,
-    version_id: &str,
+    version_info: &VersionManifest,
+    game_version: &str,
     loader: ModLoader,
     java_arch: &str,
 ) -> Result<Option<Vec<String>>, LibraryError> {
-    let server_jar = dirs.server_jar_path(version_id);
+    let server_jar = dirs.server_jar_path(game_version);
 
     match loader {
         ModLoader::Vanilla => Ok(Some(vec![

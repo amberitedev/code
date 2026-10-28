@@ -7,15 +7,16 @@
 //! ```text
 //! {data_dir}/meta/
 //!   libraries/<maven path>/<artifact>.jar   shared, deduped by maven coordinates
-//!   versions/<version_id>/<version_id>.json  cached merged version info
-//!   versions/<version_id>/server.jar         shared vanilla server jar
+//!   versions/<version_id>/<version_id>.json  cached version info
+//!   versions/<game_version>/server.jar       vanilla server jar, one per game version
+//!   versions/<version_id>/server-args.txt    how a Forge or NeoForge build starts
 //!   paper/paper-<game_version>-<build>.jar    Paper builds
 //!   installers/<loader>-<version>-installer.jar  Forge and NeoForge installers
 //!   packs/<sha1>.mrpack                       packs servers follow
 //! ```
 //!
 //! `version_id` is the merged id: `{game_version}` for vanilla, or
-//! `{game_version}-{loader_version}` for a modded build.
+//! `{game_version}-{loader}-{loader_version}` for a modded build.
 
 use std::path::{Path, PathBuf};
 
@@ -49,11 +50,17 @@ impl SharedDirs {
             .join(format!("{version_id}.json"))
     }
 
-    /// `{data_dir}/meta/versions/{version_id}/server.jar` — the shared vanilla
-    /// server jar for that game version. Loaders launch with this jar on the
-    /// classpath rather than copying it per instance.
-    pub fn server_jar_path(&self, version_id: &str) -> PathBuf {
-        self.version_dir(version_id).join("server.jar")
+    /// `{data_dir}/meta/versions/{game_version}/server.jar` — the vanilla server jar
+    /// every build of that game version shares. Loaders launch with this jar on the
+    /// classpath, and Forge's install steps read it, rather than copying it per server.
+    pub fn server_jar_path(&self, game_version: &str) -> PathBuf {
+        self.version_dir(game_version).join("server.jar")
+    }
+
+    /// `{data_dir}/meta/versions/{version_id}/server-args.txt` — the Java arguments a Forge
+    /// or NeoForge build installed from launcher-meta starts with, every path absolute.
+    pub fn server_args_path(&self, version_id: &str) -> PathBuf {
+        self.version_dir(version_id).join("server-args.txt")
     }
 
     /// One Paper build, run in place by every server on it.

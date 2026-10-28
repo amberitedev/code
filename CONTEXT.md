@@ -1,7 +1,8 @@
 # Amberite instances and servers
 
 Everything a player sets up is an instance, and every instance lives in one library. Hosting an
-instance gives it a server; the server is part of the instance, never a separate thing beside it.
+instance gives it a server, which is part of the instance, not a separate thing beside it. A server
+can also stand alone, created on its own.
 
 ## Language
 
@@ -35,9 +36,9 @@ _Avoid_: Clone, copy
 ### Servers
 
 **Server**:
-The hosted part of an instance: a Minecraft server running that instance's content on a Core, with
-its own world, backups, and console. An instance has at most one, and a server cannot exist without
-its instance.
+A Minecraft server running on a Core, with its own world, backups, and console. Usually it is the
+hosted part of an instance and runs that instance's content; an instance has at most one. A server
+can also stand alone, with no instance behind it.
 _Avoid_: Linked server, server instance, server-typed instance
 
 **Host**:
@@ -60,7 +61,9 @@ A server listed on Modrinth that anyone can find and join. Amberite shows it but
 
 - An instance has zero or one server. A second server with the same content means duplicating the
   instance and hosting the duplicate.
+- A standalone server has no instance. Its content belongs to the server.
 - An instance that has a server appears in the library as a server, for its owner and for everyone
   it is shared with.
 - Sharing happens only on instances. Sharing an instance that has a server shares that server.
-- Content belongs to the instance. The world, backups, and console belong to its server.
+- Content belongs to the instance, or to a standalone server. The world, backups, and console
+  belong to the server.

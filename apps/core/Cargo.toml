@@ -17,7 +17,6 @@ chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 color-eyre = { workspace = true }
 crab_nat = "0.8.1"
-daedalus = { workspace = true }
 dunce = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
@@ -25,6 +24,7 @@ http-body-util = "0.1.3"
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server-auto", "service", "tokio"] }
 igd-next = { version = "0.17.1", features = ["aio_tokio"] }
+minecraft-meta-manifest = { workspace = true }
 # Checks the signature on Copal release manifests.
 minisign-verify = "0.2.4"
 netdev = "0.46.3"

@@ -18,13 +18,15 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use daedalus::get_path_from_artifact;
-use daedalus::minecraft::{Library, LibraryDownloads};
 use dunce::canonicalize;
 use futures::stream::{self, TryStreamExt};
+use minecraft_meta_manifest::{
+    minecraft::{Library, LibraryDownloads},
+    util::get_path_from_artifact,
+};
 
 use super::dirs::SharedDirs;
-use super::rules::{classpath_separator, parse_rules};
+use super::rules::{classpath_separator, native_arch, parse_rules};
 use crate::installs::download::{self, FileDownload, Hash};
 
 #[derive(Debug, thiserror::Error)]
@@ -87,12 +89,11 @@ async fn download_one(
     }
 
     // Servers don't use natives — skip any natives-only library outright.
-    if library.natives_os_key_and_classifiers(java_arch).is_some() {
+    if natives_only(library, java_arch) {
         return Ok(());
     }
 
-    let artifact_path = get_path_from_artifact(&library.name)
-        .map_err(|e| LibraryError::Maven(format!("{}: {e}", library.name)))?;
+    let artifact_path = maven_path(&library.name)?;
     let path = dirs.libraries_dir().join(&artifact_path);
 
     // Prefer the explicit artifact download (with sha1), else fall back to a
@@ -101,20 +102,20 @@ async fn download_one(
         artifact: Some(artifact),
         ..
     }) = &library.downloads
-        && !artifact.url.is_empty()
+        && let Some(url) = &artifact.url
     {
+        let sha1 = artifact.sha1.to_string();
         if path.exists()
-            && (!verify
-                || download::has_hash(&path, Hash::Sha1(&artifact.sha1)).await)
+            && (!verify || download::has_hash(&path, Hash::Sha1(&sha1)).await)
         {
             return Ok(());
         }
         download::file(
             http,
-            &artifact.url,
+            url.as_str(),
             &path,
             &FileDownload {
-                hash: Hash::Sha1(&artifact.sha1),
+                hash: Hash::Sha1(&sha1),
                 limit: None,
                 progress: &download::quiet,
             },
@@ -151,12 +152,24 @@ async fn download_one(
     Ok(())
 }
 
+/// Whether a library only carries natives for this machine, which a dedicated server never
+/// loads. app-lib's `LibraryExt::native_classifier`.
+fn natives_only(library: &Library, java_arch: &str) -> bool {
+    library
+        .natives
+        .as_ref()
+        .is_some_and(|natives| natives.contains_key(&native_arch(java_arch)))
+}
+
+/// A library's path under the `libraries/` tree, from its maven coordinates.
+pub fn maven_path(name: &str) -> Result<String, LibraryError> {
+    get_path_from_artifact(name)
+        .map_err(|error| LibraryError::Maven(format!("{name}: {error:#}")))
+}
+
 /// Absolute path of a single library jar inside the shared store.
 fn lib_path(libraries_dir: &Path, name: &str) -> Result<String, LibraryError> {
-    let joined = libraries_dir.join(
-        get_path_from_artifact(name)
-            .map_err(|e| LibraryError::Maven(format!("{name}: {e}")))?,
-    );
+    let joined = libraries_dir.join(maven_path(name)?);
     Ok(canonicalize(&joined)?.to_string_lossy().to_string())
 }
 
@@ -185,7 +198,7 @@ pub fn build_classpath(
         if !library.include_in_classpath {
             continue;
         }
-        if library.natives_os_key_and_classifiers(java_arch).is_some() {
+        if natives_only(library, java_arch) {
             continue;
         }
         entries.push(lib_path(libraries_dir, &library.name)?);

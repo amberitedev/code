@@ -35,8 +35,8 @@ use crate::{
     },
     installs::{
         self, ModLoader,
-        daedalus::SharedDirs,
         download::{self, FileDownload, Hash},
+        shared::SharedDirs,
     },
     servers::{Hold, records as servers_records},
 };

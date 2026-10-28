@@ -15,12 +15,11 @@ use super::{
 use crate::{
     daemon::{folders, paths::Paths},
     installs::{
-        ModLoader,
-        daedalus::{
+        ModLoader, forge, java,
+        shared::{
             SharedDirs, launch::build_launch_tokens,
             version_info::merged_version_id,
         },
-        forge, java,
     },
 };
 
@@ -103,7 +102,7 @@ pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
             let tokens = build_launch_tokens(
                 &dirs,
                 &serde_json::from_slice(&info)?,
-                &version_id,
+                game_version,
                 loader,
                 std::env::consts::ARCH,
             )?
@@ -121,9 +120,15 @@ pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
                 "--nogui".into(),
             ]);
         }
-        ModLoader::Forge | ModLoader::NeoForge => args.extend(
-            forge::launch_args(&dir, loader, game_version, loader_version)?,
-        ),
+        ModLoader::Forge | ModLoader::NeoForge => {
+            args.extend(forge::launch_args(
+                &dirs,
+                &dir,
+                loader,
+                game_version,
+                loader_version,
+            )?)
+        }
     }
     Ok(args)
 }

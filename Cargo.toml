@@ -11,7 +11,6 @@ members = [
   "packages/ariadne",
   "packages/browser-bridge",
   "packages/component-derive",
-  "packages/daedalus",
   "packages/minecraft-meta-manifest",
   "packages/minecraft-meta-model",
   "packages/modrinth-content-management",
@@ -77,8 +76,6 @@ color-eyre = "0.6.5"
 color-thief = "0.2.2"
 component-derive = { path = "packages/component-derive" }
 const_format = "0.2.34"
-# Copal still reads launcher-meta through the daedalus models.
-daedalus = { path = "packages/daedalus" }
 darling = { version = "0.23" }
 dashmap = "6.1.0"
 data-url = "0.3.2"
