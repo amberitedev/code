@@ -9,10 +9,6 @@ repository.workspace = true
 [lib]
 name = "sharing_storage"
 
-[features]
-# `keys::test_support`, for Core's tests.
-testing = []
-
 [dependencies]
 axum = "0.8.4"
 base64 = { workspace = true }
@@ -52,6 +48,10 @@ nix = { version = "0.30.1", features = ["fs"] }
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[features]
+# `keys::test_support`, for Core's tests.
+testing = []
 
 [lints]
 workspace = true
