@@ -18,8 +18,7 @@ Amberite makes everything feel simple and easy. The technical stuff is hidden be
 
 ### 2. Self-hosted Core
 
-Copal/Core is Amberite’s self-hosted server manager. It is open source and free, runs on hardware you control, and fully replaces Modrinth Hosting. A server can be created from an
-instance, so its content follows the instance without anyone managing or syncing it.
+Copal/Core is Amberite’s self-hosted server manager. It is open source and free, runs on hardware you control, and fully replaces Modrinth Hosting. A server can be created from an instance, so its content follows the instance without anyone managing or syncing it.
 
 ### 3. Modrinth handles public content
 
@@ -137,9 +136,9 @@ Full command, state, and port behavior: `docs/internals/scripts.md`.
 An empty environment is a bad test. Worktrees get an isolated copy of the primary checkout's
 `.data/` instead of pointing at live state:
 
-- `.data/backend` (accounts, sharing metadata, and shared files) and `.data/core` are shared by every
-  App in the worktree.
-  `.data/scenarios/<number>` contains the complete local state of one App installation.
+- `.data/backend` (accounts and sharing metadata) and `.data/core` (servers and the shared files it
+  stores) are shared by every App in the worktree. `.data/scenarios/<number>` contains the complete
+  local state of one App installation.
 - Run `vp run dev 1 2 3` to launch several Apps as different fake accounts against the same backend and
   Core. Each scenario keeps its own database, settings, Minecraft instances, credentials, and
   WebView state.
@@ -158,8 +157,9 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
   lint, and typecheck only for the workspace you changed.
 - You usually do not need to build or compile. CI checks every push, and `vp run dev` compiles what
   it runs. When you do need the compiler, such as for a large Rust change, run `cargo check` scoped
-  to the crate you changed (`-p <crate>` or that crate's directory). Release builds (`cargo build
---release`, `vp build`) and app bundles are slow and rarely tell you anything a check would not.
+  to the crate you changed (`-p <crate>` or that crate's directory). Release builds
+  (`cargo build --release`, `vp build`) and app bundles are slow and rarely tell you anything a check
+  would not.
 - You usually do not need repo-wide checks (`vp check`, `vp run -r test`, `vp run -r typecheck`).
   CI runs the full suite. Run one when your change really reaches across the repo, and prefer the
   narrowest command that covers it.
@@ -185,8 +185,8 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - `apps/core` - Copal, the Rust server manager.
 - `apps/frontend` - Website and inherited Modrinth web surface. Not in use; it will be reverted to
   upstream.
-- `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers and D1.
-- `convex`, `apps/realtime` - legacy, being removed. Do not build on them.
+- `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers, D1, and
+  R2. Shared files live on Cores, never on Cloudflare.
 - `packages/ui` - shared Modrinth and Amberite UI.
 - `packages/api-client` - typed client for Modrinth, the backend, and Core.
 - `packages/app-lib` - inherited launcher and platform library.
@@ -207,8 +207,3 @@ and `/to-tickets` turns a plan into issues.
 - Inferred types over annotations. Never use TypeScript `any`; use `unknown` and narrow it safely.
 - Comments describe how a thing is used or why a constraint exists. Do not narrate ordinary code.
 - If a rule here fights the task, say so clearly and get developer approval before breaking it.
-
-## Additional tips
-
-- Don't use computer use unless the user explicitly agrees or requests it. The browser bridge is
-  not computer use and needs no permission.
