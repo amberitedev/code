@@ -154,8 +154,8 @@ function draw(cores: Candidate[], exclude: string[]): string | null {
  * Where a share's two copies go (docs/internals/pool.md, "Where a share lives"). An owner with a
  * private Core, one with storage off, keeps every share there alone. Otherwise a share whose
  * instance has a server on `serverCore`, one of the owner's Cores, is homed there, and the rest
- * live on other people's Cores. A share with no members takes no replica: only its server reads
- * it. Copies on a Core that still qualifies stay put, so a push moves nothing it need not.
+ * live on other people's Cores, or on the owner's own when no one else's can take them. A share
+ * with no members takes no replica: only its server reads it. Copies on a Core that still qualifies stay put, so a push moves nothing it need not.
  * `home` is null when no Core can take the share.
  */
 export async function place(
@@ -191,8 +191,18 @@ export async function place(
 			)
 		: new Set<string>()
 	const kept = held.filter((id) => offering.has(id))
-	const others = (await eligibleCores(env)).filter((core) => core.owner_id !== ownerId)
-	const home = server ?? kept[0] ?? draw(others, [])
+	const eligible = await eligibleCores(env)
+	const others = eligible.filter((core) => core.owner_id !== ownerId)
+	// With no one else's Core to take it, the owner's own Core that offers storage does, as the
+	// pool's first Core must for its owner; a later push moves it once another Core can.
+	const home =
+		server ??
+		kept[0] ??
+		draw(others, []) ??
+		draw(
+			eligible.filter((core) => core.owner_id === ownerId),
+			[],
+		)
 	if (!home || !members) return { home, replica: null }
 	return { home, replica: kept.find((id) => id !== home) ?? draw(others, [home]) }
 }

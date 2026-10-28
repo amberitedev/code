@@ -76,7 +76,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			.run()
 		// The owner's own Core, and a second Core owned by someone else. Neither has reported
 		// its storage yet, so neither can take a share. Without a server, a share lives on
-		// other people's Cores, so the owner's own Core does not take this one.
+		// other people's Cores when one can take it.
 		for (const [id, owner, key] of [
 			['core', 'owner', 'amc_core'],
 			['core2', 'other', 'amc_core2'],
@@ -180,8 +180,6 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// A version with files needs a Core. None has reported storage yet.
 		const jar = file('private-mod.jar', 'mod', 300_000)
 		const config = file('config/private-mod/client.toml', 'config', 20)
-		await code(await push(id, [jar, config]), 503, 'no_storage')
-		assert.deepEqual(await ok(await report('core', [])), { drop: [], pull: [] })
 		await code(await push(id, [jar, config]), 503, 'no_storage')
 		assert.deepEqual(await ok(await report('core2', [])), { drop: [], pull: [] })
 
@@ -540,6 +538,11 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// A Core whose owner turns storage off runs privately: other people's shares move off it.
 		await ok(await report('core2', [], { enabled: false }))
 		assert.deepEqual(await placed(), { home: 'core', replica: null })
+
+		// With no one else's Core offering storage, the owner's own takes a share without a server.
+		const fallback = await ok(await call('/instances', 'POST', { name: 'Fallback' }))
+		const fallbackVersion = await ok(await push(fallback.id, [file('fallback.jar', 'mod', 1000)]))
+		assert.equal(fallbackVersion.store.core.id, 'core')
 
 		// An owner whose Core runs privately keeps every share there alone, using no allowance.
 		await ok(await report('core', [], { enabled: false }))

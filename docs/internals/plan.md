@@ -46,7 +46,8 @@ the exact protocol are in `pool.md`. Storage was decided on 2026-10-28.
   download from it. The backend keeps the manifest and signs short-lived tickets.
 - Every share is stored twice, a home and a replica. An instance with a server has its home on the
   owner's own Core and its replica on a Core friends can reach. Without a server, or without a Core
-  of your own, both copies are on other Cores. A share with no members (a server-only instance)
+  of your own, both copies are on other Cores, or on your own Core while no one else's can take
+  them. A share with no members (a server-only instance)
   has no replica. The owner's App is the last backup: the next push restores a share that lost its
   Cores.
 - Sharing works for everyone. Everyone gets an allowance on other people's storage, 3 GB for now.

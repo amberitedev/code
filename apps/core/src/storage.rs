@@ -208,7 +208,8 @@ impl Storage {
             self.running.send_replace(Some(running));
             // Caps changed while the store started reached no running store: pass them now.
             if let Ok(now) = self.settings().await
-                && (now.cap, now.egress_cap) != (settings.cap, settings.egress_cap)
+                && (now.cap, now.egress_cap)
+                    != (settings.cap, settings.egress_cap)
                 && let Err(error) = local
                     .config(Caps {
                         cap: now.cap,

@@ -136,7 +136,9 @@ stay where they are, so a push moves nothing it does not have to:
   replica. It uses no one else's storage.
 - An instance with a server on one of the owner's Cores is homed there. The App names that Core
   in the push. Its replica is on a Core that offers storage, which friends can reach.
-- Anything else lives on other people's Cores, home and replica both.
+- Anything else lives on other people's Cores, home and replica both. When no one else's Core can
+  take it, as for the owner of the pool's only Core, the owner's own Core that offers storage is the
+  home, and a later push moves it once another Core can.
 - A share with no members has no replica: nobody fetches it but its server.
 
 A new copy goes to a Core drawn at random, weighted by free space, among eligible Cores with room.

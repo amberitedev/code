@@ -89,6 +89,11 @@ function droppedBy(kept: number) {
 	)
 }
 
+const keptTitle = computed(() => {
+	const count = pendingKept.value === null ? 0 : droppedBy(pendingKept.value)
+	return `Delete ${count} old ${count === 1 ? 'version' : 'versions'}?`
+})
+
 function setKept(next: number | null) {
 	if (!storage.value || next === storage.value.kept_versions) return
 	if (next !== null && droppedBy(next) > 0) {
@@ -150,7 +155,7 @@ function proceedDelete() {
 	<section class="flex flex-col gap-4" aria-labelledby="shared-storage-title">
 		<ConfirmModal
 			ref="confirmKept"
-			:title="`Delete ${pendingKept === null ? 0 : droppedBy(pendingKept)} old versions?`"
+			:title="keptTitle"
 			:description="`Each shared instance keeps only its last ${pendingKept}. Older versions and their files are deleted now.`"
 			proceed-label="Delete"
 			:on-hide="resetKeptDraft"
