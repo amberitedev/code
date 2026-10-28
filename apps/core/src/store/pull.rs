@@ -85,10 +85,7 @@ pub async fn pull(
 }
 
 /// `https://ip:port`, refused unless the IP is public or `allow_private` is set.
-pub(crate) fn address(
-    address: &str,
-    allow_private: bool,
-) -> Result<url::Url, StoreError> {
+fn address(address: &str, allow_private: bool) -> Result<url::Url, StoreError> {
     let invalid = |description: &str| {
         StoreError::new(Code::InvalidRequest, description.to_owned())
     };
@@ -110,7 +107,7 @@ pub(crate) fn address(
 
 /// A client that trusts exactly the certificate whose SHA-256 is `fingerprint`, follows no
 /// redirect, and uses no proxy.
-pub(crate) fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
+fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
     let fingerprint: [u8; 32] = hex::decode(fingerprint)
         .ok()
         .and_then(|bytes| bytes.try_into().ok())

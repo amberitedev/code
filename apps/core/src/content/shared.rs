@@ -9,13 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
-use futures::TryStreamExt;
 use serde::Deserialize;
 use sha1::Digest;
-use sharing_types::Decryptor;
-use tokio::io::AsyncWriteExt;
-use tokio_util::io::StreamReader;
-use tracing::warn;
+use sharing_types::store::{FetchError, PoolCore, PoolObject, StoreClient};
 
 use super::{Content, Error, install::MAX_PACK};
 use crate::installs::shared::SharedDirs;
@@ -39,17 +35,8 @@ pub struct SharedVersion {
 pub struct PoolAccess {
     /// R, in hex.
     pub root: String,
-    pub holders: Vec<Holder>,
+    pub holders: Vec<PoolCore>,
     pub ticket: String,
-}
-
-/// A Core holding a version. `address` is tried first, then `public_address`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Holder {
-    pub address: String,
-    #[serde(default)]
-    pub public_address: Option<String>,
-    pub cert_fingerprint: String,
 }
 
 /// One file of the version that lives in the pool, by its path in the server folder.
@@ -99,9 +86,11 @@ pub async fn write_pack(
                     "The version has files but nowhere to fetch them.".into(),
                 )
             })?;
+            let store =
+                StoreClient::new(concat!("copal/", env!("CARGO_PKG_VERSION")));
             for (n, file) in version.files.iter().enumerate() {
                 let path = staging.join(n.to_string());
-                fetch(pool, file, &path).await?;
+                fetch(&store, pool, file, &path).await?;
                 fetched.push((file.path.clone(), path));
             }
         }
@@ -128,109 +117,44 @@ pub async fn write_pack(
 }
 
 /// Fetch one file from the first holder that serves it correctly, decrypted and checked against
-/// both C and P, into `path`.
+/// both C and P, into `path`, as a member's App does.
 async fn fetch(
+    store: &StoreClient,
     pool: &PoolAccess,
     file: &PoolFile,
     path: &Path,
 ) -> Result<(), Error> {
-    let root = hash(&pool.root)?;
-    let object = hash(&file.object)?;
+    let root = hex::encode(hash(&pool.root)?);
     let plain = hash(&file.sha256)?;
-    let key = match &file.key {
-        Some(key) => hash(key)?,
-        None => sharing_types::content_key(&plain),
+    let object = PoolObject {
+        root: &root,
+        holders: &pool.holders,
+        ticket: &pool.ticket,
+        object: hash(&file.object)?,
+        object_size: file.object_size,
+        plain,
+        key: match &file.key {
+            Some(key) => hash(key)?,
+            None => sharing_types::crypto::content_key(&plain),
+        },
     };
-    let mut last = format!("{} is on no holder of the version.", file.path);
-    for holder in &pool.holders {
-        let client = match crate::store::pull::pinned(&holder.cert_fingerprint)
-        {
-            Ok(client) => client,
-            Err(error) => {
-                last = error.description;
-                continue;
-            }
-        };
-        for address in std::iter::once(&holder.address)
-            .chain(holder.public_address.as_ref())
-        {
-            // An `https://ip:port`, so the ticket only goes over TLS pinned to the holder. A
-            // private address is allowed: a holder on the Core's own network is reached there.
-            let base = match crate::store::pull::address(address, true) {
-                Ok(base) => base,
-                Err(error) => {
-                    last = error.description;
-                    continue;
+    // The holders that served bad bytes are logged by the client; only members report them.
+    let mut faults = Vec::new();
+    store
+        .fetch_file(&object, &|_| {}, &mut faults, |mut reader| async move {
+            let mut out = tokio::fs::File::create(path).await?;
+            tokio::io::copy(&mut reader, &mut out).await?;
+            out.sync_all().await
+        })
+        .await
+        .map_err(|error| {
+            Error::Invalid(match error {
+                FetchError::Sink(error) => {
+                    format!("Could not write {}: {error}", file.path)
                 }
-            };
-            let url = format!(
-                "{}/store/versions/{}/objects/{}",
-                base.as_str().trim_end_matches('/'),
-                hex::encode(root),
-                hex::encode(object)
-            );
-            match fetch_from(
-                &client,
-                &url,
-                &pool.ticket,
-                file,
-                &key,
-                object,
-                plain,
-                path,
-            )
-            .await
-            {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    warn!(%url, %error, "could not fetch a shared file");
-                    last = error;
-                }
-            }
-        }
-    }
-    let _ = tokio::fs::remove_file(path).await;
-    Err(Error::Invalid(format!(
-        "Could not fetch {}: {last}",
-        file.path
-    )))
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn fetch_from(
-    client: &reqwest::Client,
-    url: &str,
-    ticket: &str,
-    file: &PoolFile,
-    key: &[u8; 32],
-    object: [u8; 32],
-    plain: [u8; 32],
-    path: &Path,
-) -> Result<(), String> {
-    let response = client
-        .get(url)
-        .bearer_auth(ticket)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|error| error.to_string())?;
-    if response
-        .content_length()
-        .is_some_and(|length| length != file.object_size)
-    {
-        return Err("the holder sent another size".into());
-    }
-    let body = StreamReader::new(
-        response.bytes_stream().map_err(std::io::Error::other),
-    );
-    let mut out = tokio::fs::File::create(path)
-        .await
-        .map_err(|error| error.to_string())?;
-    Decryptor::new(key, object, plain)
-        .run(body, &mut out)
-        .await
-        .map_err(|error| error.to_string())?;
-    out.flush().await.map_err(|error| error.to_string())
+                error => format!("Could not fetch {}: {error}", file.path),
+            })
+        })
 }
 
 /// Write `index` and the fetched files, under `overrides/`, as an `.mrpack` at `path`. Returns

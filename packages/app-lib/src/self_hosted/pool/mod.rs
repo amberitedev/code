@@ -2,47 +2,23 @@
 //! shared file and stores it on a Core; a member fetches it back from one of the version's
 //! holders and checks it twice, against C and then P.
 
-pub mod store;
-
-pub use sharing_types as crypto;
+pub use sharing_types::{crypto, store};
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::ErrorKind;
-use crypto::{DecryptError, Decryptor};
-use store::{ListedObject, PoolCore, StoreError};
+use store::{FetchError, ListedObject, PoolCore, StoreClient, StoreError};
 
-#[derive(Debug, thiserror::Error)]
-enum PoolFetchError {
-    /// The bytes are not the object that was asked for: the Core's fault.
-    #[error("the Core sent bytes that are not the shared file")]
-    WrongObject,
-    /// The object decrypts to a different file than the manifest names: the manifest's fault.
-    #[error("the shared file does not match its manifest")]
-    WrongContent,
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Http(#[from] StoreError),
-}
-
-impl From<DecryptError> for PoolFetchError {
-    fn from(error: DecryptError) -> Self {
-        match error {
-            DecryptError::WrongObject => Self::WrongObject,
-            DecryptError::WrongContent => Self::WrongContent,
-            DecryptError::Io(error) => Self::Io(error),
-        }
-    }
-}
+/// The App's client for Cores' stores, for the life of the process.
+static STORE: LazyLock<StoreClient> =
+    LazyLock::new(|| StoreClient::new(crate::launcher_user_agent()));
 
 /// What a member needs to fetch one version's files.
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,147 +53,48 @@ pub fn parse_hash(text: &str) -> Option<[u8; 32]> {
     Some(hash)
 }
 
-const PIPE_SIZE: usize = 256 * 1024;
-/// Further tries at one holder after a dropped connection, each from where the last stopped.
-const RESUME_ATTEMPTS: usize = 2;
-/// Waits at one holder that answered it is busy (every fetch slot taken), with the wait doubling
-/// up to [`RATE_LIMIT_MAX_WAIT`]: about three minutes in all.
-const RATE_LIMIT_WAITS: u32 = 8;
-const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(30);
-
-/// Fetches one file from the first holder that serves it correctly. `sink` gets the plain bytes
-/// and is called afresh for each holder. It must fail unless it reads the file's full size: the
-/// last chunk is only released once the whole file checks out, so a sink that requires the size
-/// never completes with a wrong file.
+/// Fetches one file from the first holder that serves it correctly (see
+/// [`StoreClient::fetch_file`]), and reports the holders that served bad bytes to the backend.
+/// `sink` gets the plain bytes and is called afresh for each holder. It must fail unless it reads
+/// the file's full size.
 pub(crate) async fn fetch_file<T, Fut>(
     file: &PoolFile,
     downloaded: &(dyn Fn(u64) + Sync),
-    mut sink: impl FnMut(tokio::io::DuplexStream) -> Fut,
+    sink: impl FnMut(tokio::io::DuplexStream) -> Fut,
 ) -> crate::Result<T>
 where
     Fut: Future<Output = crate::Result<T>>,
 {
     let access = &file.access;
-    let key = file
-        .key
-        .unwrap_or_else(|| crypto::content_key(&file.sha256));
-    let object = hex::encode(file.object);
-    for core in &access.holders {
-        let (writer, reader) = tokio::io::duplex(PIPE_SIZE);
-        let decrypt = async {
-            let mut writer = writer;
-            let mut decryptor = Decryptor::new(&key, file.object, file.sha256);
-            let mut attempt = 0;
-            let mut waits = 0;
-            loop {
-                match fetch_once(
-                    core,
-                    access,
-                    &object,
-                    file.object_size,
-                    &mut decryptor,
-                    &mut writer,
-                    downloaded,
-                )
-                .await
-                {
-                    Err(PoolFetchError::Http(StoreError::RateLimited))
-                        if waits < RATE_LIMIT_WAITS =>
-                    {
-                        tokio::time::sleep(
-                            Duration::from_secs(1 << waits)
-                                .min(RATE_LIMIT_MAX_WAIT),
-                        )
-                        .await;
-                        waits += 1;
-                    }
-                    Err(error)
-                        if attempt < RESUME_ATTEMPTS
-                            && is_transient(&error) =>
-                    {
-                        attempt += 1;
-                    }
-                    result => break result,
-                }
-            }
-        };
-        let (decrypted, sunk) = tokio::join!(decrypt, sink(reader));
-        match decrypted {
-            Ok(()) => return sunk,
-            // The sink stopped reading on its own; its error is the real one.
-            Err(PoolFetchError::Io(error))
-                if error.kind() == std::io::ErrorKind::BrokenPipe =>
-            {
-                return sunk;
-            }
-            Err(PoolFetchError::WrongContent) => {
-                // Every holder has the same bytes, so trying another cannot help.
-                crate::api::instance::report_pool_failure(
-                    &access.shared_instance_id,
-                    access.version,
-                    &core.id,
-                    "content",
-                )
-                .await;
-                return Err(ErrorKind::PoolFilesBroken.into());
-            }
-            Err(error) => {
-                tracing::warn!(
-                    core = %core.id,
-                    object,
-                    error = %error,
-                    "Could not fetch a shared file from this Core"
-                );
-                if matches!(error, PoolFetchError::WrongObject) {
-                    crate::api::instance::report_pool_failure(
-                        &access.shared_instance_id,
-                        access.version,
-                        &core.id,
-                        "object",
-                    )
-                    .await;
-                }
-            }
-        }
+    let object = store::PoolObject {
+        root: &access.root,
+        holders: &access.holders,
+        ticket: &access.ticket,
+        object: file.object,
+        object_size: file.object_size,
+        plain: file.sha256,
+        key: file
+            .key
+            .unwrap_or_else(|| crypto::content_key(&file.sha256)),
+    };
+    let mut faults = Vec::new();
+    let result = STORE
+        .fetch_file(&object, downloaded, &mut faults, sink)
+        .await;
+    for fault in faults {
+        crate::api::instance::report_pool_failure(
+            &access.shared_instance_id,
+            access.version,
+            &fault.core,
+            fault.kind.as_str(),
+        )
+        .await;
     }
-    Err(ErrorKind::PoolFilesUnavailable.into())
-}
-
-fn is_transient(error: &PoolFetchError) -> bool {
-    match error {
-        PoolFetchError::Io(error) => {
-            error.kind() != std::io::ErrorKind::BrokenPipe
-        }
-        PoolFetchError::Http(StoreError::Http(_)) => true,
-        _ => false,
-    }
-}
-
-async fn fetch_once(
-    core: &PoolCore,
-    access: &PoolAccess,
-    object: &str,
-    object_size: u64,
-    decryptor: &mut Decryptor,
-    writer: &mut tokio::io::DuplexStream,
-    downloaded: &(dyn Fn(u64) + Sync),
-) -> Result<(), PoolFetchError> {
-    let from = decryptor.offset();
-    let response =
-        store::fetch(core, &access.ticket, &access.root, object, from).await?;
-    if response
-        .content_length()
-        .is_some_and(|length| length != object_size.saturating_sub(from))
-    {
-        return Err(PoolFetchError::WrongObject);
-    }
-    let body = tokio_util::io::StreamReader::new(
-        response
-            .bytes_stream()
-            .map_err(std::io::Error::other)
-            .inspect_ok(|chunk| downloaded(chunk.len() as u64)),
-    );
-    Ok(decryptor.run(body, writer).await?)
+    result.map_err(|error| match error {
+        FetchError::Broken => ErrorKind::PoolFilesBroken.into(),
+        FetchError::Unavailable => ErrorKind::PoolFilesUnavailable.into(),
+        FetchError::Sink(error) => error,
+    })
 }
 
 /// A file encrypted for a push, waiting in the push's folder under its C.
@@ -283,7 +160,8 @@ pub(crate) async fn store_version(
         .map(|object| object.hash.clone())
         .collect::<Vec<_>>();
 
-    let have = store::have(core, ticket, root, &hashes)
+    let have = STORE
+        .have(core, ticket, root, &hashes)
         .await
         .map_err(store_error)?;
     if have.complete {
@@ -310,7 +188,7 @@ pub(crate) async fn store_version(
             .iter()
             .filter_map(|hash| Some((hash.clone(), paths.get(hash)?.clone())))
             .collect::<Vec<_>>();
-        let upload = store::upload(
+        let upload = STORE.upload(
             core,
             ticket,
             root,
