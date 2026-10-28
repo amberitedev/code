@@ -59,8 +59,11 @@ export function createSharedInstanceContext(
 		if (!expectedUserId.value) return false
 		return auth.user.value?.id !== expectedUserId.value
 	})
+	// A shared instance that is gone has no account to switch to, so "missing" wins.
 	const wrongAccount = computed(
-		() => linkedToOtherAccount.value || ownerProblem.value === 'wrong_account',
+		() =>
+			ownerProblem.value !== 'missing' &&
+			(linkedToOtherAccount.value || ownerProblem.value === 'wrong_account'),
 	)
 	const actionsLocked = computed(() => wrongAccount.value)
 	const signedOut = computed(() => !auth.session_token.value)
@@ -211,14 +214,19 @@ export function createSharedInstanceContext(
 	 * Asks the backend whether the shared instance this App owns still exists and belongs to this
 	 * account, and updates the state to match. Call it when a sharing surface opens. Returns the
 	 * problem it found, if any; a failed connection leaves the state as it was.
+	 *
+	 * When the instance is linked to another account, only "gone" is taken from the backend: that
+	 * offers Stop sharing, so a record pointing at a deleted instance or account can be detached
+	 * without deleting the instance, while a working link stays locked to its account.
 	 */
 	async function verifyOwner() {
 		const instanceId = instance.value?.id
 		const attachment = instance.value?.shared_instance
 		const userId = auth.user.value?.id
-		if (attachment?.role !== 'owner' || !userId || offline.value || linkedToOtherAccount.value) {
+		if (attachment?.role !== 'owner' || !userId || offline.value) {
 			return ownerProblem.value
 		}
+		const otherAccount = linkedToOtherAccount.value
 
 		let problem: typeof ownerProblem.value = null
 		try {
@@ -228,6 +236,7 @@ export function createSharedInstanceContext(
 		} catch (error) {
 			if (!(error instanceof SharedInstancesApiError)) return ownerProblem.value
 			if (error.status === 404) problem = 'missing'
+			else if (otherAccount) return ownerProblem.value
 			// A session the backend no longer accepts is a sign-in problem, not the wrong account.
 			else if (error.status === 401 && error.code !== 'invalid_credentials')
 				problem = 'wrong_account'
