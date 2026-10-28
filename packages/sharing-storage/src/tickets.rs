@@ -7,10 +7,10 @@
 
 use serde::Deserialize;
 
-use super::{Code, StoreError, objects::Hash};
-use crate::access::{
-    keys::Keys,
-    tickets::{ISSUER, LEEWAY_S, Unverified},
+use crate::{
+    Code, StoreError,
+    keys::{ISSUER, JsonFile, Keys, LEEWAY_S},
+    objects::Hash,
 };
 
 pub const STORE: &str = "store";
@@ -96,18 +96,14 @@ fn invalid(description: &str) -> StoreError {
 /// The claims of `ticket`, required to be of `kind`, for this Core, for `root`, and current at
 /// `now`.
 pub async fn verify(
-    keys: &Keys,
+    keys: &Keys<JsonFile>,
     ticket: &str,
     core_id: &str,
     kind: &'static str,
     root: &Hash,
     now: i64,
 ) -> Result<Claims, StoreError> {
-    let unverified = Unverified::parse(ticket).map_err(invalid)?;
-    let key = keys.get(&unverified.kid).await.ok_or_else(|| {
-        invalid("The ticket is signed with a key this Core does not know.")
-    })?;
-    let value = unverified.verify(&key).map_err(invalid)?;
+    let value = keys.verify(ticket).await.map_err(invalid)?;
     let common: Common = serde_json::from_value(value.clone())
         .map_err(|_| invalid("The ticket's claims are unreadable."))?;
     if common.iss != ISSUER {
@@ -160,7 +156,7 @@ pub async fn verify(
 pub mod test_support {
     use serde_json::{Value, json};
 
-    use crate::access::tickets::{ISSUER, test_support::Signer};
+    use crate::keys::{ISSUER, test_support::Signer};
 
     /// A ticket of `kind` for `root` on `aud`, issued at `iat` and good for an hour, with
     /// `extra` claims.
@@ -186,7 +182,7 @@ pub mod test_support {
         {
             claims.extend(extra);
         }
-        signer.sign_value("EdDSA", &claims)
+        signer.sign(&claims)
     }
 }
 
@@ -195,11 +191,11 @@ mod tests {
     use serde_json::json;
 
     use super::{test_support::ticket, *};
-    use crate::access::tickets::test_support::Signer;
+    use crate::keys::test_support::Signer;
 
     const NOW: i64 = 1_800_000_000;
 
-    async fn keys(signer: &Signer) -> (tempfile::TempDir, Keys) {
+    async fn keys(signer: &Signer) -> (tempfile::TempDir, Keys<JsonFile>) {
         let dir = tempfile::tempdir().unwrap();
         let keys = Keys::load_file(
             dir.path().join("keys.json"),
@@ -215,7 +211,7 @@ mod tests {
     }
 
     async fn code(
-        keys: &Keys,
+        keys: &Keys<JsonFile>,
         ticket: &str,
         kind: &'static str,
         now: i64,
@@ -264,9 +260,10 @@ mod tests {
             code(&keys, &fetch, STORE, NOW).await,
             Code::TicketWrongKind
         );
-        let session = signer.sign(
-            &crate::access::tickets::test_support::claims("u", "core", NOW),
-        );
+        let session = signer.sign(&json!({
+            "iss": ISSUER, "kind": "session", "sub": "u", "aud": "core",
+            "iat": NOW, "exp": NOW + 300, "jti": "j",
+        }));
         assert_eq!(
             code(&keys, &session, FETCH, NOW).await,
             Code::TicketWrongKind

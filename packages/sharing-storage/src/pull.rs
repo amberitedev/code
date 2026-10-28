@@ -1,6 +1,7 @@
 //! Copying a version from another Core, as a pull ticket asks. The store reaches only the Core
 //! the backend named, at a public address, over TLS pinned to that Core's certificate, so it
-//! cannot be turned into a general downloader.
+//! cannot be turned into a general downloader. [`address`] and [`pinned`] are how anything else
+//! reaches a holder safely too.
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
@@ -17,7 +18,7 @@ use sha2::{Digest, Sha256};
 use tokio_util::io::StreamReader;
 use tracing::info;
 
-use super::{
+use crate::{
     Code, Store, StoreError,
     objects::{self, Hash, VersionList, WriteError},
     tickets::Source,
@@ -34,7 +35,7 @@ fn failed(description: impl std::fmt::Display) -> StoreError {
 }
 
 /// Copy `root` from `source`. True when the version is now stored here whole.
-pub async fn pull(
+pub(crate) async fn pull(
     store: &Store,
     root: &Hash,
     source: &Source,
@@ -85,7 +86,10 @@ pub async fn pull(
 }
 
 /// `https://ip:port`, refused unless the IP is public or `allow_private` is set.
-fn address(address: &str, allow_private: bool) -> Result<url::Url, StoreError> {
+pub fn address(
+    address: &str,
+    allow_private: bool,
+) -> Result<url::Url, StoreError> {
     let invalid = |description: &str| {
         StoreError::new(Code::InvalidRequest, description.to_owned())
     };
@@ -99,15 +103,60 @@ fn address(address: &str, allow_private: bool) -> Result<url::Url, StoreError> {
     if url.scheme() != "https" {
         return Err(invalid("The source Core's address must be https."));
     }
-    if !allow_private && !crate::content::hosts::is_public(ip) {
+    if !allow_private && !is_public(ip) {
         return Err(invalid("The source Core's address is not public."));
     }
     Ok(url)
 }
 
+/// Whether `ip` is on the public internet: not loopback, private, link-local, shared (CGNAT),
+/// multicast, documentation, or otherwise reserved.
+pub fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || ip.is_multicast()
+                || a == 0
+                // 100.64.0.0/10, shared address space.
+                || (a == 100 && (64..128).contains(&b))
+                // 192.0.0.0/24, protocol assignments.
+                || (a == 192 && b == 0 && ip.octets()[2] == 0)
+                // 198.18.0.0/15, benchmarking.
+                || (a == 198 && (18..20).contains(&b))
+                // 240.0.0.0/4, reserved.
+                || a >= 240)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return is_public(IpAddr::V4(v4));
+            }
+            let first = ip.segments()[0];
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                // fc00::/7, unique local.
+                || (first & 0xfe00) == 0xfc00
+                // fe80::/10, link-local.
+                || (first & 0xffc0) == 0xfe80
+                // 2001:db8::/32, documentation.
+                || (first == 0x2001 && ip.segments()[1] == 0xdb8)
+                // 64:ff9b::/96 and the like embed IPv4 addresses that are checked nowhere else.
+                || first == 0x64
+                // 2002::/16, 6to4.
+                || first == 0x2002)
+        }
+    }
+}
+
 /// A client that trusts exactly the certificate whose SHA-256 is `fingerprint`, follows no
 /// redirect, and uses no proxy.
-fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
+pub fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
     let fingerprint: [u8; 32] = hex::decode(fingerprint)
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
@@ -203,14 +252,44 @@ impl ServerCertVerifier for Pinned {
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, http::Method};
+    use hyper_util::{
+        rt::{TokioExecutor, TokioIo},
+        server::conn::auto::Builder,
+        service::TowerToHyperService,
+    };
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     use serde_json::json;
+    use tokio_rustls::TlsAcceptor;
 
     use super::*;
     use crate::{
-        daemon::paths::Paths,
-        network::tls::Identity,
-        store::routes::tests::{Fixture, fixture},
+        routes::tests::{Fixture, fixture},
+        tickets::test_support::ticket,
     };
+
+    #[test]
+    fn private_addresses_are_not_public() {
+        for private in [
+            "127.0.0.1",
+            "10.0.0.8",
+            "172.16.4.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "224.0.0.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:192.168.1.1",
+            "64:ff9b::a00:1",
+        ] {
+            assert!(!is_public(private.parse().unwrap()), "{private}");
+        }
+        for public in ["1.1.1.1", "104.16.0.1", "2606:4700::1111"] {
+            assert!(is_public(public.parse().unwrap()), "{public}");
+        }
+    }
 
     #[test]
     fn only_public_https_addresses_are_sources() {
@@ -232,21 +311,45 @@ mod tests {
         assert!(address("https://127.0.0.1:16662", true).is_ok());
     }
 
-    /// `source` served over TLS on localhost, as a Core would. Returns its address and
-    /// certificate fingerprint.
+    /// `source` served over TLS on localhost with a self-signed certificate, as a Core serves
+    /// it. Returns its address and certificate fingerprint.
     async fn serve(source: &Fixture) -> (String, String) {
-        let identity_dir = tempfile::tempdir().unwrap();
-        let paths = Paths::new(identity_dir.path());
-        std::fs::create_dir_all(paths.tls_cert().parent().unwrap()).unwrap();
-        let identity = Identity::load_or_create(&paths).unwrap();
-        let fingerprint = identity.fingerprint.clone();
+        let made =
+            rcgen::generate_simple_self_signed(vec!["amberite-core".into()])
+                .unwrap();
+        let fingerprint = hex::encode(Sha256::digest(made.cert.der()));
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![made.cert.der().clone()],
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+                made.signing_key.serialize_der(),
+            )),
+        )
+        .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config));
         let listener =
             tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = format!("https://{}", listener.local_addr().unwrap());
         let router = source.router.clone();
         tokio::spawn(async move {
-            let _keep = identity_dir;
-            crate::network::tls::serve(listener, router, &identity).await;
+            while let Ok((stream, _)) = listener.accept().await {
+                let (acceptor, router) = (acceptor.clone(), router.clone());
+                tokio::spawn(async move {
+                    if let Ok(stream) = acceptor.accept(stream).await {
+                        let _ = Builder::new(TokioExecutor::new())
+                            .serve_connection(
+                                TokioIo::new(stream),
+                                TowerToHyperService::new(router),
+                            )
+                            .await;
+                    }
+                });
+            }
         });
         (address, fingerprint)
     }
@@ -264,12 +367,12 @@ mod tests {
         let replica = fixture("core", 1 << 30, 1 << 30).await;
         replica.store.keys.set(&source.signer.public_keys()).await;
         let pull = |fingerprint: &str| {
-            crate::store::tickets::test_support::ticket(
+            ticket(
                 &source.signer,
                 "pull",
                 json!("core"),
                 root.as_str(),
-                crate::store::now(),
+                crate::now(),
                 json!({ "source": {
                     "core": { "id": "source", "address": address, "public_address": null, "cert_fingerprint": fingerprint },
                     "ticket": fetch,

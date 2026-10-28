@@ -9,9 +9,10 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
-// One Core's storage for the shared file pool: whether it holds other people's encrypted shared
-// files, how much, and the caps its owner sets. Read from the Core itself, so it shows only while
-// the Core answers. Turning it off never affects sharing.
+// One Core's storage for shared files: whether it offers storage to other people's shares, what it
+// holds, and the caps its owner sets. Off makes the owner private: their shares live only on this
+// Core and use no one else's storage. It always holds the owner's own shares, so its usage shows
+// either way. Read from the Core itself, so it shows only while the Core answers.
 
 const props = defineProps<{ core: Archon.Cores.v1.Core }>()
 
@@ -61,9 +62,13 @@ function setCap(field: 'cap' | 'egress_cap', event: Event) {
 	<div v-if="storage" class="flex flex-col gap-2 pb-3">
 		<div class="flex items-center justify-between gap-4">
 			<label :for="`core-storage-${core.id}`" class="flex min-w-0 flex-col gap-0.5">
-				<span class="text-sm font-medium text-contrast">Store shared files</span>
+				<span class="text-sm font-medium text-contrast">Store friends' shared files</span>
 				<span class="text-sm text-secondary">
-					Holds other people's shared files, encrypted so you can't read them.
+					{{
+						storage.enabled
+							? "Encrypted, so you can't read them."
+							: "Private: your shares stay on this Core and use no one else's storage."
+					}}
 				</span>
 			</label>
 			<Toggle
@@ -72,12 +77,12 @@ function setCap(field: 'cap' | 'egress_cap', event: Event) {
 				:disabled="change.isPending.value"
 			/>
 		</div>
-		<div v-if="storage.enabled" class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+		<div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
 			<span class="tabular-nums text-secondary">
 				{{ formatBytes(storage.used, 1) }} used · {{ formatBytes(storage.egress_today, 1) }} sent
 				today
 			</span>
-			<label class="flex items-center gap-2 text-secondary">
+			<label v-if="storage.enabled" class="flex items-center gap-2 text-secondary">
 				Disk cap
 				<input
 					type="number"
@@ -89,7 +94,7 @@ function setCap(field: 'cap' | 'egress_cap', event: Event) {
 				/>
 				GB
 			</label>
-			<label class="flex items-center gap-2 text-secondary">
+			<label v-if="storage.enabled" class="flex items-center gap-2 text-secondary">
 				Daily transfer cap
 				<input
 					type="number"

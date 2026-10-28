@@ -12,8 +12,10 @@ export const MAX_VERSION_FILES = 4096
 export const MAX_MANIFEST_BODY = 4 * 1024 * 1024
 /** A share's latest version, in distinct encrypted bytes. */
 export const MAX_SHARE_BYTES = 1024 ** 3
-/** The sum of an account's shares' latest versions. */
-export const MAX_USER_BYTES = 3 * 1024 ** 3
+/** Every account's allowance on other people's Cores: its usage may not pass this. */
+export const ALLOWANCE_BYTES = 3 * 1024 ** 3
+/** Ready versions a share keeps, files included, when its owner has not chosen. */
+export const DEFAULT_KEPT_VERSIONS = 5
 /** How long an unconfirmed version blocks the next push: the store ticket's life. */
 export const UNCONFIRMED_TTL_MS = 60 * 60_000
 /** A Core that has not reported its storage for this long takes no new shares. */
@@ -132,22 +134,67 @@ async function eligibleCores(env: Env): Promise<Candidate[]> {
 	)
 }
 
-/**
- * The Core a new share goes to: the owner's own if eligible, else one drawn by free space, so a
- * new large disk does not take every share until it is the fullest. Null when none is eligible.
- */
-export async function pickHome(env: Env, ownerId: string): Promise<string | null> {
-	const cores = await eligibleCores(env)
-	const own = cores.find((core) => core.owner_id === ownerId)
-	if (own) return own.id
-	const total = cores.reduce((sum, core) => sum + core.room, 0)
+/** A share's two copies. Either is null while it has none. */
+export type Placement = { home: string | null; replica: string | null }
+
+/** One of `cores` drawn by free space, so a new large disk does not take every share at once. */
+function draw(cores: Candidate[], exclude: string[]): string | null {
+	const open = cores.filter((core) => !exclude.includes(core.id))
+	const total = open.reduce((sum, core) => sum + core.room, 0)
 	if (!total) return null
-	let draw = Math.random() * total
-	for (const core of cores) {
-		draw -= core.room
-		if (draw < 0) return core.id
+	let left = Math.random() * total
+	for (const core of open) {
+		left -= core.room
+		if (left < 0) return core.id
 	}
-	return cores[cores.length - 1]?.id ?? null
+	return open[open.length - 1]?.id ?? null
+}
+
+/**
+ * Where a share's two copies go (docs/internals/pool.md, "Where a share lives"). An owner with a
+ * private Core, one with storage off, keeps every share there alone. Otherwise a share whose
+ * instance has a server on `serverCore`, one of the owner's Cores, is homed there, and the rest
+ * live on other people's Cores. A share with no members takes no replica: only its server reads
+ * it. Copies on a Core that still qualifies stay put, so a push moves nothing it need not.
+ * `home` is null when no Core can take the share.
+ */
+export async function place(
+	env: Env,
+	ownerId: string,
+	current: Placement,
+	{ serverCore, members }: { serverCore: string | null; members: boolean },
+): Promise<Placement> {
+	const own = (
+		await env.DB.prepare(
+			'SELECT c.id, s.enabled FROM cores c JOIN core_storage s ON s.core_id = c.id WHERE c.owner_id = ? AND s.reported > ? AND c.cert_fingerprint IS NOT NULL',
+		)
+			.bind(ownerId, new Date(Date.now() - REPORT_FRESH_MS).toISOString())
+			.all<{ id: string; enabled: number }>()
+	).results
+	const privateCores = own.filter((core) => !core.enabled).map((core) => core.id)
+	if (privateCores.length) {
+		const home =
+			[serverCore, current.home].find((id) => id && privateCores.includes(id)) ?? privateCores[0]
+		return { home: home ?? null, replica: null }
+	}
+	const server = own.find((core) => core.id === serverCore)?.id ?? null
+	const held = [current.home, current.replica].filter((id): id is string => id !== null)
+	const offering = held.length
+		? new Set(
+				(
+					await env.DB.prepare(
+						'SELECT c.id FROM cores c JOIN core_storage s ON s.core_id = c.id WHERE s.enabled = 1 AND c.owner_id != ? AND c.id IN (SELECT value FROM json_each(?))',
+					)
+						.bind(ownerId, JSON.stringify(held))
+						.all<{ id: string }>()
+				).results.map((row) => row.id),
+			)
+		: new Set<string>()
+	const kept = held.filter((id) => offering.has(id))
+	const others = (await eligibleCores(env)).filter((core) => core.owner_id !== ownerId)
+	const home = server ?? kept[0] ?? draw(others, [])
+	if (!home || !members) return { home, replica: null }
+	return { home, replica: kept.find((id) => id !== home) ?? draw(others, [home]) }
 }
 
 /** The Cores with these ids, in the given order, as the App reaches them. */
@@ -199,26 +246,112 @@ export async function storeGrant(env: Env, homeId: string, root: string, bytes: 
 	return { core, ticket, expires }
 }
 
-/**
- * What the owner's other shares hold, so the new version keeps the account under its quota. Each
- * share counts its latest ready version or a version still being uploaded, whichever is larger,
- * so pushes to several shares at once cannot each see the others as empty. This share is left
- * out: the new version replaces it.
- */
-export async function otherSharesBytes(
+/** How many ready versions `ownerId`'s shares keep. Null keeps them all. */
+export async function keptVersions(env: Env, ownerId: string): Promise<number | null> {
+	const row = await env.DB.prepare('SELECT kept_versions FROM sharing_settings WHERE user_id = ?')
+		.bind(ownerId)
+		.first<{ kept_versions: number | null }>()
+	return row ? row.kept_versions : DEFAULT_KEPT_VERSIONS
+}
+
+/** The object names of a stored version, read from its manifest. */
+export async function versionObjects(
 	env: Env,
-	ownerId: string,
 	instanceId: string,
-): Promise<number> {
-	const row = await env.DB.prepare(
-		`SELECT COALESCE(SUM(share),0) AS total FROM (
-			SELECT MAX(v.bytes) AS share FROM shared_instances i JOIN shared_versions v ON v.instance_id = i.id
-			WHERE i.owner_id = ?1 AND i.id != ?2 AND (
-				v.version = (SELECT MAX(version) FROM shared_versions WHERE instance_id = i.id AND ready = 1)
-				OR (v.ready = 0 AND v.created > ?3))
-			GROUP BY i.id)`,
+	version: number,
+): Promise<Map<string, number>> {
+	const stored = await env.FILES.get(manifestKey(instanceId, version))
+	const files = stored
+		? ((await stored.json()) as { external_files: ManifestFile[] }).external_files
+		: []
+	return new Map(files.map((file) => [file.object, file.object_size]))
+}
+
+/** The bytes of `objects` that `before` did not have. */
+export function addedBytes(objects: Map<string, number>, before: Map<string, number>): number {
+	let added = 0
+	for (const [object, size] of objects) if (!before.has(object)) added += size
+	return added
+}
+
+/** A kept version as usage counts it, oldest first. */
+export type CountedVersion = { bytes: number; added: number | null }
+
+/**
+ * A share's usage: its oldest kept version whole, plus what each later one added. A file is
+ * counted once however many versions keep it, unless it left and came back.
+ */
+export function shareUsage(versions: CountedVersion[]): number {
+	return versions.reduce(
+		(sum, version, index) => sum + (index === 0 ? version.bytes : (version.added ?? version.bytes)),
+		0,
 	)
-		.bind(ownerId, instanceId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
-		.first<{ total: number }>()
-	return row?.total ?? 0
+}
+
+export type ShareStorage = {
+	id: string
+	name: string
+	/** Whether it uses someone else's Core, so its usage counts against the allowance. */
+	counted: boolean
+	used: number
+	/** Newest first. `current` is the newest ready one, which members install. */
+	versions: { version: number; created: string; bytes: number; ready: boolean; current: boolean }[]
+}
+
+/**
+ * Every share `ownerId` owns, with its kept versions: the ready ones, and one still uploading
+ * within its store ticket's life, so pushes to several shares at once cannot each see the others
+ * as empty.
+ */
+export async function ownerShares(env: Env, ownerId: string): Promise<ShareStorage[]> {
+	const [rows, own] = await Promise.all([
+		env.DB.prepare(
+			`SELECT i.id, i.name, i.home, i.replica, v.version, v.bytes, v.added, v.ready, v.created
+			FROM shared_instances i LEFT JOIN shared_versions v ON v.instance_id = i.id AND (v.ready = 1 OR v.created > ?2)
+			WHERE i.owner_id = ?1 ORDER BY i.created, i.id, v.version`,
+		)
+			.bind(ownerId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
+			.all<{
+				id: string
+				name: string
+				home: string | null
+				replica: string | null
+				version: number | null
+				bytes: number
+				added: number | null
+				ready: number
+				created: string
+			}>(),
+		env.DB.prepare('SELECT id FROM cores WHERE owner_id = ?').bind(ownerId).all<{ id: string }>(),
+	])
+	const ownIds = new Set(own.results.map((core) => core.id))
+	const shares = new Map<string, ShareStorage & { kept: CountedVersion[] }>()
+	for (const row of rows.results) {
+		let share = shares.get(row.id)
+		if (!share) {
+			share = {
+				id: row.id,
+				name: row.name,
+				counted: [row.home, row.replica].some((id) => id !== null && !ownIds.has(id)),
+				used: 0,
+				versions: [],
+				kept: [],
+			}
+			shares.set(row.id, share)
+		}
+		if (row.version === null) continue
+		share.kept.push({ bytes: row.bytes, added: row.added })
+		share.versions.unshift({
+			version: row.version,
+			created: row.created,
+			bytes: row.bytes,
+			ready: row.ready === 1,
+			current: false,
+		})
+	}
+	return [...shares.values()].map(({ kept, ...share }) => {
+		const current = share.versions.find((version) => version.ready)
+		if (current) current.current = true
+		return { ...share, used: share.counted ? shareUsage(kept) : 0 }
+	})
 }

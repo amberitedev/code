@@ -103,6 +103,42 @@ export namespace SharedInstances {
 		}
 	}
 
+	export namespace Storage {
+		export namespace v1 {
+			export type StoredVersion = {
+				version: number
+				created: string
+				bytes: number
+				ready: boolean
+				/** The latest ready version. It cannot be deleted. */
+				current: boolean
+			}
+
+			export type StoredShare = {
+				id: string
+				name: string
+				/** False when the share uses none of the allowance: it is private or has no members. */
+				counted: boolean
+				/** Bytes this share counts against the allowance, 0 when not counted. */
+				used: number
+				/** Newest first. */
+				versions: StoredVersion[]
+			}
+
+			/** Only the shares the signed-in account owns. Sizes are in bytes. */
+			export type Storage = {
+				used: number
+				allowance: number
+				/** How many versions each share keeps, files included. Null keeps all of them. */
+				kept_versions: number | null
+				shares: StoredShare[]
+			}
+
+			/** `kept_versions` is 1 to 1000, or null to keep all. */
+			export type StorageSettings = Pick<Storage, 'kept_versions'>
+		}
+	}
+
 	export namespace Moderation {
 		export namespace v1 {
 			export type BlacklistUserRequest = {

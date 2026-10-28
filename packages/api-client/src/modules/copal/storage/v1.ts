@@ -2,8 +2,9 @@ import { AbstractModule } from '../../../core/abstract-module'
 import type { Copal } from '../types'
 
 /**
- * A Core's storage for the shared file pool: how much of other people's encrypted shared files it
- * holds, and the caps its owner sets. Owner only. Turning storage off never affects sharing.
+ * A Core's storage for shared files: what it holds and the caps its owner sets. Owner only.
+ * `enabled` means it offers storage to other people's shares; off keeps the owner's shares on
+ * this Core alone, using no one else's storage.
  */
 export class CopalStorageV1Module extends AbstractModule {
 	public getModuleID(): string {

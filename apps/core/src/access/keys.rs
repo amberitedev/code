@@ -1,291 +1,74 @@
-//! The backend's public ticket keys. Stored so tickets verify while the backend is down,
-//! refreshed once a day, and refetched when a ticket names a key Core does not know, at most once
-//! every ten minutes. Core stores them in its database; the store process, which has no database,
-//! in a file of its own (see [`Keys::load_file`]).
+//! The backend's public ticket keys ([`sharing_storage::keys`]), kept in Core's database.
 
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
-
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::{Deserialize, Serialize};
+use sharing_storage::keys::{Persist, PublicKeys};
 use sqlx::SqlitePool;
-use tokio::sync::Mutex;
-use tracing::{debug, warn};
 
-use super::now;
-use crate::api::backend::PublicKeys;
+pub type Keys = sharing_storage::keys::Keys<Db>;
 
-const REFRESH_EVERY_S: i64 = 24 * 3600;
-/// How long a failed daily refresh waits before trying again.
-const RETRY: Duration = Duration::from_secs(3600);
-const UNKNOWN_KID_EVERY: Duration = Duration::from_secs(600);
+/// The `core` table's `ticket_keys` and `ticket_keys_at`.
+pub struct Db(SqlitePool);
 
-pub struct Keys {
-    stored: Stored,
-    http: reqwest::Client,
-    /// `{backend}/core/keys.json`. `None` without a backend: only stored keys are used.
-    url: Option<String>,
-    state: Mutex<State>,
-}
-
-/// Where the keys are kept between runs.
-enum Stored {
-    Db(SqlitePool),
-    /// A JSON [`KeysFile`].
-    File(PathBuf),
-}
-
-/// The store's `keys.json`.
-#[derive(Default, Serialize, Deserialize)]
-struct KeysFile {
-    fetched_at: i64,
-    #[serde(flatten)]
-    keys: PublicKeys,
-}
-
-struct State {
-    /// Ed25519 public keys by key id.
-    keys: HashMap<String, [u8; 32]>,
-    /// Unix seconds; 0 before the first fetch.
-    fetched_at: i64,
-    /// When an unknown key id last made Core refetch.
-    refetched: Option<Instant>,
-}
-
-impl Keys {
-    /// The keys stored in the database.
-    pub async fn load(
-        db: SqlitePool,
-        http: reqwest::Client,
-        backend_url: Option<&str>,
-    ) -> sqlx::Result<Self> {
-        let (stored, fetched_at): (Option<String>, Option<i64>) =
-            sqlx::query_as(
-                "SELECT ticket_keys, ticket_keys_at FROM core WHERE id = 1",
-            )
-            .fetch_optional(&db)
-            .await?
-            .unwrap_or_default();
-        let keys = stored
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .map(|keys| parse(&keys))
-            .unwrap_or_default();
-        Ok(Self::new(
-            Stored::Db(db),
-            http,
-            backend_url,
-            keys,
-            fetched_at.unwrap_or(0),
-        ))
-    }
-
-    /// The keys stored in `path`, a JSON file that need not exist yet.
-    pub fn load_file(
-        path: PathBuf,
-        http: reqwest::Client,
-        backend_url: Option<&str>,
-    ) -> Self {
-        let file: KeysFile = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
-        Self::new(
-            Stored::File(path),
-            http,
-            backend_url,
-            parse(&file.keys),
-            file.fetched_at,
-        )
-    }
-
-    fn new(
-        stored: Stored,
-        http: reqwest::Client,
-        backend_url: Option<&str>,
-        keys: HashMap<String, [u8; 32]>,
-        fetched_at: i64,
-    ) -> Self {
-        Self {
-            stored,
-            http,
-            url: backend_url.map(|url| format!("{url}/core/keys.json")),
-            state: Mutex::new(State {
-                keys,
-                fetched_at,
-                refetched: None,
-            }),
-        }
-    }
-
-    /// The key named `kid`. An unknown id refetches the keys first, unless that happened in the
-    /// last ten minutes.
-    pub async fn get(&self, kid: &str) -> Option<[u8; 32]> {
-        let mut state = self.state.lock().await;
-        if let Some(key) = state.keys.get(kid) {
-            return Some(*key);
-        }
-        if state
-            .refetched
-            .is_some_and(|at| at.elapsed() < UNKNOWN_KID_EVERY)
-        {
-            return None;
-        }
-        state.refetched = Some(Instant::now());
-        // Unlocked while the backend answers, so tickets with known keys never wait on it.
-        drop(state);
-        if let Err(error) = self.fetch().await {
-            warn!(%error, "could not refetch the ticket keys");
-        }
-        self.state.lock().await.keys.get(kid).copied()
-    }
-
-    /// Refetch the keys whenever they are a day old, for as long as Core runs.
-    pub async fn refresh_daily(&self) {
-        if self.url.is_none() {
-            return;
-        }
-        loop {
-            let due =
-                self.state.lock().await.fetched_at + REFRESH_EVERY_S - now();
-            let wait = if due > 0 {
-                Duration::from_secs(due as u64)
-            } else {
-                match self.fetch().await {
-                    Ok(()) => Duration::from_secs(REFRESH_EVERY_S as u64),
-                    Err(error) => {
-                        warn!(%error, "could not refresh the ticket keys");
-                        RETRY
-                    }
-                }
-            };
-            tokio::time::sleep(wait).await;
-        }
-    }
-
-    /// Download the keys, then take the lock only to store them.
-    async fn fetch(&self) -> Result<(), String> {
-        let Some(url) = &self.url else {
-            return Err("this Core has no backend".into());
-        };
-        let keys: PublicKeys = self
-            .http
-            .get(url)
-            .timeout(Duration::from_secs(20))
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(|error| error.to_string())?
-            .json()
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut state = self.state.lock().await;
-        self.store(&mut state, &keys).await
-    }
-
-    async fn store(
+impl Persist for Db {
+    async fn save(
         &self,
-        state: &mut State,
         keys: &PublicKeys,
+        fetched_at: i64,
     ) -> Result<(), String> {
-        let fetched_at = now();
-        match &self.stored {
-            Stored::Db(db) => {
-                sqlx::query(
-                    "UPDATE core SET ticket_keys = ?, ticket_keys_at = ? WHERE id = 1",
-                )
-                .bind(serde_json::to_string(keys).expect("keys serialize"))
-                .bind(fetched_at)
-                .execute(db)
-                .await
-                .map_err(|error| error.to_string())?;
-            }
-            Stored::File(path) => {
-                let file = KeysFile {
-                    fetched_at,
-                    keys: keys.clone(),
-                };
-                let json = serde_json::to_vec(&file).expect("keys serialize");
-                // Written aside and renamed, so a crash never leaves half a file.
-                let part = path.with_extension("json.part");
-                tokio::fs::write(&part, json)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                tokio::fs::rename(&part, path)
-                    .await
-                    .map_err(|error| error.to_string())?;
-            }
-        }
-        state.keys = parse(keys);
-        state.fetched_at = fetched_at;
-        debug!(count = state.keys.len(), "stored the ticket keys");
-        Ok(())
-    }
-
-    /// Use `keys` as if they were just fetched.
-    #[cfg(test)]
-    pub async fn set(&self, keys: &PublicKeys) {
-        let mut state = self.state.lock().await;
-        self.store(&mut state, keys).await.unwrap();
+        sqlx::query(
+            "UPDATE core SET ticket_keys = ?, ticket_keys_at = ? WHERE id = 1",
+        )
+        .bind(serde_json::to_string(keys).expect("keys serialize"))
+        .bind(fetched_at)
+        .execute(&self.0)
+        .await
+        .map(drop)
+        .map_err(|error| error.to_string())
     }
 }
 
-/// The usable Ed25519 keys of a key set. Anything else in it is ignored.
-fn parse(keys: &PublicKeys) -> HashMap<String, [u8; 32]> {
-    keys.keys
-        .iter()
-        .filter(|key| key.kty == "OKP" && key.crv == "Ed25519")
-        .filter_map(|key| {
-            let bytes = URL_SAFE_NO_PAD.decode(&key.x).ok()?;
-            Some((key.kid.clone(), bytes.try_into().ok()?))
-        })
-        .collect()
+/// The keys stored in the database.
+pub async fn load(
+    db: SqlitePool,
+    http: reqwest::Client,
+    backend_url: Option<&str>,
+) -> sqlx::Result<Keys> {
+    let (stored, fetched_at): (Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT ticket_keys, ticket_keys_at FROM core WHERE id = 1",
+    )
+    .fetch_optional(&db)
+    .await?
+    .unwrap_or_default();
+    let keys: PublicKeys = stored
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    Ok(Keys::new(
+        Db(db),
+        &keys,
+        fetched_at.unwrap_or(0),
+        http,
+        backend_url,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
+    use sharing_storage::keys::test_support::Signer;
+
     use super::*;
-    use crate::{api::backend::PublicKey, db};
+    use crate::db;
 
     #[tokio::test]
     async fn stored_keys_survive_a_restart() {
         let db = db::memory().await;
         db::core_id(&db).await.unwrap();
         let http = reqwest::Client::new();
-        let keys = Keys::load(db.clone(), http.clone(), None).await.unwrap();
-        keys.set(&PublicKeys {
-            keys: vec![PublicKey {
-                kty: "OKP".into(),
-                crv: "Ed25519".into(),
-                kid: "one".into(),
-                x: URL_SAFE_NO_PAD.encode([7; 32]),
-            }],
-        })
-        .await;
-        let again = Keys::load(db, http, None).await.unwrap();
-        assert_eq!(again.get("one").await, Some([7; 32]));
-        assert_eq!(again.get("two").await, None);
-    }
-
-    #[tokio::test]
-    async fn file_keys_survive_a_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("keys.json");
-        let http = reqwest::Client::new();
-        let keys = Keys::load_file(path.clone(), http.clone(), None);
-        assert_eq!(keys.get("one").await, None);
-        keys.set(&PublicKeys {
-            keys: vec![PublicKey {
-                kty: "OKP".into(),
-                crv: "Ed25519".into(),
-                kid: "one".into(),
-                x: URL_SAFE_NO_PAD.encode([7; 32]),
-            }],
-        })
-        .await;
-        let again = Keys::load_file(path, http, None);
-        assert_eq!(again.get("one").await, Some([7; 32]));
+        let signer = Signer::new("one");
+        let keys = load(db.clone(), http.clone(), None).await.unwrap();
+        keys.set(&signer.public_keys()).await;
+        let again = load(db, http, None).await.unwrap();
+        let ticket = signer.sign(&serde_json::json!({}));
+        assert!(again.verify(&ticket).await.is_ok());
+        let unknown = Signer::new("two").sign(&serde_json::json!({}));
+        assert!(again.verify(&unknown).await.is_err());
     }
 }

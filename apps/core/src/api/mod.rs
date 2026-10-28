@@ -67,7 +67,7 @@ pub struct AppState {
     pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
-    pub storage: Arc<crate::store::Storage>,
+    pub storage: Arc<crate::storage::Storage>,
 }
 
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its

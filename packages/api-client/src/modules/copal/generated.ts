@@ -210,7 +210,7 @@ export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remo
 
 export type StorageReport = { 
 /**
- * The owner offers storage for shared files.
+ * This Core offers storage to other people's shares. Off, it holds only its owner's.
  */
 enabled: boolean, 
 /**
@@ -350,7 +350,7 @@ version: string, };
 
 export type StorageSettings = { 
 /**
- * Offer storage for other people's shared files.
+ * Offer storage to other people's shares. Off, the Core runs privately.
  */
 enabled?: boolean, 
 /**
@@ -362,7 +362,11 @@ cap?: number,
  */
 egress_cap?: number, };
 
-export type StorageStatus = { enabled: boolean, cap: number, egress_cap: number, 
+export type StorageStatus = { 
+/**
+ * Offers storage to other people's shares. Off, the Core runs privately.
+ */
+enabled: boolean, cap: number, egress_cap: number, 
 /**
  * What the stored versions take, counting each object once.
  */

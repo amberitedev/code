@@ -1,19 +1,20 @@
-//! `copal storage`: the storage this Core offers for other people's shared files.
+//! `copal storage`: this Core's storage for shared files, and whether it offers it to other
+//! people's shares or runs privately.
 
 use axum::http::Method;
 use color_eyre::eyre::Result;
 
-use super::{Client, Output, on_off};
+use super::{Client, Output};
 use crate::api::storage::{StorageSettings, StorageStatus};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, clap::Args)]
 pub struct StorageArgs {
-    /// Offer storage.
+    /// Offer storage to other people's shares.
     #[arg(long, conflicts_with = "disable")]
     enable: bool,
-    /// Stop offering storage. Your own sharing is not affected.
+    /// Run privately: keep only your own shares here and use no one else's storage.
     #[arg(long)]
     disable: bool,
     /// The most to hold, in GiB.
@@ -48,23 +49,25 @@ pub async fn run(client: &Client, args: StorageArgs) -> Result<Output> {
 
 fn describe(status: &StorageStatus) -> String {
     let gib = |bytes: u64| format!("{:.1} GiB", bytes as f64 / GIB as f64);
-    let mut lines = vec![format!(
-        "Storage for shared files: {}",
-        on_off(status.enabled)
-    )];
-    if status.enabled {
-        lines.push(format!(
+    let offered = if status.enabled {
+        "Storage: offered to others"
+    } else {
+        "Storage: private, your own shares only"
+    };
+    [
+        offered.to_owned(),
+        format!(
             "Holding {} versions in {} of {} ({} free on this disk)",
             status.versions,
             gib(status.used),
             gib(status.cap),
             gib(status.free)
-        ));
-        lines.push(format!(
+        ),
+        format!(
             "Sent today: {} of {}",
             gib(status.egress_today),
             gib(status.egress_cap)
-        ));
-    }
-    lines.join("\n")
+        ),
+    ]
+    .join("\n")
 }

@@ -1483,11 +1483,13 @@ pub async fn instance_share_get_publish_preview(
 pub async fn instance_share_publish(
     instance_id: &str,
     file_paths: Vec<String>,
+    server_core_id: Option<String>,
     on_progress: tauri::ipc::Channel<(u64, u64)>,
 ) -> Result<SharedInstanceAttachment> {
     Ok(theseus::instance::publish_shared_instance(
         instance_id,
         file_paths,
+        server_core_id,
         &|uploaded, total| {
             let _ = on_progress.send((uploaded, total));
         },

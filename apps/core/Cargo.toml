@@ -39,6 +39,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+# The shared file pool's store, run as `copal store`, and the ticket keys it shares with Core.
+sharing-storage = { workspace = true }
 # Decrypts the share versions a server applies (`content::shared`).
 sharing-types = { workspace = true }
 # Listening on IPv6 next to IPv4.
@@ -63,7 +65,7 @@ walkdir = "2.5"
 zip = { workspace = true }
 
 [dev-dependencies]
-tar = { workspace = true }
+sharing-storage = { workspace = true, features = ["testing"] }
 tower = { version = "0.5.2", features = ["util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

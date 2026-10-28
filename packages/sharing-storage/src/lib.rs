@@ -1,21 +1,27 @@
 //! The shared file pool's store (`docs/internals/pool.md`): encrypted objects named by hash, kept
 //! for versions a backend-signed ticket names, served to whoever holds a fetch ticket.
 //!
-//! It is `copal store`, a second process Core starts and supervises (see [`supervisor`]), so it
-//! holds no database, no session, and neither Core's backend key nor its TLS key: a compromise
-//! of it yields no identity. It listens on `127.0.0.1` only; Core forwards `/store/...` to it
-//! unchanged and calls `/admin/...` with a token it hands the store at start.
+//! It runs as `copal store`, a child process Copal starts and supervises, and is reached only
+//! through Copal: Copal forwards `/store/...` from its own address and port to the store's HTTP
+//! listener on `127.0.0.1`, unread. The store has no identity of its own: no backend record, key,
+//! or sign-in, no database, and neither Copal's backend key nor its TLS key, so a compromise of
+//! it yields none. What it holds reaches the backend in Copal's reports.
+//!
+//! Copal manages it over its stdin and stdout ([`local`]): the store says where it listens, then
+//! answers status, drop, and config calls. Only Copal holds the pipes, so the calls need no
+//! token. Closing stdin stops the store. stderr is its log, which Copal copies into its own.
 
+pub mod keys;
 mod limits;
+pub mod local;
 mod objects;
-mod pull;
+pub mod pull;
 mod routes;
-pub mod supervisor;
+pub mod space;
 mod tar;
 mod tickets;
 
 use std::{
-    io::Write,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -27,24 +33,22 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use color_eyre::eyre::{Result, WrapErr, bail};
+use color_eyre::eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use crate::{access::keys::Keys, api::backend::HeldVersion};
+use keys::{JsonFile, Keys};
 use limits::Limits;
-use objects::{Hash, Index, Layout, ListState, VersionList};
-pub use supervisor::Storage;
+use local::{Caps, HeldVersion, Status};
+pub use objects::Hash;
+use objects::{Index, Layout, ListState, VersionList};
+pub use pull::is_public;
 
-/// The environment variable the admin token comes in, so it never shows in a process list.
-pub const ADMIN_TOKEN_ENV: &str = "COPAL_STORE_ADMIN_TOKEN";
-/// Set to `1` to let a pull copy from a private address, as Cores do in development.
-pub const ALLOW_PRIVATE_ENV: &str = "COPAL_STORE_ALLOW_PRIVATE_SOURCES";
 /// Room the disk keeps after an upload, so the store never fills the disk the Core uses.
 const DISK_RESERVE: u64 = 256 * 1024 * 1024;
 const GC_EVERY: Duration = Duration::from_secs(10 * 60);
 
-/// `copal store`, as the Core starts it.
+/// `copal store`, as Copal starts it.
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// The store's own folder.
@@ -62,32 +66,9 @@ pub struct Args {
     /// Bytes it may serve a day.
     #[arg(long)]
     pub egress_cap: u64,
-}
-
-/// The store's caps, as `/admin/config` takes them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Caps {
-    pub cap: u64,
-    pub egress_cap: u64,
-}
-
-/// `GET /admin/status`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminStatus {
-    pub cap: u64,
-    /// Bytes the stored, pending, and dropped lists name.
-    pub used: u64,
-    /// Free bytes on the store's disk.
-    pub free: u64,
-    pub egress_cap: u64,
-    pub egress_today: u64,
-    pub versions: Vec<HeldVersion>,
-}
-
-/// `POST /admin/drop`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Drop {
-    pub roots: Vec<String>,
+    /// Let a pull copy from a private address, as Cores do in development.
+    #[arg(long)]
+    pub allow_private_sources: bool,
 }
 
 /// An error code of the store, as `{ error, description }` like Core's.
@@ -157,8 +138,7 @@ fn now() -> i64 {
 pub struct Store {
     layout: Layout,
     core_id: String,
-    keys: Keys,
-    admin_token: String,
+    keys: Keys<JsonFile>,
     allow_private_sources: bool,
     caps: Mutex<Caps>,
     index: Mutex<Index>,
@@ -170,8 +150,7 @@ impl Store {
     fn open(
         layout: Layout,
         core_id: String,
-        keys: Keys,
-        admin_token: String,
+        keys: Keys<JsonFile>,
         allow_private_sources: bool,
         caps: Caps,
     ) -> std::io::Result<Self> {
@@ -182,7 +161,6 @@ impl Store {
             layout,
             core_id,
             keys,
-            admin_token,
             allow_private_sources,
             caps: Mutex::new(caps),
             index: Mutex::new(index),
@@ -191,6 +169,10 @@ impl Store {
 
     fn caps(&self) -> Caps {
         *self.caps.lock().expect("not poisoned")
+    }
+
+    fn set_caps(&self, caps: Caps) {
+        *self.caps.lock().expect("not poisoned") = caps;
     }
 
     fn index(&self) -> std::sync::MutexGuard<'_, Index> {
@@ -247,8 +229,8 @@ impl Store {
                 self.index().pending.remove(root);
             }
         };
-        let free = crate::backups::space::free(self.layout.root())
-            .inspect_err(|_| unreserve())?;
+        let free =
+            space::free(self.layout.root()).inspect_err(|_| unreserve())?;
         if free < needed + DISK_RESERVE {
             unreserve();
             return Err(StoreError::new(
@@ -322,7 +304,7 @@ impl Store {
         Ok(())
     }
 
-    fn status(&self) -> std::io::Result<AdminStatus> {
+    fn status(&self) -> std::io::Result<Status> {
         let caps = self.caps();
         let (used, versions) = {
             let index = self.index();
@@ -336,10 +318,10 @@ impl Store {
                 .collect();
             (index.used(), versions)
         };
-        Ok(AdminStatus {
+        Ok(Status {
             cap: caps.cap,
             used,
-            free: crate::backups::space::free(self.layout.root())?,
+            free: space::free(self.layout.root())?,
             egress_cap: caps.egress_cap,
             egress_today: self.limits.egress_today(),
             versions,
@@ -361,22 +343,18 @@ impl Store {
     }
 }
 
-/// `copal store`: serve until stdin closes, which is how Core stops it.
+/// `copal store`: serve until stdin closes, which is how Copal stops it.
 pub async fn main(args: Args) -> Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "copal=info".into()),
+                .unwrap_or_else(|_| "sharing_storage=info".into()),
         )
-        // Core writes each line into its own log, which adds the time.
+        // Copal writes each line into its own log, which adds the time.
         .without_time()
         .with_ansi(false)
         .with_writer(std::io::stderr)
         .try_init();
-    let admin_token = std::env::var(ADMIN_TOKEN_ENV).unwrap_or_default();
-    if admin_token.len() < 32 {
-        bail!("{ADMIN_TOKEN_ENV} must hold the admin token Core made");
-    }
     let backend_url =
         Some(args.backend_url).filter(|url| !url.is_empty() && url != "none");
     let http = reqwest::Client::builder()
@@ -390,8 +368,7 @@ pub async fn main(args: Args) -> Result<()> {
             layout,
             args.core_id,
             keys,
-            admin_token,
-            std::env::var(ALLOW_PRIVATE_ENV).is_ok_and(|value| value == "1"),
+            args.allow_private_sources,
             Caps {
                 cap: args.cap,
                 egress_cap: args.egress_cap,
@@ -423,23 +400,21 @@ pub async fn main(args: Args) -> Result<()> {
     let listener =
         tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let port = listener.local_addr()?.port();
-    // The one line Core waits for. Everything else goes to stderr.
-    let mut stdout = std::io::stdout();
-    writeln!(stdout, "listening {port}")?;
-    stdout.flush()?;
-
-    let (closed, stdin_closed) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
-        let _ = closed.send(());
-    });
+    let local = local::serve(
+        Arc::clone(&store),
+        port,
+        tokio::io::stdin(),
+        tokio::io::stdout(),
+    );
     axum::serve(
         listener,
         routes::router(Arc::clone(&store))
             .into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async {
-        let _ = stdin_closed.await;
+        if let Err(error) = local.await {
+            warn!(%error, "lost the pipes to Copal");
+        }
     })
     .await?;
     store.limits.save().await;

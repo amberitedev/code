@@ -6,27 +6,30 @@ import type { Env } from '../common/types'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
 import {
+	ALLOWANCE_BYTES,
 	EMPTY_ROOT,
 	MAX_MANIFEST_BODY,
 	MAX_SHARE_BYTES,
-	MAX_USER_BYTES,
 	MAX_VERSION_FILES,
 	type ManifestFile,
 	UNCONFIRMED_TTL_MS,
+	addedBytes,
 	confirmedHolders,
+	keptVersions,
 	manifestFile,
 	manifestKey,
-	otherSharesBytes,
-	pickHome,
+	ownerShares,
+	place,
 	poolAccess,
 	root,
+	shareUsage,
 	storeGrant,
 	versionBytes,
+	versionObjects,
 } from './pool'
 
 // Sharing metadata, as Modrinth's App expects it. The files themselves live on Cores; see pool.ts.
 // Every version lists all of the share's files, so dropping older ones loses nothing.
-const KEPT_VERSIONS = 5
 
 type Instance = {
 	id: string
@@ -42,6 +45,7 @@ type Version = {
 	version: number
 	root: string
 	bytes: number
+	added: number | null
 	ready: number
 	created: string
 }
@@ -224,17 +228,18 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
 }
 
 /**
- * Keeps the latest complete versions and drops uploads abandoned before the newest one, with
- * their manifests. Deletes by name, so a push does not pay for listing the instance's manifests.
+ * Keeps the `kept` latest complete versions (all when null) and drops uploads abandoned before
+ * the newest one, with their manifests. Deletes by name, so a push does not pay for listing the
+ * instance's manifests. The Cores holding the files drop them at their next storage report.
  */
-async function pruneVersions(env: Env, id: string): Promise<void> {
+async function pruneVersions(env: Env, id: string, kept: number | null): Promise<void> {
 	const { results } = await env.DB.prepare(
 		`DELETE FROM shared_versions WHERE instance_id = ?1 AND (
 			version < (SELECT MIN(version) FROM (SELECT version FROM shared_versions WHERE instance_id = ?1 AND ready = 1 ORDER BY version DESC LIMIT ?2))
 			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_versions WHERE instance_id = ?1 AND ready = 1)))
 		RETURNING version`,
 	)
-		.bind(id, KEPT_VERSIONS)
+		.bind(id, kept ?? -1)
 		.all<{ version: number }>()
 	if (results.length) await env.FILES.delete(results.map((row) => manifestKey(id, row.version)))
 }
@@ -301,14 +306,16 @@ export async function versionReady(env: Env, id: string, version: number): Promi
 		.run()
 	if (!result.meta.changes) return
 	await notifyReadyInvites(env, id)
-	await pruneVersions(env, id)
+	const item = await instance(env, id)
+	await pruneVersions(env, id, await keptVersions(env, item.owner_id))
 }
 
 /**
  * The owner's App pushed: it sends the manifest with every file already encrypted and named, and
  * gets back the home Core and a store ticket to upload to. The version is ready once that Core
  * confirms. A push with the same files as an unconfirmed version resumes it; one with other files
- * waits until that version is confirmed or an hour old.
+ * waits until that version is confirmed or an hour old. `server_core` names the owner's Core
+ * running a server of this instance, where the share is then homed (see `place`).
  */
 async function createVersion(
 	request: Request,
@@ -368,13 +375,10 @@ async function createVersion(
 			'A shared instance can hold at most 1 GB of files',
 			'share_too_large',
 		)
-	if (bytes && bytes + (await otherSharesBytes(env, userId, item.id)) > MAX_USER_BYTES)
-		throw new ApiError(
-			413,
-			'invalid_input',
-			'Your shared instances can hold at most 3 GB of files together',
-			'storage_quota',
-		)
+	const serverCore =
+		body.server_core === undefined || body.server_core === null
+			? null
+			: string(body.server_core, 'server_core', 64)
 
 	// One push at a time: an unconfirmed version younger than its store ticket is still being
 	// uploaded, unless this push is the same version again, which resumes it.
@@ -401,27 +405,76 @@ async function createVersion(
 			.run()
 	}
 
-	let home = item.home
-	if (bytes && !home) {
-		home = await pickHome(env, userId)
-		if (!home)
+	// Where the files go, and what they add to the owner's usage: the share's kept versions once
+	// this one is ready and those beyond the owner's setting are dropped.
+	let added = bytes
+	if (bytes) {
+		const members = await env.DB.prepare(
+			"SELECT 1 FROM shared_members WHERE instance_id = ? AND join_type != 'owner' LIMIT 1",
+		)
+			.bind(item.id)
+			.first()
+		const placement = await place(
+			env,
+			userId,
+			{ home: item.home, replica: item.replica },
+			{ serverCore, members: members !== null },
+		)
+		if (!placement.home)
 			throw new ApiError(
 				503,
 				'no_storage',
 				'No storage is available for shared files right now. Try again later.',
 				'no_storage',
 			)
-		await env.DB.prepare('UPDATE shared_instances SET home = ? WHERE id = ? AND home IS NULL')
-			.bind(home, item.id)
-			.run()
-		item = { ...item, home }
+		const ready = (
+			await env.DB.prepare(
+				'SELECT version, bytes, added FROM shared_versions WHERE instance_id = ? AND ready = 1 ORDER BY version',
+			)
+				.bind(item.id)
+				.all<Pick<Version, 'version' | 'bytes' | 'added'>>()
+		).results
+		const previous = ready.at(-1)
+		if (previous)
+			added = addedBytes(
+				new Map(external.map((file) => [file.object, file.object_size])),
+				await versionObjects(env, item.id, previous.version),
+			)
+		const [shares, kept, own] = await Promise.all([
+			ownerShares(env, userId),
+			keptVersions(env, userId),
+			env.DB.prepare('SELECT id FROM cores WHERE owner_id = ?').bind(userId).all<{ id: string }>(),
+		])
+		const counted = [placement.home, placement.replica].some(
+			(id) => id !== null && !own.results.some((core) => core.id === id),
+		)
+		if (counted) {
+			const after = [...ready, { bytes, added }]
+			const others = shares
+				.filter((share) => share.id !== item.id)
+				.reduce((sum, share) => sum + share.used, 0)
+			if (others + shareUsage(kept === null ? after : after.slice(-kept)) > ALLOWANCE_BYTES)
+				throw new ApiError(
+					413,
+					'invalid_input',
+					`This push needs more than your ${ALLOWANCE_BYTES / 1024 ** 3} GB of shared storage. Delete old versions to free space.`,
+					'storage_quota',
+				)
+		}
+		if (placement.home !== item.home || placement.replica !== item.replica) {
+			await env.DB.prepare('UPDATE shared_instances SET home = ?, replica = ? WHERE id = ?')
+				.bind(placement.home, placement.replica, item.id)
+				.run()
+			item = { ...item, ...placement }
+		}
 	}
+	const home = item.home
 	// The number is allocated in the insert itself, so two pushes at once never share one, and
 	// the insert refuses while another version is still uploading, so two pushes cannot both get
 	// a store ticket. The row starts unready, so nobody reads it before its manifest is in R2; a
 	// failed write takes the row back.
 	const version = await env.DB.prepare(
-		'INSERT INTO shared_versions (instance_id,version,root,bytes,ready,created) SELECT ?1,COALESCE(m,0)+1,?2,?3,0,?4 FROM (SELECT MAX(version) AS m FROM shared_versions WHERE instance_id = ?1) WHERE NOT EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND ready = 0 AND created > ?5) RETURNING *',
+		'INSERT INTO shared_versions (instance_id,version,root,bytes,added,ready,created) SELECT ?1,COALESCE(m,0)+1,?2,?3,?6,0,?4 FROM (SELECT MAX(version) AS m FROM shared_versions WHERE instance_id = ?1) WHERE NOT EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND ready = 0 AND created > ?5) RETURNING *',
 	)
 		.bind(
 			item.id,
@@ -429,6 +482,7 @@ async function createVersion(
 			bytes,
 			now(),
 			new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString(),
+			added,
 		)
 		.first<Version>()
 	if (!version)
@@ -483,6 +537,85 @@ async function reportVersion(
 		.bind(item.id, version.version, userId, coreId, kind, now())
 		.run()
 	return empty()
+}
+
+/**
+ * The owner deletes an older version to free space. The current version, which members install,
+ * stays, and so does one still uploading. The next version's added bytes are counted again
+ * against the version before the deleted one, so usage stays right.
+ */
+async function deleteVersion(
+	env: Env,
+	item: Instance,
+	version: Version,
+	userId: string,
+): Promise<Response> {
+	owner(item, userId)
+	const current = await latestVersion(env, item.id)
+	if (!version.ready || current.version === version.version)
+		throw new ApiError(
+			409,
+			'conflict',
+			version.ready ? 'The current version cannot be deleted.' : 'This version is still uploading.',
+			'current_version',
+		)
+	const neighbour = (direction: '<' | '>') =>
+		env.DB.prepare(
+			`SELECT version FROM shared_versions WHERE instance_id = ? AND ready = 1 AND version ${direction} ? ORDER BY version ${direction === '<' ? 'DESC' : 'ASC'} LIMIT 1`,
+		)
+			.bind(item.id, version.version)
+			.first<{ version: number }>()
+	const [previous, next] = await Promise.all([neighbour('<'), neighbour('>')])
+	const remove = env.DB.prepare(
+		'DELETE FROM shared_versions WHERE instance_id = ? AND version = ?',
+	).bind(item.id, version.version)
+	if (previous && next) {
+		const [after, before] = await Promise.all([
+			versionObjects(env, item.id, next.version),
+			versionObjects(env, item.id, previous.version),
+		])
+		await env.DB.batch([
+			remove,
+			env.DB.prepare(
+				'UPDATE shared_versions SET added = ? WHERE instance_id = ? AND version = ?',
+			).bind(addedBytes(after, before), item.id, next.version),
+		])
+	} else await remove.run()
+	await env.FILES.delete(manifestKey(item.id, version.version))
+	return empty()
+}
+
+/**
+ * `GET /v1/storage`: the account's usage of its allowance, its kept-versions setting, and its
+ * shares with their kept versions. `PATCH` changes the setting; lowering it drops older versions
+ * at once.
+ */
+async function storage(request: Request, env: Env, userId: string): Promise<Response> {
+	if (request.method === 'PATCH') {
+		const kept = (await readJson(request)).kept_versions
+		if (
+			kept !== null &&
+			(typeof kept !== 'number' || !Number.isSafeInteger(kept) || kept < 1 || kept > 1000)
+		)
+			throw new ApiError(400, 'invalid_input', 'Invalid kept_versions')
+		await env.DB.prepare(
+			'INSERT INTO sharing_settings (user_id,kept_versions) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET kept_versions = excluded.kept_versions',
+		)
+			.bind(userId, kept)
+			.run()
+		const owned = await env.DB.prepare('SELECT id FROM shared_instances WHERE owner_id = ?')
+			.bind(userId)
+			.all<{ id: string }>()
+		for (const share of owned.results) await pruneVersions(env, share.id, kept)
+	} else if (request.method !== 'GET')
+		throw new ApiError(405, 'method_not_allowed', 'Unsupported storage operation')
+	const [shares, kept] = await Promise.all([ownerShares(env, userId), keptVersions(env, userId)])
+	return json({
+		used: shares.reduce((sum, share) => sum + share.used, 0),
+		allowance: ALLOWANCE_BYTES,
+		kept_versions: kept,
+		shares,
+	})
 }
 
 // Invite links carry this code, so it is short: 12 characters from a 32-character alphabet (60 bits).
@@ -692,7 +825,9 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
 	if (
 		parts[0] !== 'v1' ||
-		!['instances', 'invites', 'blacklist', 'moderation', 'icons'].includes(parts[1] ?? '')
+		!['instances', 'invites', 'blacklist', 'moderation', 'icons', 'storage'].includes(
+			parts[1] ?? '',
+		)
 	)
 		return null
 	const [, route, id, section, child] = parts
@@ -757,6 +892,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			return empty()
 		}
 	}
+	if (route === 'storage' && !id) return storage(request, env, user.id)
 	if (route !== 'instances')
 		throw new ApiError(404, 'not_found', 'Sharing endpoint was not found', 'endpoint_not_found')
 	await requireSharing(env, user.id)
@@ -828,6 +964,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
 		if (request.method === 'GET' && parts.length <= 5)
 			return versionResponse(env, item, version, user.id)
+		if (request.method === 'DELETE' && child && parts.length === 5)
+			return deleteVersion(env, item, version, user.id)
 		if (request.method === 'POST' && parts[5] === 'reports' && parts.length === 6)
 			return reportVersion(request, env, item, version, user.id)
 	}

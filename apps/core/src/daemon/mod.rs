@@ -125,14 +125,14 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()?;
-    let keys = access::keys::Keys::load(
+    let keys = access::keys::load(
         db.clone(),
         http.clone(),
         config.backend_url.as_deref(),
     )
     .await?;
     let access = Arc::new(access::Access::new(keys));
-    let storage = Arc::new(crate::store::Storage::new(
+    let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
         core_id.clone(),

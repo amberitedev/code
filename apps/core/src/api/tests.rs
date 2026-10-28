@@ -16,7 +16,6 @@ use super::{AppState, router};
 use crate::{
     access::{
         self, Access,
-        keys::Keys,
         local::Local,
         now, sessions,
         tickets::test_support::{Signer, claims},
@@ -59,7 +58,7 @@ async fn core() -> Core {
             .unwrap();
     }
     let signer = Signer::new("k1");
-    let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
+    let keys = access::keys::load(db.clone(), reqwest::Client::new(), None)
         .await
         .unwrap();
     keys.set(&signer.public_keys()).await;
@@ -77,7 +76,7 @@ async fn core() -> Core {
         Arc::clone(&backups),
     )
     .unwrap();
-    let storage = Arc::new(crate::store::Storage::new(
+    let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
         core_id.clone(),
@@ -1428,7 +1427,7 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    // Anyone may reach the store, which checks its own tickets; while it is off, nobody can.
+    // Anyone may reach the store, which checks its own tickets, but only while it runs.
     let (status, error) = core
         .call(Method::GET, "/store/versions/x", None, None, None)
         .await;

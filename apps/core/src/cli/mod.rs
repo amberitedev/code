@@ -69,7 +69,7 @@ pub enum Command {
     },
     /// The shared file pool's store. Core starts this; it is not for people.
     #[command(hide = true)]
-    Store(crate::store::Args),
+    Store(sharing_storage::Args),
     /// Show whether Core runs, its version, and what its servers are doing.
     Status,
     /// Get a fresh pairing code, to enter in Amberite to make this Core yours.
@@ -98,7 +98,7 @@ pub enum Command {
     /// Who may use each server, and their sessions.
     #[command(subcommand)]
     Access(access::AccessCommand),
-    /// Show or change the storage this Core offers for other people's shared files.
+    /// Show this Core's storage for shared files, or change what it offers others.
     Storage(storage::StorageArgs),
 }
 

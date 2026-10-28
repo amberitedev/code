@@ -1,6 +1,10 @@
-//! Core's side of the store: start `copal store` while storage is on and restart it when it
-//! dies, forward `/store/...` to it, keep it to the owner's settings, and report what it holds to
-//! the backend (`POST /core/storage`, sent by `access::sync`).
+//! Core's side of the store ([`sharing_storage`]): keep `copal store` running, restarting it when
+//! it dies, forward `/store/...` to it, keep it to the owner's settings over its local API, and
+//! report what it holds to the backend (`POST /core/storage`, sent by `access::sync`).
+//!
+//! The store always runs. The owner's setting only says whether this Core offers storage to
+//! other people's shares; off, the Core runs privately and the backend places only its owner's
+//! shares here, which the store still holds and Core still reports.
 //!
 //! In development the store runs as the account running Core. Running it as an OS account of its
 //! own, with a folder Core cannot read, is the install-time follow-up the design asks for.
@@ -21,20 +25,21 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hyper_util::{
-    client::legacy::{Client, connect::HttpConnector},
+    client::legacy::{Client as HttpClient, connect::HttpConnector},
     rt::TokioExecutor,
+};
+use sharing_storage::{
+    Hash,
+    local::{Caps, Client, Status},
 };
 use sqlx::SqlitePool;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, Command},
+    process::{Child, ChildStdin, ChildStdout, Command},
     sync::{Notify, watch},
 };
 use tracing::{info, warn};
 
-use super::{
-    ADMIN_TOKEN_ENV, ALLOW_PRIVATE_ENV, AdminStatus, Caps, Drop, objects::Hash,
-};
 use crate::{
     access::sync,
     api::{
@@ -51,7 +56,8 @@ const GIB: u64 = 1024 * 1024 * 1024;
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// Reports after uploads wait this long, so a burst of them makes one.
 const REPORT_DEBOUNCE: Duration = Duration::from_secs(2);
-const REPORT_EVERY: Duration = Duration::from_secs(24 * 3600);
+/// Often enough that a replica learns of new versions within the hour.
+const REPORT_EVERY: Duration = Duration::from_secs(3600);
 /// Headers about one connection, which a proxy must not pass on.
 const HOP_HEADERS: [&str; 8] = [
     "connection",
@@ -64,6 +70,9 @@ const HOP_HEADERS: [&str; 8] = [
     "transfer-encoding",
 ];
 
+/// The store's local API, over the pipes of the running `copal store`.
+type Local = Client<ChildStdin, ChildStdout>;
+
 /// The cap when the owner set none: a tenth of the free space, at most 20 GiB and at least
 /// 10 GiB.
 fn default_cap(free: u64) -> u64 {
@@ -73,9 +82,17 @@ fn default_cap(free: u64) -> u64 {
 /// The owner's storage settings, as the `core` table keeps them.
 #[derive(Debug, Clone, Copy)]
 struct Settings {
+    /// Offer storage to other people's shares.
     enabled: bool,
     cap: u64,
     egress_cap: u64,
+}
+
+/// The running store, while there is one.
+#[derive(Clone)]
+struct Running {
+    port: u16,
+    local: Arc<Local>,
 }
 
 pub struct Storage {
@@ -86,18 +103,13 @@ pub struct Storage {
     /// Installed as a service, which the backend requires of a Core holding others' files.
     service: bool,
     default_cap: u64,
-    /// What the store's `/admin/` routes take. New on every Core start.
-    token: String,
-    /// The store's port while it runs.
-    port: watch::Sender<Option<u16>>,
-    /// The settings changed.
-    changed: Notify,
+    running: watch::Sender<Option<Running>>,
     /// A forwarded upload may have stored something.
     stored: Notify,
     /// Wakes backend sync (`Access::owed`).
     owed: Arc<Notify>,
     pulling: Mutex<HashSet<String>>,
-    forwarder: Client<HttpConnector, Body>,
+    forwarder: HttpClient<HttpConnector, Body>,
     http: reqwest::Client,
 }
 
@@ -113,12 +125,6 @@ impl Storage {
         let free = space::free(&paths.store())
             .or_else(|_| space::free(paths.root()))
             .unwrap_or(0);
-        let mut token = [0u8; 32];
-        ring::rand::SecureRandom::fill(
-            &ring::rand::SystemRandom::new(),
-            &mut token,
-        )
-        .expect("the OS has randomness");
         Self {
             db,
             paths,
@@ -126,13 +132,11 @@ impl Storage {
             backend_url,
             service,
             default_cap: default_cap(free),
-            token: hex::encode(token),
-            port: watch::channel(None).0,
-            changed: Notify::new(),
+            running: watch::channel(None).0,
             stored: Notify::new(),
             owed,
             pulling: Mutex::default(),
-            forwarder: Client::builder(TokioExecutor::new()).build_http(),
+            forwarder: HttpClient::builder(TokioExecutor::new()).build_http(),
             http: reqwest::Client::builder()
                 .no_proxy()
                 .build()
@@ -140,7 +144,7 @@ impl Storage {
         }
     }
 
-    /// Run the store while storage is on, and report to the backend after uploads and daily.
+    /// Run the store, and report to the backend after uploads and hourly.
     pub fn start(self: &Arc<Self>) {
         tokio::spawn(Arc::clone(self).supervise());
         let storage = Arc::clone(self);
@@ -174,11 +178,10 @@ impl Storage {
     }
 
     fn port(&self) -> Option<u16> {
-        *self.port.borrow()
+        self.running.borrow().as_ref().map(|running| running.port)
     }
 
-    /// Keep the store running while storage is on: start it, start it again with backoff when it
-    /// exits, and stop it when storage is turned off.
+    /// Keep the store running: start it, and start it again with backoff when it exits.
     async fn supervise(self: Arc<Self>) {
         let mut failures = 0u32;
         loop {
@@ -190,14 +193,9 @@ impl Storage {
                     continue;
                 }
             };
-            if !settings.enabled {
-                self.port.send_replace(None);
-                self.changed.notified().await;
-                continue;
-            }
             let started = Instant::now();
-            let (mut child, port) = match self.spawn(settings).await {
-                Ok(running) => running,
+            let (mut child, running) = match self.spawn(settings).await {
+                Ok(started) => started,
                 Err(error) => {
                     failures += 1;
                     warn!(%error, "could not start the store");
@@ -205,32 +203,27 @@ impl Storage {
                     continue;
                 }
             };
-            let stdin = child.stdin.take();
-            self.port.send_replace(Some(port));
-            info!(port, "the store for shared files is running");
-            if self.admin_status().await.is_some() {
+            info!(port = running.port, "the store for shared files is running");
+            let local = Arc::clone(&running.local);
+            self.running.send_replace(Some(running));
+            // Caps changed while the store started reached no running store: pass them now.
+            if let Ok(now) = self.settings().await
+                && (now.cap, now.egress_cap) != (settings.cap, settings.egress_cap)
+                && let Err(error) = local
+                    .config(Caps {
+                        cap: now.cap,
+                        egress_cap: now.egress_cap,
+                    })
+                    .await
+            {
+                warn!(%error, "could not pass the new caps to the store");
+            }
+            if self.store_status().await.is_some() {
                 self.owe_report().await;
             }
-            let exited = tokio::select! {
-                status = child.wait() => {
-                    warn!(?status, "the store stopped");
-                    true
-                }
-                () = self.turned_off() => false,
-            };
-            self.port.send_replace(None);
-            if !exited {
-                // Closing stdin is how the store is asked to stop.
-                drop(stdin);
-                if tokio::time::timeout(Duration::from_secs(10), child.wait())
-                    .await
-                    .is_err()
-                {
-                    let _ = child.kill().await;
-                }
-                info!("storage is off; the store stopped");
-                continue;
-            }
+            let status = child.wait().await;
+            warn!(?status, "the store stopped");
+            self.running.send_replace(None);
             failures = if started.elapsed() > Duration::from_secs(60) {
                 1
             } else {
@@ -240,22 +233,11 @@ impl Storage {
         }
     }
 
-    /// Resolves once the owner turns storage off.
-    async fn turned_off(&self) {
-        loop {
-            self.changed.notified().await;
-            if self
-                .settings()
-                .await
-                .is_ok_and(|settings| !settings.enabled)
-            {
-                return;
-            }
-        }
-    }
-
-    /// Start `copal store` and read the port it says it listens on.
-    async fn spawn(&self, settings: Settings) -> std::io::Result<(Child, u16)> {
+    /// Start `copal store` and connect to its local API.
+    async fn spawn(
+        &self,
+        settings: Settings,
+    ) -> std::io::Result<(Child, Running)> {
         let mut command = Command::new(std::env::current_exe()?);
         command
             .arg("store")
@@ -268,7 +250,6 @@ impl Storage {
             ])
             .args(["--cap", &settings.cap.to_string()])
             .args(["--egress-cap", &settings.egress_cap.to_string()])
-            .env(ADMIN_TOKEN_ENV, &self.token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -284,7 +265,7 @@ impl Storage {
             .as_deref()
             .is_some_and(|url| url.starts_with("http://"))
         {
-            command.env(ALLOW_PRIVATE_ENV, "1");
+            command.arg("--allow-private-sources");
         }
         let mut child = command.spawn()?;
         // The store's log goes into Core's.
@@ -295,87 +276,63 @@ impl Storage {
                 info!(target: "copal::store", "{line}");
             }
         });
+        let stdin = child.stdin.take().expect("stdin is piped");
         let stdout = child.stdout.take().expect("stdout is piped");
-        let line = tokio::time::timeout(
-            START_TIMEOUT,
-            BufReader::new(stdout).lines().next_line(),
-        )
-        .await;
-        let port = match line {
-            Ok(Ok(Some(line))) => line
-                .strip_prefix("listening ")
-                .and_then(|port| port.trim().parse().ok()),
-            _ => None,
-        };
-        match port {
-            Some(port) => Ok((child, port)),
-            None => {
+        let connected =
+            tokio::time::timeout(START_TIMEOUT, Client::connect(stdin, stdout))
+                .await
+                .unwrap_or_else(|_| {
+                    Err(std::io::Error::other(
+                        "the store did not say where it listens in time",
+                    ))
+                });
+        match connected {
+            Ok((local, port)) => Ok((
+                child,
+                Running {
+                    port,
+                    local: Arc::new(local),
+                },
+            )),
+            Err(error) => {
                 let _ = child.kill().await;
-                Err(std::io::Error::other(
-                    "the store did not say where it listens",
-                ))
+                Err(error)
             }
         }
     }
 
-    fn admin_url(&self, path: &str) -> Option<String> {
-        self.port()
-            .map(|port| format!("http://127.0.0.1:{port}{path}"))
-    }
-
-    /// The store's status. A store that is starting, as right after storage is turned on, gets
-    /// a few seconds to come up first, so its holdings are not reported as nothing.
-    async fn admin_status(&self) -> Option<AdminStatus> {
-        let mut port = self.port.subscribe();
+    /// The running store's local API. A store that is starting, as right after Core starts,
+    /// gets a few seconds to come up first, so its holdings are not reported as nothing.
+    async fn local(&self) -> Result<Arc<Local>, String> {
+        let mut running = self.running.subscribe();
         let _ = tokio::time::timeout(
             Duration::from_secs(10),
-            port.wait_for(Option::is_some),
+            running.wait_for(Option::is_some),
         )
         .await;
-        let url = self.admin_url("/admin/status")?;
-        let answer = self
-            .http
-            .get(url)
-            .bearer_auth(&self.token)
-            .timeout(Duration::from_secs(10))
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status);
-        match answer {
-            Ok(answer) => answer.json().await.ok(),
-            Err(error) => {
-                warn!(%error, "the store did not answer its status");
-                None
-            }
-        }
+        let running = running.borrow().clone();
+        running
+            .map(|running| running.local)
+            .ok_or_else(|| "the store is not running".into())
     }
 
-    async fn admin_post(
-        &self,
-        path: &str,
-        body: &impl serde::Serialize,
-    ) -> Result<(), String> {
-        let url = self.admin_url(path).ok_or("the store is not running")?;
-        self.http
-            .post(url)
-            .bearer_auth(&self.token)
-            .timeout(Duration::from_secs(30))
-            .json(body)
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map(drop)
-            .map_err(|error| error.to_string())
+    /// What the store holds, or `None` when it does not answer.
+    async fn store_status(&self) -> Option<Status> {
+        let status = match self.local().await {
+            Ok(local) => local.status().await,
+            Err(error) => Err(error),
+        };
+        status
+            .inspect_err(|error| {
+                warn!(%error, "the store did not answer its status");
+            })
+            .ok()
     }
 
     /// `GET /storage`.
     pub async fn status(&self) -> Result<StorageStatus, ApiError> {
         let settings = self.settings().await?;
-        let running = if settings.enabled {
-            self.admin_status().await
-        } else {
-            None
-        };
+        let running = self.store_status().await;
         let free = match &running {
             Some(status) => status.free,
             None => space::free(&self.paths.store()).unwrap_or(0),
@@ -396,8 +353,8 @@ impl Storage {
         })
     }
 
-    /// `PATCH /storage`: keep the settings given, pass the caps to a running store, start or stop
-    /// it, and tell the backend.
+    /// `PATCH /storage`: keep the settings given, pass the caps to the store, and tell the
+    /// backend.
     pub async fn change(
         &self,
         change: StorageSettings,
@@ -421,16 +378,17 @@ impl Storage {
         .execute(&self.db)
         .await?;
         let settings = self.settings().await?;
-        if self.port().is_some() {
+        // A store that is not running starts with the new caps.
+        let running = self.running.borrow().clone();
+        if let Some(running) = running {
             let caps = Caps {
                 cap: settings.cap,
                 egress_cap: settings.egress_cap,
             };
-            if let Err(error) = self.admin_post("/admin/config", &caps).await {
+            if let Err(error) = running.local.config(caps).await {
                 warn!(%error, "could not pass the new caps to the store");
             }
         }
-        self.changed.notify_one();
         self.owe_report().await;
         self.status().await
     }
@@ -450,25 +408,14 @@ impl Storage {
         }
     }
 
-    /// What `POST /core/storage` sends now. `None` while storage is on but the store does not
-    /// answer: its next start owes a report again.
+    /// What `POST /core/storage` sends now: what the store holds, whether or not this Core offers
+    /// storage to others. `None` while the store does not answer: its next start owes a report
+    /// again.
     pub async fn report(&self) -> Option<StorageReport> {
         let settings = self.settings().await.ok()?;
-        if !settings.enabled {
-            return Some(StorageReport {
-                enabled: false,
-                service: self.service,
-                cap: settings.cap,
-                used: 0,
-                free: space::free(&self.paths.store()).unwrap_or(0),
-                egress_cap: settings.egress_cap,
-                egress_today: 0,
-                versions: Vec::new(),
-            });
-        }
-        let status = self.admin_status().await?;
+        let status = self.store_status().await?;
         Some(StorageReport {
-            enabled: true,
+            enabled: settings.enabled,
             service: self.service,
             cap: status.cap,
             used: status.used,
@@ -488,10 +435,11 @@ impl Storage {
         let storage = Arc::clone(self);
         tokio::spawn(async move {
             if !answer.drop.is_empty() {
-                let roots = Drop { roots: answer.drop };
-                if let Err(error) =
-                    storage.admin_post("/admin/drop", &roots).await
-                {
+                let dropped = match storage.local().await {
+                    Ok(local) => local.drop_versions(answer.drop).await,
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = dropped {
                     warn!(%error, "could not drop versions");
                 }
             }
@@ -511,12 +459,12 @@ impl Storage {
     async fn pull(self: Arc<Self>, order: PullOrder) {
         let complete = async {
             let root = Hash::parse(&order.root).ok_or("not a version")?;
-            let url = self
-                .admin_url(&format!("/store/versions/{root}/pull"))
-                .ok_or("the store is not running")?;
+            let port = self.port().ok_or("the store is not running")?;
             let answer: serde_json::Value = self
                 .http
-                .post(url)
+                .post(format!(
+                    "http://127.0.0.1:{port}/store/versions/{root}/pull"
+                ))
                 .bearer_auth(&order.ticket)
                 .send()
                 .await
@@ -546,14 +494,21 @@ impl Storage {
 
     /// Forward a request under `/store/` to the store as it is, with `caller` as
     /// `X-Forwarded-For`, and stream the answer back. Core never reads either body.
-    pub async fn forward(
+    pub async fn forward(&self, request: Request, caller: IpAddr) -> Response {
+        match self.port() {
+            Some(port) => self.forward_to(port, request, caller).await,
+            None => unavailable(
+                "This Core's storage is not running. Try again shortly.",
+            ),
+        }
+    }
+
+    async fn forward_to(
         &self,
+        port: u16,
         mut request: Request,
         caller: IpAddr,
     ) -> Response {
-        let Some(port) = self.port() else {
-            return unavailable("Storage is off on this Core.");
-        };
         let path = request
             .uri()
             .path_and_query()
@@ -650,10 +605,10 @@ pub mod tests {
                 .body(Body::from("the body"))
                 .unwrap()
         };
-        let off = storage
+        let stopped = storage
             .forward(request(), IpAddr::from([203, 0, 113, 5]))
             .await;
-        assert_eq!(off.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(stopped.status(), StatusCode::SERVICE_UNAVAILABLE);
 
         let echo = Router::new().fallback(any(
             |uri: Uri, headers: HeaderMap, body: String| async move {
@@ -665,12 +620,10 @@ pub mod tests {
         ));
         let listener =
             tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        storage
-            .port
-            .send_replace(Some(listener.local_addr().unwrap().port()));
+        let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move { axum::serve(listener, echo).await });
         let response = storage
-            .forward(request(), IpAddr::from([203, 0, 113, 5]))
+            .forward_to(port, request(), IpAddr::from([203, 0, 113, 5]))
             .await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();

@@ -121,6 +121,7 @@ import {
 	defineMessages,
 	FileTreeSelect,
 	type FileTreeSelectItem,
+	injectModrinthClient,
 	NewModal,
 	Tabs,
 	type TabsTab,
@@ -176,6 +177,7 @@ const emit = defineEmits<{
 }>()
 
 const { formatMessage } = useVIntl()
+const client = injectModrinthClient()
 const formatBytes = useFormatBytes()
 const { notifySharedInstanceError, notifySharedInstanceAvailability } = useSharedInstanceErrors()
 const sharedInstanceState = injectSharedInstance()
@@ -329,7 +331,12 @@ async function publishChanges(restart: boolean) {
 async function publishToFriends() {
 	const task = trackSharedInstancePublish(props.instance)
 	try {
-		await publish_shared_instance(props.instance.id, selectedFilePaths.value, task.update)
+		await publish_shared_instance(
+			props.instance.id,
+			selectedFilePaths.value,
+			await ownServerCore(),
+			task.update,
+		)
 		await loadSupportDetails(task)
 		task.succeed()
 		return true
@@ -339,6 +346,22 @@ async function publishToFriends() {
 		handlePublishError(error)
 		return false
 	}
+}
+
+/**
+ * The first of the account's own Cores that runs one of this instance's servers. The share's home
+ * copy is kept there. A server on someone else's Core, or one whose Core can't be found, is skipped.
+ */
+async function ownServerCore() {
+	for (const server of props.servers ?? []) {
+		try {
+			const core = await client.archon.cores_v1.coreOf(server.server_id)
+			if (core.owned) return core.id
+		} catch (error) {
+			console.error(`Could not find the Core of server ${server.server_id}`, error)
+		}
+	}
+	return null
 }
 
 async function loadSupportDetails(task: ReturnType<typeof trackSharedInstancePublish>) {

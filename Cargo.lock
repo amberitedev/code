@@ -3234,6 +3234,7 @@ dependencies = [
  "serde_json",
  "sha1 0.10.6",
  "sha2 0.10.9",
+ "sharing-storage",
  "sharing-types",
  "socket2 0.6.5",
  "sqlx",
@@ -12997,6 +12998,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "sharing-storage"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "clap 4.6.7",
+ "color-eyre",
+ "futures",
+ "hex",
+ "http-body-util",
+ "hyper-util",
+ "nix",
+ "rcgen",
+ "reqwest 0.12.24",
+ "ring",
+ "rustls 0.23.32",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-rustls 0.26.6",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "url",
+ "uuid 1.23.3",
+ "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

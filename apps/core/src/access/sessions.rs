@@ -248,9 +248,10 @@ mod tests {
             .await
             .unwrap();
         let signer = Signer::new("k1");
-        let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
-            .await
-            .unwrap();
+        let keys =
+            crate::access::keys::load(db.clone(), reqwest::Client::new(), None)
+                .await
+                .unwrap();
         keys.set(&signer.public_keys()).await;
         (db, keys, signer, core_id)
     }

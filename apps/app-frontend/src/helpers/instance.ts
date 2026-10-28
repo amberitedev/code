@@ -768,14 +768,20 @@ export async function get_shared_instance_publish_preview(
 	return await invoke('plugin:instance|instance_share_get_publish_preview', { instanceId })
 }
 
+/**
+ * `serverCoreId` is a Core the account owns that runs a linked server of this instance. The
+ * backend then keeps the share's home copy on it.
+ */
 export async function publish_shared_instance(
 	instanceId: string,
 	filePaths: string[],
+	serverCoreId: string | null,
 	onProgress: (uploadedBytes: number, totalBytes: number) => void,
 ): Promise<SharedInstanceAttachment> {
 	return await invoke('plugin:instance|instance_share_publish', {
 		instanceId,
 		filePaths,
+		serverCoreId,
 		onProgress: new Channel<[number, number]>(([uploaded, total]) => onProgress(uploaded, total)),
 	})
 }
