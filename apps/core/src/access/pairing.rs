@@ -1,22 +1,35 @@
 //! Pairing: how a Core comes to belong to an account and gets its own backend key (`amc_...`).
 //!
 //! An unpaired Core asks the backend for a code and the key it will use, prints the code, and
-//! polls. The owner enters the code in the App, which approves it with their account; from then
-//! on the key works. The App never talks to the Core during pairing. The code being shown is kept
+//! waits on a WebSocket that the backend wakes when the code is approved, asking `/core/auth/poll`
+//! for the answer each time it wakes. Where no socket opens, it polls instead. The owner enters the
+//! code in the App, which approves it with their account; from then on the key works. The App never talks to the Core during pairing. The code being shown is kept
 //! in the `pairing` table, so every copal process on one data folder shows the same code, and
 //! `copal status` reads it there. `copal pair` drops it and wakes the loop for a fresh one.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reqwest::StatusCode;
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
+use reqwest::{
+    StatusCode, Upgraded,
+    header::{CONNECTION, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
+};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
+use tokio_tungstenite::{
+    WebSocketStream,
+    tungstenite::{Message, handshake::client::generate_key, protocol::Role},
+};
 use tracing::warn;
 
 /// Wait between attempts to reach the backend.
 const RETRY: Duration = Duration::from_secs(10);
+/// Ping on the approval socket this often, so nothing between here and the backend drops it as
+/// idle.
+const PING: Duration = Duration::from_secs(30);
 
 /// What pairing needs to know about this Core.
 pub struct Pairing<'a> {
@@ -112,24 +125,15 @@ pub async fn pair(state: &Pairing<'_>) {
             Duration::from_secs(pending.poll_interval.clamp(1, 60) as u64);
         let mut last_problem = String::new();
         loop {
-            tokio::select! {
-                () = tokio::time::sleep(interval) => {}
-                () = state.new_code.notified() => {}
-            }
-            // `copal pair` dropped this code, or another copal process replaced it.
-            if pending.expires_at > now()
-                && current_code(state)
-                    .await
-                    .is_none_or(|current| current.code != pending.code)
-            {
-                break;
-            }
+            // Opened before polling, so an approval in between still wakes it.
+            let socket = open_socket(state, &pending.key).await;
             match poll(state, &pending.key).await {
                 Poll::Approved(account) => {
                     if let Err(error) =
                         set_owner(state.db, &account, &pending.key).await
                     {
                         warn!(%error, "could not store the Core owner");
+                        tokio::time::sleep(RETRY).await;
                         continue;
                     }
                     forget_code(state, &pending.code).await;
@@ -151,8 +155,78 @@ pub async fn pair(state: &Pairing<'_>) {
                     }
                 }
             }
+            match socket {
+                Some(socket) => {
+                    wait(socket, pending.expires_at, state.new_code).await
+                }
+                None => tokio::select! {
+                    () = tokio::time::sleep(interval) => {}
+                    () = state.new_code.notified() => {}
+                },
+            }
+            // `copal pair` dropped this code, or another copal process replaced it.
+            if pending.expires_at > now()
+                && current_code(state)
+                    .await
+                    .is_none_or(|current| current.code != pending.code)
+            {
+                break;
+            }
         }
     }
+}
+
+/// A socket the backend wakes when this code is approved, or `None` when none opens, such as on
+/// a network that blocks WebSockets or once the code is gone.
+async fn open_socket(
+    state: &Pairing<'_>,
+    key: &str,
+) -> Option<WebSocketStream<Upgraded>> {
+    let response = state
+        .http
+        .get(format!("{}/core/auth/wait", state.backend_url))
+        .bearer_auth(key)
+        .header(CONNECTION, "upgrade")
+        .header(UPGRADE, "websocket")
+        .header(SEC_WEBSOCKET_VERSION, "13")
+        .header(SEC_WEBSOCKET_KEY, generate_key())
+        .send()
+        .await
+        .ok()?;
+    if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+        return None;
+    }
+    let upgraded = response.upgrade().await.ok()?;
+    Some(WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await)
+}
+
+/// Wait until the backend wakes `socket`, the socket drops, the code expires, or the owner asks
+/// for a new code.
+async fn wait(
+    mut socket: WebSocketStream<Upgraded>,
+    expires_at: i64,
+    new_code: &Notify,
+) {
+    let expiry = tokio::time::sleep(Duration::from_secs(
+        (expires_at - now()).max(0) as u64,
+    ));
+    tokio::pin!(expiry);
+    loop {
+        tokio::select! {
+            message = socket.next() => match message {
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                _ => break,
+            },
+            () = tokio::time::sleep(PING) => {
+                if socket.send(Message::Ping(Bytes::new())).await.is_err() {
+                    break;
+                }
+            }
+            () = &mut expiry => break,
+            () = new_code.notified() => break,
+        }
+    }
+    let _ = socket.close(None).await;
 }
 
 /// Whether this Core has an owner and a backend key.

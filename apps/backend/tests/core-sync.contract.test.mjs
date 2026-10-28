@@ -71,6 +71,38 @@ function decode(ticket) {
 	}
 }
 
+test('a signed-out Core waits on a socket that approval closes', { timeout: 30_000 }, async () => {
+	await withCore('core-sign-in', async ({ backend, call }) => {
+		const { code, key } = await (
+			await call(
+				'POST',
+				'/core/auth/code',
+				{ core_id: 'new-core', name: 'Box', address: 'https://192.168.1.3:16662' },
+				'',
+			)
+		).json()
+		const wait = () =>
+			backend.fetch('http://local.test/core/auth/wait', {
+				headers: { upgrade: 'websocket', authorization: `Bearer ${key}` },
+			})
+		const waiting = await wait()
+		assert.equal(waiting.status, 101)
+		waiting.webSocket.accept()
+		const woken = new Promise((resolve) =>
+			waiting.webSocket.addEventListener('message', (event) => resolve(event.data)),
+		)
+
+		assert.equal((await call('POST', '/cores/approve', { code }, 'mra_owner')).status, 200)
+		assert.equal(await woken, 'approved')
+		assert.deepEqual(await (await call('POST', '/core/auth/poll', undefined, key)).json(), {
+			status: 'approved',
+			account: { id: 'owner', username: 'owner' },
+		})
+		// The code is used up, so there is nothing left to wait for.
+		assert.equal((await wait()).status, 410)
+	})
+})
+
 test('tickets carry the user and the Core, for the owner and the access directory only', async () => {
 	await withCore('core-tickets', async ({ backend, call, writes }) => {
 		await backend.db

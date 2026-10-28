@@ -113,7 +113,8 @@ Later:
   requires login.
 - A Core belongs to one account, its owner. Owner only: no members, roles, or invites.
 - A Core signs in like a device: it asks the backend for a code and the key it will use, prints
-  "Open Amberite, go to Settings > Cores > Add Core, and enter ABCD-EFGH", and polls. You enter
+  "Open Amberite, go to Settings > Cores > Add Core, and enter ABCD-EFGH", and waits on a socket
+  that the backend wakes on approval, so a Core nobody approves costs almost nothing. You enter
   the code in the App and approve it; the App shows the Core's machine name first so you can tell
   it is yours. From then on the key works, the Core is listed under your account, and the Core
   prints "Signed in as <you>". The App never talks to the Core during sign-in, so

@@ -29,7 +29,10 @@ export async function startBackend(name, bindings = {}) {
 		compatibilityFlags: ['nodejs_compat'],
 		d1Databases: { DB: name },
 		r2Buckets: { FILES: name },
-		durableObjects: { FRIENDS: { className: 'FriendsHub', useSQLite: true } },
+		durableObjects: {
+			FRIENDS: { className: 'FriendsHub', useSQLite: true },
+			CORE_SIGN_IN: { className: 'CoreSignIn', useSQLite: true },
+		},
 		bindings: { LOCAL_DEV: 'true', ...bindings },
 	})
 	const db = await runtime.getD1Database('DB')
