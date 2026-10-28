@@ -308,6 +308,8 @@ pub(super) fn shared_instance_loader_version(
     (!loader_version.is_empty()).then_some(loader_version)
 }
 
+/// The shared content installed now: Modrinth version ids, external files, and the SHA-1 of each
+/// external file present on disk, by name and file type.
 pub(super) async fn current_shared_content(
     metadata: &crate::state::InstanceMetadata,
     include_linked_modpack_content: bool,
@@ -333,7 +335,7 @@ pub(super) async fn current_shared_content(
     .collect::<HashMap<_, _>>();
     let mut version_ids = Vec::new();
     let mut external_files = BTreeSet::new();
-    let mut external_file_paths = HashMap::new();
+    let mut external_file_sha1s = HashMap::new();
 
     for entry in entries {
         let include_entry = entry.source_kind
@@ -358,10 +360,12 @@ pub(super) async fn current_shared_content(
                 content_type: entry.project_type.into(),
                 path: file.file_name.clone(),
             });
-            external_file_paths.insert(
-                (file.file_name.clone(), file_type(entry.project_type)),
-                file.relative_path.clone(),
-            );
+            if !file.missing {
+                external_file_sha1s.insert(
+                    (file.file_name.clone(), file_type(entry.project_type)),
+                    file.sha1.clone(),
+                );
+            }
         }
     }
     if include_linked_modpack_content
@@ -376,7 +380,7 @@ pub(super) async fn current_shared_content(
     }
     dedupe_strings(&mut version_ids);
 
-    Ok((version_ids, external_files, external_file_paths))
+    Ok((version_ids, external_files, external_file_sha1s))
 }
 
 pub(super) struct CurrentPublishSnapshot {
@@ -799,8 +803,8 @@ pub(super) async fn publish_current_content(
         .iter()
         .fold(0_u64, |total, file| total.saturating_add(file.size));
     if total_size > MAX_SHARED_FILES_TOTAL_SIZE {
-        bail!(crate::ErrorKind::InputError(format!(
-            "files exceed the {} limit for a shared instance version",
+        bail!(crate::ErrorKind::PoolTooLarge(format!(
+            "A shared instance can hold at most {} of files.",
             crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
         )));
     }
@@ -860,7 +864,15 @@ async fn push_version(
     report: &mut PublishReport,
     state: &State,
 ) -> crate::Result<i32> {
-    let keys = file_keys(shared_instance_id, hashed_files, state).await?;
+    let previous = previous_versions(shared_instance_id, state).await?;
+    let carried = carried_config_files(&previous, hashed_files);
+    let file_count = hashed_files.len() + carried.len();
+    if file_count > MAX_SHARED_FILES {
+        bail!(crate::ErrorKind::PoolTooLarge(format!(
+            "A shared instance can hold at most {MAX_SHARED_FILES} files, and this push has {file_count}."
+        )));
+    }
+    let keys = file_keys(&previous, hashed_files);
     crate::util::io::create_dir_all(folder).await?;
     // Collected first so the stream holds plain futures, not a borrowing closure, which keeps
     // the push future Send for Tauri commands.
@@ -869,7 +881,7 @@ async fn push_version(
         .zip(&keys)
         .map(|(file, key)| pool::encrypt_file(key, file.content.path(), folder))
         .collect::<Vec<_>>();
-    let objects = futures::stream::iter(encryptions)
+    let mut objects = futures::stream::iter(encryptions)
         .buffered(UPLOAD_CONCURRENCY)
         .try_collect::<Vec<_>>()
         .await?;
@@ -890,15 +902,15 @@ async fn push_version(
     }
     report.step(format!("Encrypted {} files", objects.len()));
 
-    let root = hex::encode(crypto::root(objects.iter().map(|o| o.object)));
-    let external_files = hashed_files
+    let mut external_files = hashed_files
         .iter()
         .zip(&keys)
         .zip(&objects)
         .map(|((file, key), object)| ExternalFileData {
             file_name: file.file_name.clone(),
             file_type: file.file_type.clone(),
-            size: file.size,
+            file_size: file.size,
+            sha1: file.sha1.clone(),
             sha256: hex::encode(file.sha256),
             object: hex::encode(object.object),
             object_size: object.size,
@@ -906,6 +918,11 @@ async fn push_version(
                 .then(|| hex::encode(key)),
         })
         .collect::<Vec<_>>();
+    for (file, object) in carried {
+        external_files.push(file);
+        objects.push(object);
+    }
+    let root = hex::encode(crypto::root(objects.iter().map(|o| o.object)));
     version_request["external_files"] = json!(external_files);
     version_request["root"] = json!(root);
 
@@ -966,16 +983,12 @@ async fn push_version(
     Err(crate::ErrorKind::PoolPushUnconfirmed.into())
 }
 
-/// Each file's key. Content files derive theirs from P. Other files keep the key an earlier
-/// version gave the same P, so an unchanged file stays the same object, and get a new random
-/// key otherwise. A push that crashed after creating its version left it unconfirmed one past
-/// the latest ready one; its keys win, so pushing the same files again gives the same root and
-/// resumes that upload instead of waiting for it to expire.
-async fn file_keys(
+/// The versions a push builds on: the latest one, then the version a crashed push left
+/// unconfirmed one past it, if there is one.
+async fn previous_versions(
     shared_instance_id: &str,
-    files: &[HashedExternalFile],
     state: &State,
-) -> crate::Result<Vec<[u8; 32]>> {
+) -> crate::Result<Vec<InstanceVersionResponse>> {
     let mut versions = Vec::new();
     if let SharedInstanceRemoteResponse::Available(latest) =
         get_latest_remote_version_optional_unavailable(
@@ -984,45 +997,121 @@ async fn file_keys(
         )
         .await?
     {
-        if latest.ready
-            && let Some(pending) = get_remote_version(
-                shared_instance_id,
-                latest.version + 1,
-                state,
-            )
-            .await?
-        {
-            versions.push(pending);
-        }
+        let pending = if latest.ready {
+            get_remote_version(shared_instance_id, latest.version + 1, state)
+                .await?
+        } else {
+            None
+        };
         versions.push(latest);
+        versions.extend(pending);
     }
-    let mut previous = HashMap::new();
-    for file in versions
-        .into_iter()
-        .flat_map(|version| version.external_files)
+    Ok(versions)
+}
+
+/// The config files of the latest ready version that this push does not send again. Configs
+/// are picked per push, so each version carries the earlier ones forward and lists every config
+/// shared so far: any version stands alone, however many older ones the backend has dropped.
+/// The Core still holds their objects, since it keeps the latest ready version.
+fn carried_config_files(
+    previous: &[InstanceVersionResponse],
+    pushed: &[HashedExternalFile],
+) -> Vec<(ExternalFileData, pool::PoolObject)> {
+    let Some(latest) = previous.first().filter(|version| version.ready) else {
+        return Vec::new();
+    };
+    let pushed = pushed
+        .iter()
+        .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
+        .collect::<HashSet<_>>();
+    latest
+        .external_files
+        .iter()
+        .filter(|file| {
+            matches!(
+                file.file_type.as_str(),
+                CONFIG_FILE_TYPE | CONFIG_BUNDLE_FILE_TYPE
+            ) && !pushed
+                .contains(&(file.file_type.as_str(), file.file_name.as_str()))
+        })
+        .filter_map(|file| {
+            let carried = carried_config_file(file);
+            if carried.is_none() {
+                tracing::warn!(
+                    file_name = %file.file_name,
+                    "A shared config file has an incomplete manifest entry and is not carried forward"
+                );
+            }
+            carried
+        })
+        .collect()
+}
+
+fn carried_config_file(
+    file: &ExternalFileResponse,
+) -> Option<(ExternalFileData, pool::PoolObject)> {
+    let object = file.object.as_deref().and_then(pool::parse_hash)?;
+    let object_size = file.object_size?;
+    let sha256 = file.sha256.as_deref().and_then(pool::parse_hash)?;
+    Some((
+        ExternalFileData {
+            file_name: file.file_name.clone(),
+            file_type: file.file_type.clone(),
+            file_size: file
+                .file_size
+                .and_then(|size| u64::try_from(size).ok())?,
+            sha1: file.sha1.clone()?,
+            sha256: hex::encode(sha256),
+            object: hex::encode(object),
+            object_size,
+            key: Some(file.key.clone()?),
+        },
+        pool::PoolObject {
+            object,
+            size: object_size,
+            path: None,
+            plain: sha256,
+        },
+    ))
+}
+
+/// Each file's key. Content files derive theirs from P. Other files keep the key an earlier
+/// version gave the same P, so an unchanged file stays the same object, and get a new random
+/// key otherwise. A push that crashed after creating its version left it unconfirmed one past
+/// the latest ready one; its keys win, so pushing the same files again gives the same root and
+/// resumes that upload instead of waiting for it to expire.
+fn file_keys(
+    previous: &[InstanceVersionResponse],
+    files: &[HashedExternalFile],
+) -> Vec<[u8; 32]> {
+    let mut keys = HashMap::new();
+    for file in previous
+        .iter()
+        .rev()
+        .flat_map(|version| &version.external_files)
     {
         if let (Some(p), Some(key)) = (
             file.sha256.as_deref().and_then(pool::parse_hash),
             file.key.as_deref().and_then(pool::parse_hash),
         ) {
-            previous.entry(p).or_insert(key);
+            keys.entry(p).or_insert(key);
         }
     }
 
-    Ok(files
+    files
         .iter()
         .map(|file| {
             if crypto::is_content_type(&file.file_type) {
                 return crypto::content_key(&file.sha256);
             }
-            *previous.entry(file.sha256).or_insert_with(|| {
+            *keys.entry(file.sha256).or_insert_with(|| {
                 use rand::RngCore;
                 let mut key = [0; 32];
                 rand::rngs::OsRng.fill_bytes(&mut key);
                 key
             })
         })
-        .collect())
+        .collect()
 }
 
 pub(super) async fn collect_shareable_files(
@@ -1129,8 +1218,8 @@ async fn shared_file_candidates(
         let size = crate::util::io::metadata(&source).await?.len();
         total_size = total_size.saturating_add(size);
         if total_size > MAX_SHARED_FILES_TOTAL_SIZE {
-            bail!(crate::ErrorKind::InputError(format!(
-                "selected files exceed the {} limit for a shared instance version",
+            bail!(crate::ErrorKind::PoolTooLarge(format!(
+                "A shared instance can hold at most {} of files.",
                 crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
             )));
         }
@@ -1198,14 +1287,15 @@ pub(super) fn ensure_shareable_link(link: &InstanceLink) -> crate::Result<()> {
     Ok(())
 }
 
-/// A publish candidate with its content, size, SHA-512 (for the publish report) and SHA-256,
-/// which is the pool's P.
+/// A publish candidate with its content, size, SHA-512 (for the publish report), SHA-1 (which a
+/// member's install compares) and SHA-256, which is the pool's P.
 pub(super) struct HashedExternalFile {
     file_name: String,
     file_type: String,
     content: crate::state::content_store::ReadableContent,
     size: u64,
     sha512: String,
+    sha1: String,
     sha256: [u8; 32],
     executable: bool,
 }
@@ -1235,6 +1325,7 @@ async fn hash_external_file(
     let content = external_file_source(instance_path, candidate, state).await?;
     let mut file = tokio::fs::File::open(content.path()).await?;
     let mut hasher = sha2::Sha512::new();
+    let mut sha1 = sha1_smol::Sha1::new();
     let mut sha256 = sha2::Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024];
     let mut head = Vec::with_capacity(FILE_SCAN_HEAD_SIZE);
@@ -1245,6 +1336,7 @@ async fn hash_external_file(
             break;
         }
         hasher.update(&buffer[..read]);
+        sha1.update(&buffer[..read]);
         sha256.update(&buffer[..read]);
         let remaining = FILE_SCAN_HEAD_SIZE - head.len();
         head.extend_from_slice(&buffer[..read.min(remaining)]);
@@ -1257,6 +1349,7 @@ async fn hash_external_file(
         content,
         size,
         sha512: format!("{:x}", hasher.finalize()),
+        sha1: sha1.digest().to_string(),
         sha256: sha256.finalize().into(),
         executable: is_executable_content(&head),
     })

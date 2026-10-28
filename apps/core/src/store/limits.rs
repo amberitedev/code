@@ -1,5 +1,5 @@
 //! What keeps a leaked ticket or a scripted install from draining a volunteer's uplink: a daily
-//! egress cap, a cap on fetches at once, and a per-address request rate.
+//! egress cap, a cap on fetches at once, and a per-address rate of refused requests.
 
 use std::{
     collections::HashMap,
@@ -14,8 +14,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Object fetches streaming at once.
 pub const CONCURRENT_FETCHES: usize = 32;
-/// Requests one address may make a minute.
-pub const REQUESTS_PER_MINUTE: u32 = 120;
+/// Refused requests one address may make a minute before it is turned away unheard. Requests
+/// with a valid ticket never count, so an install fetching thousands of files is never slowed.
+pub const REFUSALS_PER_MINUTE: u32 = 120;
 
 /// Bytes served on one UTC day, as `egress.json` keeps them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,15 +53,22 @@ impl Limits {
         }
     }
 
-    /// Count a request from `address`. False past [`REQUESTS_PER_MINUTE`].
-    pub fn allow(&self, address: IpAddr) -> bool {
+    /// Whether `address` has used up this minute's [`REFUSALS_PER_MINUTE`].
+    pub fn limited(&self, address: IpAddr) -> bool {
         let mut addresses = self.addresses.lock().expect("not poisoned");
         addresses
             .retain(|_, (start, _)| start.elapsed() < Duration::from_secs(60));
+        addresses
+            .get(&address)
+            .is_some_and(|(_, count)| *count >= REFUSALS_PER_MINUTE)
+    }
+
+    /// Count a refused request from `address`.
+    pub fn refused(&self, address: IpAddr) {
+        let mut addresses = self.addresses.lock().expect("not poisoned");
         let (_, count) =
             addresses.entry(address).or_insert((Instant::now(), 0));
         *count += 1;
-        *count <= REQUESTS_PER_MINUTE
     }
 
     /// One of the fetch slots, held until the response is sent. `None` when all are taken.
@@ -105,14 +113,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_address_gets_its_minute_s_requests_and_no_more() {
+    fn an_address_gets_its_minute_s_refusals_and_no_more() {
         let limits = Limits::load(PathBuf::from("missing.json"));
         let one = IpAddr::from([203, 0, 113, 1]);
-        for _ in 0..REQUESTS_PER_MINUTE {
-            assert!(limits.allow(one));
+        for _ in 0..REFUSALS_PER_MINUTE {
+            assert!(!limits.limited(one));
+            limits.refused(one);
         }
-        assert!(!limits.allow(one));
-        assert!(limits.allow(IpAddr::from([203, 0, 113, 2])));
+        assert!(limits.limited(one));
+        assert!(!limits.limited(IpAddr::from([203, 0, 113, 2])));
     }
 
     #[test]

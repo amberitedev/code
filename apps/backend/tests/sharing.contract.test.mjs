@@ -45,7 +45,8 @@ function file(file_name, file_type, size, key = file_type === 'config') {
 	return {
 		file_name,
 		file_type,
-		size,
+		file_size: size,
+		sha1: createHash('sha1').update(randomBytes(16)).digest('hex'),
 		sha256: sha256(randomBytes(16)),
 		object,
 		object_size: size + 16 * Math.max(1, Math.ceil(size / 1_048_576)),
@@ -200,11 +201,12 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(store.claims.exp - store.claims.iat, 3600)
 		assert.deepEqual(
 			second.external_files.map(
-				({ file_name, file_type, url, size, sha256, object, object_size, key }) => ({
+				({ file_name, file_type, url, file_size, sha1, sha256, object, object_size, key }) => ({
 					file_name,
 					file_type,
 					url,
-					size,
+					file_size,
+					sha1,
 					sha256,
 					object,
 					object_size,
@@ -309,11 +311,19 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			[[{ ...jar, key: randomBytes(32).toString('hex') }], 400],
 			[[{ ...config, key: undefined }], 400],
 			[[{ ...jar, object_size: jar.object_size + 1 }], 400],
+			[[{ ...jar, sha1: undefined }], 400],
 			[[{ ...jar, file_name: '../escape.jar' }], 400],
 			[[jar, jar], 400],
-			[Array.from({ length: 4097 }, (_, index) => file(`${index}.jar`, 'mod', 1)), 413],
 		])
 			assert.equal((await push(id, external)).status, status, JSON.stringify(external[0]))
+		await code(
+			await push(
+				id,
+				Array.from({ length: 4097 }, (_, index) => file(`${index}.jar`, 'mod', 1)),
+			),
+			413,
+			'too_many_files',
+		)
 		assert.equal(
 			(
 				await call(`/instances/${id}/versions`, 'POST', {

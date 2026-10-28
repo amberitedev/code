@@ -43,14 +43,6 @@ export const sharedInstanceErrorMessages = defineMessages({
 		id: 'instance.shared-instance.wrong-account.text',
 		defaultMessage: 'Sign in as the account that shared this instance to manage sharing.',
 	},
-	pushUnfinishedTitle: {
-		id: 'instance.shared-instance.push-unfinished.title',
-		defaultMessage: 'Update not pushed',
-	},
-	pushUnfinishedText: {
-		id: 'instance.shared-instance.push-unfinished.text',
-		defaultMessage: 'The push did not finish. Push again.',
-	},
 	inviteFailedTitle: {
 		id: 'instance.shared-instance.invite-failed.title',
 		defaultMessage: 'Invite not sent',
@@ -107,7 +99,21 @@ export const sharedInstanceErrorMessages = defineMessages({
 		id: 'instance.shared-instance.file-not-allowed.title',
 		defaultMessage: 'File type not allowed',
 	},
+	tooLargeTitle: {
+		id: 'instance.shared-instance.too-large.title',
+		defaultMessage: 'Over the sharing limit',
+	},
 })
+
+/** A push over one of the pool's limits. Its message names the limit. */
+function isSharedInstanceTooLargeError(error: unknown) {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'code' in error &&
+		error.code === 'pool_too_large'
+	)
+}
 
 export function sharedInstanceUnavailableTextMessage(
 	reason: SharedInstanceUnavailableReason | null,
@@ -200,7 +206,9 @@ export function useSharedInstanceErrors() {
 			title: formatMessage(
 				isSharedInstanceFileNotAllowedError(error)
 					? sharedInstanceErrorMessages.fileNotAllowedTitle
-					: sharedInstanceErrorMessages.errorTitle,
+					: isSharedInstanceTooLargeError(error)
+						? sharedInstanceErrorMessages.tooLargeTitle
+						: sharedInstanceErrorMessages.errorTitle,
 			),
 			text: getErrorMessage(error),
 		})

@@ -61,8 +61,8 @@ object, and it works from any of the owner's machines because the backend's copy
 
 XChaCha20-Poly1305 in 1 MiB chunks, the chunk index as nonce, a last-chunk flag in the associated
 data so truncation fails at the cipher and not only at the P check. A member verifies each chunk as
-it arrives and a download resumes at the chunk. Modrinth's sha1 and sha512 stay in the manifest for
-the install dedupe that exists today and are never used as keys.
+it arrives and a download resumes at the chunk. Modrinth's sha1 stays in the manifest for the
+install dedupe that exists today and is never used as a key.
 
 ### Push
 
@@ -85,13 +85,22 @@ A share has at most one unconfirmed version at a time. A second push while one i
 refused with a clear message. An unconfirmed version older than the store ticket's life is
 abandoned and the next push replaces it, so a crashed App never locks a share.
 
+Every version is a full manifest: every path the share holds, with its hashes, like a Git tree over
+the pool's content-addressed objects. Content files are the instance's content list, which is whole
+in every push anyway. Config files are picked per push, so the App carries the latest ready
+version's configs forward into the new manifest unless this push sends them again. Their objects
+are already on the home, which keeps the latest ready version, so carrying them uploads nothing. Any
+version stands alone, and dropping old manifests never loses a file.
+
 ### Install
 
 The member's App asks the backend for the version and receives the manifest, the confirmed holders
 with their certificate fingerprints, and one fetch ticket for R. It drops every file it already has
-by P, as Modrinth's install does today, then sends a holder the explicit set of C's it wants. The
+by SHA-1, as Modrinth's install does today, then sends a holder the explicit set of C's it wants. The
 Core checks each one is in R's list and streams them. The App checks each object twice: bytes
-against C, then decrypted bytes against P.
+against C, then decrypted bytes against P. Of the config files, an update writes only those that
+differ from the version the member last applied, so a member's own edits to configs the owner did
+not change are kept, as when upstream published configs one push at a time.
 
 The two failures mean different things. Bytes that do not hash to C are the Core's fault: the App
 discards them, tries the replica, and reports the Core. Bytes that hash to C but decrypt to the
@@ -137,7 +146,7 @@ below what it holds keeps what it has and takes no new shares.
 ### Kept versions and cleanup
 
 The backend keeps the last five manifests of a share in R2, for history and the diff view the UI
-expects. Stores keep objects for the latest confirmed version only; disk is the real resource.
+expects. Each is a full manifest, so nothing depends on the ones dropped. Stores keep objects for the latest confirmed version only; disk is the real resource.
 
 Each Core reports once a day what it holds and how much room it has, and after every stored
 upload. The backend answers with versions to drop and versions to pull. A holder's drop list is
@@ -160,7 +169,8 @@ forwarded to the store on localhost as opaque streams; the Core never parses the
 verifies tickets itself, so it stays the authority on what it serves. It has three routes: store a
 version, say which objects you have, fetch objects from a version. It never unpacks or inspects
 what it stores. It enforces its own disk cap, a daily egress cap, a concurrent fetch limit, a
-per-address rate limit, and the size limit from the ticket on each upload, and it answers over cap
+per-address limit on refused requests (a fetch with a valid ticket never counts, so a large install
+is not slowed), and the size limit from the ticket on each upload, and it answers over cap
 with one of two errors, disk full or egress spent, so the App can show the right thing.
 
 The store writes a status file the Core reads, and the Core includes storage in its daily report
@@ -309,10 +319,12 @@ ceil(size / 1 MiB))`. Encryption is deterministic given the key, so the same pla
 `external_files[]` on the backend's version routes:
 
 ```
-{ file_name, file_type, size, sha256, object, object_size, key? }
+{ file_name, file_type, file_size, sha1, sha256, object, object_size, key? }
 ```
 
-`size` and `object_size` are plain and encrypted byte counts, `sha256` is P, `object` is C.
+The first four are Modrinth's: `file_size` is the plain byte count and `sha1` is what a member's
+install compares to skip a file it already has. `sha256` is P, `object` is C, and `object_size` is
+the encrypted byte count. Every version lists all of the share's files (see Push).
 `url` is also present for upstream code that expects it and is `pool:<C>`; nothing fetches it.
 
 `POST /v1/instances/:id/versions` (owner) takes the upstream fields plus `external_files` as above
@@ -326,8 +338,9 @@ limits. It stores the manifest in R2 as `manifests/<instance>/<version>`, one D1
 
 `core` is `{ id, address, public_address, cert_fingerprint }`. A version with no files is ready
 at once and has no `store`. Errors, as `code`: `no_storage` (503, no eligible Core),
-`push_in_flight` (409, an unconfirmed version younger than an hour exists), `share_too_large`
-(413, over 1 GiB), `storage_quota` (413, over the owner's 3 GiB across shares).
+`push_in_flight` (409, an unconfirmed version younger than an hour exists), `too_many_files`
+(413, over 4,096 files), `share_too_large` (413, over 1 GiB), `storage_quota` (413, over the
+owner's 3 GiB across shares). Every 413 names its limit in `description`, which the App shows.
 
 `GET /v1/instances/:id/versions[/:n]` (member) answers the same manifest with `version`, `ready`,
 `root`, and:

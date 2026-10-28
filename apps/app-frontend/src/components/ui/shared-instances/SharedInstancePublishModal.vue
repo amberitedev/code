@@ -9,7 +9,7 @@
 		scrollable
 	>
 		<div class="flex flex-col gap-4 px-6 py-4">
-			<Tabs v-if="files.length > 0" v-model:value="activeTab" :tabs="tabs" size="large" />
+			<Tabs v-if="sharesWithFriends" v-model:value="activeTab" :tabs="tabs" size="large" />
 			<p class="m-0 text-base text-primary">
 				{{
 					formatMessage(
@@ -131,7 +131,6 @@ import {
 	defineMessages,
 	FileTreeSelect,
 	type FileTreeSelectItem,
-	injectNotificationManager,
 	NewModal,
 	Tabs,
 	type TabsTab,
@@ -150,13 +149,9 @@ import {
 	publish_shared_instance,
 	type SharedInstancePublishFile,
 } from '@/helpers/instance'
-import {
-	sharedInstanceErrorMessages,
-	useSharedInstanceErrors,
-} from '@/helpers/shared-instance-errors'
-import type { GameInstance, SharedInstanceAttachment } from '@/helpers/types'
+import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
+import type { GameInstance } from '@/helpers/types'
 import { injectSharedInstance } from '@/pages/instance/shared-instance-context'
-import { apiClient } from '@/platform/modrinth-client'
 
 type SharedInstancePublishState = 'idle' | 'reviewing' | 'publishing'
 
@@ -183,7 +178,6 @@ const emit = defineEmits<{
 
 const { formatMessage } = useVIntl()
 const formatBytes = useFormatBytes()
-const { addNotification } = injectNotificationManager()
 const { notifySharedInstanceError, notifySharedInstanceAvailability } = useSharedInstanceErrors()
 const sharedInstanceState = injectSharedInstance()
 const modal = ref<InstanceType<typeof NewModal>>()
@@ -335,26 +329,12 @@ async function publishChanges(restart: boolean) {
 	}
 }
 
-/** Publishes to friends and reports whether the push reached the backend intact. */
+/** Publishes to friends and reports whether it succeeded. */
 async function publishToFriends() {
 	const task = trackSharedInstancePublish(props.instance)
 	try {
-		const attachment = await publish_shared_instance(
-			props.instance.id,
-			selectedFilePaths.value,
-			task.update,
-		)
+		await publish_shared_instance(props.instance.id, selectedFilePaths.value, task.update)
 		await loadSupportDetails(task)
-		if (!(await pushReachedFriends(attachment))) {
-			const text = formatMessage(sharedInstanceErrorMessages.pushUnfinishedText)
-			task.fail(text)
-			addNotification({
-				type: 'error',
-				title: formatMessage(sharedInstanceErrorMessages.pushUnfinishedTitle),
-				text,
-			})
-			return false
-		}
 		task.succeed()
 		return true
 	} catch (error) {
@@ -363,39 +343,6 @@ async function publishToFriends() {
 		handlePublishError(error)
 		return false
 	}
-}
-
-/**
- * Checks a finished push against the backend. The version it made must be complete with every
- * file stored, and the instance must no longer differ from what friends get, which compares the
- * file list and each uploaded file's hash. Anything else means the push stopped partway.
- */
-async function pushReachedFriends(attachment: SharedInstanceAttachment) {
-	const version = attachment.latest_version
-	if (version == null) {
-		console.error('Push finished without a version', attachment)
-		return false
-	}
-
-	const remote = await apiClient.sharedinstances.instances_v1.getVersion(attachment.id, version)
-	const notStored = remote.external_files.filter((file) => !file.sha256)
-	const preview = await get_shared_instance_publish_preview(props.instance.id)
-	const complete =
-		remote.ready &&
-		notStored.length === 0 &&
-		preview?.latestVersion === version &&
-		preview.diffs.length === 0
-	if (!complete) {
-		console.error('Push did not reach the backend intact', {
-			sharedInstanceId: attachment.id,
-			version,
-			ready: remote.ready,
-			filesNotStored: notStored.map((file) => file.file_name),
-			latestVersion: preview?.latestVersion,
-			remainingDiffs: preview?.diffs,
-		})
-	}
-	return complete
 }
 
 async function loadSupportDetails(task: ReturnType<typeof trackSharedInstancePublish>) {

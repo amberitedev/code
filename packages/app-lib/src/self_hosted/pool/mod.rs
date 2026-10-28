@@ -55,9 +55,8 @@ pub fn parse_hash(text: &str) -> Option<[u8; 32]> {
 const PIPE_SIZE: usize = 256 * 1024;
 /// Further tries at one holder after a dropped connection, each from where the last stopped.
 const RESUME_ATTEMPTS: usize = 2;
-/// Waits at one holder that answered it is busy (its fetch slots or the per-address rate), with
-/// the wait doubling up to [`RATE_LIMIT_MAX_WAIT`]: about three minutes in all, which covers the
-/// store's one-minute rate window during a large install.
+/// Waits at one holder that answered it is busy (every fetch slot taken), with the wait doubling
+/// up to [`RATE_LIMIT_MAX_WAIT`]: about three minutes in all.
 const RATE_LIMIT_WAITS: u32 = 8;
 const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(30);
 
@@ -200,7 +199,8 @@ async fn fetch_once(
 pub(crate) struct PoolObject {
     pub object: [u8; 32],
     pub size: u64,
-    pub path: PathBuf,
+    /// `None` for a file carried from the previous version, which the Core already holds.
+    pub path: Option<PathBuf>,
     /// P of the plaintext that was encrypted, which the push compares to the P it hashed.
     pub plain: [u8; 32],
 }
@@ -220,7 +220,7 @@ pub(crate) async fn encrypt_file(
     Ok(PoolObject {
         object: encrypted.object,
         size: encrypted.size,
-        path,
+        path: Some(path),
         plain: encrypted.plain,
     })
 }
@@ -240,7 +240,9 @@ pub(crate) async fn store_version(
 ) -> crate::Result<HashSet<String>> {
     let paths = objects
         .iter()
-        .map(|object| (hex::encode(object.object), object.path.clone()))
+        .filter_map(|object| {
+            Some((hex::encode(object.object), object.path.clone()?))
+        })
         .collect::<HashMap<_, _>>();
     let mut list = objects
         .iter()
@@ -263,6 +265,13 @@ pub(crate) async fn store_version(
         return Ok(HashSet::new());
     }
     let mut missing = have.missing;
+    if missing.iter().any(|hash| !paths.contains_key(hash)) {
+        return Err(ErrorKind::InputError(
+            "The Core no longer has a config file shared earlier. Select it under Files and push again."
+                .to_string(),
+        )
+        .into());
+    }
     let requested = missing.iter().cloned().collect::<HashSet<_>>();
     let total = list
         .iter()

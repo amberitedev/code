@@ -10,7 +10,11 @@
 	>
 		<SpinnerIcon v-if="busy" class="animate-spin" aria-hidden="true" />
 		<UploadIcon v-else aria-hidden="true" />
-		{{ formatMessage(messages.pushUpdate) }}
+		{{
+			formatMessage(
+				pushing ? messages.pushing : reviewing ? messages.reviewing : messages.pushUpdate,
+			)
+		}}
 	</Button>
 
 	<SharedInstancePublishModal
@@ -54,6 +58,7 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 
+import { findRunningSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
 import SharedInstancePublishModal from '@/components/ui/shared-instances/SharedInstancePublishModal.vue'
 import {
 	coreProblem,
@@ -89,11 +94,19 @@ const { servers } = useLinkedServers(() => props.instance.id)
 const publishModal = ref<InstanceType<typeof SharedInstancePublishModal>>()
 const playersModal = ref<InstanceType<typeof NewModal>>()
 const publishState = ref<'idle' | 'reviewing' | 'publishing'>('idle')
-const pushing = ref(false)
+const uploading = ref(false)
 const playersOnlineCount = ref(0)
 
 const publishesToFriends = computed(() => props.instance.shared_instance?.role === 'owner')
-const busy = computed(() => pushing.value || publishState.value !== 'idle')
+// A push started from another button of this instance shows here too, as upstream's does.
+const pushing = computed(
+	() =>
+		uploading.value ||
+		publishState.value === 'publishing' ||
+		!!findRunningSharedInstancePublish(props.instance.id),
+)
+const reviewing = computed(() => publishState.value === 'reviewing')
+const busy = computed(() => pushing.value || reviewing.value)
 const isDisabled = computed(
 	() => props.disabled || busy.value || props.instance.install_stage !== 'installed',
 )
@@ -122,8 +135,8 @@ function answerPlayers(restart: boolean) {
 
 async function upload(restart: boolean) {
 	const targets = servers.value
-	if (targets.length === 0 || pushing.value) return
-	pushing.value = true
+	if (targets.length === 0 || uploading.value) return
+	uploading.value = true
 	try {
 		const pack = await exportInstancePack(props.instance.id)
 		const failed: string[] = []
@@ -162,15 +175,23 @@ async function upload(restart: boolean) {
 			text: error instanceof Error ? error.message : String(error),
 		})
 	} finally {
-		pushing.value = false
+		uploading.value = false
 		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
 	}
 }
 
 const messages = defineMessages({
 	pushUpdate: {
-		id: 'instance.linked-servers.push-update',
+		id: 'app.instance.admonitions.shared-instance.publish-button',
 		defaultMessage: 'Push update',
+	},
+	pushing: {
+		id: 'app.instance.admonitions.shared-instance.publishing-button',
+		defaultMessage: 'Pushing...',
+	},
+	reviewing: {
+		id: 'app.instance.admonitions.shared-instance.reviewing-button',
+		defaultMessage: 'Reviewing...',
 	},
 	playersHeader: {
 		id: 'instance.linked-servers.players-online.header',

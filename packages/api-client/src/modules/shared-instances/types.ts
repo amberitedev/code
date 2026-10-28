@@ -87,7 +87,6 @@ export namespace SharedInstances {
 				file_type: string
 				url: string
 				file_size?: number
-				sha256?: string
 				metadata?: FileMetadata[]
 			}
 
@@ -100,22 +99,6 @@ export namespace SharedInstances {
 				game_version: string
 				loader: string
 				loader_version: string
-			}
-
-			export type CreateVersionRequest = {
-				modrinth_ids: string[]
-				external_files: Array<{ file_name: string; file_type: string }>
-				modpack_id?: string
-				game_version: string
-				loader: string
-				loader_version?: string
-			}
-
-			export type LinkInvite = {
-				id: string
-				expiration: string
-				max_uses: number
-				uses: number
 			}
 		}
 	}

@@ -21,7 +21,7 @@ use crate::state::{
     CachedEntry, ContentSetSyncStatus, ContentSourceKind, InstanceLink,
     ProjectType, SharedInstanceAttachmentInput, SharedInstanceRole, State,
 };
-use crate::util::fetch::DownloadReason;
+use crate::util::fetch::{DownloadReason, REQWEST_CLIENT};
 use anyhow::{Context, bail};
 use futures::StreamExt;
 use path_util::SafeRelativeUtf8UnixPathBuf;
@@ -101,31 +101,12 @@ struct CurrentSharedInstanceExternalFile {
 }
 
 impl CurrentSharedInstanceExternalFile {
-    /// Whether the installed file is already the one wanted, so it need not be downloaded again.
-    /// Amberite's manifest carries SHA-256 instead of upstream's SHA-1, so the installed file is
-    /// hashed when there is no SHA-1 to compare.
-    async fn matches(
-        &self,
-        desired: &SharedInstanceExternalFileData,
-        instance_path: &std::path::Path,
-    ) -> crate::Result<bool> {
-        if self.missing {
-            return Ok(false);
-        }
-        if let Some(sha1) = desired.sha1.as_deref() {
-            return Ok(self.sha1.eq_ignore_ascii_case(sha1));
-        }
-        if desired.sha256.is_none() {
-            return Ok(false);
-        }
-        Ok(
-            !crate::self_hosted::integrity::installed_shared_file_changed(
-                instance_path,
-                Some(&self.relative_path),
-                desired.sha256.as_deref(),
-            )
-            .await?,
-        )
+    fn matches(&self, desired: &SharedInstanceExternalFileData) -> bool {
+        !self.missing
+            && desired
+                .sha1
+                .as_deref()
+                .is_some_and(|sha1| self.sha1.eq_ignore_ascii_case(sha1))
     }
 }
 
@@ -250,18 +231,11 @@ impl SharedInstanceApplyPlan {
             }
         }
 
-        let instance_path = state
-            .directories
-            .instances_dir()
-            .join(&metadata.instance.path);
         for desired in desired.external_files.into_values() {
             let key = (desired.file_type, desired.file.file_name.clone());
             match current.external_files.get(&key) {
-                Some(current) => {
-                    if !current.matches(&desired.file, &instance_path).await? {
-                        plan.external_updates.push(desired);
-                    }
-                }
+                Some(current) if current.matches(&desired.file) => {}
+                Some(_) => plan.external_updates.push(desired),
                 None => plan.external_additions.push(desired),
             }
         }
@@ -1160,7 +1134,7 @@ async fn download_shared_instance_external_file(
     file: &SharedInstanceExternalFileData,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<Vec<u8>> {
-    let response = crate::self_hosted::integrity::download(&file.url).await?;
+    let response = REQWEST_CLIENT.get(&file.url).send().await?;
 
     if !response.status().is_success() {
         bail!(
@@ -1200,10 +1174,6 @@ async fn download_shared_instance_external_file(
         bytes.extend_from_slice(&chunk);
     }
 
-    crate::self_hosted::integrity::verify_shared_file(
-        &bytes,
-        file.sha256.as_deref(),
-    )?;
     Ok(bytes)
 }
 
@@ -1247,7 +1217,7 @@ async fn install_shared_instance_file(
         .await;
     }
 
-    let response = crate::self_hosted::integrity::download(&file.url).await?;
+    let response = REQWEST_CLIENT.get(&file.url).send().await?;
     if !response.status().is_success() {
         bail!(
             "shared instance file download failed with status {}",
@@ -1279,22 +1249,13 @@ async fn install_shared_instance_file(
 
 /// Whether the instance already has this exact shared file, so the download
 /// can be skipped. Without a hash from the server it is treated as changed.
-/// Amberite's backend reports SHA-256 instead of SHA-1.
 async fn shared_instance_file_is_current(
     writer: &crate::api::instance::InstanceFileWriter,
     file: &SharedInstanceExternalFileData,
     state: &State,
 ) -> crate::Result<bool> {
     let Some(expected_sha1) = file.sha1.as_deref() else {
-        let Some(expected_sha256) = file.sha256.as_deref() else {
-            return Ok(false);
-        };
-        let path = writer.destination(state, &file.file_name).await?;
-        return Ok(!crate::self_hosted::integrity::shared_file_changed(
-            &path,
-            Some(expected_sha256),
-        )
-        .await?);
+        return Ok(false);
     };
     let path = writer.destination(state, &file.file_name).await?;
     let is_same_size =

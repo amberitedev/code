@@ -56,12 +56,14 @@ pub(super) enum ExternalFileSource {
     SharedFile(std::path::PathBuf),
 }
 
-/// A pushed file's manifest entry, as the Protocol in `docs/internals/pool.md` names it.
+/// A pushed file's manifest entry, as the Protocol in `docs/internals/pool.md` names it. The
+/// upstream fields come first; `sha1` is what a member's install compares to skip a file it has.
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct ExternalFileData {
     pub(super) file_name: String,
     pub(super) file_type: String,
-    pub(super) size: u64,
+    pub(super) file_size: u64,
+    pub(super) sha1: String,
     /// P.
     pub(super) sha256: String,
     /// C.
@@ -174,10 +176,8 @@ pub(super) struct ExternalFileResponse {
     #[serde(default)]
     pub(super) file_size: Option<i64>,
     #[serde(default)]
-    pub(super) size: Option<u64>,
-    #[serde(default)]
     pub(super) sha1: Option<String>,
-    /// Amberite's backend reports SHA-256, which the integrity checks verify.
+    /// P, which a member checks after decrypting.
     #[serde(default)]
     pub(super) sha256: Option<String>,
     /// C, for files in the pool.
@@ -190,15 +190,6 @@ pub(super) struct ExternalFileResponse {
     /// Filled in from the version, see [`InstanceVersionResponse::with_pool_access`].
     #[serde(skip)]
     pub(super) pool: Option<Arc<PoolAccess>>,
-}
-
-impl ExternalFileResponse {
-    /// The plain size, which the pool's manifest calls `size` and upstream `file_size`.
-    pub(super) fn plain_size(&self) -> Option<u64> {
-        self.size.or_else(|| {
-            self.file_size.and_then(|size| u64::try_from(size).ok())
-        })
-    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -726,7 +717,7 @@ pub(super) async fn create_remote_version(
     ) {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        if let Some(kind) = pool_error_kind(&body) {
+        if let Some(kind) = pool_error_kind(status, &body) {
             return Err(kind.into());
         }
         bail!(
@@ -744,18 +735,22 @@ pub(super) async fn create_remote_version(
     .await
 }
 
-fn pool_error_kind(body: &str) -> Option<ErrorKind> {
+/// Every refusal over a limit (413) carries a description naming the limit, which is shown as is.
+fn pool_error_kind(status: StatusCode, body: &str) -> Option<ErrorKind> {
     #[derive(Deserialize)]
     struct Body {
-        code: String,
+        #[serde(default)]
+        code: Option<String>,
         #[serde(default)]
         description: String,
     }
     let body = serde_json::from_str::<Body>(body).ok()?;
-    Some(match body.code.as_str() {
-        "no_storage" => ErrorKind::PoolNoStorage,
-        "push_in_flight" => ErrorKind::PoolPushInFlight,
-        "share_too_large" | "storage_quota" => {
+    Some(match body.code.as_deref() {
+        Some("no_storage") => ErrorKind::PoolNoStorage,
+        Some("push_in_flight") => ErrorKind::PoolPushInFlight,
+        _ if status == StatusCode::PAYLOAD_TOO_LARGE
+            && !body.description.is_empty() =>
+        {
             ErrorKind::PoolTooLarge(body.description)
         }
         _ => return None,
