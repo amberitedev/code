@@ -410,15 +410,28 @@ async function createVersion(
 			.run()
 		item = { ...item, home }
 	}
-	// The number is allocated in the insert itself, so two pushes at once never share one. The
-	// row starts unready, so nobody reads it before its manifest is in R2; a failed write takes
-	// the row back.
+	// The number is allocated in the insert itself, so two pushes at once never share one, and
+	// the insert refuses while another version is still uploading, so two pushes cannot both get
+	// a store ticket. The row starts unready, so nobody reads it before its manifest is in R2; a
+	// failed write takes the row back.
 	const version = await env.DB.prepare(
-		'INSERT INTO shared_versions (instance_id,version,root,bytes,ready,created) SELECT ?1,COALESCE(MAX(version),0)+1,?2,?3,0,?4 FROM shared_versions WHERE instance_id = ?1 RETURNING *',
+		'INSERT INTO shared_versions (instance_id,version,root,bytes,ready,created) SELECT ?1,COALESCE(m,0)+1,?2,?3,0,?4 FROM (SELECT MAX(version) AS m FROM shared_versions WHERE instance_id = ?1) WHERE NOT EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND ready = 0 AND created > ?5) RETURNING *',
 	)
-		.bind(item.id, manifest.root, bytes, now())
+		.bind(
+			item.id,
+			manifest.root,
+			bytes,
+			now(),
+			new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString(),
+		)
 		.first<Version>()
-	if (!version) throw new ApiError(500, 'database_error', 'Could not create shared version')
+	if (!version)
+		throw new ApiError(
+			409,
+			'conflict',
+			'Another push of this instance is still uploading. Try again when it finishes.',
+			'push_in_flight',
+		)
 	try {
 		await env.FILES.put(manifestKey(item.id, version.version), JSON.stringify(manifest))
 	} catch (error) {
