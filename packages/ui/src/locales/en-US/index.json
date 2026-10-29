@@ -6057,19 +6057,19 @@
     "defaultMessage": "SFTP credentials rotated"
   },
   "servers.settings.backups.auto.description": {
-    "defaultMessage": "Automatically back up your server at regular intervals."
+    "defaultMessage": "Back up your server on a schedule."
   },
   "servers.settings.backups.auto.title": {
     "defaultMessage": "Auto backups"
   },
   "servers.settings.backups.interval.title": {
-    "defaultMessage": "Backup interval"
+    "defaultMessage": "Back up every"
   },
-  "servers.settings.backups.manual-slots.description": {
-    "defaultMessage": "Choose how many of your {limit} backup slots to use for manual and automatic backups."
+  "servers.settings.backups.keep.description": {
+    "defaultMessage": "Older automatic backups are deleted. The other {manual} of {limit} slots hold backups you make yourself."
   },
-  "servers.settings.backups.manual-slots.title": {
-    "defaultMessage": "Manual backup slots"
+  "servers.settings.backups.keep.title": {
+    "defaultMessage": "Automatic backups kept"
   },
   "servers.settings.backups.save.error-title": {
     "defaultMessage": "Failed to update backup settings"
