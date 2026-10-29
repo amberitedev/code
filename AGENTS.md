@@ -110,6 +110,9 @@ developer's go-ahead.
 3. `preview_snapshot` with `save: true` writes a PNG and returns its path. Read that file to look at
    the screen. For a pull request, upload it with the `file-upload` skill and embed the URL.
 4. `node scripts/dev-runner.ts down` when you are finished.
+5. If the change has UI, end by starting the App for the developer with
+   `node scripts/dev-runner.ts up <scenarios> --show-windows`, with test data that reaches the
+   changed screen, so they can try it straight away.
 
 - Take the "before" screenshot before you edit; the App reloads UI changes on its own, so the
   "after" is the same tab a moment later. Motion and timing changes get a short recording
