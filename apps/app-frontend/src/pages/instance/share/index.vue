@@ -84,7 +84,14 @@
 
 		<div v-else-if="membersTableLoading" class="h-64" aria-hidden="true" />
 
-		<SharedInstanceMembersTable v-else-if="showMembersTable" />
+		<template v-else-if="showMembersTable">
+			<SharedInstanceMembersTable />
+			<SharedInstanceVersions
+				v-if="instance.shared_instance?.role === 'owner'"
+				:share-id="instance.shared_instance.id"
+				class="mt-2"
+			/>
+		</template>
 
 		<SharedInstanceShareEmptyState
 			v-else-if="sharedInstanceUnavailable"
@@ -193,6 +200,7 @@ import SharedInstanceMembersTable from './shared-instance-members-table.vue'
 import SharedInstanceRemoveMemberModal from './shared-instance-remove-member-modal.vue'
 import SharedInstanceShareEmptyState from './shared-instance-share-empty-state.vue'
 import { SHARED_INSTANCE_USER_LIMIT, type ShareRow } from './shared-instance-share-types'
+import SharedInstanceVersions from './shared-instance-versions.vue'
 import { useSharedInstanceInviteCandidates } from './use-shared-instance-invite-candidates'
 import { useSharedInstanceInviteLink } from './use-shared-instance-invite-link'
 import { useSharedInstanceMembers } from './use-shared-instance-members'

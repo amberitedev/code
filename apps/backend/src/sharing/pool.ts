@@ -304,6 +304,10 @@ export type ShareStorage = {
 	/** Whether it uses someone else's Core, so its usage counts against the allowance. */
 	counted: boolean
 	used: number
+	/** What its kept versions take, counted or not. */
+	size: number
+	/** The owner's own Cores holding it, as home or replica. */
+	cores: string[]
 	/** Newest first. `current` is the newest ready one, which members install. */
 	versions: { version: number; created: string; bytes: number; ready: boolean; current: boolean }[]
 }
@@ -344,6 +348,8 @@ export async function ownerShares(env: Env, ownerId: string): Promise<ShareStora
 				name: row.name,
 				counted: [row.home, row.replica].some((id) => id !== null && !ownIds.has(id)),
 				used: 0,
+				size: 0,
+				cores: [row.home, row.replica].filter((id): id is string => id !== null && ownIds.has(id)),
 				versions: [],
 				kept: [],
 			}
@@ -362,6 +368,7 @@ export async function ownerShares(env: Env, ownerId: string): Promise<ShareStora
 	return [...shares.values()].map(({ kept, ...share }) => {
 		const current = share.versions.find((version) => version.ready)
 		if (current) current.current = true
-		return { ...share, used: share.counted ? shareUsage(kept) : 0 }
+		const size = shareUsage(kept)
+		return { ...share, size, used: share.counted ? size : 0 }
 	})
 }
