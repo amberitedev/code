@@ -3,7 +3,7 @@ import { invalid } from '../common/http'
 import type { Env, UserRow } from '../common/types'
 
 export const defaultPreferences = {
-	appearance: { auto: true, theme: 'dark' },
+	appearance: { auto: false, theme: 'dark' },
 	behavior: {
 		minimize_app: false,
 		refocus_on_game_close: false,
