@@ -1,30 +1,33 @@
 //! What Core and the backend exchange. The backend is a phone book and a notifier: Core reports
-//! on start and on change, never on a timer, and is the only authority on access.
+//! on start and on change, and only storage reports also go on a timer. Core is the only
+//! authority on access.
 //!
 //! - Tickets: the App gets a [`TicketClaims`] JWT from the backend (`POST /cores/{id}/ticket`)
 //!   and hands it to one Core.
-//! - `GET /core/keys.json` (a static file): the backend's ticket keys, [`PublicKeys`].
+//! - `GET /core/keys.json` (a static file): the backend's ticket keys,
+//!   [`PublicKeys`](sharing_storage::keys::PublicKeys).
 //! - `POST /core/state`: on start, on reconnect, and when the address changes. [`StateReport`].
 //! - `PUT /core/access`: the whole directory, replacing the backend's copy, on every start and
 //!   reconnect. [`AccessDirectory`].
 //! - `POST /core/access`: this user may reach this Core; notify them. [`Grant`].
 //! - `DELETE /core/access`: withdraw the invite, and the directory entry unless `keep_core`.
 //!   [`Remove`].
-//! - `POST /core/storage`: what this Core's store holds and has room for, after uploads and
-//!   daily. [`StorageReport`] in, [`StorageAnswer`] out (see `store::supervisor`).
+//! - `POST /core/storage`: what this Core's store holds and has room for, after uploads and pulls
+//!   and hourly. [`StorageReport`] in, [`StorageAnswer`] out (see `storage`).
 //!
 //! Every call is authenticated with Core's own key, `Authorization: Bearer amc_...`. A key the
 //! backend no longer knows gets 410 `core_removed` from the state report and the directory
 //! replace: the Core was removed from its account and un-pairs.
 
 use serde::{Deserialize, Serialize};
+use sharing_storage::local::HeldVersion;
 use ts_rs::TS;
 
 use super::access::Role;
 
 /// The claims of a sign-in ticket: an Ed25519-signed JWT (`alg: EdDSA`), valid for five minutes,
 /// for one Core and one use. The pool's tickets are signed with the same keys and differ in
-/// `kind` (see `store::tickets`).
+/// `kind` (see `sharing_storage`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TicketClaims {
     /// The backend's issuer name.
@@ -43,25 +46,6 @@ pub struct TicketClaims {
     pub exp: i64,
     /// Random one-time id. Core records it in the same write that uses the ticket.
     pub jti: String,
-}
-
-/// The backend's ticket keys as a JWK set. A key stays listed for a day after it is replaced.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-pub struct PublicKeys {
-    pub keys: Vec<PublicKey>,
-}
-
-/// One Ed25519 public key as a JWK.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct PublicKey {
-    /// Always `OKP`.
-    pub kty: String,
-    /// Always `Ed25519`.
-    pub crv: String,
-    /// The id a ticket names in its `kid` header.
-    pub kid: String,
-    /// The key, base64url.
-    pub x: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -132,7 +116,7 @@ pub enum OwedCall {
 /// Body of `POST /core/storage`. Bytes throughout.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StorageReport {
-    /// The owner offers storage for shared files.
+    /// This Core offers storage to other people's shares. Off, it holds only its owner's.
     pub enabled: bool,
     /// Core is installed as a service.
     pub service: bool,
@@ -145,14 +129,6 @@ pub struct StorageReport {
     pub egress_today: u64,
     /// Every version the store holds whole.
     pub versions: Vec<HeldVersion>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct HeldVersion {
-    /// R, the version's root hash.
-    pub root: String,
-    /// The bytes of its objects.
-    pub bytes: u64,
 }
 
 /// What the backend answers a [`StorageReport`] with.

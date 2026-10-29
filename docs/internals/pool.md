@@ -19,8 +19,8 @@ stored on someone else's machine must be unreadable to that machine's owner.
 
 Shared files live in a pool of always-on Cores. The backend keeps the manifests, as it does now,
 plus which Cores hold which versions, and signs short-lived tickets. It never carries a file byte.
-The owner's App encrypts its files and uploads them straight to one Core; that Core copies them to a
-second. A member's App downloads from one of those two. Cores store opaque encrypted objects named
+The owner's App encrypts its files and uploads them straight to one Core, the home; a second, the
+replica, copies them from it. A member's App downloads from one of those two. Cores store opaque encrypted objects named
 by hash and serve them to anyone presenting a valid ticket; they know no users, shares, or file
 names.
 
@@ -68,18 +68,18 @@ install dedupe that exists today and is never used as a key.
 
 The owner's App hashes, encrypts, and hashes again, producing P and C per file and R for the
 version. It sends the backend only the manifest: names, types, sizes, P, C, keys for non-content
-files, R. A manifest is kilobytes to a megabyte. The backend stores it in R2, writes one D1 row with
-R, the version's distinct object bytes, home, and replica, picks or reuses the share's home Core,
-and returns a store ticket for it.
+files, R. A manifest is kilobytes to a megabyte. The backend places the share (see "Where a share
+lives"), checks the owner's allowance, stores the manifest in R2, writes one D1 row with R and the
+version's distinct object bytes, and returns a store ticket for the home.
 
 The App asks the home which of the C's it already has, then streams a tar of the rest with the
 version list first. The home verifies each entry's bytes against its name as it arrives, writes it
 to a temporary name, and renames it into place, so a crashed upload never reports a half object as
 present. It checks that the list hashes to R, keeps the list, and tells the backend what it now
 holds. A retry re-asks which objects the home has and sends the rest, so uploads resume per object
-on a residential uplink. The version is ready for members when the home has confirmed; the home
-copies to the replica in the background with the replica's own store ticket, and that is tracked
-separately so a push never waits on a second machine.
+on a residential uplink. The version is ready for members when the home has confirmed. The replica
+learns of it at its next storage report, within the hour, and pulls it from the home with a pull
+ticket, so a push never waits on a second machine.
 
 A share has at most one unconfirmed version at a time. A second push while one is in flight is
 refused with a clear message. An unconfirmed version older than the store ticket's life is
@@ -126,43 +126,75 @@ already hold, the pool keeps serving with the backend down.
 
 ### Where a share lives
 
-Every share lives whole on exactly two Cores, home and replica, and all its versions go to the same
-pair. An install is served by one Core, never assembled from pieces across many. The two holder
-slots exist in the schema from day one.
+Every share lives whole on at most two Cores, home and replica, and all its kept versions go to the
+same pair. An install is served by one Core, never assembled from pieces across many.
 
-Placement happens once, when a share is created: the owner's own Core if it is eligible, otherwise
-weighted random by free space among eligible Cores with room. Weighted random rather than most free
-so a new large disk does not absorb every share until it is the fullest.
+Placement is decided on every push with files, and copies already on a Core that still qualifies
+stay where they are, so a push moves nothing it does not have to:
 
-Replica and re-homing are phase two, built when a second Core joins the pool. The rules when they
-arrive: a home whose stored bytes fail the C check for three current members of one share in a day
-swaps roles with its replica for that share, at most once per share per day. Both holders have the
-same bytes, so the swap costs nothing and a few hostile accounts in one share can only shuffle their
-own share. A Core with C failures from three distinct shares in a day takes no new placements for a
-day. A Core silent for a week is treated as gone, its shares get a new Core for the vacated role,
-and the survivor is told to copy them over at its next report. A Core whose owner lowers the cap
-below what it holds keeps what it has and takes no new shares.
+- An owner with a private Core, one with storage off, keeps every share there alone, with no
+  replica. It uses no one else's storage.
+- An instance with a server on one of the owner's Cores is homed there. The App names that Core
+  in the push. Its replica is on a Core that offers storage, which friends can reach.
+- Anything else lives on other people's Cores, home and replica both. When no one else's Core can
+  take it, as for the owner of the pool's only Core, the owner's own Core that offers storage is the
+  home, and a later push moves it once another Core can.
+- A share with no members has no replica: nobody fetches it but its server.
 
-### Kept versions and cleanup
+A new copy goes to a Core drawn at random, weighted by free space, among eligible Cores with room.
+Weighted random rather than most free so a new large disk does not absorb every share until it is
+the fullest. When there is no second eligible Core the share has no replica until a later push
+finds one. A push that moves the home uploads whatever the new home lacks; the old holder drops
+the share at its next report.
 
-The backend keeps the last five manifests of a share in R2, for history and the diff view the UI
-expects. Each is a full manifest, so nothing depends on the ones dropped. Stores keep objects for the latest confirmed version only; disk is the real resource.
+A Core whose owner turns storage off runs privately. At its next report, other people's shares on
+it move: a share that has another holder keeps that one as its home and gets a new replica, which
+pulls from it. A share held only there stays until its owner's next push places it elsewhere, so
+no share loses its only copy. The owner's own shares move onto the private Core at their next push.
 
-Each Core reports once a day what it holds and how much room it has, and after every stored
-upload. The backend answers with versions to drop and versions to pull. A holder's drop list is
-computed against the latest version that holder has confirmed, so a replica never drops the
-previous version's objects before it holds the new one. Objects are files under a two-level hash
-prefix. A version's list file goes with its version, and an object is deleted when no live list
-references it, after a grace period equal to the fetch ticket life. There are no packs and no
-repacking.
+Later, re-homing when a Core goes away: a home whose stored bytes fail the C check for three
+current members of one share in a day swaps roles with its replica for that share, at most once
+per share per day. Both holders have the same bytes, so the swap costs nothing and a few hostile
+accounts in one share can only shuffle their own share. A Core with C failures from three distinct
+shares in a day takes no new placements for a day. A Core silent for a week is treated as gone,
+its shares get a new Core for the vacated role, and the survivor is told to copy them over at its
+next report. A Core whose owner lowers the cap below what it holds keeps what it has and takes no
+new shares.
+
+### Kept versions and usage
+
+How many versions a share keeps, files included, is its owner's setting for the whole account:
+the last five by default, any other number, or all. When a version is confirmed, ready versions
+beyond the setting are dropped with their manifests; lowering the setting drops them at once. The
+owner can also delete any kept version but the current one, which members install. Each version is
+a full manifest, so nothing depends on the ones dropped.
+
+Stores keep the objects of every kept version. Each Core reports once an hour what it holds and
+how much room it has, and after every stored upload or pull. The backend answers with versions to
+drop and versions to pull. A holder never drops the newest version it has confirmed of a share it
+holds, so a replica keeps an old version until it holds a newer one. Objects are files under a
+two-level hash prefix. A version's list file goes with its version, and an object is deleted when
+no live list references it, after a grace period equal to the fetch ticket life. There are no packs
+and no repacking.
+
+Usage is what an account's shares take on other people's Cores: for each share with a copy on a
+Core the owner does not own, the bytes of its kept versions, each object counted once. A share
+counts its oldest kept version whole, plus for each later version the bytes it added over the
+version before it, which the backend records when the version is pushed. That is exact unless a
+file leaves and comes back, which counts it twice. A file in two shares counts in each. Usage is
+one D1 query; nothing reads manifests to compute it. Deleting a version from the middle recomputes
+the next version's added bytes from the two manifests around it.
 
 ### The store
 
-The store is a second process of the `copal` binary. It runs under its own OS account with its own
-folder beside the Core's data, unreadable by the Core and by the account that runs Minecraft
-servers. It has no database, no sessions, and no secrets: not the Core's key, not the TLS key. It
-holds the backend's public keys, encrypted objects, and a list of C's and sizes per version, which
-is the only share-shaped thing it ever sees.
+The store is its own package, `sharing-storage` (`packages/sharing-storage`), run as a child
+process of `copal` (`copal store`) with its own folder beside the Core's data. It is a code split
+only: the backend knows one Core, with one record, one key, and one address and port, and the
+store has no identity, sign-in, or registration of its own. It has no database, no sessions, and
+no secrets: not the Core's key, not the TLS key. It holds the backend's public keys, encrypted
+objects, and a list of C's and sizes per version, which is the only share-shaped thing it ever
+sees. Running it under its own OS account, with a folder unreadable by the Core and by the account
+that runs Minecraft servers, comes with the installer.
 
 The Core keeps its one port and terminates TLS as it does now. Requests under `/store/` are
 forwarded to the store on localhost as opaque streams; the Core never parses them. The store
@@ -173,30 +205,36 @@ per-address limit on refused requests (a fetch with a valid ticket never counts,
 is not slowed), and the size limit from the ticket on each upload, and it answers over cap
 with one of two errors, disk full or egress spent, so the App can show the right thing.
 
-The store writes a status file the Core reads, and the Core includes storage in its daily report
-with the Core key it already has. A store only ever fetches from another Core that a backend-signed
-ticket names, pinned to that Core's certificate, so it cannot be turned into a general downloader.
-A compromise of the store process yields no key and no identity.
+The Core starts the store, starts it again when it exits, and manages it over a small local API on
+the child's stdin and stdout, which only the Core holds, so it needs no token. The Core asks it for
+its status, passes it the owner's caps, and tells it which versions to drop, and it reports storage
+to the backend with the Core key it already has. A store only ever fetches from another Core that a
+backend-signed ticket names, pinned to that Core's certificate, so it cannot be turned into a
+general downloader. A compromise of the store process yields no key and no identity.
 
 ### Who contributes
 
-A Core is eligible when it is installed as a service, has storage on, has a public address that is
-not private, loopback, or link-local, has room under its cap, and has been reporting. Reachability
-is confirmed by the first successful fetch from any App. Any operating system; a Windows VPS is as
-always-on as a Linux one. A store-only node is a Core with storage on and no servers.
+A Core is eligible to hold other people's shares when it is installed as a service, has storage
+on, has a public address that is not private, loopback, or link-local, has room under its cap, and
+has been reporting. Reachability is confirmed by the first successful fetch from any App. Any
+operating system; a Windows VPS is as always-on as a Linux one. A store-only node is a Core with
+storage on and no servers.
 
-Storage for others is on by default on eligible Cores, offering 20 GB or a tenth of free space,
-whichever is smaller, with a 10 GB floor. The owner sees usage, the disk cap, and the egress cap in
-Settings, Cores and can change or turn storage off. Turning it off has no consequence for sharing.
-People who own no Core are never affected.
+Every Core runs its store, since it holds its owner's shares that have a server there. Storage for
+others is on by default, offering 20 GB or a tenth of free space, whichever is smaller, with a
+10 GB floor. The owner sees usage, the disk cap, and the egress cap in Settings, Cores and can
+change them or turn storage off. Off means private: the Core holds only its owner's shares, and
+they use none of the allowance. Sharing works either way, and people who own no Core are never
+affected.
 
 ### Limits
 
-- 1 GB per share at launch. Modrinth allows 2 GB; the pool starts lower to protect the first disk
-  and grows with usage.
-- 3 GB per user across all their shares, the sum of each share's latest-version distinct bytes read
-  from D1. Checked when a store ticket is issued, as the total minus the share's current version
-  plus the new one.
+- 1 GB per version of a share at launch. Modrinth allows 2 GB; the pool starts lower to protect the
+  first disk and grows with usage.
+- A 3 GB allowance per account on other people's Cores, as "Kept versions and usage" counts it.
+  Checked when a store ticket is issued, as the owner's other shares plus this share's kept versions
+  once the new one is ready and the oldest beyond the setting are dropped. Over it, the push is
+  refused with a message that says to delete old versions to free space.
 - 50 GB of egress per Core per day and a concurrent fetch limit, so a leaked ticket or a scripted
   install cannot saturate a volunteer's uplink. Over the cap the App tries the replica.
 
@@ -211,8 +249,9 @@ Core fails with a clear message and never falls back to Cloudflare.
 
 ### What the backend costs
 
-Per push: one R2 write, one D1 row, one holdings row per confirming Core. Per install: D1 reads and
-one R2 read. Per Core per day: one request, one write if anything changed. Per idle Core: nothing.
+Per push: one R2 write, one R2 read for the previous version's objects, one D1 row, one holdings
+row per confirming Core. Per install: D1 reads and one R2 read. Per Core per hour: one request, a
+write only when its holdings changed and twice a day otherwise.
 D1 holds only small rows, so the 500 MB cap is far away. The write ceiling is far above launch
 scale. When it is reached, the exits are Workers Paid at $5 a month for five hundred times the
 writes, or a small VPS at about the same price.
@@ -224,7 +263,7 @@ writes, or a small VPS at about the same price.
 - **The backend pushes to Cores.** A Worker cannot pin a self-signed certificate, so the backend
   cannot talk to a Core at all. Everything flows App to Core and Core to Core.
 - **The owner uploads to every replica.** Multiplies the owner's upload time by the copy count. The
-  home copies instead.
+  replica copies from the home instead.
 - **Bare hashes as access.** A 256-bit name is unguessable, but hashes spread and a removed member
   keeps them. Tickets restore revocation and keep Cores ignorant of users.
 - **Random object names.** Would make the same file different in every share, killing dedupe, and
@@ -243,8 +282,11 @@ writes, or a small VPS at about the same price.
   it can be added later.
 - **Diffs by "I hold version N-3".** Needs old version lists kept forever. The member sends the set
   of objects it wants instead.
-- **Keeping five versions on stores.** Disk is the real resource. The backend keeps five manifests,
-  the stores keep one version.
+- **Keeping only the latest version on stores.** Saves disk, but an owner who wants an older
+  version back has only the manifest. Stores keep every kept version, and the owner chooses how
+  many, paid for out of the allowance.
+- **Usage read from manifests.** Exact even when a file comes back, but reads every kept manifest
+  inside one 10 ms request. Each version records the bytes it added when pushed.
 - **Placement by scoring held objects.** Needs every held version's manifest from every candidate
   inside one 10 ms request. Weighted random by free space costs one query.
 - **Per-object holdings on the backend.** One write per object per Core. Holdings are per version.
@@ -283,14 +325,14 @@ writes, or a small VPS at about the same price.
 - Fetch tickets are reusable from any address for six hours. The egress cap makes a leaked one
   tolerable; binding to an address would close it at the cost of breaking on mobile and carrier NAT.
 - Whether readiness should ever wait for the replica. This design says no.
-- The sizes: 1 GB per share, 3 GB per user, 10 GB launch cap, 20 GB default volunteer cap, 50 GB
+- The sizes: 1 GB per version, a 3 GB allowance, 10 GB launch cap, 20 GB default volunteer cap, 50 GB
   daily egress. Set, then revisited from usage.
 - The domain.
 
 ## Protocol
 
 The exact shapes every side is built against. The backend (`apps/backend/src/sharing`), the
-store (`apps/core/src/store`), and the App (`packages/app-lib/src/self_hosted/pool`) share this
+store (`packages/sharing-storage`), and the App (`packages/app-lib/src/self_hosted/pool`) share this
 text and nothing else.
 
 ### Hashes and encryption
@@ -328,9 +370,12 @@ the encrypted byte count. Every version lists all of the share's files (see Push
 `url` is also present for upstream code that expects it and is `pool:<C>`; nothing fetches it.
 
 `POST /v1/instances/:id/versions` (owner) takes the upstream fields plus `external_files` as above
-and `root` (R), up to 4,096 files and a 4 MiB body. The backend recomputes R, requires `key`
-exactly on non-content files, sums distinct `object_size` into the version's bytes, and checks the
-limits. It stores the manifest in R2 as `manifests/<instance>/<version>`, one D1 row, and answers:
+and `root` (R), up to 4,096 files and a 4 MiB body, and `server_core`, the id of one of the owner's
+Cores running a server of this instance, when there is one. The backend recomputes R, requires
+`key` exactly on non-content files, sums distinct `object_size` into the version's bytes, places
+the share, and checks the limits. It stores the manifest in R2 as
+`manifests/<instance>/<version>`, one D1 row with the bytes this version adds over the latest
+ready one, and answers:
 
 ```
 { ...manifest, version, ready: false, root, store: { core, ticket, expires } }
@@ -340,7 +385,8 @@ limits. It stores the manifest in R2 as `manifests/<instance>/<version>`, one D1
 at once and has no `store`. Errors, as `code`: `no_storage` (503, no eligible Core),
 `push_in_flight` (409, an unconfirmed version younger than an hour exists), `too_many_files`
 (413, over 4,096 files), `share_too_large` (413, over 1 GiB), `storage_quota` (413, over the
-owner's 3 GiB across shares). Every 413 names its limit in `description`, which the App shows.
+owner's allowance; its `description` says to delete old versions to free space). Every 413 names
+its limit in `description`, which the App shows.
 
 `GET /v1/instances/:id/versions[/:n]` (member) answers the same manifest with `version`, `ready`,
 `root`, and:
@@ -355,6 +401,21 @@ owner's 3 GiB across shares). Every 413 names its limit in `description`, which 
 `POST /v1/instances/:id/versions/:n/reports` (member) takes `{ core_id, kind }`, `kind` being
 `object` (bytes did not hash to C: the Core's fault) or `content` (decrypted to the wrong P: the
 manifest's fault). One row per member, version and kind. 204.
+
+`DELETE /v1/instances/:id/versions/:n` (owner) deletes a kept version and its manifest. 204. The
+current version, and one still uploading, are refused with 409 `current_version`.
+
+`GET /v1/storage` (session) is the account's storage, for Settings, Cores:
+
+```
+{ used, allowance, kept_versions, shares: [{ id, name, counted, used,
+  versions: [{ version, created, bytes, ready, current }…] }…] }
+```
+
+`kept_versions` is null when every version is kept. `counted` is whether the share has a copy on
+someone else's Core; `used` is 0 when it does not. Versions are newest first, and `current` marks
+the newest ready one. `PATCH /v1/storage` takes `{ kept_versions }`, a whole number from 1 to 1,000
+or null, drops older versions beyond it at once, and answers the same.
 
 ### Tickets
 
@@ -399,26 +460,43 @@ Errors are `{ error, description }` like the Core's: `ticket_invalid`, `ticket_e
 `ticket_wrong_core`, `ticket_wrong_kind`, `not_found`, `disk_full` (507), `egress_spent` (429),
 `rate_limited` (429), `invalid_request`, `conflict`.
 
-The store also serves admin routes under `/admin/` that the Core never forwards and that take a
-token the Core hands the store when it starts it: `GET /admin/status` (`{ cap, used, free,
-egress_cap, egress_today, versions: [{ root, bytes }] }`), `POST /admin/drop` (`{ roots }`), and
-`POST /admin/config` (`{ cap, egress_cap }`). A dropped list keeps its objects six hours, the
-fetch ticket life, before the store deletes those no other list references.
+### Core and store
+
+The Core runs `copal store --data-dir … --core-id … --backend-url … --cap … --egress-cap …`, adding
+`--allow-private-sources` when its backend is local. The local API is one JSON object per line
+(`sharing_storage::local`). The store's first line on stdout is `{ "listening": port }`. Then the
+Core sends calls on stdin and the store answers each, in order, on stdout:
+
+- `{ id, call: "status" }` answers `{ id, ok: status }`, the status being
+  `{ cap, used, free, egress_cap, egress_today, versions: [{ root, bytes }…] }`.
+- `{ id, call: "drop", roots: [root…] }` and `{ id, call: "config", cap, egress_cap }` answer
+  `{ id, ok: null }`.
+- A failed call answers `{ id, error }`.
+
+Closing stdin stops the store. Its log is stderr, which the Core copies into its own. A dropped
+list keeps its objects six hours, the fetch ticket life, before the store deletes those no other
+list references.
 
 ### Core and backend
 
-`POST /core/storage` (Core key) reports storage, after every completed upload and once a day:
+`POST /core/storage` (Core key) reports storage, after every completed upload or pull and once an
+hour:
 
 ```
 { enabled, service, cap, used, free, egress_cap, egress_today, versions: [{ root, bytes }] }
 ```
 
-`service` is whether this Core is installed as a service. The backend answers
-`{ drop: [root…], pull: [{ root, ticket }…] }`. It writes holdings only where they changed, and
-confirms every version whose home is this Core and whose root it now holds. A Core is eligible
-for new shares when `enabled`, `service`, its public address is not private, `used < cap`, and
-it reported within two days. In local development (`LOCAL_DEV`) `service` and the public address
-are not required.
+`enabled` is whether this Core offers storage to other people's shares; `versions` is everything
+its store holds either way. `service` is whether this Core is installed as a service. The backend
+answers `{ drop: [root…], pull: [{ root, ticket }…] }`. It writes holdings only where they
+changed, and confirms every version whose home is this Core and whose root it now holds. `drop`
+is every held root that no kept version of a share placed here needs, except the newest this Core
+confirmed of each such share; `pull` is up to 20 kept versions placed here that the other holder
+has and this Core lacks, newest first. A report with `enabled` false moves other people's shares
+off the Core, as "Where a share lives" says. A Core is eligible for other people's shares when
+`enabled`, `service`, its public address is not private, `used < cap`, and it reported within two
+days; one of the owner's own Cores takes the owner's shares when it reported within two days. In
+local development (`LOCAL_DEV`) `service` and the public address are not required.
 
 The Core's hosting API has `GET /storage` and `PATCH /storage` (owner), `StorageSettings`:
 `{ enabled, cap, egress_cap }`, which the App's Settings, Cores page shows and changes.

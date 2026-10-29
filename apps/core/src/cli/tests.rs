@@ -9,7 +9,7 @@ use super::{
     machine::UpdateCommand, servers::ServersCommand,
 };
 use crate::{
-    access::{Access, keys::Keys},
+    access::Access,
     api::{self, AppState},
     daemon::{accounts, folders, paths::Paths},
     db,
@@ -129,9 +129,10 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
-    let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
-        .await
-        .unwrap();
+    let keys =
+        crate::access::keys::load(db.clone(), reqwest::Client::new(), None)
+            .await
+            .unwrap();
     let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
     let backups = crate::backups::Backups::open(
         paths.clone(),
@@ -160,7 +161,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
             String::new(),
         )),
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
-        storage: Arc::new(crate::store::Storage::new(
+        storage: Arc::new(crate::storage::Storage::new(
             db.clone(),
             paths.clone(),
             core_id,

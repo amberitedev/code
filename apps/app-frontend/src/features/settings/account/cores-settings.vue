@@ -16,6 +16,7 @@ import AccountRequired from '@/features/cores/account-required.vue'
 import { coresQueryKey, injectCoreActions, useCores } from '@/features/cores/use-cores'
 import { coreOffline, serversQueryKey, useServers } from '@/features/servers/linked-servers'
 import CoreStorage from '@/features/settings/account/core-storage.vue'
+import SharedStorage from '@/features/settings/account/shared-storage.vue'
 
 const client = injectModrinthClient()
 const auth = injectAuth()
@@ -130,5 +131,6 @@ async function remove() {
 				<CoreStorage v-if="isOnline(core)" :core="core" />
 			</div>
 		</div>
+		<SharedStorage class="mt-4" />
 	</div>
 </template>

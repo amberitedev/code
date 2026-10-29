@@ -230,7 +230,7 @@ impl Paths {
         self.root.join("logs")
     }
 
-    /// The store's own folder. See `store::objects`.
+    /// The store's own folder. See `sharing_storage`.
     pub fn store(&self) -> PathBuf {
         self.root.join("store")
     }

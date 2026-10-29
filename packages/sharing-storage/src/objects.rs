@@ -7,7 +7,7 @@
 //!   keeps its objects from cleanup until it completes or [`GRACE_S`] passes.
 //! - `versions/<R>.dropped.<unix seconds>.json`: a dropped list, kept [`GRACE_S`] so fetch
 //!   tickets issued before the drop still work.
-//! - `keys.json`, `egress.json`: see `access::keys` and `limits`.
+//! - `keys.json`, `egress.json`: see `keys` and `limits`.
 //!
 //! A path is only ever built from a [`Hash`], never from request text.
 
@@ -500,7 +500,7 @@ mod tests {
         assert!(repeated.check(&repeated.root()).is_err());
         assert!(list.check(&Hash::parse(&"0".repeat(64)).unwrap()).is_err());
         // Sizes that wrap past u64 would slip under every cap.
-        let mut huge = list.clone();
+        let mut huge = list;
         huge.objects[0].size = 1 << 63;
         huge.objects[1].size = (1 << 63) + 5;
         assert!(huge.check(&huge.root()).is_err());

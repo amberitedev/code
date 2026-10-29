@@ -1,12 +1,12 @@
 import { ApiError, json, readBytes } from '../common/http'
 import type { Env } from '../common/types'
-import { UNCONFIRMED_TTL_MS, holders } from '../sharing/pool'
+import { UNCONFIRMED_TTL_MS, holders, place } from '../sharing/pool'
 import { versionReady } from '../sharing'
 import { pullTicket } from './tickets'
 
 // A Core's storage report: what its store holds and how much room it has, sent after every
-// completed upload and once a day. The backend confirms the versions whose home it is, tells it
-// which versions to drop and which to pull, and writes only what changed. See
+// completed upload or pull and once an hour. The backend confirms the versions whose home it is,
+// tells it which versions to drop and which to pull, and writes only what changed. See
 // docs/internals/pool.md, "Core and backend".
 
 const MAX_VERSIONS = 10_000
@@ -151,13 +151,44 @@ export async function reportStorage(
 		for (const row of confirmed) await versionReady(env, row.instance_id, row.version)
 	}
 
+	if (!next.enabled) await handOn(env, core)
+
 	return json({ drop: await dropList(env, core.id), pull: await pullList(env, core.id) })
 }
 
 /**
- * Roots this Core holds that no share on it needs: not the newest version (ready, or still being
+ * A Core with storage off runs privately, so other people's shares on it move to Cores that
+ * offer storage, and it drops them once they are gone from it. Only a share with another holder
+ * moves now: the new Core copies from that one. A share held here alone stays until its owner's
+ * next push puts it somewhere else.
+ */
+async function handOn(env: Env, core: { id: string; owner_id: string }) {
+	const shares = (
+		await env.DB.prepare(
+			`SELECT i.id, i.owner_id, i.home, i.replica,
+				EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = i.id AND m.join_type != 'owner') AS members
+			FROM shared_instances i WHERE (i.home = ?1 OR i.replica = ?1) AND i.owner_id != ?2
+			AND i.home IS NOT NULL AND i.replica IS NOT NULL`,
+		)
+			.bind(core.id, core.owner_id)
+			.all<{ id: string; owner_id: string; home: string; replica: string; members: number }>()
+	).results
+	for (const share of shares) {
+		const placement = await place(env, share.owner_id, share, {
+			serverCore: share.home,
+			members: share.members === 1,
+		})
+		if (!placement.home) continue
+		await env.DB.prepare('UPDATE shared_instances SET home = ?, replica = ? WHERE id = ?')
+			.bind(placement.home, placement.replica, share.id)
+			.run()
+	}
+}
+
+/**
+ * Roots this Core holds that no share on it needs: not a kept version (ready, or still being
  * uploaded) of a share homed or replicated here, and not the newest version this Core itself
- * confirmed for such a share, so a replica keeps the old version until it holds the new one.
+ * confirmed for such a share, so a replica keeps an old version until it holds a newer one.
  */
 async function dropList(env: Env, coreId: string): Promise<string[]> {
 	const fresh = new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString()
@@ -165,8 +196,7 @@ async function dropList(env: Env, coreId: string): Promise<string[]> {
 		`SELECT h.root FROM core_holdings h WHERE h.core_id = ?1
 		AND h.root NOT IN (
 			SELECT v.root FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id
-			WHERE (i.home = ?1 OR i.replica = ?1) AND (v.ready = 1 OR v.created > ?2)
-			AND v.version = (SELECT MAX(version) FROM shared_versions WHERE instance_id = i.id AND (ready = 1 OR created > ?2)))
+			WHERE (i.home = ?1 OR i.replica = ?1) AND (v.ready = 1 OR v.created > ?2))
 		AND h.root NOT IN (
 			SELECT v.root FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id
 			WHERE (i.home = ?1 OR i.replica = ?1)
@@ -179,17 +209,16 @@ async function dropList(env: Env, coreId: string): Promise<string[]> {
 
 /**
  * Versions this Core should hold but does not, each with a pull ticket for the other holder that
- * has it: the newest ready version of every share homed or replicated here.
+ * has it: every kept ready version of every share homed or replicated here, newest first.
  */
 async function pullList(env: Env, coreId: string) {
 	const rows = await env.DB.prepare(
-		`SELECT v.root, CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END AS source
+		`SELECT DISTINCT v.root, CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END AS source
 		FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id
 		WHERE (i.home = ?1 OR i.replica = ?1) AND v.ready = 1
-		AND v.version = (SELECT MAX(version) FROM shared_versions WHERE instance_id = i.id AND ready = 1)
 		AND v.root NOT IN (SELECT root FROM core_holdings WHERE core_id = ?1)
 		AND EXISTS (SELECT 1 FROM core_holdings s WHERE s.root = v.root AND s.core_id = CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END)
-		LIMIT ?2`,
+		ORDER BY v.created DESC LIMIT ?2`,
 	)
 		.bind(coreId, MAX_PULLS)
 		.all<{ root: string; source: string }>()

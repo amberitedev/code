@@ -1,6 +1,6 @@
 //! Backend sync. The backend is a phone book and a notifier: Core tells it where this Core is and
-//! who may reach it, on start and on change, never on a timer. Storage reports (see
-//! `store::supervisor`) are the exception: they also go once a day.
+//! who may reach it, on start and on change, never on a timer. Storage reports (see `storage`) are
+//! the exception: they also go hourly, so a replica learns of new versions within the hour.
 //!
 //! A call that must reach the backend is owed: [`owe`] stores it in `backend_owed` in the same
 //! transaction as the change, and [`run`] sends it, retrying with backoff until the backend
@@ -24,7 +24,7 @@ use super::{Access, Changed, now, pairing};
 use crate::{
     api::backend::{AccessDirectory, OwedCall, StateReport, StorageAnswer},
     network::public_ip,
-    store::Storage,
+    storage::Storage,
 };
 
 /// How often Core looks for a new address.
@@ -497,7 +497,6 @@ mod tests {
 
     use super::*;
     use crate::{
-        access::keys::Keys,
         api::{
             access::Role,
             backend::{Grant, Remove},
@@ -557,9 +556,10 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
-        let keys = Keys::load(db.clone(), reqwest::Client::new(), None)
-            .await
-            .unwrap();
+        let keys =
+            crate::access::keys::load(db.clone(), reqwest::Client::new(), None)
+                .await
+                .unwrap();
         let dir = tempfile::tempdir().unwrap();
         Sync {
             storage: Arc::new(Storage::new(

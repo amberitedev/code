@@ -1,0 +1,57 @@
+[package]
+name = "sharing-storage"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "The shared file pool's store, run by Copal as `copal store`"
+repository.workspace = true
+
+[lib]
+name = "sharing_storage"
+
+[dependencies]
+axum = "0.8.4"
+base64 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+color-eyre = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+ring = "0.17.14"
+rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["io"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# The key set is part of Core's generated TypeScript.
+ts-rs = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+walkdir = "2.5"
+
+[dev-dependencies]
+http-body-util = "0.1.3"
+hyper-util = { workspace = true, features = ["http1", "server-auto", "service", "tokio"] }
+rcgen = "0.14.7"
+tar = { workspace = true }
+tempfile = { workspace = true }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+tower = { version = "0.5.2", features = ["util"] }
+
+[target."cfg(unix)".dependencies]
+nix = { version = "0.30.1", features = ["fs"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[features]
+# `keys::test_support`, for Core's tests.
+testing = []
+
+[lints]
+workspace = true

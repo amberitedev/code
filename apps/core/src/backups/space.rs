@@ -1,7 +1,7 @@
 //! Free disk space, checked before every backup so a full disk refuses it instead of failing
 //! halfway.
 
-use std::{io, path::Path};
+pub use sharing_storage::space::free;
 
 use super::Error;
 
@@ -18,34 +18,6 @@ pub fn enough_space(needed: u64, free: u64) -> Result<(), Error> {
         });
     }
     Ok(())
-}
-
-/// The bytes this account may still write on the disk that holds `path`.
-#[cfg(unix)]
-pub fn free(path: &Path) -> io::Result<u64> {
-    let stat = nix::sys::statvfs::statvfs(path)?;
-    // The field types differ between platforms.
-    #[allow(clippy::useless_conversion)]
-    Ok(u64::from(stat.blocks_available()) * u64::from(stat.fragment_size()))
-}
-
-/// The bytes this account may still write on the disk that holds `path`.
-#[cfg(windows)]
-pub fn free(path: &Path) -> io::Result<u64> {
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-
-    use crate::daemon::win::{check, wide};
-    let mut available = 0u64;
-    // SAFETY: a NUL-terminated path and a valid out pointer; the others may be null.
-    check(unsafe {
-        GetDiskFreeSpaceExW(
-            wide(path).as_ptr(),
-            &raw mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    })?;
-    Ok(available)
 }
 
 #[cfg(test)]
@@ -66,11 +38,5 @@ mod tests {
         // Big worlds keep a twentieth free.
         assert!(enough_space(100_000 * MB, 104_000 * MB).is_err());
         assert!(enough_space(100_000 * MB, 106_000 * MB).is_ok());
-    }
-
-    #[test]
-    fn the_free_space_of_a_real_disk_is_read() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(free(dir.path()).unwrap() > 0);
     }
 }

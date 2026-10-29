@@ -337,8 +337,14 @@ pub(super) async fn ensure_ready_remote_version_for_invite(
                 shared_instance_id = %attachment.id,
                 "Shared instance has no ready version before invite; publishing current content"
             );
-            publish_shared_instance_inner(instance_id, &[], &|_, _| {}, state)
-                .await
+            publish_shared_instance_inner(
+                instance_id,
+                &[],
+                None,
+                &|_, _| {},
+                state,
+            )
+            .await
         }
         SharedInstanceRemoteResponse::Unavailable(reason) => {
             handle_unavailable_shared_instance_if_current_user(

@@ -99,17 +99,21 @@ pub(super) async fn detach_local_shared_instance(
 }
 
 /// `on_progress` receives the uploaded and total bytes of the files the
-/// shared instances service asks for.
+/// shared instances service asks for. `server_core` is a Core the owner owns
+/// that runs a linked server of this instance; the backend keeps the share's
+/// home copy there.
 #[tracing::instrument(skip(on_progress))]
 pub async fn publish_shared_instance(
     instance_id: &str,
     file_paths: Vec<String>,
+    server_core: Option<String>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
 ) -> crate::Result<SharedInstanceAttachment> {
     let state = State::get().await?;
     publish_shared_instance_inner(
         instance_id,
         &file_paths,
+        server_core.as_deref(),
         on_progress,
         &state,
     )
@@ -617,6 +621,7 @@ pub(super) async fn set_shared_instance_publish_status(
 pub(super) async fn publish_shared_instance_inner(
     instance_id: &str,
     file_paths: &[String],
+    server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     state: &State,
 ) -> crate::Result<()> {
@@ -624,6 +629,7 @@ pub(super) async fn publish_shared_instance_inner(
     let result = publish_shared_instance_reported(
         instance_id,
         file_paths,
+        server_core,
         on_progress,
         &mut report,
         state,
@@ -636,6 +642,7 @@ pub(super) async fn publish_shared_instance_inner(
 async fn publish_shared_instance_reported(
     instance_id: &str,
     file_paths: &[String],
+    server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     report: &mut PublishReport,
     state: &State,
@@ -671,6 +678,7 @@ async fn publish_shared_instance_reported(
         instance_id,
         &attachment.id,
         file_paths,
+        server_core,
         on_progress,
         report,
         state,
@@ -731,6 +739,7 @@ pub(super) async fn publish_current_content(
     instance_id: &str,
     shared_instance_id: &str,
     file_paths: &[String],
+    server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     report: &mut PublishReport,
     state: &State,
@@ -808,7 +817,7 @@ pub(super) async fn publish_current_content(
             crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
         )));
     }
-    let version_request = json!({
+    let mut version_request = json!({
         "modrinth_ids": modrinth_ids,
         "modpack_id": modpack_id,
         "game_version": metadata.applied_content_set.game_version.clone(),
@@ -819,6 +828,9 @@ pub(super) async fn publish_current_content(
             .clone()
             .unwrap_or_default(),
     });
+    if let Some(server_core) = server_core {
+        version_request["server_core"] = json!(server_core);
+    }
 
     // The encrypted files wait in a folder of their own until the Core has them.
     let folder = state
@@ -1472,8 +1484,14 @@ pub(super) async fn owned_shared_instance(
                 shared_instance_id = %remote.id,
                 "Attached local instance as shared instance owner"
             );
-            publish_shared_instance_inner(instance_id, &[], &|_, _| {}, state)
-                .await?;
+            publish_shared_instance_inner(
+                instance_id,
+                &[],
+                None,
+                &|_, _| {},
+                state,
+            )
+            .await?;
             shared_attachment(instance_id, state).await?.ok_or(
                 crate::ErrorKind::InputError(
                     "shared instance attachment was not persisted".to_string(),

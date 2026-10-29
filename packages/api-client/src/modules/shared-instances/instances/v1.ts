@@ -80,6 +80,15 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		)
 	}
 
+	/** Owner only. The current version cannot be deleted: a 409 with code `current_version`. */
+	public async deleteVersion(instanceId: string, version: number): Promise<void> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'DELETE',
+		})
+	}
+
 	public async getVersion(
 		instanceId: string,
 		version: number,

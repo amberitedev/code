@@ -1,4 +1,4 @@
-//! Storage for the shared file pool (see `store`). Owner only.
+//! Storage for the shared file pool (see `crate::storage`). Owner only.
 //!
 //! - `GET /storage`: [`StorageStatus`].
 //! - `PATCH /storage`: [`StorageSettings`] in, [`StorageStatus`] out.
@@ -21,7 +21,7 @@ use crate::access::{Caller, Peer};
 /// The settings to change. Absent ones stay. Bytes throughout.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 pub struct StorageSettings {
-    /// Offer storage for other people's shared files.
+    /// Offer storage to other people's shares. Off, the Core runs privately.
     #[ts(optional)]
     pub enabled: Option<bool>,
     /// The most the store may hold.
@@ -32,9 +32,11 @@ pub struct StorageSettings {
     pub egress_cap: Option<i64>,
 }
 
-/// Bytes throughout.
+/// Bytes throughout. What the store holds is shown whether or not storage is offered: a Core
+/// that does not offer it still holds its owner's shares.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StorageStatus {
+    /// Offers storage to other people's shares. Off, the Core runs privately.
     pub enabled: bool,
     pub cap: u64,
     pub egress_cap: u64,

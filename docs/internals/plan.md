@@ -35,20 +35,39 @@ Who talks to whom:
 There are no friend groups. You share an instance with friends, and sharing is not tied to a Core.
 Someone an instance is shared with does not control it; for now they can only propose changes.
 
-**Now: the shared file pool.** The App keeps Modrinth's own sharing code and UI. Our backend answers
+**The shared file pool.** The App keeps Modrinth's own sharing code and UI. Our backend answers
 the same API with our accounts, and the files live in a pool of always-on Cores. The design and
-the exact protocol are in `pool.md`.
+the exact protocol are in `pool.md`. Storage was decided on 2026-10-28.
 
 - Shared exactly as Modrinth does: links for anything on Modrinth; real files for content that is
   not (mod jars, resource packs, shaders, datapacks); and the config files the owner picks when
   pushing, each under its path in the instance.
 - The owner's App encrypts every file and uploads it straight to the share's Core; members
   download from it. The backend keeps the manifest and signs short-lived tickets.
-- Limits: 1 GB per shared instance, 3 GB per account across its shares, 4,096 files per version.
-  Files stored on your own Core do not count.
-- The five latest manifests are kept; Cores keep the files of the latest version only.
+- Every share is stored twice, a home and a replica. An instance with a server has its home on the
+  owner's own Core and its replica on a Core friends can reach. Without a server, or without a Core
+  of your own, both copies are on other Cores, or on your own Core while no one else's can take
+  them. A share with no members (a server-only instance)
+  has no replica. The owner's App is the last backup: the next push restores a share that lost its
+  Cores.
+- Sharing works for everyone. Everyone gets an allowance on other people's storage, 3 GB for now.
+  Turning storage off on your Core means you run privately: your shares live only on your own Core
+  and you use no one else's, and other people's shares move off it. A Core that friends cannot
+  reach is not much use anyway, since they cannot join its servers either.
+- Usage is the size of the files you uploaded across the versions kept, each file counted once
+  however many copies exist. Only shares on someone else's Core count, so Modrinth files,
+  manifests, private shares, and shares with no members on your own Core do not. The limit numbers
+  are tuned over time. Also 1 GB per version of a share and 4,096 files per version.
+- How many versions are kept, files included, is the owner's auto-cleanup setting: keep the last
+  five by default, any other number, or all of them. Older versions drop on their own. A push over
+  the limit is refused with "delete old versions to free space". Usage, the setting, and the kept
+  versions, with a way to delete them, are in Settings, Cores, beside each Core's storage.
 - A push with no Core offering storage fails with a clear message. Storage is on by default on a
   Core and is turned off, or its caps changed, in Settings, Cores.
+- Two packages: `sharing-types`, the share format and encryption the App and Core both use; and
+  `sharing-storage`, the storage process. It stays a child process of `copal` on the Core's address
+  and port, reports through the Core, and talks to it over a small local API. It has no identity
+  of its own: the backend knows one Core. Its own OS account comes with the installer.
 
 Later, in rough order of intent:
 
@@ -56,13 +75,9 @@ Later, in rough order of intent:
 - Pins, once a version history view exists. KubeJS scripts in the bundle.
 - Stop uploading files at all where possible: reference where a file already lives and make sure
   it stays there, so a shared version is about half a megabyte.
-- A second Core in the pool: replicas and re-homing, as `pool.md` describes for phase two.
-- The store under its own OS account on an installed Core.
-- The store as its own package, separate from Core. Everything reaches it only through its API, so
-  the separation changes no consumer. Storing on your own Core, and an internal API between Core
-  and store, come with that change.
-- Limits tied to what you give: offer storage to others (for example 10 GB) and your own limit
-  follows from it.
+- Re-homing when a Core holding a share goes away, as `pool.md` describes.
+- Limits tied to what you give: offer storage to others (for example 10 GB) and your own
+  allowance follows from it.
 
 ## Privacy
 

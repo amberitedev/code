@@ -1,5 +1,5 @@
-//! The store's routes. `/store/...` take a pool ticket and are what Core forwards; `/admin/...`
-//! take the admin token and only Core calls them. Shapes: `docs/internals/pool.md`, Protocol.
+//! The store's routes, which Copal forwards from its own port. Each takes a pool ticket. Shapes:
+//! `docs/internals/pool.md`, Protocol.
 
 use std::{
     io::{self, SeekFrom},
@@ -24,12 +24,11 @@ use axum::{
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::{ReaderStream, StreamReader};
 
-use super::{
-    AdminStatus, Caps, Code, Drop, Store, StoreError, now,
+use crate::{
+    Code, Store, StoreError, now,
     objects::{self, Hash, VersionList, WriteError},
     pull, tar,
     tickets::{self, Claims},
@@ -38,15 +37,12 @@ use super::{
 /// The most `version.json` may weigh: 4,096 objects take well under a megabyte.
 const MAX_LIST: u64 = 4 * 1024 * 1024;
 
-pub fn router(store: Arc<Store>) -> Router {
+pub(crate) fn router(store: Arc<Store>) -> Router {
     Router::new()
         .route("/store/versions/{root}", get(list).post(upload))
         .route("/store/versions/{root}/have", post(have))
         .route("/store/versions/{root}/objects/{object}", get(object))
         .route("/store/versions/{root}/pull", post(pull_version))
-        .route("/admin/status", get(status))
-        .route("/admin/drop", post(drop_versions))
-        .route("/admin/config", post(config))
         .with_state(store)
 }
 
@@ -114,19 +110,6 @@ impl Store {
         self.ticket(headers, tickets::FETCH, root)
             .await
             .inspect_err(|_| self.limits.refused(address))
-    }
-
-    fn admin(&self, headers: &HeaderMap) -> Result<(), StoreError> {
-        // Compared as hashes, so the time taken says nothing about the token.
-        let given = Sha256::digest(bearer(headers).unwrap_or_default());
-        if given == Sha256::digest(&self.admin_token) {
-            Ok(())
-        } else {
-            Err(StoreError::new(
-                Code::TicketInvalid,
-                "That is not the admin token.",
-            ))
-        }
     }
 }
 
@@ -359,57 +342,22 @@ async fn pull_version(
     Ok(Json(Pulled { complete }))
 }
 
-/// `GET /admin/status`.
-async fn status(
-    State(store): State<Arc<Store>>,
-    headers: HeaderMap,
-) -> Result<Json<AdminStatus>, StoreError> {
-    store.admin(&headers)?;
-    Ok(Json(store.status()?))
-}
-
-/// `POST /admin/drop`.
-async fn drop_versions(
-    State(store): State<Arc<Store>>,
-    headers: HeaderMap,
-    Json(Drop { roots }): Json<Drop>,
-) -> Result<StatusCode, StoreError> {
-    store.admin(&headers)?;
-    let roots: Vec<_> =
-        roots.iter().filter_map(|root| Hash::parse(root)).collect();
-    store.drop_versions(&roots).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `POST /admin/config`.
-async fn config(
-    State(store): State<Arc<Store>>,
-    headers: HeaderMap,
-    Json(caps): Json<Caps>,
-) -> Result<StatusCode, StoreError> {
-    store.admin(&headers)?;
-    *store.caps.lock().expect("not poisoned") = caps;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 #[cfg(test)]
 pub mod tests {
     use axum::http::{Method, Request};
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
+    use sha2::{Digest, Sha256};
     use tower::ServiceExt;
 
     use super::*;
     use crate::{
-        access::{keys::Keys, tickets::test_support::Signer},
-        store::{
-            objects::{GRACE_S, Layout, list_of},
-            tar::test_support::tar,
-            tickets::test_support::ticket,
-        },
+        keys::{Keys, test_support::Signer},
+        local::{Caps, HeldVersion},
+        objects::{GRACE_S, Layout, list_of},
+        tar::test_support::tar,
+        tickets::test_support::ticket,
     };
-
-    pub const ADMIN: &str = "an admin token of at least thirty-two characters";
 
     pub struct Fixture {
         pub core: String,
@@ -434,7 +382,6 @@ pub mod tests {
                 Layout::new(dir.path()),
                 core.into(),
                 keys,
-                ADMIN.into(),
                 true,
                 Caps { cap, egress_cap },
             )
@@ -593,10 +540,15 @@ pub mod tests {
             )
             .await;
         assert_eq!(have, json!({ "missing": [], "complete": true }));
-        let (_, status) =
-            f.admin(Method::GET, "/admin/status", Value::Null).await;
-        assert_eq!(status["used"], 11);
-        assert_eq!(status["versions"], json!([{ "root": root, "bytes": 11 }]));
+        let status = f.store.status().unwrap();
+        assert_eq!(status.used, 11);
+        assert_eq!(
+            status.versions,
+            [HeldVersion {
+                root: root.to_string(),
+                bytes: 11
+            }]
+        );
     }
 
     #[tokio::test]
@@ -646,34 +598,6 @@ pub mod tests {
         let (status, error) = f.upload(&list_of(&[b"three"]), &[], 100).await;
         assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
         assert_eq!(error["error"], "disk_full");
-    }
-
-    impl Fixture {
-        async fn admin(
-            &self,
-            method: Method,
-            uri: &str,
-            body: Value,
-        ) -> (StatusCode, Value) {
-            let body = if body.is_null() {
-                Body::empty()
-            } else {
-                Body::from(body.to_string())
-            };
-            let (status, _, bytes) = self
-                .call(
-                    method,
-                    uri,
-                    ADMIN,
-                    &[("content-type", "application/json")],
-                    body,
-                )
-                .await;
-            (
-                status,
-                serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-            )
-        }
     }
 
     async fn stored(f: &Fixture, objects: &[&[u8]]) -> VersionList {
@@ -773,29 +697,13 @@ pub mod tests {
             f.json(Method::GET, &uri, &fetch, Body::empty()).await;
         assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(error["error"], "egress_spent");
-        let (_, status) =
-            f.admin(Method::GET, "/admin/status", Value::Null).await;
-        assert_eq!(status["egress_today"], 11);
-        f.admin(
-            Method::POST,
-            "/admin/config",
-            json!({ "cap": 1 << 30, "egress_cap": 100 }),
-        )
-        .await;
+        assert_eq!(f.store.status().unwrap().egress_today, 11);
+        f.store.set_caps(Caps {
+            cap: 1 << 30,
+            egress_cap: 100,
+        });
         let (status, ..) =
             f.call(Method::GET, &uri, &fetch, &[], Body::empty()).await;
-        assert_eq!(status, StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn the_admin_routes_need_the_token() {
-        let f = fixture("core", 1 << 30, 1 << 30).await;
-        let (status, error) = f
-            .json(Method::GET, "/admin/status", "wrong", Body::empty())
-            .await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "{error}");
-        let (status, _) =
-            f.admin(Method::GET, "/admin/status", Value::Null).await;
         assert_eq!(status, StatusCode::OK);
     }
 
@@ -805,13 +713,11 @@ pub mod tests {
         let kept = stored(&f, &[b"shared", b"kept"]).await;
         let dropped = stored(&f, &[b"shared", b"gone"]).await;
         let root = dropped.root();
-        let (status, _) = f
-            .admin(Method::POST, "/admin/drop", json!({ "roots": [root] }))
-            .await;
-        assert_eq!(status, StatusCode::NO_CONTENT);
-        let (_, status) =
-            f.admin(Method::GET, "/admin/status", Value::Null).await;
-        assert_eq!(status["versions"].as_array().unwrap().len(), 1);
+        f.store
+            .drop_versions(std::slice::from_ref(&root))
+            .await
+            .unwrap();
+        assert_eq!(f.store.status().unwrap().versions.len(), 1);
         let gone = list_of(&[b"gone"]).objects[0].hash.clone();
         let uri = format!("/store/versions/{root}/objects/{gone}");
         let fetch = f.ticket("fetch", &root, json!({}));
@@ -844,9 +750,7 @@ pub mod tests {
         let (code, ..) =
             f.call(Method::GET, &uri, &fetch, &[], Body::empty()).await;
         assert_eq!(code, StatusCode::NOT_FOUND);
-        let (_, status) =
-            f.admin(Method::GET, "/admin/status", Value::Null).await;
-        assert_eq!(status["used"], 10);
+        assert_eq!(f.store.status().unwrap().used, 10);
     }
 
     #[tokio::test]
@@ -871,7 +775,7 @@ pub mod tests {
                 .0
             }
         };
-        let limit = crate::store::limits::REFUSALS_PER_MINUTE;
+        let limit = crate::limits::REFUSALS_PER_MINUTE;
         for _ in 0..=limit {
             assert_eq!(get(&fetch, "203.0.113.9").await, StatusCode::OK);
         }

@@ -70,6 +70,7 @@ import { PurpurVersionsV2Module } from './purpur/v2'
 import { SharedInstancesInstancesV1Module } from './shared-instances/instances/v1'
 import { SharedInstancesInvitesV1Module } from './shared-instances/invites/v1'
 import { SharedInstancesModerationV1Module } from './shared-instances/moderation/v1'
+import { SharedInstancesStorageV1Module } from './shared-instances/storage/v1'
 import { SharedInstancesUsersV1Module } from './shared-instances/users/v1'
 
 type ModuleConstructor = new (client: AbstractModrinthClient) => AbstractModule
@@ -155,6 +156,7 @@ export const MODULE_REGISTRY = {
 	sharedinstances_invites_v1: SharedInstancesInvitesV1Module,
 	sharedinstances_instances_v1: SharedInstancesInstancesV1Module,
 	sharedinstances_moderation_v1: SharedInstancesModerationV1Module,
+	sharedinstances_storage_v1: SharedInstancesStorageV1Module,
 	sharedinstances_users_v1: SharedInstancesUsersV1Module,
 } as const satisfies Record<string, ModuleConstructor>
 
