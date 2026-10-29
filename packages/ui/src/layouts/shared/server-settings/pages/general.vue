@@ -19,7 +19,7 @@
 									:disabled="!canUseAdvancedSettings"
 									@keyup.enter="!serverName && saveGeneral"
 								/>
-								<span>This name is only visible on Modrinth.</span>
+								<span v-if="!client.selfHostedHosting">This name is only visible on Modrinth.</span>
 								<div class="text-red font-medium">
 									<span v-if="!isValidServerName"> Server name cannot be empty. </span>
 								</div>
@@ -81,7 +81,7 @@
 
 				<!-- preferences -->
 				<div
-					v-for="(prefConfig, key) in preferences"
+					v-for="(prefConfig, key) in shownPreferences"
 					:key="key"
 					class="flex items-center justify-between gap-2"
 				>
@@ -161,7 +161,7 @@
 				/>
 
 				<!-- Info -->
-				<div class="flex flex-col gap-2.5 pb-10">
+				<div v-if="infoProperties.length > 0" class="flex flex-col gap-2.5 pb-10">
 					<div class="text-lg m-0 font-semibold text-contrast">Info</div>
 					<div
 						class="flex flex-col gap-2.5 rounded-[20px] p-4"
@@ -218,6 +218,7 @@ import {
 	injectNotificationManager,
 	injectPageContext,
 } from '#ui/providers'
+import { formatLoaderLabel } from '#ui/utils/loaders'
 
 const { addNotification } = injectNotificationManager()
 const client = injectModrinthClient()
@@ -324,6 +325,13 @@ const preferences = {
 
 type PreferenceKeys = keyof typeof preferences
 
+// A Core server has no subdomain, so there is no label to hide.
+const shownPreferences = computed(() => {
+	if (!client.selfHostedHosting) return preferences
+	const { hideSubdomainLabel: _, ...rest } = preferences
+	return rest
+})
+
 type UserPreferences = {
 	[K in PreferenceKeys]: boolean
 }
@@ -412,14 +420,6 @@ const getServerSpecs = (product?: Labrinth.Billing.Internal.Product | null) => {
 	}
 }
 
-const serverHostname = computed(() =>
-	client.selfHostedHosting && data.value?.net
-		? `${data.value.net.ip}:${data.value.net.port}`
-		: serverSubdomain.value
-			? `${serverSubdomain.value}.modrinth.gg`
-			: 'Unknown',
-)
-
 const serverSpecs = computed(() => getServerSpecs(serverProduct.value))
 
 type InfoProperty =
@@ -440,25 +440,63 @@ type InfoProperty =
 			lines: string[]
 	  }
 
-// Info properties
-const infoProperties = computed<InfoProperty[]>(() => [
-	{ name: 'Server ID', value: serverId ?? 'Unknown', type: 'copy' },
-	{ name: 'Node', value: data.value?.node?.instance ?? 'Unknown', type: 'copy' },
-	{ name: 'Hostname', value: serverHostname.value, type: 'copy' },
-	{
-		name: 'Server specs',
-		value: serverSpecs.value ? 'Available' : 'Unknown',
-		type: 'specs',
-		lines: serverSpecs.value
-			? [
-					`${serverSpecs.value.sharedCpus} Shared CPU${Number(serverSpecs.value.sharedCpus) > 1 ? 's' : ''} (Bursts up to ${serverSpecs.value.burstCpus} CPUs)`,
-					`${serverSpecs.value.ramGb} GB RAM`,
-					`${serverSpecs.value.swapGb} GB Swap`,
-					`${serverSpecs.value.storageGb} GB SSD`,
-				]
-			: [],
-	},
-])
+// The Core this server runs on, for its name and its address on its own network.
+const { data: core } = useQuery({
+	queryKey: ['cores', 'of', serverId],
+	queryFn: () => client.archon.cores_v1.coreOf(serverId),
+	enabled: client.selfHostedHosting,
+})
+
+/** `host:port` players on the Core's network join at, or null when the Core's address is unknown. */
+const localAddress = computed(() => {
+	if (!core.value?.owned || !data.value) return null
+	try {
+		return `${new URL(core.value.address).hostname}:${data.value.net.port}`
+	} catch {
+		return null
+	}
+})
+
+const gameVersion = computed(() => {
+	const server = data.value
+	if (!server?.mc_version) return null
+	const loader = server.loader ? `${formatLoaderLabel(server.loader)} ` : ''
+	return `${loader}${server.mc_version}`
+})
+
+const infoProperties = computed<InfoProperty[]>(() => {
+	if (client.selfHostedHosting) {
+		const rows: InfoProperty[] = []
+		if (core.value) rows.push({ name: 'Core', value: core.value.name, type: 'text' })
+		if (gameVersion.value) rows.push({ name: 'Version', value: gameVersion.value, type: 'text' })
+		if (localAddress.value) {
+			rows.push({ name: 'Local address', value: localAddress.value, type: 'copy' })
+		}
+		return rows
+	}
+	return [
+		{ name: 'Server ID', value: serverId ?? 'Unknown', type: 'copy' },
+		{ name: 'Node', value: data.value?.node?.instance ?? 'Unknown', type: 'copy' },
+		{
+			name: 'Hostname',
+			value: serverSubdomain.value ? `${serverSubdomain.value}.modrinth.gg` : 'Unknown',
+			type: 'copy',
+		},
+		{
+			name: 'Server specs',
+			value: serverSpecs.value ? 'Available' : 'Unknown',
+			type: 'specs',
+			lines: serverSpecs.value
+				? [
+						`${serverSpecs.value.sharedCpus} Shared CPU${Number(serverSpecs.value.sharedCpus) > 1 ? 's' : ''} (Bursts up to ${serverSpecs.value.burstCpus} CPUs)`,
+						`${serverSpecs.value.ramGb} GB RAM`,
+						`${serverSpecs.value.swapGb} GB Swap`,
+						`${serverSpecs.value.storageGb} GB SSD`,
+					]
+				: [],
+		},
+	]
+})
 
 // Unsaved changes tracking (API fields + preferences)
 const hasServerSettingsChanges = computed(
