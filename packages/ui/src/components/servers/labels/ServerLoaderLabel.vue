@@ -3,7 +3,6 @@
 		<Separator v-if="!noSeparator" />
 		<div class="flex flex-row items-center gap-1.5">
 			<TagIcon v-if="loader" :tag="loader" enforce-type="loader" />
-			<div v-else class="size-5 shrink-0 animate-pulse rounded-full bg-button-border"></div>
 			<AutoLink
 				v-if="isLink"
 				v-tooltip="'Change server loader'"
@@ -15,19 +14,11 @@
 					{{ loader }}
 					<span v-if="loaderVersion">{{ loaderVersion }}</span>
 				</span>
-				<span v-else class="flex gap-2">
-					<span class="inline-block h-4 w-12 animate-pulse rounded bg-button-border"></span>
-					<span class="inline-block h-4 w-12 animate-pulse rounded bg-button-border"></span>
-				</span>
 			</AutoLink>
 			<div v-else class="pointer-events-none min-w-0 font-medium text-sm">
 				<span v-if="loader">
 					{{ loader }}
 					<span v-if="loaderVersion">{{ loaderVersion }}</span>
-				</span>
-				<span v-else class="flex gap-2">
-					<span class="inline-block h-4 w-12 animate-pulse rounded bg-button-border"></span>
-					<span class="inline-block h-4 w-12 animate-pulse rounded bg-button-border"></span>
 				</span>
 			</div>
 		</div>
