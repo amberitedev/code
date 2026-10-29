@@ -99,17 +99,12 @@ const ownerId = computed(() => server.value?.owner_id ?? 'Ghost')
 const isOwner = computed(() => currentUserId.value != null && currentUserId.value === ownerId.value)
 const isAdmin = computed(() => currentUserRole.value === 'admin')
 
-// Modrinth hosting tabs a Core has no routes behind: billing, staff support, and allocations.
-const selfHostedHiddenTabs: ServerSettingsTabId[] = [
-	'billing',
-	'admin-billing',
-	'support',
-	'network',
-]
-
 const tabs = computed<TabbedModalTab[]>(() =>
 	serverSettingsTabDefinitions
-		.filter((tab) => !client.selfHostedHosting || !selfHostedHiddenTabs.includes(tab.id))
+		.filter(
+			(tab) =>
+				!client.selfHostedHosting || !['billing', 'admin-billing', 'support'].includes(tab.id),
+		)
 		.map((tab) => {
 			const ctx = {
 				serverId: currentServerId,
