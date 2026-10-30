@@ -114,6 +114,10 @@ developer's go-ahead.
    `node scripts/dev-runner.ts up <scenarios> --show-windows`, with test data that reaches the
    changed screen, so they can try it straight away.
 
+- Once the developer has an App window, it is theirs: do not drive that App through the bridge. A
+  bridge tab runs against the same App, so your clicks change what they see and save real
+  settings. Do your bridge pass before step 5, or ask first.
+
 - Take the "before" screenshot before you edit; the App reloads UI changes on its own, so the
   "after" is the same tab a moment later. Motion and timing changes get a short recording
   (`preview_recording_start` / `preview_recording_stop`) instead.

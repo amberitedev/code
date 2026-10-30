@@ -124,7 +124,20 @@
 		}
 	})
 
+	// Calls that raise the native window. The page calls `show_window` on every load, so a bridge
+	// tab would otherwise pull the App window in front of whoever is at the desk each time it loads.
+	const WINDOW_RAISING = new Set([
+		'show_window',
+		'plugin:window|show',
+		'plugin:window|set_focus',
+		'plugin:window|unminimize',
+		'plugin:window|maximize',
+		'plugin:window|toggle_maximize',
+		'plugin:window|set_fullscreen',
+	])
+
 	async function invoke(cmd, args = {}, options) {
+		if (WINDOW_RAISING.has(cmd)) return null
 		await ready
 		if (!socket || socket.readyState !== WebSocket.OPEN) {
 			throw new Error('Amberite browser bridge is not connected')

@@ -68,7 +68,8 @@ describe.sequential('Amberite Tauri API inventory', () => {
 	})
 
 	it('round-trips every direct command Amberite sends through invoke', async () => {
-		const commands = collectCommands(readAmberiteSources())
+		// `show_window` raises the native window, so the bridge answers it in the browser.
+		const commands = collectCommands(readAmberiteSources()).filter((cmd) => cmd !== 'show_window')
 		expect(commands.length).toBeGreaterThan(150)
 		const { socket, window } = await installBrowserBridge()
 

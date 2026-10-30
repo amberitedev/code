@@ -107,12 +107,8 @@ describe.sequential('Tauri surfaces used by Amberite', () => {
 		const current = getCurrentWindow()
 		expect(current.label).toBe('main')
 		await roundTrip(current.minimize(), 'plugin:window|minimize', { label: 'main' }, undefined)
-		await roundTrip(
-			current.toggleMaximize(),
-			'plugin:window|toggle_maximize',
-			{ label: 'main' },
-			undefined,
-		)
+		// Raising the window stays in the browser; see the transport test.
+		await expect(current.toggleMaximize()).resolves.toBeNull()
 		await roundTrip(
 			current.setDecorations(false),
 			'plugin:window|set_decorations',

@@ -88,6 +88,15 @@ describe.sequential('browser transport', () => {
 		socket.respond(request, 'error', { message: 'answered twice' })
 	})
 
+	it('never raises the native window from a bridge tab', async () => {
+		const { socket, window } = await installBrowserBridge()
+		await expect(window.__TAURI_INTERNALS__.invoke('show_window')).resolves.toBeNull()
+		await expect(
+			window.__TAURI_INTERNALS__.invoke('plugin:window|set_focus', { label: 'main' }),
+		).resolves.toBeNull()
+		expect(socket.sent.filter((message) => message.type === 'invoke')).toEqual([])
+	})
+
 	it('maps convertFileSrc to the scoped loopback asset endpoint', async () => {
 		const { window } = await installBrowserBridge()
 		const url = new URL(window.__TAURI_INTERNALS__.convertFileSrc('C:\\Amberite Data\\icon.png'))
