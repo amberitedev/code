@@ -57,6 +57,13 @@ const modal = ref<InstanceType<typeof TabbedModal> | null>(null)
 
 const { serverId: currentServerId, worldId, server } = injectModrinthServerContext()
 
+// The Core a self-hosted server runs on, named in the title.
+const { data: core } = useQuery({
+	queryKey: ['cores', 'of', currentServerId],
+	queryFn: () => client.archon.cores_v1.coreOf(currentServerId),
+	enabled: client.selfHostedHosting,
+})
+
 const currentUserId = ref<string | null>(null)
 const currentUserRole = ref<string | null>(null)
 
@@ -248,6 +255,7 @@ defineExpose({ show, hide })
 		</template>
 		<template #title>
 			<span class="flex items-center gap-2 text-lg font-semibold text-primary">
+				<template v-if="core">{{ core.name }} <ChevronRightIcon /></template>
 				{{ server.name || 'Server' }} <ChevronRightIcon />
 				<span class="font-extrabold text-contrast">{{
 					formatMessage(commonMessages.settingsLabel)

@@ -117,8 +117,8 @@
 					Couldn't load startup settings: {{ startupError.message }}
 				</p>
 
-				<!-- Startup command section -->
-				<div class="flex flex-col gap-2.5">
+				<!-- Startup command section (a Core builds its own and accepts no other) -->
+				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
 					<div class="flex h-10 flex-col items-end justify-between gap-4 sm:flex-row">
 						<label for="startup-command-field" class="mb-0.5 flex flex-col gap-2">
 							<span class="text-lg font-semibold text-contrast">Startup command</span>
@@ -146,7 +146,6 @@
 							v-tooltip="advancedActionTooltip"
 							resize="vertical"
 							input-class="font-mono field-sizing-content"
-							:readonly="client.selfHostedHosting"
 							:disabled="isStartupLoading || !canUseAdvancedSettings"
 						/>
 						<div
@@ -156,10 +155,7 @@
 							<SpinnerIcon class="h-6 w-6 animate-spin text-secondary" />
 						</div>
 					</div>
-					<span v-if="client.selfHostedHosting">
-						The command your server starts with. Your Core builds it.
-					</span>
-					<span v-else> The command that runs when your server is started. </span>
+					<span> The command that runs when your server is started. </span>
 				</div>
 
 				<!-- Java version section -->
