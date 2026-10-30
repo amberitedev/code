@@ -125,6 +125,11 @@ export default new createRouter({
 					component: () => import('@/pages/instance/share/index.vue'),
 				},
 				{
+					path: 'history',
+					name: 'InstanceHistory',
+					component: () => import('@/pages/instance/history/index.vue'),
+				},
+				{
 					path: '',
 					name: 'InstanceContent',
 					component: () => import('@/pages/instance/content/index.vue'),

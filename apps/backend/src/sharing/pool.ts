@@ -312,6 +312,26 @@ export type ShareStorage = {
 	versions: { version: number; created: string; bytes: number; ready: boolean; current: boolean }[]
 }
 
+/** One share's kept versions as `ownerShares` lists them, for its members' version history. */
+export async function shareVersions(
+	env: Env,
+	instanceId: string,
+): Promise<ShareStorage['versions']> {
+	const rows = await env.DB.prepare(
+		'SELECT version, bytes, ready, created FROM shared_versions WHERE instance_id = ? AND (ready = 1 OR created > ?) ORDER BY version DESC',
+	)
+		.bind(instanceId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
+		.all<{ version: number; bytes: number; ready: number; created: string }>()
+	const current = rows.results.find((row) => row.ready === 1)?.version
+	return rows.results.map((row) => ({
+		version: row.version,
+		created: row.created,
+		bytes: row.bytes,
+		ready: row.ready === 1,
+		current: row.version === current,
+	}))
+}
+
 /**
  * Every share `ownerId` owns, with its kept versions: the ready ones, and one still uploading
  * within its store ticket's life, so pushes to several shares at once cannot each see the others

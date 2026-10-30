@@ -169,6 +169,11 @@ beyond the setting are dropped with their manifests; lowering the setting drops 
 owner can also delete any kept version but the current one, which members install. Each version is
 a full manifest, so nothing depends on the ones dropped.
 
+Restoring a kept version is local: the owner's App installs it into the owner's instance, as a
+member's update would, and leaves the instance with changes to push. Members get it only when the
+owner pushes, so a push stays the one way content reaches them. The App diffs two kept manifests
+to show what a version changed over the one before it.
+
 Stores keep the objects of every kept version. Each Core reports once an hour what it holds and
 how much room it has, and after every stored upload or pull. The backend answers with versions to
 drop and versions to pull. A holder never drops the newest version it has confirmed of a share it
@@ -404,6 +409,9 @@ manifest's fault). One row per member, version and kind. 204.
 
 `DELETE /v1/instances/:id/versions/:n` (owner) deletes a kept version and its manifest. 204. The
 current version, and one still uploading, are refused with 409 `current_version`.
+
+`GET /v1/instances/:id/history` (member) lists the kept versions, newest first, as
+`[{ version, created, bytes, ready, current }…]`, the entries `GET /v1/storage` gives the owner.
 
 `GET /v1/storage` (session) is the account's storage, for Settings, Cores:
 

@@ -211,6 +211,7 @@ pub(crate) fn read_bounded_config_bundle_entry(
 mod client;
 mod content;
 mod diff;
+mod history;
 mod install;
 mod invites;
 mod publish;
@@ -222,6 +223,9 @@ pub(crate) use self::client::report_pool_failure;
 pub(crate) use self::install::check_shared_instance_availability_before_launch;
 pub(crate) use self::publish::sync_shared_instance_icon;
 
+pub use self::history::{
+    get_shared_instance_version, restore_shared_instance_version,
+};
 pub use self::install::{
     accept_shared_instance_invite_for_install,
     get_shared_instance_install_preview, get_shared_instance_update_preview,
@@ -249,6 +253,7 @@ pub use self::types::{
     SharedInstancePublishFile, SharedInstancePublishPreview,
     SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType,
     SharedInstanceUpdatePreview, SharedInstanceUser, SharedInstanceUsers,
+    SharedInstanceVersionDetails,
 };
 
 pub async fn can_active_user_use_shared_instances() -> crate::Result<bool> {

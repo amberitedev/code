@@ -4,10 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import { getErrorMessage } from '@/helpers/install'
 
-type Share = SharedInstances.Storage.v1.StoredShare
-type StoredVersion = SharedInstances.Storage.v1.StoredVersion
-
 export const sharedStorageKey = ['shared-storage'] as const
+/** One share's kept versions, as its members see them. */
+export const versionHistoryKey = (shareId: string) => ['shared-version-history', shareId] as const
 
 /** The account's shared storage: its allowance, kept versions, and the shares it owns. */
 export function useSharedStorage() {
@@ -18,23 +17,27 @@ export function useSharedStorage() {
 	})
 }
 
-/** Deletes an older version of one of the account's shares, then reloads the storage. */
+/** Deletes an older version of one of the account's shares, then reloads its storage and history. */
 export function useDeleteVersion() {
 	const client = injectModrinthClient()
 	const queryClient = useQueryClient()
 	const { addNotification } = injectNotificationManager()
 	return useMutation({
-		mutationFn: ({ share, version }: { share: Share; version: StoredVersion }) =>
-			client.sharedinstances.instances_v1.deleteVersion(share.id, version.version),
-		onError: (cause, { share, version }) => {
+		mutationFn: ({ shareId, version }: { shareId: string; version: number }) =>
+			client.sharedinstances.instances_v1.deleteVersion(shareId, version),
+		onError: (cause) => {
 			console.error('Failed to delete version', cause)
 			addNotification({
 				type: 'error',
-				title: `Could not delete version ${version.version} of ${share.name}`,
+				title: 'Could not delete the version',
 				text: getErrorMessage(cause),
 			})
 		},
-		onSettled: () => queryClient.invalidateQueries({ queryKey: sharedStorageKey }),
+		onSettled: (_data, _error, { shareId }) =>
+			Promise.all([
+				queryClient.invalidateQueries({ queryKey: sharedStorageKey }),
+				queryClient.invalidateQueries({ queryKey: versionHistoryKey(shareId) }),
+			]),
 	})
 }
 

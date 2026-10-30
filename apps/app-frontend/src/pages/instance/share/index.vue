@@ -86,11 +86,7 @@
 
 		<template v-else-if="showMembersTable">
 			<SharedInstanceMembersTable />
-			<SharedInstanceVersions
-				v-if="instance.shared_instance?.role === 'owner'"
-				:share-id="instance.shared_instance.id"
-				class="mt-2"
-			/>
+			<SharedInstanceInviteLinks v-if="instance.shared_instance?.role === 'owner'" class="mt-2" />
 		</template>
 
 		<SharedInstanceShareEmptyState
@@ -195,12 +191,12 @@ import {
 
 import { injectInstancePage } from '../instance-context'
 import { injectSharedInstance } from '../shared-instance-context'
+import SharedInstanceInviteLinks from './shared-instance-invite-links.vue'
 import { provideSharedInstanceManagement } from './shared-instance-management-context'
 import SharedInstanceMembersTable from './shared-instance-members-table.vue'
 import SharedInstanceRemoveMemberModal from './shared-instance-remove-member-modal.vue'
 import SharedInstanceShareEmptyState from './shared-instance-share-empty-state.vue'
 import { SHARED_INSTANCE_USER_LIMIT, type ShareRow } from './shared-instance-share-types'
-import SharedInstanceVersions from './shared-instance-versions.vue'
 import { useSharedInstanceInviteCandidates } from './use-shared-instance-invite-candidates'
 import { useSharedInstanceInviteLink } from './use-shared-instance-invite-link'
 import { useSharedInstanceMembers } from './use-shared-instance-members'

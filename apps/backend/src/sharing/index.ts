@@ -19,6 +19,7 @@ import {
 	manifestFile,
 	manifestKey,
 	ownerShares,
+	shareVersions,
 	place,
 	poolAccess,
 	root,
@@ -949,6 +950,10 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			await sweepFiles(env, id)
 			return empty()
 		}
+	}
+	if (section === 'history' && !child && request.method === 'GET') {
+		if (item.quarantine) throw quarantined()
+		return json(await shareVersions(env, id))
 	}
 	if (section === 'versions') {
 		if (item.quarantine) throw quarantined()

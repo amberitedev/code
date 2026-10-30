@@ -106,6 +106,91 @@ pub(super) async fn shared_instance_update_diffs(
     Ok(diffs)
 }
 
+/// What `after` changed over `before`, two versions of the same share, for its version history.
+/// Without `before`, everything `after` holds is added.
+pub(super) async fn shared_version_diffs(
+    before: Option<&InstanceVersionResponse>,
+    after: &InstanceVersionResponse,
+    state: &State,
+) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
+    let snapshot = |version: &InstanceVersionResponse| {
+        remote_shared_content(version).map(|(version_ids, external_files)| {
+            SharedContentSnapshot {
+                version_ids,
+                external_files,
+                configuration: remote_configuration(version),
+            }
+        })
+    };
+    let after_snapshot = snapshot(after)?;
+    let before_snapshot = match before {
+        Some(before) => snapshot(before)?,
+        None => SharedContentSnapshot {
+            version_ids: Vec::new(),
+            external_files: BTreeSet::new(),
+            configuration: after_snapshot.configuration.clone(),
+        },
+    };
+    let mut diffs = shared_content_diffs(
+        &before_snapshot,
+        &after_snapshot,
+        &HashSet::new(),
+        &HashSet::new(),
+        &BTreeSet::new(),
+        CommonExternalFilePolicy::AssumeUpdated,
+        state,
+    )
+    .await?;
+    // Both manifests carry each file's SHA-1, so a file in both is updated only when it changed.
+    let before_files = before
+        .map(|version| version.external_files.as_slice())
+        .unwrap_or_default();
+    let mut unchanged_files = HashSet::new();
+    let mut changed_files = HashSet::new();
+    for file in &after.external_files {
+        let Some(previous) = before_files.iter().find(|previous| {
+            previous.file_name == file.file_name
+                && previous.file_type == file.file_type
+        }) else {
+            continue;
+        };
+        if previous.sha1.is_some() && previous.sha1 == file.sha1 {
+            unchanged_files.insert(file.file_name.as_str());
+        } else {
+            changed_files.insert(file.file_name.as_str());
+        }
+    }
+    unchanged_files.retain(|name| !changed_files.contains(name));
+    diffs.retain(|diff| {
+        !matches!(diff.type_, SharedInstanceUpdateDiffType::Updated)
+            || diff.project_id.is_some()
+            || !diff
+                .file_name
+                .as_deref()
+                .is_some_and(|name| unchanged_files.contains(name))
+    });
+    let config_file_count = super::content::changed_config_files(
+        &after.external_files,
+        before.map(|version| version.external_files.as_slice()),
+    )?
+    .iter()
+    .filter(|file| file.file_type == CONFIG_FILE_TYPE)
+    .count();
+    if config_file_count > 0 {
+        diffs.push(SharedInstanceUpdateDiff {
+            type_: SharedInstanceUpdateDiffType::ConfigFilesUpdated,
+            project_id: None,
+            project_name: None,
+            file_name: None,
+            current_version_name: None,
+            new_version_name: None,
+            config_file_count: Some(config_file_count),
+            disabled: false,
+        });
+    }
+    Ok(diffs)
+}
+
 pub(super) async fn shared_instance_publish_diffs(
     metadata: &crate::state::InstanceMetadata,
     version: &InstanceVersionResponse,
@@ -575,7 +660,7 @@ pub(super) fn shared_external_file_key(
     })
 }
 
-fn remote_shared_content(
+pub(super) fn remote_shared_content(
     version: &InstanceVersionResponse,
 ) -> crate::Result<(Vec<String>, BTreeSet<ExternalFileKey>)> {
     let mut version_ids = version.modrinth_ids.clone();

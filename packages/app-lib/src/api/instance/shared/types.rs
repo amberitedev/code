@@ -160,6 +160,21 @@ pub struct SharedInstanceUpdateDiff {
     pub disabled: bool,
 }
 
+/// One kept version as its version history shows it: what it runs on, how much it holds, and
+/// what it changed over the version before it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedInstanceVersionDetails {
+    pub game_version: String,
+    pub loader: ModLoader,
+    pub loader_version: String,
+    /// Projects and files, not counting config files.
+    pub content_count: usize,
+    pub diffs: Vec<SharedInstanceUpdateDiff>,
+    /// Paths of the config files it changed, or of all it holds without a base.
+    pub config_files: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SharedInstanceUpdateDiffType {

@@ -12,20 +12,23 @@ import {
 	type TableColumn,
 	useFormatBytes,
 } from '@modrinth/ui'
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useDebounceFn } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import AccountRequired from '@/features/cores/account-required.vue'
+import { injectAppSettingsModal } from '@/features/settings/app-settings-modal/context'
 import {
 	countedShares,
 	sharedStorageKey,
 	useSharedStorage,
 } from '@/features/settings/sharing/use-shared-storage'
 import { getErrorMessage } from '@/helpers/install'
+import { instanceListQueryOptions } from '@/pages/instance/query-options'
 
 // The account's shared storage: how much of its allowance its shares use, each share's part of
-// it, and how many versions they keep. Deleting single versions is on each instance's Share page.
+// it, and how many versions they keep. Deleting single versions is on each instance's History tab.
 
 /** The slider's top, which keeps every version. The backend stores that as null. */
 const MAX_KEPT = 50
@@ -52,6 +55,23 @@ const segments = computed(() =>
 	})),
 )
 
+// The local instance of each share, to open its history from here.
+const router = useRouter()
+const settingsModal = injectAppSettingsModal(null)
+const { data: instances } = useQuery(instanceListQueryOptions())
+const instanceIds = computed(
+	() =>
+		new Map(
+			(instances.value ?? []).flatMap((instance) =>
+				instance.shared_instance ? [[instance.shared_instance.id, instance.id] as const] : [],
+			),
+		),
+)
+function openHistory(instanceId: string) {
+	if (settingsModal && !settingsModal.close()) return
+	void router.push(`/instance/${encodeURIComponent(instanceId)}/history`)
+}
+
 // Shares on someone else's Core first, in the bar's order, then ones only on the account's own.
 const rows = computed(() => {
 	const colors = new Map(counted.value.map((share) => [share.id, share.color]))
@@ -60,6 +80,7 @@ const rows = computed(() => {
 		.map((share) => ({
 			id: share.id,
 			name: share.name,
+			instanceId: instanceIds.value.get(share.id),
 			color: colors.get(share.id),
 			versions: share.versions.filter((version) => version.ready).length,
 			size: share.size,
@@ -172,7 +193,15 @@ function onConfirmHidden() {
 						class="size-3 shrink-0 rounded-full border-2 border-solid border-surface-5"
 						aria-label="Only on your Core"
 					/>
-					<span class="truncate font-semibold text-contrast">{{ row.name }}</span>
+					<button
+						v-if="row.instanceId"
+						v-tooltip="'Open history'"
+						class="min-w-0 cursor-pointer truncate border-none bg-transparent p-0 text-left font-semibold text-contrast hover:underline"
+						@click="openHistory(row.instanceId)"
+					>
+						{{ row.name }}
+					</button>
+					<span v-else class="truncate font-semibold text-contrast">{{ row.name }}</span>
 				</span>
 			</template>
 			<template #cell-versions="{ row }">

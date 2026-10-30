@@ -334,11 +334,17 @@ export function createContentInstall(opts: {
 		]
 	}
 
+	/**
+	 * Shows the plan's dependencies as installing. `revision` is the instance's content revision
+	 * from before the install started: an install of cached files can finish, and clear its
+	 * placeholders, before the plan's details arrive, and placeholders added after that never clear.
+	 */
 	async function addInstallingItemsForPlan(
 		instanceId: string,
 		plan: ResolveContentPlan,
 		primaryProject: Labrinth.Projects.v2.Project,
 		primaryVersion: Labrinth.Versions.v2.Version,
+		revision: number | undefined,
 	) {
 		const entries = [plan.primary, ...plan.dependencies]
 		const projectIds = [...new Set(entries.map((entry) => entry.project_id))]
@@ -354,6 +360,7 @@ export function createContentInstall(opts: {
 			get_project_many(projectIds, 'bypass').catch(() => []),
 			get_version_many(versionIds, 'bypass').catch(() => []),
 		])
+		if (installRevisionByInstance.value.get(instanceId) !== revision) return
 
 		for (const project of projects as InstallingProjectDisplay[]) {
 			if (project?.id) projectMap.set(project.id, project)
@@ -683,6 +690,7 @@ export function createContentInstall(opts: {
 		const installedProjectIds: string[] = [currentProject.id]
 		let plannedProjectIds: string[] = [currentProject.id]
 		addInstallingItem(instance.id, currentProject, version)
+		const revision = installRevisionByInstance.value.get(instance.id)
 
 		const installWaiter = waitForContentInstall(instance.id, currentProject.id)
 		try {
@@ -693,7 +701,7 @@ export function createContentInstall(opts: {
 			}
 			const plan = await install_project_with_dependencies(instance.id, request)
 			plannedProjectIds = resolvedProjectIds(plan)
-			await addInstallingItemsForPlan(instance.id, plan, currentProject, version)
+			await addInstallingItemsForPlan(instance.id, plan, currentProject, version, revision)
 			installedProjectIds.splice(
 				0,
 				installedProjectIds.length,
@@ -829,13 +837,14 @@ export function createContentInstall(opts: {
 			createdInstanceId = id
 			await wait_for_install_job(opts.appEvents, job.job_id)
 			addInstallingItem(id, currentProject!, version)
+			const revision = installRevisionByInstance.value.get(id)
 
 			const plan = await install_project_with_dependencies(id, {
 				project_id: currentProject!.id,
 				version_id: version.id,
 				content_type: resolveContentType(currentProject!.project_type),
 			})
-			await addInstallingItemsForPlan(id, plan, currentProject!, version)
+			await addInstallingItemsForPlan(id, plan, currentProject!, version, revision)
 			await opts.router.push(`/instance/${encodeURIComponent(id)}`)
 
 			trackEvent('InstanceCreate', {
@@ -961,6 +970,7 @@ export function createContentInstall(opts: {
 				const installedProjectIds: string[] = [project.id]
 				let plannedProjectIds: string[] = [project.id]
 				addInstallingItem(instanceId, project, version)
+				const revision = installRevisionByInstance.value.get(instanceId)
 				const installWaiter = waitForContentInstall(instance.id, project.id)
 				try {
 					const request = {
@@ -970,7 +980,7 @@ export function createContentInstall(opts: {
 					}
 					const plan = await install_project_with_dependencies(instance.id, request)
 					plannedProjectIds = resolvedProjectIds(plan)
-					await addInstallingItemsForPlan(instanceId, plan, project, version)
+					await addInstallingItemsForPlan(instanceId, plan, project, version, revision)
 					installedProjectIds.splice(
 						0,
 						installedProjectIds.length,

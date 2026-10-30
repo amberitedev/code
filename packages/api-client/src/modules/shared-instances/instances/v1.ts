@@ -80,6 +80,18 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		)
 	}
 
+	/** Members. The kept versions, newest first, as the owner's storage lists them. */
+	public async getHistory(instanceId: string): Promise<SharedInstances.Storage.v1.StoredVersion[]> {
+		return this.request<SharedInstances.Storage.v1.StoredVersion[]>(
+			`/instances/${encodeURIComponent(instanceId)}/history`,
+			{
+				api: 'sharedinstances',
+				version: 1,
+				method: 'GET',
+			},
+		)
+	}
+
 	/** Owner only. The current version cannot be deleted: a 409 with code `current_version`. */
 	public async deleteVersion(instanceId: string, version: number): Promise<void> {
 		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}`, {

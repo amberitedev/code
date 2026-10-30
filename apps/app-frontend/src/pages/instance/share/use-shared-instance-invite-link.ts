@@ -1,4 +1,5 @@
 import type { InviteLinkSettings } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
 import { config } from '@/config'
@@ -11,6 +12,10 @@ export function useSharedInstanceInviteLink(
 	maxInviteUses: Ref<number>,
 	onError: (error: unknown) => void,
 ) {
+	const queryClient = useQueryClient()
+	// The Share tab lists the links, so a new or replaced one shows there.
+	const refreshInvites = () =>
+		queryClient.invalidateQueries({ queryKey: ['sharedInstanceInvites', instanceId.value] })
 	const details = ref<Awaited<ReturnType<typeof create_shared_instance_invite_link>>>()
 	const pending = ref(false)
 	const link = computed(() =>
@@ -28,6 +33,7 @@ export function useSharedInstanceInviteLink(
 		pending.value = true
 		try {
 			details.value = await create_shared_instance_invite_link(instanceId.value, { maxUses })
+			void refreshInvites()
 			return true
 		} catch (error) {
 			onError(error)
@@ -53,6 +59,7 @@ export function useSharedInstanceInviteLink(
 				maxUses: Math.min(settings.maxUses, maxInviteLinkUses),
 				replaceInviteId: details.value.inviteId,
 			})
+			void refreshInvites()
 		} catch (error) {
 			// Reported here and not rethrown, so the link editor does not show the raw request error.
 			onError(error)
