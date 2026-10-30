@@ -57,13 +57,14 @@ somewhere else. Before calling frontend work done, check which of these apply:
 
 ## Dev servers
 
-- Worktree setup (`node scripts/setup-worktree.ts`, run by `t3.json`) installs dependencies and copies
-  the primary checkout's test data. It takes a few minutes and is often still running when you
+- Worktree setup (`node scripts/setup-worktree.ts`, run by `t3.json`) installs dependencies, copies
+  the primary checkout's test data, and then compiles the App and Core in the background so they
+  are ready when you need them. It takes a few minutes and is often still running when you
   start. Do not wait for it: reading and editing code needs none of it, so begin the work straight
   away. Look at `.data/setup.json` only when you first need to run something: `running` means it is
   not ready yet (never run `vp i` beside it), `failed` or a missing file means run the script again.
-- `node scripts/dev-runner.ts up 1 2` starts the whole stack in the background and returns when it is ready,
-  printing each App's browser bridge URL. `node scripts/dev-runner.ts status` prints the same at any time and
+- `node scripts/dev-runner.ts up 1 2` starts the whole stack in the background and returns once each App's
+  page loads through its browser bridge, printing the bridge URLs. `node scripts/dev-runner.ts status` prints the same at any time and
   `node scripts/dev-runner.ts down` stops it. The log is `.data/dev.log`. Apps started this way have no window
   on the desktop; add `--show-windows` when a person needs to see them.
 - The App and Core are built once per distinct set of Rust inputs and shared by every checkout. A

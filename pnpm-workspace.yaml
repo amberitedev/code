@@ -5,6 +5,9 @@ overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.9
   vue: 3.5.27
 minimumReleaseAge: 10080 # 7 days
+# Every checkout links its packages from one shared copy in the store instead of copying them, so
+# installing in a new worktree takes about a minute instead of eight.
+enableGlobalVirtualStore: true
 strictPeerDependencies: false
 autoInstallPeers: true
 publicHoistPattern:

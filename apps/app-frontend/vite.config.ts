@@ -93,6 +93,9 @@ export default defineConfig({
 		host: '127.0.0.1',
 		port: devPort,
 		strictPort: true,
+		// Compiles the App and every page as the server starts. The first load is then quick, and
+		// opening a page for the first time no longer finds new dependencies and reloads the App.
+		warmup: { clientFiles: ['./src/main.js', './src/pages/**/*.vue'] },
 		headers: {
 			'content-security-policy': Object.entries(tauriConf.app.security.csp)
 				.map(([directive, sources]) => {

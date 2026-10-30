@@ -11,6 +11,13 @@ import * as NodePath from 'node:path'
 
 // Local Minecraft, account, and server state. Everything else in the primary .data is scratch.
 const DATA_ENTRIES = ['backend', 'core', 'scenarios'] as const
+// Inside a scenario: Minecraft's game assets and the App window's browser caches. They are most
+// of the files, nothing reads them until a game starts or a page loads, and both are fetched again
+// on demand.
+const SKIPPED_SCENARIO_PATHS = [
+	/^meta\/assets$/,
+	/^webview2\/EBWebView\/(?:.+\/)?(?:Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|Dawn\w+Cache)$/,
+]
 const ENV_FILE = NodePath.join('packages', 'app-lib', '.env')
 
 const worktree = git(['rev-parse', '--show-toplevel'], process.cwd())
@@ -30,6 +37,7 @@ try {
 		copyDevelopmentData()
 		copyEnvFile()
 	}
+	startBuild()
 	for (const path of [
 		NodePath.join(data, 'core'),
 		...[1, 2, 3, 4].map((scenario) => NodePath.join(data, 'scenarios', String(scenario))),
@@ -60,10 +68,20 @@ function copyDevelopmentData(): void {
 		// instead of being mistaken for finished data.
 		const partial = `${to}.partial`
 		NodeFS.rmSync(partial, { recursive: true, force: true })
-		NodeFS.cpSync(from, partial, { recursive: true })
+		NodeFS.cpSync(from, partial, {
+			filter: (path) =>
+				entry !== 'scenarios' || !skippedScenarioPath(NodePath.relative(from, path)),
+			recursive: true,
+		})
 		NodeFS.renameSync(partial, to)
 		console.log(`[setup] copied ${entry} from ${source}`)
 	}
+}
+
+/** Whether `path`, relative to the scenarios folder, is left out of the copy. */
+function skippedScenarioPath(path: string): boolean {
+	const inScenario = path.split(NodePath.sep).slice(1).join('/')
+	return SKIPPED_SCENARIO_PATHS.some((pattern) => pattern.test(inScenario))
 }
 
 // A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.
@@ -83,6 +101,21 @@ async function installDependencies(): Promise<boolean> {
 		console.error(`[setup] vp i failed${attempt === 1 ? '; retrying once' : ''}`)
 	}
 	return false
+}
+
+/**
+ * Builds the App and Core in the background, so `up` has them ready by the time the work needs
+ * them. It runs behind everything else, waits its turn behind other checkouts' builds, and finds
+ * nothing to do when another checkout already built the same Rust. Its log is `.data/build.log`.
+ */
+function startBuild(): void {
+	const log = NodeFS.openSync(NodePath.join(data, 'build.log'), 'w')
+	NodeChildProcess.spawn(
+		process.execPath,
+		[NodePath.join(worktree, 'scripts', 'dev-runner.ts'), 'build'],
+		{ cwd: worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
+	).unref()
+	NodeFS.closeSync(log)
 }
 
 function run(command: string, args: ReadonlyArray<string>): Promise<number> {
