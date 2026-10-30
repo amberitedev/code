@@ -41,26 +41,30 @@
 						:format-label="(hours) => formatInterval(hours as number)"
 						:aria-label="formatMessage(messages.intervalTitle)"
 						:disabled="!canManageBackups || !autoEnabled"
+						:neutral-items="intervalOptions"
 						equal-width
 					/>
 				</div>
 
 				<div class="flex flex-col gap-2.5">
 					<h3 class="m-0 text-lg font-semibold text-contrast">
-						{{ formatMessage(messages.manualSlotsTitle) }}
+						{{ formatMessage(messages.keepTitle) }}
 					</h3>
 					<Slider
-						v-model="manualSlots"
-						:min="0"
+						v-model="autoSlots"
+						:min="1"
 						:max="slotLimit"
 						:step="1"
-						:snap-points="manualSlotSnapPoints"
-						:snap-range="1"
 						:disabled="!canManageBackups || !autoEnabled"
-						:aria-label="formatMessage(messages.manualSlotsTitle)"
+						:aria-label="formatMessage(messages.keepTitle)"
 					/>
 					<p class="m-0">
-						{{ formatMessage(messages.manualSlotsDescription, { limit: slotLimit }) }}
+						{{
+							formatMessage(messages.keepDescription, {
+								manual: slotLimit - autoSlots,
+								limit: slotLimit,
+							})
+						}}
 					</p>
 				</div>
 			</div>
@@ -110,20 +114,20 @@ const messages = defineMessages({
 	},
 	autoDescription: {
 		id: 'servers.settings.backups.auto.description',
-		defaultMessage: 'Automatically back up your server at regular intervals.',
+		defaultMessage: 'Back up your server on a schedule.',
 	},
 	intervalTitle: {
 		id: 'servers.settings.backups.interval.title',
-		defaultMessage: 'Backup interval',
+		defaultMessage: 'Back up every',
 	},
-	manualSlotsTitle: {
-		id: 'servers.settings.backups.manual-slots.title',
-		defaultMessage: 'Manual backup slots',
+	keepTitle: {
+		id: 'servers.settings.backups.keep.title',
+		defaultMessage: 'Automatic backups kept',
 	},
-	manualSlotsDescription: {
-		id: 'servers.settings.backups.manual-slots.description',
+	keepDescription: {
+		id: 'servers.settings.backups.keep.description',
 		defaultMessage:
-			'Choose how many of your {limit} backup slots to use for manual and automatic backups.',
+			'Older automatic backups are deleted. The other {manual} of {limit} slots hold backups you make yourself.',
 	},
 	saveErrorTitle: {
 		id: 'servers.settings.backups.save.error-title',
@@ -148,7 +152,7 @@ const manageTooltip = computed(() =>
 
 const autoEnabled = ref(false)
 const interval = ref(24)
-const manualSlots = ref(0)
+const autoSlots = ref(DEFAULT_AUTO_SLOTS)
 
 const intervalOptions = computed(() => {
 	const saved = options.value?.interval
@@ -158,17 +162,13 @@ const intervalOptions = computed(() => {
 
 const slotLimit = computed(() => Math.min(options.value?.limit ?? 0, MAX_BACKUP_SLOTS))
 
-const manualSlotSnapPoints = computed(() =>
-	Array.from({ length: Math.floor(slotLimit.value / 5) }, (_, index) => (index + 1) * 5),
-)
-
 const pendingPatch = computed<Archon.BackupsQueue.v1.PatchWorldBackupOptions | null>(() => {
 	if (!options.value) return null
 	const limit = slotLimit.value
 	return autoEnabled.value
 		? {
-				split_automatic: limit - manualSlots.value,
-				split_manual: manualSlots.value,
+				split_automatic: autoSlots.value,
+				split_manual: limit - autoSlots.value,
 				interval: interval.value,
 			}
 		: { split_automatic: 0, split_manual: limit }
@@ -180,7 +180,7 @@ const hasUnsavedChanges = computed(() => {
 	if (autoEnabled.value !== saved.split_automatic > 0) return true
 	return (
 		autoEnabled.value &&
-		(manualSlots.value !== saved.split_manual || interval.value !== saved.interval)
+		(autoSlots.value !== saved.split_automatic || interval.value !== saved.interval)
 	)
 })
 
@@ -188,7 +188,9 @@ function syncForm() {
 	if (!options.value) return
 	autoEnabled.value = options.value.split_automatic > 0
 	interval.value = options.value.interval
-	manualSlots.value = Math.min(options.value.split_manual, slotLimit.value)
+	// Off keeps no automatic backups; turning it on starts from the default.
+	const saved = options.value.split_automatic
+	autoSlots.value = Math.min(saved > 0 ? saved : DEFAULT_AUTO_SLOTS, slotLimit.value)
 }
 
 watch(
@@ -198,13 +200,6 @@ watch(
 	},
 	{ immediate: true },
 )
-
-watch(autoEnabled, (enabled) => {
-	const limit = slotLimit.value
-	if (enabled && manualSlots.value >= limit) {
-		manualSlots.value = Math.max(limit - DEFAULT_AUTO_SLOTS, 0)
-	}
-})
 
 const rotationModal = ref<InstanceType<typeof BackupRotationModal>>()
 

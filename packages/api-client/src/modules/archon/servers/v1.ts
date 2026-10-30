@@ -1,5 +1,6 @@
 import { AbstractModule } from '../../../core/abstract-module'
 import { coreNodeUrl } from '../../../utils/node-url'
+import type { Copal } from '../../copal/types'
 import type { Archon } from '../types'
 
 export class ArchonServersV1Module extends AbstractModule {
@@ -28,6 +29,27 @@ export class ArchonServersV1Module extends AbstractModule {
 			version: 'local',
 			method: 'PATCH',
 			body: settings,
+		})
+	}
+
+	// A Core's own routes are unversioned (`/servers/:id/...`), so `servers` goes in the version slot.
+
+	/** A Core server's memory, JVM flags, and restart settings. */
+	public async getPerformance(serverId: string): Promise<Copal.Performance> {
+		return this.client.request<Copal.Performance>(`/${serverId}/performance`, {
+			api: 'archon',
+			version: 'servers',
+			method: 'GET',
+		})
+	}
+
+	/** Changes when a Core server restarts on its own. */
+	public async setRestarts(serverId: string, restarts: Copal.Restarts): Promise<Copal.Performance> {
+		return this.client.request<Copal.Performance>(`/${serverId}/restarts`, {
+			api: 'archon',
+			version: 'servers',
+			method: 'PUT',
+			body: restarts,
 		})
 	}
 

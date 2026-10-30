@@ -19,7 +19,7 @@
 									:disabled="!canUseAdvancedSettings"
 									@keyup.enter="!serverName && saveGeneral"
 								/>
-								<span>This name is only visible on Modrinth.</span>
+								<span v-if="!client.selfHostedHosting">This name is only visible on Modrinth.</span>
 								<div class="text-red font-medium">
 									<span v-if="!isValidServerName"> Server name cannot be empty. </span>
 								</div>
@@ -81,7 +81,7 @@
 
 				<!-- preferences -->
 				<div
-					v-for="(prefConfig, key) in preferences"
+					v-for="(prefConfig, key) in shownPreferences"
 					:key="key"
 					class="flex items-center justify-between gap-2"
 				>
@@ -104,6 +104,50 @@
 							class="flex-none"
 							:disabled="!prefConfig.implemented || isPreferenceForcedByFeatureFlag(key)"
 							@update:model-value="(value) => setPreferenceValue(key, !!value)"
+						/>
+					</div>
+				</div>
+
+				<!-- Info -->
+				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5 pb-10">
+					<div class="text-lg m-0 font-semibold text-contrast">Info</div>
+					<div
+						class="flex flex-col gap-2.5 rounded-[20px] p-4"
+						:class="isApp ? 'bg-surface-3' : 'bg-surface-2'"
+					>
+						<template v-for="property in infoProperties" :key="property.name">
+							<div
+								v-if="property.value !== 'Unknown'"
+								class="flex items-start justify-between gap-4"
+							>
+								<span class="mt-1">{{ property.name }}</span>
+								<CopyCode v-if="property.type === 'copy'" :text="property.value" />
+								<div
+									v-else-if="property.type === 'specs'"
+									class="flex flex-col items-end text-right text-sm leading-5 break-words"
+								>
+									<span v-for="line in property.lines" :key="line">{{ line }}</span>
+								</div>
+							</div>
+						</template>
+					</div>
+				</div>
+
+				<!-- Crash restarts (a Core setting, saved with the rest of the page) -->
+				<div
+					v-if="client.selfHostedHosting && performance"
+					class="flex items-center justify-between gap-2"
+				>
+					<label for="restart-on-crash" class="flex flex-col gap-1">
+						<span class="text-lg font-semibold text-contrast">Restart if it crashes</span>
+						<span>Starts the server again on its own after a crash.</span>
+					</label>
+					<div v-tooltip="advancedActionTooltip">
+						<Toggle
+							id="restart-on-crash"
+							v-model="restartOnCrash"
+							class="flex-none"
+							:disabled="!canUseAdvancedSettings"
 						/>
 					</div>
 				</div>
@@ -159,32 +203,6 @@
 					:confirmation-text="data.name"
 					@proceed="deleteServer"
 				/>
-
-				<!-- Info -->
-				<div class="flex flex-col gap-2.5 pb-10">
-					<div class="text-lg m-0 font-semibold text-contrast">Info</div>
-					<div
-						class="flex flex-col gap-2.5 rounded-[20px] p-4"
-						:class="isApp ? 'bg-surface-3' : 'bg-surface-2'"
-					>
-						<template v-for="property in infoProperties" :key="property.name">
-							<div
-								v-if="property.value !== 'Unknown'"
-								class="flex items-start justify-between gap-4"
-							>
-								<span class="mt-1">{{ property.name }}</span>
-								<CopyCode v-if="property.type === 'copy'" :text="property.value" />
-								<div
-									v-else-if="property.type === 'specs'"
-									class="flex flex-col items-end text-right text-sm leading-5 break-words"
-								>
-									<span v-for="line in property.lines" :key="line">{{ line }}</span>
-								</div>
-								<span v-else class="text-right text-sm break-words">{{ property.value }}</span>
-							</div>
-						</template>
-					</div>
-				</div>
 			</div>
 		</div>
 		<div v-else />
@@ -324,6 +342,13 @@ const preferences = {
 
 type PreferenceKeys = keyof typeof preferences
 
+// A Core server has no subdomain, so there is no label to hide.
+const shownPreferences = computed(() => {
+	if (!client.selfHostedHosting) return preferences
+	const { hideSubdomainLabel: _, ...rest } = preferences
+	return rest
+})
+
 type UserPreferences = {
 	[K in PreferenceKeys]: boolean
 }
@@ -412,14 +437,6 @@ const getServerSpecs = (product?: Labrinth.Billing.Internal.Product | null) => {
 	}
 }
 
-const serverHostname = computed(() =>
-	client.selfHostedHosting && data.value?.net
-		? `${data.value.net.ip}:${data.value.net.port}`
-		: serverSubdomain.value
-			? `${serverSubdomain.value}.modrinth.gg`
-			: 'Unknown',
-)
-
 const serverSpecs = computed(() => getServerSpecs(serverProduct.value))
 
 type InfoProperty =
@@ -431,20 +448,18 @@ type InfoProperty =
 	| {
 			name: string
 			value: string
-			type: 'text'
-	  }
-	| {
-			name: string
-			value: string
 			type: 'specs'
 			lines: string[]
 	  }
 
-// Info properties
 const infoProperties = computed<InfoProperty[]>(() => [
 	{ name: 'Server ID', value: serverId ?? 'Unknown', type: 'copy' },
 	{ name: 'Node', value: data.value?.node?.instance ?? 'Unknown', type: 'copy' },
-	{ name: 'Hostname', value: serverHostname.value, type: 'copy' },
+	{
+		name: 'Hostname',
+		value: serverSubdomain.value ? `${serverSubdomain.value}.modrinth.gg` : 'Unknown',
+		type: 'copy',
+	},
 	{
 		name: 'Server specs',
 		value: serverSpecs.value ? 'Available' : 'Unknown',
@@ -460,11 +475,29 @@ const infoProperties = computed<InfoProperty[]>(() => [
 	},
 ])
 
+const { data: performance } = useQuery({
+	queryKey: ['servers', 'performance', serverId],
+	queryFn: () => client.archon.servers_v1.getPerformance(serverId),
+	enabled: client.selfHostedHosting,
+})
+const restartOnCrash = ref(true)
+watch(
+	performance,
+	(saved) => {
+		if (saved) restartOnCrash.value = saved.restarts.crash
+	},
+	{ immediate: true },
+)
+const hasRestartChanges = computed(
+	() => !!performance.value && restartOnCrash.value !== performance.value.restarts.crash,
+)
+
 // Unsaved changes tracking (API fields + preferences)
 const hasServerSettingsChanges = computed(
 	() =>
 		(serverName.value && serverName.value !== data.value?.name) ||
-		(!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')),
+		(!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')) ||
+		hasRestartChanges.value,
 )
 const hasPreferenceChanges = computed(
 	() => JSON.stringify(newUserPreferences.value) !== JSON.stringify(userPreferences.value),
@@ -481,6 +514,13 @@ const saveGeneral = async () => {
 		isUpdating.value = true
 		if (serverName.value !== data.value?.name) {
 			await client.archon.servers_v0.updateName(serverId, serverName.value ?? '')
+		}
+		if (hasRestartChanges.value && performance.value) {
+			const saved = await client.archon.servers_v1.setRestarts(serverId, {
+				...performance.value.restarts,
+				crash: restartOnCrash.value,
+			})
+			queryClient.setQueryData(['servers', 'performance', serverId], saved)
 		}
 		if (!client.selfHostedHosting && serverSubdomain.value !== (data.value?.net?.domain ?? '')) {
 			try {
@@ -537,5 +577,6 @@ const resetGeneral = () => {
 	serverName.value = data.value?.name || ''
 	serverSubdomain.value = data.value?.net?.domain ?? ''
 	newUserPreferences.value = { ...userPreferences.value }
+	if (performance.value) restartOnCrash.value = performance.value.restarts.crash
 }
 </script>

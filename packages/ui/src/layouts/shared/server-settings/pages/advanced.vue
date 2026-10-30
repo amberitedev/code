@@ -113,8 +113,12 @@
 					</div>
 				</div>
 
-				<!-- Startup command section -->
-				<div class="flex flex-col gap-2.5">
+				<p v-if="startupError" class="m-0 text-red">
+					Couldn't load startup settings: {{ startupError.message }}
+				</p>
+
+				<!-- Startup command section (a Core builds its own and accepts no other) -->
+				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
 					<div class="flex h-10 flex-col items-end justify-between gap-4 sm:flex-row">
 						<label for="startup-command-field" class="mb-0.5 flex flex-col gap-2">
 							<span class="text-lg font-semibold text-contrast">Startup command</span>
@@ -192,8 +196,8 @@
 					<span> The Java version your server runs on. </span>
 				</div>
 
-				<!-- Java runtime section -->
-				<div class="flex flex-col gap-2.5">
+				<!-- Java runtime section (a Core runs one runtime) -->
+				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
 					<div class="flex flex-col gap-2">
 						<span class="text-lg font-semibold text-contrast">Java runtime</span>
 					</div>
@@ -380,10 +384,17 @@ function togglePasswordVisibility() {
 // Startup state
 const startupQueryKey = computed(() => ['servers', 'startup', 'v1', serverId, worldId.value])
 
-const { data: startupData, isLoading: isStartupLoading } = useQuery({
+const {
+	data: startupData,
+	isLoading: isStartupLoading,
+	error: startupError,
+} = useQuery({
 	queryKey: startupQueryKey,
 	queryFn: () => client.archon.options_v1.getStartup(serverId, worldId.value!),
 	enabled: computed(() => worldId.value !== null),
+	// A Core's refusal (a server with nothing installed yet) does not change on retry, and
+	// retrying kept every field spinning for seconds.
+	retry: client.selfHostedHosting ? false : 3,
 })
 
 const JAVA_VERSIONS = [
