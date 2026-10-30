@@ -52,6 +52,11 @@ the time the work needs them. That build logs to `.data/build.log`.
 - `node scripts/dev-runner.ts down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
   starting anything. Worktree setup runs it.
+- `node scripts/dev-runner.ts preset`: Lists the saved datasets in the primary checkout's
+  `.data/presets`. `preset save <name>` saves this checkout's `backend`, `core`, and `scenarios`
+  there, replacing any earlier preset of that name; the stack must be stopped.
+  `up --preset <name> 1 2` replaces this checkout's data with that preset, then starts. Copies
+  leave out game assets and browser caches, as setup does.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
