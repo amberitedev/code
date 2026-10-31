@@ -1579,6 +1579,7 @@ function git(args: ReadonlyArray<string>, cwd: string, input?: string): string {
 		encoding: 'utf8',
 		input,
 		maxBuffer: 256 * 1024 * 1024,
+		windowsHide: true,
 	})
 	if (result.status !== 0) {
 		throw new DevRunnerError(result.stderr.trim() || `git ${args.join(' ')} failed.`)
