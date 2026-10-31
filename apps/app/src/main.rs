@@ -171,7 +171,7 @@ fn main() {
 
     #[cfg(all(debug_assertions, feature = "browser-bridge"))]
     {
-        builder = builder.plugin(amberite_browser_bridge::init());
+        builder = builder.plugin(browser_bridge::init());
     }
 
     #[cfg(target_os = "macos")]

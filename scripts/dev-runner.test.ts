@@ -51,7 +51,7 @@ describe('dev runner ports', () => {
 				primaryPath: '/repo',
 				worktreePath: '/repo',
 			}),
-		).toEqual({ offset: 42, source: 'AMBERITE_PORT_OFFSET=42' })
+		).toEqual({ offset: 42, source: 'PORT_OFFSET=42' })
 
 		const named = resolveStartOffset({
 			devInstance: 'design-review',
@@ -59,7 +59,7 @@ describe('dev runner ports', () => {
 			worktreePath: '/repo',
 		})
 		expect(named.offset).toBeGreaterThan(0)
-		expect(named.source).toBe('hashed AMBERITE_DEV_INSTANCE=design-review')
+		expect(named.source).toBe('hashed DEV_INSTANCE=design-review')
 	})
 
 	it('rejects invalid explicit offsets', () => {
@@ -69,7 +69,7 @@ describe('dev runner ports', () => {
 				primaryPath: '/repo',
 				worktreePath: '/repo',
 			}),
-		).toThrow('AMBERITE_PORT_OFFSET must be a non-negative integer')
+		).toThrow('PORT_OFFSET must be a non-negative integer')
 	})
 
 	it('moves the complete stack together when a port is occupied', async () => {
@@ -121,21 +121,12 @@ describe('dev runner environment', () => {
 				PORT: '9999',
 				SHARED: 'kept',
 			},
-			paths: {
-				coreData: '/repo/.data/core',
-				data: '/repo/.data',
-				primary: '/repo',
-				runtime: '/repo/.data/runtime.json',
-				scenariosData: '/repo/.data/scenarios',
-				worktree: '/repo',
-			},
 			ports: portsForOffset(3),
 		})
 
 		expect(env.HOST).toBeUndefined()
 		expect(env.PORT).toBeUndefined()
 		expect(env.SHARED).toBe('kept')
-		expect(env.AMBERITE_DEV_MODE).toBe('true')
 		expect(env.ACCOUNT_API_URL).toBe('http://127.0.0.1:8790')
 	})
 })
@@ -295,7 +286,7 @@ describe('dev runner readiness', () => {
 	it('reads the browser bridge URL from the line the App prints', () => {
 		expect(
 			bridgeUrlFromLine(
-				'2026-10-11T15:33:26.147268Z  INFO amberite_browser_bridge: Amberite browser bridge ready url=http://127.0.0.1:64463',
+				'2026-10-11T15:33:26.147268Z  INFO browser_bridge: Amberite browser bridge ready url=http://127.0.0.1:64463',
 			),
 		).toBe('http://127.0.0.1:64463')
 		expect(bridgeUrlFromLine('Browser bridge Vite WebSocket proxy failed')).toBeUndefined()

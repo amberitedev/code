@@ -7,7 +7,7 @@ const TAG = '__amberiteBrowserBridge'
 describe.sequential('browser transport', () => {
 	it('installs the Tauri globals synchronously with native metadata', async () => {
 		const { socket, window } = await installBrowserBridge()
-		expect(socket.url).toBe('ws://127.0.0.1:43123/__amberite_browser_bridge_ws')
+		expect(socket.url).toBe('ws://127.0.0.1:43123/__browser_bridge_ws')
 		expect(window.__TAURI_INTERNALS__.metadata).toEqual({
 			currentWebview: { label: 'main' },
 			currentWindow: { label: 'main' },
@@ -101,7 +101,7 @@ describe.sequential('browser transport', () => {
 		const { window } = await installBrowserBridge()
 		const url = new URL(window.__TAURI_INTERNALS__.convertFileSrc('C:\\Amberite Data\\icon.png'))
 		expect(url.origin).toBe('http://127.0.0.1:43123')
-		expect(url.pathname).toBe('/__amberite_browser_bridge_asset')
+		expect(url.pathname).toBe('/__browser_bridge_asset')
 		expect(url.searchParams.get('path')).toBe('C:\\Amberite Data\\icon.png')
 		expect(url.searchParams.get('protocol')).toBe('asset')
 	})

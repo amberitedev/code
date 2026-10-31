@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sha1::Digest;
-use sharing_types::store::{FetchError, PoolCore, PoolObject, StoreClient};
+use sharing_client::store::{FetchError, PoolCore, PoolObject, StoreClient};
 
 use super::{Content, Error, install::MAX_PACK};
 use crate::installs::shared::SharedDirs;
@@ -135,7 +135,7 @@ async fn fetch(
         plain,
         key: match &file.key {
             Some(key) => hash(key)?,
-            None => sharing_types::crypto::content_key(&plain),
+            None => sharing_client::crypto::content_key(&plain),
         },
     };
     // The holders that served bad bytes are logged by the client; only members report them.
