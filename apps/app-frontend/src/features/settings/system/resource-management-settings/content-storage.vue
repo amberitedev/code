@@ -2,11 +2,13 @@
 import { LoaderCircleIcon, ShieldCheckIcon, TrashIcon } from '@modrinth/assets'
 import {
 	Admonition,
+	type BarSegment,
 	Button,
 	defineMessages,
 	injectNotificationManager,
 	Input,
 	ProgressBar,
+	SegmentedBar,
 	useFormatBytes,
 	useVIntl,
 } from '@modrinth/ui'
@@ -186,7 +188,7 @@ const messages = defineMessages({
 	},
 })
 
-const categories = computed(() => {
+const segments = computed<BarSegment[]>(() => {
 	const unused = storeUsage.value?.unused_cache_bytes ?? 0
 	const shared = storeUsage.value?.shared_bytes ?? 0
 	return [
@@ -196,19 +198,14 @@ const categories = computed(() => {
 			bytes: Math.max(0, totalBytes.value - unused - shared),
 			color: 'bg-blue',
 		},
-		{
-			id: 'shared',
-			label: messages.shared,
-			bytes: shared,
-			color: 'bg-purple',
-		},
-		{
-			id: 'unused',
-			label: messages.unused,
-			bytes: unused,
-			color: 'bg-gray',
-		},
-	]
+		{ id: 'shared', label: messages.shared, bytes: shared, color: 'bg-purple' },
+		{ id: 'unused', label: messages.unused, bytes: unused, color: 'bg-gray' },
+	].map(({ label, bytes, ...category }) => ({
+		...category,
+		label: formatMessage(label),
+		value: bytes,
+		display: formatBytes(bytes, 1),
+	}))
 })
 
 const actionMutation = useMutation({
@@ -280,7 +277,7 @@ function saveCacheLimit() {
 			<p class="m-0 text-secondary">{{ formatMessage(messages.description) }}</p>
 		</div>
 
-		<div class="flex flex-col gap-3">
+		<div>
 			<ProgressBar
 				v-if="calculating"
 				:progress="0"
@@ -289,35 +286,7 @@ function saveCacheLimit() {
 				class="[&>div:last-child]:h-3.5 [&>div:last-child]:bg-surface-4 [&>div:last-child>div]:bg-[--color-base]"
 				aria-hidden="true"
 			/>
-			<div
-				v-else
-				aria-hidden="true"
-				class="flex h-3.5 gap-0.5 overflow-hidden rounded-full bg-surface-4"
-			>
-				<template v-for="category in categories" :key="category.id">
-					<div
-						v-if="category.bytes > 0"
-						class="h-full min-w-0 bg-gradient-to-b from-white/10 to-black/10 motion-safe:transition-[flex-grow] motion-safe:duration-300"
-						:class="category.color"
-						:style="{ flexGrow: category.bytes, flexBasis: '0%' }"
-					/>
-				</template>
-			</div>
-			<dl v-if="storeUsage" class="m-0 grid grid-cols-1 gap-3 @lg:grid-cols-3 @lg:gap-4">
-				<div
-					v-for="category in categories"
-					:key="category.id"
-					class="flex flex-wrap items-center gap-2"
-				>
-					<dt class="flex items-center gap-2">
-						<span class="size-3 shrink-0 rounded-full" :class="category.color" aria-hidden="true" />
-						{{ formatMessage(category.label) }}
-					</dt>
-					<dd class="m-0 ml-auto font-semibold tabular-nums text-contrast @lg:ml-0">
-						{{ formatBytes(category.bytes, 1) }}
-					</dd>
-				</div>
-			</dl>
+			<SegmentedBar v-else :segments="segments" legend />
 		</div>
 
 		<div class="flex flex-wrap items-center gap-2">

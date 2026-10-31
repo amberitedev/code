@@ -169,6 +169,11 @@ beyond the setting are dropped with their manifests; lowering the setting drops 
 owner can also delete any kept version but the current one, which members install. Each version is
 a full manifest, so nothing depends on the ones dropped.
 
+Restoring a kept version is local: the owner's App installs it into the owner's instance, as a
+member's update would, and leaves the instance with changes to push. Members get it only when the
+owner pushes, so a push stays the one way content reaches them. The App diffs two kept manifests
+to show what a version changed over the one before it.
+
 Stores keep the objects of every kept version. Each Core reports once an hour what it holds and
 how much room it has, and after every stored upload or pull. The backend answers with versions to
 drop and versions to pull. A holder never drops the newest version it has confirmed of a share it
@@ -405,15 +410,19 @@ manifest's fault). One row per member, version and kind. 204.
 `DELETE /v1/instances/:id/versions/:n` (owner) deletes a kept version and its manifest. 204. The
 current version, and one still uploading, are refused with 409 `current_version`.
 
-`GET /v1/storage` (session) is the account's storage, for Settings, Cores:
+`GET /v1/instances/:id/history` (member) lists the kept versions, newest first, as
+`[{ version, created, bytes, ready, current }…]`, the entries `GET /v1/storage` gives the owner.
+
+`GET /v1/storage` (session) is the account's storage, for Settings, Sharing:
 
 ```
-{ used, allowance, kept_versions, shares: [{ id, name, counted, used,
+{ used, allowance, kept_versions, shares: [{ id, name, counted, used, size, cores: [id…],
   versions: [{ version, created, bytes, ready, current }…] }…] }
 ```
 
 `kept_versions` is null when every version is kept. `counted` is whether the share has a copy on
-someone else's Core; `used` is 0 when it does not. Versions are newest first, and `current` marks
+someone else's Core; `used` is 0 when it does not. `size` is what its kept versions take, counted
+or not, and `cores` lists only the owner's own Cores that hold it. Versions are newest first, and `current` marks
 the newest ready one. `PATCH /v1/storage` takes `{ kept_versions }`, a whole number from 1 to 1,000
 or null, drops older versions beyond it at once, and answers the same.
 

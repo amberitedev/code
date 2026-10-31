@@ -232,6 +232,38 @@ export async function install_update_shared_instance(instanceId: string) {
 	})
 }
 
+/** A kept version of a share, as its version history shows it. */
+export interface SharedInstanceVersionDetails {
+	gameVersion: string
+	loader: string
+	loaderVersion: string
+	/** Projects and files, not counting config files. */
+	contentCount: number
+	diffs: SharedInstanceUpdateDiff[]
+	/** Paths of the config files it changed, or of all it holds without a base. */
+	configFiles: string[]
+}
+
+/** `version` of the instance's share and what it changed over `base`. Without a base, all of it is added. */
+export async function install_get_shared_instance_version(
+	instanceId: string,
+	version: number,
+	base: number | null,
+) {
+	return await invoke<SharedInstanceVersionDetails>(
+		'plugin:install|install_get_shared_instance_version',
+		{ instanceId, version, base },
+	)
+}
+
+/** Owner only. Puts the instance back to a kept version, leaving it to push. */
+export async function install_restore_shared_instance_version(instanceId: string, version: number) {
+	return await invoke<InstallJobSnapshot>(
+		'plugin:install|install_restore_shared_instance_version',
+		{ instanceId, version },
+	)
+}
+
 export async function install_import_instance(
 	launcherType: string,
 	basePath: string,

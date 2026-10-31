@@ -304,8 +304,32 @@ export type ShareStorage = {
 	/** Whether it uses someone else's Core, so its usage counts against the allowance. */
 	counted: boolean
 	used: number
+	/** What its kept versions take, counted or not. */
+	size: number
+	/** The owner's own Cores holding it, as home or replica. */
+	cores: string[]
 	/** Newest first. `current` is the newest ready one, which members install. */
 	versions: { version: number; created: string; bytes: number; ready: boolean; current: boolean }[]
+}
+
+/** One share's kept versions as `ownerShares` lists them, for its members' version history. */
+export async function shareVersions(
+	env: Env,
+	instanceId: string,
+): Promise<ShareStorage['versions']> {
+	const rows = await env.DB.prepare(
+		'SELECT version, bytes, ready, created FROM shared_versions WHERE instance_id = ? AND (ready = 1 OR created > ?) ORDER BY version DESC',
+	)
+		.bind(instanceId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
+		.all<{ version: number; bytes: number; ready: number; created: string }>()
+	const current = rows.results.find((row) => row.ready === 1)?.version
+	return rows.results.map((row) => ({
+		version: row.version,
+		created: row.created,
+		bytes: row.bytes,
+		ready: row.ready === 1,
+		current: row.version === current,
+	}))
 }
 
 /**
@@ -344,6 +368,8 @@ export async function ownerShares(env: Env, ownerId: string): Promise<ShareStora
 				name: row.name,
 				counted: [row.home, row.replica].some((id) => id !== null && !ownIds.has(id)),
 				used: 0,
+				size: 0,
+				cores: [row.home, row.replica].filter((id): id is string => id !== null && ownIds.has(id)),
 				versions: [],
 				kept: [],
 			}
@@ -362,6 +388,7 @@ export async function ownerShares(env: Env, ownerId: string): Promise<ShareStora
 	return [...shares.values()].map(({ kept, ...share }) => {
 		const current = share.versions.find((version) => version.ready)
 		if (current) current.current = true
-		return { ...share, used: share.counted ? shareUsage(kept) : 0 }
+		const size = shareUsage(kept)
+		return { ...share, size, used: share.counted ? size : 0 }
 	})
 }

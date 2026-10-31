@@ -92,6 +92,7 @@ import {
 	EditIcon,
 	FolderOpenIcon,
 	GlobeIcon,
+	HistoryIcon,
 	ImageIcon,
 	PlayIcon,
 	PlusIcon,
@@ -194,6 +195,7 @@ const messages = defineMessages({
 	worldsTab: { id: 'app.instance.tab.worlds', defaultMessage: 'Worlds' },
 	logsTab: { id: 'app.instance.tab.logs', defaultMessage: 'Logs' },
 	shareTab: { id: 'app.instance.tab.share', defaultMessage: 'Share' },
+	historyTab: { id: 'app.instance.tab.history', defaultMessage: 'History' },
 	shortcutCreated: {
 		id: 'app.instance.shortcut.created',
 		defaultMessage: 'Shortcut created',
@@ -528,6 +530,14 @@ const showShareTab = computed(() => {
 	)
 })
 
+// Members see the history too, read-only.
+const showHistoryTab = computed(
+	() =>
+		currentUserCanUseSharedInstances.value &&
+		!instance.value?.quarantined &&
+		!!instance.value?.shared_instance,
+)
+
 const tabs = computed(() => {
 	const instanceTabs = [
 		{
@@ -575,16 +585,28 @@ const tabs = computed(() => {
 		})
 	}
 
+	if (showHistoryTab.value) {
+		instanceTabs.push({
+			label: formatMessage(messages.historyTab),
+			href: `${basePath.value}/history`,
+			icon: HistoryIcon,
+		})
+	}
+
 	return instanceTabs
 })
 
 watch(
 	() => ({
 		quarantined: instance.value?.quarantined ?? false,
+		unshared: !!instance.value && !instance.value.shared_instance,
 		routeName: router.currentRoute.value.name,
 	}),
-	({ quarantined, routeName }) => {
-		if (quarantined && routeName === 'InstanceShare') {
+	({ quarantined, unshared, routeName }) => {
+		if (
+			(quarantined && (routeName === 'InstanceShare' || routeName === 'InstanceHistory')) ||
+			(unshared && routeName === 'InstanceHistory')
+		) {
 			void router.replace(basePath.value)
 		}
 	},

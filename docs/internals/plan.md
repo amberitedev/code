@@ -60,8 +60,9 @@ the exact protocol are in `pool.md`. Storage was decided on 2026-10-28.
   are tuned over time. Also 1 GB per version of a share and 4,096 files per version.
 - How many versions are kept, files included, is the owner's auto-cleanup setting: keep the last
   five by default, any other number, or all of them. Older versions drop on their own. A push over
-  the limit is refused with "delete old versions to free space". Usage, the setting, and the kept
-  versions, with a way to delete them, are in Settings, Cores, beside each Core's storage.
+  the limit is refused with "delete old versions to free space". Usage and the setting are in
+  Settings, Sharing. Each instance's History tab lists its kept versions with what each changed;
+  the owner restores one into the instance, to push again, or deletes it.
 - A push with no Core offering storage fails with a clear message. Storage is on by default on a
   Core and is turned off, or its caps changed, in Settings, Cores.
 - Two packages: `sharing-types`, the share format and encryption the App and Core both use; and
