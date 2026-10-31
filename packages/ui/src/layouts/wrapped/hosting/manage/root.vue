@@ -917,12 +917,17 @@ const navLinks = computed<Tab[]>(() => [
 		icon: LayoutTemplateIcon,
 		subpages: [],
 	},
-	{
-		label: 'Play',
-		href: `/hosting/manage/${props.serverId}/play`,
-		icon: PlayIcon,
-		subpages: [],
-	},
+	// Server play shares the server's content with players, which a Core cannot do yet.
+	...(client.selfHostedHosting
+		? []
+		: [
+				{
+					label: 'Play',
+					href: `/hosting/manage/${props.serverId}/play`,
+					icon: PlayIcon,
+					subpages: [],
+				},
+			]),
 	{
 		label: 'Content',
 		href: `/hosting/manage/${props.serverId}/content`,

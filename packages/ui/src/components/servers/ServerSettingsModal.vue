@@ -128,8 +128,11 @@ const tabs = computed<TabbedModalTab[]>(() =>
 				serverStatus: server.value?.status,
 				isOwner: isOwner.value,
 				isAdmin: isAdmin.value,
-				isShared: !!serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-					?.shared_instance_id,
+				// A Core cannot share a server's content yet, so its servers have no Sharing tab.
+				isShared:
+					!client.selfHostedHosting &&
+					!!serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
+						?.shared_instance_id,
 			}
 			const name = defineMessage({
 				id: `server.settings.tabs.${tab.id}`,

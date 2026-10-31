@@ -117,7 +117,10 @@
 					@click="setSetupType('custom')"
 				/>
 				<BigOptionButton
-					v-if="ctx.flowType === 'server-onboarding' || ctx.flowType === 'reset-server'"
+					v-if="
+						!client.selfHostedHosting &&
+						(ctx.flowType === 'server-onboarding' || ctx.flowType === 'reset-server')
+					"
 					v-tooltip="ctx.finishDisabled.value ? ctx.finishDisabledTooltip.value : undefined"
 					:disabled="ctx.navigating.value || ctx.finishDisabled.value"
 					:icon="AnvilIcon"
@@ -153,7 +156,11 @@ import { computed, h, markRaw, onMounted, ref, watch } from 'vue'
 
 import { useDebugLogger } from '#ui/composables/debug-logger'
 
-import { injectFilePicker, injectInstanceServerSource } from '../../../../providers'
+import {
+	injectFilePicker,
+	injectInstanceServerSource,
+	injectModrinthClient,
+} from '../../../../providers'
 import BigOptionButton from '../../../base/BigOptionButton.vue'
 import Combobox from '../../../base/Combobox.vue'
 import { injectCreationFlowContext } from '../creation-flow-context'
@@ -161,6 +168,7 @@ import { curseforgeMessages } from '../curseforge'
 
 const debug = useDebugLogger('SetupTypeStage')
 const ctx = injectCreationFlowContext()
+const client = injectModrinthClient()
 const filePicker = injectFilePicker()
 // Only the App can create a server from an instance.
 const instanceSource = injectInstanceServerSource(null)
