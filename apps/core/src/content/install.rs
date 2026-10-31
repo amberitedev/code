@@ -43,8 +43,9 @@ use crate::{
 
 /// Pack files downloaded at once.
 const CONCURRENCY: usize = 6;
-/// The largest single file a pack may list.
-const MAX_FILE: u64 = 2 * 1024 * 1024 * 1024;
+/// The largest single downloaded file. Stated sizes are only hints, so this is the cap and the
+/// hash decides whether a file is valid.
+pub const MAX_FILE: u64 = 2 * 1024 * 1024 * 1024;
 /// The largest `.mrpack`.
 pub const MAX_PACK: u64 = 4 * 1024 * 1024 * 1024;
 
@@ -502,7 +503,11 @@ async fn stage_downloads(
                 fetch_index_file(content, file, &path, &|bytes| {
                     let done =
                         received.fetch_add(bytes, Ordering::Relaxed) + bytes;
-                    progress.set("files", key, done as f64 / total as f64);
+                    progress.set(
+                        "files",
+                        key,
+                        (done as f64 / total as f64).min(1.0),
+                    );
                 })
                 .await?;
                 Ok::<_, Error>((n, path))
@@ -536,7 +541,7 @@ async fn fetch_index_file(
             path,
             &FileDownload {
                 hash,
-                limit: Some(file.file_size.clamp(1, MAX_FILE)),
+                limit: Some(MAX_FILE),
                 progress: &|update| {
                     if let download::Progress::Bytes { bytes, .. } = update {
                         progress(bytes);

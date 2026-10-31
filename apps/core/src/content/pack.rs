@@ -289,7 +289,8 @@ pub struct Disk<'a> {
 }
 
 /// The most a set of steps writes, refused past [`archive::MAX_UNPACKED`] before anything is
-/// written: one budget for the whole install.
+/// written: one budget for the whole install. Download sizes are the index's word, so for them
+/// this is an estimate; each download is only capped at [`super::install::MAX_FILE`].
 pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
     let total = steps
         .iter()
