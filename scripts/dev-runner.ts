@@ -1002,8 +1002,10 @@ async function ensureProgram(
 			// Another runner may have built it while this one waited.
 			while (!NodeFS.existsSync(cached(key))) {
 				runnerLog('info', `${spec.label} building ${build.program} (${key})`)
-				if (build.cloneFrom) cloneBuildOutput(worktree, spec, build, build.cloneFrom)
-				else if (!markCheckoutCratesChanged(worktree, spec, build)) return undefined
+				if (build.cloneFrom) {
+					if (!(await cloneBuildOutput(worktree, spec, build, build.cloneFrom, builds, stopped)))
+						return undefined
+				} else if (!markCheckoutCratesChanged(worktree, spec, build)) return undefined
 				if (!(await runCargo(spec, build, builds, build.cargoArgs))) return undefined
 				const builtKey = programKey(worktree, build)
 				// An input edited during the build makes this program a mix. Build again.
@@ -1095,25 +1097,27 @@ function markCheckoutCratesChanged(
  * deleted and cloned again. That build compiles this worktree's changes without their compiler
  * caches, and the worktree is back to taking almost no space.
  */
-function cloneBuildOutput(
+async function cloneBuildOutput(
 	worktree: string,
 	spec: ProcessSpec,
 	build: ProgramBuild,
 	primary: string,
-): void {
+	builds: Set<NodeChildProcess.ChildProcess>,
+	stopped: () => boolean,
+): Promise<boolean> {
 	const source = closestBuiltCheckout(worktree, build, primary)
 	const from = NodePath.join(source, 'target')
-	if (!NodeFS.existsSync(from)) return
+	if (!NodeFS.existsSync(from)) return true
 	if (NodeFS.existsSync(build.targetDir)) {
 		const growth = folderSize(build.targetDir) - folderSize(from, build.cacheDir)
-		if (growth < BUILD_GROWTH_LIMIT) return
+		if (growth < BUILD_GROWTH_LIMIT) return true
 		const old = `${build.targetDir}.old`
 		try {
 			NodeFS.rmSync(old, { recursive: true, force: true })
 			NodeFS.renameSync(build.targetDir, old)
 		} catch {
 			// Something still has a file open, such as an older App run from it. Build there.
-			return
+			return true
 		}
 		runnerLog(
 			'info',
@@ -1124,11 +1128,46 @@ function cloneBuildOutput(
 	runnerLog('info', `${spec.label} cloning the build output of ${source}`)
 	const partial = `${build.targetDir}.partial`
 	NodeFS.rmSync(partial, { recursive: true, force: true })
-	NodeFS.cpSync(from, partial, {
-		filter: (path) => path !== build.cacheDir && !path.endsWith('.checkout'),
-		preserveTimestamps: true,
-		recursive: true,
+	// Robocopy, many files at once: Windows' copy engine clones each file on ReFS, but the cost is
+	// per file, and a build output has tens of thousands. NodeFS.cpSync took over ten minutes.
+	const copy = NodeChildProcess.spawn(
+		'robocopy',
+		[
+			NodePath.resolve(from),
+			NodePath.resolve(partial),
+			'/E',
+			'/MT:64',
+			'/COPY:DAT',
+			'/DCOPY:T',
+			'/R:0',
+			'/W:0',
+			'/NP',
+			'/NFL',
+			'/NDL',
+			'/NJH',
+			'/NJS',
+			'/XD',
+			NodePath.resolve(build.cacheDir),
+			'/XF',
+			'*.checkout',
+		],
+		{ stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+	)
+	builds.add(copy)
+	const output: string[] = []
+	copy.stdout.on('data', (chunk) => output.push(String(chunk)))
+	copy.stderr.on('data', (chunk) => output.push(String(chunk)))
+	const code = await new Promise<number | null>((resolve) => {
+		copy.once('error', () => resolve(null))
+		copy.once('close', resolve)
 	})
+	builds.delete(copy)
+	// Robocopy's codes below 8 all mean every file was copied.
+	if (code === null || code >= 8) {
+		if (!stopped()) runnerLog('error', `Could not clone ${from}: ${output.join('').trim()}`)
+		NodeFS.rmSync(partial, { recursive: true, force: true })
+		return false
+	}
 	const buildScripts = NodePath.join(partial, 'debug', 'build')
 	const paths = [source, worktree].map((path) => `${path}${NodePath.sep}`)
 	const [sourceEscaped, worktreeEscaped] = paths.map((path) => path.replaceAll('\\', '\\\\'))
@@ -1164,6 +1203,7 @@ function cloneBuildOutput(
 		const { atime, mtime } = NodeFS.statSync(NodePath.join(source, file))
 		NodeFS.utimesSync(NodePath.join(worktree, file), atime, mtime)
 	}
+	return true
 }
 
 /**

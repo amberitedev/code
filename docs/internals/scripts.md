@@ -97,7 +97,8 @@ Where a checkout compiles depends on its drive:
 - On a Windows Dev Drive (ReFS), when the worktree and the primary checkout are on the same drive,
   each worktree compiles into its own `target`. Before its first build, the runner clones another
   checkout's `target` into it: of the primary checkout and the checkouts that built a cached
-  program, the one whose Rust files differ least from this worktree's. The clone is instant and
+  program, the one whose Rust files differ least from this worktree's. Robocopy clones the files
+  many at a time, which takes a few minutes for the tens of thousands in a `target`, and the clone
   shares disk space with the original until files change. The runner then gives every input file
   that matches the source the source's file time, and rewrites the absolute paths build scripts
   recorded, so Cargo treats unchanged crates as built and compiles only what differs. The worktree keeps its own
