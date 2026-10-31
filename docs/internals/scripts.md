@@ -250,3 +250,13 @@ errors and warnings to the same terminal; error and warning notifications are lo
 - `vp check`, `vp run -r test`, and `vp run -r typecheck`: Repository-wide checks owned by CI. Run
   them locally only when the developer asks.
 - `vp run build`: Builds the repository. Do not run it unless the developer asks.
+
+## Upstream sync
+
+`.github/workflows/upstream-sync.yml` runs daily. When Modrinth has new commits and no earlier sync
+is waiting, it runs `node scripts/upstream-sync.ts` on a new `sync/upstream/N` branch and pushes it:
+one merge commit with both parents, the `ignore` paths from `upstream.json` deleted, lockfiles taken
+from Modrinth and pruned, and any conflict markers committed as they are. The run's
+`upstream-sync-N` artifact holds the script's JSON summary, the new commit titles, the merged
+Modrinth pull requests, and the diff of Modrinth's changelog. The `/upstream-sync` skill resolves
+the branch and opens the pull request. Merge it with a merge commit, never a squash.
