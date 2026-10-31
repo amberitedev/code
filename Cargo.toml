@@ -10,8 +10,8 @@ members = [
   "packages/modrinth-content-management",
   "packages/path-util",
   "packages/serde-binhum",
+  "packages/sharing-client",
   "packages/sharing-storage",
-  "packages/sharing-types",
   "packages/toasty",
 ]
 
@@ -104,8 +104,8 @@ serde_with = "3.24.0"
 sha1 = "0.11.0"
 sha1_smol = { version = "1.0.1", features = ["std"] }
 sha2 = "0.11.1"
+sharing-client = { path = "packages/sharing-client" }
 sharing-storage = { path = "packages/sharing-storage" }
-sharing-types = { path = "packages/sharing-types" }
 shlex = "2.0.1"
 sqlx = { version = "0.9.0", default-features = false }
 syn = { version = "3.0" }

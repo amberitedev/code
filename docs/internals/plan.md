@@ -65,7 +65,7 @@ the exact protocol are in `pool.md`. Storage was decided on 2026-10-28.
   the owner restores one into the instance, to push again, or deletes it.
 - A push with no Core offering storage fails with a clear message. Storage is on by default on a
   Core and is turned off, or its caps changed, in Settings, Cores.
-- Two packages: `sharing-types`, the share format and encryption the App and Core both use; and
+- Two packages: `sharing-client`, the share format and encryption the App and Core both use; and
   `sharing-storage`, the storage process. It stays a child process of `copal` on the Core's address
   and port, reports through the Core, and talks to it over a small local API. It has no identity
   of its own: the backend knows one Core. Its own OS account comes with the installer.
@@ -178,9 +178,9 @@ Later:
   computer you sign in on. After sign-in the App talks to the Core directly.
 - A Core reports its own address, on every start, every five minutes after that, and whenever it
   changes. By default that is the address and port it listens on, or the machine's local network
-  address when it listens on every interface. `AMBERITE_PUBLIC_URL` overrides it. Nobody types an
-  address. It must be HTTPS unless it is loopback or a private network address. Once the Core has
-  an address on the internet it reports that too (see "Reaching a Core from outside").
+  address when it listens on every interface. Nobody types an address. It must be HTTPS unless it
+  is loopback or a private network address. Once the Core has an address on the internet it reports
+  that too (see "Reaching a Core from outside").
 - A Core makes its own certificate on first start and serves its API over HTTPS with it. No domain
   and no certificate authority. The Core sends the certificate's SHA-256 fingerprint when it asks
   for a code, the backend stores it with the Core, and the App trusts only that certificate for

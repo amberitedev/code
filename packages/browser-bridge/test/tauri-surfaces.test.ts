@@ -97,7 +97,7 @@ describe.sequential('Tauri surfaces used by Amberite', () => {
 		expect(platform()).toBe('windows')
 		expect(osType()).toBe('windows')
 		expect(version()).toBe('11.0.0')
-		expect(convertFileSrc('C:\\icon.png')).toContain('__amberite_browser_bridge_asset')
+		expect(convertFileSrc('C:\\icon.png')).toContain('__browser_bridge_asset')
 
 		const direct = invoke('custom_command', { exact: 'args' })
 		await roundTrip(direct, 'custom_command', { exact: 'args' }, { exact: 'result' })
@@ -330,8 +330,8 @@ async function roundTrip<T>(
 ): Promise<void> {
 	const request = await socket.nextInvoke()
 	expect(request).toMatchObject({ cmd })
-	expect(request.args).toEqual(bridgeWindow.__AMBERITE_BROWSER_BRIDGE_TEST__.toWire(args))
-	socket.respond(request, 'success', bridgeWindow.__AMBERITE_BROWSER_BRIDGE_TEST__.toWire(result))
+	expect(request.args).toEqual(bridgeWindow.__BROWSER_BRIDGE_TEST__.toWire(args))
+	socket.respond(request, 'success', bridgeWindow.__BROWSER_BRIDGE_TEST__.toWire(result))
 	await expect(promise).resolves.toEqual(result)
 }
 

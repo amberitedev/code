@@ -167,28 +167,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c880a97d28a3681c0267bd29cff89621202715b065127cd445fa0f0fe0aa2880"
 
 [[package]]
-name = "amberite-browser-bridge"
-version = "0.1.0"
-dependencies = [
- "futures",
- "http-body-util",
- "hyper",
- "hyper-tungstenite",
- "hyper-util",
- "mime_guess",
- "reqwest 0.13.5",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin-os",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "ambient-authority"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1600,6 +1578,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "browser-bridge"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-tungstenite",
+ "hyper-util",
+ "mime_guess",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-os",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2302,8 +2302,8 @@ dependencies = [
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.1",
+ "sharing-client",
  "sharing-storage",
- "sharing-types",
  "socket2",
  "sqlx",
  "tar",
@@ -8929,6 +8929,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharing-client"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "chacha20poly1305",
+ "futures",
+ "hex",
+ "hkdf",
+ "reqwest 0.13.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "sharing-storage"
 version = "0.1.0"
 dependencies = [
@@ -8963,29 +8986,6 @@ dependencies = [
  "uuid 1.28.0",
  "walkdir",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "sharing-types"
-version = "0.0.0"
-dependencies = [
- "bytes",
- "chacha20poly1305",
- "futures",
- "hex",
- "hkdf",
- "reqwest 0.13.5",
- "rustls",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -10284,7 +10284,7 @@ dependencies = [
  "serde_with",
  "sha1_smol",
  "sha2 0.11.1",
- "sharing-types",
+ "sharing-client",
  "shlex 2.0.1",
  "sqlx",
  "sysinfo",
@@ -10314,9 +10314,9 @@ name = "theseus_gui"
 version = "1.0.0-local"
 dependencies = [
  "aes-gcm 0.11.1",
- "amberite-browser-bridge",
  "anyhow",
  "base64 0.23.1",
+ "browser-bridge",
  "bytes",
  "chrono",
  "dashmap",

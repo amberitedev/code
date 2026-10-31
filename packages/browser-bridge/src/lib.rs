@@ -35,12 +35,12 @@ use tokio::{
 };
 use url::Url;
 
-const ASSET_PATH: &str = "/__amberite_browser_bridge_asset";
-const CALLBACK_EVENT: &str = "amberite-browser-bridge://callback";
-const RESPONSE_EVENT: &str = "amberite-browser-bridge://response";
-const SCRIPT_PATH: &str = "/__amberite_browser_bridge.js";
+const ASSET_PATH: &str = "/__browser_bridge_asset";
+const CALLBACK_EVENT: &str = "browser-bridge://callback";
+const RESPONSE_EVENT: &str = "browser-bridge://response";
+const SCRIPT_PATH: &str = "/__browser_bridge.js";
 const TAG: &str = "__amberiteBrowserBridge";
-const WS_PATH: &str = "/__amberite_browser_bridge_ws";
+const WS_PATH: &str = "/__browser_bridge_ws";
 
 /// How long the native webview gets to run a script before it counts as not running.
 const EVAL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,7 +50,7 @@ const STUCK_AFTER: Duration = Duration::from_secs(30);
 /// Minimum gap between reloads of a native page that has no Tauri, so a dev server that is still
 /// down is not hammered.
 const HEAL_COOLDOWN: Duration = Duration::from_secs(10);
-const PROBE_SCRIPT: &str = "JSON.stringify({ href: location.href, readyState: document.readyState, tauri: typeof window.__TAURI_INTERNALS__, dispatcher: typeof window.__AMBERITE_BROWSER_BRIDGE_NATIVE__ })";
+const PROBE_SCRIPT: &str = "JSON.stringify({ href: location.href, readyState: document.readyState, tauri: typeof window.__TAURI_INTERNALS__, dispatcher: typeof window.__BROWSER_BRIDGE_NATIVE__ })";
 
 type SocketSink =
     Arc<Mutex<futures::stream::SplitSink<BridgeWebsocket, Message>>>;
@@ -537,7 +537,7 @@ async fn handle_bridge_socket(
                             if let Err(error) = eval_native(
                                 &state.app,
                                 &format!(
-                                    "window.__AMBERITE_BROWSER_BRIDGE_NATIVE__?.unregister({connection_id}, {callback_id});"
+                                    "window.__BROWSER_BRIDGE_NATIVE__?.unregister({connection_id}, {callback_id});"
                                 ),
                             ) {
                                 tracing::warn!(%error, "Browser bridge could not unregister a callback");
@@ -575,9 +575,7 @@ async fn handle_bridge_socket(
         .retain(|(connection, _), _| *connection != connection_id);
     let _ = eval_native(
         &state.app,
-        &format!(
-            "window.__AMBERITE_BROWSER_BRIDGE_NATIVE__?.clear({connection_id});"
-        ),
+        &format!("window.__BROWSER_BRIDGE_NATIVE__?.clear({connection_id});"),
     );
     result
 }
@@ -606,7 +604,7 @@ fn invoke_native(
     // The dispatcher is sent with every invoke because a reloaded page has lost it. The script
     // evaluates to what `dispatch` returns.
     let script = format!(
-        "{}\nwindow.__AMBERITE_BROWSER_BRIDGE_NATIVE__.dispatch({serialized})",
+        "{}\nwindow.__BROWSER_BRIDGE_NATIVE__.dispatch({serialized})",
         include_str!("native-bridge.js")
     );
 
@@ -840,7 +838,7 @@ fn browser_script() -> String {
     // Keep configuration in the same-origin script so the upstream policy can
     // continue blocking inline scripts in the browser preview.
     format!(
-        "window.__AMBERITE_BROWSER_BRIDGE_CONFIG__={config};\n{}",
+        "window.__BROWSER_BRIDGE_CONFIG__={config};\n{}",
         include_str!("browser-bridge.js")
     )
 }

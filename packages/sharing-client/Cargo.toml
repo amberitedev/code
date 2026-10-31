@@ -1,5 +1,5 @@
 [package]
-name = "sharing-types"
+name = "sharing-client"
 edition.workspace = true
 
 # What the App and Core share about sharing (`docs/internals/pool.md`): the pool's encryption and
