@@ -123,6 +123,7 @@ const I18N_CALL_PATTERNS = ['formatMessage', '$t'] as const
 
 function findVueFiles(dir: string): string[] {
 	const files: string[] = []
+	if (!fs.existsSync(dir)) return files
 
 	function walk(currentDir: string) {
 		const entries = fs.readdirSync(currentDir, { withFileTypes: true })

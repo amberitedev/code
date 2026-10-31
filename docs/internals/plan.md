@@ -227,8 +227,7 @@ How it works (`apps/core/src/network`):
   ufw and firewalld: it opens ports itself when it runs as root and prints the command otherwise.
   On macOS it only reports that the firewall is on. Hand-written nftables or iptables rules are
   not read.
-- Outside test: a granted mapping is not proof. The backend no longer tests ports; see the Network
-  section of `core-plan.md`.
+- Outside test: a granted mapping is not proof. The backend no longer tests ports.
 - Diagnosis: whenever the answer for a port changes, Core prints what it tested, what it found,
   and the steps to fix it. It tells these apart: the server is not listening; the local firewall
   blocks it; the router answers no forwarding protocol; the router refused; two routers in a row;

@@ -22,10 +22,7 @@ This repository contains several projects. For detailed development information,
 
 | Project       | Directory       | Guide                                                     |
 | ------------- | --------------- | --------------------------------------------------------- |
-| Website       | `apps/frontend` | [Guide](https://docs.modrinth.com/contributing/knossos/)  |
 | App           | `apps/app`      | [Guide](https://docs.modrinth.com/contributing/theseus/)  |
-| API           | `apps/labrinth` | [Guide](https://docs.modrinth.com/contributing/labrinth/) |
-| Documentation | `apps/docs`     | [Guide](https://docs.modrinth.com/contributing/docs/)     |
 
 Shared libraries live in `packages/`.
 

@@ -28,7 +28,7 @@ Modrinth handles public content (mods, modpacks, resource packs, etc.). Amberite
 
 The App keeps the full Modrinth experience. Users can continue using it as their main launcher (browsing content, managing instances, installing modpacks and mods, etc.), with Amberite’s features added on top.
 
-Amberite ports Modrinth’s social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over.
+Amberite ports Modrinth’s social backend from upstream `apps/labrinth` (friends, profiles, sharing, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over. Labrinth is not kept in this repo: read it from `modrinth/main`. `upstream.json` lists the upstream paths we never take (`ignore`) and the labrinth paths we port from (`watch`).
 
 ### 5. Minecraft-first identity
 
@@ -194,8 +194,6 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
   files for the pool. It has no identity of its own: the Core forwards `/store/` on its one port to
   it unread, manages it over stdio, and reports for it (`apps/core/src/storage.rs`). It has no
   database or keys and checks the backend's tickets itself. Design in `docs/internals/pool.md`.
-- `apps/frontend` - Website and inherited Modrinth web surface. Not in use; it will be reverted to
-  upstream.
 - `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers, D1, and
   R2. Shared files live on Cores, never on Cloudflare.
 - `packages/ui` - shared Modrinth and Amberite UI.
@@ -215,6 +213,7 @@ and `/to-tickets` turns a plan into issues.
 - Complexity belongs at the adapter boundary. Backend-facing workflows stay in
   `@modrinth/api-client`; UI stays dumb.
 - Preserve upstream behavior until Amberite has a product reason to differ.
+- Nothing is released and nothing is installed. Never plan migrations or backward compatibility.
 - Inferred types over annotations. Never use TypeScript `any`; use `unknown` and narrow it safely.
 - Comments describe how a thing is used or why a constraint exists. Do not narrate ordinary code.
 - If a rule here fights the task, say so clearly and get developer approval before breaking it.
