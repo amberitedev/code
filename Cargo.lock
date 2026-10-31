@@ -2288,6 +2288,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "igd-next",
+ "image",
  "libc",
  "minecraft-meta-manifest",
  "minisign-verify",

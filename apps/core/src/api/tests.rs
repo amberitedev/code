@@ -1581,3 +1581,82 @@ async fn a_jar_modrinth_does_not_know_shows_its_own_name_and_logo() {
         "the file is a mod, not a plugin"
     );
 }
+
+#[tokio::test]
+async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
+    let core = core().await;
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    let uri = format!("/v1/servers/{}/icon", core.server);
+    let get = |uri: String, token: String| {
+        let request = Request::get(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let router = core.router.clone();
+        async move {
+            let response = router.oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes =
+                response.into_body().collect().await.unwrap().to_bytes();
+            (status, bytes)
+        }
+    };
+    let put = |token: &str, body: Vec<u8>| {
+        Request::put(&uri)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/octet-stream")
+            .body(Body::from(body))
+            .unwrap()
+    };
+
+    assert_eq!(
+        get(uri.clone(), viewer.clone()).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    let mut wide = Vec::new();
+    image::RgbaImage::new(1024, 512)
+        .write_to(
+            &mut std::io::Cursor::new(&mut wide),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    assert_eq!(
+        core.send(put(&viewer, wide.clone())).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        core.send(put(&editor, b"not an image".to_vec())).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        core.send(put(&editor, wide)).await.0,
+        StatusCode::NO_CONTENT
+    );
+
+    let (status, game) = get(uri.clone(), viewer.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    let game = image::load_from_memory(&game).unwrap();
+    assert_eq!((game.width(), game.height()), (64, 64));
+    let (_, original) =
+        get(format!("{uri}?original=true"), viewer.clone()).await;
+    let original = image::load_from_memory(&original).unwrap();
+    assert_eq!(
+        (original.width(), original.height()),
+        (512, 256),
+        "shrunk to fit, shape kept"
+    );
+    let server_dir = core.state.servers.paths().server(&core.server);
+    assert!(server_dir.join("server-icon.png").exists());
+
+    let (status, _) = core
+        .call(Method::DELETE, &uri, Some(&editor), None, None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        get(format!("{uri}?original=true"), viewer).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert!(!server_dir.join("server-icon.png").exists());
+}

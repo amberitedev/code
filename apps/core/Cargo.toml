@@ -23,6 +23,8 @@ hex = { workspace = true }
 http-body-util = "0.1.3"
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server-auto", "service", "tokio"] }
+# Server icons: decoded from what the App uploads, saved as the PNGs Minecraft and the App read.
+image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 minecraft-meta-manifest = { workspace = true }
 # Checks the signature on Copal release manifests.
