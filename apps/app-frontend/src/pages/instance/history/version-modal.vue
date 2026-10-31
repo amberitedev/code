@@ -47,9 +47,9 @@ defineExpose({
 <template>
 	<NewModal ref="modal" max-width="544px" width="544px" no-padding scrollable>
 		<template #title>
-			<span v-if="row" class="flex min-w-0 items-baseline gap-3">
-				<span class="truncate text-lg font-bold text-contrast">{{ row.title }}</span>
-				<span class="shrink-0 text-secondary">
+			<span v-if="row" class="flex min-w-0 flex-col gap-1">
+				<span class="text-lg font-bold leading-tight text-contrast">{{ row.title }}</span>
+				<span class="text-sm text-secondary">
 					{{ row.ready ? formatRelativeTime(row.created) : 'Uploading' }}
 				</span>
 			</span>
