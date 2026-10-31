@@ -40,10 +40,7 @@ export default defineConfig({
 	},
 	lint: {
 		ignorePatterns: [
-			// Inherited Modrinth code Amberite does not ship or edit, and generated files.
-			'apps/docs/**',
-			'apps/frontend/**',
-			'apps/app/src/api/ads-consent/**',
+			// Generated files.
 			'**/generated/**',
 			'.data/**',
 			'.repos/**',
