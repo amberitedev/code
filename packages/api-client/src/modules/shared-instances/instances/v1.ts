@@ -1,4 +1,5 @@
 import { AbstractModule } from '../../../core/abstract-module'
+import type { DownloadSink } from '../../../types/download'
 import type { RequestOptions } from '../../../types/request'
 import { SharedInstancesApiError } from '../errors'
 import type { SharedInstances } from '../types'
@@ -17,13 +18,17 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		}
 	}
 
-	public async get(instanceId: string): Promise<SharedInstances.Instances.v1.Instance> {
+	public async get(
+		instanceId: string,
+		params?: { query_linked_server?: boolean },
+	): Promise<SharedInstances.Instances.v1.Instance> {
 		return this.request<SharedInstances.Instances.v1.Instance>(
 			`/instances/${encodeURIComponent(instanceId)}`,
 			{
 				api: 'sharedinstances',
 				version: 1,
 				method: 'GET',
+				params,
 			},
 		)
 	}
@@ -100,6 +105,47 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 				version: 1,
 				method: 'GET',
 			},
+		)
+	}
+
+	public async inviteUsers(instanceId: string, userIds: string[]): Promise<{ failed: string[] }> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'POST',
+			body: { user_ids: userIds },
+			retry: false,
+		})
+	}
+
+	public async removeUsers(instanceId: string, userIds: string[]): Promise<void> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/users`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'DELETE',
+			body: { user_ids: userIds },
+		})
+	}
+
+	public async downloadMrpack(instanceId: string, version: number): Promise<Blob> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+			responseType: 'blob',
+			timeout: 600_000,
+		})
+	}
+
+	public async downloadMrpackTo(
+		instanceId: string,
+		version: number,
+		sink: DownloadSink,
+	): Promise<void> {
+		return this.client.download(
+			`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`,
+			{ api: 'sharedinstances', version: 1, method: 'GET' },
+			sink,
 		)
 	}
 }

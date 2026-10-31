@@ -4,9 +4,8 @@
 //! API, and installs them (`content::shared` in Core). No file goes from the App to the server.
 
 use super::client::*;
-use super::publish::{
-    owned_shared_instance, remote_publish_content, shared_attachment,
-};
+use super::content::remote_shared_content;
+use super::publish::{owned_shared_instance, shared_attachment};
 use super::*;
 use crate::self_hosted::pool::store::PoolCore;
 use crate::state::VersionEnvironment;
@@ -95,8 +94,7 @@ pub async fn get_shared_instance_server_pack(
         ));
     }
 
-    let (version_ids, _) =
-        remote_publish_content(&version, true, &state).await?;
+    let (version_ids, _) = remote_shared_content(&version, &state).await?;
     let ids = version_ids.iter().map(String::as_str).collect::<Vec<_>>();
     let (versions, environments) = tokio::try_join!(
         CachedEntry::get_version_many(
@@ -159,7 +157,11 @@ pub async fn get_shared_instance_server_pack(
         ModLoader::Forge => Some("forge"),
         ModLoader::NeoForge => Some("neoforge"),
         ModLoader::Vanilla => None,
-    } {
+    }
+    // A vanilla version reads as Fabric with no loader version, for players; a server stays
+    // vanilla.
+    .filter(|_| !version.loader_version.is_empty())
+    {
         dependencies.insert(loader, version.loader_version.clone());
     }
 

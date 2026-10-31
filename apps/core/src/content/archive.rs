@@ -47,7 +47,7 @@ pub fn entries<R: Read + Seek>(
     let mut checked = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
         let entry = archive.by_index_raw(index)?;
-        let name = entry.name().to_owned();
+        let name = entry.name()?.into_owned();
         let refuse = |reason: String| ArchiveError::Entry {
             name: name.clone(),
             reason,

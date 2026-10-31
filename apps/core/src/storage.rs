@@ -137,7 +137,7 @@ impl Storage {
             owed,
             pulling: Mutex::default(),
             forwarder: HttpClient::builder(TokioExecutor::new()).build_http(),
-            http: reqwest::Client::builder()
+            http: crate::network::http()
                 .no_proxy()
                 .build()
                 .expect("a plain HTTP client builds"),

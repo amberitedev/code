@@ -245,7 +245,7 @@ async fn core_session_exists(
 
 /// This computer's name, as Core lists the session.
 fn device_name() -> String {
-    let name = whoami::fallible::hostname().unwrap_or_default();
+    let name = whoami::hostname().unwrap_or_default();
     let name = name.trim();
     if name.is_empty() {
         "Amberite App".into()

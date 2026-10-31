@@ -556,10 +556,13 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
-        let keys =
-            crate::access::keys::load(db.clone(), reqwest::Client::new(), None)
-                .await
-                .unwrap();
+        let keys = crate::access::keys::load(
+            db.clone(),
+            crate::network::http().build().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
         let dir = tempfile::tempdir().unwrap();
         Sync {
             storage: Arc::new(Storage::new(
@@ -571,7 +574,7 @@ mod tests {
                 Arc::new(tokio::sync::Notify::new()),
             )),
             db,
-            http: reqwest::Client::new(),
+            http: crate::network::http().build().unwrap(),
             backend_url: url,
             core_id,
             cert_fingerprint: "f".repeat(64),
@@ -727,11 +730,12 @@ mod tests {
         assert_eq!(changed.recv().await.unwrap(), Changed::Everyone);
         assert_eq!(sync.key().await, None);
         for table in ["access", "sessions"] {
-            let count: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-                    .fetch_one(&sync.db)
-                    .await
-                    .unwrap();
+            let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table}"
+            )))
+            .fetch_one(&sync.db)
+            .await
+            .unwrap();
             assert_eq!(count, 0, "{table}");
         }
         let servers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM servers")

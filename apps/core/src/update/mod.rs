@@ -595,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn answers_past_their_cap_are_refused_before_they_are_read_whole() {
-        let http = reqwest::Client::new();
+        let http = crate::network::http().build().unwrap();
         for say_length in [true, false] {
             let url =
                 serve_once(vec![b'x'; MAX_SIGNATURE + 1], say_length).await;

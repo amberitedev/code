@@ -58,9 +58,13 @@ async fn core() -> Core {
             .unwrap();
     }
     let signer = Signer::new("k1");
-    let keys = access::keys::load(db.clone(), reqwest::Client::new(), None)
-        .await
-        .unwrap();
+    let keys = access::keys::load(
+        db.clone(),
+        crate::network::http().build().unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
     keys.set(&signer.public_keys()).await;
     let backups = crate::backups::Backups::open(
         servers.paths().clone(),
@@ -87,7 +91,7 @@ async fn core() -> Core {
     let update = Arc::new(Updater::new(
         paths,
         db.clone(),
-        reqwest::Client::new(),
+        crate::network::http().build().unwrap(),
         String::new(),
     ));
     let state = Arc::new(AppState {
@@ -166,7 +170,7 @@ impl Core {
     }
 
     async fn count(&self, sql: &str) -> i64 {
-        sqlx::query_scalar(sql)
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
             .fetch_one(&self.state.db)
             .await
             .unwrap()

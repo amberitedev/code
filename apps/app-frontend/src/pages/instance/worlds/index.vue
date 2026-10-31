@@ -136,15 +136,9 @@
 						:playing-instance="playing"
 						:playing-world="worldsMatch(row.world, worldPlaying)"
 						:starting-instance="startingInstance"
-						:refreshing="
-							row.world.type === 'server' ? serverData[row.world.address]?.refreshing : undefined
-						"
-						:server-status="
-							row.world.type === 'server' ? serverData[row.world.address]?.status : undefined
-						"
-						:rendered-motd="
-							row.world.type === 'server' ? serverData[row.world.address]?.renderedMotd : undefined
-						"
+						:refreshing="getServerData(row.world)?.refreshing"
+						:server-status="getServerData(row.world)?.status"
+						:rendered-motd="getServerData(row.world)?.renderedMotd"
 						:game-mode="
 							row.world.type === 'singleplayer' ? GAME_MODES[row.world.game_mode] : undefined
 						"
@@ -223,6 +217,7 @@ import {
 	useReadyState,
 	useVIntl,
 } from '@modrinth/ui'
+import { autoToHTML } from '@sfirew/minecraft-motd-parser'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { platform } from '@tauri-apps/plugin-os'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -562,6 +557,40 @@ const worldsReveal = useGhostReveal(() => worldsReadyPending.value)
 
 const worlds = ref<World[]>([])
 const serverData = ref<Record<string, ServerData>>({})
+const headerServerData = computed<ServerData>(() => {
+	const status = instancePage.serverStatus.value
+	return {
+		refreshing: instancePage.serverStatusLoading.value,
+		status,
+		renderedMotd: status?.description ? autoToHTML(status.description) : undefined,
+	}
+})
+
+function isHeaderServerAddress(address: string) {
+	const headerAddress = instancePage.serverAddress.value
+	const normalizedHeaderAddress = headerAddress && normalizeServerAddress(headerAddress)
+	return (
+		instancePage.isServerInstance.value &&
+		!!normalizedHeaderAddress &&
+		normalizeServerAddress(address) === normalizedHeaderAddress
+	)
+}
+
+// Not a type guard: a `false` from it does not mean the world is not a server.
+function isHeaderServerWorld(world: World): boolean {
+	return world.type === 'server' && isHeaderServerAddress(world.address)
+}
+
+function getServerData(world: World): ServerData | undefined {
+	if (world.type !== 'server') return undefined
+	return isHeaderServerAddress(world.address)
+		? headerServerData.value
+		: serverData.value[world.address]
+}
+
+function manualPingWorlds() {
+	return worlds.value.filter((world) => !isHeaderServerWorld(world))
+}
 
 // Track servers_updated calls on Linux to prevent server ping spam
 const MAX_LINUX_REFRESHES = 3
@@ -587,7 +616,7 @@ watch(
 			// Manual refresh handles its own server pings to avoid double-pinging
 			if (!refreshingAll.value) {
 				void refreshServers(
-					worlds.value,
+					manualPingWorlds(),
 					serverData.value,
 					protocolVersion.value,
 					protocolVersionReady.value,
@@ -690,12 +719,16 @@ async function initWorldsTab() {
 
 	// Not only when the instance has worlds of its own: linked servers registered themselves in
 	// `serverData` before the protocol was known and are still waiting for their first ping.
-	void refreshServers(worlds.value, serverData.value, protocolVersion.value)
+	void refreshServers(manualPingWorlds(), serverData.value, protocolVersion.value)
 }
 
 void initWorldsTab()
 
 async function refreshServer(address: string) {
+	if (isHeaderServerAddress(address)) {
+		await instancePage.refreshServerStatus()
+		return
+	}
 	if (!serverData.value[address]) {
 		serverData.value[address] = {
 			refreshing: true,
@@ -738,7 +771,7 @@ async function refreshAllWorlds() {
 	refreshingAll.value = true
 	try {
 		// Show loading on server rows immediately while the list refreshes
-		for (const world of worlds.value) {
+		for (const world of manualPingWorlds()) {
 			if (world.type === 'server') {
 				if (!serverData.value[world.address]) {
 					serverData.value[world.address] = { refreshing: true }
@@ -749,12 +782,15 @@ async function refreshAllWorlds() {
 		}
 
 		await queryClient.invalidateQueries({ queryKey: instanceKeys.worlds(instance.value.id) })
-		await refreshServers(
-			worlds.value,
-			serverData.value,
-			protocolVersion.value,
-			protocolVersionReady.value,
-		)
+		await Promise.all([
+			refreshServers(
+				manualPingWorlds(),
+				serverData.value,
+				protocolVersion.value,
+				protocolVersionReady.value,
+			),
+			instancePage.refreshServerStatus(),
+		])
 	} finally {
 		refreshingAll.value = false
 	}
@@ -938,8 +974,8 @@ const filterOptions = computed(() => {
 			options.push({ id: 'vanilla', label: formatMessage(messages.vanillaFilter) })
 			options.push({ id: 'modded', label: formatMessage(messages.moddedFilter) })
 		}
-		const hasOnline = servers.some((x) => !!serverData.value[x.address]?.status)
-		const hasOffline = servers.some((x) => !serverData.value[x.address]?.status)
+		const hasOnline = servers.some((x) => !!getServerData(x)?.status)
+		const hasOffline = servers.some((x) => !getServerData(x)?.status)
 		if (hasOnline && hasOffline) {
 			options.push({ id: 'online', label: formatMessage(messages.onlineFilter) })
 			options.push({ id: 'offline', label: formatMessage(messages.offlineFilter) })
@@ -987,7 +1023,7 @@ const filteredRows = computed(() =>
 
 		let passesStatus = true
 		if (statusFilters.length > 0) {
-			const isOnline = !!serverData.value[x.address]?.status
+			const isOnline = !!getServerData(x)?.status
 			passesStatus =
 				(statusFilters.includes('online') && isOnline) ||
 				(statusFilters.includes('offline') && !isOnline)

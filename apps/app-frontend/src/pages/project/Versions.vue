@@ -1,8 +1,8 @@
 <template>
 	<div>
 		<ProjectPageVersions
-			:loaders="loaders"
-			:game-versions="gameVersions"
+			:loaders="loaderTags"
+			:game-versions="gameVersionTags"
 			:versions="versions"
 			:project="project"
 			:show-environment-column="appSettings.featureFlags.show_version_environment_column"
@@ -10,6 +10,31 @@
 		>
 			<template #actions="{ version }">
 				<IconButton
+					v-if="serverInstallContext"
+					v-tooltip="
+						serverSelectedVersionId === version.id
+							? formatMessage(commonMessages.selectedLabel)
+							: formatMessage(commonMessages.installButton)
+					"
+					type="quiet"
+					color="brand"
+					:label="
+						serverSelectedVersionId === version.id
+							? formatMessage(commonMessages.selectedLabel)
+							: formatMessage(commonMessages.installButton)
+					"
+					:disabled="
+						installing ||
+						serverInstalled ||
+						(!!serverSelectedVersionId && serverSelectedVersionId !== version.id)
+					"
+					@click.stop="() => install(version.id)"
+				>
+					<CheckIcon v-if="serverSelectedVersionId === version.id" />
+					<DownloadIcon v-else />
+				</IconButton>
+				<IconButton
+					v-else
 					v-tooltip="
 						!installed
 							? formatMessage(commonMessages.installButton)
@@ -62,8 +87,6 @@ import { useRoute } from 'vue-router'
 import { SwapIcon } from '@/assets/icons/index.js'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 
-import { useProjectTags } from './use-project-tags'
-
 const { formatMessage } = useVIntl()
 const appSettings = useAppSettings()
 
@@ -103,6 +126,26 @@ defineProps({
 		type: String,
 		default: null,
 	},
+	serverInstallContext: {
+		type: Boolean,
+		default: false,
+	},
+	serverInstalled: {
+		type: Boolean,
+		default: false,
+	},
+	serverSelectedVersionId: {
+		type: String,
+		default: null,
+	},
+	loaderTags: {
+		type: Array,
+		required: true,
+	},
+	gameVersionTags: {
+		type: Array,
+		required: true,
+	},
 })
 
 const route = useRoute()
@@ -119,8 +162,6 @@ function buildProjectHref(path) {
 	const qs = params.toString()
 	return qs ? `${path}?${qs}` : path
 }
-
-const { loaders, gameVersions } = useProjectTags()
 </script>
 
 <style scoped lang="scss">

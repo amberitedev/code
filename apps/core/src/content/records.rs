@@ -42,9 +42,9 @@ pub async fn files(
     db: impl SqliteExecutor<'_>,
     server_id: &str,
 ) -> sqlx::Result<Vec<ContentFile>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {FILE_COLUMNS} FROM content_files WHERE server_id = ? ORDER BY path"
-    ))
+    )))
     .bind(server_id)
     .fetch_all(db)
     .await
@@ -55,9 +55,9 @@ pub async fn file(
     server_id: &str,
     path: &str,
 ) -> sqlx::Result<Option<ContentFile>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {FILE_COLUMNS} FROM content_files WHERE server_id = ? AND path = ?"
-    ))
+    )))
     .bind(server_id)
     .bind(path)
     .fetch_optional(db)

@@ -119,9 +119,13 @@ mod tests {
     async fn keys(signer: &Signer) -> Keys {
         let db = db::memory().await;
         db::core_id(&db).await.unwrap();
-        let keys = crate::access::keys::load(db, reqwest::Client::new(), None)
-            .await
-            .unwrap();
+        let keys = crate::access::keys::load(
+            db,
+            crate::network::http().build().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
         keys.set(&signer.public_keys()).await;
         keys
     }

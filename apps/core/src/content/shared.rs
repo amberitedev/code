@@ -10,7 +10,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use sha1::Digest;
 use sharing_types::store::{FetchError, PoolCore, PoolObject, StoreClient};
 
 use super::{Content, Error, install::MAX_PACK};
@@ -182,7 +181,7 @@ fn zip(
         std::io::copy(&mut std::fs::File::open(fetched)?, &mut zip)?;
     }
     zip.finish().map_err(zip_error)?;
-    let mut hasher = sha1::Sha1::default();
-    std::io::copy(&mut std::fs::File::open(path)?, &mut hasher)?;
-    Ok(hex::encode(hasher.finalize()))
+    Ok(crate::installs::download::sha1_of(std::fs::File::open(
+        path,
+    )?)?)
 }

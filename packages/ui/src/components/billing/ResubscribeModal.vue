@@ -366,12 +366,14 @@ const region = computed(() =>
 )
 const regionFlag = computed(() =>
 	region.value
-		? (regionOverrides[region.value.shortcode]?.flag ??
+		? (regionOverrides[region.value.shortcode as keyof typeof regionOverrides]?.flag ??
 			`https://flagcdn.com/${region.value.country_code}.svg`)
 		: undefined,
 )
 const regionOverrideTitle = computed(() =>
-	region.value ? regionOverrides[region.value.shortcode]?.name : undefined,
+	region.value
+		? regionOverrides[region.value.shortcode as keyof typeof regionOverrides]?.name
+		: undefined,
 )
 const regionTitle = computed(() =>
 	regionOverrideTitle.value ? formatMessage(regionOverrideTitle.value) : region.value?.display_name,

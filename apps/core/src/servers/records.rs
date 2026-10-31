@@ -78,18 +78,20 @@ pub fn port_free(port: u16) -> bool {
 }
 
 pub async fn list(db: &SqlitePool) -> sqlx::Result<Vec<ServerRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM servers ORDER BY created_at, id"
-    ))
+    )))
     .fetch_all(db)
     .await
 }
 
 pub async fn get(db: &SqlitePool, id: &str) -> sqlx::Result<Option<ServerRow>> {
-    sqlx::query_as(&format!("SELECT {COLUMNS} FROM servers WHERE id = ?"))
-        .bind(id)
-        .fetch_optional(db)
-        .await
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLUMNS} FROM servers WHERE id = ?"
+    )))
+    .bind(id)
+    .fetch_optional(db)
+    .await
 }
 
 /// Create an unconfigured server on the lowest port of the server range that no server has and

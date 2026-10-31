@@ -61,7 +61,7 @@ mod tests {
     async fn stored_keys_survive_a_restart() {
         let db = db::memory().await;
         db::core_id(&db).await.unwrap();
-        let http = reqwest::Client::new();
+        let http = crate::network::http().build().unwrap();
         let signer = Signer::new("one");
         let keys = load(db.clone(), http.clone(), None).await.unwrap();
         keys.set(&signer.public_keys()).await;

@@ -2,6 +2,7 @@ import { AbstractModrinthClient } from '../core/abstract-client'
 import { ModrinthApiError } from '../core/errors'
 import type { RequestContext } from '../types/request'
 import {
+	type FileUploadMetadata,
 	isLocalFile,
 	type LocalFile,
 	type UploadHandle,
@@ -60,7 +61,7 @@ export abstract class XHRUploadClient extends AbstractModrinthClient {
 				const url = await resolveUrl()
 				const isFormData =
 					('formData' in options && options.formData instanceof FormData) ||
-					!!options.multipartField
+					('multipartField' in options && !!options.multipartField)
 				const baseHeaders = await this.defaultHeadersFor(options)
 				if (isFormData) {
 					delete baseHeaders['Content-Type']
@@ -207,7 +208,7 @@ export abstract class XHRUploadClient extends AbstractModrinthClient {
 			url: appendRequestParams(context.url, context.options.params),
 			headers: context.options.headers ?? {},
 			file,
-			multipartField: (context.metadata as UploadMetadata).multipartField,
+			multipartField: (context.metadata as FileUploadMetadata).multipartField,
 			signal: abortController.signal,
 			onProgress: (progress) => progressCallbacks.forEach((cb) => cb(progress)),
 		})

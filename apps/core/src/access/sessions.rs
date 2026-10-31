@@ -200,10 +200,12 @@ pub async fn get(
     id: &str,
     current: Option<&str>,
 ) -> sqlx::Result<Option<Session>> {
-    let row: Option<Row> = sqlx::query_as(&format!("{SESSION} WHERE s.id = ?"))
-        .bind(id)
-        .fetch_optional(db)
-        .await?;
+    let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "{SESSION} WHERE s.id = ?"
+    )))
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
     Ok(row.map(|row| session(row, current)))
 }
 
@@ -214,10 +216,10 @@ pub async fn list(
     current: Option<&str>,
     now: i64,
 ) -> sqlx::Result<Vec<Session>> {
-    let rows: Vec<Row> = sqlx::query_as(&format!(
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SESSION} WHERE (?1 IS NULL OR s.user_id = ?1) AND s.expires_at > ?2 \
          AND s.last_used_at > ?2 - ?3 ORDER BY s.user_id, s.created_at"
-    ))
+    )))
     .bind(user)
     .bind(now)
     .bind(IDLE_S)
@@ -248,10 +250,13 @@ mod tests {
             .await
             .unwrap();
         let signer = Signer::new("k1");
-        let keys =
-            crate::access::keys::load(db.clone(), reqwest::Client::new(), None)
-                .await
-                .unwrap();
+        let keys = crate::access::keys::load(
+            db.clone(),
+            crate::network::http().build().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
         keys.set(&signer.public_keys()).await;
         (db, keys, signer, core_id)
     }
@@ -286,11 +291,12 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.error, ErrorCode::NotInvited);
         for table in ["sessions", "used_tickets", "users", "activity"] {
-            let count: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-                    .fetch_one(&db)
-                    .await
-                    .unwrap();
+            let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table}"
+            )))
+            .fetch_one(&db)
+            .await
+            .unwrap();
             assert_eq!(count, 0, "{table}");
         }
     }

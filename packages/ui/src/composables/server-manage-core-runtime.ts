@@ -347,6 +347,11 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 					},
 					{ immediate: true },
 				),
+				watch(runtimeLease.socketGeneration, () => {
+					if (!shouldProcessEvent()) return
+					modrinthServersConsole.clear()
+					modrinthServersConsole.beginInitialLogHydration()
+				}),
 				watch(
 					runtimeLease.isSocketAuthIncorrect,
 					(authIncorrect) => {

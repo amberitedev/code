@@ -142,9 +142,9 @@ async fn queue(
 
 /// The oldest queued operation.
 pub async fn next_queued(db: &SqlitePool) -> sqlx::Result<Option<Operation>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OPERATION} FROM backup_operations WHERE state = 'queued' ORDER BY id LIMIT 1"
-    ))
+    )))
     .fetch_optional(db)
     .await
 }
@@ -153,9 +153,9 @@ pub async fn operation(
     db: &SqlitePool,
     id: i64,
 ) -> sqlx::Result<Option<Operation>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OPERATION} FROM backup_operations WHERE id = ?"
-    ))
+    )))
     .bind(id)
     .fetch_optional(db)
     .await
@@ -165,9 +165,9 @@ pub async fn operations(
     db: &SqlitePool,
     server_id: &str,
 ) -> sqlx::Result<Vec<Operation>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OPERATION} FROM backup_operations WHERE server_id = ? ORDER BY id"
-    ))
+    )))
     .bind(server_id)
     .fetch_all(db)
     .await
@@ -238,11 +238,12 @@ pub async fn finish(
 
 /// Operations a Core that stopped left running end as failed.
 pub async fn fail_interrupted(db: &SqlitePool) -> sqlx::Result<Vec<Operation>> {
-    let interrupted: Vec<Operation> = sqlx::query_as(&format!(
-        "SELECT {OPERATION} FROM backup_operations WHERE state = 'running'"
-    ))
-    .fetch_all(db)
-    .await?;
+    let interrupted: Vec<Operation> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {OPERATION} FROM backup_operations WHERE state = 'running'"
+        )))
+        .fetch_all(db)
+        .await?;
     for operation in &interrupted {
         finish(db, operation, Err("Core stopped while this ran")).await?;
     }
@@ -253,9 +254,9 @@ pub async fn backups(
     db: &SqlitePool,
     server_id: &str,
 ) -> sqlx::Result<Vec<Backup>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {BACKUP} FROM backups WHERE server_id = ? ORDER BY created_at DESC, rowid DESC"
-    ))
+    )))
     .bind(server_id)
     .fetch_all(db)
     .await
@@ -266,9 +267,9 @@ pub async fn backup(
     server_id: &str,
     id: &str,
 ) -> sqlx::Result<Option<Backup>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {BACKUP} FROM backups WHERE server_id = ? AND id = ?"
-    ))
+    )))
     .bind(server_id)
     .bind(id)
     .fetch_optional(db)
