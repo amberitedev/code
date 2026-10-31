@@ -20,7 +20,7 @@ bridged without App-side shims.
 A tab sends `{type: "invoke", id, cmd, args, options}` over its WebSocket. The App records the
 invoke as pending and evaluates the dispatcher (`native-bridge.js`) in the native webview. The
 dispatcher runs the real Tauri invoke and emits `{connectionId, id, status, payload}` on the single
-event `amberite-browser-bridge://response`. One permanent listener forwards it to the tab as
+event `browser-bridge://response`. One permanent listener forwards it to the tab as
 `{type: "response", id, status, payload}`.
 
 Every invoke gets exactly one response. When the native page cannot answer, the tab gets an error

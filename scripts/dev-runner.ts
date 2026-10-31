@@ -163,21 +163,19 @@ export function resolveStartOffset(input: {
 	const explicit = input.explicitOffset?.trim()
 	if (explicit) {
 		if (!/^\d+$/.test(explicit)) {
-			throw new DevRunnerError(
-				`AMBERITE_PORT_OFFSET must be a non-negative integer; received ${explicit}.`,
-			)
+			throw new DevRunnerError(`PORT_OFFSET must be a non-negative integer; received ${explicit}.`)
 		}
-		return { offset: Number(explicit), source: `AMBERITE_PORT_OFFSET=${explicit}` }
+		return { offset: Number(explicit), source: `PORT_OFFSET=${explicit}` }
 	}
 
 	const instance = input.devInstance?.trim()
 	if (instance) {
 		if (/^\d+$/.test(instance)) {
-			return { offset: Number(instance), source: `numeric AMBERITE_DEV_INSTANCE=${instance}` }
+			return { offset: Number(instance), source: `numeric DEV_INSTANCE=${instance}` }
 		}
 		return {
 			offset: (stableHash(instance) % MAX_HASH_OFFSET) + 1,
-			source: `hashed AMBERITE_DEV_INSTANCE=${instance}`,
+			source: `hashed DEV_INSTANCE=${instance}`,
 		}
 	}
 
@@ -216,23 +214,15 @@ export async function findFirstAvailableOffset(input: {
 
 export function createRuntimeEnvironment(input: {
 	readonly baseEnv: NodeJS.ProcessEnv
-	readonly paths: WorktreePaths
 	readonly ports: DevPorts
 }): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = { ...input.baseEnv }
 	delete env.HOST
 	delete env.PORT
-	// The dev Core reports the address it listens on, never one left in an env file.
-	delete env.AMBERITE_PUBLIC_URL
 	env.ACCOUNT_API_URL = `http://127.0.0.1:${input.ports.backend}`
 	env.VITE_ACCOUNT_API_URL = env.ACCOUNT_API_URL
 	env.ACCOUNT_WEB_URL = `http://127.0.0.1:${input.ports.accountWeb}`
-	return {
-		...env,
-		AMBERITE_DATA_DIR: input.paths.data,
-		AMBERITE_DEV_MODE: 'true',
-		AMBERITE_LOCAL_CORE_DATA_DIR: input.paths.coreData,
-	}
+	return env
 }
 
 /** The browser bridge URL an App prints once it is usable, if this log line is that one. */
@@ -272,8 +262,8 @@ async function main(): Promise<void> {
 	}
 	const input = parseInput(process.argv.slice(2), defaultScenarios)
 	const { offset: startOffset, source } = resolveStartOffset({
-		devInstance: process.env.AMBERITE_DEV_INSTANCE,
-		explicitOffset: process.env.AMBERITE_PORT_OFFSET,
+		devInstance: process.env.DEV_INSTANCE,
+		explicitOffset: process.env.PORT_OFFSET,
 		primaryPath: paths.primary,
 		worktreePath: paths.worktree,
 	})
@@ -292,13 +282,13 @@ async function main(): Promise<void> {
 		...readEnv(NodePath.join(paths.worktree, '.env.local')),
 		...process.env,
 	}
-	const env = createRuntimeEnvironment({ baseEnv: sharedEnv, paths, ports })
+	const env = createRuntimeEnvironment({ baseEnv: sharedEnv, ports })
 	if (!input.dryRun) {
 		const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
 		NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
 		if (!NodeFS.existsSync(secretPath))
 			NodeFS.writeFileSync(secretPath, NodeCrypto.randomBytes(32).toString('hex'), { mode: 0o600 })
-		env.AMBERITE_LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
+		env.LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
 		if (processLabelsForMode(input.mode).includes('backend')) {
 			prepareLocalBackend(paths, env)
 		}
@@ -599,7 +589,7 @@ export function createProcessSpecs(input: {
 	const coreEnv = {
 		...input.env,
 		ALLOWED_ORIGIN: `http://localhost:${input.ports.app}`,
-		AMBERITE_BIND_HOST: '127.0.0.1',
+		BIND_HOST: '127.0.0.1',
 		CORE_DATA_DIR: input.paths.coreData,
 		PORT: String(input.ports.core),
 	}
@@ -714,7 +704,7 @@ function createAppProcessSpec(input: {
 		cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 		env: {
 			...input.env,
-			RUST_LOG: 'theseus=warn,theseus_gui=warn,amberite_browser_bridge=info,webview=off',
+			RUST_LOG: 'theseus=warn,theseus_gui=warn,browser_bridge=info,webview=off',
 			THESEUS_CONFIG_DIR: dataDir,
 			WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
 		},
@@ -1421,7 +1411,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function prepareLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
 	const ticketKey = localTicketKey(NodePath.join(paths.data, 'backend'))
-	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.AMBERITE_LOCAL_DEV_SECRET}\nTICKET_KEY=${ticketKey}\n`
+	const variables = `LOCAL_DEV=true\nLOCAL_DEV_SECRET=${env.LOCAL_DEV_SECRET}\nTICKET_KEY=${ticketKey}\n`
 	NodeFS.writeFileSync(NodePath.join(paths.data, 'backend', '.dev.vars'), variables, {
 		mode: 0o600,
 	})

@@ -102,7 +102,7 @@ builds again.
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
 packaged build does not allow yet. The App signs in to a Core with a ticket on its first request
-and keeps that session in the OS keychain; set `AMBERITE_CORE_PROXY_LOG=1` before starting an App
+and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before starting an App
 to log the head of every request its Core proxy sends, with the session token left out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
@@ -187,15 +187,15 @@ derive a stable preferred offset from their path and add it to every port.
 
 Offset resolution, in order:
 
-1. `AMBERITE_PORT_OFFSET`, which must be a non-negative integer.
-2. `AMBERITE_DEV_INSTANCE`. A number is used directly; any other non-empty value is hashed.
+1. `PORT_OFFSET`, which must be a non-negative integer.
+2. `DEV_INSTANCE`. A number is used directly; any other non-empty value is hashed.
 3. `0` for the primary checkout, or a stable hash of the linked worktree path.
 
 The runner checks only the ports needed by the selected mode; `up` does not need the account
 website's. A full run shifts the App, Worker,
 and account website ports together. When a required port is occupied, the runner
 advances the complete applicable set until it finds an available one. To start Apps separately from
-an existing backend, use the same `AMBERITE_PORT_OFFSET` if that backend shifted from its preferred
+an existing backend, use the same `PORT_OFFSET` if that backend shifted from its preferred
 offset; read the ports in the runner output first.
 
 Treat the `[dev-runner]` output and `.data/runtime.json` as authoritative. The preferred ports are
