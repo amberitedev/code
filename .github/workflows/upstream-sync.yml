@@ -1,0 +1,121 @@
+name: Upstream sync
+
+# Once a day, merges modrinth/main into a new sync/upstream/N branch with conflict markers left in
+# place (scripts/upstream-sync.ts). The /upstream-sync skill picks the branch up, resolves it, and
+# opens the pull request. It finds this run's notes in the upstream-sync-N artifact.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: upstream-sync
+
+jobs:
+  sync:
+    name: Merge Modrinth
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the sync branch
+      pull-requests: read # find earlier sync pull requests
+    outputs:
+      branch: ${{ steps.next.outputs.branch }}
+      clean: ${{ steps.merge.outputs.clean }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Pick the next sync branch
+        id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote add modrinth https://github.com/modrinth/code
+          git fetch --quiet modrinth main
+          if git merge-base --is-ancestor modrinth/main HEAD; then
+            echo "Nothing new from Modrinth."
+            exit 0
+          fi
+
+          # "<branch> <state>" for every sync pull request, open or not.
+          prs=$(gh pr list --state all --limit 1000 --json headRefName,state \
+            --jq '.[] | select(.headRefName | startswith("sync/upstream/")) | "\(.headRefName) \(.state)"')
+          branches=$(git ls-remote --heads origin 'refs/heads/sync/upstream/*' | sed 's|.*refs/heads/||')
+
+          if grep -q ' OPEN$' <<<"$prs"; then
+            echo "A sync pull request is still open."
+            exit 0
+          fi
+          for branch in $branches; do
+            if ! grep -q "^$branch " <<<"$prs"; then
+              echo "$branch has no pull request yet."
+              exit 0
+            fi
+          done
+
+          last=$( { cut -d' ' -f1 <<<"$prs"; echo "$branches"; } \
+            | sed -n 's|^sync/upstream/\([0-9][0-9]*\)$|\1|p' | sort -n | tail -1)
+          n=$(( ${last:-0} + 1 ))
+          echo "n=$n" >> "$GITHUB_OUTPUT"
+          echo "branch=sync/upstream/$n" >> "$GITHUB_OUTPUT"
+
+      - if: steps.next.outputs.branch
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+      - if: steps.next.outputs.branch
+        run: corepack enable
+      - if: steps.next.outputs.branch
+        uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
+        with:
+          cache: false
+
+      - name: Merge
+        id: merge
+        if: steps.next.outputs.branch
+        env:
+          BRANCH: ${{ steps.next.outputs.branch }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          mkdir -p "$RUNNER_TEMP/sync"
+          node scripts/upstream-sync.ts > "$RUNNER_TEMP/sync/summary.json"
+          echo "clean=$(jq -r .clean "$RUNNER_TEMP/sync/summary.json")" >> "$GITHUB_OUTPUT"
+          git push origin "$BRANCH"
+
+      - name: Collect upstream notes
+        if: steps.next.outputs.branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out="$RUNNER_TEMP/sync"
+          base=$(jq -r .base "$out/summary.json")
+          git log --no-merges --format='%h %s' "$base..modrinth/main" > "$out/commits.txt"
+          { grep -o '(#[0-9][0-9]*)' "$out/commits.txt" || true; } | tr -d '(#)' | sort -un \
+            | while read -r number; do
+                gh api "repos/modrinth/code/pulls/$number" --jq '{number, title, body, url: .html_url}'
+              done | jq -s . > "$out/prs.json"
+          git diff "$base" modrinth/main -- packages/blog/changelog.ts > "$out/changelog.diff"
+
+      - if: steps.next.outputs.branch
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upstream-sync-${{ steps.next.outputs.n }}
+          path: ${{ runner.temp }}/sync
+
+  # A push made with GITHUB_TOKEN starts no workflows, so CI is called directly for a clean merge.
+  ci:
+    name: CI
+    needs: sync
+    if: needs.sync.outputs.clean == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.sync.outputs.branch }}
