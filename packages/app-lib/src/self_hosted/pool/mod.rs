@@ -2,7 +2,7 @@
 //! shared file and stores it on a Core; a member fetches it back from one of the version's
 //! holders and checks it twice, against C and then P.
 
-pub use sharing_types::{crypto, store};
+pub use sharing_client::{crypto, store};
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;

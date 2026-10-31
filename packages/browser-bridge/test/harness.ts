@@ -26,7 +26,7 @@ type BrowserBridgeTestApi = {
 }
 
 export type BrowserWindow = Record<string, unknown> & {
-	__AMBERITE_BROWSER_BRIDGE_TEST__: BrowserBridgeTestApi
+	__BROWSER_BRIDGE_TEST__: BrowserBridgeTestApi
 	__TAURI_INTERNALS__: {
 		callbacks: Map<number, (value: unknown) => unknown>
 		convertFileSrc: (path: string, protocol?: string) => string
@@ -106,8 +106,8 @@ export async function installBrowserBridge(): Promise<{
 	window: BrowserWindow
 }> {
 	const window = {
-		__AMBERITE_BROWSER_BRIDGE_CONFIG__: {
-			assetPath: '/__amberite_browser_bridge_asset',
+		__BROWSER_BRIDGE_CONFIG__: {
+			assetPath: '/__browser_bridge_asset',
 			currentWebviewLabel: 'main',
 			currentWindowLabel: 'main',
 			os: {
@@ -121,7 +121,7 @@ export async function installBrowserBridge(): Promise<{
 			},
 			pathDelimiter: ';',
 			pathSeparator: '\\',
-			wsPath: '/__amberite_browser_bridge_ws',
+			wsPath: '/__browser_bridge_ws',
 		},
 		crypto: globalThis.crypto,
 		location: {
@@ -152,7 +152,7 @@ export async function installBrowserBridge(): Promise<{
 	NodeVM.runInNewContext(readSource('browser-bridge.js'), context, {
 		filename: 'browser-bridge.js',
 	})
-	await window.__AMBERITE_BROWSER_BRIDGE_TEST__.ready
+	await window.__BROWSER_BRIDGE_TEST__.ready
 	const socket = MockWebSocket.latest
 	if (!socket) throw new Error('Browser bridge did not create a WebSocket')
 	return { socket, window }
@@ -212,7 +212,7 @@ export function installNativeBridge(handler: (invocation: NativeInvocation) => u
 		},
 		{ filename: 'native-bridge.js' },
 	)
-	const dispatcher = window.__AMBERITE_BROWSER_BRIDGE_NATIVE__ as NativeDispatcher
+	const dispatcher = window.__BROWSER_BRIDGE_NATIVE__ as NativeDispatcher
 	return { callbacks, dispatcher, emitted, invocations, window }
 }
 

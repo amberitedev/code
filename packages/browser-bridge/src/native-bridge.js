@@ -2,7 +2,7 @@
 ;(function installAmberiteNativeBridgeDispatcher() {
 	'use strict'
 
-	if (window.__AMBERITE_BROWSER_BRIDGE_NATIVE__) return
+	if (window.__BROWSER_BRIDGE_NATIVE__) return
 
 	const TAG = '__amberiteBrowserBridge'
 	const callbackIds = new Map()
@@ -171,7 +171,7 @@
 		}
 	}
 
-	Object.defineProperty(window, '__AMBERITE_BROWSER_BRIDGE_NATIVE__', {
+	Object.defineProperty(window, '__BROWSER_BRIDGE_NATIVE__', {
 		value: { clear, dispatch, invoke, unregister },
 	})
 })()

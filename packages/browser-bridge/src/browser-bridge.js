@@ -4,7 +4,7 @@
 
 	if (window.__TAURI_INTERNALS__?.invoke) return
 
-	const config = window.__AMBERITE_BROWSER_BRIDGE_CONFIG__
+	const config = window.__BROWSER_BRIDGE_CONFIG__
 	if (!config) throw new Error('Amberite browser bridge configuration is missing')
 
 	const TAG = '__amberiteBrowserBridge'
@@ -220,7 +220,7 @@
 			version: config.os.version,
 		},
 	})
-	Object.defineProperty(window, '__AMBERITE_BROWSER_BRIDGE_TEST__', {
+	Object.defineProperty(window, '__BROWSER_BRIDGE_TEST__', {
 		value: { fromWire, ready, socket: () => socket, toWire },
 	})
 })()

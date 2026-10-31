@@ -20,7 +20,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// `PORT`. The HTTPS API port.
     pub port: u16,
-    /// `AMBERITE_BIND_HOST`. Every interface by default: the API is reachable from the internet.
+    /// `BIND_HOST`. Every interface by default: the API is reachable from the internet.
     pub bind: IpAddr,
     /// `ACCOUNT_API_URL`. The Amberite backend. `None` until the hosted backend has an address;
     /// a Core without one serves its API but cannot pair or sync.
@@ -59,10 +59,9 @@ impl Config {
             config.port =
                 port.parse().wrap_err("PORT must be a port number")?;
         }
-        if let Some(bind) = env("AMBERITE_BIND_HOST") {
-            config.bind = bind
-                .parse()
-                .wrap_err("AMBERITE_BIND_HOST must be an IP address")?;
+        if let Some(bind) = env("BIND_HOST") {
+            config.bind =
+                bind.parse().wrap_err("BIND_HOST must be an IP address")?;
         }
         if let Some(url) = env("ACCOUNT_API_URL") {
             config.backend_url = Some(url);

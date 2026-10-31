@@ -51,9 +51,9 @@ describe.sequential('Amberite Tauri API inventory', () => {
 			'utf8',
 		)
 
-		expect(appCargo).toContain('[dependencies.amberite-browser-bridge]')
-		expect(appCargo).toMatch(/\[dependencies\.amberite-browser-bridge\][\s\S]*?optional = true/)
-		expect(appCargo).toContain('browser-bridge = ["dep:amberite-browser-bridge"]')
+		expect(appCargo).toContain('[dependencies.browser-bridge]')
+		expect(appCargo).toMatch(/\[dependencies\.browser-bridge\][\s\S]*?optional = true/)
+		expect(appCargo).toContain('browser-bridge = ["dep:browser-bridge"]')
 		expect(appMain).toContain('#[cfg(all(debug_assertions, feature = "browser-bridge"))]')
 		expect(appPackage).toMatch(/tauri dev --features [\w,-]*browser-bridge/)
 		expect(devRunner).toMatch(

@@ -53,7 +53,7 @@ urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
 
-[dependencies.amberite-browser-bridge]
+[dependencies.browser-bridge]
 path = "../../packages/browser-bridge"
 optional = true
 
@@ -86,7 +86,7 @@ features = [
 # by default Tauri runs in production mode
 # when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
 default = ["custom-protocol"]
-browser-bridge = ["dep:amberite-browser-bridge"]
+browser-bridge = ["dep:browser-bridge"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
