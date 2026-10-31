@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
+import { createLocalFileUploader } from '@/platform/adapters/local-file-upload'
 
 const appVersion = getVersion()
 
@@ -56,6 +57,7 @@ export const apiClient: TauriModrinthClient = new TauriModrinthClient({
 	},
 	archonBaseUrl: config.archonBaseUrl,
 	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
+	localFileUploader: createLocalFileUploader(),
 	features: [
 		...(config.accountApiUrl
 			? [

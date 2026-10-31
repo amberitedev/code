@@ -11,7 +11,7 @@ chacha20poly1305 = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 hkdf = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
 # The ring backend avoids aws-lc-sys's CMake build on Windows, as in Core.
 rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }

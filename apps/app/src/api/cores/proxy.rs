@@ -34,7 +34,6 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::TokioIo;
-use rand::{RngCore, rngs::OsRng};
 use tokio::{io::copy_bidirectional, net::TcpListener, sync::Mutex};
 
 use super::{
@@ -57,10 +56,10 @@ pub struct Proxy {
     pub capability: String,
 }
 
-/// A new capability: 32 random bytes from the OS, in hex.
+/// A new capability: 32 random bytes from rand's OS-seeded CSPRNG, in hex.
 pub fn capability() -> String {
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

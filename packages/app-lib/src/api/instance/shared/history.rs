@@ -39,7 +39,8 @@ pub async fn get_shared_instance_version(
     .filter(|file| file.file_type == CONFIG_FILE_TYPE)
     .map(|file| file.file_name)
     .collect();
-    let (version_ids, external_files) = remote_shared_content(&after)?;
+    let (version_ids, external_files) =
+        super::content::remote_shared_content(&after, &state).await?;
     Ok(SharedInstanceVersionDetails {
         content_count: version_ids.len() + external_files.len(),
         game_version: after.game_version,
@@ -82,7 +83,8 @@ pub async fn restore_shared_instance_version(
         &state,
     )
     .await?;
-    crate::install::update_shared_instance(instance_id.to_string(), data).await
+    crate::install::update_shared_instance(instance_id.to_string(), Some(data))
+        .await
 }
 
 async fn attachment(

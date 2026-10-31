@@ -51,7 +51,14 @@ fn entries(zip: &Path) -> Vec<String> {
     let mut archive =
         zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
     let mut names: Vec<String> = (0..archive.len())
-        .map(|index| archive.by_index(index).unwrap().name().to_owned())
+        .map(|index| {
+            archive
+                .by_index(index)
+                .unwrap()
+                .name()
+                .unwrap()
+                .into_owned()
+        })
         .collect();
     names.sort();
     names

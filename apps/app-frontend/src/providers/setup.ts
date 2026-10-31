@@ -7,7 +7,6 @@ import type { InstanceIconConfig } from '@/helpers/types'
 import type { AppEvents } from './app-events'
 import { setupOnboardingChecklistProvider } from './onboarding-checklist'
 import { setupCreationModal } from './setup/creation-modal'
-import { setupFileDownloadProvider } from './setup/file-download'
 import { setupFileDropProvider } from './setup/file-drop'
 import { setupFilePickerProvider } from './setup/file-picker'
 import { setupImageViewerEditorProvider } from './setup/image-viewer-editor'
@@ -26,7 +25,6 @@ export function setupProviders(
 	const tags = setupTagsProvider(notificationManager)
 	setupFileDropProvider()
 	setupFilePickerProvider()
-	setupFileDownloadProvider(client)
 	setupImageViewerEditorProvider()
 	setupInstanceImportProvider(notificationManager)
 	setupInstanceServerSourceProvider()

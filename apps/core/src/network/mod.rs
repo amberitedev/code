@@ -8,6 +8,14 @@ pub mod public_ip;
 pub mod router;
 pub mod tls;
 
+/// Where every reqwest client in Core starts. reqwest is built without a TLS provider so Core
+/// stays on ring, and it panics without one installed; installing it here rather than only in
+/// `main` covers tests too.
+pub fn http() -> reqwest::ClientBuilder {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+}
+
 use std::net::IpAddr;
 
 /// Loopback, private network, and link-local addresses: not reachable from the internet.

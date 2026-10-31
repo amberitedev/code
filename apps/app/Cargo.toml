@@ -10,7 +10,7 @@ license = "GPL-3.0-only"
 [dependencies]
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
-async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
+
 base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
@@ -52,6 +52,7 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
+zip = { workspace = true }
 
 [dependencies.browser-bridge]
 path = "../../packages/browser-bridge"
@@ -63,6 +64,7 @@ features = ["devtools", "macos-private-api", "protocol-asset"]
 
 [dev-dependencies]
 rcgen = "0.14.7"
+rustls = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]

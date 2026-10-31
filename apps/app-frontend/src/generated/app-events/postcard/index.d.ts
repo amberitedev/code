@@ -96,6 +96,7 @@ export type CommandPayload =
 	  }
 	| { tag: 'InstallSharedInstanceInvite'; value: { invite_id: string } }
 	| { tag: 'RunMRPack'; value: { path: string } }
+	| { tag: 'PlayHostingServer'; value: { server_id: string; world_id: string } }
 export type ProcessPayload = {
 	instance_id: string
 	uuid: string

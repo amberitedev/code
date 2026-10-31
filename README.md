@@ -20,9 +20,9 @@ If you're not a developer and you've stumbled upon this repository, you can acce
 
 This repository contains several projects. For detailed development information, please refer to their respective guides:
 
-| Project       | Directory       | Guide                                                     |
-| ------------- | --------------- | --------------------------------------------------------- |
-| App           | `apps/app`      | [Guide](https://docs.modrinth.com/contributing/theseus/)  |
+| Project | Directory  | Guide                                                    |
+| ------- | ---------- | -------------------------------------------------------- |
+| App     | `apps/app` | [Guide](https://docs.modrinth.com/contributing/theseus/) |
 
 Shared libraries live in `packages/`.
 

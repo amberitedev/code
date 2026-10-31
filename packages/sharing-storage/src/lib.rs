@@ -21,6 +21,14 @@ pub mod space;
 mod tar;
 mod tickets;
 
+/// Where every reqwest client in the store starts. reqwest is built without a TLS provider so
+/// the store stays on ring, and it panics without one installed; installing it here covers
+/// tests too.
+pub(crate) fn http() -> reqwest::ClientBuilder {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+}
+
 use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -357,7 +365,7 @@ pub async fn main(args: Args) -> Result<()> {
         .try_init();
     let backend_url =
         Some(args.backend_url).filter(|url| !url.is_empty() && url != "none");
-    let http = reqwest::Client::builder()
+    let http = http()
         .user_agent(concat!("copal-store/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .build()?;

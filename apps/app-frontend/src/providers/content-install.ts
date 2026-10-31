@@ -6,6 +6,7 @@ import {
 	createContext,
 	defineMessage,
 	getLatestMatchingInstallVersion,
+	newestVersionForChannel,
 	useVIntl,
 } from '@modrinth/ui'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -102,16 +103,26 @@ function isVersionCompatible(
 function findPreferredVersion(
 	versions: Labrinth.Versions.v2.Version[],
 	project: Labrinth.Projects.v2.Project,
-	instance: Pick<GameInstance, 'game_version' | 'loader'>,
+	// Install candidates carry no update channel; those fall back to release.
+	instance: Pick<GameInstance, 'game_version' | 'loader'> &
+		Partial<Pick<GameInstance, 'update_channel'>>,
 ) {
 	const projectType = project.project_type ?? 'mod'
+	const channel = instance.update_channel ?? 'release'
 
 	return (
-		versions.find(
-			(v) =>
-				v.game_versions.includes(instance.game_version) &&
-				(projectType === 'mod' ? v.loaders.includes(instance.loader) : true),
-		) ?? versions.find((v) => isVersionCompatible(v, project, instance))
+		newestVersionForChannel(
+			versions.filter(
+				(v) =>
+					v.game_versions.includes(instance.game_version) &&
+					(projectType === 'mod' ? v.loaders.includes(instance.loader) : true),
+			),
+			channel,
+		) ??
+		newestVersionForChannel(
+			versions.filter((v) => isVersionCompatible(v, project, instance)),
+			channel,
+		)
 	)
 }
 

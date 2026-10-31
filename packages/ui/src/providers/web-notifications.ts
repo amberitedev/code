@@ -65,6 +65,7 @@ export abstract class AbstractWebNotificationManager {
 	handleError = (error: unknown): void => {
 		if (isCancelledError(error)) return
 
+		console.error(error)
 		this.addNotification({
 			title: 'An error occurred',
 			text: error instanceof Error ? error.message : String(error),

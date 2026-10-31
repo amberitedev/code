@@ -48,9 +48,9 @@
 		<div class="flex flex-col gap-4 p-6">
 			<div
 				v-if="projectInstallContext"
-				class="sticky top-0 z-20 -mx-6 -mt-6 rounded-tl-[--radius-xl] border-0 border-b border-solid bg-surface-1 px-3 py-4 border-surface-5"
+				class="sticky top-0 z-20 -mx-6 -mt-6 rounded-tl-[--radius-xl] border-0 border-b border-solid bg-surface-1 px-6 py-4 border-surface-5"
 			>
-				<BrowseInstallHeader :install-context="projectInstallContext" />
+				<BrowseInstallHeader :install-context="projectHeaderInstallContext" />
 			</div>
 			<InstanceIndicator v-if="instance && !projectInstallContext" :instance="instance" />
 			<template v-if="headerProject">
@@ -192,7 +192,8 @@
 					]"
 				/>
 				<RouterView
-					v-if="data && route.path.startsWith('/project')"
+					v-if="data"
+					:route="displayedProjectRoute"
 					:project="data"
 					:versions="versions"
 					:members="members"
@@ -201,6 +202,11 @@
 					:installed="installed"
 					:installing="installing"
 					:installed-version="installedVersion"
+					:server-install-context="serverProjectInstallContext"
+					:server-installed="serverProjectInstalled"
+					:server-selected-version-id="serverSelectedVersionId"
+					:loader-tags="allLoaders ?? []"
+					:game-version-tags="allGameVersions ?? []"
 				/>
 			</template>
 			<template v-else>{{ formatMessage(messages.loadError) }}</template>
@@ -215,7 +221,10 @@
 			</template>
 		</ContextMenu>
 		<CreationFlowModal
-			v-if="serverInstallContent.isServerContext.value && data?.project_type === 'modpack'"
+			v-if="
+				serverInstallContent.isServerContext.value &&
+				serverInstallContent.serverFlowFrom.value !== 'onboarding'
+			"
 			ref="serverSetupModalRef"
 			:type="
 				serverInstallContent.serverFlowFrom.value === 'reset-server'
@@ -225,10 +234,9 @@
 			:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper', 'purpur']"
 			:show-snapshot-toggle="true"
 			:on-back="serverInstallContent.onServerFlowBack"
-			:search-modpacks="serverInstallContent.searchServerModpacks"
 			:get-project-versions="serverInstallContent.getServerProjectVersions"
 			:get-loader-manifest="getLoaderManifest"
-			@hide="() => {}"
+			@hide="serverInstallContent.onServerFlowHide"
 			@browse-modpacks="() => {}"
 			@create="serverInstallContent.handleServerModpackFlowCreate"
 		/>
@@ -284,12 +292,9 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons/index.js'
 import InstanceIndicator from '@/components/ui/InstanceIndicator.vue'
-import {
-	fetchCachedServerStatus,
-	getFreshCachedServerStatus,
-} from '@/composables/instances/use-server-status-query'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
+import { fetchCachedServerStatus, getFreshCachedServerStatus } from '@/features/servers/queries'
 import {
 	get_organization,
 	get_project,
@@ -308,9 +313,9 @@ import {
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
 import { get_by_instance_id } from '@/helpers/process'
 import { getServerAddress } from '@/helpers/worlds'
+import { useServerInstallContent } from '@/platform/adapters/browse/server-install-content'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
-import { createServerInstallContent } from '@/providers/setup/server-install-content'
 import { provideBreadcrumbParent, useBreadcrumb } from '@/shared/breadcrumbs'
 
 import { useProjectTags } from './use-project-tags'
@@ -321,6 +326,7 @@ const { handleError } = injectNotificationManager()
 const { install: installVersion } = injectContentInstall()
 const route = useRoute()
 const router = useRouter()
+
 const displayedProjectRoute = shallowRef(router.currentRoute.value)
 watch(
 	() => router.currentRoute.value,
@@ -455,7 +461,10 @@ const serverStatusOnline = ref(false)
 const serverInstancePath = ref(null)
 const serverPlaying = ref(false)
 const serverSetupModalRef = ref(null)
-const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
+const serverInstallContent = useServerInstallContent({
+	serverSetupModalRef,
+	inheritBreadcrumbServer: true,
+})
 
 serverInstallContent.watchServerContextChanges()
 serverInstallContent.initServerContext().catch(handleError)
@@ -494,7 +503,7 @@ function buildProjectHref(path, extraQuery = {}) {
 function buildBrowseHref(path) {
 	const params = new URLSearchParams()
 	for (const [key, val] of Object.entries(route.query)) {
-		if (key === 'b') continue
+		if (key === 'b' || key === 'g' || key === 'l') continue
 		if (Array.isArray(val)) {
 			for (const v of val) params.append(key, v)
 		} else if (val) {
@@ -514,6 +523,7 @@ const projectGalleryHref = computed(() => buildProjectHref(`/project/${route.par
 const projectBrowseBackUrl = computed(() => {
 	const browsePath = route.query.b
 	if (typeof browsePath === 'string' && browsePath.startsWith('/browse/')) return browsePath
+	if (serverInstallContent.isServerContext.value) return serverInstallContent.serverBackUrl.value
 	const instanceId = route.query.i
 	if (typeof instanceId === 'string' && instanceId) {
 		return `/instance/${encodeURIComponent(instanceId)}`
@@ -521,19 +531,21 @@ const projectBrowseBackUrl = computed(() => {
 	const type = data.value?.project_type ? `${data.value.project_type}` : 'mod'
 	return buildBrowseHref(`/browse/${type}`)
 })
-const projectBackLabel = computed(() =>
-	typeof route.query.i === 'string' && typeof route.query.b !== 'string'
+const projectBackLabel = computed(() => {
+	if (typeof route.query.b === 'string') return formatMessage(messages.backToBrowse)
+	if (serverInstallContent.isServerContext.value) return serverInstallContent.serverBackLabel.value
+	return typeof route.query.i === 'string'
 		? formatMessage(messages.backToInstance)
-		: formatMessage(messages.backToBrowse),
-)
+		: formatMessage(messages.backToBrowse)
+})
 
 const projectInstallContext = computed(() => {
 	const serverData = serverInstallContent.serverContextServerData.value
 	if (serverData) {
 		return {
 			name: serverData.name,
-			loader: serverData.loader ?? '',
-			gameVersion: serverData.mc_version ?? '',
+			loader: serverInstallContent.serverContextPlatform.value.loader ?? '',
+			gameVersion: serverInstallContent.serverContextPlatform.value.gameVersion ?? '',
 			serverId: serverInstallContent.serverIdQuery.value,
 			upstream: serverData.upstream,
 			iconSrc: null,
@@ -567,22 +579,50 @@ const projectInstallContext = computed(() => {
 	return null
 })
 
+/**
+ * Going back from a project returns to browse, where the selection is still shown, so the header
+ * skips the "selected projects not installed yet" prompt that would otherwise leave to the server.
+ */
+const projectHeaderInstallContext = computed(() => {
+	const context = projectInstallContext.value
+	if (!context) return null
+	return {
+		...context,
+		selectedProjects: [],
+		isInstallingSelected: false,
+	}
+})
+
 const serverProjectInstallContext = computed(
 	() =>
 		!!serverInstallContent.serverContextServerData.value &&
-		['modpack', 'mod', 'plugin', 'datapack'].includes(data.value?.project_type),
+		['modpack', 'mod', 'plugin', 'datapack', 'resourcepack', 'shader'].includes(
+			data.value?.project_type,
+		),
 )
 const serverProjectSelected = computed(
-	() => !!data.value && serverInstallContent.queuedServerInstallProjectIds.value.has(data.value.id),
+	() =>
+		!serverInstallContent.isSetupServerContext.value &&
+		!!data.value &&
+		serverInstallContent.queuedServerInstallProjectIds.value.has(data.value.id),
 )
 const serverProjectInstalled = computed(
 	() =>
+		!serverInstallContent.isSetupServerContext.value &&
 		!!data.value &&
 		(serverInstallContent.serverContentProjectIds.value.has(data.value.id) ||
 			serverInstallContent.serverContextServerData.value?.upstream?.project_id === data.value.id),
 )
+const serverSelectedVersionId = computed(() =>
+	serverProjectInstallContext.value && serverProjectSelected.value
+		? (serverInstallContent.getQueuedServerInstallPlans().get(data.value.id)?.versionId ?? null)
+		: null,
+)
 const installButtonLoading = computed(
-	() => installing.value || serverInstallContent.isInstallingQueuedServerInstalls.value,
+	() =>
+		installing.value ||
+		serverInstallContent.isInstallingQueuedServerInstalls.value ||
+		serverInstallContent.activeServerModpackInstallProjectId.value === data.value?.id,
 )
 const installButtonValidating = computed(
 	() =>
@@ -966,19 +1006,30 @@ async function install(version) {
 					icon_url: data.value.icon_url,
 				},
 				contentType,
-				mode: contentType === 'modpack' ? 'immediate' : 'queue',
+				mode:
+					contentType === 'modpack' || serverInstallContent.isSetupServerContext.value
+						? 'immediate'
+						: 'queue',
 				selectedFilters: [],
 				providedFilters: [],
 				overriddenProvidedFilterTypes: [],
-				targetPreferences: getTargetInstallPreferences(
-					{
-						gameVersion: serverInstallContent.serverContextServerData.value?.mc_version,
-						loader: serverInstallContent.serverContextServerData.value?.loader,
-					},
-					contentType,
-				),
+				targetPreferences: serverInstallContent.isSetupServerContext.value
+					? {}
+					: getTargetInstallPreferences(
+							{
+								gameVersion: serverInstallContent.serverContextPlatform.value.gameVersion,
+								loader: serverInstallContent.serverContextPlatform.value.loader,
+							},
+							contentType,
+						),
+				updateChannel: version ? undefined : await serverInstallContent.getServerUpdateChannel(),
 				// Versions load after the header, so an early click waits for them here.
-				getProjectVersions: () => queryClient.fetchQuery(projectVersionsQuery(data.value)),
+				getProjectVersions: async () => {
+					const projectVersions = await queryClient.fetchQuery(projectVersionsQuery(data.value))
+					return version
+						? projectVersions.filter((candidate) => candidate.id === version)
+						: projectVersions
+				},
 				queue: {
 					get: serverInstallContent.getQueuedServerInstallPlans,
 					set: serverInstallContent.setQueuedServerInstallPlans,
@@ -986,6 +1037,7 @@ async function install(version) {
 				install: (plan) =>
 					serverInstallContent.openServerModpackInstallFlow({
 						projectId: plan.projectId,
+						contentType: plan.contentType,
 						versionId: plan.versionId,
 						name: plan.project.title ?? plan.project.name ?? data.value.title,
 						iconUrl: plan.project.icon_url ?? undefined,

@@ -116,7 +116,7 @@ pub fn client() -> reqwest::Result<reqwest::Client> {
 
 /// The timeouts and user agent of every Core client.
 pub fn builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
+    crate::network::http()
         .user_agent(concat!(
             "amberite/copal/",
             env!("CARGO_PKG_VERSION"),
@@ -334,7 +334,14 @@ fn staging_path(path: &Path) -> PathBuf {
 /// The SHA-1 of everything `reader` holds, hex encoded.
 pub fn sha1_of(mut reader: impl std::io::Read) -> std::io::Result<String> {
     let mut hasher = sha1::Sha1::new();
-    std::io::copy(&mut reader, &mut hasher)?;
+    let mut buffer = vec![0; 64 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
     Ok(hex::encode(hasher.finalize()))
 }
 

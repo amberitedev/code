@@ -29,9 +29,6 @@
   "billing.resubscribe-modal.cancel": {
     "defaultMessage": "Anuluj"
   },
-  "billing.resubscribe-modal.cpus": {
-    "defaultMessage": "{sharedCpus} współdzielonych procesorów"
-  },
   "billing.resubscribe-modal.description": {
     "defaultMessage": "Zamierzasz ponownie subskrybować <server-name>{serverName}</server-name>. Twoja subskrypcja zostanie ponownie aktywowana i twój serwer będzie pracował bez przerywania."
   },
@@ -44,23 +41,8 @@
   "billing.resubscribe-modal.failed-load": {
     "defaultMessage": "Nie udało się załadować szczegółów subskrypcji."
   },
-  "billing.resubscribe-modal.interval": {
-    "defaultMessage": "{intervalOption, select, fiveDays {/5 dni} monthly {miesięcznie} quarterly {kwartalnie} yearly {rocznie} other {{interval}}}"
-  },
-  "billing.resubscribe-modal.next-charge": {
-    "defaultMessage": "Następna opłata zostanie pobrana dnia <charge-date>{date}</charge-date>."
-  },
-  "billing.resubscribe-modal.plan-label": {
-    "defaultMessage": "Plan"
-  },
-  "billing.resubscribe-modal.ram": {
-    "defaultMessage": "{ramGb} GB pamięci RAM"
-  },
   "billing.resubscribe-modal.resubscribe": {
     "defaultMessage": "Odnów subskrypcję"
-  },
-  "billing.resubscribe-modal.storage": {
-    "defaultMessage": "{storageGb} GB miejsca na dysku"
   },
   "billing.resubscribe-modal.title": {
     "defaultMessage": "Wznów subskrypcję serwera"
@@ -359,9 +341,6 @@
   "content.card.synced": {
     "defaultMessage": "Synchronizowana między instancjami"
   },
-  "content.card.uploaded": {
-    "defaultMessage": "Przesłano"
-  },
   "content.confirm-bulk-update.admonition-body": {
     "defaultMessage": "Czy na pewno chcesz zaktualizować {count, plural, one {# projekt} few {# projekty} other {# projektów}} do {count, plural, one {jego najnowszej} other {ich najnowszych}} wersji? Zalecane jest aktualizowanie modów jeden po drugim."
   },
@@ -460,9 +439,6 @@
   },
   "content.diff-modal.added-count": {
     "defaultMessage": "Dodano {count}"
-  },
-  "content.diff-modal.config-files-updated": {
-    "defaultMessage": "Zmieniono pliki konfiguracji"
   },
   "content.diff-modal.diff-type.added": {
     "defaultMessage": "Dodano (zależność)"
@@ -620,9 +596,6 @@
   "content.managed-card.view-content": {
     "defaultMessage": "Pokaż zawartość"
   },
-  "content.metadata-filter.author": {
-    "defaultMessage": "Autor"
-  },
   "content.metadata-filter.environment": {
     "defaultMessage": "Środowisko"
   },
@@ -647,17 +620,8 @@
   "content.metadata-filter.update.available": {
     "defaultMessage": "Dostępna aktualizacja"
   },
-  "content.metadata-filter.warning.client-depends": {
-    "defaultMessage": "Klient wymaga pliku"
-  },
   "content.metadata-filter.warning.client-only": {
     "defaultMessage": "Zawartość tylko dla klienta"
-  },
-  "content.metadata-filter.warning.client-retained": {
-    "defaultMessage": "Zachowany plik dla klienta"
-  },
-  "content.metadata-filter.warning.none": {
-    "defaultMessage": "Brak ostrzeżeń"
   },
   "content.metadata-filter.warnings": {
     "defaultMessage": "Ostrzeżenia"
@@ -694,9 +658,6 @@
   },
   "content.page-layout.filter.add": {
     "defaultMessage": "Filtruj"
-  },
-  "content.page-layout.filter.author-count": {
-    "defaultMessage": "{count, plural, one {# autor} other {# autorów}}"
   },
   "content.page-layout.loading": {
     "defaultMessage": "Ładowanie zawartości..."
@@ -1598,9 +1559,6 @@
   "files.navbar.home": {
     "defaultMessage": "Strona główna"
   },
-  "files.navbar.install-curseforge-pack": {
-    "defaultMessage": "Zainstaluj paczkę modów CurseForge"
-  },
   "files.navbar.new-file": {
     "defaultMessage": "Nowy plik"
   },
@@ -1733,21 +1691,6 @@
   "files.zip-url-modal.backup-name": {
     "defaultMessage": "Instalacja paczki CurseForge"
   },
-  "files.zip-url-modal.cf-header": {
-    "defaultMessage": "Instaluj paczkę modów CurseForge"
-  },
-  "files.zip-url-modal.cf-not-found-text": {
-    "defaultMessage": "Nie znaleziono paczki modów CurseForge pod tym adresem."
-  },
-  "files.zip-url-modal.cf-not-found-title": {
-    "defaultMessage": "Nie znaleziono paczki modów CurseForge"
-  },
-  "files.zip-url-modal.enter-link": {
-    "defaultMessage": "Wprowadź link"
-  },
-  "files.zip-url-modal.error-cf-url": {
-    "defaultMessage": "Adres URL musi prowadzić do jakiejś wersji paczki CurseForge."
-  },
   "files.zip-url-modal.error-url-invalid": {
     "defaultMessage": "Adres URL musi być prawidłowy."
   },
@@ -1759,24 +1702,6 @@
   },
   "files.zip-url-modal.install-failed-title": {
     "defaultMessage": "Instalacja nie powiodła się"
-  },
-  "files.zip-url-modal.step-copy-description": {
-    "defaultMessage": "Skopiuj adres URL strony wersji i wklej go poniżej."
-  },
-  "files.zip-url-modal.step-copy-title": {
-    "defaultMessage": "Kopiuj adres URL"
-  },
-  "files.zip-url-modal.step-find-description": {
-    "defaultMessage": "Przeglądaj CurseForge i znajdź paczkę, którą chcesz zainstalować."
-  },
-  "files.zip-url-modal.step-find-title": {
-    "defaultMessage": "Znajdź paczkę modów"
-  },
-  "files.zip-url-modal.step-select-description": {
-    "defaultMessage": "Przejdź do kategorii \"Pliki\" i wybierz wersję do zainstalowania."
-  },
-  "files.zip-url-modal.step-select-title": {
-    "defaultMessage": "Wybierz wersję"
   },
   "files.zip-url-modal.unknown-error": {
     "defaultMessage": "Wystąpił nieoczekiwany błąd"
@@ -1931,12 +1856,6 @@
   "hosting.content.failed-to-bulk-delete": {
     "defaultMessage": "Nie udało się usunąć zawartości"
   },
-  "hosting.content.failed-to-bulk-disable": {
-    "defaultMessage": "Nie udało się wyłączyć zawartości"
-  },
-  "hosting.content.failed-to-bulk-enable": {
-    "defaultMessage": "Nie udało się włączyć zawartości"
-  },
   "hosting.content.failed-to-bulk-update": {
     "defaultMessage": "Nie udało się zaktualizować zawartości"
   },
@@ -1951,9 +1870,6 @@
   },
   "hosting.content.failed-to-remove": {
     "defaultMessage": "Nie udało się usunąć zawartości"
-  },
-  "hosting.content.failed-to-toggle": {
-    "defaultMessage": "Nie udało się przełączyć {name}"
   },
   "hosting.content.failed-to-unlink": {
     "defaultMessage": "Nie udało się rozłączyć od paczki modów"
@@ -2017,6 +1933,9 @@
   },
   "hosting.loader.reset-to-onboarding-success-title": {
     "defaultMessage": "Serwer zresetowany do trybu onboardingu"
+  },
+  "hosting.save-banner.resolve-errors": {
+    "defaultMessage": "Rozwiąż błędy w swoich zmianach przed zapisaniem."
   },
   "hosting.settings.properties.motd-profanity": {
     "defaultMessage": "Ze względu na Wytyczne Minecraft'a, MOTD twojego serwera nie może zawierać wulgarności. Wykryto: „{value}”."
@@ -2396,12 +2315,6 @@
   "instances.managed-content-modal.enabled": {
     "defaultMessage": "Włączone"
   },
-  "instances.managed-content-modal.external-content": {
-    "defaultMessage": "Zewnętrzne"
-  },
-  "instances.managed-content-modal.external-content-description": {
-    "defaultMessage": "Ten plik nie jest opublikowany na Modrinth."
-  },
   "instances.managed-content-modal.header": {
     "defaultMessage": "Zarządzana zawartość"
   },
@@ -2416,9 +2329,6 @@
   },
   "instances.managed-content-modal.search-placeholder": {
     "defaultMessage": "Szukaj wśród {count, number} {count, plural, one {projektu} other {projektów}}"
-  },
-  "instances.managed-content-modal.warnings": {
-    "defaultMessage": "Ostrzeżenia"
   },
   "instances.updater-modal.badge.current": {
     "defaultMessage": "Aktualny"
@@ -2503,15 +2413,6 @@
   },
   "label.changes-saved": {
     "defaultMessage": "Zmiany zapisane"
-  },
-  "label.client-depends-warning": {
-    "defaultMessage": "Zależność tego moda jest wymagana po stronie klienta i może powodować problemy z włączaniem Twojego serwera"
-  },
-  "label.client-only-warning": {
-    "defaultMessage": "Ta modyfikacja działa tylko po stronie klienta gry i może powodować problemy podczas uruchamiania serwera"
-  },
-  "label.client-retained-warning": {
-    "defaultMessage": "Ten mod, zainstalowany jako zależność, działa tylko po stronie klienta i może powodować problemy z włączaniem Twojego serwera"
   },
   "label.collections": {
     "defaultMessage": "Kolekcje"
@@ -3248,6 +3149,9 @@
   "profile.button.create-project": {
     "defaultMessage": "Utwórz projekt"
   },
+  "profile.button.edit-user": {
+    "defaultMessage": "Edytuj użytkownika"
+  },
   "profile.button.force-password-reset": {
     "defaultMessage": "Wymuś zresetowanie hasła"
   },
@@ -3720,7 +3624,7 @@
     "defaultMessage": "Pokaż {count} więcej"
   },
   "project.disclosure.derivative-work.title": {
-    "defaultMessage": "Jest to dzieło pochodne:"
+    "defaultMessage": "Dzieło pochodne:"
   },
   "project.disclosure.paid-features.title": {
     "defaultMessage": "Zawiera płatne funkcje"
@@ -4685,6 +4589,9 @@
   "servers.access-page.activity-log-filter.action.server-stopped": {
     "defaultMessage": "Zatrzymano serwer"
   },
+  "servers.access-page.activity-log-filter.action.sftp-credentials-rolled": {
+    "defaultMessage": "Wymieniono dane logowania SFTP"
+  },
   "servers.access-page.activity-log-filter.action.sftp-login": {
     "defaultMessage": "Zalogowano się poprzez SFTP"
   },
@@ -5065,6 +4972,9 @@
   },
   "servers.audit-log.event.server-subdomain-changed": {
     "defaultMessage": "Zmieniono poddomenę serwera na <subdomain></subdomain>"
+  },
+  "servers.audit-log.event.sftp-credentials-rolled": {
+    "defaultMessage": "Wymieniono dane logowania SFTP"
   },
   "servers.audit-log.event.sftp-login": {
     "defaultMessage": "Zalogowano się poprzez SFTP"
@@ -5573,15 +5483,6 @@
   "servers.manage.servers-title": {
     "defaultMessage": "Modrinth Hosting"
   },
-  "servers.manage.settings-hint.description": {
-    "defaultMessage": "Teraz mogą być znalezione tutaj!"
-  },
-  "servers.manage.settings-hint.dismiss": {
-    "defaultMessage": "Nie pokazuj ponownie"
-  },
-  "servers.manage.settings-hint.title": {
-    "defaultMessage": "Ustawienia twojego serwera zostały przeniesione"
-  },
   "servers.manage.shared-servers-title": {
     "defaultMessage": "Współdzielone serwery"
   },
@@ -5852,18 +5753,6 @@
   "servers.settings.support.clear-action-log-title": {
     "defaultMessage": "Wyczyść dziennik zdarzeń?"
   },
-  "servers.setup.onboarding.installation-failed.text": {
-    "defaultMessage": "Wystąpił nieoczekiwany błąd podczas instalacji. Spróbuj ponownie później."
-  },
-  "servers.setup.onboarding.installation-failed.title": {
-    "defaultMessage": "Instalacja nie powiodła się"
-  },
-  "servers.setup.onboarding.modpack-upload-failed.text": {
-    "defaultMessage": "Wystąpił nieoczekiwany błąd podczas przesyłania. Spróbuj ponownie później."
-  },
-  "servers.setup.onboarding.modpack-upload-failed.title": {
-    "defaultMessage": "Przesyłanie paczki modów nie powiodło się"
-  },
   "servers.setup.onboarding.setup-server.button": {
     "defaultMessage": "Ustaw serwer"
   },
@@ -5887,9 +5776,6 @@
   },
   "servers.setup.onboarding.steps.heading": {
     "defaultMessage": "Ustaw swój serwer (~2 minuty)"
-  },
-  "servers.setup.onboarding.uploading.progress": {
-    "defaultMessage": "Przesyłanie ({percent, number}%)"
   },
   "servers.setup.onboarding.welcome.description": {
     "defaultMessage": "Twój serwer jest gotowy. Oto co musisz zrobić, by zacząć grać!"
@@ -6973,6 +6859,27 @@
   },
   "update-all-modal.warning-server": {
     "defaultMessage": "Nie możemy zagwarantować, że aktualizacje są bezpieczna dla Twojego serwera. Przejrzyj dzienniki zmian i rozważ zrobienie kopii zapasowej."
+  },
+  "user-restrictions.group.organizations": {
+    "defaultMessage": "Organizacje"
+  },
+  "user-restrictions.group.profile": {
+    "defaultMessage": "Profil"
+  },
+  "user-restrictions.group.versions": {
+    "defaultMessage": "Wersje"
+  },
+  "user-restrictions.scope.user-write": {
+    "defaultMessage": "Edytuj profilowe, obserwowane projekty i zmień preferencje"
+  },
+  "user-restrictions.scope.version-create": {
+    "defaultMessage": "Prześlij nowe wydanie"
+  },
+  "user-restrictions.scope.version-delete": {
+    "defaultMessage": "Usuń wydanie i pliki z wydania"
+  },
+  "user-restrictions.scope.version-write": {
+    "defaultMessage": "Edytuj wydanie lub dodaj pliki do wydań"
   },
   "user.profile.badge.alpha.about.1": {
     "defaultMessage": "Ten użytkownik utworzył konto za czasów wersji alfa Modrinth, trwającej do listopada 2020 r."

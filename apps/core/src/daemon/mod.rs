@@ -121,7 +121,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let db = db::open(&paths.database()).await?;
     let core_id = db::core_id(&db).await?;
     let identity = Identity::load_or_create(&paths)?;
-    let http = reqwest::Client::builder()
+    let http = crate::network::http()
         .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()?;

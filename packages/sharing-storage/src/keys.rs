@@ -402,7 +402,7 @@ mod tests {
     async fn file_keys_survive_a_restart() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("keys.json");
-        let http = reqwest::Client::new();
+        let http = crate::http().build().unwrap();
         let keys = Keys::load_file(path.clone(), http.clone(), None);
         assert_eq!(keys.get("one").await, None);
         keys.set(&key("one")).await;
@@ -416,7 +416,7 @@ mod tests {
         let signer = Signer::new("k1");
         let keys = Keys::load_file(
             dir.path().join("keys.json"),
-            reqwest::Client::new(),
+            crate::http().build().unwrap(),
             None,
         );
         keys.set(&signer.public_keys()).await;

@@ -129,10 +129,13 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
-    let keys =
-        crate::access::keys::load(db.clone(), reqwest::Client::new(), None)
-            .await
-            .unwrap();
+    let keys = crate::access::keys::load(
+        db.clone(),
+        crate::network::http().build().unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
     let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
     let backups = crate::backups::Backups::open(
         paths.clone(),
@@ -157,7 +160,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
         update: Arc::new(Updater::new(
             paths.clone(),
             db.clone(),
-            reqwest::Client::new(),
+            crate::network::http().build().unwrap(),
             String::new(),
         )),
         network: Arc::new(crate::network::forward::Network::off(db.clone())),

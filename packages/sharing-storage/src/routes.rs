@@ -373,7 +373,7 @@ pub mod tests {
         let signer = Signer::new("k1");
         let keys = Keys::load_file(
             dir.path().join("keys.json"),
-            reqwest::Client::new(),
+            crate::http().build().unwrap(),
             None,
         );
         keys.set(&signer.public_keys()).await;

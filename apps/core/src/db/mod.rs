@@ -191,7 +191,7 @@ mod tests {
             1,
             "init".into(),
             sqlx::migrate::MigrationType::Simple,
-            edited_001().into(),
+            sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(edited_001())),
             false,
         )]
         .into();
