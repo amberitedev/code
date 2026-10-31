@@ -56,7 +56,7 @@ pub async fn sign_in() {
     let (Some(username), Some(backend_url), Ok(secret)) = (
         &config.username,
         &config.backend_url,
-        env::var("AMBERITE_LOCAL_DEV_SECRET"),
+        env::var("LOCAL_DEV_SECRET"),
     ) else {
         return;
     };

@@ -44,7 +44,7 @@ use super::{
 
 /// Set to print the head of every request the proxy sends to a Core, with the session token left
 /// out, and whether the WebView had sent an `Authorization` of its own.
-const LOG_VAR: &str = "AMBERITE_CORE_PROXY_LOG";
+const LOG_VAR: &str = "CORE_PROXY_LOG";
 static LOG: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os(LOG_VAR).is_some());
 
