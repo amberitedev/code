@@ -8,7 +8,7 @@ const [scriptName, ...args] = process.argv.slice(2)
 
 if (!scriptName) {
 	console.error('Usage: pnpm scripts <script-name> [args...]')
-	console.error('Example: pnpm scripts coverage-i18n --verbose')
+	console.error('Example: pnpm scripts collect-changelog')
 	process.exit(1)
 }
 
