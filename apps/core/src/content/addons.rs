@@ -10,7 +10,7 @@ use super::{
     Content, Error,
     folder::{self, Folder},
     install::{MAX_FILE, identify},
-    modrinth::{self, Version},
+    modrinth::{self, ReleaseChannel, Version},
     records::{self, ContentFile, Origin},
 };
 use crate::{
@@ -108,6 +108,7 @@ pub fn scan(folder: &Folder, loader: Option<ModLoader>) -> Vec<Listed> {
 struct Target {
     loader: ModLoader,
     game_version: String,
+    channel: ReleaseChannel,
 }
 
 async fn target(content: &Content, server_id: &str) -> Result<Target, Error> {
@@ -123,6 +124,7 @@ async fn target(content: &Content, server_id: &str) -> Result<Target, Error> {
         (Some(loader), Some(game_version)) => Ok(Target {
             loader,
             game_version,
+            channel: server.update_channel,
         }),
         _ => Err(Error::Invalid(
             "Install a loader on this server first.".into(),
@@ -152,7 +154,7 @@ fn kind_of(version: &Version, target: &Target) -> AddonKind {
     }
 }
 
-/// The newest version of `project` that runs on this server.
+/// The newest version of `project` that runs on this server and is on its update channel.
 async fn latest(
     content: &Content,
     target: &Target,
@@ -168,11 +170,13 @@ async fn latest(
         .versions(project, &filter, Some(&target.game_version))
         .await?
         .into_iter()
-        .next()
+        .find(|version| version.version_type <= target.channel)
         .ok_or_else(|| {
             Error::Invalid(format!(
-                "{project} has no version for {} {}.",
-                target.loader, target.game_version
+                "{project} has no version for {} {} on the {} channel.",
+                target.loader,
+                target.game_version,
+                target.channel.name()
             ))
         })
 }
@@ -574,7 +578,12 @@ pub async fn updates(
             of_kind.iter().map(|(_, sha1, _)| sha1.clone()).collect();
         match content
             .modrinth
-            .updates(&sha1s, &loaders(&target, kind), &target.game_version)
+            .updates(
+                &sha1s,
+                &loaders(&target, kind),
+                &target.game_version,
+                target.channel,
+            )
             .await
         {
             Ok(mut newer) => {

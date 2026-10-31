@@ -36,6 +36,7 @@ use crate::{
         self, Busy,
         addons::{self, Listed},
         install::{self as content_install, Linked, PackSource},
+        modrinth::ReleaseChannel,
         pack,
         records::{self, ContentFile, Origin, Pack, PendingPack},
         shared::{self, SharedVersion},
@@ -169,6 +170,8 @@ pub struct Addons {
     pub modloader: Option<String>,
     pub modloader_version: Option<String>,
     pub game_version: Option<String>,
+    /// The least stable channel addon updates are offered from.
+    pub update_channel: ReleaseChannel,
     pub modpack: Option<ModpackFields>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installing: Option<Installing>,
@@ -694,6 +697,7 @@ pub async fn list(
         modloader: server.loader,
         modloader_version: server.loader_version,
         game_version: server.game_version,
+        update_channel: server.update_channel,
         modpack,
         installing: activity.installing,
         error,

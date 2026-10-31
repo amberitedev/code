@@ -19,11 +19,57 @@ pub enum ModrinthError {
     Http(#[from] reqwest::Error),
 }
 
+/// How stable a Modrinth version is, ordered from most to least stable. As a server's
+/// update channel, the least stable type it takes versions of. Mirrors
+/// Archon.Servers.v1.ReleaseChannel.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    Serialize,
+    Deserialize,
+    sqlx::Type,
+)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+pub enum ReleaseChannel {
+    #[default]
+    Release,
+    Beta,
+    Alpha,
+}
+
+impl ReleaseChannel {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Release => "release",
+            Self::Beta => "beta",
+            Self::Alpha => "alpha",
+        }
+    }
+
+    /// The version types a server on this channel takes.
+    pub fn version_types(self) -> &'static [ReleaseChannel] {
+        use ReleaseChannel::*;
+        match self {
+            Release => &[Release],
+            Beta => &[Release, Beta],
+            Alpha => &[Release, Beta, Alpha],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Version {
     pub id: String,
     pub project_id: String,
     pub version_number: String,
+    pub version_type: ReleaseChannel,
     #[serde(default)]
     pub loaders: Vec<String>,
     #[serde(default)]
@@ -202,12 +248,14 @@ impl Modrinth {
         .await
     }
 
-    /// The newest version for each file, by SHA-1, that runs on `loaders` and `game_version`.
+    /// The newest version for each file, by SHA-1, that runs on `loaders` and `game_version`
+    /// and is on `channel`.
     pub async fn updates(
         &self,
         sha1s: &[String],
         loaders: &[&str],
         game_version: &str,
+        channel: ReleaseChannel,
     ) -> Result<HashMap<String, Version>, ModrinthError> {
         if sha1s.is_empty() {
             return Ok(HashMap::new());
@@ -216,6 +264,7 @@ impl Modrinth {
             "hashes": sha1s,
             "algorithm": "sha1",
             "game_versions": [game_version],
+            "version_types": channel.version_types(),
         });
         if !loaders.is_empty() {
             body["loaders"] = serde_json::json!(loaders);

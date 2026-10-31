@@ -3,6 +3,7 @@
 use sqlx::SqlitePool;
 
 use super::shim::{EndedBy, ExitStatus};
+use crate::content::modrinth::ReleaseChannel;
 use crate::network::firewall::SERVER_PORTS;
 
 /// A row of `servers`.
@@ -18,6 +19,7 @@ pub struct ServerRow {
     pub java_path: Option<String>,
     pub java_version: Option<i64>,
     pub eula_accepted: bool,
+    pub update_channel: ReleaseChannel,
 }
 
 /// How a run ended, as `runs.outcome` stores it.
@@ -43,7 +45,7 @@ pub struct Ended {
 const DEFAULT_MEMORY_MB: i64 = 2048;
 
 const COLUMNS: &str = "id, name, game_version, loader, loader_version, port, memory_mb, \
-                       java_path, java_version, eula_accepted";
+                       java_path, java_version, eula_accepted, update_channel";
 
 /// Whether no other program on this machine holds `port`. Minecraft listens on every interface,
 /// TCP for the game and UDP for query and voice mods, so Core tries to bind the same: TCP and
@@ -171,6 +173,19 @@ pub async fn set_java(
     .bind(id)
     .execute(db)
     .await?;
+    Ok(())
+}
+
+pub async fn set_update_channel(
+    db: &SqlitePool,
+    id: &str,
+    channel: ReleaseChannel,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE servers SET update_channel = ? WHERE id = ?")
+        .bind(channel)
+        .bind(id)
+        .execute(db)
+        .await?;
     Ok(())
 }
 

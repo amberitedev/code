@@ -1482,3 +1482,35 @@ async fn a_failed_install_tells_the_app_why() {
         ]
     );
 }
+
+#[tokio::test]
+async fn editors_set_the_worlds_update_channel() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    let detail = format!("/v1/servers/{server}");
+    let world = format!("/v1/servers/{server}/worlds/{server}");
+    let channel =
+        |detail: &Value| detail["worlds"][0]["update_channel"].clone();
+
+    let (_, before) = core
+        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .await;
+    assert_eq!(channel(&before), "release");
+
+    let beta = Some(json!({ "update_channel": "beta" }));
+    let (status, _) = core
+        .call(Method::PATCH, &world, Some(&viewer), None, beta.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = core
+        .call(Method::PATCH, &world, Some(&editor), None, beta)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, after) = core
+        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .await;
+    assert_eq!(channel(&after), "beta");
+}
