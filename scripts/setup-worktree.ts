@@ -37,13 +37,13 @@ try {
 		copyDevelopmentData()
 		copyEnvFile()
 	}
-	startBuild()
 	for (const path of [
 		NodePath.join(data, 'core'),
 		...[1, 2, 3, 4].map((scenario) => NodePath.join(data, 'scenarios', String(scenario))),
 	]) {
 		NodeFS.mkdirSync(path, { recursive: true })
 	}
+	startBuild()
 } catch (error) {
 	// A failed copy must not hide the install result, or stop the install from finishing.
 	console.error(`[setup] ${error instanceof Error ? error.message : String(error)}`)
@@ -109,13 +109,24 @@ async function installDependencies(): Promise<boolean> {
  * nothing to do when another checkout already built the same Rust. Its log is `.data/build.log`.
  */
 function startBuild(): void {
-	const log = NodeFS.openSync(NodePath.join(data, 'build.log'), 'w')
-	NodeChildProcess.spawn(
-		process.execPath,
-		[NodePath.join(worktree, 'scripts', 'dev-runner.ts'), 'build'],
-		{ cwd: worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
-	).unref()
-	NodeFS.closeSync(log)
+	// Optional: `up` builds whatever is missing, so a build that cannot start never fails setup.
+	const notStarted = (error: unknown) =>
+		console.error(
+			`[setup] background build not started: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	try {
+		const log = NodeFS.openSync(NodePath.join(data, 'build.log'), 'w')
+		const child = NodeChildProcess.spawn(
+			process.execPath,
+			[NodePath.join(worktree, 'scripts', 'dev-runner.ts'), 'build'],
+			{ cwd: worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
+		)
+		child.once('error', notStarted)
+		child.unref()
+		NodeFS.closeSync(log)
+	} catch (error) {
+		notStarted(error)
+	}
 }
 
 function run(command: string, args: ReadonlyArray<string>): Promise<number> {

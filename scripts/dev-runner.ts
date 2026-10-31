@@ -1675,9 +1675,10 @@ async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
 }
 
 /**
- * Whether the App's page loads through a bridge: its entry module and the dependencies that
- * module imports. In a new checkout the frontend server spends a minute or two preparing those,
- * and holds the requests until it is done, so asking here keeps that wait inside `up`.
+ * Whether the App's page loads through a bridge: the modules that start it (the entry, and the App
+ * and routes it imports) and the dependencies they import. In a new checkout the frontend server
+ * spends a minute or two preparing those, and holds the requests until it is done, so asking here
+ * keeps that wait inside `up`.
  */
 async function appPageLoads(bridgeUrl: string): Promise<boolean> {
 	/** The file's text, or `undefined` when the server answered with an error. */
@@ -1688,10 +1689,14 @@ async function appPageLoads(bridgeUrl: string): Promise<boolean> {
 		return response.ok ? text : undefined
 	}
 	try {
-		const entry = await load('/src/main.js')
-		if (entry === undefined) return false
-		const dependencies = entry.matchAll(/"(\/node_modules\/\.vite\/deps\/[^"]+)"/g)
-		const loaded = await Promise.all([...dependencies].map(([, path]) => load(path!)))
+		const modules = await Promise.all(['/src/main.js', '/src/App.vue', '/src/routes.js'].map(load))
+		if (modules.some((text) => text === undefined)) return false
+		const dependencies = new Set(
+			modules.flatMap((text) =>
+				[...text!.matchAll(/"(\/node_modules\/\.vite\/deps\/[^"]+)"/g)].map(([, path]) => path!),
+			),
+		)
+		const loaded = await Promise.all([...dependencies].map(load))
 		return loaded.every((text) => text !== undefined)
 	} catch (error) {
 		if (error instanceof PageError) throw error
