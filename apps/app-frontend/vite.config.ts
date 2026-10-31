@@ -83,6 +83,12 @@ export default defineConfig({
 		}),
 	],
 
+	optimizeDeps: {
+		// Imported only from @modrinth/ui's ShareModal, which the startup scan misses. Found later,
+		// it made the first page load rebundle dependencies and reload the App.
+		include: ['@modrinth/ui > qrcode.vue'],
+	},
+
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	// prevent vite from obscuring rust errors
 	clearScreen: false,
@@ -93,6 +99,11 @@ export default defineConfig({
 		host: '127.0.0.1',
 		port: devPort,
 		strictPort: true,
+		// Compiles the App and every page as the server starts. The first load is then quick, and
+		// opening a page for the first time no longer finds new dependencies and reloads the App.
+		warmup: {
+			clientFiles: ['./src/main.js', './src/App.vue', './src/routes.js', './src/pages/**/*.vue'],
+		},
 		headers: {
 			'content-security-policy': Object.entries(tauriConf.app.security.csp)
 				.map(([directive, sources]) => {

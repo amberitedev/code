@@ -30,6 +30,8 @@ const CACHED_PROGRAMS = 6
 const BUILD_GROWTH_LIMIT = 10 * 2 ** 30
 const BUILD_LOCK_STALE_MS = 60 * 60_000
 const BUILD_LOCK = 'building'
+// Beside each cached program: the checkout it was built in, whose build output a new worktree may clone.
+const CHECKOUT_FILE = 'checkout'
 const BRIDGE_READY = /browser bridge ready.*?url=(http:\/\/[\d.]+:\d+)/
 const FETCH_BAD_PORTS = new Set([
 	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
@@ -270,6 +272,7 @@ async function main(): Promise<void> {
 		if (!(await printStatus(paths))) process.exitCode = 1
 		return
 	}
+	if (command === 'build') return buildPrograms(paths)
 	const input = parseInput(process.argv.slice(2), defaultScenarios)
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.AMBERITE_DEV_INSTANCE,
@@ -284,15 +287,7 @@ async function main(): Promise<void> {
 	})
 	const ports = portsForOffset(selectedOffset)
 	const branch = currentBranch(paths.worktree)
-	const sharedEnv = {
-		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env.prod')),
-		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env')),
-		...readEnv(NodePath.join(paths.primary, '.env.local')),
-		...readEnv(NodePath.join(paths.primary, 'apps', 'core', '.env.local')),
-		...readEnv(NodePath.join(paths.worktree, '.env.local')),
-		...process.env,
-	}
-	const env = createRuntimeEnvironment({ baseEnv: sharedEnv, paths, ports })
+	const env = createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), paths, ports })
 	if (!input.dryRun) {
 		const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
 		NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
@@ -575,6 +570,42 @@ function resolveWorktreePaths(): WorktreePaths {
 	}
 }
 
+/** Settings from the env files, overridden by the environment. */
+function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
+	return {
+		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env.prod')),
+		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env')),
+		...readEnv(NodePath.join(paths.primary, '.env.local')),
+		...readEnv(NodePath.join(paths.primary, 'apps', 'core', '.env.local')),
+		...readEnv(NodePath.join(paths.worktree, '.env.local')),
+		...process.env,
+	}
+}
+
+/**
+ * `build`: compiles the App and Core for this checkout's current Rust without starting anything,
+ * so a later `up` finds them ready. Worktree setup runs it in the background.
+ */
+async function buildPrograms(paths: WorktreePaths): Promise<void> {
+	const ports = portsForOffset(0)
+	const specs = createProcessSpecs({
+		accountWeb: false,
+		branch: currentBranch(paths.worktree),
+		env: createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), paths, ports }),
+		hideWindows: true,
+		mode: 'dev',
+		paths,
+		ports,
+		scenarios: [1],
+	})
+	for (const spec of specs) {
+		if (!spec.build) continue
+		if (!(await ensureProgram(paths.worktree, spec, spec.build, new Set(), () => false))) {
+			process.exitCode = 1
+		}
+	}
+}
+
 function ensureDataLayout(paths: WorktreePaths, scenarios: ReadonlyArray<number>): void {
 	NodeFS.mkdirSync(paths.data, { recursive: true })
 	NodeFS.mkdirSync(paths.coreData, { recursive: true })
@@ -658,7 +689,7 @@ export function createProcessSpecs(input: {
 				cwd: coreDir,
 				env: {},
 				ignoredInputs: [],
-				inputs: workspaceInputs(input.paths),
+				inputs: workspaceInputs(input.paths, 'copal'),
 				program: programFile('copal'),
 				...workspaceBuildDirs(input.paths, input.env),
 			},
@@ -750,27 +781,76 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 		},
 		ignoredInputs: [NodePath.join(appLibDir, '.env')],
 		// The App's version comes from the frontend.
-		inputs: [...workspaceInputs(paths), 'apps/app-frontend/package.json'],
+		inputs: [...workspaceInputs(paths, 'theseus_gui'), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
 		...workspaceBuildDirs(paths, env),
 	}
 }
 
 /**
- * What a program in the root Cargo workspace (the App and Core) may read. When unsure whether a
- * build reads something, list it: a stale program is the worst outcome. Every workspace crate counts.
+ * What a program in the root Cargo workspace (the App and Core) may read: the workspace settings
+ * and the folders of `packageName` and every local crate it builds with. Crates it does not use,
+ * such as labrinth, change without rebuilding it. When unsure whether a build reads something,
+ * list it: a stale program is the worst outcome.
  */
-function workspaceInputs(paths: WorktreePaths): ReadonlyArray<string> {
-	const manifest = NodeFS.readFileSync(NodePath.join(paths.worktree, 'Cargo.toml'), 'utf8')
-	const members = /^members = \[([^\]]*)\]/m.exec(manifest)?.[1] ?? ''
-	const crates = [...members.matchAll(/"([^"]+)"/g), ...manifest.matchAll(/\bpath = "([^"]+)"/g)]
+function workspaceInputs(paths: WorktreePaths, packageName: string): ReadonlyArray<string> {
+	const settings = ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo']
+	const crates = localCrates(paths.worktree)
+	const root = [...crates.values()].find((crate) => crate.name === packageName)
+	// The manifests do not read. Cargo prints why when it builds; until then, assume anything.
+	if (!root) return [...settings, 'apps', 'packages']
+	const folders = new Set<string>()
+	const visit = (folder: string) => {
+		if (folders.has(folder)) return
+		folders.add(folder)
+		for (const dependency of crates.get(folder)?.dependencies ?? []) visit(dependency)
+	}
+	visit(root.folder)
+	const checkout = NodeFS.realpathSync.native(paths.worktree)
 	return [
-		'Cargo.toml',
-		'Cargo.lock',
-		'rust-toolchain.toml',
-		'.cargo',
-		...new Set(crates.map((match) => match[1]!)),
+		...settings,
+		...[...folders].map((folder) => NodePath.relative(checkout, folder).replaceAll('\\', '/')),
 	]
+}
+
+type LocalCrate = {
+	/** Folders of the local crates it builds with. Development-only ones are left out. */
+	readonly dependencies: ReadonlyArray<string>
+	readonly folder: string
+	readonly name: string
+}
+const localCratesResults = new Map<string, ReadonlyMap<string, LocalCrate>>()
+/** The workspace's crates by folder, as Cargo reports them. Empty when the manifests do not read. */
+function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
+	const known = localCratesResults.get(worktree)
+	if (known) return known
+	const metadata = NodeChildProcess.spawnSync(
+		'cargo',
+		['metadata', '--no-deps', '--offline', '--format-version', '1'],
+		{ cwd: worktree, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+	)
+	const crates = new Map<string, LocalCrate>()
+	if (metadata.status === 0) {
+		const { packages } = JSON.parse(metadata.stdout) as {
+			packages: ReadonlyArray<{
+				dependencies: ReadonlyArray<{ kind: string | null; path?: string }>
+				manifest_path: string
+				name: string
+			}>
+		}
+		for (const crate of packages) {
+			const folder = NodePath.dirname(crate.manifest_path)
+			crates.set(folder, {
+				dependencies: crate.dependencies.flatMap((dependency) =>
+					dependency.path && dependency.kind !== 'dev' ? [dependency.path] : [],
+				),
+				folder,
+				name: crate.name,
+			})
+		}
+	}
+	localCratesResults.set(worktree, crates)
+	return crates
 }
 
 /**
@@ -888,6 +968,10 @@ async function ensureProgram(
 					const partial = `${cached(key)}.${process.pid}.partial`
 					NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', build.program), partial)
 					NodeFS.renameSync(partial, cached(key))
+					NodeFS.writeFileSync(
+						NodePath.join(NodePath.dirname(cached(key)), CHECKOUT_FILE),
+						worktree,
+					)
 				}
 				key = builtKey
 			}
@@ -956,12 +1040,14 @@ function markCheckoutCratesChanged(
 }
 
 /**
- * Gives a worktree its own build output by cloning the primary checkout's, then makes the clone
- * look built from this worktree: Cargo trusts file times, and build scripts record absolute paths.
- * Crates whose files match the primary's are then up to date; changed ones compile again.
+ * Gives a worktree its own build output by cloning another checkout's, then makes the clone look
+ * built from this worktree: Cargo trusts file times, and build scripts record absolute paths.
+ * Crates whose files match the source's are then up to date; changed ones compile again. The
+ * source is whichever checkout behind a cached program, or the primary, has the fewest Rust files
+ * that differ from this one. The primary is rarely built, so that is usually a recent worktree.
  *
  * Cargo never deletes old output, and every file a build writes stops being shared with the
- * primary. So once a worktree's build output outgrows the primary's by `BUILD_GROWTH_LIMIT`, it is
+ * source. So once a worktree's build output outgrows the source's by `BUILD_GROWTH_LIMIT`, it is
  * deleted and cloned again. That build compiles this worktree's changes without their compiler
  * caches, and the worktree is back to taking almost no space.
  */
@@ -971,7 +1057,8 @@ function cloneBuildOutput(
 	build: ProgramBuild,
 	primary: string,
 ): void {
-	const from = NodePath.join(primary, 'target')
+	const source = closestBuiltCheckout(worktree, build, primary)
+	const from = NodePath.join(source, 'target')
 	if (!NodeFS.existsSync(from)) return
 	if (NodeFS.existsSync(build.targetDir)) {
 		const growth = folderSize(build.targetDir) - folderSize(from, build.cacheDir)
@@ -986,11 +1073,11 @@ function cloneBuildOutput(
 		}
 		runnerLog(
 			'info',
-			`${spec.label} deleting its build output, ${(growth / 2 ** 30).toFixed(1)} GB over the primary's`,
+			`${spec.label} deleting its build output, ${(growth / 2 ** 30).toFixed(1)} GB over ${source}'s`,
 		)
 		NodeFS.rmSync(old, { recursive: true, force: true })
 	}
-	runnerLog('info', `${spec.label} cloning the build output of ${primary}`)
+	runnerLog('info', `${spec.label} cloning the build output of ${source}`)
 	const partial = `${build.targetDir}.partial`
 	NodeFS.rmSync(partial, { recursive: true, force: true })
 	NodeFS.cpSync(from, partial, {
@@ -999,15 +1086,15 @@ function cloneBuildOutput(
 		recursive: true,
 	})
 	const buildScripts = NodePath.join(partial, 'debug', 'build')
-	const paths = [primary, worktree].map((path) => `${path}${NodePath.sep}`)
-	const [primaryEscaped, worktreeEscaped] = paths.map((path) => path.replaceAll('\\', '\\\\'))
+	const paths = [source, worktree].map((path) => `${path}${NodePath.sep}`)
+	const [sourceEscaped, worktreeEscaped] = paths.map((path) => path.replaceAll('\\', '\\\\'))
 	for (const folder of NodeFS.existsSync(buildScripts) ? NodeFS.readdirSync(buildScripts) : []) {
 		for (const name of ['output', 'root-output']) {
 			const file = NodePath.join(buildScripts, folder, name)
 			if (!NodeFS.existsSync(file)) continue
 			const text = NodeFS.readFileSync(file, 'utf8')
 			const rewritten = text
-				.replaceAll(primaryEscaped!, worktreeEscaped!)
+				.replaceAll(sourceEscaped!, worktreeEscaped!)
 				.replaceAll(paths[0]!, paths[1]!)
 			if (rewritten === text) continue
 			// Rewritten in place with its old time, or Cargo would run the build script again.
@@ -1018,24 +1105,9 @@ function cloneBuildOutput(
 	}
 	NodeFS.renameSync(partial, build.targetDir)
 
-	const blobs = (checkout: string) =>
-		new Map(
-			git(['ls-files', '-s', '-z', '--', ...build.inputs], checkout)
-				.split('\0')
-				.flatMap((entry) => {
-					const [details, file] = entry.split('\t')
-					return details && file ? [[file, details.split(' ')[1]!] as const] : []
-				}),
-		)
-	const edited = (checkout: string) =>
-		new Set(git(['ls-files', '-m', '-z', '--', ...build.inputs], checkout).split('\0'))
-	const primaryBlobs = blobs(primary)
-	const changed = new Set([...edited(primary), ...edited(worktree)])
-	const sameFiles = [...blobs(worktree)]
-		.filter(([file, blob]) => primaryBlobs.get(file) === blob && !changed.has(file))
-		.map(([file]) => file)
+	const sameFiles = [...sameInputFiles(worktree, source, build.inputs)]
 	for (const file of build.ignoredInputs) {
-		const original = NodePath.join(primary, NodePath.relative(worktree, file))
+		const original = NodePath.join(source, NodePath.relative(worktree, file))
 		if (
 			NodeFS.existsSync(file) &&
 			NodeFS.existsSync(original) &&
@@ -1045,9 +1117,66 @@ function cloneBuildOutput(
 		}
 	}
 	for (const file of sameFiles) {
-		const { atime, mtime } = NodeFS.statSync(NodePath.join(primary, file))
+		const { atime, mtime } = NodeFS.statSync(NodePath.join(source, file))
 		NodeFS.utimesSync(NodePath.join(worktree, file), atime, mtime)
 	}
+}
+
+/**
+ * Of the primary and the checkouts that built a cached program, the one with build output whose
+ * committed Rust files differ least from `worktree`'s.
+ */
+function closestBuiltCheckout(worktree: string, build: ProgramBuild, primary: string): string {
+	const builders = NodeFS.readdirSync(build.cacheDir).flatMap((entry) => {
+		const file = NodePath.join(build.cacheDir, entry, CHECKOUT_FILE)
+		return NodeFS.existsSync(file) ? [NodeFS.readFileSync(file, 'utf8')] : []
+	})
+	const candidates = [...new Set([primary, ...builders])].filter(
+		(checkout) =>
+			!samePath(checkout, worktree) && NodeFS.existsSync(NodePath.join(checkout, 'target')),
+	)
+	const inputs = inputBlobs(worktree, build.inputs).size
+	let closest = { checkout: primary, differing: Number.POSITIVE_INFINITY }
+	for (const checkout of candidates) {
+		let differing: number
+		try {
+			differing = inputs - sameInputFiles(worktree, checkout, build.inputs).length
+		} catch {
+			// Deleted while this ran.
+			continue
+		}
+		if (differing < closest.differing) closest = { checkout, differing }
+	}
+	return closest.checkout
+}
+
+/** Input files, relative to the checkouts, committed with the same content in both and edited in neither. */
+function sameInputFiles(
+	checkout: string,
+	other: string,
+	inputs: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+	const otherBlobs = inputBlobs(other, inputs)
+	const edited = new Set([...editedInputs(other, inputs), ...editedInputs(checkout, inputs)])
+	return [...inputBlobs(checkout, inputs)]
+		.filter(([file, blob]) => otherBlobs.get(file) === blob && !edited.has(file))
+		.map(([file]) => file)
+}
+
+/** Each committed input file, relative to the checkout, with its content's hash. */
+function inputBlobs(checkout: string, inputs: ReadonlyArray<string>): ReadonlyMap<string, string> {
+	return new Map(
+		git(['ls-files', '-s', '-z', '--', ...inputs], checkout)
+			.split('\0')
+			.flatMap((entry) => {
+				const [details, file] = entry.split('\t')
+				return details && file ? [[file, details.split(' ')[1]!] as const] : []
+			}),
+	)
+}
+
+function editedInputs(checkout: string, inputs: ReadonlyArray<string>): ReadonlyArray<string> {
+	return git(['ls-files', '-m', '-z', '--', ...inputs], checkout).split('\0')
 }
 
 /** The total size in bytes of the files in a folder, leaving out `skip`. */
@@ -1238,14 +1367,15 @@ function pipeOutput(
 	lines.on('line', (line) => {
 		const plainLine = stripAnsi(line).trimEnd()
 		onLine?.(plainLine)
+		const noise = REPEATED_NOISE.find((text) => plainLine.includes(text))
 		if (
 			!plainLine.trim() ||
 			isNoisyProgressLine(plainLine) ||
 			plainLine === previousLine ||
-			(isRepeatedNoiseLine(plainLine) && seenRepeatedNoise.has(plainLine))
+			(noise && seenRepeatedNoise.has(noise))
 		)
 			return
-		if (isRepeatedNoiseLine(plainLine)) seenRepeatedNoise.add(plainLine)
+		if (noise) seenRepeatedNoise.add(noise)
 		previousLine = plainLine
 		const displayedLine =
 			plainLine.length > 4_000 ? `${plainLine.slice(0, 4_000)} … truncated` : line.trimEnd()
@@ -1339,12 +1469,14 @@ function isNoisyProgressLine(line: string): boolean {
 	)
 }
 
-function isRepeatedNoiseLine(line: string): boolean {
-	return (
-		line.includes('Skipping origin header as it is a forbidden header') ||
-		line.includes('if keeping the header is a desired behavior')
-	)
-}
+/** Harmless warnings that repeat on every request or page load. Only the first of each is shown. */
+const REPEATED_NOISE = [
+	'Skipping origin header as it is a forbidden header',
+	'if keeping the header is a desired behavior',
+	"[TAURI] Couldn't find callback id",
+	'This project is using Custom Message Compiler',
+	'Game setting locales: options file read failed',
+]
 
 function stripAnsi(value: string): string {
 	return NodeUtil.stripVTControlCharacters(value)
@@ -1535,7 +1667,62 @@ async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
 			portIsOpen(runtime.ports[name]),
 		),
 	)
-	return open.every(Boolean)
+	if (!open.every(Boolean)) return false
+	const serving = await Promise.all(
+		runtime.scenarios.map((scenario) => appPageLoads(scenario.bridgeUrl!)),
+	)
+	return serving.every(Boolean)
+}
+
+/**
+ * Whether the App's page loads through a bridge: the modules that start it (the entry, and the App
+ * and routes it imports) and the dependencies they import. In a new checkout the frontend server
+ * spends a minute or two preparing those, and holds the requests until it is done, so asking here
+ * keeps that wait inside `up`.
+ */
+async function appPageLoads(bridgeUrl: string): Promise<boolean> {
+	/** The file's text, or `undefined` when the server answered with an error. */
+	const load = async (path: string) => {
+		const response = await fetch(`${bridgeUrl}${path}`, { signal: AbortSignal.timeout(60_000) })
+		const text = await response.text()
+		if (response.status === 500) throw new PageError(path, text)
+		return response.ok ? text : undefined
+	}
+	try {
+		const modules = await Promise.all(['/src/main.js', '/src/App.vue', '/src/routes.js'].map(load))
+		if (modules.some((text) => text === undefined)) return false
+		const dependencies = new Set(
+			modules.flatMap((text) =>
+				[...text!.matchAll(/"(\/node_modules\/\.vite\/deps\/[^"]+)"/g)].map(([, path]) => path!),
+			),
+		)
+		const loaded = await Promise.all([...dependencies].map(load))
+		return loaded.every((text) => text !== undefined)
+	} catch (error) {
+		if (error instanceof PageError) throw error
+		// Not answering yet, or still preparing after a minute. Asked again on the next check.
+		return false
+	}
+}
+
+/**
+ * The App's page does not compile, so it will never load: `up` stops waiting and shows why. The
+ * frontend server answers such a request with an error page that carries the compiler's error.
+ */
+class PageError extends DevRunnerError {
+	constructor(path: string, page: string) {
+		let detail = ''
+		try {
+			const error: unknown = JSON.parse(/const error = (\{.*\})/.exec(page)?.[1] ?? '')
+			if (isRecord(error)) {
+				detail = [error.message, error.frame].filter((part) => typeof part === 'string').join('\n')
+			}
+		} catch {
+			// Not the frontend server's error page.
+		}
+		super(`The App's page does not compile (${path}).${detail ? `\n${detail}` : ''}`)
+		this.name = 'PageError'
+	}
 }
 
 function portIsOpen(port: number): Promise<boolean> {
@@ -1559,9 +1746,18 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 		runnerLog('info', 'not running. Start it with: node scripts/dev-runner.ts up')
 		return false
 	}
-	const ready = await runtimeIsReady(runtime)
+	let ready = false
+	let pageError: string | undefined
+	try {
+		ready = await runtimeIsReady(runtime)
+	} catch (error) {
+		if (!(error instanceof PageError)) throw error
+		pageError = error.message
+	}
 	const labels = processLabelsForMode(runtime.mode, runtime.accountWeb)
-	runnerLog('info', `${runtime.mode} PID ${runtime.pid} · ${ready ? 'ready' : 'starting'}`)
+	const state = pageError ? 'page does not compile' : ready ? 'ready' : 'starting'
+	runnerLog('info', `${runtime.mode} PID ${runtime.pid} · ${state}`)
+	if (pageError) runnerLog('error', pageError)
 	if (labels.includes('backend')) runnerLog('info', `Accounts and sharing ${runtime.urls.backend}`)
 	if (labels.includes('account-web')) {
 		runnerLog('info', `Account sign-in ${runtime.urls.accountWeb}`)
@@ -1633,7 +1829,19 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 			process.exitCode = 1
 			return
 		}
-		if (current && (await runtimeIsReady(current))) {
+		let ready: boolean
+		try {
+			ready = current !== undefined && (await runtimeIsReady(current))
+		} catch (error) {
+			if (!(error instanceof PageError)) throw error
+			runnerLog(
+				'error',
+				`${error.message}\nThe stack is still running and picks up the fix by itself. Fix it, then run up again.`,
+			)
+			process.exitCode = 1
+			return
+		}
+		if (ready) {
 			await printStatus(paths)
 			return
 		}

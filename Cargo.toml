@@ -336,6 +336,17 @@ tauri-utils = { git = "https://github.com/tauri-apps/tauri", rev = "7cc68e74ff69
 # Toasty's unused SQLite driver conflicts with SQLx's native SQLite bindings.
 toasty = { path = "packages/toasty" }
 
+# Line numbers in backtraces, without the full debugger information that made each build output
+# about 20 GB and slowed every link.
+[profile.dev]
+debug = "line-tables-only"
+
+# Third-party crates compile once per Cargo.lock change, so they get basic optimizations: the
+# App's networking, database, and browser bridge run several times faster in development.
+[profile.dev.package."*"]
+opt-level = 1
+debug = false
+
 [profile.dev.package.sqlx-macros]
 opt-level = 3
 
