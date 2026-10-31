@@ -8,16 +8,8 @@
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
+import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
 
-// Local Minecraft, account, and server state. Everything else in the primary .data is scratch.
-const DATA_ENTRIES = ['backend', 'core', 'scenarios'] as const
-// Inside a scenario: Minecraft's game assets and the App window's browser caches. They are most
-// of the files, nothing reads them until a game starts or a page loads, and both are fetched again
-// on demand.
-const SKIPPED_SCENARIO_PATHS = [
-	/^meta\/assets$/,
-	/^webview2\/EBWebView\/(?:.+\/)?(?:Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|Dawn\w+Cache)$/,
-]
 const ENV_FILE = NodePath.join('packages', 'app-lib', '.env')
 
 const worktree = git(['rev-parse', '--show-toplevel'], process.cwd())
@@ -58,30 +50,15 @@ console.log(
 		: '[setup] done',
 )
 
+// Only what is missing, so running setup again never replaces data the work has changed.
 function copyDevelopmentData(): void {
 	const source = NodePath.join(primary, '.data')
 	for (const entry of DATA_ENTRIES) {
-		const from = NodePath.join(source, entry)
-		const to = NodePath.join(data, entry)
-		if (!NodeFS.existsSync(from) || NodeFS.existsSync(to)) continue
-		// Copied beside the target and moved into place, so a failed copy is retried next run
-		// instead of being mistaken for finished data.
-		const partial = `${to}.partial`
-		NodeFS.rmSync(partial, { recursive: true, force: true })
-		NodeFS.cpSync(from, partial, {
-			filter: (path) =>
-				entry !== 'scenarios' || !skippedScenarioPath(NodePath.relative(from, path)),
-			recursive: true,
-		})
-		NodeFS.renameSync(partial, to)
+		if (!NodeFS.existsSync(NodePath.join(source, entry))) continue
+		if (NodeFS.existsSync(NodePath.join(data, entry))) continue
+		copyDataEntry(source, data, entry)
 		console.log(`[setup] copied ${entry} from ${source}`)
 	}
-}
-
-/** Whether `path`, relative to the scenarios folder, is left out of the copy. */
-function skippedScenarioPath(path: string): boolean {
-	const inScenario = path.split(NodePath.sep).slice(1).join('/')
-	return SKIPPED_SCENARIO_PATHS.some((pattern) => pattern.test(inScenario))
 }
 
 // A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.

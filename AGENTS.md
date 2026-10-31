@@ -160,6 +160,11 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
   unless its `-wal` and `-shm` files are copied with it.
 - Copy data into the worktree, never symlink it to another checkout. Test data flows into the
   sandbox, never back out.
+- Presets are saved datasets for situations the baseline does not reach.
+  `node scripts/dev-runner.ts preset` lists them, and `up --preset <name> 1 2` replaces this
+  checkout's data with one before starting. `preset save <name>` stores this checkout's data as a
+  preset for every checkout; that sends data out of the sandbox, so do it only when the developer
+  asks.
 
 ## Verifying
 

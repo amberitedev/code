@@ -9,6 +9,7 @@ import * as NodePath from 'node:path'
 import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
+import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
 import { normalizeScenarioDatabase, runningAppCommands } from './scenario-state.ts'
 
 const BASE_PORTS = {
@@ -257,15 +258,24 @@ async function main(): Promise<void> {
 	const defaultScenarios = readDefaultScenarios(NodePath.join(paths.worktree, 'dev.json'))
 	const [command, ...commandArgs] = process.argv.slice(2)
 	if (command === 'up') {
-		const args = commandArgs.filter((arg) => arg !== '--show-windows')
+		const presetIndex = commandArgs.indexOf('--preset')
+		const preset = presetIndex === -1 ? undefined : commandArgs[presetIndex + 1]
+		if (presetIndex !== -1 && !preset) throw new DevRunnerError('--preset needs a preset name.')
+		const args = (presetIndex === -1 ? commandArgs : commandArgs.toSpliced(presetIndex, 2)).filter(
+			(arg) => arg !== '--show-windows',
+		)
 		// The mode is optional here: `up 1 2` means the full stack with those scenarios.
 		const hasMode = DEV_MODES.some((mode) => mode === args[0])
-		return up(paths, {
-			...parseInput(hasMode ? args : ['dev', ...args], defaultScenarios),
-			// Apps sign themselves in and are used through the browser bridge.
-			accountWeb: false,
-			hideWindows: !commandArgs.includes('--show-windows'),
-		})
+		return up(
+			paths,
+			{
+				...parseInput(hasMode ? args : ['dev', ...args], defaultScenarios),
+				// Apps sign themselves in and are used through the browser bridge.
+				accountWeb: false,
+				hideWindows: !commandArgs.includes('--show-windows'),
+			},
+			preset,
+		)
 	}
 	if (command === 'down') return down(paths)
 	if (command === 'status') {
@@ -273,6 +283,7 @@ async function main(): Promise<void> {
 		return
 	}
 	if (command === 'build') return buildPrograms(paths)
+	if (command === 'preset') return savePreset(paths, commandArgs)
 	const input = parseInput(process.argv.slice(2), defaultScenarios)
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.AMBERITE_DEV_INSTANCE,
@@ -604,6 +615,49 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 			process.exitCode = 1
 		}
 	}
+}
+
+/**
+ * `preset` lists the saved datasets. `preset save <name>` saves this checkout's data under that
+ * name, replacing any earlier one, so any checkout can start from it with `up --preset <name>`.
+ * Presets live in the primary checkout's `.data/presets`.
+ */
+function savePreset(paths: WorktreePaths, args: ReadonlyArray<string>): void {
+	const [action, name] = args
+	if (action === undefined) {
+		const presets = NodePath.join(paths.primary, '.data', 'presets')
+		const names = NodeFS.existsSync(presets) ? NodeFS.readdirSync(presets) : []
+		for (const preset of names.filter((entry) => !entry.endsWith('.partial'))) {
+			const scenarios = NodePath.join(presets, preset, 'scenarios')
+			const numbers = NodeFS.existsSync(scenarios) ? NodeFS.readdirSync(scenarios) : []
+			runnerLog('info', `${preset} (scenarios ${numbers.join(' ') || 'none'})`)
+		}
+		if (names.length === 0) runnerLog('info', 'no presets. Save one with: preset save <name>')
+		return
+	}
+	if (action !== 'save' || !name) {
+		throw new DevRunnerError('Use preset to list presets, or preset save <name>.')
+	}
+	const target = presetPath(paths, name)
+	if (readLiveRuntime(paths)) {
+		throw new DevRunnerError(
+			'Run node scripts/dev-runner.ts down first, so the data is not in use.',
+		)
+	}
+	NodeFS.mkdirSync(target, { recursive: true })
+	for (const entry of DATA_ENTRIES) {
+		if (NodeFS.existsSync(NodePath.join(paths.data, entry)))
+			copyDataEntry(paths.data, target, entry)
+		else NodeFS.rmSync(NodePath.join(target, entry), { recursive: true, force: true })
+	}
+	runnerLog('info', `saved preset ${name}`)
+}
+
+function presetPath(paths: WorktreePaths, name: string): string {
+	if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+		throw new DevRunnerError(`Preset names use lowercase letters, digits, and dashes: ${name}`)
+	}
+	return NodePath.join(paths.primary, '.data', 'presets', name)
 }
 
 function ensureDataLayout(paths: WorktreePaths, scenarios: ReadonlyArray<number>): void {
@@ -1773,10 +1827,31 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	return ready
 }
 
-/** Starts the dev stack in the background and returns once it is ready to use. */
-async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
+/**
+ * Starts the dev stack in the background and returns once it is ready to use. With `preset`, this
+ * checkout's data is replaced by that saved dataset first.
+ */
+async function up(paths: WorktreePaths, input: RunnerInput, preset?: string): Promise<void> {
 	let started: NodeChildProcess.ChildProcess | undefined
 	const live = readLiveRuntime(paths)
+	if (preset) {
+		if (live) {
+			throw new DevRunnerError(
+				'Already running. Run node scripts/dev-runner.ts down before switching data.',
+			)
+		}
+		const source = presetPath(paths, preset)
+		if (!NodeFS.existsSync(source)) {
+			throw new DevRunnerError(
+				`There is no preset ${preset}. node scripts/dev-runner.ts preset lists them.`,
+			)
+		}
+		for (const entry of DATA_ENTRIES) {
+			if (NodeFS.existsSync(NodePath.join(source, entry))) copyDataEntry(source, paths.data, entry)
+			else NodeFS.rmSync(NodePath.join(paths.data, entry), { recursive: true, force: true })
+		}
+		runnerLog('info', `data from preset ${preset}`)
+	}
 	// An App decides whether to show its window when it starts, so asking a running one is too late.
 	if (live?.hideWindows && !input.hideWindows) {
 		runnerLog(
