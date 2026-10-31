@@ -34,7 +34,7 @@ pub enum DownloadError {
     Status { url: String, status: StatusCode },
     #[error("{url} sent a file that does not match its hash")]
     Hash { url: String },
-    #[error("{url} is larger than {limit} bytes")]
+    #[error("{url} is larger than the {} MB limit", limit / 1024 / 1024)]
     TooLarge { url: String, limit: u64 },
     #[error("{0}")]
     Io(#[from] std::io::Error),

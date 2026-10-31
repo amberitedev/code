@@ -1454,6 +1454,11 @@ function initializeServer() {
 			extraSubscriptions: (targetServerId) => [
 				client.archon.sockets.on(targetServerId, 'backup-progress', handleBackupProgress),
 				client.archon.sockets.on(targetServerId, 'filesystem-ops', handleFilesystemOps),
+				// A Core install that fails before reporting any progress is only visible as the
+				// content's `error`, so the content is fetched again to show it.
+				client.archon.sockets.on(targetServerId, 'installation-result', () =>
+					queryClient.invalidateQueries({ queryKey: serverKeys.content(props.serverId) }),
+				),
 			],
 		})
 			.then((connected) => {

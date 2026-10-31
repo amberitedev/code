@@ -192,8 +192,13 @@ impl Content {
         entry.clone()
     }
 
-    /// Progress for an install the caller runs itself, outside [`Content::spawn`].
+    /// Progress for an install the caller runs itself, outside [`Content::spawn`]. The caller
+    /// ends it with [`Progress::finish`].
     pub fn progress(self: &Arc<Self>, server_id: &str) -> Progress {
+        self.update(server_id, |activity| {
+            activity.items.clear();
+            activity.error = None;
+        });
         Progress {
             content: Arc::clone(self),
             server_id: server_id.to_owned(),
@@ -229,7 +234,8 @@ impl Content {
                 content: Arc::clone(&content),
                 server_id: server_id.clone(),
             };
-            let result = work(Arc::clone(&content), hold, progress).await;
+            let result =
+                work(Arc::clone(&content), hold, progress.clone()).await;
             drop(busy);
             let (game_version, error) = match result {
                 Ok(change) => (change, None),
@@ -243,12 +249,7 @@ impl Content {
                     warn!(server = %server_id, ?installing, %error, "install failed")
                 }
             }
-            content.update(&server_id, |activity| {
-                *activity = Activity {
-                    error: error.clone(),
-                    ..Activity::default()
-                };
-            });
+            progress.finish(error.as_deref());
             content.emit(
                 &server_id,
                 WsEvent::InstallationResult(match error {
@@ -270,17 +271,16 @@ pub struct Progress {
 }
 
 impl Progress {
-    /// Set how far `id` is, from 0 to 1. Sent on when it moved a whole percent.
+    /// Set how far `id` is, from 0 to 1. Sent on as a percent, the App's scale, when it moved a
+    /// whole percent.
     pub fn set(&self, id: &str, key: &InstallProgressKey, progress: f64) {
-        let progress = progress.clamp(0.0, 1.0);
+        let progress = (progress.clamp(0.0, 1.0) * 100.0).floor();
         let world_id = Uuid::parse_str(&self.server_id).unwrap_or_default();
         let mut changed = false;
         let activity = self.content.update(&self.server_id, |activity| {
             match activity.items.iter_mut().find(|item| item.id == id) {
                 Some(item) => {
-                    let before = item.progress.unwrap_or(0.0);
-                    changed =
-                        (progress * 100.0).floor() != (before * 100.0).floor();
+                    changed = item.progress != Some(progress);
                     item.progress = Some(progress);
                 }
                 None => {
@@ -303,5 +303,26 @@ impl Progress {
                 },
             );
         }
+    }
+
+    /// End the install: every item is done, or failed with `error`, which the App shows. The
+    /// items stay until the next install starts, so a page opened later sees the outcome too.
+    pub fn finish(&self, error: Option<&str>) {
+        let activity = self.content.update(&self.server_id, |activity| {
+            activity.installing = None;
+            activity.error = error.map(str::to_owned);
+            for item in &mut activity.items {
+                match error {
+                    None => item.progress = Some(100.0),
+                    Some(error) => item.error = Some(error.to_owned()),
+                }
+            }
+        });
+        self.content.emit(
+            &self.server_id,
+            WsEvent::InstallProgress {
+                items: activity.items,
+            },
+        );
     }
 }

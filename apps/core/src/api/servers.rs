@@ -716,16 +716,25 @@ pub async fn reinstall(
     let busy = state.content.busy(&id)?;
     let hold = state.servers.hold(&id)?;
     content::records::unlink(&state.db, &id).await?;
-    content::install::loader(
+    let progress = state.content.progress(&id);
+    let result = content::install::loader(
         &state.content,
         &hold,
-        &state.content.progress(&id),
+        &progress,
         loader,
         &game_version,
         loader_version.as_deref(),
         false,
     )
-    .await?;
+    .await;
+    progress.finish(
+        result
+            .as_ref()
+            .err()
+            .map(|error| format!("{error:#}"))
+            .as_deref(),
+    );
+    result?;
     drop((hold, busy));
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
