@@ -152,6 +152,7 @@ zip = { version = "9.0.5", default-features = false, features = [
   "deflate64",
   "zstd",
 ] }
+
 [workspace.lints.clippy]
 bool_to_int_with_if = "warn"
 borrow_as_ptr = "warn"

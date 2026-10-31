@@ -64,8 +64,8 @@ features = ["devtools", "macos-private-api", "protocol-asset"]
 
 [dev-dependencies]
 rcgen = "0.14.7"
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 rustls = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
 tauri-build = { workspace = true, features = ["codegen"] }
