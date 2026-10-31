@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
 import { config } from '@/config'
-import { create_shared_instance_invite_link } from '@/helpers/instance'
+import { create_shared_instance_invite_link, type SharedInstanceInvite } from '@/helpers/instance'
 
 const DEFAULT_INVITE_LINK_MAX_USES = 10
 
@@ -48,6 +48,7 @@ export function useSharedInstanceInviteLink(
 		const maxInviteLinkUses = Math.floor(maxInviteUses.value)
 		if (maxInviteLinkUses <= 0) return
 
+		const replaced = details.value.inviteId
 		pending.value = true
 		try {
 			const maxAgeSeconds = Math.max(
@@ -57,12 +58,19 @@ export function useSharedInstanceInviteLink(
 			details.value = await create_shared_instance_invite_link(instanceId.value, {
 				maxAgeSeconds,
 				maxUses: Math.min(settings.maxUses, maxInviteLinkUses),
-				replaceInviteId: details.value.inviteId,
+				replaceInviteId: replaced,
 			})
 			void refreshInvites()
 		} catch (error) {
 			// Reported here and not rethrown, so the link editor does not show the raw request error.
 			onError(error)
+			// The old link is deleted before the new one is made, so it may be gone now.
+			await refreshInvites()
+			const invites = queryClient.getQueryData<SharedInstanceInvite[]>([
+				'sharedInstanceInvites',
+				instanceId.value,
+			])
+			if (invites && !invites.some((invite) => invite.id === replaced)) reset()
 		} finally {
 			pending.value = false
 		}

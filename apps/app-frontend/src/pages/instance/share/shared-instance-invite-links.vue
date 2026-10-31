@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 
+import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { config } from '@/config'
 import {
 	get_shared_instance_invites,
@@ -22,12 +23,14 @@ import {
 
 import { injectInstancePage } from '../instance-context'
 import { injectSharedInstance } from '../shared-instance-context'
+import { injectSharedInstanceManagement } from './shared-instance-management-context'
 import ConfirmRevokeSharedInstanceInviteModal from './confirm-revoke-shared-instance-invite-modal.vue'
 
 // The owner's active invite links, under the members on the Share tab. Hidden while there are none.
 
 const instancePage = injectInstancePage()
 const sharedInstance = injectSharedInstance()
+const management = injectSharedInstanceManagement()
 const { formatMessage } = useVIntl()
 const queryClient = useQueryClient()
 const formatRelativeTime = useRelativeTime()
@@ -53,6 +56,12 @@ const invitesQuery = useQuery({
 	refetchOnWindowFocus: false,
 })
 const invites = computed(() => invitesQuery.data.value ?? [])
+// Someone joining through a link uses it up.
+useSharedInstanceEvent(
+	'shared_instance_users',
+	() => instancePage.instance.value?.shared_instance?.id,
+	() => void invitesQuery.refetch(),
+)
 
 const revokeMutation = useMutation({
 	mutationFn: ({ instanceId, inviteId }: { instanceId: string; inviteId: string }) =>
@@ -62,6 +71,7 @@ const revokeMutation = useMutation({
 			['sharedInstanceInvites', instanceId],
 			(current = []) => current.filter((invite) => invite.id !== inviteId),
 		)
+		management.inviteRevoked(inviteId)
 	},
 	onError: (error) => void sharedInstance.reportActionError(error),
 })

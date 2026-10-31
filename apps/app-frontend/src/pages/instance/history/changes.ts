@@ -10,7 +10,14 @@ export interface ChangedItem extends AvatarGroupItem {
 const ORDER = ['added', 'updated', 'removed'] as const
 
 function nameOf(diff: SharedInstanceUpdateDiff) {
-	return diff.projectName ?? (diff.fileName ? decodeURIComponent(diff.fileName) : '')
+	if (diff.projectName) return diff.projectName
+	if (!diff.fileName) return ''
+	// A file name can hold a stray "%" that does not decode.
+	try {
+		return decodeURIComponent(diff.fileName)
+	} catch {
+		return diff.fileName
+	}
 }
 
 /** The projects and files a version changed, added first and removed last, as one group. */
@@ -29,7 +36,8 @@ export function changedItems(
 						? diff.currentVersionName
 						: [diff.currentVersionName, diff.newVersionName].filter(Boolean).join(' → ')
 			return {
-				key: diff.projectId ?? diff.fileName ?? name,
+				// One project can be in a version more than once, such as two removed files of it.
+				key: [kind, diff.projectId ?? diff.fileName ?? name, version].join('|'),
 				name,
 				src: diff.projectId ? icons.get(diff.projectId) : null,
 				version: version || undefined,

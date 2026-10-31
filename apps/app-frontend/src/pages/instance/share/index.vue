@@ -86,7 +86,10 @@
 
 		<template v-else-if="showMembersTable">
 			<SharedInstanceMembersTable />
-			<SharedInstanceInviteLinks v-if="instance.shared_instance?.role === 'owner'" class="mt-2" />
+			<SharedInstanceInviteLinks
+				v-if="instance.shared_instance?.role === 'owner' && !sharedInstanceActionsLocked"
+				class="mt-2"
+			/>
 		</template>
 
 		<SharedInstanceShareEmptyState
@@ -465,6 +468,9 @@ provideSharedInstanceManagement({
 	invitePending: inviteLink.pending,
 	pushUpdateDisabled: computed(() => offline.value),
 	invite: (event) => void showInvitePlayers(event),
+	inviteRevoked: (inviteId) => {
+		if (inviteLink.details.value?.inviteId === inviteId) inviteLink.reset()
+	},
 	remove: showRemoveMemberModal,
 })
 

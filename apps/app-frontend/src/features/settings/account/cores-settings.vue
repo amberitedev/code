@@ -72,16 +72,17 @@ const { data: storage } = useQuery({
 	retry: false,
 })
 
+// Each change carries the Core it was made on, since another can be picked before it lands.
 const change = useMutation({
-	mutationFn: (settings: Copal.StorageSettings) =>
-		client.copal.storage_v1.change(core.value!.id, settings),
-	onSuccess: (status) => queryClient.setQueryData(storageKey.value, status),
-	onError: (cause) => {
+	mutationFn: ({ coreId, settings }: { coreId: string; settings: Copal.StorageSettings }) =>
+		client.copal.storage_v1.change(coreId, settings),
+	onSuccess: (status, { coreId }) => queryClient.setQueryData(['core-storage', coreId], status),
+	onError: (cause, { coreId }) => {
 		console.error('Failed to change Core storage', cause)
 		resetSliders()
 		addNotification({
 			type: 'error',
-			title: `Could not change ${core.value?.name}`,
+			title: `Could not change ${cores.value.find((each) => each.id === coreId)?.name ?? 'the Core'}`,
 			text: 'Check that the Core is online, then try again.',
 		})
 	},
@@ -89,7 +90,8 @@ const change = useMutation({
 
 const enabled = computed({
 	get: () => storage.value?.enabled ?? false,
-	set: (value: boolean) => change.mutate({ enabled: value }),
+	set: (value: boolean) =>
+		core.value && change.mutate({ coreId: core.value.id, settings: { enabled: value } }),
 })
 
 // Everything the store may use: what it holds and what is free on its disk.
@@ -125,11 +127,15 @@ function resetSliders() {
 }
 watch(storage, resetSliders, { immediate: true })
 
-// Saves once the slider rests.
-const saveCap = useDebounceFn((field: 'cap' | 'egress_cap', gib: number) => {
+// Saves once the slider rests, on the Core it was moved on.
+const saveCapOn = useDebounceFn((coreId: string, field: 'cap' | 'egress_cap', gib: number) => {
 	const bytes = gib * GiB
-	if (bytes !== storage.value?.[field]) change.mutate({ [field]: bytes })
+	const current = queryClient.getQueryData<Copal.StorageStatus>(['core-storage', coreId])
+	if (bytes !== current?.[field]) change.mutate({ coreId, settings: { [field]: bytes } })
 }, 600)
+function saveCap(field: 'cap' | 'egress_cap', gib: number) {
+	if (core.value) void saveCapOn(core.value.id, field, gib)
+}
 
 const confirmRemove = ref<InstanceType<typeof ConfirmModal>>()
 const removing = ref(false)
