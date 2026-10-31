@@ -28,7 +28,7 @@ Modrinth handles public content (mods, modpacks, resource packs, etc.). Amberite
 
 The App keeps the full Modrinth experience. Users can continue using it as their main launcher (browsing content, managing instances, installing modpacks and mods, etc.), with Amberite’s features added on top.
 
-Amberite ports Modrinth’s social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over.
+Amberite ports Modrinth’s social backend from upstream `apps/labrinth` (friends, profiles, sharing, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over. Labrinth is not kept in this repo: read it from `modrinth/main`. `upstream.json` lists the upstream paths we never take (`ignore`) and the labrinth paths we port from (`watch`).
 
 ### 5. Minecraft-first identity
 
@@ -57,13 +57,14 @@ somewhere else. Before calling frontend work done, check which of these apply:
 
 ## Dev servers
 
-- Worktree setup (`node scripts/setup-worktree.ts`, run by `t3.json`) installs dependencies and copies
-  the primary checkout's test data. It takes a few minutes and is often still running when you
+- Worktree setup (`node scripts/setup-worktree.ts`, run by `t3.json`) installs dependencies, copies
+  the primary checkout's test data, and then compiles the App and Core in the background so they
+  are ready when you need them. It takes a few minutes and is often still running when you
   start. Do not wait for it: reading and editing code needs none of it, so begin the work straight
   away. Look at `.data/setup.json` only when you first need to run something: `running` means it is
   not ready yet (never run `vp i` beside it), `failed` or a missing file means run the script again.
-- `node scripts/dev-runner.ts up 1 2` starts the whole stack in the background and returns when it is ready,
-  printing each App's browser bridge URL. `node scripts/dev-runner.ts status` prints the same at any time and
+- `node scripts/dev-runner.ts up 1 2` starts the whole stack in the background and returns once each App's
+  page loads through its browser bridge, printing the bridge URLs. `node scripts/dev-runner.ts status` prints the same at any time and
   `node scripts/dev-runner.ts down` stops it. The log is `.data/dev.log`. Apps started this way have no window
   on the desktop; add `--show-windows` when a person needs to see them.
 - The App and Core are built once per distinct set of Rust inputs and shared by every checkout. A
@@ -71,7 +72,9 @@ somewhere else. Before calling frontend work done, check which of these apply:
   nothing. Otherwise the start compiles first, one build at a time across all checkouts: about a
   minute after a small Rust edit in a checkout that has built before. The first build in a worktree
   takes a few minutes, or compiles only what that worktree changed on a Dev Drive. `up` stops at once and prints the compiler errors when the Rust does not
-  compile, so it is also the check for Rust changes. It gives up waiting after 9 minutes; run it
+  compile, so it is also the check for Rust changes. It does the same when the App's entry
+  (`apps/app-frontend/src/main.js`) does not compile; the stack keeps running and picks up the fix.
+  It gives up waiting after 9 minutes; run it
   again to keep waiting.
 - Nothing watches Rust files. After a Rust edit, run `down` then `up`, which rebuilds because the
   inputs changed.
@@ -157,6 +160,11 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
   unless its `-wal` and `-shm` files are copied with it.
 - Copy data into the worktree, never symlink it to another checkout. Test data flows into the
   sandbox, never back out.
+- Presets are saved datasets for situations the baseline does not reach.
+  `node scripts/dev-runner.ts preset` lists them, and `up --preset <name> 1 2` replaces this
+  checkout's data with one before starting. `preset save <name>` stores this checkout's data as a
+  preset for every checkout; that sends data out of the sandbox, so do it only when the developer
+  asks.
 
 ## Verifying
 
@@ -194,8 +202,6 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
   files for the pool. It has no identity of its own: the Core forwards `/store/` on its one port to
   it unread, manages it over stdio, and reports for it (`apps/core/src/storage.rs`). It has no
   database or keys and checks the backend's tickets itself. Design in `docs/internals/pool.md`.
-- `apps/frontend` - Website and inherited Modrinth web surface. Not in use; it will be reverted to
-  upstream.
 - `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers, D1, and
   R2. Shared files live on Cores, never on Cloudflare.
 - `packages/ui` - shared Modrinth and Amberite UI.
@@ -215,6 +221,7 @@ and `/to-tickets` turns a plan into issues.
 - Complexity belongs at the adapter boundary. Backend-facing workflows stay in
   `@modrinth/api-client`; UI stays dumb.
 - Preserve upstream behavior until Amberite has a product reason to differ.
+- Nothing is released and nothing is installed. Never plan migrations or backward compatibility.
 - Inferred types over annotations. Never use TypeScript `any`; use `unknown` and narrow it safely.
 - Comments describe how a thing is used or why a constraint exists. Do not narrate ordinary code.
 - If a rule here fights the task, say so clearly and get developer approval before breaking it.

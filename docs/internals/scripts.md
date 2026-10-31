@@ -20,8 +20,12 @@ coding-agent app that gives each task an isolated Git worktree. When T3 Code cre
 runs `node scripts/setup-worktree.ts` from `t3.json`. The script installs dependencies (retrying once,
 because two worktrees set up at the same time can collide on the shared Git config), copies the
 `backend`, `core`, and `scenarios` development data from the primary checkout, and copies the App
-library's `.env`. It does not overwrite anything already in the worktree, so it is safe to run
-again. `.data/setup.json` records whether it is `running`, `done`, or `failed`.
+library's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
+window's browser caches; they are most of the files and are fetched again when needed. It does not
+overwrite anything already in the worktree, so it is safe to run again. `.data/setup.json` records
+whether it is `running`, `done`, or `failed`. Once the data is copied, it starts
+`node scripts/dev-runner.ts build` in the background, so the App and Core are usually compiled by
+the time the work needs them. That build logs to `.data/build.log`.
 
 ## Dev
 
@@ -34,9 +38,11 @@ again. `.data/setup.json` records whether it is `running`, `done`, or `failed`.
 - `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
   against the Worker's public key, so start `dev:backend` too.
 - `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every service answers
-  and every App has printed its browser bridge URL, then prints them. It writes to `.data/dev.log`
+  and every App's page loads through its browser bridge, then prints the bridge URLs. In a new
+  checkout the frontend spends a minute or two preparing its dependencies; that happens inside `up`. It writes to `.data/dev.log`
   and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
-  fails at once when a Rust build fails. An optional mode comes first:
+  fails at once when a Rust build fails, or when the App's entry module does not compile, printing
+  the compiler error; the stack keeps running. An optional mode comes first:
   `node scripts/dev-runner.ts up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
   website and keeps App windows off the desktop, because agents use Apps through the browser
   bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
@@ -44,6 +50,13 @@ again. `.data/setup.json` records whether it is `running`, `done`, or `failed`.
 - `node scripts/dev-runner.ts status`: Prints what is running, whether it is ready, and each App's bridge URL. Exits
   non-zero when the stack is not ready.
 - `node scripts/dev-runner.ts down`: Stops this checkout's dev runner and everything it started.
+- `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
+  starting anything. Worktree setup runs it.
+- `node scripts/dev-runner.ts preset`: Lists the saved datasets in the primary checkout's
+  `.data/presets`. `preset save <name>` saves this checkout's `backend`, `core`, and `scenarios`
+  there, replacing any earlier preset of that name; the stack must be stopped.
+  `up --preset <name> 1 2` replaces this checkout's data with that preset, then starts. Copies
+  leave out game assets and browser caches, as setup does.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -56,8 +69,10 @@ Each program is copied to `<target>/dev-bin/<key>/` and run from there, where `<
 primary checkout's `target`; every worktree shares those programs. Both are members of the root Cargo workspace.
 The key is a hash of everything that goes into the build:
 
-- Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, every workspace member
-  and path dependency named in `Cargo.toml`, and the Cargo arguments.
+- Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
+  and the folders of the program's crate and every local crate it builds with, as
+  `cargo metadata` reports them. Crates it does not use, such as labrinth, can change without a
+  rebuild.
 - App, also: `apps/app-frontend/package.json` (the App's version), `packages/app-lib/.env`, the
   variables named in that file and `.env.prod`, and `apps/app/tauri-local.conf.json`.
 
@@ -80,24 +95,24 @@ restarting after Rust edits queue up instead of taking the whole machine.
 Where a checkout compiles depends on its drive:
 
 - On a Windows Dev Drive (ReFS), when the worktree and the primary checkout are on the same drive,
-  each worktree compiles into its own `target`. Before its first build, the runner clones the
-  primary checkout's `target` into it. The clone is instant and shares disk space with the original
-  until files change. The runner then gives every input file that matches the primary checkout the
-  primary's file time, and rewrites the absolute paths build scripts recorded, so Cargo treats
-  unchanged crates as built and compiles only what this worktree changed. The worktree keeps its own
+  each worktree compiles into its own `target`. Before its first build, the runner clones another
+  checkout's `target` into it: of the primary checkout and the checkouts that built a cached
+  program, the one whose Rust files differ least from this worktree's. The clone is instant and
+  shares disk space with the original until files change. The runner then gives every input file
+  that matches the source the source's file time, and rewrites the absolute paths build scripts
+  recorded, so Cargo treats unchanged crates as built and compiles only what differs. The worktree keeps its own
   compiler caches, so later edits there compile incrementally. Cargo never deletes old output, and
   every file it writes stops being shared, so the worktree's `target` slowly grows. Before a build,
-  once it is 10 GB bigger than the primary's, the runner deletes it and clones it again.
+  once it is 10 GB bigger than the source's, the runner deletes it and clones it again.
 - Everywhere else, checkouts compile into the primary checkout's `target`. Cargo decides what to
   recompile from file times alone, so a crate last compiled from another checkout can look finished
   here. When the previous build of a program came from a different checkout, the runner marks the
   crates that live in the repo as changed, and Cargo compiles those again. Third-party crates and
   compiler caches are kept.
 
-A clone is only as current as the primary checkout's build: keep the primary checkout on recent
-`main` and run `up` there after pulling, or worktrees compile what changed since. An older checkout
-that still runs its App from `target/debug` holds that file open; the runner renames it aside and
-builds again.
+The primary checkout's own `target` does not need to be kept current: a new worktree clones from
+whichever recent build is closest. An older checkout that still runs its App from `target/debug`
+holds that file open; the runner renames it aside and builds again.
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
 until then the Servers page asks for a Core. The dev App may call any Core address, which a
@@ -235,3 +250,13 @@ errors and warnings to the same terminal; error and warning notifications are lo
 - `vp check`, `vp run -r test`, and `vp run -r typecheck`: Repository-wide checks owned by CI. Run
   them locally only when the developer asks.
 - `vp run build`: Builds the repository. Do not run it unless the developer asks.
+
+## Upstream sync
+
+`.github/workflows/upstream-sync.yml` runs daily. When Modrinth has new commits and no earlier sync
+is waiting, it runs `node scripts/upstream-sync.ts` on a new `sync/upstream/N` branch and pushes it:
+one merge commit with both parents, the `ignore` paths from `upstream.json` deleted, lockfiles taken
+from Modrinth and pruned, and any conflict markers committed as they are. The run's
+`upstream-sync-N` artifact holds the script's JSON summary, the new commit titles, the merged
+Modrinth pull requests, and the diff of Modrinth's changelog. The `/upstream-sync` skill resolves
+the branch and opens the pull request. Merge it with a merge commit, never a squash.

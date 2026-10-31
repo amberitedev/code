@@ -8,7 +8,7 @@ use theseus::install::{
 };
 use theseus::instance::{
     SharedInstanceInstallPreview, SharedInstanceInviteInstallPreview,
-    SharedInstanceUpdatePreview,
+    SharedInstanceUpdatePreview, SharedInstanceVersionDetails,
 };
 use theseus::pack::import::ImportLauncherType;
 use theseus::pack::install_from::CreatePackLocation;
@@ -27,6 +27,8 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             install_get_shared_instance_update_preview,
             install_shared_instance,
             install_update_shared_instance,
+            install_get_shared_instance_version,
+            install_restore_shared_instance_version,
             install_bulk_update_content,
             install_import_instance,
             install_duplicate_instance,
@@ -200,6 +202,32 @@ pub async fn install_update_shared_instance(
     instance_id: String,
 ) -> Result<InstallJobSnapshot> {
     Ok(theseus::instance::update_shared_instance(&instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn install_get_shared_instance_version(
+    instance_id: String,
+    version: i32,
+    base: Option<i32>,
+) -> Result<SharedInstanceVersionDetails> {
+    Ok(theseus::instance::get_shared_instance_version(
+        &instance_id,
+        version,
+        base,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn install_restore_shared_instance_version(
+    instance_id: String,
+    version: i32,
+) -> Result<InstallJobSnapshot> {
+    Ok(theseus::instance::restore_shared_instance_version(
+        &instance_id,
+        version,
+    )
+    .await?)
 }
 
 #[tauri::command]

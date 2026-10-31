@@ -1,9 +1,8 @@
 # Networking & Remote Access — Design Notes (future work)
 
 Captured design ideas for exposing self-hosted Copal instances to the
-internet. It records intent and trade-offs so we don't lose the reasoning. The
-target design, including what was decided here, is
-`docs/internals/core-plan.md`.
+internet. It records intent and trade-offs so we don't lose the reasoning. What was
+decided here is in `docs/internals/plan.md`.
 
 ## Problem
 

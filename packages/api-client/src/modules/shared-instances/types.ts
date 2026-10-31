@@ -143,6 +143,10 @@ export namespace SharedInstances {
 				counted: boolean
 				/** Bytes this share counts against the allowance, 0 when not counted. */
 				used: number
+				/** Bytes its kept versions take, counted or not. */
+				size: number
+				/** The account's own Cores holding it. */
+				cores: string[]
 				/** Newest first. */
 				versions: StoredVersion[]
 			}

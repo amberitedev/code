@@ -206,6 +206,9 @@ pub enum InstallRequest {
     },
     UpdateSharedInstance {
         instance_id: String,
+        /// A kept version to apply instead of the latest, when an owner restores one.
+        #[serde(default)]
+        version: Option<SharedInstanceInstallData>,
     },
     BulkUpdateContent {
         instance_id: String,

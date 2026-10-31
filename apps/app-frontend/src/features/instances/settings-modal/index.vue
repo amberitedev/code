@@ -6,7 +6,6 @@ import {
 	CoffeeIcon,
 	InfoIcon,
 	Settings2Icon,
-	UsersIcon,
 	WindowIcon,
 	WrenchIcon,
 } from '@modrinth/assets'
@@ -34,7 +33,6 @@ import HooksSettings from './hooks-settings.vue'
 import InstallationSettings from './installation-settings.vue'
 import { provideInstanceSettings } from './instance-settings-context.ts'
 import JavaSettings from './java-settings.vue'
-import SharingSettings from './sharing-settings/index.vue'
 import SyncedOptionsSettings from './synced-options-settings.vue'
 import WindowSettings from './window-settings.vue'
 
@@ -121,16 +119,6 @@ const tabs = computed<TabbedModalTab[]>(() => [
 		icon: WrenchIcon,
 		category: tabCategories.instance,
 		content: InstallationSettings,
-	},
-	{
-		name: defineMessage({
-			id: 'instance.settings.tabs.sharing',
-			defaultMessage: 'Sharing',
-		}),
-		category: tabCategories.instance,
-		icon: UsersIcon,
-		content: SharingSettings,
-		shown: props.instance.shared_instance?.role === 'owner' && !props.instance.quarantined,
 	},
 	{
 		name: defineMessage({

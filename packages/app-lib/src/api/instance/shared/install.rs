@@ -356,7 +356,7 @@ pub async fn update_shared_instance(
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
     member_attachment(&metadata)?;
-    crate::install::update_shared_instance(instance_id.to_string()).await
+    crate::install::update_shared_instance(instance_id.to_string(), None).await
 }
 
 fn member_attachment(

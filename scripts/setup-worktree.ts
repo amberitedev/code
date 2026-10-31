@@ -8,9 +8,8 @@
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
+import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
 
-// Local Minecraft, account, and server state. Everything else in the primary .data is scratch.
-const DATA_ENTRIES = ['backend', 'core', 'scenarios'] as const
 const ENV_FILE = NodePath.join('packages', 'app-lib', '.env')
 
 const worktree = git(['rev-parse', '--show-toplevel'], process.cwd())
@@ -36,6 +35,7 @@ try {
 	]) {
 		NodeFS.mkdirSync(path, { recursive: true })
 	}
+	startBuild()
 } catch (error) {
 	// A failed copy must not hide the install result, or stop the install from finishing.
 	console.error(`[setup] ${error instanceof Error ? error.message : String(error)}`)
@@ -50,18 +50,13 @@ console.log(
 		: '[setup] done',
 )
 
+// Only what is missing, so running setup again never replaces data the work has changed.
 function copyDevelopmentData(): void {
 	const source = NodePath.join(primary, '.data')
 	for (const entry of DATA_ENTRIES) {
-		const from = NodePath.join(source, entry)
-		const to = NodePath.join(data, entry)
-		if (!NodeFS.existsSync(from) || NodeFS.existsSync(to)) continue
-		// Copied beside the target and moved into place, so a failed copy is retried next run
-		// instead of being mistaken for finished data.
-		const partial = `${to}.partial`
-		NodeFS.rmSync(partial, { recursive: true, force: true })
-		NodeFS.cpSync(from, partial, { recursive: true })
-		NodeFS.renameSync(partial, to)
+		if (!NodeFS.existsSync(NodePath.join(source, entry))) continue
+		if (NodeFS.existsSync(NodePath.join(data, entry))) continue
+		copyDataEntry(source, data, entry)
 		console.log(`[setup] copied ${entry} from ${source}`)
 	}
 }
@@ -83,6 +78,32 @@ async function installDependencies(): Promise<boolean> {
 		console.error(`[setup] vp i failed${attempt === 1 ? '; retrying once' : ''}`)
 	}
 	return false
+}
+
+/**
+ * Builds the App and Core in the background, so `up` has them ready by the time the work needs
+ * them. It runs behind everything else, waits its turn behind other checkouts' builds, and finds
+ * nothing to do when another checkout already built the same Rust. Its log is `.data/build.log`.
+ */
+function startBuild(): void {
+	// Optional: `up` builds whatever is missing, so a build that cannot start never fails setup.
+	const notStarted = (error: unknown) =>
+		console.error(
+			`[setup] background build not started: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	try {
+		const log = NodeFS.openSync(NodePath.join(data, 'build.log'), 'w')
+		const child = NodeChildProcess.spawn(
+			process.execPath,
+			[NodePath.join(worktree, 'scripts', 'dev-runner.ts'), 'build'],
+			{ cwd: worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
+		)
+		child.once('error', notStarted)
+		child.unref()
+		NodeFS.closeSync(log)
+	} catch (error) {
+		notStarted(error)
+	}
 }
 
 function run(command: string, args: ReadonlyArray<string>): Promise<number> {

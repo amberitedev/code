@@ -5,6 +5,9 @@ overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.9
   vue: 3.5.27
 minimumReleaseAge: 10080 # 7 days
+# Every checkout links its packages from one shared copy in the store instead of copying them, so
+# installing in a new worktree takes about a minute instead of eight.
+enableGlobalVirtualStore: true
 strictPeerDependencies: false
 autoInstallPeers: true
 publicHoistPattern:
@@ -19,12 +22,6 @@ publicHoistPattern:
   - 'globals'
 patchedDependencies:
   'readable-stream@2.3.8': 'patches/readable-stream@2.3.8.patch'
-  '@vue-email/markdown@0.0.7': 'patches/@vue-email__markdown@0.0.7.patch'
-  '@vue-email/tailwind@0.2.0': 'patches/@vue-email__tailwind@0.2.0.patch'
-packageExtensions:
-  '@vue-email/markdown@0.0.7':
-    dependencies:
-      xss: '^1.0.14'
 peerDependencyRules:
   allowedVersions:
     vite: '8'

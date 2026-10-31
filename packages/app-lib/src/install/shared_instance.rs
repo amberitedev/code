@@ -103,6 +103,31 @@ pub(super) async fn finalize_shared_instance_attachment(
     data: &SharedInstanceInstallData,
     state: &State,
 ) -> crate::Result<()> {
+    // An owner who restored a kept version stays its owner, with changes to push unless the
+    // version is the latest.
+    if let Some(owner) = crate::state::get_instance(instance_id, &state.pool)
+        .await?
+        .and_then(|metadata| metadata.shared_instance)
+        .filter(|attachment| attachment.role == SharedInstanceRole::Owner)
+    {
+        let latest = owner.latest_version == Some(data.version);
+        return crate::state::set_shared_instance_sync_status(
+            instance_id,
+            if latest {
+                ContentSetSyncStatus::UpToDate
+            } else {
+                ContentSetSyncStatus::Stale
+            },
+            if latest {
+                Some(data.version)
+            } else {
+                owner.applied_version
+            },
+            owner.latest_version,
+            &state.pool,
+        )
+        .await;
+    }
     if let Some(server) = &data.linked_server {
         let icon = linked_server_icon(data, state).await?;
         let icon_path = crate::state::instances::commands::resolve_icon_path(
@@ -597,7 +622,7 @@ async fn current_shared_instance_content(
     let mut content = CurrentSharedInstanceContent::default();
 
     for entry in entries {
-        if entry.source_kind != ContentSourceKind::SharedInstance {
+        if !replaced_by_shared_update(metadata, entry.source_kind) {
             continue;
         }
 
@@ -774,6 +799,20 @@ async fn ensure_shared_instance_additions_enabled(
         }
     }
     Ok(())
+}
+
+/// Whether a shared update replaces content of this kind. A member keeps what they added
+/// themselves. Everything in the owner's instance is pushed, so restoring a version replaces
+/// their own additions too.
+fn replaced_by_shared_update(
+    metadata: &crate::state::InstanceMetadata,
+    source_kind: ContentSourceKind,
+) -> bool {
+    source_kind == ContentSourceKind::SharedInstance
+        || source_kind == ContentSourceKind::Local
+            && metadata.shared_instance.as_ref().is_some_and(|attachment| {
+                attachment.role == SharedInstanceRole::Owner
+            })
 }
 
 async fn desired_shared_instance_content(
@@ -1105,7 +1144,10 @@ pub(super) async fn remove_existing_shared_instance_content(
     .await?;
     let managed_ids = entries
         .into_iter()
-        .filter(|entry| entry.source_kind.is_shared_instance_managed())
+        .filter(|entry| {
+            entry.source_kind.is_shared_instance_managed()
+                || replaced_by_shared_update(&metadata, entry.source_kind)
+        })
         .filter_map(|entry| entry.file_id)
         .collect::<HashSet<_>>();
     for file in

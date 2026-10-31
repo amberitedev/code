@@ -42,7 +42,7 @@ pub(super) async fn remote_shared_config_files(
 
 /// The config files of `latest` that are new or differ from `applied`. A legacy config bundle
 /// comes first so individual files are written over it.
-fn changed_config_files(
+pub(super) fn changed_config_files(
     latest: &[ExternalFileResponse],
     applied: Option<&[ExternalFileResponse]>,
 ) -> crate::Result<Vec<ExternalFileResponse>> {

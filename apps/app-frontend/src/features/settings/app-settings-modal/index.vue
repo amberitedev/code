@@ -12,6 +12,7 @@ import {
 	RefreshCwIcon,
 	ServerStackIcon,
 	Settings2Icon,
+	ShareIcon,
 	ToggleRightIcon,
 	UserIcon,
 	WindowIcon,
@@ -47,6 +48,7 @@ import JavaAndMemorySettings from '@/features/settings/instance-defaults/java-an
 import LaunchHooksSettings from '@/features/settings/instance-defaults/launch-hooks-settings.vue'
 import WindowSettings from '@/features/settings/instance-defaults/window-settings.vue'
 import type { InstanceDefaultsTab } from '@/features/settings/settings-actions'
+import SharingSettings from '@/features/settings/sharing/sharing-settings.vue'
 import SyncingSettings from '@/features/settings/syncing/syncing-settings.vue'
 import ResourceManagementSettings from '@/features/settings/system/resource-management-settings/index.vue'
 import TroubleshootingSettings from '@/features/settings/system/troubleshooting-settings.vue'
@@ -162,6 +164,15 @@ const tabs = [
 		category: tabCategories.account,
 		icon: ServerStackIcon,
 		content: CoresSettings,
+	},
+	{
+		name: defineMessage({
+			id: 'app.settings.tabs.sharing',
+			defaultMessage: 'Sharing',
+		}),
+		category: tabCategories.account,
+		icon: ShareIcon,
+		content: SharingSettings,
 	},
 	{
 		name: defineMessage({

@@ -120,10 +120,17 @@ pub async fn create_shared_instance(
     start(InstallRequest::CreateSharedInstance { data }).await
 }
 
+/// Updates a shared instance to its latest version, or to `version` when an owner restores a
+/// kept one.
 pub async fn update_shared_instance(
     instance_id: String,
+    version: Option<SharedInstanceInstallData>,
 ) -> crate::Result<InstallJobSnapshot> {
-    start(InstallRequest::UpdateSharedInstance { instance_id }).await
+    start(InstallRequest::UpdateSharedInstance {
+        instance_id,
+        version,
+    })
+    .await
 }
 
 pub async fn bulk_update_content(
@@ -1541,21 +1548,25 @@ async fn run_request(
             )
             .await
         }
-        InstallRequest::UpdateSharedInstance { instance_id } => {
-            diagnostics::install_step(
-                job_id,
-                "update_shared_instance",
-                || async move {
-                    prepare_existing_rollback(
-                        job_id,
-                        request,
-                        job_state,
-                        &state.pool,
-                        &instance_id,
-                    )
-                    .await?;
-                    lock_instance(&instance_id, state).await?;
-                    let data = diagnostics::install_step(
+        InstallRequest::UpdateSharedInstance {
+            instance_id,
+            version,
+        } => diagnostics::install_step(
+            job_id,
+            "update_shared_instance",
+            || async move {
+                prepare_existing_rollback(
+                    job_id,
+                    request,
+                    job_state,
+                    &state.pool,
+                    &instance_id,
+                )
+                .await?;
+                lock_instance(&instance_id, state).await?;
+                let data = match version {
+                    Some(version) => version,
+                    None => diagnostics::install_step(
                         job_id,
                         "resolve_shared_instance_update",
                         || {
@@ -1565,44 +1576,40 @@ async fn run_request(
                             )
                         },
                     )
+                    .await?,
+                };
+                prepare_update_backup(
+                    job_id,
+                    request,
+                    Some(&data),
+                    job_state,
+                    state,
+                )
+                .await?;
+                let disabled_project_ids =
+                    disabled_project_ids(&instance_id, state).await?;
+                apply_shared_instance_update(
+                    job_id,
+                    job_state,
+                    state,
+                    &instance_id,
+                    &data,
+                )
+                .await?;
+                restore_disabled_projects(
+                    &instance_id,
+                    disabled_project_ids,
+                    state,
+                )
+                .await?;
+                finalize_shared_instance_attachment(&instance_id, &data, state)
                     .await?;
-                    prepare_update_backup(
-                        job_id,
-                        request,
-                        Some(&data),
-                        job_state,
-                        state,
-                    )
+                emit_instance(&instance_id, InstancePayloadType::Edited)
                     .await?;
-                    let disabled_project_ids =
-                        disabled_project_ids(&instance_id, state).await?;
-                    apply_shared_instance_update(
-                        job_id,
-                        job_state,
-                        state,
-                        &instance_id,
-                        &data,
-                    )
-                    .await?;
-                    restore_disabled_projects(
-                        &instance_id,
-                        disabled_project_ids,
-                        state,
-                    )
-                    .await?;
-                    finalize_shared_instance_attachment(
-                        &instance_id,
-                        &data,
-                        state,
-                    )
-                    .await?;
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await?;
-                    Ok(Some(instance_id))
-                },
-            )
-            .await
-        }
+                Ok(Some(instance_id))
+            },
+        )
+        .await,
     }
 }
 
@@ -2009,7 +2016,7 @@ async fn update_backup_scope(
             );
             (instance_id, packs)
         }
-        InstallRequest::UpdateSharedInstance { instance_id } => {
+        InstallRequest::UpdateSharedInstance { instance_id, .. } => {
             let data = shared_update
                 .context("shared instance update data is missing")?;
             if data.fresh_start {

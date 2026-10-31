@@ -84,7 +84,13 @@
 
 		<div v-else-if="membersTableLoading" class="h-64" aria-hidden="true" />
 
-		<SharedInstanceMembersTable v-else-if="showMembersTable" />
+		<template v-else-if="showMembersTable">
+			<SharedInstanceMembersTable />
+			<SharedInstanceInviteLinks
+				v-if="instance.shared_instance?.role === 'owner' && !sharedInstanceActionsLocked"
+				class="mt-2"
+			/>
+		</template>
 
 		<SharedInstanceShareEmptyState
 			v-else-if="sharedInstanceUnavailable"
@@ -188,6 +194,7 @@ import {
 
 import { injectInstancePage } from '../instance-context'
 import { injectSharedInstance } from '../shared-instance-context'
+import SharedInstanceInviteLinks from './shared-instance-invite-links.vue'
 import { provideSharedInstanceManagement } from './shared-instance-management-context'
 import SharedInstanceMembersTable from './shared-instance-members-table.vue'
 import SharedInstanceRemoveMemberModal from './shared-instance-remove-member-modal.vue'
@@ -461,6 +468,9 @@ provideSharedInstanceManagement({
 	invitePending: inviteLink.pending,
 	pushUpdateDisabled: computed(() => offline.value),
 	invite: (event) => void showInvitePlayers(event),
+	inviteRevoked: (inviteId) => {
+		if (inviteLink.details.value?.inviteId === inviteId) inviteLink.reset()
+	},
 	remove: showRemoveMemberModal,
 })
 

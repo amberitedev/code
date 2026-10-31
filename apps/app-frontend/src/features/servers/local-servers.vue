@@ -206,22 +206,15 @@ async function browseModpacks() {
 
 <template>
 	<div data-pyro-server-list-root class="relative mx-auto flex h-full w-full flex-col p-6">
+		<!-- Only over a list, so every empty and problem state stays centered. -->
 		<div
-			v-if="auth.user.value && !problem && !needsCore"
+			v-if="auth.user.value && !problem && !needsCore && allServers.length > 0"
 			class="mb-4 flex w-full flex-row items-center justify-between gap-2"
 		>
 			<h1 class="m-0 text-2xl font-extrabold text-contrast">Servers</h1>
 			<div class="flex items-center gap-2">
-				<Input
-					v-if="allServers.length > 0"
-					v-model="searchInput"
-					:icon="SearchIcon"
-					placeholder="Search servers"
-				/>
-				<Button @click="openCoreSettings"><SettingsIcon /> Core settings</Button>
-				<Button v-if="allServers.length > 0" type="colored" color="brand" @click="newServer">
-					<PlusIcon /> New server
-				</Button>
+				<Input v-model="searchInput" :icon="SearchIcon" placeholder="Search servers" />
+				<Button type="colored" color="brand" @click="newServer"><PlusIcon /> New server</Button>
 			</div>
 		</div>
 

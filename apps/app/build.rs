@@ -166,6 +166,8 @@ fn main() {
                         "install_get_shared_instance_update_preview",
                         "install_shared_instance",
                         "install_update_shared_instance",
+                        "install_get_shared_instance_version",
+                        "install_restore_shared_instance_version",
                         "install_bulk_update_content",
                         "install_import_instance",
                         "install_duplicate_instance",

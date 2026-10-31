@@ -20,13 +20,7 @@
 
 <script setup lang="ts">
 import { DownloadIcon } from '@modrinth/assets'
-import {
-	commonMessages,
-	type ContentDiffItem,
-	ContentDiffModal,
-	defineMessages,
-	useVIntl,
-} from '@modrinth/ui'
+import { commonMessages, ContentDiffModal, defineMessages, useVIntl } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
 import { config } from '@/config'
@@ -41,6 +35,8 @@ import {
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
 import { injectAppEvents } from '@/providers/app-events'
+
+import { sharedDiffItems } from './shared-diff-items'
 
 type UpdateCompleteCallback = () => void | Promise<void>
 
@@ -58,24 +54,13 @@ const onComplete = ref<UpdateCompleteCallback>(() => {})
 const { formatMessage } = useVIntl()
 const appEvents = injectAppEvents()
 const { notifySharedInstanceError } = useSharedInstanceErrors()
-const diffs = computed<ContentDiffItem[]>(
-	() =>
-		preview.value?.diffs
-			.filter(
-				(diff) =>
-					config.accountApiUrl || !(diff.type === 'updated' && !diff.projectId && diff.fileName),
-			)
-			.map((diff) => ({
-				type: diff.type,
-				projectName: diff.projectName ?? undefined,
-				fileName: diff.fileName ?? undefined,
-				currentVersionName: diff.currentVersionName ?? undefined,
-				newVersionName: diff.newVersionName ?? undefined,
-				fileCount: diff.configFileCount ?? undefined,
-				fileNames: diff.configFileNames ?? undefined,
-				disabled: diff.disabled,
-				external: diff.type === 'added' && !diff.projectId && !!diff.fileName,
-			})) ?? [],
+const diffs = computed(() =>
+	sharedDiffItems(
+		preview.value?.diffs.filter(
+			(diff) =>
+				config.accountApiUrl || !(diff.type === 'updated' && !diff.projectId && diff.fileName),
+		) ?? [],
+	),
 )
 
 async function update() {

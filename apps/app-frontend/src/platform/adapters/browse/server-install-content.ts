@@ -1,6 +1,7 @@
 import type { Archon, Labrinth } from '@modrinth/api-client'
 import {
 	type BrowseInstallPlan,
+	type BrowseInstallProject,
 	type BrowseSelectedProject,
 	createContext,
 	type CreationFlowContextValue,
@@ -30,7 +31,9 @@ import { useBreadcrumbServerId } from '@/shared/breadcrumbs'
 
 type ServerFlowFrom = 'onboarding' | 'reset-server'
 
-type InstallableSearchResult = Labrinth.Search.v3.ResultSearchProject & {
+// Queued from search results and from project pages, so only the fields install needs.
+type InstallableSearchResult = BrowseInstallProject & {
+	name: string
 	installing?: boolean
 	installed?: boolean
 }
