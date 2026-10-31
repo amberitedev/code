@@ -308,9 +308,9 @@ import {
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
 import { get_by_instance_id } from '@/helpers/process'
 import { getServerAddress } from '@/helpers/worlds'
+import { createServerInstallContent } from '@/platform/adapters/browse/server-install-content'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
-import { createServerInstallContent } from '@/providers/setup/server-install-content'
 import { provideBreadcrumbParent, useBreadcrumb } from '@/shared/breadcrumbs'
 
 import { useProjectTags } from './use-project-tags'

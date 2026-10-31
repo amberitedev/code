@@ -19,7 +19,7 @@ tracing = { workspace = true }
 reqwest = { workspace = true, features = [
   "json",
   "multipart",
-  "rustls-tls-webpki-roots",
+  "rustls-no-provider",
   "stream",
 ] }
 

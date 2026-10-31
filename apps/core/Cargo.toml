@@ -29,7 +29,7 @@ minecraft-meta-manifest = { workspace = true }
 minisign-verify = "0.2.4"
 netdev = "0.46.3"
 rcgen = "0.14.7"
-reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
 # Already in the build through rustls: Ed25519 for tickets and random session tokens.
 ring = "0.17.14"
 # The ring backend avoids aws-lc-sys's CMake build on Windows.

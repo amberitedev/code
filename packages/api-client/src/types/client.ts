@@ -1,6 +1,7 @@
 import type { AbstractFeature } from '../core/abstract-feature'
 import type { Copal } from '../modules/copal/types'
 import type { RequestContext } from './request'
+import type { LocalFileUploader } from './upload'
 
 export type MaybePromise<T> = T | Promise<T>
 export type UserAgentProvider = string | (() => MaybePromise<string | undefined>)
@@ -116,6 +117,12 @@ export interface ClientConfig {
 	 * @default false
 	 */
 	archonSentryCapture?: boolean | (() => boolean)
+
+	/**
+	 * Sends uploads of `LocalFile`s, which the platform reads straight from disk.
+	 * Without it, uploading a `LocalFile` fails.
+	 */
+	localFileUploader?: LocalFileUploader
 
 	/**
 	 * Features to enable for this client
