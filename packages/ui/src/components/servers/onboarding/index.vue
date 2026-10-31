@@ -156,8 +156,9 @@ async function onCreate(config: CreationFlowContextValue) {
 	}
 
 	// Players reach a server that follows an instance through the instance's share, not a server
-	// invite link, so setup ends here.
-	if (config.instanceSelection.value && instanceSource) {
+	// invite link, so setup ends here. A Core cannot share a server's content yet, so its servers
+	// skip the invite step too.
+	if ((config.instanceSelection.value && instanceSource) || client.selfHostedHosting) {
 		modalRef.value?.hide()
 		introCompletion = dismissServerIntro.mutateAsync(request.serverId).then(() => {})
 		try {
