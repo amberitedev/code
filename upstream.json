@@ -43,7 +43,6 @@
 		"patches/@vue-email__markdown@0.0.7.patch",
 		"patches/@vue-email__tailwind@0.2.0.patch",
 		"scripts/clone-labrinth-projects.mjs",
-		"scripts/coverage-i18n.ts",
 		"scripts/import-projects.py",
 		"scripts/reset-db.sh",
 		"scripts/seed-db.sh"
