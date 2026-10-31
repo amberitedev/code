@@ -344,8 +344,8 @@ debug = "line-tables-only"
 # Third-party crates compile once per Cargo.lock change, so they get basic optimizations: the
 # App's networking, database, and browser bridge run several times faster in development.
 [profile.dev.package."*"]
-debug = false
 opt-level = 1
+debug = false
 
 [profile.dev.package.sqlx-macros]
 opt-level = 3
