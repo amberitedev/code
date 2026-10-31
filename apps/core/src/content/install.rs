@@ -503,11 +503,7 @@ async fn stage_downloads(
                 fetch_index_file(content, file, &path, &|bytes| {
                     let done =
                         received.fetch_add(bytes, Ordering::Relaxed) + bytes;
-                    progress.set(
-                        "files",
-                        key,
-                        (done as f64 / total as f64).min(1.0),
-                    );
+                    progress.set("files", key, done as f64 / total as f64);
                 })
                 .await?;
                 Ok::<_, Error>((n, path))
