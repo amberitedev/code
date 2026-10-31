@@ -10,6 +10,8 @@ export interface SharedInstanceManagementContext {
 	readonly invitePending: Ref<boolean>
 	readonly pushUpdateDisabled: ComputedRef<boolean>
 	invite: (event: MouseEvent) => void
+	/** Forgets the link "Invite friends" hands out when it is the one revoked. */
+	inviteRevoked: (inviteId: string) => void
 	remove: (row: ShareRow) => void
 }
 

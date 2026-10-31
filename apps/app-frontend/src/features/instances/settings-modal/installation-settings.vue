@@ -35,6 +35,7 @@ import { get_loader_versions } from '@/helpers/metadata'
 import { get_game_versions, get_loaders } from '@/helpers/tags'
 import type { Manifest } from '@/helpers/types'
 import { instanceKeys } from '@/pages/instance/query-options'
+import { injectSharedInstance } from '@/pages/instance/shared-instance-context'
 import { injectAppEvents } from '@/providers/app-events'
 import { provideInstanceBackup } from '@/providers/instance-backup'
 
@@ -51,6 +52,7 @@ const appSettings = useAppSettings()
 
 const { instance, offline, isMinecraftServer, onUnlinked, closeModal } = injectInstanceSettings()
 const managedContentPolicy = useManagedContentPolicy(instance)
+const sharedInstance = injectSharedInstance()
 const skipNonEssentialWarnings = computed(() => appSettings.skipNonEssentialWarnings)
 
 debug('metadata load: start', {
@@ -121,6 +123,9 @@ const isModrinthLinkedModpack = computed(
 const isImportedModpack = computed(() => instance.value.link?.type === 'imported_modpack')
 const isSharedInstanceManagedModpack = managedContentPolicy.isManagedModpack
 const canUnlinkSharedInstance = managedContentPolicy.canUnlink
+const canUnpublishSharedInstance = computed(
+	() => instance.value.shared_instance?.role === 'owner' && !instance.value.quarantined,
+)
 
 const modpackInfoQuery = useQuery({
 	queryKey: computed(() => ['linkedModpackInfo', instance.value.id]),
@@ -132,6 +137,7 @@ const modpackInfo = modpackInfoQuery.data
 const repairing = ref(false)
 const reinstalling = ref(false)
 const unlinkingSharedInstance = ref(false)
+const unpublishingSharedInstance = ref(false)
 const installationSettingsBusy = computed(
 	() =>
 		instance.value.quarantined ||
@@ -139,6 +145,7 @@ const installationSettingsBusy = computed(
 		repairing.value ||
 		reinstalling.value ||
 		unlinkingSharedInstance.value ||
+		unpublishingSharedInstance.value ||
 		!!offline,
 )
 const installationSettingsBusyMessage = computed(() =>
@@ -158,6 +165,20 @@ async function unlinkSharedInstance() {
 		handleError(error)
 	} finally {
 		unlinkingSharedInstance.value = false
+	}
+}
+
+/** The owner stops sharing: members lose the instance, and this one keeps its content. */
+async function unpublishSharedInstance() {
+	unpublishingSharedInstance.value = true
+	try {
+		await sharedInstance.stopSharing()
+		await queryClient.invalidateQueries({ queryKey: ['linkedModpackInfo', instance.value.id] })
+		onUnlinked()
+	} catch (error) {
+		void sharedInstance.reportActionError(error)
+	} finally {
+		unpublishingSharedInstance.value = false
 	}
 }
 
@@ -491,9 +512,12 @@ provideInstallationSettings({
 		<template #extra>
 			<SharedInstanceInstallationSettingsControls
 				:can-unlink="canUnlinkSharedInstance"
+				:can-unpublish="canUnpublishSharedInstance"
 				:busy="installationSettingsBusy"
 				:unlinking="unlinkingSharedInstance"
+				:unpublishing="unpublishingSharedInstance"
 				:unlink="unlinkSharedInstance"
+				:unpublish="unpublishSharedInstance"
 			/>
 		</template>
 	</InstallationSettingsLayout>
