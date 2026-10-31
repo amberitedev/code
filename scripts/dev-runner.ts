@@ -1684,6 +1684,7 @@ async function appPageLoads(bridgeUrl: string): Promise<boolean> {
 	const load = async (path: string) => {
 		const response = await fetch(`${bridgeUrl}${path}`, { signal: AbortSignal.timeout(60_000) })
 		const text = await response.text()
+		if (response.status === 500) throw new PageError(path, text)
 		return response.ok ? text : undefined
 	}
 	try {
@@ -1692,9 +1693,30 @@ async function appPageLoads(bridgeUrl: string): Promise<boolean> {
 		const dependencies = entry.matchAll(/"(\/node_modules\/\.vite\/deps\/[^"]+)"/g)
 		const loaded = await Promise.all([...dependencies].map(([, path]) => load(path!)))
 		return loaded.every((text) => text !== undefined)
-	} catch {
+	} catch (error) {
+		if (error instanceof PageError) throw error
 		// Not answering yet, or still preparing after a minute. Asked again on the next check.
 		return false
+	}
+}
+
+/**
+ * The App's page does not compile, so it will never load: `up` stops waiting and shows why. The
+ * frontend server answers such a request with an error page that carries the compiler's error.
+ */
+class PageError extends DevRunnerError {
+	constructor(path: string, page: string) {
+		let detail = ''
+		try {
+			const error: unknown = JSON.parse(/const error = (\{.*\})/.exec(page)?.[1] ?? '')
+			if (isRecord(error)) {
+				detail = [error.message, error.frame].filter((part) => typeof part === 'string').join('\n')
+			}
+		} catch {
+			// Not the frontend server's error page.
+		}
+		super(`The App's page does not compile (${path}).${detail ? `\n${detail}` : ''}`)
+		this.name = 'PageError'
 	}
 }
 
@@ -1719,9 +1741,18 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 		runnerLog('info', 'not running. Start it with: node scripts/dev-runner.ts up')
 		return false
 	}
-	const ready = await runtimeIsReady(runtime)
+	let ready = false
+	let pageError: string | undefined
+	try {
+		ready = await runtimeIsReady(runtime)
+	} catch (error) {
+		if (!(error instanceof PageError)) throw error
+		pageError = error.message
+	}
 	const labels = processLabelsForMode(runtime.mode, runtime.accountWeb)
-	runnerLog('info', `${runtime.mode} PID ${runtime.pid} · ${ready ? 'ready' : 'starting'}`)
+	const state = pageError ? 'page does not compile' : ready ? 'ready' : 'starting'
+	runnerLog('info', `${runtime.mode} PID ${runtime.pid} · ${state}`)
+	if (pageError) runnerLog('error', pageError)
 	if (labels.includes('backend')) runnerLog('info', `Accounts and sharing ${runtime.urls.backend}`)
 	if (labels.includes('account-web')) {
 		runnerLog('info', `Account sign-in ${runtime.urls.accountWeb}`)
@@ -1793,7 +1824,19 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 			process.exitCode = 1
 			return
 		}
-		if (current && (await runtimeIsReady(current))) {
+		let ready: boolean
+		try {
+			ready = current !== undefined && (await runtimeIsReady(current))
+		} catch (error) {
+			if (!(error instanceof PageError)) throw error
+			runnerLog(
+				'error',
+				`${error.message}\nThe stack is still running and picks up the fix by itself. Fix it, then run up again.`,
+			)
+			process.exitCode = 1
+			return
+		}
+		if (ready) {
 			await printStatus(paths)
 			return
 		}

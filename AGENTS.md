@@ -72,7 +72,9 @@ somewhere else. Before calling frontend work done, check which of these apply:
   nothing. Otherwise the start compiles first, one build at a time across all checkouts: about a
   minute after a small Rust edit in a checkout that has built before. The first build in a worktree
   takes a few minutes, or compiles only what that worktree changed on a Dev Drive. `up` stops at once and prints the compiler errors when the Rust does not
-  compile, so it is also the check for Rust changes. It gives up waiting after 9 minutes; run it
+  compile, so it is also the check for Rust changes. It does the same when the App's entry
+  (`apps/app-frontend/src/main.js`) does not compile; the stack keeps running and picks up the fix.
+  It gives up waiting after 9 minutes; run it
   again to keep waiting.
 - Nothing watches Rust files. After a Rust edit, run `down` then `up`, which rebuilds because the
   inputs changed.

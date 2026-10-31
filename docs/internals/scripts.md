@@ -41,7 +41,8 @@ the time the work needs them. That build logs to `.data/build.log`.
   and every App's page loads through its browser bridge, then prints the bridge URLs. In a new
   checkout the frontend spends a minute or two preparing its dependencies; that happens inside `up`. It writes to `.data/dev.log`
   and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
-  fails at once when a Rust build fails. An optional mode comes first:
+  fails at once when a Rust build fails, or when the App's entry module does not compile, printing
+  the compiler error; the stack keeps running. An optional mode comes first:
   `node scripts/dev-runner.ts up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
   website and keeps App windows off the desktop, because agents use Apps through the browser
   bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
