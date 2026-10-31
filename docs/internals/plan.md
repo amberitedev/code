@@ -24,11 +24,12 @@ Who talks to whom:
   endpoints wherever that makes sense.
 - App to Core is direct. The backend is never in that path. Core has two separate APIs:
   - **Hosting API** at `/hosting`, shaped like Modrinth's Archon. Only the Core's owner can use it.
-    Nobody else can access a server for now; sharing a server with friends is a later overhaul.
+    Managing a server stays owner only. Sharing a server gives people its content to play, not
+    control of it (see "Shares, members, and players").
   - **Sharing API**, later, for when Cores store shared files. It is separate from hosting and has
     its own access: the backend's metadata says who may store or fetch a file.
-- Sharing uploads and downloads go through the existing native path in app-lib, kept as close to
-  upstream as possible.
+- Sharing code, apart from what the App and Core each own, lives in `sharing-client`, which both
+  use (see "Shares, members, and players").
 
 ## Sharing and storage
 
@@ -65,10 +66,49 @@ the exact protocol are in `pool.md`. Storage was decided on 2026-10-28.
   the owner restores one into the instance, to push again, or deletes it.
 - A push with no Core offering storage fails with a clear message. Storage is on by default on a
   Core and is turned off, or its caps changed, in Settings, Cores.
-- Two packages: `sharing-client`, the share format and encryption the App and Core both use; and
+- Two packages: `sharing-client`, the sharing code the App and Core both use; and
   `sharing-storage`, the storage process. It stays a child process of `copal` on the Core's address
   and port, reports through the Core, and talks to it over a small local API. It has no identity
   of its own: the backend knows one Core. Its own OS account comes with the installer.
+
+### Shares, members, and players
+
+Decided 2026-10-31.
+
+- **One share per thing, one writer, latest version.** Content that comes from an instance is that
+  instance's share, and only its owner's App pushes it. A server with no instance (server-first)
+  has its own share, and its Core pushes it. Nothing else writes a share, and nothing gets a second
+  share of the same content. Everyone reads the latest version.
+- An instance with a linked server always has a share, even when it is shared with nobody, so the
+  server reads it like anyone else. The files are stored on Cores either way, so this uploads
+  nothing extra.
+- **Two lists of people.**
+  - **Members** are the people an instance is shared with directly ("I made a cool pack").
+  - **Players** are the people a server is shared with (the SMP you made). They get the content
+    they need to play there, which may come from an instance, but they are not members of it.
+
+  Sharing an instance does not share its servers. Sharing a server does not make anyone a member.
+
+- The Play tab lists that server's players. The instance's Share tab lists everyone who gets its
+  updates: members and the players of every server that follows it, each with how they got access.
+  Kicking someone there stops their updates. A player kicked there loses the server's content too.
+- **Side toggles** (on for the server, on for players) are written in the manifest by the writer.
+  A server-first share leaves out files turned off for players. Instance-first side toggles come
+  later.
+- **`sharing-client` is the sharing code the App and Core both use.** It holds:
+  - the manifest and backend types, generated to TypeScript with `ts-rs` like Copal's
+  - the backend client, which takes the caller's login (an account session or a Core key)
+  - encryption and the Core store client
+  - the **producer**: hash, encrypt, upload, and create the version. The App produces from an
+    instance, a Core from a server-first server.
+  - the **consumer**: turns a manifest into files. The client side takes everything players get;
+    the server side skips client-only files and files turned off for servers.
+
+  What decides which files go in (the App's database, Copal's content records) stays with each
+  caller.
+
+- UI shapes follow the product, not upstream's backend. When the Share or Play tab needs data in a
+  new shape, the backend exposes it and `packages/api-client` adapts it, so the UI stays dumb.
 
 Later, in rough order of intent:
 
@@ -108,7 +148,8 @@ same versions members read, from the same place. Nothing is ever uploaded to a s
 - The Core reaches files only through the store API. How and where the store keeps files does
   not matter to it, so the store can become its own package without changing this.
 - Each server records the version it applied. The owner sees when a server is behind the latest
-  push, and server cards follow the applied version.
+  push. Server cards install the latest version, as everyone else does; a running server takes it
+  when it next restarts.
 - A push that only changes what servers use (server-only mods, server config) is still a normal
   version, but members are not prompted. A member's App compares its content with the latest
   version, ignoring server-only mods, and offers no update when nothing it needs changed; it
@@ -172,8 +213,9 @@ Later:
   opens Add Core with the code filled in.
 - The Core's key is a Core key, not a session. With it the Core reports its address, certificate,
   and version, lists the servers it shows to friends, invites and removes people on its servers,
-  and asks for reachability tests. It cannot touch friends, sharing, notifications, or the
-  account; those routes take account sessions only.
+  and asks for reachability tests. It reads the shares its servers follow and pushes the shares of
+  its server-first servers. It cannot touch friends, notifications, or the account; those routes
+  take account sessions only.
 - The backend keeps each account's list of Cores and where they are, so the App finds them on any
   computer you sign in on. After sign-in the App talks to the Core directly.
 - A Core reports its own address, on every start, every five minutes after that, and whenever it

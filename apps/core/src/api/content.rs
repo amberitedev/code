@@ -1075,7 +1075,7 @@ async fn install_instance(
         id: instance.id,
         name: instance.name,
         shared_instance_id: share.shared_instance_id.clone(),
-        version: share.version,
+        version: share.version.into(),
     };
     match state.servers.hold(id) {
         Ok(hold) => {

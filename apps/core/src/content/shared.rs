@@ -9,55 +9,14 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-use sharing_client::store::{FetchError, PoolCore, PoolObject, StoreClient};
+use sharing_client::consume::{self, ConsumeError, PoolAccess, PoolFile};
+use sharing_client::store::{FetchError, StoreClient};
 
 use super::{Content, Error, install::MAX_PACK};
 use crate::installs::shared::SharedDirs;
 
 /// A share version as the App sends it.
-#[derive(Debug, Clone, Deserialize)]
-pub struct SharedVersion {
-    pub shared_instance_id: String,
-    pub version: i64,
-    /// `modrinth.index.json`, written as it is. The install checks it.
-    pub index: serde_json::Value,
-    /// Where the files below are, absent when the version has none.
-    #[serde(default)]
-    pub pool: Option<PoolAccess>,
-    #[serde(default)]
-    pub files: Vec<PoolFile>,
-}
-
-/// A version's holders and the fetch ticket for it, as the backend gave them to the App.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PoolAccess {
-    /// R, in hex.
-    pub root: String,
-    pub holders: Vec<PoolCore>,
-    pub ticket: String,
-}
-
-/// One file of the version that lives in the pool, by its path in the server folder.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PoolFile {
-    pub path: String,
-    /// C, in hex.
-    pub object: String,
-    pub object_size: u64,
-    /// P, in hex.
-    pub sha256: String,
-    /// The file's own key, in hex; absent for content files, whose key derives from P.
-    #[serde(default)]
-    pub key: Option<String>,
-}
-
-fn hash(text: &str) -> Result<[u8; 32], Error> {
-    let mut hash = [0; 32];
-    hex::decode_to_slice(text, &mut hash)
-        .map_err(|_| Error::Invalid(format!("{text} is not a hash.")))?;
-    Ok(hash)
-}
+pub use sharing_client::consume::ServerPack as SharedVersion;
 
 /// Fetch the version's files and write it as an `.mrpack` in the shared store. Returns the
 /// pack's SHA-1.
@@ -123,37 +82,21 @@ async fn fetch(
     file: &PoolFile,
     path: &Path,
 ) -> Result<(), Error> {
-    let root = hex::encode(hash(&pool.root)?);
-    let plain = hash(&file.sha256)?;
-    let object = PoolObject {
-        root: &root,
-        holders: &pool.holders,
-        ticket: &pool.ticket,
-        object: hash(&file.object)?,
-        object_size: file.object_size,
-        plain,
-        key: match &file.key {
-            Some(key) => hash(key)?,
-            None => sharing_client::crypto::content_key(&plain),
-        },
-    };
     // The holders that served bad bytes are logged by the client; only members report them.
-    let mut faults = Vec::new();
-    store
-        .fetch_file(&object, &|_| {}, &mut faults, |mut reader| async move {
-            let mut out = tokio::fs::File::create(path).await?;
-            tokio::io::copy(&mut reader, &mut out).await?;
-            out.sync_all().await
+    consume::fetch(store, pool, file, |mut reader| async move {
+        let mut out = tokio::fs::File::create(path).await?;
+        tokio::io::copy(&mut reader, &mut out).await?;
+        out.sync_all().await
+    })
+    .await
+    .map_err(|error| {
+        Error::Invalid(match error {
+            ConsumeError::Fetch(FetchError::Sink(error)) => {
+                format!("Could not write {}: {error}", file.path)
+            }
+            error => format!("Could not fetch {}: {error}", file.path),
         })
-        .await
-        .map_err(|error| {
-            Error::Invalid(match error {
-                FetchError::Sink(error) => {
-                    format!("Could not write {}: {error}", file.path)
-                }
-                error => format!("Could not fetch {}: {error}", file.path),
-            })
-        })
+    })
 }
 
 /// Write `index` and the fetched files, under `overrides/`, as an `.mrpack` at `path`. Returns

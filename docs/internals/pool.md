@@ -337,8 +337,8 @@ writes, or a small VPS at about the same price.
 ## Protocol
 
 The exact shapes every side is built against. The backend (`apps/backend/src/sharing`), the
-store (`packages/sharing-storage`), and the App (`packages/app-lib/src/self_hosted/pool`) share this
-text and nothing else.
+store (`packages/sharing-storage`), and the writers and readers of shares (`packages/sharing-client`,
+which the App and Core both use) share this text and nothing else.
 
 ### Hashes and encryption
 

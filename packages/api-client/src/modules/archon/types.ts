@@ -1,3 +1,4 @@
+import type { Copal } from '../copal/types'
 import type { Labrinth } from '../labrinth/types'
 
 export namespace Archon {
@@ -670,31 +671,8 @@ export namespace Archon {
 						restart?: boolean
 				  }
 
-			/** Core only. A share version as the App reads it from the backend. */
-			export type SharedVersion = {
-				shared_instance_id: string
-				version: number
-				/** `modrinth.index.json` for the files on Modrinth. */
-				index: unknown
-				pool: {
-					root: string
-					holders: {
-						id: string
-						address: string
-						public_address?: string | null
-						cert_fingerprint: string
-					}[]
-					ticket: string
-				} | null
-				/** The files in the pool, by their path in the server folder. */
-				files: {
-					path: string
-					object: string
-					object_size: number
-					sha256: string
-					key: string | null
-				}[]
-			}
+			/** Core only. A share version as a server takes it, built by the App from the backend's latest. */
+			export type SharedVersion = Copal.ServerPack
 
 			export type AddonDiffVersion = {
 				id: string
