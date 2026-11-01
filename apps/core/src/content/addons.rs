@@ -4,6 +4,7 @@
 
 use std::{collections::HashSet, path::Path, sync::Arc};
 
+use modrinth_content_management::DependencyType;
 use tracing::warn;
 
 use super::{
@@ -170,7 +171,7 @@ async fn latest(
         .versions(project, &filter, Some(&target.game_version))
         .await?
         .into_iter()
-        .find(|version| version.version_type <= target.channel)
+        .find(|version| version.version_type <= target.channel.into())
         .ok_or_else(|| {
             Error::Invalid(format!(
                 "{project} has no version for {} {} on the {} channel.",
@@ -209,7 +210,7 @@ pub async fn add(
         provided.insert(install[index].project_id.clone());
         index += 1;
         for dependency in dependencies {
-            if dependency.dependency_type != "required" {
+            if dependency.dependency_type != DependencyType::Required {
                 continue;
             }
             let dependency_version =
@@ -702,7 +703,7 @@ pub async fn updates(
                 &sha1s,
                 &loaders(&target, kind),
                 &target.game_version,
-                target.channel,
+                target.channel.version_types(),
             )
             .await
         {

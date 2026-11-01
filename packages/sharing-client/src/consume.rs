@@ -6,8 +6,12 @@
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 
+use bedrock::content::{
+    Hashes, Index, IndexFile, VersionEnvironment, loader_dependency, mrpack_env,
+};
 use bedrock::net::ErrorBody;
-use serde::{Deserialize, Serialize};
+use bedrock::state::ModLoader;
+use serde::Deserialize;
 
 use crate::crypto::{self, parse_hash};
 use crate::push::{Backend, CONFIG_FILE_TYPE, PushError, success};
@@ -21,7 +25,7 @@ pub struct ServerPack {
     pub version: i32,
     /// `modrinth.index.json` for the files on Modrinth. Core writes it as it is, and its pack
     /// install checks it.
-    pub index: PackIndex,
+    pub index: Index,
     /// Where `files` are, absent when there are none.
     pub pool: Option<PoolAccess>,
     pub files: Vec<PoolFile>,
@@ -49,28 +53,6 @@ pub struct PoolFile {
     pub key: Option<String>,
 }
 
-/// `modrinth.index.json` of a [`ServerPack`].
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PackIndex {
-    format_version: u32,
-    game: &'static str,
-    version_id: String,
-    name: String,
-    files: Vec<PackIndexFile>,
-    dependencies: BTreeMap<&'static str, String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PackIndexFile {
-    path: String,
-    hashes: BTreeMap<&'static str, String>,
-    env: BTreeMap<&'static str, &'static str>,
-    downloads: Vec<String>,
-    file_size: u64,
-}
-
 /// Modrinth's API as the caller reaches it, so each side uses its own client and cache.
 pub trait Modrinth {
     type Error;
@@ -94,8 +76,8 @@ pub trait Modrinth {
 pub struct ModrinthVersion {
     pub id: String,
     pub loaders: Vec<String>,
-    /// v3's `environment`, such as `client_only`.
-    pub environment: Option<String>,
+    /// Where it runs, as v3 says.
+    pub environment: Option<VersionEnvironment>,
     /// The file it is installed from. A version without one is left out.
     pub file: Option<ModrinthFile>,
 }
@@ -325,33 +307,28 @@ pub async fn server_pack<M: Modrinth>(
         })
         .filter_map(|version| {
             let file = version.file?;
-            let mut hashes = BTreeMap::from([("sha1", file.sha1)]);
-            hashes.extend(file.sha512.map(|sha512| ("sha512", sha512)));
-            Some(PackIndexFile {
+            Some(IndexFile {
                 path: format!("mods/{}", file.filename),
-                hashes,
-                env: BTreeMap::from([
-                    ("client", "required"),
-                    ("server", server_side(version.environment.as_deref())),
-                ]),
+                hashes: Hashes {
+                    sha1: file.sha1,
+                    sha512: file.sha512,
+                },
+                env: Some(mrpack_env(version.environment)),
                 downloads: vec![file.url],
                 file_size: file.size,
             })
         })
         .collect();
 
-    let mut dependencies =
-        BTreeMap::from([("minecraft", version.game_version.clone())]);
-    if let Some(loader) = match version.loader.as_str() {
-        "fabric" => Some("fabric-loader"),
-        "quilt" => Some("quilt-loader"),
-        "forge" => Some("forge"),
-        "neoforge" => Some("neoforge"),
-        _ => None,
-    }
-    .filter(|_| !version.loader_version.is_empty())
+    let mut dependencies = BTreeMap::from([(
+        "minecraft".to_owned(),
+        version.game_version.clone(),
+    )]);
+    if let Some(loader) =
+        loader_dependency(ModLoader::from_string(&version.loader))
+            .filter(|_| !version.loader_version.is_empty())
     {
-        dependencies.insert(loader, version.loader_version.clone());
+        dependencies.insert(loader.to_owned(), version.loader_version.clone());
     }
 
     let mut pool_files = Vec::new();
@@ -382,25 +359,18 @@ pub async fn server_pack<M: Modrinth>(
     Ok(ServerPack {
         shared_instance_id: share_id,
         version: version.version,
-        index: PackIndex {
-            format_version: 1,
-            game: "minecraft",
+        index: Index {
+            format_version: Index::FORMAT_VERSION,
+            game: Index::GAME.to_owned(),
             version_id: version.version.to_string(),
             name: name.to_string(),
+            summary: None,
             files,
             dependencies,
         },
         pool,
         files: pool_files,
     })
-}
-
-/// Whether a server runs a Modrinth version, as a pack index says it.
-fn server_side(environment: Option<&str>) -> &'static str {
-    match environment {
-        Some("client_only" | "singleplayer_only") => "unsupported",
-        _ => "required",
-    }
 }
 
 /// Where a manifest entry goes on a server, or `None` when servers do not take it. A server gets

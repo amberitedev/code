@@ -7,6 +7,7 @@
 //! 3. Our own shared code: content rules ([`content`]), reaching Cores ([`net`]), free disk space
 //!    ([`disk`]), and [`limits`].
 
+pub mod content;
 pub mod disk;
 mod error;
 pub mod limits;

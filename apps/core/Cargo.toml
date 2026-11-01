@@ -28,6 +28,7 @@ igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 # Server icons: decoded from what the App uploads, saved as the PNG files Minecraft and the App read.
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 minecraft-meta-manifest = { workspace = true }
+modrinth-content-management = { workspace = true }
 # Checks the signature on Copal release manifests.
 minisign-verify = "0.2.4"
 netdev = "0.46.3"

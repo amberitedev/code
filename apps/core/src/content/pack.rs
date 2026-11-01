@@ -8,7 +8,7 @@ use std::{
     io::{Read, Seek},
 };
 
-use serde::Deserialize;
+use bedrock::content::SideType;
 
 use super::{
     archive::{self, ArchiveError},
@@ -16,9 +16,6 @@ use super::{
     records::{ContentFile, Origin, Pending},
 };
 use crate::installs::ModLoader;
-
-/// The index is small; a pack claiming a larger one is refused.
-const MAX_INDEX: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
@@ -40,61 +37,18 @@ pub enum PackError {
     TooLarge,
 }
 
-/// `modrinth.index.json`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Index {
-    pub format_version: u32,
-    pub game: String,
-    pub version_id: String,
-    pub name: String,
-    pub summary: Option<String>,
-    #[serde(default)]
-    pub files: Vec<IndexFile>,
-    #[serde(default)]
-    pub dependencies: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IndexFile {
-    pub path: String,
-    pub hashes: IndexHashes,
-    pub env: Option<Env>,
-    #[serde(default)]
-    pub downloads: Vec<String>,
-    pub file_size: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexHashes {
-    pub sha1: String,
-    pub sha512: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Env {
-    pub server: String,
-}
+/// `modrinth.index.json`, as bedrock models it for both sides.
+pub use bedrock::content::{Index, IndexFile};
 
 /// Read and check a pack's index.
 pub fn read_index<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
 ) -> Result<Index, PackError> {
-    let not_a_pack = |reason: &str| PackError::NotAPack(reason.to_owned());
-    let mut text = String::new();
-    archive
-        .by_name("modrinth.index.json")
-        .map_err(|_| not_a_pack("it has no modrinth.index.json"))?
-        .take(MAX_INDEX)
-        .read_to_string(&mut text)
-        .map_err(|_| not_a_pack("its index is unreadable"))?;
-    let index: Index = serde_json::from_str(&text)
-        .map_err(|error| PackError::NotAPack(error.to_string()))?;
-    if index.format_version != 1 || index.game != "minecraft" {
-        return Err(not_a_pack("it is not a Minecraft pack of format 1"));
-    }
-    Ok(index)
+    bedrock::content::read_index(archive).map_err(
+        |bedrock::content::IndexError::NotAPack(reason)| {
+            PackError::NotAPack(reason)
+        },
+    )
 }
 
 /// The loader and versions a pack runs on.
@@ -106,32 +60,20 @@ pub struct Platform {
 }
 
 pub fn platform(index: &Index) -> Result<Platform, PackError> {
-    let game_version = index
-        .dependencies
-        .get("minecraft")
-        .ok_or_else(|| {
-            PackError::NotAPack("it names no Minecraft version".into())
-        })?
-        .clone();
-    let loaders = [
-        ("fabric-loader", ModLoader::Fabric),
-        ("quilt-loader", ModLoader::Quilt),
-        ("forge", ModLoader::Forge),
-        ("neoforge", ModLoader::NeoForge),
-    ];
-    let (loader, loader_version) = loaders
-        .iter()
-        .find_map(|(key, loader)| {
-            index
-                .dependencies
-                .get(*key)
-                .map(|version| (*loader, Some(version.clone())))
-        })
-        .unwrap_or((ModLoader::Vanilla, None));
+    use bedrock::state::ModLoader as PackLoader;
+    let platform = bedrock::content::platform(index).ok_or_else(|| {
+        PackError::NotAPack("it names no Minecraft version".into())
+    })?;
     Ok(Platform {
-        loader,
-        game_version,
-        loader_version,
+        loader: match platform.loader {
+            PackLoader::Vanilla => ModLoader::Vanilla,
+            PackLoader::Fabric => ModLoader::Fabric,
+            PackLoader::Quilt => ModLoader::Quilt,
+            PackLoader::Forge => ModLoader::Forge,
+            PackLoader::NeoForge => ModLoader::NeoForge,
+        },
+        game_version: platform.game_version,
+        loader_version: platform.loader_version,
     })
 }
 
@@ -208,7 +150,7 @@ pub fn wanted<R: Read + Seek>(
         if file
             .env
             .as_ref()
-            .is_some_and(|env| env.server == "unsupported")
+            .is_some_and(|env| env.server == SideType::Unsupported)
         {
             continue;
         }

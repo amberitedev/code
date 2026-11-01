@@ -97,18 +97,13 @@ impl consume::Modrinth for Lookup<'_> {
         Ok(versions
             .into_iter()
             .map(|version| {
-                let file = version
-                    .files
-                    .iter()
-                    .find(|file| file.primary)
-                    .or_else(|| version.files.first())
-                    .map(|file| ModrinthFile {
-                        url: file.url.clone(),
-                        filename: file.filename.clone(),
-                        sha1: file.hashes.sha1.clone(),
-                        sha512: file.hashes.sha512.clone(),
-                        size: file.size,
-                    });
+                let file = version.primary().map(|file| ModrinthFile {
+                    url: file.url.clone(),
+                    filename: file.filename.clone(),
+                    sha1: file.hashes.sha1.clone(),
+                    sha512: file.hashes.sha512.clone(),
+                    size: file.size,
+                });
                 ModrinthVersion {
                     id: version.id,
                     loaders: version.loaders,
