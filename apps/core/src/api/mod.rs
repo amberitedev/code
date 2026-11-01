@@ -170,6 +170,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/content/modpack/update",
             get(content::modpack).post(content::update_modpack),
         )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/content/embedded-icon",
+            get(content::embedded_icon),
+        )
         .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
         .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))
         .route("/servers/{id}/modrinth/v0/fs/move", post(files::rename))
