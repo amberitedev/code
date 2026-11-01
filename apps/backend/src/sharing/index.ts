@@ -237,25 +237,31 @@ function dropServers(env: Env, instanceId: string, ownerIds: string[]): D1Prepar
 
 /**
  * A Core's server was deleted or stopped following an instance (`DELETE /core/players`): its
- * players and links go, and the share's members are told.
+ * players and links go, and the share's members are told. With `shareId`, only while the server
+ * still follows that share, so a late call from the Core keeps the players of a share it follows
+ * since.
  */
-export async function forgetServer(env: Env, coreId: string, serverId: string): Promise<void> {
+export async function forgetServer(
+	env: Env,
+	coreId: string,
+	serverId: string,
+	shareId: string | null = null,
+): Promise<void> {
 	const server = await env.DB.prepare(
 		'SELECT instance_id FROM shared_servers WHERE core_id = ? AND server_id = ?',
 	)
 		.bind(coreId, serverId)
 		.first<{ instance_id: string }>()
-	await env.DB.batch([
-		env.DB.prepare('DELETE FROM shared_links WHERE core_id = ? AND server_id = ?').bind(
-			coreId,
-			serverId,
+	if (!server || (shareId !== null && server.instance_id !== shareId)) return
+	// Keyed on the share read above, so a share followed in between keeps its players and links.
+	await env.DB.batch(
+		['shared_links', 'shared_servers'].map((table) =>
+			env.DB.prepare(
+				`DELETE FROM ${table} WHERE core_id = ? AND server_id = ? AND instance_id = ?`,
+			).bind(coreId, serverId, server.instance_id),
 		),
-		env.DB.prepare('DELETE FROM shared_servers WHERE core_id = ? AND server_id = ?').bind(
-			coreId,
-			serverId,
-		),
-	])
-	if (server) await notifyMembers(env, server.instance_id, 'shared_instance_users')
+	)
+	await notifyMembers(env, server.instance_id, 'shared_instance_users')
 }
 
 /**

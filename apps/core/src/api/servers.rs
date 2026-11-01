@@ -826,6 +826,7 @@ async fn remove_server(
         &super::backend::OwedCall::ForgetPlayers(
             super::backend::ForgetPlayers {
                 server_id: id.into(),
+                share_id: None,
             },
         ),
     )

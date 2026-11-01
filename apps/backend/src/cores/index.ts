@@ -504,10 +504,16 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 	if (path === '/core/access' && method === 'PUT') return replaceAccess(request, env)
 	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
 	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)
-	// A server was deleted or stopped following an instance: its players and links go.
+	// A server was deleted or stopped following an instance: its players and links go. With
+	// `share_id`, only while it still follows that share.
 	if (path === '/core/players' && method === 'DELETE') {
 		const core = await requireListedCore(request, env)
-		await forgetServer(env, core.id, stringField(await readJson(request), 'server_id', 64))
+		const body = await readJson(request)
+		const shareId =
+			body.share_id === undefined || body.share_id === null
+				? null
+				: stringField(body, 'share_id', 64)
+		await forgetServer(env, core.id, stringField(body, 'server_id', 64), shareId)
 		return new Response(null, { status: 204 })
 	}
 	if (path === '/cores/approve/lookup' && method === 'POST') return lookupCode(request, env)

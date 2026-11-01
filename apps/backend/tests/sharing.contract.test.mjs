@@ -790,6 +790,28 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		assert.equal((await asOther(`/instances/${smp.id}/versions`)).status, 401)
 		assert.deepEqual((await ok(await call('/servers/core/srv1/players'))).users, [])
+		// The Core's late forget of the old share keeps the players of the one it follows now.
+		await ok(
+			await call('/servers/core/srv1/players', 'POST', {
+				...server,
+				instance_id: next.id,
+				user_ids: ['friend'],
+			}),
+		)
+		const forgetShare = (share_id) =>
+			send(
+				'http://local.test/core/players',
+				'DELETE',
+				'amc_core',
+				JSON.stringify({ server_id: 'srv1', share_id }),
+				{ 'content-type': 'application/json' },
+			)
+		assert.equal((await forgetShare(smp.id)).status, 204)
+		const players = async () =>
+			(await ok(await call('/servers/core/srv1/players'))).users.map((user) => user.id)
+		assert.deepEqual(await players(), ['friend'])
+		assert.equal((await forgetShare(next.id)).status, 204)
+		assert.deepEqual(await players(), [])
 
 		// A Core writes the share of its own server-first server with its key.
 		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)

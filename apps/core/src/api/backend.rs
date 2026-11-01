@@ -99,10 +99,12 @@ pub struct Remove {
 }
 
 /// Body of `DELETE /core/players`: `server_id` was deleted or stopped following an instance, so
-/// the backend drops its players and their links.
+/// the backend drops its players and their links. With `share_id`, only while the server still
+/// follows that share there: a late call never drops the players of a share it follows since.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ForgetPlayers {
     pub server_id: String,
+    pub share_id: Option<String>,
 }
 
 /// A call Core still owes the backend, stored as JSON in `backend_owed.call` and retried with

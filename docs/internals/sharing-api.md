@@ -33,8 +33,10 @@ differs from what that client was written for, on purpose.
   the server's Core owner owns it or is a joined member; a member who leaves or is kicked takes
   their servers, players, and links with them. Players get 403 `members_only` on `GET users`, and
   a server's link previews as the server, invited by its Core's owner, with no `instance_users`.
-- `DELETE /core/players` (Core key, body `server_id`): the server was deleted or stopped following
-  an instance, so its players and links go.
+- `DELETE /core/players` (Core key, body `server_id` and `share_id`): the server was deleted or
+  stopped following an instance, so its players and links go. A `share_id` limits this to while
+  the server still follows that share, so a late call keeps the players of a share it follows
+  since; `null`, for a deleted server, drops them whatever it follows.
 - `GET /v1/instances/{id}/access`, owner only: `users`, the members and the players of every server
   following the share, each with `via` saying how they got access; and `links`, every server's
   live link, which the owner revokes with `DELETE invites/{id}`. For the instance's Share tab.

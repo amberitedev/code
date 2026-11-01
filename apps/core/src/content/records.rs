@@ -287,7 +287,7 @@ pub async fn set_pack(
     .await?
     .flatten();
     if followed.is_some() && followed != pack.shared_instance_id {
-        forget_players(&mut tx, server_id).await?;
+        forget_players(&mut tx, server_id, followed.clone()).await?;
     }
     if followed.is_some() && pack.shared_instance_id.is_none() {
         sqlx::query("DELETE FROM pending_packs WHERE server_id = ?")
@@ -324,15 +324,18 @@ pub async fn set_pack(
     tx.commit().await
 }
 
-/// Owe the backend dropping the server's players, who read the instance it followed through it.
+/// Owe the backend dropping the server's players, who read `share_id`, the share of the instance
+/// it followed, through it.
 async fn forget_players(
     tx: &mut sqlx::SqliteConnection,
     server_id: &str,
+    share_id: Option<String>,
 ) -> sqlx::Result<()> {
     owe(
         tx,
         &OwedCall::ForgetPlayers(ForgetPlayers {
             server_id: server_id.into(),
+            share_id,
         }),
     )
     .await
@@ -357,14 +360,15 @@ pub async fn set_pack_error(
 /// instance's share through it; wake sync with `Access::owed` after.
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     let mut tx = db.begin().await?;
-    let followed: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM packs WHERE server_id = ? AND shared_instance_id IS NOT NULL)",
+    let followed: Option<String> = sqlx::query_scalar(
+        "SELECT shared_instance_id FROM packs WHERE server_id = ?",
     )
     .bind(server_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if followed {
-        forget_players(&mut tx, server_id).await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    if followed.is_some() {
+        forget_players(&mut tx, server_id, followed).await?;
     }
     sqlx::query("DELETE FROM packs WHERE server_id = ?")
         .bind(server_id)
