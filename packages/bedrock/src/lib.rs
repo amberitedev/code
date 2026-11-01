@@ -13,5 +13,10 @@ mod error;
 pub mod limits;
 pub mod net;
 pub mod state;
+pub mod upstream;
+mod util;
+
+// The content store clone finds these at the crate root, where app-lib has them.
+pub(crate) use upstream::store::{State, install};
 
 pub use error::{Error, ErrorKind, Result};

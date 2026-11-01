@@ -659,7 +659,11 @@ async fn manifests(
             .filter_map(|listed| {
                 let file = open_jar(&folder, &listed)?;
                 let key = format!("{id}/{}", listed.path);
-                let inspection = content.manifests.get(&key, file, loader)?;
+                let inspection = content.manifests.get(
+                    &key,
+                    file,
+                    content::manifest::platform(loader),
+                )?;
                 Some((listed.path, inspection.manifest))
             })
             .collect()
@@ -1951,7 +1955,7 @@ pub async fn embedded_icon(
         let key = format!("{id}/{}", listed.path);
         let path = content
             .manifests
-            .get(&key, open_jar(&folder, &listed)?, loader)?
+            .get(&key, open_jar(&folder, &listed)?, manifest::platform(loader))?
             .icon?;
         let bytes = manifest::read_icon(open_jar(&folder, &listed)?, &path)?;
         Some((path, bytes))

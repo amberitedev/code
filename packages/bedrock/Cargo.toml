@@ -11,18 +11,30 @@ repository.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
+fs4 = { workspace = true, features = ["tokio"] }
+futures = { workspace = true }
 hex = { workspace = true }
+itertools = { workspace = true }
+json5 = { workspace = true }
 modrinth-content-management = { workspace = true }
+parking_lot = { workspace = true }
+pathdiff = { workspace = true }
 postcard-bindgen = { workspace = true, features = ["generating", "std"], optional = true }
-reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
 # The ring backend avoids aws-lc-sys's CMake build on Windows.
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+same-file = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+sqlx = { workspace = true, features = ["macros", "runtime-tokio", "sqlite"] }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["io"] }
+toml = { workspace = true }
 tracing = { workspace = true }
 ts-rs = { workspace = true, features = [
   "chrono-impl",
@@ -30,15 +42,17 @@ ts-rs = { workspace = true, features = [
   "uuid-impl",
 ], optional = true }
 url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 zip = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [target."cfg(unix)".dependencies]
 nix = { version = "0.30.1", features = ["fs"] }
 
 [target."cfg(windows)".dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
