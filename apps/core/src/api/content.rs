@@ -21,6 +21,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -39,8 +40,8 @@ use crate::{
         manifest::{self, Manifest},
         modrinth::ReleaseChannel,
         pack,
-        records::{self, ContentFile, Origin, Pack, PendingPack},
-        shared::{self, SharedVersion},
+        records::{self, ContentFile, Origin, Pack, PendingPack, SideToggle},
+        shared,
     },
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
@@ -123,11 +124,17 @@ pub struct Addon {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub btime: Option<DateTime<Utc>>,
     pub disabled: bool,
+    /// Off for the server alone; see `addons::set_side`.
+    pub disabled_server: bool,
+    pub disabled_player: bool,
+    pub side_toggle_unlocked: bool,
     pub kind: AddonKind,
     pub from_modpack: bool,
     pub status: AddonStatus,
     pub pack_client_retained: bool,
     pub pack_client_depends: bool,
+    /// Core does not guess sides when it installs a pack, so there is nothing to review.
+    pub needs_side_type_review: bool,
     pub has_update: Option<String>,
     pub name: Option<String>,
     pub project_id: Option<String>,
@@ -180,6 +187,8 @@ pub struct Addons {
     pub installing: Option<Installing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ContentError>,
+    /// Always 0, as `Addon::needs_side_type_review` is always false.
+    pub files_need_side_type_review: u32,
     pub addons: Option<Vec<Addon>>,
 }
 
@@ -190,6 +199,8 @@ pub struct AddonsQuery {
     pub from_modpack: Option<bool>,
     #[serde(default)]
     pub disabled: Option<bool>,
+    #[serde(default)]
+    pub needs_side_type_review: Option<bool>,
     #[serde(default)]
     pub addons: Option<bool>,
     #[serde(default)]
@@ -213,6 +224,34 @@ pub struct AddAddonRequest {
 pub struct RemoveAddonRequest {
     pub kind: AddonKind,
     pub filename: String,
+}
+
+/// Body of POST `.../addons/set-enabled-server` and `.../set-enabled-player`. Mirrors
+/// Archon.Content.v1.SetAddonEnabledRequest.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetAddonEnabledRequest {
+    pub kind: AddonKind,
+    pub filename: String,
+    pub enabled: bool,
+}
+
+/// Body of POST `.../addons/set-locked-side-toggle`. Mirrors
+/// Archon.Content.v1.SetAddonSideToggleLockedRequest.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetAddonSideToggleLockedRequest {
+    pub kind: AddonKind,
+    pub filename: String,
+    pub locked: bool,
+}
+
+/// Body of POST `.../addons/complete-side-type-review`. Mirrors
+/// Archon.Content.v1.CompleteSideTypeReviewRequest. Core has nothing to review, so it is only
+/// checked.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CompleteSideTypeReviewRequest {
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub addons: Option<Vec<RemoveAddonRequest>>,
 }
 
 /// Body of POST `.../addons/delete-many`, `.../disable-many`, and `.../enable-many`. Mirrors the
@@ -322,12 +361,16 @@ pub enum InstallWorldContent {
         #[serde(default)]
         properties: Option<PropertiesFields>,
     },
-    /// Amberite: apply a version of an App instance's share (`content::shared`). On a running
-    /// server it waits for the server to stop, or with `restart` stops it, applies, and starts
-    /// it again.
+    /// Amberite: apply the latest version of an App instance's share (`content::shared`), which
+    /// Core reads from the backend itself. On a running server it waits for the server to stop,
+    /// or with `restart` stops it, applies, and starts it again.
     Instance {
         instance: UploadedInstance,
-        share: SharedVersion,
+        shared_instance_id: String,
+        /// The backend's read ticket for this Core and share, which the App gets with its user's
+        /// session. Required from the App; the local CLI has none and reads as the owner.
+        #[serde(default)]
+        ticket: Option<String>,
         #[serde(default)]
         properties: Option<PropertiesFields>,
         #[serde(default)]
@@ -491,6 +534,11 @@ async fn addon_list(
         .into_iter()
         .map(|row| (row.path.clone(), row))
         .collect();
+    let toggles: HashMap<String, SideToggle> = records::toggles(&state.db, id)
+        .await?
+        .into_iter()
+        .map(|toggle| (toggle.path.clone(), toggle))
+        .collect();
     let mut project_ids: Vec<String> = rows
         .values()
         .filter_map(|row| row.project_id.clone())
@@ -532,17 +580,24 @@ async fn addon_list(
             let version = row
                 .and_then(|row| row.version_id.as_ref())
                 .and_then(|version| versions.get(version));
+            let toggle = toggles.get(&item.path);
+            let sides = addons::Sides::of(&item, toggle);
             Addon {
                 id: item.path.clone(),
                 filename: item.filename,
                 filesize: item.size,
                 btime: item.created,
-                disabled: item.disabled,
+                disabled: sides.disabled,
+                disabled_server: sides.disabled_server,
+                disabled_player: sides.disabled_player,
+                side_toggle_unlocked: toggle
+                    .is_some_and(|toggle| toggle.unlocked),
                 kind: item.kind,
                 from_modpack: row.is_some_and(|row| row.origin == Origin::Pack),
                 status: AddonStatus::Installed,
                 pack_client_retained: false,
                 pack_client_depends: false,
+                needs_side_type_review: false,
                 has_update: newer
                     .get(&item.path)
                     .map(|version| version.id.clone()),
@@ -744,6 +799,9 @@ pub async fn list(
                 .from_modpack
                 .is_none_or(|wanted| addon.from_modpack == wanted)
                 && query.disabled.is_none_or(|wanted| addon.disabled == wanted)
+                && query
+                    .needs_side_type_review
+                    .is_none_or(|wanted| addon.needs_side_type_review == wanted)
         });
         Some(addons)
     };
@@ -763,6 +821,7 @@ pub async fn list(
         modpack,
         installing: activity.installing,
         error,
+        files_need_side_type_review: 0,
         addons,
     }))
 }
@@ -922,6 +981,100 @@ pub async fn enable_many(
     .await
 }
 
+/// Refuses a server that follows an instance. Its instance's owner writes the share it reads,
+/// side toggles included, so it has no share or toggles of its own.
+pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
+    let linked = records::pack(&state.db, id)
+        .await?
+        .is_some_and(|pack| content_install::linked(&pack).is_some());
+    if linked {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            "This server follows an instance, which its owner shares.",
+        ));
+    }
+    Ok(())
+}
+
+async fn set_side(
+    state: &AppState,
+    caller: &Caller,
+    id: &str,
+    wid: &str,
+    request: SetAddonEnabledRequest,
+    side: addons::Side,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, id, Level::Editor).await?;
+    world(id, wid)?;
+    server_first(state, id).await?;
+    let _busy = state.content.busy(id)?;
+    addons::set_side(
+        &state.content,
+        id,
+        request.kind,
+        &request.filename,
+        side,
+        request.enabled,
+    )
+    .await?;
+    activity::log(&state.db, caller, Some(id), Action::ContentChanged).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST .../addons/set-enabled-server`.
+pub async fn set_enabled_server(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<SetAddonEnabledRequest>,
+) -> Result<StatusCode, ApiError> {
+    set_side(&state, &caller, &id, &wid, request, addons::Side::Server).await
+}
+
+/// `POST .../addons/set-enabled-player`.
+pub async fn set_enabled_player(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<SetAddonEnabledRequest>,
+) -> Result<StatusCode, ApiError> {
+    set_side(&state, &caller, &id, &wid, request, addons::Side::Player).await
+}
+
+/// `POST .../addons/set-locked-side-toggle`.
+pub async fn set_side_toggle_locked(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<SetAddonSideToggleLockedRequest>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    server_first(&state, &id).await?;
+    let _busy = state.content.busy(&id)?;
+    addons::set_unlocked(
+        &state.content,
+        &id,
+        request.kind,
+        &request.filename,
+        !request.locked,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST .../addons/complete-side-type-review`: nothing to do, since Core never asks for one.
+pub async fn complete_side_type_review(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(_): Json<CompleteSideTypeReviewRequest>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `GET .../addons/update?filename`: the file, with its newest version in `has_update`.
 pub async fn get_update(
     caller: Caller,
@@ -1031,12 +1184,14 @@ pub async fn install(
                 })?;
             let requested = Some(version).filter(|version| !version.is_empty());
             let (hold, busy) = begin(&state, &id)?;
+            let access = state.access.clone();
             state.content.spawn(
                 hold,
                 busy,
                 Installing::Loader,
                 move |content, hold, progress| async move {
                     records::unlink(&content.db, hold.id()).await?;
+                    access.owed.notify_one();
                     content_install::loader(
                         &content,
                         &hold,
@@ -1059,13 +1214,22 @@ pub async fn install(
         }
         InstallWorldContent::Instance {
             instance,
-            share,
+            shared_instance_id,
+            ticket,
             properties,
             restart,
             force,
         } => {
             install_instance(
-                &state, &id, instance, share, properties, restart, force,
+                &state,
+                &id,
+                &caller,
+                ticket,
+                instance,
+                shared_instance_id,
+                properties,
+                restart,
+                force,
             )
             .await?;
         }
@@ -1111,71 +1275,131 @@ fn spawn_pack(
     properties: Option<PropertiesFields>,
     force: bool,
 ) {
+    let access = state.access.clone();
     state.content.spawn(
         hold,
         busy,
         Installing::Modpack,
         move |content, hold, progress| async move {
-            content_install::pack(
+            let result = content_install::pack(
                 &content, &hold, &progress, source, properties, force,
             )
-            .await
+            .await;
+            // A pack of its own may have dropped the players of the instance it followed.
+            access.owed.notify_one();
+            result
         },
     );
 }
 
-/// Apply a share version to a server. A stopped server installs it now. A running one keeps
-/// running: Core fetches the version, then it waits for the server to stop, or with `restart`
-/// Core stops the server, and it applies then (see [`apply_pending`]).
+/// Apply the latest version of a share to a server, which Core reads from the backend with its
+/// own key and the `ticket` of the user who asked, so it reads only what that user can. Only the
+/// local CLI reads without one, as the Core's owner. The version is read before this returns,
+/// so one that cannot go fails the request. A stopped server installs it now. A running one keeps running: Core fetches the
+/// version's files, then it waits for the server to stop, or with `restart` Core stops the
+/// server, and it applies then (see [`apply_pending`]).
+#[allow(clippy::too_many_arguments)]
 async fn install_instance(
     state: &Arc<AppState>,
     id: &str,
+    caller: &Caller,
+    ticket: Option<String>,
     instance: UploadedInstance,
-    share: SharedVersion,
+    shared_instance_id: String,
     properties: Option<PropertiesFields>,
     restart: bool,
     force: bool,
 ) -> Result<(), ApiError> {
     let busy = state.content.busy(id)?;
-    let linked = Linked {
-        id: instance.id,
-        name: instance.name,
-        shared_instance_id: share.shared_instance_id.clone(),
-        version: share.version,
+    let backend = super::share::backend(state).await?;
+    let backend = match (ticket, caller) {
+        (Some(ticket), _) => backend.with_read_ticket(ticket),
+        (None, Caller::Local) => backend,
+        // Without a ticket the backend reads as the Core's owner, which is not who asked.
+        (None, Caller::Session { .. }) => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "An instance install needs a read ticket for this Core.",
+            ));
+        }
     };
+    let version = consume::ready_version(&backend, &shared_instance_id)
+        .await
+        .map_err(|error| match error {
+            // The backend names why by its code. It checks the Core owner's account before the
+            // reader's, so a locked or blacklisted account is most likely the owner's.
+            consume::ReadError::Denied { code, description } => {
+                let message = match code.as_str() {
+                    "not_member" => {
+                        "You no longer have access to this instance's share."
+                    }
+                    "ticket_invalid" => {
+                        "The request to update the server expired. Try again."
+                    }
+                    "account_locked" | "blacklisted" => {
+                        "The owner of this Core cannot use sharing right now."
+                    }
+                    _ => description.as_str(),
+                };
+                ApiError::new(ErrorCode::Forbidden, message)
+            }
+            consume::ReadError::Backend(error) => ApiError::from(error),
+            error @ consume::ReadError::NoVersion => {
+                ApiError::new(ErrorCode::NotFound, error.to_string())
+            }
+            error @ consume::ReadError::NotReady => {
+                ApiError::new(ErrorCode::Conflict, error.to_string())
+            }
+        })?;
     match state.servers.hold(id) {
         Ok(hold) => {
             // A version still waiting from an earlier push is superseded by this one.
             let waiting = records::clear_pending(&state.db, id).await?;
             forget_pack(state, waiting).await;
+            let app = Arc::clone(state);
             state.content.spawn(
                 hold,
                 busy,
                 Installing::Modpack,
                 move |content, hold, progress| async move {
-                    let sha1 =
-                        match shared::write_pack(&content, hold.id(), &share)
-                            .await
-                        {
-                            Ok(sha1) => sha1,
-                            Err(error) => {
-                                records::set_pack_error(
-                                    &content.db,
-                                    hold.id(),
-                                    Some(&format!("{error:#}")),
-                                )
-                                .await?;
-                                return Err(error);
-                            }
-                        };
+                    let written = shared::write_pack(
+                        &content,
+                        hold.id(),
+                        version,
+                        &instance.name,
+                    )
+                    .await;
+                    let (sha1, version) = match written {
+                        Ok(written) => written,
+                        Err(error) => {
+                            records::set_pack_error(
+                                &content.db,
+                                hold.id(),
+                                Some(&format!("{error:#}")),
+                            )
+                            .await?;
+                            return Err(error);
+                        }
+                    };
                     let source = PackSource::Stored {
                         sha1,
-                        instance: Some(linked),
+                        instance: Some(Linked {
+                            id: instance.id,
+                            name: instance.name,
+                            shared_instance_id,
+                            version: version.into(),
+                        }),
                     };
-                    content_install::pack(
+                    let installed = content_install::pack(
                         &content, &hold, &progress, source, properties, force,
                     )
-                    .await
+                    .await;
+                    // Another instance may have dropped the players of the one it
+                    // followed, even when a later step failed.
+                    app.access.owed.notify_one();
+                    let change = installed?;
+                    drop_own_share(&app, hold.id()).await?;
+                    Ok(change)
                 },
             );
         }
@@ -1183,22 +1407,29 @@ async fn install_instance(
             let state = Arc::clone(state);
             let id = id.to_owned();
             tokio::spawn(async move {
-                let written =
-                    shared::write_pack(&state.content, &id, &share).await;
+                let written = shared::write_pack(
+                    &state.content,
+                    &id,
+                    version,
+                    &instance.name,
+                )
+                .await;
                 drop(busy);
                 let result = async {
+                    let (sha1, version) = written?;
                     let pending = PendingPack {
-                        sha1: written?,
-                        instance_id: linked.id,
-                        instance_name: linked.name,
-                        shared_instance_id: linked.shared_instance_id,
-                        shared_version: linked.version,
+                        sha1,
+                        instance_id: instance.id,
+                        instance_name: instance.name,
+                        shared_instance_id,
+                        shared_version: version.into(),
                         start_after: restart,
                         force,
                     };
                     let replaced =
                         records::set_pending(&state.db, &id, &pending).await?;
                     forget_pack(&state, replaced).await;
+                    drop_own_share(&state, &id).await?;
                     if restart {
                         match state.servers.stop(&id).await {
                             // It stopped on its own while the version was fetched.
@@ -1229,6 +1460,17 @@ async fn install_instance(
     Ok(())
 }
 
+/// Let go of the server's own share once it follows an instance, since a server never has two
+/// shares. Called only after the link is recorded, so a failed link keeps the share and its
+/// players.
+async fn drop_own_share(state: &AppState, id: &str) -> sqlx::Result<()> {
+    let mut tx = state.db.begin().await?;
+    super::share::owe_share_deletion(&mut tx, id).await?;
+    tx.commit().await?;
+    state.access.owed.notify_one();
+    Ok(())
+}
+
 /// Apply the version waiting for a server, when one waits and the server is stopped. Starts the
 /// server again afterwards when the push asked for a restart.
 /// Another change to the server's content is waited for, so it never costs the version.
@@ -1245,6 +1487,7 @@ pub async fn apply_pending(state: Arc<AppState>, id: String) {
         return;
     }
     let (start_after, force) = (pending.start_after, pending.force);
+    let access = state.access.clone();
     let source = PackSource::Stored {
         sha1: pending.sha1,
         instance: Some(Linked {
@@ -1263,6 +1506,8 @@ pub async fn apply_pending(state: Arc<AppState>, id: String) {
                 &content, &hold, &progress, source, None, force,
             )
             .await;
+            // Another instance may have dropped the players of the one it followed.
+            access.owed.notify_one();
             if start_after {
                 // Back up either way: a failed update changes nothing it could not finish.
                 let id = hold.id().to_owned();
@@ -1370,6 +1615,7 @@ pub async fn unlink(
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     records::unlink(&state.db, &id).await?;
+    state.access.owed.notify_one();
     state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)

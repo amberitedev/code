@@ -1461,8 +1461,11 @@ provideContentManager({
 	disableAddContentTooltip: permissionDeniedMessage.value,
 	contentTypeLabel: type,
 	toggleEnabled: handleToggleEnabled,
-	// Side toggles are kept by Modrinth's hosting; a Core does not store them yet.
-	setEnabledFor: client.selfHostedHosting ? undefined : handleSetEnabledFor,
+	// A Core keeps side toggles only for a server that follows no instance: the instance's owner
+	// decides them for its servers.
+	get setEnabledFor() {
+		return client.selfHostedHosting && linkedInstanceId.value ? undefined : handleSetEnabledFor
+	},
 	deleteItem: handleDeleteItem,
 	bulkDeleteItems: handleBulkDelete,
 	refresh: async () => {
@@ -1537,7 +1540,7 @@ provideContentManager({
 					:header="
 						formatMessage(linkedInstanceId ? messages.instanceContent : messages.modpackContent)
 					"
-					:enable-enabled-for="!linkedInstanceId && !client.selfHostedHosting"
+					:enable-enabled-for="!linkedInstanceId"
 					show-environment-warnings
 					:action-disabled="contentActionDisabled"
 					:action-disabled-tooltip="contentActionBusyMessage ?? undefined"

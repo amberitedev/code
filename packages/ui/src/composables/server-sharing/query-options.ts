@@ -35,12 +35,13 @@ export function serverShareableFilesQueryOptions(
 
 export function sharedInstanceInvitesQueryOptions(
 	client: AbstractModrinthClient,
+	serverId: string,
 	instanceId: string,
 	userId: string | undefined,
 ) {
 	return {
-		queryKey: sharedInstanceKeys.invites(instanceId, userId),
-		queryFn: () => client.sharedinstances.invites_v1.list(instanceId),
+		queryKey: sharedInstanceKeys.invites(instanceId, serverId, userId),
+		queryFn: () => client.sharedinstances.players_v1.links(serverId, instanceId),
 		retry: false,
 	}
 }

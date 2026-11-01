@@ -17,13 +17,18 @@ import {
 } from '#ui/composables/server-sharing'
 import { injectAuth, injectModrinthClient } from '#ui/providers'
 
-export function useServerPlayers(instanceId: Ref<string | null>, canManage: Ref<boolean>) {
+export function useServerPlayers(
+	serverId: string,
+	instanceId: Ref<string | null>,
+	canManage: Ref<boolean>,
+) {
 	const client = injectModrinthClient()
+	const players = client.sharedinstances.players_v1
 	const auth = injectAuth()
 	const queryClient = useQueryClient()
 	const userId = computed(() => auth.user.value?.id)
-	const memberKey = (id: string) => sharedInstanceKeys.players(id, userId.value)
-	const members = useServerPlayerMembers(instanceId)
+	const memberKey = (id: string) => sharedInstanceKeys.players(id, serverId, userId.value)
+	const members = useServerPlayerMembers(serverId, instanceId)
 	const rows = computed(() => members.data.value?.rows ?? [])
 	const remaining = computed(() => members.data.value?.remaining ?? 0)
 	const friends = useQuery({
@@ -55,7 +60,7 @@ export function useServerPlayers(instanceId: Ref<string | null>, canManage: Ref<
 	})
 	const links = useQuery(
 		computed(() => ({
-			...sharedInstanceInvitesQueryOptions(client, instanceId.value ?? '', userId.value),
+			...sharedInstanceInvitesQueryOptions(client, serverId, instanceId.value ?? '', userId.value),
 			enabled: !!instanceId.value && !!userId.value && canManage.value,
 		})),
 	)
@@ -73,8 +78,8 @@ export function useServerPlayers(instanceId: Ref<string | null>, canManage: Ref<
 			user?: InvitePlayersUser
 		}) => {
 			if (!canManage.value) throw new Error('You do not have permission to manage players.')
-			if (remove) return client.sharedinstances.instances_v1.removeUsers(id, [userId])
-			const result = await client.sharedinstances.instances_v1.inviteUsers(id, [userId])
+			if (remove) return players.remove(serverId, id, [userId])
+			const result = await players.invite(serverId, id, [userId])
 			if (result.failed.includes(userId))
 				throw new Error('This player’s privacy settings do not allow this invitation.')
 		},
@@ -125,15 +130,15 @@ export function useServerPlayers(instanceId: Ref<string | null>, canManage: Ref<
 		}) => {
 			if (!canManage.value) throw new Error('You do not have permission to manage invite links.')
 			const requestedAge = Math.floor((settings.expiresAt.getTime() - Date.now()) / 1000)
-			const created = await client.sharedinstances.invites_v1.create(id, {
+			const created = await players.createLink(serverId, id, {
 				max_age: Math.max(1, Math.min(INVITE_LINK_MAX_AGE_SECONDS, requestedAge)),
 				max_uses: Math.max(1, Math.min(settings.maxUses, remaining.value)),
 			})
 			if (replaceId) {
 				try {
-					await client.sharedinstances.invites_v1.delete(id, replaceId)
+					await players.deleteLink(serverId, id, replaceId)
 				} catch (error) {
-					await client.sharedinstances.invites_v1.delete(id, created.id)
+					await players.deleteLink(serverId, id, created.id)
 					throw error
 				}
 			}
@@ -143,7 +148,7 @@ export function useServerPlayers(instanceId: Ref<string | null>, canManage: Ref<
 	})
 
 	async function ensureLink(id: string, remainingSlots?: number) {
-		await ensureServerInviteLink(client, id, remainingSlots)
+		await ensureServerInviteLink(client, serverId, id, remainingSlots)
 		await queryClient.invalidateQueries({ queryKey: sharedInstanceKeys.invites(id) })
 	}
 

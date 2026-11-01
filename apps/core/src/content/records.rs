@@ -3,6 +3,11 @@
 
 use sqlx::{SqliteExecutor, SqlitePool};
 
+use crate::{
+    access::sync::owe,
+    api::backend::{ForgetPlayers, OwedCall},
+};
+
 /// Who put a tracked file there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
@@ -122,6 +127,119 @@ pub async fn set_project(
     Ok(())
 }
 
+/// A row of `side_toggles`: which sides an addon is on for, by its enabled path. A file with no
+/// row is on for both.
+#[derive(Debug, Clone, Default, PartialEq, Eq, sqlx::FromRow)]
+pub struct SideToggle {
+    pub path: String,
+    /// The file is `.disabled` on disk, but the server's share still carries it.
+    pub disabled_server: bool,
+    /// The server runs it; its share leaves it out.
+    pub disabled_player: bool,
+    pub unlocked: bool,
+}
+
+pub async fn toggles(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Vec<SideToggle>> {
+    sqlx::query_as(
+        "SELECT path, disabled_server, disabled_player, unlocked FROM side_toggles \
+         WHERE server_id = ?",
+    )
+    .bind(server_id)
+    .fetch_all(db)
+    .await
+}
+
+/// Record a file's toggles. A file on for both sides and never set by hand keeps no row.
+pub async fn set_toggle(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    toggle: &SideToggle,
+) -> sqlx::Result<()> {
+    if *toggle
+        == (SideToggle {
+            path: toggle.path.clone(),
+            ..SideToggle::default()
+        })
+    {
+        return remove_toggle(db, server_id, &toggle.path).await;
+    }
+    sqlx::query(
+        "INSERT INTO side_toggles (server_id, path, disabled_server, disabled_player, unlocked) \
+         VALUES (?, ?, ?, ?, ?) ON CONFLICT (server_id, path) DO UPDATE SET \
+         disabled_server = excluded.disabled_server, \
+         disabled_player = excluded.disabled_player, unlocked = excluded.unlocked",
+    )
+    .bind(server_id)
+    .bind(&toggle.path)
+    .bind(toggle.disabled_server)
+    .bind(toggle.disabled_player)
+    .bind(toggle.unlocked)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Give a file's toggles to the file replacing it, as an update does.
+pub async fn move_toggle(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    from: &str,
+    to: &str,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE OR REPLACE side_toggles SET path = ? WHERE server_id = ? AND path = ?",
+    )
+    .bind(to)
+    .bind(server_id)
+    .bind(from)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_toggle(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    path: &str,
+) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM side_toggles WHERE server_id = ? AND path = ?")
+        .bind(server_id)
+        .bind(path)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// The share of a server that follows no instance, once it is shared.
+pub async fn share_id(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Option<String>> {
+    Ok(sqlx::query_scalar::<_, Option<String>>(
+        "SELECT share_id FROM servers WHERE id = ?",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await?
+    .flatten())
+}
+
+pub async fn set_share_id(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    share_id: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE servers SET share_id = ? WHERE id = ?")
+        .bind(share_id)
+        .bind(server_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// A row of `packs`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct Pack {
@@ -152,11 +270,34 @@ pub async fn pack(
     .await
 }
 
+/// Record the pack the server now follows. Moving off the instance it followed, to a pack of its
+/// own or another instance, drops that instance's players as [`unlink`] does (wake sync with
+/// `Access::owed` after), and a pack of its own drops any version of it waiting to apply.
+/// The transactions here read before they write. They begin IMMEDIATE so they take the write
+/// lock first and wait for it; a deferred one fails at once with "database is locked" when another
+/// connection wrote after its read.
 pub async fn set_pack(
-    db: impl SqliteExecutor<'_>,
+    db: &SqlitePool,
     server_id: &str,
     pack: &Pack,
 ) -> sqlx::Result<()> {
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    let followed: Option<String> = sqlx::query_scalar(
+        "SELECT shared_instance_id FROM packs WHERE server_id = ?",
+    )
+    .bind(server_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    if followed.is_some() && followed != pack.shared_instance_id {
+        forget_players(&mut tx, server_id, followed.clone()).await?;
+    }
+    if followed.is_some() && pack.shared_instance_id.is_none() {
+        sqlx::query("DELETE FROM pending_packs WHERE server_id = ?")
+            .bind(server_id)
+            .execute(&mut *tx)
+            .await?;
+    }
     sqlx::query(
         "INSERT INTO packs (server_id, project_id, version_id, name, version_number, summary, \
          sha1, instance_id, instance_name, shared_instance_id, shared_version, error) \
@@ -181,9 +322,26 @@ pub async fn set_pack(
     .bind(&pack.shared_instance_id)
     .bind(pack.shared_version)
     .bind(&pack.error)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
-    Ok(())
+    tx.commit().await
+}
+
+/// Owe the backend dropping the server's players, who read `share_id`, the share of the instance
+/// it followed, through it.
+async fn forget_players(
+    tx: &mut sqlx::SqliteConnection,
+    server_id: &str,
+    share_id: Option<String>,
+) -> sqlx::Result<()> {
+    owe(
+        tx,
+        &OwedCall::ForgetPlayers(ForgetPlayers {
+            server_id: server_id.into(),
+            share_id,
+        }),
+    )
+    .await
 }
 
 /// Record why a pack install failed, or clear it with `None`. No row, nothing to record.
@@ -201,9 +359,20 @@ pub async fn set_pack_error(
 }
 
 /// Stop following the pack, and drop any waiting to apply. Its files stay, as files someone
-/// added.
+/// added. A server that followed an instance owes the backend dropping its players, who got that
+/// instance's share through it; wake sync with `Access::owed` after.
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    let followed: Option<String> = sqlx::query_scalar(
+        "SELECT shared_instance_id FROM packs WHERE server_id = ?",
+    )
+    .bind(server_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    if followed.is_some() {
+        forget_players(&mut tx, server_id, followed).await?;
+    }
     sqlx::query("DELETE FROM packs WHERE server_id = ?")
         .bind(server_id)
         .execute(&mut *tx)
@@ -253,7 +422,7 @@ pub async fn set_pending(
     server_id: &str,
     pending: &PendingPack,
 ) -> sqlx::Result<Option<String>> {
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let replaced = pending_sha1(&mut *tx, server_id).await?;
     sqlx::query(
         "INSERT OR REPLACE INTO pending_packs (server_id, sha1, instance_id, instance_name, \
@@ -315,4 +484,60 @@ pub async fn servers_pending(db: &SqlitePool) -> sqlx::Result<Vec<String>> {
     sqlx::query_scalar("SELECT server_id FROM pending_packs")
         .fetch_all(db)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pack(shared_instance_id: Option<&str>) -> Pack {
+        Pack {
+            project_id: None,
+            version_id: None,
+            name: "Pack".into(),
+            version_number: "1".into(),
+            summary: None,
+            sha1: "a".repeat(40),
+            instance_id: shared_instance_id.map(|_| "i".into()),
+            instance_name: shared_instance_id.map(|_| "Instance".into()),
+            shared_instance_id: shared_instance_id.map(Into::into),
+            shared_version: shared_instance_id.map(|_| 1),
+            error: None,
+        }
+    }
+
+    async fn owed(db: &SqlitePool) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM backend_owed")
+            .fetch_one(db)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn leaving_an_instance_drops_its_players() {
+        let db = crate::db::memory().await;
+        sqlx::query(
+            "INSERT INTO servers (id, name, created_at, port, memory_mb) VALUES ('s1', 'A', 0, 25565, 1024)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        set_pack(&db, "s1", &pack(Some("share-a"))).await.unwrap();
+        set_pack(&db, "s1", &pack(Some("share-a"))).await.unwrap();
+        assert_eq!(owed(&db).await, 0, "a new version of the same instance");
+        set_pack(&db, "s1", &pack(Some("share-b"))).await.unwrap();
+        assert_eq!(owed(&db).await, 1, "another instance");
+
+        sqlx::query(
+            "INSERT INTO pending_packs (server_id, sha1, instance_id, instance_name, \
+             shared_instance_id, shared_version, start_after, force) \
+             VALUES ('s1', 'b', 'i', 'Instance', 'share-b', 2, 0, 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        set_pack(&db, "s1", &pack(None)).await.unwrap();
+        assert_eq!(owed(&db).await, 2, "a pack of its own");
+        assert_eq!(pending(&db, "s1").await.unwrap(), None);
+    }
 }

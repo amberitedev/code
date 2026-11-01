@@ -1396,6 +1396,113 @@ async fn a_pack_update_takes_an_empty_body_sent_as_json() {
 }
 
 #[tokio::test]
+async fn side_toggles_decide_what_the_server_runs_and_what_players_get() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    sqlx::query(
+        "UPDATE servers SET loader = 'fabric', game_version = '1.21.1' WHERE id = ?",
+    )
+    .bind(&server)
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    let mods = core.state.servers.paths().server(&server).join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+    for name in ["client.jar", "server.jar"] {
+        std::fs::write(mods.join(name), name).unwrap();
+    }
+    let addons = format!("/v1/servers/{server}/worlds/{server}/addons");
+    let set = |route: &str, filename: &str, enabled: bool| {
+        let uri = format!("{addons}/{route}");
+        let body =
+            json!({ "kind": "mod", "filename": filename, "enabled": enabled });
+        let (core, editor) = (&core, &editor);
+        async move {
+            core.call(Method::POST, &uri, Some(editor), None, Some(body))
+                .await
+        }
+    };
+    assert_eq!(
+        set("set-enabled-server", "client.jar", false).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set("set-enabled-player", "server.jar", false).await.0,
+        StatusCode::NO_CONTENT
+    );
+    // Off for the server, the file no longer loads; off for players, it still does.
+    assert!(mods.join("client.jar.disabled").exists());
+    assert!(mods.join("server.jar").exists());
+
+    let (_, listed) = core
+        .call(Method::GET, &addons, Some(&editor), None, None)
+        .await;
+    let sides = |filename: &str| {
+        let addon = listed["addons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|addon| addon["filename"] == filename)
+            .unwrap();
+        (
+            addon["disabled"].as_bool().unwrap(),
+            addon["disabled_server"].as_bool().unwrap(),
+            addon["disabled_player"].as_bool().unwrap(),
+        )
+    };
+    assert_eq!(sides("client.jar"), (false, true, false));
+    assert_eq!(sides("server.jar"), (false, false, true));
+
+    // Disabling it outright turns it off for both sides.
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &format!("{addons}/disable"),
+            Some(&editor),
+            None,
+            Some(json!({ "kind": "mod", "filename": "client.jar" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, listed) = core
+        .call(Method::GET, &addons, Some(&editor), None, None)
+        .await;
+    let client = listed["addons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|addon| addon["filename"] == "client.jar")
+        .unwrap();
+    assert_eq!(client["disabled"], true);
+    assert_eq!(client["disabled_server"], false);
+
+    // A server that follows an instance has neither toggles nor a share of its own.
+    sqlx::query(
+        "INSERT INTO packs (server_id, name, version_number, sha1, instance_id, instance_name, \
+         shared_instance_id, shared_version) VALUES (?, 'I', '1', 'x', 'i', 'I', 's', 1)",
+    )
+    .bind(&server)
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        set("set-enabled-player", "server.jar", true).await.0,
+        StatusCode::CONFLICT
+    );
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &format!("/v1/servers/{server}/worlds/{server}/content/share"),
+            Some(&editor),
+            None,
+            Some(json!({ "config_paths": [] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
     let core = core().await;
     let owner = core.sign_in("owner").await;

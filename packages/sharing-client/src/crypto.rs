@@ -23,6 +23,13 @@ pub fn content_key(p: &[u8; 32]) -> [u8; 32] {
     key
 }
 
+/// A hash written as 64 hex characters.
+pub fn parse_hash(text: &str) -> Option<[u8; 32]> {
+    let mut hash = [0; 32];
+    hex::decode_to_slice(text, &mut hash).ok()?;
+    Some(hash)
+}
+
 /// Content files get a derived key; every other file type gets a random one.
 pub fn is_content_type(file_type: &str) -> bool {
     matches!(file_type, "mod" | "resourcepack" | "shader" | "datapack")

@@ -4,17 +4,10 @@ use super::install::*;
 use super::report::{PublishReport, PublishReportFile};
 use super::types::*;
 use super::*;
-use crate::self_hosted::pool::{self, crypto};
+use crate::self_hosted::pool;
 use async_walkdir::{Filtering, WalkDir};
 use futures::{StreamExt, TryStreamExt};
-use sha2::Digest;
-use std::time::Duration;
-
-/// Files hashed or encrypted at once.
-const UPLOAD_CONCURRENCY: usize = 4;
-/// The Core confirms a stored version to the backend on its own, so a push waits up to a minute.
-const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
-const CONFIRM_ATTEMPTS: usize = 30;
+use sharing_client::push;
 
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
@@ -752,174 +745,76 @@ pub(super) async fn publish_current_content(
     } else {
         Vec::new()
     };
-    let modrinth_ids = snapshot.version_ids;
     let mut external_files = snapshot.external_files;
     external_files.extend(shared_files);
     tracing::debug!(
         instance_id,
         shared_instance_id,
         modpack_id = modpack_id.as_deref().unwrap_or("none"),
-        modrinth_id_count = modrinth_ids.len(),
+        modrinth_id_count = snapshot.version_ids.len(),
         external_file_count = external_files.len(),
         "Creating shared instance version"
     );
-    report.modrinth_ids = modrinth_ids.clone();
-    let hashed_files =
-        hash_external_files(&metadata.instance.path, &external_files, state)
+    report.modrinth_ids = snapshot.version_ids.clone();
+    // Held until the push ends, so each path keeps pointing at the file's bytes.
+    let sources =
+        external_file_sources(&metadata.instance.path, &external_files, state)
             .await?;
-    report.files = hashed_files
-        .iter()
-        .map(|file| PublishReportFile {
-            file_name: file.file_name.clone(),
-            file_type: file.file_type.clone(),
-            size: file.size,
-            sha512: file.sha512.clone(),
-            executable: file.executable,
+    let files = external_files
+        .into_iter()
+        .zip(&sources)
+        .map(|(candidate, source)| push::PushFile {
+            file_name: candidate.file_name,
+            file_type: candidate.file_type,
+            path: source.path().to_path_buf(),
         })
-        .collect();
-    report.step(format!("Hashed {} files", hashed_files.len()));
-    if let Some(file) = hashed_files.iter().find(|file| file.executable) {
-        bail!(crate::ErrorKind::SharedInstanceFileNotAllowed(
-            file.file_name.clone()
-        ));
-    }
-    let total_size = hashed_files
-        .iter()
-        .fold(0_u64, |total, file| total.saturating_add(file.size));
-    if total_size > MAX_SHARED_FILES_TOTAL_SIZE {
-        bail!(crate::ErrorKind::PoolTooLarge(format!(
-            "A shared instance can hold at most {} of files.",
-            crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
-        )));
-    }
-    let mut version_request = json!({
-        "modrinth_ids": modrinth_ids,
-        "modpack_id": modpack_id,
-        "removed_files": snapshot.removed_files,
-        "game_version": metadata.applied_content_set.game_version.clone(),
-        "loader": metadata.applied_content_set.loader.as_str(),
-        "loader_version": metadata
+        .collect::<Vec<_>>();
+    let content = VersionContent {
+        modrinth_ids: snapshot.version_ids,
+        modpack_id,
+        removed_files: snapshot.removed_files,
+        game_version: metadata.applied_content_set.game_version.clone(),
+        loader: metadata.applied_content_set.loader.as_str(),
+        loader_version: metadata
             .applied_content_set
             .loader_version
             .clone()
             .unwrap_or_default(),
-    });
-    if let Some(server_core) = server_core {
-        version_request["server_core"] = json!(server_core);
-    }
+    };
 
-    // The encrypted files wait in a folder of their own until the Core has them.
-    let folder = state
-        .directories
-        .caches_dir()
-        .join("pool")
-        .join(uuid::Uuid::new_v4().to_string());
-    let result = push_version(
-        instance_id,
-        &metadata,
+    let base_url = service_base_url()?;
+    let backend = push::Backend::new(
+        shared_instances_upload_client(&base_url).clone(),
+        base_url,
+        shared_clients_session()
+            .and_then(|session| session.access_token)
+            .ok_or(crate::ErrorKind::NotLoggedIn)?,
+    );
+    let result = push::push(
+        &backend,
+        &pool::STORE,
         shared_instance_id,
-        version_request,
-        &hashed_files,
-        &folder,
-        on_progress,
-        report,
-        state,
+        &content,
+        server_core,
+        &files,
+        &state.directories.caches_dir().join("pool"),
+        &mut |event| report_push_event(report, on_progress, event),
     )
     .await;
-    if let Err(error) = tokio::fs::remove_dir_all(&folder).await
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::warn!(
-            folder = %folder.display(),
-            error = %error,
-            "Could not remove a push's encrypted files"
-        );
-    }
-    result
-}
-
-/// Encrypts the files, creates the version, stores the files on the Core the backend picks, and
-/// waits until the Core has confirmed them.
-#[allow(clippy::too_many_arguments)]
-async fn push_version(
-    instance_id: &str,
-    metadata: &crate::state::InstanceMetadata,
-    shared_instance_id: &str,
-    mut version_request: serde_json::Value,
-    hashed_files: &[HashedExternalFile],
-    folder: &std::path::Path,
-    on_progress: &(dyn Fn(u64, u64) + Send + Sync),
-    report: &mut PublishReport,
-    state: &State,
-) -> crate::Result<i32> {
-    let previous = previous_versions(shared_instance_id, state).await?;
-    let carried = carried_config_files(&previous, hashed_files);
-    let file_count = hashed_files.len() + carried.len();
-    if file_count > MAX_SHARED_FILES {
-        bail!(crate::ErrorKind::PoolTooLarge(format!(
-            "A shared instance can hold at most {MAX_SHARED_FILES} files, and this push has {file_count}."
-        )));
-    }
-    let keys = file_keys(&previous, hashed_files);
-    crate::util::io::create_dir_all(folder).await?;
-    // Collected first so the stream holds plain futures, not a borrowing closure, which keeps
-    // the push future Send for Tauri commands.
-    let encryptions = hashed_files
-        .iter()
-        .zip(&keys)
-        .map(|(file, key)| pool::encrypt_file(key, file.content.path(), folder))
-        .collect::<Vec<_>>();
-    let mut objects = futures::stream::iter(encryptions)
-        .buffered(UPLOAD_CONCURRENCY)
-        .try_collect::<Vec<_>>()
-        .await?;
-    // A file written to between hashing and encrypting would reach the Core with a P that its
-    // bytes no longer match, and every member's install would fail on it.
-    if let Some(file) =
-        hashed_files
-            .iter()
-            .zip(&objects)
-            .find_map(|(file, object)| {
-                (object.plain != file.sha256).then_some(file)
-            })
-    {
-        bail!(crate::ErrorKind::InputError(format!(
-            "{} changed while it was being pushed. Push again.",
-            file.file_name
-        )));
-    }
-    report.step(format!("Encrypted {} files", objects.len()));
-
-    let mut external_files = hashed_files
-        .iter()
-        .zip(&keys)
-        .zip(&objects)
-        .map(|((file, key), object)| ExternalFileData {
-            file_name: file.file_name.clone(),
-            file_type: file.file_type.clone(),
-            file_size: file.size,
-            sha1: file.sha1.clone(),
-            sha256: hex::encode(file.sha256),
-            object: hex::encode(object.object),
-            object_size: object.size,
-            key: (!crypto::is_content_type(&file.file_type))
-                .then(|| hex::encode(key)),
-        })
-        .collect::<Vec<_>>();
-    for (file, object) in carried {
-        external_files.push(file);
-        objects.push(object);
-    }
-    let root = hex::encode(crypto::root(objects.iter().map(|o| o.object)));
-    version_request["external_files"] = json!(external_files);
-    version_request["root"] = json!(root);
-
-    let response =
-        create_remote_version(shared_instance_id, version_request, state)
-            .await?;
-    let response = match response {
-        SharedInstanceRemoteResponse::Available(response) => response,
-        SharedInstanceRemoteResponse::Unavailable(reason) => {
+    match result {
+        Ok(version) => Ok(version),
+        Err(push::PushError::Unavailable(reason)) => {
+            let reason = match reason {
+                push::Unavailable::Deleted => {
+                    SharedInstanceUnavailableReason::Deleted
+                }
+                push::Unavailable::AccessRevoked => {
+                    if !active_amberite_session_is_configured(state).await? {
+                        bail!(crate::ErrorKind::NotLoggedIn);
+                    }
+                    SharedInstanceUnavailableReason::AccessRevoked
+                }
+            };
             if let Some(attachment) = metadata.shared_instance.as_ref() {
                 handle_unavailable_shared_instance_if_current_user(
                     instance_id,
@@ -929,176 +824,110 @@ async fn push_version(
                 )
                 .await?;
             }
-
-            return Err(shared_instance_unavailable_error(reason));
+            Err(shared_instance_unavailable_error(reason))
         }
-    };
-    report.created_version = Some(response.version);
-    report.step(format!("Created version {}", response.version));
-    if response.ready {
-        return Ok(response.version);
+        Err(error) => Err(push_error(error)),
     }
+}
 
-    if let Some(store) = &response.store {
-        let sent = pool::store_version(
-            &store.core,
-            &store.ticket,
-            &root,
-            &objects,
-            on_progress,
-        )
-        .await?;
-        report.requested_files = Some(
-            external_files
+/// A version's upstream fields, which the writer sends beside the files it adds.
+#[derive(Serialize)]
+struct VersionContent<'a> {
+    modrinth_ids: Vec<String>,
+    modpack_id: Option<String>,
+    removed_files: Vec<SharedInstanceRemovedFile>,
+    game_version: String,
+    loader: &'a str,
+    loader_version: String,
+}
+
+fn report_push_event(
+    report: &mut PublishReport,
+    on_progress: &(dyn Fn(u64, u64) + Send + Sync),
+    event: push::PushEvent<'_>,
+) {
+    use push::PushEvent;
+
+    match event {
+        PushEvent::Hashed(files) => {
+            report.files = files
                 .iter()
-                .filter(|file| sent.contains(&file.object))
-                .map(|file| file.file_name.clone())
-                .collect(),
-        );
-        report.step(format!("Stored {} files on the Core", sent.len()));
-    }
-
-    for _ in 0..CONFIRM_ATTEMPTS {
-        tokio::time::sleep(CONFIRM_INTERVAL).await;
-        if get_remote_version(shared_instance_id, response.version, state)
-            .await?
-            .is_some_and(|version| version.ready)
-        {
-            report.step("The Core confirmed the files");
-            return Ok(response.version);
+                .map(|file| PublishReportFile {
+                    file_name: file.file_name.clone(),
+                    file_type: file.file_type.clone(),
+                    size: file.size,
+                    sha256: hex::encode(file.sha256),
+                    executable: file.executable,
+                })
+                .collect();
+            report.step(format!("Hashed {} files", files.len()));
         }
+        PushEvent::Encrypted(count) => {
+            report.step(format!("Encrypted {count} files"));
+        }
+        PushEvent::Created(version) => {
+            report.created_version = Some(version);
+            report.step(format!("Created version {version}"));
+        }
+        PushEvent::Stored { objects, files } => {
+            report.requested_files = Some(files);
+            report.step(format!("Stored {objects} files on the Core"));
+        }
+        PushEvent::Progress(uploaded, total) => on_progress(uploaded, total),
+        PushEvent::Confirmed => report.step("The Core confirmed the files"),
     }
-    Err(crate::ErrorKind::PoolPushUnconfirmed.into())
 }
 
-/// The versions a push builds on: the latest one, then the version a crashed push left
-/// unconfirmed one past it, if there is one.
-async fn previous_versions(
-    shared_instance_id: &str,
-    state: &State,
-) -> crate::Result<Vec<InstanceVersionResponse>> {
-    let mut versions = Vec::new();
-    if let SharedInstanceRemoteResponse::Available(latest) =
-        get_latest_remote_version_optional_unavailable(
-            shared_instance_id,
-            state,
+/// The App's error for each way a push fails, worded for the push UI.
+fn push_error(error: push::PushError) -> crate::Error {
+    use push::PushError;
+    use sharing_client::store::StoreError;
+
+    match error {
+        PushError::Executable(file_name) => {
+            crate::ErrorKind::SharedInstanceFileNotAllowed(file_name).into()
+        }
+        PushError::TooLarge => crate::ErrorKind::PoolTooLarge(format!(
+            "A shared instance can hold at most {} of files.",
+            crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
+        ))
+        .into(),
+        PushError::TooManyFiles(count) => crate::ErrorKind::PoolTooLarge(format!(
+            "A shared instance can hold at most {MAX_SHARED_FILES} files, and this push has {count}."
+        ))
+        .into(),
+        PushError::FileChanged(file_name) => crate::ErrorKind::InputError(
+            format!("{file_name} changed while it was being pushed. Push again."),
         )
-        .await?
-    {
-        let pending = if latest.ready {
-            get_remote_version(shared_instance_id, latest.version + 1, state)
-                .await?
-        } else {
-            None
-        };
-        versions.push(latest);
-        versions.extend(pending);
-    }
-    Ok(versions)
-}
-
-/// The config files of the latest ready version that this push does not send again. Configs
-/// are picked per push, so each version carries the earlier ones forward and lists every config
-/// shared so far: any version stands alone, however many older ones the backend has dropped.
-/// The Core still holds their objects, since it keeps the latest ready version.
-fn carried_config_files(
-    previous: &[InstanceVersionResponse],
-    pushed: &[HashedExternalFile],
-) -> Vec<(ExternalFileData, pool::PoolObject)> {
-    let Some(latest) = previous.first().filter(|version| version.ready) else {
-        return Vec::new();
-    };
-    let pushed = pushed
-        .iter()
-        .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
-        .collect::<HashSet<_>>();
-    latest
-        .external_files
-        .iter()
-        .filter(|file| {
-            matches!(
-                file.file_type.as_str(),
-                CONFIG_FILE_TYPE | CONFIG_BUNDLE_FILE_TYPE
-            ) && !pushed
-                .contains(&(file.file_type.as_str(), file.file_name.as_str()))
-        })
-        .filter_map(|file| {
-            let carried = carried_config_file(file);
-            if carried.is_none() {
-                tracing::warn!(
-                    file_name = %file.file_name,
-                    "A shared config file has an incomplete manifest entry and is not carried forward"
-                );
-            }
-            carried
-        })
-        .collect()
-}
-
-fn carried_config_file(
-    file: &ExternalFileResponse,
-) -> Option<(ExternalFileData, pool::PoolObject)> {
-    let object = file.object.as_deref().and_then(pool::parse_hash)?;
-    let object_size = file.object_size?;
-    let sha256 = file.sha256.as_deref().and_then(pool::parse_hash)?;
-    Some((
-        ExternalFileData {
-            file_name: file.file_name.clone(),
-            file_type: file.file_type.clone(),
-            file_size: file
-                .file_size
-                .and_then(|size| u64::try_from(size).ok())?,
-            sha1: file.sha1.clone()?,
-            sha256: hex::encode(sha256),
-            object: hex::encode(object),
-            object_size,
-            key: Some(file.key.clone()?),
-        },
-        pool::PoolObject {
-            object,
-            size: object_size,
-            path: None,
-            plain: sha256,
-        },
-    ))
-}
-
-/// Each file's key. Content files derive theirs from P. Other files keep the key an earlier
-/// version gave the same P, so an unchanged file stays the same object, and get a new random
-/// key otherwise. A push that crashed after creating its version left it unconfirmed one past
-/// the latest ready one; its keys win, so pushing the same files again gives the same root and
-/// resumes that upload instead of waiting for it to expire.
-fn file_keys(
-    previous: &[InstanceVersionResponse],
-    files: &[HashedExternalFile],
-) -> Vec<[u8; 32]> {
-    let mut keys = HashMap::new();
-    for file in previous
-        .iter()
-        .rev()
-        .flat_map(|version| &version.external_files)
-    {
-        if let (Some(p), Some(key)) = (
-            file.sha256.as_deref().and_then(pool::parse_hash),
-            file.key.as_deref().and_then(pool::parse_hash),
-        ) {
-            keys.entry(p).or_insert(key);
+        .into(),
+        PushError::CarriedFileMissing => crate::ErrorKind::InputError(
+            "The Core no longer has a config file shared earlier. Select it under Files and push again."
+                .to_string(),
+        )
+        .into(),
+        PushError::NoStorage => crate::ErrorKind::PoolNoStorage.into(),
+        PushError::PushInFlight => crate::ErrorKind::PoolPushInFlight.into(),
+        PushError::Refused(description) => {
+            crate::ErrorKind::PoolTooLarge(description).into()
         }
+        PushError::Unconfirmed => crate::ErrorKind::PoolPushUnconfirmed.into(),
+        PushError::Store(StoreError::DiskFull) => {
+            crate::ErrorKind::PoolDiskFull.into()
+        }
+        PushError::Store(StoreError::EgressSpent) => {
+            crate::ErrorKind::PoolEgressSpent.into()
+        }
+        PushError::Io(error) => error.into(),
+        PushError::Http(error) => anyhow::Error::new(error.without_url())
+            .context(crate::ErrorKind::SharedInstancesApiError)
+            .into(),
+        error @ PushError::Backend { status, .. } if status >= 500 => {
+            anyhow::Error::new(error)
+                .context(crate::ErrorKind::SharedInstancesApiError)
+                .into()
+        }
+        error => anyhow::Error::new(error).into(),
     }
-
-    files
-        .iter()
-        .map(|file| {
-            if crypto::is_content_type(&file.file_type) {
-                return crypto::content_key(&file.sha256);
-            }
-            *keys.entry(file.sha256).or_insert_with(|| {
-                let mut key = [0; 32];
-                rand::fill(&mut key);
-                key
-            })
-        })
-        .collect()
 }
 
 pub(super) async fn collect_shareable_files(
@@ -1274,74 +1103,20 @@ pub(super) fn ensure_shareable_link(link: &InstanceLink) -> crate::Result<()> {
     Ok(())
 }
 
-/// A publish candidate with its content, size, SHA-512 (for the publish report), SHA-1 (which a
-/// member's install compares) and SHA-256, which is the pool's P.
-pub(super) struct HashedExternalFile {
-    file_name: String,
-    file_type: String,
-    content: crate::state::content_store::ReadableContent,
-    size: u64,
-    sha512: String,
-    sha1: String,
-    sha256: [u8; 32],
-    executable: bool,
-}
-
-async fn hash_external_files(
+/// Where each candidate's bytes are, held for as long as the caller reads them.
+async fn external_file_sources(
     instance_path: &str,
     candidates: &[ExternalFileCandidate],
     state: &State,
-) -> crate::Result<Vec<HashedExternalFile>> {
-    let hashes = candidates
+) -> crate::Result<Vec<crate::state::content_store::ReadableContent>> {
+    let sources = candidates
         .iter()
-        .map(|candidate| hash_external_file(instance_path, candidate, state))
+        .map(|candidate| external_file_source(instance_path, candidate, state))
         .collect::<Vec<_>>();
-    futures::stream::iter(hashes)
-        .buffered(UPLOAD_CONCURRENCY)
+    futures::stream::iter(sources)
+        .buffered(4)
         .try_collect()
         .await
-}
-
-async fn hash_external_file(
-    instance_path: &str,
-    candidate: &ExternalFileCandidate,
-    state: &State,
-) -> crate::Result<HashedExternalFile> {
-    use tokio::io::AsyncReadExt;
-
-    let content = external_file_source(instance_path, candidate, state).await?;
-    let mut file = tokio::fs::File::open(content.path()).await?;
-    let mut hasher = sha2::Sha512::new();
-    let mut sha1 = sha1_smol::Sha1::new();
-    let mut sha256 = sha2::Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    let mut head = Vec::with_capacity(FILE_SCAN_HEAD_SIZE);
-    let mut size = 0_u64;
-    loop {
-        let read = file.read(&mut buffer).await?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        sha1.update(&buffer[..read]);
-        sha256.update(&buffer[..read]);
-        let remaining = FILE_SCAN_HEAD_SIZE - head.len();
-        head.extend_from_slice(&buffer[..read.min(remaining)]);
-        size += read as u64;
-    }
-
-    Ok(HashedExternalFile {
-        file_name: candidate.file_name.clone(),
-        file_type: candidate.file_type.clone(),
-        content,
-        size,
-        sha512: crate::util::content_hash::encode_hex(
-            hasher.finalize().as_slice(),
-        ),
-        sha1: sha1.digest().to_string(),
-        sha256: sha256.finalize().into(),
-        executable: is_executable_content(&head),
-    })
 }
 
 async fn external_file_source(

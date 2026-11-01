@@ -19,9 +19,11 @@ export const serverKeys = {
 export const sharedInstanceKeys = {
 	instance: (instanceId: string, ...scope: [userId?: string]) =>
 		['shared-instances', instanceId, 'instance', ...scope] as const,
-	players: (instanceId: string, ...scope: [userId?: string]) =>
+	// Players and their links belong to one server: on a Core, two servers following the same
+	// shared instance have their own.
+	players: (instanceId: string, ...scope: [serverId?: string, userId?: string]) =>
 		['shared-instances', instanceId, 'players', ...scope] as const,
-	invites: (instanceId: string, ...scope: [userId?: string]) =>
+	invites: (instanceId: string, ...scope: [serverId?: string, userId?: string]) =>
 		['shared-instances', instanceId, 'invites', ...scope] as const,
 	friends: (userId: string | undefined) => ['shared-instances', 'friends', userId] as const,
 }

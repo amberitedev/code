@@ -27,16 +27,18 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
+use ts_rs::TS;
 
 use crate::crypto::{DecryptError, Decryptor};
 
 /// A Core as the backend names it. `address` is tried first and `public_address` when the first
 /// does not connect, so a Core on the same network is reached directly.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct PoolCore {
     pub id: String,
     pub address: String,
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub public_address: Option<String>,
     pub cert_fingerprint: String,
 }

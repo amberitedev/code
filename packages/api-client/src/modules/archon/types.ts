@@ -659,42 +659,18 @@ export namespace Archon {
 				  }
 				| {
 						/**
-						 * Core only. Applies a version of an App instance's share, which Core fetches
-						 * from the pool itself. A running server takes it when it next stops, or with
-						 * `restart` is stopped, updated, and started again.
+						 * Core only. Applies the latest version of an App instance's share, which Core
+						 * reads from the backend and fetches from the pool itself. A running server takes
+						 * it when it next stops, or with `restart` is stopped, updated, and started again.
 						 */
 						content_variant: 'instance'
 						instance: { id: string; name: string }
-						share: SharedVersion
+						shared_instance_id: string
+						/** From `sharedinstances.instances_v1.getServerTicket` for this server's Core. */
+						ticket: string
 						properties?: PropertiesFields | null
 						restart?: boolean
 				  }
-
-			/** Core only. A share version as the App reads it from the backend. */
-			export type SharedVersion = {
-				shared_instance_id: string
-				version: number
-				/** `modrinth.index.json` for the files on Modrinth. */
-				index: unknown
-				pool: {
-					root: string
-					holders: {
-						id: string
-						address: string
-						public_address?: string | null
-						cert_fingerprint: string
-					}[]
-					ticket: string
-				} | null
-				/** The files in the pool, by their path in the server folder. */
-				files: {
-					path: string
-					object: string
-					object_size: number
-					sha256: string
-					key: string | null
-				}[]
-			}
 
 			export type AddonDiffVersion = {
 				id: string

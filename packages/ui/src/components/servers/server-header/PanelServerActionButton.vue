@@ -121,7 +121,7 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { useSharedInstanceInstalledOnce } from '#ui/composables/server-sharing/shared-instance'
 import { useServerShareReview } from '#ui/composables/server-sharing/use-server-share-review'
-import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
+import { injectModrinthServerContext } from '#ui/providers'
 
 import { type PowerAction, useServerPowerAction } from './use-server-power-action'
 
@@ -138,12 +138,8 @@ const { formatMessage } = useVIntl()
 const { serverId, worldId, serverFull } = injectModrinthServerContext()
 const { canSetup } = useServerPermissions()
 const world = computed(() => serverFull.value?.worlds.find((world) => world.id === worldId.value))
-const client = injectModrinthClient()
-// A Core cannot share a server's content yet, so the server play prompts stay off there.
 const installedOnce = useSharedInstanceInstalledOnce(
-	computed(() =>
-		client.selfHostedHosting ? null : (world.value?.content?.shared_instance_id ?? null),
-	),
+	computed(() => world.value?.content?.shared_instance_id ?? null),
 )
 const needsShareReview = computed(
 	() =>

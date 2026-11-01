@@ -28,7 +28,7 @@ Modrinth handles public content (mods, modpacks, resource packs, etc.). Amberite
 
 The App keeps the full Modrinth experience. Users can continue using it as their main launcher (browsing content, managing instances, installing modpacks and mods, etc.), with Amberite’s features added on top.
 
-Amberite ports Modrinth’s social backend from upstream `apps/labrinth` (friends, profiles, sharing, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite runs this backend itself, with relevant upstream changes carried over. Labrinth is not kept in this repo: read it from `modrinth/main`. `upstream.json` lists the upstream paths we never take (`ignore`) and the labrinth paths we port from (`watch`).
+Amberite ports Modrinth’s social backend from upstream `apps/labrinth` (friends, profiles, accounts, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Labrinth has no sharing server, so the sharing API follows the App's client instead; its intentional differences are in `docs/internals/sharing-api.md`. Amberite runs this backend itself, with relevant upstream changes carried over. Labrinth is not kept in this repo: read it from `modrinth/main`. `upstream.json` lists the upstream paths we never take (`ignore`) and the labrinth paths we port from (`watch`).
 
 ### 5. Minecraft-first identity
 

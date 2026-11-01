@@ -95,6 +95,29 @@ export namespace SharedInstances {
 				users: InstanceUser[]
 			}
 
+			/** How someone gets a share's updates: as a member, or as a player of a server following it. */
+			export type AccessVia = { type: 'member' } | ({ type: 'player' } & AccessServer)
+
+			/** A Core server following the share. */
+			export type AccessServer = { core_id: string; server_id: string; name: string }
+
+			/** Everyone who gets a share's updates, and the live links of the servers following it. */
+			export type Access = {
+				users: AccessEntry[]
+				links: (Invites.v1.InviteLink & { server: AccessServer })[]
+			}
+
+			/**
+			 * One way someone gets a share's updates, for the instance's Share tab. Someone who is
+			 * both a member and a player, or a player of two servers, has an entry for each.
+			 */
+			export type AccessEntry = {
+				user: { id: string; username: string; avatar_url: string | null }
+				joined_at: string | null
+				join_type: Exclude<JoinType, 'owner'>
+				via: AccessVia
+			}
+
 			export type FileMetadata = {
 				path: string
 				hash: string
