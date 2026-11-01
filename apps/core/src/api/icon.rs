@@ -13,12 +13,15 @@
 use std::{io::Cursor, sync::Arc};
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
 };
-use image::{DynamicImage, ImageFormat, ImageReader, imageops::FilterType};
+use image::{
+    DynamicImage, ImageDecoder, ImageFormat, ImageReader, imageops::FilterType,
+    metadata::Orientation,
+};
 use serde::Deserialize;
 
 use super::{
@@ -29,7 +32,6 @@ use super::{
 };
 use crate::{
     access::{Caller, Level, activity},
-    content::folder::Folder,
     servers::{ServerError, records},
 };
 
@@ -75,26 +77,21 @@ pub async fn get(
     } else {
         &[GAME_ICON]
     };
-    let png = blocking(move || {
-        for name in names {
-            if let Some(png) = read(&folder, name)? {
-                return Ok(png);
-            }
-        }
-        Err(no_icon())
+    // Streamed: the file routes can put a file of any size at these names.
+    let file = blocking(move || {
+        names
+            .iter()
+            .find_map(|name| folder.open_file(name).ok().flatten())
+            .map(cap_std::fs::File::into_std)
+            .ok_or_else(no_icon)
     })
     .await?;
-    Ok(([(header::CONTENT_TYPE, "image/png")], png))
-}
-
-/// The plain file `name`, or `None` when nothing is there.
-fn read(folder: &Folder, name: &str) -> Result<Option<Vec<u8>>, ApiError> {
-    let Some(file) = folder.open_file(name).ok().flatten() else {
-        return Ok(None);
-    };
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file.into_std(), &mut bytes)?;
-    Ok(Some(bytes))
+    let stream =
+        tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
+    Ok((
+        [(header::CONTENT_TYPE, "image/png")],
+        Body::from_stream(stream),
+    ))
 }
 
 /// `PUT /v1/servers/{id}/icon`.
@@ -150,7 +147,13 @@ fn icons(image: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
             ),
         ));
     }
-    let image = reader()?.decode().map_err(|_| invalid())?;
+    // Phone photos are often stored sideways, with the turn in their metadata.
+    let mut decoder = reader()?.into_decoder().map_err(|_| invalid())?;
+    let orientation =
+        decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut image =
+        DynamicImage::from_decoder(decoder).map_err(|_| invalid())?;
+    image.apply_orientation(orientation);
     let original = if width > ORIGINAL_MAX || height > ORIGINAL_MAX {
         image.resize(ORIGINAL_MAX, ORIGINAL_MAX, FilterType::Lanczos3)
     } else {
@@ -181,12 +184,19 @@ pub async fn delete(
     exists(&state, &id).await?;
     let (folder, busy) = changing(&state, &id)?;
     locked(&busy, move || {
-        let had = folder.exists(GAME_ICON) || folder.exists(ORIGINAL_ICON);
-        if !had {
+        // Only plain files: `remove` would also take a folder by that name, and its contents.
+        let icons: Vec<_> = [GAME_ICON, ORIGINAL_ICON]
+            .into_iter()
+            .filter(|name| {
+                folder.metadata(name).is_ok_and(|meta| meta.is_file())
+            })
+            .collect();
+        if icons.is_empty() {
             return Err(no_icon());
         }
-        folder.remove(GAME_ICON)?;
-        folder.remove(ORIGINAL_ICON)?;
+        for name in icons {
+            folder.remove(name)?;
+        }
         Ok(())
     })
     .await?;
