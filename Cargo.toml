@@ -5,6 +5,7 @@ members = [
   "apps/core",
   "packages/app-lib",
   "packages/ariadne",
+  "packages/bedrock",
   "packages/browser-bridge",
   "packages/minecraft-meta-manifest",
   "packages/modrinth-content-management",
@@ -30,6 +31,7 @@ async-trait = "0.1.92"
 async-tungstenite = { version = "0.35.0", default-features = false, features = ["futures-03-sink"] }
 async-walkdir = "2.2.0"
 base64 = "0.23.1"
+bedrock = { path = "packages/bedrock" }
 bon = "3.10.2"
 bytemuck = "1.25.2"
 bytes = "1.12.1"

@@ -18,6 +18,7 @@ async-tungstenite = { workspace = true, features = ["tokio-runtime", "tokio-rust
 async-walkdir = { workspace = true }
 
 base64 = { workspace = true }
+bedrock = { workspace = true }
 bon = { workspace = true }
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true, features = ["serde"] }
@@ -138,7 +139,7 @@ winreg = { workspace = true }
 
 [features]
 cli = ["dep:indicatif"]
-export-ts = ["dep:postcard-bindgen", "dep:ts-rs"]
+export-ts = ["bedrock/export-ts", "dep:postcard-bindgen", "dep:ts-rs"]
 tauri = ["dep:postcard", "dep:tauri"]
 
 [lints]

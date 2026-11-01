@@ -14,8 +14,8 @@ use sqlx::SqlitePool;
 mod dirs;
 pub use self::dirs::*;
 
-mod instance_types;
-pub use self::instance_types::*;
+// instance_types.rs is compiled by bedrock along with the content model.
+pub use bedrock::state::instance_types::*;
 
 pub(crate) mod instances;
 pub use self::instances::*;

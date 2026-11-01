@@ -1,0 +1,30 @@
+[package]
+name = "bedrock"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# What the App and Copal both need that is not sharing: the content schema borrowed from app-lib,
+# clones of upstream code tangled with app-lib's State (`ports.toml`), `.mrpack` and Modrinth
+# content rules, connections to Cores, and limits. Imports go one way:
+# modrinth-content-management -> bedrock -> sharing-client -> sharing-storage.
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+modrinth-content-management = { workspace = true }
+postcard-bindgen = { workspace = true, features = ["generating", "std"], optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true, features = [
+  "chrono-impl",
+  "no-serde-warnings",
+  "uuid-impl",
+], optional = true }
+
+[features]
+# app-lib's `export-ts`: the borrowed types derive their TypeScript there.
+export-ts = ["dep:postcard-bindgen", "dep:ts-rs"]
+
+[lints]
+workspace = true

@@ -1303,6 +1303,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bedrock"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "modrinth-content-management",
+ "postcard-bindgen",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ts-rs",
+]
+
+[[package]]
 name = "bigdecimal"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10232,6 +10246,7 @@ dependencies = [
  "async-tungstenite",
  "async-walkdir",
  "base64 0.23.1",
+ "bedrock",
  "bon",
  "bytemuck",
  "bytes",
