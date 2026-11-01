@@ -302,13 +302,25 @@ async fn place_version(
         })
         .cloned()
         .collect();
+    // A file off for the server stays off when it is updated, since its toggle moves to the new
+    // file and only counts while the file is `.disabled`.
+    let toggles = records::toggles(&content.db, server_id).await?;
+    let off_for_server = old.iter().any(|row| {
+        toggles
+            .iter()
+            .any(|toggle| toggle.path == row.path && toggle.disabled_server)
+    });
+    let written = if off_for_server {
+        format!("{path}{DISABLED}")
+    } else {
+        path.clone()
+    };
     let placed = {
         let folder = Arc::clone(folder);
-        let path = path.clone();
         let old = old.clone();
         let staged = staging.clone();
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            folder.write(&path, &mut std::fs::File::open(&staged)?)?;
+            folder.write(&written, &mut std::fs::File::open(&staged)?)?;
             for row in &old {
                 folder.remove(&row.path)?;
                 folder.remove(&format!("{}{DISABLED}", row.path))?;
