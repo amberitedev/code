@@ -104,6 +104,25 @@ type RemovedFile =
 const REMOVED_PARENTS = ['mods', 'plugins', 'datapacks', 'shaderpacks', 'resourcepacks']
 /** The App drops a version whose removed path names any other kind of file. */
 const REMOVED_SUFFIXES = ['.jar', '.zip', '.jar.disabled', '.zip.disabled']
+/** Windows device names, as `is_reserved_windows_device_name` in `packages/path-util`. */
+const RESERVED_DEVICE_NAMES = [
+	...['CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'],
+	...['COM', 'LPT'].flatMap((name) => [...'123456789¹²³'].map((digit) => name + digit)),
+]
+
+/**
+ * Whether `name` is one plain file name, as `path_util::is_safe_file_name` decides: no
+ * separator of either kind, no drive prefix, not `.` or `..`, and no Windows device name
+ * (`CON`, `con.jar`, `NUL:x`).
+ */
+function safeFileName(name: string): boolean {
+	if (!name || name === '.' || name === '..' || /[/\\]/.test(name) || /^[a-z]:/i.test(name))
+		return false
+	const upper = name.replace(/[a-z]/g, (letter) => letter.toUpperCase())
+	return !RESERVED_DEVICE_NAMES.some(
+		(device) => upper.startsWith(device) && /^($|[.:])/.test(upper.slice(device.length)),
+	)
+}
 
 function removedFiles(value: unknown, modpack: string | null): RemovedFile[] {
 	if (value === undefined || value === null) return []
@@ -118,7 +137,7 @@ function removedFiles(value: unknown, modpack: string | null): RemovedFile[] {
 			entry.type !== 'path' ||
 			typeof entry.parent !== 'string' ||
 			!REMOVED_PARENTS.includes(entry.parent) ||
-			filename.includes('/') ||
+			!safeFileName(filename) ||
 			!REMOVED_SUFFIXES.some((suffix) => filename.endsWith(suffix))
 		)
 			throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
@@ -872,11 +891,14 @@ async function coreSharing(
 	[route, id, section, child, ...rest]: string[],
 ): Promise<Response> {
 	const core = await requireListedCore(request, env)
-	await requireUnlocked(env, core.owner_id)
-	await requireSharing(env, core.owner_id)
 	const refused = () =>
 		new ApiError(403, 'forbidden', 'A Core reaches only the shares of its own servers', 'not_owner')
 	if (route !== 'instances') throw refused()
+	// An owner may always delete their share, locked or not.
+	if (!(id && !section && request.method === 'DELETE')) {
+		await requireUnlocked(env, core.owner_id)
+		await requireSharing(env, core.owner_id)
+	}
 	if (!id) {
 		if (request.method !== 'POST') throw refused()
 		const body = await readJson(request)
@@ -1003,7 +1025,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	if (route === 'storage' && !id) return storage(request, env, user.id)
 	if (route !== 'instances')
 		throw new ApiError(404, 'not_found', 'Sharing endpoint was not found', 'endpoint_not_found')
-	await requireSharing(env, user.id)
+	// An owner may always delete their share; `owner` below still checks it is theirs.
+	if (!(id && !section && request.method === 'DELETE')) await requireSharing(env, user.id)
 	if (!id) {
 		if (request.method === 'GET') {
 			if (url.searchParams.has('user') && url.searchParams.get('user') !== user.id)

@@ -577,7 +577,10 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal((await packVersion({})).status, 400)
 		const outside = { type: 'path', parent: 'config', filename: 'a.toml' }
 		const notAddon = { type: 'path', parent: 'mods', filename: 'notes.txt' }
-		for (const bad of [outside, notAddon])
+		// The App refuses a name that is not one safe file name.
+		const backslash = { type: 'path', parent: 'mods', filename: 'a\\b.jar' }
+		const device = { type: 'path', parent: 'mods', filename: 'con.jar' }
+		for (const bad of [outside, notAddon, backslash, device])
 			assert.equal(
 				(await packVersion({ modpack_id: 'PACKVER1', removed_files: [bad] })).status,
 				400,
@@ -610,6 +613,18 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			'not_owner',
 		)
 		await moveShare('core')
+		// An owner who may not share any more can still delete a share.
+		const leaving = await ok(
+			await asCore('/instances', 'POST', { name: 'Leaving', server_id: 'leaving' }),
+		)
+		await db.prepare('INSERT INTO sharing_blacklist (user_id) VALUES (?)').bind('owner').run()
+		await code(
+			await asCore(`/instances/${leaving.id}`, 'PATCH', { name: 'Still' }),
+			403,
+			'blacklisted',
+		)
+		await ok(await asCore(`/instances/${leaving.id}`, 'DELETE'))
+		await db.prepare('DELETE FROM sharing_blacklist WHERE user_id = ?').bind('owner').run()
 		// Removing the Core from the account deletes its server-first shares.
 		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))
 		assert.equal(
