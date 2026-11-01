@@ -43,7 +43,6 @@ httpdate = { workspace = true }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 indexmap = { workspace = true }
 indicatif = { workspace = true, optional = true }
-infer = { workspace = true }
 itertools = { workspace = true }
 json5 = { workspace = true }
 minecraft-meta-manifest = { workspace = true }

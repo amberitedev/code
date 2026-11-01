@@ -10257,7 +10257,6 @@ dependencies = [
  "image",
  "indexmap 2.14.2",
  "indicatif",
- "infer 0.22.0",
  "itertools 0.15.0",
  "json5",
  "minecraft-meta-manifest",
