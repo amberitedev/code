@@ -34,10 +34,6 @@ pub enum PackError {
     Host(String),
     #[error("the pack lists both {0} and {1}, which are the same file here")]
     Collision(String, String),
-    #[error(
-        "the pack would unpack more than {} GB", archive::MAX_UNPACKED / 1024 / 1024 / 1024
-    )]
-    TooLarge,
 }
 
 /// `modrinth.index.json`.
@@ -185,6 +181,23 @@ pub fn fold(path: &str, case_insensitive: bool) -> String {
     }
 }
 
+/// The folders of a pack that are unpacked onto the server, the later one winning.
+const OVERRIDES: [&str; 2] = ["overrides/", "server-overrides/"];
+
+/// What a pack's overrides unpack to, as the archive lists them. Checked against the disk
+/// before [`wanted`] reads them, so a zip bomb is refused without inflating it.
+pub fn overrides_size<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<u64, ArchiveError> {
+    let mut size = 0u64;
+    for (n, (path, _)) in archive::entries(archive)?.iter().enumerate() {
+        if OVERRIDES.iter().any(|prefix| path.starts_with(prefix)) {
+            size = size.saturating_add(archive.by_index_raw(n)?.size());
+        }
+    }
+    Ok(size)
+}
+
 /// Every file a server running `index` should have, by path. Client-only files are left out, and
 /// `server-overrides/` wins over `overrides/`. Downloads must come from an allowed host.
 pub fn wanted<R: Read + Seek>(
@@ -230,15 +243,13 @@ pub fn wanted<R: Read + Seek>(
         )?;
     }
     let entries = archive::entries(archive)?;
-    // One budget for every override: a small pack must not inflate past it entry by entry.
-    let mut budget = archive::MAX_UNPACKED;
-    for prefix in ["overrides/", "server-overrides/"] {
+    for prefix in OVERRIDES {
         for (n, (path, is_dir)) in entries.iter().enumerate() {
             let Some(path) = path.strip_prefix(prefix).filter(|_| !is_dir)
             else {
                 continue;
             };
-            let (sha1, size) = archive::entry_sha1(archive, n, &mut budget)?;
+            let (sha1, size) = archive::entry_sha1(archive, n)?;
             add(
                 path.to_owned(),
                 Wanted {
@@ -288,21 +299,20 @@ pub struct Disk<'a> {
     pub case_insensitive: bool,
 }
 
-/// The most a set of steps writes, refused past [`archive::MAX_UNPACKED`] before anything is
-/// written: one budget for the whole install. Download sizes are the index's word, so for them
-/// this is an estimate; each download is only capped at [`super::install::MAX_FILE`].
-pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
-    let total = steps
+/// The most disk a set of steps takes while it runs. A download is staged and then copied in, so
+/// it counts twice. Download sizes are the index's word, so for them this is an estimate; each
+/// download is only capped at [`super::install::MAX_FILE`].
+pub fn writes(steps: &[Step]) -> u64 {
+    steps
         .iter()
         .map(|step| match step {
-            Step::Place { wanted, .. } => wanted.size,
+            Step::Place { wanted, .. } => match wanted.source {
+                Source::Download(_) => wanted.size.saturating_mul(2),
+                Source::Override(_) => wanted.size,
+            },
             _ => 0,
         })
-        .fold(0u64, u64::saturating_add);
-    if total > archive::MAX_UNPACKED {
-        return Err(PackError::TooLarge);
-    }
-    Ok(total)
+        .fold(0, u64::saturating_add)
 }
 
 /// What installing `wanted` over the files on disk does, given the rows recorded for them.
@@ -840,27 +850,6 @@ mod tests {
         let both = wanted(&index, &mut archive, false).unwrap();
         assert_eq!(both.len(), 2);
         assert_eq!(both["config/a.toml"].size, 1);
-    }
-
-    #[test]
-    fn one_budget_covers_the_whole_install() {
-        let place = |size| Step::Place {
-            path: "mods/m.jar".into(),
-            wanted: Wanted { size, ..want("m1") },
-            row: None,
-            expected: None,
-            before: None,
-        };
-        let half = archive::MAX_UNPACKED / 2;
-        assert_eq!(
-            check_budget(&[place(half), place(half)]).unwrap(),
-            archive::MAX_UNPACKED
-        );
-        // Each file fits on its own; together they do not.
-        assert!(matches!(
-            check_budget(&[place(half), place(half), place(1)]),
-            Err(PackError::TooLarge)
-        ));
     }
 
     #[test]

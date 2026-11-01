@@ -843,6 +843,7 @@ pub async fn unarchive(
             .flatten()
             .ok_or_else(|| not_found(&source))?
             .into_std();
+        let packed = file.metadata()?.len();
         let mut zip = zip::ZipArchive::new(file).map_err(|error| {
             ApiError::from(crate::content::Error::from(ArchiveError::from(
                 error,
@@ -865,7 +866,7 @@ pub async fn unarchive(
             .map(|path| format!("/{path}"))
             .collect();
         if !query.dry {
-            archive::extract(&folder, &mut zip, |entry| {
+            archive::extract(&folder, &mut zip, packed, |entry| {
                 let path = destination(entry);
                 let exists = folder.exists(&path);
                 let owned = folder::is_server_owned(&path, &level);

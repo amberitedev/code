@@ -33,6 +33,7 @@ use crate::{
         events::{ContentPlatform, InstallProgressKey},
         properties::PropertiesFields,
     },
+    backups::space,
     installs::{
         self, ModLoader,
         download::{self, FileDownload, Hash},
@@ -255,7 +256,9 @@ async fn install_pack(
         .await
         .map_err(std::io::Error::other)?
     };
-    pack::check_budget(&steps)?;
+    // What is replaced is still counted, so an update asks for a little more than it needs.
+    space::enough_space(pack::writes(&steps), space::free(folder.root())?)
+        .map_err(super::archive::ArchiveError::from)?;
     let staged = stage_downloads(content, id, &index, &steps, progress).await?;
 
     if server.game_version.is_some() && !repair {
@@ -439,7 +442,8 @@ fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
         })
 }
 
-/// A pack's index and the files it wants, read from the `.mrpack` at `path`.
+/// A pack's index and the files it wants, read from the `.mrpack` at `path`. Overrides that
+/// would not fit on the disk refuse the pack before they are read.
 pub async fn read_pack(
     path: &Path,
     case_insensitive: bool,
@@ -447,9 +451,15 @@ pub async fn read_pack(
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(&path)?;
+        let packed = file.metadata()?.len();
         let mut archive = zip::ZipArchive::new(file)
             .map_err(super::archive::ArchiveError::from)?;
         let index = pack::read_index(&mut archive)?;
+        super::archive::check_room(
+            pack::overrides_size(&mut archive)?,
+            packed,
+            space::free(path.parent().unwrap_or(&path))?,
+        )?;
         let wanted = pack::wanted(&index, &mut archive, case_insensitive)?;
         Ok((index, wanted))
     })
@@ -678,8 +688,8 @@ async fn sha1_now(
 }
 
 /// Write one file the pack wants: a staged download, or an entry of the pack's own archive. An
-/// entry that inflates past the size it was planned with is refused before it replaces
-/// anything, so the budget checked before the install holds.
+/// entry that inflates past its listed size fails the read before it replaces anything, so the
+/// space checked before the install holds.
 async fn place(
     folder: &Arc<Folder>,
     archive_path: &Path,
@@ -689,7 +699,6 @@ async fn place(
 ) -> Result<(), Error> {
     let folder = Arc::clone(folder);
     let path = path.to_owned();
-    let size = wanted.size;
     let source = match &wanted.source {
         Source::Download(n) => {
             Err(staged.get(n).cloned().ok_or_else(|| {
@@ -708,16 +717,10 @@ async fn place(
                 let mut archive =
                     zip::ZipArchive::new(std::fs::File::open(archive_path)?)
                         .map_err(super::archive::ArchiveError::from)?;
-                let entry = archive
+                let mut entry = archive
                     .by_index(entry)
                     .map_err(super::archive::ArchiveError::from)?;
-                folder.write(
-                    &path,
-                    &mut super::archive::AtMost {
-                        inner: entry,
-                        left: size,
-                    },
-                )?;
+                folder.write(&path, &mut entry)?;
             }
         }
         Ok(())

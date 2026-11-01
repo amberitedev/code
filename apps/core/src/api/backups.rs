@@ -253,9 +253,7 @@ impl From<backups::Error> for ApiError {
             error => {
                 let code = match &error {
                     Error::NotFound(_) => ErrorCode::NotFound,
-                    Error::Conflict(_) | Error::Space { .. } => {
-                        ErrorCode::Conflict
-                    }
+                    Error::Conflict(_) | Error::Space(_) => ErrorCode::Conflict,
                     _ => ErrorCode::Internal,
                 };
                 Self::new(code, format!("{error:#}"))
