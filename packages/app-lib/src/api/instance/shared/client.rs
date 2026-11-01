@@ -565,14 +565,27 @@ pub(super) async fn add_remote_users(
     user_ids: Vec<String>,
     state: &State,
 ) -> crate::Result<()> {
-    request_empty(
+    /// The accounts the backend did not invite because their privacy settings refuse it.
+    #[derive(Deserialize)]
+    struct AddUsersResponse {
+        failed: Vec<String>,
+    }
+
+    let response: AddUsersResponse = request_json(
         "add_instance_users",
         Method::POST,
         &format!("/instances/{shared_instance_id}/users"),
         Some(json!({ "user_ids": user_ids })),
         state,
     )
-    .await
+    .await?;
+    if !response.failed.is_empty() {
+        bail!(ErrorKind::InputError(format!(
+            "{} of the invited accounts do not allow sharing invitations in their privacy settings",
+            response.failed.len()
+        )));
+    }
+    Ok(())
 }
 
 pub(super) async fn remove_remote_users(

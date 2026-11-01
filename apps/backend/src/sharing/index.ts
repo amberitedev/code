@@ -38,6 +38,7 @@ type Instance = {
 	name: string
 	icon: string | null
 	quarantine: number
+	installed_once: number
 	home: string | null
 	replica: string | null
 }
@@ -51,10 +52,15 @@ type Version = {
 	created: string
 }
 type Link = { id: string; instance_id: string; expiration: string; max_uses: number; uses: number }
+/** A modpack file the owner turned off, which members remove after installing the modpack. */
+type RemovedFile =
+	| { type: 'version'; version_id: string }
+	| { type: 'path'; parent: string; filename: string }
 /** The manifest as R2 holds it: the upstream fields, the pool's file entries, and R. */
 type Manifest = {
 	modrinth_ids: string[]
 	modpack_id: string | null
+	removed_files: RemovedFile[]
 	game_version: string
 	loader: string
 	loader_version: string
@@ -90,6 +96,33 @@ function fileType(value: unknown): string {
 	const type = string(value, 'file_type', 64)
 	if (!/^[a-z0-9_-]+$/.test(type)) throw new ApiError(400, 'invalid_input', 'Invalid file_type')
 	return type
+}
+
+const REMOVED_PARENTS = ['mods', 'plugins', 'datapacks', 'shaderpacks', 'resourcepacks']
+const REMOVED_SUFFIXES = ['.jar', '.zip', '.jar.disabled', '.zip.disabled']
+
+/** `removed_files` by the App's own rules (`SharedInstanceRemovedFile::validate` in app-lib). */
+function removedFiles(value: unknown, modpackId: string | null): RemovedFile[] {
+	if (value === undefined || value === null) return []
+	if (!Array.isArray(value) || value.length > MAX_VERSION_FILES)
+		throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
+	if (value.length && !modpackId)
+		throw new ApiError(400, 'invalid_input', 'Removed modpack files require a modpack_id')
+	return value.map((item): RemovedFile => {
+		const entry = object(item)
+		if (entry.type === 'version')
+			return { type: 'version', version_id: string(entry.version_id, 'version_id') }
+		const filename = typeof entry.filename === 'string' ? entry.filename : ''
+		if (
+			entry.type !== 'path' ||
+			typeof entry.parent !== 'string' ||
+			!REMOVED_PARENTS.includes(entry.parent) ||
+			/[/\\\u0000-\u001f]/.test(filename) ||
+			!REMOVED_SUFFIXES.some((suffix) => filename.endsWith(suffix))
+		)
+			throw new ApiError(400, 'invalid_input', 'Invalid removed modpack file')
+		return { type: 'path', parent: entry.parent, filename }
+	})
 }
 
 function strings(value: unknown, field: string, max = 250): string[] {
@@ -354,12 +387,14 @@ async function createVersion(
 		seen.add(name)
 		return manifestFile(entry, file_name, file_type)
 	})
+	const modpackId =
+		body.modpack_id === undefined || body.modpack_id === null
+			? null
+			: string(body.modpack_id, 'modpack_id')
 	const manifest: Manifest = {
 		modrinth_ids: strings(body.modrinth_ids ?? [], 'modrinth_ids', 1000),
-		modpack_id:
-			body.modpack_id === undefined || body.modpack_id === null
-				? null
-				: string(body.modpack_id, 'modpack_id'),
+		modpack_id: modpackId,
+		removed_files: removedFiles(body.removed_files, modpackId),
 		game_version: string(body.game_version, 'game_version'),
 		loader,
 		loader_version: typeof body.loader_version === 'string' ? body.loader_version : '',
@@ -630,6 +665,14 @@ function inviteCode(): string {
 	).join('')
 }
 
+/** Marks a share installed once someone other than the owner joins it. Leaving never clears it. */
+async function installedOnce(env: Env, item: Instance, userId: string): Promise<void> {
+	if (item.installed_once || userId === item.owner_id) return
+	await env.DB.prepare('UPDATE shared_instances SET installed_once = 1 WHERE id = ?')
+		.bind(item.id)
+		.run()
+}
+
 async function usableLink(env: Env, id: string): Promise<Link> {
 	const link = await env.DB.prepare(
 		'SELECT * FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
@@ -640,11 +683,21 @@ async function usableLink(env: Env, id: string): Promise<Link> {
 	return link
 }
 
-async function previewInvite(env: Env, id: string): Promise<Response> {
+/**
+ * `GET /v1/invites/{id}`, unauthenticated: what the link shares, shown before accepting. With
+ * `?version=true` it adds the latest ready version for the install preview, without file keys or
+ * pool access, which only members get. It has no version while none is ready or the instance is
+ * quarantined.
+ */
+async function previewInvite(env: Env, id: string, withVersion: boolean): Promise<Response> {
 	const link = await usableLink(env, id)
 	const item = await instance(env, link.instance_id)
-	const version = await latestVersion(env, item.id)
-	const manifest = JSON.parse(await manifestText(env, version)) as Manifest
+	const ready = await env.DB.prepare(
+		'SELECT * FROM shared_versions WHERE instance_id = ? AND ready = 1 ORDER BY version DESC LIMIT 1',
+	)
+		.bind(item.id)
+		.first<Version>()
+	const manifest = ready ? (JSON.parse(await manifestText(env, ready)) as Manifest) : undefined
 	const manager = await env.DB.prepare('SELECT id,username,avatar_url FROM users WHERE id = ?')
 		.bind(item.owner_id)
 		.first<{ id: string; username: string; avatar_url: string | null }>()
@@ -659,12 +712,25 @@ async function previewInvite(env: Env, id: string): Promise<Response> {
 		instance_id: item.id,
 		instance_name: item.name,
 		instance_icon: item.icon,
-		game_version: manifest.game_version,
-		loader_version: manifest.loader_version,
+		game_version: manifest?.game_version ?? '',
+		loader_version: manifest?.loader_version ?? '',
+		inviter: manager
+			? { id: manager.id, name: manager.username, avatar: manager.avatar_url }
+			: null,
 		managers: manager
 			? [{ type: 'user', id: manager.id, name: manager.username, avatar: manager.avatar_url }]
 			: [],
 		instance_users: users,
+		...(withVersion && !item.quarantine && ready && manifest
+			? {
+					version: {
+						...manifest,
+						external_files: manifest.external_files.map(({ key: _key, ...file }) => file),
+						version: ready.version,
+						ready: true,
+					},
+				}
+			: {}),
 	})
 }
 
@@ -684,6 +750,7 @@ async function invites(
 				.run()
 			if (!result.meta.changes)
 				throw new ApiError(404, 'not_found', 'Pending invite was not found', 'invite_not_found')
+			await installedOnce(env, item, userId)
 			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
@@ -716,6 +783,7 @@ async function invites(
 			),
 		])
 		await member(env, item, userId)
+		await installedOnce(env, item, userId)
 		await notifyMembers(env, item.id, 'shared_instance_users', userId)
 		return empty()
 	}
@@ -798,18 +866,14 @@ async function users(
 	owner(item, userId)
 	if (request.method !== 'POST')
 		throw new ApiError(405, 'method_not_allowed', 'Unsupported member operation')
+	// Everyone who accepts sharing invitations is invited; the rest come back in `failed`.
+	const failed: string[] = []
 	for (const id of ids) {
 		if (id === userId) continue
-		if (!(await canInviteToSharedInstance(env, userId, id)))
-			throw new ApiError(
-				403,
-				'forbidden',
-				'This account does not accept this sharing invitation',
-				'invite_not_accepted',
-			)
-	}
-	for (const id of ids) {
-		if (id === userId) continue
+		if (!(await canInviteToSharedInstance(env, userId, id))) {
+			failed.push(id)
+			continue
+		}
 		await env.DB.prepare(
 			"INSERT OR IGNORE INTO shared_members (instance_id,user_id,join_type) VALUES (?,?,'invite')",
 		)
@@ -818,7 +882,7 @@ async function users(
 	}
 	await notifyReadyInvites(env, item.id)
 	await notifyMembers(env, item.id, 'shared_instance_users', userId)
-	return empty()
+	return json({ failed })
 }
 
 export async function handleSharing(request: Request, env: Env): Promise<Response | null> {
@@ -832,7 +896,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	)
 		return null
 	const [, route, id, section, child] = parts
-	if (route === 'invites' && id && request.method === 'GET') return previewInvite(env, id)
+	if (route === 'invites' && id && request.method === 'GET')
+		return previewInvite(env, id, url.searchParams.get('version') === 'true')
 	if (route === 'icons' && id && request.method === 'GET') {
 		const row = await env.DB.prepare(
 			'SELECT icon_data,icon_type FROM shared_instances WHERE icon = ?',
@@ -936,8 +1001,15 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	if (section === 'users') return users(request, env, item, user.id)
 	await member(env, item, user.id, !section)
 	if (!section) {
-		if (request.method === 'GET')
-			return json({ name: item.name, icon: item.icon, quarantine: item.quarantine === 1 })
+		if (request.method === 'GET') {
+			return json({
+				name: item.name,
+				icon: item.icon,
+				quarantine: item.quarantine === 1,
+				installed_once: item.installed_once === 1,
+				linked_server: null,
+			})
+		}
 		owner(item, user.id)
 		if (request.method === 'PATCH') {
 			await env.DB.prepare('UPDATE shared_instances SET name = ? WHERE id = ?')
@@ -951,6 +1023,9 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			return empty()
 		}
 	}
+	// No share has a linked server yet, so none has its icon. The App reads 404 as no icon.
+	if (section === 'server-icon' && !child && request.method === 'GET')
+		throw new ApiError(404, 'not_found', 'Shared instance has no server icon', 'icon_not_found')
 	if (section === 'history' && !child && request.method === 'GET') {
 		if (item.quarantine) throw quarantined()
 		return json(await shareVersions(env, id))
@@ -965,7 +1040,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 					.bind(id, Number(child))
 					.first<Version>()
 			: await latestVersion(env, id)
-		if (!version)
+		// Members only see versions once they are ready; the App reads the 404 as "never ready".
+		if (!version || (child && !version.ready && item.owner_id !== user.id))
 			throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
 		if (request.method === 'GET' && parts.length <= 5)
 			return versionResponse(env, item, version, user.id)
