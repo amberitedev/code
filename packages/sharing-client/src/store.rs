@@ -464,8 +464,8 @@ async fn check(
     }
     let status = response.status().as_u16();
     let text = response.text().await.unwrap_or_default();
-    let Some(body) = ErrorBody::parse(text.as_bytes())
-        .filter(|body| !body.error.is_empty())
+    let Some(body) =
+        ErrorBody::parse(text.as_bytes()).filter(|body| !body.error.is_empty())
     else {
         return Err(StoreError::Other(status, text));
     };

@@ -233,8 +233,8 @@ impl Store {
                 self.index().pending.remove(root);
             }
         };
-        let free =
-            bedrock::disk::free(self.layout.root()).inspect_err(|_| unreserve())?;
+        let free = bedrock::disk::free(self.layout.root())
+            .inspect_err(|_| unreserve())?;
         if free < needed + bedrock::limits::DISK_MARGIN_BYTES {
             unreserve();
             return Err(StoreError::new(

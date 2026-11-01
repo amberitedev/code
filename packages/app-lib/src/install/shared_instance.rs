@@ -13,8 +13,7 @@ use super::runner::{
 use crate::ErrorKind;
 use crate::api::instance::{
     CONFIG_BUNDLE_FILE_TYPE, CONFIG_DIRECTORY, CONFIG_FILE_TYPE,
-    CONFIG_SYNC_ENABLED, MAX_CONFIG_BUNDLE_ENTRIES,
-    is_shareable_file_path,
+    CONFIG_SYNC_ENABLED, MAX_CONFIG_BUNDLE_ENTRIES, is_shareable_file_path,
     is_supported_config_file, read_bounded_config_bundle_entry,
     shared_modpack_files,
 };
