@@ -273,12 +273,15 @@ pub async fn pack(
 /// Record the pack the server now follows. Moving off the instance it followed, to a pack of its
 /// own or another instance, drops that instance's players as [`unlink`] does (wake sync with
 /// `Access::owed` after), and a pack of its own drops any version of it waiting to apply.
+/// The transactions here read before they write. They begin IMMEDIATE so they take the write
+/// lock first and wait for it; a deferred one fails at once with "database is locked" when another
+/// connection wrote after its read.
 pub async fn set_pack(
     db: &SqlitePool,
     server_id: &str,
     pack: &Pack,
 ) -> sqlx::Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let followed: Option<String> = sqlx::query_scalar(
         "SELECT shared_instance_id FROM packs WHERE server_id = ?",
     )
@@ -359,7 +362,7 @@ pub async fn set_pack_error(
 /// added. A server that followed an instance owes the backend dropping its players, who got that
 /// instance's share through it; wake sync with `Access::owed` after.
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let followed: Option<String> = sqlx::query_scalar(
         "SELECT shared_instance_id FROM packs WHERE server_id = ?",
     )
@@ -419,7 +422,7 @@ pub async fn set_pending(
     server_id: &str,
     pending: &PendingPack,
 ) -> sqlx::Result<Option<String>> {
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let replaced = pending_sha1(&mut *tx, server_id).await?;
     sqlx::query(
         "INSERT OR REPLACE INTO pending_packs (server_id, sha1, instance_id, instance_name, \
