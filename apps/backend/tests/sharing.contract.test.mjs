@@ -576,10 +576,12 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			})
 		assert.equal((await packVersion({})).status, 400)
 		const outside = { type: 'path', parent: 'config', filename: 'a.toml' }
-		assert.equal(
-			(await packVersion({ modpack_id: 'PACKVER1', removed_files: [outside] })).status,
-			400,
-		)
+		const notAddon = { type: 'path', parent: 'mods', filename: 'notes.txt' }
+		for (const bad of [outside, notAddon])
+			assert.equal(
+				(await packVersion({ modpack_id: 'PACKVER1', removed_files: [bad] })).status,
+				400,
+			)
 		await ok(await packVersion({ modpack_id: 'PACKVER1' }))
 		const shared = await ok(await asCore(`/instances/${serverShare.id}/versions`, 'GET'))
 		assert.equal(shared.modpack_id, 'PACKVER1')

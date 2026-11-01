@@ -102,6 +102,8 @@ type RemovedFile =
 	| { type: 'version'; version_id: string }
 	| { type: 'path'; parent: string; filename: string }
 const REMOVED_PARENTS = ['mods', 'plugins', 'datapacks', 'shaderpacks', 'resourcepacks']
+/** The App drops a version whose removed path names any other kind of file. */
+const REMOVED_SUFFIXES = ['.jar', '.zip', '.jar.disabled', '.zip.disabled']
 
 function removedFiles(value: unknown, modpack: string | null): RemovedFile[] {
 	if (value === undefined || value === null) return []
@@ -116,7 +118,8 @@ function removedFiles(value: unknown, modpack: string | null): RemovedFile[] {
 			entry.type !== 'path' ||
 			typeof entry.parent !== 'string' ||
 			!REMOVED_PARENTS.includes(entry.parent) ||
-			filename.includes('/')
+			filename.includes('/') ||
+			!REMOVED_SUFFIXES.some((suffix) => filename.endsWith(suffix))
 		)
 			throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
 		return { type: 'path', parent: entry.parent, filename }

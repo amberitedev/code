@@ -49,7 +49,9 @@ pub fn removed(
             (Some(version_id), _) => RemovedFile::Version {
                 version_id: version_id.clone(),
             },
-            (None, Some(("mods", filename))) if !filename.contains('/') => {
+            (None, Some(("mods", filename)))
+                if !filename.contains('/') && removable(filename) =>
+            {
                 RemovedFile::Path {
                     parent: "mods".into(),
                     filename: filename.into(),
@@ -62,6 +64,14 @@ pub fn removed(
         }
     }
     removed
+}
+
+/// Whether the App takes `filename` as a removed path: only addon archives, as
+/// `SharedInstanceRemovedFile::validate` checks. It drops a version listing anything else.
+fn removable(filename: &str) -> bool {
+    [".jar", ".zip", ".jar.disabled", ".zip.disabled"]
+        .iter()
+        .any(|suffix| filename.ends_with(suffix))
 }
 
 /// One addon as the share carries it.
@@ -263,6 +273,36 @@ mod tests {
                     version_id: "server".into(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn only_addon_archives_are_removed_by_path() {
+        let row = |path: &str| {
+            (
+                path.to_owned(),
+                ContentFile {
+                    path: path.into(),
+                    origin: Origin::Pack,
+                    sha1: "x".into(),
+                    project_id: None,
+                    version_id: None,
+                    pending: None,
+                },
+            )
+        };
+        let rows = HashMap::from([
+            row("mods/gone.jar"),
+            row("mods/gone.zip"),
+            row("mods/readme.txt"),
+            row("mods/gone"),
+        ]);
+        assert_eq!(
+            removed(&[], &rows, &HashMap::new(), &["mods".into()]),
+            ["gone.jar", "gone.zip"].map(|filename| RemovedFile::Path {
+                parent: "mods".into(),
+                filename: filename.into(),
+            })
         );
     }
 }
