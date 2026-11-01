@@ -49,9 +49,7 @@ pub fn removed(
             (Some(version_id), _) => RemovedFile::Version {
                 version_id: version_id.clone(),
             },
-            (None, Some(("mods", filename)))
-                if !filename.contains('/') && removable(filename) =>
-            {
+            (None, Some(("mods", filename))) if removable(filename) => {
                 RemovedFile::Path {
                     parent: "mods".into(),
                     filename: filename.into(),
@@ -66,12 +64,15 @@ pub fn removed(
     removed
 }
 
-/// Whether the App takes `filename` as a removed path: only addon archives, as
-/// `SharedInstanceRemovedFile::validate` checks. It drops a version listing anything else.
+/// Whether the App takes `filename` as a removed path: one plain file name of an addon archive,
+/// as `SharedInstanceRemovedFile::validate` checks. It drops a version listing anything else.
+/// The backend's file names also refuse control characters.
 fn removable(filename: &str) -> bool {
-    [".jar", ".zip", ".jar.disabled", ".zip.disabled"]
-        .iter()
-        .any(|suffix| filename.ends_with(suffix))
+    path_util::is_safe_file_name(filename)
+        && !filename.contains(char::is_control)
+        && [".jar", ".zip", ".jar.disabled", ".zip.disabled"]
+            .iter()
+            .any(|suffix| filename.ends_with(suffix))
 }
 
 /// One addon as the share carries it.
@@ -304,5 +305,23 @@ mod tests {
                 filename: filename.into(),
             })
         );
+    }
+
+    #[test]
+    fn a_removed_path_is_one_safe_archive_name() {
+        for name in ["a.jar", "a.zip", "a.jar.disabled", "CONFIG.jar"] {
+            assert!(removable(name), "{name}");
+        }
+        for name in [
+            "a\\b.jar",
+            "a/b.jar",
+            "..jar.disabled/x.jar",
+            "a\u{1}.jar",
+            "con.jar",
+            "C:a.jar",
+            "readme.txt",
+        ] {
+            assert!(!removable(name), "{name}");
+        }
     }
 }
