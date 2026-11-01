@@ -1,16 +1,17 @@
 //! Free disk space, checked before every backup so a full disk refuses it instead of failing
 //! halfway.
 
-pub use sharing_storage::space::free;
+pub use bedrock::disk::free;
+use bedrock::limits::DISK_MARGIN_BYTES;
 
 use super::Error;
 
 const MB: u64 = 1024 * 1024;
 
 /// Refuse a copy of `needed` bytes unless the disk keeps some room after it: a twentieth of the
-/// copy, and at least 256 MB, so a backup never fills the disk a server writes to.
+/// copy, and at least [`DISK_MARGIN_BYTES`], so a backup never fills the disk a server writes to.
 pub fn enough_space(needed: u64, free: u64) -> Result<(), Error> {
-    let wanted = needed + (needed / 20).max(256 * MB);
+    let wanted = needed + (needed / 20).max(DISK_MARGIN_BYTES);
     if wanted > free {
         return Err(Error::Space {
             needed_mb: wanted.div_ceil(MB),

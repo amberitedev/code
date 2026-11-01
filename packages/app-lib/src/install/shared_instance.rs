@@ -14,7 +14,7 @@ use crate::ErrorKind;
 use crate::api::instance::{
     CONFIG_BUNDLE_FILE_TYPE, CONFIG_DIRECTORY, CONFIG_FILE_TYPE,
     CONFIG_SYNC_ENABLED, MAX_CONFIG_BUNDLE_ENTRIES,
-    MAX_SHARED_FILES_TOTAL_SIZE, is_shareable_file_path,
+    is_shareable_file_path,
     is_supported_config_file, read_bounded_config_bundle_entry,
     shared_modpack_files,
 };
@@ -1661,7 +1661,7 @@ async fn download_shared_instance_external_file(
     Ok(bytes)
 }
 
-/// Shared files can be up to the version's size limit, so they are streamed to
+/// Shared files can be large, so they are streamed to
 /// disk rather than held in memory.
 async fn install_shared_instance_file(
     writer: &crate::api::instance::InstanceFileWriter,
@@ -1673,11 +1673,9 @@ async fn install_shared_instance_file(
         downloaded.add(file.file_size);
         return Ok(());
     }
-    if !is_shareable_file_path(&file.file_name)
-        || file.file_size > MAX_SHARED_FILES_TOTAL_SIZE
-    {
+    if !is_shareable_file_path(&file.file_name) {
         bail!(ErrorKind::InputError(format!(
-            "shared instance file {} is unsupported or too large",
+            "shared instance file {} is unsupported",
             file.file_name
         )));
     }

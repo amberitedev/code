@@ -46,7 +46,6 @@ pub(super) fn changed_config_files(
     latest: &[ExternalFileResponse],
     applied: Option<&[ExternalFileResponse]>,
 ) -> crate::Result<Vec<ExternalFileResponse>> {
-    ensure_config_limits(latest)?;
     let applied = applied
         .unwrap_or_default()
         .iter()
@@ -67,31 +66,6 @@ pub(super) fn changed_config_files(
     }
 
     Ok(bundle.into_iter().chain(files.into_values()).collect())
-}
-
-fn ensure_config_limits(
-    external_files: &[ExternalFileResponse],
-) -> crate::Result<()> {
-    let mut count = 0;
-    let mut size = 0_u64;
-    for file in external_files
-        .iter()
-        .filter(|file| file.file_type == CONFIG_FILE_TYPE)
-    {
-        count += 1;
-        size = size.saturating_add(
-            file.file_size
-                .and_then(|size| u64::try_from(size).ok())
-                .unwrap_or(u64::MAX),
-        );
-    }
-    if count > MAX_SHARED_FILES || size > MAX_SHARED_FILES_TOTAL_SIZE {
-        bail!(crate::ErrorKind::InputError(
-            "shared instance files exceed the size or file count limit"
-                .to_string(),
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) struct SharedModpackFile {
@@ -409,16 +383,5 @@ mod tests {
                 (CONFIG_FILE_TYPE, "config/a.toml"),
             ]
         );
-    }
-
-    #[test]
-    fn limits_apply_to_the_version() {
-        let mut half = file(CONFIG_FILE_TYPE, "config/a.toml", "1");
-        half.file_size = Some((MAX_SHARED_FILES_TOTAL_SIZE / 2 + 1) as i64);
-        let mut other_half = half.clone();
-        other_half.file_name = "config/b.toml".to_string();
-
-        assert!(changed_config_files(&[half.clone()], None).is_ok());
-        assert!(changed_config_files(&[half, other_half], None).is_err());
     }
 }

@@ -8,7 +8,7 @@ use std::{
 
 use tokio::net::UdpSocket;
 
-use super::{is_private, router::Router};
+use super::{is_public, router::Router};
 
 const STUN_SERVERS: [&str; 2] =
     ["stun.cloudflare.com:3478", "stun.l.google.com:19302"];
@@ -40,12 +40,6 @@ pub async fn find(local: Option<Ipv4Addr>) -> Option<IpAddr> {
         }
     }
     None
-}
-
-/// Not private, and not the shared range carriers use behind CGNAT (100.64.0.0/10).
-fn is_public(ip: IpAddr) -> bool {
-    let shared = matches!(ip, IpAddr::V4(v4) if v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64);
-    !is_private(ip) && !shared && !ip.is_unspecified()
 }
 
 /// Ask a STUN server which address this machine's IPv4 traffic comes from.
@@ -134,13 +128,5 @@ mod tests {
             "another transaction"
         );
         assert_eq!(request(&id)[..2], [0, 1]);
-    }
-
-    #[test]
-    fn private_and_carrier_addresses_are_not_public() {
-        assert!(is_public("203.0.113.5".parse().unwrap()));
-        assert!(!is_public("192.168.1.2".parse().unwrap()));
-        assert!(!is_public("100.72.0.1".parse().unwrap()));
-        assert!(is_public("100.128.0.1".parse().unwrap()));
     }
 }

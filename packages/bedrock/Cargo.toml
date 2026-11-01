@@ -6,21 +6,34 @@ repository.workspace = true
 
 # What the App and Copal both need that is not sharing: the content schema borrowed from app-lib,
 # clones of upstream code tangled with app-lib's State (`ports.toml`), `.mrpack` and Modrinth
-# content rules, connections to Cores, and limits. Imports go one way:
+# content rules, connections to Cores, disk space, and limits. Imports go one way:
 # modrinth-content-management -> bedrock -> sharing-client -> sharing-storage.
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
+hex = { workspace = true }
 modrinth-content-management = { workspace = true }
 postcard-bindgen = { workspace = true, features = ["generating", "std"], optional = true }
+# The ring backend avoids aws-lc-sys's CMake build on Windows.
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, features = [
   "chrono-impl",
   "no-serde-warnings",
   "uuid-impl",
 ], optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[target."cfg(unix)".dependencies]
+nix = { version = "0.30.1", features = ["fs"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
 # app-lib's `export-ts`: the borrowed types derive their TypeScript there.

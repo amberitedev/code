@@ -1,28 +1,16 @@
-//! TLS to a Core, trusting only the certificate whose fingerprint the App learned at pairing.
-//!
-//! A Core serves HTTPS with a certificate it made itself, so nothing else can vouch for it. The
-//! handshake signature is still checked, so the other side must hold that certificate's key.
+//! TLS to a Core, trusting only the certificate whose fingerprint the App learned at pairing
+//! (`bedrock::net::tls`).
 
 use std::{sync::Arc, time::Duration};
 
+use bedrock::net::{CoreAddress, tls};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     Request, StatusCode, body::Body, client::conn::http1::SendRequest,
 };
 use hyper_util::rt::TokioIo;
-use rustls::{
-    ClientConfig, DigitallySignedStruct, Error, SignatureScheme,
-    client::danger::{
-        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-    },
-    crypto::{
-        CryptoProvider, aws_lc_rs::default_provider, verify_tls12_signature,
-        verify_tls13_signature,
-    },
-    pki_types::{CertificateDer, ServerName, UnixTime},
-};
-use sha2::{Digest, Sha256};
+use rustls::pki_types::ServerName;
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
@@ -31,52 +19,29 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One Core's address and the certificate it must present there.
 pub struct Target {
-    host: String,
-    port: u16,
+    address: CoreAddress,
     connector: TlsConnector,
 }
 
 impl Target {
-    /// `address` is `https://host:port`; `fingerprint` is the certificate's SHA-256 in hex.
+    /// `address` is `https://ip:port`; `fingerprint` is the certificate's SHA-256 in hex.
     pub fn new(address: &str, fingerprint: &str) -> Result<Self, String> {
-        let url =
-            url::Url::parse(address).map_err(|error| error.to_string())?;
-        let (host, port) =
-            match (url.scheme(), url.host_str(), url.port_or_known_default()) {
-                ("https", Some(host), Some(port)) => {
-                    (host.trim_matches(['[', ']']).to_string(), port)
-                }
-                _ => {
-                    return Err(
-                        "a Core address must be https://host:port".into()
-                    );
-                }
-            };
-        let fingerprint: [u8; 32] = hex(fingerprint)
+        let address =
+            CoreAddress::parse(address).map_err(|error| error.to_string())?;
+        let fingerprint = tls::parse_fingerprint(fingerprint)
             .ok_or("a Core fingerprint must be 64 hex characters")?;
-        let provider = Arc::new(default_provider());
-        let config = ClientConfig::builder_with_provider(Arc::clone(&provider))
-            .with_safe_default_protocol_versions()
-            .map_err(|error| error.to_string())?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(Pinned {
-                fingerprint,
-                provider,
-            }))
-            .with_no_client_auth();
+        let config = tls::pinned_config(fingerprint)
+            .map_err(|error| error.to_string())?;
         Ok(Self {
-            host,
-            port,
+            address,
             connector: TlsConnector::from(Arc::new(config)),
         })
     }
 
     pub async fn connect(&self) -> std::io::Result<TlsStream<TcpStream>> {
-        let stream =
-            TcpStream::connect((self.host.as_str(), self.port)).await?;
-        // The name is not checked: the certificate is matched by fingerprint.
+        let stream = TcpStream::connect(self.address.socket()).await?;
         let name =
-            ServerName::try_from("amberite-core").expect("a valid DNS name");
+            ServerName::try_from(tls::SERVER_NAME).expect("a valid DNS name");
         self.connector.connect(name, stream).await
     }
 
@@ -125,116 +90,8 @@ impl Target {
             .map_err(|_| "no answer in time".to_string())?
     }
 
-    /// `host:port`, as a `Host` header names it.
+    /// `ip:port`, as a `Host` header names it.
     pub fn authority(&self) -> String {
-        if self.host.contains(':') {
-            format!("[{}]:{}", self.host, self.port)
-        } else {
-            format!("{}:{}", self.host, self.port)
-        }
-    }
-}
-
-fn hex(text: &str) -> Option<[u8; 32]> {
-    if text.len() != 64 || !text.is_ascii() {
-        return None;
-    }
-    let mut bytes = [0u8; 32];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok()?;
-    }
-    Some(bytes)
-}
-
-/// Accepts exactly one certificate: the one whose SHA-256 is `fingerprint`.
-#[derive(Debug)]
-struct Pinned {
-    fingerprint: [u8; 32],
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for Pinned {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, Error> {
-        if Sha256::digest(end_entity)[..] == self.fingerprint {
-            Ok(ServerCertVerified::assertion())
-        } else {
-            Err(Error::General(
-                "this is not the certificate of the paired Core".into(),
-            ))
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_the_pinned_certificate_is_accepted() {
-        let certificate = CertificateDer::from(b"the paired Core".to_vec());
-        let other = CertificateDer::from(b"somebody else".to_vec());
-        let pinned = Pinned {
-            fingerprint: Sha256::digest(&certificate).into(),
-            provider: Arc::new(default_provider()),
-        };
-        let verify = |certificate: &CertificateDer<'_>| {
-            pinned.verify_server_cert(
-                certificate,
-                &[],
-                &ServerName::try_from("amberite-core").unwrap(),
-                &[],
-                UnixTime::now(),
-            )
-        };
-        assert!(verify(&certificate).is_ok());
-        assert!(verify(&other).is_err());
-    }
-
-    #[test]
-    fn a_fingerprint_is_64_hex_characters() {
-        assert_eq!(hex(&"0f".repeat(32)), Some([15u8; 32]));
-        assert_eq!(hex("0f"), None);
-        assert_eq!(hex(&"zz".repeat(32)), None);
+        self.address.authority()
     }
 }

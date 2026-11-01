@@ -6,26 +6,17 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bedrock::net::{CoreAddress, ErrorBody, tls};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use reqwest::StatusCode;
-use rustls::client::danger::{
-    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-};
-use rustls::crypto::{
-    CryptoProvider, verify_tls12_signature, verify_tls13_signature,
-};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use ts_rs::TS;
 
@@ -153,9 +144,8 @@ impl StoreClient {
     }
 
     fn client(&self, core: &PoolCore) -> Result<reqwest::Client, StoreError> {
-        let mut fingerprint = [0; 32];
-        hex::decode_to_slice(&core.cert_fingerprint, &mut fingerprint)
-            .map_err(|_| {
+        let fingerprint = tls::parse_fingerprint(&core.cert_fingerprint)
+            .ok_or_else(|| {
                 StoreError::Other(0, "the Core's fingerprint is invalid".into())
             })?;
         let mut clients =
@@ -163,17 +153,8 @@ impl StoreClient {
         if let Some(client) = clients.get(&fingerprint) {
             return Ok(client.clone());
         }
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let config =
-            rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
-                .with_safe_default_protocol_versions()
-                .map_err(|error| StoreError::Other(0, error.to_string()))?
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(Pinned {
-                    fingerprint,
-                    provider,
-                }))
-                .with_no_client_auth();
+        let config = tls::pinned_config(fingerprint)
+            .map_err(|error| StoreError::Other(0, error.to_string()))?;
         // No overall timeout: an object can take minutes on a slow uplink.
         let client = reqwest::Client::builder()
             .use_preconfigured_tls(config)
@@ -200,8 +181,11 @@ impl StoreClient {
             .chain([core.address.clone()])
             .chain(core.public_address.clone())
         {
-            let address = address.trim_end_matches('/').to_string();
-            if is_https_ip(&address) && !addresses.contains(&address) {
+            let Ok(address) = CoreAddress::parse(&address) else {
+                continue;
+            };
+            let address = address.to_string();
+            if !addresses.contains(&address) {
                 addresses.push(address);
             }
         }
@@ -472,35 +456,17 @@ fn is_transient(error: &AttemptError) -> bool {
     }
 }
 
-/// Whether `address` is `https://ip:port`, the only kind a store is reached at.
-fn is_https_ip(address: &str) -> bool {
-    url::Url::parse(address).is_ok_and(|url| {
-        url.scheme() == "https"
-            && url.port().is_some()
-            && url.host_str().is_some_and(|host| {
-                host.trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .parse::<IpAddr>()
-                    .is_ok()
-            })
-    })
-}
-
 async fn check(
     response: reqwest::Response,
 ) -> Result<reqwest::Response, StoreError> {
     if response.status().is_success() {
         return Ok(response);
     }
-    #[derive(Deserialize)]
-    struct Body {
-        error: String,
-        #[serde(default)]
-        description: String,
-    }
     let status = response.status().as_u16();
     let text = response.text().await.unwrap_or_default();
-    let Ok(body) = serde_json::from_str::<Body>(&text) else {
+    let Some(body) = ErrorBody::parse(text.as_bytes())
+        .filter(|body| !body.error.is_empty())
+    else {
         return Err(StoreError::Other(status, text));
     };
     Err(match body.error.as_str() {
@@ -598,68 +564,6 @@ fn tar_body(
     futures::stream::iter(parts).flatten()
 }
 
-/// Accepts exactly one certificate: the one whose SHA-256 is `fingerprint`. The handshake
-/// signature is still checked, so the Core must hold that certificate's key.
-#[derive(Debug)]
-struct Pinned {
-    fingerprint: [u8; 32],
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for Pinned {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        if Sha256::digest(end_entity)[..] == self.fingerprint {
-            Ok(ServerCertVerified::assertion())
-        } else {
-            Err(rustls::Error::General(
-                "this is not the certificate the backend named for this Core"
-                    .into(),
-            ))
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,34 +603,5 @@ mod tests {
         assert_eq!(read[0], ("version.json".to_string(), list));
         assert_eq!(read[1], (objects[0].0.clone(), Vec::new()));
         assert_eq!(read[2], (objects[1].0.clone(), vec![1; 513]));
-    }
-
-    #[test]
-    fn only_the_pinned_certificate_is_accepted() {
-        let certificate = CertificateDer::from(b"the Core".to_vec());
-        let pinned = Pinned {
-            fingerprint: Sha256::digest(&certificate).into(),
-            provider: Arc::new(rustls::crypto::ring::default_provider()),
-        };
-        let verify = |certificate: &CertificateDer<'_>| {
-            pinned.verify_server_cert(
-                certificate,
-                &[],
-                &ServerName::try_from("core").unwrap(),
-                &[],
-                UnixTime::now(),
-            )
-        };
-        assert!(verify(&certificate).is_ok());
-        assert!(verify(&CertificateDer::from(b"another".to_vec())).is_err());
-    }
-
-    #[test]
-    fn only_https_ip_addresses_are_used() {
-        assert!(is_https_ip("https://10.0.0.11:17007"));
-        assert!(is_https_ip("https://[::1]:17007"));
-        assert!(!is_https_ip("http://10.0.0.11:17007"));
-        assert!(!is_https_ip("https://core.example:17007"));
-        assert!(!is_https_ip("https://10.0.0.11"));
     }
 }

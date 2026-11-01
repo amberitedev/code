@@ -12,6 +12,7 @@ name = "sharing_storage"
 [dependencies]
 axum = "0.8.4"
 base64 = { workspace = true }
+bedrock = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
@@ -42,12 +43,6 @@ tar = { workspace = true }
 tempfile = { workspace = true }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 tower = { version = "0.5.2", features = ["util"] }
-
-[target."cfg(unix)".dependencies]
-nix = { version = "0.30.1", features = ["fs"] }
-
-[target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
 # `keys::test_support`, for Core's tests.

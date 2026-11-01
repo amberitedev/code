@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 
+use bedrock::net::ErrorBody;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, parse_hash};
@@ -230,25 +231,15 @@ pub async fn ready_version(
         return Err(ReadError::NoVersion);
     }
     if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-        #[derive(Deserialize)]
-        struct Body {
-            #[serde(default)]
-            error: String,
-            #[serde(default)]
-            code: Option<String>,
-            #[serde(default)]
-            description: String,
-        }
-        let body = response.text().await.unwrap_or_default();
-        let body = serde_json::from_str::<Body>(&body).unwrap_or(Body {
-            error: String::new(),
-            code: None,
+        let body = response.bytes().await.unwrap_or_default();
+        let body = ErrorBody::parse(&body).unwrap_or_else(|| ErrorBody {
             description: format!(
                 "The backend refused the read with status {status}."
             ),
+            ..ErrorBody::default()
         });
         return Err(ReadError::Denied {
-            code: body.code.unwrap_or(body.error),
+            code: body.code().to_owned(),
             description: body.description,
         });
     }

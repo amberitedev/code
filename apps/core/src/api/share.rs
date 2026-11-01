@@ -306,7 +306,6 @@ impl From<push::PushError> for ApiError {
         let code = match &error {
             PushError::Executable(_)
             | PushError::TooLarge
-            | PushError::TooManyFiles(_)
             | PushError::Refused(_) => ErrorCode::InvalidRequest,
             PushError::NoStorage
             | PushError::PushInFlight

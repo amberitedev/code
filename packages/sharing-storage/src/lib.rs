@@ -17,7 +17,6 @@ pub mod local;
 mod objects;
 pub mod pull;
 mod routes;
-pub mod space;
 mod tar;
 mod tickets;
 
@@ -50,10 +49,7 @@ use limits::Limits;
 use local::{Caps, HeldVersion, Status};
 pub use objects::Hash;
 use objects::{Index, Layout, ListState, VersionList};
-pub use pull::is_public;
 
-/// Room the disk keeps after an upload, so the store never fills the disk the Core uses.
-const DISK_RESERVE: u64 = 256 * 1024 * 1024;
 const GC_EVERY: Duration = Duration::from_secs(10 * 60);
 
 /// `copal store`, as Copal starts it.
@@ -238,8 +234,8 @@ impl Store {
             }
         };
         let free =
-            space::free(self.layout.root()).inspect_err(|_| unreserve())?;
-        if free < needed + DISK_RESERVE {
+            bedrock::disk::free(self.layout.root()).inspect_err(|_| unreserve())?;
+        if free < needed + bedrock::limits::DISK_MARGIN_BYTES {
             unreserve();
             return Err(StoreError::new(
                 Code::DiskFull,
@@ -329,7 +325,7 @@ impl Store {
         Ok(Status {
             cap: caps.cap,
             used,
-            free: space::free(self.layout.root())?,
+            free: bedrock::disk::free(self.layout.root())?,
             egress_cap: caps.egress_cap,
             egress_today: self.limits.egress_today(),
             versions,

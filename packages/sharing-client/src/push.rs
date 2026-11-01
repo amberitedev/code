@@ -12,6 +12,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use bedrock::limits::MAX_SHARE_BYTES;
+use bedrock::net::ErrorBody;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -21,10 +23,6 @@ use tokio::io::AsyncReadExt;
 use crate::crypto::{self, parse_hash};
 use crate::store::{ListedObject, PoolCore, StoreClient, StoreError};
 
-/// Most files one version can hold.
-pub const MAX_FILES: usize = 4096;
-/// Most plain bytes one version can hold.
-pub const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 /// A single file the owner picked to share, named by its path in the instance.
 pub const CONFIG_FILE_TYPE: &str = "config";
 /// Upstream's zip of config files, which older versions carry.
@@ -307,14 +305,7 @@ pub(crate) async fn success(
 
 /// Every refusal over a limit (413) carries a description naming the limit, which is shown as is.
 fn refusal(status: StatusCode, body: &str) -> Option<PushError> {
-    #[derive(Deserialize)]
-    struct Body {
-        #[serde(default)]
-        code: Option<String>,
-        #[serde(default)]
-        description: String,
-    }
-    let body = serde_json::from_str::<Body>(body).ok()?;
+    let body = ErrorBody::parse(body.as_bytes())?;
     Some(match body.code.as_deref() {
         Some("no_storage") => PushError::NoStorage,
         Some("push_in_flight") => PushError::PushInFlight,
@@ -342,12 +333,8 @@ pub enum Unavailable {
 pub enum PushError {
     #[error("{0} is an executable, which a share cannot carry")]
     Executable(String),
-    #[error("a share can hold at most {MAX_BYTES} bytes of files")]
+    #[error("a share can hold at most {MAX_SHARE_BYTES} bytes of files")]
     TooLarge,
-    #[error(
-        "a share can hold at most {MAX_FILES} files, and this push has {0}"
-    )]
-    TooManyFiles(usize),
     #[error("{0} changed while it was being pushed")]
     FileChanged(String),
     /// The Core lost the object of a config carried from an earlier version, which this push
@@ -518,7 +505,7 @@ pub async fn push<C: Serialize + Sync>(
     let total_size = hashed
         .iter()
         .fold(0_u64, |total, file| total.saturating_add(file.size));
-    if total_size > MAX_BYTES {
+    if total_size > MAX_SHARE_BYTES {
         return Err(PushError::TooLarge);
     }
 
@@ -559,10 +546,6 @@ async fn push_hashed<C: Serialize + Sync>(
 ) -> Result<i32, PushError> {
     let previous = previous_versions(backend, share_id).await?;
     let carried = carried_config_files(&previous, hashed);
-    let file_count = hashed.len() + carried.len();
-    if file_count > MAX_FILES {
-        return Err(PushError::TooManyFiles(file_count));
-    }
     let keys = file_keys(&previous, hashed);
     tokio::fs::create_dir_all(folder).await?;
     // Collected first so the stream holds plain futures, not a borrowing closure, which keeps

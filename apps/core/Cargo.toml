@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 axum = { version = "0.8.4", features = ["multipart", "ws"] }
 base64 = { workspace = true }
+bedrock = { workspace = true }
 bytes = { workspace = true }
 # Server folders are written by mods; every path Core opens in one stays inside it.
 cap-fs-ext = "3.4"

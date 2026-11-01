@@ -892,10 +892,6 @@ fn push_error(error: push::PushError) -> crate::Error {
             crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
         ))
         .into(),
-        PushError::TooManyFiles(count) => crate::ErrorKind::PoolTooLarge(format!(
-            "A shared instance can hold at most {MAX_SHARED_FILES} files, and this push has {count}."
-        ))
-        .into(),
         PushError::FileChanged(file_name) => crate::ErrorKind::InputError(
             format!("{file_name} changed while it was being pushed. Push again."),
         )
@@ -1024,7 +1020,6 @@ async fn shared_file_candidates(
             Some(_) => {}
         }
     }
-    ensure_shared_file_count(&selected_paths)?;
 
     let instance_path = state.directories.instances_dir().join(instance_path);
     let mut total_size = 0_u64;
@@ -1047,34 +1042,6 @@ async fn shared_file_candidates(
     }
 
     Ok(candidates)
-}
-
-fn ensure_shared_file_count(paths: &BTreeSet<&str>) -> crate::Result<()> {
-    if paths.len() <= MAX_SHARED_FILES {
-        return Ok(());
-    }
-
-    let mut folder_entry_counts = HashMap::new();
-    for path in paths {
-        if let Some((folder, _)) = path.split_once('/') {
-            *folder_entry_counts.entry(folder).or_insert(0_usize) += 1;
-        }
-    }
-
-    if let Some((folder, count)) = folder_entry_counts
-        .into_iter()
-        .filter(|(_, count)| *count > MAX_SHARED_FILES)
-        .max_by_key(|(_, count)| *count)
-    {
-        bail!(crate::ErrorKind::InputError(format!(
-            "the \"{folder}\" folder has too many files to share ({count}; maximum {MAX_SHARED_FILES}); select fewer files from this folder"
-        )));
-    }
-
-    bail!(crate::ErrorKind::InputError(format!(
-        "too many files were selected to share ({}; maximum {MAX_SHARED_FILES}); select fewer files",
-        paths.len()
-    )))
 }
 
 pub(super) fn shared_modpack_id(link: &InstanceLink) -> Option<String> {
