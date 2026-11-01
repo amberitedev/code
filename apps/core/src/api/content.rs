@@ -1261,10 +1261,14 @@ async fn install_instance(
                         sha1,
                         instance: Some(linked),
                     };
-                    let change = content_install::pack(
+                    let installed = content_install::pack(
                         &content, &hold, &progress, source, properties, force,
                     )
-                    .await?;
+                    .await;
+                    // Another instance may have dropped the players of the one it
+                    // followed, even when a later step failed.
+                    app.access.owed.notify_one();
+                    let change = installed?;
                     drop_own_share(&app, hold.id()).await?;
                     Ok(change)
                 },
