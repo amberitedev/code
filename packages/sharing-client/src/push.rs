@@ -147,6 +147,97 @@ impl Backend {
         }
         Ok(success(response, operation).await?.json().await?)
     }
+
+    /// The share of the calling Core's server `server_id`, created now unless it has one. Only
+    /// a Core key may, for a server that follows no instance.
+    pub async fn create_server_share(
+        &self,
+        name: &str,
+        server_id: &str,
+    ) -> Result<String, PushError> {
+        #[derive(Deserialize)]
+        struct Created {
+            id: String,
+        }
+        let response = self
+            .request(reqwest::Method::POST, "/instances")
+            .json(&serde_json::json!({ "name": name, "server_id": server_id }))
+            .send()
+            .await?;
+        let created: Created =
+            success(response, "create_instance").await?.json().await?;
+        Ok(created.id)
+    }
+
+    pub async fn rename_share(
+        &self,
+        share_id: &str,
+        name: &str,
+    ) -> Result<(), PushError> {
+        let response = self
+            .request(reqwest::Method::PATCH, &format!("/instances/{share_id}"))
+            .json(&serde_json::json!({ "name": name }))
+            .send()
+            .await?;
+        success(response, "edit_instance").await.map(drop)
+    }
+
+    /// Deletes the share. One already gone counts as deleted.
+    pub async fn delete_share(&self, share_id: &str) -> Result<(), PushError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/instances/{share_id}"))
+            .send()
+            .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        success(response, "delete_instance").await.map(drop)
+    }
+
+    /// The latest version members can install, or `None` while there is none.
+    pub async fn latest_ready(
+        &self,
+        share_id: &str,
+    ) -> Result<Option<LatestVersion>, PushError> {
+        let response = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/instances/{share_id}/versions"),
+            )
+            .send()
+            .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let latest: LatestVersion = success(response, "get_instance_version")
+            .await?
+            .json()
+            .await?;
+        Ok(latest.ready.then_some(latest))
+    }
+}
+
+/// A version's upstream content fields and files, as a writer compares its next push to them.
+#[derive(Debug, Deserialize)]
+pub struct LatestVersion {
+    pub version: i32,
+    pub ready: bool,
+    #[serde(default)]
+    pub modrinth_ids: Vec<String>,
+    pub game_version: String,
+    pub loader: String,
+    #[serde(default)]
+    pub loader_version: String,
+    #[serde(default)]
+    pub external_files: Vec<LatestFile>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LatestFile {
+    pub file_name: String,
+    pub file_type: String,
+    #[serde(default)]
+    pub sha1: Option<String>,
 }
 
 fn unavailable(status: StatusCode) -> Option<Unavailable> {

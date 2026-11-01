@@ -24,6 +24,7 @@ pub mod performance;
 pub mod properties;
 pub mod servers;
 pub mod sessions;
+pub mod share;
 mod startup;
 pub mod storage;
 #[cfg(test)]
@@ -162,6 +163,24 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/servers/{id}/worlds/{wid}/addons/enable", post(content::enable))
         .route("/v1/servers/{id}/worlds/{wid}/addons/disable-many", post(content::disable_many))
         .route("/v1/servers/{id}/worlds/{wid}/addons/enable-many", post(content::enable_many))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/set-enabled-server",
+            post(content::set_enabled_server),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/set-enabled-player",
+            post(content::set_enabled_player),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/set-locked-side-toggle",
+            post(content::set_side_toggle_locked),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/complete-side-type-review",
+            post(content::complete_side_type_review),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/content/share/diff", get(share::diff))
+        .route("/v1/servers/{id}/worlds/{wid}/content/share/files", get(share::files))
         .route("/v1/servers/{id}/worlds/{wid}/content", post(content::install))
         .route("/v1/servers/{id}/worlds/{wid}/content/repair", post(content::repair))
         .route("/v1/servers/{id}/worlds/{wid}/content/unlink-modpack", post(content::unlink))
@@ -191,6 +210,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         // Starting a server answers once Java runs, and an install or update once it is done.
         .route("/modrinth/v0/servers/{id}/power", post(servers::power))
         .route("/update/apply", post(update::apply))
+        // A push uploads the server's files and waits for the store to confirm them.
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/content/share",
+            post(share::share).delete(share::unshare),
+        )
         .route("/servers/{id}/reachability", post(insight::check))
         .route(
             "/modrinth/v0/servers/{id}/reinstall",

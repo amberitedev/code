@@ -11,7 +11,7 @@ use super::{
     folder::{self, Folder},
     install::identify,
     modrinth::{self, Version},
-    records::{self, ContentFile, Origin},
+    records::{self, ContentFile, Origin, SideToggle},
 };
 use crate::{
     api::content::AddonKind,
@@ -321,6 +321,7 @@ async fn place_version(
     let _ = tokio::fs::remove_file(&staging).await;
     placed??;
     for row in old {
+        records::move_toggle(&content.db, server_id, &row.path, &path).await?;
         // A pack file's row stays, so the pack does not put it back.
         if row.origin == Origin::Added {
             records::remove(&content.db, server_id, &row.path).await?;
@@ -373,6 +374,7 @@ pub async fn remove(
     let folder = Folder::open(&content.paths.server(server_id))?;
     let (path, on_disk) = locate(&folder, kind, filename)?;
     folder.remove(&on_disk)?;
+    records::remove_toggle(&content.db, server_id, &path).await?;
     if let Some(row) = records::file(&content.db, server_id, &path).await?
         && row.origin == Origin::Added
     {
@@ -381,7 +383,8 @@ pub async fn remove(
     Ok(())
 }
 
-/// Disable an addon by renaming it to `.disabled`, or enable it again.
+/// Disable an addon by renaming it to `.disabled`, or enable it again. Either way it is no longer
+/// off for the server alone: disabled it is off for both sides.
 pub async fn set_enabled(
     content: &Content,
     server_id: &str,
@@ -391,15 +394,120 @@ pub async fn set_enabled(
 ) -> Result<(), Error> {
     let folder = Folder::open(&content.paths.server(server_id))?;
     let (path, on_disk) = locate(&folder, kind, filename)?;
+    let mut toggle = toggle(content, server_id, &path).await?;
+    toggle.disabled_server = false;
+    rename_enabled(&folder, &path, &on_disk, enabled)?;
+    records::set_toggle(&content.db, server_id, &toggle).await?;
+    Ok(())
+}
+
+fn rename_enabled(
+    folder: &Folder,
+    path: &str,
+    on_disk: &str,
+    enabled: bool,
+) -> Result<(), Error> {
     let wanted = if enabled {
-        path
+        path.to_owned()
     } else {
         format!("{path}{DISABLED}")
     };
     if on_disk != wanted {
-        folder.rename(&on_disk, &wanted)?;
+        folder.rename(on_disk, &wanted)?;
     }
     Ok(())
+}
+
+async fn toggle(
+    content: &Content,
+    server_id: &str,
+    path: &str,
+) -> Result<SideToggle, Error> {
+    Ok(records::toggles(&content.db, server_id)
+        .await?
+        .into_iter()
+        .find(|toggle| toggle.path == path)
+        .unwrap_or_else(|| SideToggle {
+            path: path.to_owned(),
+            ..SideToggle::default()
+        }))
+}
+
+/// A side an addon can be turned off for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Server,
+    Player,
+}
+
+/// Turn an addon on or off for one side. Off for the server, its file is `.disabled` and the
+/// server's share still carries it; off for players, the server runs it and the share leaves it
+/// out.
+pub async fn set_side(
+    content: &Content,
+    server_id: &str,
+    kind: AddonKind,
+    filename: &str,
+    side: Side,
+    enabled: bool,
+) -> Result<(), Error> {
+    let folder = Folder::open(&content.paths.server(server_id))?;
+    let (path, on_disk) = locate(&folder, kind, filename)?;
+    let mut toggle = toggle(content, server_id, &path).await?;
+    match side {
+        Side::Server => {
+            rename_enabled(&folder, &path, &on_disk, enabled)?;
+            toggle.disabled_server = !enabled;
+        }
+        Side::Player => toggle.disabled_player = !enabled,
+    }
+    records::set_toggle(&content.db, server_id, &toggle).await?;
+    Ok(())
+}
+
+/// Mark an addon's sides as set by hand, or as following the file again.
+pub async fn set_unlocked(
+    content: &Content,
+    server_id: &str,
+    kind: AddonKind,
+    filename: &str,
+    unlocked: bool,
+) -> Result<(), Error> {
+    let folder = Folder::open(&content.paths.server(server_id))?;
+    let (path, _) = locate(&folder, kind, filename)?;
+    let mut toggle = toggle(content, server_id, &path).await?;
+    toggle.unlocked = unlocked;
+    records::set_toggle(&content.db, server_id, &toggle).await?;
+    Ok(())
+}
+
+/// Where an addon runs, from its file and its toggles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sides {
+    /// Off for both sides.
+    pub disabled: bool,
+    pub disabled_server: bool,
+    pub disabled_player: bool,
+}
+
+impl Sides {
+    /// A `.disabled` file is off for the server alone only while its toggle says so; a file
+    /// renamed back by hand runs again.
+    pub fn of(listed: &Listed, toggle: Option<&SideToggle>) -> Self {
+        let disabled_server = listed.disabled
+            && toggle.is_some_and(|toggle| toggle.disabled_server);
+        Self {
+            disabled: listed.disabled && !disabled_server,
+            disabled_server,
+            disabled_player: toggle
+                .is_some_and(|toggle| toggle.disabled_player),
+        }
+    }
+
+    /// The server's share carries it, for players.
+    pub fn for_players(self) -> bool {
+        !self.disabled && !self.disabled_player
+    }
 }
 
 /// Find an addon by file name in any folder this server lists.

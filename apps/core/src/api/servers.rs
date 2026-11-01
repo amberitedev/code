@@ -377,6 +377,13 @@ pub struct WorldReadiness {
 /// Mirrors Archon.Servers.v1.WorldContentInfo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldContentInfo {
+    /// The share of a server that follows no instance, once it is shared (`api::share`). A
+    /// server that follows an instance reads its instance's share and has none.
+    pub shared_instance_id: Option<String>,
+    /// Not tracked yet: Core does not compare the server to its share until a push asks.
+    pub shared_instance_needs_update: bool,
+    /// A push changes nothing the server runs, so it never needs a restart.
+    pub requires_restart: bool,
     pub modloader: String,
     pub modloader_version: String,
     pub game_version: String,
@@ -852,8 +859,19 @@ async fn server_full(
     let invocation = launch::args(paths, &row)
         .ok()
         .map(|args| launch::invocation(&args));
+    let follows_instance = content::records::pack(&state.db, &row.id)
+        .await?
+        .is_some_and(|pack| content::install::linked(&pack).is_some());
+    let shared_instance_id = if follows_instance {
+        None
+    } else {
+        content::records::share_id(&state.db, &row.id).await?
+    };
     let content = match (&row.loader, &row.game_version) {
         (Some(loader), Some(game_version)) => Some(WorldContentInfo {
+            shared_instance_id,
+            shared_instance_needs_update: false,
+            requires_restart: false,
             modloader: loader.clone(),
             modloader_version: row.loader_version.clone().unwrap_or_default(),
             game_version: game_version.clone(),

@@ -1,8 +1,9 @@
-import { requireUser } from '../common/auth'
+import { requireUnlocked, requireUser, tokenFrom } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, json, readBytes, readJson } from '../common/http'
 import { notificationResponse, notifyMembers } from '../common/notifications'
 import type { Env } from '../common/types'
+import { requireListedCore } from '../cores'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
 import {
@@ -40,6 +41,9 @@ type Instance = {
 	quarantine: number
 	home: string | null
 	replica: string | null
+	/** The Core whose key writes this share, for a server-first share; see `coreSharing`. */
+	core_id: string | null
+	server_id: string | null
 }
 type Version = {
 	instance_id: string
@@ -316,13 +320,15 @@ export async function versionReady(env: Env, id: string, version: number): Promi
  * gets back the home Core and a store ticket to upload to. The version is ready once that Core
  * confirms. A push with the same files as an unconfirmed version resumes it; one with other files
  * waits until that version is confirmed or an hour old. `server_core` names the owner's Core
- * running a server of this instance, where the share is then homed (see `place`).
+ * running a server of this instance, where the share is then homed (see `place`). A Core pushing
+ * its own server's share passes itself as `core`, which is that server's Core.
  */
 async function createVersion(
 	request: Request,
 	env: Env,
 	item: Instance,
 	userId: string,
+	core: string | null = null,
 ): Promise<Response> {
 	owner(item, userId)
 	const text = new TextDecoder().decode(await readBytes(request, MAX_MANIFEST_BODY))
@@ -377,9 +383,10 @@ async function createVersion(
 			'share_too_large',
 		)
 	const serverCore =
-		body.server_core === undefined || body.server_core === null
+		core ??
+		(body.server_core === undefined || body.server_core === null
 			? null
-			: string(body.server_core, 'server_core', 64)
+			: string(body.server_core, 'server_core', 64))
 
 	// One push at a time: an unconfirmed version younger than its store ticket is still being
 	// uploaded, unless this push is the same version again, which resumes it.
@@ -821,6 +828,70 @@ async function users(
 	return empty()
 }
 
+/**
+ * A Core, with its key, writing the share of one of its server-first servers (a server that
+ * follows no instance). It acts as the share's owner, its own owner account, for: create
+ * (`POST /v1/instances` with `server_id`, answering the server's existing share if it has one),
+ * rename, delete, and its versions. It reaches no other share and no other route.
+ */
+async function coreSharing(
+	request: Request,
+	env: Env,
+	[route, id, section, child, ...rest]: string[],
+): Promise<Response> {
+	const core = await requireListedCore(request, env)
+	await requireUnlocked(env, core.owner_id)
+	await requireSharing(env, core.owner_id)
+	const refused = () =>
+		new ApiError(403, 'forbidden', 'A Core reaches only the shares of its own servers', 'not_owner')
+	if (route !== 'instances') throw refused()
+	if (!id) {
+		if (request.method !== 'POST') throw refused()
+		const body = await readJson(request)
+		const name = string(body.name, 'name')
+		const serverId = string(body.server_id, 'server_id', 64)
+		await env.DB.prepare(
+			'INSERT INTO shared_instances (id,owner_id,name,created,core_id,server_id) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING',
+		)
+			.bind(crypto.randomUUID(), core.owner_id, name, now(), core.id, serverId)
+			.run()
+		const row = await env.DB.prepare(
+			'SELECT id FROM shared_instances WHERE core_id = ? AND server_id = ?',
+		)
+			.bind(core.id, serverId)
+			.first<{ id: string }>()
+		return json({ id: row?.id })
+	}
+	const item = await instance(env, id)
+	if (item.core_id !== core.id) throw refused()
+	if (!section && request.method === 'PATCH') {
+		await env.DB.prepare('UPDATE shared_instances SET name = ? WHERE id = ?')
+			.bind(string((await readJson(request)).name, 'name'), id)
+			.run()
+		return empty()
+	}
+	if (!section && request.method === 'DELETE') {
+		await env.DB.prepare('DELETE FROM shared_instances WHERE id = ?').bind(id).run()
+		await sweepFiles(env, id)
+		return empty()
+	}
+	if (section !== 'versions' || rest.length) throw refused()
+	if (item.quarantine) throw quarantined()
+	if (request.method === 'POST' && !child)
+		return createVersion(request, env, item, core.owner_id, core.id)
+	if (request.method !== 'GET') throw refused()
+	if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
+		throw new ApiError(400, 'invalid_input', 'Invalid shared version')
+	const version = child
+		? await env.DB.prepare('SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?')
+				.bind(id, Number(child))
+				.first<Version>()
+		: await latestVersion(env, id)
+	if (!version)
+		throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+	return versionResponse(env, item, version, core.owner_id)
+}
+
 export async function handleSharing(request: Request, env: Env): Promise<Response | null> {
 	const url = new URL(request.url)
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
@@ -852,6 +923,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			},
 		)
 	}
+	if (tokenFrom(request).startsWith('amc_')) return coreSharing(request, env, parts.slice(1))
 	const user = await requireUser(request, env)
 	if (route === 'blacklist' && id && request.method === 'GET') {
 		return json({

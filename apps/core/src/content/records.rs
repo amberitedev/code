@@ -122,6 +122,119 @@ pub async fn set_project(
     Ok(())
 }
 
+/// A row of `side_toggles`: which sides an addon is on for, by its enabled path. A file with no
+/// row is on for both.
+#[derive(Debug, Clone, Default, PartialEq, Eq, sqlx::FromRow)]
+pub struct SideToggle {
+    pub path: String,
+    /// The file is `.disabled` on disk, but the server's share still carries it.
+    pub disabled_server: bool,
+    /// The server runs it; its share leaves it out.
+    pub disabled_player: bool,
+    pub unlocked: bool,
+}
+
+pub async fn toggles(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Vec<SideToggle>> {
+    sqlx::query_as(
+        "SELECT path, disabled_server, disabled_player, unlocked FROM side_toggles \
+         WHERE server_id = ?",
+    )
+    .bind(server_id)
+    .fetch_all(db)
+    .await
+}
+
+/// Record a file's toggles. A file on for both sides and never set by hand keeps no row.
+pub async fn set_toggle(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    toggle: &SideToggle,
+) -> sqlx::Result<()> {
+    if *toggle
+        == (SideToggle {
+            path: toggle.path.clone(),
+            ..SideToggle::default()
+        })
+    {
+        return remove_toggle(db, server_id, &toggle.path).await;
+    }
+    sqlx::query(
+        "INSERT INTO side_toggles (server_id, path, disabled_server, disabled_player, unlocked) \
+         VALUES (?, ?, ?, ?, ?) ON CONFLICT (server_id, path) DO UPDATE SET \
+         disabled_server = excluded.disabled_server, \
+         disabled_player = excluded.disabled_player, unlocked = excluded.unlocked",
+    )
+    .bind(server_id)
+    .bind(&toggle.path)
+    .bind(toggle.disabled_server)
+    .bind(toggle.disabled_player)
+    .bind(toggle.unlocked)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Give a file's toggles to the file replacing it, as an update does.
+pub async fn move_toggle(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    from: &str,
+    to: &str,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE OR REPLACE side_toggles SET path = ? WHERE server_id = ? AND path = ?",
+    )
+    .bind(to)
+    .bind(server_id)
+    .bind(from)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_toggle(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    path: &str,
+) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM side_toggles WHERE server_id = ? AND path = ?")
+        .bind(server_id)
+        .bind(path)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// The share of a server that follows no instance, once it is shared.
+pub async fn share_id(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Option<String>> {
+    Ok(sqlx::query_scalar::<_, Option<String>>(
+        "SELECT share_id FROM servers WHERE id = ?",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await?
+    .flatten())
+}
+
+pub async fn set_share_id(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+    share_id: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE servers SET share_id = ? WHERE id = ?")
+        .bind(share_id)
+        .bind(server_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// A row of `packs`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct Pack {

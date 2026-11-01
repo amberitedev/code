@@ -378,7 +378,7 @@ async function findCore(request: Request, env: Env): Promise<CoreRow | null> {
  * The Core a request's key belongs to. A key that belonged to a Core that was since removed from
  * its account gets 410, so the Core un-pairs on that answer and on no other.
  */
-async function requireListedCore(request: Request, env: Env): Promise<CoreRow> {
+export async function requireListedCore(request: Request, env: Env): Promise<CoreRow> {
 	const core = await findCore(request, env)
 	if (!core)
 		throw new ApiError(
