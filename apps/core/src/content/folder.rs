@@ -241,6 +241,11 @@ impl Folder {
         Ok(found)
     }
 
+    /// Where the folder is, for asking its disk how much is free.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// The world folder this server uses.
     pub fn level_name(&self) -> String {
         level_name(&self.root)

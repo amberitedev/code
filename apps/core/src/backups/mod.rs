@@ -87,10 +87,8 @@ const DOWNLOAD_GRANT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(
-        "there is not enough free disk space for this backup: it needs about {needed_mb} MB and {free_mb} MB are free"
-    )]
-    Space { needed_mb: u64, free_mb: u64 },
+    #[error(transparent)]
+    Space(#[from] space::NoSpace),
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]

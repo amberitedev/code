@@ -1,31 +1,57 @@
 //! Unpacking zip archives into a server folder: pack overrides, uploaded worlds and folders, and
 //! the file manager's unarchive. Every entry is checked before anything is written; one entry
-//! with `..`, a root, a link, or a name Windows would change refuses the whole archive. What is
-//! unpacked is capped by the bytes actually written, not by what the archive claims.
+//! with `..`, a root, a link, or a name Windows would change refuses the whole archive. So is an
+//! archive that would not fit on the disk, judged by the sizes it lists: the zip reader fails an
+//! entry that inflates past its listed size, so those are a true bound.
 
 use std::io::{self, Read, Seek};
 
 use sha1::Digest;
 
 use super::folder::{self, Folder, PathError};
+use crate::backups::space::{self, NoSpace};
 
-/// The most an archive may unpack to.
-pub const MAX_UNPACKED: u64 = 8 * 1024 * 1024 * 1024;
 /// The most entries an archive may have.
 pub const MAX_ENTRIES: usize = 200_000;
+/// About the most deflate can shrink data. An archive listing more than this times its own size
+/// has entries that share their data, which only a zip bomb does.
+const MAX_RATIO: u64 = 1032;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
     #[error("the archive has an entry {name} that is refused: {reason}")]
     Entry { name: String, reason: String },
-    #[error("the archive unpacks to more than {} GB", MAX_UNPACKED / 1024 / 1024 / 1024)]
-    TooLarge,
     #[error("the archive has more than {MAX_ENTRIES} entries")]
     TooMany,
+    #[error(
+        "This archive is a zip bomb: {} that would unpack to {}. Nothing was unpacked.",
+        space::label(*.packed),
+        space::label(*.unpacked)
+    )]
+    Bomb { packed: u64, unpacked: u64 },
+    #[error(transparent)]
+    Space(#[from] NoSpace),
     #[error("the archive is damaged: {0}")]
     Zip(#[from] zip::result::ZipError),
     #[error(transparent)]
     Io(#[from] io::Error),
+}
+
+/// Refuse unpacking `unpacked` bytes, as an archive of `packed` bytes lists them, onto a disk
+/// with `free` bytes. One that does not fit is called a zip bomb when no real archive could
+/// shrink that much; either way nothing is read or written yet.
+pub fn check_room(
+    unpacked: u64,
+    packed: u64,
+    free: u64,
+) -> Result<(), ArchiveError> {
+    space::enough_space(unpacked, free).map_err(|no_space| {
+        if unpacked / packed.max(1) > MAX_RATIO {
+            ArchiveError::Bomb { packed, unpacked }
+        } else {
+            no_space.into()
+        }
+    })
 }
 
 /// A file an extraction wrote.
@@ -70,52 +96,34 @@ pub fn entries<R: Read + Seek>(
 
 /// Unpack every entry `place` maps to a path into `folder`, and return what was written.
 /// `place` gets each checked entry path and returns where it goes, or `None` to skip it.
-/// Refuses the whole archive before writing anything if an entry is bad.
+/// `packed` is the archive's size. Refuses the whole archive before writing anything if an
+/// entry is bad or what it places would not fit on the disk.
 pub fn extract<R: Read + Seek>(
     folder: &Folder,
     archive: &mut zip::ZipArchive<R>,
-    place: impl FnMut(&str) -> Option<String>,
-) -> Result<Vec<Placed>, ArchiveError> {
-    extract_within(folder, archive, MAX_UNPACKED, place)
-}
-
-/// [`extract`], unpacking at most `budget` bytes in all.
-fn extract_within<R: Read + Seek>(
-    folder: &Folder,
-    archive: &mut zip::ZipArchive<R>,
-    mut budget: u64,
+    packed: u64,
     mut place: impl FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Placed>, ArchiveError> {
-    let entries = entries(archive)?;
-    let mut placed = Vec::new();
-    for (index, (path, is_dir)) in entries.into_iter().enumerate() {
+    let mut targets = Vec::new();
+    let mut unpacked = 0u64;
+    for (index, (path, is_dir)) in entries(archive)?.into_iter().enumerate() {
         let Some(target) = place(&path) else {
             continue;
         };
+        unpacked = unpacked.saturating_add(archive.by_index_raw(index)?.size());
+        targets.push((index, target, is_dir));
+    }
+    check_room(unpacked, packed, space::free(folder.root())?)?;
+    let mut placed = Vec::new();
+    for (index, target, is_dir) in targets {
         if is_dir {
             folder.create_dir_all(&target)?;
             continue;
         }
-        let entry = archive.by_index(index)?;
-        let mut reader = Hashing::new(AtMost {
-            inner: entry,
-            left: budget,
-        });
-        // Past the budget the read fails, so the write never replaces what was there.
-        let written = match folder.write(&target, &mut reader) {
-            Err(error)
-                if error.get_ref().is_some_and(|inner| {
-                    matches!(
-                        inner.downcast_ref::<ArchiveError>(),
-                        Some(ArchiveError::TooLarge)
-                    )
-                }) =>
-            {
-                return Err(ArchiveError::TooLarge);
-            }
-            written => written?,
-        };
-        budget -= written;
+        // An entry that inflates past its listed size fails the read, so the write never
+        // replaces what was there.
+        let mut reader = Hashing::new(archive.by_index(index)?);
+        folder.write(&target, &mut reader)?;
         placed.push(Placed {
             path: target,
             sha1: reader.finish(),
@@ -124,36 +132,14 @@ fn extract_within<R: Read + Seek>(
     Ok(placed)
 }
 
-/// The SHA-1 and size of one entry, read without unpacking it. The size is what the entry
-/// actually inflates to, not what the archive claims, and is taken from `budget`, shared by
-/// every entry read: inflating past what is left stops at once.
+/// The SHA-1 and size of one entry, read without unpacking it.
 pub fn entry_sha1<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     index: usize,
-    budget: &mut u64,
 ) -> Result<(String, u64), ArchiveError> {
-    let mut reader = Hashing::new(archive.by_index(index)?.take(*budget + 1));
+    let mut reader = Hashing::new(archive.by_index(index)?);
     let size = io::copy(&mut reader, &mut io::sink())?;
-    *budget = budget.checked_sub(size).ok_or(ArchiveError::TooLarge)?;
     Ok((reader.finish(), size))
-}
-
-/// Reads at most `left` more bytes and fails the read past them, so a `Folder::write` of it fails
-/// before its file is renamed over anything already there.
-pub struct AtMost<R> {
-    pub inner: R,
-    pub left: u64,
-}
-
-impl<R: Read> Read for AtMost<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let read = self.inner.read(buf)?;
-        self.left = self
-            .left
-            .checked_sub(read as u64)
-            .ok_or_else(|| io::Error::other(ArchiveError::TooLarge))?;
-        Ok(read)
-    }
 }
 
 /// Hashes what passes through it.
@@ -226,7 +212,7 @@ mod tests {
                 file(writer, bad, b"payload");
             });
             let error =
-                extract(&folder, &mut zip, |path| Some(path.to_owned()))
+                extract(&folder, &mut zip, 0, |path| Some(path.to_owned()))
                     .unwrap_err();
             assert!(
                 matches!(error, ArchiveError::Entry { .. }),
@@ -255,24 +241,40 @@ mod tests {
                 .unwrap();
         });
         assert!(matches!(
-            extract(&folder, &mut zip, |path| Some(path.to_owned())),
+            extract(&folder, &mut zip, 0, |path| Some(path.to_owned())),
             Err(ArchiveError::Entry { .. })
         ));
     }
 
     #[test]
-    fn an_entry_past_the_budget_leaves_the_file_it_would_replace() {
+    fn an_entry_that_inflates_past_its_listed_size_leaves_the_file_it_would_replace()
+     {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config")).unwrap();
         std::fs::write(dir.path().join("config/a.toml"), "original").unwrap();
         let folder = Folder::open(dir.path()).unwrap();
-        let mut zip = archive(|writer| {
-            file(writer, "config/a.toml", &[b'x'; 20]);
-        });
-        let error =
-            extract_within(&folder, &mut zip, 10, |path| Some(path.to_owned()))
-                .unwrap_err();
-        assert!(matches!(error, ArchiveError::TooLarge), "{error}");
+        // Stored, so the listed sizes sit as plain numbers: 20 bytes, claimed as 10.
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "config/a.toml",
+                SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        writer.write_all(&[b'x'; 20]).unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        for (signature, offset) in [(b"PK\x03\x04", 22), (b"PK\x01\x02", 24)] {
+            let at = bytes
+                .windows(4)
+                .position(|window| window == signature)
+                .unwrap();
+            bytes[at + offset..at + offset + 4]
+                .copy_from_slice(&10u32.to_le_bytes());
+        }
+        let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract(&folder, &mut zip, 0, |path| Some(path.to_owned()))
+            .unwrap_err();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("config/a.toml")).unwrap(),
             "original"
@@ -287,18 +289,19 @@ mod tests {
     }
 
     #[test]
-    fn hashing_entries_draws_on_one_budget() {
-        let mut zip = archive(|writer| {
-            file(writer, "overrides/a", &[b'a'; 10]);
-            file(writer, "overrides/b", &[b'b'; 10]);
-        });
-        let mut budget = 15;
-        assert_eq!(entry_sha1(&mut zip, 0, &mut budget).unwrap().1, 10);
-        assert_eq!(budget, 5);
+    fn an_archive_that_does_not_fit_is_a_bomb_only_past_what_deflate_can_do() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        assert!(check_room(GB, GB, 10 * GB).is_ok());
         assert!(matches!(
-            entry_sha1(&mut zip, 1, &mut budget),
-            Err(ArchiveError::TooLarge)
+            check_room(20 * GB, 4 * GB, 10 * GB),
+            Err(ArchiveError::Space(_))
         ));
+        assert!(matches!(
+            check_room(20 * GB, 1024 * 1024, 10 * GB),
+            Err(ArchiveError::Bomb { .. })
+        ));
+        // A bomb that fits harms nothing, so it is unpacked like any archive.
+        assert!(check_room(GB, 1024, 10 * GB).is_ok());
     }
 
     #[test]
@@ -315,7 +318,7 @@ mod tests {
             file(writer, "overrides/config/a.toml", b"x = 1");
             file(writer, "client-overrides/options.txt", b"fov");
         });
-        let placed = extract(&folder, &mut zip, |path| {
+        let placed = extract(&folder, &mut zip, 0, |path| {
             path.strip_prefix("overrides/").map(str::to_owned)
         })
         .unwrap();
