@@ -224,12 +224,25 @@ pub struct LatestVersion {
     pub ready: bool,
     #[serde(default)]
     pub modrinth_ids: Vec<String>,
+    #[serde(default)]
+    pub modpack_id: Option<String>,
+    #[serde(default)]
+    pub removed_files: Vec<RemovedFile>,
     pub game_version: String,
     pub loader: String,
     #[serde(default)]
     pub loader_version: String,
     #[serde(default)]
     pub external_files: Vec<LatestFile>,
+}
+
+/// A file of a version's modpack that members do not get, by its Modrinth version or, for a
+/// mod Modrinth does not know, its path. As `SharedInstanceRemovedFile` in `app-lib`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemovedFile {
+    Version { version_id: String },
+    Path { parent: String, filename: String },
 }
 
 #[derive(Debug, Deserialize)]

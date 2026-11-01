@@ -2,14 +2,67 @@
 //! Core writes its share; see `api::share`). Players get the server's addons that are on for
 //! them, whether or not the server runs them: Modrinth versions by id, other files as they are on
 //! disk. Plugins run only on a server and are never shared.
+//!
+//! A server installed from a Modrinth modpack shares that modpack, as the App does, so players
+//! also get its client-only files, which never land on the server. Its pack files are then left
+//! to the modpack, and the ones the owner removed or turned off for players are listed as removed.
 
 use std::collections::HashMap;
 
 use super::{
     addons::{Listed, Sides},
-    records::{ContentFile, SideToggle},
+    records::{ContentFile, Origin, SideToggle},
 };
+use sharing_client::push::RemovedFile;
+
 use crate::api::content::AddonKind;
+
+/// The pack files of a shared modpack that players do not get: deleted from the server, or on
+/// disk but off for players. A file Modrinth knows goes by version; any other mod by its path.
+pub fn removed(
+    listed: &[Listed],
+    rows: &HashMap<String, ContentFile>,
+    toggles: &HashMap<String, SideToggle>,
+    addon_dirs: &[String],
+) -> Vec<RemovedFile> {
+    let mut pack_rows = rows
+        .values()
+        .filter(|row| row.origin == Origin::Pack)
+        .collect::<Vec<_>>();
+    pack_rows.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut removed = Vec::new();
+    for row in pack_rows {
+        let for_players = match listed.iter().find(|item| item.path == row.path)
+        {
+            Some(item) => {
+                Sides::of(item, toggles.get(&item.path)).for_players()
+            }
+            // Gone from disk. Only addons count; the pack's other files are not content.
+            None => !row.path.rsplit_once('/').is_some_and(|(dir, _)| {
+                addon_dirs.iter().any(|addon_dir| addon_dir == dir)
+            }),
+        };
+        if for_players {
+            continue;
+        }
+        let entry = match (&row.version_id, row.path.split_once('/')) {
+            (Some(version_id), _) => RemovedFile::Version {
+                version_id: version_id.clone(),
+            },
+            (None, Some(("mods", filename))) if !filename.contains('/') => {
+                RemovedFile::Path {
+                    parent: "mods".into(),
+                    filename: filename.into(),
+                }
+            }
+            _ => continue,
+        };
+        if !removed.contains(&entry) {
+            removed.push(entry);
+        }
+    }
+    removed
+}
 
 /// One addon as the share carries it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,15 +80,23 @@ pub enum Carried {
     },
 }
 
-/// The addons of `listed` that the share carries, in order.
+/// The addons of `listed` that the share carries, in order. With `modpack` the share carries
+/// the modpack, so the pack's own files are left to it.
 pub fn carried(
     listed: &[Listed],
     rows: &HashMap<String, ContentFile>,
     toggles: &HashMap<String, SideToggle>,
+    modpack: bool,
 ) -> Vec<Carried> {
     listed
         .iter()
         .filter(|item| Sides::of(item, toggles.get(&item.path)).for_players())
+        .filter(|item| {
+            !modpack
+                || rows
+                    .get(&item.path)
+                    .is_none_or(|row| row.origin != Origin::Pack)
+        })
         .filter_map(|item| {
             let file_type = match item.kind {
                 AddonKind::Mod => "mod",
@@ -133,7 +194,7 @@ mod tests {
             on_disk: on_disk.into(),
         };
         assert_eq!(
-            carried(&listed, &rows, &toggles),
+            carried(&listed, &rows, &toggles, false),
             [
                 file("both.jar", "mod", "mods/both.jar"),
                 file("client.jar", "mod", "mods/client.jar.disabled"),
@@ -143,6 +204,64 @@ mod tests {
                     project_id: "project".into(),
                 },
                 file("pack.zip", "datapack", "world/datapacks/pack.zip"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_shared_modpack_carries_only_what_the_owner_changed() {
+        let row = |path: &str, origin, version_id: Option<&str>| {
+            (
+                path.to_owned(),
+                ContentFile {
+                    path: path.into(),
+                    origin,
+                    sha1: "x".into(),
+                    project_id: version_id.map(|_| "project".into()),
+                    version_id: version_id.map(Into::into),
+                    pending: None,
+                },
+            )
+        };
+        let listed = [
+            listed("mods/kept.jar", AddonKind::Mod, false),
+            // Off for the server: players still get it from the pack.
+            listed("mods/client.jar", AddonKind::Mod, true),
+            listed("mods/server.jar", AddonKind::Mod, false),
+            listed("mods/added.jar", AddonKind::Mod, false),
+        ];
+        let toggles = HashMap::from([
+            toggle("mods/client.jar", true, false),
+            toggle("mods/server.jar", false, true),
+        ]);
+        let rows = HashMap::from([
+            row("mods/kept.jar", Origin::Pack, Some("kept")),
+            row("mods/client.jar", Origin::Pack, None),
+            row("mods/server.jar", Origin::Pack, Some("server")),
+            // Deleted by the owner.
+            row("mods/deleted.jar", Origin::Pack, None),
+            // A config the pack placed, deleted: not content.
+            row("config/a.toml", Origin::Pack, None),
+            row("mods/added.jar", Origin::Added, Some("added")),
+        ]);
+
+        assert_eq!(
+            carried(&listed, &rows, &toggles, true),
+            [Carried::Modrinth {
+                version_id: "added".into(),
+                project_id: "project".into(),
+            }]
+        );
+        assert_eq!(
+            removed(&listed, &rows, &toggles, &["mods".into()]),
+            [
+                RemovedFile::Path {
+                    parent: "mods".into(),
+                    filename: "deleted.jar".into(),
+                },
+                RemovedFile::Version {
+                    version_id: "server".into(),
+                },
             ]
         );
     }

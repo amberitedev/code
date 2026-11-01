@@ -24,7 +24,7 @@ use sharing_client::{push, store::StoreClient};
 
 use super::{
     AppState,
-    content::{server_first, world},
+    content::{AddonKind, server_first, world},
     error::{ApiError, ErrorCode},
 };
 use crate::{
@@ -33,7 +33,7 @@ use crate::{
         addons,
         folder::{self, Folder},
         records::{self, ContentFile, SideToggle},
-        server_share::{Carried, carried},
+        server_share::{Carried, carried, removed},
     },
     installs::ModLoader,
     servers::{ServerError, records as servers_records},
@@ -117,8 +117,7 @@ pub struct LoaderName {
     pub version: Option<String>,
 }
 
-/// Mirrors Archon.Content.v1.SharedContentDiffEntry. Core never shares a modpack, so it has no
-/// `modpack` entry.
+/// Mirrors Archon.Content.v1.SharedContentDiffEntry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiffEntry {
@@ -130,6 +129,9 @@ pub enum DiffEntry {
         file_type: String,
         file_name: String,
         kind: FileChange,
+    },
+    Modpack {
+        change: Change<String>,
     },
     GameVersion {
         change: Change<String>,
@@ -167,11 +169,13 @@ pub struct SharedInstancePublishDiff {
     pub versions: HashMap<String, VersionName>,
 }
 
-/// A version's upstream content fields. Core shares no modpack: every addon is listed itself.
+/// A version's upstream content fields, as the App sends them.
 #[derive(Serialize)]
 struct VersionContent {
     modrinth_ids: Vec<String>,
+    /// The Modrinth version of the modpack the server was installed from.
     modpack_id: Option<String>,
+    removed_files: Vec<push::RemovedFile>,
     game_version: String,
     loader: &'static str,
     loader_version: String,
@@ -240,7 +244,19 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
         .into_iter()
         .map(|toggle| (toggle.path.clone(), toggle))
         .collect();
-    let carried = carried(&listed, &rows, &toggles);
+    // A pack uploaded as a file is not on Modrinth, so its files are shared one by one.
+    let modpack_id = records::pack(&state.db, id)
+        .await?
+        .and_then(|pack| pack.version_id);
+    let carried = carried(&listed, &rows, &toggles, modpack_id.is_some());
+    let removed_files = if modpack_id.is_some() {
+        let level = folder.level_name();
+        let dirs = [AddonKind::Mod, AddonKind::Datapack]
+            .map(|kind| addons::kind_folder(kind, &level));
+        removed(&listed, &rows, &toggles, &dirs)
+    } else {
+        Vec::new()
+    };
     let modrinth_ids = carried
         .iter()
         .filter_map(|item| match item {
@@ -253,7 +269,8 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
         folder,
         content: VersionContent {
             modrinth_ids,
-            modpack_id: None,
+            modpack_id,
+            removed_files,
             game_version,
             loader: shared_loader,
             loader_version: loader_version.unwrap_or_default(),
@@ -572,10 +589,34 @@ pub async fn diff(
             Carried::File { .. } => None,
         })
         .collect::<BTreeMap<_, _>>();
+    // The modpack's files players stop getting (`true`) or get again.
+    let removed_changes = [
+        (&snapshot.content.removed_files, &latest.removed_files, true),
+        (
+            &latest.removed_files,
+            &snapshot.content.removed_files,
+            false,
+        ),
+    ]
+    .into_iter()
+    .flat_map(|(list, other, removed)| {
+        list.iter()
+            .filter(|entry| !other.contains(entry))
+            .map(move |entry| (entry, removed))
+    })
+    .collect::<Vec<_>>();
+    let removed_versions =
+        removed_changes.iter().filter_map(|(entry, _)| match entry {
+            push::RemovedFile::Version { version_id } => Some(version_id),
+            push::RemovedFile::Path { .. } => None,
+        });
     let version_ids = latest
         .modrinth_ids
         .iter()
         .chain(after.values())
+        .chain(removed_versions)
+        .chain(&latest.modpack_id)
+        .chain(&snapshot.content.modpack_id)
         .cloned()
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -585,18 +626,56 @@ pub async fn diff(
         .versions_by_id(&version_ids)
         .await
         .unwrap_or_default();
+    let project_of = |version_id: &String| {
+        versions
+            .iter()
+            .find(|version| &version.id == version_id)
+            .map_or(version_id, |version| &version.project_id)
+            .clone()
+    };
     let before = latest
         .modrinth_ids
         .iter()
-        .map(|version_id| {
-            let project = versions
-                .iter()
-                .find(|version| &version.id == version_id)
-                .map_or(version_id, |version| &version.project_id);
-            (project.clone(), version_id.clone())
-        })
+        .map(|version_id| (project_of(version_id), version_id.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut diffs = project_diffs(&before, &after);
+    let mut pack_projects = latest
+        .modpack_id
+        .iter()
+        .chain(&snapshot.content.modpack_id)
+        .map(project_of)
+        .collect::<Vec<_>>();
+    for (entry, removed) in removed_changes {
+        diffs.push(match entry {
+            push::RemovedFile::Version { version_id } => {
+                let project_id = project_of(version_id);
+                pack_projects.push(project_id.clone());
+                DiffEntry::Project {
+                    project_id,
+                    change: if removed {
+                        Change::Removed {
+                            before: version_id.clone(),
+                        }
+                    } else {
+                        Change::Added {
+                            after: version_id.clone(),
+                        }
+                    },
+                }
+            }
+            push::RemovedFile::Path { filename, .. } => {
+                DiffEntry::ExternalFile {
+                    file_type: "mod".into(),
+                    file_name: filename.clone(),
+                    kind: if removed {
+                        FileChange::Removed
+                    } else {
+                        FileChange::Added
+                    },
+                }
+            }
+        });
+    }
 
     // Files: content files by SHA-1, and configs only where the server's copy changed, since a
     // config not sent again stays shared.
@@ -673,6 +752,18 @@ pub async fn diff(
     }
 
     let content = &snapshot.content;
+    let modpack = match (latest.modpack_id.clone(), content.modpack_id.clone())
+    {
+        (Some(before), Some(after)) if before != after => {
+            Some(Change::Updated { before, after })
+        }
+        (Some(before), None) => Some(Change::Removed { before }),
+        (None, Some(after)) => Some(Change::Added { after }),
+        _ => None,
+    };
+    if let Some(change) = modpack {
+        diffs.push(DiffEntry::Modpack { change });
+    }
     if latest.game_version != content.game_version {
         diffs.push(DiffEntry::GameVersion {
             change: Change::Updated {
@@ -701,6 +792,7 @@ pub async fn diff(
     let project_ids = before
         .keys()
         .chain(after.keys())
+        .chain(&pack_projects)
         .cloned()
         .collect::<BTreeSet<_>>()
         .into_iter()

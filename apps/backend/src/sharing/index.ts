@@ -59,6 +59,7 @@ type Link = { id: string; instance_id: string; expiration: string; max_uses: num
 type Manifest = {
 	modrinth_ids: string[]
 	modpack_id: string | null
+	removed_files: RemovedFile[]
 	game_version: string
 	loader: string
 	loader_version: string
@@ -94,6 +95,32 @@ function fileType(value: unknown): string {
 	const type = string(value, 'file_type', 64)
 	if (!/^[a-z0-9_-]+$/.test(type)) throw new ApiError(400, 'invalid_input', 'Invalid file_type')
 	return type
+}
+
+/** A file of the version's modpack that members do not get, as `SharedInstanceRemovedFile`. */
+type RemovedFile =
+	| { type: 'version'; version_id: string }
+	| { type: 'path'; parent: string; filename: string }
+const REMOVED_PARENTS = ['mods', 'plugins', 'datapacks', 'shaderpacks', 'resourcepacks']
+
+function removedFiles(value: unknown, modpack: string | null): RemovedFile[] {
+	if (value === undefined || value === null) return []
+	if (!Array.isArray(value) || value.length > 1000 || (value.length && !modpack))
+		throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
+	return value.map((value): RemovedFile => {
+		const entry = object(value)
+		if (entry.type === 'version')
+			return { type: 'version', version_id: string(entry.version_id, 'version_id') }
+		const filename = fileName(entry.filename)
+		if (
+			entry.type !== 'path' ||
+			typeof entry.parent !== 'string' ||
+			!REMOVED_PARENTS.includes(entry.parent) ||
+			filename.includes('/')
+		)
+			throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
+		return { type: 'path', parent: entry.parent, filename }
+	})
 }
 
 function strings(value: unknown, field: string, max = 250): string[] {
@@ -360,12 +387,14 @@ async function createVersion(
 		seen.add(name)
 		return manifestFile(entry, file_name, file_type)
 	})
+	const modpack =
+		body.modpack_id === undefined || body.modpack_id === null
+			? null
+			: string(body.modpack_id, 'modpack_id')
 	const manifest: Manifest = {
 		modrinth_ids: strings(body.modrinth_ids ?? [], 'modrinth_ids', 1000),
-		modpack_id:
-			body.modpack_id === undefined || body.modpack_id === null
-				? null
-				: string(body.modpack_id, 'modpack_id'),
+		modpack_id: modpack,
+		removed_files: removedFiles(body.removed_files, modpack),
 		game_version: string(body.game_version, 'game_version'),
 		loader,
 		loader_version: typeof body.loader_version === 'string' ? body.loader_version : '',

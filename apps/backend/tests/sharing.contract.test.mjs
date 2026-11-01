@@ -256,6 +256,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			{ ...latest, external_files: undefined, pool: undefined },
 			{
 				...manifest,
+				removed_files: [],
 				root: second.root,
 				version: 2,
 				ready: true,
@@ -561,6 +562,28 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			await ok(await asCore('/instances', 'POST', { name: 'Server', server_id: 'server' })),
 			serverShare,
 		)
+		// A server installed from a modpack shares it, with the pack files players do not get.
+		const removed_files = [
+			{ type: 'version', version_id: 'PACKMOD1' },
+			{ type: 'path', parent: 'mods', filename: 'server-only.jar' },
+		]
+		const packVersion = (body) =>
+			asCore(`/instances/${serverShare.id}/versions`, 'POST', {
+				...manifest,
+				external_files: [],
+				removed_files,
+				...body,
+			})
+		assert.equal((await packVersion({})).status, 400)
+		const outside = { type: 'path', parent: 'config', filename: 'a.toml' }
+		assert.equal(
+			(await packVersion({ modpack_id: 'PACKVER1', removed_files: [outside] })).status,
+			400,
+		)
+		await ok(await packVersion({ modpack_id: 'PACKVER1' }))
+		const shared = await ok(await asCore(`/instances/${serverShare.id}/versions`, 'GET'))
+		assert.equal(shared.modpack_id, 'PACKVER1')
+		assert.deepEqual(shared.removed_files, removed_files)
 		// A Core picks its own id when it pairs, so a matching core_id is not enough: a share whose
 		// owner is not the Core's owner stays out of its reach.
 		const moveShare = (core) =>
