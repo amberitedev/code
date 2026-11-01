@@ -118,7 +118,7 @@ pub async fn set(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The game icon and the original as PNGs. The game icon is cropped to a square from the
+/// The game icon and the original as PNG files. The game icon is cropped to a square from the
 /// middle; the original keeps its shape and only shrinks.
 fn icons(image: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
     let invalid = || {
