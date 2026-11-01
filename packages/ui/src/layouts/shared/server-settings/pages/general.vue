@@ -63,8 +63,7 @@
 					/>
 				</div>
 
-				<!-- A Core keeps no update channel per world. -->
-				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
+				<div class="flex flex-col gap-2.5">
 					<span class="text-lg font-semibold text-contrast">
 						{{ formatMessage(messages.updateChannel) }}
 					</span>

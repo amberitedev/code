@@ -1482,3 +1482,102 @@ async fn a_failed_install_tells_the_app_why() {
         ]
     );
 }
+
+#[tokio::test]
+async fn editors_set_the_worlds_update_channel() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    let detail = format!("/v1/servers/{server}");
+    let world = format!("/v1/servers/{server}/worlds/{server}");
+    let channel =
+        |detail: &Value| detail["worlds"][0]["update_channel"].clone();
+
+    let (_, before) = core
+        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .await;
+    assert_eq!(channel(&before), "release");
+
+    let beta = Some(json!({ "update_channel": "beta" }));
+    let (status, _) = core
+        .call(Method::PATCH, &world, Some(&viewer), None, beta.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = core
+        .call(Method::PATCH, &world, Some(&editor), None, beta)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, after) = core
+        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .await;
+    assert_eq!(channel(&after), "beta");
+}
+
+#[tokio::test]
+async fn a_jar_modrinth_does_not_know_shows_its_own_name_and_logo() {
+    use std::io::Write;
+
+    let core = core().await;
+    let server = core.server.clone();
+    let viewer = core.sign_in("viewer").await;
+    sqlx::query("UPDATE servers SET loader = 'fabric', game_version = '1.21.1' WHERE id = ?")
+        .bind(&server)
+        .execute(&core.state.db)
+        .await
+        .unwrap();
+    let mut jar = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    jar.start_file("fabric.mod.json", options).unwrap();
+    jar.write_all(
+        br#"{"id":"x","name":"Mystery Mod","version":"1.0","icon":"logo.png"}"#,
+    )
+    .unwrap();
+    jar.start_file("logo.png", options).unwrap();
+    jar.write_all(b"not really a png").unwrap();
+    let mods = core.state.servers.paths().server(&server).join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+    std::fs::write(
+        mods.join("mystery.jar"),
+        jar.finish().unwrap().into_inner(),
+    )
+    .unwrap();
+
+    let (status, list) = core
+        .call(
+            Method::GET,
+            &format!("/v1/servers/{server}/worlds/{server}/addons"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let manifest = &list["addons"][0]["manifest"];
+    assert_eq!(manifest["name"], "Mystery Mod");
+    assert_eq!(manifest["platform"], "fabric");
+    assert_eq!(manifest["environment"], "client_and_server");
+    assert_eq!(manifest["icon_embedded"], true);
+
+    let icon = |directory: &str| {
+        Request::builder()
+            .uri(format!(
+                "/servers/{server}/v1/worlds/{server}/content/embedded-icon?parent_directory={directory}&filename=mystery.jar"
+            ))
+            .header("authorization", format!("Bearer {viewer}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = core.router.clone().oneshot(icon("mods")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/png");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], b"not really a png");
+    let (status, _) = core.send(icon("plugins")).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the file is a mod, not a plugin"
+    );
+}

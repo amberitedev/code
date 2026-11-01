@@ -3,7 +3,7 @@
 //! `.../addons` routes (list, add, install-many, delete, delete-many, disable, enable,
 //! disable-many, enable-many, update, update-many), all under `/v1/servers/{id}/worlds/{wid}`, and
 //! the uploads `POST /servers/{id}/v1/worlds/{wid}/content/upload-addon-file` and
-//! `.../upload-modpack-file`. Mirrors `Archon.Content.v1` (`archon/content/v1.ts`) and
+//! `.../upload-modpack-file`, and `GET /servers/{id}/v1/worlds/{wid}/content/embedded-icon`. Mirrors `Archon.Content.v1` (`archon/content/v1.ts`) and
 //! `kyros/content/v1.ts`. A server has one world, whose id is the server's.
 //!
 //! Also Amberite's `GET|POST /servers/{id}/content/edited`: the pack files the owner edited, and
@@ -17,7 +17,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use axum::{
     Json,
     extract::{Multipart, Path, Query, State, multipart::Field},
-    http::StatusCode,
+    http::{StatusCode, header::CONTENT_TYPE},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,8 @@ use crate::{
         self, Busy,
         addons::{self, Listed},
         install::{self as content_install, Linked, PackSource},
+        manifest::{self, Manifest},
+        modrinth::ReleaseChannel,
         pack,
         records::{self, ContentFile, Origin, Pack, PendingPack},
         shared::{self, SharedVersion},
@@ -132,6 +134,8 @@ pub struct Addon {
     pub version: Option<AddonVersion>,
     pub owner: Option<ContentOwner>,
     pub icon_url: Option<String>,
+    /// What the jar says about itself, for mods and plugins.
+    pub manifest: Option<Manifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed: Option<bool>,
 }
@@ -169,6 +173,8 @@ pub struct Addons {
     pub modloader: Option<String>,
     pub modloader_version: Option<String>,
     pub game_version: Option<String>,
+    /// The least stable channel addon updates are offered from.
+    pub update_channel: ReleaseChannel,
     pub modpack: Option<ModpackFields>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installing: Option<Installing>,
@@ -475,9 +481,11 @@ fn loader_of(loader: Modloader) -> Result<ModLoader, ApiError> {
 async fn addon_list(
     state: &AppState,
     id: &str,
+    loader: Option<ModLoader>,
     listed: Vec<Listed>,
     updates: bool,
 ) -> Result<Vec<Addon>, ApiError> {
+    let mut manifests = manifests(state, id, loader, &listed).await;
     let rows = records::files(&state.db, id).await?;
     let rows: HashMap<String, ContentFile> = rows
         .into_iter()
@@ -547,10 +555,62 @@ async fn addon_list(
                 }),
                 owner: None,
                 icon_url: project.and_then(|project| project.icon_url.clone()),
+                manifest: manifests.remove(&item.path),
                 installed: None,
             }
         })
         .collect())
+}
+
+/// The jar on disk for `listed`, opened without following a link.
+fn open_jar(
+    folder: &content::folder::Folder,
+    listed: &Listed,
+) -> Option<std::fs::File> {
+    let on_disk = if listed.disabled {
+        format!("{}{}", listed.path, addons::DISABLED)
+    } else {
+        listed.path.clone()
+    };
+    Some(folder.open_file(&on_disk).ok()??.into_std())
+}
+
+/// What each mod and plugin jar in `listed` says about itself, by path. Best effort: a jar that
+/// cannot be read has none.
+async fn manifests(
+    state: &AppState,
+    id: &str,
+    loader: Option<ModLoader>,
+    listed: &[Listed],
+) -> HashMap<String, Manifest> {
+    let jars: Vec<Listed> = listed
+        .iter()
+        .filter(|listed| {
+            matches!(listed.kind, AddonKind::Mod | AddonKind::Plugin)
+        })
+        .cloned()
+        .collect();
+    if jars.is_empty() {
+        return HashMap::new();
+    }
+    let content = Arc::clone(&state.content);
+    let root = state.servers.paths().server(id);
+    let id = id.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let Ok(folder) = content::folder::Folder::open(&root) else {
+            return HashMap::new();
+        };
+        jars.into_iter()
+            .filter_map(|listed| {
+                let file = open_jar(&folder, &listed)?;
+                let key = format!("{id}/{}", listed.path);
+                let inspection = content.manifests.get(&key, file, loader)?;
+                Some((listed.path, inspection.manifest))
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// The pack a server follows, as the modpack card shows it.
@@ -671,9 +731,14 @@ pub async fn list(
             content::folder::Folder::open(&state.servers.paths().server(&id))?;
         let listed: Vec<Listed> =
             addons::scan(&folder, loader).into_iter().collect();
-        let mut addons =
-            addon_list(&state, &id, listed, query.updates == Some(true))
-                .await?;
+        let mut addons = addon_list(
+            &state,
+            &id,
+            loader,
+            listed,
+            query.updates == Some(true),
+        )
+        .await?;
         addons.retain(|addon| {
             query
                 .from_modpack
@@ -694,6 +759,7 @@ pub async fn list(
         modloader: server.loader,
         modloader_version: server.loader_version,
         game_version: server.game_version,
+        update_channel: server.update_channel,
         modpack,
         installing: activity.installing,
         error,
@@ -878,7 +944,7 @@ pub async fn get_update(
                 format!("There is no {}.", query.filename),
             )
         })?;
-    let addon = addon_list(&state, &id, vec![listed], true)
+    let addon = addon_list(&state, &id, loader, vec![listed], true)
         .await?
         .pop()
         .expect("one in, one out");
@@ -1597,4 +1663,69 @@ pub async fn decide(
     .await?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Query of GET `.../content/embedded-icon`. Mirrors `KyrosContentV1Module.getEmbeddedAddonIcon`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmbeddedIconQuery {
+    pub parent_directory: String,
+    pub filename: String,
+}
+
+/// `GET /servers/{id}/v1/worlds/{wid}/content/embedded-icon`: the logo inside a mod or plugin
+/// jar, for files Modrinth has no icon for. An addon's `manifest.icon_embedded` says it has one.
+pub async fn embedded_icon(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Query(query): Query<EmbeddedIconQuery>,
+) -> Result<([(axum::http::HeaderName, &'static str); 1], Vec<u8>), ApiError> {
+    caller.require(&state.db, &id, Level::Viewer).await?;
+    world(&id, &wid)?;
+    let kind = match query.parent_directory.as_str() {
+        "mods" => AddonKind::Mod,
+        "plugins" => AddonKind::Plugin,
+        _ => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "parent_directory is mods or plugins.",
+            ));
+        }
+    };
+    let server = servers_records::get(&state.db, &id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let loader = server.loader.as_deref().and_then(ModLoader::parse);
+    let content = Arc::clone(&state.content);
+    let root = state.servers.paths().server(&id);
+    let icon = tokio::task::spawn_blocking(move || {
+        let folder = content::folder::Folder::open(&root).ok()?;
+        let listed = addons::find(&folder, loader, &query.filename)
+            .filter(|listed| listed.kind == kind)?;
+        let key = format!("{id}/{}", listed.path);
+        let path = content
+            .manifests
+            .get(&key, open_jar(&folder, &listed)?, loader)?
+            .icon?;
+        let bytes = manifest::read_icon(open_jar(&folder, &listed)?, &path)?;
+        Some((path, bytes))
+    })
+    .await
+    .ok()
+    .flatten();
+    let (path, bytes) = icon.ok_or_else(|| {
+        ApiError::new(ErrorCode::NotFound, "That file has no embedded icon.")
+    })?;
+    let mime = match path
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    };
+    Ok(([(CONTENT_TYPE, mime)], bytes))
 }

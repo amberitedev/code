@@ -112,6 +112,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/local/servers/{id}/eula", post(servers::accept_eula))
         .route("/v1/servers", get(servers::list_v1))
         .route("/v1/servers/{id}", get(servers::get_v1))
+        .route("/v1/servers/{id}/worlds/{wid}", patch(servers::patch_world))
         .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
         .route(
             "/modrinth/v0/servers/{id}/startup",
@@ -168,6 +169,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/servers/{id}/worlds/{wid}/content/modpack/update",
             get(content::modpack).post(content::update_modpack),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/content/embedded-icon",
+            get(content::embedded_icon),
         )
         .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
         .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))

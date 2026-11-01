@@ -13,6 +13,7 @@ pub mod archive;
 pub mod folder;
 pub mod hosts;
 pub mod install;
+pub mod manifest;
 pub mod modrinth;
 pub mod pack;
 pub mod properties;
@@ -97,6 +98,8 @@ pub struct Content {
     /// Pack content, from allowed hosts only. See `hosts`.
     pub downloads: reqwest::Client,
     pub modrinth: modrinth::Modrinth,
+    /// What addon jars say about themselves, for the content list.
+    pub manifests: manifest::Cache,
     /// Updates back the world up first.
     pub backups: Arc<Backups>,
     activity: Mutex<HashMap<String, Activity>>,
@@ -122,6 +125,7 @@ impl Content {
         let http = download::client()?;
         let content = Arc::new(Self {
             modrinth: modrinth::Modrinth::new(http.clone()),
+            manifests: manifest::Cache::default(),
             downloads: hosts::client()?,
             http,
             paths,

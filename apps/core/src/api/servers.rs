@@ -1,6 +1,7 @@
 //! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`, `name`,
 //! `fs`, `ws`, and `reinstall` routes; `GET /v1/servers`, `GET /v1/servers/{id}`,
-//! `GET /v1/servers/{id}/worlds/{wid}/select-download`, `DELETE /v1/servers/{id}/flows/intro`; and
+//! `PATCH /v1/servers/{id}/worlds/{wid}`, `GET /v1/servers/{id}/worlds/{wid}/select-download`,
+//! `DELETE /v1/servers/{id}/flows/intro`; and
 //! Amberite's `POST /local/servers` and `DELETE /local/servers/{id}`. Mirrors `Archon.Servers` in
 //! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
 //! and `createServer` in `archon/cores/v1.ts`).
@@ -26,7 +27,7 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},
-    content,
+    content::{self, modrinth::ReleaseChannel},
     installs::ModLoader,
     servers::{Phase, ServerError, launch, records},
 };
@@ -359,6 +360,7 @@ pub struct LocationMetadata {
 pub struct WorldFull {
     pub id: Uuid,
     pub name: String,
+    pub update_channel: ReleaseChannel,
     pub created_at: DateTime<Utc>,
     pub is_active: bool,
     pub download_method: WorldDownloadMethod,
@@ -891,6 +893,7 @@ async fn server_full(
         worlds: vec![WorldFull {
             id,
             name: row.name,
+            update_channel: row.update_channel,
             created_at,
             is_active: true,
             download_method: WorldDownloadMethod::DirectNodeDownload,
@@ -930,4 +933,33 @@ pub async fn get_v1(
         .await?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server_full(&state, row, host(&headers)).await?))
+}
+
+/// Body of PATCH `/v1/servers/{id}/worlds/{wid}`. A world's `name` and `icon_data` are Modrinth
+/// hosting's: a Core's world is its server, named and iconed as the server. Mirrors
+/// Archon.Servers.v1.PatchWorld.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PatchWorld {
+    #[serde(default)]
+    pub update_channel: Option<ReleaseChannel>,
+}
+
+/// `PATCH /v1/servers/{id}/worlds/{wid}`.
+pub async fn patch_world(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<PatchWorld>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    super::content::world(&id, &wid)?;
+    records::get(&state.db, &id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    if let Some(channel) = request.update_channel {
+        records::set_update_channel(&state.db, &id, channel).await?;
+        activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
+            .await;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
