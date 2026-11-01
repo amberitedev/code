@@ -451,13 +451,33 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    let share_id =
-        records::share_id(&state.db, &id).await?.ok_or_else(|| {
-            ApiError::new(ErrorCode::NotFound, "This server is not shared.")
-        })?;
-    backend(&state).await?.delete_share(&share_id).await?;
-    records::set_share_id(&state.db, &id, None).await?;
+    if records::share_id(&state.db, &id).await?.is_none() {
+        return Err(ApiError::new(
+            ErrorCode::NotFound,
+            "This server is not shared.",
+        ));
+    }
+    drop_share(&state, &id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete the server's own share, if it has one, so its players stop getting it. Called when the
+/// share is deleted, when the server is, and before the server follows an instance, since a
+/// server never has two shares.
+pub async fn drop_share(state: &AppState, id: &str) -> Result<(), ApiError> {
+    let Some(share_id) = records::share_id(&state.db, id).await? else {
+        return Ok(());
+    };
+    // An unpaired Core, or a 403 to a Core paired again, means the Core was removed from the
+    // account that had the share, and the backend deleted its shares then.
+    if let Ok(backend) = backend(state).await {
+        match backend.delete_share(&share_id).await {
+            Ok(()) | Err(push::PushError::Backend { status: 403, .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    records::set_share_id(&state.db, id, None).await?;
+    Ok(())
 }
 
 /// `GET .../content/share/files`: the config files a push can carry.

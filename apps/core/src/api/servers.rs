@@ -777,6 +777,10 @@ pub async fn delete(
             "Stop the server before deleting it.",
         ));
     }
+    if let Err(error) = super::share::drop_share(&state, &id).await {
+        state.servers.release(&id);
+        return Err(error);
+    }
     let removed = remove_server(&state, &caller, &id).await;
     let members = match removed {
         Ok(members) => members,

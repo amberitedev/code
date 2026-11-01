@@ -1219,6 +1219,8 @@ async fn install_instance(
     force: bool,
 ) -> Result<(), ApiError> {
     let busy = state.content.busy(id)?;
+    // The server now reads the instance's share, so its own goes first.
+    super::share::drop_share(state, id).await?;
     let linked = Linked {
         id: instance.id,
         name: instance.name,
