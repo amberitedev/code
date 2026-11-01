@@ -645,11 +645,13 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		// The Share tab lists both kinds, each with how they got access. Only its owner reads it.
 		assert.deepEqual(
-			(await ok(await call(`/instances/${smp.id}/access`))).map(({ user, join_type, via }) => ({
-				id: user.id,
-				join_type,
-				via,
-			})),
+			(await ok(await call(`/instances/${smp.id}/access`))).users.map(
+				({ user, join_type, via }) => ({
+					id: user.id,
+					join_type,
+					via,
+				}),
+			),
 			[
 				{ id: 'stranger', join_type: 'link', via: { type: 'member' } },
 				{
@@ -679,6 +681,89 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }))
 		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
 		assert.equal((await asFriend(`/instances/${smp.id}`)).status, 401)
+		// A member's server passes the share on to its players only while its owner is a member.
+		await ok(
+			await call(`/instances/${smp.id}/invites/${shareLink.id}`, 'POST', undefined, 'mra_other'),
+		)
+		const memberServer = { instance_id: smp.id, name: 'Other SMP', address: null }
+		const memberLink = await ok(
+			await call(
+				'/servers/core2/srv2/invites',
+				'POST',
+				{ ...memberServer, max_uses: 5 },
+				'mra_other',
+			),
+		)
+		// Its link shows the server and its owner, not the instance's members.
+		const serverPreview = await ok(
+			await send(`http://local.test/v1/invites/${memberLink.id}`, 'GET'),
+		)
+		assert.deepEqual(
+			[
+				serverPreview.instance_id,
+				serverPreview.instance_name,
+				serverPreview.inviter.id,
+				serverPreview.instance_users,
+			],
+			[smp.id, 'Other SMP', 'other', []],
+		)
+		await ok(
+			await call(`/instances/${smp.id}/invites/${memberLink.id}`, 'POST', undefined, 'mra_friend'),
+		)
+		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
+		// Players do not see the member list.
+		await code(await asFriend(`/instances/${smp.id}/users`), 403, 'members_only')
+		// The share's owner sees and can revoke every server's link.
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/access`))).links.map(({ id, server }) => [
+				id,
+				server.server_id,
+			]),
+			[
+				[memberLink.id, 'srv2'],
+				[serverLink.id, 'srv1'],
+			],
+		)
+		// Checked when read: a member whose membership lapses no longer passes it on.
+		const setJoined = (value) =>
+			db
+				.prepare('UPDATE shared_members SET joined_at = ? WHERE instance_id = ? AND user_id = ?')
+				.bind(value, smp.id, 'other')
+				.run()
+		await setJoined(null)
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
+		await setJoined(new Date().toISOString())
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 200)
+		// Kicking the member drops their server, its players, and its links.
+		await ok(await call(`/instances/${smp.id}/users`, 'DELETE', { user_ids: ['other'] }))
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
+		assert.equal(
+			await db
+				.prepare('SELECT 1 FROM shared_servers WHERE core_id = ? AND server_id = ?')
+				.bind('core2', 'srv2')
+				.first(),
+			null,
+		)
+		assert.equal((await send(`http://local.test/v1/invites/${memberLink.id}`, 'GET')).status, 404)
+		// A Core that deletes or unlinks a server drops its players and links.
+		assert.equal(
+			(await call(`/instances/${smp.id}/versions`, 'GET', undefined, 'mra_other')).status,
+			200,
+			'still a player of srv1',
+		)
+		const forget = await send(
+			'http://local.test/core/players',
+			'DELETE',
+			'amc_core',
+			JSON.stringify({ server_id: 'srv1' }),
+			{ 'content-type': 'application/json' },
+		)
+		assert.equal(forget.status, 204)
+		assert.equal(
+			(await call(`/instances/${smp.id}/versions`, 'GET', undefined, 'mra_other')).status,
+			401,
+		)
+		assert.equal((await send(`http://local.test/v1/invites/${serverLink.id}`, 'GET')).status, 404)
 
 		// A Core writes the share of its own server-first server with its key.
 		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)

@@ -139,8 +139,11 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		})
 	}
 
-	/** Owner only. Everyone who gets this share's updates, each with how they got access. */
-	public async getAccess(instanceId: string): Promise<SharedInstances.Instances.v1.AccessEntry[]> {
+	/**
+	 * Owner only. Everyone who gets this share's updates, each with how they got access, and the
+	 * live links of the servers following it, revoked with `invites_v1.delete`.
+	 */
+	public async getAccess(instanceId: string): Promise<SharedInstances.Instances.v1.Access> {
 		return this.request(`/instances/${encodeURIComponent(instanceId)}/access`, {
 			api: 'sharedinstances',
 			version: 1,

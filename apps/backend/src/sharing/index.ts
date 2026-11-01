@@ -195,8 +195,67 @@ async function instance(env: Env, id: string): Promise<Instance> {
 	return result
 }
 
-/** SQL joining a server's players (`p`) to the server (`s`), which names the share it follows. */
-const PLAYERS = 'server_players p JOIN shared_servers s USING (core_id, server_id)'
+/**
+ * SQL true while the server `s` may pass its share on: its Core's owner still owns the share it
+ * follows or is a joined member of it. A member who leaves or is kicked takes their servers'
+ * players with them, even before `dropServers` deletes the rows.
+ */
+const LIVE_SERVER = `EXISTS (SELECT 1 FROM cores lc JOIN shared_instances li ON li.id = s.instance_id WHERE lc.id = s.core_id
+	AND (li.owner_id = lc.owner_id OR EXISTS (SELECT 1 FROM shared_members lm WHERE lm.instance_id = li.id AND lm.user_id = lc.owner_id AND lm.joined_at IS NOT NULL)))`
+
+/**
+ * SQL joining a server's players (`p`) to the server (`s`), which names the share it follows.
+ * Only servers that may pass it on (`LIVE_SERVER`), so everything players read goes through it.
+ */
+const PLAYERS = `server_players p JOIN shared_servers s ON s.core_id = p.core_id AND s.server_id = p.server_id AND ${LIVE_SERVER}`
+
+/** Whether `userId` owns the share or has joined it as a member. Players are not members. */
+async function joinedMember(env: Env, item: Instance, userId: string): Promise<boolean> {
+	if (item.owner_id === userId) return true
+	return !!(await env.DB.prepare(
+		'SELECT 1 FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NOT NULL',
+	)
+		.bind(item.id, userId)
+		.first())
+}
+
+/**
+ * Delete the servers of `ownerIds`' Cores that follow the share, with their players and links:
+ * they lost the share, so their servers cannot pass it on. Statements for the caller's batch.
+ */
+function dropServers(env: Env, instanceId: string, ownerIds: string[]): D1PreparedStatement[] {
+	return ownerIds.flatMap((ownerId) => [
+		env.DB.prepare(
+			'DELETE FROM shared_links WHERE instance_id = ? AND server_id IS NOT NULL AND core_id IN (SELECT id FROM cores WHERE owner_id = ?)',
+		).bind(instanceId, ownerId),
+		env.DB.prepare(
+			'DELETE FROM shared_servers WHERE instance_id = ? AND core_id IN (SELECT id FROM cores WHERE owner_id = ?)',
+		).bind(instanceId, ownerId),
+	])
+}
+
+/**
+ * A Core's server was deleted or stopped following an instance (`DELETE /core/players`): its
+ * players and links go, and the share's members are told.
+ */
+export async function forgetServer(env: Env, coreId: string, serverId: string): Promise<void> {
+	const server = await env.DB.prepare(
+		'SELECT instance_id FROM shared_servers WHERE core_id = ? AND server_id = ?',
+	)
+		.bind(coreId, serverId)
+		.first<{ instance_id: string }>()
+	await env.DB.batch([
+		env.DB.prepare('DELETE FROM shared_links WHERE core_id = ? AND server_id = ?').bind(
+			coreId,
+			serverId,
+		),
+		env.DB.prepare('DELETE FROM shared_servers WHERE core_id = ? AND server_id = ?').bind(
+			coreId,
+			serverId,
+		),
+	])
+	if (server) await notifyMembers(env, server.instance_id, 'shared_instance_users')
+}
 
 /**
  * Whoever reads the share: its owner, its members, and the players of every server that follows
@@ -783,19 +842,32 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 		.bind(item.id)
 		.first<Version>()
 	const manifest = ready ? (JSON.parse(await manifestText(env, ready)) as Manifest) : undefined
+	// A server's link invites to the server, by its Core's owner: it shows nothing of the
+	// instance's members, whom players never see.
+	const server = link.server_id
+		? await env.DB.prepare(
+				'SELECT s.name, c.owner_id FROM shared_servers s JOIN cores c ON c.id = s.core_id WHERE s.core_id = ? AND s.server_id = ?',
+			)
+				.bind(link.core_id, link.server_id)
+				.first<{ name: string; owner_id: string }>()
+		: null
+	if (link.server_id && !server)
+		throw new ApiError(404, 'not_found', 'Invite was not found', 'invite_invalid')
 	const manager = await env.DB.prepare('SELECT id,username,avatar_url FROM users WHERE id = ?')
-		.bind(item.owner_id)
+		.bind(server?.owner_id ?? item.owner_id)
 		.first<{ id: string; username: string; avatar_url: string | null }>()
-	const users = (
-		await env.DB.prepare(
-			'SELECT u.id,u.username AS name,u.avatar_url AS avatar,m.joined_at FROM shared_members m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ?',
-		)
-			.bind(item.id)
-			.all()
-	).results
+	const users = server
+		? []
+		: (
+				await env.DB.prepare(
+					'SELECT u.id,u.username AS name,u.avatar_url AS avatar,m.joined_at FROM shared_members m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ?',
+				)
+					.bind(item.id)
+					.all()
+			).results
 	return json({
 		instance_id: item.id,
-		instance_name: item.name,
+		instance_name: server?.name ?? item.name,
 		instance_icon: item.icon,
 		game_version: manifest?.game_version ?? '',
 		loader_version: manifest?.loader_version ?? '',
@@ -845,7 +917,7 @@ async function invites(
 			return empty()
 		}
 		if (request.method === 'DELETE') {
-			const [declined] = await env.DB.batch([
+			const [members, players] = await env.DB.batch([
 				env.DB.prepare(
 					'DELETE FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
 				).bind(item.id, userId),
@@ -853,7 +925,8 @@ async function invites(
 					'DELETE FROM server_players WHERE user_id = ?2 AND joined_at IS NULL AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?1)',
 				).bind(item.id, userId),
 			])
-			if (declined?.meta.changes) await notifyMembers(env, item.id, 'shared_instance_users', userId)
+			if (members?.meta.changes || players?.meta.changes)
+				await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
 	}
@@ -880,7 +953,7 @@ async function invites(
 		await env.DB.batch([
 			usable.server_id
 				? env.DB.prepare(
-						"INSERT INTO server_players (core_id,server_id,user_id,joined_at,join_type) SELECT l.core_id,l.server_id,?1,?2,'link' FROM shared_links l JOIN shared_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id AND s.instance_id = l.instance_id WHERE l.id = ?3 AND l.expiration > ?2 AND (l.max_uses = 0 OR l.uses < l.max_uses) ON CONFLICT(core_id,server_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
+						`INSERT INTO server_players (core_id,server_id,user_id,joined_at,join_type) SELECT l.core_id,l.server_id,?1,?2,'link' FROM shared_links l JOIN shared_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id AND s.instance_id = l.instance_id WHERE ${LIVE_SERVER} AND l.id = ?3 AND l.expiration > ?2 AND (l.max_uses = 0 OR l.uses < l.max_uses) ON CONFLICT(core_id,server_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type`,
 					).bind(userId, now(), inviteId)
 				: env.DB.prepare(
 						"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) SELECT instance_id,?,?,'link' FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses) ON CONFLICT(instance_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
@@ -944,6 +1017,14 @@ async function users(
 ): Promise<Response> {
 	await member(env, item, userId)
 	if (request.method === 'GET') {
+		// Players get the content, not the list of who the instance is shared with.
+		if (!(await joinedMember(env, item, userId)))
+			throw new ApiError(
+				403,
+				'forbidden',
+				'Only members see who an instance is shared with',
+				'members_only',
+			)
 		const rows = (
 			await env.DB.prepare(
 				'SELECT user_id AS id,joined_at,join_type,last_played FROM shared_members WHERE instance_id = ?',
@@ -980,6 +1061,8 @@ async function users(
 							).bind(item.id, userId),
 						]
 					: []),
+				// A member who leaves or is kicked can no longer pass the share on through their servers.
+				...dropServers(env, item.id, ids),
 			])
 			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 		}
@@ -1048,7 +1131,7 @@ async function followShare(
 	}
 	await env.DB.batch([
 		env.DB.prepare(
-			'INSERT INTO shared_servers (core_id,server_id,instance_id,name,address) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET instance_id = excluded.instance_id, name = excluded.name, address = excluded.address',
+			'INSERT INTO shared_servers (core_id,server_id,instance_id,name,address) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET instance_id = excluded.instance_id, name = excluded.name, address = COALESCE(excluded.address, address)',
 		).bind(coreId, serverId, item.id, server.name, server.address),
 		env.DB.prepare(
 			'UPDATE shared_links SET instance_id = ? WHERE core_id = ? AND server_id = ?',
@@ -1177,9 +1260,10 @@ async function serverPlayers(
 
 /**
  * `GET /v1/instances/{id}/access`, owner only, for the instance's Share tab: everyone who gets the
- * share's updates and how. Members, then the players of each server that follows it, named by
- * that server; someone is listed once for each way in. A member is kicked with `users`, a player
- * with their server's `players`.
+ * share's updates and how, and the live links of the servers that follow it. `users` lists
+ * members, then the players of each server, named by that server; someone is listed once for
+ * each way in. A member is kicked with `users`, a player with their server's `players`, and a
+ * server's link revoked with the share's own `DELETE invites/{id}`.
  */
 async function access(env: Env, item: Instance, userId: string): Promise<Response> {
 	owner(item, userId)
@@ -1190,7 +1274,8 @@ async function access(env: Env, item: Instance, userId: string): Promise<Respons
 		joined_at: string | null
 		join_type: 'invite' | 'link'
 	}
-	const [members, players] = await Promise.all([
+	type ServerRow = { core_id: string; server_id: string; name: string }
+	const [members, players, links] = await Promise.all([
 		env.DB.prepare(
 			"SELECT u.id, u.username, u.avatar_url, m.joined_at, m.join_type FROM shared_members m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ? AND m.join_type != 'owner' ORDER BY m.joined_at IS NULL, m.joined_at",
 		)
@@ -1200,20 +1285,35 @@ async function access(env: Env, item: Instance, userId: string): Promise<Respons
 			`SELECT u.id, u.username, u.avatar_url, p.joined_at, p.join_type, s.core_id, s.server_id, s.name FROM ${PLAYERS} JOIN users u ON u.id = p.user_id WHERE s.instance_id = ? ORDER BY s.name, p.joined_at IS NULL, p.joined_at`,
 		)
 			.bind(item.id)
-			.all<Person & { core_id: string; server_id: string; name: string }>(),
+			.all<Person & ServerRow>(),
+		env.DB.prepare(
+			'SELECT l.id, l.expiration, l.max_uses, l.uses, s.core_id, s.server_id, s.name FROM shared_links l JOIN shared_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id WHERE l.instance_id = ? AND l.expiration > ? ORDER BY s.name, l.expiration',
+		)
+			.bind(item.id, now())
+			.all<{ id: string; expiration: string; max_uses: number; uses: number } & ServerRow>(),
 	])
 	const entry = ({ id, username, avatar_url, joined_at, join_type }: Person) => ({
 		user: { id, username, avatar_url },
 		joined_at,
 		join_type,
 	})
-	return json([
-		...members.results.map((row) => ({ ...entry(row), via: { type: 'member' } })),
-		...players.results.map((row) => ({
-			...entry(row),
-			via: { type: 'player', core_id: row.core_id, server_id: row.server_id, name: row.name },
+	const server = ({ core_id, server_id, name }: ServerRow) => ({ core_id, server_id, name })
+	return json({
+		users: [
+			...members.results.map((row) => ({ ...entry(row), via: { type: 'member' } })),
+			...players.results.map((row) => ({
+				...entry(row),
+				via: { type: 'player', ...server(row) },
+			})),
+		],
+		links: links.results.map(({ id, expiration, max_uses, uses, ...row }) => ({
+			id,
+			expiration,
+			max_uses,
+			uses,
+			server: server(row),
 		})),
-	])
+	})
 }
 
 /**

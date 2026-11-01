@@ -13,7 +13,7 @@ import {
 import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
-import { sweepFiles } from '../sharing'
+import { forgetServer, sweepFiles } from '../sharing'
 import { MAX_SERVER_NAME, parseServers, writeServers } from './servers'
 import { waitForApproval } from './sign-in'
 import { reportStorage } from './storage'
@@ -504,6 +504,12 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 	if (path === '/core/access' && method === 'PUT') return replaceAccess(request, env)
 	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
 	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)
+	// A server was deleted or stopped following an instance: its players and links go.
+	if (path === '/core/players' && method === 'DELETE') {
+		const core = await requireListedCore(request, env)
+		await forgetServer(env, core.id, stringField(await readJson(request), 'server_id', 64))
+		return new Response(null, { status: 204 })
+	}
 	if (path === '/cores/approve/lookup' && method === 'POST') return lookupCode(request, env)
 	if (path === '/cores/approve' && method === 'POST') return approveCode(request, env)
 	if (path === '/cores' && method === 'GET') {

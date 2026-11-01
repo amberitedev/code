@@ -29,9 +29,15 @@ differs from what that client was written for, on purpose.
   players of a Core server, the people it is shared with, in the shapes of `users` and `invites`.
   They read the share the server follows without being members, and accept and leave as members
   do. A write names the share (`instance_id`) and the server's `name` and `address`. The App's
-  Play tab reaches these through `sharedinstances.players_v1`.
-- `GET /v1/instances/{id}/access`, owner only: members and the players of every server following
-  the share, each with `via` saying how they got access. For the instance's Share tab.
+  Play tab reaches these through `sharedinstances.players_v1`. Players read the share only while
+  the server's Core owner owns it or is a joined member; a member who leaves or is kicked takes
+  their servers, players, and links with them. Players get 403 `members_only` on `GET users`, and
+  a server's link previews as the server, invited by its Core's owner, with no `instance_users`.
+- `DELETE /core/players` (Core key, body `server_id`): the server was deleted or stopped following
+  an instance, so its players and links go.
+- `GET /v1/instances/{id}/access`, owner only: `users`, the members and the players of every server
+  following the share, each with `via` saying how they got access; and `links`, every server's
+  live link, which the owner revokes with `DELETE invites/{id}`. For the instance's Share tab.
 - `POST /v1/instances/{id}/versions/{v}/reports`: a member reports broken files.
 - `GET` and `PATCH /v1/storage`: the account's pool usage and kept-versions setting.
 - `GET /v1/icons/{id}`: instance icons, stored in D1 instead of a CDN.
