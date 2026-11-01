@@ -9,7 +9,7 @@ use tracing::warn;
 use super::{
     Content, Error,
     folder::{self, Folder},
-    install::identify,
+    install::{MAX_FILE, identify},
     modrinth::{self, Version},
     records::{self, ContentFile, Origin},
 };
@@ -288,7 +288,7 @@ async fn place_version(
         &staging,
         &FileDownload {
             hash,
-            limit: Some(file.size.max(1)),
+            limit: Some(MAX_FILE),
             progress: &download::quiet,
         },
     )
