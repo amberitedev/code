@@ -7,6 +7,7 @@ import { createApp } from 'vue'
 
 import { config } from '@/config'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
+import { installCrashScreen } from '@/features/crash'
 import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
 import i18nPlugin from '@/plugins/i18n'
@@ -23,6 +24,7 @@ async function bootstrap() {
 	])
 	debugStartup('Frontend entry module evaluated')
 	const app = createApp(App)
+	installCrashScreen(app, router)
 	if (!config.accountApiUrl) setupErrorReporting(app, router)
 
 	focusManager.setEventListener((setFocused) => {

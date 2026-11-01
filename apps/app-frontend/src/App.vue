@@ -103,6 +103,7 @@ import {
 	provideCoreActions,
 	useCores,
 } from '@/features/cores/use-cores'
+import { pageGeneration } from '@/features/crash'
 import ServerPlayHandler from '@/features/hosting/play-handler.vue'
 import { prefetchHostingData } from '@/features/hosting/prefetch'
 import {
@@ -2152,7 +2153,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<RouterView v-else v-slot="{ Component }">
 				<template v-if="Component">
 					<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
-						<component :is="Component"></component>
+						<component :is="Component" :key="pageGeneration"></component>
 					</Suspense>
 				</template>
 			</RouterView>

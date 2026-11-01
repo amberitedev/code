@@ -124,6 +124,9 @@ developer's go-ahead.
 - Take the "before" screenshot before you edit; the App reloads UI changes on its own, so the
   "after" is the same tab a moment later. Motion and timing changes get a short recording
   (`preview_recording_start` / `preview_recording_stop`) instead.
+- A full-screen "Something broke" (`[data-crash-screen]`) means a page threw while rendering. Its
+  Details hold the route, source, and stack; the console has the same under `[crash]`. Errors that
+  leave the page usable are only logged, under `[error]`.
 - The first load of a tab takes around 20 seconds and shows a blank page meanwhile. Wait for the
   sidebar before judging or screenshotting.
 - A second tab that T3 Code is not showing does not lay out: `innerText` reads as empty and
