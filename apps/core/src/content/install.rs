@@ -386,7 +386,7 @@ async fn install_platform(
 }
 
 /// Download a Modrinth pack version's `.mrpack` into the shared store and return its SHA-1.
-async fn fetch_modrinth_pack(
+pub(super) async fn fetch_modrinth_pack(
     content: &Content,
     dirs: &SharedDirs,
     version_id: &str,

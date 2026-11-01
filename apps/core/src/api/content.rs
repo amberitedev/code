@@ -21,6 +21,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -38,7 +39,7 @@ use crate::{
         install::{self as content_install, Linked, PackSource},
         pack,
         records::{self, ContentFile, Origin, Pack, PendingPack, SideToggle},
-        shared::{self, SharedVersion},
+        shared,
     },
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
@@ -354,12 +355,16 @@ pub enum InstallWorldContent {
         #[serde(default)]
         properties: Option<PropertiesFields>,
     },
-    /// Amberite: apply a version of an App instance's share (`content::shared`). On a running
-    /// server it waits for the server to stop, or with `restart` stops it, applies, and starts
-    /// it again.
+    /// Amberite: apply the latest version of an App instance's share (`content::shared`), which
+    /// Core reads from the backend itself. On a running server it waits for the server to stop,
+    /// or with `restart` stops it, applies, and starts it again.
     Instance {
         instance: UploadedInstance,
-        share: SharedVersion,
+        shared_instance_id: String,
+        /// The backend's read ticket for this Core and share, which the App gets with its user's
+        /// session. Required from the App; the local CLI has none and reads as the owner.
+        #[serde(default)]
+        ticket: Option<String>,
         #[serde(default)]
         properties: Option<PropertiesFields>,
         #[serde(default)]
@@ -1141,13 +1146,22 @@ pub async fn install(
         }
         InstallWorldContent::Instance {
             instance,
-            share,
+            shared_instance_id,
+            ticket,
             properties,
             restart,
             force,
         } => {
             install_instance(
-                &state, &id, instance, share, properties, restart, force,
+                &state,
+                &id,
+                &caller,
+                ticket,
+                instance,
+                shared_instance_id,
+                properties,
+                restart,
+                force,
             )
             .await?;
         }
@@ -1206,25 +1220,65 @@ fn spawn_pack(
     );
 }
 
-/// Apply a share version to a server. A stopped server installs it now. A running one keeps
-/// running: Core fetches the version, then it waits for the server to stop, or with `restart`
-/// Core stops the server, and it applies then (see [`apply_pending`]).
+/// Apply the latest version of a share to a server, which Core reads from the backend with its
+/// own key and the `ticket` of the user who asked, so it reads only what that user can. Only the
+/// local CLI reads without one, as the Core's owner. The version is read before this returns,
+/// so one that cannot go fails the request. A stopped server installs it now. A running one keeps running: Core fetches the
+/// version's files, then it waits for the server to stop, or with `restart` Core stops the
+/// server, and it applies then (see [`apply_pending`]).
+#[allow(clippy::too_many_arguments)]
 async fn install_instance(
     state: &Arc<AppState>,
     id: &str,
+    caller: &Caller,
+    ticket: Option<String>,
     instance: UploadedInstance,
-    share: SharedVersion,
+    shared_instance_id: String,
     properties: Option<PropertiesFields>,
     restart: bool,
     force: bool,
 ) -> Result<(), ApiError> {
     let busy = state.content.busy(id)?;
-    let linked = Linked {
-        id: instance.id,
-        name: instance.name,
-        shared_instance_id: share.shared_instance_id.clone(),
-        version: share.version.into(),
+    let backend = super::share::backend(state).await?;
+    let backend = match (ticket, caller) {
+        (Some(ticket), _) => backend.with_read_ticket(ticket),
+        (None, Caller::Local) => backend,
+        // Without a ticket the backend reads as the Core's owner, which is not who asked.
+        (None, Caller::Session { .. }) => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "An instance install needs a read ticket for this Core.",
+            ));
+        }
     };
+    let version = consume::ready_version(&backend, &shared_instance_id)
+        .await
+        .map_err(|error| match error {
+            // The backend names why by its code. It checks the Core owner's account before the
+            // reader's, so a locked or blacklisted account is most likely the owner's.
+            consume::ReadError::Denied { code, description } => {
+                let message = match code.as_str() {
+                    "not_member" => {
+                        "You no longer have access to this instance's share."
+                    }
+                    "ticket_invalid" => {
+                        "The request to update the server expired. Try again."
+                    }
+                    "account_locked" | "blacklisted" => {
+                        "The owner of this Core cannot use sharing right now."
+                    }
+                    _ => description.as_str(),
+                };
+                ApiError::new(ErrorCode::Forbidden, message)
+            }
+            consume::ReadError::Backend(error) => ApiError::from(error),
+            error @ consume::ReadError::NoVersion => {
+                ApiError::new(ErrorCode::NotFound, error.to_string())
+            }
+            error @ consume::ReadError::NotReady => {
+                ApiError::new(ErrorCode::Conflict, error.to_string())
+            }
+        })?;
     match state.servers.hold(id) {
         Ok(hold) => {
             // A version still waiting from an earlier push is superseded by this one.
@@ -1236,24 +1290,33 @@ async fn install_instance(
                 busy,
                 Installing::Modpack,
                 move |content, hold, progress| async move {
-                    let sha1 =
-                        match shared::write_pack(&content, hold.id(), &share)
-                            .await
-                        {
-                            Ok(sha1) => sha1,
-                            Err(error) => {
-                                records::set_pack_error(
-                                    &content.db,
-                                    hold.id(),
-                                    Some(&format!("{error:#}")),
-                                )
-                                .await?;
-                                return Err(error);
-                            }
-                        };
+                    let written = shared::write_pack(
+                        &content,
+                        hold.id(),
+                        version,
+                        &instance.name,
+                    )
+                    .await;
+                    let (sha1, version) = match written {
+                        Ok(written) => written,
+                        Err(error) => {
+                            records::set_pack_error(
+                                &content.db,
+                                hold.id(),
+                                Some(&format!("{error:#}")),
+                            )
+                            .await?;
+                            return Err(error);
+                        }
+                    };
                     let source = PackSource::Stored {
                         sha1,
-                        instance: Some(linked),
+                        instance: Some(Linked {
+                            id: instance.id,
+                            name: instance.name,
+                            shared_instance_id,
+                            version: version.into(),
+                        }),
                     };
                     let change = content_install::pack(
                         &content, &hold, &progress, source, properties, force,
@@ -1268,16 +1331,22 @@ async fn install_instance(
             let state = Arc::clone(state);
             let id = id.to_owned();
             tokio::spawn(async move {
-                let written =
-                    shared::write_pack(&state.content, &id, &share).await;
+                let written = shared::write_pack(
+                    &state.content,
+                    &id,
+                    version,
+                    &instance.name,
+                )
+                .await;
                 drop(busy);
                 let result = async {
+                    let (sha1, version) = written?;
                     let pending = PendingPack {
-                        sha1: written?,
-                        instance_id: linked.id,
-                        instance_name: linked.name,
-                        shared_instance_id: linked.shared_instance_id,
-                        shared_version: linked.version,
+                        sha1,
+                        instance_id: instance.id,
+                        instance_name: instance.name,
+                        shared_instance_id,
+                        shared_version: version.into(),
                         start_after: restart,
                         force,
                     };

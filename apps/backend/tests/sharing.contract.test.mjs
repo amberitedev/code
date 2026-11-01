@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, sign, verify } from 'node:crypto'
 import test from 'node:test'
 
 import { startBackend } from './worker.mjs'
@@ -604,8 +604,8 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		await code(
 			await asCore(`/instances/${serverShare.id}/versions`, 'GET', undefined, 'core2'),
-			403,
-			'not_owner',
+			401,
+			'not_member',
 		)
 		await code(
 			await asCore('/instances', 'POST', { name: 'Taken', server_id: 'server' }, 'core2'),
@@ -625,6 +625,94 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		await ok(await asCore(`/instances/${leaving.id}`, 'DELETE'))
 		await db.prepare('DELETE FROM sharing_blacklist WHERE user_id = ?').bind('owner').run()
+
+		// A server following a share: the Core reads it for the user who asked, with the read
+		// ticket that user's App got for this Core and share. Without one it reads as its owner.
+		const readFor = (share, ticket, core = 'core') =>
+			send(
+				`http://local.test/v1/instances/${share}/versions`,
+				'GET',
+				`amc_${core}`,
+				undefined,
+				ticket ? { 'x-amberite-read-ticket': ticket } : {},
+			)
+		const readTicket = async (share, user, core = 'core') => {
+			const { ticket } = await ok(
+				await call(`/instances/${share}/server-ticket`, 'POST', { core_id: core }, `mra_${user}`),
+			)
+			assert.deepEqual(
+				(({ kind, sub, aud, share }) => ({ kind, sub, aud, share }))(decode(ticket).claims),
+				{ kind: 'read', sub: user, aud: core, share },
+			)
+			return ticket
+		}
+		// The Core's owner is a member of the stranger's share, so the Core reads it without a
+		// ticket, as for its CLI.
+		const strangers = await ok(
+			await call('/instances', 'POST', { name: 'Private' }, 'mra_stranger'),
+		)
+		const join = (share, user) =>
+			db
+				.prepare(
+					"INSERT INTO shared_members (instance_id,user_id,join_type,joined_at) VALUES (?,?,'invite',?)",
+				)
+				.bind(share, user, new Date().toISOString())
+				.run()
+		await join(strangers.id, 'owner')
+		await code(await readFor(strangers.id), 404, 'version_not_found')
+		// A Core that wrote a user into its access list still cannot read as them without their
+		// ticket: it reads as its owner, who is not a member of the friend's share.
+		await db
+			.prepare("INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend',?)")
+			.bind(new Date().toISOString())
+			.run()
+		const friends = await ok(await call('/instances', 'POST', { name: 'Mine' }, 'mra_friend'))
+		await code(await readFor(friends.id), 401, 'not_member')
+		// A forged ticket, or one signed by another key, is refused.
+		await code(await readFor(friends.id, 'forged'), 403, 'ticket_invalid')
+		const other = generateKeyPairSync('ed25519').privateKey
+		const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
+		const exp = Math.floor(Date.now() / 1000) + 300
+		const unsigned = `${encode({ alg: 'EdDSA', typ: 'JWT', kid })}.${encode({ iss: 'amberite', kind: 'read', sub: 'friend', aud: 'core', share: friends.id, exp })}`
+		const forged = `${unsigned}.${sign(null, Buffer.from(unsigned), other).toString('base64url')}`
+		await code(await readFor(friends.id, forged), 403, 'ticket_invalid')
+		// With the user's own ticket the Core reads their share, and only that share on that Core.
+		const friendTicket = await readTicket(friends.id, 'friend')
+		await code(await readFor(friends.id, friendTicket), 404, 'version_not_found')
+		await code(await readFor(strangers.id, friendTicket), 403, 'ticket_invalid')
+		await code(await readFor(friends.id, friendTicket, 'core2'), 403, 'ticket_invalid')
+		await code(
+			await readFor(friends.id, await readTicket(friends.id, 'friend', 'core2')),
+			403,
+			'ticket_invalid',
+		)
+		// Only someone who can read a share gets a ticket for it, and a member's ticket reads only
+		// while they still can.
+		await code(
+			await call(
+				`/instances/${strangers.id}/server-ticket`,
+				'POST',
+				{ core_id: 'core' },
+				'mra_friend',
+			),
+			401,
+			'not_member',
+		)
+		await join(strangers.id, 'friend')
+		const memberTicket = await readTicket(strangers.id, 'friend')
+		await code(await readFor(strangers.id, memberTicket), 404, 'version_not_found')
+		await db
+			.prepare("DELETE FROM shared_members WHERE instance_id = ? AND user_id = 'friend'")
+			.bind(strangers.id)
+			.run()
+		await code(await readFor(strangers.id, memberTicket), 401, 'not_member')
+		// A Core's read gets no owner extras, even of its owner's share still uploading.
+		const coreRead = await ok(await readFor(alone.id))
+		assert.equal(coreRead.ready, false)
+		assert.equal(coreRead.store, undefined)
+		assert.equal(coreRead.reports, undefined)
+		assert.ok((await ok(await call(`/instances/${alone.id}/versions`))).store)
+
 		// Removing the Core from the account deletes its server-first shares.
 		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))
 		assert.equal(
