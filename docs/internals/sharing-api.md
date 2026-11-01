@@ -11,8 +11,8 @@ differs from what that client was written for, on purpose.
 - A version carries `root` (R), and each `external_files` entry carries `sha256`, `object`,
   `object_size`, and `key` for non-content files. `url` is `pool:<object>`, which nothing fetches.
   See `pool.md`, "Protocol".
-- A ready version adds `pool` (holders and a fetch ticket) for members. An unconfirmed one adds
-  `store` (home Core and a store ticket) for the owner. The owner also gets `reports`.
+- A ready version adds `pool` (holders and a fetch ticket) for members, unless it has no pool
+  files (`root` is the empty root). An unconfirmed one adds `store` (home Core and a store ticket) for the owner. The owner also gets `reports`.
 - The push may name `server_core`, the owner's Core running a server of the instance, where the
   share is then homed.
 - The unauthenticated invite preview (`GET /v1/invites/{id}?version=true`) returns the latest
