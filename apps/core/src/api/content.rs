@@ -1113,12 +1113,14 @@ pub async fn install(
                 })?;
             let requested = Some(version).filter(|version| !version.is_empty());
             let (hold, busy) = begin(&state, &id)?;
+            let access = state.access.clone();
             state.content.spawn(
                 hold,
                 busy,
                 Installing::Loader,
                 move |content, hold, progress| async move {
                     records::unlink(&content.db, hold.id()).await?;
+                    access.owed.notify_one();
                     content_install::loader(
                         &content,
                         &hold,
@@ -1193,15 +1195,19 @@ fn spawn_pack(
     properties: Option<PropertiesFields>,
     force: bool,
 ) {
+    let access = state.access.clone();
     state.content.spawn(
         hold,
         busy,
         Installing::Modpack,
         move |content, hold, progress| async move {
-            content_install::pack(
+            let result = content_install::pack(
                 &content, &hold, &progress, source, properties, force,
             )
-            .await
+            .await;
+            // A pack of its own may have dropped the players of the instance it followed.
+            access.owed.notify_one();
+            result
         },
     );
 }
@@ -1255,10 +1261,14 @@ async fn install_instance(
                         sha1,
                         instance: Some(linked),
                     };
-                    let change = content_install::pack(
+                    let installed = content_install::pack(
                         &content, &hold, &progress, source, properties, force,
                     )
-                    .await?;
+                    .await;
+                    // Another instance may have dropped the players of the one it
+                    // followed, even when a later step failed.
+                    app.access.owed.notify_one();
+                    let change = installed?;
                     drop_own_share(&app, hold.id()).await?;
                     Ok(change)
                 },
@@ -1342,6 +1352,7 @@ pub async fn apply_pending(state: Arc<AppState>, id: String) {
         return;
     }
     let (start_after, force) = (pending.start_after, pending.force);
+    let access = state.access.clone();
     let source = PackSource::Stored {
         sha1: pending.sha1,
         instance: Some(Linked {
@@ -1360,6 +1371,8 @@ pub async fn apply_pending(state: Arc<AppState>, id: String) {
                 &content, &hold, &progress, source, None, force,
             )
             .await;
+            // Another instance may have dropped the players of the one it followed.
+            access.owed.notify_one();
             if start_after {
                 // Back up either way: a failed update changes nothing it could not finish.
                 let id = hold.id().to_owned();
@@ -1467,6 +1480,7 @@ pub async fn unlink(
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     records::unlink(&state.db, &id).await?;
+    state.access.owed.notify_one();
     state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)

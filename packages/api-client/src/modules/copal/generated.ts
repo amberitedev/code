@@ -206,7 +206,9 @@ user: string, server_id: string, server_name: string, role: Role, };
 
 export type Remove = { user_id: string, server_id: string, keep_core: boolean, };
 
-export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "delete_share", share_id: string, } | { "type": "report_state" } | { "type": "report_storage" };
+export type ForgetPlayers = { server_id: string, share_id: string | null, };
+
+export type OwedCall = { "type": "grant" } & Grant | { "type": "remove" } & Remove | { "type": "delete_share", share_id: string, } | { "type": "forget_players" } & ForgetPlayers | { "type": "report_state" } | { "type": "report_storage" };
 
 export type StorageReport = { 
 /**

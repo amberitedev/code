@@ -109,7 +109,12 @@ const busyWarning = computed(() =>
 const shareWorld = computed(() =>
 	serverContext.serverFull.value?.worlds.find((world) => world.id === worldId.value),
 )
-const sharedInstanceId = computed(() => shareWorld.value?.content?.shared_instance_id ?? null)
+// Config pushes go to the server's own share; a server that follows an instance has none.
+const sharedInstanceId = computed(() =>
+	serverContext.server.value?.linked_instance
+		? null
+		: (shareWorld.value?.content?.shared_instance_id ?? null),
+)
 const sharedInstanceInstalledOnce = useSharedInstanceInstalledOnce(sharedInstanceId)
 const configPushModal = ref<InstanceType<typeof ConfigPushPromptModal>>()
 const configPushDeferredPaths = new Set<string>()

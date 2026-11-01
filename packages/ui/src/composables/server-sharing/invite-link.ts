@@ -18,21 +18,23 @@ export function findActiveInviteLink(
 
 export async function ensureServerInviteLink(
 	client: AbstractModrinthClient,
+	serverId: string,
 	instanceId: string,
 	remainingSlots?: number,
 	options: { maximizeUses?: boolean } = {},
 ): Promise<string> {
-	const active = findActiveInviteLink(await client.sharedinstances.invites_v1.list(instanceId))
+	const players = client.sharedinstances.players_v1
+	const active = findActiveInviteLink(await players.links(serverId, instanceId))
 	if (active) return active.id
 
 	let availableSlots = remainingSlots
 	if (availableSlots === undefined) {
-		const players = await client.sharedinstances.instances_v1.getUsers(instanceId)
-		availableSlots = remainingPlayerSlots(players.users.length)
+		const listed = await players.list(serverId, instanceId)
+		availableSlots = remainingPlayerSlots(listed.users.length)
 	}
 	if (availableSlots === 0) throw new Error('This shared instance has no available player slots.')
 
-	const invite = await client.sharedinstances.invites_v1.create(instanceId, {
+	const invite = await players.createLink(serverId, instanceId, {
 		max_age: INVITE_LINK_MAX_AGE_SECONDS,
 		max_uses: options.maximizeUses
 			? availableSlots
@@ -61,7 +63,7 @@ export async function createServerInviteLink(
 		(await client.archon.content_v1.share(serverId, worldId, [], { timeout: 20_000 }))
 			.shared_instance_id
 	if (!isCurrent()) return null
-	const inviteId = await ensureServerInviteLink(client, instanceId, undefined, {
+	const inviteId = await ensureServerInviteLink(client, serverId, instanceId, undefined, {
 		maximizeUses: true,
 	})
 	return `${siteUrl.replace(/\/$/, '')}/share/${encodeURIComponent(inviteId)}`

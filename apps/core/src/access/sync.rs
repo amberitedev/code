@@ -406,6 +406,10 @@ impl Sync {
                 )
                 .await
             }
+            OwedCall::ForgetPlayers(forget) => {
+                self.call(key, Method::DELETE, "/core/players", forget)
+                    .await
+            }
             OwedCall::ReportState => {
                 self.call(
                     key,

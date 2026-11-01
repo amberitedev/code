@@ -23,7 +23,7 @@
 				:loading="players.members.isLoading.value"
 				:can-manage="canSetup"
 				:disabled="players.membershipMutation.isPending.value || actionsLocked || migrating"
-				:show-push-update="!!sharedInstanceId"
+				:show-push-update="!!sharedInstanceId && !followsInstance"
 				:push-update-disabled="actionsLocked || migrating || !worldId"
 				:push-update-pending="previewQuery.isFetching.value || pendingAction === 'push'"
 				:invite-disabled="actionsLocked || migrating || !worldId"
@@ -154,7 +154,8 @@ const ensureServerRunning = useEnsureServerRunning()
 const world = computed(() => serverFull.value?.worlds.find((world) => world.id === worldId.value))
 const sharedInstanceId = computed(() => world.value?.content?.shared_instance_id ?? null)
 const needsUpdate = computed(() => world.value?.content?.shared_instance_needs_update ?? false)
-const players = useServerPlayers(sharedInstanceId, canSetup)
+const followsInstance = computed(() => !!server.value?.linked_instance)
+const players = useServerPlayers(serverId, sharedInstanceId, canSetup)
 const invitePlayersModal = ref<InstanceType<typeof InvitePlayersModal>>()
 const inviteHandoff = injectServerInviteHandoff(null)
 const migration = injectServerPlayMigration(null)
@@ -212,7 +213,10 @@ async function performAction(action: Action, target: ServerShareActionTarget) {
 	const { worldId: targetWorldId, configPaths, isCurrent: sameContext } = target
 	let id = serverFull.value?.worlds.find((world) => world.id === targetWorldId)?.content
 		?.shared_instance_id
+	// A server that follows an instance reads that instance's share, which only the instance
+	// owner's App pushes: here it only manages players and plays.
 	const shouldShare =
+		!followsInstance.value &&
 		canSetup.value &&
 		(!id ||
 			action === 'push' ||

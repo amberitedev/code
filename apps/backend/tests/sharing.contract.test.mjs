@@ -163,8 +163,23 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const info = await ok(await call(`/instances/${id}`))
 		assert.equal(info.name, 'Proof pack')
 		assert.deepEqual(Buffer.from(await (await send(info.icon, 'GET')).arrayBuffer()), icon)
-		await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend'] }))
+		assert.equal(info.installed_once, false)
+		assert.equal(info.linked_server, null)
+		await code(await call(`/instances/${id}/server-icon`), 404, 'icon_not_found')
+		// Inviting a batch invites those who accept invitations and names the rest.
+		assert.deepEqual(
+			await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend', 'stranger'] })),
+			{ failed: ['stranger'] },
+		)
 		assert.equal(await notifications(), 0, 'no invitation before there is something to install')
+
+		// An invite link previews the share without signing in; there is no version to show yet.
+		const link = await ok(await call(`/instances/${id}/invites`, 'POST', {}))
+		const preview = async (search = '?version=true') =>
+			ok(await send(`http://local.test/v1/invites/${link.id}${search}`, 'GET'))
+		const empty = await preview()
+		assert.deepEqual(empty.inviter, { id: 'owner', name: 'owner', avatar: null })
+		assert.equal(empty.version, undefined)
 
 		// A version with only Modrinth content needs no Core and is ready at once.
 		const first = await ok(await push(id, []))
@@ -233,12 +248,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			1,
 			'members get the latest ready version',
 		)
-		const unready = await ok(
-			await call(`/instances/${id}/versions/2`, 'GET', undefined, 'mra_friend'),
+		assert.equal(
+			(await call(`/instances/${id}/versions/2`, 'GET', undefined, 'mra_friend')).status,
+			404,
+			'members do not see a version before it is ready',
 		)
-		assert.equal(unready.ready, false)
-		assert.equal(unready.store, undefined, 'only the owner gets the store ticket')
-		assert.equal(unready.reports, undefined)
+		assert.equal(
+			(await ok(await call(`/instances/${id}`, 'GET', undefined, 'mra_friend'))).installed_once,
+			true,
+		)
 
 		// Pushing the same files again resumes the upload; other files wait for it.
 		const resumed = await ok(await push(id, [jar, config]))
@@ -283,6 +301,20 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_stranger')).status,
 			401,
 		)
+
+		// The preview shows the ready version, but never file keys or pool access.
+		const shown = (await preview()).version
+		assert.equal(shown.version, 2)
+		assert.equal(shown.ready, true)
+		assert.deepEqual(
+			shown.external_files.map((entry) => entry.file_name),
+			[jar.file_name, config.file_name],
+		)
+		assert.ok(shown.external_files.every((entry) => entry.key === undefined))
+		assert.equal(shown.pool, undefined)
+		assert.equal(shown.store, undefined)
+		assert.doesNotMatch(JSON.stringify(shown), /ticket/)
+		assert.equal((await preview('')).version, undefined)
 
 		// A member reports broken files; the owner sees it and nobody else.
 		await ok(
@@ -420,6 +452,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend')).status,
 			401,
 		)
+		assert.equal(
+			(await ok(await call(`/instances/${id}`))).installed_once,
+			true,
+			'a share stays installed once after its last friend leaves',
+		)
+
+		// A quarantined share's invite preview shows no version.
+		await db.prepare('UPDATE shared_instances SET quarantine = 1 WHERE id = ?').bind(id).run()
+		assert.equal((await preview()).version, undefined)
 
 		// Deleting a share removes its manifests.
 		await ok(await call(`/instances/${id}`, 'DELETE'))
@@ -553,6 +594,237 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
 
+		// Players of a server read the share it follows without being members, until removed.
+		const smp = await ok(await call('/instances', 'POST', { name: 'SMP' }))
+		await ok(await push(smp.id, []))
+		const server = { instance_id: smp.id, name: 'SMP server', port: 25570 }
+		assert.deepEqual(
+			await ok(
+				await call('/servers/core/srv1/players', 'POST', { ...server, user_ids: ['friend'] }),
+			),
+			{ failed: [] },
+		)
+		const asFriend = (path) => call(path, 'GET', undefined, 'mra_friend')
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401, 'until accepted')
+		await ok(await call(`/instances/${smp.id}/invites/pending`, 'POST', undefined, 'mra_friend'))
+		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
+		// Players join at the Core's last reported address with the server's port.
+		const linkedDomain = async () =>
+			(await ok(await asFriend(`/instances/${smp.id}`))).linked_server.domain
+		assert.deepEqual((await ok(await asFriend(`/instances/${smp.id}`))).linked_server, {
+			domain: '192.168.1.2:25570',
+			region: '',
+			online_status: null,
+		})
+		await db
+			.prepare('UPDATE cores SET public_address = ? WHERE id = ?')
+			.bind('https://203.0.113.7:16662', 'core')
+			.run()
+		assert.equal(await linkedDomain(), '203.0.113.7:25570', 'the outside address once reported')
+		// The router's port is used while it is on the Core's public IP, and a write without one
+		// keeps it. A stale outside on another IP loses to the public address the Core reports.
+		const writePlayers = (outside) =>
+			call('/servers/core/srv1/players', 'POST', { ...server, outside, user_ids: [] })
+		await ok(await writePlayers({ ip: '203.0.113.7', port: 40000 }))
+		assert.equal(await linkedDomain(), '203.0.113.7:40000')
+		await ok(await writePlayers(null))
+		assert.equal(await linkedDomain(), '203.0.113.7:40000')
+		await ok(await writePlayers({ ip: '198.51.100.4', port: 40000 }))
+		assert.equal(await linkedDomain(), '203.0.113.7:25570')
+		assert.equal((await writePlayers({ ip: 'evil.example', port: 1 })).status, 400)
+		await db.prepare('UPDATE shared_servers SET outside = NULL').run()
+		await db.prepare('UPDATE cores SET public_address = NULL WHERE id = ?').bind('core').run()
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/users`))).users.map((user) => user.id),
+			['owner'],
+			'a player is not a member',
+		)
+		assert.deepEqual(
+			(await ok(await call('/servers/core/srv1/players'))).users.map((user) => user.id),
+			['friend'],
+		)
+		// A member by the share's link, and a player by the server's link.
+		const shareLink = await ok(await call(`/instances/${smp.id}/invites`, 'POST', {}))
+		await ok(
+			await call(`/instances/${smp.id}/invites/${shareLink.id}`, 'POST', undefined, 'mra_stranger'),
+		)
+		const serverLink = await ok(
+			await call('/servers/core/srv1/invites', 'POST', { ...server, max_uses: 5 }),
+		)
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/invites`))).map((invite) => invite.id),
+			[shareLink.id],
+			"a server's links are listed with its players",
+		)
+		await ok(
+			await call(`/instances/${smp.id}/invites/${serverLink.id}`, 'POST', undefined, 'mra_other'),
+		)
+		assert.equal(
+			(await ok(await call(`/instances/${smp.id}/versions`, 'GET', undefined, 'mra_other')))
+				.version,
+			1,
+		)
+		// The Share tab lists both kinds, each with how they got access. Only its owner reads it.
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/access`))).users.map(
+				({ user, join_type, via }) => ({
+					id: user.id,
+					join_type,
+					via,
+				}),
+			),
+			[
+				{ id: 'stranger', join_type: 'link', via: { type: 'member' } },
+				{
+					id: 'friend',
+					join_type: 'invite',
+					via: { type: 'player', core_id: 'core', server_id: 'srv1', name: server.name },
+				},
+				{
+					id: 'other',
+					join_type: 'link',
+					via: { type: 'player', core_id: 'core', server_id: 'srv1', name: server.name },
+				},
+			],
+		)
+		await code(await asFriend(`/instances/${smp.id}/access`), 403, 'not_owner')
+		await code(
+			await call(`/instances/${smp.id}/access`, 'GET', undefined, 'amc_core'),
+			403,
+			'not_owner',
+		)
+		// Only the Core's owner or the share's owner removes a player; removal ends their access.
+		assert.equal(
+			(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }, 'mra_stranger'))
+				.status,
+			403,
+		)
+		await ok(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }))
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
+		assert.equal((await asFriend(`/instances/${smp.id}`)).status, 401)
+		// A member's server passes the share on to its players only while its owner is a member.
+		await ok(
+			await call(`/instances/${smp.id}/invites/${shareLink.id}`, 'POST', undefined, 'mra_other'),
+		)
+		const memberServer = { instance_id: smp.id, name: 'Other SMP', port: 25565 }
+		const memberLink = await ok(
+			await call(
+				'/servers/core2/srv2/invites',
+				'POST',
+				{ ...memberServer, max_uses: 5 },
+				'mra_other',
+			),
+		)
+		// Its link shows the server and its owner, not the instance's members.
+		const serverPreview = await ok(
+			await send(`http://local.test/v1/invites/${memberLink.id}`, 'GET'),
+		)
+		assert.deepEqual(
+			[
+				serverPreview.instance_id,
+				serverPreview.instance_name,
+				serverPreview.inviter.id,
+				serverPreview.instance_users,
+			],
+			[smp.id, 'Other SMP', 'other', []],
+		)
+		await ok(
+			await call(`/instances/${smp.id}/invites/${memberLink.id}`, 'POST', undefined, 'mra_friend'),
+		)
+		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
+		// Players do not see the member list.
+		await code(await asFriend(`/instances/${smp.id}/users`), 403, 'members_only')
+		// The share's owner sees and can revoke every server's link.
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/access`))).links.map(({ id, server }) => [
+				id,
+				server.server_id,
+			]),
+			[
+				[memberLink.id, 'srv2'],
+				[serverLink.id, 'srv1'],
+			],
+		)
+		// Checked when read: a member whose membership lapses no longer passes it on.
+		const setJoined = (value) =>
+			db
+				.prepare('UPDATE shared_members SET joined_at = ? WHERE instance_id = ? AND user_id = ?')
+				.bind(value, smp.id, 'other')
+				.run()
+		await setJoined(null)
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
+		await setJoined(new Date().toISOString())
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 200)
+		// Kicking the member drops their server, its players, and its links.
+		await ok(await call(`/instances/${smp.id}/users`, 'DELETE', { user_ids: ['other'] }))
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
+		assert.equal(
+			await db
+				.prepare('SELECT 1 FROM shared_servers WHERE core_id = ? AND server_id = ?')
+				.bind('core2', 'srv2')
+				.first(),
+			null,
+		)
+		assert.equal((await send(`http://local.test/v1/invites/${memberLink.id}`, 'GET')).status, 404)
+		// A Core that deletes or unlinks a server drops its players and links.
+		assert.equal(
+			(await call(`/instances/${smp.id}/versions`, 'GET', undefined, 'mra_other')).status,
+			200,
+			'still a player of srv1',
+		)
+		const forget = await send(
+			'http://local.test/core/players',
+			'DELETE',
+			'amc_core',
+			JSON.stringify({ server_id: 'srv1' }),
+			{ 'content-type': 'application/json' },
+		)
+		assert.equal(forget.status, 204)
+		assert.equal(
+			(await call(`/instances/${smp.id}/versions`, 'GET', undefined, 'mra_other')).status,
+			401,
+		)
+		assert.equal((await send(`http://local.test/v1/invites/${serverLink.id}`, 'GET')).status, 404)
+		// A server that follows another share drops its players: they were given the old one.
+		const asOther = (path, method = 'GET') => call(path, method, undefined, 'mra_other')
+		const rejoin = await ok(
+			await call('/servers/core/srv1/invites', 'POST', { ...server, max_uses: 1 }),
+		)
+		await ok(await asOther(`/instances/${smp.id}/invites/${rejoin.id}`, 'POST'))
+		assert.equal((await asOther(`/instances/${smp.id}/versions`)).status, 200)
+		const next = await ok(await call('/instances', 'POST', { name: 'Next' }))
+		await ok(
+			await call('/servers/core/srv1/invites', 'POST', {
+				...server,
+				instance_id: next.id,
+				max_uses: 1,
+			}),
+		)
+		assert.equal((await asOther(`/instances/${smp.id}/versions`)).status, 401)
+		assert.deepEqual((await ok(await call('/servers/core/srv1/players'))).users, [])
+		// The Core's late forget of the old share keeps the players of the one it follows now.
+		await ok(
+			await call('/servers/core/srv1/players', 'POST', {
+				...server,
+				instance_id: next.id,
+				user_ids: ['friend'],
+			}),
+		)
+		const forgetShare = (share_id) =>
+			send(
+				'http://local.test/core/players',
+				'DELETE',
+				'amc_core',
+				JSON.stringify({ server_id: 'srv1', share_id }),
+				{ 'content-type': 'application/json' },
+			)
+		assert.equal((await forgetShare(smp.id)).status, 204)
+		const players = async () =>
+			(await ok(await call('/servers/core/srv1/players'))).users.map((user) => user.id)
+		assert.deepEqual(await players(), ['friend'])
+		assert.equal((await forgetShare(next.id)).status, 204)
+		assert.deepEqual(await players(), [])
+
 		// A Core writes the share of its own server-first server with its key.
 		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)
 		const serverShare = await ok(
@@ -630,6 +902,33 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(
 			await db.prepare('SELECT 1 FROM shared_instances WHERE id = ?').bind(serverShare.id).first(),
 			null,
+		)
+		// Modpack files the owner turned off are kept with the version, by the App's own rules.
+		const pack = await ok(await call('/instances', 'POST', { name: 'Pack' }))
+		const removed = [
+			{ type: 'version', version_id: 'AAAABBBB' },
+			{ type: 'path', parent: 'mods', filename: 'extra.jar.disabled' },
+		]
+		const withRemoved = (removed_files, modpack_id = 'PACKPACK') =>
+			call(`/instances/${pack.id}/versions`, 'POST', {
+				...manifest,
+				modpack_id,
+				removed_files,
+				external_files: [],
+				root: EMPTY_ROOT,
+			})
+		for (const [bad, modpack] of [
+			[[removed[0]], null],
+			[[{ type: 'path', parent: 'config', filename: 'a.jar' }]],
+			[[{ type: 'path', parent: 'mods', filename: 'a.txt' }]],
+			[[{ type: 'path', parent: 'mods', filename: '../a.jar' }]],
+			[[{ type: 'other' }]],
+		])
+			assert.equal((await withRemoved(bad, modpack)).status, 400, JSON.stringify(bad))
+		await ok(await withRemoved(removed))
+		assert.deepEqual(
+			(await ok(await call(`/instances/${pack.id}/versions`))).removed_files,
+			removed,
 		)
 	} finally {
 		await backend.dispose()

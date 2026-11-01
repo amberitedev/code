@@ -9,15 +9,17 @@ import { remainingPlayerSlots } from './invite-link'
 
 export type ServerPlayerMembers = { rows: InvitedPlayerRow[]; remaining: number }
 
-export function useServerPlayerMembers(instanceId: Ref<string | null>) {
+export function useServerPlayerMembers(serverId: string, instanceId: Ref<string | null>) {
 	const client = injectModrinthClient()
 	const auth = injectAuth()
 	const userId = computed(() => auth.user.value?.id)
 	return useQuery({
-		queryKey: computed(() => sharedInstanceKeys.players(instanceId.value ?? '', userId.value)),
+		queryKey: computed(() =>
+			sharedInstanceKeys.players(instanceId.value ?? '', serverId, userId.value),
+		),
 		enabled: computed(() => !!instanceId.value && !!userId.value),
 		queryFn: async (): Promise<ServerPlayerMembers> => {
-			const response = await client.sharedinstances.instances_v1.getUsers(instanceId.value!)
+			const response = await client.sharedinstances.players_v1.list(serverId, instanceId.value!)
 			const users = response.users.length
 				? await client.labrinth.users_v2.getMultiple(response.users.map((user) => user.id))
 				: []

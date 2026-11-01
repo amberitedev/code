@@ -139,6 +139,39 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		})
 	}
 
+	/**
+	 * Owner only. Everyone who gets this share's updates, each with how they got access, and the
+	 * live links of the servers following it, revoked with `invites_v1.delete`.
+	 */
+	public async getAccess(instanceId: string): Promise<SharedInstances.Instances.v1.Access> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/access`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+		})
+	}
+
+	/**
+	 * Owner only. Stops one entry of `getAccess` getting updates: a member leaves the share, a
+	 * player leaves the server they came through.
+	 */
+	public async removeAccess(
+		instanceId: string,
+		entry: SharedInstances.Instances.v1.AccessEntry,
+	): Promise<void> {
+		if (entry.via.type === 'member') return this.removeUsers(instanceId, [entry.user.id])
+		const { core_id, server_id } = entry.via
+		return this.request(
+			`/servers/${encodeURIComponent(core_id)}/${encodeURIComponent(server_id)}/players`,
+			{
+				api: 'sharedinstances',
+				version: 1,
+				method: 'DELETE',
+				body: { user_ids: [entry.user.id] },
+			},
+		)
+	}
+
 	public async downloadMrpack(instanceId: string, version: number): Promise<Blob> {
 		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`, {
 			api: 'sharedinstances',
