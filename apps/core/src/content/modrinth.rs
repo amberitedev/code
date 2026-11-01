@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::installs::download;
 
 const API: &str = "https://api.modrinth.com/v2";
+const API_V3: &str = "https://api.modrinth.com/v3";
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
@@ -41,6 +42,18 @@ impl Version {
             .find(|file| file.primary)
             .or_else(|| self.files.first())
     }
+}
+
+/// A version as v3 of the API gives it, which also says where it runs.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SidedVersion {
+    pub id: String,
+    #[serde(default)]
+    pub loaders: Vec<String>,
+    #[serde(default)]
+    pub files: Vec<VersionFile>,
+    /// Such as `client_only`.
+    pub environment: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -185,6 +198,22 @@ impl Modrinth {
         let ids = serde_json::to_string(ids).expect("strings serialize");
         self.get(&format!("/versions?ids={}", urlencode(&ids)))
             .await
+    }
+
+    /// As [`Self::versions_by_id`], with where each version runs.
+    pub async fn sided_versions(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<SidedVersion>, ModrinthError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids = serde_json::to_string(ids).expect("strings serialize");
+        Ok(download::json(
+            &self.http,
+            &format!("{API_V3}/versions?ids={}", urlencode(&ids)),
+        )
+        .await?)
     }
 
     /// The version each file is, by SHA-1. Files Modrinth does not know are left out.

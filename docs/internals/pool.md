@@ -437,6 +437,13 @@ All tickets are Ed25519 JWTs (`alg: EdDSA`, `kid` in the header) with `iss: "amb
 | `store`   | the home Core id         | `root`, `bytes` (the version's bytes) | 1 hour                |
 | `fetch`   | array of holder Core ids | `root`                                | 6 hours               |
 | `pull`    | the replica Core id      | `root`, `source: { core, ticket }`    | 24 hours              |
+| `read`    | the reading Core id      | `sub`, `share`                        | 5 minutes             |
+
+A read ticket is the backend's own: no Core takes it. The App gets one with its user's session
+(`POST /v1/instances/{id}/server-ticket` with `{ core_id }`, owner or member) and passes it in an
+`instance` install. The Core sends it as `X-Amberite-Read-Ticket` on its key's reads of that
+share, and the backend reads as `sub` only when `aud` is the calling Core and `share` the share,
+then checks `sub` can still read it.
 
 A store ticket is reusable until it expires, because a resumed upload needs it; it names one
 root and a byte cap, so reuse cannot store anything else. The design above says single-use; this

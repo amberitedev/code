@@ -60,6 +60,7 @@ pub struct Backend {
     http: reqwest::Client,
     base_url: String,
     token: String,
+    read_ticket: Option<String>,
 }
 
 impl Backend {
@@ -74,7 +75,16 @@ impl Backend {
             http,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             token: token.into(),
+            read_ticket: None,
         }
+    }
+
+    /// A Core key reading a share its server follows, with the read ticket the asking user's App
+    /// got for this Core and share. The backend then reads it as that user, and only while they
+    /// can read it.
+    pub fn with_read_ticket(mut self, ticket: impl Into<String>) -> Self {
+        self.read_ticket = Some(ticket.into());
+        self
     }
 
     fn request(
@@ -82,25 +92,24 @@ impl Backend {
         method: reqwest::Method,
         path: &str,
     ) -> reqwest::RequestBuilder {
-        self.http
+        let request = self
+            .http
             .request(method, format!("{}/v1{path}", self.base_url))
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token);
+        match &self.read_ticket {
+            Some(ticket) => request.header("X-Amberite-Read-Ticket", ticket),
+            None => request,
+        }
     }
 
-    /// A version of the share, or the latest one without `version`. `None` when it does not
-    /// exist.
-    async fn version(
+    /// A version of the share, or the latest one without `version`, read as `T`. `None` when it
+    /// does not exist.
+    pub(crate) async fn version<T: serde::de::DeserializeOwned>(
         &self,
         share_id: &str,
         version: Option<i32>,
-    ) -> Result<Option<Version>, PushError> {
-        let path = match version {
-            Some(version) => {
-                format!("/instances/{share_id}/versions/{version}")
-            }
-            None => format!("/instances/{share_id}/versions"),
-        };
-        let response = self.request(reqwest::Method::GET, &path).send().await?;
+    ) -> Result<Option<T>, PushError> {
+        let response = self.version_response(share_id, version).await?;
         match unavailable(response.status()) {
             Some(Unavailable::Deleted) => Ok(None),
             Some(reason) => Err(PushError::Unavailable(reason)),
@@ -111,6 +120,22 @@ impl Backend {
                     .await?,
             )),
         }
+    }
+
+    /// The backend's response to reading a version, or the latest one without `version`, as it
+    /// came.
+    pub(crate) async fn version_response(
+        &self,
+        share_id: &str,
+        version: Option<i32>,
+    ) -> Result<reqwest::Response, PushError> {
+        let path = match version {
+            Some(version) => {
+                format!("/instances/{share_id}/versions/{version}")
+            }
+            None => format!("/instances/{share_id}/versions"),
+        };
+        Ok(self.request(reqwest::Method::GET, &path).send().await?)
     }
 
     /// Creates a version. The pool's refusals come back as their own errors, named by the
@@ -261,7 +286,7 @@ fn unavailable(status: StatusCode) -> Option<Unavailable> {
     }
 }
 
-async fn success(
+pub(crate) async fn success(
     response: reqwest::Response,
     operation: &'static str,
 ) -> Result<reqwest::Response, PushError> {
@@ -303,11 +328,13 @@ fn refusal(status: StatusCode, body: &str) -> Option<PushError> {
 }
 
 /// Why the backend would not give the share.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Unavailable {
     /// 404: the share is gone, or belongs to another backend.
+    #[error("The shared instance was deleted.")]
     Deleted,
     /// 401: the token no longer reaches the share.
+    #[error("You no longer have access to the shared instance.")]
     AccessRevoked,
 }
 
@@ -334,7 +361,7 @@ pub enum PushError {
     /// A limit the backend names in its own words.
     #[error("{0}")]
     Refused(String),
-    #[error("the shared instance is unavailable ({0:?})")]
+    #[error(transparent)]
     Unavailable(Unavailable),
     #[error(
         "shared instances API request {operation} failed with status {status}"
@@ -621,7 +648,7 @@ async fn push_hashed<C: Serialize + Sync>(
     for _ in 0..CONFIRM_ATTEMPTS {
         tokio::time::sleep(CONFIRM_INTERVAL).await;
         if backend
-            .version(share_id, Some(created.version))
+            .version::<Version>(share_id, Some(created.version))
             .await?
             .is_some_and(|version| version.ready)
         {
@@ -675,7 +702,7 @@ async fn previous_versions(
     backend: &Backend,
     share_id: &str,
 ) -> Result<Vec<Version>, PushError> {
-    let latest = match backend.version(share_id, None).await {
+    let latest = match backend.version::<Version>(share_id, None).await {
         Ok(Some(latest)) => latest,
         Ok(None) | Err(PushError::Unavailable(_)) => return Ok(Vec::new()),
         Err(error) => return Err(error),

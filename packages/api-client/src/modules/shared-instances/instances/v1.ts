@@ -64,6 +64,22 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		})
 	}
 
+	/**
+	 * Owner or member. A ticket for Core `coreId` to read this share for the signed-in user, sent
+	 * with an `instance` install so the Core reads only what that user can.
+	 */
+	public async getServerTicket(
+		instanceId: string,
+		coreId: string,
+	): Promise<{ ticket: string; expires: string }> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/server-ticket`, {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'POST',
+			body: { core_id: coreId },
+		})
+	}
+
 	public async declinePendingInvite(instanceId: string): Promise<void> {
 		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites/pending`, {
 			api: 'sharedinstances',

@@ -124,7 +124,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_share_unlink,
             instance_share_unpublish,
             instance_share_ensure,
-            instance_share_server_pack,
             instance_export_mrpack,
             instance_get_pack_export_candidates,
         ])
@@ -1535,11 +1534,4 @@ pub async fn instance_share_ensure(
     Ok(theseus::instance::ensure_shared_instance(instance_id)
         .await?
         .into())
-}
-
-#[tauri::command]
-pub async fn instance_share_server_pack(
-    instance_id: &str,
-) -> Result<theseus::instance::SharedInstanceServerPack> {
-    Ok(theseus::instance::get_shared_instance_server_pack(instance_id).await?)
 }
