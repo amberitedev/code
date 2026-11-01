@@ -479,17 +479,25 @@ pub async fn unshare(
 }
 
 /// Delete the server's own share, if it has one, so its players stop getting it. Called when the
-/// share is deleted, when the server is, and before the server follows an instance, since a
+/// share is deleted, when the server is, and once the server follows an instance, since a
 /// server never has two shares.
 pub async fn drop_share(state: &AppState, id: &str) -> Result<(), ApiError> {
     let Some(share_id) = records::share_id(&state.db, id).await? else {
         return Ok(());
     };
-    // An unpaired Core, or a 403 to a Core paired again, means the Core was removed from the
-    // account that had the share, and the backend deleted its shares then.
+    // An unpaired Core, or a 410 `core_removed`, means the Core was removed from the account
+    // that had the share, and the backend deleted its shares then. A share already gone is a
+    // 404, which `delete_share` counts as deleted. A 403 (the account is locked or may not
+    // share, or this share is not the Core's) leaves the share up, so it is an error.
     if let Ok(backend) = backend(state).await {
         match backend.delete_share(&share_id).await {
-            Ok(()) | Err(push::PushError::Backend { status: 403, .. }) => {}
+            Ok(()) | Err(push::PushError::Backend { status: 410, .. }) => {}
+            Err(push::PushError::Backend { status: 403, .. }) => {
+                return Err(ApiError::new(
+                    ErrorCode::Conflict,
+                    "Amberite refused to delete this server's share. Check that the account                      this Core is paired with can share, then try again.",
+                ));
+            }
             Err(error) => return Err(error.into()),
         }
     }
