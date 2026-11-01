@@ -604,8 +604,8 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		await code(
 			await asCore(`/instances/${serverShare.id}/versions`, 'GET', undefined, 'core2'),
-			403,
-			'not_owner',
+			401,
+			'not_member',
 		)
 		await code(
 			await asCore('/instances', 'POST', { name: 'Taken', server_id: 'server' }, 'core2'),
@@ -625,6 +625,47 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		await ok(await asCore(`/instances/${leaving.id}`, 'DELETE'))
 		await db.prepare('DELETE FROM sharing_blacklist WHERE user_id = ?').bind('owner').run()
+
+		// A server following a share: the Core reads it for the user who asked, who must reach
+		// both the share and the Core.
+		const readFor = (share, reader) =>
+			send(
+				`http://local.test/v1/instances/${share}/versions`,
+				'GET',
+				'amc_core',
+				undefined,
+				reader ? { 'x-amberite-reader': reader } : {},
+			)
+		// The Core's owner is a member of the stranger's share; someone without access to the Core
+		// cannot have it read the share for them.
+		const strangers = await ok(
+			await call('/instances', 'POST', { name: 'Private' }, 'mra_stranger'),
+		)
+		await db
+			.prepare(
+				"INSERT INTO shared_members (instance_id,user_id,join_type,joined_at) VALUES (?,'owner','invite',?)",
+			)
+			.bind(strangers.id, new Date().toISOString())
+			.run()
+		await code(await readFor(strangers.id), 404, 'version_not_found')
+		await code(await readFor(strangers.id, 'friend'), 403, 'not_owner')
+		// With access to the Core, a user reads only shares they can read themselves.
+		await db
+			.prepare("INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend',?)")
+			.bind(new Date().toISOString())
+			.run()
+		await code(await readFor(strangers.id, 'friend'), 401, 'not_member')
+		// An Editor who is not the Core's owner has it read their own share.
+		const friends = await ok(await call('/instances', 'POST', { name: 'Mine' }, 'mra_friend'))
+		await code(await readFor(friends.id, 'friend'), 404, 'version_not_found')
+		await code(await readFor(friends.id), 401, 'not_member')
+		// A Core's read gets no owner extras, even of its owner's share still uploading.
+		const coreRead = await ok(await readFor(alone.id))
+		assert.equal(coreRead.ready, false)
+		assert.equal(coreRead.store, undefined)
+		assert.equal(coreRead.reports, undefined)
+		assert.ok((await ok(await call(`/instances/${alone.id}/versions`))).store)
+
 		// Removing the Core from the account deletes its server-first shares.
 		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))
 		assert.equal(

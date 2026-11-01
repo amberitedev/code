@@ -141,9 +141,9 @@ same versions members read, from the same place. Nothing is ever uploaded to a s
   with nobody. A push sends the manifest to the backend and only the new files to the store, as
   any share push does.
 - Push and restart tells each server's Core the share's id. The Core reads the latest version
-  from the backend with its own key, which may read any share its owner can: the Modrinth ids,
-  the pool entries of the other files, and a fetch ticket. The
-  Core downloads Modrinth files from Modrinth and the rest through the store API, checks and
+  from the backend with its own key, on behalf of the user who asked, before it accepts the
+  request: the Modrinth ids, the pool entries of the other files, and a fetch ticket. The backend
+  allows it only when that user can read the share and reach the Core. The Core downloads Modrinth files from Modrinth and the rest through the store API, checks and
   decrypts them as a member's App does, and applies only what changed. A running server takes it
   when it stops, or is stopped, updated, and started again.
 - The Core reaches files only through the store API. How and where the store keeps files does

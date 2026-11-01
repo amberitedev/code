@@ -60,6 +60,7 @@ pub struct Backend {
     http: reqwest::Client,
     base_url: String,
     token: String,
+    reader: Option<String>,
 }
 
 impl Backend {
@@ -74,7 +75,15 @@ impl Backend {
             http,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             token: token.into(),
+            reader: None,
         }
+    }
+
+    /// A Core key reading a share its server follows, for the account that asked. The backend
+    /// lets it read only what that account can, and only while the account can reach the Core.
+    pub fn for_reader(mut self, user_id: impl Into<String>) -> Self {
+        self.reader = Some(user_id.into());
+        self
     }
 
     fn request(
@@ -82,9 +91,14 @@ impl Backend {
         method: reqwest::Method,
         path: &str,
     ) -> reqwest::RequestBuilder {
-        self.http
+        let request = self
+            .http
             .request(method, format!("{}/v1{path}", self.base_url))
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token);
+        match &self.reader {
+            Some(reader) => request.header("X-Amberite-Reader", reader),
+            None => request,
+        }
     }
 
     /// A version of the share, or the latest one without `version`, read as `T`. `None` when it
@@ -303,11 +317,13 @@ fn refusal(status: StatusCode, body: &str) -> Option<PushError> {
 }
 
 /// Why the backend would not give the share.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Unavailable {
     /// 404: the share is gone, or belongs to another backend.
+    #[error("The shared instance was deleted.")]
     Deleted,
     /// 401: the token no longer reaches the share.
+    #[error("You no longer have access to the shared instance.")]
     AccessRevoked,
 }
 
@@ -334,7 +350,7 @@ pub enum PushError {
     /// A limit the backend names in its own words.
     #[error("{0}")]
     Refused(String),
-    #[error("the shared instance is unavailable ({0:?})")]
+    #[error(transparent)]
     Unavailable(Unavailable),
     #[error(
         "shared instances API request {operation} failed with status {status}"

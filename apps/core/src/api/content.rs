@@ -21,6 +21,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -1149,6 +1150,7 @@ pub async fn install(
             install_instance(
                 &state,
                 &id,
+                caller.user_id(),
                 instance,
                 shared_instance_id,
                 properties,
@@ -1213,20 +1215,39 @@ fn spawn_pack(
 }
 
 /// Apply the latest version of a share to a server, which Core reads from the backend with its
-/// own key. A stopped server installs it now. A running one keeps running: Core fetches the
-/// version, then it waits for the server to stop, or with `restart` Core stops the server, and
-/// it applies then (see [`apply_pending`]).
+/// own key for `reader`, the user who asked (its owner for the local CLI), so it reads only what
+/// that user can. The version is read before this returns, so one that cannot go fails the
+/// request. A stopped server installs it now. A running one keeps running: Core fetches the
+/// version's files, then it waits for the server to stop, or with `restart` Core stops the
+/// server, and it applies then (see [`apply_pending`]).
+#[allow(clippy::too_many_arguments)]
 async fn install_instance(
     state: &Arc<AppState>,
     id: &str,
+    reader: Option<&str>,
     instance: UploadedInstance,
     shared_instance_id: String,
     properties: Option<PropertiesFields>,
     restart: bool,
     force: bool,
 ) -> Result<(), ApiError> {
-    let backend = super::share::backend(state).await?;
     let busy = state.content.busy(id)?;
+    let backend = super::share::backend(state).await?;
+    let backend = match reader {
+        Some(reader) => backend.for_reader(reader),
+        None => backend,
+    };
+    let version = consume::ready_version(&backend, &shared_instance_id)
+        .await
+        .map_err(|error| match error {
+            consume::ReadError::Backend(error) => ApiError::from(error),
+            error @ consume::ReadError::NoVersion => {
+                ApiError::new(ErrorCode::NotFound, error.to_string())
+            }
+            error @ consume::ReadError::NotReady => {
+                ApiError::new(ErrorCode::Conflict, error.to_string())
+            }
+        })?;
     match state.servers.hold(id) {
         Ok(hold) => {
             // A version still waiting from an earlier push is superseded by this one.
@@ -1241,8 +1262,7 @@ async fn install_instance(
                     let written = shared::write_pack(
                         &content,
                         hold.id(),
-                        &backend,
-                        &shared_instance_id,
+                        version,
                         &instance.name,
                     )
                     .await;
@@ -1283,8 +1303,7 @@ async fn install_instance(
                 let written = shared::write_pack(
                     &state.content,
                     &id,
-                    &backend,
-                    &shared_instance_id,
+                    version,
                     &instance.name,
                 )
                 .await;

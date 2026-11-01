@@ -218,9 +218,10 @@ async function manifestText(env: Env, item: Pick<Version, 'instance_id' | 'versi
  * A version as the App reads it: the stored manifest, spliced as text, plus what the pool adds.
  * A member of a ready version gets the confirmed holders and a fetch ticket; the owner of an
  * unconfirmed one gets the home and a store ticket, so a crashed push resumes; the owner also
- * sees how many members reported broken files.
+ * sees how many members reported broken files. A Core's read (`userId` null) gets no owner
+ * extras: its push takes the store ticket from creating the version.
  */
-async function versionResponse(env: Env, item: Instance, version: Version, userId: string) {
+async function versionResponse(env: Env, item: Instance, version: Version, userId: string | null) {
 	const manifest = await manifestText(env, version)
 	const extra: Record<string, unknown> = { version: version.version, ready: version.ready === 1 }
 	if (version.root !== EMPTY_ROOT) {
@@ -884,8 +885,8 @@ async function users(
  * follows no instance). It acts as the share's owner, its own owner account, for: create
  * (`POST /v1/instances` with `server_id`, answering the server's existing share if it has one),
  * rename, delete, and its versions. A Core also reads the versions of a share one of its servers
- * follows, which its owner can read as a member (`content::shared` in Core). It reaches no other
- * share and no other route.
+ * follows, for a user who can read it and reach this Core (`content::shared` in Core). It reaches
+ * no other share and no other route.
  */
 async function coreSharing(
 	request: Request,
@@ -923,8 +924,20 @@ async function coreSharing(
 	// The owner check matters because a Core picks its own id when it pairs: a share left from an
 	// earlier pairing of that id is not this Core's.
 	if (item.core_id !== core.id || item.owner_id !== core.owner_id) {
+		// A server following a share: the Core reads it for the user who asked, named in
+		// `X-Amberite-Reader` (its owner when absent, as for its own CLI). That user must reach
+		// both the share and this Core, so a Core never reads a share for someone who cannot.
 		if (section !== 'versions' || rest.length || request.method !== 'GET') throw refused()
-		await member(env, item, core.owner_id)
+		const reader = request.headers.get('X-Amberite-Reader') ?? core.owner_id
+		if (
+			reader !== core.owner_id &&
+			!(await env.DB.prepare('SELECT 1 FROM core_access WHERE core_id = ? AND user_id = ?')
+				.bind(core.id, reader)
+				.first())
+		)
+			throw refused()
+		await requireSharing(env, reader)
+		await member(env, item, reader)
 	}
 	if (!section && request.method === 'PATCH') {
 		await env.DB.prepare('UPDATE shared_instances SET name = ? WHERE id = ?')
@@ -951,7 +964,7 @@ async function coreSharing(
 		: await latestVersion(env, id)
 	if (!version)
 		throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
-	return versionResponse(env, item, version, core.owner_id)
+	return versionResponse(env, item, version, null)
 }
 
 export async function handleSharing(request: Request, env: Env): Promise<Response | null> {

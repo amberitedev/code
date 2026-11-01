@@ -1,7 +1,7 @@
 //! The reading side of a share: a version as a server takes it, and fetching a version's files
-//! from the pool. A server's Core builds a [`ServerPack`] from the latest version of the share
-//! it follows with [`server_pack`], fetches its files with [`fetch`], and installs it like any
-//! pack.
+//! from the pool. A server's Core reads the latest version of the share it follows with
+//! [`ready_version`], builds a [`ServerPack`] from it with [`server_pack`], fetches its files
+//! with [`fetch`], and installs it like any pack.
 
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
@@ -113,8 +113,9 @@ pub struct ModpackFile {
     pub version_id: Option<String>,
 }
 
+/// Why a share's latest version cannot go to a server now.
 #[derive(Debug, thiserror::Error)]
-pub enum ServerPackError<E> {
+pub enum ReadError {
     #[error(transparent)]
     Backend(#[from] PushError),
     #[error("The instance's share has no version.")]
@@ -123,6 +124,10 @@ pub enum ServerPackError<E> {
         "The instance's latest version is still uploading. Try again in a moment."
     )]
     NotReady,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ServerPackError<E> {
     #[error("Modrinth version {0} of the share was not found.")]
     MissingVersion(String),
     #[error("The share's file {0} has an invalid pool entry.")]
@@ -202,24 +207,40 @@ impl RemovedFile {
     }
 }
 
-/// The latest version of the share `share_id`, as a server takes it: the Modrinth mods, in a
-/// pack index named `name`, and the mods and config files in the pool. A version based on a
-/// modpack takes the modpack's files too, less the ones the owner removed or the share carries
-/// itself. Client-only Modrinth mods are listed but marked unsupported on servers.
-pub async fn server_pack<M: Modrinth>(
+/// The latest version of a share, read with [`ready_version`] and ready for [`server_pack`].
+pub struct ReadyVersion {
+    share_id: String,
+    version: SharedVersion,
+}
+
+/// The latest version of the share `share_id`, when it is ready for a server. A Core reads this
+/// before it accepts an install, so a version that cannot go fails the request itself.
+pub async fn ready_version(
     backend: &Backend,
     share_id: &str,
-    name: &str,
-    modrinth: &M,
-) -> Result<ServerPack, ServerPackError<M::Error>> {
+) -> Result<ReadyVersion, ReadError> {
     let version: SharedVersion = backend
         .version(share_id, None)
         .await?
-        .ok_or(ServerPackError::NoVersion)?;
+        .ok_or(ReadError::NoVersion)?;
     if !version.ready {
-        return Err(ServerPackError::NotReady);
+        return Err(ReadError::NotReady);
     }
+    Ok(ReadyVersion {
+        share_id: share_id.to_string(),
+        version,
+    })
+}
 
+/// `version` as a server takes it: the Modrinth mods, in a pack index named `name`, and the mods
+/// and config files in the pool. A version based on a modpack takes the modpack's files too,
+/// less the ones the owner removed or the share carries itself. Client-only Modrinth mods are
+/// listed but marked unsupported on servers.
+pub async fn server_pack<M: Modrinth>(
+    ReadyVersion { share_id, version }: ReadyVersion,
+    name: &str,
+    modrinth: &M,
+) -> Result<ServerPack, ServerPackError<M::Error>> {
     let modpack = version.modpack_id.as_deref().filter(|id| !id.is_empty());
     let mut ids = version
         .modrinth_ids
@@ -334,7 +355,7 @@ pub async fn server_pack<M: Modrinth>(
     };
 
     Ok(ServerPack {
-        shared_instance_id: share_id.to_string(),
+        shared_instance_id: share_id,
         version: version.version,
         index: PackIndex {
             format_version: 1,

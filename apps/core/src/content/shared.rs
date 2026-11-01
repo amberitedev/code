@@ -1,6 +1,7 @@
 //! A share version as a pack. A server follows an App instance by applying versions of the
 //! instance's share, like one more member. Core reads the share's latest version from the
-//! backend with its own key: a Modrinth pack index for the files on Modrinth, and the pool
+//! backend with its own key, for the user who asked for the install, who must be able to read
+//! the share and reach this Core: a Modrinth pack index for the files on Modrinth, and the pool
 //! entries of the rest. It fetches those through the store API of the version's holders, as a
 //! member's App does, decrypts and checks them, and writes an `.mrpack` with them as overrides,
 //! which installs like any other pack.
@@ -12,30 +13,27 @@ use std::path::{Path, PathBuf};
 
 use sharing_client::consume::{
     self, ConsumeError, ModpackFile, ModrinthFile, ModrinthVersion, PoolAccess,
-    PoolFile, ServerPackError,
+    PoolFile, ReadyVersion, ServerPackError,
 };
-use sharing_client::push::Backend;
 use sharing_client::store::{FetchError, StoreClient};
 
 use super::{Content, Error, install, install::MAX_PACK};
 use crate::installs::shared::SharedDirs;
 
-/// Read the latest version of the share `share_id`, fetch its files, and write it as an
+/// Fetch the files of `version` (read with [`consume::ready_version`]) and write it as an
 /// `.mrpack` named `name` in the shared store. Returns the pack's SHA-1 and the version.
 pub async fn write_pack(
     content: &Content,
     server_id: &str,
-    backend: &Backend,
-    share_id: &str,
+    version: ReadyVersion,
     name: &str,
 ) -> Result<(String, i32), Error> {
-    let version =
-        consume::server_pack(backend, share_id, name, &Lookup(content))
-            .await
-            .map_err(|error| match error {
-                ServerPackError::Modrinth(error) => error,
-                error => Error::Invalid(error.to_string()),
-            })?;
+    let version = consume::server_pack(version, name, &Lookup(content))
+        .await
+        .map_err(|error| match error {
+            ServerPackError::Modrinth(error) => error,
+            error => Error::Invalid(error.to_string()),
+        })?;
     let total: u64 = version.files.iter().map(|file| file.object_size).sum();
     if total > MAX_PACK {
         return Err(Error::Invalid(
