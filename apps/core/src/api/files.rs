@@ -386,13 +386,16 @@ fn not_found(path: &str) -> ApiError {
     ApiError::new(ErrorCode::NotFound, format!("There is no {path}."))
 }
 
-fn folder(state: &AppState, id: &str) -> Result<Arc<Folder>, ApiError> {
+pub(super) fn folder(
+    state: &AppState,
+    id: &str,
+) -> Result<Arc<Folder>, ApiError> {
     Ok(Arc::new(Folder::open(&state.servers.paths().server(id))?))
 }
 
 /// The folder, taken for a change: the same lock installs hold, so an edit never lands between
 /// an install's plan and its writes. Do the change through [`locked`].
-fn changing(
+pub(super) fn changing(
     state: &AppState,
     id: &str,
 ) -> Result<(Arc<Folder>, Arc<Busy>), ApiError> {
@@ -414,7 +417,7 @@ fn inner_path(path: &str) -> Result<String, ApiError> {
     })
 }
 
-async fn blocking<T: Send + 'static>(
+pub(super) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(work).await.map_err(|error| {
@@ -424,7 +427,7 @@ async fn blocking<T: Send + 'static>(
 
 /// As [`blocking`], keeping the content lock until `work` itself ends: a request that times out
 /// stops waiting, but the work it started holds the lock to the end.
-async fn locked<T: Send + 'static>(
+pub(super) async fn locked<T: Send + 'static>(
     busy: &Arc<Busy>,
     work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {

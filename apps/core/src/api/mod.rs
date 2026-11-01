@@ -17,6 +17,7 @@ pub mod eula;
 pub mod events;
 pub mod files;
 mod health;
+mod icon;
 pub mod insight;
 pub mod logs;
 pub mod pairing;
@@ -113,6 +114,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/servers", get(servers::list_v1))
         .route("/v1/servers/{id}", get(servers::get_v1))
         .route("/v1/servers/{id}/worlds/{wid}", patch(servers::patch_world))
+        .route(
+            "/v1/servers/{id}/icon",
+            get(icon::get).put(icon::set).delete(icon::delete),
+        )
         .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
         .route(
             "/modrinth/v0/servers/{id}/startup",
