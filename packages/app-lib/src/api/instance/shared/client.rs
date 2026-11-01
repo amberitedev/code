@@ -61,24 +61,6 @@ pub(super) enum ExternalFileSource {
     SharedFile(std::path::PathBuf),
 }
 
-/// A pushed file's manifest entry, as the Protocol in `docs/internals/pool.md` names it. The
-/// upstream fields come first; `sha1` is what a member's install compares to skip a file it has.
-#[derive(Clone, Debug, Serialize)]
-pub(super) struct ExternalFileData {
-    pub(super) file_name: String,
-    pub(super) file_type: String,
-    pub(super) file_size: u64,
-    pub(super) sha1: String,
-    /// P.
-    pub(super) sha256: String,
-    /// C.
-    pub(super) object: String,
-    pub(super) object_size: u64,
-    /// Only non-content files carry a key.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) key: Option<String>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct CreateInstanceResponse {
     #[serde(alias = "instance_id")]
@@ -136,8 +118,6 @@ pub(super) struct InstanceVersionResponse {
     pub(super) root: Option<String>,
     /// Where members fetch the files, once the version is ready.
     pub(super) pool: Option<RemotePoolAccess>,
-    /// Where the owner stores the files while the version is unconfirmed.
-    pub(super) store: Option<StoreGrant>,
 }
 
 impl InstanceVersionResponse {
@@ -181,8 +161,6 @@ struct RawInstanceVersionResponse {
     root: Option<String>,
     #[serde(default)]
     pool: Option<RemotePoolAccess>,
-    #[serde(default)]
-    store: Option<StoreGrant>,
 }
 
 impl From<RawInstanceVersionResponse> for InstanceVersionResponse {
@@ -207,7 +185,6 @@ impl From<RawInstanceVersionResponse> for InstanceVersionResponse {
             loader_version,
             root: raw.root,
             pool: raw.pool,
-            store: raw.store,
         }
     }
 }
@@ -231,12 +208,6 @@ impl InstanceVersionResponse {
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct RemotePoolAccess {
     pub(super) holders: Vec<PoolCore>,
-    pub(super) ticket: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct StoreGrant {
-    pub(super) core: PoolCore,
     pub(super) ticket: String,
 }
 
@@ -773,67 +744,6 @@ where
     .await?;
     decode_optional_unavailable(operation, method, path, response, state, auth)
         .await
-}
-
-/// Creates a version. The pool's refusals come back as their own error kinds, named by the
-/// backend's `code`, so the App can say what happened.
-pub(super) async fn create_remote_version(
-    shared_instance_id: &str,
-    body: serde_json::Value,
-    state: &State,
-) -> crate::Result<SharedInstanceRemoteResponse<InstanceVersionResponse>> {
-    let operation = "create_instance_version";
-    let method = Method::POST;
-    let path = format!("/instances/{shared_instance_id}/versions");
-    let response =
-        send_request(operation, method.clone(), &path, Some(body), state)
-            .await?;
-    if matches!(
-        response.status(),
-        StatusCode::CONFLICT
-            | StatusCode::PAYLOAD_TOO_LARGE
-            | StatusCode::SERVICE_UNAVAILABLE
-    ) {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        if let Some(kind) = pool_error_kind(status, &body) {
-            return Err(kind.into());
-        }
-        bail!(
-            "shared instances API request {operation} {method} {path} failed with status {status}"
-        );
-    }
-    decode_optional_unavailable(
-        operation,
-        method,
-        &path,
-        response,
-        state,
-        SharedInstancesRequestAuth::AmberiteSession,
-    )
-    .await
-}
-
-/// Every refusal over a limit (413) carries a description naming the limit, which is shown as is.
-fn pool_error_kind(status: StatusCode, body: &str) -> Option<ErrorKind> {
-    #[derive(Deserialize)]
-    struct Body {
-        #[serde(default)]
-        code: Option<String>,
-        #[serde(default)]
-        description: String,
-    }
-    let body = serde_json::from_str::<Body>(body).ok()?;
-    Some(match body.code.as_deref() {
-        Some("no_storage") => ErrorKind::PoolNoStorage,
-        Some("push_in_flight") => ErrorKind::PoolPushInFlight,
-        _ if status == StatusCode::PAYLOAD_TOO_LARGE
-            && !body.description.is_empty() =>
-        {
-            ErrorKind::PoolTooLarge(body.description)
-        }
-        _ => return None,
-    })
 }
 
 /// Tells the backend a holder served a bad file. Best effort: the install goes on either way.

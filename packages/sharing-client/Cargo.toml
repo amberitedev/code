@@ -2,26 +2,32 @@
 name = "sharing-client"
 edition.workspace = true
 
-# What the App and Core share about sharing (`docs/internals/pool.md`): the pool's encryption and
-# the client for a Core's store routes. The App uses both to push and install shares; Core uses
-# them to apply a share version to a server.
+# What the App and Core share about sharing (`docs/internals/pool.md`): the pool's encryption, the
+# client for a Core's store routes, and the writer that pushes a share's versions. The App uses
+# them to push and install shares; Core uses them to apply a share version to a server, and to
+# push a server's own share.
 [dependencies]
 bytes = { workspace = true }
 chacha20poly1305 = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 hkdf = { workspace = true }
+infer = { workspace = true }
+rand = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
 # The ring backend avoids aws-lc-sys's CMake build on Windows, as in Core.
 rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha1_smol = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "time"] }
 tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
+# The types the App's UI also sees, generated into `packages/api-client` by Core.
+ts-rs = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

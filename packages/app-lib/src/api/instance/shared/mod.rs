@@ -64,15 +64,12 @@ pub(crate) fn shared_clients_session() -> Option<SharedClientsSession> {
         .clone()
 }
 
-pub(crate) const CONFIG_BUNDLE_FILE_TYPE: &str = "configs";
-/// Wire type for an instance file the owner selected to share. The file name
-/// is its instance-relative path.
-pub(crate) const CONFIG_FILE_TYPE: &str = "config";
+pub(crate) use sharing_client::push::{
+    CONFIG_BUNDLE_FILE_TYPE, CONFIG_FILE_TYPE,
+    MAX_BYTES as MAX_SHARED_FILES_TOTAL_SIZE, MAX_FILES as MAX_SHARED_FILES,
+};
 pub(crate) const CONFIG_SYNC_ENABLED: bool = true;
 pub(crate) const CONFIG_DIRECTORY: &str = "config";
-pub(crate) const MAX_SHARED_FILES: usize = 4096;
-/// The pool's limit per share.
-pub(crate) const MAX_SHARED_FILES_TOTAL_SIZE: u64 = 1024 * 1024 * 1024;
 pub(crate) const MAX_CONFIG_BUNDLE_ENTRIES: usize = 4096;
 pub(crate) const MAX_CONFIG_BUNDLE_FILE_SIZE: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_CONFIG_BUNDLE_TOTAL_SIZE: u64 = 512 * 1024 * 1024;
@@ -135,22 +132,9 @@ fn is_executable_file(path: &str) -> bool {
         })
 }
 
-/// Leading bytes of each file passed to [`is_executable_content`].
-pub(super) const FILE_SCAN_HEAD_SIZE: usize = 8192;
-
-/// Mirrors the upload scan of the shared instances backend, so files it would
-/// reject fail before a version is created.
-pub(super) fn is_executable_content(head: &[u8]) -> bool {
-    infer::get(head).is_some_and(|kind| match kind.matcher_type() {
-        infer::MatcherType::App => {
-            !matches!(kind.extension(), "der" | "pem" | "obj" | "bc")
-        }
-        _ => matches!(
-            kind.extension(),
-            "sh" | "msi" | "cab" | "deb" | "rpm" | "crx"
-        ),
-    })
-}
+pub(super) use sharing_client::push::{
+    SCAN_HEAD_SIZE as FILE_SCAN_HEAD_SIZE, is_executable_content,
+};
 
 /// Whether a directory can hold shareable files, so the rest can be skipped
 /// while walking the instance.

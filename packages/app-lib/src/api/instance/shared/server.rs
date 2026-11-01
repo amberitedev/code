@@ -7,24 +7,14 @@ use super::client::*;
 use super::content::remote_shared_content;
 use super::publish::{owned_shared_instance, shared_attachment};
 use super::*;
-use crate::self_hosted::pool::store::PoolCore;
 use crate::state::VersionEnvironment;
+use sharing_client::consume::{PoolAccess, PoolFile, server_path};
 
-/// A share version as a server's Core takes it.
-#[derive(Debug, Serialize)]
-pub struct SharedInstanceServerPack {
-    pub shared_instance_id: String,
-    pub version: i32,
-    /// `modrinth.index.json` for the files on Modrinth.
-    pub index: ServerPackIndex,
-    /// Where `files` are, absent when there are none.
-    pub pool: Option<ServerPackPool>,
-    pub files: Vec<ServerPackFile>,
-}
+pub use sharing_client::consume::ServerPack as SharedInstanceServerPack;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ServerPackIndex {
+struct ServerPackIndex {
     format_version: u32,
     game: &'static str,
     version_id: String,
@@ -41,24 +31,6 @@ struct ServerPackIndexFile {
     env: HashMap<&'static str, &'static str>,
     downloads: Vec<String>,
     file_size: u32,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ServerPackPool {
-    pub root: String,
-    pub holders: Vec<PoolCore>,
-    pub ticket: String,
-}
-
-/// A file of the version that lives in the pool, by its path in the server folder.
-#[derive(Debug, Serialize)]
-pub struct ServerPackFile {
-    pub path: String,
-    pub object: String,
-    pub object_size: u64,
-    pub sha256: String,
-    /// Absent for content files, whose key derives from `sha256`.
-    pub key: Option<String>,
 }
 
 /// The instance's share, created with its first version when it has none, so the instance can
@@ -167,10 +139,8 @@ pub async fn get_shared_instance_server_pack(
 
     let mut pool_files = Vec::new();
     for file in &version.external_files {
-        let path = match file.file_type.as_str() {
-            CONFIG_FILE_TYPE => file.file_name.clone(),
-            "mod" => format!("mods/{}", file.file_name),
-            _ => continue,
+        let Some(path) = server_path(&file.file_type, &file.file_name) else {
+            continue;
         };
         let invalid = || {
             crate::ErrorKind::InputError(format!(
@@ -178,7 +148,7 @@ pub async fn get_shared_instance_server_pack(
                 file.file_name
             ))
         };
-        pool_files.push(ServerPackFile {
+        pool_files.push(PoolFile {
             path,
             object: file.object.clone().ok_or_else(invalid)?,
             object_size: file.object_size.ok_or_else(invalid)?,
@@ -188,7 +158,7 @@ pub async fn get_shared_instance_server_pack(
     }
     let pool = match (version.pool, version.root) {
         _ if pool_files.is_empty() => None,
-        (Some(pool), Some(root)) => Some(ServerPackPool {
+        (Some(pool), Some(root)) => Some(PoolAccess {
             root,
             holders: pool.holders,
             ticket: pool.ticket,
@@ -202,14 +172,14 @@ pub async fn get_shared_instance_server_pack(
     Ok(SharedInstanceServerPack {
         shared_instance_id: attachment.id,
         version: version.version,
-        index: ServerPackIndex {
+        index: serde_json::to_value(ServerPackIndex {
             format_version: 1,
             game: "minecraft",
             version_id: version.version.to_string(),
             name: metadata.instance.name,
             files,
             dependencies,
-        },
+        })?,
         pool,
         files: pool_files,
     })
