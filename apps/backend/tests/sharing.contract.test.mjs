@@ -163,8 +163,23 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const info = await ok(await call(`/instances/${id}`))
 		assert.equal(info.name, 'Proof pack')
 		assert.deepEqual(Buffer.from(await (await send(info.icon, 'GET')).arrayBuffer()), icon)
-		await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend'] }))
+		assert.equal(info.installed_once, false)
+		assert.equal(info.linked_server, null)
+		await code(await call(`/instances/${id}/server-icon`), 404, 'icon_not_found')
+		// Inviting a batch invites those who accept invitations and names the rest.
+		assert.deepEqual(
+			await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend', 'stranger'] })),
+			{ failed: ['stranger'] },
+		)
 		assert.equal(await notifications(), 0, 'no invitation before there is something to install')
+
+		// An invite link previews the share without signing in; there is no version to show yet.
+		const link = await ok(await call(`/instances/${id}/invites`, 'POST', {}))
+		const preview = async (search = '?version=true') =>
+			ok(await send(`http://local.test/v1/invites/${link.id}${search}`, 'GET'))
+		const empty = await preview()
+		assert.deepEqual(empty.inviter, { id: 'owner', name: 'owner', avatar: null })
+		assert.equal(empty.version, undefined)
 
 		// A version with only Modrinth content needs no Core and is ready at once.
 		const first = await ok(await push(id, []))
@@ -233,12 +248,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			1,
 			'members get the latest ready version',
 		)
-		const unready = await ok(
-			await call(`/instances/${id}/versions/2`, 'GET', undefined, 'mra_friend'),
+		assert.equal(
+			(await call(`/instances/${id}/versions/2`, 'GET', undefined, 'mra_friend')).status,
+			404,
+			'members do not see a version before it is ready',
 		)
-		assert.equal(unready.ready, false)
-		assert.equal(unready.store, undefined, 'only the owner gets the store ticket')
-		assert.equal(unready.reports, undefined)
+		assert.equal(
+			(await ok(await call(`/instances/${id}`, 'GET', undefined, 'mra_friend'))).installed_once,
+			true,
+		)
 
 		// Pushing the same files again resumes the upload; other files wait for it.
 		const resumed = await ok(await push(id, [jar, config]))
@@ -256,6 +274,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			{ ...latest, external_files: undefined, pool: undefined },
 			{
 				...manifest,
+				removed_files: [],
 				root: second.root,
 				version: 2,
 				ready: true,
@@ -282,6 +301,20 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_stranger')).status,
 			401,
 		)
+
+		// The preview shows the ready version, but never file keys or pool access.
+		const shown = (await preview()).version
+		assert.equal(shown.version, 2)
+		assert.equal(shown.ready, true)
+		assert.deepEqual(
+			shown.external_files.map((entry) => entry.file_name),
+			[jar.file_name, config.file_name],
+		)
+		assert.ok(shown.external_files.every((entry) => entry.key === undefined))
+		assert.equal(shown.pool, undefined)
+		assert.equal(shown.store, undefined)
+		assert.doesNotMatch(JSON.stringify(shown), /ticket/)
+		assert.equal((await preview('')).version, undefined)
 
 		// A member reports broken files; the owner sees it and nobody else.
 		await ok(
@@ -551,6 +584,34 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(aloneVersion.store.core.id, 'core')
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
+
+		// Modpack files the owner turned off are kept with the version, by the App's own rules.
+		const pack = await ok(await call('/instances', 'POST', { name: 'Pack' }))
+		const removed = [
+			{ type: 'version', version_id: 'AAAABBBB' },
+			{ type: 'path', parent: 'mods', filename: 'extra.jar.disabled' },
+		]
+		const withRemoved = (removed_files, modpack_id = 'PACKPACK') =>
+			call(`/instances/${pack.id}/versions`, 'POST', {
+				...manifest,
+				modpack_id,
+				removed_files,
+				external_files: [],
+				root: EMPTY_ROOT,
+			})
+		for (const [bad, modpack] of [
+			[[removed[0]], null],
+			[[{ type: 'path', parent: 'config', filename: 'a.jar' }]],
+			[[{ type: 'path', parent: 'mods', filename: 'a.txt' }]],
+			[[{ type: 'path', parent: 'mods', filename: '../a.jar' }]],
+			[[{ type: 'other' }]],
+		])
+			assert.equal((await withRemoved(bad, modpack)).status, 400, JSON.stringify(bad))
+		await ok(await withRemoved(removed))
+		assert.deepEqual(
+			(await ok(await call(`/instances/${pack.id}/versions`))).removed_files,
+			removed,
+		)
 	} finally {
 		await backend.dispose()
 	}
