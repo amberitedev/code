@@ -49,6 +49,8 @@ const LISTEN_WAIT: Duration = Duration::from_secs(120);
 #[derive(Debug, Clone)]
 pub struct Report {
     pub diagnosis: Diagnosis,
+    /// Where the port is joined from the internet, while Core can tell it is usable there.
+    pub outside: Option<SocketAddr>,
     /// Unix seconds.
     pub at: i64,
 }
@@ -290,6 +292,7 @@ impl Network {
         reports.insert(
             key.into(),
             Report {
+                outside: outside(&facts, &diagnosis),
                 diagnosis,
                 at: now(),
             },
@@ -437,6 +440,23 @@ fn changed(previous: Option<&Diagnosis>, now: &Diagnosis) -> bool {
     previous.is_none_or(|previous| {
         previous.case != now.case || previous.title != now.title
     })
+}
+
+/// Where a usable port is joined from the internet: this computer's own public address, or the
+/// router's internet side with the port it granted.
+fn outside(facts: &Facts, diagnosis: &Diagnosis) -> Option<SocketAddr> {
+    if !diagnosis.usable() {
+        return None;
+    }
+    match &facts.router {
+        RouterFacts::NoNat => Some(SocketAddr::new(facts.local_ip, facts.port)),
+        RouterFacts::Found {
+            wan_ip: Some(ip),
+            mapping: Ok(port),
+            ..
+        } => Some(SocketAddr::new(*ip, *port)),
+        _ => None,
+    }
 }
 
 async fn save(db: &SqlitePool, key: &str, mapping: &Mapping) {

@@ -3,6 +3,11 @@
 
 use sqlx::{SqliteExecutor, SqlitePool};
 
+use crate::{
+    access::sync::owe,
+    api::backend::{ForgetPlayers, OwedCall},
+};
+
 /// Who put a tracked file there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
@@ -314,9 +319,25 @@ pub async fn set_pack_error(
 }
 
 /// Stop following the pack, and drop any waiting to apply. Its files stay, as files someone
-/// added.
+/// added. A server that followed an instance owes the backend dropping its players, who got that
+/// instance's share through it; wake sync with `Access::owed` after.
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     let mut tx = db.begin().await?;
+    let followed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM packs WHERE server_id = ? AND shared_instance_id IS NOT NULL)",
+    )
+    .bind(server_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if followed {
+        owe(
+            &mut tx,
+            &OwedCall::ForgetPlayers(ForgetPlayers {
+                server_id: server_id.into(),
+            }),
+        )
+        .await?;
+    }
     sqlx::query("DELETE FROM packs WHERE server_id = ?")
         .bind(server_id)
         .execute(&mut *tx)

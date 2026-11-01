@@ -47,6 +47,7 @@ fn declarations() -> String {
         backend::AccessDirectory::decl(&cfg),
         backend::Grant::decl(&cfg),
         backend::Remove::decl(&cfg),
+        backend::ForgetPlayers::decl(&cfg),
         backend::OwedCall::decl(&cfg),
         backend::StorageReport::decl(&cfg),
         sharing_storage::local::HeldVersion::decl(&cfg),

@@ -98,6 +98,13 @@ pub struct Remove {
     pub keep_core: bool,
 }
 
+/// Body of `DELETE /core/players`: `server_id` was deleted or stopped following an instance, so
+/// the backend drops its players and their links.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ForgetPlayers {
+    pub server_id: String,
+}
+
 /// A call Core still owes the backend, stored as JSON in `backend_owed.call` and retried with
 /// backoff.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -110,6 +117,8 @@ pub enum OwedCall {
     /// `DELETE /v1/instances/{share_id}`: a server's own share, which the server let go of when
     /// it was deleted or linked to an instance.
     DeleteShare { share_id: String },
+    /// `DELETE /core/players`.
+    ForgetPlayers(ForgetPlayers),
     /// `POST /core/state` with the state at the time it is sent.
     ReportState,
     /// `POST /core/storage` with the store's holdings at the time it is sent.

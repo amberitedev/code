@@ -1113,12 +1113,14 @@ pub async fn install(
                 })?;
             let requested = Some(version).filter(|version| !version.is_empty());
             let (hold, busy) = begin(&state, &id)?;
+            let access = state.access.clone();
             state.content.spawn(
                 hold,
                 busy,
                 Installing::Loader,
                 move |content, hold, progress| async move {
                     records::unlink(&content.db, hold.id()).await?;
+                    access.owed.notify_one();
                     content_install::loader(
                         &content,
                         &hold,
@@ -1467,6 +1469,7 @@ pub async fn unlink(
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     records::unlink(&state.db, &id).await?;
+    state.access.owed.notify_one();
     state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)

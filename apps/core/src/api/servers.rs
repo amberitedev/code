@@ -377,8 +377,8 @@ pub struct WorldReadiness {
 /// Mirrors Archon.Servers.v1.WorldContentInfo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldContentInfo {
-    /// The share of a server that follows no instance, once it is shared (`api::share`). A
-    /// server that follows an instance reads its instance's share and has none.
+    /// The share the server reads: its instance's, when it follows one, else its own once it is
+    /// shared (`api::share`). Only its own is written from the server.
     pub shared_instance_id: Option<String>,
     /// Not tracked yet: Core does not compare the server to its share until a push asks.
     pub shared_instance_needs_update: bool,
@@ -521,7 +521,15 @@ async fn server(
             ip: None,
             port: u16::try_from(row.port).unwrap_or_default(),
             domain: String::new(),
-            outside: None,
+            // Known while the server runs and its port is forwarded, or open on a public address.
+            outside: state
+                .network
+                .report(&row.id)
+                .and_then(|report| report.outside)
+                .map(|address| OutsideAddress {
+                    ip: address.ip().to_string(),
+                    port: address.port(),
+                }),
         },
         game: Game::Minecraft,
         backup_quota: 0,
@@ -723,6 +731,7 @@ pub async fn reinstall(
     let busy = state.content.busy(&id)?;
     let hold = state.servers.hold(&id)?;
     content::records::unlink(&state.db, &id).await?;
+    state.access.owed.notify_one();
     let progress = state.content.progress(&id);
     let result = content::install::loader(
         &state.content,
@@ -794,7 +803,7 @@ pub async fn delete(
 }
 
 /// Delete a held server's row, and with it every role on it and its own share, owing the backend
-/// each removal. Returns who had a role.
+/// each removal and dropping its players. Returns who had a role.
 async fn remove_server(
     state: &AppState,
     caller: &Caller,
@@ -811,6 +820,16 @@ async fn remove_server(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    // Its players, if it had any, lose what it shared with them.
+    crate::access::sync::owe(
+        &mut tx,
+        &super::backend::OwedCall::ForgetPlayers(
+            super::backend::ForgetPlayers {
+                server_id: id.into(),
+            },
+        ),
+    )
+    .await?;
     for user in &members {
         super::access::owe_removal(&mut tx, user, id).await?;
     }
@@ -860,13 +879,15 @@ async fn server_full(
     let invocation = launch::args(paths, &row)
         .ok()
         .map(|args| launch::invocation(&args));
-    let follows_instance = content::records::pack(&state.db, &row.id)
+    // A server that follows an instance reads that instance's share; one that follows none has
+    // its own once it is shared.
+    let linked = content::records::pack(&state.db, &row.id)
         .await?
-        .is_some_and(|pack| content::install::linked(&pack).is_some());
-    let shared_instance_id = if follows_instance {
-        None
-    } else {
-        content::records::share_id(&state.db, &row.id).await?
+        .as_ref()
+        .and_then(content::install::linked);
+    let shared_instance_id = match linked {
+        Some(linked) => Some(linked.shared_instance_id),
+        None => content::records::share_id(&state.db, &row.id).await?,
     };
     let content = match (&row.loader, &row.game_version) {
         (Some(loader), Some(game_version)) => Some(WorldContentInfo {
