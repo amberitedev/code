@@ -1438,3 +1438,47 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error["error"], "conflict");
 }
+
+#[tokio::test]
+async fn a_failed_install_tells_the_app_why() {
+    use super::{
+        content::Installing,
+        events::{InstallProgressKey, WsEvent},
+    };
+    let core = core().await;
+    let content = &core.state.content;
+    let mut events = content.events.subscribe();
+    content.spawn(
+        core.state.servers.hold(&core.server).unwrap(),
+        content.busy(&core.server).unwrap(),
+        Installing::Modpack,
+        |_, _, progress| async move {
+            let key = InstallProgressKey::LocalModpack {
+                filename: "pack".into(),
+            };
+            progress.set("files", &key, 0.5);
+            Err(crate::content::Error::Invalid("too large".into()))
+        },
+    );
+    // The App reads an install's end from its items: a percent, then the error.
+    let mut seen = Vec::new();
+    while let Ok((_, event)) = events.recv().await {
+        match event {
+            WsEvent::InstallProgress { items } => seen.push(
+                items
+                    .into_iter()
+                    .map(|item| (item.progress, item.error))
+                    .collect::<Vec<_>>(),
+            ),
+            WsEvent::InstallationResult(_) => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        seen,
+        [
+            vec![(Some(50.0), None)],
+            vec![(Some(50.0), Some("too large".to_owned()))],
+        ]
+    );
+}
