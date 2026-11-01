@@ -773,6 +773,23 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			401,
 		)
 		assert.equal((await send(`http://local.test/v1/invites/${serverLink.id}`, 'GET')).status, 404)
+		// A server that follows another share drops its players: they were given the old one.
+		const asOther = (path, method = 'GET') => call(path, method, undefined, 'mra_other')
+		const rejoin = await ok(
+			await call('/servers/core/srv1/invites', 'POST', { ...server, max_uses: 1 }),
+		)
+		await ok(await asOther(`/instances/${smp.id}/invites/${rejoin.id}`, 'POST'))
+		assert.equal((await asOther(`/instances/${smp.id}/versions`)).status, 200)
+		const next = await ok(await call('/instances', 'POST', { name: 'Next' }))
+		await ok(
+			await call('/servers/core/srv1/invites', 'POST', {
+				...server,
+				instance_id: next.id,
+				max_uses: 1,
+			}),
+		)
+		assert.equal((await asOther(`/instances/${smp.id}/versions`)).status, 401)
+		assert.deepEqual((await ok(await call('/servers/core/srv1/players'))).users, [])
 
 		// A Core writes the share of its own server-first server with its key.
 		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)

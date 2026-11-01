@@ -1093,9 +1093,10 @@ async function users(
 
 /**
  * Record which share a Core server follows and what it is called, from the body of a players or
- * invites write: `instance_id`, `name`, and `port` (its game port). The share is the server's own server-first share, or one the Core's owner owns or
- * has joined; a player cannot pass on what they were given. Changing the share moves the server's
- * players and links to it.
+ * invites write: `instance_id`, `name`, and `port` (its game port). The share is the server's
+ * own server-first share, or one the Core's owner owns or has joined; a player cannot pass on what
+ * they were given. Changing the share drops the server's players and links, as the Core does when
+ * the server follows another instance: they were given the old one.
  */
 async function followShare(
 	env: Env,
@@ -1129,14 +1130,17 @@ async function followShare(
 		name: string(body.name, 'name'),
 		port: gamePort(body.port),
 	}
-	await env.DB.batch([
-		env.DB.prepare(
-			'INSERT INTO shared_servers (core_id,server_id,instance_id,name,port) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET instance_id = excluded.instance_id, name = excluded.name, port = excluded.port',
-		).bind(coreId, serverId, item.id, server.name, server.port),
-		env.DB.prepare(
-			'UPDATE shared_links SET instance_id = ? WHERE core_id = ? AND server_id = ?',
-		).bind(item.id, coreId, serverId),
-	])
+	const followed = await env.DB.prepare(
+		'SELECT instance_id FROM shared_servers WHERE core_id = ? AND server_id = ?',
+	)
+		.bind(coreId, serverId)
+		.first<{ instance_id: string }>()
+	if (followed && followed.instance_id !== item.id) await forgetServer(env, coreId, serverId)
+	await env.DB.prepare(
+		'INSERT INTO shared_servers (core_id,server_id,instance_id,name,port) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET name = excluded.name, port = excluded.port',
+	)
+		.bind(coreId, serverId, item.id, server.name, server.port)
+		.run()
 	return server
 }
 
