@@ -281,7 +281,9 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
 }
 
 /// The backend's share routes, reached with this Core's key.
-async fn backend(state: &AppState) -> Result<push::Backend, ApiError> {
+pub(super) async fn backend(
+    state: &AppState,
+) -> Result<push::Backend, ApiError> {
     let key: Option<String> =
         sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
             .fetch_optional(&state.db)
@@ -293,7 +295,7 @@ async fn backend(state: &AppState) -> Result<push::Backend, ApiError> {
         }
         _ => Err(ApiError::new(
             ErrorCode::Conflict,
-            "Pair this Core with an account to share its servers.",
+            "Pair this Core with an account to share its servers or follow an instance.",
         )),
     }
 }

@@ -38,7 +38,7 @@ use crate::{
         install::{self as content_install, Linked, PackSource},
         pack,
         records::{self, ContentFile, Origin, Pack, PendingPack, SideToggle},
-        shared::{self, SharedVersion},
+        shared,
     },
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
@@ -354,12 +354,12 @@ pub enum InstallWorldContent {
         #[serde(default)]
         properties: Option<PropertiesFields>,
     },
-    /// Amberite: apply a version of an App instance's share (`content::shared`). On a running
-    /// server it waits for the server to stop, or with `restart` stops it, applies, and starts
-    /// it again.
+    /// Amberite: apply the latest version of an App instance's share (`content::shared`), which
+    /// Core reads from the backend itself. On a running server it waits for the server to stop,
+    /// or with `restart` stops it, applies, and starts it again.
     Instance {
         instance: UploadedInstance,
-        share: SharedVersion,
+        shared_instance_id: String,
         #[serde(default)]
         properties: Option<PropertiesFields>,
         #[serde(default)]
@@ -1141,13 +1141,19 @@ pub async fn install(
         }
         InstallWorldContent::Instance {
             instance,
-            share,
+            shared_instance_id,
             properties,
             restart,
             force,
         } => {
             install_instance(
-                &state, &id, instance, share, properties, restart, force,
+                &state,
+                &id,
+                instance,
+                shared_instance_id,
+                properties,
+                restart,
+                force,
             )
             .await?;
         }
@@ -1206,25 +1212,21 @@ fn spawn_pack(
     );
 }
 
-/// Apply a share version to a server. A stopped server installs it now. A running one keeps
-/// running: Core fetches the version, then it waits for the server to stop, or with `restart`
-/// Core stops the server, and it applies then (see [`apply_pending`]).
+/// Apply the latest version of a share to a server, which Core reads from the backend with its
+/// own key. A stopped server installs it now. A running one keeps running: Core fetches the
+/// version, then it waits for the server to stop, or with `restart` Core stops the server, and
+/// it applies then (see [`apply_pending`]).
 async fn install_instance(
     state: &Arc<AppState>,
     id: &str,
     instance: UploadedInstance,
-    share: SharedVersion,
+    shared_instance_id: String,
     properties: Option<PropertiesFields>,
     restart: bool,
     force: bool,
 ) -> Result<(), ApiError> {
+    let backend = super::share::backend(state).await?;
     let busy = state.content.busy(id)?;
-    let linked = Linked {
-        id: instance.id,
-        name: instance.name,
-        shared_instance_id: share.shared_instance_id.clone(),
-        version: share.version.into(),
-    };
     match state.servers.hold(id) {
         Ok(hold) => {
             // A version still waiting from an earlier push is superseded by this one.
@@ -1236,24 +1238,34 @@ async fn install_instance(
                 busy,
                 Installing::Modpack,
                 move |content, hold, progress| async move {
-                    let sha1 =
-                        match shared::write_pack(&content, hold.id(), &share)
-                            .await
-                        {
-                            Ok(sha1) => sha1,
-                            Err(error) => {
-                                records::set_pack_error(
-                                    &content.db,
-                                    hold.id(),
-                                    Some(&format!("{error:#}")),
-                                )
-                                .await?;
-                                return Err(error);
-                            }
-                        };
+                    let written = shared::write_pack(
+                        &content,
+                        hold.id(),
+                        &backend,
+                        &shared_instance_id,
+                        &instance.name,
+                    )
+                    .await;
+                    let (sha1, version) = match written {
+                        Ok(written) => written,
+                        Err(error) => {
+                            records::set_pack_error(
+                                &content.db,
+                                hold.id(),
+                                Some(&format!("{error:#}")),
+                            )
+                            .await?;
+                            return Err(error);
+                        }
+                    };
                     let source = PackSource::Stored {
                         sha1,
-                        instance: Some(linked),
+                        instance: Some(Linked {
+                            id: instance.id,
+                            name: instance.name,
+                            shared_instance_id,
+                            version: version.into(),
+                        }),
                     };
                     let change = content_install::pack(
                         &content, &hold, &progress, source, properties, force,
@@ -1268,16 +1280,23 @@ async fn install_instance(
             let state = Arc::clone(state);
             let id = id.to_owned();
             tokio::spawn(async move {
-                let written =
-                    shared::write_pack(&state.content, &id, &share).await;
+                let written = shared::write_pack(
+                    &state.content,
+                    &id,
+                    &backend,
+                    &shared_instance_id,
+                    &instance.name,
+                )
+                .await;
                 drop(busy);
                 let result = async {
+                    let (sha1, version) = written?;
                     let pending = PendingPack {
-                        sha1: written?,
-                        instance_id: linked.id,
-                        instance_name: linked.name,
-                        shared_instance_id: linked.shared_instance_id,
-                        shared_version: linked.version,
+                        sha1,
+                        instance_id: instance.id,
+                        instance_name: instance.name,
+                        shared_instance_id,
+                        shared_version: version.into(),
                         start_after: restart,
                         force,
                     };

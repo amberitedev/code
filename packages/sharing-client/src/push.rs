@@ -87,13 +87,13 @@ impl Backend {
             .bearer_auth(&self.token)
     }
 
-    /// A version of the share, or the latest one without `version`. `None` when it does not
-    /// exist.
-    async fn version(
+    /// A version of the share, or the latest one without `version`, read as `T`. `None` when it
+    /// does not exist.
+    pub(crate) async fn version<T: serde::de::DeserializeOwned>(
         &self,
         share_id: &str,
         version: Option<i32>,
-    ) -> Result<Option<Version>, PushError> {
+    ) -> Result<Option<T>, PushError> {
         let path = match version {
             Some(version) => {
                 format!("/instances/{share_id}/versions/{version}")
@@ -621,7 +621,7 @@ async fn push_hashed<C: Serialize + Sync>(
     for _ in 0..CONFIRM_ATTEMPTS {
         tokio::time::sleep(CONFIRM_INTERVAL).await;
         if backend
-            .version(share_id, Some(created.version))
+            .version::<Version>(share_id, Some(created.version))
             .await?
             .is_some_and(|version| version.ready)
         {
@@ -675,7 +675,7 @@ async fn previous_versions(
     backend: &Backend,
     share_id: &str,
 ) -> Result<Vec<Version>, PushError> {
-    let latest = match backend.version(share_id, None).await {
+    let latest = match backend.version::<Version>(share_id, None).await {
         Ok(Some(latest)) => latest,
         Ok(None) | Err(PushError::Unavailable(_)) => return Ok(Vec::new()),
         Err(error) => return Err(error),

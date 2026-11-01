@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
 import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
-import { ensure_shared_instance, get_shared_instance_server_pack } from '@/helpers/instance'
+import { ensure_shared_instance } from '@/helpers/instance'
 import { apiClient } from '@/platform/modrinth-client'
 
 export type LinkedServer = Archon.Servers.v0.Server & {
@@ -171,23 +171,23 @@ export function playersOnline(server: Archon.Servers.v0.Server) {
 
 /**
  * Has a server apply the latest version of the instance's share. The server follows the instance
- * through its share like one more member: its Core fetches the files from the pool itself, so
- * nothing is uploaded from here. The first push installs the instance and links the server to
- * it. A running server takes the version when it next stops, unless `restart` is set.
+ * through its share like one more member: its Core reads the version from the backend and fetches
+ * the files from the pool itself, so nothing is uploaded from here. The first push installs the
+ * instance and links the server to it. A running server takes the version when it next stops,
+ * unless `restart` is set.
  */
 export async function pushInstanceToServer(
 	instance: { id: string; name: string },
 	serverId: string,
 	options: { properties?: Archon.Content.v1.PropertiesFields; restart?: boolean } = {},
 ) {
-	await ensure_shared_instance(instance.id)
-	const share = await get_shared_instance_server_pack(instance.id)
+	const share = await ensure_shared_instance(instance.id)
 	// A Core server has one world, with the server's own id.
 	const worldId = serverId
 	await apiClient.archon.content_v1.installContent(serverId, worldId, {
 		content_variant: 'instance',
 		instance,
-		share,
+		shared_instance_id: share.id,
 		properties: options.properties,
 		restart: options.restart,
 	})

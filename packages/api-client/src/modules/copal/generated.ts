@@ -240,37 +240,6 @@ root: string,
  */
 bytes: number, };
 
-export type ServerPack = { shared_instance_id: string, version: number, 
-/**
- * `modrinth.index.json` for the files on Modrinth. Core writes it as it is, and its pack
- * install checks it.
- */
-index: unknown, 
-/**
- * Where `files` are, absent when there are none.
- */
-pool: PoolAccess | null, files: Array<PoolFile>, };
-
-export type PoolAccess = { 
-/**
- * R, in hex.
- */
-root: string, holders: Array<PoolCore>, ticket: string, };
-
-export type PoolFile = { path: string, 
-/**
- * C, in hex.
- */
-object: string, object_size: number, 
-/**
- * P, in hex.
- */
-sha256: string, 
-/**
- * The file's own key, in hex. Absent for content files, whose key derives from P.
- */
-key: string | null, };
-
 export type PoolCore = { id: string, address: string, public_address?: string | null, cert_fingerprint: string, };
 
 export type StorageAnswer = { 

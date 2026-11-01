@@ -1,4 +1,3 @@
-import type { Copal } from '../copal/types'
 import type { Labrinth } from '../labrinth/types'
 
 export namespace Archon {
@@ -660,19 +659,16 @@ export namespace Archon {
 				  }
 				| {
 						/**
-						 * Core only. Applies a version of an App instance's share, which Core fetches
-						 * from the pool itself. A running server takes it when it next stops, or with
-						 * `restart` is stopped, updated, and started again.
+						 * Core only. Applies the latest version of an App instance's share, which Core
+						 * reads from the backend and fetches from the pool itself. A running server takes
+						 * it when it next stops, or with `restart` is stopped, updated, and started again.
 						 */
 						content_variant: 'instance'
 						instance: { id: string; name: string }
-						share: SharedVersion
+						shared_instance_id: string
 						properties?: PropertiesFields | null
 						restart?: boolean
 				  }
-
-			/** Core only. A share version as a server takes it, built by the App from the backend's latest. */
-			export type SharedVersion = Copal.ServerPack
 
 			export type AddonDiffVersion = {
 				id: string

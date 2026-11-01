@@ -883,7 +883,9 @@ async function users(
  * A Core, with its key, writing the share of one of its server-first servers (a server that
  * follows no instance). It acts as the share's owner, its own owner account, for: create
  * (`POST /v1/instances` with `server_id`, answering the server's existing share if it has one),
- * rename, delete, and its versions. It reaches no other share and no other route.
+ * rename, delete, and its versions. A Core also reads the versions of a share one of its servers
+ * follows, which its owner can read as a member (`content::shared` in Core). It reaches no other
+ * share and no other route.
  */
 async function coreSharing(
 	request: Request,
@@ -920,7 +922,10 @@ async function coreSharing(
 	const item = await instance(env, id)
 	// The owner check matters because a Core picks its own id when it pairs: a share left from an
 	// earlier pairing of that id is not this Core's.
-	if (item.core_id !== core.id || item.owner_id !== core.owner_id) throw refused()
+	if (item.core_id !== core.id || item.owner_id !== core.owner_id) {
+		if (section !== 'versions' || rest.length || request.method !== 'GET') throw refused()
+		await member(env, item, core.owner_id)
+	}
 	if (!section && request.method === 'PATCH') {
 		await env.DB.prepare('UPDATE shared_instances SET name = ? WHERE id = ?')
 			.bind(string((await readJson(request)).name, 'name'), id)
