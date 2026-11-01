@@ -452,6 +452,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend')).status,
 			401,
 		)
+		assert.equal(
+			(await ok(await call(`/instances/${id}`))).installed_once,
+			true,
+			'a share stays installed once after its last friend leaves',
+		)
+
+		// A quarantined share's invite preview shows no version.
+		await db.prepare('UPDATE shared_instances SET quarantine = 1 WHERE id = ?').bind(id).run()
+		assert.equal((await preview()).version, undefined)
 
 		// Deleting a share removes its manifests.
 		await ok(await call(`/instances/${id}`, 'DELETE'))

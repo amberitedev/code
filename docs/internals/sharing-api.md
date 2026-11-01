@@ -16,7 +16,8 @@ differs from what that client was written for, on purpose.
 - The push may name `server_core`, the owner's Core running a server of the instance, where the
   share is then homed.
 - The unauthenticated invite preview (`GET /v1/invites/{id}?version=true`) returns the latest
-  ready version without `key`, `pool`, or `store`, and no `version` while none is ready.
+  ready version without `key`, `pool`, or `store`, and no `version` while none is ready or the
+  instance is quarantined.
 - A member reading a version that is not ready gets 404, which the App reads as "never ready".
 
 ## Routes the upstream client did not have
@@ -34,7 +35,6 @@ differs from what that client was written for, on purpose.
 - `last_played` on members is always null.
 - `linked_server` on `GET /v1/instances/{id}` is null, and `GET /v1/instances/{id}/server-icon`
   is always 404, until shares know their linked server.
-- `installed_once` is computed from current members: true while a non-owner has joined.
 
 ## Missing
 

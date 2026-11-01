@@ -38,6 +38,7 @@ type Instance = {
 	name: string
 	icon: string | null
 	quarantine: number
+	installed_once: number
 	home: string | null
 	replica: string | null
 }
@@ -664,6 +665,14 @@ function inviteCode(): string {
 	).join('')
 }
 
+/** Marks a share installed once someone other than the owner joins it. Leaving never clears it. */
+async function installedOnce(env: Env, item: Instance, userId: string): Promise<void> {
+	if (item.installed_once || userId === item.owner_id) return
+	await env.DB.prepare('UPDATE shared_instances SET installed_once = 1 WHERE id = ?')
+		.bind(item.id)
+		.run()
+}
+
 async function usableLink(env: Env, id: string): Promise<Link> {
 	const link = await env.DB.prepare(
 		'SELECT * FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
@@ -677,7 +686,8 @@ async function usableLink(env: Env, id: string): Promise<Link> {
 /**
  * `GET /v1/invites/{id}`, unauthenticated: what the link shares, shown before accepting. With
  * `?version=true` it adds the latest ready version for the install preview, without file keys or
- * pool access, which only members get. It has no version while none is ready.
+ * pool access, which only members get. It has no version while none is ready or the instance is
+ * quarantined.
  */
 async function previewInvite(env: Env, id: string, withVersion: boolean): Promise<Response> {
 	const link = await usableLink(env, id)
@@ -711,7 +721,7 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 			? [{ type: 'user', id: manager.id, name: manager.username, avatar: manager.avatar_url }]
 			: [],
 		instance_users: users,
-		...(withVersion && ready && manifest
+		...(withVersion && !item.quarantine && ready && manifest
 			? {
 					version: {
 						...manifest,
@@ -740,6 +750,7 @@ async function invites(
 				.run()
 			if (!result.meta.changes)
 				throw new ApiError(404, 'not_found', 'Pending invite was not found', 'invite_not_found')
+			await installedOnce(env, item, userId)
 			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
@@ -772,6 +783,7 @@ async function invites(
 			),
 		])
 		await member(env, item, userId)
+		await installedOnce(env, item, userId)
 		await notifyMembers(env, item.id, 'shared_instance_users', userId)
 		return empty()
 	}
@@ -990,16 +1002,11 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	await member(env, item, user.id, !section)
 	if (!section) {
 		if (request.method === 'GET') {
-			const joined = await env.DB.prepare(
-				"SELECT 1 FROM shared_members WHERE instance_id = ? AND join_type != 'owner' AND joined_at IS NOT NULL LIMIT 1",
-			)
-				.bind(id)
-				.first()
 			return json({
 				name: item.name,
 				icon: item.icon,
 				quarantine: item.quarantine === 1,
-				installed_once: joined !== null,
+				installed_once: item.installed_once === 1,
 				linked_server: null,
 			})
 		}
