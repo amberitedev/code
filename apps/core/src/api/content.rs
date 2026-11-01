@@ -1219,8 +1219,6 @@ async fn install_instance(
     force: bool,
 ) -> Result<(), ApiError> {
     let busy = state.content.busy(id)?;
-    // The server now reads the instance's share, so its own goes first.
-    super::share::drop_share(state, id).await?;
     let linked = Linked {
         id: instance.id,
         name: instance.name,
@@ -1232,6 +1230,7 @@ async fn install_instance(
             // A version still waiting from an earlier push is superseded by this one.
             let waiting = records::clear_pending(&state.db, id).await?;
             forget_pack(state, waiting).await;
+            let app = Arc::clone(state);
             state.content.spawn(
                 hold,
                 busy,
@@ -1256,10 +1255,12 @@ async fn install_instance(
                         sha1,
                         instance: Some(linked),
                     };
-                    content_install::pack(
+                    let change = content_install::pack(
                         &content, &hold, &progress, source, properties, force,
                     )
-                    .await
+                    .await?;
+                    drop_own_share(&app, hold.id()).await;
+                    Ok(change)
                 },
             );
         }
@@ -1283,6 +1284,7 @@ async fn install_instance(
                     let replaced =
                         records::set_pending(&state.db, &id, &pending).await?;
                     forget_pack(&state, replaced).await;
+                    drop_own_share(&state, &id).await;
                     if restart {
                         match state.servers.stop(&id).await {
                             // It stopped on its own while the version was fetched.
@@ -1311,6 +1313,15 @@ async fn install_instance(
         Err(error) => return Err(error.into()),
     }
     Ok(())
+}
+
+/// Delete the server's own share once it follows an instance, since a server never has two
+/// shares. Called only after the link is recorded, so a failed link keeps the share and its
+/// players. A share the backend will not delete keeps its id, and deleting the server tries again.
+async fn drop_own_share(state: &AppState, id: &str) {
+    if let Err(error) = super::share::drop_share(state, id).await {
+        tracing::warn!(server = %id, error = %error.description, "could not delete the server's own share");
+    }
 }
 
 /// Apply the version waiting for a server, when one waits and the server is stopped. Starts the
