@@ -109,13 +109,7 @@ impl Backend {
         share_id: &str,
         version: Option<i32>,
     ) -> Result<Option<T>, PushError> {
-        let path = match version {
-            Some(version) => {
-                format!("/instances/{share_id}/versions/{version}")
-            }
-            None => format!("/instances/{share_id}/versions"),
-        };
-        let response = self.request(reqwest::Method::GET, &path).send().await?;
+        let response = self.version_response(share_id, version).await?;
         match unavailable(response.status()) {
             Some(Unavailable::Deleted) => Ok(None),
             Some(reason) => Err(PushError::Unavailable(reason)),
@@ -126,6 +120,22 @@ impl Backend {
                     .await?,
             )),
         }
+    }
+
+    /// The backend's response to reading a version, or the latest one without `version`, as it
+    /// came.
+    pub(crate) async fn version_response(
+        &self,
+        share_id: &str,
+        version: Option<i32>,
+    ) -> Result<reqwest::Response, PushError> {
+        let path = match version {
+            Some(version) => {
+                format!("/instances/{share_id}/versions/{version}")
+            }
+            None => format!("/instances/{share_id}/versions"),
+        };
+        Ok(self.request(reqwest::Method::GET, &path).send().await?)
     }
 
     /// Creates a version. The pool's refusals come back as their own errors, named by the
@@ -276,7 +286,7 @@ fn unavailable(status: StatusCode) -> Option<Unavailable> {
     }
 }
 
-async fn success(
+pub(crate) async fn success(
     response: reqwest::Response,
     operation: &'static str,
 ) -> Result<reqwest::Response, PushError> {

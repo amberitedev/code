@@ -21,7 +21,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sharing_client::{consume, push};
+use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -1254,15 +1254,23 @@ async fn install_instance(
     let version = consume::ready_version(&backend, &shared_instance_id)
         .await
         .map_err(|error| match error {
-            consume::ReadError::Backend(
-                push::PushError::Unavailable(push::Unavailable::AccessRevoked)
-                | push::PushError::Backend {
-                    status: 401 | 403, ..
-                },
-            ) => ApiError::new(
-                ErrorCode::Forbidden,
-                "You no longer have access to this instance's share.",
-            ),
+            // The backend names why by its code. It checks the Core owner's account before the
+            // reader's, so a locked or blacklisted account is most likely the owner's.
+            consume::ReadError::Denied { code, description } => {
+                let message = match code.as_str() {
+                    "not_member" => {
+                        "You no longer have access to this instance's share."
+                    }
+                    "ticket_invalid" => {
+                        "The request to update the server expired. Try again."
+                    }
+                    "account_locked" | "blacklisted" => {
+                        "The owner of this Core cannot use sharing right now."
+                    }
+                    _ => description.as_str(),
+                };
+                ApiError::new(ErrorCode::Forbidden, message)
+            }
             consume::ReadError::Backend(error) => ApiError::from(error),
             error @ consume::ReadError::NoVersion => {
                 ApiError::new(ErrorCode::NotFound, error.to_string())

@@ -9,8 +9,9 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, parse_hash};
-use crate::push::{Backend, CONFIG_FILE_TYPE, PushError};
+use crate::push::{Backend, CONFIG_FILE_TYPE, PushError, success};
 use crate::store::{FetchError, PoolCore, PoolObject, StoreClient};
+use reqwest::StatusCode;
 
 /// A share version as a server takes it.
 #[derive(Debug, Clone)]
@@ -118,6 +119,10 @@ pub struct ModpackFile {
 pub enum ReadError {
     #[error(transparent)]
     Backend(#[from] PushError),
+    /// The backend refused the read (401 or 403), with the `code` it named, or its `error` kind
+    /// when it named none, and its description.
+    #[error("{description}")]
+    Denied { code: String, description: String },
     #[error("The instance's share has no version.")]
     NoVersion,
     #[error(
@@ -219,10 +224,39 @@ pub async fn ready_version(
     backend: &Backend,
     share_id: &str,
 ) -> Result<ReadyVersion, ReadError> {
-    let version: SharedVersion = backend
-        .version(share_id, None)
+    let response = backend.version_response(share_id, None).await?;
+    let status = response.status();
+    if status == StatusCode::NOT_FOUND {
+        return Err(ReadError::NoVersion);
+    }
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        #[derive(Deserialize)]
+        struct Body {
+            #[serde(default)]
+            error: String,
+            #[serde(default)]
+            code: Option<String>,
+            #[serde(default)]
+            description: String,
+        }
+        let body = response.text().await.unwrap_or_default();
+        let body = serde_json::from_str::<Body>(&body).unwrap_or(Body {
+            error: String::new(),
+            code: None,
+            description: format!(
+                "The backend refused the read with status {status}."
+            ),
+        });
+        return Err(ReadError::Denied {
+            code: body.code.unwrap_or(body.error),
+            description: body.description,
+        });
+    }
+    let version: SharedVersion = success(response, "get_instance_version")
         .await?
-        .ok_or(ReadError::NoVersion)?;
+        .json()
+        .await
+        .map_err(PushError::from)?;
     if !version.ready {
         return Err(ReadError::NotReady);
     }
