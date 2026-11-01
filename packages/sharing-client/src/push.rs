@@ -60,7 +60,7 @@ pub struct Backend {
     http: reqwest::Client,
     base_url: String,
     token: String,
-    reader: Option<String>,
+    read_ticket: Option<String>,
 }
 
 impl Backend {
@@ -75,14 +75,15 @@ impl Backend {
             http,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             token: token.into(),
-            reader: None,
+            read_ticket: None,
         }
     }
 
-    /// A Core key reading a share its server follows, for the account that asked. The backend
-    /// lets it read only what that account can, and only while the account can reach the Core.
-    pub fn for_reader(mut self, user_id: impl Into<String>) -> Self {
-        self.reader = Some(user_id.into());
+    /// A Core key reading a share its server follows, with the read ticket the asking user's App
+    /// got for this Core and share. The backend then reads it as that user, and only while they
+    /// can read it.
+    pub fn with_read_ticket(mut self, ticket: impl Into<String>) -> Self {
+        self.read_ticket = Some(ticket.into());
         self
     }
 
@@ -95,8 +96,8 @@ impl Backend {
             .http
             .request(method, format!("{}/v1{path}", self.base_url))
             .bearer_auth(&self.token);
-        match &self.reader {
-            Some(reader) => request.header("X-Amberite-Reader", reader),
+        match &self.read_ticket {
+            Some(ticket) => request.header("X-Amberite-Read-Ticket", ticket),
             None => request,
         }
     }

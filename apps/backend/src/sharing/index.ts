@@ -4,6 +4,7 @@ import { ApiError, json, readBytes, readJson } from '../common/http'
 import { notificationResponse, notifyMembers } from '../common/notifications'
 import type { Env } from '../common/types'
 import { requireListedCore } from '../cores'
+import { readTicket, readTicketUser } from '../cores/tickets'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
 import {
@@ -885,8 +886,8 @@ async function users(
  * follows no instance). It acts as the share's owner, its own owner account, for: create
  * (`POST /v1/instances` with `server_id`, answering the server's existing share if it has one),
  * rename, delete, and its versions. A Core also reads the versions of a share one of its servers
- * follows, for a user who can read it and reach this Core (`content::shared` in Core). It reaches
- * no other share and no other route.
+ * follows, for a user who can read it and gave it a read ticket (`content::shared` in Core). It
+ * reaches no other share and no other route.
  */
 async function coreSharing(
 	request: Request,
@@ -924,18 +925,21 @@ async function coreSharing(
 	// The owner check matters because a Core picks its own id when it pairs: a share left from an
 	// earlier pairing of that id is not this Core's.
 	if (item.core_id !== core.id || item.owner_id !== core.owner_id) {
-		// A server following a share: the Core reads it for the user who asked, named in
-		// `X-Amberite-Reader` (its owner when absent, as for its own CLI). That user must reach
-		// both the share and this Core, so a Core never reads a share for someone who cannot.
+		// A server following a share: the Core reads it for the user who asked, with the read
+		// ticket that user's App got for this Core and share (`X-Amberite-Read-Ticket`). Without
+		// one it reads as its own owner, as for its CLI. Either way that user must still read the
+		// share, so a Core never reads a share for someone who did not ask it to.
 		if (section !== 'versions' || rest.length || request.method !== 'GET') throw refused()
-		const reader = request.headers.get('X-Amberite-Reader') ?? core.owner_id
-		if (
-			reader !== core.owner_id &&
-			!(await env.DB.prepare('SELECT 1 FROM core_access WHERE core_id = ? AND user_id = ?')
-				.bind(core.id, reader)
-				.first())
-		)
-			throw refused()
+		const ticket = request.headers.get('X-Amberite-Read-Ticket')
+		const reader = ticket ? await readTicketUser(env, ticket, core.id, id) : core.owner_id
+		if (!reader)
+			throw new ApiError(
+				403,
+				'forbidden',
+				'The read ticket is not for this Core and share',
+				'ticket_invalid',
+			)
+		await requireUnlocked(env, reader)
 		await requireSharing(env, reader)
 		await member(env, item, reader)
 	}
@@ -1098,6 +1102,13 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			await sweepFiles(env, id)
 			return empty()
 		}
+	}
+	// A ticket for one Core to read this share for the user, so a server they manage can follow
+	// it. The Core sends it with its reads, and the backend checks the user can still read then.
+	if (section === 'server-ticket' && !child && request.method === 'POST') {
+		if (item.quarantine) throw quarantined()
+		const coreId = string((await readJson(request)).core_id, 'core_id', 64)
+		return json(await readTicket(env, user.id, id, coreId))
 	}
 	if (section === 'history' && !child && request.method === 'GET') {
 		if (item.quarantine) throw quarantined()

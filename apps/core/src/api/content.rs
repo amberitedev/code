@@ -21,7 +21,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sharing_client::consume;
+use sharing_client::{consume, push};
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -361,6 +361,10 @@ pub enum InstallWorldContent {
     Instance {
         instance: UploadedInstance,
         shared_instance_id: String,
+        /// The backend's read ticket for this Core and share, which the App gets with its user's
+        /// session. Required from the App; the local CLI has none and reads as the owner.
+        #[serde(default)]
+        ticket: Option<String>,
         #[serde(default)]
         properties: Option<PropertiesFields>,
         #[serde(default)]
@@ -1143,6 +1147,7 @@ pub async fn install(
         InstallWorldContent::Instance {
             instance,
             shared_instance_id,
+            ticket,
             properties,
             restart,
             force,
@@ -1150,7 +1155,8 @@ pub async fn install(
             install_instance(
                 &state,
                 &id,
-                caller.user_id(),
+                &caller,
+                ticket,
                 instance,
                 shared_instance_id,
                 properties,
@@ -1215,16 +1221,17 @@ fn spawn_pack(
 }
 
 /// Apply the latest version of a share to a server, which Core reads from the backend with its
-/// own key for `reader`, the user who asked (its owner for the local CLI), so it reads only what
-/// that user can. The version is read before this returns, so one that cannot go fails the
-/// request. A stopped server installs it now. A running one keeps running: Core fetches the
+/// own key and the `ticket` of the user who asked, so it reads only what that user can. Only the
+/// local CLI reads without one, as the Core's owner. The version is read before this returns,
+/// so one that cannot go fails the request. A stopped server installs it now. A running one keeps running: Core fetches the
 /// version's files, then it waits for the server to stop, or with `restart` Core stops the
 /// server, and it applies then (see [`apply_pending`]).
 #[allow(clippy::too_many_arguments)]
 async fn install_instance(
     state: &Arc<AppState>,
     id: &str,
-    reader: Option<&str>,
+    caller: &Caller,
+    ticket: Option<String>,
     instance: UploadedInstance,
     shared_instance_id: String,
     properties: Option<PropertiesFields>,
@@ -1233,13 +1240,29 @@ async fn install_instance(
 ) -> Result<(), ApiError> {
     let busy = state.content.busy(id)?;
     let backend = super::share::backend(state).await?;
-    let backend = match reader {
-        Some(reader) => backend.for_reader(reader),
-        None => backend,
+    let backend = match (ticket, caller) {
+        (Some(ticket), _) => backend.with_read_ticket(ticket),
+        (None, Caller::Local) => backend,
+        // Without a ticket the backend reads as the Core's owner, which is not who asked.
+        (None, Caller::Session { .. }) => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "An instance install needs a read ticket for this Core.",
+            ));
+        }
     };
     let version = consume::ready_version(&backend, &shared_instance_id)
         .await
         .map_err(|error| match error {
+            consume::ReadError::Backend(
+                push::PushError::Unavailable(push::Unavailable::AccessRevoked)
+                | push::PushError::Backend {
+                    status: 401 | 403, ..
+                },
+            ) => ApiError::new(
+                ErrorCode::Forbidden,
+                "You no longer have access to this instance's share.",
+            ),
             consume::ReadError::Backend(error) => ApiError::from(error),
             error @ consume::ReadError::NoVersion => {
                 ApiError::new(ErrorCode::NotFound, error.to_string())
