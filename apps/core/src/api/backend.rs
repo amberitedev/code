@@ -107,6 +107,9 @@ pub enum OwedCall {
     Grant(Grant),
     /// `DELETE /core/access`.
     Remove(Remove),
+    /// `DELETE /v1/instances/{share_id}`: a server's own share, which the server let go of when
+    /// it was deleted or linked to an instance.
+    DeleteShare { share_id: String },
     /// `POST /core/state` with the state at the time it is sent.
     ReportState,
     /// `POST /core/storage` with the store's holdings at the time it is sent.

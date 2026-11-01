@@ -1259,7 +1259,7 @@ async fn install_instance(
                         &content, &hold, &progress, source, properties, force,
                     )
                     .await?;
-                    drop_own_share(&app, hold.id()).await;
+                    drop_own_share(&app, hold.id()).await?;
                     Ok(change)
                 },
             );
@@ -1284,7 +1284,7 @@ async fn install_instance(
                     let replaced =
                         records::set_pending(&state.db, &id, &pending).await?;
                     forget_pack(&state, replaced).await;
-                    drop_own_share(&state, &id).await;
+                    drop_own_share(&state, &id).await?;
                     if restart {
                         match state.servers.stop(&id).await {
                             // It stopped on its own while the version was fetched.
@@ -1315,13 +1315,15 @@ async fn install_instance(
     Ok(())
 }
 
-/// Delete the server's own share once it follows an instance, since a server never has two
+/// Let go of the server's own share once it follows an instance, since a server never has two
 /// shares. Called only after the link is recorded, so a failed link keeps the share and its
-/// players. A share the backend will not delete keeps its id, and deleting the server tries again.
-async fn drop_own_share(state: &AppState, id: &str) {
-    if let Err(error) = super::share::drop_share(state, id).await {
-        tracing::warn!(server = %id, error = %error.description, "could not delete the server's own share");
-    }
+/// players.
+async fn drop_own_share(state: &AppState, id: &str) -> sqlx::Result<()> {
+    let mut tx = state.db.begin().await?;
+    super::share::owe_share_deletion(&mut tx, id).await?;
+    tx.commit().await?;
+    state.access.owed.notify_one();
+    Ok(())
 }
 
 /// Apply the version waiting for a server, when one waits and the server is stopped. Starts the

@@ -380,6 +380,32 @@ impl Sync {
             OwedCall::Remove(remove) => {
                 self.call(key, Method::DELETE, "/core/access", remove).await
             }
+            OwedCall::DeleteShare { share_id } => {
+                // A server took the share again since, through the backend answering its
+                // existing share: it stays.
+                let taken: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM servers WHERE share_id = ?)",
+                )
+                .bind(share_id)
+                .fetch_one(&self.db)
+                .await
+                .map_err(|error| {
+                    Failure::Lost(Lost::Unreachable(error.to_string()))
+                })?;
+                if taken {
+                    return Ok(());
+                }
+                // Done on success and on 404 (gone), 403 `not_owner` (no longer this Core's),
+                // and 410 `core_removed`: the first two are refused and dropped, and the last
+                // un-pairs, which forgets every owed call.
+                self.call(
+                    key,
+                    Method::DELETE,
+                    &format!("/v1/instances/{share_id}"),
+                    &(),
+                )
+                .await
+            }
             OwedCall::ReportState => {
                 self.call(
                     key,

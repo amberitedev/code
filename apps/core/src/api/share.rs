@@ -24,6 +24,7 @@ use sharing_client::{push, store::StoreClient};
 
 use super::{
     AppState,
+    backend::OwedCall,
     content::{AddonKind, server_first, world},
     error::{ApiError, ErrorCode},
 };
@@ -474,35 +475,39 @@ pub async fn unshare(
             "This server is not shared.",
         ));
     }
-    drop_share(&state, &id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// Delete the server's own share, if it has one, so its players stop getting it. Called when the
-/// share is deleted, when the server is, and once the server follows an instance, since a
-/// server never has two shares.
-pub async fn drop_share(state: &AppState, id: &str) -> Result<(), ApiError> {
-    let Some(share_id) = records::share_id(&state.db, id).await? else {
-        return Ok(());
-    };
     // An unpaired Core, or a 410 `core_removed`, means the Core was removed from the account
     // that had the share, and the backend deleted its shares then. A share already gone is a
-    // 404, which `delete_share` counts as deleted. A 403 (the account is locked or may not
-    // share, or this share is not the Core's) leaves the share up, so it is an error.
-    if let Ok(backend) = backend(state).await {
+    // 404, which `delete_share` counts as deleted, and a 403 `not_owner` means it is not this
+    // Core's any more.
+    if let (Some(share_id), Ok(backend)) = (
+        records::share_id(&state.db, &id).await?,
+        backend(&state).await,
+    ) {
         match backend.delete_share(&share_id).await {
-            Ok(()) | Err(push::PushError::Backend { status: 410, .. }) => {}
-            Err(push::PushError::Backend { status: 403, .. }) => {
-                return Err(ApiError::new(
-                    ErrorCode::Conflict,
-                    "Amberite refused to delete this server's share. Check that the account                      this Core is paired with can share, then try again.",
-                ));
-            }
+            Ok(())
+            | Err(push::PushError::Backend {
+                status: 403 | 410, ..
+            }) => {}
             Err(error) => return Err(error.into()),
         }
     }
-    records::set_share_id(&state.db, id, None).await?;
-    Ok(())
+    records::set_share_id(&state.db, &id, None).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Let go of the server's own share, if it has one, in the caller's transaction: the server
+/// stops being shared now, and the backend is owed the share's deletion, so its players stop
+/// getting it. Wake sync with `Access::owed` once it commits. Called when the server is deleted
+/// and once it follows an instance, since a server never has two shares.
+pub async fn owe_share_deletion(
+    conn: &mut sqlx::SqliteConnection,
+    id: &str,
+) -> sqlx::Result<()> {
+    let Some(share_id) = records::share_id(&mut *conn, id).await? else {
+        return Ok(());
+    };
+    records::set_share_id(&mut *conn, id, None).await?;
+    crate::access::sync::owe(conn, &OwedCall::DeleteShare { share_id }).await
 }
 
 /// `GET .../content/share/files`: the config files a push can carry.
