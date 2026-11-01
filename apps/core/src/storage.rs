@@ -144,6 +144,11 @@ impl Storage {
         }
     }
 
+    /// The backend's root, unless none is set.
+    pub fn backend_url(&self) -> Option<&str> {
+        self.backend_url.as_deref()
+    }
+
     /// Run the store, and report to the backend after uploads and hourly.
     pub fn start(self: &Arc<Self>) {
         tokio::spawn(Arc::clone(self).supervise());

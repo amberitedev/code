@@ -13,6 +13,7 @@ import {
 import { addNotification } from '../common/notifications'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
+import { sweepFiles } from '../sharing'
 import { MAX_SERVER_NAME, parseServers, writeServers } from './servers'
 import { waitForApproval } from './sign-in'
 import { reportStorage } from './storage'
@@ -378,7 +379,7 @@ async function findCore(request: Request, env: Env): Promise<CoreRow | null> {
  * The Core a request's key belongs to. A key that belonged to a Core that was since removed from
  * its account gets 410, so the Core un-pairs on that answer and on no other.
  */
-async function requireListedCore(request: Request, env: Env): Promise<CoreRow> {
+export async function requireListedCore(request: Request, env: Env): Promise<CoreRow> {
 	const core = await findCore(request, env)
 	if (!core)
 		throw new ApiError(
@@ -523,10 +524,20 @@ export async function handleCores(request: Request, env: Env): Promise<Response 
 	const core = path.match(/^\/cores\/([^/]+)$/)
 	if (core && method === 'DELETE') {
 		const user = await requireUser(request, env)
+		const id = decodeURIComponent(core[1])
 		const deleted = await env.DB.prepare('DELETE FROM cores WHERE id = ? AND owner_id = ?')
-			.bind(decodeURIComponent(core[1]), user.id)
+			.bind(id, user.id)
 			.run()
 		if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
+		// Its server-first shares go with it: only that Core could write them.
+		const shares = (
+			await env.DB.prepare(
+				'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
+			)
+				.bind(id, user.id)
+				.all<{ id: string }>()
+		).results
+		for (const share of shares) await sweepFiles(env, share.id)
 		return new Response(null, { status: 204 })
 	}
 	return null

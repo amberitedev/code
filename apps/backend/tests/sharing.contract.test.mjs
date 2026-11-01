@@ -256,6 +256,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			{ ...latest, external_files: undefined, pool: undefined },
 			{
 				...manifest,
+				removed_files: [],
 				root: second.root,
 				version: 2,
 				ready: true,
@@ -551,6 +552,85 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(aloneVersion.store.core.id, 'core')
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
+
+		// A Core writes the share of its own server-first server with its key.
+		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)
+		const serverShare = await ok(
+			await asCore('/instances', 'POST', { name: 'Server', server_id: 'server' }),
+		)
+		assert.deepEqual(
+			await ok(await asCore('/instances', 'POST', { name: 'Server', server_id: 'server' })),
+			serverShare,
+		)
+		// A server installed from a modpack shares it, with the pack files players do not get.
+		const removed_files = [
+			{ type: 'version', version_id: 'PACKMOD1' },
+			{ type: 'path', parent: 'mods', filename: 'server-only.jar' },
+		]
+		const packVersion = (body) =>
+			asCore(`/instances/${serverShare.id}/versions`, 'POST', {
+				...manifest,
+				external_files: [],
+				removed_files,
+				...body,
+			})
+		assert.equal((await packVersion({})).status, 400)
+		const outside = { type: 'path', parent: 'config', filename: 'a.toml' }
+		const notAddon = { type: 'path', parent: 'mods', filename: 'notes.txt' }
+		// The App refuses a name that is not one safe file name.
+		const backslash = { type: 'path', parent: 'mods', filename: 'a\\b.jar' }
+		const device = { type: 'path', parent: 'mods', filename: 'con.jar' }
+		for (const bad of [outside, notAddon, backslash, device])
+			assert.equal(
+				(await packVersion({ modpack_id: 'PACKVER1', removed_files: [bad] })).status,
+				400,
+			)
+		await ok(await packVersion({ modpack_id: 'PACKVER1' }))
+		const shared = await ok(await asCore(`/instances/${serverShare.id}/versions`, 'GET'))
+		assert.equal(shared.modpack_id, 'PACKVER1')
+		assert.deepEqual(shared.removed_files, removed_files)
+		// A Core picks its own id when it pairs, so a matching core_id is not enough: a share whose
+		// owner is not the Core's owner stays out of its reach.
+		const moveShare = (core) =>
+			db
+				.prepare('UPDATE shared_instances SET core_id = ? WHERE id = ?')
+				.bind(core, serverShare.id)
+				.run()
+		await moveShare('core2')
+		await code(
+			await asCore(`/instances/${serverShare.id}`, 'PATCH', { name: 'Taken' }, 'core2'),
+			403,
+			'not_owner',
+		)
+		await code(
+			await asCore(`/instances/${serverShare.id}/versions`, 'GET', undefined, 'core2'),
+			403,
+			'not_owner',
+		)
+		await code(
+			await asCore('/instances', 'POST', { name: 'Taken', server_id: 'server' }, 'core2'),
+			403,
+			'not_owner',
+		)
+		await moveShare('core')
+		// An owner who may not share any more can still delete a share.
+		const leaving = await ok(
+			await asCore('/instances', 'POST', { name: 'Leaving', server_id: 'leaving' }),
+		)
+		await db.prepare('INSERT INTO sharing_blacklist (user_id) VALUES (?)').bind('owner').run()
+		await code(
+			await asCore(`/instances/${leaving.id}`, 'PATCH', { name: 'Still' }),
+			403,
+			'blacklisted',
+		)
+		await ok(await asCore(`/instances/${leaving.id}`, 'DELETE'))
+		await db.prepare('DELETE FROM sharing_blacklist WHERE user_id = ?').bind('owner').run()
+		// Removing the Core from the account deletes its server-first shares.
+		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))
+		assert.equal(
+			await db.prepare('SELECT 1 FROM shared_instances WHERE id = ?').bind(serverShare.id).first(),
+			null,
+		)
 	} finally {
 		await backend.dispose()
 	}

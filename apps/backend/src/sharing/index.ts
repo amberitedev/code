@@ -1,8 +1,9 @@
-import { requireUser } from '../common/auth'
+import { requireUnlocked, requireUser, tokenFrom } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, json, readBytes, readJson } from '../common/http'
 import { notificationResponse, notifyMembers } from '../common/notifications'
 import type { Env } from '../common/types'
+import { requireListedCore } from '../cores'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
 import {
@@ -40,6 +41,9 @@ type Instance = {
 	quarantine: number
 	home: string | null
 	replica: string | null
+	/** The Core whose key writes this share, for a server-first share; see `coreSharing`. */
+	core_id: string | null
+	server_id: string | null
 }
 type Version = {
 	instance_id: string
@@ -55,6 +59,7 @@ type Link = { id: string; instance_id: string; expiration: string; max_uses: num
 type Manifest = {
 	modrinth_ids: string[]
 	modpack_id: string | null
+	removed_files: RemovedFile[]
 	game_version: string
 	loader: string
 	loader_version: string
@@ -90,6 +95,54 @@ function fileType(value: unknown): string {
 	const type = string(value, 'file_type', 64)
 	if (!/^[a-z0-9_-]+$/.test(type)) throw new ApiError(400, 'invalid_input', 'Invalid file_type')
 	return type
+}
+
+/** A file of the version's modpack that members do not get, as `SharedInstanceRemovedFile`. */
+type RemovedFile =
+	| { type: 'version'; version_id: string }
+	| { type: 'path'; parent: string; filename: string }
+const REMOVED_PARENTS = ['mods', 'plugins', 'datapacks', 'shaderpacks', 'resourcepacks']
+/** The App drops a version whose removed path names any other kind of file. */
+const REMOVED_SUFFIXES = ['.jar', '.zip', '.jar.disabled', '.zip.disabled']
+/** Windows device names, as `is_reserved_windows_device_name` in `packages/path-util`. */
+const RESERVED_DEVICE_NAMES = [
+	...['CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'],
+	...['COM', 'LPT'].flatMap((name) => [...'123456789¹²³'].map((digit) => name + digit)),
+]
+
+/**
+ * Whether `name` is one plain file name, as `path_util::is_safe_file_name` decides: no
+ * separator of either kind, no drive prefix, not `.` or `..`, and no Windows device name
+ * (`CON`, `con.jar`, `NUL:x`).
+ */
+function safeFileName(name: string): boolean {
+	if (!name || name === '.' || name === '..' || /[/\\]/.test(name) || /^[a-z]:/i.test(name))
+		return false
+	const upper = name.replace(/[a-z]/g, (letter) => letter.toUpperCase())
+	return !RESERVED_DEVICE_NAMES.some(
+		(device) => upper.startsWith(device) && /^($|[.:])/.test(upper.slice(device.length)),
+	)
+}
+
+function removedFiles(value: unknown, modpack: string | null): RemovedFile[] {
+	if (value === undefined || value === null) return []
+	if (!Array.isArray(value) || value.length > 1000 || (value.length && !modpack))
+		throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
+	return value.map((value): RemovedFile => {
+		const entry = object(value)
+		if (entry.type === 'version')
+			return { type: 'version', version_id: string(entry.version_id, 'version_id') }
+		const filename = fileName(entry.filename)
+		if (
+			entry.type !== 'path' ||
+			typeof entry.parent !== 'string' ||
+			!REMOVED_PARENTS.includes(entry.parent) ||
+			!safeFileName(filename) ||
+			!REMOVED_SUFFIXES.some((suffix) => filename.endsWith(suffix))
+		)
+			throw new ApiError(400, 'invalid_input', 'Invalid removed_files')
+		return { type: 'path', parent: entry.parent, filename }
+	})
 }
 
 function strings(value: unknown, field: string, max = 250): string[] {
@@ -316,13 +369,15 @@ export async function versionReady(env: Env, id: string, version: number): Promi
  * gets back the home Core and a store ticket to upload to. The version is ready once that Core
  * confirms. A push with the same files as an unconfirmed version resumes it; one with other files
  * waits until that version is confirmed or an hour old. `server_core` names the owner's Core
- * running a server of this instance, where the share is then homed (see `place`).
+ * running a server of this instance, where the share is then homed (see `place`). A Core pushing
+ * its own server's share passes itself as `core`, which is that server's Core.
  */
 async function createVersion(
 	request: Request,
 	env: Env,
 	item: Instance,
 	userId: string,
+	core: string | null = null,
 ): Promise<Response> {
 	owner(item, userId)
 	const text = new TextDecoder().decode(await readBytes(request, MAX_MANIFEST_BODY))
@@ -354,12 +409,14 @@ async function createVersion(
 		seen.add(name)
 		return manifestFile(entry, file_name, file_type)
 	})
+	const modpack =
+		body.modpack_id === undefined || body.modpack_id === null
+			? null
+			: string(body.modpack_id, 'modpack_id')
 	const manifest: Manifest = {
 		modrinth_ids: strings(body.modrinth_ids ?? [], 'modrinth_ids', 1000),
-		modpack_id:
-			body.modpack_id === undefined || body.modpack_id === null
-				? null
-				: string(body.modpack_id, 'modpack_id'),
+		modpack_id: modpack,
+		removed_files: removedFiles(body.removed_files, modpack),
 		game_version: string(body.game_version, 'game_version'),
 		loader,
 		loader_version: typeof body.loader_version === 'string' ? body.loader_version : '',
@@ -377,9 +434,10 @@ async function createVersion(
 			'share_too_large',
 		)
 	const serverCore =
-		body.server_core === undefined || body.server_core === null
+		core ??
+		(body.server_core === undefined || body.server_core === null
 			? null
-			: string(body.server_core, 'server_core', 64)
+			: string(body.server_core, 'server_core', 64))
 
 	// One push at a time: an unconfirmed version younger than its store ticket is still being
 	// uploaded, unless this push is the same version again, which resumes it.
@@ -821,6 +879,76 @@ async function users(
 	return empty()
 }
 
+/**
+ * A Core, with its key, writing the share of one of its server-first servers (a server that
+ * follows no instance). It acts as the share's owner, its own owner account, for: create
+ * (`POST /v1/instances` with `server_id`, answering the server's existing share if it has one),
+ * rename, delete, and its versions. It reaches no other share and no other route.
+ */
+async function coreSharing(
+	request: Request,
+	env: Env,
+	[route, id, section, child, ...rest]: string[],
+): Promise<Response> {
+	const core = await requireListedCore(request, env)
+	const refused = () =>
+		new ApiError(403, 'forbidden', 'A Core reaches only the shares of its own servers', 'not_owner')
+	if (route !== 'instances') throw refused()
+	// An owner may always delete their share, locked or not.
+	if (!(id && !section && request.method === 'DELETE')) {
+		await requireUnlocked(env, core.owner_id)
+		await requireSharing(env, core.owner_id)
+	}
+	if (!id) {
+		if (request.method !== 'POST') throw refused()
+		const body = await readJson(request)
+		const name = string(body.name, 'name')
+		const serverId = string(body.server_id, 'server_id', 64)
+		await env.DB.prepare(
+			'INSERT INTO shared_instances (id,owner_id,name,created,core_id,server_id) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING',
+		)
+			.bind(crypto.randomUUID(), core.owner_id, name, now(), core.id, serverId)
+			.run()
+		const row = await env.DB.prepare(
+			'SELECT id FROM shared_instances WHERE core_id = ? AND server_id = ? AND owner_id = ?',
+		)
+			.bind(core.id, serverId, core.owner_id)
+			.first<{ id: string }>()
+		if (!row) throw refused()
+		return json({ id: row.id })
+	}
+	const item = await instance(env, id)
+	// The owner check matters because a Core picks its own id when it pairs: a share left from an
+	// earlier pairing of that id is not this Core's.
+	if (item.core_id !== core.id || item.owner_id !== core.owner_id) throw refused()
+	if (!section && request.method === 'PATCH') {
+		await env.DB.prepare('UPDATE shared_instances SET name = ? WHERE id = ?')
+			.bind(string((await readJson(request)).name, 'name'), id)
+			.run()
+		return empty()
+	}
+	if (!section && request.method === 'DELETE') {
+		await env.DB.prepare('DELETE FROM shared_instances WHERE id = ?').bind(id).run()
+		await sweepFiles(env, id)
+		return empty()
+	}
+	if (section !== 'versions' || rest.length) throw refused()
+	if (item.quarantine) throw quarantined()
+	if (request.method === 'POST' && !child)
+		return createVersion(request, env, item, core.owner_id, core.id)
+	if (request.method !== 'GET') throw refused()
+	if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
+		throw new ApiError(400, 'invalid_input', 'Invalid shared version')
+	const version = child
+		? await env.DB.prepare('SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?')
+				.bind(id, Number(child))
+				.first<Version>()
+		: await latestVersion(env, id)
+	if (!version)
+		throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+	return versionResponse(env, item, version, core.owner_id)
+}
+
 export async function handleSharing(request: Request, env: Env): Promise<Response | null> {
 	const url = new URL(request.url)
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
@@ -852,6 +980,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			},
 		)
 	}
+	if (tokenFrom(request).startsWith('amc_')) return coreSharing(request, env, parts.slice(1))
 	const user = await requireUser(request, env)
 	if (route === 'blacklist' && id && request.method === 'GET') {
 		return json({
@@ -896,7 +1025,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	if (route === 'storage' && !id) return storage(request, env, user.id)
 	if (route !== 'instances')
 		throw new ApiError(404, 'not_found', 'Sharing endpoint was not found', 'endpoint_not_found')
-	await requireSharing(env, user.id)
+	// An owner may always delete their share; `owner` below still checks it is theirs.
+	if (!(id && !section && request.method === 'DELETE')) await requireSharing(env, user.id)
 	if (!id) {
 		if (request.method === 'GET') {
 			if (url.searchParams.has('user') && url.searchParams.get('user') !== user.id)
