@@ -551,6 +551,46 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(aloneVersion.store.core.id, 'core')
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
+
+		// A Core writes the share of its own server-first server with its key.
+		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)
+		const serverShare = await ok(
+			await asCore('/instances', 'POST', { name: 'Server', server_id: 'server' }),
+		)
+		assert.deepEqual(
+			await ok(await asCore('/instances', 'POST', { name: 'Server', server_id: 'server' })),
+			serverShare,
+		)
+		// A Core picks its own id when it pairs, so a matching core_id is not enough: a share whose
+		// owner is not the Core's owner stays out of its reach.
+		const moveShare = (core) =>
+			db
+				.prepare('UPDATE shared_instances SET core_id = ? WHERE id = ?')
+				.bind(core, serverShare.id)
+				.run()
+		await moveShare('core2')
+		await code(
+			await asCore(`/instances/${serverShare.id}`, 'PATCH', { name: 'Taken' }, 'core2'),
+			403,
+			'not_owner',
+		)
+		await code(
+			await asCore(`/instances/${serverShare.id}/versions`, 'GET', undefined, 'core2'),
+			403,
+			'not_owner',
+		)
+		await code(
+			await asCore('/instances', 'POST', { name: 'Taken', server_id: 'server' }, 'core2'),
+			403,
+			'not_owner',
+		)
+		await moveShare('core')
+		// Removing the Core from the account deletes its server-first shares.
+		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))
+		assert.equal(
+			await db.prepare('SELECT 1 FROM shared_instances WHERE id = ?').bind(serverShare.id).first(),
+			null,
+		)
 	} finally {
 		await backend.dispose()
 	}

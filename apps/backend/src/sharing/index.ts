@@ -856,14 +856,17 @@ async function coreSharing(
 			.bind(crypto.randomUUID(), core.owner_id, name, now(), core.id, serverId)
 			.run()
 		const row = await env.DB.prepare(
-			'SELECT id FROM shared_instances WHERE core_id = ? AND server_id = ?',
+			'SELECT id FROM shared_instances WHERE core_id = ? AND server_id = ? AND owner_id = ?',
 		)
-			.bind(core.id, serverId)
+			.bind(core.id, serverId, core.owner_id)
 			.first<{ id: string }>()
-		return json({ id: row?.id })
+		if (!row) throw refused()
+		return json({ id: row.id })
 	}
 	const item = await instance(env, id)
-	if (item.core_id !== core.id) throw refused()
+	// The owner check matters because a Core picks its own id when it pairs: a share left from an
+	// earlier pairing of that id is not this Core's.
+	if (item.core_id !== core.id || item.owner_id !== core.owner_id) throw refused()
 	if (!section && request.method === 'PATCH') {
 		await env.DB.prepare('UPDATE shared_instances SET name = ? WHERE id = ?')
 			.bind(string((await readJson(request)).name, 'name'), id)
