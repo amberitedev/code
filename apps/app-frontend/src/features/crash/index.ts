@@ -1,6 +1,6 @@
 import { getVersion } from '@tauri-apps/api/app'
 import { type App, createApp, ref } from 'vue'
-import type { Router } from 'vue-router'
+import type { RouteLocationNormalized, Router } from 'vue-router'
 
 import CrashScreen from './crash-screen.vue'
 
@@ -28,14 +28,15 @@ export function installCrashScreen(app: App, router: Router) {
 	const version = getVersion().catch(() => 'unknown')
 	let crashed = false
 
-	async function show(error: unknown, source: string) {
+	/** `failed` is the page a navigation could not reach; the router stays on the previous one. */
+	async function show(error: unknown, source: string, failed?: RouteLocationNormalized) {
 		console.error(`[crash] ${source}`, error)
 		if (crashed) return
 		crashed = true
 		const message = error instanceof Error ? error.message : String(error)
 		const report = [
 			`Amberite ${await version}`,
-			`Route: ${router.currentRoute.value.fullPath}`,
+			`Route: ${(failed ?? router.currentRoute.value).fullPath}`,
 			`Source: ${source}`,
 			error instanceof Error ? (error.stack ?? message) : message,
 		].join('\n')
@@ -47,7 +48,9 @@ export function installCrashScreen(app: App, router: Router) {
 				screen.unmount()
 				root.remove()
 				crashed = false
-				pageGeneration.value++
+				// A retry that fails again comes back through `onError`.
+				if (failed) router.push(failed).catch(() => {})
+				else pageGeneration.value++
 			},
 		})
 		screen.mount(root)
@@ -57,5 +60,5 @@ export function installCrashScreen(app: App, router: Router) {
 		if (pageBreaking.test(info)) void show(error, info)
 		else console.error(`[error] ${info}`, error)
 	}
-	router.onError((error) => void show(error, 'navigation'))
+	router.onError((error, to) => void show(error, 'navigation', to))
 }
