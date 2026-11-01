@@ -12,6 +12,9 @@ CREATE TABLE shared_servers (
   -- The server's game port. Players join it at the Core's last reported address
   -- (`linked_server` on `GET /v1/instances/{id}`), so a new address needs no write here.
   port INTEGER NOT NULL,
+  -- `ip:port` the Core's router granted the server on the internet, refreshed by each write that
+  -- knows one. Players join it first when it is set.
+  outside TEXT,
   PRIMARY KEY (core_id, server_id)
 );
 CREATE INDEX shared_servers_instance ON shared_servers(instance_id);

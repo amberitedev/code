@@ -28,7 +28,8 @@ differs from what that client was written for, on purpose.
 - `/v1/servers/{core}/{server}/players` (`GET`, `POST`, `DELETE`) and `/invites[/{id}]`: the
   players of a Core server, the people it is shared with, in the shapes of `users` and `invites`.
   They read the share the server follows without being members, and accept and leave as members
-  do. A write names the share (`instance_id`) and the server's `name` and `port`. The App's
+  do. A write names the share (`instance_id`), the server's `name` and `port`, and `outside`, the
+  Core's `net.outside` (`{ ip, port }`, or null, which keeps the last one known). The App's
   Play tab reaches these through `sharedinstances.players_v1`. Players read the share only while
   the server's Core owner owns it or is a joined member; a member who leaves or is kicked takes
   their servers, players, and links with them. Players get 403 `members_only` on `GET users`, and
@@ -49,8 +50,9 @@ differs from what that client was written for, on purpose.
 - `backtrack_version` is never set.
 - `last_played` on members is always null.
 - `linked_server` on `GET /v1/instances/{id}` is the server a player came through, and null for
-  members. Its `domain` is the host of the Core's last reported address (`public_address` when it
-  has one) with the server's port. Its `region` is empty and `online_status` null.
+  members. Its `domain` is the server's last known `outside` `ip:port`; without one, the host of
+  the Core's `public_address`, then of its reported `address`, with the server's port. Its
+  `region` is empty and `online_status` null.
 - `GET /v1/instances/{id}/server-icon` is always 404: the backend keeps no server icons.
 
 ## Missing

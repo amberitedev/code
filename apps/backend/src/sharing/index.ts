@@ -73,6 +73,8 @@ type SharedServer = {
 	name: string
 	/** Its game port; players join it at the Core's address (`joinAddress`). */
 	port: number
+	/** `ip:port` the Core's router granted it on the internet, last known; see `joinAddress`. */
+	outside: string | null
 }
 /** A modpack file the owner turned off, which members remove after installing the modpack. */
 type RemovedFile =
@@ -1099,7 +1101,8 @@ async function users(
 
 /**
  * Record which share a Core server follows and what it is called, from the body of a players or
- * invites write: `instance_id`, `name`, and `port` (its game port). The share is the server's
+ * invites write: `instance_id`, `name`, `port` (its game port), and `outside` (the Core's
+ * `net.outside`, null while it has none, which keeps the last one known). The share is the server's
  * own server-first share, or one the Core's owner owns or has joined; a player cannot pass on what
  * they were given. Changing the share drops the server's players and links, as the Core does when
  * the server follows another instance: they were given the old one.
@@ -1135,6 +1138,7 @@ async function followShare(
 		instance_id: item.id,
 		name: string(body.name, 'name'),
 		port: gamePort(body.port),
+		outside: outsideAddress(body.outside),
 	}
 	const followed = await env.DB.prepare(
 		'SELECT instance_id FROM shared_servers WHERE core_id = ? AND server_id = ?',
@@ -1143,9 +1147,9 @@ async function followShare(
 		.first<{ instance_id: string }>()
 	if (followed && followed.instance_id !== item.id) await forgetServer(env, coreId, serverId)
 	await env.DB.prepare(
-		'INSERT INTO shared_servers (core_id,server_id,instance_id,name,port) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET name = excluded.name, port = excluded.port',
+		'INSERT INTO shared_servers (core_id,server_id,instance_id,name,port,outside) VALUES (?,?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET name = excluded.name, port = excluded.port, outside = COALESCE(excluded.outside, outside)',
 	)
-		.bind(coreId, serverId, item.id, server.name, server.port)
+		.bind(coreId, serverId, item.id, server.name, server.port, server.outside)
 		.run()
 	return server
 }
@@ -1156,12 +1160,26 @@ function gamePort(value: unknown): number {
 	return value
 }
 
+/** `net.outside` as `ip:port`, bracketing an IPv6 address; null while the Core has none. */
+function outsideAddress(value: unknown): string | null {
+	if (value === undefined || value === null) return null
+	const outside = object(value)
+	const ip = string(outside.ip, 'outside', 45)
+	if (!/^[\da-f.:]+$/i.test(ip)) throw new ApiError(400, 'invalid_input', 'Invalid outside')
+	return `${ip.includes(':') ? `[${ip}]` : ip}:${gamePort(outside.port)}`
+}
+
 /**
- * Where players join a server: the host of its Core's last reported address, the one reached from
- * outside when it has one, with the server's port. Read each time, so it follows the Core's reports.
+ * Where players join a server: the `ip:port` its Core's router granted it, when known; otherwise
+ * the host of the Core's last reported address, the one reached from outside when it has one,
+ * with the server's port. Read each time, so it follows the Core's reports.
  */
-function joinAddress(server: { port: number; address: string; public_address: string | null }) {
-	return `${new URL(server.public_address ?? server.address).hostname}:${server.port}`
+function joinAddress(
+	server: SharedServer & { address: string; public_address: string | null },
+): string {
+	return (
+		server.outside ?? `${new URL(server.public_address ?? server.address).hostname}:${server.port}`
+	)
 }
 
 /** The server a player reads the share through, with its Core's addresses; null for its owner and members. */

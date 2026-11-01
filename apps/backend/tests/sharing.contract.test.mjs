@@ -621,6 +621,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			.bind('https://203.0.113.7:16662', 'core')
 			.run()
 		assert.equal(await linkedDomain(), '203.0.113.7:25570', 'the outside address once reported')
+		// The port the Core's router granted comes first, and a write without one keeps it.
+		const writePlayers = (outside) =>
+			call('/servers/core/srv1/players', 'POST', { ...server, outside, user_ids: [] })
+		await ok(await writePlayers({ ip: '198.51.100.4', port: 40000 }))
+		assert.equal(await linkedDomain(), '198.51.100.4:40000')
+		await ok(await writePlayers(null))
+		assert.equal(await linkedDomain(), '198.51.100.4:40000')
+		assert.equal((await writePlayers({ ip: 'evil.example', port: 1 })).status, 400)
+		await db.prepare('UPDATE shared_servers SET outside = NULL').run()
 		await db.prepare('UPDATE cores SET public_address = NULL WHERE id = ?').bind('core').run()
 		assert.deepEqual(
 			(await ok(await call(`/instances/${smp.id}/users`))).users.map((user) => user.id),
