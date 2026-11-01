@@ -14,7 +14,18 @@ import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
 import { createLocalFileUploader } from '@/platform/adapters/local-file-upload'
 
-const appVersion = getVersion()
+/**
+ * The App version for the User-Agent, fetched once. A failed fetch is not kept, so the next
+ * request asks again: a browser bridge tab can ask while the native page is still loading.
+ */
+const getAppVersion = (() => {
+	let version: Promise<string> | undefined
+	return () =>
+		(version ??= getVersion().catch((error: unknown) => {
+			version = undefined
+			throw error
+		}))
+})()
 
 /** The account signed in. A Core session belongs to one account and one Core. */
 async function account(): Promise<string> {
@@ -28,7 +39,7 @@ async function account(): Promise<string> {
  * components; code outside components imports it directly.
  */
 export const apiClient: TauriModrinthClient = new TauriModrinthClient({
-	userAgent: async () => `modrinth/theseus/${await appVersion}`,
+	userAgent: async () => `modrinth/theseus/${await getAppVersion()}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	// With our own account backend, hosting is the account's own Cores, found through it.
 	selfHostedHosting: Boolean(config.accountApiUrl),
@@ -78,5 +89,3 @@ export const apiClient: TauriModrinthClient = new TauriModrinthClient({
 		new VerboseLoggingFeature(),
 	],
 })
-
-export { appVersion }
