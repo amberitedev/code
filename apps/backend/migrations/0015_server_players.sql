@@ -9,8 +9,9 @@ CREATE TABLE shared_servers (
   server_id TEXT NOT NULL,
   instance_id TEXT NOT NULL REFERENCES shared_instances(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  -- The Minecraft address players join, once the Core knows one.
-  address TEXT,
+  -- The server's game port. Players join it at the Core's last reported address
+  -- (`linked_server` on `GET /v1/instances/{id}`), so a new address needs no write here.
+  port INTEGER NOT NULL,
   PRIMARY KEY (core_id, server_id)
 );
 CREATE INDEX shared_servers_instance ON shared_servers(instance_id);

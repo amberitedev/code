@@ -98,17 +98,11 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 	}
 
 	/**
-	 * What a write tells the backend about the server: the share it follows, and the name and
-	 * address its players see. The address is where it is joined from the internet, null until
-	 * the Core knows one.
+	 * What a write tells the backend about the server: the share it follows, the name its players
+	 * see, and its port. The backend joins the port to the Core's latest address for players.
 	 */
 	private async server(serverId: string, instanceId: string) {
 		const { name, net } = await this.client.archon.servers_v0.get(serverId)
-		const outside = net.outside
-		return {
-			instance_id: instanceId,
-			name,
-			address: net.domain || (outside ? `${outside.ip}:${outside.port}` : null),
-		}
+		return { instance_id: instanceId, name, port: net.port }
 	}
 }

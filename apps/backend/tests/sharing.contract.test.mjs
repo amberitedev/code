@@ -597,7 +597,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// Players of a server read the share it follows without being members, until removed.
 		const smp = await ok(await call('/instances', 'POST', { name: 'SMP' }))
 		await ok(await push(smp.id, []))
-		const server = { instance_id: smp.id, name: 'SMP server', address: 'smp.example:25565' }
+		const server = { instance_id: smp.id, name: 'SMP server', port: 25570 }
 		assert.deepEqual(
 			await ok(
 				await call('/servers/core/srv1/players', 'POST', { ...server, user_ids: ['friend'] }),
@@ -608,11 +608,20 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401, 'until accepted')
 		await ok(await call(`/instances/${smp.id}/invites/pending`, 'POST', undefined, 'mra_friend'))
 		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
+		// Players join at the Core's last reported address with the server's port.
+		const linkedDomain = async () =>
+			(await ok(await asFriend(`/instances/${smp.id}`))).linked_server.domain
 		assert.deepEqual((await ok(await asFriend(`/instances/${smp.id}`))).linked_server, {
-			domain: server.address,
+			domain: '192.168.1.2:25570',
 			region: '',
 			online_status: null,
 		})
+		await db
+			.prepare('UPDATE cores SET public_address = ? WHERE id = ?')
+			.bind('https://203.0.113.7:16662', 'core')
+			.run()
+		assert.equal(await linkedDomain(), '203.0.113.7:25570', 'the outside address once reported')
+		await db.prepare('UPDATE cores SET public_address = NULL WHERE id = ?').bind('core').run()
 		assert.deepEqual(
 			(await ok(await call(`/instances/${smp.id}/users`))).users.map((user) => user.id),
 			['owner'],
@@ -685,7 +694,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(
 			await call(`/instances/${smp.id}/invites/${shareLink.id}`, 'POST', undefined, 'mra_other'),
 		)
-		const memberServer = { instance_id: smp.id, name: 'Other SMP', address: null }
+		const memberServer = { instance_id: smp.id, name: 'Other SMP', port: 25565 }
 		const memberLink = await ok(
 			await call(
 				'/servers/core2/srv2/invites',

@@ -71,7 +71,8 @@ type SharedServer = {
 	server_id: string
 	instance_id: string
 	name: string
-	address: string | null
+	/** Its game port; players join it at the Core's address (`joinAddress`). */
+	port: number
 }
 /** A modpack file the owner turned off, which members remove after installing the modpack. */
 type RemovedFile =
@@ -1092,8 +1093,7 @@ async function users(
 
 /**
  * Record which share a Core server follows and what it is called, from the body of a players or
- * invites write: `instance_id`, `name`, and `address` (its Minecraft address, null while the Core
- * has none). The share is the server's own server-first share, or one the Core's owner owns or
+ * invites write: `instance_id`, `name`, and `port` (its game port). The share is the server's own server-first share, or one the Core's owner owns or
  * has joined; a player cannot pass on what they were given. Changing the share moves the server's
  * players and links to it.
  */
@@ -1127,12 +1127,12 @@ async function followShare(
 		server_id: serverId,
 		instance_id: item.id,
 		name: string(body.name, 'name'),
-		address: body.address == null ? null : string(body.address, 'address', 261),
+		port: gamePort(body.port),
 	}
 	await env.DB.batch([
 		env.DB.prepare(
-			'INSERT INTO shared_servers (core_id,server_id,instance_id,name,address) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET instance_id = excluded.instance_id, name = excluded.name, address = COALESCE(excluded.address, address)',
-		).bind(coreId, serverId, item.id, server.name, server.address),
+			'INSERT INTO shared_servers (core_id,server_id,instance_id,name,port) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET instance_id = excluded.instance_id, name = excluded.name, port = excluded.port',
+		).bind(coreId, serverId, item.id, server.name, server.port),
 		env.DB.prepare(
 			'UPDATE shared_links SET instance_id = ? WHERE core_id = ? AND server_id = ?',
 		).bind(item.id, coreId, serverId),
@@ -1140,14 +1140,28 @@ async function followShare(
 	return server
 }
 
-/** The server a player reads the share through, or null for its owner and members. */
+function gamePort(value: unknown): number {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 65535)
+		throw new ApiError(400, 'invalid_input', 'Invalid port')
+	return value
+}
+
+/**
+ * Where players join a server: the host of its Core's last reported address, the one reached from
+ * outside when it has one, with the server's port. Read each time, so it follows the Core's reports.
+ */
+function joinAddress(server: { port: number; address: string; public_address: string | null }) {
+	return `${new URL(server.public_address ?? server.address).hostname}:${server.port}`
+}
+
+/** The server a player reads the share through, with its Core's addresses; null for its owner and members. */
 async function cameThrough(env: Env, item: Instance, userId: string) {
 	if (item.owner_id === userId) return null
 	return env.DB.prepare(
-		`SELECT s.* FROM ${PLAYERS} WHERE s.instance_id = ?1 AND p.user_id = ?2 AND NOT EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ?1 AND user_id = ?2) ORDER BY p.joined_at IS NULL, p.joined_at LIMIT 1`,
+		`SELECT s.*, c.address, c.public_address FROM ${PLAYERS} JOIN cores c ON c.id = s.core_id WHERE s.instance_id = ?1 AND p.user_id = ?2 AND NOT EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ?1 AND user_id = ?2) ORDER BY p.joined_at IS NULL, p.joined_at LIMIT 1`,
 	)
 		.bind(item.id, userId)
-		.first<SharedServer>()
+		.first<SharedServer & { address: string; public_address: string | null }>()
 }
 
 /**
@@ -1516,9 +1530,9 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 				icon: item.icon,
 				quarantine: item.quarantine === 1,
 				installed_once: item.installed_once === 1,
-				// The App adds it to the instance's server list, so only a server with an address.
-				linked_server: server?.address
-					? { domain: server.address, region: '', online_status: null }
+				// The App adds it to the instance's server list.
+				linked_server: server
+					? { domain: joinAddress(server), region: '', online_status: null }
 					: null,
 			})
 		}
