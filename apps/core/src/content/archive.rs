@@ -11,8 +11,8 @@ use super::folder::{self, Folder, PathError};
 
 /// The most an archive may unpack to.
 pub const MAX_UNPACKED: u64 = 8 * 1024 * 1024 * 1024;
-/// The most entries an archive may have.
-pub const MAX_ENTRIES: usize = 200_000;
+/// The most entries an archive may have, as bedrock defines it for every archive a Core unpacks.
+pub use bedrock::limits::MAX_ARCHIVE_ENTRIES as MAX_ENTRIES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {

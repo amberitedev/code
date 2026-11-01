@@ -1955,7 +1955,11 @@ pub async fn embedded_icon(
         let key = format!("{id}/{}", listed.path);
         let path = content
             .manifests
-            .get(&key, open_jar(&folder, &listed)?, manifest::platform(loader))?
+            .get(
+                &key,
+                open_jar(&folder, &listed)?,
+                manifest::platform(loader),
+            )?
             .icon?;
         let bytes = manifest::read_icon(open_jar(&folder, &listed)?, &path)?;
         Some((path, bytes))

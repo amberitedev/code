@@ -35,7 +35,7 @@ limits! {
     /// Placeholder, decide later.
     ALLOWANCE_BYTES: u64 = 3 * 1024 * 1024 * 1024;
     /// The most entries an archive a Core unpacks (a pack, a share, an upload) may have.
-    MAX_ARCHIVE_ENTRIES: u64 = 200_000;
+    MAX_ARCHIVE_ENTRIES: usize = 200_000;
     /// The most an archive entry may grow when unpacked, as uncompressed bytes per compressed
     /// byte. Past this it is a zip bomb.
     MAX_COMPRESSION_RATIO: u64 = 100;

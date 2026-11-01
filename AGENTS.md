@@ -213,6 +213,37 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 - `docs/internals` - `plan.md` holds product goals and decisions; `scripts.md` covers dev commands;
   `ui.md` holds the rules for how the App's UI behaves.
 
+### Shared Rust
+
+Code the App and Copal both need exists once, in these crates. The App (`packages/app-lib`,
+`apps/app`) and Copal stay thin: state, Tauri commands or HTTP routes, progress.
+
+| Crate                                  | Job                                                                              | Rule                             |
+| -------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------- |
+| `packages/modrinth-content-management` | Modrinth's content decisions: `resolve_content`, content and configuration diffs | Upstream's. Never edit; call it. |
+| `packages/bedrock`                     | Everything both sides share that is not sharing                                  | Ours.                            |
+| `packages/sharing-client`              | Everything about shares                                                          | Ours.                            |
+| `packages/sharing-storage`             | The store process                                                                | Ours.                            |
+
+Imports go one way: `modrinth-content-management` -> `bedrock` -> `sharing-client` ->
+`sharing-storage`. Copal never depends on app-lib.
+
+bedrock holds three kinds of code:
+
+1. Borrowed app-lib files, compiled in place with `#[path]` (`state/`). app-lib imports those types
+   from bedrock instead of compiling them. Prefer this for any app-lib file whose dependencies are
+   small enough for bedrock to provide.
+2. Clones of upstream code tangled with app-lib's `State` (`upstream/`), kept byte for byte where
+   possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
+   The App keeps the originals.
+3. Our own shared code: content rules, reaching Cores, disk space, and `limits` (also generated
+   into `packages/api-client/src/modules/bedrock/limits.ts`).
+
+New and restructured Rust follows app-lib's layout: `api/` for entry points, `state/<domain>/` with
+`model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one operation
+per file), optional `domain/` (pure rules), and `mod.rs` re-exports. Use app-lib's names for the
+same concepts (`ContentSet`, `ContentEntry`, `list_content`, ...).
+
 ## Work tracking
 
 Work lives in Linear, team `AMB`. Labels, statuses, the issue template, and Linear operations are in
