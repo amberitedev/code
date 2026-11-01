@@ -55,7 +55,24 @@ type Version = {
 	ready: number
 	created: string
 }
-type Link = { id: string; instance_id: string; expiration: string; max_uses: number; uses: number }
+type Link = {
+	id: string
+	instance_id: string
+	expiration: string
+	max_uses: number
+	uses: number
+	/** Set on a server's link, which makes whoever opens it a player of that server. */
+	core_id: string | null
+	server_id: string | null
+}
+/** A Core server with players, and the share it follows. */
+type SharedServer = {
+	core_id: string
+	server_id: string
+	instance_id: string
+	name: string
+	address: string | null
+}
 /** A modpack file the owner turned off, which members remove after installing the modpack. */
 type RemovedFile =
 	| { type: 'version'; version_id: string }
@@ -178,6 +195,13 @@ async function instance(env: Env, id: string): Promise<Instance> {
 	return result
 }
 
+/** SQL joining a server's players (`p`) to the server (`s`), which names the share it follows. */
+const PLAYERS = 'server_players p JOIN shared_servers s USING (core_id, server_id)'
+
+/**
+ * Whoever reads the share: its owner, its members, and the players of every server that follows
+ * it. Pending ones too with `allowPending`, so an invite can be previewed.
+ */
 async function member(
 	env: Env,
 	item: Instance,
@@ -186,11 +210,12 @@ async function member(
 ): Promise<void> {
 	if (item.owner_id === userId) return
 	const row = await env.DB.prepare(
-		'SELECT joined_at FROM shared_members WHERE instance_id = ? AND user_id = ?',
+		`SELECT EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ?1 AND user_id = ?2 AND (?3 OR joined_at IS NOT NULL))
+			OR EXISTS (SELECT 1 FROM ${PLAYERS} WHERE s.instance_id = ?1 AND p.user_id = ?2 AND (?3 OR p.joined_at IS NOT NULL)) AS reads`,
 	)
-		.bind(item.id, userId)
-		.first<{ joined_at: string | null }>()
-	if (!row || (!allowPending && !row.joined_at))
+		.bind(item.id, userId, allowPending ? 1 : 0)
+		.first<{ reads: number }>()
+	if (!row?.reads)
 		throw new ApiError(401, 'unauthorized', 'Shared instance access was revoked', 'not_member')
 }
 
@@ -311,45 +336,77 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 		.first()
 	if (!ready) return
 	const item = await instance(env, id)
-	const pending = (
+	const members = (
 		await env.DB.prepare(
 			'SELECT user_id FROM shared_members WHERE instance_id = ? AND joined_at IS NULL AND notified = 0',
 		)
 			.bind(id)
 			.all<{ user_id: string }>()
 	).results
-	for (const row of pending) {
-		const body = {
-			type: 'shared_instance_invite',
-			shared_instance_id: id,
-			shared_instance_name: item.name,
-			shared_instance_icon: item.icon,
-			invited_by: item.owner_id,
-		}
+	// A player is invited to the server, by its Core's owner, under the server's name.
+	const players = (
+		await env.DB.prepare(
+			`SELECT p.user_id, p.core_id, p.server_id, s.name, c.owner_id FROM ${PLAYERS} JOIN cores c ON c.id = p.core_id WHERE s.instance_id = ? AND p.joined_at IS NULL AND p.notified = 0`,
+		)
+			.bind(id)
+			.all<{
+				user_id: string
+				core_id: string
+				server_id: string
+				name: string
+				owner_id: string
+			}>()
+	).results
+	// `rows` selects the invite's own pending row, so a concurrent call sends it only once.
+	const invites = [
+		...members.map((row) => ({
+			user: row.user_id,
+			name: item.name,
+			by: item.owner_id,
+			table: 'shared_members',
+			rows: 'instance_id = ?1 AND user_id = ?2 AND joined_at IS NULL',
+			keys: [id, row.user_id],
+		})),
+		...players.map((row) => ({
+			user: row.user_id,
+			name: row.name,
+			by: row.owner_id,
+			table: 'server_players',
+			rows: 'core_id = ?1 AND server_id = ?2 AND user_id = ?3 AND joined_at IS NULL',
+			keys: [row.core_id, row.server_id, row.user_id],
+		})),
+	]
+	for (const invite of invites) {
 		const notification = {
 			id: randomId(),
-			user_id: row.user_id,
-			body: JSON.stringify(body),
+			user_id: invite.user,
+			body: JSON.stringify({
+				type: 'shared_instance_invite',
+				shared_instance_id: id,
+				shared_instance_name: invite.name,
+				shared_instance_icon: item.icon,
+				invited_by: invite.by,
+			}),
 			created: now(),
 			read: 0,
 		}
+		const at = invite.keys.length
 		const result = await env.DB.batch([
 			env.DB.prepare(
-				'INSERT INTO notifications (id,user_id,body,created) SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL AND notified = 0)',
+				`INSERT INTO notifications (id,user_id,body,created) SELECT ?${at + 1},?${at + 2},?${at + 3},?${at + 4} WHERE EXISTS (SELECT 1 FROM ${invite.table} WHERE ${invite.rows} AND notified = 0)`,
 			).bind(
+				...invite.keys,
 				notification.id,
 				notification.user_id,
 				notification.body,
 				notification.created,
-				id,
-				row.user_id,
 			),
-			env.DB.prepare(
-				'UPDATE shared_members SET notified = 1 WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
-			).bind(id, row.user_id),
+			env.DB.prepare(`UPDATE ${invite.table} SET notified = 1 WHERE ${invite.rows}`).bind(
+				...invite.keys,
+			),
 		])
 		if (result[0]?.meta.changes)
-			await notifyUser(env, row.user_id, notificationResponse(notification)).catch(() => undefined)
+			await notifyUser(env, invite.user, notificationResponse(notification)).catch(() => undefined)
 	}
 }
 
@@ -474,7 +531,7 @@ async function createVersion(
 	let added = bytes
 	if (bytes) {
 		const members = await env.DB.prepare(
-			"SELECT 1 FROM shared_members WHERE instance_id = ? AND join_type != 'owner' LIMIT 1",
+			`SELECT 1 FROM shared_members WHERE instance_id = ?1 AND join_type != 'owner' UNION ALL SELECT 1 FROM ${PLAYERS} WHERE s.instance_id = ?1 LIMIT 1`,
 		)
 			.bind(item.id)
 			.first()
@@ -769,43 +826,65 @@ async function invites(
 	userId: string,
 	inviteId?: string,
 ): Promise<Response> {
+	// The invite to the share may have come as a member or as a player of a server following it;
+	// accepting or declining answers every pending one.
 	if (inviteId === 'pending') {
 		if (request.method === 'POST') {
-			const result = await env.DB.prepare(
-				'UPDATE shared_members SET joined_at = COALESCE(joined_at,?) WHERE instance_id = ? AND user_id = ?',
-			)
-				.bind(now(), item.id, userId)
-				.run()
-			if (!result.meta.changes)
+			const [members, players] = await env.DB.batch([
+				env.DB.prepare(
+					'UPDATE shared_members SET joined_at = COALESCE(joined_at,?1) WHERE instance_id = ?2 AND user_id = ?3',
+				).bind(now(), item.id, userId),
+				env.DB.prepare(
+					'UPDATE server_players SET joined_at = COALESCE(joined_at,?1) WHERE user_id = ?3 AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?2)',
+				).bind(now(), item.id, userId),
+			])
+			if (!members?.meta.changes && !players?.meta.changes)
 				throw new ApiError(404, 'not_found', 'Pending invite was not found', 'invite_not_found')
 			await installedOnce(env, item, userId)
 			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
 		if (request.method === 'DELETE') {
-			const declined = await env.DB.prepare(
-				'DELETE FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
-			)
-				.bind(item.id, userId)
-				.run()
-			if (declined.meta.changes) await notifyMembers(env, item.id, 'shared_instance_users', userId)
+			const [declined] = await env.DB.batch([
+				env.DB.prepare(
+					'DELETE FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
+				).bind(item.id, userId),
+				env.DB.prepare(
+					'DELETE FROM server_players WHERE user_id = ?2 AND joined_at IS NULL AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?1)',
+				).bind(item.id, userId),
+			])
+			if (declined?.meta.changes) await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
 		}
 	}
 	if (inviteId && request.method === 'POST') {
-		const existing = await env.DB.prepare(
-			'SELECT joined_at FROM shared_members WHERE instance_id = ? AND user_id = ?',
-		)
-			.bind(item.id, userId)
-			.first<{ joined_at: string | null }>()
-		if (existing?.joined_at) return empty()
-		const link = await usableLink(env, inviteId)
-		if (link.instance_id !== item.id)
+		const link = await env.DB.prepare('SELECT * FROM shared_links WHERE id = ?')
+			.bind(inviteId)
+			.first<Link>()
+		// A server's link makes them a player of that server; any other makes them a member.
+		const joined = link?.server_id
+			? await env.DB.prepare(
+					'SELECT joined_at FROM server_players WHERE core_id = ? AND server_id = ? AND user_id = ?',
+				)
+					.bind(link.core_id, link.server_id, userId)
+					.first<{ joined_at: string | null }>()
+			: await env.DB.prepare(
+					'SELECT joined_at FROM shared_members WHERE instance_id = ? AND user_id = ?',
+				)
+					.bind(item.id, userId)
+					.first<{ joined_at: string | null }>()
+		if (joined?.joined_at) return empty()
+		const usable = await usableLink(env, inviteId)
+		if (usable.instance_id !== item.id)
 			throw new ApiError(404, 'not_found', 'Invite was not found', 'invite_invalid')
 		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) SELECT instance_id,?,?,'link' FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses) ON CONFLICT(instance_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
-			).bind(userId, now(), inviteId, now()),
+			usable.server_id
+				? env.DB.prepare(
+						"INSERT INTO server_players (core_id,server_id,user_id,joined_at,join_type) SELECT l.core_id,l.server_id,?1,?2,'link' FROM shared_links l JOIN shared_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id AND s.instance_id = l.instance_id WHERE l.id = ?3 AND l.expiration > ?2 AND (l.max_uses = 0 OR l.uses < l.max_uses) ON CONFLICT(core_id,server_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
+					).bind(userId, now(), inviteId)
+				: env.DB.prepare(
+						"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) SELECT instance_id,?,?,'link' FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses) ON CONFLICT(instance_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
+					).bind(userId, now(), inviteId, now()),
 			env.DB.prepare('UPDATE shared_links SET uses = uses + 1 WHERE id = ? AND changes() > 0').bind(
 				inviteId,
 			),
@@ -816,11 +895,12 @@ async function invites(
 		return empty()
 	}
 	owner(item, userId)
+	// A server's links are listed with its players (`serverPlayers`).
 	if (request.method === 'GET' && !inviteId)
 		return json(
 			(
 				await env.DB.prepare(
-					'SELECT id,expiration,max_uses,uses FROM shared_links WHERE instance_id = ? AND expiration > ? ORDER BY expiration',
+					'SELECT id,expiration,max_uses,uses FROM shared_links WHERE instance_id = ? AND server_id IS NULL AND expiration > ? ORDER BY expiration',
 				)
 					.bind(item.id, now())
 					.all()
@@ -832,22 +912,28 @@ async function invites(
 			.run()
 		return empty()
 	}
-	if (request.method === 'POST' && !inviteId) {
-		const body = await readJson(request)
-		const id = inviteCode()
-		const maxAge = natural(body.max_age, 604800, 31536000)
-		const maxUses = natural(body.max_uses, 0, 10000)
-		const expiration = new Date(
-			Date.now() + (maxAge === 0 ? 31536000 : maxAge) * 1000,
-		).toISOString()
-		await env.DB.prepare(
-			'INSERT INTO shared_links (id,instance_id,expiration,max_uses) VALUES (?,?,?,?)',
-		)
-			.bind(id, item.id, expiration, maxUses)
-			.run()
-		return json({ id })
-	}
+	if (request.method === 'POST' && !inviteId)
+		return createLink(env, await readJson(request), item.id)
 	throw new ApiError(405, 'method_not_allowed', 'Unsupported invite operation')
+}
+
+/** A new invite link to the share `instanceId`, or with `server`, to be a player of that server. */
+async function createLink(
+	env: Env,
+	body: Record<string, unknown>,
+	instanceId: string,
+	server?: SharedServer,
+): Promise<Response> {
+	const id = inviteCode()
+	const maxAge = natural(body.max_age, 604800, 31536000)
+	const maxUses = natural(body.max_uses, 0, 10000)
+	const expiration = new Date(Date.now() + (maxAge === 0 ? 31536000 : maxAge) * 1000).toISOString()
+	await env.DB.prepare(
+		'INSERT INTO shared_links (id,instance_id,expiration,max_uses,core_id,server_id) VALUES (?,?,?,?,?,?)',
+	)
+		.bind(id, instanceId, expiration, maxUses, server?.core_id ?? null, server?.server_id ?? null)
+		.run()
+	return json({ id })
 }
 
 async function users(
@@ -866,7 +952,7 @@ async function users(
 				.all()
 		).results
 		const tokens = await env.DB.prepare(
-			'SELECT COUNT(*) AS count FROM shared_links WHERE instance_id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
+			'SELECT COUNT(*) AS count FROM shared_links WHERE instance_id = ? AND server_id IS NULL AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
 		)
 			.bind(item.id, now())
 			.first<{ count: number }>()
@@ -879,14 +965,22 @@ async function users(
 		if (ids.includes(item.owner_id))
 			throw new ApiError(400, 'invalid_input', 'The owner cannot leave their own instance')
 		if (ids.length) {
-			await env.DB.batch(
-				ids.map((id) =>
+			await env.DB.batch([
+				...ids.map((id) =>
 					env.DB.prepare('DELETE FROM shared_members WHERE instance_id = ? AND user_id = ?').bind(
 						item.id,
 						id,
 					),
 				),
-			)
+				// Leaving a share a player reads also leaves the servers it came through.
+				...(ids.includes(userId)
+					? [
+							env.DB.prepare(
+								'DELETE FROM server_players WHERE user_id = ?2 AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?1)',
+							).bind(item.id, userId),
+						]
+					: []),
+			])
 			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 		}
 		return empty()
@@ -911,6 +1005,215 @@ async function users(
 	await notifyReadyInvites(env, item.id)
 	await notifyMembers(env, item.id, 'shared_instance_users', userId)
 	return json({ failed })
+}
+
+/**
+ * Record which share a Core server follows and what it is called, from the body of a players or
+ * invites write: `instance_id`, `name`, and `address` (its Minecraft address, null while the Core
+ * has none). The share is the server's own server-first share, or one the Core's owner owns or
+ * has joined; a player cannot pass on what they were given. Changing the share moves the server's
+ * players and links to it.
+ */
+async function followShare(
+	env: Env,
+	userId: string,
+	coreId: string,
+	serverId: string,
+	body: Record<string, unknown>,
+): Promise<SharedServer> {
+	const item = await instance(env, string(body.instance_id, 'instance_id', 64))
+	const own = item.core_id === coreId && item.server_id === serverId
+	const joined =
+		own ||
+		item.owner_id === userId ||
+		(await env.DB.prepare(
+			'SELECT 1 FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NOT NULL',
+		)
+			.bind(item.id, userId)
+			.first())
+	if ((item.core_id !== null && !own) || !joined)
+		throw new ApiError(
+			403,
+			'forbidden',
+			'A server can only follow your own share or one you joined',
+			'not_member',
+		)
+	if (item.quarantine) throw quarantined()
+	const server: SharedServer = {
+		core_id: coreId,
+		server_id: serverId,
+		instance_id: item.id,
+		name: string(body.name, 'name'),
+		address: body.address == null ? null : string(body.address, 'address', 261),
+	}
+	await env.DB.batch([
+		env.DB.prepare(
+			'INSERT INTO shared_servers (core_id,server_id,instance_id,name,address) VALUES (?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET instance_id = excluded.instance_id, name = excluded.name, address = excluded.address',
+		).bind(coreId, serverId, item.id, server.name, server.address),
+		env.DB.prepare(
+			'UPDATE shared_links SET instance_id = ? WHERE core_id = ? AND server_id = ?',
+		).bind(item.id, coreId, serverId),
+	])
+	return server
+}
+
+/** The server a player reads the share through, or null for its owner and members. */
+async function cameThrough(env: Env, item: Instance, userId: string) {
+	if (item.owner_id === userId) return null
+	return env.DB.prepare(
+		`SELECT s.* FROM ${PLAYERS} WHERE s.instance_id = ?1 AND p.user_id = ?2 AND NOT EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ?1 AND user_id = ?2) ORDER BY p.joined_at IS NULL, p.joined_at LIMIT 1`,
+	)
+		.bind(item.id, userId)
+		.first<SharedServer>()
+}
+
+/**
+ * `/v1/servers/{core}/{server}/players` and `/invites[/{id}]`, from the App's Play tab: the
+ * players of a Core server, the people it is shared with. They read the share the server follows
+ * without being its members, and get its updates until they leave or are removed. The Core's owner
+ * invites them, directly or by link, and removes them; so can the owner of the share the server
+ * follows, from that instance's Share tab (`access`). Each write also says which share the server
+ * follows (`followShare`). Answers in the shapes of the share's own `users` and `invites`.
+ */
+async function serverPlayers(
+	request: Request,
+	env: Env,
+	userId: string,
+	coreId: string,
+	serverId: string,
+	section: string,
+	child: string | undefined,
+): Promise<Response> {
+	const core = await env.DB.prepare('SELECT owner_id FROM cores WHERE id = ?')
+		.bind(coreId)
+		.first<{ owner_id: string }>()
+	if (!core) throw new ApiError(404, 'not_found', 'Core was not found', 'core_not_found')
+	const server = await env.DB.prepare(
+		'SELECT * FROM shared_servers WHERE core_id = ? AND server_id = ?',
+	)
+		.bind(coreId, serverId)
+		.first<SharedServer>()
+	const coreOwner = core.owner_id === userId
+	const shareOwner = server ? (await instance(env, server.instance_id)).owner_id === userId : false
+	const refused = () =>
+		new ApiError(403, 'forbidden', "Only the server's owner can share it", 'not_owner')
+	const links = 'FROM shared_links WHERE core_id = ? AND server_id = ? AND expiration > ?'
+
+	if (section === 'players' && !child && request.method === 'GET') {
+		// The people who manage servers on the Core see who plays there, as its owner does.
+		const manager = await env.DB.prepare(
+			'SELECT 1 FROM core_access WHERE core_id = ? AND user_id = ?',
+		)
+			.bind(coreId, userId)
+			.first()
+		if (!coreOwner && !shareOwner && !manager) throw refused()
+		const users = (
+			await env.DB.prepare(
+				'SELECT user_id AS id, joined_at, join_type, NULL AS last_played FROM server_players WHERE core_id = ? AND server_id = ? ORDER BY joined_at IS NULL, joined_at',
+			)
+				.bind(coreId, serverId)
+				.all()
+		).results
+		const tokens = await env.DB.prepare(
+			`SELECT COUNT(*) AS count ${links} AND (max_uses = 0 OR uses < max_uses)`,
+		)
+			.bind(coreId, serverId, now())
+			.first<{ count: number }>()
+		return json({ users, tokens: tokens?.count ?? 0 })
+	}
+	if (section === 'players' && !child && request.method === 'DELETE') {
+		const ids = strings((await readJson(request)).user_ids, 'user_ids', 100)
+		// A player may leave; the Core's owner and the share's owner remove anyone.
+		if (!coreOwner && !shareOwner && ids.some((id) => id !== userId)) throw refused()
+		if (ids.length)
+			await env.DB.batch(
+				ids.map((id) =>
+					env.DB.prepare(
+						'DELETE FROM server_players WHERE core_id = ? AND server_id = ? AND user_id = ?',
+					).bind(coreId, serverId, id),
+				),
+			)
+		if (server) await notifyMembers(env, server.instance_id, 'shared_instance_users', userId)
+		return empty()
+	}
+	if (!coreOwner) throw refused()
+	if (section === 'invites' && !child && request.method === 'GET')
+		return json(
+			(
+				await env.DB.prepare(`SELECT id,expiration,max_uses,uses ${links} ORDER BY expiration`)
+					.bind(coreId, serverId, now())
+					.all()
+			).results,
+		)
+	if (section === 'invites' && child && request.method === 'DELETE') {
+		await env.DB.prepare('DELETE FROM shared_links WHERE id = ? AND core_id = ? AND server_id = ?')
+			.bind(child, coreId, serverId)
+			.run()
+		return empty()
+	}
+	if (child || request.method !== 'POST')
+		throw new ApiError(405, 'method_not_allowed', 'Unsupported player operation')
+	const body = await readJson(request)
+	const followed = await followShare(env, userId, coreId, serverId, body)
+	if (section === 'invites') return createLink(env, body, followed.instance_id, followed)
+	// Everyone who accepts sharing invitations is invited; the rest come back in `failed`.
+	const failed: string[] = []
+	for (const id of strings(body.user_ids, 'user_ids', 100)) {
+		if (id === userId) continue
+		if (!(await canInviteToSharedInstance(env, userId, id))) {
+			failed.push(id)
+			continue
+		}
+		await env.DB.prepare(
+			"INSERT OR IGNORE INTO server_players (core_id,server_id,user_id,join_type) VALUES (?,?,?,'invite')",
+		)
+			.bind(coreId, serverId, id)
+			.run()
+	}
+	await notifyReadyInvites(env, followed.instance_id)
+	await notifyMembers(env, followed.instance_id, 'shared_instance_users', userId)
+	return json({ failed })
+}
+
+/**
+ * `GET /v1/instances/{id}/access`, owner only, for the instance's Share tab: everyone who gets the
+ * share's updates and how. Members, then the players of each server that follows it, named by
+ * that server; someone is listed once for each way in. A member is kicked with `users`, a player
+ * with their server's `players`.
+ */
+async function access(env: Env, item: Instance, userId: string): Promise<Response> {
+	owner(item, userId)
+	type Person = {
+		id: string
+		username: string
+		avatar_url: string | null
+		joined_at: string | null
+		join_type: 'invite' | 'link'
+	}
+	const [members, players] = await Promise.all([
+		env.DB.prepare(
+			"SELECT u.id, u.username, u.avatar_url, m.joined_at, m.join_type FROM shared_members m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ? AND m.join_type != 'owner' ORDER BY m.joined_at IS NULL, m.joined_at",
+		)
+			.bind(item.id)
+			.all<Person>(),
+		env.DB.prepare(
+			`SELECT u.id, u.username, u.avatar_url, p.joined_at, p.join_type, s.core_id, s.server_id, s.name FROM ${PLAYERS} JOIN users u ON u.id = p.user_id WHERE s.instance_id = ? ORDER BY s.name, p.joined_at IS NULL, p.joined_at`,
+		)
+			.bind(item.id)
+			.all<Person & { core_id: string; server_id: string; name: string }>(),
+	])
+	const entry = ({ id, username, avatar_url, joined_at, join_type }: Person) => ({
+		user: { id, username, avatar_url },
+		joined_at,
+		join_type,
+	})
+	return json([
+		...members.results.map((row) => ({ ...entry(row), via: { type: 'member' } })),
+		...players.results.map((row) => ({
+			...entry(row),
+			via: { type: 'player', core_id: row.core_id, server_id: row.server_id, name: row.name },
+		})),
+	])
 }
 
 /**
@@ -988,7 +1291,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
 	if (
 		parts[0] !== 'v1' ||
-		!['instances', 'invites', 'blacklist', 'moderation', 'icons', 'storage'].includes(
+		!['instances', 'invites', 'blacklist', 'moderation', 'icons', 'storage', 'servers'].includes(
 			parts[1] ?? '',
 		)
 	)
@@ -1058,6 +1361,10 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		}
 	}
 	if (route === 'storage' && !id) return storage(request, env, user.id)
+	if (route === 'servers' && id && section && (child === 'players' || child === 'invites')) {
+		await requireSharing(env, user.id)
+		return serverPlayers(request, env, user.id, id, section, child, parts[5])
+	}
 	if (route !== 'instances')
 		throw new ApiError(404, 'not_found', 'Sharing endpoint was not found', 'endpoint_not_found')
 	// An owner may always delete their share; `owner` below still checks it is theirs.
@@ -1074,7 +1381,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			return json(
 				(
 					await env.DB.prepare(
-						'SELECT instance_id FROM shared_members WHERE user_id = ? AND joined_at IS NOT NULL',
+						`SELECT instance_id FROM shared_members WHERE user_id = ?1 AND joined_at IS NOT NULL UNION SELECT s.instance_id FROM ${PLAYERS} WHERE p.user_id = ?1 AND p.joined_at IS NOT NULL`,
 					)
 						.bind(user.id)
 						.all<{ instance_id: string }>()
@@ -1099,15 +1406,20 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const item = await instance(env, id)
 	if (section === 'invites') return invites(request, env, item, user.id, child)
 	if (section === 'users') return users(request, env, item, user.id)
+	if (section === 'access' && !child && request.method === 'GET') return access(env, item, user.id)
 	await member(env, item, user.id, !section)
 	if (!section) {
 		if (request.method === 'GET') {
+			const server = await cameThrough(env, item, user.id)
 			return json({
 				name: item.name,
 				icon: item.icon,
 				quarantine: item.quarantine === 1,
 				installed_once: item.installed_once === 1,
-				linked_server: null,
+				// The App adds it to the instance's server list, so only a server with an address.
+				linked_server: server?.address
+					? { domain: server.address, region: '', online_status: null }
+					: null,
 			})
 		}
 		owner(item, user.id)
@@ -1123,7 +1435,8 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			return empty()
 		}
 	}
-	// No share has a linked server yet, so none has its icon. The App reads 404 as no icon.
+	// The backend keeps no server icons yet, so the server a player came through has none. The App
+	// reads 404 as no icon.
 	if (section === 'server-icon' && !child && request.method === 'GET')
 		throw new ApiError(404, 'not_found', 'Shared instance has no server icon', 'icon_not_found')
 	if (section === 'history' && !child && request.method === 'GET') {

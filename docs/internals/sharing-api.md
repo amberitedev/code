@@ -25,6 +25,13 @@ differs from what that client was written for, on purpose.
 - `GET /v1/instances/{id}/servers`: servers other people host for the instance
   (`apps/backend/src/cores/servers.ts`).
 - `GET /v1/instances/{id}/history`: kept versions for the version history.
+- `/v1/servers/{core}/{server}/players` (`GET`, `POST`, `DELETE`) and `/invites[/{id}]`: the
+  players of a Core server, the people it is shared with, in the shapes of `users` and `invites`.
+  They read the share the server follows without being members, and accept and leave as members
+  do. A write names the share (`instance_id`) and the server's `name` and `address`. The App's
+  Play tab reaches these through `sharedinstances.players_v1`.
+- `GET /v1/instances/{id}/access`, owner only: members and the players of every server following
+  the share, each with `via` saying how they got access. For the instance's Share tab.
 - `POST /v1/instances/{id}/versions/{v}/reports`: a member reports broken files.
 - `GET` and `PATCH /v1/storage`: the account's pool usage and kept-versions setting.
 - `GET /v1/icons/{id}`: instance icons, stored in D1 instead of a CDN.
@@ -33,8 +40,9 @@ differs from what that client was written for, on purpose.
 
 - `backtrack_version` is never set.
 - `last_played` on members is always null.
-- `linked_server` on `GET /v1/instances/{id}` is null, and `GET /v1/instances/{id}/server-icon`
-  is always 404, until shares know their linked server.
+- `linked_server` on `GET /v1/instances/{id}` is the server a player came through, and null for
+  members and while that server has no address. Its `region` is empty and `online_status` null.
+- `GET /v1/instances/{id}/server-icon` is always 404: the backend keeps no server icons.
 
 ## Missing
 

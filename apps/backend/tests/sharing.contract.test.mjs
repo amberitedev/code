@@ -594,6 +594,92 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
 
+		// Players of a server read the share it follows without being members, until removed.
+		const smp = await ok(await call('/instances', 'POST', { name: 'SMP' }))
+		await ok(await push(smp.id, []))
+		const server = { instance_id: smp.id, name: 'SMP server', address: 'smp.example:25565' }
+		assert.deepEqual(
+			await ok(
+				await call('/servers/core/srv1/players', 'POST', { ...server, user_ids: ['friend'] }),
+			),
+			{ failed: [] },
+		)
+		const asFriend = (path) => call(path, 'GET', undefined, 'mra_friend')
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401, 'until accepted')
+		await ok(await call(`/instances/${smp.id}/invites/pending`, 'POST', undefined, 'mra_friend'))
+		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
+		assert.deepEqual((await ok(await asFriend(`/instances/${smp.id}`))).linked_server, {
+			domain: server.address,
+			region: '',
+			online_status: null,
+		})
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/users`))).users.map((user) => user.id),
+			['owner'],
+			'a player is not a member',
+		)
+		assert.deepEqual(
+			(await ok(await call('/servers/core/srv1/players'))).users.map((user) => user.id),
+			['friend'],
+		)
+		// A member by the share's link, and a player by the server's link.
+		const shareLink = await ok(await call(`/instances/${smp.id}/invites`, 'POST', {}))
+		await ok(
+			await call(`/instances/${smp.id}/invites/${shareLink.id}`, 'POST', undefined, 'mra_stranger'),
+		)
+		const serverLink = await ok(
+			await call('/servers/core/srv1/invites', 'POST', { ...server, max_uses: 5 }),
+		)
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/invites`))).map((invite) => invite.id),
+			[shareLink.id],
+			"a server's links are listed with its players",
+		)
+		await ok(
+			await call(`/instances/${smp.id}/invites/${serverLink.id}`, 'POST', undefined, 'mra_other'),
+		)
+		assert.equal(
+			(await ok(await call(`/instances/${smp.id}/versions`, 'GET', undefined, 'mra_other')))
+				.version,
+			1,
+		)
+		// The Share tab lists both kinds, each with how they got access. Only its owner reads it.
+		assert.deepEqual(
+			(await ok(await call(`/instances/${smp.id}/access`))).map(({ user, join_type, via }) => ({
+				id: user.id,
+				join_type,
+				via,
+			})),
+			[
+				{ id: 'stranger', join_type: 'link', via: { type: 'member' } },
+				{
+					id: 'friend',
+					join_type: 'invite',
+					via: { type: 'player', core_id: 'core', server_id: 'srv1', name: server.name },
+				},
+				{
+					id: 'other',
+					join_type: 'link',
+					via: { type: 'player', core_id: 'core', server_id: 'srv1', name: server.name },
+				},
+			],
+		)
+		await code(await asFriend(`/instances/${smp.id}/access`), 403, 'not_owner')
+		await code(
+			await call(`/instances/${smp.id}/access`, 'GET', undefined, 'amc_core'),
+			403,
+			'not_owner',
+		)
+		// Only the Core's owner or the share's owner removes a player; removal ends their access.
+		assert.equal(
+			(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }, 'mra_stranger'))
+				.status,
+			403,
+		)
+		await ok(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }))
+		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
+		assert.equal((await asFriend(`/instances/${smp.id}`)).status, 401)
+
 		// A Core writes the share of its own server-first server with its key.
 		const asCore = (path, method, body, core = 'core') => call(path, method, body, `amc_${core}`)
 		const serverShare = await ok(

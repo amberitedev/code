@@ -166,7 +166,8 @@ async function handOn(env: Env, core: { id: string; owner_id: string }) {
 	const shares = (
 		await env.DB.prepare(
 			`SELECT i.id, i.owner_id, i.home, i.replica,
-				EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = i.id AND m.join_type != 'owner') AS members
+				(EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = i.id AND m.join_type != 'owner')
+					OR EXISTS (SELECT 1 FROM server_players p JOIN shared_servers s USING (core_id, server_id) WHERE s.instance_id = i.id)) AS members
 			FROM shared_instances i WHERE (i.home = ?1 OR i.replica = ?1) AND i.owner_id != ?2
 			AND i.home IS NOT NULL AND i.replica IS NOT NULL`,
 		)
