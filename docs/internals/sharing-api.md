@@ -50,8 +50,9 @@ differs from what that client was written for, on purpose.
 - `backtrack_version` is never set.
 - `last_played` on members is always null.
 - `linked_server` on `GET /v1/instances/{id}` is the server a player came through, and null for
-  members. Its `domain` is the server's last known `outside` `ip:port`; without one, the host of
-  the Core's `public_address`, then of its reported `address`, with the server's port. Its
+  members. Its `domain` is the host of the Core's `public_address` with the server's port, or the
+  server's last known `outside` `ip:port` when it is on that same IP (the router's port). With no
+  public address: the last `outside`, then the host of the Core's `address` with the server's port. Its
   `region` is empty and `online_status` null.
 - `GET /v1/instances/{id}/server-icon` is always 404: the backend keeps no server icons.
 

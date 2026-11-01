@@ -1177,9 +1177,16 @@ function outsideAddress(value: unknown): string | null {
 function joinAddress(
 	server: SharedServer & { address: string; public_address: string | null },
 ): string {
-	return (
-		server.outside ?? `${new URL(server.public_address ?? server.address).hostname}:${server.port}`
-	)
+	// The Core reports its public address on every change, so it wins over the outside address the
+	// App last saw. That one is only kept for the router's port when it is still on the same IP.
+	const host = (address: string) => new URL(address).hostname
+	if (server.public_address) {
+		const publicHost = host(server.public_address)
+		return server.outside && host(`http://${server.outside}`) === publicHost
+			? server.outside
+			: `${publicHost}:${server.port}`
+	}
+	return server.outside ?? `${host(server.address)}:${server.port}`
 }
 
 /** The server a player reads the share through, with its Core's addresses; null for its owner and members. */
