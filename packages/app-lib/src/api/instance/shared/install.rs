@@ -654,11 +654,9 @@ fn shared_instance_external_file_data(
         None => {
             let access =
                 access.ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
-            Some(
-                PoolFile::new(&file, std::sync::Arc::clone(access)).map_err(
-                    |error| crate::ErrorKind::InputError(error.to_string()),
-                )?,
-            )
+            Some(PoolFile::new(&file, std::sync::Arc::clone(access)).map_err(
+                |error| crate::ErrorKind::InputError(error.to_string()),
+            )?)
         }
     };
     Ok(SharedInstanceExternalFileData {

@@ -69,7 +69,10 @@ impl HistoryStore for AppHistory<'_> {
         Ok(())
     }
 
-    async fn entries(&self, share_id: &str) -> crate::Result<Vec<HistoryEntry>> {
+    async fn entries(
+        &self,
+        share_id: &str,
+    ) -> crate::Result<Vec<HistoryEntry>> {
         let rows: Vec<String> = sqlx::query_scalar(
             "SELECT entry FROM share_history WHERE share_id = ?",
         )
@@ -271,8 +274,8 @@ pub async fn restore_shared_instance_version(
     let restored = entry_version(&plan.entry);
     // Every config of the version is written back. A config the last push shared and the
     // version does not is removed while it is still as pushed.
-    let last_files = last_push
-        .map(|entry| entry.manifest().cloned().collect::<Vec<_>>());
+    let last_files =
+        last_push.map(|entry| entry.manifest().cloned().collect::<Vec<_>>());
     let configs = ConfigUpdate {
         write: restored.configs().cloned().collect(),
         left: config_update(&restored.external_files, last_files.as_deref())
@@ -344,7 +347,9 @@ pub async fn set_shared_history_kept(
     get_shared_history_settings().await
 }
 
-async fn history_counts(state: &State) -> crate::Result<HashMap<String, usize>> {
+async fn history_counts(
+    state: &State,
+) -> crate::Result<HashMap<String, usize>> {
     let rows = sqlx::query(
         "SELECT share_id, COUNT(*) AS entries FROM share_history GROUP BY share_id",
     )

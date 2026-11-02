@@ -7,8 +7,8 @@ use theseus::install::{
     InstallJobSnapshot, InstallModpackPreview, InstallPostInstallEdit,
 };
 use theseus::instance::{
-    SharedInstanceInstallPreview, SharedInstanceInviteInstallPreview,
     SharedHistorySettings, SharedInstanceHistoryEntry,
+    SharedInstanceInstallPreview, SharedInstanceInviteInstallPreview,
     SharedInstanceUpdatePreview,
 };
 use theseus::pack::import::ImportLauncherType;
@@ -232,11 +232,13 @@ pub async fn install_delete_shared_instance_version(
     instance_id: String,
     version: i32,
 ) -> Result<()> {
-    Ok(theseus::instance::delete_shared_instance_version(
-        &instance_id,
-        version,
+    Ok(
+        theseus::instance::delete_shared_instance_version(
+            &instance_id,
+            version,
+        )
+        .await?,
     )
-    .await?)
 }
 
 #[tauri::command]

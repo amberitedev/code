@@ -299,7 +299,8 @@ mod tests {
             share_id: &str,
             version: i32,
         ) -> Result<(), Self::Error> {
-            if let Some(entries) = self.entries.lock().unwrap().get_mut(share_id)
+            if let Some(entries) =
+                self.entries.lock().unwrap().get_mut(share_id)
             {
                 entries.retain(|entry| entry.version != version);
             }
@@ -437,9 +438,6 @@ mod tests {
             diffs: Vec::new(),
         };
         let json = serde_json::to_string(&entry).unwrap();
-        assert_eq!(
-            serde_json::from_str::<HistoryEntry>(&json).unwrap(),
-            entry
-        );
+        assert_eq!(serde_json::from_str::<HistoryEntry>(&json).unwrap(), entry);
     }
 }

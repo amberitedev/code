@@ -867,7 +867,9 @@ async fn owner_shared_content(
     let last_push =
         crate::api::instance::last_shared_push(&attachment.id, state).await?;
     let mut content = OwnerSharedContent::default();
-    content.version_ids.extend(data.modrinth_ids.iter().cloned());
+    content
+        .version_ids
+        .extend(data.modrinth_ids.iter().cloned());
     if let Some(entry) = &last_push {
         content
             .version_ids
