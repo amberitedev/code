@@ -223,7 +223,7 @@ fn mark_client_dependencies(
     let required_on_server: HashSet<String> = addons
         .iter()
         .filter(|addon| runs_on_server(addon))
-        .flat_map(|addon| required(addon))
+        .flat_map(&required)
         .collect();
     for addon in addons.iter_mut().filter(|addon| runs_on_server(addon)) {
         let own = addon.project_id.as_deref();
