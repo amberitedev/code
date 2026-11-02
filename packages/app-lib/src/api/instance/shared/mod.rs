@@ -59,7 +59,6 @@ pub(crate) fn shared_clients_session() -> Option<SharedClientsSession> {
         .clone()
 }
 
-pub(crate) use bedrock::limits::MAX_SHARE_BYTES as MAX_SHARED_FILES_TOTAL_SIZE;
 use sharing_client::rules::ShareScope;
 pub(crate) use sharing_client::rules::{
     CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,

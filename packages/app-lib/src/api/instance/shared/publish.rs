@@ -894,7 +894,7 @@ fn push_error(error: push::PushError) -> crate::Error {
         }
         PushError::TooLarge => crate::ErrorKind::PoolTooLarge(format!(
             "A shared instance can hold at most {} of files.",
-            crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
+            crate::util::io::format_bytes(bedrock::limits::MAX_SHARE_BYTES)
         ))
         .into(),
         PushError::FileChanged(file_name) => {
@@ -979,18 +979,9 @@ async fn shared_file_candidates(
     }
 
     let instance_path = state.directories.instances_dir().join(instance_path);
-    let mut total_size = 0_u64;
     let mut candidates = Vec::with_capacity(selected_paths.len());
     for path in selected_paths {
         let source = instance_path.join(path);
-        let size = crate::util::io::metadata(&source).await?.len();
-        total_size = total_size.saturating_add(size);
-        if total_size > MAX_SHARED_FILES_TOTAL_SIZE {
-            bail!(crate::ErrorKind::PoolTooLarge(format!(
-                "A shared instance can hold at most {} of files.",
-                crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
-            )));
-        }
         candidates.push(ExternalFileCandidate {
             file_name: path.to_string(),
             file_type: CONFIG_FILE_TYPE.to_string(),

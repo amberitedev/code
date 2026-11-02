@@ -36,7 +36,6 @@ use uuid::Uuid;
 const DEFAULT_SERVER_ICON: &[u8] = include_bytes!(
     "../../../assets/external/illustrations/minecraft_server_icon.png"
 );
-const MAX_SHARED_INSTANCE_EXTERNAL_FILE_SIZE: u64 = 500 * 1024 * 1024;
 const MAX_SHARED_INSTANCE_INITIAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
 const SHARED_INSTANCE_CONTENT_DOWNLOAD_CONCURRENCY: usize = 4;
 const SHARED_INSTANCE_FILE_DOWNLOAD_CONCURRENCY: usize = 64;
@@ -1652,13 +1651,6 @@ async fn install_shared_instance_external_file(
     downloaded: &DownloadedBytes,
 ) -> crate::Result<()> {
     validate_shared_instance_external_file_name(&file.file_name)?;
-
-    if file.file_size > MAX_SHARED_INSTANCE_EXTERNAL_FILE_SIZE {
-        bail!(ErrorKind::InputError(format!(
-            "shared instance external file {} exceeds the maximum size",
-            file.file_name
-        )));
-    }
 
     let bytes = match (&file.local, &file.pool) {
         (Some(path), _) => {
