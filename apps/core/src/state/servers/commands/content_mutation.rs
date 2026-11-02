@@ -20,21 +20,25 @@ use modrinth_content_management::{
 };
 use tracing::warn;
 
-use super::{
-    Content, Error,
-    folder::{self, Folder},
-    install::{MAX_FILE, identify},
-    modrinth::{self, Version},
-};
+use super::install_pack::{MAX_FILE, identify};
 use crate::{
     installs::{
         ModLoader,
         download::{self, FileDownload, Hash},
     },
-    servers::records as servers_records,
     state::servers::{
-        ContentSourceKind, EntrySides, TrackedFile,
-        adapters::sqlite::content_rows,
+        Content, ContentSourceKind, EntrySides, Error, TrackedFile,
+        adapters::{
+            filesystem::{
+                archive,
+                folder::{self, Folder},
+            },
+            network::{
+                hosts,
+                modrinth::{self, Version},
+            },
+            sqlite::{content_rows, server_rows},
+        },
     },
 };
 
@@ -140,11 +144,12 @@ pub async fn target(
     content: &Content,
     server_id: &str,
 ) -> Result<Target, Error> {
-    let server = servers_records::get(&content.db, server_id)
-        .await?
-        .ok_or_else(|| {
-            Error::NotFound(format!("There is no server {server_id}."))
-        })?;
+    let server =
+        server_rows::get(&content.db, server_id)
+            .await?
+            .ok_or_else(|| {
+                Error::NotFound(format!("There is no server {server_id}."))
+            })?;
     match (
         server.loader.as_deref().and_then(ModLoader::parse),
         server.game_version,
@@ -313,7 +318,7 @@ async fn place_version(
     let path = format!("{dir}/{name}");
     let url = reqwest::Url::parse(&file.url)
         .ok()
-        .filter(|url| super::hosts::allowed(url, false))
+        .filter(|url| hosts::allowed(url, false))
         .ok_or_else(|| {
             Error::Invalid(format!("{} is not on an allowed host.", file.url))
         })?;
@@ -748,11 +753,12 @@ pub async fn upload(
     filename: &str,
     staged: &Path,
 ) -> Result<(), Error> {
-    let server = servers_records::get(&content.db, server_id)
-        .await?
-        .ok_or_else(|| {
-            Error::NotFound(format!("There is no server {server_id}."))
-        })?;
+    let server =
+        server_rows::get(&content.db, server_id)
+            .await?
+            .ok_or_else(|| {
+                Error::NotFound(format!("There is no server {server_id}."))
+            })?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let name = folder::clean(filename)?;
     if name.contains('/') {
@@ -779,7 +785,7 @@ pub async fn upload(
         let staged = staged.to_owned();
         tokio::task::spawn_blocking(move || -> std::io::Result<String> {
             let mut reader =
-                super::archive::Hashing::new(std::fs::File::open(staged)?);
+                archive::Hashing::new(std::fs::File::open(staged)?);
             folder.write(&path, &mut reader)?;
             Ok(reader.finish())
         })

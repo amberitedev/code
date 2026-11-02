@@ -17,8 +17,11 @@ use sharing_client::consume::{
 };
 use sharing_client::store::{FetchError, StoreClient};
 
-use super::{Content, Error, install, install::MAX_PACK};
-use crate::installs::shared::SharedDirs;
+use super::install_pack::{self as install, MAX_PACK};
+use crate::{
+    installs::shared::SharedDirs,
+    state::servers::{Content, Error},
+};
 
 /// Fetch the files of `version` (read with [`consume::ready_version`]) and write it as an
 /// `.mrpack` named `name` in the shared store. Returns the pack's SHA-1 and the version.

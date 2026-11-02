@@ -40,17 +40,23 @@ use super::{
 };
 use crate::{
     access::{Caller, Level, activity},
-    content::{
-        self, Busy,
-        addons::{self, Listed},
-        install::{self as content_install, Linked, PackSource},
-        pack, shared,
-    },
     installs::{ModLoader, shared::SharedDirs},
-    servers::{Hold, ServerError, records as servers_records},
+    servers::{Hold, ServerError},
     state::servers::{
-        Pack, Pending, PendingPack, SkippedFile, TrackedFile,
-        adapters::sqlite::content_rows, project_type_of,
+        self as content, Busy, Pack, Pending, PendingPack, SkippedFile,
+        TrackedFile,
+        adapters::{
+            filesystem::folder,
+            network::modrinth,
+            sqlite::{content_rows, server_rows},
+        },
+        commands::{
+            content_mutation::{self as addons, Listed},
+            install_pack::{self as content_install, Linked, PackSource},
+            write_shared_pack as shared,
+        },
+        domain::pack,
+        project_type_of,
     },
 };
 
@@ -538,12 +544,12 @@ async fn addon_list(
         modrinth.projects(&project_ids),
         modrinth.versions_by_id(&version_ids)
     );
-    let projects: HashMap<String, content::modrinth::Project> = projects
+    let projects: HashMap<String, modrinth::Project> = projects
         .unwrap_or_default()
         .into_iter()
         .map(|project| (project.id.clone(), project))
         .collect();
-    let versions: HashMap<String, content::modrinth::Version> = versions
+    let versions: HashMap<String, modrinth::Version> = versions
         .unwrap_or_default()
         .into_iter()
         .map(|version| (version.id.clone(), version))
@@ -648,10 +654,7 @@ async fn addon_list(
 }
 
 /// The jar on disk for `listed`, opened without following a link.
-fn open_jar(
-    folder: &content::folder::Folder,
-    listed: &Listed,
-) -> Option<std::fs::File> {
+fn open_jar(folder: &folder::Folder, listed: &Listed) -> Option<std::fs::File> {
     let on_disk = if listed.disabled {
         format!("{}{}", listed.path, addons::DISABLED)
     } else {
@@ -682,7 +685,7 @@ async fn manifests(
     let root = state.servers.paths().server(id);
     let id = id.to_owned();
     tokio::task::spawn_blocking(move || {
-        let Ok(folder) = content::folder::Folder::open(&root) else {
+        let Ok(folder) = folder::Folder::open(&root) else {
             return HashMap::new();
         };
         jars.into_iter()
@@ -812,15 +815,14 @@ pub async fn list(
 ) -> Result<Json<Addons>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let addons = if query.addons == Some(false) {
         None
     } else {
-        let folder =
-            content::folder::Folder::open(&state.servers.paths().server(&id))?;
+        let folder = folder::Folder::open(&state.servers.paths().server(&id))?;
         let listed: Vec<Listed> =
             addons::scan(&folder, loader).into_iter().collect();
         let skipped = content_rows::get_skipped_files(&state.db, &id).await?;
@@ -1123,11 +1125,10 @@ pub async fn get_update(
 ) -> Result<Json<Addon>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let folder =
-        content::folder::Folder::open(&state.servers.paths().server(&id))?;
+    let folder = folder::Folder::open(&state.servers.paths().server(&id))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let listed =
         addons::find(&folder, loader, &query.filename).ok_or_else(|| {
@@ -1200,7 +1201,7 @@ pub async fn install(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     match request {
@@ -1604,7 +1605,7 @@ pub async fn repair(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let (hold, busy) = begin(&state, &id)?;
@@ -1925,9 +1926,8 @@ pub async fn edited(
 ) -> Result<Json<EditedFiles>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     let rows = content_rows::get_tracked_files(&state.db, &id).await?;
-    let folder = Arc::new(content::folder::Folder::open(
-        &state.servers.paths().server(&id),
-    )?);
+    let folder =
+        Arc::new(folder::Folder::open(&state.servers.paths().server(&id))?);
     let files = tokio::task::spawn_blocking(move || {
         pack::edited(&rows, &|path| folder.sha1(path).ok().flatten())
             .into_iter()
@@ -1955,8 +1955,7 @@ pub async fn decide(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let _busy = state.content.busy(&id)?;
-    let path =
-        content::folder::clean(&decision.path).map_err(content::Error::from)?;
+    let path = folder::clean(&decision.path).map_err(content::Error::from)?;
     content_install::decide(
         &state.content,
         &id,
@@ -1995,14 +1994,14 @@ pub async fn embedded_icon(
             ));
         }
     };
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let content = Arc::clone(&state.content);
     let root = state.servers.paths().server(&id);
     let icon = tokio::task::spawn_blocking(move || {
-        let folder = content::folder::Folder::open(&root).ok()?;
+        let folder = folder::Folder::open(&root).ok()?;
         let listed = addons::find(&folder, loader, &query.filename)
             .filter(|listed| listed.kind == kind)?;
         let key = format!("{id}/{}", listed.path);

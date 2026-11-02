@@ -30,7 +30,8 @@ use super::{
 };
 use crate::{
     access::now,
-    servers::{Lifecycle, Servers, records},
+    servers::{Lifecycle, Servers},
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// The key of Core's own API mapping and report.
@@ -227,7 +228,8 @@ impl Network {
         let Some(run) = servers.run_of(&server_id) else {
             return;
         };
-        let Ok(Some(server)) = records::get(&self.db, &server_id).await else {
+        let Ok(Some(server)) = server_rows::get(&self.db, &server_id).await
+        else {
             return;
         };
         let Ok(port) = u16::try_from(server.port) else {

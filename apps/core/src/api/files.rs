@@ -41,11 +41,14 @@ use super::{
 use crate::{
     access::{Caller, Level, activity, now},
     backups::Target,
-    content::{
-        Busy, addons,
-        archive::{self, ArchiveError},
-        folder::{self, Folder},
-        pack,
+    state::servers::{
+        Busy,
+        adapters::filesystem::{
+            archive::{self, ArchiveError},
+            folder::{self, Folder},
+        },
+        commands::content_mutation as addons,
+        domain::pack,
     },
 };
 
@@ -847,9 +850,9 @@ pub async fn unarchive(
             .ok_or_else(|| not_found(&source))?
             .into_std();
         let mut zip = zip::ZipArchive::new(file).map_err(|error| {
-            ApiError::from(crate::content::Error::from(ArchiveError::from(
-                error,
-            )))
+            ApiError::from(crate::state::servers::Error::from(
+                ArchiveError::from(error),
+            ))
         })?;
         let modpack_name =
             pack::read_index(&mut zip).ok().map(|index| index.name);
@@ -858,8 +861,8 @@ pub async fn unarchive(
             Some(target) => format!("{target}/{entry}"),
             None => entry.to_owned(),
         };
-        let entries =
-            archive::entries(&mut zip).map_err(crate::content::Error::from)?;
+        let entries = archive::entries(&mut zip)
+            .map_err(crate::state::servers::Error::from)?;
         let conflicting_files: Vec<String> = entries
             .iter()
             .filter(|(_, is_dir)| !is_dir)
@@ -874,7 +877,7 @@ pub async fn unarchive(
                 let owned = folder::is_server_owned(&path, &level);
                 (!exists || (query.overwrite && !owned)).then_some(path)
             })
-            .map_err(crate::content::Error::from)?;
+            .map_err(crate::state::servers::Error::from)?;
         }
         Ok(ExtractResult {
             modpack_name,

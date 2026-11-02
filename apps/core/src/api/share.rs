@@ -31,14 +31,16 @@ use super::{
 };
 use crate::{
     access::{Caller, Level},
-    content::{
-        addons,
-        folder::{self, Folder},
-        server_share::{Carried, carried, removed},
-    },
     installs::ModLoader,
-    servers::{ServerError, records as servers_records},
-    state::servers::adapters::sqlite::content_rows,
+    servers::ServerError,
+    state::servers::{
+        adapters::{
+            filesystem::folder::{self, Folder},
+            sqlite::{content_rows, server_rows},
+        },
+        commands::content_mutation as addons,
+        domain::server_share::{Carried, carried, removed},
+    },
 };
 
 /// Config files `GET .../content/share/files` lists at most.
@@ -214,7 +216,7 @@ fn shareable_config(path: &str) -> bool {
 }
 
 async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
-    let server = servers_records::get(&state.db, id)
+    let server = server_rows::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.to_owned()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
@@ -345,7 +347,7 @@ pub async fn share(
     let mut configs = Vec::with_capacity(request.config_paths.len());
     for path in &request.config_paths {
         let path = folder::clean(path.trim_start_matches('/'))
-            .map_err(crate::content::Error::from)?;
+            .map_err(crate::state::servers::Error::from)?;
         if !shareable_config(&path) {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
@@ -358,7 +360,7 @@ pub async fn share(
     let snapshot = snapshot(&state, &id).await?;
     // The share takes the server's name on every push. One deleted elsewhere, or made by this
     // Core under an earlier pairing, is replaced by a new one.
-    let existing = match servers_records::share_id(&state.db, &id).await? {
+    let existing = match server_rows::share_id(&state.db, &id).await? {
         Some(share_id) => {
             match backend.rename_share(&share_id, &snapshot.name).await {
                 Err(push::PushError::Backend {
@@ -374,8 +376,7 @@ pub async fn share(
         None => {
             let share_id =
                 backend.create_server_share(&snapshot.name, &id).await?;
-            servers_records::set_share_id(&state.db, &id, Some(&share_id))
-                .await?;
+            server_rows::set_share_id(&state.db, &id, Some(&share_id)).await?;
             share_id
         }
     };
@@ -472,7 +473,7 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    if servers_records::share_id(&state.db, &id).await?.is_none() {
+    if server_rows::share_id(&state.db, &id).await?.is_none() {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             "This server is not shared.",
@@ -483,7 +484,7 @@ pub async fn unshare(
     // 404, which `delete_share` counts as deleted, and a 403 `not_owner` means it is not this
     // Core's any more.
     if let (Some(share_id), Ok(backend)) = (
-        servers_records::share_id(&state.db, &id).await?,
+        server_rows::share_id(&state.db, &id).await?,
         backend(&state).await,
     ) {
         match backend.delete_share(&share_id).await {
@@ -494,7 +495,7 @@ pub async fn unshare(
             Err(error) => return Err(error.into()),
         }
     }
-    servers_records::set_share_id(&state.db, &id, None).await?;
+    server_rows::set_share_id(&state.db, &id, None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -506,11 +507,10 @@ pub async fn owe_share_deletion(
     conn: &mut sqlx::SqliteConnection,
     id: &str,
 ) -> sqlx::Result<()> {
-    let Some(share_id) = servers_records::share_id(&mut *conn, id).await?
-    else {
+    let Some(share_id) = server_rows::share_id(&mut *conn, id).await? else {
         return Ok(());
     };
-    servers_records::set_share_id(&mut *conn, id, None).await?;
+    server_rows::set_share_id(&mut *conn, id, None).await?;
     crate::access::sync::owe(conn, &OwedCall::DeleteShare { share_id }).await
 }
 
@@ -584,7 +584,7 @@ pub async fn diff(
     let not_shared = || {
         ApiError::new(ErrorCode::NotFound, "This server has no shared version.")
     };
-    let share_id = servers_records::share_id(&state.db, &id)
+    let share_id = server_rows::share_id(&state.db, &id)
         .await?
         .ok_or_else(not_shared)?;
     let latest = backend(&state)

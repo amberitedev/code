@@ -3,7 +3,9 @@
 use std::io::{Read, Write};
 
 use super::*;
-use crate::{daemon::folders, db, servers::records as servers_records};
+use crate::{
+    daemon::folders, db, state::servers::adapters::sqlite::server_rows,
+};
 
 struct Setup {
     _dir: tempfile::TempDir,
@@ -20,7 +22,7 @@ async fn setup() -> Setup {
     let db = db::memory().await;
     let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
     let server = servers.create("A").await.unwrap().id;
-    servers_records::set_installed(&db, &server, "vanilla", "1.21.1", None)
+    server_rows::set_installed(&db, &server, "vanilla", "1.21.1", None)
         .await
         .unwrap();
     let world = paths.server(&server).join("world");
@@ -159,15 +161,15 @@ const DAY: i64 = 24 * 3600;
 
 /// The server ran and stopped a moment ago.
 async fn ran(setup: &Setup) {
-    servers_records::start_run(&setup.db, &setup.server, "run", now() - 100)
+    server_rows::start_run(&setup.db, &setup.server, "run", now() - 100)
         .await
         .unwrap();
-    servers_records::end_run(
+    server_rows::end_run(
         &setup.db,
         "run",
-        &servers_records::Ended {
+        &server_rows::Ended {
             at: now() - 50,
-            outcome: servers_records::Outcome::Stopped,
+            outcome: server_rows::Outcome::Stopped,
             exit_code: Some(0),
             last_lines: None,
         },

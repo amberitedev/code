@@ -2,8 +2,8 @@
 
 use sqlx::SqlitePool;
 
-use super::shim::{EndedBy, ExitStatus};
 use crate::network::firewall::SERVER_PORTS;
+use crate::servers::shim::{EndedBy, ExitStatus};
 use modrinth_content_management::VersionType;
 
 /// A row of `servers`.
@@ -18,7 +18,9 @@ pub struct ServerRow {
     pub memory_mb: i64,
     pub java_path: Option<String>,
     pub java_version: Option<i64>,
-    #[sqlx(try_from = "crate::content::modrinth::ChannelText")]
+    #[sqlx(
+        try_from = "crate::state::servers::adapters::network::modrinth::ChannelText"
+    )]
     pub update_channel: VersionType,
 }
 

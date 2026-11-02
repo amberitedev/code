@@ -45,12 +45,12 @@ use uuid::Uuid;
 use crate::{
     access::{Caller, now},
     api::events::{BackupState, BackupTask, WsEvent},
-    content::{
+    daemon::paths::Paths,
+    servers::{Phase, ServerError, Servers, console},
+    state::servers::adapters::filesystem::{
         archive,
         folder::{self, Folder},
     },
-    daemon::paths::Paths,
-    servers::{Phase, ServerError, Servers, console},
     util::if_present,
 };
 use records::{Kind, OpKind, OpState, Operation};

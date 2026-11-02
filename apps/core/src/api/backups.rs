@@ -44,7 +44,8 @@ use crate::{
             self, Kind, OpKind, OpState, Operation, State as BackupRowState,
         },
     },
-    servers::{ServerError, records as servers_records},
+    servers::ServerError,
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// Also the `{kind}` of the history routes. Mirrors
@@ -915,7 +916,7 @@ pub async fn download_world(
     let caller =
         downloader(&state, caller, query.token.as_deref(), &id, &Target::World)
             .await?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let path = state

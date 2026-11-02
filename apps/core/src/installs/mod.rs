@@ -13,7 +13,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::servers::{Hold, ServerError, Servers, launch, records::ServerRow};
+use crate::{
+    servers::{Hold, ServerError, Servers, launch},
+    state::servers::adapters::sqlite::server_rows::ServerRow,
+};
 use shared::SharedDirs;
 
 /// The server software a server runs, as `servers.loader` stores it. App-lib's `ModLoader`
@@ -284,7 +287,7 @@ async fn remove_installer_leftovers(dir: &Path, installer: Option<&str>) {
     let log = installer.map(|installer| format!("{installer}.log"));
     let removed =
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            let folder = crate::content::folder::Folder::open(&dir)?;
+            let folder = crate::state::servers::adapters::filesystem::folder::Folder::open(&dir)?;
             let mut leftovers: Vec<String> = log.into_iter().collect();
             if let Ok(tmp) = folder.open_dir(Some("tmp")) {
                 for entry in tmp.entries()?.filter_map(Result::ok) {

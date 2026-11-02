@@ -101,7 +101,7 @@ async fn core() -> Core {
     )
     .await
     .unwrap();
-    let content = crate::content::Content::open(
+    let content = crate::state::servers::Content::open(
         servers.paths().clone(),
         db.clone(),
         Arc::clone(&servers),
@@ -1583,7 +1583,7 @@ async fn a_failed_install_tells_the_app_why() {
                 filename: "pack".into(),
             };
             progress.set("files", &key, 0.5);
-            Err(crate::content::Error::Invalid("too large".into()))
+            Err(crate::state::servers::Error::Invalid("too large".into()))
         },
     );
     // The App reads an install's end from its items: a percent, then the error.

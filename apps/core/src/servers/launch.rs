@@ -8,10 +8,7 @@ use std::{
 
 use color_eyre::eyre::Result;
 
-use super::{
-    records::ServerRow,
-    shim::{Launch, PROTOCOL},
-};
+use super::shim::{Launch, PROTOCOL};
 use crate::{
     daemon::{folders, paths::Paths},
     installs::{
@@ -21,6 +18,7 @@ use crate::{
             version_info::merged_version_id,
         },
     },
+    state::servers::adapters::sqlite::server_rows::ServerRow,
 };
 
 /// Why a server cannot start yet.

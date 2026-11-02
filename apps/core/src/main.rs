@@ -5,7 +5,6 @@ mod access;
 mod api;
 mod backups;
 mod cli;
-mod content;
 mod daemon;
 mod db;
 mod installs;

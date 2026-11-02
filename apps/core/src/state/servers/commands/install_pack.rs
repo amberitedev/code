@@ -20,13 +20,6 @@ use futures::{StreamExt, TryStreamExt};
 use crate::api::events::GameVersionChange;
 use tracing::{info, warn};
 
-use super::{
-    Content, Error, Progress,
-    folder::Folder,
-    modrinth,
-    pack::{self, Index, Platform, Source, Step, Wanted},
-    properties,
-};
 use crate::{
     api::{
         events::{ContentPlatform, InstallProgressKey},
@@ -37,10 +30,21 @@ use crate::{
         download::{self, FileDownload, Hash},
         shared::SharedDirs,
     },
-    servers::{Hold, records as servers_records},
+    servers::Hold,
     state::servers::{
-        ContentSet, ContentSetStatus, ContentSourceKind, Pack, Pending,
-        SkippedFile, TrackedFile, adapters::sqlite::content_rows,
+        Content, ContentSet, ContentSetStatus, ContentSourceKind, Error, Pack,
+        Pending, Progress, SkippedFile, TrackedFile,
+        adapters::{
+            filesystem::{
+                archive,
+                folder::{self, Folder},
+                properties,
+            },
+            network::{hosts, modrinth},
+            sqlite::{content_rows, server_rows},
+        },
+        commands::content_mutation::DISABLED,
+        domain::pack::{self, Index, Platform, Source, Step, Wanted},
     },
 };
 
@@ -106,7 +110,7 @@ pub async fn loader(
     verify: bool,
 ) -> Result<(), Error> {
     let id = hold.id();
-    let server = servers_records::get(&content.db, id)
+    let server = server_rows::get(&content.db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
     if server.game_version.is_some() && !verify {
@@ -129,7 +133,7 @@ pub async fn loader(
         &|share| progress.set("platform", &key, share),
     )
     .await?;
-    servers_records::set_installed(
+    server_rows::set_installed(
         &content.db,
         id,
         loader.as_str(),
@@ -150,7 +154,7 @@ pub async fn pack_update(
     project_id: &str,
     installed: &modrinth::Version,
 ) -> Result<Option<String>, Error> {
-    let server = servers_records::get(&content.db, id)
+    let server = server_rows::get(&content.db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
     let versions = content.modrinth.project_versions(project_id).await?;
@@ -248,7 +252,7 @@ async fn install_pack(
         (None, None) => ContentSourceKind::ImportedModpack,
     };
 
-    let server = servers_records::get(&content.db, id)
+    let server = server_rows::get(&content.db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
     let game_version_change = game_version_change(
@@ -271,9 +275,8 @@ async fn install_pack(
         tokio::task::spawn_blocking(move || {
             let level = folder.level_name();
             let sha1 = |path: &str| folder.sha1(path).ok().flatten();
-            let disabled = |path: &str| {
-                folder.exists(&format!("{path}{}", super::addons::DISABLED))
-            };
+            let disabled =
+                |path: &str| folder.exists(&format!("{path}{}", DISABLED));
             pack::plan(
                 &rows,
                 &wanted,
@@ -403,7 +406,7 @@ async fn install_platform(
     platform: &Platform,
     verify: bool,
 ) -> Result<(), Error> {
-    let server = servers_records::get(&content.db, hold.id())
+    let server = server_rows::get(&content.db, hold.id())
         .await?
         .ok_or_else(|| Error::NotFound("The server is gone.".into()))?;
     let loader = ModLoader::from(platform.loader);
@@ -424,7 +427,7 @@ async fn install_platform(
         &|share| progress.set("platform", &key, share),
     )
     .await?;
-    servers_records::set_installed(
+    server_rows::set_installed(
         &content.db,
         hold.id(),
         platform.loader.as_str(),
@@ -480,7 +483,7 @@ pub(super) async fn fetch_modrinth_pack(
 fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
     reqwest::Url::parse(url)
         .ok()
-        .filter(|url| super::hosts::allowed(url, false))
+        .filter(|url| hosts::allowed(url, false))
         .ok_or_else(|| {
             Error::Invalid(format!(
                 "{url} is not on a host packs may download from."
@@ -499,8 +502,8 @@ pub async fn read_pack(
     let path = path.to_owned();
     let (index, candidates) = tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(&path)?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(super::archive::ArchiveError::from)?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(archive::ArchiveError::from)?;
         let index = pack::read_index(&mut archive)?;
         let loader = pack::platform(&index)?.loader;
         let candidates = pack::candidates(
@@ -684,7 +687,7 @@ async fn apply(
             }
             // A path that became the server's since the plan is only forgotten.
             Step::Delete(row)
-                if super::folder::is_server_owned(
+                if folder::is_server_owned(
                     &row.relative_path,
                     &folder.level_name(),
                 ) =>
@@ -812,13 +815,13 @@ async fn place(
             Ok(entry) => {
                 let mut archive =
                     zip::ZipArchive::new(std::fs::File::open(archive_path)?)
-                        .map_err(super::archive::ArchiveError::from)?;
+                        .map_err(archive::ArchiveError::from)?;
                 let entry = archive
                     .by_index(entry)
-                    .map_err(super::archive::ArchiveError::from)?;
+                    .map_err(archive::ArchiveError::from)?;
                 folder.write(
                     &path,
-                    &mut super::archive::AtMost {
+                    &mut archive::AtMost {
                         inner: entry,
                         left: size,
                     },

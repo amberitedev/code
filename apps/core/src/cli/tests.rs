@@ -144,7 +144,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     )
     .await
     .unwrap();
-    let content = crate::content::Content::open(
+    let content = crate::state::servers::Content::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),

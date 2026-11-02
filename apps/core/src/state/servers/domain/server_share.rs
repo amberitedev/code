@@ -9,7 +9,9 @@
 
 use std::collections::HashMap;
 
-use super::addons::{Listed, Sides};
+use crate::state::servers::commands::content_mutation::{
+    DISABLED, Listed, Sides,
+};
 use crate::state::servers::{EntrySides, TrackedFile};
 use sharing_client::push::RemovedFile;
 
@@ -127,7 +129,7 @@ pub fn carried(
                 file_name: item.filename.clone(),
                 file_type,
                 on_disk: if item.disabled {
-                    format!("{}{}", item.path, super::addons::DISABLED)
+                    format!("{}{}", item.path, DISABLED)
                 } else {
                     item.path.clone()
                 },

@@ -148,7 +148,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         Arc::clone(&servers),
     )
     .await?;
-    let content = crate::content::Content::open(
+    let content = crate::state::servers::Content::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),

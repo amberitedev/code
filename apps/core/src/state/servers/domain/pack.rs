@@ -16,12 +16,15 @@ use bedrock::upstream::jar::{
     Environment as JarEnvironment, Platform as JarPlatform,
 };
 
-use super::{
-    archive::{self, ArchiveError},
-    folder::{self, PathError},
-};
 use crate::state::servers::{
     ContentSourceKind, Pending, SkippedFile, TrackedFile,
+    adapters::{
+        filesystem::{
+            archive::{self, ArchiveError},
+            folder::{self, PathError},
+        },
+        network::hosts,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -269,7 +272,7 @@ pub fn split(
         let usable = matches!(candidate.wanted.source, Source::Override(_))
             || candidate.downloads.iter().any(|url| {
                 reqwest::Url::parse(url)
-                    .is_ok_and(|url| super::hosts::allowed(&url, false))
+                    .is_ok_and(|url| hosts::allowed(&url, false))
             });
         if !usable {
             return Err(PackError::Host(candidate.path));
@@ -329,7 +332,7 @@ pub struct Disk<'a> {
 
 /// The most a set of steps writes, refused past [`archive::MAX_UNPACKED`] before anything is
 /// written: one budget for the whole install. Download sizes are the index's word, so for them
-/// this is an estimate; each download is only capped at [`super::install::MAX_FILE`].
+/// this is an estimate; each download is only capped at [`install_pack::MAX_FILE`](crate::state::servers::commands::install_pack::MAX_FILE).
 pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
     let total = steps
         .iter()

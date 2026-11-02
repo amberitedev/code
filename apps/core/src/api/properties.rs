@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{AppState, activity::Action, content::world, error::ApiError};
 use crate::{
     access::{Caller, Level, activity},
-    content::properties,
+    state::servers::adapters::filesystem::properties,
 };
 
 /// The properties the App has a form field for, keyed with underscores instead of dashes. Part of

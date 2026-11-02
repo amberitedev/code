@@ -26,10 +26,12 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},
-    content,
     installs::ModLoader,
-    servers::{Phase, ServerError, launch, records},
-    state::servers::adapters::sqlite::content_rows,
+    servers::{Phase, ServerError, launch},
+    state::servers::{
+        adapters::sqlite::{content_rows, server_rows},
+        commands::install_pack,
+    },
 };
 
 /// Response of GET `/modrinth/v0/servers`. `users` is keyed by user id. Mirrors
@@ -462,7 +464,7 @@ fn host(headers: &HeaderMap) -> &str {
 /// `host`.
 async fn server(
     state: &AppState,
-    row: records::ServerRow,
+    row: server_rows::ServerRow,
     level: Level,
     host: &str,
 ) -> Result<Server, ApiError> {
@@ -471,10 +473,12 @@ async fn server(
         Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
         Some(Phase::Stopping) => ServerPowerState::Stopping,
         Some(Phase::Installing) => ServerPowerState::Offline,
-        None => match records::last_outcome(&state.db, &row.id).await? {
-            Some(records::Outcome::Crashed) => ServerPowerState::Crashed,
-            Some(records::Outcome::Killed) => ServerPowerState::Killed,
-            Some(records::Outcome::Stopped) | None => ServerPowerState::Offline,
+        None => match server_rows::last_outcome(&state.db, &row.id).await? {
+            Some(server_rows::Outcome::Crashed) => ServerPowerState::Crashed,
+            Some(server_rows::Outcome::Killed) => ServerPowerState::Killed,
+            Some(server_rows::Outcome::Stopped) | None => {
+                ServerPowerState::Offline
+            }
         },
     };
     let owner_id: Option<String> =
@@ -546,7 +550,7 @@ async fn linked_instance(
     let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
         return Ok(None);
     };
-    let Some(linked) = content::install::linked(&pack) else {
+    let Some(linked) = install_pack::linked(&pack) else {
         return Ok(None);
     };
     Ok(Some(LinkedInstance {
@@ -580,7 +584,7 @@ pub async fn list(
     headers: HeaderMap,
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
-    for row in records::list(&state.db).await? {
+    for row in server_rows::list(&state.db).await? {
         if let Some(level) = caller.level(&state.db, &row.id).await? {
             servers.push(server(&state, row, level, host(&headers)).await?);
         }
@@ -606,7 +610,7 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
     let level = caller.require(&state.db, &id, Level::Viewer).await?;
-    let row = records::get(&state.db, &id)
+    let row = server_rows::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server(&state, row, level, host(&headers)).await?))
@@ -702,7 +706,7 @@ pub async fn reinstall(
     content_rows::unlink(&state.db, &id).await?;
     state.access.owed.notify_one();
     let progress = state.content.progress(&id);
-    let result = content::install::loader(
+    let result = install_pack::loader(
         &state.content,
         &hold,
         &progress,
@@ -732,7 +736,7 @@ pub async fn delete(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    records::get(&state.db, &id)
+    server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if state.servers.hold_for_deletion(&id).is_err() {
@@ -820,7 +824,7 @@ pub async fn ws_auth(
 /// the server's.
 async fn server_full(
     state: &AppState,
-    row: records::ServerRow,
+    row: server_rows::ServerRow,
     host: &str,
 ) -> Result<ServerFull, ApiError> {
     let created_at: i64 =
@@ -840,10 +844,10 @@ async fn server_full(
     let linked = content_rows::get_pack(&state.db, &row.id)
         .await?
         .as_ref()
-        .and_then(content::install::linked);
+        .and_then(install_pack::linked);
     let shared_instance_id = match linked {
         Some(linked) => Some(linked.shared_instance_id),
-        None => records::share_id(&state.db, &row.id).await?,
+        None => server_rows::share_id(&state.db, &row.id).await?,
     };
     let content = match (&row.loader, &row.game_version) {
         (Some(loader), Some(game_version)) => Some(WorldContentInfo {
@@ -907,7 +911,7 @@ pub async fn list_v1(
     headers: HeaderMap,
 ) -> Result<Json<Vec<ServerFull>>, ApiError> {
     let mut servers = Vec::new();
-    for row in records::list(&state.db).await? {
+    for row in server_rows::list(&state.db).await? {
         if caller.level(&state.db, &row.id).await?.is_some() {
             servers.push(server_full(&state, row, host(&headers)).await?);
         }
@@ -923,7 +927,7 @@ pub async fn get_v1(
     Path(id): Path<String>,
 ) -> Result<Json<ServerFull>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
-    let row = records::get(&state.db, &id)
+    let row = server_rows::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server_full(&state, row, host(&headers)).await?))
@@ -947,11 +951,11 @@ pub async fn patch_world(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     super::content::world(&id, &wid)?;
-    records::get(&state.db, &id)
+    server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(channel) = request.update_channel {
-        records::set_update_channel(&state.db, &id, channel).await?;
+        server_rows::set_update_channel(&state.db, &id, channel).await?;
         activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
             .await;
     }

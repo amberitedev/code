@@ -374,7 +374,7 @@ async fn countdown(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, servers::records};
+    use crate::{db, state::servers::adapters::sqlite::server_rows};
 
     #[test]
     fn times_of_day_are_checked() {
@@ -658,8 +658,10 @@ mod tests {
     #[tokio::test]
     async fn settings_default_until_set() {
         let db = db::memory().await;
-        let server =
-            records::create(&db, "A", |_| true).await.unwrap().unwrap();
+        let server = server_rows::create(&db, "A", |_| true)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(get(&db, &server.id).await.unwrap(), Restarts::default());
         let changed = Restarts {
             crash: false,

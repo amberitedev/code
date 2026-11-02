@@ -1,23 +1,13 @@
 //! Content: the files on a server's disk, with where each tracked file came from (the pack, or
-//! someone on the server) recorded in app-lib's content tables (`state::servers`). The folders
-//! are the list, and a record only says who put a file there and what it was then, which is how
-//! Core knows the owner edited it (see `pack::edited`), and which sides it is on for.
+//! someone on the server) recorded in app-lib's content tables (`adapters::sqlite::content_rows`).
+//! The folders are the list, and a record only says who put a file there and what it was then,
+//! which is how Core knows the owner edited it (see `domain::pack::edited`), and which sides it is
+//! on for.
 //!
 //! One change at a time per server: a second one is refused as busy rather than queued. Loader and
 //! pack installs run in the background, hold the server so it cannot start, and report progress
 //! and their result to the server's console sockets as `install-progress` and
 //! `installation-result`.
-
-pub mod addons;
-pub mod archive;
-pub mod folder;
-pub mod hosts;
-pub mod install;
-pub mod modrinth;
-pub mod pack;
-pub mod properties;
-pub mod server_share;
-pub mod shared;
 
 use std::{
     collections::HashMap,
@@ -41,6 +31,13 @@ use crate::{
     daemon::paths::Paths,
     installs::{self, download},
     servers::{Hold, ServerError, Servers},
+    state::servers::{
+        adapters::{
+            filesystem::{archive, folder},
+            network::{hosts, modrinth},
+        },
+        domain::pack,
+    },
 };
 
 /// Why a content change failed.

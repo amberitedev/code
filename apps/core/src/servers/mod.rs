@@ -11,7 +11,6 @@ pub mod insight;
 pub mod launch;
 pub mod memory;
 pub mod process;
-pub mod records;
 pub mod restarts;
 pub mod shim;
 mod watch;
@@ -29,8 +28,10 @@ use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::state::servers::adapters::sqlite::server_rows::{
+    self, Ended, Outcome,
+};
 use crate::{daemon::paths::Paths, util::if_present};
-use records::{Ended, Outcome};
 use shim::{Connection, ExitStatus, Message, RunRecord, ShimError};
 
 /// Where a server with a shim is in its run.
@@ -247,7 +248,7 @@ impl Servers {
         // keeps this from closing a run a start in progress has just recorded.
         let cutoff =
             chrono::Utc::now().timestamp() - START_TIMEOUT.as_secs() as i64;
-        for id in records::servers_with_open_runs(&self.db).await? {
+        for id in server_rows::servers_with_open_runs(&self.db).await? {
             if !self.live().contains_key(&id)
                 && !shim::is_running(&self.paths, &id)
             {
@@ -340,21 +341,21 @@ impl Servers {
     async fn finish(&self, id: &str, started_before: i64, only: Option<&str>) {
         let status: Option<ExitStatus> =
             shim::read_versioned(&self.paths.run_status(id)).ok();
-        let runs = match records::open_runs(&self.db, id, started_before).await
-        {
-            Ok(runs) => runs,
-            Err(error) => {
-                warn!(server = %id, %error, "could not read open runs");
-                return;
-            }
-        };
+        let runs =
+            match server_rows::open_runs(&self.db, id, started_before).await {
+                Ok(runs) => runs,
+                Err(error) => {
+                    warn!(server = %id, %error, "could not read open runs");
+                    return;
+                }
+            };
         for run_id in runs
             .into_iter()
             .filter(|run| only.is_none_or(|only| run == only))
         {
             let status =
                 status.as_ref().filter(|status| status.run_id == run_id);
-            let (outcome, exit_code) = records::outcome(status);
+            let (outcome, exit_code) = server_rows::outcome(status);
             let last_lines = (outcome == Outcome::Crashed).then(|| {
                 let mut lines: Vec<String> =
                     console::tail(&self.paths.console_log(id), CRASH_LINES)
@@ -377,7 +378,7 @@ impl Servers {
             };
             info!(server = %id, run = %run_id, ?outcome, ?exit_code, "run ended");
             if let Err(error) =
-                records::end_run(&self.db, &run_id, &ended).await
+                server_rows::end_run(&self.db, &run_id, &ended).await
             {
                 warn!(server = %id, %error, "could not record the end of a run");
             }
@@ -401,7 +402,7 @@ impl Servers {
         while self.is_copying(id) {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        let server = records::get(&self.db, id)
+        let server = server_rows::get(&self.db, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
         {
@@ -496,7 +497,7 @@ impl Servers {
 
     async fn launch(
         &self,
-        server: &records::ServerRow,
+        server: &server_rows::ServerRow,
         run_id: &str,
     ) -> Result<(), ServerError> {
         let id = server.id.as_str();
@@ -522,7 +523,7 @@ impl Servers {
             if_present(std::fs::remove_file(stale))?;
         }
         shim::write_json(&self.paths.launch_spec(id), &launch)?;
-        records::start_run(
+        server_rows::start_run(
             &self.db,
             id,
             run_id,
@@ -779,10 +780,11 @@ impl Servers {
     pub async fn create(
         &self,
         name: &str,
-    ) -> Result<records::ServerRow, ServerError> {
-        let server = records::create(&self.db, name, records::port_free)
-            .await?
-            .ok_or(ServerError::NoPorts)?;
+    ) -> Result<server_rows::ServerRow, ServerError> {
+        let server =
+            server_rows::create(&self.db, name, server_rows::port_free)
+                .await?
+                .ok_or(ServerError::NoPorts)?;
         crate::daemon::folders::create_server_folder(
             &self.paths.server(&server.id),
         )?;
@@ -966,7 +968,7 @@ mod tests {
 
         let (dir, servers) = servers().await;
         let server = servers.create("A").await.unwrap();
-        records::set_installed(
+        server_rows::set_installed(
             &servers.db,
             &server.id,
             "vanilla",
@@ -1021,11 +1023,13 @@ mod tests {
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
         let db = db::memory().await;
-        let server =
-            records::create(&db, "A", |_| true).await.unwrap().unwrap();
+        let server = server_rows::create(&db, "A", |_| true)
+            .await
+            .unwrap()
+            .unwrap();
         // The dead Core recorded the run and wrote the launch; its shim has not started yet.
         let now = chrono::Utc::now().timestamp();
-        records::start_run(&db, &server.id, "late", now)
+        server_rows::start_run(&db, &server.id, "late", now)
             .await
             .unwrap();
         std::fs::create_dir_all(paths.run(&server.id)).unwrap();
@@ -1045,7 +1049,9 @@ mod tests {
         let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
         assert_eq!(servers.phase(&server.id), None);
         assert_eq!(
-            records::open_runs(&db, &server.id, i64::MAX).await.unwrap(),
+            server_rows::open_runs(&db, &server.id, i64::MAX)
+                .await
+                .unwrap(),
             ["late"]
         );
 
@@ -1077,7 +1083,9 @@ mod tests {
             Err(ServerError::AlreadyRunning)
         ));
         assert_eq!(
-            records::open_runs(&db, &server.id, i64::MAX).await.unwrap(),
+            server_rows::open_runs(&db, &server.id, i64::MAX)
+                .await
+                .unwrap(),
             ["late"]
         );
     }
@@ -1125,8 +1133,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server =
-            records::create(&db, "A", |_| true).await.unwrap().unwrap();
+        let server = server_rows::create(&db, "A", |_| true)
+            .await
+            .unwrap()
+            .unwrap();
         let _shim = shim::try_lock(&paths, &server.id).unwrap().unwrap();
         std::fs::write(
             paths.run_record(&server.id),
@@ -1151,12 +1161,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server =
-            records::create(&db, "A", |_| true).await.unwrap().unwrap();
-        records::start_run(&db, &server.id, "killed", 1)
+        let server = server_rows::create(&db, "A", |_| true)
+            .await
+            .unwrap()
+            .unwrap();
+        server_rows::start_run(&db, &server.id, "killed", 1)
             .await
             .unwrap();
-        records::start_run(&db, &server.id, "vanished", 2)
+        server_rows::start_run(&db, &server.id, "vanished", 2)
             .await
             .unwrap();
         std::fs::create_dir_all(paths.run(&server.id)).unwrap();

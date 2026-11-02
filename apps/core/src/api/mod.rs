@@ -64,7 +64,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::Access>,
-    pub content: Arc<crate::content::Content>,
+    pub content: Arc<crate::state::servers::Content>,
     pub backups: Arc<crate::backups::Backups>,
     pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
