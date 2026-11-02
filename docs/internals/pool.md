@@ -87,10 +87,12 @@ abandoned and the next push replaces it, so a crashed App never locks a share.
 
 Every version is a full manifest: every path the share holds, with its hashes, like a Git tree over
 the pool's content-addressed objects. Content files are the instance's content list, which is whole
-in every push anyway. Config files are picked per push, so the App carries the latest ready
-version's configs forward into the new manifest unless this push sends them again. Their objects
-are already on the home, which keeps the latest ready version, so carrying them uploads nothing. Any
-version stands alone, and dropping old manifests never loses a file.
+in every push anyway. Config files are picked per push, and a push keeps the latest ready
+version's configs the owner still shares: each is sent again from the owner's copy, with the key
+the earlier version gave the same bytes, so an unchanged config is the same object, already on the
+home, and uploads nothing. A config the owner unticks, or no longer has, leaves the share with that
+push, and one the home lost is uploaded again. Any version stands alone, and dropping old manifests
+never loses a file.
 
 ### Install
 
@@ -349,7 +351,7 @@ which the App and Core both use) share this text and nothing else.
   R = SHA-256 of nothing, `e3b0c442…b855`.
 - Content files are `file_type` in `mod`, `resourcepack`, `shader`, `datapack`. Their key is
   `HKDF-SHA256(ikm = P as raw bytes, salt = empty, info = "amberite-shared-file-v1")`, 32 bytes.
-  Every other `file_type` (`config`, `configs`) gets a random 32-byte key, carried in the manifest
+  Every other `file_type` (`config`) gets a random 32-byte key, carried in the manifest
   as `key`, 64 hex characters. A content file carries no `key`.
 - Cipher: XChaCha20-Poly1305. The plain file is cut into chunks of 1 MiB (1,048,576 bytes); the
   last chunk is shorter or empty, and an empty file is one empty last chunk. Chunk `i` (from 0)

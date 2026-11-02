@@ -240,6 +240,11 @@ bedrock holds three kinds of code:
 3. Our own shared code: content rules, reaching Cores, disk space, and `limits` (also generated
    into `packages/api-client/src/modules/bedrock/limits.ts`).
 
+sharing-client is one folder per concern: `backend` (the one client for the backend's share
+routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries and
+what `blocked` means; generated into `packages/api-client/src/modules/sharing/rules.ts`), `push`,
+`pool` (the store client and the fetch), `consume` and `crypto`.
+
 New and restructured Rust follows app-lib's layout: `api/` for entry points, `state/<domain>/` with
 `model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one operation
 per file), optional `domain/` (pure rules), and `mod.rs` re-exports. Use app-lib's names for the
