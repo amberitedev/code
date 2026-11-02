@@ -1,8 +1,11 @@
 //! A server's content list, and the pack it follows as the modpack card shows it.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
-use modrinth_content_management::ContentType;
+use modrinth_content_management::{ContentType, DependencyType};
 
 use super::check_content_updates::{
     check_content_updates, check_modpack_update,
@@ -168,7 +171,69 @@ pub async fn list_content(
             installed: Some(false),
         })
     }));
+    mark_client_dependencies(&mut addons, &versions);
     Ok(addons)
+}
+
+/// Upstream's client-only dependency warnings. `pack_client_depends`: the server runs the addon
+/// and it requires a client-only project. `pack_client_retained`: the server runs a client-only
+/// addon because another addon it runs requires it. Client only means a pack file the server
+/// skips, or a version Modrinth says players alone run.
+fn mark_client_dependencies(
+    addons: &mut [Addon],
+    versions: &HashMap<String, modrinth::Version>,
+) {
+    let runs_on_server = |addon: &Addon| {
+        !addon.disabled
+            && !addon.disabled_server
+            && addon.installed != Some(false)
+    };
+    let required = |addon: &Addon| -> Vec<String> {
+        addon
+            .version
+            .as_ref()
+            .and_then(|version| versions.get(&version.id))
+            .map(|version| {
+                version
+                    .dependencies
+                    .iter()
+                    .filter(|dependency| {
+                        dependency.dependency_type == DependencyType::Required
+                    })
+                    .filter_map(|dependency| dependency.project_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let client_only: HashSet<String> = addons
+        .iter()
+        .filter(|addon| {
+            addon.installed == Some(false)
+                || !bedrock::content::server_takes(
+                    None,
+                    addon
+                        .version
+                        .as_ref()
+                        .and_then(|version| version.environment),
+                    None,
+                )
+        })
+        .filter_map(|addon| addon.project_id.clone())
+        .collect();
+    let required_on_server: HashSet<String> = addons
+        .iter()
+        .filter(|addon| runs_on_server(addon))
+        .flat_map(|addon| required(addon))
+        .collect();
+    for addon in addons.iter_mut().filter(|addon| runs_on_server(addon)) {
+        let own = addon.project_id.as_deref();
+        addon.pack_client_depends = required(addon).iter().any(|project| {
+            Some(project.as_str()) != own && client_only.contains(project)
+        });
+        addon.pack_client_retained = own.is_some_and(|own| {
+            client_only.contains(own) && required_on_server.contains(own)
+        });
+    }
 }
 
 /// The jar on disk for `listed`, opened without following a link.
@@ -324,4 +389,109 @@ pub async fn linked_pack_state(
             LinkedPackState::UpToDate
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn addon(project: &str, installed: Option<bool>) -> Addon {
+        Addon {
+            id: format!("mods/{project}.jar"),
+            filename: format!("{project}.jar"),
+            filesize: 0,
+            btime: None,
+            disabled: false,
+            disabled_server: installed == Some(false),
+            disabled_player: false,
+            side_toggle_unlocked: false,
+            kind: ContentType::Mod,
+            from_modpack: true,
+            status: AddonStatus::Installed,
+            pack_client_retained: false,
+            pack_client_depends: false,
+            needs_side_type_review: false,
+            has_update: None,
+            name: None,
+            project_id: Some(project.to_owned()),
+            version: Some(AddonVersion {
+                id: format!("{project}-v"),
+                name: None,
+                environment: None,
+            }),
+            owner: None,
+            icon_url: None,
+            manifest: None,
+            installed,
+        }
+    }
+
+    fn version(
+        project: &str,
+        environment: &str,
+        requires: &[&str],
+    ) -> modrinth::Version {
+        let dependencies: Vec<_> = requires
+            .iter()
+            .map(|dependency| {
+                serde_json::json!({
+                    "project_id": dependency,
+                    "dependency_type": "required",
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "id": format!("{project}-v"),
+            "project_id": project,
+            "version_number": "1",
+            "dependencies": dependencies,
+            "date_published": null,
+            "environment": environment,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn server_addons_that_require_client_only_projects_are_marked() {
+        // `uses-skipped` requires a pack file the server skips; `uses-placed` requires a client-only
+        // mod the server runs anyway.
+        let mut addons = vec![
+            addon("uses-skipped", None),
+            addon("skipped", Some(false)),
+            addon("uses-placed", None),
+            addon("placed", None),
+            addon("plain", None),
+        ];
+        let versions: HashMap<String, modrinth::Version> = [
+            version("uses-skipped", "client_and_server", &["skipped"]),
+            version("skipped", "client_only", &[]),
+            version("uses-placed", "client_and_server", &["placed"]),
+            version("placed", "client_only", &[]),
+            version("plain", "client_and_server", &[]),
+        ]
+        .into_iter()
+        .map(|version| (version.id.clone(), version))
+        .collect();
+        for addon in &mut addons {
+            addon.version.as_mut().unwrap().environment =
+                versions[&addon.version.as_ref().unwrap().id].environment;
+        }
+        mark_client_dependencies(&mut addons, &versions);
+        let flags: Vec<(bool, bool)> = addons
+            .iter()
+            .map(|addon| {
+                (addon.pack_client_depends, addon.pack_client_retained)
+            })
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                (true, false),
+                (false, false),
+                (true, false),
+                (false, true),
+                (false, false)
+            ]
+        );
+    }
 }
