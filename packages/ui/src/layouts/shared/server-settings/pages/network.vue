@@ -246,7 +246,9 @@ const { canUseAdvancedSettings, permissionDeniedMessage } = useServerPermissions
 const data = server
 
 const serverIP = ref(data?.value?.net?.ip ?? '')
-const serverPrimaryPort = ref(data?.value?.net?.port ?? 0)
+// A Core server's `port` is where players join from, which may be the router's; the primary
+// allocation is the port the server listens on.
+const serverPrimaryPort = ref(data?.value?.net?.game_port ?? data?.value?.net?.port ?? 0)
 const userDomain = ref('')
 const exampleDomain = 'play.example.com'
 
