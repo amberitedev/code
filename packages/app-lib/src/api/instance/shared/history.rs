@@ -12,18 +12,36 @@ use sharing_client::history::{self, HistoryEntry, HistoryError, HistoryStore};
 use sharing_client::install::{ConfigUpdate, config_update};
 use sharing_client::push::Pushed;
 use sharing_client::versions::VersionContent;
-use sqlx::Row;
 use std::path::{Path, PathBuf};
 
 /// How many entries each share keeps: a number, or `all`. Unset keeps
 /// [`history::DEFAULT_KEPT`].
 const KEPT_SETTING: &str = "share_history_kept";
 
-/// The App's history: entries in `share_history`, files retained in the content store.
+/// The App's history: entries in the App's database, files retained in the content store.
 struct AppHistory<'a>(&'a State);
 
 impl HistoryStore for AppHistory<'_> {
     type Error = crate::Error;
+
+    fn db(&self) -> &sqlx::SqlitePool {
+        &self.0.pool
+    }
+
+    async fn kept(&self) -> crate::Result<Option<usize>> {
+        let setting =
+            crate::state::content_store::setting(&self.0.pool, KEPT_SETTING)
+                .await?;
+        Ok(match setting.as_deref() {
+            None => Some(history::DEFAULT_KEPT),
+            Some("all") => None,
+            Some(kept) => Some(kept.parse().map_err(|_| {
+                crate::ErrorKind::InputError(format!(
+                    "the kept versions setting {kept} is invalid"
+                ))
+            })?),
+        })
+    }
 
     async fn store_file(&self, path: &Path) -> crate::Result<String> {
         Ok(self.0.content_store.store_file(path).await?.metadata.sha512)
@@ -51,53 +69,6 @@ impl HistoryStore for AppHistory<'_> {
             .release(history::OWNER_KIND, owner)
             .await
     }
-
-    async fn save_entry(
-        &self,
-        share_id: &str,
-        entry: &HistoryEntry,
-    ) -> crate::Result<()> {
-        sqlx::query(
-            "INSERT INTO share_history (share_id, version, entry) VALUES (?, ?, ?) \
-             ON CONFLICT (share_id, version) DO UPDATE SET entry = excluded.entry",
-        )
-        .bind(share_id)
-        .bind(entry.version)
-        .bind(serde_json::to_string(entry)?)
-        .execute(&self.0.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn entries(
-        &self,
-        share_id: &str,
-    ) -> crate::Result<Vec<HistoryEntry>> {
-        let rows: Vec<String> = sqlx::query_scalar(
-            "SELECT entry FROM share_history WHERE share_id = ?",
-        )
-        .bind(share_id)
-        .fetch_all(&self.0.pool)
-        .await?;
-        rows.iter()
-            .map(|entry| serde_json::from_str(entry).map_err(Into::into))
-            .collect()
-    }
-
-    async fn delete_entry(
-        &self,
-        share_id: &str,
-        version: i32,
-    ) -> crate::Result<()> {
-        sqlx::query(
-            "DELETE FROM share_history WHERE share_id = ? AND version = ?",
-        )
-        .bind(share_id)
-        .bind(version)
-        .execute(&self.0.pool)
-        .await?;
-        Ok(())
-    }
 }
 
 fn history_error(error: HistoryError<crate::Error>) -> crate::Error {
@@ -107,68 +78,31 @@ fn history_error(error: HistoryError<crate::Error>) -> crate::Error {
     }
 }
 
-/// How many entries each share keeps, `None` for all of them.
-async fn kept(state: &State) -> crate::Result<Option<usize>> {
-    let setting =
-        crate::state::content_store::setting(&state.pool, KEPT_SETTING).await?;
-    Ok(match setting.as_deref() {
-        None => Some(history::DEFAULT_KEPT),
-        Some("all") => None,
-        Some(kept) => Some(kept.parse().map_err(|_| {
-            crate::ErrorKind::InputError(format!(
-                "the kept versions setting {kept} is invalid"
-            ))
-        })?),
-    })
-}
-
-/// Records a push of `share_id`, naming what it changed over the version before it. The push
-/// already succeeded, so a failure here is logged and the version is only missing from the
-/// history.
+/// Records a push of `share_id`, naming what it changed over the version before it
+/// (`sharing_client::history::record_push`).
 pub(super) async fn record_push(
     share_id: &str,
     content: &VersionContent,
     pushed: &Pushed,
     state: &State,
 ) {
-    let result = async {
-        let after = ShareVersion {
-            version: pushed.version,
-            ready: true,
-            content: content.clone(),
-            root: [0; 32],
-            external_files: pushed.external_files.clone(),
-            pool: None,
-            store: None,
-            backtrack_version: None,
-        };
-        let diffs = match shared_version_diffs(
-            pushed.previous.as_ref(),
-            &after,
-            state,
-        )
-        .await
-        {
-            Ok((diffs, _)) => diffs,
-            Err(error) => {
-                tracing::warn!(share_id, %error, "Could not name what a push changed");
-                Vec::new()
-            }
-        };
-        history::record(
-            &AppHistory(state),
-            share_id,
-            content,
-            pushed,
-            diffs,
-            kept(state).await?,
-        )
-        .await
-    }
-    .await;
-    if let Err(error) = result {
-        tracing::warn!(share_id, %error, "Could not record a push in the share's history");
-    }
+    let after = ShareVersion {
+        version: pushed.version,
+        ready: true,
+        content: content.clone(),
+        root: [0; 32],
+        external_files: pushed.external_files.clone(),
+        pool: None,
+        store: None,
+        backtrack_version: None,
+    };
+    let diffs = async {
+        shared_version_diffs(pushed.previous.as_ref(), &after, state)
+            .await
+            .map(|(diffs, _)| diffs)
+    };
+    history::record_push(&AppHistory(state), share_id, content, pushed, diffs)
+        .await;
 }
 
 /// The last push of `share_id` from this App: the newest entry of its history.
@@ -325,8 +259,8 @@ pub async fn get_shared_history_settings()
 -> crate::Result<SharedHistorySettings> {
     let state = State::get().await?;
     Ok(SharedHistorySettings {
-        kept: kept(&state).await?,
-        entries: history_counts(&state).await?,
+        kept: AppHistory(&state).kept().await?,
+        entries: history::counts(&state.pool).await?,
     })
 }
 
@@ -341,28 +275,10 @@ pub async fn set_shared_history_kept(
     crate::state::content_store::set_setting(&state.pool, KEPT_SETTING, &value)
         .await?;
     let store = AppHistory(&state);
-    for share_id in history_counts(&state).await?.into_keys() {
+    for share_id in history::counts(&state.pool).await?.into_keys() {
         history::prune(&store, &share_id, kept).await?;
     }
     get_shared_history_settings().await
-}
-
-async fn history_counts(
-    state: &State,
-) -> crate::Result<HashMap<String, usize>> {
-    let rows = sqlx::query(
-        "SELECT share_id, COUNT(*) AS entries FROM share_history GROUP BY share_id",
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    rows.iter()
-        .map(|row| {
-            Ok((
-                row.try_get::<String, _>("share_id")?,
-                row.try_get::<i64, _>("entries")? as usize,
-            ))
-        })
-        .collect()
 }
 
 async fn attachment(

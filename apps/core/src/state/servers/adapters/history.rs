@@ -1,11 +1,11 @@
 //! The history of the server-first shares this Core pushed, as Copal keeps it
-//! (`sharing_client::history`): entries in `share_history`, files retained in the content store
+//! (`sharing_client::history`): entries in Core's database, files retained in the content store
 //! clone (`bedrock::upstream::store`). The App keeps its own the same way in app-lib's store.
 
 use std::path::{Path, PathBuf};
 
 use bedrock::upstream::store::{self, ContentStore};
-use sharing_client::history::{HistoryEntry, HistoryStore, OWNER_KIND};
+use sharing_client::history::{HistoryStore, OWNER_KIND};
 use sqlx::SqlitePool;
 
 use crate::state::servers::Error;
@@ -22,6 +22,10 @@ fn store_error(error: bedrock::Error) -> Error {
 
 impl HistoryStore for History<'_> {
     type Error = Error;
+
+    fn db(&self) -> &SqlitePool {
+        self.db
+    }
 
     async fn store_file(&self, path: &Path) -> Result<String, Error> {
         let stored = store::store_file(self.store, path)
@@ -47,58 +51,6 @@ impl HistoryStore for History<'_> {
         store::release(self.store, OWNER_KIND, owner)
             .await
             .map_err(store_error)
-    }
-
-    async fn save_entry(
-        &self,
-        share_id: &str,
-        entry: &HistoryEntry,
-    ) -> Result<(), Error> {
-        let json = serde_json::to_string(entry)
-            .map_err(|error| Error::Invalid(error.to_string()))?;
-        sqlx::query(
-            "INSERT INTO share_history (share_id, version, entry) VALUES (?, ?, ?) \
-             ON CONFLICT (share_id, version) DO UPDATE SET entry = excluded.entry",
-        )
-        .bind(share_id)
-        .bind(entry.version)
-        .bind(json)
-        .execute(self.db)
-        .await?;
-        Ok(())
-    }
-
-    async fn entries(
-        &self,
-        share_id: &str,
-    ) -> Result<Vec<HistoryEntry>, Error> {
-        let rows: Vec<String> = sqlx::query_scalar(
-            "SELECT entry FROM share_history WHERE share_id = ?",
-        )
-        .bind(share_id)
-        .fetch_all(self.db)
-        .await?;
-        rows.iter()
-            .map(|entry| {
-                serde_json::from_str(entry)
-                    .map_err(|error| Error::Invalid(error.to_string()))
-            })
-            .collect()
-    }
-
-    async fn delete_entry(
-        &self,
-        share_id: &str,
-        version: i32,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "DELETE FROM share_history WHERE share_id = ? AND version = ?",
-        )
-        .bind(share_id)
-        .bind(version)
-        .execute(self.db)
-        .await?;
-        Ok(())
     }
 }
 

@@ -346,15 +346,3 @@ CREATE TABLE port_mappings (
     -- JSON of `network::router::Mapping`.
     mapping TEXT NOT NULL
 );
-
--- The history of each server-first share this Core pushed (sharing_client::history). The newest
--- entry is the last push, which `shared_instance_needs_update` compares the server with. An
--- entry's files are retained in the content store under owner kind 'share_history'; the store's
--- own tables come from `bedrock::upstream::store::SCHEMA` (see `db::migrate`).
-CREATE TABLE share_history (
-    share_id TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    -- JSON of `sharing_client::history::HistoryEntry`.
-    entry TEXT NOT NULL,
-    PRIMARY KEY (share_id, version)
-);

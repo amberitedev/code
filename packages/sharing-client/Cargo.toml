@@ -22,6 +22,8 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 sha1_smol = { workspace = true }
 sha2 = { workspace = true }
+# The share history table (`history::SCHEMA`), in the App's and Core's SQLite databases.
+sqlx = { workspace = true, features = ["json", "runtime-tokio", "sqlite"] }
 tar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "time"] }

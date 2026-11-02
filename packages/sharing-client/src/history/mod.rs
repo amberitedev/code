@@ -4,21 +4,30 @@
 //! server with to tell whether a push would change anything.
 //!
 //! An entry is the version's content, its manifest and what it changed over the version before
-//! it. The files it carries (configs and files outside Modrinth) are copied into the side's
-//! content store and retained there under [`OWNER_KIND`] and [`owner_id`], so restoring reads
-//! them locally. Each side implements [`HistoryStore`] over its store and database.
+//! it. Entries are rows of `share_history` ([`SCHEMA`]) in the side's SQLite database. The files
+//! an entry carries (configs and files outside Modrinth) are copied into the side's content store
+//! and retained there under [`OWNER_KIND`] and [`owner_id`], so restoring reads them locally.
+//! Each side implements [`HistoryStore`] over its store and database.
 
+mod adapters;
 mod model;
 
+use std::fmt::Display;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
+use sqlx::SqlitePool;
+
+pub use adapters::counts;
 pub use model::{HistoryEntry, HistoryFile};
 
 use crate::diff::SharedInstanceUpdateDiff;
 use crate::push::Pushed;
 use crate::versions::{ManifestFile, VersionContent};
 
+/// The `share_history` table. The App and Core apply it after their own migrations; it only
+/// creates what is missing.
+pub const SCHEMA: &str = include_str!("schema.sql");
 /// The content store's owner kind for the files of history entries.
 pub const OWNER_KIND: &str = "share_history";
 /// Entries kept per share until the owner picks another number. Placeholder, decide later.
@@ -31,7 +40,17 @@ pub fn owner_id(share_id: &str, version: i32) -> String {
 
 /// Where a side keeps its history: entries in its database, files in its content store.
 pub trait HistoryStore: Sync {
-    type Error: Send;
+    type Error: Send + From<sqlx::Error>;
+
+    /// The database with [`SCHEMA`] that holds the entries.
+    fn db(&self) -> &SqlitePool;
+
+    /// How many entries each share keeps, `None` for all of them.
+    fn kept(
+        &self,
+    ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
+        async { Ok(Some(DEFAULT_KEPT)) }
+    }
 
     /// Copies the file at `path` into the store and returns the key of the copy.
     fn store_file(
@@ -56,25 +75,6 @@ pub trait HistoryStore: Sync {
     fn release(
         &self,
         owner: &str,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Saves `entry` for `share_id`, replacing one with the same version.
-    fn save_entry(
-        &self,
-        share_id: &str,
-        entry: &HistoryEntry,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Every entry of `share_id`, in any order.
-    fn entries(
-        &self,
-        share_id: &str,
-    ) -> impl Future<Output = Result<Vec<HistoryEntry>, Self::Error>> + Send;
-
-    fn delete_entry(
-        &self,
-        share_id: &str,
-        version: i32,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
@@ -126,9 +126,35 @@ pub async fn record<S: HistoryStore>(
         files,
         diffs,
     };
-    store.save_entry(share_id, &entry).await?;
+    adapters::save_entry(store.db(), share_id, &entry).await?;
     prune(store, share_id, kept).await?;
     Ok(entry)
+}
+
+/// Records `pushed`, a version of `share_id` with `content`, keeping as many entries as the
+/// side keeps. `diffs` names what it changed over the version before it. The push already
+/// succeeded, so a failure is logged and the version is only missing from the history.
+pub async fn record_push<S: HistoryStore, E: Display>(
+    store: &S,
+    share_id: &str,
+    content: &VersionContent,
+    pushed: &Pushed,
+    diffs: impl Future<Output = Result<Vec<SharedInstanceUpdateDiff>, E>>,
+) where
+    S::Error: Display,
+{
+    let diffs = diffs.await.unwrap_or_else(|error| {
+        tracing::warn!(share_id, %error, "Could not name what a push changed");
+        Vec::new()
+    });
+    let result = async {
+        let kept = store.kept().await?;
+        record(store, share_id, content, pushed, diffs, kept).await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(share_id, %error, "Could not record a push in the share's history");
+    }
 }
 
 /// The entries of `share_id`, newest first.
@@ -136,7 +162,7 @@ pub async fn list<S: HistoryStore>(
     store: &S,
     share_id: &str,
 ) -> Result<Vec<HistoryEntry>, S::Error> {
-    let mut entries = store.entries(share_id).await?;
+    let mut entries = adapters::entries(store.db(), share_id).await?;
     entries.sort_by(|a, b| b.version.cmp(&a.version));
     Ok(entries)
 }
@@ -154,8 +180,7 @@ pub async fn get<S: HistoryStore>(
     share_id: &str,
     version: i32,
 ) -> Result<Option<HistoryEntry>, S::Error> {
-    Ok(store
-        .entries(share_id)
+    Ok(adapters::entries(store.db(), share_id)
         .await?
         .into_iter()
         .find(|entry| entry.version == version))
@@ -191,7 +216,7 @@ pub async fn delete<S: HistoryStore>(
     share_id: &str,
     version: i32,
 ) -> Result<(), S::Error> {
-    store.delete_entry(share_id, version).await?;
+    adapters::delete_entry(store.db(), share_id, version).await?;
     store.release(&owner_id(share_id, version)).await
 }
 
@@ -223,16 +248,36 @@ mod tests {
 
     use super::*;
 
-    /// A store in memory: blobs by the file's path, entries by share.
-    #[derive(Default)]
+    /// A store with blobs in memory, by the file's path, and entries in an in-memory database.
     struct Memory {
+        db: SqlitePool,
         blobs: Mutex<BTreeSet<String>>,
         retained: Mutex<BTreeMap<String, Vec<String>>>,
-        entries: Mutex<BTreeMap<String, Vec<HistoryEntry>>>,
+    }
+
+    impl Memory {
+        async fn new() -> Self {
+            // One connection, because every in-memory connection is its own database.
+            let db = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::raw_sql(SCHEMA).execute(&db).await.unwrap();
+            Self {
+                db,
+                blobs: Mutex::default(),
+                retained: Mutex::default(),
+            }
+        }
     }
 
     impl HistoryStore for Memory {
-        type Error = std::convert::Infallible;
+        type Error = sqlx::Error;
+
+        fn db(&self) -> &SqlitePool {
+            &self.db
+        }
 
         async fn store_file(&self, path: &Path) -> Result<String, Self::Error> {
             let blob = path.to_string_lossy().into_owned();
@@ -266,44 +311,6 @@ mod tests {
 
         async fn release(&self, owner: &str) -> Result<(), Self::Error> {
             self.retained.lock().unwrap().remove(owner);
-            Ok(())
-        }
-
-        async fn save_entry(
-            &self,
-            share_id: &str,
-            entry: &HistoryEntry,
-        ) -> Result<(), Self::Error> {
-            let mut entries = self.entries.lock().unwrap();
-            let entries = entries.entry(share_id.to_owned()).or_default();
-            entries.retain(|each| each.version != entry.version);
-            entries.push(entry.clone());
-            Ok(())
-        }
-
-        async fn entries(
-            &self,
-            share_id: &str,
-        ) -> Result<Vec<HistoryEntry>, Self::Error> {
-            Ok(self
-                .entries
-                .lock()
-                .unwrap()
-                .get(share_id)
-                .cloned()
-                .unwrap_or_default())
-        }
-
-        async fn delete_entry(
-            &self,
-            share_id: &str,
-            version: i32,
-        ) -> Result<(), Self::Error> {
-            if let Some(entries) =
-                self.entries.lock().unwrap().get_mut(share_id)
-            {
-                entries.retain(|entry| entry.version != version);
-            }
             Ok(())
         }
     }
@@ -345,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_push_is_recorded_with_its_files_and_restored_from_them() {
-        let store = Memory::default();
+        let store = Memory::new().await;
         record(
             &store,
             "s",
@@ -389,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn pruning_keeps_the_newest_and_releases_the_rest() {
-        let store = Memory::default();
+        let store = Memory::new().await;
         for version in 1..=3 {
             record(
                 &store,
@@ -418,9 +425,11 @@ mod tests {
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(owners, ["s:2", "s:3"]);
+        assert_eq!(counts(&store.db).await.unwrap().get("s"), Some(&2));
 
         prune(&store, "s", Some(0)).await.unwrap();
         assert!(list(&store, "s").await.unwrap().is_empty());
+        assert!(counts(&store.db).await.unwrap().is_empty());
         assert!(store.retained.lock().unwrap().is_empty());
     }
 

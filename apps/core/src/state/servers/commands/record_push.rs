@@ -11,9 +11,8 @@ use super::share_snapshot::{
 };
 use crate::state::servers::{Content, Error};
 
-/// Records `pushed` in the share's history, naming what it changed over the version before it.
-/// The push already succeeded, so a failure is logged and the version is only missing from the
-/// history.
+/// Records `pushed` in the share's history, naming what it changed over the version before it
+/// (`sharing_client::history::record_push`).
 pub async fn record_push(
     content: &Content,
     snapshot: &Snapshot,
@@ -38,20 +37,12 @@ pub async fn record_push(
             .await
             .map_err(|error| Error::Other(color_eyre::eyre::eyre!("{error}")))
     };
-    let diffs = diffs.await.unwrap_or_else(|error| {
-        tracing::warn!(share = %share_id, %error, "could not name what a push changed");
-        Vec::new()
-    });
-    if let Err(error) = history::record(
+    history::record_push(
         &history_store(content),
         share_id,
         &snapshot.content,
         pushed,
         diffs,
-        Some(history::DEFAULT_KEPT),
     )
-    .await
-    {
-        tracing::warn!(share = %share_id, %error, "could not record a push in the share's history");
-    }
+    .await;
 }

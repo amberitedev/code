@@ -8990,6 +8990,7 @@ dependencies = [
  "serde_json",
  "sha1_smol",
  "sha2 0.11.1",
+ "sqlx",
  "tar",
  "tempfile",
  "thiserror 2.0.21",

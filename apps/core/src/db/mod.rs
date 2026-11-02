@@ -35,7 +35,8 @@ pub async fn memory() -> SqlitePool {
 }
 
 /// Copal's migrations, then the tables of the content store clone, which bedrock owns
-/// (`bedrock::upstream::store::SCHEMA`), once.
+/// (`bedrock::upstream::store::SCHEMA`), once, and the share history table, which
+/// sharing-client owns (`sharing_client::history::SCHEMA`).
 async fn migrate(pool: &SqlitePool) -> sqlx::Result<()> {
     sqlx::migrate!("./migrations").run(pool).await?;
     let mut tx = pool.begin().await?;
@@ -49,6 +50,9 @@ async fn migrate(pool: &SqlitePool) -> sqlx::Result<()> {
             .execute(&mut *tx)
             .await?;
     }
+    sqlx::raw_sql(sharing_client::history::SCHEMA)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 
