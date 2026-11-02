@@ -14,7 +14,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 
 import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
-import { config } from '@/config'
 import {
 	get_shared_instance_invites,
 	revoke_shared_instance_invite,
@@ -23,8 +22,9 @@ import {
 
 import { injectInstancePage } from '../instance-context'
 import { injectSharedInstance } from '../shared-instance-context'
-import { injectSharedInstanceManagement } from './shared-instance-management-context'
 import ConfirmRevokeSharedInstanceInviteModal from './confirm-revoke-shared-instance-invite-modal.vue'
+import { injectSharedInstanceManagement } from './shared-instance-management-context'
+import { sharedInstanceInviteUrl } from './shared-instance-share-types'
 
 // The owner's active invite links, under the members on the Share tab. Hidden while there are none.
 
@@ -113,10 +113,7 @@ const messages = defineMessages({
 		</h2>
 		<Table :columns="columns" :data="invites" row-key="id" table-min-width="36rem">
 			<template #cell-id="{ row }">
-				<CopyCode
-					:text="`${config.accountWebUrl || config.accountApiUrl || config.siteUrl}/share/${encodeURIComponent(row.id)}`"
-					:display-text="`/${row.id}`"
-				/>
+				<CopyCode :text="sharedInstanceInviteUrl(row.id)" :display-text="`/${row.id}`" />
 			</template>
 			<template #cell-uses="{ row }">
 				<span class="font-medium text-primary">{{ row.uses }}</span>

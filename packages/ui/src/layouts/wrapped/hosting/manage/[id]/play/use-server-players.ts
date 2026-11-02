@@ -10,7 +10,8 @@ import { sharedInstanceKeys } from '#ui/composables/server-queries'
 import {
 	ensureServerInviteLink,
 	findActiveInviteLink,
-	INVITE_LINK_MAX_AGE_SECONDS,
+	inviteLinkMaxAge,
+	inviteLinkMaxUses,
 	type ServerPlayerMembers,
 	sharedInstanceInvitesQueryOptions,
 	useServerPlayerMembers,
@@ -129,10 +130,9 @@ export function useServerPlayers(
 			replaceId?: string
 		}) => {
 			if (!canManage.value) throw new Error('You do not have permission to manage invite links.')
-			const requestedAge = Math.floor((settings.expiresAt.getTime() - Date.now()) / 1000)
 			const created = await players.createLink(serverId, id, {
-				max_age: Math.max(1, Math.min(INVITE_LINK_MAX_AGE_SECONDS, requestedAge)),
-				max_uses: Math.max(1, Math.min(settings.maxUses, remaining.value)),
+				max_age: inviteLinkMaxAge(settings.expiresAt),
+				max_uses: inviteLinkMaxUses(settings.maxUses, remaining.value),
 			})
 			if (replaceId) {
 				try {

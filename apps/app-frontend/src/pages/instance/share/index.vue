@@ -177,6 +177,7 @@ import {
 	type InvitePlayersInvitePayload,
 	InvitePlayersModal,
 	type InvitePlayersUser,
+	remainingPlayerSlots,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -260,9 +261,7 @@ const members = useSharedInstanceMembers({
 	onError: notifyOperationError,
 	onInviteError: notifyInviteError,
 })
-const remainingUserSlots = computed(() =>
-	Math.max(0, SHARED_INSTANCE_USER_LIMIT - members.rows.value.length),
-)
+const remainingUserSlots = computed(() => remainingPlayerSlots(members.rows.value.length))
 const hasRemainingUserSlots = computed(() => remainingUserSlots.value > 0)
 const {
 	inviteFriends,

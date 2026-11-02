@@ -1,11 +1,32 @@
 import type { AbstractModrinthClient, SharedInstances } from '@modrinth/api-client'
 
+// The invite rules for instance and server shares alike; the App's share pages import them too.
+// The age and default uses mirror SHARED_INSTANCE_INVITE_MAX_AGE_SECONDS and
+// SHARED_INSTANCE_INVITE_MAX_USES in packages/app-lib/src/api/instance/shared/invites.rs (upstream),
+// which refuses a longer age for the App's own shares. The player cap is upstream's
+// SHARED_INSTANCE_USER_LIMIT; nothing on the backend enforces it yet.
 export const SHARED_INSTANCE_MAX_PLAYERS = 50
 export const INVITE_LINK_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 export const DEFAULT_INVITE_LINK_MAX_USES = 10
 
 export function remainingPlayerSlots(playerCount: number) {
 	return Math.max(0, SHARED_INSTANCE_MAX_PLAYERS - playerCount)
+}
+
+/** The page an invite link opens. */
+export function inviteLinkUrl(siteUrl: string, inviteId: string) {
+	return `${siteUrl.replace(/\/$/, '')}/share/${encodeURIComponent(inviteId)}`
+}
+
+/** The lifetime of an edited invite link: until `expiresAt`, within what a link may last. */
+export function inviteLinkMaxAge(expiresAt: Date) {
+	const requested = Math.floor((expiresAt.getTime() - Date.now()) / 1000)
+	return Math.max(1, Math.min(INVITE_LINK_MAX_AGE_SECONDS, requested))
+}
+
+/** The uses of an edited invite link: what was asked for, within the open player slots. */
+export function inviteLinkMaxUses(requested: number, remainingSlots: number) {
+	return Math.max(1, Math.min(requested, Math.floor(remainingSlots)))
 }
 
 export function findActiveInviteLink(
@@ -66,5 +87,5 @@ export async function createServerInviteLink(
 	const inviteId = await ensureServerInviteLink(client, serverId, instanceId, undefined, {
 		maximizeUses: true,
 	})
-	return `${siteUrl.replace(/\/$/, '')}/share/${encodeURIComponent(inviteId)}`
+	return inviteLinkUrl(siteUrl, inviteId)
 }

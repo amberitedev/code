@@ -12,6 +12,7 @@ import {
 } from '#ui/components/base'
 import { useFormatDateTime, useRelativeTime } from '#ui/composables'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { inviteLinkUrl } from '#ui/composables/server-sharing/invite-link'
 import { commonMessages } from '#ui/utils/common-messages'
 
 import { injectSharingSettings } from '../providers/sharing-settings'
@@ -103,10 +104,7 @@ const columns = computed<TableColumn<'id' | 'uses' | 'expiration' | 'actions'>[]
 				</div>
 			</template>
 			<template #cell-id="{ row }">
-				<CopyCode
-					:text="`${siteUrl.replace(/\/$/, '')}/share/${encodeURIComponent(row.id)}`"
-					:display-text="`/${row.id}`"
-				/>
+				<CopyCode :text="inviteLinkUrl(siteUrl, row.id)" :display-text="`/${row.id}`" />
 			</template>
 			<template #cell-uses="{ row }">
 				<span class="font-medium text-primary">{{ row.uses }}</span>
