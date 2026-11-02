@@ -24,8 +24,8 @@ ring = "0.17.14"
 rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sharing-client = { workspace = true }
 sha2 = { workspace = true }
+sharing-client = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
