@@ -14,8 +14,10 @@
 
 mod hash;
 mod upload;
+mod version;
 
 pub use hash::HashedFile;
+pub use version::{BuildError, VersionInput, build_version, keeps_config};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

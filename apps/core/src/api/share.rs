@@ -196,17 +196,24 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
             Carried::File { .. } => None,
         })
         .collect();
-    Ok(Snapshot {
-        name: server.name,
-        folder,
-        content: VersionContent {
+    // The files are staged when a push sends them; the builder decides the content.
+    let (content, _) = push::build_version(
+        SCOPE,
+        push::VersionInput {
             modrinth_ids,
             modpack_id,
             removed_files,
             game_version,
             loader: shared_loader.to_owned(),
-            loader_version: loader_version.unwrap_or_default(),
+            loader_version,
+            files: Vec::new(),
         },
+    )
+    .map_err(|error| ApiError::new(ErrorCode::Internal, error.to_string()))?;
+    Ok(Snapshot {
+        name: server.name,
+        folder,
+        content,
         carried,
         pack_files,
     })
@@ -445,7 +452,7 @@ fn kept_config(
         let (folder, staging, removed) =
             (Arc::clone(&folder), staging.clone(), Arc::clone(&removed));
         Box::pin(async move {
-            if removed.contains(&file_name) || !SCOPE.carries(&file_name) {
+            if !push::keeps_config(SCOPE, &removed, &file_name) {
                 return Ok(None);
             }
             tokio::task::spawn_blocking(move || {

@@ -8,7 +8,6 @@ use crate::self_hosted::pool;
 use async_walkdir::{Filtering, WalkDir};
 use futures::{StreamExt, TryStreamExt};
 use sharing_client::push;
-use sharing_client::versions::VersionContent;
 
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
@@ -744,18 +743,19 @@ pub(super) async fn publish_current_content(
             path: source.path().to_path_buf(),
         })
         .collect::<Vec<_>>();
-    let content = VersionContent {
-        modrinth_ids: snapshot.version_ids,
-        modpack_id,
-        removed_files: snapshot.removed_files,
-        game_version: metadata.applied_content_set.game_version.clone(),
-        loader: metadata.applied_content_set.loader.as_str().to_owned(),
-        loader_version: metadata
-            .applied_content_set
-            .loader_version
-            .clone()
-            .unwrap_or_default(),
-    };
+    let (content, files) = push::build_version(
+        INSTANCE_SCOPE,
+        push::VersionInput {
+            modrinth_ids: snapshot.version_ids,
+            modpack_id,
+            removed_files: snapshot.removed_files,
+            game_version: metadata.applied_content_set.game_version.clone(),
+            loader: metadata.applied_content_set.loader.as_str().to_owned(),
+            loader_version: metadata.applied_content_set.loader_version.clone(),
+            files,
+        },
+    )
+    .map_err(|error| crate::ErrorKind::InputError(error.to_string()))?;
 
     let keep = kept_config(
         state
@@ -813,11 +813,10 @@ fn kept_config(
 > + Send
 + Sync
 + use<> {
-    let removed = removed_paths.iter().cloned().collect::<HashSet<_>>();
+    let removed = removed_paths.to_vec();
     move |file_name: String| {
-        let kept = (!removed.contains(&file_name)
-            && INSTANCE_SCOPE.carries(&file_name))
-        .then(|| instance_path.join(&file_name));
+        let kept = push::keeps_config(INSTANCE_SCOPE, &removed, &file_name)
+            .then(|| instance_path.join(&file_name));
         Box::pin(async move {
             let Some(path) = kept else {
                 return Ok(None);
