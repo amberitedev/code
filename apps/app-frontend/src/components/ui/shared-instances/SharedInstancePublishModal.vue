@@ -5,7 +5,6 @@
 		:files="files"
 		:requires-restart="hasServers"
 		:allow-empty="serversBehind"
-		:limit="SHARE_LIMIT_BYTES"
 		@confirm="confirmPublish"
 		@cancel="finishReview"
 	/>
@@ -58,8 +57,6 @@ const emit = defineEmits<{
 const client = injectModrinthClient()
 const { notifySharedInstanceError, notifySharedInstanceAvailability } = useSharedInstanceErrors()
 const sharedInstanceState = injectSharedInstance()
-// The pool stores at most 1 GiB per shared version (MAX_SHARE_BYTES in apps/backend).
-const SHARE_LIMIT_BYTES = 1024 ** 3
 
 const modal = ref<InstanceType<typeof SharedFilesPublishModal>>()
 const publishDiffs = ref<ContentDiffItem[]>([])
