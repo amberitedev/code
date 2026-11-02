@@ -191,6 +191,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/v1/servers/{id}/worlds/{wid}/content/share/diff", get(share::diff))
         .route("/v1/servers/{id}/worlds/{wid}/content/share/files", get(share::files))
+        .route("/v1/servers/{id}/worlds/{wid}/content/share/history", get(share::history))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/content/share/history/{version}",
+            delete(share::delete_version),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/content/share/history/{version}/restore",
+            post(share::restore),
+        )
         .route("/v1/servers/{id}/worlds/{wid}/content", post(content::install))
         .route("/v1/servers/{id}/worlds/{wid}/content/repair", post(content::repair))
         .route("/v1/servers/{id}/worlds/{wid}/content/unlink-modpack", post(content::unlink))

@@ -1531,6 +1531,41 @@ async fn sides_decide_what_the_server_runs_and_what_players_get() {
 }
 
 #[tokio::test]
+async fn only_the_owner_reads_and_changes_a_servers_share_history() {
+    let core = core().await;
+    let server = core.server.clone();
+    let owner = core.sign_in("owner").await;
+    let editor = core.sign_in("editor").await;
+    let history =
+        format!("/v1/servers/{server}/worlds/{server}/content/share/history");
+
+    for (method, uri) in [
+        (Method::GET, history.clone()),
+        (Method::POST, format!("{history}/1/restore")),
+        (Method::DELETE, format!("{history}/1")),
+    ] {
+        let (status, _) =
+            core.call(method, &uri, Some(&editor), None, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+    }
+    let (status, versions) = core
+        .call(Method::GET, &history, Some(&owner), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(versions, json!([]), "a server not shared has no history");
+    let (status, _) = core
+        .call(
+            Method::DELETE,
+            &format!("{history}/1"),
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn a_client_only_pack_file_is_placed_for_the_server_and_taken_back() {
     use std::io::Write;
 
