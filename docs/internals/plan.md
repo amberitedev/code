@@ -142,6 +142,10 @@ Decided 2026-11-02.
   push. The two History pages behave the same: list, restore, delete.
 - **A restore is local.** It puts the source back to that version and changes nothing else. To
   give it to anyone, you push it.
+- On a Core, a restore to a version on another loader, Minecraft version or modpack installs that
+  first, so the server must be stopped, as for any loader or pack install. A restore leaves a
+  server's modpack files to the modpack: a version lists the pack files players do not get, but
+  not whether the owner deleted one or only turned it off for players.
 - **Linked things store no history.** A linked server or a Play instance shows its source's
   history read-only, fetched from the source, so you can see what changed. Restore and push
   happen only where the content is managed.
