@@ -7,6 +7,7 @@ pub mod check_content_updates;
 pub mod client_only_files;
 pub mod content_mutation;
 pub mod edited_files;
+pub mod export_mrpack;
 pub mod install_loader;
 pub mod install_pack;
 pub mod list_content;

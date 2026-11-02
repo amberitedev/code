@@ -15,6 +15,7 @@ pub mod content;
 pub mod error;
 pub mod eula;
 pub mod events;
+pub mod export;
 pub mod files;
 pub mod health;
 mod icon;
@@ -159,6 +160,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(files::authorize_file),
         )
         .route(
+            "/servers/{id}/v1/worlds/{wid}/content/export-mrpack/authorize",
+            get(export::authorize),
+        )
+        .route(
             "/v1/servers/{id}/worlds/{wid}/properties",
             get(properties::get).patch(properties::patch),
         )
@@ -260,6 +265,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/servers/{id}/v1/worlds/{wid}/files/contents-raw",
             get(files::download_file),
+        )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/content/export-mrpack",
+            get(export::export),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).

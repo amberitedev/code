@@ -114,6 +114,8 @@ pub enum Target {
     Backup(String),
     /// One file of the server, by its cleaned path.
     File(String),
+    /// The server's content as a `.mrpack`.
+    Pack,
 }
 
 /// A download link someone with access asked for: single use, for a few minutes.

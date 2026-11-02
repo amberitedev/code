@@ -779,7 +779,7 @@ pub(super) fn expired_link() -> ApiError {
 
 /// Who is downloading: a link token for `target` on `server`, or a session in the header. Either
 /// way they must still be an editor of the server.
-async fn downloader(
+pub(super) async fn downloader(
     state: &AppState,
     caller: Result<Caller, ApiError>,
     token: Option<&str>,
@@ -801,10 +801,12 @@ async fn downloader(
     Ok(caller)
 }
 
-/// A zip streamed to the client, with a name to save it as.
-fn zip_response(
+/// A zip streamed to the client, saved as `name` with `extension`. A `temporary` file is removed
+/// once the response is done with it.
+pub(super) fn zip_response(
     file: std::fs::File,
     name: &str,
+    extension: &str,
     temporary: Option<std::path::PathBuf>,
 ) -> Response {
     let length = file.metadata().map(|meta| meta.len()).unwrap_or_default();
@@ -830,7 +832,7 @@ fn zip_response(
             (header::CONTENT_LENGTH, length.to_string()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{name}.zip\""),
+                format!("attachment; filename=\"{name}.{extension}\""),
             ),
         ],
         Body::from_stream(stream),
@@ -901,7 +903,7 @@ pub async fn download_backup(
         },
     )
     .await;
-    Ok(zip_response(file, &found.name, None))
+    Ok(zip_response(file, &found.name, "zip", None))
 }
 
 /// `GET /servers/{id}/v1/worlds/{wid}/files/download-full-zip`: the world and settings as they
@@ -928,7 +930,7 @@ pub async fn download_world(
     state.backups.snapshot(&id, &path, |_| {}).await?;
     let file = std::fs::File::open(&path)?;
     activity::log(&state.db, &caller, Some(&id), Action::WorldDownloaded).await;
-    Ok(zip_response(file, &server.name, Some(path)))
+    Ok(zip_response(file, &server.name, "zip", Some(path)))
 }
 
 /// `GET /v1/servers/{id}/worlds/{wid}/select-download`: the world downloads straight from Core.
