@@ -665,10 +665,11 @@ pub async fn update(
         content_rows::get_tracked_file(&content.db, server_id, &listed.path)
             .await?
             .map(|(row, _)| row);
-    // The version installed now: the one recorded, or the one Modrinth knows by its hash.
+    // The version installed now: the one recorded, or the one Modrinth knows by its hash. A
+    // recorded one Modrinth no longer answers for is unknown; the row still names the project.
     let installed = match row.as_ref().and_then(|row| row.version_id.as_deref())
     {
-        Some(id) => Some(content.modrinth.version(id).await?),
+        Some(id) => content.modrinth.version(id).await.ok(),
         None => {
             let on_disk = if listed.disabled {
                 format!("{}{DISABLED}", listed.path)
@@ -883,41 +884,6 @@ pub async fn updates(
         }
     }
     found
-}
-
-/// The newest version of the Modrinth pack `project_id` a server can update to, when it is not
-/// `installed`: one for the server's Minecraft and loader, on the least stable of the server's
-/// channel and the installed version's.
-pub async fn pack_update(
-    content: &Content,
-    server_id: &str,
-    project_id: &str,
-    installed: Option<&Version>,
-) -> Result<Option<String>, Error> {
-    let target = target(content, server_id).await?;
-    let channel = installed.map_or(target.channel, |version| {
-        least_stable(target.channel, version.version_type)
-    });
-    let newest = match resolve(
-        content,
-        &target,
-        project_id,
-        None,
-        ContentType::ModPack,
-        HashSet::new(),
-        channel,
-    )
-    .await
-    {
-        Ok(plan) => plan.primary.version_id,
-        Err(Error::Resolve(
-            modrinth_content_management::Error::NoCompatibleVersion(_),
-        )) => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    Ok(Some(newest).filter(|newest| {
-        installed.is_none_or(|installed| installed.id != *newest)
-    }))
 }
 
 #[cfg(test)]

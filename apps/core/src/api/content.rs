@@ -720,18 +720,18 @@ async fn modpack_fields(
                     modrinth.version(version_id)
                 );
                 let version = version.ok();
-                let has_update = if check {
-                    addons::pack_update(
+                // Without the installed version there is nothing to compare, as in the App.
+                let has_update = match &version {
+                    Some(installed) if check => content_install::pack_update(
                         &state.content,
                         id,
                         project_id,
-                        version.as_ref(),
+                        installed,
                     )
                     .await
                     .ok()
-                    .flatten()
-                } else {
-                    None
+                    .flatten(),
+                    _ => None,
                 };
                 (project.ok(), version, has_update)
             }
@@ -1716,30 +1716,27 @@ pub async fn update_modpack(
             "This pack came from a file; upload the new file instead.",
         ));
     };
-    let installed = match &pack.version_id {
-        Some(version_id) => Some(
-            state
-                .content
-                .modrinth
-                .version(version_id)
-                .await
-                .map_err(content::Error::from)?,
-        ),
-        None => None,
+    let no_update = || {
+        ApiError::new(
+            ErrorCode::Conflict,
+            "The pack has no newer version on this server's update channel.",
+        )
     };
-    let newest = addons::pack_update(
+    let installed_id = pack.version_id.as_deref().ok_or_else(no_update)?;
+    let installed = state
+        .content
+        .modrinth
+        .version(installed_id)
+        .await
+        .map_err(content::Error::from)?;
+    let newest = content_install::pack_update(
         &state.content,
         &id,
         &project_id,
-        installed.as_ref(),
+        &installed,
     )
     .await?
-    .ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::Conflict,
-            "The pack has no newer version for this server's Minecraft and update channel.",
-        )
-    })?;
+    .ok_or_else(no_update)?;
     let (hold, busy) = begin(&state, &id)?;
     spawn_pack(
         &state,

@@ -9,7 +9,8 @@ pub mod model;
 pub use adapters::modrinth::{Modrinth, ModrinthError};
 pub use adapters::mrpack::{IndexError, read_index};
 pub use domain::channel::{
-    least_stable, parse_version_type, version_type_fallbacks, version_type_name,
+    least_stable, pack_update, parse_version_type, version_type_fallbacks,
+    version_type_name,
 };
 pub use domain::mrpack::{PackPlatform, loader_dependency, platform};
 pub use domain::sides::{mrpack_env, server_takes};

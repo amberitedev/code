@@ -66,6 +66,12 @@ upstream = "packages/app-lib/src/state/cache.rs"
 commit = "fbef1fec98505f042812fd5e6a9c90e207534144"
 
 [[copy]]
+ours = "packages/bedrock/src/content/domain/channel.rs"
+item = "check_modpack_update"
+upstream = "packages/app-lib/src/state/instances/commands/list_content.rs"
+commit = "d39674ce0096fb88fd128459988e4c1de8102648"
+
+[[copy]]
 ours = "packages/bedrock/src/content/domain/sides.rs"
 item = "get_mrpack_environment"
 upstream = "packages/app-lib/src/api/instance/export_mrpack.rs"

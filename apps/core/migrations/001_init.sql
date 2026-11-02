@@ -216,7 +216,9 @@ CREATE TABLE server_content_sets (
     loader_version TEXT,
     created INTEGER NOT NULL,
     modified INTEGER NOT NULL,
-    -- Copal: where the pack came from. The Modrinth project and version, or null for a pack file
+    -- Copal: every column from here on, which app-lib keeps in `instance_links` and
+    -- `instance_content_set_remote_refs`; a server follows at most one pack, so they live on its
+    -- set. Where the pack came from: the Modrinth project and version, or null for a pack file
     -- the App uploaded.
     project_id TEXT,
     version_id TEXT,

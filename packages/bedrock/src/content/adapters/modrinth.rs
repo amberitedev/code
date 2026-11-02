@@ -134,6 +134,14 @@ impl Modrinth {
         self.get(format!("{API}/version/{id}")).await
     }
 
+    /// Every version of project `id`, with no filter.
+    pub async fn project_versions(
+        &self,
+        id: &str,
+    ) -> Result<Vec<Version>, ModrinthError> {
+        self.get(format!("{API}/project/{id}/version")).await
+    }
+
     pub async fn project(&self, id: &str) -> Result<Project, ModrinthError> {
         self.get(format!("{API}/project/{id}")).await
     }

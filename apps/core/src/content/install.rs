@@ -141,6 +141,27 @@ pub async fn loader(
     Ok(())
 }
 
+/// The version of the Modrinth pack `project_id` to offer over `installed` on server `id`, as the
+/// App picks it (`bedrock::content::pack_update`) on the server's update channel. Its Minecraft
+/// may differ from the server's; [`pack`] guards that.
+pub async fn pack_update(
+    content: &Content,
+    id: &str,
+    project_id: &str,
+    installed: &modrinth::Version,
+) -> Result<Option<String>, Error> {
+    let server = servers_records::get(&content.db, id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
+    let versions = content.modrinth.project_versions(project_id).await?;
+    Ok(bedrock::content::pack_update(
+        installed,
+        &versions,
+        server.update_channel,
+    )
+    .map(|version| version.id.clone()))
+}
+
 /// Install or update the held server's pack, or repair it (`PackSource::Current`). Settings in
 /// `properties` are written once the pack is in place.
 pub async fn pack(
