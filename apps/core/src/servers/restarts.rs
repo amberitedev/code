@@ -553,7 +553,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::daemon::paths::Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
-        let servers = Servers::open(paths, db::memory().await).await.unwrap();
+        let servers = Servers::open(
+            paths,
+            db::memory().await,
+            Some(std::net::Ipv4Addr::LOCALHOST.into()),
+        )
+        .await
+        .unwrap();
         let id = servers.create("A").await.unwrap().id;
         let lock = servers.pretend_running(&id);
         (dir, servers, id, lock)

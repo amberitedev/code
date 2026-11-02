@@ -136,7 +136,13 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     )
     .await
     .unwrap();
-    let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+    let servers = Servers::open(
+        paths.clone(),
+        db.clone(),
+        Some(std::net::Ipv4Addr::LOCALHOST.into()),
+    )
+    .await
+    .unwrap();
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),

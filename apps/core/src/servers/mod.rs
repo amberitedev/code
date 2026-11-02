@@ -17,6 +17,7 @@ mod watch;
 
 use std::{
     collections::{HashMap, HashSet},
+    net::IpAddr,
     path::PathBuf,
     process::Child,
     sync::{Arc, Mutex, Weak},
@@ -116,6 +117,8 @@ pub struct Servers {
     paths: Paths,
     db: SqlitePool,
     http: reqwest::Client,
+    /// See `Config::local_only`.
+    local_only: Option<IpAddr>,
     live: Mutex<HashMap<String, Live>>,
     /// Servers held for deletion, which never start again. Only taken while `live` is held.
     deleted: Mutex<HashSet<String>>,
@@ -173,12 +176,17 @@ const CRASH_LINES: usize = 50;
 impl Servers {
     /// Adopt every server whose shim still runs, record how the others' runs ended, and start
     /// watching for runs that end and shims that appear.
-    pub async fn open(paths: Paths, db: SqlitePool) -> Result<Arc<Self>> {
+    pub async fn open(
+        paths: Paths,
+        db: SqlitePool,
+        local_only: Option<IpAddr>,
+    ) -> Result<Arc<Self>> {
         let http = crate::installs::download::client()?;
         let servers = Arc::new_cyclic(|me| Self {
             paths,
             db,
             http,
+            local_only,
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
             killed: Mutex::default(),
@@ -505,15 +513,20 @@ impl Servers {
             return Err(ServerError::Eula);
         }
         // The lease keeps its Java until the shim runs it, when the launch spec does.
-        let (mut launch, _java) =
-            launch::prepare(&self.paths, &self.http, server, run_id)
-                .await
-                .map_err(|error| {
-                    match error.downcast::<launch::NotReady>() {
-                        Ok(not_ready) => ServerError::NotReady(not_ready),
-                        Err(error) => ServerError::Other(error),
-                    }
-                })?;
+        let (mut launch, _java) = launch::prepare(
+            &self.paths,
+            &self.http,
+            server,
+            run_id,
+            self.local_only,
+        )
+        .await
+        .map_err(|error| {
+            match error.downcast::<launch::NotReady>() {
+                Ok(not_ready) => ServerError::NotReady(not_ready),
+                Err(error) => ServerError::Other(error),
+            }
+        })?;
         if let Some(flags) = memory::flags(&self.db, id).await? {
             memory::use_flags(&mut launch.args, flags);
         }
@@ -781,10 +794,11 @@ impl Servers {
         &self,
         name: &str,
     ) -> Result<server_rows::ServerRow, ServerError> {
-        let server =
-            server_rows::create(&self.db, name, server_rows::port_free)
-                .await?
-                .ok_or(ServerError::NoPorts)?;
+        let server = server_rows::create(&self.db, name, |port| {
+            server_rows::port_free(port, self.local_only)
+        })
+        .await?
+        .ok_or(ServerError::NoPorts)?;
         crate::daemon::folders::create_server_folder(
             &self.paths.server(&server.id),
         )?;
@@ -957,7 +971,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
-        let servers = Servers::open(paths, db::memory().await).await.unwrap();
+        let servers = Servers::open(
+            paths,
+            db::memory().await,
+            Some(std::net::Ipv4Addr::LOCALHOST.into()),
+        )
+        .await
+        .unwrap();
         (dir, servers)
     }
 
@@ -1046,7 +1066,13 @@ mod tests {
         )
         .unwrap();
 
-        let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+        let servers = Servers::open(
+            paths.clone(),
+            db.clone(),
+            Some(std::net::Ipv4Addr::LOCALHOST.into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(servers.phase(&server.id), None);
         assert_eq!(
             server_rows::open_runs(&db, &server.id, i64::MAX)
@@ -1144,7 +1170,13 @@ mod tests {
         )
         .unwrap();
 
-        let servers = Servers::open(paths, db).await.unwrap();
+        let servers = Servers::open(
+            paths,
+            db,
+            Some(std::net::Ipv4Addr::LOCALHOST.into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(1))));
         assert!(matches!(
             servers.stop(&server.id).await,
@@ -1187,7 +1219,13 @@ mod tests {
         )
         .unwrap();
 
-        let servers = Servers::open(paths, db.clone()).await.unwrap();
+        let servers = Servers::open(
+            paths,
+            db.clone(),
+            Some(std::net::Ipv4Addr::LOCALHOST.into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(servers.phase(&server.id), None);
         let runs: Vec<(String, Outcome, Option<String>)> = sqlx::query_as(
             "SELECT id, outcome, last_lines FROM runs ORDER BY started_at",
