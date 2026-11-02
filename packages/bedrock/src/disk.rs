@@ -1,6 +1,15 @@
-//! Free disk space, which the store checks before every upload and Copal before every backup.
+//! Free disk space, which the store checks before every upload and Copal before every backup,
+//! download and unpack.
 
 use std::{io, path::Path};
+
+use crate::limits::DISK_MARGIN_BYTES;
+
+/// The bytes a Core may still write on the disk that holds `path`: its free space less
+/// [`DISK_MARGIN_BYTES`], which it always leaves free.
+pub fn room(path: &Path) -> io::Result<u64> {
+    Ok(free(path)?.saturating_sub(DISK_MARGIN_BYTES))
+}
 
 /// The bytes this account may still write on the disk that holds `path`.
 #[cfg(unix)]

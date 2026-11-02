@@ -15,11 +15,11 @@ use modrinth_content_management::{
 };
 use tracing::warn;
 
-use super::{install_pack::MAX_FILE, sync_content_files::identify};
+use super::sync_content_files::identify;
 use crate::{
     installs::{
         ModLoader,
-        download::{self, FileDownload, Hash},
+        download::{self, Hash},
     },
     state::servers::{
         Content, ContentSourceKind, EntrySides, Error, TrackedFile,
@@ -30,7 +30,7 @@ use crate::{
                 folder::{self, Folder},
             },
             network::{
-                hosts,
+                content_download, hosts,
                 modrinth::{self, Version},
             },
             sqlite::{content_rows, server_rows},
@@ -237,15 +237,12 @@ pub async fn place_version(
         .sha512
         .as_deref()
         .map_or(Hash::Sha1(&file.hashes.sha1), Hash::Sha512);
-    download::file(
+    content_download::fetch(
         &content.downloads,
         url.as_str(),
         &staging,
-        &FileDownload {
-            hash,
-            limit: Some(MAX_FILE),
-            progress: &download::quiet,
-        },
+        hash,
+        &download::quiet,
     )
     .await?;
     let old: Vec<TrackedFile> = rows

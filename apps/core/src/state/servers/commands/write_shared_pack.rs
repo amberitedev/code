@@ -17,10 +17,13 @@ use sharing_client::consume::{
 };
 use sharing_client::store::{FetchError, StoreClient};
 
-use super::install_pack::{self as install, MAX_PACK};
+use super::install_pack as install;
 use crate::{
     installs::shared::SharedDirs,
-    state::servers::{Content, Error},
+    state::servers::{
+        Content, Error,
+        adapters::filesystem::archive::{self, NoRoom},
+    },
 };
 
 /// Fetch the files of `version` (read with [`consume::ready_version`]) and write it as an
@@ -38,16 +41,17 @@ pub async fn write_pack(
             error => Error::Invalid(error.to_string()),
         })?;
     let total: u64 = version.files.iter().map(|file| file.object_size).sum();
-    if total > MAX_PACK {
-        return Err(Error::Invalid(
-            "The instance's files are too large for one server.".into(),
-        ));
-    }
     let staging = content
         .paths
         .staging(server_id)
         .join(uuid::Uuid::new_v4().to_string());
     tokio::fs::create_dir_all(&staging).await?;
+    // The files, then the pack written from them.
+    NoRoom::check(
+        "the instance's files",
+        total.saturating_mul(2),
+        archive::room(&staging)?,
+    )?;
     let result = async {
         let mut fetched = Vec::with_capacity(version.files.len());
         if !version.files.is_empty() {

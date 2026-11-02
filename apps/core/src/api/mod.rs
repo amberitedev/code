@@ -262,7 +262,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(files::download_file),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY))
-        // Uploads stream to disk with their own cap (`content::MAX_UPLOAD`).
+        // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
         .route(
             "/servers/{id}/v1/worlds/{wid}/content/upload-modpack-file",
             post(content::upload_modpack),

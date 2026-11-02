@@ -62,6 +62,8 @@ pub enum Error {
     #[error(transparent)]
     Archive(#[from] archive::ArchiveError),
     #[error(transparent)]
+    NoRoom(#[from] archive::NoRoom),
+    #[error(transparent)]
     Path(#[from] folder::PathError),
     #[error(transparent)]
     Install(#[from] installs::InstallError),

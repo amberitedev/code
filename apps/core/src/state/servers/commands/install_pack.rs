@@ -23,7 +23,7 @@ use crate::{
     api::{events::InstallProgressKey, properties::PropertiesFields},
     installs::{
         self, ModLoader,
-        download::{self, FileDownload, Hash},
+        download::{self, Hash},
         shared::SharedDirs,
     },
     servers::Hold,
@@ -38,7 +38,7 @@ use crate::{
                 folder::{self, Folder},
                 properties,
             },
-            network::{hosts, modrinth},
+            network::{content_download, hosts, modrinth},
             sqlite::{content_rows, server_rows},
         },
         domain::pack::{self, Index, Platform, Source, Step, Wanted},
@@ -47,11 +47,6 @@ use crate::{
 
 /// Pack files downloaded at once.
 const CONCURRENCY: usize = 6;
-/// The largest single downloaded file. Stated sizes are only hints, so this is the cap and the
-/// hash decides whether a file is valid.
-pub const MAX_FILE: u64 = 2 * 1024 * 1024 * 1024;
-/// The largest `.mrpack`.
-pub const MAX_PACK: u64 = 4 * 1024 * 1024 * 1024;
 
 /// Which pack to install.
 #[derive(Debug, Clone)]
@@ -209,7 +204,7 @@ async fn install_pack(
         .await
         .map_err(std::io::Error::other)?
     };
-    pack::check_budget(&steps)?;
+    pack::check_room(&steps, archive::room(&content.paths.server(id))?)?;
     let staged = stage_downloads(content, id, &index, &steps, progress).await?;
 
     if server.game_version.is_some() && !repair {
@@ -354,23 +349,20 @@ pub(super) async fn fetch_modrinth_pack(
     if !download::has_hash(&path, Hash::Sha1(&sha1)).await {
         let received = AtomicU64::new(0);
         let total = file.size.max(1);
-        download::file(
+        content_download::fetch(
             &content.downloads,
             url.as_str(),
             &path,
-            &FileDownload {
-                hash: Hash::Sha1(&sha1),
-                limit: Some(MAX_PACK),
-                progress: &|update| match update {
-                    download::Progress::Bytes { bytes, .. } => {
-                        let done = received.fetch_add(bytes, Ordering::Relaxed)
-                            + bytes;
-                        progress(done as f64 / total as f64);
-                    }
-                    download::Progress::Reset => {
-                        received.store(0, Ordering::Relaxed)
-                    }
-                },
+            Hash::Sha1(&sha1),
+            &|update| match update {
+                download::Progress::Bytes { bytes, .. } => {
+                    let done =
+                        received.fetch_add(bytes, Ordering::Relaxed) + bytes;
+                    progress(done as f64 / total as f64);
+                }
+                download::Progress::Reset => {
+                    received.store(0, Ordering::Relaxed)
+                }
             },
         )
         .await?;
@@ -503,24 +495,23 @@ pub(super) async fn fetch_index_file(
         Error::Invalid(format!("{} has no allowed download.", file.path));
     for url in &file.downloads {
         let Ok(url) = allowed_url(url) else { continue };
-        let result = download::file(
+        let result = content_download::fetch(
             &content.downloads,
             url.as_str(),
             path,
-            &FileDownload {
-                hash,
-                limit: Some(MAX_FILE),
-                progress: &|update| {
-                    if let download::Progress::Bytes { bytes, .. } = update {
-                        progress(bytes);
-                    }
-                },
+            hash,
+            &|update| {
+                if let download::Progress::Bytes { bytes, .. } = update {
+                    progress(bytes);
+                }
             },
         )
         .await;
         match result {
             Ok(()) => return Ok(()),
-            Err(error) => last = error.into(),
+            // Another host does not make it fit.
+            Err(error @ Error::NoRoom(_)) => return Err(error),
+            Err(error) => last = error,
         }
     }
     Err(last)

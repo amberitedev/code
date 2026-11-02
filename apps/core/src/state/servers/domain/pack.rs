@@ -20,7 +20,7 @@ use crate::state::servers::{
     ContentSourceKind, Pending, SkippedFile, TrackedFile,
     adapters::{
         filesystem::{
-            archive::{self, ArchiveError},
+            archive::{self, ArchiveError, NoRoom},
             folder::{self, PathError},
         },
         network::hosts,
@@ -41,10 +41,8 @@ pub enum PackError {
     Host(String),
     #[error("the pack lists both {0} and {1}, which are the same file here")]
     Collision(String, String),
-    #[error(
-        "the pack would unpack more than {} GB", archive::MAX_UNPACKED / 1024 / 1024 / 1024
-    )]
-    TooLarge,
+    #[error(transparent)]
+    NoRoom(#[from] NoRoom),
 }
 
 /// `modrinth.index.json`, as bedrock models it for both sides.
@@ -167,8 +165,6 @@ pub fn candidates<R: Read + Seek>(
         });
     }
     let entries = archive::entries(archive)?;
-    // One budget for every override: a small pack must not inflate past it entry by entry.
-    let mut budget = archive::MAX_UNPACKED;
     let server_side = Env {
         client: SideType::Unsupported,
         server: SideType::Required,
@@ -177,12 +173,12 @@ pub fn candidates<R: Read + Seek>(
         ("overrides/", None),
         ("server-overrides/", Some(server_side)),
     ] {
-        for (n, (path, is_dir)) in entries.iter().enumerate() {
-            let Some(path) = path.strip_prefix(prefix).filter(|_| !is_dir)
+        for (n, (entry, is_dir)) in entries.iter().enumerate() {
+            let Some(path) = entry.strip_prefix(prefix).filter(|_| !is_dir)
             else {
                 continue;
             };
-            let (sha1, size) = archive::entry_sha1(archive, n, &mut budget)?;
+            let (sha1, size) = archive::entry_sha1(archive, n, entry)?;
             let jar = if env.is_none() && path.ends_with(".jar") {
                 jar_environment(archive, n, size, loader)
             } else {
@@ -330,20 +326,28 @@ pub struct Disk<'a> {
     pub case_insensitive: bool,
 }
 
-/// The most a set of steps writes, refused past [`archive::MAX_UNPACKED`] before anything is
-/// written: one budget for the whole install. Download sizes are the index's word, so for them
-/// this is an estimate; each download is only capped at [`install_pack::MAX_FILE`](crate::state::servers::commands::install_pack::MAX_FILE).
-pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
+/// The most a set of steps writes, refused before anything is written unless it fits in `room`
+/// (see `archive::room`): one check for the whole install. A download is written twice, staged
+/// and then placed, so it counts twice. Download sizes are the index's word, so for them this is
+/// an estimate; each download is cut off once it no longer fits.
+pub fn check_room(steps: &[Step], room: u64) -> Result<u64, PackError> {
     let total = steps
         .iter()
         .map(|step| match step {
+            Step::Place {
+                wanted:
+                    Wanted {
+                        source: Source::Download(_),
+                        size,
+                        ..
+                    },
+                ..
+            } => size.saturating_mul(2),
             Step::Place { wanted, .. } => wanted.size,
             _ => 0,
         })
         .fold(0u64, u64::saturating_add);
-    if total > archive::MAX_UNPACKED {
-        return Err(PackError::TooLarge);
-    }
+    NoRoom::check("the pack", total, room)?;
     Ok(total)
 }
 
@@ -996,24 +1000,26 @@ mod tests {
     }
 
     #[test]
-    fn one_budget_covers_the_whole_install() {
-        let place = |size| Step::Place {
+    fn the_whole_install_must_fit_on_the_disk() {
+        let place = |size, source| Step::Place {
             path: "mods/m.jar".into(),
-            wanted: Wanted { size, ..want("m1") },
+            wanted: Wanted {
+                size,
+                source,
+                ..want("m1")
+            },
             row: None,
             expected: None,
             before: None,
         };
-        let half = archive::MAX_UNPACKED / 2;
-        assert_eq!(
-            check_budget(&[place(half), place(half)]).unwrap(),
-            archive::MAX_UNPACKED
-        );
+        let steps = [
+            place(10, Source::Override(0)),
+            place(10, Source::Download(0)),
+        ];
+        // The download is staged before it is placed.
+        assert_eq!(check_room(&steps, 30).unwrap(), 30);
         // Each file fits on its own; together they do not.
-        assert!(matches!(
-            check_budget(&[place(half), place(half), place(1)]),
-            Err(PackError::TooLarge)
-        ));
+        assert!(matches!(check_room(&steps, 29), Err(PackError::NoRoom(_))));
     }
 
     #[test]

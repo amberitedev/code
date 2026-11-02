@@ -47,6 +47,7 @@ use crate::{
         self as content, Busy, PendingPack, SharedInstanceLink,
         adapters::{
             filesystem::{
+                archive::{self, NoRoom},
                 content_files::{self, Listed},
                 folder,
             },
@@ -454,6 +455,12 @@ impl From<content::Error> for ApiError {
                     Error::Resolve(
                         modrinth_content_management::Error::Provider(_),
                     ) => ErrorCode::Internal,
+                    // The disk, not the request: the same one may go once there is room.
+                    Error::NoRoom(_)
+                    | Error::Archive(archive::ArchiveError::NoRoom(_))
+                    | Error::Pack(content::domain::pack::PackError::NoRoom(
+                        _,
+                    )) => ErrorCode::Conflict,
                     Error::Invalid(_)
                     | Error::Resolve(_)
                     | Error::Path(_)
@@ -1474,18 +1481,15 @@ pub async fn update_modpack(
     Ok(StatusCode::ACCEPTED)
 }
 
-/// The most one upload request may write.
-pub const MAX_UPLOAD: u64 = 4 * 1024 * 1024 * 1024;
-
-/// Stream one multipart field into `path`, at most `limit` bytes, returning its SHA-1.
+/// Stream one multipart field into `path`, as much as fits on the disk (`archive::room`),
+/// returning its SHA-1.
 pub async fn stage_field(
     field: &mut Field<'_>,
     path: &std::path::Path,
-    limit: u64,
 ) -> Result<String, ApiError> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
+    let parent = path.parent().unwrap_or(path);
+    tokio::fs::create_dir_all(parent).await?;
+    let room = archive::room(parent)?;
     let result = async {
         let mut file = tokio::fs::File::create(path).await?;
         let mut hasher = sha1::Sha1::default();
@@ -1494,14 +1498,13 @@ pub async fn stage_field(
             ApiError::new(ErrorCode::InvalidRequest, error.body_text())
         })? {
             written += chunk.len() as u64;
-            if written > limit {
-                return Err(ApiError::new(
-                    ErrorCode::InvalidRequest,
-                    format!(
-                        "Uploads are at most {} GB.",
-                        limit / 1024 / 1024 / 1024
-                    ),
-                ));
+            if written > room {
+                return Err(content::Error::from(NoRoom {
+                    what: "the upload".into(),
+                    needed: None,
+                    room,
+                })
+                .into());
             }
             sha1::Digest::update(&mut hasher, &chunk);
             file.write_all(&chunk).await?;
@@ -1542,12 +1545,7 @@ pub async fn upload_modpack(
                 Some("file") => {
                     let path =
                         dirs.pack(&format!("upload-{}", uuid::Uuid::new_v4()));
-                    let sha1 = stage_field(
-                        &mut field,
-                        &path,
-                        content_install::MAX_PACK,
-                    )
-                    .await?;
+                    let sha1 = stage_field(&mut field, &path).await?;
                     staged = Some((path, sha1));
                 }
                 Some("properties") => {
@@ -1615,7 +1613,6 @@ pub async fn upload_addons(
         .staging(&id)
         .join(uuid::Uuid::new_v4().to_string());
     let result = async {
-        let mut budget = MAX_UPLOAD;
         let mut n = 0;
         while let Some(mut field) = form.next_field().await.map_err(bad_form)? {
             let Some(filename) = field.file_name().map(str::to_owned) else {
@@ -1623,9 +1620,7 @@ pub async fn upload_addons(
             };
             n += 1;
             let path = staging.join(n.to_string());
-            stage_field(&mut field, &path, budget).await?;
-            budget =
-                budget.saturating_sub(tokio::fs::metadata(&path).await?.len());
+            stage_field(&mut field, &path).await?;
             add_uploaded_file(&state.content, &id, &filename, &path).await?;
         }
         Ok::<_, ApiError>(())
